@@ -35,9 +35,12 @@
 
 namespace WebCore {
 
+using ScopedOCDMAccessor = std::unique_ptr<OpenCDMAccessor, OpenCDMError(*)(OpenCDMAccessor*)>;
+
 class CDMFactoryOpenCDM : public CDMFactory {
 private:
-    CDMFactoryOpenCDM() = default;
+    CDMFactoryOpenCDM()
+        : m_openCDMAccessor(opencdm_create_system(), opencdm_destruct_system) { }
     CDMFactoryOpenCDM(const CDMFactoryOpenCDM&) = delete;
     CDMFactoryOpenCDM& operator=(const CDMFactoryOpenCDM&) = delete;
 
@@ -48,9 +51,7 @@ public:
 
     virtual std::unique_ptr<CDMPrivate> createCDM(const String&) final;
     virtual bool supportsKeySystem(const String&) final;
-
-private:
-    media::OpenCdm m_openCDM;
+    ScopedOCDMAccessor m_openCDMAccessor;
 };
 
 class CDMInstanceOpenCDM final : public CDMInstance {
@@ -62,7 +63,10 @@ private:
     class Session;
 
 public:
-    CDMInstanceOpenCDM(media::OpenCdm&, const String&);
+    using AccessorHandle = OpenCDMAccessor*;
+    static constexpr void* InvalidAccessorHandle = nullptr;
+
+    CDMInstanceOpenCDM(AccessorHandle, const String&);
     virtual ~CDMInstanceOpenCDM() = default;
 
     // Metadata getters, just for some DRM characteristics.
@@ -96,7 +100,7 @@ private:
 
     String m_keySystem;
     const char* m_mimeType;
-    media::OpenCdm m_openCDM;
+    AccessorHandle m_openCDMAccessorHandle;
     // Protects against concurrent access to m_sessionsMap. In addition to the main thread
     // the GStreamer decryptor elements running in the streaming threads have a need to
     // lookup values in this map.
