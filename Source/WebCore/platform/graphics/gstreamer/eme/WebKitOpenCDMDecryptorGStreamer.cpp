@@ -154,9 +154,11 @@ static SessionResult webKitMediaOpenCDMDecryptorResetSessionFromInitDataIfNeeded
         GST_DEBUG_OBJECT(self, "session %s is empty or unusable, resetting", session.utf8().data());
         priv->m_session = String();
         priv->m_openCdm = nullptr;
+        opencdm_destruct_system(priv->m_openCdmAccessor);
         priv->m_openCdmAccessor = nullptr;
     } else if (session != priv->m_session) {
         priv->m_session = session;
+        priv->m_openCdm = nullptr;
         priv->m_openCdmAccessor = opencdm_create_system();
         GST_DEBUG_OBJECT(self, "new session %s is usable", session.utf8().data());
         returnValue = NewSession;
@@ -197,7 +199,7 @@ static bool webKitMediaOpenCDMDecryptorDecrypt(WebKitMediaCommonEncryptionDecryp
         GST_ERROR_OBJECT(self, "Failed to map key ID buffer");
         return false;
     }
-    
+
     if (!priv->m_openCdm) {
         priv->m_openCdm =  opencdm_get_session(priv->m_openCdmAccessor, mappedKeyID.data(), mappedKeyID.size(), WEBCORE_GSTREAMER_EME_LICENSE_KEY_RESPONSE_TIMEOUT.millisecondsAs<uint32_t>());
         if(!priv->m_openCdm) {
