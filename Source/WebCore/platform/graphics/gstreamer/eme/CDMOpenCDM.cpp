@@ -504,7 +504,7 @@ void CDMInstanceOpenCDM::requestLicense(LicenseType licenseType, const AtomicStr
         auto session = lookupSession(sessionIdAsString);
         if (session->isValid()) {
             GST_DEBUG("session %s exists and is valid, we can return now", sessionIdAsString.utf8().data());
-            callback(session->message(), sessionIdAsString, session->needsIndividualization(), Succeeded);
+            generateChallengeLambda(session.get());
         } else {
             // Created but waits on challenge.
             session->generateChallenge(WTFMove(generateChallengeLambda));
