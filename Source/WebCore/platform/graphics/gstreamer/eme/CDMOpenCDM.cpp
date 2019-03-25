@@ -134,7 +134,7 @@ void OCDMSessionCallbacksNotifier::removeObserver(Observer* observer)
 bool OCDMSessionCallbacksNotifier::tryNotify(OpenCDMSession* session, Notification method, const uint8_t message[], uint16_t messageLength)
 {
     if (!isMainThread()) {
-        // Make sure all happen on the main thread to avoid locking.
+        // Make sure all happens on the main thread to avoid locking.
         callOnMainThread([session, method, message, messageLength]() {
             OCDMSessionCallbacksNotifier::tryNotify(session, method, message, messageLength);
         });
@@ -210,8 +210,7 @@ public:
 
 private:
     using ScopedSession = std::unique_ptr<OpenCDMSession, WTF::Function<void(OpenCDMSession*)>>;
-    struct KeyUpdateData
-    {
+    struct KeyUpdateData {
         KeyUpdateData(DidUpdateKey&& callback, const uint8_t* data, const unsigned length)
             : m_callback(WTFMove(callback))
             , m_keySize(length)
