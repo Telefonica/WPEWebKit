@@ -37,10 +37,24 @@ endmacro()
 # override them.
 macro(WEBKIT_APPEND_GLOBAL_CXX_FLAGS)
     foreach (_flag ${ARGN})
-        check_cxx_compiler_flag("${_flag}" CXX_COMPILER_SUPPORTS_${_flag})
-        if (CXX_COMPILER_SUPPORTS_${_flag})
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_flag}")
-        endif ()
+      message(STATUS "Performing Test ${_flag}")
+      execute_process(
+        COMMAND sh -c "${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} ${_flag} -E -xdumpmacros /dev/null 2>&1"
+        COMMAND egrep -i -c "illegal value ignored"
+        RESULT_VARIABLE COMMAND_RESULT
+        OUTPUT_VARIABLE COMMAND_OUTPUT
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+      if (COMMAND_RESULT STREQUAL "1" AND COMMAND_OUTPUT STREQUAL "0")
+        set(CXX_COMPILER_SUPPORTS_FLAG_CURRENT 1 PARENT_SCOPE)
+        message(STATUS "Performing Test CXX_COMPILER_SUPPORTS_${_flag} - Success")
+      else ()
+        set(CXX_COMPILER_SUPPORTS_FLAG_CURRENT 0 PARENT_SCOPE)
+        message(STATUS "Performing Test CXX_COMPILER_SUPPORTS_${_flag} - Failed")
+      endif ()
+      if (CXX_COMPILER_SUPPORTS_FLAG_CURRENT)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_flag}")
+      endif ()
     endforeach ()
 endmacro()
 
