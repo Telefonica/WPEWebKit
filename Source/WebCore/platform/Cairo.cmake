@@ -1,3 +1,5 @@
+add_definitions(-DBACKEND_BCM_NEXUS=1)
+
 list(APPEND WebCore_INCLUDE_DIRECTORIES
     ${CAIRO_INCLUDE_DIRS}
     "${WEBCORE_DIR}/platform/graphics/cairo"
