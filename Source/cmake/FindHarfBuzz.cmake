@@ -49,7 +49,7 @@ if (HARFBUZZ_INCLUDE_DIRS)
     if (EXISTS "${HARFBUZZ_INCLUDE_DIRS}/hb-version.h")
         file(READ "${HARFBUZZ_INCLUDE_DIRS}/hb-version.h" _harfbuzz_version_content)
 
-        string(REGEX MATCH "#define +HB_VERSION_STRING +\"([0-9]+\.[0-9]+\.[0-9]+)\"" _dummy "${_harfbuzz_version_content}")
+        string(REGEX MATCH "#define +HB_VERSION_STRING +\"([0-9]+.[0-9]+.[0-9]+)\"" _dummy "${_harfbuzz_version_content}")
         set(HARFBUZZ_VERSION "${CMAKE_MATCH_1}")
     endif ()
 endif ()
