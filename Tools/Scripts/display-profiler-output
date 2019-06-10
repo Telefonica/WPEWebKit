@@ -538,11 +538,11 @@ def sourceOnOneLine(source, limit)
 end
 
 def screenWidth
-    if $stdin.tty?
-        HighLine::SystemExtensions.terminal_size[0]
-    else
+    # if $stdin.tty?
+    #     HighLine::SystemExtensions.terminal_size[0]
+    # else
         200
-    end
+    # end
 end
 
 def sortByMode(list)
