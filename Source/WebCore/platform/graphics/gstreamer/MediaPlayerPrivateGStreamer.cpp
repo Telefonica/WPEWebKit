@@ -2377,17 +2377,23 @@ void MediaPlayerPrivateGStreamer::createGSTPlayBin()
 #endif    
 
 #if PLATFORM(BCM_NEXUS)
-    m_videoSink = gst_element_factory_make( "brcmvideosink", "brcmvideosink");
+    m_videoSink = gst_element_factory_make("brcmvideosink", "brcmvideosink");
     g_object_set(m_pipeline.get(), "video-sink", m_videoSink.get(), nullptr);
-    
+
     GValue window_set = {0, };
     static char str[40];
+    char *strZorder = nullptr;
+    int zOrder = 0;
+    // TODO: Evaluate wich resolution must be this one (ENV?)
     snprintf(str, 40, "%d,%d,%d,%d", 0,0, 1280, 720);
-
     g_value_init(&window_set, G_TYPE_STRING);
     g_value_set_static_string(&window_set, str);
     g_object_set(m_videoSink.get(), "window_set", str, nullptr);
-    g_object_set(m_videoSink.get(), "zorder", 0, nullptr);
+
+    // WPE video z order
+    if (strZorder = getenv("WPE_NEXUS_ZORDER"))
+            zOrder = atoi(strZorder);
+    g_object_set(m_videoSink.get(), "zorder", zOrder, nullptr);
 
     GstElement* audioSink = gst_element_factory_make( "brcmaudiosink", "brcmaudiosink");
     g_object_set(m_pipeline.get(), "audio-sink", audioSink, nullptr);
