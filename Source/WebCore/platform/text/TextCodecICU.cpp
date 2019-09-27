@@ -286,7 +286,7 @@ void TextCodecICU::createICUConverter() const
     if (cachedConverter) {
         err = U_ZERO_ERROR;
         const char* cachedConverterName = ucnv_getName(cachedConverter, &err);
-        if (U_SUCCESS(err) && !strcmp(m_canonicalConverterName, cachedConverterName)) {
+        if (U_SUCCESS(err) && m_canonicalConverterName != NULL && !strcmp(m_canonicalConverterName, cachedConverterName)) {
             m_converterICU = cachedConverter;
             cachedConverter = 0;
             return;
