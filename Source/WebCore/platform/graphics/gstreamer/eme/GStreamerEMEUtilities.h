@@ -47,6 +47,8 @@ class GStreamerEMEUtilities {
 public:
     static const char* s_ClearKeyUUID;
     static const char* s_ClearKeyKeySystem;
+    static const char* s_UnspecifiedUUID;
+    static const char* s_UnspecifiedKeySystem;
 
 #if USE(OPENCDM) || USE(PLAYREADY)
     static const char* s_PlayReadyUUID;
@@ -61,6 +63,11 @@ public:
     static bool isClearKeyKeySystem(const String& keySystem)
     {
         return equalIgnoringASCIICase(keySystem, s_ClearKeyKeySystem);
+    }
+
+    static bool isUnspecifiedKeySystem(const String& keySystem)
+    {
+        return equalIgnoringASCIICase(keySystem, s_UnspecifiedKeySystem);
     }
 
 #if USE(OPENCDM)
@@ -81,6 +88,14 @@ public:
         if (isClearKeyKeySystem(keySystem))
             return s_ClearKeyUUID;
 
+        if (isUnspecifiedKeySystem(keySystem)) {
+#if USE(OPENCDM)
+            return s_WidevineUUID;
+#else
+            return s_UnspecifiedUUID;
+#endif
+        }
+
 #if USE(OPENCDM)
         if (isPlayReadyKeySystem(keySystem))
             return s_PlayReadyUUID;
@@ -97,6 +112,13 @@ public:
     {
         if (uuid == s_ClearKeyUUID)
             return s_ClearKeyKeySystem;
+
+        if (uuid == s_UnspecifiedUUID)
+#if USE(OPENCDM)
+            return s_WidevineKeySystem;
+#else
+            return s_UnspecifiedKeySystem;
+#endif
 
 #if USE(OPENCDM)
         if (uuid == s_PlayReadyUUID)

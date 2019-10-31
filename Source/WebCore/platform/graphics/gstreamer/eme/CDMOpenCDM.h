@@ -35,9 +35,21 @@
 
 namespace WebCore {
 
+struct OCDMSystemDeleter {
+    OpenCDMError operator()(OpenCDMSystem* ptr) const { return opencdm_destruct_system(ptr); }
+};
+
+using ScopedOCDMSystem = std::unique_ptr<OpenCDMSystem, OCDMSystemDeleter>;
+
+struct SessionDeleter {
+    OpenCDMError operator()(OpenCDMSession* ptr) const { return opencdm_destruct_session(ptr); }
+};
+
+using ScopedSession = std::unique_ptr<OpenCDMSession, SessionDeleter>;
+
 class CDMFactoryOpenCDM : public CDMFactory {
 private:
-    CDMFactoryOpenCDM() = default;
+    CDMFactoryOpenCDM() { }
     CDMFactoryOpenCDM(const CDMFactoryOpenCDM&) = delete;
     CDMFactoryOpenCDM& operator=(const CDMFactoryOpenCDM&) = delete;
 
@@ -48,9 +60,6 @@ public:
 
     virtual std::unique_ptr<CDMPrivate> createCDM(const String&) final;
     virtual bool supportsKeySystem(const String&) final;
-
-private:
-    media::OpenCdm m_openCDM;
 };
 
 class CDMInstanceOpenCDM final : public CDMInstance {
@@ -62,7 +71,7 @@ private:
     class Session;
 
 public:
-    CDMInstanceOpenCDM(media::OpenCdm&, const String&);
+    CDMInstanceOpenCDM(OpenCDMSystem&, const String&);
     virtual ~CDMInstanceOpenCDM() = default;
 
     // Metadata getters, just for some DRM characteristics.
@@ -85,23 +94,30 @@ public:
     void removeSessionData(const String&, LicenseType, RemoveSessionDataCallback) final;
     void storeRecordOfKeyUsage(const String&) final { }
 
-    // FIXME: For now, the init data is the only way to find a proper session id.
-    String sessionIdByInitData(const InitData&) const;
-    bool isSessionIdUsable(const String&) const;
+    void setClient(CDMInstanceClient& client) override { m_client = &client; }
+    void clearClient() override { m_client = nullptr; }
 
+    String sessionIdByKeyId(const SharedBuffer&) const;
+    bool isKeyIdInSessionUsable(const SharedBuffer&, const String&) const;
+
+    CDMInstanceClient* client() const { return m_client; }
+
+    OpenCDMSystem* ocdmSystem() const { return &m_openCDMSystem; }
 private:
-    bool addSession(const String& sessionId, Session* session);
+    bool addSession(const String& sessionId, RefPtr<Session>&& session);
     bool removeSession(const String& sessionId);
     RefPtr<Session> lookupSession(const String& sessionId) const;
 
     String m_keySystem;
-    const char* m_mimeType;
-    media::OpenCdm m_openCDM;
+    OpenCDMSystem& m_openCDMSystem;
     // Protects against concurrent access to m_sessionsMap. In addition to the main thread
     // the GStreamer decryptor elements running in the streaming threads have a need to
     // lookup values in this map.
     mutable Lock m_sessionMapMutex;
     HashMap<String, RefPtr<Session>> m_sessionsMap;
+    CDMInstanceClient* m_client { nullptr };
+    KeyStatusVector m_keyStatuses;
+    RefPtr<SharedBuffer> m_message;
 };
 
 } // namespace WebCore

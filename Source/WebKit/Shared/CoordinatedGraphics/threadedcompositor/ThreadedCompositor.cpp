@@ -263,7 +263,8 @@ void ThreadedCompositor::renderLayerTree()
                         [](auto& it) { return it.second.platformLayerChanged || it.second.platformLayerUpdated; });
                 m_attributes.coordinateUpdateCompletionWithClient = coordinateUpdate;
             }
-        }
+        } else
+            m_attributes.clientRendersNextFrame = false;
 
         // Reset the needsResize attribute to false.
         m_attributes.needsResize = false;
