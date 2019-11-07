@@ -43,6 +43,17 @@ class SharedBuffer;
 
 struct CDMKeySystemConfiguration;
 
+class CDMInstanceClient {
+public:
+    virtual ~CDMInstanceClient() = default;
+
+    using KeyStatus = CDMKeyStatus;
+    using MessageType = CDMMessageType;
+    using KeyStatusVector = Vector<std::pair<Ref<SharedBuffer>, KeyStatus>>;
+    virtual void updateKeyStatuses(KeyStatusVector&&) = 0;
+    virtual void enqueueMessageWithTask(MessageType, Ref<SharedBuffer>&&) = 0;
+};
+
 class CDMInstance : public RefCounted<CDMInstance> {
 public:
     virtual ~CDMInstance() { }
@@ -75,7 +86,7 @@ public:
     using LicenseCallback = Function<void(Ref<SharedBuffer>&& message, const String& sessionId, bool needsIndividualization, SuccessValue succeeded)>;
     virtual void requestLicense(LicenseType, const AtomicString& initDataType, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback) = 0;
 
-    using KeyStatusVector = Vector<std::pair<Ref<SharedBuffer>, KeyStatus>>;
+    using KeyStatusVector = CDMInstanceClient::KeyStatusVector;
     using Message = std::pair<MessageType, Ref<SharedBuffer>>;
     using LicenseUpdateCallback = Function<void(bool sessionWasClosed, std::optional<KeyStatusVector>&& changedKeys, std::optional<double>&& changedExpiration, std::optional<Message>&& message, SuccessValue succeeded)>;
     virtual void updateLicense(const String& sessionId, LicenseType, const SharedBuffer& response, LicenseUpdateCallback) = 0;
@@ -87,6 +98,9 @@ public:
         QuotaExceeded,
         Other,
     };
+
+    virtual void setClient(CDMInstanceClient&) { }
+    virtual void clearClient() { }
 
     using LoadSessionCallback = Function<void(std::optional<KeyStatusVector>&&, std::optional<double>&&, std::optional<Message>&&, SuccessValue, SessionLoadFailure)>;
     virtual void loadSession(LicenseType, const String& sessionId, const String& origin, LoadSessionCallback) = 0;

@@ -1329,7 +1329,8 @@ unsigned MediaPlayerPrivateGStreamerBase::videoDecodedByteCount() const
 void MediaPlayerPrivateGStreamerBase::handleProtectionStructure(const GstStructure* structure)
 {
     GRefPtr<GstBuffer> data;
-    gst_structure_get(structure, "init-data", GST_TYPE_BUFFER, &data.outPtr(), nullptr);
+    GUniqueOutPtr<char> eventKeySystemUUID;
+    gst_structure_get(structure, "init-data", GST_TYPE_BUFFER, &data.outPtr(), "key-system-uuid", G_TYPE_STRING, &eventKeySystemUUID.outPtr(), nullptr);
 
     GstMappedBuffer mappedInitData(data.get(), GST_MAP_READ);
     if (!mappedInitData) {
@@ -1338,7 +1339,7 @@ void MediaPlayerPrivateGStreamerBase::handleProtectionStructure(const GstStructu
     }
 
     InitData initData(mappedInitData.data(), mappedInitData.size());
-    initializationDataEncountered(initData);
+    initializationDataEncountered(ASCIILiteral(!g_strcmp0(eventKeySystemUUID.get(), GST_PROTECTION_UNSPECIFIED_SYSTEM_ID) ? "webm" : "cenc"), initData);
 }
 
 void MediaPlayerPrivateGStreamerBase::handleProtectionEvents(const Vector<GstEvent*>& protectionEvents)
@@ -1349,10 +1350,12 @@ void MediaPlayerPrivateGStreamerBase::handleProtectionEvents(const Vector<GstEve
     ASSERT(isMainThread());
 
     InitData concatenatedInitDatas;
+    bool isSystemUUIDUnspecified = false;
     for (auto* event : protectionEvents) {
         GstBuffer* buffer = nullptr;
         const char* eventKeySystemUUID = nullptr;
         gst_event_parse_protection(event, &eventKeySystemUUID, &buffer, nullptr);
+        isSystemUUIDUnspecified = !g_strcmp0(eventKeySystemUUID, GStreamerEMEUtilities::s_UnspecifiedUUID);
 
         GST_TRACE("handling protection event %u for %s", GST_EVENT_SEQNUM(event), eventKeySystemUUID);
         if (m_cdmInstance && g_strcmp0(eventKeySystemUUID, GStreamerEMEUtilities::keySystemToUuid(m_cdmInstance->keySystem()))) {
@@ -1372,17 +1375,17 @@ void MediaPlayerPrivateGStreamerBase::handleProtectionEvents(const Vector<GstEve
     }
 
     if (!concatenatedInitDatas.isEmpty())
-        initializationDataEncountered(concatenatedInitDatas);
+        initializationDataEncountered(ASCIILiteral(isSystemUUIDUnspecified ? "webm" : "cenc"), concatenatedInitDatas);
 }
 
-void MediaPlayerPrivateGStreamerBase::initializationDataEncountered(const InitData& initData)
+void MediaPlayerPrivateGStreamerBase::initializationDataEncountered(const String& initDataType, const InitData& initData)
 {
     ASSERT(isMainThread());
 
     GST_TRACE("init data encountered of size %" G_GSIZE_FORMAT " with MD5 %s", initData.sizeInBytes(), GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
     GST_MEMDUMP("init data", initData.characters8(), initData.sizeInBytes());
 
-    m_player->initializationDataEncountered(ASCIILiteral("cenc"), ArrayBuffer::create(reinterpret_cast<const uint8_t*>(initData.characters8()), initData.sizeInBytes()));
+    m_player->initializationDataEncountered(initDataType, ArrayBuffer::create(reinterpret_cast<const uint8_t*>(initData.characters8()), initData.sizeInBytes()));
 }
 
 void MediaPlayerPrivateGStreamerBase::cdmInstanceAttached(const CDMInstance& instance)

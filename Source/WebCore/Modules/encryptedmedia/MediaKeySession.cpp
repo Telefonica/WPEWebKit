@@ -81,11 +81,14 @@ MediaKeySession::MediaKeySession(ScriptExecutionContext& context, WeakPtr<MediaK
     // 3.8. Let the use distinctive identifier value be this object's use distinctive identifier value.
     // 3.9. Let the cdm implementation value be this object's cdm implementation.
     // 3.10. Let the cdm instance value be this object's cdm instance.
+
+    m_instance->setClient(*this);
 }
 
 MediaKeySession::~MediaKeySession()
 {
     m_keyStatuses->detachSession();
+    m_instance->clearClient();
 }
 
 const String& MediaKeySession::sessionId() const
@@ -192,7 +195,7 @@ void MediaKeySession::generateRequest(const AtomicString& initDataType, const Bu
         }
 
         LOG(EME, "EME - request license from CDM implementation");
-        m_instance->requestLicense(m_sessionType, initDataType, WTFMove(initData), WTFMove(customData), [this, weakThis = m_weakPtrFactory.createWeakPtr(*this), promise = WTFMove(promise)] (Ref<SharedBuffer>&& message, const String& sessionId, bool needsIndividualization, CDMInstance::SuccessValue succeeded) mutable {
+        m_instance->requestLicense(m_sessionType, initDataType, sanitizedInitData.releaseNonNull(), WTFMove(customData), [this, weakThis = m_weakPtrFactory.createWeakPtr(*this), promise = WTFMove(promise)] (Ref<SharedBuffer>&& message, const String& sessionId, bool needsIndividualization, CDMInstance::SuccessValue succeeded) mutable {
             if (!weakThis)
                 return;
 
@@ -604,6 +607,29 @@ void MediaKeySession::enqueueMessage(MediaKeyMessageType messageType, const Shar
     //    session.
     auto messageEvent = MediaKeyMessageEvent::create(eventNames().messageEvent, {messageType, message.tryCreateArrayBuffer()}, Event::IsTrusted::Yes);
     m_eventQueue.enqueueEvent(WTFMove(messageEvent));
+}
+
+void MediaKeySession::enqueueMessageWithTask(CDMInstanceClient::MessageType type, Ref<SharedBuffer>&& message)
+{
+    m_taskQueue.enqueueTask([this, type, message = WTFMove(message)] () mutable {
+        MediaKeyMessageType messageType;
+        switch (type) {
+        case CDMInstance::MessageType::LicenseRequest:
+            messageType = MediaKeyMessageType::LicenseRequest;
+            break;
+        case CDMInstance::MessageType::LicenseRenewal:
+            messageType = MediaKeyMessageType::LicenseRenewal;
+            break;
+        case CDMInstance::MessageType::LicenseRelease:
+            messageType = MediaKeyMessageType::LicenseRelease;
+            break;
+        case CDMInstance::MessageType::IndividualizationRequest:
+            messageType = MediaKeyMessageType::IndividualizationRequest;
+            break;
+        }
+
+        enqueueMessage(messageType, message.get());
+    });
 }
 
 void MediaKeySession::updateKeyStatuses(CDMInstance::KeyStatusVector&& inputStatuses)

@@ -36,25 +36,35 @@
 
 namespace WebCore {
 
-static Vector<Ref<SharedBuffer>> extractKeyIDsKeyids(const SharedBuffer& buffer)
+namespace {
+    const uint32_t kCencMaxBoxSize = 64 * KB;
+    // ContentEncKeyID has this EBML code [47][E2] in WebM,
+    // as per spec the size of the ContentEncKeyID is encoded on 16 bits.
+    // https://matroska.org/technical/specs/index.html#ContentEncKeyID/
+    const uint32_t kWebMMaxContentEncKeyIDSize = 64 * KB; // 2^16
+    const uint32_t kKeyIdsMinKeyIdSizeInBytes = 1;
+    const uint32_t kKeyIdsMaxKeyIdSizeInBytes = 512;
+}
+
+static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsKeyids(const SharedBuffer& buffer)
 {
     // 1. Format
     // https://w3c.github.io/encrypted-media/format-registry/initdata/keyids.html#format
     if (buffer.size() > std::numeric_limits<unsigned>::max())
-        return { };
+        return std::nullopt;
     String json { buffer.data(), static_cast<unsigned>(buffer.size()) };
 
     RefPtr<JSON::Value> value;
     if (!JSON::Value::parseJSON(json, value))
-        return { };
+        return std::nullopt;
 
     RefPtr<JSON::Object> object;
     if (!value->asObject(object))
-        return { };
+        return std::nullopt;
 
     RefPtr<JSON::Array> kidsArray;
     if (!object->getArray("kids", kidsArray))
-        return { };
+        return std::nullopt;
 
     Vector<Ref<SharedBuffer>> keyIDs;
     for (auto& value : *kidsArray) {
@@ -65,6 +75,9 @@ static Vector<Ref<SharedBuffer>> extractKeyIDsKeyids(const SharedBuffer& buffer)
         Vector<char> keyIDData;
         if (!WTF::base64URLDecode(keyID, { keyIDData }))
             continue;
+
+        if (keyIDData.size() < kKeyIdsMinKeyIdSizeInBytes || keyIDData.size() > kKeyIdsMaxKeyIdSizeInBytes)
+            return std::nullopt;
 
         Ref<SharedBuffer> keyIDBuffer = SharedBuffer::create(WTFMove(keyIDData));
         keyIDs.append(WTFMove(keyIDBuffer));
@@ -77,13 +90,13 @@ static RefPtr<SharedBuffer> sanitizeKeyids(const SharedBuffer& buffer)
 {
     // 1. Format
     // https://w3c.github.io/encrypted-media/format-registry/initdata/keyids.html#format
-    Vector<Ref<SharedBuffer>> keyIDBuffer = extractKeyIDsKeyids(buffer);
-    if (keyIDBuffer.isEmpty())
+    auto keyIDBuffer = extractKeyIDsKeyids(buffer);
+    if (!keyIDBuffer)
         return nullptr;
 
     auto object = JSON::Object::create();
     auto kidsArray = JSON::Array::create();
-    for (auto& buffer : keyIDBuffer)
+    for (auto& buffer : keyIDBuffer.value())
         kidsArray->pushString(WTF::base64URLEncode(buffer->data(), buffer->size()));
     object->setArray("kids", WTFMove(kidsArray));
 
@@ -99,28 +112,35 @@ static RefPtr<SharedBuffer> sanitizeCenc(const SharedBuffer& buffer)
     return buffer.copy();
 }
 
-static Vector<Ref<SharedBuffer>> extractKeyIDsCenc(const SharedBuffer&)
+static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsCenc(const SharedBuffer&)
 {
     // 4. Common SystemID and PSSH Box Format
     // https://w3c.github.io/encrypted-media/format-registry/initdata/cenc.html#common-system
     notImplemented();
-    return { };
+    return std::nullopt;
 }
 
 static RefPtr<SharedBuffer> sanitizeWebM(const SharedBuffer& buffer)
 {
-    // 1. Format
-    // https://w3c.github.io/encrypted-media/format-registry/initdata/webm.html#format
-    notImplemented();
+    // Check if the buffer is a valid WebM initData.
+    // The WebM initData is the ContentEncKeyID, so should be less than kWebMMaxContentEncKeyIDSize.
+    if (buffer.isEmpty() || buffer.size() > kWebMMaxContentEncKeyIDSize)
+        return nullptr;
+
     return buffer.copy();
 }
 
-static Vector<Ref<SharedBuffer>> extractKeyIDsWebM(const SharedBuffer&)
+static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsWebM(const SharedBuffer& buffer)
 {
+    Vector<Ref<SharedBuffer>> keyIDs;
+    RefPtr<SharedBuffer> sanitizedBuffer = sanitizeWebM(buffer);
+    if (!sanitizedBuffer)
+        return std::nullopt;
+
     // 1. Format
     // https://w3c.github.io/encrypted-media/format-registry/initdata/webm.html#format
-    notImplemented();
-    return { };
+    keyIDs.append(sanitizedBuffer.releaseNonNull());
+    return keyIDs;
 }
 
 InitDataRegistry& InitDataRegistry::shared()
@@ -146,11 +166,11 @@ RefPtr<SharedBuffer> InitDataRegistry::sanitizeInitData(const AtomicString& init
     return iter->value.sanitizeInitData(buffer);
 }
 
-Vector<Ref<SharedBuffer>> InitDataRegistry::extractKeyIDs(const AtomicString& initDataType, const SharedBuffer& buffer)
+std::optional<Vector<Ref<SharedBuffer>>> InitDataRegistry::extractKeyIDs(const AtomicString& initDataType, const SharedBuffer& buffer)
 {
     auto iter = m_types.find(initDataType);
     if (iter == m_types.end() || !iter->value.sanitizeInitData)
-        return { };
+        return std::nullopt;
     return iter->value.extractKeyIDs(buffer);
 }
 
