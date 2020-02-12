@@ -566,6 +566,7 @@ add_library(WPEInjectedBundle MODULE "${WEBKIT_DIR}/WebProcess/InjectedBundle/AP
 ADD_WEBKIT_PREFIX_HEADER(WPEInjectedBundle)
 target_link_libraries(WPEInjectedBundle WebKit)
 
+
 if (EXPORT_DEPRECATED_WEBKIT2_C_API)
     set(WPE_INSTALLED_WEBKIT_HEADERS
         ${WEBKIT_DIR}/Shared/API/c/WKArray.h
@@ -704,5 +705,14 @@ if (EXPORT_DEPRECATED_WEBKIT2_C_API)
     install(FILES ${CMAKE_BINARY_DIR}/wpe-webkit.pc
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
         COMPONENT "Development"
+    )
+else ()
+  install(FILES ${CMAKE_BINARY_DIR}/wpe-webkit.pc
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
+    COMPONENT "Development"
+    )
+  install(FILES ${WPE_API_INSTALLED_HEADERS}
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/wpe-${WPE_API_VERSION}/wpe"
+    COMPONENT "Development"
     )
 endif ()
