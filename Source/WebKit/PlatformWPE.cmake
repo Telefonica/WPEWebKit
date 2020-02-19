@@ -318,6 +318,7 @@ set(WPE_API_INSTALLED_HEADERS
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitEditorState.h
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitError.h
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitFaviconDatabase.h
+    ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitFileChooserRequest.h
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitFindController.h
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitFormSubmissionRequest.h
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitGeolocationPermissionRequest.h
@@ -334,6 +335,7 @@ set(WPE_API_INSTALLED_HEADERS
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitPlugin.h
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitPolicyDecision.h
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitResponsePolicyDecision.h
+    ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitScriptDialog.h
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitSecurityManager.h
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitSecurityOrigin.h
     ${WEBKIT_DIR}/UIProcess/API/wpe/WebKitSettings.h
