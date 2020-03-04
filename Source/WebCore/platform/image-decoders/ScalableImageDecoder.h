@@ -33,6 +33,7 @@
 #include "IntRect.h"
 #include "SharedBuffer.h"
 #include <wtf/Assertions.h>
+#include <wtf/Lock.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
@@ -69,6 +70,7 @@ public:
 
     void setData(SharedBuffer& data, bool allDataReceived) override
     {
+        LockHolder lockHolder(m_mutex);
         if (m_encodedDataStatus == EncodedDataStatus::Error)
             return;
 
@@ -205,6 +207,7 @@ protected:
     bool m_scaled { false };
     Vector<int> m_scaledColumns;
     Vector<int> m_scaledRows;
+    mutable Lock m_mutex;
     bool m_premultiplyAlpha;
     bool m_ignoreGammaAndColorProfile;
     ImageOrientation m_orientation;
