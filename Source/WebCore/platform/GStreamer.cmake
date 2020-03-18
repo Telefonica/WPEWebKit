@@ -157,6 +157,7 @@ if (ENABLE_ENCRYPTED_MEDIA)
     else()
         list(APPEND WebCore_SOURCES
             platform/encryptedmedia/clearkey/CDMClearKey.cpp
+	    platform/encryptedmedia/playready/CDMPlayReady.cpp
             platform/graphics/gstreamer/eme/WebKitClearKeyDecryptorGStreamer.cpp
         )
     endif ()

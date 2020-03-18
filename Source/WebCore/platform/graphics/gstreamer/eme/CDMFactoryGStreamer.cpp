@@ -35,6 +35,7 @@
 #include "CDMOpenCDM.h"
 #else
 #include "CDMClearKey.h"
+#include "CDMPlayReady.h"
 #endif
 
 namespace WebCore {
@@ -45,6 +46,7 @@ void CDMFactory::platformRegisterFactories(Vector<CDMFactory*>& factories)
     factories.append(&CDMFactoryOpenCDM::singleton());
 #else
     factories.append(&CDMFactoryClearKey::singleton());
+    factories.append(&CDMFactoryPlayReady::singleton());
 #endif
 }
 

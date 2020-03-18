@@ -142,7 +142,7 @@ endif ()
 
 if (ENABLE_PLAYREADY)
     add_definitions(-DUSE_PLAYREADY=1)
-    find_package(Playready REQUIRED)
+    #find_package(Playready REQUIRED)
 endif ()
 
 if (ENABLE_BREAKPAD)
