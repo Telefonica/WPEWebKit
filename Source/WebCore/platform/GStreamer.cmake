@@ -139,6 +139,7 @@ endif ()
 if (ENABLE_ENCRYPTED_MEDIA)
     list(APPEND WebCore_INCLUDE_DIRECTORIES
         "${WEBCORE_DIR}/platform/encryptedmedia/clearkey"
+	"${WEBCORE_DIR}/platform/encryptedmedia/playready"
         ${LIBGCRYPT_INCLUDE_DIRS}
     )
     list(APPEND WebCore_SOURCES
