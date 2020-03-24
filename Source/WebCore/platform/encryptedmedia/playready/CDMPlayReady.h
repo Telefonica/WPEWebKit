@@ -55,7 +55,7 @@ class CDMPrivatePlayReady final : public CDMPrivate {
 public:
     CDMPrivatePlayReady();
     virtual ~CDMPrivatePlayReady();
-/*
+
     bool supportsInitDataType(const AtomicString&) const override;
     bool supportsConfiguration(const CDMKeySystemConfiguration&) const override;
     bool supportsConfigurationWithRestrictions(const CDMKeySystemConfiguration&, const CDMRestrictions&) const override;
@@ -71,7 +71,7 @@ public:
     bool supportsInitData(const AtomicString&, const SharedBuffer&) const override;
     RefPtr<SharedBuffer> sanitizeResponse(const SharedBuffer&) const override;
     std::optional<String> sanitizeSessionId(const String&) const override;
-    */
+  
 };
 
 class CDMInstancePlayReady final : public CDMInstance {
@@ -80,7 +80,7 @@ public:
     virtual ~CDMInstancePlayReady();
 
     ImplementationType implementationType() const final { return ImplementationType::PlayReady; }
-/*
+
     SuccessValue initializeWithConfiguration(const CDMKeySystemConfiguration&) override;
     SuccessValue setDistinctiveIdentifiersAllowed(bool) override;
     SuccessValue setPersistentStateAllowed(bool) override;
@@ -102,7 +102,7 @@ public:
     };
 
     const Vector<Key>& keys() const { return m_keys; }
-*/
+
 private:
     WeakPtrFactory<CDMInstancePlayReady> m_weakPtrFactory;
     Vector<Key> m_keys;
