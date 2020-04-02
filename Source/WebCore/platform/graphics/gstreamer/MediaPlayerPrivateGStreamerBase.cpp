@@ -1468,7 +1468,7 @@ bool MediaPlayerPrivateGStreamerBase::supportsKeySystem(const String& keySystem,
     bool result = false;
 
 #if ENABLE(ENCRYPTED_MEDIA) && !USE(OPENCDM)
-    result = GStreamerEMEUtilities::isClearKeyKeySystem(keySystem);
+    result = GStreamerEMEUtilities::isClearKeyKeySystem(keySystem) || GStreamerEMEUtilities::isPlayReadyKeySystem(keySystem);
 #endif
 
     GST_DEBUG("checking for KeySystem support with %s and type %s: %s", keySystem.utf8().data(), mimeType.utf8().data(), boolForPrinting(result));

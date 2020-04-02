@@ -49,11 +49,13 @@ public:
     static const char* s_ClearKeyKeySystem;
     static const char* s_UnspecifiedUUID;
     static const char* s_UnspecifiedKeySystem;
-
-#if USE(OPENCDM) || USE(PLAYREADY)
     static const char* s_PlayReadyUUID;
     static std::array<const char*, 2> s_PlayReadyKeySystems;
-#endif
+
+/*#if USE(OPENCDM) || USE(PLAYREADY)
+    static const char* s_PlayReadyUUID;
+    static std::array<const char*, 2> s_PlayReadyKeySystems;
+#endif*/
 
 #if USE(OPENCDM)
     static const char* s_WidevineUUID;
@@ -70,13 +72,13 @@ public:
         return equalIgnoringASCIICase(keySystem, s_UnspecifiedKeySystem);
     }
 
-#if USE(OPENCDM)
+//#if USE(OPENCDM)
     static bool isPlayReadyKeySystem(const String& keySystem)
     {
         return equalIgnoringASCIICase(keySystem, s_PlayReadyKeySystems[0])
             || equalIgnoringASCIICase(keySystem, s_PlayReadyKeySystems[1]);
     }
-
+#if USE(OPENCDM)
     static bool isWidevineKeySystem(const String& keySystem)
     {
         return equalIgnoringASCIICase(keySystem, s_WidevineKeySystem);
@@ -120,10 +122,10 @@ public:
             return s_UnspecifiedKeySystem;
 #endif
 
-#if USE(OPENCDM)
+//#if USE(OPENCDM)
         if (uuid == s_PlayReadyUUID)
             return s_PlayReadyKeySystems[0];
-
+#if USE(OPENCDM)
         if (uuid == s_WidevineUUID)
             return s_WidevineKeySystem;
 #endif

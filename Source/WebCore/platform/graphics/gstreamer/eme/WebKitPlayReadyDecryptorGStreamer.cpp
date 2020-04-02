@@ -28,7 +28,7 @@
 #include <gst/base/gstbytereader.h>
 #include <wtf/RunLoop.h>
 
-#define CLEARKEY_SIZE 16
+#define PLAYREADY_SIZE 16
 
 struct Key {
     GRefPtr<GstBuffer> keyID;
@@ -57,15 +57,14 @@ static GstStaticPadTemplate sinkTemplate = GST_STATIC_PAD_TEMPLATE("sink",
     "application/x-webm-enc, original-media-type=(string)video/x-vp8;"
     "application/x-webm-enc, original-media-type=(string)video/x-vp9;"
     "application/x-video-mp4, original-media-type=(string)video/mp4; "
-    "application/x-audio-mp4, original-media-type=(string)audio/mp4; "
-    "application/x-audio-mpeg, original-media-type=(string)audio/mpeg; "));
-
+    "application/x-audio-mp4, original-media-type=(string)audio/mp4; "));
 
 
 static GstStaticPadTemplate srcTemplate = GST_STATIC_PAD_TEMPLATE("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/x-vp8; video/x-vp9"));
+    GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/x-vp8; video/x-vp9; video/webm; audio/webm; video/mp4; audio/mp4; application/vnd.ms-sstr+xml;"));
+
 
 #define webkit_media_play_ready_decrypt_parent_class parent_class
 G_DEFINE_TYPE(WebKitMediaPlayReadyDecrypt, webkit_media_play_ready_decrypt, WEBKIT_TYPE_MEDIA_CENC_DECRYPT);
@@ -157,7 +156,7 @@ static bool webKitMediaPlayReadyDecryptorSetupCipher(WebKitMediaCommonEncryption
         return false;
     }
 
-    ASSERT(mappedKeyBuffer.size() == CLEARKEY_SIZE);
+    ASSERT(mappedKeyBuffer.size() == PLAYREADY_SIZE);
     error = gcry_cipher_setkey(priv->handle, mappedKeyBuffer.data(), mappedKeyBuffer.size());
     if (error) {
         GST_ERROR_OBJECT(self, "gcry_cipher_setkey failed: %s", gpg_strerror(error));
@@ -177,17 +176,17 @@ static bool webKitMediaPlayReadyDecryptorDecrypt(WebKitMediaCommonEncryptionDecr
         return false;
     }
 
-    uint8_t ctr[CLEARKEY_SIZE];
+    uint8_t ctr[PLAYREADY_SIZE];
     if (mappedIVBuffer.size() == 8) {
         memset(ctr + 8, 0, 8);
         memcpy(ctr, mappedIVBuffer.data(), 8);
     } else {
-        ASSERT(mappedIVBuffer.size() == CLEARKEY_SIZE);
-        memcpy(ctr, mappedIVBuffer.data(), CLEARKEY_SIZE);
+        ASSERT(mappedIVBuffer.size() == PLAYREADY_SIZE);
+        memcpy(ctr, mappedIVBuffer.data(), PLAYREADY_SIZE);
     }
 
     WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_PR_DECRYPT(self));
-    gcry_error_t error = gcry_cipher_setctr(priv->handle, ctr, CLEARKEY_SIZE);
+    gcry_error_t error = gcry_cipher_setctr(priv->handle, ctr, PLAYREADY_SIZE);
     if (error) {
         GST_ERROR_OBJECT(self, "gcry_cipher_setctr failed: %s", gpg_strerror(error));
         return false;
