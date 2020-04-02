@@ -510,6 +510,10 @@ WEBKIT_API void
 webkit_web_view_restore_session_state                (WebKitWebView             *web_view,
                                                       WebKitWebViewSessionState *state);
 
+WEBKIT_API void
+webkit_web_view_set_transparent                      (WebKitWebView             *web_view,
+                                                      gboolean                  transparent);
+
 G_END_DECLS
 
 #endif
