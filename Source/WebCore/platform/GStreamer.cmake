@@ -160,6 +160,7 @@ if (ENABLE_ENCRYPTED_MEDIA)
             platform/encryptedmedia/clearkey/CDMClearKey.cpp
 	    platform/encryptedmedia/playready/CDMPlayReady.cpp
             platform/graphics/gstreamer/eme/WebKitClearKeyDecryptorGStreamer.cpp
+	    platform/graphics/gstreamer/eme/WebKitPlayReadyDecryptorGStreamer.cpp
         )
     endif ()
 endif ()

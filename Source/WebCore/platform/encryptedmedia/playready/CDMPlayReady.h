@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2016 Metrological Group B.V.
- * Copyright (C) 2016 Igalia S.L.
+ * 
+ * 
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,6 +35,33 @@
 #include "CDMPrivate.h"
 #include "SharedBuffer.h"
 #include <wtf/WeakPtr.h>
+
+//includes from BSEAV Playready 3.0
+/*#include <oemcommon.h>
+#include <drmmanager.h>
+#include <drmmathsafe.h>
+#include <drmtypes.h>
+#include <drmerr.h>*/
+
+// The following two values determine the initial size of the in-memory license
+// store. If more licenses are used concurrently, Playready will resize the
+// to make room. However, the resizing action is inefficient in both CPU and
+// memory, so it is useful to get the max size right and set it here.
+/*const DRM_DWORD LICENSE_SIZE_BYTES = 512;  // max possible license size (ask the server team)
+const DRM_DWORD MAX_NUM_LICENSES = 200;    // max number of licenses (ask the RefApp team)
+
+struct OutputProtection {
+    uint16_t compressedDigitalVideoLevel;   //!< Compressed digital video output protection level.
+    uint16_t uncompressedDigitalVideoLevel; //!< Uncompressed digital video output protection level.
+    uint16_t analogVideoLevel;              //!< Analog video output protection level.
+    uint16_t compressedDigitalAudioLevel;   //!< Compressed digital audio output protection level.
+    uint16_t uncompressedDigitalAudioLevel; //!< Uncompressed digital audio output protection level.
+    uint32_t maxResDecodeWidth;             //!< Max res decode width in pixels.
+    uint32_t maxResDecodeHeight;            //!< Max res decode height in pixels.
+    OutputProtection();
+    void setOutputLevels(const DRM_MINIMUM_OUTPUT_PROTECTION_LEVELS& mopLevels);
+    void setMaxResDecode(uint32_t width, uint32_t height);
+};*/
 
 namespace WebCore {
 
@@ -101,11 +128,82 @@ public:
         RefPtr<SharedBuffer> keyValueData;
     };
 
+    enum KeyState {
+        // Has been initialized.
+        KEY_INIT = 0,
+        // Has a key message pending to be processed.
+        KEY_PENDING = 1,
+        // Has a usable key.
+        KEY_READY = 2,
+        // Has an error.
+        KEY_ERROR = 3,
+        // Has been closed.
+        KEY_CLOSED = 4
+    };
+    enum MessageType {
+        LicenseRequest = 0,
+        LicenseRenewal = 1,
+        LicenseRelease = 2,
+        IndividualizationRequest = 3
+    };
+    
+    typedef enum SessionType {
+        session_type_eTemporary = 0,
+        session_type_ePersistent,
+        session_type_ePersistentUsageRecord
+    } SessionType;
+
+
+
     const Vector<Key>& keys() const { return m_keys; }
+
+    struct CallbackInfo
+    {
+    	//IMediaKeySessionCallback * _callback;
+	    uint16_t _compressedVideo;
+	    uint16_t _uncompressedVideo;
+	    uint16_t _analogVideo;
+	    uint16_t _compressedAudio;
+	    uint16_t _uncompressedAudio;
+    };
+
+    /*static void * PlayLevelUpdateCallback(void * data)
+    {
+    	CallbackInfo * callbackInfo = static_cast<CallbackInfo *>(data);
+	    std::string keyMessage;
+	    keyMessage << "{";
+	    keyMessage << "\"compressed-video\": " << callbackInfo->_compressedVideo << ",";
+	    keyMessage << "\"uncompressed-video\": " << callbackInfo->_uncompressedVideo << ",";
+	    keyMessage << "\"analog-video\": " << callbackInfo->_analogVideo << ",";
+	    keyMessage << "\"compressed-audio\": " << callbackInfo->_compressedAudio << ",";
+	    keyMessage << "\"uncompressed-audio\": " << callbackInfo->_uncompressedAudio;
+	    keyMessage << "}";
+
+	    std::string keyMessageStr = keyMessage.c_str();
+	    const uint8_t * messageBytes = reinterpret_cast<const uint8_t *>(keyMessageStr.c_str());
+
+	    char urlBuffer[64];
+	    strcpy(urlBuffer, "properties");
+	    //callbackInfo->_callback->OnKeyMessage(messageBytes, keyMessageStr.length() + 1, urlBuffer);
+
+	    delete callbackInfo;
+	    return nullptr;
+    }*/
+
+    bool GenerateKeyRequest(std::string initData, SessionType type = session_type_eTemporary);
+    std::string GetKeyRequestResponse(std::string url);
+    bool m_valid;
+    std::string m_wrmheader;
+    std::string m_initData;
+    std::string m_keyId;
+    uint32_t m_systemCode;
 
 private:
     WeakPtrFactory<CDMInstancePlayReady> m_weakPtrFactory;
     Vector<Key> m_keys;
+    //DRM_RESULT GetKeyIdsFromHeader(DRM_CGP_HEADER_KIDS_DATA **pKIDsData);   /* Allocates memory for KeyIds; Caller is responsible for freeing them */
+    //RM_RESULT DeleteStoredLicenses();
+
 };
 
 } // namespace WebCore

@@ -55,9 +55,9 @@ RefPtr<JSON::Object> parseJSONObjectPR(const SharedBuffer& buffer)
 
 std::optional<Vector<CDMInstancePlayReady::Key>> parseLicenseFormatPR(const JSON::Object& root)
 {
-    // If the 'keys' key is present in the root object, parse the JSON further
+    // If the 'kids' key is present in the root object, parse the JSON further
     // according to the specified 'license' format.
-    auto it = root.find("keys");
+    auto it = root.find("kids");
     if (it == root.end())
         return std::nullopt;
 

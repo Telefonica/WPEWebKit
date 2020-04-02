@@ -55,6 +55,7 @@
 #include "WebKitOpenCDMDecryptorGStreamer.h"
 #else
 #include "WebKitClearKeyDecryptorGStreamer.h"
+#include "WebKitPlayReadyDecryptorGStreamer.h"
 #endif
 #endif
 
@@ -169,6 +170,10 @@ void MediaPlayerPrivateGStreamerBase::ensureWebKitGStreamerElements()
     GRefPtr<GstElementFactory> clearKeyDecryptorFactory = adoptGRef(gst_element_factory_find("webkitclearkey"));
     if (!clearKeyDecryptorFactory)
         gst_element_register(nullptr, "webkitclearkey", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_MEDIA_CK_DECRYPT);
+    GRefPtr<GstElementFactory> playReadyDecryptorFactory = adoptGRef(gst_element_factory_find("webkitplayready"));
+    if (!playReadyDecryptorFactory)
+	gst_element_register(nullptr, "webkitplayready", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_MEDIA_PR_DECRYPT);
+
 
 #endif
 #endif
