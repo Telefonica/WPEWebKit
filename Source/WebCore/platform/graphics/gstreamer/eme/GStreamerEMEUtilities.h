@@ -98,10 +98,10 @@ public:
 #endif
         }
 
-#if USE(OPENCDM)
+//#if USE(OPENCDM)
         if (isPlayReadyKeySystem(keySystem))
             return s_PlayReadyUUID;
-
+#if USE(OPENCDM)
         if (isWidevineKeySystem(keySystem))
             return s_WidevineUUID;
 #endif

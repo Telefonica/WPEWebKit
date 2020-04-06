@@ -52,8 +52,9 @@
 #include "SharedBuffer.h"
 #if USE(OPENCDM)
 #include "CDMOpenCDM.h"
-#include "WebKitOpenCDMDecryptorGStreamer.h"
+//#include "WebKitOpenCDMDecryptorGStreamer.h"
 #else
+#include "WebKitOpenCDMDecryptorGStreamer.h"
 #include "WebKitClearKeyDecryptorGStreamer.h"
 #include "WebKitPlayReadyDecryptorGStreamer.h"
 #endif

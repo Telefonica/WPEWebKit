@@ -23,7 +23,7 @@
 #include "config.h"
 #include "CDMOpenCDM.h"
 
-#if ENABLE(ENCRYPTED_MEDIA) && USE(OPENCDM)
+#if ENABLE(ENCRYPTED_MEDIA) //&& USE(OPENCDM)
 
 #include "CDMPrivate.h"
 #include "GenericTaskQueue.h"

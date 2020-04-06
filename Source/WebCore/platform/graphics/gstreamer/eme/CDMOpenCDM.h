@@ -22,7 +22,7 @@
 
 #pragma once
 
-#if ENABLE(ENCRYPTED_MEDIA) && USE(OPENCDM)
+#if ENABLE(ENCRYPTED_MEDIA) //&& USE(OPENCDM)
 
 #include "CDM.h"
 #include "CDMFactory.h"
@@ -124,4 +124,4 @@ private:
 
 SPECIALIZE_TYPE_TRAITS_CDM_INSTANCE(WebCore::CDMInstanceOpenCDM, WebCore::CDMInstance::ImplementationType::OpenCDM);
 
-#endif // ENABLE(ENCRYPTED_MEDIA) && USE(OPENCDM)
+#endif // ENABLE(ENCRYPTED_MEDIA) //&& USE(OPENCDM)

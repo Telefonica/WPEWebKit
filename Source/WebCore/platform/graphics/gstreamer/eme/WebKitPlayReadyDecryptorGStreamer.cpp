@@ -54,6 +54,7 @@ static GstStaticPadTemplate sinkTemplate = GST_STATIC_PAD_TEMPLATE("sink",
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS("application/x-cenc, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
     "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID";"
+    "pplication/vnd.ms-sstr+xml, original-media-type=(string)video/x-h264, rotection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
     "application/x-webm-enc, original-media-type=(string)video/x-vp8;"
     "application/x-webm-enc, original-media-type=(string)video/x-vp9;"
     "application/x-video-mp4, original-media-type=(string)video/mp4; "

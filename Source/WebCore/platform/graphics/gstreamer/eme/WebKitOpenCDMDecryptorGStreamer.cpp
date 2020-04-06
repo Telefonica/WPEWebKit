@@ -23,7 +23,7 @@
 #include "config.h"
 #include "WebKitOpenCDMDecryptorGStreamer.h"
 
-#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(OPENCDM)
+#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) //&& USE(OPENCDM)
 
 #include "CDMOpenCDM.h"
 #include <GStreamerCommon.h>
