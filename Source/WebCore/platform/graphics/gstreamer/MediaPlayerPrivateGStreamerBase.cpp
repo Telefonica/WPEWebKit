@@ -162,17 +162,17 @@ void MediaPlayerPrivateGStreamerBase::ensureWebKitGStreamerElements()
     GRefPtr<GstElementFactory> decryptorFactory = adoptGRef(gst_element_factory_find("webkitopencdm"));
     if (!decryptorFactory)
         gst_element_register(0, "webkitopencdm", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_OPENCDM_DECRYPT);
-#else
+#endif
     GST_ERROR("Register webkitclearkey and webkitplayready as factory");
 
     GRefPtr<GstElementFactory> clearKeyDecryptorFactory = adoptGRef(gst_element_factory_find("webkitclearkey"));
     if (!clearKeyDecryptorFactory)
         gst_element_register(nullptr, "webkitclearkey", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_MEDIA_CK_DECRYPT);
 
+#if USE(PLAYREADY)
     GRefPtr<GstElementFactory> playReadyDecryptorFactory = adoptGRef(gst_element_factory_find("webkitplayready"));
     if (!playReadyDecryptorFactory)
 	gst_element_register(nullptr, "webkitplayready", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_MEDIA_PR_DECRYPT);
-
 #endif
 #endif
 }
