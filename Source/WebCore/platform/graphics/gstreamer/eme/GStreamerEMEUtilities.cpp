@@ -33,13 +33,11 @@ const char* GStreamerEMEUtilities::s_ClearKeyUUID = WEBCORE_GSTREAMER_EME_UTILIT
 const char* GStreamerEMEUtilities::s_ClearKeyKeySystem = "org.w3.clearkey";
 const char* GStreamerEMEUtilities::s_UnspecifiedUUID = GST_PROTECTION_UNSPECIFIED_SYSTEM_ID;
 const char* GStreamerEMEUtilities::s_UnspecifiedKeySystem = "org.webkit.unspecifiedkeysystem";
-const char* GStreamerEMEUtilities::s_PlayReadyUUID = WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID;
-std::array<const char*,2> GStreamerEMEUtilities::s_PlayReadyKeySystems = { "com.microsoft.playready", "com.youtube.playready" };
 
-/*#if USE(OPENCDM) || USE(PLAYREADY)
+#if USE(PLAYREADY)
 const char* GStreamerEMEUtilities::s_PlayReadyUUID = WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID;
 std::array<const char*,2> GStreamerEMEUtilities::s_PlayReadyKeySystems = { "com.microsoft.playready", "com.youtube.playready" };
-#endif*/
+#endif
 
 #if USE(OPENCDM)
 const char* GStreamerEMEUtilities::s_WidevineUUID = WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID;

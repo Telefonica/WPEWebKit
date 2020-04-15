@@ -47,18 +47,15 @@
 #include <gst/audio/streamvolume.h>
 #include <gst/video/gstvideometa.h>
 
-#if ENABLE(ENCRYPTED_MEDIA)
 #include "CDMInstance.h"
 #include "SharedBuffer.h"
+
 #if USE(OPENCDM)
 #include "CDMOpenCDM.h"
-//#include "WebKitOpenCDMDecryptorGStreamer.h"
-#else
 #include "WebKitOpenCDMDecryptorGStreamer.h"
+#endif
 #include "WebKitClearKeyDecryptorGStreamer.h"
 #include "WebKitPlayReadyDecryptorGStreamer.h"
-#endif
-#endif
 
 #if USE(GSTREAMER_GL)
 #if PLATFORM(WPE)
@@ -161,20 +158,20 @@ void MediaPlayerPrivateGStreamerBase::ensureWebKitGStreamerElements()
 #if ENABLE(ENCRYPTED_MEDIA)
     if (!webkitGstCheckVersion(1, 6, 1))
         return;
-
 #if USE(OPENCDM)
     GRefPtr<GstElementFactory> decryptorFactory = adoptGRef(gst_element_factory_find("webkitopencdm"));
     if (!decryptorFactory)
         gst_element_register(0, "webkitopencdm", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_OPENCDM_DECRYPT);
-
 #else
+    GST_ERROR("Register webkitclearkey and webkitplayready as factory");
+
     GRefPtr<GstElementFactory> clearKeyDecryptorFactory = adoptGRef(gst_element_factory_find("webkitclearkey"));
     if (!clearKeyDecryptorFactory)
         gst_element_register(nullptr, "webkitclearkey", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_MEDIA_CK_DECRYPT);
+
     GRefPtr<GstElementFactory> playReadyDecryptorFactory = adoptGRef(gst_element_factory_find("webkitplayready"));
     if (!playReadyDecryptorFactory)
 	gst_element_register(nullptr, "webkitplayready", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_MEDIA_PR_DECRYPT);
-
 
 #endif
 #endif
@@ -1467,11 +1464,9 @@ void MediaPlayerPrivateGStreamerBase::dispatchDecryptionStructure(GUniquePtr<Gst
 bool MediaPlayerPrivateGStreamerBase::supportsKeySystem(const String& keySystem, const String& mimeType)
 {
     bool result = false;
-
-#if ENABLE(ENCRYPTED_MEDIA) && !USE(OPENCDM)
+#if ENABLE(ENCRYPTED_MEDIA) && (!USE(OPENCDM) || USE(PLAYREADY))
     result = GStreamerEMEUtilities::isClearKeyKeySystem(keySystem) || GStreamerEMEUtilities::isPlayReadyKeySystem(keySystem);
 #endif
-
     GST_DEBUG("checking for KeySystem support with %s and type %s: %s", keySystem.utf8().data(), mimeType.utf8().data(), boolForPrinting(result));
     return result;
 }

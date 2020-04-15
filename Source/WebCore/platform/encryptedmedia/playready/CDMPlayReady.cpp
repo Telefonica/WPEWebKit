@@ -3,6 +3,7 @@
 
 #if ENABLE(ENCRYPTED_MEDIA)
 
+#include "GStreamerEMEUtilities.h"
 #include "CDMKeySystemConfiguration.h"
 #include "CDMRestrictions.h"
 #include "CDMSessionType.h"
@@ -278,6 +279,7 @@ std::optional<String> CDMPrivatePlayReady::sanitizeSessionId(const String& sessi
 
 CDMInstancePlayReady::CDMInstancePlayReady()
 {
+    GST_ERROR_OBJECT(nullptr, "Create CDMInstancePlayReady");
 }
 
 CDMInstancePlayReady::~CDMInstancePlayReady() = default;
@@ -309,6 +311,7 @@ CDMInstance::SuccessValue CDMInstancePlayReady::setServerCertificate(Ref<SharedB
 void CDMInstancePlayReady::requestLicense(LicenseType, const AtomicString&, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback callback)
 {
 	//TODO
+    GST_ERROR_OBJECT(nullptr, "request licenses for playready");
     static uint32_t s_sessionIdValue = 0;
     ++s_sessionIdValue;
 
@@ -326,6 +329,7 @@ void CDMInstancePlayReady::updateLicense(const String& sessionId, LicenseType, c
 	//TODO
     // Use a helper functor that schedules the callback dispatch, avoiding
     // duplicated callOnMainThread() calls.
+    GST_ERROR_OBJECT(nullptr, "update licenses for playready");
     auto dispatchCallback =
         [this, &callback](bool sessionWasClosed, std::optional<KeyStatusVector>&& changedKeys, SuccessValue succeeded) {
             callOnMainThread(

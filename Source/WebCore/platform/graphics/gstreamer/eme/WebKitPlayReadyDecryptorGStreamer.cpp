@@ -20,6 +20,7 @@
 #include "config.h"
 #include "WebKitPlayReadyDecryptorGStreamer.h"
 
+
 #if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
 
 #include "GStreamerCommon.h"
@@ -52,26 +53,25 @@ GST_DEBUG_CATEGORY_STATIC(webkit_media_play_ready_decrypt_debug_category);
 static GstStaticPadTemplate sinkTemplate = GST_STATIC_PAD_TEMPLATE("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("application/x-cenc, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+    GST_STATIC_CAPS("application/vnd.ms-sstr+xml, original-media-type=(string)application/vnd.ms-sstr+xml, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+    "application/x-cenc, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
     "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID";"
-    "pplication/vnd.ms-sstr+xml, original-media-type=(string)video/x-h264, rotection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
-    "application/x-webm-enc, original-media-type=(string)video/x-vp8;"
-    "application/x-webm-enc, original-media-type=(string)video/x-vp9;"
+    "application/vnd.ms-sstr+xml, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+    "application/x-cenc, original-media-type=(string)video/x-h265, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
     "application/x-video-mp4, original-media-type=(string)video/mp4; "
     "application/x-audio-mp4, original-media-type=(string)audio/mp4; "));
-
 
 static GstStaticPadTemplate srcTemplate = GST_STATIC_PAD_TEMPLATE("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/x-vp8; video/x-vp9; video/webm; audio/webm; video/mp4; audio/mp4; application/vnd.ms-sstr+xml;"));
-
+    GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/mp4; audio/mp4; application/vnd.ms-sstr+xml; application/x-cenc; video/x-h265;"));
 
 #define webkit_media_play_ready_decrypt_parent_class parent_class
 G_DEFINE_TYPE(WebKitMediaPlayReadyDecrypt, webkit_media_play_ready_decrypt, WEBKIT_TYPE_MEDIA_CENC_DECRYPT);
 
 static void webkit_media_play_ready_decrypt_class_init(WebKitMediaPlayReadyDecryptClass* klass)
 {
+    GST_ERROR_OBJECT(klass, "webkit_media_play_ready_decrypt_class_init");
     GObjectClass* gobjectClass = G_OBJECT_CLASS(klass);
     gobjectClass->finalize = webKitMediaPlayReadyDecryptorFinalize;
 
@@ -98,6 +98,7 @@ static void webkit_media_play_ready_decrypt_class_init(WebKitMediaPlayReadyDecry
 
 static void webkit_media_play_ready_decrypt_init(WebKitMediaPlayReadyDecrypt* self)
 {
+    GST_ERROR_OBJECT(self, "webkit_media_play_ready_decrypt_init");
     WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(self);
 
     self->priv = priv;
@@ -106,6 +107,7 @@ static void webkit_media_play_ready_decrypt_init(WebKitMediaPlayReadyDecrypt* se
 
 static void webKitMediaPlayReadyDecryptorFinalize(GObject* object)
 {
+    GST_ERROR_OBJECT(object, "webKitMediaPlayReadyDecryptorFinalize");
     WebKitMediaPlayReadyDecrypt* self = WEBKIT_MEDIA_PR_DECRYPT(object);
     WebKitMediaPlayReadyDecryptPrivate* priv = self->priv;
 
@@ -116,6 +118,7 @@ static void webKitMediaPlayReadyDecryptorFinalize(GObject* object)
 
 static bool webKitMediaPlayReadyDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer)
 {
+    GST_ERROR_OBJECT(self, "webKitMediaPlayReadyDecryptorSetupCipher");
     if (!keyIDBuffer) {
         GST_ERROR_OBJECT(self, "got no key id buffer");
         return false;
@@ -169,8 +172,8 @@ static bool webKitMediaPlayReadyDecryptorSetupCipher(WebKitMediaCommonEncryption
 
 static bool webKitMediaPlayReadyDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer, GstBuffer* ivBuffer, GstBuffer* buffer, unsigned subSampleCount, GstBuffer* subSamplesBuffer)
 {
+    GST_ERROR_OBJECT(self, "webKitMediaPlayReadyDecryptorDecrypt");
     UNUSED_PARAM(keyIDBuffer);
-
     GstMappedBuffer mappedIVBuffer(ivBuffer, GST_MAP_READ);
     if (!mappedIVBuffer) {
         GST_ERROR_OBJECT(self, "Failed to map IV");
@@ -249,6 +252,7 @@ static bool webKitMediaPlayReadyDecryptorDecrypt(WebKitMediaCommonEncryptionDecr
 
 static void webKitMediaPlayReadyDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt* self)
 {
+    GST_ERROR_OBJECT(self, "webKitMediaPlayReadyDecryptorReleaseCipher");
     WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_PR_DECRYPT(self));
     gcry_cipher_close(priv->handle);
 }

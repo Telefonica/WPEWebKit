@@ -23,7 +23,7 @@
 #include "config.h"
 #include "CDMOpenCDM.h"
 
-#if ENABLE(ENCRYPTED_MEDIA) //&& USE(OPENCDM)
+#if ENABLE(ENCRYPTED_MEDIA) && USE(OPENCDM) 
 
 #include "CDMPrivate.h"
 #include "GenericTaskQueue.h"
@@ -703,4 +703,4 @@ RefPtr<CDMInstanceOpenCDM::Session> CDMInstanceOpenCDM::lookupSession(const Stri
 
 } // namespace WebCore
 
-#endif // ENABLE(ENCRYPTED_MEDIA) && USE(OPENCDM)
+#endif // ENABLE(ENCRYPTED_MEDIA)
