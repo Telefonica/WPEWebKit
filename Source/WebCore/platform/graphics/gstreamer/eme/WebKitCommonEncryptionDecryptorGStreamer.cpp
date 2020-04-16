@@ -232,7 +232,7 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
     }
 
     const GValue* value;
-    GST_ERROR_OBJECT(self, "protection into: %s", protectionMeta->info);
+    GST_ERROR_OBJECT(self, "protection info: %s", protectionMeta->info);
     value = gst_structure_get_value(protectionMeta->info, "kid");
     GstBuffer* keyIDBuffer = nullptr;
     if (!value) {
