@@ -310,7 +310,7 @@ CDMInstance::SuccessValue CDMInstancePlayReady::setServerCertificate(Ref<SharedB
 
 void CDMInstancePlayReady::requestLicense(LicenseType, const AtomicString&, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback callback)
 {
-	//TODO
+    //TODO: Improve the request license system, with default values for test content and working for all kind of content
     GST_ERROR_OBJECT(nullptr, "request licenses for playready");
     static uint32_t s_sessionIdValue = 0;
     ++s_sessionIdValue;
@@ -326,7 +326,7 @@ void CDMInstancePlayReady::requestLicense(LicenseType, const AtomicString&, Ref<
 
 void CDMInstancePlayReady::updateLicense(const String& sessionId, LicenseType, const SharedBuffer& response, LicenseUpdateCallback callback)
 {
-	//TODO
+    //TODO: Improve the update license system, with default values for test content and working for all kind of content
     // Use a helper functor that schedules the callback dispatch, avoiding
     // duplicated callOnMainThread() calls.
     GST_ERROR_OBJECT(nullptr, "update licenses for playready");
