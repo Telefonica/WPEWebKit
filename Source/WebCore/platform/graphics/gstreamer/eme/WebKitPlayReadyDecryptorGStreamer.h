@@ -18,7 +18,7 @@
 
 #pragma once
 
-#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && (!USE(OPENCDM) || USE(PLAYREADY))
+#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(PLAYREADY)
 
 #include "WebKitCommonEncryptionDecryptorGStreamer.h"
 

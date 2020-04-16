@@ -63,7 +63,7 @@
 #include "CDMOpenCDM.h"
 #elif ENABLE(ENCRYPTED_MEDIA)
 #include "CDMClearKey.h"
-#if USe(PLAYREADY)
+#if USE(PLAYREADY)
 #include "CDMPlayReady.h"
 #endif
 #endif
