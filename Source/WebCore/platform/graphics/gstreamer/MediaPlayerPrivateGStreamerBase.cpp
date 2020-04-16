@@ -1469,7 +1469,7 @@ void MediaPlayerPrivateGStreamerBase::dispatchDecryptionStructure(GUniquePtr<Gst
 bool MediaPlayerPrivateGStreamerBase::supportsKeySystem(const String& keySystem, const String& mimeType)
 {
     bool result = false;
-#if ENABLE(ENCRYPTED_MEDIA) && !USE(OPENCDM)
+#if ENABLE(ENCRYPTED_MEDIA) && (!(USE(OPENCDM)) || USE(PLAYREADY))
     result = GStreamerEMEUtilities::isClearKeyKeySystem(keySystem) || GStreamerEMEUtilities::isPlayReadyKeySystem(keySystem);
 #endif
     GST_DEBUG("checking for KeySystem support with %s and type %s: %s", keySystem.utf8().data(), mimeType.utf8().data(), boolForPrinting(result));
