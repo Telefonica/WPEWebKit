@@ -47,6 +47,7 @@
 #include <gst/audio/streamvolume.h>
 #include <gst/video/gstvideometa.h>
 
+#if ENABLE(ENCRYPTED_MEDIA)
 #include "CDMInstance.h"
 #include "SharedBuffer.h"
 
@@ -57,6 +58,8 @@
 #include "WebKitClearKeyDecryptorGStreamer.h"
 #if USE(PLAYREADY)
 #include "WebKitPlayReadyDecryptorGStreamer.h"
+#endif
+
 #endif
 
 #if USE(GSTREAMER_GL)
@@ -1466,7 +1469,7 @@ void MediaPlayerPrivateGStreamerBase::dispatchDecryptionStructure(GUniquePtr<Gst
 bool MediaPlayerPrivateGStreamerBase::supportsKeySystem(const String& keySystem, const String& mimeType)
 {
     bool result = false;
-#if ENABLE(ENCRYPTED_MEDIA) && (!USE(OPENCDM) || USE(PLAYREADY))
+#if ENABLE(ENCRYPTED_MEDIA) && !USE(OPENCDM)
     result = GStreamerEMEUtilities::isClearKeyKeySystem(keySystem) || GStreamerEMEUtilities::isPlayReadyKeySystem(keySystem);
 #endif
     GST_DEBUG("checking for KeySystem support with %s and type %s: %s", keySystem.utf8().data(), mimeType.utf8().data(), boolForPrinting(result));
