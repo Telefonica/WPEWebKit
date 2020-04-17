@@ -62,10 +62,11 @@ public:
         Mock,
 #if USE(OPENCDM)
         OpenCDM,
-#endif
+#else
         ClearKey,
-#if USE(PLAYREADY)
+    #if USE(PLAYREADY)
         PlayReady,
+    #endif
 #endif
     };
 

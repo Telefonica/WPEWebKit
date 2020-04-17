@@ -158,7 +158,7 @@ if (ENABLE_ENCRYPTED_MEDIA)
             platform/graphics/gstreamer/eme/CDMOpenCDM.cpp
             platform/graphics/gstreamer/eme/WebKitOpenCDMDecryptorGStreamer.cpp
         )
-    endif()
+    else()
     if (ENABLE_PLAYREADY)
         list(APPEND WebCore_SOURCES
 	    platform/encryptedmedia/playready/CDMPlayReady.cpp
@@ -169,6 +169,7 @@ if (ENABLE_ENCRYPTED_MEDIA)
         platform/encryptedmedia/clearkey/CDMClearKey.cpp
         platform/graphics/gstreamer/eme/WebKitClearKeyDecryptorGStreamer.cpp
     )
+    endif()
 endif ()
 
 if (USE_HOLE_PUNCH_EXTERNAL)
