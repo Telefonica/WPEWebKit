@@ -159,16 +159,16 @@ if (ENABLE_ENCRYPTED_MEDIA)
             platform/graphics/gstreamer/eme/WebKitOpenCDMDecryptorGStreamer.cpp
         )
     else()
-    if (ENABLE_PLAYREADY)
+        if (ENABLE_PLAYREADY)
+            list(APPEND WebCore_SOURCES
+	        platform/encryptedmedia/playready/CDMPlayReady.cpp
+                platform/graphics/gstreamer/eme/WebKitPlayReadyDecryptorGStreamer.cpp
+	    )
+        endif()
         list(APPEND WebCore_SOURCES
-	    platform/encryptedmedia/playready/CDMPlayReady.cpp
-            platform/graphics/gstreamer/eme/WebKitPlayReadyDecryptorGStreamer.cpp
-	)
-    endif()
-    list(APPEND WebCore_SOURCES
-        platform/encryptedmedia/clearkey/CDMClearKey.cpp
-        platform/graphics/gstreamer/eme/WebKitClearKeyDecryptorGStreamer.cpp
-    )
+            platform/encryptedmedia/clearkey/CDMClearKey.cpp
+            platform/graphics/gstreamer/eme/WebKitClearKeyDecryptorGStreamer.cpp
+        )
     endif()
 endif ()
 

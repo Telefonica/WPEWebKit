@@ -29,7 +29,7 @@
 
 #define WEBCORE_GSTREAMER_EME_UTILITIES_CLEARKEY_UUID "58147ec8-0423-4659-92e6-f52c5ce8c3cc"
 
-#if USE(PLAYREADY) || USE(OPENCDM)
+#if USE(OPENCDM) || USE(PLAYREADY)
 #define WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "9a04f079-9840-4286-ab92-e65be0885f95"
 #endif
 
@@ -51,7 +51,7 @@ public:
     static const char* s_ClearKeyKeySystem;
     static const char* s_UnspecifiedUUID;
     static const char* s_UnspecifiedKeySystem;
-#if USE(PLAYREADY) || USE(OPENCDM)
+#if USE(OPENCDM) || USE(PLAYREADY)
     static const char* s_PlayReadyUUID;
     static std::array<const char*, 2> s_PlayReadyKeySystems;
 #endif
@@ -70,7 +70,7 @@ public:
     {
         return equalIgnoringASCIICase(keySystem, s_UnspecifiedKeySystem);
     }
-#if USE(PLAYREADY) || USE(OPENCDM)
+#if USE(OPENCDM) || USE(PLAYREADY)
     static bool isPlayReadyKeySystem(const String& keySystem)
     {
         return equalIgnoringASCIICase(keySystem, s_PlayReadyKeySystems[0])

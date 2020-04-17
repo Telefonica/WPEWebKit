@@ -29,7 +29,11 @@
 #include "CDMInstance.h"
 #include "GStreamerEMEUtilities.h"
 #include "MediaKeyStatus.h"
+#if USE(PLAYREADY)
 #include <ocdm/open_cdm.h>
+#else
+#include <open_cdm.h>
+#endif
 #include <wtf/HashMap.h>
 #include <wtf/text/StringHash.h>
 
