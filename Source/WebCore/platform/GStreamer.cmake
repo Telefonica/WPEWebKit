@@ -141,8 +141,12 @@ if (ENABLE_ENCRYPTED_MEDIA)
         "${WEBCORE_DIR}/platform/encryptedmedia/clearkey"
         ${LIBGCRYPT_INCLUDE_DIRS}
     )
+    if (ENABLE_PLAYREADY)
+        list(APPEND WebCore_INCLUDE_DIRECTORIES
+            "${WEBCORE_DIR}/platform/encryptedmedia/playready"
+	)
+    endif()
     list(APPEND WebCore_SOURCES
-
         platform/graphics/gstreamer/eme/CDMFactoryGStreamer.cpp
     )
     list(APPEND WebCore_LIBRARIES
@@ -155,11 +159,17 @@ if (ENABLE_ENCRYPTED_MEDIA)
             platform/graphics/gstreamer/eme/WebKitOpenCDMDecryptorGStreamer.cpp
         )
     else()
+        if (ENABLE_PLAYREADY)
+            list(APPEND WebCore_SOURCES
+	        platform/encryptedmedia/playready/CDMPlayReady.cpp
+                platform/graphics/gstreamer/eme/WebKitPlayReadyDecryptorGStreamer.cpp
+	    )
+        endif()
         list(APPEND WebCore_SOURCES
             platform/encryptedmedia/clearkey/CDMClearKey.cpp
             platform/graphics/gstreamer/eme/WebKitClearKeyDecryptorGStreamer.cpp
         )
-    endif ()
+    endif()
 endif ()
 
 if (USE_HOLE_PUNCH_EXTERNAL)

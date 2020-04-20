@@ -1,7 +1,5 @@
-/* GStreamer ClearKey common encryption decryptor
+/* GStreamer PlayReady common encryption decryptor
  *
- * Copyright (C) 2016 Metrological
- * Copyright (C) 2016 Igalia S.L
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,7 +18,9 @@
  */
 
 #include "config.h"
-#include "WebKitClearKeyDecryptorGStreamer.h"
+#include "WebKitPlayReadyDecryptorGStreamer.h"
+
+
 #if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
 
 #include "GStreamerCommon.h"
@@ -29,95 +29,102 @@
 #include <gst/base/gstbytereader.h>
 #include <wtf/RunLoop.h>
 
-#define CLEARKEY_SIZE 16
+#define PLAYREADY_SIZE 16
 
 struct Key {
     GRefPtr<GstBuffer> keyID;
     GRefPtr<GstBuffer> keyValue;
 };
 
-#define WEBKIT_MEDIA_CK_DECRYPT_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE((obj), WEBKIT_TYPE_MEDIA_CK_DECRYPT, WebKitMediaClearKeyDecryptPrivate))
-struct _WebKitMediaClearKeyDecryptPrivate {
+#define WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE((obj), WEBKIT_TYPE_MEDIA_PR_DECRYPT, WebKitMediaPlayReadyDecryptPrivate))
+struct _WebKitMediaPlayReadyDecryptPrivate {
     Vector<Key> keys;
     gcry_cipher_hd_t handle;
 };
 
-static void webKitMediaClearKeyDecryptorFinalize(GObject*);
-static bool webKitMediaClearKeyDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt*, GstBuffer*);
-static bool webKitMediaClearKeyDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* keyIDBuffer, GstBuffer* iv, GstBuffer* sample, unsigned subSamplesCount, GstBuffer* subSamples);
-static void webKitMediaClearKeyDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt*);
+static void webKitMediaPlayReadyDecryptorFinalize(GObject*);
+static bool webKitMediaPlayReadyDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt*, GstBuffer*);
+static bool webKitMediaPlayReadyDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* keyIDBuffer, GstBuffer* iv, GstBuffer* sample, unsigned subSamplesCount, GstBuffer* subSamples);
+static void webKitMediaPlayReadyDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt*);
 
-GST_DEBUG_CATEGORY_STATIC(webkit_media_clear_key_decrypt_debug_category);
-#define GST_CAT_DEFAULT webkit_media_clear_key_decrypt_debug_category
+GST_DEBUG_CATEGORY_STATIC(webkit_media_play_ready_decrypt_debug_category);
+#define GST_CAT_DEFAULT webkit_media_play_ready_decrypt_debug_category
 
 static GstStaticPadTemplate sinkTemplate = GST_STATIC_PAD_TEMPLATE("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("application/x-cenc, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_CLEARKEY_UUID "; "
-    "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_CLEARKEY_UUID";"
-    "application/x-webm-enc, original-media-type=(string)video/x-vp8;"
-    "application/x-webm-enc, original-media-type=(string)video/x-vp9;"));
+    GST_STATIC_CAPS("application/vnd.ms-sstr+xml, original-media-type=(string)application/vnd.ms-sstr+xml, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+    "application/x-cenc, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+    "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID";"
+    "application/vnd.ms-sstr+xml, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+    "application/x-cenc, original-media-type=(string)video/x-h265, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+    "application/x-video-mp4, original-media-type=(string)video/mp4; "
+    "application/x-audio-mp4, original-media-type=(string)audio/mp4; "));
 
 static GstStaticPadTemplate srcTemplate = GST_STATIC_PAD_TEMPLATE("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/x-vp8; video/x-vp9"));
+    GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/mp4; audio/mp4; application/vnd.ms-sstr+xml; application/x-cenc; video/x-h265;"));
 
-#define webkit_media_clear_key_decrypt_parent_class parent_class
-G_DEFINE_TYPE(WebKitMediaClearKeyDecrypt, webkit_media_clear_key_decrypt, WEBKIT_TYPE_MEDIA_CENC_DECRYPT);
+#define webkit_media_play_ready_decrypt_parent_class parent_class
+G_DEFINE_TYPE(WebKitMediaPlayReadyDecrypt, webkit_media_play_ready_decrypt, WEBKIT_TYPE_MEDIA_CENC_DECRYPT);
 
-static void webkit_media_clear_key_decrypt_class_init(WebKitMediaClearKeyDecryptClass* klass)
+static void webkit_media_play_ready_decrypt_class_init(WebKitMediaPlayReadyDecryptClass* klass)
 {
+    GST_ERROR_OBJECT(klass, "webkit_media_play_ready_decrypt_class_init");
     GObjectClass* gobjectClass = G_OBJECT_CLASS(klass);
-    gobjectClass->finalize = webKitMediaClearKeyDecryptorFinalize;
+    gobjectClass->finalize = webKitMediaPlayReadyDecryptorFinalize;
 
     GstElementClass* elementClass = GST_ELEMENT_CLASS(klass);
     gst_element_class_add_pad_template(elementClass, gst_static_pad_template_get(&sinkTemplate));
     gst_element_class_add_pad_template(elementClass, gst_static_pad_template_get(&srcTemplate));
 
     gst_element_class_set_static_metadata(elementClass,
-        "Decrypt content encrypted using ISOBMFF ClearKey Common Encryption",
+        "Decrypt content encrypted using ISOBMFF PlayReady Common Encryption",
         GST_ELEMENT_FACTORY_KLASS_DECRYPTOR,
-        "Decrypts media that has been encrypted using ISOBMFF ClearKey Common Encryption.",
+        "Decrypts media that has been encrypted using ISOBMFF PlayReady Common Encryption.",
         "Philippe Normand <philn@igalia.com>");
 
-    GST_DEBUG_CATEGORY_INIT(webkit_media_clear_key_decrypt_debug_category,
-        "webkitclearkey", 0, "ClearKey decryptor");
+    GST_DEBUG_CATEGORY_INIT(webkit_media_play_ready_decrypt_debug_category,
+        "webkitplayready", 0, "PlayReady decryptor");
 
     WebKitMediaCommonEncryptionDecryptClass* cencClass = WEBKIT_MEDIA_CENC_DECRYPT_CLASS(klass);
-    cencClass->setupCipher = GST_DEBUG_FUNCPTR(webKitMediaClearKeyDecryptorSetupCipher);
-    cencClass->decrypt = GST_DEBUG_FUNCPTR(webKitMediaClearKeyDecryptorDecrypt);
-    cencClass->releaseCipher = GST_DEBUG_FUNCPTR(webKitMediaClearKeyDecryptorReleaseCipher);
+    cencClass->setupCipher = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorSetupCipher);
+    cencClass->decrypt = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorDecrypt);
+    cencClass->releaseCipher = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorReleaseCipher);
 
-    g_type_class_add_private(klass, sizeof(WebKitMediaClearKeyDecryptPrivate));
+    g_type_class_add_private(klass, sizeof(WebKitMediaPlayReadyDecryptPrivate));
 }
 
-static void webkit_media_clear_key_decrypt_init(WebKitMediaClearKeyDecrypt* self)
+static void webkit_media_play_ready_decrypt_init(WebKitMediaPlayReadyDecrypt* self)
 {
-    WebKitMediaClearKeyDecryptPrivate* priv = WEBKIT_MEDIA_CK_DECRYPT_GET_PRIVATE(self);
+    GST_ERROR_OBJECT(self, "webkit_media_play_ready_decrypt_init");
+    WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(self);
 
     self->priv = priv;
-    new (priv) WebKitMediaClearKeyDecryptPrivate();
+    new (priv) WebKitMediaPlayReadyDecryptPrivate();
 }
 
-static void webKitMediaClearKeyDecryptorFinalize(GObject* object)
+static void webKitMediaPlayReadyDecryptorFinalize(GObject* object)
 {
-    WebKitMediaClearKeyDecrypt* self = WEBKIT_MEDIA_CK_DECRYPT(object);
-    WebKitMediaClearKeyDecryptPrivate* priv = self->priv;
+    GST_ERROR_OBJECT(object, "webKitMediaPlayReadyDecryptorFinalize");
+    WebKitMediaPlayReadyDecrypt* self = WEBKIT_MEDIA_PR_DECRYPT(object);
+    WebKitMediaPlayReadyDecryptPrivate* priv = self->priv;
 
-    priv->~WebKitMediaClearKeyDecryptPrivate();
+    priv->~WebKitMediaPlayReadyDecryptPrivate();
 
     GST_CALL_PARENT(G_OBJECT_CLASS, finalize, (object));
 }
 
-static bool webKitMediaClearKeyDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer)
+static bool webKitMediaPlayReadyDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer)
 {
+    GST_ERROR_OBJECT(self, "webKitMediaPlayReadyDecryptorSetupCipher");
     if (!keyIDBuffer) {
         GST_ERROR_OBJECT(self, "got no key id buffer");
         return false;
     }
 
-    WebKitMediaClearKeyDecryptPrivate* priv = WEBKIT_MEDIA_CK_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_CK_DECRYPT(self));
+    WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_PR_DECRYPT(self));
     gcry_error_t error;
 
     GRefPtr<GstBuffer> keyBuffer;
@@ -153,7 +160,7 @@ static bool webKitMediaClearKeyDecryptorSetupCipher(WebKitMediaCommonEncryptionD
         return false;
     }
 
-    ASSERT(mappedKeyBuffer.size() == CLEARKEY_SIZE);
+    ASSERT(mappedKeyBuffer.size() == PLAYREADY_SIZE);
     error = gcry_cipher_setkey(priv->handle, mappedKeyBuffer.data(), mappedKeyBuffer.size());
     if (error) {
         GST_ERROR_OBJECT(self, "gcry_cipher_setkey failed: %s", gpg_strerror(error));
@@ -163,27 +170,27 @@ static bool webKitMediaClearKeyDecryptorSetupCipher(WebKitMediaCommonEncryptionD
     return true;
 }
 
-static bool webKitMediaClearKeyDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer, GstBuffer* ivBuffer, GstBuffer* buffer, unsigned subSampleCount, GstBuffer* subSamplesBuffer)
+static bool webKitMediaPlayReadyDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer, GstBuffer* ivBuffer, GstBuffer* buffer, unsigned subSampleCount, GstBuffer* subSamplesBuffer)
 {
+    GST_ERROR_OBJECT(self, "webKitMediaPlayReadyDecryptorDecrypt");
     UNUSED_PARAM(keyIDBuffer);
-
     GstMappedBuffer mappedIVBuffer(ivBuffer, GST_MAP_READ);
     if (!mappedIVBuffer) {
         GST_ERROR_OBJECT(self, "Failed to map IV");
         return false;
     }
 
-    uint8_t ctr[CLEARKEY_SIZE];
+    uint8_t ctr[PLAYREADY_SIZE];
     if (mappedIVBuffer.size() == 8) {
         memset(ctr + 8, 0, 8);
         memcpy(ctr, mappedIVBuffer.data(), 8);
     } else {
-        ASSERT(mappedIVBuffer.size() == CLEARKEY_SIZE);
-        memcpy(ctr, mappedIVBuffer.data(), CLEARKEY_SIZE);
+        ASSERT(mappedIVBuffer.size() == PLAYREADY_SIZE);
+        memcpy(ctr, mappedIVBuffer.data(), PLAYREADY_SIZE);
     }
 
-    WebKitMediaClearKeyDecryptPrivate* priv = WEBKIT_MEDIA_CK_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_CK_DECRYPT(self));
-    gcry_error_t error = gcry_cipher_setctr(priv->handle, ctr, CLEARKEY_SIZE);
+    WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_PR_DECRYPT(self));
+    gcry_error_t error = gcry_cipher_setctr(priv->handle, ctr, PLAYREADY_SIZE);
     if (error) {
         GST_ERROR_OBJECT(self, "gcry_cipher_setctr failed: %s", gpg_strerror(error));
         return false;
@@ -243,10 +250,11 @@ static bool webKitMediaClearKeyDecryptorDecrypt(WebKitMediaCommonEncryptionDecry
     return true;
 }
 
-static void webKitMediaClearKeyDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt* self)
+static void webKitMediaPlayReadyDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt* self)
 {
-    WebKitMediaClearKeyDecryptPrivate* priv = WEBKIT_MEDIA_CK_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_CK_DECRYPT(self));
+    GST_ERROR_OBJECT(self, "webKitMediaPlayReadyDecryptorReleaseCipher");
+    WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_PR_DECRYPT(self));
     gcry_cipher_close(priv->handle);
 }
 
-#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && !(USE(OPENCDM) 
+#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
