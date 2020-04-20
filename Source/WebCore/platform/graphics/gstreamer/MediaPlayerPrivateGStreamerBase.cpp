@@ -54,10 +54,11 @@
 #if USE(OPENCDM)
 #include "CDMOpenCDM.h"
 #include "WebKitOpenCDMDecryptorGStreamer.h"
-#endif
+#else
 #include "WebKitClearKeyDecryptorGStreamer.h"
 #if USE(PLAYREADY)
 #include "WebKitPlayReadyDecryptorGStreamer.h"
+#endif
 #endif
 
 #endif
