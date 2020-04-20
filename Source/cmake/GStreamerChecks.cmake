@@ -49,6 +49,10 @@ if (ENABLE_VIDEO OR ENABLE_WEB_AUDIO)
         find_package(OpenCDM REQUIRED)
         add_definitions(-DUSE_OPENCDM=1)
       endif()
+      if (ENABLE_PLAYREADY)
+        add_definitions(-DUSE_PLAYREADY=1)
+      endif()
+
     endif ()
 
     SET_AND_EXPOSE_TO_BUILD(USE_GSTREAMER TRUE)

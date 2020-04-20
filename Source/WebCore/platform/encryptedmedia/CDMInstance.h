@@ -64,6 +64,9 @@ public:
         OpenCDM,
 #else
         ClearKey,
+    #if USE(PLAYREADY)
+        PlayReady,
+    #endif
 #endif
     };
 

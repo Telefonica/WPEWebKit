@@ -142,7 +142,8 @@ endif ()
 
 if (ENABLE_PLAYREADY)
     add_definitions(-DUSE_PLAYREADY=1)
-    find_package(Playready REQUIRED)
+    #At this point, it's not needed to find the package PlayReady, but better to save it here for future implementation and tests
+    #find_package(Playready REQUIRED)
 endif ()
 
 if (ENABLE_BREAKPAD)

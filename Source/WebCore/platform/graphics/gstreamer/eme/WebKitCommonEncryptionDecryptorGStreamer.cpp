@@ -232,6 +232,7 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
     }
 
     const GValue* value;
+    GST_ERROR_OBJECT(self, "protection info: %s", protectionMeta->info);
     value = gst_structure_get_value(protectionMeta->info, "kid");
     GstBuffer* keyIDBuffer = nullptr;
     if (!value) {
@@ -252,6 +253,7 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
     }
 
     // The key might not have been received yet. Wait for it.
+    GST_ERROR_OBJECT(self, "priv values: priv->m_received=%i", priv->m_keyReceived);
     if (!priv->m_keyReceived) {
         GST_DEBUG_OBJECT(self, "key not available yet, waiting for it");
         if (GST_STATE(GST_ELEMENT(self)) < GST_STATE_PAUSED || (GST_STATE_TARGET(GST_ELEMENT(self)) != GST_STATE_VOID_PENDING && GST_STATE_TARGET(GST_ELEMENT(self)) < GST_STATE_PAUSED)) {
