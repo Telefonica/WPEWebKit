@@ -232,8 +232,7 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
     }
 
     const GValue* value;
-    GST_ERROR_OBJECT(self, "protection info: %s", protectionMeta->info);
-    value = gst_structure_get_value(protectionMeta->info, "kid");
+    value = gst_structure_get_value(protectionMeta->info, "kid");  
     GstBuffer* keyIDBuffer = nullptr;
     if (!value) {
         GST_ERROR_OBJECT(self, "No key ID available for encrypted sample");
@@ -241,7 +240,7 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
     }
 
     keyIDBuffer = gst_value_get_buffer(value);
-
+    GST_ERROR_OBJECT(self, "protection info kid: %s", keyIDBuffer);
     if (!priv->m_protectionEvents.isEmpty()) {
         GstMappedBuffer mappedKeyID(keyIDBuffer, GST_MAP_READ);
         if (!mappedKeyID) {
@@ -249,7 +248,9 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
             return GST_FLOW_NOT_SUPPORTED;
         }
         auto keyId = WebCore::SharedBuffer::create(mappedKeyID.data(), mappedKeyID.size());
+        GST_ERROR_OBJECT(self, "go to map keyIDBuffer: %s size: %d", mappedKeyID.data(), mappedKeyID.size());
         webkitMediaCommonEncryptionDecryptProcessProtectionEvents(self, WTFMove(keyId));
+        GST_ERROR_OBJECT(self, "Already mapped keyIDBuffer: %s size: %d", mappedKeyID.data(), mappedKeyID.size());
     }
 
     // The key might not have been received yet. Wait for it.
@@ -383,29 +384,34 @@ static bool webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(WebKitMedia
 
 static void webkitMediaCommonEncryptionDecryptProcessProtectionEvents(WebKitMediaCommonEncryptionDecrypt* self, Ref<WebCore::SharedBuffer>&& kid)
 {
+    GST_ERROR_OBJECT(self, "webkitMediaCommonEncryptionDecryptProcessProtectionEvents");
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
     WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
 
     ASSERT(priv->m_mutex.isLocked());
 
     bool isCDMInstanceAvailable = webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(self);
-
+    GST_ERROR_OBJECT(self, "Is CDM Instance available");
     WebCore::InitData concatenatedInitDatas;
     for (auto& event : priv->m_protectionEvents) {
         GstBuffer* buffer = nullptr;
         const char* eventKeySystemUUID = nullptr;
         gst_event_parse_protection(event.get(), &eventKeySystemUUID, &buffer, nullptr);
+        GST_ERROR_OBJECT(self, "Event keysystem UUID %s", eventKeySystemUUID);
         const char* eventKeySystem = WebCore::GStreamerEMEUtilities::uuidToKeySystem(eventKeySystemUUID);
 
-        GST_TRACE_OBJECT(self, "handling protection event %u for %s", GST_EVENT_SEQNUM(event.get()), eventKeySystem);
+        //GST_TRACE_OBJECT(self, "handling protection event %u for %s", GST_EVENT_SEQNUM(event.get()), eventKeySystem);
+        GST_ERROR_OBJECT(self, "handling protection event %u for %s", GST_EVENT_SEQNUM(event.get()), eventKeySystem);
 
         if (isCDMInstanceAvailable && g_strcmp0(WebCore::GStreamerEMEUtilities::keySystemToUuid(eventKeySystem), WebCore::GStreamerEMEUtilities::keySystemToUuid(priv->m_cdmInstance->keySystem()))) {
-            GST_TRACE_OBJECT(self, "protection event for a different key system");
+            //GST_TRACE_OBJECT(self, "protection event for a different key system");
+            GST_ERROR_OBJECT(self, "protection event for a different key system");
             continue;
         }
 
         if (priv->m_currentEvent == GST_EVENT_SEQNUM(event.get())) {
-            GST_TRACE_OBJECT(self, "event %u already handled", priv->m_currentEvent);
+            //GST_TRACE_OBJECT(self, "event %u already handled", priv->m_currentEvent);
+            GST_ERROR_OBJECT(self, "event %u already handled", priv->m_currentEvent);
             continue;
         }
 
@@ -418,16 +424,21 @@ static void webkitMediaCommonEncryptionDecryptProcessProtectionEvents(WebKitMedi
         if (initData.isEmpty() || gst_buffer_memcmp(buffer, 0, initData.characters8(), initData.sizeInBytes())) {
             GstMappedBuffer mappedBuffer(buffer, GST_MAP_READ);
             if (!mappedBuffer) {
-                GST_WARNING_OBJECT(self, "cannot map protection data");
+                //GST_WARNING_OBJECT(self, "cannot map protection data");
+                GST_ERROR_OBJECT(self, "cannot map protection data");
                 continue;
             }
 
             initData = WebCore::InitData(mappedBuffer.data(), mappedBuffer.size());
-            GST_DEBUG_OBJECT(self, "init data of size %u", mappedBuffer.size());
-            GST_TRACE_OBJECT(self, "init data MD5 %s", WebCore::GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
+            //GST_DEBUG_OBJECT(self, "init data of size %u", mappedBuffer.size());
+            //GST_TRACE_OBJECT(self, "init data MD5 %s", WebCore::GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
+            //GST_MEMDUMP_OBJECT(self, "init data", mappedBuffer.data(), mappedBuffer.size());
+            GST_ERROR_OBJECT(self, "init data of size %u", mappedBuffer.size());
+            GST_ERROR_OBJECT(self, "init data MD5 %s", WebCore::GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
             GST_MEMDUMP_OBJECT(self, "init data", mappedBuffer.data(), mappedBuffer.size());
             priv->m_initDatas.set(eventKeySystem, initData);
-            GST_MEMDUMP_OBJECT(self, "key ID", reinterpret_cast<const uint8_t*>(kid->data()), kid->size());
+            //GST_MEMDUMP_OBJECT(self, "key ID", reinterpret_cast<const uint8_t*>(kid->data()), kid->size());
+            GST_ERROR_OBJECT(self, "key ID", reinterpret_cast<const uint8_t*>(kid->data()), kid->size());
             priv->m_keyIds.set(initData, kid.copyRef());
 
             priv->m_keyReceived = isCDMInstanceAvailable && !klass->handleKeyId(self, WTFMove(kid));
@@ -452,7 +463,7 @@ static void webkitMediaCommonEncryptionDecryptProcessProtectionEvents(WebKitMedi
             break;
         }
     }
-
+    GST_ERROR_OBJECT(self, "clear protection events");
     priv->m_protectionEvents.clear();
 
     if (!isCDMInstanceAvailable && !concatenatedInitDatas.isEmpty()) {

@@ -30,6 +30,7 @@
 
 find_package(PkgConfig)
 pkg_check_modules(PLAYREADY playready)
+#message(FATAL_ERROR "${PLAYREADY_INCLUDE_DIRS}")
 
 include(FindPackageHandleStandardArgs)
 FIND_PACKAGE_HANDLE_STANDARD_ARGS(PLAYREADY DEFAULT_MSG PLAYREADY_LIBRARIES)

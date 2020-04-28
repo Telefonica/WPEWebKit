@@ -31,6 +31,7 @@ private:
 
 PlayReadyState& PlayReadyState::singleton()
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: singleton s_state");
     static PlayReadyState s_state;
     return s_state;
 }
@@ -39,6 +40,7 @@ PlayReadyState::PlayReadyState() = default;
 
 RefPtr<JSON::Object> parseJSONObjectPR(const SharedBuffer& buffer)
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: parseJSONObkectPR");
     // Fail on large buffers whose size doesn't fit into a 32-bit unsigned integer.
     size_t size = buffer.size();
     if (size > std::numeric_limits<unsigned>::max())
@@ -56,6 +58,7 @@ RefPtr<JSON::Object> parseJSONObjectPR(const SharedBuffer& buffer)
 
 std::optional<Vector<CDMInstancePlayReady::Key>> parseLicenseFormatPR(const JSON::Object& root)
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: parseLicenseFormatPR");
     // If the 'kids' key is present in the root object, parse the JSON further
     // according to the specified 'license' format.
     auto it = root.find("kids");
@@ -97,6 +100,7 @@ std::optional<Vector<CDMInstancePlayReady::Key>> parseLicenseFormatPR(const JSON
 
 bool parseLicenseReleaseAcknowledgement(const JSON::Object& root)
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: parseLicenseReleaseAcknowledgement");
     // If the 'kids' key is present in the root object, parse the JSON further
     // according to the specified 'license release acknowledgement' format.
     auto it = root.find("kids");
@@ -114,6 +118,7 @@ bool parseLicenseReleaseAcknowledgement(const JSON::Object& root)
 
 CDMFactoryPlayReady& CDMFactoryPlayReady::singleton()
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: singleton");
     static CDMFactoryPlayReady s_factory;
     return s_factory;
 }
@@ -123,6 +128,7 @@ CDMFactoryPlayReady::~CDMFactoryPlayReady() = default;
 
 std::unique_ptr<CDMPrivate> CDMFactoryPlayReady::createCDM(const String& keySystem)
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: createCDM");
 #ifdef NDEBUG
     UNUSED_PARAM(keySystem);
 #else
@@ -133,6 +139,7 @@ std::unique_ptr<CDMPrivate> CDMFactoryPlayReady::createCDM(const String& keySyst
 
 bool CDMFactoryPlayReady::supportsKeySystem(const String& keySystem)
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: supportsKeySystem");
     // `com.microsoft.playready` is the only supported key system.
     return equalLettersIgnoringASCIICase(keySystem, "com.microsoft.playready");
 }
@@ -154,6 +161,7 @@ bool containsPersistentLicenseTypePR(const Vector<CDMSessionType>& types)
 
 bool CDMPrivatePlayReady::supportsConfiguration(const CDMKeySystemConfiguration& configuration) const
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: supportsConfiguration");
     // Reject any configuration that marks distinctive identifier as required.
     if (configuration.distinctiveIdentifier == CDMRequirement::Required)
         return false;
@@ -224,6 +232,7 @@ bool CDMPrivatePlayReady::distinctiveIdentifiersAreUniquePerOriginAndClearable(c
 
 RefPtr<CDMInstance> CDMPrivatePlayReady::createInstance()
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: createInstance");
     return adoptRef(new CDMInstancePlayReady);
 }
 
@@ -234,18 +243,21 @@ void CDMPrivatePlayReady::loadAndInitialize()
 
 bool CDMPrivatePlayReady::supportsServerCertificates() const
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: supportsServerCertificates");
     // Server certificates are not supported.
     return false;
 }
 
 bool CDMPrivatePlayReady::supportsSessions() const
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: supportsSessions");
     // Sessions are supported.
     return true;
 }
 
 bool CDMPrivatePlayReady::supportsInitData(const AtomicString& initDataType, const SharedBuffer& initData) const
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: supportsInitData");
     // Fail for init data types other than 'keyids'.
     if (!equalLettersIgnoringASCIICase(initDataType, "keyids"))
         return false;
@@ -259,6 +271,7 @@ bool CDMPrivatePlayReady::supportsInitData(const AtomicString& initDataType, con
 
 RefPtr<SharedBuffer> CDMPrivatePlayReady::sanitizeResponse(const SharedBuffer& response) const
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: sanitizeRespone");
     // Validate the response buffer as an JSON object.
     if (!parseJSONObjectPR(response))
         return nullptr;
@@ -268,6 +281,7 @@ RefPtr<SharedBuffer> CDMPrivatePlayReady::sanitizeResponse(const SharedBuffer& r
 
 std::optional<String> CDMPrivatePlayReady::sanitizeSessionId(const String& sessionId) const
 {
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: sanitizeSessionId");
     // Validate the session ID string as an 32-bit integer.
     bool ok;
     sessionId.toUIntStrict(&ok);
@@ -279,7 +293,7 @@ std::optional<String> CDMPrivatePlayReady::sanitizeSessionId(const String& sessi
 
 CDMInstancePlayReady::CDMInstancePlayReady()
 {
-    GST_ERROR_OBJECT(nullptr, "Create CDMInstancePlayReady");
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: Create CDMInstancePlayReady");
 }
 
 CDMInstancePlayReady::~CDMInstancePlayReady() = default;
@@ -311,7 +325,7 @@ CDMInstance::SuccessValue CDMInstancePlayReady::setServerCertificate(Ref<SharedB
 void CDMInstancePlayReady::requestLicense(LicenseType, const AtomicString&, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback callback)
 {
     //TODO: Improve the request license system, with default values for test content and working for all kind of content
-    GST_ERROR_OBJECT(nullptr, "request licenses for playready");
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: request licenses for playready");
     static uint32_t s_sessionIdValue = 0;
     ++s_sessionIdValue;
 
@@ -329,7 +343,7 @@ void CDMInstancePlayReady::updateLicense(const String& sessionId, LicenseType, c
     //TODO: Improve the update license system, with default values for test content and working for all kind of content
     // Use a helper functor that schedules the callback dispatch, avoiding
     // duplicated callOnMainThread() calls.
-    GST_ERROR_OBJECT(nullptr, "update licenses for playready");
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: update licenses for playready");
     auto dispatchCallback =
         [this, &callback](bool sessionWasClosed, std::optional<KeyStatusVector>&& changedKeys, SuccessValue succeeded) {
             callOnMainThread(

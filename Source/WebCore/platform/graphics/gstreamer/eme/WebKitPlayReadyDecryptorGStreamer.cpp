@@ -50,7 +50,25 @@ static void webKitMediaPlayReadyDecryptorReleaseCipher(WebKitMediaCommonEncrypti
 GST_DEBUG_CATEGORY_STATIC(webkit_media_play_ready_decrypt_debug_category);
 #define GST_CAT_DEFAULT webkit_media_play_ready_decrypt_debug_category
 
-static GstStaticPadTemplate sinkTemplate = GST_STATIC_PAD_TEMPLATE("sink",
+
+static GstStaticPadTemplate srcTemplate =
+        GST_STATIC_PAD_TEMPLATE("src", GST_PAD_SRC, GST_PAD_ALWAYS,
+        GST_STATIC_CAPS("video/x-h264;audio/mpeg;video/x-h265;audio/x-eac3;audio/x-gst-fourcc-ec_3"));
+
+static GstStaticPadTemplate sinkTemplate =
+        GST_STATIC_PAD_TEMPLATE("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
+                GST_STATIC_CAPS(
+                        "application/x-cenc, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+                        "application/x-cenc, original-media-type=(string)video/x-h265, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+                        "application/x-cenc, original-media-type=(string)audio/x-eac3, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+                        "application/x-cenc, original-media-type=(string)audio/x-gst-fourcc-ec_3, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+                        "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID));
+
+static GstStaticPadTemplate dummySinkTemplate =
+        GST_STATIC_PAD_TEMPLATE("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
+                GST_STATIC_CAPS("playready/x-unused"));
+
+/*static GstStaticPadTemplate sinkTemplate = GST_STATIC_PAD_TEMPLATE("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS("application/vnd.ms-sstr+xml, original-media-type=(string)application/vnd.ms-sstr+xml, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
@@ -64,7 +82,7 @@ static GstStaticPadTemplate sinkTemplate = GST_STATIC_PAD_TEMPLATE("sink",
 static GstStaticPadTemplate srcTemplate = GST_STATIC_PAD_TEMPLATE("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/mp4; audio/mp4; application/vnd.ms-sstr+xml; application/x-cenc; video/x-h265;"));
+    GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/mp4; audio/mp4; application/vnd.ms-sstr+xml; application/x-cenc; video/x-h265;"));*/
 
 #define webkit_media_play_ready_decrypt_parent_class parent_class
 G_DEFINE_TYPE(WebKitMediaPlayReadyDecrypt, webkit_media_play_ready_decrypt, WEBKIT_TYPE_MEDIA_CENC_DECRYPT);
@@ -80,10 +98,10 @@ static void webkit_media_play_ready_decrypt_class_init(WebKitMediaPlayReadyDecry
     gst_element_class_add_pad_template(elementClass, gst_static_pad_template_get(&srcTemplate));
 
     gst_element_class_set_static_metadata(elementClass,
-        "Decrypt content encrypted using ISOBMFF PlayReady Common Encryption",
+        "Decrypt PlayReady encrypted contents",
         GST_ELEMENT_FACTORY_KLASS_DECRYPTOR,
-        "Decrypts media that has been encrypted using ISOBMFF PlayReady Common Encryption.",
-        "Philippe Normand <philn@igalia.com>");
+        "Decrypts streams encrypted using PlayReady Encryption.",
+	"");
 
     GST_DEBUG_CATEGORY_INIT(webkit_media_play_ready_decrypt_debug_category,
         "webkitplayready", 0, "PlayReady decryptor");

@@ -32,6 +32,13 @@
 #include "CDMPrivate.h"
 #include "SharedBuffer.h"
 #include <wtf/WeakPtr.h>
+#include <drmbuild_oem.h>
+#include "nexus/thirdparty/playready/2.5/inc/drmcommon.h"
+#include <drmmanager.h>
+#include <drmmathsafe.h>
+#include <drmtypes.h>
+#include <drmerr.h>
+
 
 // store. If more licenses are used concurrently, Playready will resize the
 // to make room. However, the resizing action is inefficient in both CPU and
