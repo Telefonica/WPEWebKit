@@ -22,14 +22,14 @@
 
 #pragma once
 
-#if ENABLE(ENCRYPTED_MEDIA) && (USE(OPENCDM) || USE(PLAYREADY))
+#if ENABLE(ENCRYPTED_MEDIA) && (USE(OPENCDM) || USE(PLAYREADY) || USE(WIDEVINE))
 
 #include "CDM.h"
 #include "CDMFactory.h"
 #include "CDMInstance.h"
 #include "GStreamerEMEUtilities.h"
 #include "MediaKeyStatus.h"
-#if USE(PLAYREADY)
+#if USE(PLAYREADY) || USE(WIDEVINE)
 #include <ocdm/open_cdm.h>
 #else
 #include <open_cdm.h>
@@ -128,4 +128,4 @@ private:
 
 SPECIALIZE_TYPE_TRAITS_CDM_INSTANCE(WebCore::CDMInstanceOpenCDM, WebCore::CDMInstance::ImplementationType::OpenCDM);
 
-#endif // ENABLE(ENCRYPTED_MEDIA) && (USE(OPENCDM) || USE(PLAYREADY)) 
+#endif // ENABLE(ENCRYPTED_MEDIA) && (USE(OPENCDM) || USE(PLAYREADY) || USE(WIDEVINE))

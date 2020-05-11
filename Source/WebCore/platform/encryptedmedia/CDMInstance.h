@@ -64,9 +64,15 @@ public:
         OpenCDM,
 #else
         ClearKey,
+
     #if USE(PLAYREADY)
         PlayReady,
     #endif
+
+    #if USE(WIDEVINE)
+        Widevine,
+    #endif
+
 #endif
     };
 

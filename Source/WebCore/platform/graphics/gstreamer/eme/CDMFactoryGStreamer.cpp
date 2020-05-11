@@ -32,12 +32,15 @@
 #if ENABLE(ENCRYPTED_MEDIA)
 
 #if USE(OPENCDM)
-#include "CDMOpenCDM.h"
+  #include "CDMOpenCDM.h"
 #else
-#if USE(PLAYREADY)
-#include "CDMPlayReady.h"
-#endif
-#include "CDMClearKey.h"
+  #include "CDMClearKey.h"
+  #if USE(PLAYREADY)
+    #include "CDMPlayReady.h"
+  #endif
+  #if USE(WIDEVINE)
+    #include "CDMWidevine.h"
+  #endif
 #endif
 namespace WebCore {
 
@@ -49,6 +52,9 @@ void CDMFactory::platformRegisterFactories(Vector<CDMFactory*>& factories)
 #if USE(PLAYREADY)
     factories.append(&CDMFactoryPlayReady::singleton());
 #endif    
+#if USE(WIDEVINE)
+    factories.append(&CDMFactoryWidevine::singleton());
+#endif
     factories.append(&CDMFactoryClearKey::singleton());
 #endif
 }
