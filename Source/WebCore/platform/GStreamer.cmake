@@ -141,8 +141,12 @@ if (ENABLE_ENCRYPTED_MEDIA)
         "${WEBCORE_DIR}/platform/encryptedmedia/clearkey"
         ${LIBGCRYPT_INCLUDE_DIRS}
     )
+    if (ENABLE_WIDEVINE)
+        list(APPEND WebCore_INCLUDE_DIRECTORIES
+            "${WEBCORE_DIR}/platform/encryptedmedia/widevine"
+        )
+    endif()
     list(APPEND WebCore_SOURCES
-
         platform/graphics/gstreamer/eme/CDMFactoryGStreamer.cpp
     )
     list(APPEND WebCore_LIBRARIES
@@ -155,11 +159,17 @@ if (ENABLE_ENCRYPTED_MEDIA)
             platform/graphics/gstreamer/eme/WebKitOpenCDMDecryptorGStreamer.cpp
         )
     else()
+        if (ENABLE_WIDEVINE)
+            list(APPEND WebCore_SOURCES
+                 platform/encryptedmedia/widevine/CDMWidevine.cpp
+                 platform/graphics/gstreamer/eme/WebKitWidevineDecryptorGStreamer.cpp
+            )
+        endif()
         list(APPEND WebCore_SOURCES
             platform/encryptedmedia/clearkey/CDMClearKey.cpp
             platform/graphics/gstreamer/eme/WebKitClearKeyDecryptorGStreamer.cpp
         )
-    endif ()
+    endif()
 endif ()
 
 if (USE_HOLE_PUNCH_EXTERNAL)

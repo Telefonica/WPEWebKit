@@ -60,9 +60,19 @@
 #endif
 
 #if USE(OPENCDM)
-#include "CDMOpenCDM.h"
+    #include "CDMOpenCDM.h"
+
 #elif ENABLE(ENCRYPTED_MEDIA)
-#include "CDMClearKey.h"
+    #include "CDMClearKey.h"
+
+    #if USE(PLAYREADY)
+        #include "CDMPlayReady.h"
+    #endif
+
+    #if USE(WIDEVINE)
+        #include "CDMWidevine.h"
+    #endif
+
 #endif
 
 // We shouldn't accept media that the player can't actually play.

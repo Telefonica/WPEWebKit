@@ -22,7 +22,7 @@
 
 #pragma once
 
-#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(OPENCDM)
+#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && (USE(OPENCDM) || USE(PLAYREADY) || USE(WIDEVINE))
 
 #include "WebKitCommonEncryptionDecryptorGStreamer.h"
 
@@ -49,4 +49,4 @@ struct _WebKitOpenCDMDecryptClass {
 
 G_END_DECLS
 
-#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(OPENCDM)
+#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && (USE(OPENCDM) || USE(PLAYREADY) || USE(WIDEVINE))

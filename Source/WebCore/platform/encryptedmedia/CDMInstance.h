@@ -64,6 +64,11 @@ public:
         OpenCDM,
 #else
         ClearKey,
+
+    #if USE(WIDEVINE)
+        Widevine,
+    #endif
+
 #endif
     };
 

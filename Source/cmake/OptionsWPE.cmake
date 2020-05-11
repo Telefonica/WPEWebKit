@@ -141,6 +141,11 @@ if (ENABLE_PLAYREADY)
     find_package(Playready REQUIRED)
 endif ()
 
+if (ENABLE_WIDEVINE)
+    add_definitions(-DUSE_WIDEVINE=1)
+    find_package(Widevine REQUIRED)
+endif ()
+
 if (ENABLE_BREAKPAD)
     find_package(Breakpad REQUIRED)
     add_definitions(-DUSE_BREAKPAD=1)

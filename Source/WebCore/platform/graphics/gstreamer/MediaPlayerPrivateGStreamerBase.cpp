@@ -50,12 +50,17 @@
 #if ENABLE(ENCRYPTED_MEDIA)
 #include "CDMInstance.h"
 #include "SharedBuffer.h"
+
 #if USE(OPENCDM)
-#include "CDMOpenCDM.h"
-#include "WebKitOpenCDMDecryptorGStreamer.h"
+  #include "CDMOpenCDM.h"
+  #include "WebKitOpenCDMDecryptorGStreamer.h"
 #else
-#include "WebKitClearKeyDecryptorGStreamer.h"
+  #include "WebKitClearKeyDecryptorGStreamer.h"
+  #if USE(WIDEVINE)
+    #include "WebKitWidevineDecryptorGStreamer.h"
+  #endif
 #endif
+
 #endif
 
 #if USE(GSTREAMER_GL)
@@ -164,11 +169,19 @@ void MediaPlayerPrivateGStreamerBase::ensureWebKitGStreamerElements()
     GRefPtr<GstElementFactory> decryptorFactory = adoptGRef(gst_element_factory_find("webkitopencdm"));
     if (!decryptorFactory)
         gst_element_register(0, "webkitopencdm", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_OPENCDM_DECRYPT);
-
 #else
+    GST_ERROR("Register webkitclearkey factory");
+
     GRefPtr<GstElementFactory> clearKeyDecryptorFactory = adoptGRef(gst_element_factory_find("webkitclearkey"));
     if (!clearKeyDecryptorFactory)
         gst_element_register(nullptr, "webkitclearkey", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_MEDIA_CK_DECRYPT);
+
+#if USE(WIDEVINE)
+    GST_ERROR("Register webkitwidevine factory");
+    GRefPtr<GstElementFactory> widevineDecryptorFactory = adoptGRef(gst_element_factory_find("webkitwidevine"));
+    if (!widevineDecryptorFactory)
+      gst_element_register(nullptr, "webkitwidevine", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_MEDIA_WV_DECRYPT);
+#endif
 
 #endif
 #endif
@@ -1462,8 +1475,29 @@ bool MediaPlayerPrivateGStreamerBase::supportsKeySystem(const String& keySystem,
 {
     bool result = false;
 
-#if ENABLE(ENCRYPTED_MEDIA) && !USE(OPENCDM)
-    result = GStreamerEMEUtilities::isClearKeyKeySystem(keySystem);
+    #if ENABLE(ENCRYPTED_MEDIA) && !(USE(OPENCDM))
+
+        result = GStreamerEMEUtilities::isClearKeyKeySystem(keySystem);
+        GST_DEBUG("ClearKey System -> %d", result)
+
+        #if USE(PLAYREADY)
+            if (!result)
+            {
+                result = GStreamerEMEUtilities::isPlayReadyKeySystem(keySystem);
+                GST_DEBUG("PlayReady System -> %d", result)
+            }
+        #endif
+
+        #if USE(WIDEVINE)
+            if (!result)
+            {
+                result = GStreamerEMEUtilities::isWidevineKeySystem(keySystem);
+                GST_DEBUG("Widevine System -> %d", result)
+            }
+        #endif
+
+    #endif
+
 #endif
 
     GST_DEBUG("checking for KeySystem support with %s and type %s: %s", keySystem.utf8().data(), mimeType.utf8().data(), boolForPrinting(result));
