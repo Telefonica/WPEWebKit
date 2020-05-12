@@ -1,4 +1,4 @@
-/* GStreamer PlayReady common encryption decryptor
+/* GStreamer Widevine common encryption decryptor
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,34 +18,34 @@
 
 #pragma once
 
-#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(PLAYREADY)
+#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(WIDEVINE)
 
 #include "WebKitCommonEncryptionDecryptorGStreamer.h"
 
 G_BEGIN_DECLS
 
-#define WEBKIT_TYPE_MEDIA_PR_DECRYPT          (webkit_media_play_ready_decrypt_get_type())
-#define WEBKIT_MEDIA_PR_DECRYPT(obj)          (G_TYPE_CHECK_INSTANCE_CAST((obj), WEBKIT_TYPE_MEDIA_PR_DECRYPT, WebKitMediaPlayReadyDecrypt))
-#define WEBKIT_MEDIA_PR_DECRYPT_CLASS(klass)  (G_TYPE_CHECK_CLASS_CAST((klass), WEBKIT_TYPE_MEDIA_PR_DECRYPT, WebKitMediaPlayReadyDecryptClass))
-#define WEBKIT_IS_MEDIA_PR_DECRYPT(obj)       (G_TYPE_CHECK_INSTANCE_TYPE((obj), WEBKIT_TYPE_MEDIA_PR_DECRYPT))
-#define WEBKIT_IS_MEDIA_PR_DECRYPT_CLASS(obj) (G_TYPE_CHECK_CLASS_TYPE((klass), WEBKIT_TYPE_MEDIA_PR_DECRYPT))
+#define WEBKIT_TYPE_MEDIA_WV_DECRYPT          (webkit_media_widevine_decrypt_get_type())
+#define WEBKIT_MEDIA_WV_DECRYPT(obj)          (G_TYPE_CHECK_INSTANCE_CAST((obj), WEBKIT_TYPE_MEDIA_WV_DECRYPT, WebKitMediaWidevineDecrypt))
+#define WEBKIT_MEDIA_WV_DECRYPT_CLASS(klass)  (G_TYPE_CHECK_CLASS_CAST((klass), WEBKIT_TYPE_MEDIA_WV_DECRYPT, WebKitMediaWidevineDecryptClass))
+#define WEBKIT_IS_MEDIA_WV_DECRYPT(obj)       (G_TYPE_CHECK_INSTANCE_TYPE((obj), WEBKIT_TYPE_MEDIA_WV_DECRYPT))
+#define WEBKIT_IS_MEDIA_WV_DECRYPT_CLASS(obj) (G_TYPE_CHECK_CLASS_TYPE((klass), WEBKIT_TYPE_MEDIA_WV_DECRYPT))
 
-typedef struct _WebKitMediaPlayReadyDecrypt        WebKitMediaPlayReadyDecrypt;
-typedef struct _WebKitMediaPlayReadyDecryptClass   WebKitMediaPlayReadyDecryptClass;
-typedef struct _WebKitMediaPlayReadyDecryptPrivate WebKitMediaPlayReadyDecryptPrivate;
+typedef struct _WebKitMediaWidevineDecrypt        WebKitMediaWidevineDecrypt;
+typedef struct _WebKitMediaWidevineDecryptClass   WebKitMediaWidevineDecryptClass;
+typedef struct _WebKitMediaWidevineDecryptPrivate WebKitMediaWidevineDecryptPrivate;
 
-GType webkit_media_play_ready_decrypt_get_type(void);
+GType webkit_media_widevine_decrypt_get_type(void);
 
-struct _WebKitMediaPlayReadyDecrypt {
+struct _WebKitMediaWidevineDecrypt {
     WebKitMediaCommonEncryptionDecrypt parent;
 
-    WebKitMediaPlayReadyDecryptPrivate* priv;
+    WebKitMediaWidevineDecryptPrivate* priv;
 };
 
-struct _WebKitMediaPlayReadyDecryptClass {
+struct _WebKitMediaWidevineDecryptClass {
     WebKitMediaCommonEncryptionDecryptClass parentClass;
 };
 
 G_END_DECLS
 
-#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
+#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(WIDEVINE)

@@ -21,7 +21,8 @@
 
 #include "config.h"
 #include "WebKitClearKeyDecryptorGStreamer.h"
-#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
+
+#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && !(USE(OPENCDM))
 
 #include "GStreamerCommon.h"
 #include "GStreamerEMEUtilities.h"
