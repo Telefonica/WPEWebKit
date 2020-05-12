@@ -1478,13 +1478,13 @@ bool MediaPlayerPrivateGStreamerBase::supportsKeySystem(const String& keySystem,
     #if ENABLE(ENCRYPTED_MEDIA) && !(USE(OPENCDM))
 
         result = GStreamerEMEUtilities::isClearKeyKeySystem(keySystem);
-        GST_DEBUG("ClearKey System -> %d", result)
+        GST_DEBUG("ClearKey System -> %d", result);
 
         #if USE(PLAYREADY)
             if (!result)
             {
                 result = GStreamerEMEUtilities::isPlayReadyKeySystem(keySystem);
-                GST_DEBUG("PlayReady System -> %d", result)
+                GST_DEBUG("PlayReady System -> %d", result);
             }
         #endif
 
@@ -1492,7 +1492,7 @@ bool MediaPlayerPrivateGStreamerBase::supportsKeySystem(const String& keySystem,
             if (!result)
             {
                 result = GStreamerEMEUtilities::isWidevineKeySystem(keySystem);
-                GST_DEBUG("Widevine System -> %d", result)
+                GST_DEBUG("Widevine System -> %d", result);
             }
         #endif
 

@@ -39,7 +39,7 @@ const char* GStreamerEMEUtilities::s_PlayReadyUUID = WEBCORE_GSTREAMER_EME_UTILI
 std::array<const char*,2> GStreamerEMEUtilities::s_PlayReadyKeySystems = { "com.microsoft.playready", "com.youtube.playready" };
 #endif
 
-#if USE(OPENCDM)
+#if USE(OPENCDM) || USE(WIDEVINE)
 const char* GStreamerEMEUtilities::s_WidevineUUID = WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID;
 const char* GStreamerEMEUtilities::s_WidevineKeySystem = "com.widevine.alpha";
 #endif
