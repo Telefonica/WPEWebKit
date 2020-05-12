@@ -1,4 +1,4 @@
-/* GStreamer PlayReady common encryption decryptor
+/* GStreamer Widevine common encryption decryptor
  *
  *
  * This library is free software; you can redistribute it and/or
@@ -18,10 +18,10 @@
  */
 
 #include "config.h"
-#include "WebKitPlayReadyDecryptorGStreamer.h"
+#include "WebKitWidevineDecryptorGStreamer.h"
 
 
-#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
+#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(WIDEVINE)
 
 #include "GStreamerCommon.h"
 #include "GStreamerEMEUtilities.h"
@@ -29,35 +29,35 @@
 #include <gst/base/gstbytereader.h>
 #include <wtf/RunLoop.h>
 
-#define PLAYREADY_SIZE 16
+#define WIDEVINE_SIZE 16
 
 struct Key {
     GRefPtr<GstBuffer> keyID;
     GRefPtr<GstBuffer> keyValue;
 };
 
-#define WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE((obj), WEBKIT_TYPE_MEDIA_PR_DECRYPT, WebKitMediaPlayReadyDecryptPrivate))
-struct _WebKitMediaPlayReadyDecryptPrivate {
+#define WEBKIT_MEDIA_WV_DECRYPT_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE((obj), WEBKIT_TYPE_MEDIA_WV_DECRYPT, WebKitMediaWidevineDecryptPrivate))
+struct _WebKitMediaWidevineDecryptPrivate {
     Vector<Key> keys;
     gcry_cipher_hd_t handle;
 };
 
-static void webKitMediaPlayReadyDecryptorFinalize(GObject*);
-static bool webKitMediaPlayReadyDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt*, GstBuffer*);
-static bool webKitMediaPlayReadyDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* keyIDBuffer, GstBuffer* iv, GstBuffer* sample, unsigned subSamplesCount, GstBuffer* subSamples);
-static void webKitMediaPlayReadyDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt*);
+static void webKitMediaWidevineDecryptorFinalize(GObject*);
+static bool webKitMediaWidevineDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt*, GstBuffer*);
+static bool webKitMediaWidevineDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* keyIDBuffer, GstBuffer* iv, GstBuffer* sample, unsigned subSamplesCount, GstBuffer* subSamples);
+static void webKitMediaWidevineDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt*);
 
-GST_DEBUG_CATEGORY_STATIC(webkit_media_play_ready_decrypt_debug_category);
-#define GST_CAT_DEFAULT webkit_media_play_ready_decrypt_debug_category
+GST_DEBUG_CATEGORY_STATIC(webkit_media_widevine_decrypt_debug_category);
+#define GST_CAT_DEFAULT webkit_media_widevine_decrypt_debug_category
 
 static GstStaticPadTemplate sinkTemplate = GST_STATIC_PAD_TEMPLATE("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("application/vnd.ms-sstr+xml, original-media-type=(string)application/vnd.ms-sstr+xml, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
-    "application/x-cenc, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
-    "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID";"
-    "application/vnd.ms-sstr+xml, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
-    "application/x-cenc, original-media-type=(string)video/x-h265, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
+    GST_STATIC_CAPS("application/vnd.ms-sstr+xml, original-media-type=(string)application/vnd.ms-sstr+xml, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID "; "
+    "application/x-cenc, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID "; "
+    "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID";"
+    "application/vnd.ms-sstr+xml, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID "; "
+    "application/x-cenc, original-media-type=(string)video/x-h265, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID "; "
     "application/x-video-mp4, original-media-type=(string)video/mp4; "
     "application/x-audio-mp4, original-media-type=(string)audio/mp4; "));
 
@@ -66,65 +66,65 @@ static GstStaticPadTemplate srcTemplate = GST_STATIC_PAD_TEMPLATE("src",
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/mp4; audio/mp4; application/vnd.ms-sstr+xml; application/x-cenc; video/x-h265;"));
 
-#define webkit_media_play_ready_decrypt_parent_class parent_class
-G_DEFINE_TYPE(WebKitMediaPlayReadyDecrypt, webkit_media_play_ready_decrypt, WEBKIT_TYPE_MEDIA_CENC_DECRYPT);
+#define webkit_media_widevine_decrypt_parent_class parent_class
+G_DEFINE_TYPE(WebKitMediaWidevineDecrypt, webkit_media_widevine_decrypt, WEBKIT_TYPE_MEDIA_CENC_DECRYPT);
 
-static void webkit_media_play_ready_decrypt_class_init(WebKitMediaPlayReadyDecryptClass* klass)
+static void webkit_media_widevine_decrypt_class_init(WebKitMediaWidevineDecryptClass* klass)
 {
-    GST_ERROR_OBJECT(klass, "webkit_media_play_ready_decrypt_class_init");
+    GST_ERROR_OBJECT(klass, "webkit_media_widevine_decrypt_class_init");
     GObjectClass* gobjectClass = G_OBJECT_CLASS(klass);
-    gobjectClass->finalize = webKitMediaPlayReadyDecryptorFinalize;
+    gobjectClass->finalize = webKitMediaWidevineDecryptorFinalize;
 
     GstElementClass* elementClass = GST_ELEMENT_CLASS(klass);
     gst_element_class_add_pad_template(elementClass, gst_static_pad_template_get(&sinkTemplate));
     gst_element_class_add_pad_template(elementClass, gst_static_pad_template_get(&srcTemplate));
 
     gst_element_class_set_static_metadata(elementClass,
-        "Decrypt content encrypted using ISOBMFF PlayReady Common Encryption",
+        "Decrypt content encrypted using ISOBMFF Widevine Common Encryption",
         GST_ELEMENT_FACTORY_KLASS_DECRYPTOR,
-        "Decrypts media that has been encrypted using ISOBMFF PlayReady Common Encryption.",
+        "Decrypts media that has been encrypted using ISOBMFF Widevine Common Encryption.",
         "Philippe Normand <philn@igalia.com>");
 
-    GST_DEBUG_CATEGORY_INIT(webkit_media_play_ready_decrypt_debug_category,
-        "webkitplayready", 0, "PlayReady decryptor");
+    GST_DEBUG_CATEGORY_INIT(webkit_media_widevine_decrypt_debug_category,
+        "webkitwidevine", 0, "Widevine decryptor");
 
     WebKitMediaCommonEncryptionDecryptClass* cencClass = WEBKIT_MEDIA_CENC_DECRYPT_CLASS(klass);
-    cencClass->setupCipher = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorSetupCipher);
-    cencClass->decrypt = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorDecrypt);
-    cencClass->releaseCipher = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorReleaseCipher);
+    cencClass->setupCipher = GST_DEBUG_FUNCPTR(webKitMediaWidevineDecryptorSetupCipher);
+    cencClass->decrypt = GST_DEBUG_FUNCPTR(webKitMediaWidevineDecryptorDecrypt);
+    cencClass->releaseCipher = GST_DEBUG_FUNCPTR(webKitMediaWidevineDecryptorReleaseCipher);
 
-    g_type_class_add_private(klass, sizeof(WebKitMediaPlayReadyDecryptPrivate));
+    g_type_class_add_private(klass, sizeof(WebKitMediaWidevineDecryptPrivate));
 }
 
-static void webkit_media_play_ready_decrypt_init(WebKitMediaPlayReadyDecrypt* self)
+static void webkit_media_widevine_decrypt_init(WebKitMediaWidevineDecrypt* self)
 {
-    GST_ERROR_OBJECT(self, "webkit_media_play_ready_decrypt_init");
-    WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(self);
+    GST_ERROR_OBJECT(self, "webkit_media_widevine_decrypt_init");
+    WebKitMediaWidevineDecryptPrivate* priv = WEBKIT_MEDIA_WV_DECRYPT_GET_PRIVATE(self);
 
     self->priv = priv;
-    new (priv) WebKitMediaPlayReadyDecryptPrivate();
+    new (priv) WebKitMediaWidevineDecryptPrivate();
 }
 
-static void webKitMediaPlayReadyDecryptorFinalize(GObject* object)
+static void webKitMediaWidevineDecryptorFinalize(GObject* object)
 {
-    GST_ERROR_OBJECT(object, "webKitMediaPlayReadyDecryptorFinalize");
-    WebKitMediaPlayReadyDecrypt* self = WEBKIT_MEDIA_PR_DECRYPT(object);
-    WebKitMediaPlayReadyDecryptPrivate* priv = self->priv;
+    GST_ERROR_OBJECT(object, "webKitMediaWidevineDecryptorFinalize");
+    WebKitMediaWidevineDecrypt* self = WEBKIT_MEDIA_WV_DECRYPT(object);
+    WebKitMediaWidevineDecryptPrivate* priv = self->priv;
 
-    priv->~WebKitMediaPlayReadyDecryptPrivate();
+    priv->~WebKitMediaWidevineDecryptPrivate();
 
     GST_CALL_PARENT(G_OBJECT_CLASS, finalize, (object));
 }
 
-static bool webKitMediaPlayReadyDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer)
+static bool webKitMediaWidevineDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer)
 {
-    GST_ERROR_OBJECT(self, "webKitMediaPlayReadyDecryptorSetupCipher");
+    GST_ERROR_OBJECT(self, "webKitMediaWidevineDecryptorSetupCipher");
     if (!keyIDBuffer) {
         GST_ERROR_OBJECT(self, "got no key id buffer");
         return false;
     }
 
-    WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_PR_DECRYPT(self));
+    WebKitMediaWidevineDecryptPrivate* priv = WEBKIT_MEDIA_WV_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_WV_DECRYPT(self));
     gcry_error_t error;
 
     GRefPtr<GstBuffer> keyBuffer;
@@ -160,7 +160,7 @@ static bool webKitMediaPlayReadyDecryptorSetupCipher(WebKitMediaCommonEncryption
         return false;
     }
 
-    ASSERT(mappedKeyBuffer.size() == PLAYREADY_SIZE);
+    ASSERT(mappedKeyBuffer.size() == WIDEVINE_SIZE);
     error = gcry_cipher_setkey(priv->handle, mappedKeyBuffer.data(), mappedKeyBuffer.size());
     if (error) {
         GST_ERROR_OBJECT(self, "gcry_cipher_setkey failed: %s", gpg_strerror(error));
@@ -170,9 +170,9 @@ static bool webKitMediaPlayReadyDecryptorSetupCipher(WebKitMediaCommonEncryption
     return true;
 }
 
-static bool webKitMediaPlayReadyDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer, GstBuffer* ivBuffer, GstBuffer* buffer, unsigned subSampleCount, GstBuffer* subSamplesBuffer)
+static bool webKitMediaWidevineDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer, GstBuffer* ivBuffer, GstBuffer* buffer, unsigned subSampleCount, GstBuffer* subSamplesBuffer)
 {
-    GST_ERROR_OBJECT(self, "webKitMediaPlayReadyDecryptorDecrypt");
+    GST_ERROR_OBJECT(self, "webKitMediaWidevineDecryptorDecrypt");
     UNUSED_PARAM(keyIDBuffer);
     GstMappedBuffer mappedIVBuffer(ivBuffer, GST_MAP_READ);
     if (!mappedIVBuffer) {
@@ -180,17 +180,17 @@ static bool webKitMediaPlayReadyDecryptorDecrypt(WebKitMediaCommonEncryptionDecr
         return false;
     }
 
-    uint8_t ctr[PLAYREADY_SIZE];
+    uint8_t ctr[WIDEVINE_SIZE];
     if (mappedIVBuffer.size() == 8) {
         memset(ctr + 8, 0, 8);
         memcpy(ctr, mappedIVBuffer.data(), 8);
     } else {
-        ASSERT(mappedIVBuffer.size() == PLAYREADY_SIZE);
-        memcpy(ctr, mappedIVBuffer.data(), PLAYREADY_SIZE);
+        ASSERT(mappedIVBuffer.size() == WIDEVINE_SIZE);
+        memcpy(ctr, mappedIVBuffer.data(), WIDEVINE_SIZE);
     }
 
-    WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_PR_DECRYPT(self));
-    gcry_error_t error = gcry_cipher_setctr(priv->handle, ctr, PLAYREADY_SIZE);
+    WebKitMediaWidevineDecryptPrivate* priv = WEBKIT_MEDIA_WV_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_WV_DECRYPT(self));
+    gcry_error_t error = gcry_cipher_setctr(priv->handle, ctr, WIDEVINE_SIZE);
     if (error) {
         GST_ERROR_OBJECT(self, "gcry_cipher_setctr failed: %s", gpg_strerror(error));
         return false;
@@ -250,11 +250,11 @@ static bool webKitMediaPlayReadyDecryptorDecrypt(WebKitMediaCommonEncryptionDecr
     return true;
 }
 
-static void webKitMediaPlayReadyDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt* self)
+static void webKitMediaWidevineDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt* self)
 {
-    GST_ERROR_OBJECT(self, "webKitMediaPlayReadyDecryptorReleaseCipher");
-    WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_PR_DECRYPT(self));
+    GST_ERROR_OBJECT(self, "webKitMediaWidevineDecryptorReleaseCipher");
+    WebKitMediaWidevineDecryptPrivate* priv = WEBKIT_MEDIA_WV_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_WV_DECRYPT(self));
     gcry_cipher_close(priv->handle);
 }
 
-#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
+#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(WIDEVINE)

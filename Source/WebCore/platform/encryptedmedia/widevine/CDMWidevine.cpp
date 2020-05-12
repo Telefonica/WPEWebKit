@@ -37,7 +37,7 @@ WidevineState& WidevineState::singleton()
 
 WidevineState::WidevineState() = default;
 
-RefPtr<JSON::Object> parseJSONObject(const SharedBuffer& buffer)
+RefPtr<JSON::Object> parseJSONObjectWV(const SharedBuffer& buffer)
 {
     // Fail on large buffers whose size doesn't fit into a 32-bit unsigned integer.
     size_t size = buffer.size();
@@ -54,7 +54,7 @@ RefPtr<JSON::Object> parseJSONObject(const SharedBuffer& buffer)
     return object;
 }
 
-std::optional<Vector<CDMInstanceWidevine::Key>> parseLicenseFormat(const JSON::Object& root)
+std::optional<Vector<CDMInstanceWidevine::Key>> parseLicenseFormatWV(const JSON::Object& root)
 {
     // If the 'keys' key is present in the root object, parse the JSON further
     // according to the specified 'license' format.
@@ -95,7 +95,7 @@ std::optional<Vector<CDMInstanceWidevine::Key>> parseLicenseFormat(const JSON::O
     return decodedKeys;
 }
 
-bool parseLicenseReleaseAcknowledgementFormat(const JSON::Object& root)
+bool parseLicenseReleaseAcknowledgementFormatWV(const JSON::Object& root)
 {
     // If the 'kids' key is present in the root object, parse the JSON further
     // according to the specified 'license release acknowledgement' format.
@@ -146,7 +146,7 @@ bool CDMPrivateWidevine::supportsInitDataType(const AtomicString& initDataType) 
     return equalLettersIgnoringASCIICase(initDataType, "keyids");
 }
 
-bool containsPersistentLicenseType(const Vector<CDMSessionType>& types)
+bool containsPersistentLicenseTypeWV(const Vector<CDMSessionType>& types)
 {
     return std::any_of(types.begin(), types.end(),
         [] (auto& sessionType) { return sessionType == CDMSessionType::PersistentLicense; });
@@ -160,7 +160,7 @@ bool CDMPrivateWidevine::supportsConfiguration(const CDMKeySystemConfiguration& 
 
     // Reject any configuration that marks persistent state as required, unless
     // the 'persistent-license' session type has to be supported.
-    if (configuration.persistentState == CDMRequirement::Required && !containsPersistentLicenseType(configuration.sessionTypes))
+    if (configuration.persistentState == CDMRequirement::Required && !containsPersistentLicenseTypeWV(configuration.sessionTypes))
         return false;
 
     return true;
@@ -181,7 +181,7 @@ bool CDMPrivateWidevine::supportsConfigurationWithRestrictions(const CDMKeySyste
 
     // Reject any configuration that marks persistent state as required, unless
     // the 'persistent-license' session type has to be supported.
-    if (configuration.persistentState == CDMRequirement::Required && !containsPersistentLicenseTypePR(configuration.sessionTypes))
+    if (configuration.persistentState == CDMRequirement::Required && !containsPersistentLicenseTypeWV(configuration.sessionTypes))
         return false;
 
     return true;
@@ -251,7 +251,7 @@ bool CDMPrivateWidevine::supportsInitData(const AtomicString& initDataType, cons
         return false;
 
     // Validate the initData buffer as an JSON object.
-    if (!parseJSONObjectPR(initData))
+    if (!parseJSONObjectWV(initData))
         return false;
 
     return true;
@@ -260,7 +260,7 @@ bool CDMPrivateWidevine::supportsInitData(const AtomicString& initDataType, cons
 RefPtr<SharedBuffer> CDMPrivateWidevine::sanitizeResponse(const SharedBuffer& response) const
 {
     // Validate the response buffer as an JSON object.
-    if (!parseJSONObjectPR(response))
+    if (!parseJSONObjectWV(response))
         return nullptr;
 
     return response.copy();
@@ -342,14 +342,14 @@ void CDMInstanceWidevine::updateLicense(const String& sessionId, LicenseType, co
         };
 
     // Parse the response buffer as an JSON object.
-    RefPtr<JSON::Object> root = parseJSONObject(response);
+    RefPtr<JSON::Object> root = parseJSONObjectWV(response);
     if (!root) {
         dispatchCallback(false, std::nullopt, SuccessValue::Failed);
         return;
     }
 
     // Parse the response using 'license' formatting, if possible.
-    if (auto decodedKeys = parseLicenseFormat(*root)) {
+    if (auto decodedKeys = parseLicenseFormatWV(*root)) {
         // Retrieve the target Vector of Key objects for this session.
         auto& keyVector = WidevineState::singleton().keys().ensure(sessionId, [] { return Vector<Key> { }; }).iterator->value;
 
@@ -419,7 +419,7 @@ void CDMInstanceWidevine::updateLicense(const String& sessionId, LicenseType, co
     }
 
     // Parse the response using 'license release acknowledgement' formatting, if possible.
-    if (parseLicenseReleaseAcknowledgement(*root)) {
+    if (parseLicenseReleaseAcknowledgementFormatWV(*root)) {
         // FIXME: Retrieve the key ID information and use it to validate the keys for this sessionId.
         WidevineState::singleton().keys().remove(sessionId);
         m_keys.clear();
