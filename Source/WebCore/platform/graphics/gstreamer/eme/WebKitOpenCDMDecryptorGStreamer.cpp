@@ -97,7 +97,6 @@ static GRefPtr<GstCaps> createSinkPadTemplateCaps()
         addKeySystemToSinkPadCaps(caps, WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID);
     }
 
-#if USE(OPENCDM) || USE(WIDEVINE)
     if (!opencdm_is_type_supported(WebCore::GStreamerEMEUtilities::s_WidevineKeySystem, emptyString.c_str())) {
         addKeySystemToSinkPadCaps(caps, WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID);
     }
