@@ -51,7 +51,7 @@ void CDMFactory::platformRegisterFactories(Vector<CDMFactory*>& factories)
 #else
 #if USE(PLAYREADY)
     factories.append(&CDMFactoryPlayReady::singleton());
-#endif    
+#endif
 #if USE(WIDEVINE)
     factories.append(&CDMFactoryWidevine::singleton());
 #endif
