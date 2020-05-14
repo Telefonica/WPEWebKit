@@ -144,7 +144,8 @@ if (ENABLE_ENCRYPTED_MEDIA)
     if (ENABLE_PLAYREADY)
         list(APPEND WebCore_INCLUDE_DIRECTORIES
             "${WEBCORE_DIR}/platform/encryptedmedia/playready"
-	)
+        )
+    endif()
     if (ENABLE_WIDEVINE)
         list(APPEND WebCore_INCLUDE_DIRECTORIES
             "${WEBCORE_DIR}/platform/encryptedmedia/widevine"
@@ -165,9 +166,10 @@ if (ENABLE_ENCRYPTED_MEDIA)
     else()
         if (ENABLE_PLAYREADY)
             list(APPEND WebCore_SOURCES
-	        platform/encryptedmedia/playready/CDMPlayReady.cpp
+                platform/encryptedmedia/playready/CDMPlayReady.cpp
                 platform/graphics/gstreamer/eme/WebKitPlayReadyDecryptorGStreamer.cpp
-	    )
+            )
+        endif()
         if (ENABLE_WIDEVINE)
             list(APPEND WebCore_SOURCES
                  platform/encryptedmedia/widevine/CDMWidevine.cpp
