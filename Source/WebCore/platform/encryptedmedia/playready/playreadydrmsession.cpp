@@ -1,0 +1,629 @@
+/*
+ * If not stated otherwise in this file or this component's license file the
+ * following copyright and licenses apply:
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
+
+/**
+ * @file playreadydrmsession.cpp
+ */
+
+#include "config.h"
+#include "playreadydrmsession.h"
+#include <gst/gst.h>
+#include <assert.h>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <string.h>
+#include <vector>
+#include <sys/utsname.h>
+
+#define NYI_KEYSYSTEM "keysystem-placeholder"
+//#define TRACE_LOG 1
+
+extern DRM_CONST_STRING g_dstrDrmPath;
+
+// The default location of CDM DRM store.
+// /opt/drm/playready/drmstore.dat
+const DRM_WCHAR g_rgwchCDMDrmStoreName[] =
+{ WCHAR_CAST('/'), WCHAR_CAST('o'), WCHAR_CAST('p'), WCHAR_CAST('t'),
+		WCHAR_CAST('/'), WCHAR_CAST('d'), WCHAR_CAST('r'), WCHAR_CAST('m'),
+		WCHAR_CAST('/'), WCHAR_CAST('p'), WCHAR_CAST('l'), WCHAR_CAST('a'),
+		WCHAR_CAST('y'), WCHAR_CAST('r'), WCHAR_CAST('e'), WCHAR_CAST('a'),
+		WCHAR_CAST('d'), WCHAR_CAST('y'), WCHAR_CAST('/'), WCHAR_CAST('d'),
+		WCHAR_CAST('r'), WCHAR_CAST('m'), WCHAR_CAST('s'), WCHAR_CAST('t'),
+		WCHAR_CAST('o'), WCHAR_CAST('r'), WCHAR_CAST('e'), WCHAR_CAST('.'),
+		WCHAR_CAST('d'), WCHAR_CAST('a'), WCHAR_CAST('t'), WCHAR_CAST('\0') };
+// default PR DRM path
+// /opt/drm/playready
+const DRM_WCHAR g_rgwchCDMDrmPath[] =
+{ WCHAR_CAST('/'), WCHAR_CAST('o'), WCHAR_CAST('p'), WCHAR_CAST('t'),
+		WCHAR_CAST('/'), WCHAR_CAST('d'), WCHAR_CAST('r'), WCHAR_CAST('m'),
+		WCHAR_CAST('/'), WCHAR_CAST('p'), WCHAR_CAST('l'), WCHAR_CAST('a'),
+		WCHAR_CAST('y'), WCHAR_CAST('r'), WCHAR_CAST('e'), WCHAR_CAST('a'),
+		WCHAR_CAST('d'), WCHAR_CAST('y'), WCHAR_CAST('\0') };
+
+const DRM_CONST_STRING g_dstChainTitle = DRM_CREATE_DRM_STRING(
+		g_rgwchCDMDrmStoreName);
+const DRM_CONST_STRING g_dstrCDMDrmPath = DRM_CREATE_DRM_STRING(g_rgwchCDMDrmPath);
+const DRM_CONST_STRING *g_rgpdstrRights[1] =
+{ &g_dstrWMDRM_RIGHT_PLAYBACK };
+
+
+// The following function is missing from the official PK 2.5 release but
+// will be available in the next PK release.
+// It should be removed if the source is building with the next PK release.
+/**
+ * @brief Read UUID from init data
+ * @param pbData : Pointer to initdata
+ * @param cbData : size of init data
+ * @param ibGuidOffset : offset to uuid
+ * @param pDrmGuid : Gets updated with uuid
+ * @retval DRM_SUCCESS if no errors encountered
+ */
+
+DRM_API DRM_RESULT DRM_CALL DRM_UTL_ReadNetworkBytesToNativeGUID(
+		const DRM_BYTE *pbData, const DRM_DWORD cbData, DRM_DWORD ibGuidOffset,
+		DRM_GUID *pDrmGuid)
+{
+	DRM_RESULT dr = DRM_SUCCESS;
+	DRM_DWORD dwResult = 0;
+
+	ChkArg(pbData != NULL);
+	ChkArg(pDrmGuid != NULL);
+	ChkDR(DRM_DWordSub(cbData, ibGuidOffset, &dwResult));
+	ChkBOOL(dwResult >= DRM_GUID_LEN, DRM_E_BUFFERTOOSMALL);
+
+	// Convert field by field.
+	NETWORKBYTES_TO_DWORD(pDrmGuid->Data1, pbData, ibGuidOffset);
+	ChkDR(DRM_DWordAdd(ibGuidOffset, SIZEOF(DRM_DWORD), &ibGuidOffset));
+
+	NETWORKBYTES_TO_WORD(pDrmGuid->Data2, pbData, ibGuidOffset);
+	ChkDR(DRM_DWordAdd(ibGuidOffset, SIZEOF(DRM_WORD), &ibGuidOffset));
+
+	NETWORKBYTES_TO_WORD(pDrmGuid->Data3, pbData, ibGuidOffset);
+	ChkDR(DRM_DWordAdd(ibGuidOffset, SIZEOF(DRM_WORD), &ibGuidOffset));
+
+	// Copy last 8 bytes.
+	DRM_BYT_CopyBytes(pDrmGuid->Data4, 0, pbData, ibGuidOffset, 8);
+
+	ErrorExit: return dr;
+}
+
+/**
+ * @brief PlayReadyDRMSession Constructor
+ */
+PlayReadyDRMSession::PlayReadyDRMSession() :
+		CDMDrmSession(PLAYREADY_KEY_SYSTEM_STRING), m_ptrAppContext(NULL), m_sbOpaBuf(NULL),
+		m_cbOpaBuf(0), m_sbRevocateBuf(NULL), m_eKeyState(KEY_INIT), m_fCommit(FALSE),
+		m_pbChallenge(NULL), m_cbChallenge(0), m_ptrDestURL(NULL), m_pbPRO(NULL), m_cbPRO(0)
+{
+	pthread_mutex_init(&decryptMutex,NULL);
+	initDRMSession();
+}
+
+
+/**
+ * @brief Initialize PR DRM session, state will be set as KEY_INIT
+ *        on success KEY_ERROR if failure.
+ */
+void PlayReadyDRMSession::initDRMSession()
+{
+	DRM_RESULT dr = DRM_SUCCESS;
+	DRM_ID aampSessionId;
+	DRM_DWORD cchEncSesID;
+
+	ChkMem(
+			m_sbOpaBuf = (DRM_BYTE *) Oem_MemAlloc(
+					MINIMUM_APPCONTEXT_OPAQUE_BUFFER_SIZE));
+	m_cbOpaBuf = MINIMUM_APPCONTEXT_OPAQUE_BUFFER_SIZE;
+
+	ChkMem(
+			m_ptrAppContext = (DRM_APP_CONTEXT *) Oem_MemAlloc(
+					SIZEOF(DRM_APP_CONTEXT)));
+
+	g_dstrDrmPath = g_dstrCDMDrmPath;
+
+	/* Initialize DRM app context.
+	   Mutex lock is added as it runs in to deadlock sometimes
+	   when initialization is called for both Audio and Video
+	*/
+
+	static pthread_mutex_t sessionMutex = PTHREAD_MUTEX_INITIALIZER;
+	pthread_mutex_lock(&sessionMutex);
+	dr = Drm_Initialize(m_ptrAppContext,
+	NULL, m_sbOpaBuf, m_cbOpaBuf, &g_dstChainTitle);
+	pthread_mutex_unlock(&sessionMutex);
+
+	ChkDR(dr);
+
+	if (DRM_REVOCATION_IsRevocationSupported())
+	{
+		ChkMem(
+				m_sbRevocateBuf = (DRM_BYTE *) Oem_MemAlloc(
+						REVOCATION_BUFFER_SIZE));
+
+		ChkDR(
+				Drm_Revocation_SetBuffer(m_ptrAppContext, m_sbRevocateBuf,
+						REVOCATION_BUFFER_SIZE));
+	}
+
+	// Generate a random media session ID.
+	ChkDR(
+			Oem_Random_GetBytes(NULL, (DRM_BYTE *) &aampSessionId,
+					SIZEOF(aampSessionId)));
+
+	//ZEROMEM(m_rgchSesID, SIZEOF(m_rgchSesID));
+	ZEROMEM(cchEncSesID, SIZEOF(cchEncSesID));
+	// Store the generated media session ID in base64 encoded form.
+	ChkDR(
+			DRM_B64_EncodeA((DRM_BYTE *) &aampSessionId, SIZEOF(aampSessionId),
+					cchEncSesID, &cchEncSesID, 0));
+
+	// The current state MUST be KEY_INIT otherwise error out.
+	ChkBOOL(m_eKeyState == KEY_INIT, DRM_E_INVALIDARG);
+	return;
+	ErrorExit:
+	m_eKeyState = KEY_ERROR;
+}
+
+/**
+ * @brief Create drm session with given init data
+ *        state will be KEY_INIT on success KEY_ERROR if failed
+ * @param f_pbInitData pointer to initdata
+ * @param f_cbInitData init data size
+ */
+void PlayReadyDRMSession::generateCDMDRMSession(const uint8_t *f_pbInitData,
+		uint32_t f_cbInitData)
+{
+	DRM_RESULT dr = DRM_SUCCESS;
+
+	if (f_pbInitData != NULL)
+	{
+		ChkDR(_ParseInitData(f_pbInitData, f_cbInitData));
+	}
+
+
+	if (m_cbPRO > 0)
+	{
+		// If PRO is supplied (via init data) then it is used
+		// to create the content header inside of the app context.
+		dr = Drm_Content_SetProperty(m_ptrAppContext, DRM_CSP_AUTODETECT_HEADER,
+				m_pbPRO, m_cbPRO);
+	} else
+	{
+		dr = Drm_Content_SetProperty(m_ptrAppContext, DRM_CSP_AUTODETECT_HEADER,
+				f_pbInitData, f_cbInitData);
+	}
+
+	ChkDR(dr);
+
+	// The current state MUST be KEY_INIT otherwise error out.
+	ChkBOOL(m_eKeyState == KEY_INIT, DRM_E_INVALIDARG);
+	return;
+
+	ErrorExit:
+	m_eKeyState = KEY_ERROR;
+}
+
+
+/**
+ * @brief PlayReadyDRMSession Destructor
+ */
+PlayReadyDRMSession::~PlayReadyDRMSession()
+{
+	pthread_mutex_destroy(&decryptMutex);
+	SAFE_OEM_FREE(m_pbChallenge);
+	SAFE_OEM_FREE(m_ptrDestURL);
+	if(m_pbPRO != NULL)
+	{
+		SAFE_OEM_FREE(m_pbPRO);
+	}
+	m_pbPRO = NULL;
+	if (DRM_REVOCATION_IsRevocationSupported())
+		SAFE_OEM_FREE(m_sbRevocateBuf);
+
+	SAFE_OEM_FREE(m_sbOpaBuf);
+	SAFE_OEM_FREE(m_ptrAppContext);
+	m_eKeyState = KEY_CLOSED;
+}
+
+// The standard PlayReady protection system ID.
+static DRM_ID CLSID_PlayReadyProtectionSystemID =
+{ 0x79, 0xf0, 0x04, 0x9a, 0x40, 0x98, 0x86, 0x42, 0xab, 0x92, 0xe6, 0x5b, 0xe0,
+		0x88, 0x5f, 0x95 };
+
+// The standard ID of the PSSH box wrapped inside of a UUID box.
+static DRM_ID PSSH_BOX_GUID =
+{ 0x18, 0x4f, 0x8a, 0xd0, 0xf3, 0x10, 0x82, 0x4a, 0xb6, 0xc8, 0x32, 0xd8, 0xab,
+		0xa1, 0x83, 0xd3 };
+
+/**
+ * @brief Retrieve PlayReady Object(PRO) from init data
+ * @param f_pbInitData : Pointer to initdata
+ * @param f_cbInitData : size of initdata
+ * @param f_pibPRO : Gets updated with PRO
+ * @param f_pcbPRO : size of PRO
+ * @retval DRM_SUCCESS if no errors encountered
+ */
+int PlayReadyDRMSession::_GetPROFromInitData(const DRM_BYTE *f_pbInitData,
+		DRM_DWORD f_cbInitData, DRM_DWORD *f_pibPRO, DRM_DWORD *f_pcbPRO)
+{
+	DRM_RESULT dr = DRM_SUCCESS;
+	DRM_DWORD ibCur = 0;
+	DRM_DWORD cbSize = 0;
+	DRM_DWORD dwType = 0;
+	DRM_WORD wVersion = 0;
+	DRM_WORD wFlags = 0;
+	DRM_GUID guidSystemID = DRM_EMPTY_DRM_GUID;
+	DRM_GUID guidUUID = DRM_EMPTY_DRM_GUID;
+	DRM_DWORD cbSystemSize = 0;
+	DRM_BOOL fFound = FALSE;
+	DRM_BOOL fUUIDBox = FALSE;
+	DRM_DWORD cbMultiKid = 0;
+	DRM_DWORD dwResult = 0;
+
+	ChkArg(f_pbInitData != NULL);
+	ChkArg(f_cbInitData > 0);
+	ChkArg(f_pibPRO != NULL);
+	ChkArg(f_pcbPRO != NULL);
+
+	*f_pibPRO = 0;
+	*f_pcbPRO = 0;
+
+	while (ibCur < f_cbInitData && !fFound)
+	{
+		ChkDR(DRM_DWordAdd(ibCur, SIZEOF(DRM_DWORD), &dwResult));
+		ChkBufferSize(dwResult, f_cbInitData);
+		NETWORKBYTES_TO_DWORD(cbSize, f_pbInitData, ibCur);
+		ibCur = dwResult;
+
+		ChkDR(DRM_DWordAdd(ibCur, SIZEOF(DRM_DWORD), &dwResult));
+		ChkBufferSize(dwResult, f_cbInitData);
+		NETWORKBYTES_TO_DWORD(dwType, f_pbInitData, ibCur);
+		ibCur = dwResult;
+
+		// 0x64697575 in big endian stands for "uuid".
+		if (dwType == 0x75756964)
+		{
+			ChkDR(DRM_DWordAdd(ibCur, SIZEOF(DRM_GUID), &dwResult));
+			ChkBufferSize(dwResult, f_cbInitData);
+
+			ChkDR(
+					DRM_UTL_ReadNetworkBytesToNativeGUID(f_pbInitData,
+							f_cbInitData, ibCur, &guidUUID));
+			ibCur = dwResult;
+
+			ChkBOOL(MEMCMP(&guidUUID, &PSSH_BOX_GUID, SIZEOF(DRM_ID)) == 0,
+					DRM_E_FAIL);
+			fUUIDBox = TRUE;
+		} else
+		{
+			// 0x68737370 in big endian stands for "pssh".
+			ChkBOOL(dwType == 0x70737368, DRM_E_FAIL);
+		}
+
+		// Read "version" of PSSH box.
+		ChkDR(DRM_DWordAdd(ibCur, SIZEOF(DRM_WORD), &dwResult));
+		ChkBufferSize(dwResult, f_cbInitData);
+		NETWORKBYTES_TO_WORD(wVersion, f_pbInitData, ibCur);
+		ibCur = dwResult;
+
+		// Read "flags" of PSSH box.
+		ChkDR(DRM_DWordAdd(ibCur, SIZEOF(DRM_WORD), &dwResult));
+		ChkBufferSize(dwResult, f_cbInitData);
+		NETWORKBYTES_TO_WORD(wFlags, f_pbInitData, ibCur);
+		ibCur = dwResult;
+
+		ChkDR(DRM_DWordAdd(ibCur, SIZEOF(DRM_GUID), &dwResult));
+		ChkBufferSize(dwResult, f_cbInitData);
+
+		// Read "system ID" of PSSH box.
+		ChkDR(
+				DRM_UTL_ReadNetworkBytesToNativeGUID(f_pbInitData, f_cbInitData,
+						ibCur, &guidSystemID));
+		ibCur = dwResult;
+
+		// Handle multi-KIDs pssh box.
+		if (wVersion > 0)
+		{
+			DRM_DWORD cKids = 0;
+
+			ChkDR(DRM_DWordAdd(ibCur, SIZEOF(DRM_DWORD), &dwResult));
+			ChkBufferSize(dwResult, f_cbInitData);
+			NETWORKBYTES_TO_DWORD(cKids, f_pbInitData, ibCur);
+			ibCur = dwResult;
+
+			// Ignore the KIDs.
+			// ibCur + cKids * sizeof( GUID )
+			ChkDR(DRM_DWordMult(cKids, SIZEOF(DRM_GUID), &dwResult));
+			ChkDR(DRM_DWordAdd(ibCur, dwResult, &dwResult));
+			ChkBufferSize(dwResult, f_cbInitData);
+			ibCur = dwResult;
+
+			cbMultiKid = SIZEOF(DRM_DWORD) + (cKids * SIZEOF(DRM_GUID));
+		}
+
+		ChkDR(DRM_DWordAdd(ibCur, SIZEOF(DRM_DWORD), &dwResult));
+		ChkBufferSize(dwResult, f_cbInitData);
+		NETWORKBYTES_TO_DWORD(cbSystemSize, f_pbInitData, ibCur);
+		ibCur = dwResult;
+
+		// Make sure the payload is still within the limit.
+		ChkDR(DRM_DWordAdd(ibCur, cbSystemSize, &dwResult));
+		ChkBufferSize(dwResult, f_cbInitData);
+
+		// Check whether the "system ID" just read is for PlayReady.
+		if (MEMCMP(&guidSystemID, &CLSID_PlayReadyProtectionSystemID,
+				SIZEOF(DRM_GUID)) == 0)
+		{
+			fFound = TRUE;
+		} else
+		{
+			ibCur = dwResult;
+		}
+	}
+
+	if (!fFound)
+	{
+		ChkDR (DRM_E_FAIL);
+	}
+
+	// Make sure the total size of all components
+	// match the overall size.
+	if (fUUIDBox)
+	{
+		ChkBOOL(
+				cbSystemSize + SIZEOF(cbSize) + SIZEOF(dwType)
+						+ SIZEOF(DRM_GUID) + SIZEOF(wVersion) + SIZEOF(wFlags)
+						+ SIZEOF(DRM_GUID) + SIZEOF(cbSystemSize) == cbSize,
+				DRM_E_FAIL);
+	} else
+	{
+		ChkBOOL(
+				cbSystemSize + SIZEOF(cbSize) + SIZEOF(dwType)
+						+ SIZEOF(wVersion) + SIZEOF(wFlags) + SIZEOF(DRM_GUID)
+						+ SIZEOF(cbSystemSize) + cbMultiKid == cbSize,
+				DRM_E_FAIL);
+	}
+
+	*f_pibPRO = ibCur;
+	*f_pcbPRO = cbSystemSize;
+
+	ErrorExit: return dr;
+}
+
+/**
+ * @brief Parse init data to retrieve PRO from it
+ * @param f_pbInitData : Pointer to initdata
+ * @param f_cbInitData : size of init data
+ * @retval DRM_SUCCESS if no errors encountered
+ */
+int PlayReadyDRMSession::_ParseInitData(const uint8_t *f_pbInitData,
+		uint32_t f_cbInitData)
+{
+	DRM_RESULT dr = DRM_SUCCESS;
+	DRM_DWORD ibPRO = 0;
+	DRM_BYTE *pbPRO = NULL;
+	DRM_DWORD cbPRO = 0;
+
+	ChkArg(f_pbInitData != NULL && f_cbInitData > 0);
+
+	// If key ID is already specified by CDM data then PRO is
+	// not allowed to be specified in init data.
+	// In the current implementation this should never happen
+	// since init data is always processed before CDM data.
+	//DRMASSERT(!m_fKeyIdSet);
+
+	// Parse init data to retrieve PRO.
+	ChkDR(_GetPROFromInitData(f_pbInitData, f_cbInitData, &ibPRO, &cbPRO));
+	ChkBOOL(cbPRO > 0, DRM_E_FAIL);
+	ChkMem(pbPRO = (DRM_BYTE *) Oem_MemAlloc(cbPRO));
+
+	MEMCPY(pbPRO, f_pbInitData + ibPRO, cbPRO);
+
+	m_cbPRO = cbPRO;
+	m_pbPRO = pbPRO;
+
+	ErrorExit:
+	return dr;
+}
+
+/**
+ * @brief Generate key request from DRM session
+ *        Caller function should free the returned memory.
+ * @param destinationURL : gets updated with license server url
+ * @retval Pointer to DrmData containing license request, NULL if failure.
+ */
+DrmData * PlayReadyDRMSession::CDMGenerateKeyRequest(string& destinationURL)
+{
+
+	DrmData * result = NULL;
+	DRM_RESULT dr = DRM_SUCCESS;
+	DRM_DWORD cchDestURL = 0;
+	DRM_ANSI_STRING dastrCustomData = DRM_EMPTY_DRM_STRING;
+
+
+	// Try to figure out the size of the license acquisition
+	// challenge to be returned.
+	dr = Drm_LicenseAcq_GenerateChallenge(m_ptrAppContext, g_rgpdstrRights,
+			sizeof(g_rgpdstrRights) / sizeof(DRM_CONST_STRING *),
+			NULL,
+			NULL,
+			0,
+			NULL, &cchDestURL,
+			NULL,
+			NULL,
+			NULL, &m_cbChallenge,
+			NULL);
+
+	if (dr == DRM_E_BUFFERTOOSMALL)
+	{
+		if (cchDestURL > 0)
+		{
+			ChkMem(
+					m_ptrDestURL = (DRM_CHAR *) Oem_MemAlloc(
+							cchDestURL + 1));
+			ZEROMEM(m_ptrDestURL, cchDestURL + 1);
+		}
+
+		// Allocate buffer that is sufficient to store the license acquisition
+		// challenge.
+		if (m_cbChallenge > 0)
+			ChkMem(m_pbChallenge = (DRM_BYTE *) Oem_MemAlloc(m_cbChallenge));
+
+		dr = DRM_SUCCESS;
+	} else
+	{
+		ChkDR(dr);
+	}
+	// Supply a buffer to receive the license acquisition challenge.
+	// TODO FIX License Acq
+	/*ChkDR(Drm_LicenseAcq_GenerateChallenge(m_ptrAppContext, g_rgpdstrRights,
+		sizeof(g_rgpdstrRights) / sizeof(DRM_CONST_STRING *),
+		NULL,
+		NULL,
+		0,
+		m_ptrDestURL, &cchDestURL,
+		NULL,
+		NULL, m_pbChallenge, &m_cbChallenge, NULL));*/
+	m_eKeyState = KEY_PENDING;
+
+	result = new DrmData(m_pbChallenge, m_cbChallenge);
+	destinationURL = static_cast<string>(m_ptrDestURL);
+	return result;
+
+	ErrorExit:
+		if (DRM_FAILED(dr))
+		{
+			m_eKeyState = KEY_ERROR;
+		}
+	return NULL;
+}
+
+/**
+ * @brief Updates the received key to DRM session
+ * @param key : License key from license server.
+ * @retval DRM_SUCCESS if no errors encountered
+ */
+int PlayReadyDRMSession::CDMDRMProcessKey(DrmData* key)
+{
+	DRM_RESULT dr = DRM_SUCCESS;
+	DRM_LICENSE_RESPONSE oLicenseResp =
+	{ eUnknownProtocol, 0 };
+	// The current state MUST be KEY_PENDING otherwise error out.
+	ChkBOOL(m_eKeyState == KEY_PENDING, DRM_E_INVALIDARG);
+	ChkArg(key->getData() && key->getDataLength() > 0);
+	dr = Drm_LicenseAcq_ProcessResponse(m_ptrAppContext,
+					DRM_PROCESS_LIC_RESPONSE_SIGNATURE_NOT_REQUIRED,
+					const_cast<DRM_BYTE *>(key->getData()),
+					key->getDataLength(), &oLicenseResp);
+	ChkDR(dr);
+
+	/*dr = Drm_Reader_Bind(m_ptrAppContext, g_rgpdstrRights,
+					NO_OF(g_rgpdstrRights), m_pOutputProtection->PR_OP_Callback,
+					m_pOutputProtection->getPlayReadyLevels(), &m_oDecryptContext);
+    	ChkDR(dr);*/
+	m_eKeyState = KEY_READY;
+	return 1;
+
+	ErrorExit: if (DRM_FAILED(dr))
+	{
+		m_eKeyState = KEY_ERROR;
+	}
+	return 0;
+
+}
+
+/**
+ * @brief Function to decrypt stream  buffer.
+ * @param f_pbIV : Initialization vector.
+ * @param f_cbIV : Initialization vector length.
+ * @param payloadData : Data to decrypt.
+ * @param payloadDataSize : Size of data.
+ * @param ppOpaqueData : pointer to opaque buffer in case of SVP.
+ * @retval Returns 1 on success 0 on failure.
+ */
+int PlayReadyDRMSession::decrypt(const uint8_t *f_pbIV, uint32_t f_cbIV,
+		const uint8_t *payloadData, uint32_t payloadDataSize, uint8_t **ppOpaqueData)
+{
+
+	int status = 1;
+	DRM_AES_COUNTER_MODE_CONTEXT oAESContext =
+	{ 0 };
+        DRM_RESULT dr = DRM_SUCCESS;
+
+	uint8_t *ivData = (uint8_t *) f_pbIV;
+	uint8_t temp;
+
+	pthread_mutex_lock(&decryptMutex);
+	// FIXME: IV bytes need to be swapped ???
+	for (uint32_t i = 0; i < f_cbIV / 2; i++)
+	{
+		temp = ivData[i];
+		ivData[i] = ivData[f_cbIV - i - 1];
+		ivData[f_cbIV - i - 1] = temp;
+	}
+
+	MEMCPY(&oAESContext.qwInitializationVector, ivData, f_cbIV);
+
+	dr = Drm_Reader_DecryptLegacy(&m_oDecryptContext, &oAESContext,
+        (DRM_BYTE *) payloadData, payloadDataSize);
+	*ppOpaqueData = NULL;
+	ChkDR(dr);
+	pthread_mutex_unlock(&decryptMutex);
+	// Return clear content.
+	status = 0;
+
+	return status;
+
+	ErrorExit:
+		pthread_mutex_unlock(&decryptMutex);
+		return status;
+
+}
+
+
+/**
+ * @brief Get the current state of DRM Session.
+ * @retval KeyState
+ */
+KeyState PlayReadyDRMSession::getState()
+{
+	return m_eKeyState;
+}
+
+/**
+ * @brief Clear the current session context
+ *        So that new init data can be bound.
+ */
+void PlayReadyDRMSession:: clearDecryptContext()
+{
+	Drm_Reader_Close(&m_oDecryptContext);
+	Drm_Reinitialize(m_ptrAppContext);
+	SAFE_OEM_FREE(m_pbChallenge);
+	SAFE_OEM_FREE(m_ptrDestURL);
+	m_pbChallenge = NULL;
+	m_ptrDestURL = NULL;
+	m_fCommit = false;
+	m_cbChallenge = 0;
+	if(m_pbPRO != NULL)
+	{
+		SAFE_OEM_FREE(m_pbPRO);
+	}
+	m_pbPRO = NULL;
+	m_cbPRO = 0;
+	m_eKeyState = KEY_INIT;
+}

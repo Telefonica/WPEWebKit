@@ -23,11 +23,21 @@
 
 #if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
 
+#include "SharedBuffer.h"
+#include <CDMInstance.h>
+#include <wtf/Condition.h>
+#include <wtf/PrintStream.h>
+#include <wtf/RunLoop.h>
+#include <wtf/text/StringHash.h>
+
+#include "CDMPlayReady.h"
 #include "GStreamerCommon.h"
 #include "GStreamerEMEUtilities.h"
 #include <gcrypt.h>
 #include <gst/base/gstbytereader.h>
 #include <wtf/RunLoop.h>
+#include <gst/gst.h>
+#include <gst/base/gstbasetransform.h>
 
 #define PLAYREADY_SIZE 16
 
@@ -42,14 +52,23 @@ struct _WebKitMediaPlayReadyDecryptPrivate {
     gcry_cipher_hd_t handle;
 };
 
+enum SessionResult {
+    InvalidSession,
+    NewSession,
+    OldSession
+};
+
 static void webKitMediaPlayReadyDecryptorFinalize(GObject*);
 static bool webKitMediaPlayReadyDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt*, GstBuffer*);
 static bool webKitMediaPlayReadyDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* keyIDBuffer, GstBuffer* iv, GstBuffer* sample, unsigned subSamplesCount, GstBuffer* subSamples);
 static void webKitMediaPlayReadyDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt*);
 
+static bool webKitMediaPlayReadyDecryptorHandleKeyId(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer&);
+static bool webKitMediaPlayReadyDecryptorAttemptToDecryptWithLocalInstance(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer&);
+
+
 GST_DEBUG_CATEGORY_STATIC(webkit_media_play_ready_decrypt_debug_category);
 #define GST_CAT_DEFAULT webkit_media_play_ready_decrypt_debug_category
-
 
 static GstStaticPadTemplate srcTemplate =
         GST_STATIC_PAD_TEMPLATE("src", GST_PAD_SRC, GST_PAD_ALWAYS,
@@ -64,26 +83,6 @@ static GstStaticPadTemplate sinkTemplate =
                         "application/x-cenc, original-media-type=(string)audio/x-gst-fourcc-ec_3, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
                         "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID));
 
-static GstStaticPadTemplate dummySinkTemplate =
-        GST_STATIC_PAD_TEMPLATE("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-                GST_STATIC_CAPS("playready/x-unused"));
-
-/*static GstStaticPadTemplate sinkTemplate = GST_STATIC_PAD_TEMPLATE("sink",
-    GST_PAD_SINK,
-    GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("application/vnd.ms-sstr+xml, original-media-type=(string)application/vnd.ms-sstr+xml, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
-    "application/x-cenc, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
-    "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID";"
-    "application/vnd.ms-sstr+xml, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
-    "application/x-cenc, original-media-type=(string)video/x-h265, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "; "
-    "application/x-video-mp4, original-media-type=(string)video/mp4; "
-    "application/x-audio-mp4, original-media-type=(string)audio/mp4; "));
-
-static GstStaticPadTemplate srcTemplate = GST_STATIC_PAD_TEMPLATE("src",
-    GST_PAD_SRC,
-    GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/mp4; audio/mp4; application/vnd.ms-sstr+xml; application/x-cenc; video/x-h265;"));*/
-
 #define webkit_media_play_ready_decrypt_parent_class parent_class
 G_DEFINE_TYPE(WebKitMediaPlayReadyDecrypt, webkit_media_play_ready_decrypt, WEBKIT_TYPE_MEDIA_CENC_DECRYPT);
 
@@ -91,9 +90,13 @@ static void webkit_media_play_ready_decrypt_class_init(WebKitMediaPlayReadyDecry
 {
     GST_ERROR_OBJECT(klass, "webkit_media_play_ready_decrypt_class_init");
     GObjectClass* gobjectClass = G_OBJECT_CLASS(klass);
+    GstElementClass* elementClass = GST_ELEMENT_CLASS(klass);
+
     gobjectClass->finalize = webKitMediaPlayReadyDecryptorFinalize;
 
-    GstElementClass* elementClass = GST_ELEMENT_CLASS(klass);
+    /* Setting up pads and setting metadata should be moved to
+    base_class_init if you intend to subclass this class. */
+
     gst_element_class_add_pad_template(elementClass, gst_static_pad_template_get(&sinkTemplate));
     gst_element_class_add_pad_template(elementClass, gst_static_pad_template_get(&srcTemplate));
 
@@ -101,7 +104,7 @@ static void webkit_media_play_ready_decrypt_class_init(WebKitMediaPlayReadyDecry
         "Decrypt PlayReady encrypted contents",
         GST_ELEMENT_FACTORY_KLASS_DECRYPTOR,
         "Decrypts streams encrypted using PlayReady Encryption.",
-	"");
+	"Telefonica");
 
     GST_DEBUG_CATEGORY_INIT(webkit_media_play_ready_decrypt_debug_category,
         "webkitplayready", 0, "PlayReady decryptor");
@@ -110,8 +113,12 @@ static void webkit_media_play_ready_decrypt_class_init(WebKitMediaPlayReadyDecry
     cencClass->setupCipher = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorSetupCipher);
     cencClass->decrypt = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorDecrypt);
     cencClass->releaseCipher = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorReleaseCipher);
+    cencClass->attemptToDecryptWithLocalInstance = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorDecrypt);
+    cencClass->handleKeyId = GST_DEBUG_FUNCPTR(webKitMediaPlayReadyDecryptorHandleKeyId);
+
 
     g_type_class_add_private(klass, sizeof(WebKitMediaPlayReadyDecryptPrivate));
+//////////////////////
 }
 
 static void webkit_media_play_ready_decrypt_init(WebKitMediaPlayReadyDecrypt* self)
@@ -119,8 +126,9 @@ static void webkit_media_play_ready_decrypt_init(WebKitMediaPlayReadyDecrypt* se
     GST_ERROR_OBJECT(self, "webkit_media_play_ready_decrypt_init");
     WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(self);
 
-    self->priv = priv;
-    new (priv) WebKitMediaPlayReadyDecryptPrivate();
+    /*self->priv = priv;
+    new (priv) WebKitMediaPlayReadyDecryptPrivate();*/
+    priv->~WebKitMediaPlayReadyDecryptPrivate();
 }
 
 static void webKitMediaPlayReadyDecryptorFinalize(GObject* object)
@@ -273,6 +281,44 @@ static void webKitMediaPlayReadyDecryptorReleaseCipher(WebKitMediaCommonEncrypti
     GST_ERROR_OBJECT(self, "webKitMediaPlayReadyDecryptorReleaseCipher");
     WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_PR_DECRYPT(self));
     gcry_cipher_close(priv->handle);
+}
+
+static SessionResult webKitMediaPlayReadyDecryptorResetSessionFromKeyIdIfNeeded(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer& keyId)
+{
+    GST_ERROR_OBJECT(self, "webKitMediaPlaywebKitMediaPlaywebKitMediaPlayReadyDecryptorResetSessionFromKeyIdIfNeededdd");
+    WebKitMediaPlayReadyDecryptPrivate* priv = WEBKIT_MEDIA_PR_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_PR_DECRYPT(self));
+
+    RefPtr<WebCore::CDMInstance> cdmInstance = webKitMediaCommonEncryptionDecryptCDMInstance(self);
+    ASSERT(cdmInstance && is<WebCore::CDMInstancePlayReady>(*cdmInstance));
+    auto& cdmInstancePlayReady = downcast<WebCore::CDMInstancePlayReady>(*cdmInstance);
+
+    SessionResult returnValue = InvalidSession;
+    /*String session = cdmInstancePlayReady.sessionIdByKeyId(keyId);
+    if (session.isEmpty() || !cdmInstancePlayReady.isKeyIdInSessionUsable(keyId, session)) {
+        GST_DEBUG_OBJECT(self, "session %s is empty or unusable, resetting", session.utf8().data());
+        priv->m_session = String();
+        priv->m_openCdmSession = nullptr;
+    } else if (session != priv->m_session) {
+        priv->m_session = session;
+        priv->m_playReadySession = nullptr;
+        GST_DEBUG_OBJECT(self, "new session %s is usable", session.utf8().data());
+        returnValue = NewSession;
+    } else {
+        GST_DEBUG_OBJECT(self, "same session %s", session.utf8().data());
+        returnValue = OldSession;
+    }*/
+
+    return returnValue;
+}
+
+static bool webKitMediaPlayReadyDecryptorHandleKeyId(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer& keyId)
+{
+    return webKitMediaPlayReadyDecryptorResetSessionFromKeyIdIfNeeded(self, keyId) == InvalidSession;
+}
+
+static bool webKitMediaPlayReadyDecryptorAttemptToDecryptWithLocalInstance(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer& keyId)
+{
+    return webKitMediaPlayReadyDecryptorResetSessionFromKeyIdIfNeeded(self, keyId) != InvalidSession;
 }
 
 #endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)

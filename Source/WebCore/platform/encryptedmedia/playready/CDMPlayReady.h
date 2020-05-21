@@ -25,19 +25,18 @@
 
 #pragma once
 
-#if ENABLE(ENCRYPTED_MEDIA)
+//#if ENABLE(ENCRYPTED_MEDIA)
 
 #include "CDMFactory.h"
 #include "CDMInstance.h"
 #include "CDMPrivate.h"
 #include "SharedBuffer.h"
 #include <wtf/WeakPtr.h>
-#include <drmbuild_oem.h>
-//#include "nexus/thirdparty/playready/2.5/inc/drmcommon.h" FIXME, this include is for PlayReady 2.5 and not exist in 3.0
+/*#include <drmbuild_oem.h>
 #include <drmmanager.h>
 #include <drmmathsafe.h>
 #include <drmtypes.h>
-#include <drmerr.h>
+#include <drmerr.h>*/
 
 
 // store. If more licenses are used concurrently, Playready will resize the
@@ -165,4 +164,4 @@ private:
 
 SPECIALIZE_TYPE_TRAITS_CDM_INSTANCE(WebCore::CDMInstancePlayReady, WebCore::CDMInstance::ImplementationType::PlayReady);
 
-#endif // ENABLE(ENCRYPTED_MEDIA)
+//#endif // ENABLE(ENCRYPTED_MEDIA)

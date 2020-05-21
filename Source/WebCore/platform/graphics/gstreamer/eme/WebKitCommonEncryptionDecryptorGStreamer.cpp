@@ -256,7 +256,8 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
     // The key might not have been received yet. Wait for it.
     GST_ERROR_OBJECT(self, "priv values: priv->m_received=%i", priv->m_keyReceived);
     if (!priv->m_keyReceived) {
-        GST_DEBUG_OBJECT(self, "key not available yet, waiting for it");
+	GST_DEBUG_OBJECT(self, "key not available yet, waiting for it");
+        //GST_DEBUG_OBJECT(self, "key not available yet, waiting for it");
         if (GST_STATE(GST_ELEMENT(self)) < GST_STATE_PAUSED || (GST_STATE_TARGET(GST_ELEMENT(self)) != GST_STATE_VOID_PENDING && GST_STATE_TARGET(GST_ELEMENT(self)) < GST_STATE_PAUSED)) {
             GST_ERROR_OBJECT(self, "can't process key requests in less than PAUSED state");
             return GST_FLOW_NOT_SUPPORTED;
@@ -272,8 +273,8 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
             GST_DEBUG_OBJECT(self, "flushing");
             return GST_FLOW_FLUSHING;
         }
-
-        GST_DEBUG_OBJECT(self, "key received, continuing");
+	//GST_DEBUG_OBJECT(self, "key received, continuing");
+        GST_ERROR_OBJECT(self, "key received, continuing");
     }
 
     unsigned ivSize;
@@ -295,7 +296,8 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
         return GST_FLOW_OK;
     }
 
-    GST_TRACE_OBJECT(base, "protection meta: %" GST_PTR_FORMAT, protectionMeta->info);
+    GST_ERROR_OBJECT(base, "protection meta: %" GST_PTR_FORMAT, protectionMeta->info);
+    //GST_TRACE_OBJECT(base, "protection meta: %" GST_PTR_FORMAT, protectionMeta->info);
 
     unsigned subSampleCount;
     if (!gst_structure_get_uint(protectionMeta->info, "subsample_count", &subSampleCount)) {
@@ -436,9 +438,11 @@ static void webkitMediaCommonEncryptionDecryptProcessProtectionEvents(WebKitMedi
             GST_ERROR_OBJECT(self, "init data of size %u", mappedBuffer.size());
             GST_ERROR_OBJECT(self, "init data MD5 %s", WebCore::GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
             GST_MEMDUMP_OBJECT(self, "init data", mappedBuffer.data(), mappedBuffer.size());
+	    GST_ERROR_OBJECT(self, "set eventKeySystem %s", eventKeySystem);
             priv->m_initDatas.set(eventKeySystem, initData);
-            //GST_MEMDUMP_OBJECT(self, "key ID", reinterpret_cast<const uint8_t*>(kid->data()), kid->size());
-            GST_ERROR_OBJECT(self, "key ID", reinterpret_cast<const uint8_t*>(kid->data()), kid->size());
+            GST_MEMDUMP_OBJECT(self, "key ID", reinterpret_cast<const uint8_t*>(kid->data()), kid->size());
+            //GST_ERROR_OBJECT(self, "key ID", reinterpret_cast<const uint8_t*>(kid->data()), kid->size());
+	    GST_ERROR_OBJECT(self, "set set initData");
             priv->m_keyIds.set(initData, kid.copyRef());
 
             priv->m_keyReceived = isCDMInstanceAvailable && !klass->handleKeyId(self, WTFMove(kid));
