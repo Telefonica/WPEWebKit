@@ -161,11 +161,7 @@ if (ENABLE_ENCRYPTED_MEDIA)
     else()
         if (ENABLE_PLAYREADY)
             list(APPEND WebCore_SOURCES
-		platform/encryptedmedia/DRMSessionFactory.cpp
-		platform/encryptedmedia/DRMSessionManager.cpp
-		platform/graphics/gstreamer/eme/WebKitCDMDecryptor.cpp
 	        platform/encryptedmedia/playready/CDMPlayReady.cpp
-		platform/encryptedmedia/playready/playreadydrmsession.cpp
                 platform/graphics/gstreamer/eme/WebKitPlayReadyDecryptorGStreamer.cpp
 	    )
         endif()
