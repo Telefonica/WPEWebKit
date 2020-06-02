@@ -25,8 +25,6 @@
 
 #pragma once
 
-//#if ENABLE(ENCRYPTED_MEDIA)
-
 #include "CDMFactory.h"
 #include "CDMInstance.h"
 #include "CDMPrivate.h"
@@ -163,5 +161,3 @@ private:
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_CDM_INSTANCE(WebCore::CDMInstancePlayReady, WebCore::CDMInstance::ImplementationType::PlayReady);
-
-//#endif // ENABLE(ENCRYPTED_MEDIA)
