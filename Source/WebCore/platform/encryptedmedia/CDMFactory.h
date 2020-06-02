@@ -31,6 +31,7 @@
 
 #include <memory>
 #include <wtf/Forward.h>
+#include <config.h>
 
 namespace WebCore {
 

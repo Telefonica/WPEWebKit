@@ -22,7 +22,8 @@
 
 #pragma once
 
-#if ENABLE(ENCRYPTED_MEDIA) && (USE(OPENCDM) || USE(PLAYREADY))
+#if ENABLE(ENCRYPTED_MEDIA) && USE(OPENCDM)
+//#if ENABLE(ENCRYPTED_MEDIA) && (USE(OPENCDM) || USE(PLAYREADY))
 
 #include "CDM.h"
 #include "CDMFactory.h"

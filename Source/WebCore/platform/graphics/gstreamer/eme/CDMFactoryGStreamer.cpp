@@ -28,7 +28,7 @@
 
 #include "config.h"
 #include "CDMFactory.h"
-
+#include "GStreamerEMEUtilities.h"
 #if ENABLE(ENCRYPTED_MEDIA)
 
 #if USE(OPENCDM)
@@ -43,12 +43,17 @@ namespace WebCore {
 
 void CDMFactory::platformRegisterFactories(Vector<CDMFactory*>& factories)
 {
+	GST_ERROR_OBJECT(nullptr, "PLAYREADY: platformRegisterFactories");
 #if USE(OPENCDM)
+	GST_ERROR_OBJECT(nullptr, "PLAYREADY: platformRegisterFactories: OpenCDM");
     factories.append(&CDMFactoryOpenCDM::singleton());
 #else
 #if USE(PLAYREADY)
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: platformRegisterFactories: Playready");
+    //factories.append(DRMSessionFactory::GetDrmSession(PLAYREADY_PROTECTION_SYSTEM_ID));
     factories.append(&CDMFactoryPlayReady::singleton());
 #endif    
+    GST_ERROR_OBJECT(nullptr, "PLAYREADY: platformRegisterFactories: ClearKey");
     factories.append(&CDMFactoryClearKey::singleton());
 #endif
 }
