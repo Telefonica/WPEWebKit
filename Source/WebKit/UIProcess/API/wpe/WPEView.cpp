@@ -76,6 +76,7 @@ View::View(struct wpe_view_backend* backend, const API::PageConfiguration& baseC
 #if PLATFORM(INTEL_CE)
     m_pageProxy->setDrawsBackground(false);
 #endif
+    m_pageProxy->setDrawsBackground(preferences->shouldDrawsBackground());
 
     m_backend = backend;
     if (!m_backend)

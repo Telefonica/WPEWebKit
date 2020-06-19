@@ -62,6 +62,7 @@
 #define DEFAULT_BACKSPACE_KEY_NAVIGATION_ENABLED false
 #define DEFAULT_FRAME_FLATTENING FrameFlatteningFullyEnabled
 #define DEFAULT_SHOULD_PRINT_BACKGROUNDS true
+#define DEFAULT_SHOULD_DRAWS_BACKGROUND true
 #define DEFAULT_TEXT_AREAS_ARE_RESIZABLE false
 #define DEFAULT_JAVASCRIPT_CAN_OPEN_WINDOWS_AUTOMATICALLY false
 #define DEFAULT_SHOULD_RESPECT_IMAGE_ORIENTATION true
@@ -80,6 +81,7 @@
 #define DEFAULT_BACKSPACE_KEY_NAVIGATION_ENABLED true
 #define DEFAULT_FRAME_FLATTENING FrameFlatteningDisabled
 #define DEFAULT_SHOULD_PRINT_BACKGROUNDS false
+#define DEFAULT_SHOULD_DRAWS_BACKGROUND true
 #define DEFAULT_TEXT_AREAS_ARE_RESIZABLE true
 #define DEFAULT_JAVASCRIPT_CAN_OPEN_WINDOWS_AUTOMATICALLY true
 #define DEFAULT_SHOULD_RESPECT_IMAGE_ORIENTATION false
@@ -183,6 +185,7 @@
     macro(DOMPasteAllowed, domPasteAllowed, Bool, bool, false, "", "") \
     macro(JavaScriptCanAccessClipboard, javaScriptCanAccessClipboard, Bool, bool, false, "", "") \
     macro(ShouldPrintBackgrounds, shouldPrintBackgrounds, Bool, bool, DEFAULT_SHOULD_PRINT_BACKGROUNDS, "", "") \
+    macro(ShouldDrawsBackground, shouldDrawsBackground, Bool, bool, DEFAULT_SHOULD_DRAWS_BACKGROUND, "", "") \
     macro(FullScreenEnabled, fullScreenEnabled, Bool, bool, false, "", "") \
     macro(AsynchronousSpellCheckingEnabled, asynchronousSpellCheckingEnabled, Bool, bool, false, "", "") \
     macro(WebSecurityEnabled, webSecurityEnabled, Bool, bool, true, "", "") \

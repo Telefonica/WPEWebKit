@@ -3900,19 +3900,3 @@ void webkit_web_view_restore_session_state(WebKitWebView* webView, WebKitWebView
 
     getPage(webView).restoreFromSessionState(webkitWebViewSessionStateGetSessionState(state), false);
 }
-
-
-/**
- * webkit_web_view_set_transparent:
- * @web_view: a #WebKitWebView
- * @transparent: a #gboolean indicating whenever the view must be transparent
- *
- * If @transparent is %TRUE, @web_view doens't draw the background of the page.
- *
- */
-void webkit_web_view_set_transparent (WebKitWebView *webView, gboolean transparent)
-{
-    g_return_if_fail(WEBKIT_IS_WEB_VIEW(webView));
-
-    getPage(webView).setDrawsBackground(transparent);
-}
