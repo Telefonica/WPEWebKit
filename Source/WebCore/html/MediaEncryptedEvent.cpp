@@ -40,12 +40,14 @@ MediaEncryptedEvent::MediaEncryptedEvent(const AtomicString& type, const MediaEn
     , m_initDataType(initializer.initDataType)
     , m_initData(initializer.initData)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 }
 
 MediaEncryptedEvent::~MediaEncryptedEvent() = default;
 
 EventInterface MediaEncryptedEvent::eventInterface() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return MediaEncryptedEventInterfaceType;
 }
 

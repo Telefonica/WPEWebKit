@@ -256,12 +256,14 @@ using namespace HTMLNames;
 typedef HashMap<Document*, HashSet<HTMLMediaElement*>> DocumentElementSetMap;
 static DocumentElementSetMap& documentToElementSetMap()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     static NeverDestroyed<DocumentElementSetMap> map;
     return map;
 }
 
 static void addElementToDocumentMap(HTMLMediaElement& element, Document& document)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     DocumentElementSetMap& map = documentToElementSetMap();
     HashSet<HTMLMediaElement*> set = map.take(&document);
     set.add(&element);
@@ -270,6 +272,7 @@ static void addElementToDocumentMap(HTMLMediaElement& element, Document& documen
 
 static void removeElementFromDocumentMap(HTMLMediaElement& element, Document& document)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     DocumentElementSetMap& map = documentToElementSetMap();
     HashSet<HTMLMediaElement*> set = map.take(&document);
     set.remove(&element);
@@ -314,6 +317,7 @@ struct HTMLMediaElement::TrackGroup {
 
 HashSet<HTMLMediaElement*>& HTMLMediaElement::allMediaElements()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     static NeverDestroyed<HashSet<HTMLMediaElement*>> elements;
     return elements;
 }
@@ -323,12 +327,14 @@ typedef HashMap<uint64_t, HTMLMediaElement*> IDToElementMap;
 
 static IDToElementMap& elementIDsToElements()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     static NeverDestroyed<IDToElementMap> map;
     return map;
 }
 
 HTMLMediaElement* HTMLMediaElement::elementWithID(uint64_t id)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (id == HTMLMediaElementInvalidID)
         return nullptr;
 
@@ -355,6 +361,7 @@ struct MediaElementSessionInfo {
 
 static MediaElementSessionInfo mediaElementSessionInfoForSession(const MediaElementSession& session, MediaElementSession::PlaybackControlsPurpose purpose)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     const HTMLMediaElement& element = session.element();
     return {
         &session,
@@ -369,6 +376,7 @@ static MediaElementSessionInfo mediaElementSessionInfoForSession(const MediaElem
 
 static bool preferMediaControlsForCandidateSessionOverOtherCandidateSession(const MediaElementSessionInfo& session, const MediaElementSessionInfo& otherSession)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaElementSession::PlaybackControlsPurpose purpose = session.purpose;
     ASSERT(purpose == otherSession.purpose);
 
@@ -386,6 +394,7 @@ static bool preferMediaControlsForCandidateSessionOverOtherCandidateSession(cons
 
 static bool mediaSessionMayBeConfusedWithMainContent(const MediaElementSessionInfo& session, MediaElementSession::PlaybackControlsPurpose purpose)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (purpose == MediaElementSession::PlaybackControlsPurpose::NowPlaying)
         return session.isPlayingAudio;
 
@@ -463,6 +472,7 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tagName, Document& docum
     , m_logIdentifier(nextLogIdentifier())
 #endif
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     allMediaElements().add(this);
 
     ALWAYS_LOG(LOGIDENTIFIER);
@@ -542,6 +552,7 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tagName, Document& docum
 
 HTMLMediaElement::~HTMLMediaElement()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ALWAYS_LOG(LOGIDENTIFIER);
 
     beginIgnoringTrackDisplayUpdateRequests();
@@ -632,6 +643,7 @@ HTMLMediaElement::~HTMLMediaElement()
 
 static bool needsAutoplayPlayPauseEventsQuirk(const Document& document)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto* page = document.page();
     if (!page || !page->settings().needsSiteSpecificQuirks())
         return false;
@@ -642,6 +654,7 @@ static bool needsAutoplayPlayPauseEventsQuirk(const Document& document)
 
 HTMLMediaElement* HTMLMediaElement::bestMediaElementForShowingPlaybackControlsManager(MediaElementSession::PlaybackControlsPurpose purpose)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto allSessions = PlatformMediaSessionManager::sharedManager().currentSessionsMatching([] (const PlatformMediaSession& session) {
         return is<MediaElementSession>(session);
     });
@@ -669,6 +682,7 @@ HTMLMediaElement* HTMLMediaElement::bestMediaElementForShowingPlaybackControlsMa
 
 void HTMLMediaElement::registerWithDocument(Document& document)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_mediaSession->registerWithDocument(document);
 
     if (m_isWaitingUntilMediaCanStart)
@@ -708,6 +722,7 @@ void HTMLMediaElement::registerWithDocument(Document& document)
 
 void HTMLMediaElement::unregisterWithDocument(Document& document)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_mediaSession->unregisterWithDocument(document);
 
     if (m_isWaitingUntilMediaCanStart)
@@ -748,6 +763,7 @@ void HTMLMediaElement::unregisterWithDocument(Document& document)
 
 void HTMLMediaElement::didMoveToNewDocument(Document& oldDocument, Document& newDocument)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT_WITH_SECURITY_IMPLICATION(&document() == &newDocument);
     if (m_shouldDelayLoadEvent) {
         oldDocument.decrementLoadEventDelayCount();
@@ -764,11 +780,13 @@ void HTMLMediaElement::didMoveToNewDocument(Document& oldDocument, Document& new
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
 void HTMLMediaElement::prepareForDocumentSuspension()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_mediaSession->unregisterWithDocument(document());
 }
 
 void HTMLMediaElement::resumeFromDocumentSuspension()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_mediaSession->registerWithDocument(document());
     updateShouldAutoplay();
 }
@@ -776,6 +794,7 @@ void HTMLMediaElement::resumeFromDocumentSuspension()
 
 bool HTMLMediaElement::supportsFocus() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (document().isMediaDocument())
         return false;
 
@@ -785,11 +804,13 @@ bool HTMLMediaElement::supportsFocus() const
 
 bool HTMLMediaElement::isMouseFocusable() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return false;
 }
 
 void HTMLMediaElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (name == srcAttr) {
         // https://html.spec.whatwg.org/multipage/embedded-content.html#location-of-the-media-resource
         // Location of the Media Resource
@@ -836,6 +857,7 @@ void HTMLMediaElement::parseAttribute(const QualifiedName& name, const AtomicStr
 
 void HTMLMediaElement::finishParsingChildren()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     HTMLElement::finishParsingChildren();
     m_parsingInProgress = false;
 
@@ -847,16 +869,19 @@ void HTMLMediaElement::finishParsingChildren()
 
 bool HTMLMediaElement::rendererIsNeeded(const RenderStyle& style)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return controls() && HTMLElement::rendererIsNeeded(style);
 }
 
 RenderPtr<RenderElement> HTMLMediaElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return createRenderer<RenderMedia>(*this, WTFMove(style));
 }
 
 bool HTMLMediaElement::childShouldCreateRenderer(const Node& child) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
     return hasShadowRootParent(child) && HTMLElement::childShouldCreateRenderer(child);
 #else
@@ -874,6 +899,7 @@ bool HTMLMediaElement::childShouldCreateRenderer(const Node& child) const
 
 Node::InsertionNotificationRequest HTMLMediaElement::insertedInto(ContainerNode& insertionPoint)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     HTMLElement::insertedInto(insertionPoint);
@@ -899,11 +925,13 @@ Node::InsertionNotificationRequest HTMLMediaElement::insertedInto(ContainerNode&
 
 void HTMLMediaElement::finishedInsertingSubtree()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     configureMediaControls();
 }
 
 void HTMLMediaElement::pauseAfterDetachedTask()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // If we were re-inserted into an active document, no need to pause.
     if (m_inActiveDocument)
         return;
@@ -933,6 +961,7 @@ void HTMLMediaElement::pauseAfterDetachedTask()
 
 void HTMLMediaElement::removedFrom(ContainerNode& insertionPoint)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     m_inActiveDocument = false;
@@ -946,17 +975,20 @@ void HTMLMediaElement::removedFrom(ContainerNode& insertionPoint)
 
 void HTMLMediaElement::willAttachRenderers()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(!renderer());
 }
 
 inline void HTMLMediaElement::updateRenderer()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (auto* renderer = this->renderer())
         renderer->updateFromElement();
 }
 
 void HTMLMediaElement::didAttachRenderers()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (auto* renderer = this->renderer()) {
         renderer->updateFromElement();
         if (m_mediaSession && m_mediaSession->wantsToObserveViewportVisibilityForAutoplay())
@@ -967,22 +999,26 @@ void HTMLMediaElement::didAttachRenderers()
 
 void HTMLMediaElement::willDetachRenderers()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (auto* renderer = this->renderer())
         renderer->unregisterForVisibleInViewportCallback();
 }
 
 void HTMLMediaElement::didDetachRenderers()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     updateShouldAutoplay();
 }
 
 void HTMLMediaElement::didRecalcStyle(Style::Change)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     updateRenderer();
 }
 
 void HTMLMediaElement::scheduleDelayedAction(DelayedActionType actionType)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (actionType ^ m_pendingActionFlags)
         ALWAYS_LOG(LOGIDENTIFIER, "setting ", actionName(actionType), " flag");
 
@@ -1010,6 +1046,7 @@ void HTMLMediaElement::scheduleDelayedAction(DelayedActionType actionType)
 
 void HTMLMediaElement::scheduleNextSourceChild()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // Schedule the timer to try the next <source> element WITHOUT resetting state ala prepareForLoad.
     m_resourceSelectionTaskQueue.enqueueTask([this] {
         loadNextSourceChild();
@@ -1018,12 +1055,14 @@ void HTMLMediaElement::scheduleNextSourceChild()
 
 void HTMLMediaElement::mediaPlayerActiveSourceBuffersChanged(const MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_hasEverHadAudio |= hasAudio();
     m_hasEverHadVideo |= hasVideo();
 }
 
 void HTMLMediaElement::scheduleEvent(const AtomicString& eventName)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     RefPtr<Event> event = Event::create(eventName, false, true);
 
     // Don't set the event target, the event queue will set it in GenericEventQueue::timerFired and setting it here
@@ -1034,11 +1073,13 @@ void HTMLMediaElement::scheduleEvent(const AtomicString& eventName)
 
 void HTMLMediaElement::scheduleResolvePendingPlayPromises()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_promiseTaskQueue.enqueueTask(std::bind(&HTMLMediaElement::resolvePendingPlayPromises, this));
 }
 
 void HTMLMediaElement::rejectPendingPlayPromises(DOMException& error)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Vector<DOMPromiseDeferred<void>> pendingPlayPromises = WTFMove(m_pendingPlayPromises);
 
     for (auto& promise : pendingPlayPromises)
@@ -1047,6 +1088,7 @@ void HTMLMediaElement::rejectPendingPlayPromises(DOMException& error)
 
 void HTMLMediaElement::resolvePendingPlayPromises()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Vector<DOMPromiseDeferred<void>> pendingPlayPromises = WTFMove(m_pendingPlayPromises);
 
     for (auto& promise : pendingPlayPromises)
@@ -1055,11 +1097,13 @@ void HTMLMediaElement::resolvePendingPlayPromises()
 
 void HTMLMediaElement::scheduleNotifyAboutPlaying()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_promiseTaskQueue.enqueueTask(std::bind(&HTMLMediaElement::notifyAboutPlaying, this));
 }
 
 void HTMLMediaElement::notifyAboutPlaying()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Ref<HTMLMediaElement> protectedThis(*this); // The 'playing' event can make arbitrary DOM mutations.
     m_playbackStartedTime = currentMediaTime().toDouble();
     dispatchEvent(Event::create(eventNames().playingEvent, false, true));
@@ -1071,11 +1115,13 @@ void HTMLMediaElement::notifyAboutPlaying()
 
 bool HTMLMediaElement::hasEverNotifiedAboutPlaying() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_hasEverNotifiedAboutPlaying;
 }
 
 void HTMLMediaElement::pendingActionTimerFired()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Ref<HTMLMediaElement> protectedThis(*this); // loadNextSourceChild may fire 'beforeload', which can make arbitrary DOM mutations.
     PendingActionFlags pendingActions = m_pendingActionFlags;
     m_pendingActionFlags = 0;
@@ -1110,11 +1156,13 @@ void HTMLMediaElement::pendingActionTimerFired()
 
 MediaError* HTMLMediaElement::error() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_error.get();
 }
 
 void HTMLMediaElement::setSrcObject(MediaProvider&& mediaProvider)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // FIXME: Setting the srcObject attribute may cause other changes to the media element's internal state:
     // Specifically, if srcObject is specified, the UA must use it as the source of media, even if the src
     // attribute is also set or children are present. If the value of srcObject is replaced or set to null
@@ -1133,21 +1181,25 @@ void HTMLMediaElement::setSrcObject(MediaProvider&& mediaProvider)
 
 void HTMLMediaElement::setCrossOrigin(const AtomicString& value)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     setAttributeWithoutSynchronization(crossoriginAttr, value);
 }
 
 String HTMLMediaElement::crossOrigin() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return parseCORSSettingsAttribute(attributeWithoutSynchronization(crossoriginAttr));
 }
 
 HTMLMediaElement::NetworkState HTMLMediaElement::networkState() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_networkState;
 }
 
 String HTMLMediaElement::canPlayType(const String& mimeType) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaEngineSupportParameters parameters;
     ContentType contentType(mimeType);
     parameters.type = contentType;
@@ -1176,6 +1228,7 @@ String HTMLMediaElement::canPlayType(const String& mimeType) const
 
 double HTMLMediaElement::getStartDate() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_player)
         return std::numeric_limits<double>::quiet_NaN();
     return m_player->getStartDate().toDouble();
@@ -1183,6 +1236,7 @@ double HTMLMediaElement::getStartDate() const
 
 void HTMLMediaElement::load()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Ref<HTMLMediaElement> protectedThis(*this); // prepareForLoad may result in a 'beforeload' event, which can make arbitrary DOM mutations.
 
     INFO_LOG(LOGIDENTIFIER);
@@ -1200,6 +1254,7 @@ void HTMLMediaElement::load()
 
 void HTMLMediaElement::prepareForLoad()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://html.spec.whatwg.org/multipage/embedded-content.html#media-element-load-algorithm
     // The Media Element Load Algorithm
     // 12 February 2017
@@ -1306,6 +1361,7 @@ void HTMLMediaElement::prepareForLoad()
 
 void HTMLMediaElement::selectMediaResource()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://www.w3.org/TR/2016/REC-html51-20161101/semantics-embedded-content.html#resource-selection-algorithm
     // The Resource Selection Algorithm
 
@@ -1476,6 +1532,7 @@ void HTMLMediaElement::selectMediaResource()
 
 void HTMLMediaElement::loadNextSourceChild()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ContentType contentType;
     String keySystem;
     URL mediaURL = selectNextSourceChild(&contentType, &keySystem, Complain);
@@ -1493,6 +1550,7 @@ void HTMLMediaElement::loadNextSourceChild()
 
 void HTMLMediaElement::loadResource(const URL& initialURL, ContentType& contentType, const String& keySystem)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(initialURL.isEmpty() || isSafeToLoadURL(initialURL, Complain));
 
     INFO_LOG(LOGIDENTIFIER, initialURL, contentType.raw(), keySystem);
@@ -1623,11 +1681,13 @@ void HTMLMediaElement::loadResource(const URL& initialURL, ContentType& contentT
 
 static bool trackIndexCompare(TextTrack* a, TextTrack* b)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return a->trackIndex() - b->trackIndex() < 0;
 }
 
 static bool eventTimeCueCompare(const std::pair<MediaTime, TextTrackCue*>& a, const std::pair<MediaTime, TextTrackCue*>& b)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 12 - Sort the tasks in events in ascending time order (tasks with earlier
     // times first).
     if (a.first != b.first)
@@ -1647,11 +1707,13 @@ static bool eventTimeCueCompare(const std::pair<MediaTime, TextTrackCue*>& a, co
 
 static bool compareCueInterval(const CueInterval& one, const CueInterval& two)
 {
-    return one.data()->isOrderedBefore(two.data());
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
+   return one.data()->isOrderedBefore(two.data());
 }
 
 void HTMLMediaElement::updateActiveTextTrackCues(const MediaTime& movieTime)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 4.8.10.8 Playing the media resource
 
     //  If the current playback position changes while the steps are running,
@@ -1875,6 +1937,7 @@ void HTMLMediaElement::updateActiveTextTrackCues(const MediaTime& movieTime)
 
 bool HTMLMediaElement::textTracksAreReady() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 4.8.10.12.1 Text track model
     // ...
     // The text tracks of a media element are ready if all the text tracks whose mode was not
@@ -1891,6 +1954,7 @@ bool HTMLMediaElement::textTracksAreReady() const
 
 void HTMLMediaElement::textTrackReadyStateChanged(TextTrack* track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (track->readinessState() != TextTrack::Loading
         && track->mode() != TextTrack::Mode::Disabled) {
         // The display trees exist as long as the track is active, in this case,
@@ -1914,6 +1978,7 @@ void HTMLMediaElement::textTrackReadyStateChanged(TextTrack* track)
 
 void HTMLMediaElement::audioTrackEnabledChanged(AudioTrack& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_audioTracks && m_audioTracks->contains(track))
         m_audioTracks->scheduleChangeEvent();
     if (processingUserGestureForMedia())
@@ -1922,6 +1987,7 @@ void HTMLMediaElement::audioTrackEnabledChanged(AudioTrack& track)
 
 void HTMLMediaElement::textTrackModeChanged(TextTrack& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     bool trackIsLoaded = true;
     if (track.trackType() == TextTrack::TrackElement) {
         trackIsLoaded = false;
@@ -1957,23 +2023,27 @@ void HTMLMediaElement::textTrackModeChanged(TextTrack& track)
 
 void HTMLMediaElement::videoTrackSelectedChanged(VideoTrack& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_videoTracks && m_videoTracks->contains(track))
         m_videoTracks->scheduleChangeEvent();
 }
 
 void HTMLMediaElement::textTrackKindChanged(TextTrack& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (track.kind() != TextTrack::Kind::Captions && track.kind() != TextTrack::Kind::Subtitles && track.mode() == TextTrack::Mode::Showing)
         track.setMode(TextTrack::Mode::Hidden);
 }
 
 void HTMLMediaElement::beginIgnoringTrackDisplayUpdateRequests()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ++m_ignoreTrackDisplayUpdate;
 }
 
 void HTMLMediaElement::endIgnoringTrackDisplayUpdateRequests()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(m_ignoreTrackDisplayUpdate);
     --m_ignoreTrackDisplayUpdate;
     if (!m_ignoreTrackDisplayUpdate && m_inActiveDocument)
@@ -1992,6 +2062,7 @@ void HTMLMediaElement::textTrackAddCues(TextTrack& track, const TextTrackCueList
 
 void HTMLMediaElement::textTrackRemoveCues(TextTrack&, const TextTrackCueList& cues)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     TrackDisplayUpdateScope scope { *this };
     for (unsigned i = 0; i < cues.length(); ++i) {
         auto& cue = *cues.item(i);
@@ -2001,6 +2072,7 @@ void HTMLMediaElement::textTrackRemoveCues(TextTrack&, const TextTrackCueList& c
 
 void HTMLMediaElement::textTrackAddCue(TextTrack& track, TextTrackCue& cue)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (track.mode() == TextTrack::Mode::Disabled)
         return;
 
@@ -2016,6 +2088,7 @@ void HTMLMediaElement::textTrackAddCue(TextTrack& track, TextTrackCue& cue)
 
 void HTMLMediaElement::textTrackRemoveCue(TextTrack&, TextTrackCue& cue)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // Negative duration cues need to be treated in the interval tree as
     // zero-length cues.
     MediaTime endTime = std::max(cue.startMediaTime(), cue.endMediaTime());
@@ -2047,6 +2120,7 @@ void HTMLMediaElement::textTrackRemoveCue(TextTrack&, TextTrackCue& cue)
 
 static inline bool isAllowedToLoadMediaURL(HTMLMediaElement& element, const URL& url, bool isInUserAgentShadowTree)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // Elements in user agent show tree should load whatever the embedding document policy is.
     if (isInUserAgentShadowTree)
         return true;
@@ -2057,6 +2131,7 @@ static inline bool isAllowedToLoadMediaURL(HTMLMediaElement& element, const URL&
 
 bool HTMLMediaElement::isSafeToLoadURL(const URL& url, InvalidURLAction actionIfInvalid)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!url.isValid()) {
         ERROR_LOG(LOGIDENTIFIER, url, " is invalid");
         return false;
@@ -2080,6 +2155,7 @@ bool HTMLMediaElement::isSafeToLoadURL(const URL& url, InvalidURLAction actionIf
 
 void HTMLMediaElement::startProgressEventTimer()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_progressEventTimer.isActive())
         return;
 
@@ -2090,6 +2166,7 @@ void HTMLMediaElement::startProgressEventTimer()
 
 void HTMLMediaElement::waitForSourceChange()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     stopPeriodicTimers();
@@ -2107,6 +2184,7 @@ void HTMLMediaElement::waitForSourceChange()
 
 void HTMLMediaElement::noneSupported()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     stopPeriodicTimers();
@@ -2148,6 +2226,7 @@ void HTMLMediaElement::noneSupported()
 
 void HTMLMediaElement::mediaLoadingFailedFatally(MediaPlayer::NetworkState error)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 1 - The user agent should cancel the fetching process.
     stopPeriodicTimers();
     m_loadState = WaitingForSource;
@@ -2187,6 +2266,7 @@ void HTMLMediaElement::mediaLoadingFailedFatally(MediaPlayer::NetworkState error
 
 void HTMLMediaElement::cancelPendingEventsAndCallbacks()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
     m_asyncEventQueue.cancelAllEvents();
 
@@ -2198,6 +2278,7 @@ void HTMLMediaElement::cancelPendingEventsAndCallbacks()
 
 void HTMLMediaElement::mediaPlayerNetworkStateChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     beginProcessingMediaPlayerCallback();
     setNetworkState(m_player->networkState());
     endProcessingMediaPlayerCallback();
@@ -2205,6 +2286,7 @@ void HTMLMediaElement::mediaPlayerNetworkStateChanged(MediaPlayer*)
 
 static void logMediaLoadRequest(Page* page, const String& mediaEngine, const String& errorMessage, bool succeeded)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!page)
         return;
 
@@ -2227,6 +2309,7 @@ static void logMediaLoadRequest(Page* page, const String& mediaEngine, const Str
 
 static String stringForNetworkState(MediaPlayer::NetworkState state)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     switch (state) {
     case MediaPlayer::Empty: return ASCIILiteral("Empty");
     case MediaPlayer::Idle: return ASCIILiteral("Idle");
@@ -2241,6 +2324,7 @@ static String stringForNetworkState(MediaPlayer::NetworkState state)
 
 void HTMLMediaElement::mediaLoadingFailed(MediaPlayer::NetworkState error)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     stopPeriodicTimers();
 
     // If we failed while trying to load a <source> element, the movie was never parsed, and there are more
@@ -2290,6 +2374,7 @@ void HTMLMediaElement::mediaLoadingFailed(MediaPlayer::NetworkState error)
 
 void HTMLMediaElement::setNetworkState(MediaPlayer::NetworkState state)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (static_cast<int>(state) != static_cast<int>(m_networkState))
         ALWAYS_LOG(LOGIDENTIFIER, "new state = ", static_cast<int>(state), ", current state = ", static_cast<int>(m_networkState));
 
@@ -2331,6 +2416,7 @@ void HTMLMediaElement::setNetworkState(MediaPlayer::NetworkState state)
 
 void HTMLMediaElement::changeNetworkStateFromLoadingToIdle()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_progressEventTimer.stop();
     if (hasMediaControls() && m_player->didLoadingProgress())
         mediaControls()->bufferingProgressed();
@@ -2344,6 +2430,7 @@ void HTMLMediaElement::changeNetworkStateFromLoadingToIdle()
 
 void HTMLMediaElement::mediaPlayerReadyStateChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     beginProcessingMediaPlayerCallback();
 
     setReadyState(m_player->readyState());
@@ -2353,6 +2440,7 @@ void HTMLMediaElement::mediaPlayerReadyStateChanged(MediaPlayer*)
 
 SuccessOr<MediaPlaybackDenialReason> HTMLMediaElement::canTransitionFromAutoplayToPlay() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (isAutoplaying()
         && mediaSession().autoplayPermitted()
         && paused()
@@ -2368,6 +2456,7 @@ SuccessOr<MediaPlaybackDenialReason> HTMLMediaElement::canTransitionFromAutoplay
 
 void HTMLMediaElement::dispatchPlayPauseEventsIfNeedsQuirks()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto& document = this->document();
     if (!needsAutoplayPlayPauseEventsQuirk(document) && !needsAutoplayPlayPauseEventsQuirk(document.topDocument()))
         return;
@@ -2378,6 +2467,7 @@ void HTMLMediaElement::dispatchPlayPauseEventsIfNeedsQuirks()
 
 void HTMLMediaElement::setReadyState(MediaPlayer::ReadyState state)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // Set "wasPotentiallyPlaying" BEFORE updating m_readyState, potentiallyPlaying() uses it
     bool wasPotentiallyPlaying = potentiallyPlaying();
 
@@ -2531,11 +2621,13 @@ void HTMLMediaElement::setReadyState(MediaPlayer::ReadyState state)
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA)
 RefPtr<ArrayBuffer> HTMLMediaElement::mediaPlayerCachedKeyForKeyId(const String& keyId) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_webKitMediaKeys ? m_webKitMediaKeys->cachedKeyForKeyId(keyId) : nullptr;
 }
 
 bool HTMLMediaElement::mediaPlayerKeyNeeded(MediaPlayer*, Uint8Array* initData)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!RuntimeEnabledFeatures::sharedFeatures().legacyEncryptedMediaAPIEnabled())
         return false;
 
@@ -2554,6 +2646,7 @@ bool HTMLMediaElement::mediaPlayerKeyNeeded(MediaPlayer*, Uint8Array* initData)
 
 String HTMLMediaElement::mediaPlayerMediaKeysStorageDirectory() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto* page = document().page();
     if (!page || page->usesEphemeralSession())
         return emptyString();
@@ -2567,6 +2660,7 @@ String HTMLMediaElement::mediaPlayerMediaKeysStorageDirectory() const
 
 void HTMLMediaElement::webkitSetMediaKeys(WebKitMediaKeys* mediaKeys)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!RuntimeEnabledFeatures::sharedFeatures().legacyEncryptedMediaAPIEnabled())
         return;
 
@@ -2582,6 +2676,7 @@ void HTMLMediaElement::webkitSetMediaKeys(WebKitMediaKeys* mediaKeys)
 
 void HTMLMediaElement::keyAdded()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!RuntimeEnabledFeatures::sharedFeatures().legacyEncryptedMediaAPIEnabled())
         return;
 
@@ -2595,6 +2690,7 @@ void HTMLMediaElement::keyAdded()
 
 MediaKeys* HTMLMediaElement::mediaKeys() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_mediaKeys.get();
 }
 
@@ -2603,17 +2699,24 @@ void HTMLMediaElement::setMediaKeys(MediaKeys* mediaKeys, Ref<DeferredPromise>&&
     // https://w3c.github.io/encrypted-media/#dom-htmlmediaelement-setmediakeys
     // W3C Editor's Draft 09 November 2016
 
+    printf("++%s(mediaKeys: %p)\n", __func__, mediaKeys);
     // 1. If mediaKeys and the mediaKeys attribute are the same object, return a resolved promise.
     if (mediaKeys == m_mediaKeys) {
+        printf("---> [%s:%d]\n", __func__, __LINE__);
         promise->resolve();
         return;
     }
 
+    printf("---> [%s:%d]\n", __func__, __LINE__);
+
     // 2. If this object's attaching media keys value is true, return a promise rejected with an InvalidStateError.
     if (m_attachingMediaKeys) {
+        printf("---> [%s:%d]\n", __func__, __LINE__);
         promise->reject(InvalidStateError);
         return;
     }
+
+    printf("---> [%s:%d]\n", __func__, __LINE__);
 
     // 3. Let this object's attaching media keys value be true.
     m_attachingMediaKeys = true;
@@ -2635,17 +2738,21 @@ void HTMLMediaElement::setMediaKeys(MediaKeys* mediaKeys, Ref<DeferredPromise>&&
             // 5.2.3. Stop using the CDM instance represented by the mediaKeys attribute to decrypt media data and remove the association with the media element.
             // 5.2.4. If the preceding step failed, let this object's attaching media keys value be false and reject promise with the appropriate error name.
             // FIXME: ^
+            printf("---> [%s:%d]\n", __func__, __LINE__);
 
             m_mediaKeys->detachCDMClient(*this);
         }
+        printf("---> [%s:%d]\n", __func__, __LINE__);
 
         // 5.3. If mediaKeys is not null, run the following steps:
         if (mediaKeys) {
+            printf("---> [%s:%d]\n", __func__, __LINE__);
             // 5.3.1. Associate the CDM instance represented by mediaKeys with the media element for decrypting media data.
             mediaKeys->attachCDMClient(*this);
-            if (m_player)
+            if (m_player) {
+                printf("---> [%s:%d]\n", __func__, __LINE__);
                 m_player->cdmInstanceAttached(mediaKeys->cdmInstance());
-
+            }
             // 5.3.2. If the preceding step failed, run the following steps:
             //   5.3.2.1. Set the mediaKeys attribute to null.
             //   5.3.2.2. Let this object's attaching media keys value be false.
@@ -2660,6 +2767,7 @@ void HTMLMediaElement::setMediaKeys(MediaKeys* mediaKeys, Ref<DeferredPromise>&&
         m_mediaKeys = WTFMove(mediaKeys);
         m_attachingMediaKeys = false;
         promise->resolve();
+        printf("---> [%s:%d]\n", __func__, __LINE__);
     });
 
     // 6. Return promise.
@@ -2667,6 +2775,7 @@ void HTMLMediaElement::setMediaKeys(MediaKeys* mediaKeys, Ref<DeferredPromise>&&
 
 void HTMLMediaElement::mediaPlayerInitializationDataEncountered(const String& initDataType, RefPtr<ArrayBuffer>&& initData)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#initdata-encountered
     // W3C Editor's Draft 23 June 2017
 
@@ -2690,6 +2799,7 @@ void HTMLMediaElement::mediaPlayerInitializationDataEncountered(const String& in
 
 void HTMLMediaElement::attemptToDecrypt()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#attempt-to-decrypt
     // W3C Editor's Draft 23 June 2017
 
@@ -2723,6 +2833,7 @@ void HTMLMediaElement::attemptToDecrypt()
 
 void HTMLMediaElement::attemptToResumePlaybackIfNecessary()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#resume-playback
     // W3C Editor's Draft 23 June 2017
 
@@ -2742,11 +2853,13 @@ void HTMLMediaElement::attemptToResumePlaybackIfNecessary()
 
 void HTMLMediaElement::cdmClientAttemptToResumePlaybackIfNecessary()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     attemptToResumePlaybackIfNecessary();
 }
 
 void HTMLMediaElement::cdmClientAttemptToDecryptWithInstance(const CDMInstance& instance)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_player)
         m_player->attemptToDecryptWithInstance(instance);
 }
@@ -2754,6 +2867,7 @@ void HTMLMediaElement::cdmClientAttemptToDecryptWithInstance(const CDMInstance& 
 
 void HTMLMediaElement::progressEventTimerFired()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(m_player);
     if (m_networkState != NETWORK_LOADING)
         return;
@@ -2777,16 +2891,19 @@ void HTMLMediaElement::progressEventTimerFired()
 
 void HTMLMediaElement::rewind(double timeDelta)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     setCurrentTime(std::max(currentMediaTime() - MediaTime::createWithDouble(timeDelta), minTimeSeekable()));
 }
 
 void HTMLMediaElement::returnToRealtime()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     setCurrentTime(maxTimeSeekable());
 }
 
 void HTMLMediaElement::addPlayedRange(const MediaTime& start, const MediaTime& end)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     DEBUG_LOG(LOGIDENTIFIER, "[", start, ", ", end, "]");
     if (!m_playedTimeRanges)
         m_playedTimeRanges = TimeRanges::create();
@@ -2795,11 +2912,13 @@ void HTMLMediaElement::addPlayedRange(const MediaTime& start, const MediaTime& e
 
 bool HTMLMediaElement::supportsScanning() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->supportsScanning() : false;
 }
 
 void HTMLMediaElement::prepareToPlay()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
     if (m_havePreparedToPlay)
         return;
@@ -2810,11 +2929,13 @@ void HTMLMediaElement::prepareToPlay()
 
 void HTMLMediaElement::fastSeek(double time)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     fastSeek(MediaTime::createWithDouble(time));
 }
 
 void HTMLMediaElement::fastSeek(const MediaTime& time)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, time);
     // 4.7.10.9 Seeking
     // 9. If the approximate-for-speed flag is set, adjust the new playback position to a value that will
@@ -2831,18 +2952,21 @@ void HTMLMediaElement::fastSeek(const MediaTime& time)
 
 void HTMLMediaElement::seek(const MediaTime& time)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, time);
     seekWithTolerance(time, MediaTime::zeroTime(), MediaTime::zeroTime(), true);
 }
 
 void HTMLMediaElement::seekInternal(const MediaTime& time)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, time);
     seekWithTolerance(time, MediaTime::zeroTime(), MediaTime::zeroTime(), false);
 }
 
 void HTMLMediaElement::seekWithTolerance(const MediaTime& inTime, const MediaTime& negativeTolerance, const MediaTime& positiveTolerance, bool fromDOM)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 4.8.10.9 Seeking
     MediaTime time = inTime;
 
@@ -2898,6 +3022,7 @@ void HTMLMediaElement::seekWithTolerance(const MediaTime& inTime, const MediaTim
 
 void HTMLMediaElement::seekTask()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     if (!m_player) {
@@ -2987,6 +3112,7 @@ void HTMLMediaElement::seekTask()
 
 void HTMLMediaElement::clearSeeking()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_seeking = false;
     m_seekRequested = false;
     m_pendingSeekType = NoSeek;
@@ -2995,6 +3121,7 @@ void HTMLMediaElement::clearSeeking()
 
 void HTMLMediaElement::finishSeek()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 4.8.10.9 Seeking
     // 14 - Set the seeking IDL attribute to false.
     clearSeeking();
@@ -3018,26 +3145,31 @@ void HTMLMediaElement::finishSeek()
 
 HTMLMediaElement::ReadyState HTMLMediaElement::readyState() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_readyState;
 }
 
 MediaPlayer::MovieLoadType HTMLMediaElement::movieLoadType() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->movieLoadType() : MediaPlayer::Unknown;
 }
 
 bool HTMLMediaElement::hasAudio() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->hasAudio() : false;
 }
 
 bool HTMLMediaElement::seeking() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_seeking;
 }
 
 void HTMLMediaElement::refreshCachedTime() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_player)
         return;
 
@@ -3054,6 +3186,7 @@ void HTMLMediaElement::refreshCachedTime() const
 
 void HTMLMediaElement::invalidateCachedTime() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_cachedTime = MediaTime::invalidTime();
     if (!m_player || !m_player->maximumDurationToCacheMediaTime())
         return;
@@ -3069,11 +3202,13 @@ void HTMLMediaElement::invalidateCachedTime() const
 // playback state
 double HTMLMediaElement::currentTime() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return currentMediaTime().toDouble();
 }
 
 MediaTime HTMLMediaElement::currentMediaTime() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if LOG_CACHED_TIME_WARNINGS
     static const MediaTime minCachedDeltaForWarning = MediaTime::create(1, 100);
 #endif
@@ -3133,12 +3268,12 @@ MediaTime HTMLMediaElement::currentMediaTime() const
 
 void HTMLMediaElement::setCurrentTime(double time)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     setCurrentTime(MediaTime::createWithDouble(time));
 }
 
 void HTMLMediaElement::setCurrentTime(const MediaTime& time)
-{
-    if (m_mediaController)
+{    if (m_mediaController)
         return;
 
     seekInternal(time);
@@ -3146,6 +3281,7 @@ void HTMLMediaElement::setCurrentTime(const MediaTime& time)
 
 ExceptionOr<void> HTMLMediaElement::setCurrentTimeForBindings(double time)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_mediaController)
         return Exception { InvalidStateError };
     seek(MediaTime::createWithDouble(time));
@@ -3154,11 +3290,13 @@ ExceptionOr<void> HTMLMediaElement::setCurrentTimeForBindings(double time)
 
 double HTMLMediaElement::duration() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return durationMediaTime().toDouble();
 }
 
 MediaTime HTMLMediaElement::durationMediaTime() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_player && m_readyState >= HAVE_METADATA)
         return m_player->duration();
 
@@ -3167,6 +3305,7 @@ MediaTime HTMLMediaElement::durationMediaTime() const
 
 bool HTMLMediaElement::paused() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // As of this writing, JavaScript garbage collection calls this function directly. In the past
     // we had problems where this was called on an object after a bad cast. The assertion below
     // made our regression test detect the problem, so we should keep it because of that. But note
@@ -3179,6 +3318,7 @@ bool HTMLMediaElement::paused() const
 
 double HTMLMediaElement::defaultPlaybackRate() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_STREAM)
     // http://w3c.github.io/mediacapture-main/#mediastreams-in-media-elements
     // "defaultPlaybackRate" - On setting: ignored. On getting: return 1.0
@@ -3194,6 +3334,7 @@ double HTMLMediaElement::defaultPlaybackRate() const
 
 void HTMLMediaElement::setDefaultPlaybackRate(double rate)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_STREAM)
     // http://w3c.github.io/mediacapture-main/#mediastreams-in-media-elements
     // "defaultPlaybackRate" - On setting: ignored. On getting: return 1.0
@@ -3214,16 +3355,19 @@ void HTMLMediaElement::setDefaultPlaybackRate(double rate)
 
 double HTMLMediaElement::effectivePlaybackRate() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_mediaController ? m_mediaController->playbackRate() : m_reportedPlaybackRate;
 }
 
 double HTMLMediaElement::requestedPlaybackRate() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_mediaController ? m_mediaController->playbackRate() : m_requestedPlaybackRate;
 }
 
 double HTMLMediaElement::playbackRate() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_STREAM)
     // http://w3c.github.io/mediacapture-main/#mediastreams-in-media-elements
     // "playbackRate" - A MediaStream is not seekable. Therefore, this attribute must always
@@ -3238,6 +3382,7 @@ double HTMLMediaElement::playbackRate() const
 
 void HTMLMediaElement::setPlaybackRate(double rate)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ALWAYS_LOG(LOGIDENTIFIER, rate);
 
 #if ENABLE(MEDIA_STREAM)
@@ -3261,6 +3406,7 @@ void HTMLMediaElement::setPlaybackRate(double rate)
 
 void HTMLMediaElement::updatePlaybackRate()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     double requestedRate = requestedPlaybackRate();
     if (m_player && potentiallyPlaying() && m_player->rate() != requestedRate)
         m_player->setRate(requestedRate);
@@ -3268,11 +3414,13 @@ void HTMLMediaElement::updatePlaybackRate()
 
 bool HTMLMediaElement::webkitPreservesPitch() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_webkitPreservesPitch;
 }
 
 void HTMLMediaElement::setWebkitPreservesPitch(bool preservesPitch)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, preservesPitch);
 
     m_webkitPreservesPitch = preservesPitch;
@@ -3285,6 +3433,7 @@ void HTMLMediaElement::setWebkitPreservesPitch(bool preservesPitch)
 
 bool HTMLMediaElement::ended() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_STREAM)
     // http://w3c.github.io/mediacapture-main/#mediastreams-in-media-elements
     // When the MediaStream state moves from the active to the inactive state, the User Agent
@@ -3301,11 +3450,13 @@ bool HTMLMediaElement::ended() const
 
 bool HTMLMediaElement::autoplay() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return hasAttributeWithoutSynchronization(autoplayAttr);
 }
 
 String HTMLMediaElement::preload() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_STREAM)
     // http://w3c.github.io/mediacapture-main/#mediastreams-in-media-elements
     // "preload" - On getting: none. On setting: ignored.
@@ -3328,6 +3479,7 @@ String HTMLMediaElement::preload() const
 
 void HTMLMediaElement::setPreload(const String& preload)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, preload);
 #if ENABLE(MEDIA_STREAM)
     // http://w3c.github.io/mediacapture-main/#mediastreams-in-media-elements
@@ -3341,6 +3493,7 @@ void HTMLMediaElement::setPreload(const String& preload)
 
 void HTMLMediaElement::play(DOMPromiseDeferred<void>&& promise)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ALWAYS_LOG(LOGIDENTIFIER);
 
     auto success = m_mediaSession->playbackPermitted(*this);
@@ -3369,6 +3522,7 @@ void HTMLMediaElement::play(DOMPromiseDeferred<void>&& promise)
 
 void HTMLMediaElement::play()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ALWAYS_LOG(LOGIDENTIFIER);
 
     auto success = m_mediaSession->playbackPermitted(*this);
@@ -3385,6 +3539,7 @@ void HTMLMediaElement::play()
 
 bool HTMLMediaElement::playInternal()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ALWAYS_LOG(LOGIDENTIFIER);
 
     if (!m_mediaSession->clientWillBeginPlayback()) {
@@ -3462,6 +3617,7 @@ bool HTMLMediaElement::playInternal()
 
 void HTMLMediaElement::pause()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ALWAYS_LOG(LOGIDENTIFIER);
 
     m_temporarilyAllowingInlinePlaybackAfterFullscreen = false;
@@ -3478,6 +3634,7 @@ void HTMLMediaElement::pause()
 
 void HTMLMediaElement::pauseInternal()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ALWAYS_LOG(LOGIDENTIFIER);
 
     if (!m_mediaSession->clientWillPausePlayback()) {
@@ -3519,6 +3676,7 @@ void HTMLMediaElement::pauseInternal()
 
 void HTMLMediaElement::detachMediaSource()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_mediaSource)
         return;
 
@@ -3530,17 +3688,20 @@ void HTMLMediaElement::detachMediaSource()
 
 bool HTMLMediaElement::loop() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return hasAttributeWithoutSynchronization(loopAttr);
 }
 
 void HTMLMediaElement::setLoop(bool b)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, b);
     setBooleanAttribute(loopAttr, b);
 }
 
 bool HTMLMediaElement::controls() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Frame* frame = document().frame();
 
     // always show controls when scripting is disabled
@@ -3552,17 +3713,20 @@ bool HTMLMediaElement::controls() const
 
 void HTMLMediaElement::setControls(bool b)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, b);
     setBooleanAttribute(controlsAttr, b);
 }
 
 double HTMLMediaElement::volume() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_volume;
 }
 
 ExceptionOr<void> HTMLMediaElement::setVolume(double volume)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, volume);
 
     if (!(volume >= 0 && volume <= 1))
@@ -3582,11 +3746,13 @@ ExceptionOr<void> HTMLMediaElement::setVolume(double volume)
 
 bool HTMLMediaElement::muted() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_explicitlyMuted ? m_muted : hasAttributeWithoutSynchronization(mutedAttr);
 }
 
 void HTMLMediaElement::setMuted(bool muted)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, muted);
 
     bool mutedStateChanged = m_muted != muted;
@@ -3633,6 +3799,7 @@ void HTMLMediaElement::setMuted(bool muted)
 #if USE(AUDIO_SESSION) && PLATFORM(MAC)
 void HTMLMediaElement::hardwareMutedStateDidChange(AudioSession* session)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!session->isMuted())
         return;
 
@@ -3648,6 +3815,7 @@ void HTMLMediaElement::hardwareMutedStateDidChange(AudioSession* session)
 
 void HTMLMediaElement::togglePlayState()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, "canPlay() is ", canPlay());
 
     // We can safely call the internal play/pause methods, which don't check restrictions, because
@@ -3661,6 +3829,7 @@ void HTMLMediaElement::togglePlayState()
 
 void HTMLMediaElement::beginScrubbing()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, "paused() is ", paused());
 
     if (!paused()) {
@@ -3682,6 +3851,7 @@ void HTMLMediaElement::beginScrubbing()
 
 void HTMLMediaElement::endScrubbing()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, "m_pausedInternal is", m_pausedInternal);
 
     if (m_pausedInternal)
@@ -3690,6 +3860,7 @@ void HTMLMediaElement::endScrubbing()
 
 void HTMLMediaElement::beginScanning(ScanDirection direction)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_scanType = supportsScanning() ? Scan : Seek;
     m_scanDirection = direction;
 
@@ -3709,6 +3880,7 @@ void HTMLMediaElement::beginScanning(ScanDirection direction)
 
 void HTMLMediaElement::endScanning()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_scanType == Scan)
         setPlaybackRate(defaultPlaybackRate());
 
@@ -3723,6 +3895,7 @@ void HTMLMediaElement::endScanning()
 
 double HTMLMediaElement::nextScanRate()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     double rate = std::min(ScanMaximumRate, fabs(playbackRate() * 2));
     if (m_scanDirection == Backward)
         rate *= -1;
@@ -3734,6 +3907,7 @@ double HTMLMediaElement::nextScanRate()
 
 void HTMLMediaElement::scanTimerFired()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_scanType == Seek) {
         double seekTime = m_scanDirection == Forward ? SeekTime : -SeekTime;
         setCurrentTime(currentTime() + seekTime);
@@ -3747,6 +3921,7 @@ static const Seconds maxTimeupdateEventFrequency { 200_ms };
 
 void HTMLMediaElement::startPlaybackProgressTimer()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_playbackProgressTimer.isActive())
         return;
 
@@ -3756,6 +3931,7 @@ void HTMLMediaElement::startPlaybackProgressTimer()
 
 void HTMLMediaElement::playbackProgressTimerFired()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(m_player);
 
     if (m_fragmentEndTime.isValid() && currentMediaTime() >= m_fragmentEndTime && requestedPlaybackRate() > 0) {
@@ -3791,6 +3967,7 @@ void HTMLMediaElement::playbackProgressTimerFired()
 
 void HTMLMediaElement::scheduleTimeupdateEvent(bool periodicEvent)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MonotonicTime now = MonotonicTime::now();
     Seconds timedelta = now - m_clockTimeAtLastUpdateEvent;
 
@@ -3810,11 +3987,13 @@ void HTMLMediaElement::scheduleTimeupdateEvent(bool periodicEvent)
 
 bool HTMLMediaElement::canPlay() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return paused() || ended() || m_readyState < HAVE_METADATA;
 }
 
 double HTMLMediaElement::percentLoaded() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_player)
         return 0;
     MediaTime duration = m_player->duration();
@@ -3837,6 +4016,7 @@ double HTMLMediaElement::percentLoaded() const
 
 void HTMLMediaElement::mediaPlayerDidAddAudioTrack(AudioTrackPrivate& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (isPlaying() && !m_mediaSession->playbackPermitted(*this)) {
         pauseInternal();
         setPlaybackWithoutUserGesture(PlaybackWithoutUserGesture::Prevented);
@@ -3847,6 +4027,7 @@ void HTMLMediaElement::mediaPlayerDidAddAudioTrack(AudioTrackPrivate& track)
 
 void HTMLMediaElement::mediaPlayerDidAddTextTrack(InbandTextTrackPrivate& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 4.8.10.12.2 Sourcing in-band text tracks
     // 1. Associate the relevant data with a new text track and its corresponding new TextTrack object.
     auto textTrack = InbandTextTrack::create(*ActiveDOMObject::scriptExecutionContext(), *this, track);
@@ -3880,37 +4061,44 @@ void HTMLMediaElement::mediaPlayerDidAddTextTrack(InbandTextTrackPrivate& track)
 
 void HTMLMediaElement::mediaPlayerDidAddVideoTrack(VideoTrackPrivate& track)
 {
-    addVideoTrack(VideoTrack::create(*this, track));
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
+addVideoTrack(VideoTrack::create(*this, track));
 }
 
 void HTMLMediaElement::mediaPlayerDidRemoveAudioTrack(AudioTrackPrivate& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     track.willBeRemoved();
 }
 
 void HTMLMediaElement::mediaPlayerDidRemoveTextTrack(InbandTextTrackPrivate& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     track.willBeRemoved();
 }
 
 void HTMLMediaElement::mediaPlayerDidRemoveVideoTrack(VideoTrackPrivate& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     track.willBeRemoved();
 }
 
 void HTMLMediaElement::closeCaptionTracksChanged()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (hasMediaControls())
         mediaControls()->closedCaptionTracksChanged();
 }
 
 void HTMLMediaElement::addAudioTrack(Ref<AudioTrack>&& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     audioTracks().append(WTFMove(track));
 }
 
 void HTMLMediaElement::addTextTrack(Ref<TextTrack>&& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_requireCaptionPreferencesChangedCallbacks) {
         m_requireCaptionPreferencesChangedCallbacks = true;
         Document& document = this->document();
@@ -3926,11 +4114,13 @@ void HTMLMediaElement::addTextTrack(Ref<TextTrack>&& track)
 
 void HTMLMediaElement::addVideoTrack(Ref<VideoTrack>&& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     videoTracks().append(WTFMove(track));
 }
 
 void HTMLMediaElement::removeAudioTrack(AudioTrack& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_audioTracks->contains(track))
         m_audioTracks->remove(track);
     track.clearClient();
@@ -3938,6 +4128,7 @@ void HTMLMediaElement::removeAudioTrack(AudioTrack& track)
 
 void HTMLMediaElement::removeTextTrack(TextTrack& track, bool scheduleEvent)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     TrackDisplayUpdateScope scope { *this };
     if (auto* cues = track.cues())
         textTrackRemoveCues(track, *cues);
@@ -3950,6 +4141,7 @@ void HTMLMediaElement::removeTextTrack(TextTrack& track, bool scheduleEvent)
 
 void HTMLMediaElement::removeVideoTrack(VideoTrack& track)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_videoTracks->contains(track))
         m_videoTracks->remove(track);
     track.clearClient();
@@ -3957,6 +4149,7 @@ void HTMLMediaElement::removeVideoTrack(VideoTrack& track)
 
 void HTMLMediaElement::forgetResourceSpecificTracks()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     while (m_audioTracks &&  m_audioTracks->length())
         removeAudioTrack(*m_audioTracks->lastItem());
 
@@ -3975,6 +4168,7 @@ void HTMLMediaElement::forgetResourceSpecificTracks()
 
 ExceptionOr<TextTrack&> HTMLMediaElement::addTextTrack(const String& kind, const String& label, const String& language)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 4.8.10.12.4 Text track API
     // The addTextTrack(kind, label, language) method of media elements, when invoked, must run the following steps:
 
@@ -4008,6 +4202,7 @@ ExceptionOr<TextTrack&> HTMLMediaElement::addTextTrack(const String& kind, const
 
 AudioTrackList& HTMLMediaElement::audioTracks()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_audioTracks)
         m_audioTracks = AudioTrackList::create(this, ActiveDOMObject::scriptExecutionContext());
 
@@ -4016,6 +4211,7 @@ AudioTrackList& HTMLMediaElement::audioTracks()
 
 TextTrackList& HTMLMediaElement::textTracks()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_textTracks)
         m_textTracks = TextTrackList::create(this, ActiveDOMObject::scriptExecutionContext());
 
@@ -4024,6 +4220,7 @@ TextTrackList& HTMLMediaElement::textTracks()
 
 VideoTrackList& HTMLMediaElement::videoTracks()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_videoTracks)
         m_videoTracks = VideoTrackList::create(this, ActiveDOMObject::scriptExecutionContext());
 
@@ -4032,6 +4229,7 @@ VideoTrackList& HTMLMediaElement::videoTracks()
 
 void HTMLMediaElement::didAddTextTrack(HTMLTrackElement& trackElement)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(trackElement.hasTagName(trackTag));
 
     // 4.8.10.12.3 Sourcing out-of-band text tracks
@@ -4051,6 +4249,7 @@ void HTMLMediaElement::didAddTextTrack(HTMLTrackElement& trackElement)
 
 void HTMLMediaElement::didRemoveTextTrack(HTMLTrackElement& trackElement)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(trackElement.hasTagName(trackTag));
 
     auto& textTrack = trackElement.track();
@@ -4071,6 +4270,7 @@ void HTMLMediaElement::didRemoveTextTrack(HTMLTrackElement& trackElement)
 
 void HTMLMediaElement::configureTextTrackGroup(const TrackGroup& group)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(group.tracks.size());
 
     Page* page = document().page();
@@ -4184,6 +4384,7 @@ void HTMLMediaElement::configureTextTrackGroup(const TrackGroup& group)
 
 static JSC::JSValue controllerJSValue(JSC::ExecState& exec, JSDOMGlobalObject& globalObject, HTMLMediaElement& media)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     JSC::VM& vm = globalObject.vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
     auto mediaJSWrapper = toJS(&exec, &globalObject, media);
@@ -4210,6 +4411,7 @@ static JSC::JSValue controllerJSValue(JSC::ExecState& exec, JSDOMGlobalObject& g
 
 void HTMLMediaElement::ensureMediaControlsShadowRoot()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(!m_creatingControls);
     m_creatingControls = true;
     ensureUserAgentShadowRoot();
@@ -4218,6 +4420,7 @@ void HTMLMediaElement::ensureMediaControlsShadowRoot()
 
 void HTMLMediaElement::updateCaptionContainer()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
     if (m_haveSetUpCaptionContainer)
         return;
@@ -4274,6 +4477,7 @@ void HTMLMediaElement::updateCaptionContainer()
 
 void HTMLMediaElement::layoutSizeChanged()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
     if (auto* frameView = document().view()) {
         auto task = [this, protectedThis = makeRef(*this)] {
@@ -4297,11 +4501,13 @@ void HTMLMediaElement::layoutSizeChanged()
 
 void HTMLMediaElement::visibilityDidChange()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     updateShouldAutoplay();
 }
 
 void HTMLMediaElement::setSelectedTextTrack(TextTrack* trackToSelect)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     TextTrackList& trackList = textTracks();
     if (!trackList.length())
         return;
@@ -4348,6 +4554,7 @@ void HTMLMediaElement::setSelectedTextTrack(TextTrack* trackToSelect)
 
 void HTMLMediaElement::configureTextTracks()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     TrackGroup captionAndSubtitleTracks(TrackGroup::CaptionsAndSubtitles);
     TrackGroup descriptionTracks(TrackGroup::Description);
     TrackGroup chapterTracks(TrackGroup::Chapter);
@@ -4414,6 +4621,7 @@ void HTMLMediaElement::configureTextTracks()
 
 bool HTMLMediaElement::havePotentialSourceChild()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // Stash the current <source> node and next nodes so we can restore them after checking
     // to see there is another potential.
     RefPtr<HTMLSourceElement> currentSourceNode = m_currentSourceNode;
@@ -4429,6 +4637,7 @@ bool HTMLMediaElement::havePotentialSourceChild()
 
 URL HTMLMediaElement::selectNextSourceChild(ContentType* contentType, String* keySystem, InvalidURLAction actionIfInvalid)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     UNUSED_PARAM(keySystem);
 
     // Don't log if this was just called to find out if there are any valid <source> elements.
@@ -4531,6 +4740,7 @@ CheckAgain:
 
 void HTMLMediaElement::sourceWasAdded(HTMLSourceElement& source)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (willLog(WTFLogLevelInfo) && source.hasTagName(sourceTag)) {
         URL url = source.getNonEmptyURLAttribute(srcAttr);
         INFO_LOG(LOGIDENTIFIER, "'src' is ", url);
@@ -4578,6 +4788,7 @@ void HTMLMediaElement::sourceWasAdded(HTMLSourceElement& source)
 
 void HTMLMediaElement::sourceWasRemoved(HTMLSourceElement& source)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (willLog(WTFLogLevelInfo) && source.hasTagName(sourceTag)) {
         URL url = source.getNonEmptyURLAttribute(srcAttr);
         INFO_LOG(LOGIDENTIFIER, "'src' is ", url);
@@ -4600,6 +4811,7 @@ void HTMLMediaElement::sourceWasRemoved(HTMLSourceElement& source)
 
 void HTMLMediaElement::mediaPlayerTimeChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
 #if ENABLE(VIDEO_TRACK)
@@ -4687,6 +4899,7 @@ void HTMLMediaElement::mediaPlayerTimeChanged(MediaPlayer*)
 
 void HTMLMediaElement::addBehaviorRestrictionsOnEndIfNecessary()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (isFullscreen())
         return;
 
@@ -4697,6 +4910,7 @@ void HTMLMediaElement::addBehaviorRestrictionsOnEndIfNecessary()
 
 void HTMLMediaElement::handleSeekToPlaybackPosition(double position)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if PLATFORM(MAC)
     // FIXME: This should ideally use faskSeek, but this causes MediaRemote's playhead to flicker upon release.
     // Please see <rdar://problem/28457219> for more details.
@@ -4716,6 +4930,7 @@ void HTMLMediaElement::handleSeekToPlaybackPosition(double position)
 
 void HTMLMediaElement::seekToPlaybackPositionEndedTimerFired()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if PLATFORM(MAC)
     if (!m_isScrubbingRemotely)
         return;
@@ -4728,6 +4943,7 @@ void HTMLMediaElement::seekToPlaybackPositionEndedTimerFired()
 
 void HTMLMediaElement::mediaPlayerVolumeChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     beginProcessingMediaPlayerCallback();
@@ -4744,6 +4960,7 @@ void HTMLMediaElement::mediaPlayerVolumeChanged(MediaPlayer*)
 
 void HTMLMediaElement::mediaPlayerMuteChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     beginProcessingMediaPlayerCallback();
@@ -4754,6 +4971,7 @@ void HTMLMediaElement::mediaPlayerMuteChanged(MediaPlayer*)
 
 void HTMLMediaElement::mediaPlayerDurationChanged(MediaPlayer* player)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     beginProcessingMediaPlayerCallback();
@@ -4771,6 +4989,7 @@ void HTMLMediaElement::mediaPlayerDurationChanged(MediaPlayer* player)
 
 void HTMLMediaElement::mediaPlayerRateChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     beginProcessingMediaPlayerCallback();
 
     // Stash the rate in case the one we tried to set isn't what the engine is
@@ -4789,6 +5008,7 @@ void HTMLMediaElement::mediaPlayerRateChanged(MediaPlayer*)
 
 void HTMLMediaElement::mediaPlayerPlaybackStateChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     if (!m_player || m_pausedInternal)
@@ -4804,6 +5024,7 @@ void HTMLMediaElement::mediaPlayerPlaybackStateChanged(MediaPlayer*)
 
 void HTMLMediaElement::mediaPlayerSawUnsupportedTracks(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     // The MediaPlayer came across content it cannot completely handle.
@@ -4815,6 +5036,7 @@ void HTMLMediaElement::mediaPlayerSawUnsupportedTracks(MediaPlayer*)
 
 void HTMLMediaElement::mediaPlayerResourceNotSupported(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     // The MediaPlayer came across content which no installed engine supports.
@@ -4824,6 +5046,7 @@ void HTMLMediaElement::mediaPlayerResourceNotSupported(MediaPlayer*)
 // MediaPlayerPresentation methods
 void HTMLMediaElement::mediaPlayerRepaint(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     beginProcessingMediaPlayerCallback();
     updateDisplayState();
     if (auto* renderer = this->renderer())
@@ -4833,6 +5056,7 @@ void HTMLMediaElement::mediaPlayerRepaint(MediaPlayer*)
 
 void HTMLMediaElement::mediaPlayerSizeChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     if (is<MediaDocument>(document()) && m_player)
@@ -4856,6 +5080,7 @@ void HTMLMediaElement::mediaPlayerSizeChanged(MediaPlayer*)
 
 bool HTMLMediaElement::mediaPlayerRenderingCanBeAccelerated(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto* renderer = this->renderer();
     return is<RenderVideo>(renderer)
         && downcast<RenderVideo>(*renderer).view().compositor().canAccelerateVideoRendering(downcast<RenderVideo>(*renderer));
@@ -4863,6 +5088,7 @@ bool HTMLMediaElement::mediaPlayerRenderingCanBeAccelerated(MediaPlayer*)
 
 void HTMLMediaElement::mediaPlayerRenderingModeChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     // Kick off a fake recalcStyle that will update the compositing tree.
@@ -4871,6 +5097,7 @@ void HTMLMediaElement::mediaPlayerRenderingModeChanged(MediaPlayer*)
 
 bool HTMLMediaElement::mediaPlayerAcceleratedCompositingEnabled()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return document().settings().acceleratedCompositingEnabled();
 }
 
@@ -4878,6 +5105,7 @@ bool HTMLMediaElement::mediaPlayerAcceleratedCompositingEnabled()
 
 GraphicsDeviceAdapter* HTMLMediaElement::mediaPlayerGraphicsDeviceAdapter(const MediaPlayer*) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto* page = document().page();
     if (!page)
         return nullptr;
@@ -4888,12 +5116,15 @@ GraphicsDeviceAdapter* HTMLMediaElement::mediaPlayerGraphicsDeviceAdapter(const 
 
 void HTMLMediaElement::mediaEngineWasUpdated()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
     beginProcessingMediaPlayerCallback();
     updateRenderer();
     endProcessingMediaPlayerCallback();
 
     m_mediaSession->mediaEngineUpdated(*this);
+
+    printf("---> [%s:%d] m_player: %p, m_mediaKeys: %p\n", __func__, __LINE__, m_player, m_mediaKeys);
 
 #if ENABLE(WEB_AUDIO)
     if (m_audioSourceNode && audioSourceProvider()) {
@@ -4923,6 +5154,7 @@ void HTMLMediaElement::mediaEngineWasUpdated()
 
 void HTMLMediaElement::mediaPlayerEngineUpdated(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
 #if ENABLE(MEDIA_SOURCE)
@@ -4936,6 +5168,7 @@ void HTMLMediaElement::mediaPlayerEngineUpdated(MediaPlayer*)
 
 void HTMLMediaElement::mediaPlayerFirstVideoFrameAvailable(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, "current display mode = ", (int)displayMode());
 
     beginProcessingMediaPlayerCallback();
@@ -4948,6 +5181,7 @@ void HTMLMediaElement::mediaPlayerFirstVideoFrameAvailable(MediaPlayer*)
 
 void HTMLMediaElement::mediaPlayerCharacteristicChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     beginProcessingMediaPlayerCallback();
@@ -4987,6 +5221,7 @@ void HTMLMediaElement::mediaPlayerCharacteristicChanged(MediaPlayer*)
 
 Ref<TimeRanges> HTMLMediaElement::buffered() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_player)
         return TimeRanges::create();
 
@@ -5000,6 +5235,7 @@ Ref<TimeRanges> HTMLMediaElement::buffered() const
 
 double HTMLMediaElement::maxBufferedTime() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto bufferedRanges = buffered();
     unsigned numRanges = bufferedRanges->length();
     if (!numRanges)
@@ -5009,6 +5245,7 @@ double HTMLMediaElement::maxBufferedTime() const
 
 Ref<TimeRanges> HTMLMediaElement::played()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_playing) {
         MediaTime time = currentMediaTime();
         if (time > m_lastSeekTime)
@@ -5023,6 +5260,7 @@ Ref<TimeRanges> HTMLMediaElement::played()
 
 Ref<TimeRanges> HTMLMediaElement::seekable() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_SOURCE)
     if (m_mediaSource)
         return m_mediaSource->seekable();
@@ -5036,16 +5274,19 @@ Ref<TimeRanges> HTMLMediaElement::seekable() const
 
 double HTMLMediaElement::seekableTimeRangesLastModifiedTime() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->seekableTimeRangesLastModifiedTime() : 0;
 }
 
 double HTMLMediaElement::liveUpdateInterval() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->liveUpdateInterval() : 0;
 }
 
 bool HTMLMediaElement::potentiallyPlaying() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (isBlockedOnMediaController())
         return false;
 
@@ -5060,6 +5301,7 @@ bool HTMLMediaElement::potentiallyPlaying() const
 
 bool HTMLMediaElement::couldPlayIfEnoughData() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (paused())
         return false;
 
@@ -5077,6 +5319,7 @@ bool HTMLMediaElement::couldPlayIfEnoughData() const
 
 bool HTMLMediaElement::endedPlayback() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaTime dur = durationMediaTime();
     if (!m_player || !dur.isValid())
         return false;
@@ -5105,6 +5348,7 @@ bool HTMLMediaElement::endedPlayback() const
 
 bool HTMLMediaElement::stoppedDueToErrors() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_readyState >= HAVE_METADATA && m_error) {
         RefPtr<TimeRanges> seekableRanges = seekable();
         if (!seekableRanges->contain(currentTime()))
@@ -5116,6 +5360,7 @@ bool HTMLMediaElement::stoppedDueToErrors() const
 
 bool HTMLMediaElement::pausedForUserInteraction() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_mediaSession->state() == PlatformMediaSession::Interrupted)
         return true;
 
@@ -5124,16 +5369,19 @@ bool HTMLMediaElement::pausedForUserInteraction() const
 
 MediaTime HTMLMediaElement::minTimeSeekable() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->minTimeSeekable() : MediaTime::zeroTime();
 }
 
 MediaTime HTMLMediaElement::maxTimeSeekable() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->maxTimeSeekable() : MediaTime::zeroTime();
 }
 
 void HTMLMediaElement::updateVolume()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_player)
         return;
 #if PLATFORM(IOS)
@@ -5177,6 +5425,7 @@ void HTMLMediaElement::updateVolume()
 
 void HTMLMediaElement::updatePlayState(UpdateState updateState)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (updateState == UpdateState::Asynchronously) {
         scheduleDelayedAction(UpdatePlayState);
         return;
@@ -5261,6 +5510,7 @@ void HTMLMediaElement::updatePlayState(UpdateState updateState)
 
 void HTMLMediaElement::setPlaying(bool playing)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (playing && m_mediaSession)
         m_mediaSession->removeBehaviorRestriction(MediaElementSession::RequirePlaybackToControlControlsManager);
 
@@ -5282,18 +5532,21 @@ void HTMLMediaElement::setPlaying(bool playing)
 
 void HTMLMediaElement::setPausedInternal(bool b)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_pausedInternal = b;
     updatePlayState(UpdateState::Asynchronously);
 }
 
 void HTMLMediaElement::stopPeriodicTimers()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_progressEventTimer.stop();
     m_playbackProgressTimer.stop();
 }
 
 void HTMLMediaElement::userCancelledLoad()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     // FIXME: We should look to reconcile the iOS and non-iOS code (below).
@@ -5347,6 +5600,7 @@ void HTMLMediaElement::userCancelledLoad()
 
 void HTMLMediaElement::clearMediaPlayer(DelayedActionType flags)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, "flags = ", actionName(flags));
 
 #if ENABLE(MEDIA_STREAM)
@@ -5412,16 +5666,19 @@ void HTMLMediaElement::clearMediaPlayer(DelayedActionType flags)
 
 bool HTMLMediaElement::canSuspendForDocumentSuspension() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return true;
 }
 
 const char* HTMLMediaElement::activeDOMObjectName() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return "HTMLMediaElement";
 }
 
 void HTMLMediaElement::stopWithoutDestroyingMediaPlayer()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     if (m_videoFullscreenMode != VideoFullscreenModeNone)
@@ -5450,6 +5707,7 @@ void HTMLMediaElement::stopWithoutDestroyingMediaPlayer()
 
 void HTMLMediaElement::contextDestroyed()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_seekTaskQueue.close();
     m_shadowDOMTaskQueue.close();
     m_promiseTaskQueue.close();
@@ -5466,6 +5724,7 @@ void HTMLMediaElement::contextDestroyed()
 
 void HTMLMediaElement::stop()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     Ref<HTMLMediaElement> protectedThis(*this);
@@ -5486,6 +5745,7 @@ void HTMLMediaElement::stop()
 
 void HTMLMediaElement::suspend(ReasonForSuspension why)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
     Ref<HTMLMediaElement> protectedThis(*this);
 
@@ -5516,6 +5776,7 @@ void HTMLMediaElement::suspend(ReasonForSuspension why)
 
 void HTMLMediaElement::resume()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
     m_inActiveDocument = true;
@@ -5554,17 +5815,20 @@ void HTMLMediaElement::resume()
 
 bool HTMLMediaElement::hasPendingActivity() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return (hasAudio() && isPlaying()) || m_asyncEventQueue.hasPendingEvents() || m_creatingControls;
 }
 
 void HTMLMediaElement::mediaVolumeDidChange()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
     updateVolume();
 }
 
 void HTMLMediaElement::visibilityStateChanged()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_elementIsHidden = document().hidden() && m_videoFullscreenMode != VideoFullscreenModePictureInPicture;
     INFO_LOG(LOGIDENTIFIER, "visible = ", !m_elementIsHidden);
     updateSleepDisabling();
@@ -5587,17 +5851,20 @@ void HTMLMediaElement::visibilityStateChanged()
 #if ENABLE(VIDEO_TRACK)
 bool HTMLMediaElement::requiresTextTrackRepresentation() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return (m_videoFullscreenMode != VideoFullscreenModeNone) && m_player ? m_player->requiresTextTrackRepresentation() : false;
 }
 
 void HTMLMediaElement::setTextTrackRepresentation(TextTrackRepresentation* representation)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_player)
         m_player->setTextTrackRepresentation(representation);
 }
 
 void HTMLMediaElement::syncTextTrackBounds()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_player)
         m_player->syncTextTrackBounds();
 }
@@ -5606,6 +5873,7 @@ void HTMLMediaElement::syncTextTrackBounds()
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
 void HTMLMediaElement::webkitShowPlaybackTargetPicker()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
     if (processingUserGestureForMedia())
         removeBehaviorsRestrictionsAfterFirstUserGesture();
@@ -5614,16 +5882,19 @@ void HTMLMediaElement::webkitShowPlaybackTargetPicker()
 
 bool HTMLMediaElement::webkitCurrentPlaybackTargetIsWireless() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_isPlayingToWirelessTarget;
 }
 
 void HTMLMediaElement::wirelessRoutesAvailableDidChange()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     enqueuePlaybackTargetAvailabilityChangedEvent();
 }
 
 void HTMLMediaElement::mediaPlayerCurrentPlaybackTargetIsWirelessChanged(MediaPlayer*)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_isPlayingToWirelessTarget = m_player && m_player->isCurrentPlaybackTargetWireless();
 
     INFO_LOG(LOGIDENTIFIER, "webkitCurrentPlaybackTargetIsWireless = ", m_isPlayingToWirelessTarget);
@@ -5638,6 +5909,7 @@ void HTMLMediaElement::mediaPlayerCurrentPlaybackTargetIsWirelessChanged(MediaPl
 
 bool HTMLMediaElement::dispatchEvent(Event& event)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (event.type() == eventNames().webkitcurrentplaybacktargetiswirelesschangedEvent) {
         m_failedToPlayToWirelessTarget = false;
         scheduleDelayedAction(CheckPlaybackTargetCompatablity);
@@ -5650,6 +5922,7 @@ bool HTMLMediaElement::dispatchEvent(Event& event)
 
 bool HTMLMediaElement::addEventListener(const AtomicString& eventType, Ref<EventListener>&& listener, const AddEventListenerOptions& options)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (eventType != eventNames().webkitplaybacktargetavailabilitychangedEvent)
         return Node::addEventListener(eventType, WTFMove(listener), options);
 
@@ -5670,6 +5943,7 @@ bool HTMLMediaElement::addEventListener(const AtomicString& eventType, Ref<Event
 
 bool HTMLMediaElement::removeEventListener(const AtomicString& eventType, EventListener& listener, const ListenerOptions& options)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (eventType != eventNames().webkitplaybacktargetavailabilitychangedEvent)
         return Node::removeEventListener(eventType, listener, options);
 
@@ -5689,6 +5963,7 @@ bool HTMLMediaElement::removeEventListener(const AtomicString& eventType, EventL
 
 void HTMLMediaElement::enqueuePlaybackTargetAvailabilityChangedEvent()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     bool hasTargets = m_mediaSession->hasWirelessPlaybackTargets(*this);
     INFO_LOG(LOGIDENTIFIER, "hasTargets = ", hasTargets);
     auto event = WebKitPlaybackTargetAvailabilityEvent::create(eventNames().webkitplaybacktargetavailabilitychangedEvent, hasTargets);
@@ -5699,6 +5974,7 @@ void HTMLMediaElement::enqueuePlaybackTargetAvailabilityChangedEvent()
 
 void HTMLMediaElement::setWirelessPlaybackTarget(Ref<MediaPlaybackTarget>&& device)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
     if (m_player)
         m_player->setWirelessPlaybackTarget(WTFMove(device));
@@ -5706,6 +5982,7 @@ void HTMLMediaElement::setWirelessPlaybackTarget(Ref<MediaPlaybackTarget>&& devi
 
 bool HTMLMediaElement::canPlayToWirelessPlaybackTarget() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     bool canPlay = m_player && m_player->canPlayToWirelessPlaybackTarget();
 
     INFO_LOG(LOGIDENTIFIER, "returning ", canPlay);
@@ -5715,11 +5992,13 @@ bool HTMLMediaElement::canPlayToWirelessPlaybackTarget() const
 
 bool HTMLMediaElement::isPlayingToWirelessPlaybackTarget() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_isPlayingToWirelessTarget;
 }
 
 void HTMLMediaElement::setShouldPlayToPlaybackTarget(bool shouldPlay)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, "shouldPlay = ", shouldPlay);
 
     if (m_player)
@@ -5729,6 +6008,7 @@ void HTMLMediaElement::setShouldPlayToPlaybackTarget(bool shouldPlay)
 
 bool HTMLMediaElement::webkitCurrentPlaybackTargetIsWireless() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return false;
 }
 
@@ -5736,16 +6016,19 @@ bool HTMLMediaElement::webkitCurrentPlaybackTargetIsWireless() const
 
 double HTMLMediaElement::minFastReverseRate() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->minFastReverseRate() : 0;
 }
 
 double HTMLMediaElement::maxFastForwardRate() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->maxFastForwardRate() : 0;
 }
 
 bool HTMLMediaElement::isFullscreen() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_videoFullscreenMode != VideoFullscreenModeNone)
         return true;
 
@@ -5759,6 +6042,7 @@ bool HTMLMediaElement::isFullscreen() const
 
 bool HTMLMediaElement::isStandardFullscreen() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(FULLSCREEN_API)
     if (document().webkitIsFullScreen() && document().webkitCurrentFullScreenElement() == this)
         return true;
@@ -5769,6 +6053,7 @@ bool HTMLMediaElement::isStandardFullscreen() const
 
 void HTMLMediaElement::toggleStandardFullscreenState()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (isStandardFullscreen())
         exitFullscreen();
     else
@@ -5777,6 +6062,7 @@ void HTMLMediaElement::toggleStandardFullscreenState()
 
 void HTMLMediaElement::enterFullscreen(VideoFullscreenMode mode)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
     ASSERT(mode != VideoFullscreenModeNone);
 
@@ -5817,11 +6103,13 @@ void HTMLMediaElement::enterFullscreen(VideoFullscreenMode mode)
 
 void HTMLMediaElement::enterFullscreen()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     enterFullscreen(VideoFullscreenModeStandard);
 }
 
 void HTMLMediaElement::exitFullscreen()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
 #if ENABLE(FULLSCREEN_API)
@@ -5868,6 +6156,7 @@ void HTMLMediaElement::exitFullscreen()
 
 void HTMLMediaElement::willBecomeFullscreenElement()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE)
     HTMLMediaElementEnums::VideoFullscreenMode oldVideoFullscreenMode = m_videoFullscreenMode;
 #endif
@@ -5893,12 +6182,14 @@ void HTMLMediaElement::willBecomeFullscreenElement()
 
 void HTMLMediaElement::didBecomeFullscreenElement()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (hasMediaControls())
         mediaControls()->enteredFullscreen();
 }
 
 void HTMLMediaElement::willStopBeingFullscreenElement()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (hasMediaControls())
         mediaControls()->exitedFullscreen();
 
@@ -5908,16 +6199,19 @@ void HTMLMediaElement::willStopBeingFullscreenElement()
 
 PlatformMedia HTMLMediaElement::platformMedia() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->platformMedia() : NoPlatformMedia;
 }
 
 PlatformLayer* HTMLMediaElement::platformLayer() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->platformLayer() : nullptr;
 }
 
 void HTMLMediaElement::setPreparedToReturnVideoLayerToInline(bool value)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_preparedForInline = value;
     if (m_preparedForInline && m_preparedForInlineCompletionHandler) {
         m_preparedForInlineCompletionHandler();
@@ -5927,6 +6221,7 @@ void HTMLMediaElement::setPreparedToReturnVideoLayerToInline(bool value)
 
 void HTMLMediaElement::waitForPreparedForInlineThen(WTF::Function<void()>&& completionHandler)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(!m_preparedForInlineCompletionHandler);
     if (m_preparedForInline)  {
         completionHandler();
@@ -5940,11 +6235,13 @@ void HTMLMediaElement::waitForPreparedForInlineThen(WTF::Function<void()>&& comp
 
 bool HTMLMediaElement::isVideoLayerInline()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return !m_videoFullscreenLayer;
 };
 
 void HTMLMediaElement::setVideoFullscreenLayer(PlatformLayer* platformLayer, WTF::Function<void()>&& completionHandler)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_videoFullscreenLayer = platformLayer;
     if (!m_player) {
         completionHandler();
@@ -5960,6 +6257,7 @@ void HTMLMediaElement::setVideoFullscreenLayer(PlatformLayer* platformLayer, WTF
 
 void HTMLMediaElement::setVideoFullscreenFrame(FloatRect frame)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_videoFullscreenFrame = frame;
     if (m_player)
         m_player->setVideoFullscreenFrame(frame);
@@ -5967,6 +6265,7 @@ void HTMLMediaElement::setVideoFullscreenFrame(FloatRect frame)
 
 void HTMLMediaElement::setVideoFullscreenGravity(MediaPlayer::VideoGravity gravity)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_videoFullscreenGravity = gravity;
     if (m_player)
         m_player->setVideoFullscreenGravity(gravity);
@@ -5976,6 +6275,7 @@ void HTMLMediaElement::setVideoFullscreenGravity(MediaPlayer::VideoGravity gravi
 
 bool HTMLMediaElement::isVideoLayerInline()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return true;
 };
 
@@ -5983,6 +6283,7 @@ bool HTMLMediaElement::isVideoLayerInline()
 
 bool HTMLMediaElement::hasClosedCaptions() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_player && m_player->hasClosedCaptions())
         return true;
 
@@ -6004,6 +6305,7 @@ bool HTMLMediaElement::hasClosedCaptions() const
 
 bool HTMLMediaElement::closedCaptionsVisible() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_closedCaptionsVisible;
 }
 
@@ -6011,6 +6313,7 @@ bool HTMLMediaElement::closedCaptionsVisible() const
 
 void HTMLMediaElement::updateTextTrackDisplay()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
     ensureMediaControlsShadowRoot();
     if (!m_mediaControlsHost)
@@ -6028,6 +6331,7 @@ void HTMLMediaElement::updateTextTrackDisplay()
 
 void HTMLMediaElement::setClosedCaptionsVisible(bool closedCaptionVisible)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, closedCaptionVisible);
 
     m_closedCaptionsVisible = false;
@@ -6049,24 +6353,28 @@ void HTMLMediaElement::setClosedCaptionsVisible(bool closedCaptionVisible)
 
 void HTMLMediaElement::setWebkitClosedCaptionsVisible(bool visible)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_webkitLegacyClosedCaptionOverride = visible;
     setClosedCaptionsVisible(visible);
 }
 
 bool HTMLMediaElement::webkitClosedCaptionsVisible() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_webkitLegacyClosedCaptionOverride && m_closedCaptionsVisible;
 }
 
 
 bool HTMLMediaElement::webkitHasClosedCaptions() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return hasClosedCaptions();
 }
 
 #if ENABLE(MEDIA_STATISTICS)
 unsigned HTMLMediaElement::webkitAudioDecodedByteCount() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_player)
         return 0;
     return m_player->audioDecodedByteCount();
@@ -6074,6 +6382,7 @@ unsigned HTMLMediaElement::webkitAudioDecodedByteCount() const
 
 unsigned HTMLMediaElement::webkitVideoDecodedByteCount() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_player)
         return 0;
     return m_player->videoDecodedByteCount();
@@ -6082,6 +6391,7 @@ unsigned HTMLMediaElement::webkitVideoDecodedByteCount() const
 
 void HTMLMediaElement::mediaCanStart(Document& document)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT_UNUSED(document, &document == &this->document());
     INFO_LOG(LOGIDENTIFIER, "m_isWaitingUntilMediaCanStart = ", m_isWaitingUntilMediaCanStart, ", m_pausedInternal = ", m_pausedInternal);
 
@@ -6096,11 +6406,13 @@ void HTMLMediaElement::mediaCanStart(Document& document)
 
 bool HTMLMediaElement::isURLAttribute(const Attribute& attribute) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return attribute.name() == srcAttr || HTMLElement::isURLAttribute(attribute);
 }
 
 void HTMLMediaElement::setShouldDelayLoadEvent(bool shouldDelay)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_shouldDelayLoadEvent == shouldDelay)
         return;
 
@@ -6115,42 +6427,50 @@ void HTMLMediaElement::setShouldDelayLoadEvent(bool shouldDelay)
 
 static String& sharedMediaCacheDirectory()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     static NeverDestroyed<String> sharedMediaCacheDirectory;
     return sharedMediaCacheDirectory;
 }
 
 void HTMLMediaElement::setMediaCacheDirectory(const String& path)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     sharedMediaCacheDirectory() = path;
 }
 
 const String& HTMLMediaElement::mediaCacheDirectory()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return sharedMediaCacheDirectory();
 }
 
 HashSet<RefPtr<SecurityOrigin>> HTMLMediaElement::originsInMediaCache(const String& path)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return MediaPlayer::originsInMediaCache(path);
 }
 
 void HTMLMediaElement::clearMediaCache(const String& path, std::chrono::system_clock::time_point modifiedSince)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaPlayer::clearMediaCache(path, modifiedSince);
 }
 
 void HTMLMediaElement::clearMediaCacheForOrigins(const String& path, const HashSet<RefPtr<SecurityOrigin>>& origins)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaPlayer::clearMediaCacheForOrigins(path, origins);
 }
 
 void HTMLMediaElement::resetMediaEngines()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaPlayer::resetMediaEngines();
 }
 
 void HTMLMediaElement::privateBrowsingStateDidChange()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_player)
         return;
 
@@ -6160,6 +6480,7 @@ void HTMLMediaElement::privateBrowsingStateDidChange()
 
 MediaControls* HTMLMediaElement::mediaControls() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
     return nullptr;
 #else
@@ -6173,6 +6494,7 @@ MediaControls* HTMLMediaElement::mediaControls() const
 
 bool HTMLMediaElement::hasMediaControls() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
     return false;
 #else
@@ -6189,6 +6511,7 @@ bool HTMLMediaElement::hasMediaControls() const
 
 bool HTMLMediaElement::createMediaControls()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
     ensureMediaControlsShadowRoot();
     return false;
@@ -6216,12 +6539,14 @@ bool HTMLMediaElement::createMediaControls()
 
 bool HTMLMediaElement::shouldForceControlsDisplay() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // Always create controls for autoplay video that requires user gesture due to being in low power mode.
     return isVideo() && autoplay() && m_mediaSession->hasBehaviorRestriction(MediaElementSession::RequireUserGestureForVideoDueToLowPowerMode);
 }
 
 void HTMLMediaElement::configureMediaControls()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     bool requireControls = controls();
 
     // Always create controls for video when fullscreen playback is required.
@@ -6262,6 +6587,7 @@ void HTMLMediaElement::configureMediaControls()
 #if ENABLE(VIDEO_TRACK)
 void HTMLMediaElement::configureTextTrackDisplay(TextTrackVisibilityCheckType checkType)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(m_textTracks);
 
     if (m_processingPreferenceChange)
@@ -6306,6 +6632,7 @@ void HTMLMediaElement::configureTextTrackDisplay(TextTrackVisibilityCheckType ch
 
 void HTMLMediaElement::captionPreferencesChanged()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!isVideo())
         return;
 
@@ -6333,6 +6660,7 @@ void HTMLMediaElement::captionPreferencesChanged()
 
 void HTMLMediaElement::markCaptionAndSubtitleTracksAsUnconfigured(ReconfigureMode mode)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_textTracks)
         return;
 
@@ -6362,6 +6690,7 @@ void HTMLMediaElement::markCaptionAndSubtitleTracksAsUnconfigured(ReconfigureMod
 
 void HTMLMediaElement::createMediaPlayer()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER);
 
 #if ENABLE(WEB_AUDIO)
@@ -6403,6 +6732,7 @@ void HTMLMediaElement::createMediaPlayer()
 #if ENABLE(WEB_AUDIO)
 void HTMLMediaElement::setAudioSourceNode(MediaElementAudioSourceNode* sourceNode)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_audioSourceNode = sourceNode;
 
     if (audioSourceProvider())
@@ -6411,6 +6741,7 @@ void HTMLMediaElement::setAudioSourceNode(MediaElementAudioSourceNode* sourceNod
 
 AudioSourceProvider* HTMLMediaElement::audioSourceProvider()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_player)
         return m_player->audioSourceProvider();
 
@@ -6420,11 +6751,13 @@ AudioSourceProvider* HTMLMediaElement::audioSourceProvider()
 
 const String& HTMLMediaElement::mediaGroup() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_mediaGroup;
 }
 
 void HTMLMediaElement::setMediaGroup(const String& group)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_mediaGroup == group)
         return;
     m_mediaGroup = group;
@@ -6461,11 +6794,13 @@ void HTMLMediaElement::setMediaGroup(const String& group)
 
 MediaController* HTMLMediaElement::controller() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_mediaController.get();
 }
 
 void HTMLMediaElement::setController(RefPtr<MediaController>&& controller)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_mediaController)
         m_mediaController->removeMediaElement(*this);
 
@@ -6480,6 +6815,7 @@ void HTMLMediaElement::setController(RefPtr<MediaController>&& controller)
 
 void HTMLMediaElement::setControllerForBindings(MediaController* controller)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 4.8.10.11.2 Media controllers: controller attribute.
     // On setting, it must first remove the element's mediagroup attribute, if any,
     setMediaGroup({ });
@@ -6489,12 +6825,14 @@ void HTMLMediaElement::setControllerForBindings(MediaController* controller)
 
 void HTMLMediaElement::updateMediaController()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_mediaController)
         m_mediaController->reportControllerState();
 }
 
 bool HTMLMediaElement::isBlocked() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // A media element is a blocked media element if its readyState attribute is in the
     // HAVE_NOTHING state, the HAVE_METADATA state, or the HAVE_CURRENT_DATA state,
     if (m_readyState <= HAVE_CURRENT_DATA)
@@ -6506,6 +6844,7 @@ bool HTMLMediaElement::isBlocked() const
 
 bool HTMLMediaElement::isBlockedOnMediaController() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_mediaController)
         return false;
 
@@ -6526,6 +6865,7 @@ bool HTMLMediaElement::isBlockedOnMediaController() const
 
 void HTMLMediaElement::prepareMediaFragmentURI()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaFragmentURIParser fragmentParser(m_currentSrc);
     MediaTime dur = durationMediaTime();
 
@@ -6551,6 +6891,7 @@ void HTMLMediaElement::prepareMediaFragmentURI()
 
 void HTMLMediaElement::applyMediaFragmentURI()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_fragmentStartTime.isValid()) {
         m_sentEndEvent = false;
         seek(m_fragmentStartTime);
@@ -6559,6 +6900,7 @@ void HTMLMediaElement::applyMediaFragmentURI()
 
 void HTMLMediaElement::updateSleepDisabling()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     SleepType shouldDisableSleep = this->shouldDisableSleep();
     if (shouldDisableSleep == SleepType::None && m_sleepDisabler)
         m_sleepDisabler = nullptr;
@@ -6574,6 +6916,7 @@ void HTMLMediaElement::updateSleepDisabling()
 
 HTMLMediaElement::SleepType HTMLMediaElement::shouldDisableSleep() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if !PLATFORM(COCOA)
     return SleepType::None;
 #endif
@@ -6605,6 +6948,7 @@ HTMLMediaElement::SleepType HTMLMediaElement::shouldDisableSleep() const
 
 String HTMLMediaElement::mediaPlayerReferrer() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Frame* frame = document().frame();
     if (!frame)
         return String();
@@ -6614,6 +6958,7 @@ String HTMLMediaElement::mediaPlayerReferrer() const
 
 String HTMLMediaElement::mediaPlayerUserAgent() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Frame* frame = document().frame();
     if (!frame)
         return String();
@@ -6625,6 +6970,7 @@ String HTMLMediaElement::mediaPlayerUserAgent() const
 
 static inline PlatformTextTrack::TrackKind toPlatform(TextTrack::Kind kind)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     switch (kind) {
     case TextTrack::Kind::Captions:
         return PlatformTextTrack::Caption;
@@ -6645,6 +6991,7 @@ static inline PlatformTextTrack::TrackKind toPlatform(TextTrack::Kind kind)
 
 static inline PlatformTextTrack::TrackMode toPlatform(TextTrack::Mode mode)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     switch (mode) {
     case TextTrack::Mode::Disabled:
         return PlatformTextTrack::Disabled;
@@ -6659,6 +7006,7 @@ static inline PlatformTextTrack::TrackMode toPlatform(TextTrack::Mode mode)
 
 Vector<RefPtr<PlatformTextTrack>> HTMLMediaElement::outOfBandTrackSources()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Vector<RefPtr<PlatformTextTrack>> outOfBandTrackSources;
     for (auto& trackElement : childrenOfType<HTMLTrackElement>(*this)) {
         URL url = trackElement.getNonEmptyURLAttribute(srcAttr);
@@ -6694,41 +7042,49 @@ Vector<RefPtr<PlatformTextTrack>> HTMLMediaElement::outOfBandTrackSources()
 
 bool HTMLMediaElement::mediaPlayerNeedsSiteSpecificHacks() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return document().settings().needsSiteSpecificQuirks();
 }
 
 String HTMLMediaElement::mediaPlayerDocumentHost() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return document().url().host();
 }
 
 void HTMLMediaElement::mediaPlayerEnterFullscreen()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     enterFullscreen();
 }
 
 void HTMLMediaElement::mediaPlayerExitFullscreen()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     exitFullscreen();
 }
 
 bool HTMLMediaElement::mediaPlayerIsFullscreen() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return isFullscreen();
 }
 
 bool HTMLMediaElement::mediaPlayerIsFullscreenPermitted() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_mediaSession->fullscreenPermitted(*this);
 }
 
 bool HTMLMediaElement::mediaPlayerIsVideo() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return isVideo();
 }
 
 LayoutRect HTMLMediaElement::mediaPlayerContentBoxRect() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto* renderer = this->renderer();
     if (!renderer)
         return { };
@@ -6737,6 +7093,7 @@ LayoutRect HTMLMediaElement::mediaPlayerContentBoxRect() const
 
 float HTMLMediaElement::mediaPlayerContentsScale() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (auto page = document().page())
         return page->pageScaleFactor() * page->deviceScaleFactor();
     return 1;
@@ -6744,42 +7101,50 @@ float HTMLMediaElement::mediaPlayerContentsScale() const
 
 void HTMLMediaElement::mediaPlayerSetSize(const IntSize& size)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     setIntegralAttribute(widthAttr, size.width());
     setIntegralAttribute(heightAttr, size.height());
 }
 
 void HTMLMediaElement::mediaPlayerPause()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     pause();
 }
 
 void HTMLMediaElement::mediaPlayerPlay()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     play();
 }
 
 bool HTMLMediaElement::mediaPlayerPlatformVolumeConfigurationRequired() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return !m_volumeInitialized;
 }
 
 bool HTMLMediaElement::mediaPlayerIsPaused() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return paused();
 }
 
 bool HTMLMediaElement::mediaPlayerIsLooping() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return loop();
 }
 
 CachedResourceLoader* HTMLMediaElement::mediaPlayerCachedResourceLoader()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return &document().cachedResourceLoader();
 }
 
 RefPtr<PlatformMediaResourceLoader> HTMLMediaElement::mediaPlayerCreateResourceLoader()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto mediaResourceLoader = adoptRef(*new MediaResourceLoader(document(), *this, crossOrigin()));
 
     m_lastMediaResourceLoaderForTesting = mediaResourceLoader->createWeakPtr();
@@ -6789,11 +7154,13 @@ RefPtr<PlatformMediaResourceLoader> HTMLMediaElement::mediaPlayerCreateResourceL
 
 const MediaResourceLoader* HTMLMediaElement::lastMediaResourceLoaderForTesting() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_lastMediaResourceLoaderForTesting.get();
 }
 
 bool HTMLMediaElement::mediaPlayerShouldUsePersistentCache() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (Page* page = document().page())
         return !page->usesEphemeralSession() && !page->isResourceCachingDisabled();
 
@@ -6802,11 +7169,13 @@ bool HTMLMediaElement::mediaPlayerShouldUsePersistentCache() const
 
 const String& HTMLMediaElement::mediaPlayerMediaCacheDirectory() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return mediaCacheDirectory();
 }
 
 bool HTMLMediaElement::mediaPlayerShouldWaitForResponseToAuthenticationChallenge(const AuthenticationChallenge& challenge)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Frame* frame = document().frame();
     if (!frame)
         return false;
@@ -6828,6 +7197,7 @@ bool HTMLMediaElement::mediaPlayerShouldWaitForResponseToAuthenticationChallenge
 
 String HTMLMediaElement::sourceApplicationIdentifier() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (Frame* frame = document().frame()) {
         if (NetworkingContext* networkingContext = frame->loader().networkingContext())
             return networkingContext->sourceApplicationIdentifier();
@@ -6837,6 +7207,7 @@ String HTMLMediaElement::sourceApplicationIdentifier() const
 
 Vector<String> HTMLMediaElement::mediaPlayerPreferredAudioCharacteristics() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (Page* page = document().page())
         return page->group().captionPreferences().preferredAudioCharacteristics();
     return Vector<String>();
@@ -6845,22 +7216,26 @@ Vector<String> HTMLMediaElement::mediaPlayerPreferredAudioCharacteristics() cons
 #if PLATFORM(IOS)
 String HTMLMediaElement::mediaPlayerNetworkInterfaceName() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return document().settings().networkInterfaceName();
 }
 
 bool HTMLMediaElement::mediaPlayerGetRawCookies(const URL& url, Vector<Cookie>& cookies) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return getRawCookies(document(), url, cookies);
 }
 #endif
 
 bool HTMLMediaElement::mediaPlayerIsInMediaDocument() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return document().isMediaDocument();
 }
 
 void HTMLMediaElement::mediaPlayerEngineFailedToLoad() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_player)
         return;
 
@@ -6870,16 +7245,19 @@ void HTMLMediaElement::mediaPlayerEngineFailedToLoad() const
 
 double HTMLMediaElement::mediaPlayerRequestedPlaybackRate() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return potentiallyPlaying() ? requestedPlaybackRate() : 0;
 }
 
 const Vector<ContentType>& HTMLMediaElement::mediaContentTypesRequiringHardwareSupport() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return document().settings().mediaContentTypesRequiringHardwareSupport();
 }
 
 bool HTMLMediaElement::mediaPlayerShouldCheckHardwareSupport() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!document().settings().allowMediaContentTypesRequiringHardwareSupportAsFallback())
         return true;
 
@@ -6895,6 +7273,7 @@ bool HTMLMediaElement::mediaPlayerShouldCheckHardwareSupport() const
 #if USE(GSTREAMER)
 void HTMLMediaElement::requestInstallMissingPlugins(const String& details, const String& description, MediaPlayerRequestInstallMissingPluginsCallback& callback)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!document().page())
         return;
 
@@ -6904,6 +7283,7 @@ void HTMLMediaElement::requestInstallMissingPlugins(const String& details, const
 
 void HTMLMediaElement::removeBehaviorsRestrictionsAfterFirstUserGesture(MediaElementSession::BehaviorRestrictions mask)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaElementSession::BehaviorRestrictions restrictionsToRemove = mask &
         (MediaElementSession::RequireUserGestureForLoad
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
@@ -6924,6 +7304,7 @@ void HTMLMediaElement::removeBehaviorsRestrictionsAfterFirstUserGesture(MediaEle
 
 void HTMLMediaElement::updateRateChangeRestrictions()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     const auto& document = this->document();
     if (!document.ownerElement() && document.isMediaDocument())
         return;
@@ -6943,6 +7324,7 @@ void HTMLMediaElement::updateRateChangeRestrictions()
 #if ENABLE(MEDIA_SOURCE)
 RefPtr<VideoPlaybackQuality> HTMLMediaElement::getVideoPlaybackQuality()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     DOMWindow* domWindow = document().domWindow();
     double timestamp = domWindow ? 1000 * domWindow->nowTimestamp() : 0;
 
@@ -6961,6 +7343,7 @@ RefPtr<VideoPlaybackQuality> HTMLMediaElement::getVideoPlaybackQuality()
 #if ENABLE(MEDIA_CONTROLS_SCRIPT)
 DOMWrapperWorld& HTMLMediaElement::ensureIsolatedWorld()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_isolatedWorld)
         m_isolatedWorld = DOMWrapperWorld::create(commonVM());
     return *m_isolatedWorld;
@@ -6968,6 +7351,7 @@ DOMWrapperWorld& HTMLMediaElement::ensureIsolatedWorld()
 
 bool HTMLMediaElement::ensureMediaControlsInjectedScript()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     DEBUG_LOG(LOGIDENTIFIER);
     Page* page = document().page();
     if (!page)
@@ -7006,6 +7390,7 @@ bool HTMLMediaElement::ensureMediaControlsInjectedScript()
 
 void HTMLMediaElement::updatePageScaleFactorJSProperty()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Page* page = document().page();
     if (!page)
         return;
@@ -7015,6 +7400,7 @@ void HTMLMediaElement::updatePageScaleFactorJSProperty()
 
 void HTMLMediaElement::updateUsesLTRUserInterfaceLayoutDirectionJSProperty()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Page* page = document().page();
     if (!page)
         return;
@@ -7025,6 +7411,7 @@ void HTMLMediaElement::updateUsesLTRUserInterfaceLayoutDirectionJSProperty()
 
 void HTMLMediaElement::setControllerJSProperty(const char* propertyName, JSC::JSValue propertyValue)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     DOMWrapperWorld& world = ensureIsolatedWorld();
     ScriptController& scriptController = document().frame()->script();
     JSDOMGlobalObject* globalObject = JSC::jsCast<JSDOMGlobalObject*>(scriptController.globalObject(world));
@@ -7046,6 +7433,7 @@ void HTMLMediaElement::setControllerJSProperty(const char* propertyName, JSC::JS
 
 void HTMLMediaElement::didAddUserAgentShadowRoot(ShadowRoot* root)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     DEBUG_LOG(LOGIDENTIFIER);
 
     Page* page = document().page();
@@ -7129,6 +7517,7 @@ void HTMLMediaElement::didAddUserAgentShadowRoot(ShadowRoot* root)
 
 void HTMLMediaElement::setMediaControlsDependOnPageScaleFactor(bool dependsOnPageScale)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     DEBUG_LOG(LOGIDENTIFIER, "MediaElement::setMediaControlsDependPageScaleFactor", dependsOnPageScale);
 
     if (document().settings().mediaControlsScaleWithPageZoom()) {
@@ -7150,6 +7539,7 @@ void HTMLMediaElement::setMediaControlsDependOnPageScaleFactor(bool dependsOnPag
 
 void HTMLMediaElement::updateMediaControlsAfterPresentationModeChange()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // Don't execute script if the controls script hasn't been injected yet, or we have
     // stopped/suspended the object.
     if (!m_mediaControlsHost || document().activeDOMObjectsAreSuspended() || document().activeDOMObjectsAreStopped())
@@ -7185,16 +7575,19 @@ void HTMLMediaElement::updateMediaControlsAfterPresentationModeChange()
 
 void HTMLMediaElement::pageScaleFactorChanged()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     updatePageScaleFactorJSProperty();
 }
 
 void HTMLMediaElement::userInterfaceLayoutDirectionChanged()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     updateUsesLTRUserInterfaceLayoutDirectionJSProperty();
 }
 
 String HTMLMediaElement::getCurrentMediaControlsStatus()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     DOMWrapperWorld& world = ensureIsolatedWorld();
     ensureMediaControlsShadowRoot();
 
@@ -7232,6 +7625,7 @@ String HTMLMediaElement::getCurrentMediaControlsStatus()
 
 unsigned long long HTMLMediaElement::fileSize() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_player)
         return m_player->fileSize();
 
@@ -7240,6 +7634,7 @@ unsigned long long HTMLMediaElement::fileSize() const
 
 PlatformMediaSession::MediaType HTMLMediaElement::mediaType() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_player && m_readyState >= HAVE_METADATA) {
         if (hasVideo() && hasAudio() && !muted())
             return PlatformMediaSession::VideoAudio;
@@ -7251,6 +7646,7 @@ PlatformMediaSession::MediaType HTMLMediaElement::mediaType() const
 
 PlatformMediaSession::MediaType HTMLMediaElement::presentationType() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (hasTagName(HTMLNames::videoTag))
         return muted() ? PlatformMediaSession::Video : PlatformMediaSession::VideoAudio;
 
@@ -7259,6 +7655,7 @@ PlatformMediaSession::MediaType HTMLMediaElement::presentationType() const
 
 PlatformMediaSession::DisplayType HTMLMediaElement::displayType() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_videoFullscreenMode == VideoFullscreenModeStandard)
         return PlatformMediaSession::Fullscreen;
     if (m_videoFullscreenMode & VideoFullscreenModePictureInPicture)
@@ -7272,6 +7669,7 @@ PlatformMediaSession::DisplayType HTMLMediaElement::displayType() const
 
 PlatformMediaSession::CharacteristicsFlags HTMLMediaElement::characteristics() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_readyState < HAVE_METADATA)
         return PlatformMediaSession::HasNothing;
 
@@ -7286,6 +7684,7 @@ PlatformMediaSession::CharacteristicsFlags HTMLMediaElement::characteristics() c
 
 bool HTMLMediaElement::canProduceAudio() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
     // Because the remote target could unmute playback without notifying us, we must assume
     // that we may be playing audio.
@@ -7301,18 +7700,21 @@ bool HTMLMediaElement::canProduceAudio() const
 
 bool HTMLMediaElement::isSuspended() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return document().activeDOMObjectsAreSuspended() || document().activeDOMObjectsAreStopped();
 }
 
 #if ENABLE(MEDIA_SOURCE)
 size_t HTMLMediaElement::maximumSourceBufferSize(const SourceBuffer& buffer) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_mediaSession->maximumMediaSourceBufferSize(buffer);
 }
 #endif
 
 void HTMLMediaElement::suspendPlayback()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, "paused = ", paused());
     if (!paused())
         pause();
@@ -7320,6 +7722,7 @@ void HTMLMediaElement::suspendPlayback()
 
 void HTMLMediaElement::resumeAutoplaying()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, "paused = ", paused());
     m_autoplaying = true;
 
@@ -7329,6 +7732,7 @@ void HTMLMediaElement::resumeAutoplaying()
 
 void HTMLMediaElement::mayResumePlayback(bool shouldResume)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, "paused = ", paused());
     if (paused() && shouldResume)
         play();
@@ -7336,6 +7740,7 @@ void HTMLMediaElement::mayResumePlayback(bool shouldResume)
 
 String HTMLMediaElement::mediaSessionTitle() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (hasAttributeWithoutSynchronization(titleAttr))
         return attributeWithoutSynchronization(titleAttr);
 
@@ -7344,6 +7749,7 @@ String HTMLMediaElement::mediaSessionTitle() const
 
 void HTMLMediaElement::didReceiveRemoteControlCommand(PlatformMediaSession::RemoteControlCommandType command, const PlatformMediaSession::RemoteCommandArgument* argument)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     INFO_LOG(LOGIDENTIFIER, static_cast<int>(command));
 
     UserGestureIndicator remoteControlUserGesture(ProcessingUserGesture, &document());
@@ -7380,6 +7786,7 @@ void HTMLMediaElement::didReceiveRemoteControlCommand(PlatformMediaSession::Remo
 
 static bool needsSeekingSupportQuirk(Document& document)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!document.settings().needsSiteSpecificQuirks())
         return false;
 
@@ -7389,11 +7796,13 @@ static bool needsSeekingSupportQuirk(Document& document)
 
 bool HTMLMediaElement::supportsSeeking() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return !needsSeekingSupportQuirk(document()) && !isLiveStream();
 }
 
 bool HTMLMediaElement::shouldOverrideBackgroundPlaybackRestriction(PlatformMediaSession::InterruptionType type) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (type == PlatformMediaSession::EnteringBackground) {
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
         if (m_isPlayingToWirelessTarget) {
@@ -7420,12 +7829,14 @@ bool HTMLMediaElement::shouldOverrideBackgroundPlaybackRestriction(PlatformMedia
 
 bool HTMLMediaElement::processingUserGestureForMedia() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return document().processingUserGestureForMedia();
 }
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
 void HTMLMediaElement::updateMediaState(UpdateState updateState)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (updateState == UpdateState::Asynchronously) {
         scheduleDelayedAction(CheckMediaState);
         return;
@@ -7447,6 +7858,7 @@ void HTMLMediaElement::updateMediaState(UpdateState updateState)
 
 MediaProducer::MediaStateFlags HTMLMediaElement::mediaState() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaStateFlags state = IsNotPlaying;
 
     bool hasActiveVideo = isVideo() && hasVideo();
@@ -7486,6 +7898,7 @@ MediaProducer::MediaStateFlags HTMLMediaElement::mediaState() const
 
 void HTMLMediaElement::handleAutoplayEvent(AutoplayEvent event)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (Page* page = document().page()) {
         bool hasAudio = this->hasAudio() && !muted() && volume();
         page->chrome().client().handleAutoplayEvent(event, hasAudio ? AutoplayEventFlags::HasAudio : OptionSet<AutoplayEventFlags>());
@@ -7494,6 +7907,7 @@ void HTMLMediaElement::handleAutoplayEvent(AutoplayEvent event)
 
 void HTMLMediaElement::userDidInterfereWithAutoplay()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_playbackWithoutUserGesture != PlaybackWithoutUserGesture::Started)
         return;
 
@@ -7507,6 +7921,7 @@ void HTMLMediaElement::userDidInterfereWithAutoplay()
 
 void HTMLMediaElement::setPlaybackWithoutUserGesture(PlaybackWithoutUserGesture playbackWithoutUserGesture)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_playbackWithoutUserGesture = playbackWithoutUserGesture;
 
     switch (playbackWithoutUserGesture) {
@@ -7528,6 +7943,7 @@ void HTMLMediaElement::setPlaybackWithoutUserGesture(PlaybackWithoutUserGesture 
 
 void HTMLMediaElement::pageMutedStateDidChange()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     updateVolume();
 
     if (Page* page = document().page()) {
@@ -7538,11 +7954,13 @@ void HTMLMediaElement::pageMutedStateDidChange()
 
 bool HTMLMediaElement::effectiveMuted() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return muted() || (document().page() && document().page()->isAudioMuted());
 }
 
 bool HTMLMediaElement::doesHaveAttribute(const AtomicString& attribute, AtomicString* value) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     QualifiedName attributeName(nullAtom(), attribute, nullAtom());
 
     auto& elementValue = attributeWithoutSynchronization(attributeName);
@@ -7560,12 +7978,14 @@ bool HTMLMediaElement::doesHaveAttribute(const AtomicString& attribute, AtomicSt
 
 void HTMLMediaElement::setShouldBufferData(bool shouldBuffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_player)
         m_player->setShouldBufferData(shouldBuffer);
 }
 
 void HTMLMediaElement::purgeBufferedDataIfPossible()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if PLATFORM(IOS)
     if (!MemoryPressureHandler::singleton().isUnderMemoryPressure() && PlatformMediaSessionManager::sharedManager().sessionCanLoadMedia(*m_mediaSession))
         return;
@@ -7586,6 +8006,7 @@ void HTMLMediaElement::purgeBufferedDataIfPossible()
 
 bool HTMLMediaElement::canSaveMediaData() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_player)
         return m_player->canSaveMediaData();
 
@@ -7595,11 +8016,13 @@ bool HTMLMediaElement::canSaveMediaData() const
 #if ENABLE(MEDIA_SESSION)
 double HTMLMediaElement::playerVolume() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_player ? m_player->volume() : 0;
 }
 
 MediaSession* HTMLMediaElement::session() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaSession* session = m_session.get();
     if (session && session == &document().defaultMediaSession())
         return nullptr;
@@ -7609,6 +8032,7 @@ MediaSession* HTMLMediaElement::session() const
 
 void HTMLMediaElement::setSession(MediaSession* session)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 6.1. Extensions to the HTMLMediaElement interface
     // 1. Let m be the media element in question.
     // 2. Let old media session be m’s current media session, if it has one, and null otherwise.
@@ -7639,6 +8063,7 @@ void HTMLMediaElement::setSession(MediaSession* session)
 
 void HTMLMediaElement::setSessionInternal(MediaSession& session)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_session = &session;
     session.addMediaElement(*this);
     m_kind = session.kind();
@@ -7646,6 +8071,7 @@ void HTMLMediaElement::setSessionInternal(MediaSession& session)
 
 void HTMLMediaElement::setShouldDuck(bool duck)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_shouldDuck == duck)
         return;
 
@@ -7657,12 +8083,14 @@ void HTMLMediaElement::setShouldDuck(bool duck)
 
 void HTMLMediaElement::allowsMediaDocumentInlinePlaybackChanged()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (potentiallyPlaying() && m_mediaSession->requiresFullscreenForVideoPlayback(*this) && !isFullscreen())
         enterFullscreen();
 }
 
 bool HTMLMediaElement::isVideoTooSmallForInlinePlayback()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto* renderer = this->renderer();
 
     if (!renderer || !is<RenderVideo>(*renderer))
@@ -7674,6 +8102,7 @@ bool HTMLMediaElement::isVideoTooSmallForInlinePlayback()
 
 void HTMLMediaElement::isVisibleInViewportChanged()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_visibilityChangeTaskQueue.enqueueTask([this] {
         updateShouldAutoplay();
         scheduleUpdatePlaybackControlsManager();
@@ -7682,6 +8111,7 @@ void HTMLMediaElement::isVisibleInViewportChanged()
 
 void HTMLMediaElement::updateShouldAutoplay()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!autoplay())
         return;
 
@@ -7700,6 +8130,7 @@ void HTMLMediaElement::updateShouldAutoplay()
 
 void HTMLMediaElement::updateShouldPlay()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!paused() && !m_mediaSession->playbackPermitted(*this)) {
         pauseInternal();
         setPlaybackWithoutUserGesture(PlaybackWithoutUserGesture::Prevented);
@@ -7709,18 +8140,21 @@ void HTMLMediaElement::updateShouldPlay()
 
 void HTMLMediaElement::resetPlaybackSessionState()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_mediaSession)
         m_mediaSession->resetPlaybackSessionState();
 }
 
 bool HTMLMediaElement::isVisibleInViewport() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto renderer = this->renderer();
     return renderer && renderer->visibleInViewportState() == VisibleInViewportState::Yes;
 }
 
 void HTMLMediaElement::updatePlaybackControlsManager()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Page* page = document().page();
     if (!page)
         return;
@@ -7734,12 +8168,14 @@ void HTMLMediaElement::updatePlaybackControlsManager()
 
 void HTMLMediaElement::scheduleUpdatePlaybackControlsManager()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_updatePlaybackControlsManagerQueue.hasPendingTasks())
         m_updatePlaybackControlsManagerQueue.enqueueTask(std::bind(&HTMLMediaElement::updatePlaybackControlsManager, this));
 }
 
 void HTMLMediaElement::playbackControlsManagerBehaviorRestrictionsTimerFired()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_playbackControlsManagerBehaviorRestrictionsQueue.hasPendingTasks())
         return;
 
@@ -7759,6 +8195,7 @@ void HTMLMediaElement::playbackControlsManagerBehaviorRestrictionsTimerFired()
 
 bool HTMLMediaElement::shouldOverrideBackgroundLoadingRestriction() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
     if (isPlayingToWirelessPlaybackTarget())
         return true;
@@ -7769,6 +8206,7 @@ bool HTMLMediaElement::shouldOverrideBackgroundLoadingRestriction() const
 
 void HTMLMediaElement::fullscreenModeChanged(VideoFullscreenMode mode)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (m_videoFullscreenMode == mode)
         return;
 
@@ -7781,12 +8219,14 @@ void HTMLMediaElement::fullscreenModeChanged(VideoFullscreenMode mode)
 #if !RELEASE_LOG_DISABLED
 WTFLogChannel& HTMLMediaElement::logChannel() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return LogMedia;
 }
 #endif
 
 bool HTMLMediaElement::willLog(WTFLogLevel level) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if !RELEASE_LOG_DISABLED
     return m_logger->willLog(logChannel(), level);
 #else

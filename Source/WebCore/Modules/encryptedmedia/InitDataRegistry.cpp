@@ -48,6 +48,7 @@ namespace {
 
 static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsKeyids(const SharedBuffer& buffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 1. Format
     // https://w3c.github.io/encrypted-media/format-registry/initdata/keyids.html#format
     if (buffer.size() > std::numeric_limits<unsigned>::max())
@@ -88,6 +89,7 @@ static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsKeyids(const Shared
 
 static RefPtr<SharedBuffer> sanitizeKeyids(const SharedBuffer& buffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 1. Format
     // https://w3c.github.io/encrypted-media/format-registry/initdata/keyids.html#format
     auto keyIDBuffer = extractKeyIDsKeyids(buffer);
@@ -106,6 +108,7 @@ static RefPtr<SharedBuffer> sanitizeKeyids(const SharedBuffer& buffer)
 
 static RefPtr<SharedBuffer> sanitizeCenc(const SharedBuffer& buffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 4. Common SystemID and PSSH Box Format
     // https://w3c.github.io/encrypted-media/format-registry/initdata/cenc.html#common-system
     notImplemented();
@@ -114,6 +117,7 @@ static RefPtr<SharedBuffer> sanitizeCenc(const SharedBuffer& buffer)
 
 static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsCenc(const SharedBuffer&)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 4. Common SystemID and PSSH Box Format
     // https://w3c.github.io/encrypted-media/format-registry/initdata/cenc.html#common-system
     notImplemented();
@@ -122,6 +126,7 @@ static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsCenc(const SharedBu
 
 static RefPtr<SharedBuffer> sanitizeWebM(const SharedBuffer& buffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // Check if the buffer is a valid WebM initData.
     // The WebM initData is the ContentEncKeyID, so should be less than kWebMMaxContentEncKeyIDSize.
     if (buffer.isEmpty() || buffer.size() > kWebMMaxContentEncKeyIDSize)
@@ -132,6 +137,7 @@ static RefPtr<SharedBuffer> sanitizeWebM(const SharedBuffer& buffer)
 
 static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsWebM(const SharedBuffer& buffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     Vector<Ref<SharedBuffer>> keyIDs;
     RefPtr<SharedBuffer> sanitizedBuffer = sanitizeWebM(buffer);
     if (!sanitizedBuffer)
@@ -145,12 +151,14 @@ static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsWebM(const SharedBu
 
 InitDataRegistry& InitDataRegistry::shared()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     static NeverDestroyed<InitDataRegistry> registry;
     return registry.get();
 }
 
 InitDataRegistry::InitDataRegistry()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     registerInitDataType("keyids", { sanitizeKeyids, extractKeyIDsKeyids });
     registerInitDataType("cenc", { sanitizeCenc, extractKeyIDsCenc });
     registerInitDataType("webm", { sanitizeWebM, extractKeyIDsWebM });
@@ -160,6 +168,7 @@ InitDataRegistry::~InitDataRegistry() = default;
 
 RefPtr<SharedBuffer> InitDataRegistry::sanitizeInitData(const AtomicString& initDataType, const SharedBuffer& buffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto iter = m_types.find(initDataType);
     if (iter == m_types.end() || !iter->value.sanitizeInitData)
         return nullptr;
@@ -168,6 +177,7 @@ RefPtr<SharedBuffer> InitDataRegistry::sanitizeInitData(const AtomicString& init
 
 std::optional<Vector<Ref<SharedBuffer>>> InitDataRegistry::extractKeyIDs(const AtomicString& initDataType, const SharedBuffer& buffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto iter = m_types.find(initDataType);
     if (iter == m_types.end() || !iter->value.sanitizeInitData)
         return std::nullopt;
@@ -176,6 +186,7 @@ std::optional<Vector<Ref<SharedBuffer>>> InitDataRegistry::extractKeyIDs(const A
 
 void InitDataRegistry::registerInitDataType(const AtomicString& initDataType, InitDataTypeCallbacks&& callbacks)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(!m_types.contains(initDataType));
     m_types.set(initDataType, WTFMove(callbacks));
 }

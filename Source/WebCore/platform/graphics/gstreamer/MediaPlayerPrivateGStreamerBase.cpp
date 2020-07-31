@@ -155,6 +155,7 @@ static const GstStreamVolumeFormat volumeFormat = GST_STREAM_VOLUME_FORMAT_CUBIC
 
 void MediaPlayerPrivateGStreamerBase::ensureWebKitGStreamerElements()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if USE(GSTREAMER_WEBKIT_HTTP_SRC)
     GRefPtr<GstElementFactory> srcFactory = adoptGRef(gst_element_factory_find("webkitwebsrc"));
     if (!srcFactory)
@@ -162,12 +163,17 @@ void MediaPlayerPrivateGStreamerBase::ensureWebKitGStreamerElements()
 #endif
 
 #if ENABLE(ENCRYPTED_MEDIA)
-    if (!webkitGstCheckVersion(1, 6, 1))
+    if (!webkitGstCheckVersion(1, 6, 1)) {
+        printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
         return;
+    }
 #if USE(OPENCDM)
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     GRefPtr<GstElementFactory> decryptorFactory = adoptGRef(gst_element_factory_find("webkitopencdm"));
-    if (!decryptorFactory)
+    if (!decryptorFactory) {
+        printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
         gst_element_register(0, "webkitopencdm", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_OPENCDM_DECRYPT);
+    }
 #else
     GST_ERROR("Register webkitclearkey factory");
 
@@ -187,11 +193,14 @@ void MediaPlayerPrivateGStreamerBase::ensureWebKitGStreamerElements()
 
 bool MediaPlayerPrivateGStreamerBase::initializeGStreamer()
 {
-    if (!WebCore::initializeGStreamer())
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
+    if (!WebCore::initializeGStreamer()) {
+        printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
         return false;
-
+    }
     static bool gstDebugEnabled = false;
     if (!gstDebugEnabled) {
+        printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
         GST_DEBUG_CATEGORY_INIT(webkit_media_player_debug, "webkitmediaplayer", 0, "WebKit media player");
         gstDebugEnabled = true;
     }
@@ -1401,10 +1410,13 @@ void MediaPlayerPrivateGStreamerBase::initializationDataEncountered(const String
 
 void MediaPlayerPrivateGStreamerBase::cdmInstanceAttached(const CDMInstance& instance)
 {
+    GST_TRACE("instance: %p, m_cdmInstance: %p", &instance, m_cdmInstance);
     ASSERT(isMainThread());
 
-    if (m_cdmInstance == &instance)
+    if (m_cdmInstance == &instance) {
+        GST_ERROR("The same instance !");
         return;
+    }
 
     if (!m_pipeline) {
         GST_ERROR("no pipeline yet");
@@ -1481,6 +1493,7 @@ bool MediaPlayerPrivateGStreamerBase::supportsKeySystem(const String& keySystem,
 
 MediaPlayer::SupportsType MediaPlayerPrivateGStreamerBase::extendedSupportsType(const MediaEngineSupportParameters& parameters, MediaPlayer::SupportsType result)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 #if ENABLE(ENCRYPTED_MEDIA)
     if (result != MediaPlayer::IsNotSupported) {
         String cryptoblockformat = parameters.type.parameter("cryptoblockformat");

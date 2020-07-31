@@ -38,6 +38,9 @@ inline bool webkitGstCheckVersion(guint major, guint minor, guint micro)
     guint currentMajor, currentMinor, currentMicro, currentNano;
     gst_version(&currentMajor, &currentMinor, &currentMicro, &currentNano);
 
+    printf("[%s:%d] ++%s(major: %d, minor: %d, micro: %d)\n", __FILE__, __LINE__, __func__, major, minor, micro);
+    printf("[%s:%d] current version: %d.%d.%d.%d\n", __FILE__, __LINE__, currentMajor, currentMinor, currentMicro, currentNano);
+
     if (currentMajor < major)
         return false;
     if (currentMajor > major)

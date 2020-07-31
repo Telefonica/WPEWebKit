@@ -38,12 +38,14 @@ MediaKeyMessageEvent::MediaKeyMessageEvent(const AtomicString& type, const Media
     , m_messageType(initializer.messageType)
     , m_message(initializer.message)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 }
 
 MediaKeyMessageEvent::~MediaKeyMessageEvent() = default;
 
 EventInterface MediaKeyMessageEvent::eventInterface() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return MediaKeyMessageEventInterfaceType;
 }
 

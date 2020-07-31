@@ -47,12 +47,14 @@ MediaKeys::MediaKeys(bool useDistinctiveIdentifier, bool persistentStateAllowed,
     , m_implementation(WTFMove(implementation))
     , m_instance(WTFMove(instance))
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 }
 
 MediaKeys::~MediaKeys() = default;
 
 ExceptionOr<Ref<MediaKeySession>> MediaKeys::createSession(ScriptExecutionContext& context, MediaKeySessionType sessionType)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#dom-mediakeys-setservercertificate
     // W3C Editor's Draft 09 November 2016
 
@@ -77,6 +79,7 @@ ExceptionOr<Ref<MediaKeySession>> MediaKeys::createSession(ScriptExecutionContex
 
 void MediaKeys::setServerCertificate(const BufferSource& serverCertificate, Ref<DeferredPromise>&& promise)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#dom-mediakeys-setservercertificate
     // W3C Editor's Draft 09 November 2016
 
@@ -117,24 +120,28 @@ void MediaKeys::setServerCertificate(const BufferSource& serverCertificate, Ref<
 
 void MediaKeys::attachCDMClient(CDMClient& client)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(!m_cdmClients.contains(&client));
     m_cdmClients.append(&client);
 }
 
 void MediaKeys::detachCDMClient(CDMClient& client)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(m_cdmClients.contains(&client));
     m_cdmClients.removeFirst(&client);
 }
 
 void MediaKeys::attemptToResumePlaybackOnClients()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     for (auto* cdmClient : m_cdmClients)
         cdmClient->cdmClientAttemptToResumePlaybackIfNecessary();
 }
 
 bool MediaKeys::hasOpenSessions() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return std::any_of(m_sessions.begin(), m_sessions.end(),
         [](auto& session) {
             return !session->isClosed();

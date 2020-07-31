@@ -618,16 +618,19 @@ void MediaPlayer::keyAdded()
 #if ENABLE(ENCRYPTED_MEDIA)
 void MediaPlayer::cdmInstanceAttached(const CDMInstance& instance)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_private->cdmInstanceAttached(instance);
 }
 
 void MediaPlayer::cdmInstanceDetached(const CDMInstance& instance)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_private->cdmInstanceDetached(instance);
 }
 
 void MediaPlayer::attemptToDecryptWithInstance(const CDMInstance& instance)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_private->attemptToDecryptWithInstance(instance);
 }
 #endif
@@ -1289,6 +1292,7 @@ String MediaPlayer::mediaKeysStorageDirectory() const
 #if ENABLE(ENCRYPTED_MEDIA)
 void MediaPlayer::initializationDataEncountered(const String& initDataType, RefPtr<ArrayBuffer>&& initData)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     client().mediaPlayerInitializationDataEncountered(initDataType, WTFMove(initData));
 }
 #endif

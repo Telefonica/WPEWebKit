@@ -57,25 +57,26 @@ public:
         : m_openCDMKeySystem(keySystem)
         , m_openCDMSystem(opencdm_create_system(keySystem.utf8().data()))
     {
+        printf("[%s:%d] ++%s(keySystem: %s)\n", __FILE__, __LINE__, __func__, keySystem.utf8().data());
     }
     virtual ~CDMPrivateOpenCDM() = default;
 
 public:
-    bool supportsInitDataType(const AtomicString& initDataType) const final { return equalLettersIgnoringASCIICase(initDataType, "cenc") || equalLettersIgnoringASCIICase(initDataType, "webm"); }
+    bool supportsInitDataType(const AtomicString& initDataType) const final { printf("[%s:%d] ++%s(initDataType: %s)\n", __FILE__, __LINE__, __func__, initDataType.characters8()); return equalLettersIgnoringASCIICase(initDataType, "cenc") || equalLettersIgnoringASCIICase(initDataType, "webm"); }
     bool supportsConfiguration(const MediaKeySystemConfiguration& config) const final;
-    bool supportsConfigurationWithRestrictions(const MediaKeySystemConfiguration& config, const MediaKeysRestrictions&) const final { return supportsConfiguration(config); }
-    bool supportsSessionTypeWithConfiguration(MediaKeySessionType&, const MediaKeySystemConfiguration& config) const final { return supportsConfiguration(config); }
+    bool supportsConfigurationWithRestrictions(const MediaKeySystemConfiguration& config, const MediaKeysRestrictions&) const final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return supportsConfiguration(config); }
+    bool supportsSessionTypeWithConfiguration(MediaKeySessionType&, const MediaKeySystemConfiguration& config) const final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return supportsConfiguration(config); }
     bool supportsRobustness(const String& robustness) const final { return !robustness.isEmpty(); }
-    MediaKeysRequirement distinctiveIdentifiersRequirement(const MediaKeySystemConfiguration&, const MediaKeysRestrictions&) const final { return MediaKeysRequirement::Optional; }
-    MediaKeysRequirement persistentStateRequirement(const MediaKeySystemConfiguration&, const MediaKeysRestrictions&) const final { return MediaKeysRequirement::Optional; }
-    bool distinctiveIdentifiersAreUniquePerOriginAndClearable(const MediaKeySystemConfiguration&) const final { return false; }
-    RefPtr<CDMInstance> createInstance() final { return adoptRef(new CDMInstanceOpenCDM(*m_openCDMSystem, m_openCDMKeySystem)); }
+    MediaKeysRequirement distinctiveIdentifiersRequirement(const MediaKeySystemConfiguration&, const MediaKeysRestrictions&) const final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return MediaKeysRequirement::Optional; }
+    MediaKeysRequirement persistentStateRequirement(const MediaKeySystemConfiguration&, const MediaKeysRestrictions&) const final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return MediaKeysRequirement::Optional; }
+    bool distinctiveIdentifiersAreUniquePerOriginAndClearable(const MediaKeySystemConfiguration&) const final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return false; }
+    RefPtr<CDMInstance> createInstance() final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return adoptRef(new CDMInstanceOpenCDM(*m_openCDMSystem, m_openCDMKeySystem)); }
     void loadAndInitialize() final { }
-    bool supportsServerCertificates() const final { return true; }
-    bool supportsSessions() const final { return true; }
-    bool supportsInitData(const AtomicString& initDataType, const SharedBuffer&) const final { return supportsInitDataType(initDataType); }
-    RefPtr<SharedBuffer> sanitizeResponse(const SharedBuffer& response) const final { return response.copy(); }
-    std::optional<String> sanitizeSessionId(const String& sessionId) const final { return sessionId; }
+    bool supportsServerCertificates() const final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return true; }
+    bool supportsSessions() const final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return true; }
+    bool supportsInitData(const AtomicString& initDataType, const SharedBuffer&) const final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return supportsInitDataType(initDataType); }
+    RefPtr<SharedBuffer> sanitizeResponse(const SharedBuffer& response) const final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return response.copy(); }
+    std::optional<String> sanitizeSessionId(const String& sessionId) const final { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return sessionId; }
 
 private:
     String m_openCDMKeySystem;
@@ -93,23 +94,25 @@ public:
     static Ref<Session> create(CDMInstanceOpenCDM*, OpenCDMSystem&, const String&, const AtomicString&, Ref<WebCore::SharedBuffer>&&, LicenseType, Ref<WebCore::SharedBuffer>&&);
     ~Session();
 
-    bool isValid() const { return m_session.get() && m_message && !m_message->isEmpty(); }
-    const String& id() const { return m_id; }
-    Ref<SharedBuffer> message() const { ASSERT(m_message); return Ref<SharedBuffer>(*m_message.get()); }
-    bool needsIndividualization() const { return m_needsIndividualization; }
-    const Ref<WebCore::SharedBuffer>& initData() const { return m_initData; }
+    bool isValid() const { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return m_session.get() && m_message && !m_message->isEmpty(); }
+    const String& id() const { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return m_id; }
+    Ref<SharedBuffer> message() const { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); ASSERT(m_message); return Ref<SharedBuffer>(*m_message.get()); }
+    bool needsIndividualization() const { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return m_needsIndividualization; }
+    const Ref<WebCore::SharedBuffer>& initData() const { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__); return m_initData; }
     void generateChallenge(ChallengeGeneratedCallback&&);
     void update(const uint8_t*, unsigned, SessionChangedCallback&&);
     void load(SessionChangedCallback&&);
     void remove(SessionChangedCallback&&);
-    bool close() { return m_session && !id().isEmpty() ? !opencdm_session_close(m_session.get()) : true; }
+    bool close() { printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);  return m_session && !id().isEmpty() ? !opencdm_session_close(m_session.get()) : true; }
     OCDMKeyStatus status(const SharedBuffer& keyId) const
     {
+        printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
         return m_session && !id().isEmpty() ? opencdm_session_status(m_session.get(), reinterpret_cast<const uint8_t*>(keyId.data()), keyId.size()) : StatusPending;
     }
 
     bool containsKeyId(const SharedBuffer& keyId) const
     {
+        printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
         if (!keyId.data())
             return false;
 
@@ -118,6 +121,7 @@ public:
         });
 
         if (index == notFound && GStreamerEMEUtilities::isPlayReadyKeySystem(m_keySystem)) {
+            printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
             GST_DEBUG("Trying to match the playready session indirectly");
             // PlayReady corner case: It happens that the keyid required by the stream and reported by the CDM
             // have different endianness of the 4-2-2 GUID components. OCDM caters for that so ask it if it knows a session
@@ -145,6 +149,7 @@ private:
     void removeFailure() { updateFailure(); }
     void updateFailure()
     {
+        printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
         for (auto& sessionChangedCallback : m_sessionChangedCallbacks)
             sessionChangedCallback(this, false, nullptr, m_keyStatuses);
         m_sessionChangedCallbacks.clear();
@@ -174,6 +179,7 @@ HashSet<CDMInstanceOpenCDM::Session*> CDMInstanceOpenCDM::Session::m_validSessio
 
 bool CDMPrivateOpenCDM::supportsConfiguration(const MediaKeySystemConfiguration& config) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     for (auto& audioCapability : config.audioCapabilities)
         if (opencdm_is_type_supported(m_openCDMKeySystem.utf8().data(), audioCapability.contentType.utf8().data()))
             return false;
@@ -185,12 +191,14 @@ bool CDMPrivateOpenCDM::supportsConfiguration(const MediaKeySystemConfiguration&
 
 CDMFactoryOpenCDM& CDMFactoryOpenCDM::singleton()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     static CDMFactoryOpenCDM s_factory;
     return s_factory;
 }
 
 std::unique_ptr<CDMPrivate> CDMFactoryOpenCDM::createCDM(const String& keySystem)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return std::unique_ptr<CDMPrivate>(new CDMPrivateOpenCDM(keySystem));
 }
 
@@ -198,11 +206,13 @@ bool CDMFactoryOpenCDM::supportsKeySystem(const String& keySystem)
 {
     std::string emptyString;
 
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return !opencdm_is_type_supported(keySystem.utf8().data(), emptyString.c_str());
 }
 
 static LicenseType openCDMLicenseType(CDMInstance::LicenseType licenseType)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     switch (licenseType) {
     case CDMInstance::LicenseType::Temporary:
         return Temporary;
@@ -218,6 +228,7 @@ static LicenseType openCDMLicenseType(CDMInstance::LicenseType licenseType)
 
 static CDMInstance::KeyStatus keyStatusFromOpenCDM(KeyStatus keyStatus)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     switch (keyStatus) {
     case Usable:
         return CDMInstance::KeyStatus::Usable;
@@ -241,6 +252,7 @@ static CDMInstance::KeyStatus keyStatusFromOpenCDM(KeyStatus keyStatus)
 
 static CDMInstance::SessionLoadFailure sessionLoadFailureFromOpenCDM(const String& loadStatus)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (loadStatus != "None")
         return CDMInstance::SessionLoadFailure::None;
     if (loadStatus == "SessionNotFound")
@@ -254,6 +266,7 @@ static CDMInstance::SessionLoadFailure sessionLoadFailureFromOpenCDM(const Strin
 
 static MediaKeyStatus mediaKeyStatusFromOpenCDM(const String& keyStatus)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (keyStatus == "KeyUsable")
         return MediaKeyStatus::Usable;
     if (keyStatus == "KeyExpired")
@@ -271,12 +284,14 @@ static MediaKeyStatus mediaKeyStatusFromOpenCDM(const String& keyStatus)
 
 static MediaKeyStatus mediaKeyStatusFromOpenCDM(const SharedBuffer& keyStatusBuffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     String keyStatus(StringImpl::createWithoutCopying(reinterpret_cast<const LChar*>(keyStatusBuffer.data()), keyStatusBuffer.size()));
     return mediaKeyStatusFromOpenCDM(keyStatus);
 }
 
 static CDMInstance::KeyStatusVector copyAndMaybeReplaceValue(CDMInstance::KeyStatusVector& keyStatuses, std::optional<MediaKeyStatus> newStatus = std::nullopt)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     CDMInstance::KeyStatusVector copy;
     for (auto& keyStatus : keyStatuses) {
         keyStatus.second = newStatus.value_or(keyStatus.second);
@@ -288,6 +303,7 @@ static CDMInstance::KeyStatusVector copyAndMaybeReplaceValue(CDMInstance::KeySta
 
 static RefPtr<SharedBuffer> parseResponseMessage(const SharedBuffer& buffer, std::optional<WebCore::MediaKeyMessageType>& messageType)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     String message(StringImpl::createWithoutCopying(reinterpret_cast<const LChar*>(buffer.data()), buffer.size()));
     size_t typePosition = message.find(":Type:");
     String requestType(message.characters8(), typePosition != notFound ? typePosition : 0);
@@ -303,11 +319,13 @@ static RefPtr<SharedBuffer> parseResponseMessage(const SharedBuffer& buffer, std
 
 Ref<CDMInstanceOpenCDM::Session> CDMInstanceOpenCDM::Session::create(CDMInstanceOpenCDM* parent, OpenCDMSystem& source, const String& keySystem, const AtomicString& initDataType, Ref<WebCore::SharedBuffer>&& initData, LicenseType licenseType, Ref<WebCore::SharedBuffer>&& customData)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return adoptRef(*new Session(parent, source, keySystem, initDataType, WTFMove(initData), licenseType, WTFMove(customData)));
 }
 
 void CDMInstanceOpenCDM::Session::openCDMNotification(const OpenCDMSession*, void* userData, Notification method, const char* name, const uint8_t message[], uint16_t messageLength)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     GST_DEBUG("Got '%s' OCDM notification", name);
     Session* session = reinterpret_cast<Session*>(userData);
     RefPtr<WebCore::SharedBuffer> sharedBuffer = WebCore::SharedBuffer::create(message, messageLength);
@@ -332,6 +350,7 @@ CDMInstanceOpenCDM::Session::Session(CDMInstanceOpenCDM* parent, OpenCDMSystem& 
     , m_ocdmSystem(source)
     , m_parent(parent)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     OpenCDMSession* session = nullptr;
     m_openCDMSessionCallbacks.process_challenge_callback = [](OpenCDMSession* session, void* userData, const char[], const uint8_t challenge[], const uint16_t challengeLength) {
         Session::openCDMNotification(session, userData, &Session::challengeGeneratedCallback, "challenge", challenge, challengeLength);
@@ -360,12 +379,14 @@ CDMInstanceOpenCDM::Session::Session(CDMInstanceOpenCDM* parent, OpenCDMSystem& 
 
 CDMInstanceOpenCDM::Session::~Session()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     close();
     Session::m_validSessions.remove(this);
 }
 
 void CDMInstanceOpenCDM::Session::challengeGeneratedCallback(RefPtr<SharedBuffer>&& buffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     std::optional<WebCore::MediaKeyMessageType> requestType;
     auto message = buffer ? parseResponseMessage(*buffer, requestType) : nullptr;
 
@@ -391,6 +412,7 @@ void CDMInstanceOpenCDM::Session::challengeGeneratedCallback(RefPtr<SharedBuffer
 
 void CDMInstanceOpenCDM::Session::keyUpdatedCallback(RefPtr<SharedBuffer>&& buffer)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     GST_MEMDUMP("Updated key", reinterpret_cast<const guint8*>(buffer->data()), buffer->size());
     auto index = m_keyStatuses.findMatching([&buffer](const std::pair<Ref<SharedBuffer>, KeyStatus>& item) {
         return memmem(buffer->data(), buffer->size(), item.first->data(), item.first->size());
@@ -405,6 +427,7 @@ void CDMInstanceOpenCDM::Session::keyUpdatedCallback(RefPtr<SharedBuffer>&& buff
 
 void CDMInstanceOpenCDM::Session::keysUpdateDoneCallback(RefPtr<SharedBuffer>&&)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     bool appliesToApiCall = !m_sessionChangedCallbacks.isEmpty();
     if (!appliesToApiCall && m_parent && m_parent->client()) {
         m_parent->client()->updateKeyStatuses(copyAndMaybeReplaceValue(m_keyStatuses));
@@ -418,6 +441,7 @@ void CDMInstanceOpenCDM::Session::keysUpdateDoneCallback(RefPtr<SharedBuffer>&&)
 
 void CDMInstanceOpenCDM::Session::errorCallback(RefPtr<SharedBuffer>&& message)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     for (const auto& challengeCallback : m_challengeCallbacks)
         challengeCallback(this);
     m_challengeCallbacks.clear();
@@ -429,6 +453,7 @@ void CDMInstanceOpenCDM::Session::errorCallback(RefPtr<SharedBuffer>&& message)
 
 void CDMInstanceOpenCDM::Session::generateChallenge(ChallengeGeneratedCallback&& callback)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (isValid()) {
         callback(this);
         return;
@@ -439,6 +464,7 @@ void CDMInstanceOpenCDM::Session::generateChallenge(ChallengeGeneratedCallback&&
 
 void CDMInstanceOpenCDM::Session::update(const uint8_t* data, const unsigned length, SessionChangedCallback&& callback)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_keyStatuses.clear();
     m_sessionChangedCallbacks.append(WTFMove(callback));
     if (!m_session || id().isEmpty() || opencdm_session_update(m_session.get(), data, length))
@@ -449,6 +475,7 @@ void CDMInstanceOpenCDM::Session::update(const uint8_t* data, const unsigned len
 
 void CDMInstanceOpenCDM::Session::load(SessionChangedCallback&& callback)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_keyStatuses.clear();
     m_sessionChangedCallbacks.append(WTFMove(callback));
     if (!m_session || id().isEmpty() || opencdm_session_load(m_session.get()))
@@ -459,6 +486,7 @@ void CDMInstanceOpenCDM::Session::load(SessionChangedCallback&& callback)
 
 void CDMInstanceOpenCDM::Session::remove(SessionChangedCallback&& callback)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // m_keyStatuses are not cleared here not to rely on CDM callbacks with Released status.
     m_sessionChangedCallbacks.append(WTFMove(callback));
     if (!m_session || id().isEmpty() || opencdm_session_remove(m_session.get()))
@@ -471,11 +499,13 @@ CDMInstanceOpenCDM::CDMInstanceOpenCDM(OpenCDMSystem& system, const String& keyS
     : m_keySystem(keySystem)
     , m_openCDMSystem(system)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     MediaPlayerPrivateGStreamerBase::ensureWebKitGStreamerElements();
 }
 
 CDMInstance::SuccessValue CDMInstanceOpenCDM::setServerCertificate(Ref<SharedBuffer>&& certificate)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return !opencdm_system_set_server_certificate(&m_openCDMSystem, reinterpret_cast<unsigned char*>(const_cast<char*>(certificate->data())), certificate->size())
         ? WebCore::CDMInstance::SuccessValue::Succeeded
         : WebCore::CDMInstance::SuccessValue::Failed;
@@ -483,6 +513,7 @@ CDMInstance::SuccessValue CDMInstanceOpenCDM::setServerCertificate(Ref<SharedBuf
 
 void CDMInstanceOpenCDM::requestLicense(LicenseType licenseType, const AtomicString& initDataType, Ref<SharedBuffer>&& rawInitData, Ref<SharedBuffer>&& rawCustomData, LicenseCallback callback)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     InitData initData = InitData(reinterpret_cast<const uint8_t*>(rawInitData->data()), rawInitData->size());
 
     GST_TRACE("Going to request a new session id, init data size %u and MD5 %s", initData.sizeInBytes(), GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
@@ -521,6 +552,7 @@ void CDMInstanceOpenCDM::requestLicense(LicenseType licenseType, const AtomicStr
 
 void CDMInstanceOpenCDM::updateLicense(const String& sessionId, LicenseType, const SharedBuffer& response, LicenseUpdateCallback callback)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     GST_TRACE("Updating session %s", sessionId.utf8().data());
     auto session = lookupSession(sessionId);
     if (!session) {
@@ -557,6 +589,7 @@ void CDMInstanceOpenCDM::updateLicense(const String& sessionId, LicenseType, con
 
 void CDMInstanceOpenCDM::loadSession(LicenseType, const String& sessionId, const String&, LoadSessionCallback callback)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto session = lookupSession(sessionId);
     if (!session) {
         GST_WARNING("cannot load the session %s cause we can't find it", sessionId.utf8().data());
@@ -593,6 +626,7 @@ void CDMInstanceOpenCDM::loadSession(LicenseType, const String& sessionId, const
 
 void CDMInstanceOpenCDM::removeSessionData(const String& sessionId, LicenseType, RemoveSessionDataCallback callback)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto session = lookupSession(sessionId);
     if (!session) {
         GST_WARNING("cannot remove non-existing session %s data", sessionId.utf8().data());
@@ -630,6 +664,7 @@ void CDMInstanceOpenCDM::removeSessionData(const String& sessionId, LicenseType,
 
 void CDMInstanceOpenCDM::closeSession(const String& sessionId, CloseSessionCallback callback)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto session = lookupSession(sessionId);
     if (!session) {
         GST_WARNING("cannot close non-existing session %s", sessionId.utf8().data());
@@ -648,6 +683,7 @@ void CDMInstanceOpenCDM::closeSession(const String& sessionId, CloseSessionCallb
 
 String CDMInstanceOpenCDM::sessionIdByKeyId(const SharedBuffer& keyId) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     LockHolder locker(m_sessionMapMutex);
 
     GST_MEMDUMP("kid", reinterpret_cast<const uint8_t*>(keyId.data()), keyId.size());
@@ -677,12 +713,14 @@ String CDMInstanceOpenCDM::sessionIdByKeyId(const SharedBuffer& keyId) const
 
 bool CDMInstanceOpenCDM::isKeyIdInSessionUsable(const SharedBuffer& keyId, const String& sessionId) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto session = lookupSession(sessionId);
     return session && session->status(keyId) == Usable;
 }
 
 bool CDMInstanceOpenCDM::addSession(const String& sessionId, RefPtr<Session>&& session)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     LockHolder locker(m_sessionMapMutex);
     ASSERT(session);
     return m_sessionsMap.set(sessionId, session).isNewEntry;
@@ -690,12 +728,14 @@ bool CDMInstanceOpenCDM::addSession(const String& sessionId, RefPtr<Session>&& s
 
 bool CDMInstanceOpenCDM::removeSession(const String& sessionId)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     LockHolder locker(m_sessionMapMutex);
     return m_sessionsMap.remove(sessionId);
 }
 
 RefPtr<CDMInstanceOpenCDM::Session> CDMInstanceOpenCDM::lookupSession(const String& sessionId) const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     LockHolder locker(m_sessionMapMutex);
     auto session = m_sessionsMap.find(sessionId);
     return session == m_sessionsMap.end() ? nullptr : session->value;

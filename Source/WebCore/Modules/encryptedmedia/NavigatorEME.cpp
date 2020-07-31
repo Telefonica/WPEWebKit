@@ -42,6 +42,7 @@ static void tryNextSupportedConfiguration(RefPtr<CDM>&& implementation, Vector<M
 
 void NavigatorEME::requestMediaKeySystemAccess(Navigator&, Document& document, const String& keySystem, Vector<MediaKeySystemConfiguration>&& supportedConfigurations, Ref<DeferredPromise>&& promise)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#dom-navigator-requestmediakeysystemaccess
     // W3C Editor's Draft 09 November 2016
     LOG(EME, "EME - request media key system access for %s", keySystem.utf8().data());
@@ -75,6 +76,7 @@ void NavigatorEME::requestMediaKeySystemAccess(Navigator&, Document& document, c
 
 static void tryNextSupportedConfiguration(RefPtr<CDM>&& implementation, Vector<MediaKeySystemConfiguration>&& supportedConfigurations, RefPtr<DeferredPromise>&& promise)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 6.3. For each value in supportedConfigurations:
     if (!supportedConfigurations.isEmpty()) {
         // 6.3.1. Let candidate configuration be the value.

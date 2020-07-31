@@ -41,6 +41,7 @@ namespace WebCore {
 
 Ref<MediaKeySystemAccess> MediaKeySystemAccess::create(const String& keySystem, MediaKeySystemConfiguration&& configuration, Ref<CDM>&& implementation)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return adoptRef(*new MediaKeySystemAccess(keySystem, WTFMove(configuration), WTFMove(implementation)));
 }
 
@@ -49,12 +50,14 @@ MediaKeySystemAccess::MediaKeySystemAccess(const String& keySystem, MediaKeySyst
     , m_configuration(new MediaKeySystemConfiguration(WTFMove(configuration)))
     , m_implementation(WTFMove(implementation))
 {
+    printf("[%s:%d] ++%s(keySystem: %s)\n", __FILE__, __LINE__, __func__, keySystem.utf8().data());
 }
 
 MediaKeySystemAccess::~MediaKeySystemAccess() = default;
 
 void MediaKeySystemAccess::createMediaKeys(Ref<DeferredPromise>&& promise)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#dom-mediakeysystemaccess-createmediakeys
     // W3C Editor's Draft 09 November 2016
 
@@ -75,24 +78,28 @@ void MediaKeySystemAccess::createMediaKeys(Ref<DeferredPromise>&& promise)
         // 2.5. Let instance be a new instance of the Key System implementation represented by this object's cdm implementation value.
         auto instance = m_implementation->createInstance();
         if (!instance) {
+            printf("[%s:%d] promise->reject(InvalidStateError)\n", __FILE__, __LINE__);
             promise->reject(InvalidStateError);
             return;
         }
 
         // 2.6. Initialize instance to enable, disable and/or select Key System features using configuration.
         if (instance->initializeWithConfiguration(*m_configuration) == CDMInstance::Failed) {
+            printf("[%s:%d] promise->reject(NotAllowedError)\n", __FILE__, __LINE__);
             promise->reject(NotAllowedError);
             return;
         }
 
         // 2.7. If use distinctive identifier is false, prevent instance from using Distinctive Identifier(s) and Distinctive Permanent Identifier(s).
         if (!useDistinctiveIdentifier && instance->setDistinctiveIdentifiersAllowed(false) == CDMInstance::Failed) {
+            printf("[%s:%d] promise->reject(NotAllowedError)\n", __FILE__, __LINE__);
             promise->reject(NotAllowedError);
             return;
         }
 
         // 2.8. If persistent state allowed is false, prevent instance from persisting any state related to the application or origin of this object's Document.
         if (!persistentStateAllowed && instance->setPersistentStateAllowed(false) == CDMInstance::Failed) {
+            printf("[%s:%d] promise->reject(NotAllowedError)\n", __FILE__, __LINE__);
             promise->reject(NotAllowedError);
             return;
         }

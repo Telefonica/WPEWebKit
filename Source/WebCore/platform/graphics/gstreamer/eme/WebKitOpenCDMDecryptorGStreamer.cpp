@@ -85,6 +85,7 @@ static GRefPtr<GstCaps> createSinkPadTemplateCaps()
     std::string emptyString;
     GRefPtr<GstCaps> caps = adoptGRef(gst_caps_new_empty());
 
+    GST_TRACE("++%s() Trying to match the playready session indirectly", __FUNCTION__);
     if (!opencdm_is_type_supported(WebCore::GStreamerEMEUtilities::s_ClearKeyKeySystem, emptyString.c_str()))
         addKeySystemToSinkPadCaps(caps, WEBCORE_GSTREAMER_EME_UTILITIES_CLEARKEY_UUID);
 
@@ -101,7 +102,7 @@ static GRefPtr<GstCaps> createSinkPadTemplateCaps()
             gst_caps_append_structure(caps.get(), gst_structure_new("application/x-webm-enc", "original-media-type", G_TYPE_STRING, webmEncryptionMediaTypes[i], nullptr));
     }
 #endif
-
+    GST_TRACE("--%s()", __FUNCTION__);
     return caps;
 }
 
@@ -134,6 +135,7 @@ static void webkit_media_opencdm_decrypt_class_init(WebKitOpenCDMDecryptClass* k
 
 static void webkit_media_opencdm_decrypt_init(WebKitOpenCDMDecrypt* self)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitOpenCDMDecryptPrivate* priv = GST_WEBKIT_OPENCDM_DECRYPT_GET_PRIVATE(self);
     priv->m_openCdmSession = nullptr;
     self->priv = priv;
@@ -143,6 +145,7 @@ static void webkit_media_opencdm_decrypt_init(WebKitOpenCDMDecrypt* self)
 
 static void webKitMediaOpenCDMDecryptorFinalize(GObject* object)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitOpenCDMDecryptPrivate* priv = GST_WEBKIT_OPENCDM_DECRYPT_GET_PRIVATE(WEBKIT_OPENCDM_DECRYPT(object));
     priv->~WebKitOpenCDMDecryptPrivate();
     GST_CALL_PARENT(G_OBJECT_CLASS, finalize, (object));
@@ -150,6 +153,7 @@ static void webKitMediaOpenCDMDecryptorFinalize(GObject* object)
 
 static SessionResult webKitMediaOpenCDMDecryptorResetSessionFromKeyIdIfNeeded(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer& keyId)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitOpenCDMDecryptPrivate* priv = GST_WEBKIT_OPENCDM_DECRYPT_GET_PRIVATE(WEBKIT_OPENCDM_DECRYPT(self));
 
     LockHolder locker(priv->m_mutex);
@@ -178,17 +182,21 @@ static SessionResult webKitMediaOpenCDMDecryptorResetSessionFromKeyIdIfNeeded(We
 
 static bool webKitMediaOpenCDMDecryptorHandleKeyId(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer& keyId)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     return webKitMediaOpenCDMDecryptorResetSessionFromKeyIdIfNeeded(self, keyId) == InvalidSession;
 }
 
 static bool webKitMediaOpenCDMDecryptorAttemptToDecryptWithLocalInstance(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer& keyId)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     return webKitMediaOpenCDMDecryptorResetSessionFromKeyIdIfNeeded(self, keyId) != InvalidSession;
 }
 
 static bool webKitMediaOpenCDMDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer, GstBuffer* ivBuffer, GstBuffer* buffer, unsigned subSampleCount, GstBuffer* subSamplesBuffer)
 {
     WebKitOpenCDMDecryptPrivate* priv = GST_WEBKIT_OPENCDM_DECRYPT_GET_PRIVATE(self);
+
+    GST_TRACE("++%s()", __FUNCTION__);
 
     GstMappedBuffer mappedKeyID(keyIDBuffer, GST_MAP_READ);
     if (!mappedKeyID) {
@@ -214,6 +222,8 @@ static bool webKitMediaOpenCDMDecryptorDecrypt(WebKitMediaCommonEncryptionDecryp
         GST_ERROR_OBJECT(self, "subsample decryption failed, error code %d", errorCode);
         return false;
     }
+
+    GST_TRACE("--%s()", __FUNCTION__);
 
     return true;
 }

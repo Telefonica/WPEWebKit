@@ -65,6 +65,7 @@ G_DEFINE_TYPE(WebKitMediaCommonEncryptionDecrypt, webkit_media_common_encryption
 
 static void webkit_media_common_encryption_decrypt_class_init(WebKitMediaCommonEncryptionDecryptClass* klass)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     GObjectClass* gobjectClass = G_OBJECT_CLASS(klass);
     gobjectClass->finalize = webKitMediaCommonEncryptionDecryptorFinalize;
 
@@ -91,6 +92,7 @@ static void webkit_media_common_encryption_decrypt_class_init(WebKitMediaCommonE
 
 static void webkit_media_common_encryption_decrypt_init(WebKitMediaCommonEncryptionDecrypt* self)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
 
     self->priv = priv;
@@ -104,6 +106,7 @@ static void webkit_media_common_encryption_decrypt_init(WebKitMediaCommonEncrypt
 
 static void webKitMediaCommonEncryptionDecryptorFinalize(GObject* object)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(object);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = self->priv;
 
@@ -113,6 +116,7 @@ static void webKitMediaCommonEncryptionDecryptorFinalize(GObject* object)
 
 static GstCaps* webkitMediaCommonEncryptionDecryptTransformCaps(GstBaseTransform* base, GstPadDirection direction, GstCaps* caps, GstCaps* filter)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     if (direction == GST_PAD_UNKNOWN)
         return nullptr;
 
@@ -209,6 +213,7 @@ static GstCaps* webkitMediaCommonEncryptionDecryptTransformCaps(GstBaseTransform
 
 static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseTransform* base, GstBuffer* buffer)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(base);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
 
@@ -356,6 +361,7 @@ static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseT
 
 static bool webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(WebKitMediaCommonEncryptionDecrypt* self)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
 
     ASSERT(priv->m_mutex.isLocked());
@@ -383,6 +389,7 @@ static bool webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(WebKitMedia
 
 static void webkitMediaCommonEncryptionDecryptProcessProtectionEvents(WebKitMediaCommonEncryptionDecrypt* self, Ref<WebCore::SharedBuffer>&& kid)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
     WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
 
@@ -472,6 +479,7 @@ static void webkitMediaCommonEncryptionDecryptProcessProtectionEvents(WebKitMedi
 
 static gboolean webkitMediaCommonEncryptionDecryptSinkEventHandler(GstBaseTransform* trans, GstEvent* event)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(trans);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
     WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
@@ -541,6 +549,7 @@ static gboolean webkitMediaCommonEncryptionDecryptSinkEventHandler(GstBaseTransf
 
 static GstStateChangeReturn webKitMediaCommonEncryptionDecryptorChangeState(GstElement* element, GstStateChange transition)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(element);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
 
@@ -563,6 +572,7 @@ static GstStateChangeReturn webKitMediaCommonEncryptionDecryptorChangeState(GstE
 
 static void webKitMediaCommonEncryptionDecryptorSetContext(GstElement* element, GstContext* context)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(element);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
 
@@ -579,6 +589,7 @@ static void webKitMediaCommonEncryptionDecryptorSetContext(GstElement* element, 
 
 RefPtr<CDMInstance> webKitMediaCommonEncryptionDecryptCDMInstance(WebKitMediaCommonEncryptionDecrypt* self)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
     ASSERT(priv->m_mutex.isLocked());
     return webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(self) ? priv->m_cdmInstance : nullptr;

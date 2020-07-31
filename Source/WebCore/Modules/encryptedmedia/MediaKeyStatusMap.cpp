@@ -40,17 +40,20 @@ namespace WebCore {
 MediaKeyStatusMap::MediaKeyStatusMap(const MediaKeySession& session)
     : m_session(&session)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 }
 
 MediaKeyStatusMap::~MediaKeyStatusMap() = default;
 
 void MediaKeyStatusMap::detachSession()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_session = nullptr;
 }
 
 unsigned long MediaKeyStatusMap::size()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_session)
         return 0;
     return m_session->statuses().size();
@@ -58,6 +61,7 @@ unsigned long MediaKeyStatusMap::size()
 
 static bool keyIdsMatch(const SharedBuffer& a, const BufferSource& b)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto length = a.size();
     if (!length || length != b.length())
         return false;
@@ -66,6 +70,7 @@ static bool keyIdsMatch(const SharedBuffer& a, const BufferSource& b)
 
 bool MediaKeyStatusMap::has(const BufferSource& keyId)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_session)
         return false;
 
@@ -76,6 +81,7 @@ bool MediaKeyStatusMap::has(const BufferSource& keyId)
 
 JSC::JSValue MediaKeyStatusMap::get(JSC::ExecState& state, const BufferSource& keyId)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_session)
         return JSC::jsUndefined();
 
@@ -91,10 +97,12 @@ JSC::JSValue MediaKeyStatusMap::get(JSC::ExecState& state, const BufferSource& k
 MediaKeyStatusMap::Iterator::Iterator(MediaKeyStatusMap& map)
     : m_map(map)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
 }
 
 std::optional<WTF::KeyValuePair<BufferSource::VariantType, MediaKeyStatus>> MediaKeyStatusMap::Iterator::next()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (!m_map->m_session)
         return std::nullopt;
 

@@ -38,23 +38,29 @@ namespace WebCore {
 
 Vector<CDMFactory*>& CDMFactory::registeredFactories()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     static NeverDestroyed<Vector<CDMFactory*>> factories;
     static std::once_flag once;
     std::call_once(once, [&] { platformRegisterFactories(factories); });
 
+    printf("--%s()\n", __func__);
     return factories;
 }
 
 void CDMFactory::registerFactory(CDMFactory& factory)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(!registeredFactories().contains(&factory));
     registeredFactories().append(&factory);
+    printf("--%s()\n", __func__);
 }
 
 void CDMFactory::unregisterFactory(CDMFactory& factory)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(registeredFactories().contains(&factory));
     registeredFactories().removeAll(&factory);
+    printf("--%s()\n", __func__);
 }
 
 #if !USE(GSTREAMER)

@@ -166,6 +166,7 @@ GstBuffer* createGstBufferForData(const char* data, int length)
 
 const char* capsMediaType(const GstCaps* caps)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(caps);
     GstStructure* structure = gst_caps_get_structure(caps, 0);
     if (!structure) {
@@ -173,6 +174,7 @@ const char* capsMediaType(const GstCaps* caps)
         return nullptr;
     }
 #if ENABLE(ENCRYPTED_MEDIA)
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     if (gst_structure_has_name(structure, "application/x-cenc") || gst_structure_has_name(structure, "application/x-webm-enc"))
         return gst_structure_get_string(structure, "original-media-type");
 #endif
@@ -191,8 +193,10 @@ bool doCapsHaveType(const GstCaps* caps, const char* type)
 
 bool areEncryptedCaps(const GstCaps* caps)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     ASSERT(caps);
 #if ENABLE(ENCRYPTED_MEDIA)
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     GstStructure* structure = gst_caps_get_structure(caps, 0);
     if (!structure) {
         GST_WARNING("caps are empty");

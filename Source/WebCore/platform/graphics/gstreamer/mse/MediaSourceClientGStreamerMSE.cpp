@@ -35,11 +35,13 @@ namespace WebCore {
 
 Ref<MediaSourceClientGStreamerMSE> MediaSourceClientGStreamerMSE::create(MediaPlayerPrivateGStreamerMSE& playerPrivate)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     // No return adoptRef(new MediaSourceClientGStreamerMSE(playerPrivate)) because the ownership has already been transferred to MediaPlayerPrivateGStreamerMSE.
     Ref<MediaSourceClientGStreamerMSE> client(adoptRef(*new MediaSourceClientGStreamerMSE(playerPrivate)));
     playerPrivate.setMediaSourceClient(client.get());
+    GST_TRACE("--%s()", __FUNCTION__);
     return client;
 }
 
@@ -47,16 +49,21 @@ MediaSourceClientGStreamerMSE::MediaSourceClientGStreamerMSE(MediaPlayerPrivateG
     : m_playerPrivate(&playerPrivate)
     , m_duration(MediaTime::invalidTime())
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 MediaSourceClientGStreamerMSE::~MediaSourceClientGStreamerMSE()
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 MediaSourcePrivate::AddStatus MediaSourceClientGStreamerMSE::addSourceBuffer(RefPtr<SourceBufferPrivateGStreamer> sourceBufferPrivate, const ContentType&)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     if (!m_playerPrivate)
@@ -69,18 +76,22 @@ MediaSourcePrivate::AddStatus MediaSourceClientGStreamerMSE::addSourceBuffer(Ref
     GST_TRACE("Adding SourceBuffer to AppendPipeline: this=%p sourceBuffer=%p appendPipeline=%p", this, sourceBufferPrivate.get(), appendPipeline.get());
     m_playerPrivate->m_appendPipelinesMap.add(sourceBufferPrivate, appendPipeline);
 
+    GST_TRACE("--%s()", __FUNCTION__);
     return m_playerPrivate->m_playbackPipeline->addSourceBuffer(sourceBufferPrivate);
 }
 
 const MediaTime& MediaSourceClientGStreamerMSE::duration()
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
+    GST_TRACE("--%s()", __FUNCTION__);
     return m_duration;
 }
 
 void MediaSourceClientGStreamerMSE::durationChanged(const MediaTime& duration)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     GST_TRACE("duration: %s", duration.toString().utf8().data());
@@ -90,10 +101,12 @@ void MediaSourceClientGStreamerMSE::durationChanged(const MediaTime& duration)
     m_duration = duration;
     if (m_playerPrivate)
         m_playerPrivate->durationChanged();
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 void MediaSourceClientGStreamerMSE::abort(RefPtr<SourceBufferPrivateGStreamer> sourceBufferPrivate)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     GST_DEBUG("aborting");
@@ -106,10 +119,12 @@ void MediaSourceClientGStreamerMSE::abort(RefPtr<SourceBufferPrivateGStreamer> s
     ASSERT(appendPipeline);
 
     appendPipeline->abort();
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 void MediaSourceClientGStreamerMSE::resetParserState(RefPtr<SourceBufferPrivateGStreamer> sourceBufferPrivate)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     GST_DEBUG("resetting parser state");
@@ -122,10 +137,12 @@ void MediaSourceClientGStreamerMSE::resetParserState(RefPtr<SourceBufferPrivateG
     ASSERT(appendPipeline);
 
     appendPipeline->abort();
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 bool MediaSourceClientGStreamerMSE::append(RefPtr<SourceBufferPrivateGStreamer> sourceBufferPrivate, const unsigned char* data, unsigned length)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     GST_DEBUG("Appending %u bytes", length);
@@ -141,31 +158,37 @@ bool MediaSourceClientGStreamerMSE::append(RefPtr<SourceBufferPrivateGStreamer> 
     GstBuffer* buffer = gst_buffer_new_wrapped_full(static_cast<GstMemoryFlags>(0), bufferData, length, 0, length, bufferData, fastFree);
     gst_buffer_fill(buffer, 0, data, length);
 
+    GST_TRACE("--%s()", __FUNCTION__);
     return appendPipeline->pushNewBuffer(buffer) == GST_FLOW_OK;
 }
 
 void MediaSourceClientGStreamerMSE::markEndOfStream(MediaSourcePrivate::EndOfStreamStatus status)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     if (!m_playerPrivate)
         return;
 
     m_playerPrivate->markEndOfStream(status);
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 void MediaSourceClientGStreamerMSE::unmarkEndOfStream()
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     if (!m_playerPrivate)
         return;
 
     m_playerPrivate->unmarkEndOfStream();
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 void MediaSourceClientGStreamerMSE::removedFromMediaSource(RefPtr<SourceBufferPrivateGStreamer> sourceBufferPrivate)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     if (!m_playerPrivate)
@@ -182,27 +205,33 @@ void MediaSourceClientGStreamerMSE::removedFromMediaSource(RefPtr<SourceBufferPr
     // AppendPipeline destructor will take care of cleaning up when appropriate.
 
     m_playerPrivate->m_playbackPipeline->removeSourceBuffer(sourceBufferPrivate);
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 void MediaSourceClientGStreamerMSE::flush(AtomicString trackId)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     // This is only for on-the-fly reenqueues after appends. When seeking, the seek will do its own flush.
     if (m_playerPrivate && !m_playerPrivate->m_seeking)
         m_playerPrivate->m_playbackPipeline->flush(trackId);
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 void MediaSourceClientGStreamerMSE::enqueueSample(Ref<MediaSample>&& sample)
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     if (m_playerPrivate)
         m_playerPrivate->m_playbackPipeline->enqueueSample(WTFMove(sample));
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 GRefPtr<WebKitMediaSrc> MediaSourceClientGStreamerMSE::webKitMediaSrc()
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     if (!m_playerPrivate)
@@ -212,14 +241,17 @@ GRefPtr<WebKitMediaSrc> MediaSourceClientGStreamerMSE::webKitMediaSrc()
 
     ASSERT(WEBKIT_IS_MEDIA_SRC(source));
 
+    GST_TRACE("--%s()", __FUNCTION__);
     return source;
 }
 
 void MediaSourceClientGStreamerMSE::clearPlayerPrivate()
 {
+    GST_TRACE("++%s()", __FUNCTION__);
     ASSERT(WTF::isMainThread());
 
     m_playerPrivate = nullptr;
+    GST_TRACE("--%s()", __FUNCTION__);
 }
 
 } // namespace WebCore.

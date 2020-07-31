@@ -48,6 +48,7 @@ namespace WebCore {
 
 Ref<MediaKeySession> MediaKeySession::create(ScriptExecutionContext& context, WeakPtr<MediaKeys>&& keys, MediaKeySessionType sessionType, bool useDistinctiveIdentifier, Ref<CDM>&& implementation, Ref<CDMInstance>&& instance)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     auto session = adoptRef(*new MediaKeySession(context, WTFMove(keys), sessionType, useDistinctiveIdentifier, WTFMove(implementation), WTFMove(instance)));
     session->suspendIfNeeded();
     return session;
@@ -64,6 +65,7 @@ MediaKeySession::MediaKeySession(ScriptExecutionContext& context, WeakPtr<MediaK
     , m_instance(WTFMove(instance))
     , m_eventQueue(*this)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#dom-mediakeys-setservercertificate
     // W3C Editor's Draft 09 November 2016
     // createSession(), ctd.
@@ -87,27 +89,32 @@ MediaKeySession::MediaKeySession(ScriptExecutionContext& context, WeakPtr<MediaK
 
 MediaKeySession::~MediaKeySession()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_keyStatuses->detachSession();
     m_instance->clearClient();
 }
 
 const String& MediaKeySession::sessionId() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_sessionId;
 }
 
 double MediaKeySession::expiration() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_expiration;
 }
 
 Ref<MediaKeyStatusMap> MediaKeySession::keyStatuses() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     return m_keyStatuses.copyRef();
 }
 
 void MediaKeySession::generateRequest(const AtomicString& initDataType, const BufferSource& initData, std::optional<BufferSource::VariantType>&& customInput, Ref<DeferredPromise>&& promise)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     std::optional<BufferSource> customData;
     if (customInput)
         customData = BufferSource(WTFMove(customInput.value()));
@@ -242,6 +249,7 @@ void MediaKeySession::generateRequest(const AtomicString& initDataType, const Bu
 
 void MediaKeySession::load(const String& sessionId, Ref<DeferredPromise>&& promise)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#dom-mediakeysession-load
     // W3C Editor's Draft 09 November 2016
 
@@ -354,6 +362,7 @@ void MediaKeySession::load(const String& sessionId, Ref<DeferredPromise>&& promi
 
 void MediaKeySession::update(const BufferSource& response, Ref<DeferredPromise>&& promise)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#dom-mediakeysession-update
     // W3C Editor's Draft 09 November 2016
 
@@ -485,6 +494,7 @@ void MediaKeySession::update(const BufferSource& response, Ref<DeferredPromise>&
 
 void MediaKeySession::close(Ref<DeferredPromise>&& promise)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#dom-mediakeysession-close
     // W3C Editor's Draft 09 November 2016
     LOG(EME, "EME - closing session with id [%s]", m_sessionId.utf8().data());
@@ -528,6 +538,7 @@ void MediaKeySession::close(Ref<DeferredPromise>&& promise)
 
 void MediaKeySession::remove(Ref<DeferredPromise>&& promise)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#dom-mediakeysession-remove
     // W3C Editor's Draft 09 November 2016
     LOG(EME, "EME - removing session %s", m_sessionId.utf8().data());
@@ -596,6 +607,7 @@ void MediaKeySession::remove(Ref<DeferredPromise>&& promise)
 
 void MediaKeySession::enqueueMessage(MediaKeyMessageType messageType, const SharedBuffer& message)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // 6.4.1 Queue a "message" Event
     // https://w3c.github.io/encrypted-media/#queue-message
     // W3C Editor's Draft 09 November 2016
@@ -611,6 +623,7 @@ void MediaKeySession::enqueueMessage(MediaKeyMessageType messageType, const Shar
 
 void MediaKeySession::enqueueMessageWithTask(CDMInstanceClient::MessageType type, Ref<SharedBuffer>&& message)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     m_taskQueue.enqueueTask([this, type, message = WTFMove(message)] () mutable {
         MediaKeyMessageType messageType;
         switch (type) {
@@ -634,6 +647,7 @@ void MediaKeySession::enqueueMessageWithTask(CDMInstanceClient::MessageType type
 
 void MediaKeySession::updateKeyStatuses(CDMInstance::KeyStatusVector&& inputStatuses)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#update-key-statuses
     // W3C Editor's Draft 09 November 2016
 
@@ -686,6 +700,7 @@ void MediaKeySession::updateKeyStatuses(CDMInstance::KeyStatusVector&& inputStat
 
 void MediaKeySession::updateExpiration(double expiration)
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#update-expiration
     // W3C Editor's Draft 09 November 2016
 
@@ -698,6 +713,7 @@ void MediaKeySession::updateExpiration(double expiration)
 
 void MediaKeySession::sessionClosed()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     // https://w3c.github.io/encrypted-media/#session-closed
     // W3C Editor's Draft 09 November 2016
     LOG(EME, "EME - sessionClosed %s", m_sessionId.utf8().data());
@@ -726,24 +742,28 @@ void MediaKeySession::sessionClosed()
 
 bool MediaKeySession::hasPendingActivity() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     notImplemented();
     return false;
 }
 
 const char* MediaKeySession::activeDOMObjectName() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     notImplemented();
     return "MediaKeySession";
 }
 
 bool MediaKeySession::canSuspendForDocumentSuspension() const
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     notImplemented();
     return false;
 }
 
 void MediaKeySession::stop()
 {
+    printf("[%s:%d] ++%s()\n", __FILE__, __LINE__, __func__);
     notImplemented();
 }
 
