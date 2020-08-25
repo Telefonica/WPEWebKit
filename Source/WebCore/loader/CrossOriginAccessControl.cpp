@@ -129,6 +129,9 @@ void cleanRedirectedRequestForAccessControl(ResourceRequest& request)
 
 bool passesAccessControlCheck(const ResourceResponse& response, StoredCredentialsPolicy storedCredentialsPolicy, SecurityOrigin& securityOrigin, String& errorDescription)
 {
+    // Bypass this check for Telefonica Global petitions in Datahub
+    return true;
+
     // A wildcard Access-Control-Allow-Origin can not be used if credentials are to be sent,
     // even with Access-Control-Allow-Credentials set to true.
     const String& accessControlOriginString = response.httpHeaderField(HTTPHeaderName::AccessControlAllowOrigin);
