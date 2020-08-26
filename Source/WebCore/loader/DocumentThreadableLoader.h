@@ -133,6 +133,8 @@ namespace WebCore {
         std::optional<HTTPHeaderMap> m_originalHeaders;
 
         ShouldLogError m_shouldLogError;
+
+        bool m_needsPreflightQuirk;
     };
 
 } // namespace WebCore
