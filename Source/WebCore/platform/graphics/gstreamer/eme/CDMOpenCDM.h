@@ -53,15 +53,24 @@ using ScopedSession = std::unique_ptr<OpenCDMSession, SessionDeleter>;
 
 class CDMFactoryOpenCDM : public CDMFactory {
 private:
-    CDMFactoryOpenCDM() { }
+    CDMFactoryOpenCDM() {
+        #if USE(OPENCDM)
+            opencdm_init();
+        #endif
+    }
     CDMFactoryOpenCDM(const CDMFactoryOpenCDM&) = delete;
     CDMFactoryOpenCDM& operator=(const CDMFactoryOpenCDM&) = delete;
 
 public:
     static CDMFactoryOpenCDM& singleton();
 
+#if USE(OPENCDM)
+    virtual ~CDMFactoryOpenCDM() {
+        opencdm_deinit();
+    }
+#else
     virtual ~CDMFactoryOpenCDM() = default;
-
+#endif
     virtual std::unique_ptr<CDMPrivate> createCDM(const String&) final;
     virtual bool supportsKeySystem(const String&) final;
 };
