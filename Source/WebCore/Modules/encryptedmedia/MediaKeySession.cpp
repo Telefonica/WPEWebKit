@@ -91,6 +91,12 @@ MediaKeySession::~MediaKeySession()
     m_instance->clearClient();
 }
 
+/* OpenCDM session fix */
+void MediaKeySession::setSessionId(const String& sessionId)
+{
+    m_sessionId = sessionId;
+}
+
 const String& MediaKeySession::sessionId() const
 {
     return m_sessionId;
@@ -627,7 +633,7 @@ void MediaKeySession::enqueueMessageWithTask(CDMInstanceClient::MessageType type
             messageType = MediaKeyMessageType::IndividualizationRequest;
             break;
         }
-
+        m_callable = true; /* OpenCDM session fix */
         enqueueMessage(messageType, message.get());
     });
 }

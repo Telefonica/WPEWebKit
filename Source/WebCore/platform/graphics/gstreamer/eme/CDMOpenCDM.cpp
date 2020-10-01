@@ -355,6 +355,8 @@ CDMInstanceOpenCDM::Session::Session(CDMInstanceOpenCDM* parent, OpenCDMSystem& 
     }
     m_session.reset(session);
     m_id = String::fromUTF8(opencdm_session_id(m_session.get()));
+    /* OpenCDM session fix */
+    m_parent->client()->setSessionId(m_id);
     Session::m_validSessions.add(this);
 }
 

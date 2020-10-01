@@ -85,6 +85,9 @@ private:
     void updateExpiration(double);
     void sessionClosed();
 
+    /* OpenCDM session fix */
+    void setSessionId(const String& sessionId) override;
+
     // EventTarget
     EventTargetInterface eventTargetInterface() const override { return MediaKeySessionEventTargetInterfaceType; }
     ScriptExecutionContext* scriptExecutionContext() const override { return ActiveDOMObject::scriptExecutionContext(); }

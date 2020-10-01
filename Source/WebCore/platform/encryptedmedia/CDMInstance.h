@@ -52,6 +52,9 @@ public:
     using KeyStatusVector = Vector<std::pair<Ref<SharedBuffer>, KeyStatus>>;
     virtual void updateKeyStatuses(KeyStatusVector&&) = 0;
     virtual void enqueueMessageWithTask(MessageType, Ref<SharedBuffer>&&) = 0;
+
+    /* OpenCDM session fix */
+    virtual void setSessionId(const String& sessionId) = 0;
 };
 
 class CDMInstance : public RefCounted<CDMInstance> {
