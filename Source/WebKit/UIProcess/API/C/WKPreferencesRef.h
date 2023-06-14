@@ -180,9 +180,15 @@ WK_EXPORT bool WKPreferencesGetAuthorAndUserStylesEnabled(WKPreferencesRef prefe
 WK_EXPORT void WKPreferencesSetShouldPrintBackgrounds(WKPreferencesRef preferences, bool shouldPrintBackgrounds);
 WK_EXPORT bool WKPreferencesGetShouldPrintBackgrounds(WKPreferencesRef preferences);
 
+WK_EXPORT void WKPreferencesSetShouldDrawsBackground(WKPreferencesRef preferences, bool shouldDrawBackgrounds);
+WK_EXPORT bool WKPreferencesGetShouldDrawsBackground(WKPreferencesRef preferences);
+
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetJavaScriptCanAccessClipboard(WKPreferencesRef preferencesRef, bool enabled);
 WK_EXPORT bool WKPreferencesGetJavaScriptCanAccessClipboard(WKPreferencesRef preferencesRef);
+
+WK_EXPORT void WKPreferencesSetBackgroundColor(WKPreferencesRef preferences, uint32_t backgroundColor);
+WK_EXPORT uint32_t WKPreferencesGetBackgroundColor(WKPreferencesRef preferences);
 
 // Defaults to false
 WK_EXPORT void WKPreferencesSetFullScreenEnabled(WKPreferencesRef preferencesRef, bool enabled);

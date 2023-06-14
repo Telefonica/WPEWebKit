@@ -463,7 +463,7 @@ CDMInstance::SuccessValue CDMInstanceClearKey::setStorageDirectory(const String&
     return storageDirectory.isEmpty() ? Succeeded : Failed;
 }
 
-void CDMInstanceClearKey::requestLicense(LicenseType, const AtomicString& initDataType, Ref<SharedBuffer>&& initData, LicenseCallback callback)
+void CDMInstanceClearKey::requestLicense(LicenseType, const AtomicString& initDataType, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback callback)
 {
     static uint32_t s_sessionIdValue = 0;
     ++s_sessionIdValue;
@@ -702,6 +702,12 @@ const String& CDMInstanceClearKey::keySystem() const
     static const NeverDestroyed<String> s_keySystem = MAKE_STATIC_STRING_IMPL("org.w3.clearkey");
 
     return s_keySystem;
+}
+
+bool CDMInstanceClearKey::areAllKeysReceived() const
+{
+    // FIXME Not tested.
+    return ClearKeyState::singleton().keys().size() > 0;
 }
 
 } // namespace WebCore

@@ -1014,6 +1014,7 @@ bool InspectorInstrumentation::isShaderProgramHighlightedImpl(InstrumentingAgent
 #if ENABLE(RESOURCE_USAGE)
 void InspectorInstrumentation::didHandleMemoryPressureImpl(InstrumentingAgents& instrumentingAgents, Critical critical)
 {
+    printf("MMP InspectorInstrumentation::didHandleMemoryPressureImpl\n"); fflush(stdout);
     if (InspectorMemoryAgent* memoryAgent = instrumentingAgents.inspectorMemoryAgent())
         memoryAgent->didHandleMemoryPressure(critical);
 }

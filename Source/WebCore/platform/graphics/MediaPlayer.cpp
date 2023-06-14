@@ -656,6 +656,11 @@ bool MediaPlayer::supportsScanning() const
     return m_private->supportsScanning();
 }
 
+bool MediaPlayer::supportsProgressMonitoring() const
+{
+    return m_private->supportsProgressMonitoring();
+}
+
 bool MediaPlayer::requiresImmediateCompositing() const
 {
     return m_private->requiresImmediateCompositing();
@@ -1515,6 +1520,11 @@ void MediaPlayer::applicationWillResignActive()
 void MediaPlayer::applicationDidBecomeActive()
 {
     m_private->applicationDidBecomeActive();
+}
+
+bool MediaPlayer::shouldIgnoreIntrinsicSize()
+{
+    return m_private->shouldIgnoreIntrinsicSize();
 }
 
 #if ENABLE(VIDEO) && USE(AVFOUNDATION)

@@ -382,7 +382,6 @@ static void webKitWebSrcStop(WebKitWebSrc* src)
 
     if (!wasSeeking) {
         priv->requestedOffset = 0;
-        priv->player = nullptr;
         priv->seekable = FALSE;
     }
 

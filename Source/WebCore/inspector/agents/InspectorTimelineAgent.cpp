@@ -551,11 +551,16 @@ void InspectorTimelineAgent::toggleHeapInstrument(InstrumentState state)
 
 void InspectorTimelineAgent::toggleMemoryInstrument(InstrumentState state)
 {
+    printf("MMP InspectorTimelineAgent::toggleMemoryInstrument\n"); fflush(stdout);
 #if ENABLE(RESOURCE_USAGE)
     if (InspectorMemoryAgent* memoryAgent = m_instrumentingAgents.inspectorMemoryAgent()) {
         ErrorString unused;
+        printf("MMP InspectorTimelineAgent::toggleMemoryInstrument startTracking?\n"); fflush(stdout);
         if (state == InstrumentState::Start)
+        {
+            printf("MMP InspectorTimelineAgent::toggleMemoryInstrument startTracking\n"); fflush(stdout);
             memoryAgent->startTracking(unused);
+        }
         else
             memoryAgent->stopTracking(unused);
     }

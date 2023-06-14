@@ -88,6 +88,12 @@ public:
     void connectDemuxerSrcPadToAppsinkFromAnyThread(GstPad*);
     void connectDemuxerSrcPadToAppsink(GstPad*);
 
+#if ENABLE(ENCRYPTED_MEDIA)
+    void demuxerIsDoneSendingProtectionEvents(const GstStructure*);
+    void cacheProtectionEvent(GstEvent*);
+    void handleProtectedBufferProbeInformation(GstPadProbeInfo*);
+#endif
+
 private:
     void resetPipeline();
     void checkEndOfAppend();
@@ -145,6 +151,8 @@ private:
 
 #if ENABLE(ENCRYPTED_MEDIA)
     struct PadProbeInformation m_appsinkPadEventProbeInformation;
+    GValue m_cachedProtectionEvents;
+    bool m_isProcessingProtectionEvents { false };
 #endif
     // Keeps track of the states of append processing, to avoid performing actions inappropriate for the current state
     // (eg: processing more samples when the last one has been detected, etc.). See setAppendState() for valid

@@ -49,7 +49,7 @@ WI.MemoryInstrument = class MemoryInstrument extends WI.Instrument
 
     startInstrumentation(initiatedByBackend)
     {
-        if (!initiatedByBackend)
+        //if (!initiatedByBackend)
             MemoryAgent.startTracking();
     }
 

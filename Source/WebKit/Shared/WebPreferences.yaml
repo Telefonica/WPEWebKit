@@ -153,10 +153,18 @@ ShouldPrintBackgrounds:
   type: bool
   defaultValue: DEFAULT_SHOULD_PRINT_BACKGROUNDS
 
+ShouldDrawsBackground:
+  type: bool
+  defaultValue: true
+
 LinkPreconnect:
   type: bool
   defaultValue: DEFAULT_LINK_PRECONNECT_ENABLED
   webcoreName: linkPreconnectEnabled
+
+BackgroundColor:
+  type: uint32_t
+  defaultValue: 0xffffffff
 
 AsynchronousSpellCheckingEnabled:
   type: bool
@@ -1175,7 +1183,7 @@ FetchAPIKeepAliveEnabled:
 
 ServiceWorkersEnabled:
   type: bool
-  defaultValue: DEFAULT_SERVICE_WORKERS_ENABLED
+  defaultValue: true
   humanReadableName: "ServiceWorkers"
   humanReadableDescription: "Enable ServiceWorkers"
   category: experimental

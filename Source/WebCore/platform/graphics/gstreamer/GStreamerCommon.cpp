@@ -173,7 +173,7 @@ const char* capsMediaType(const GstCaps* caps)
         return nullptr;
     }
 #if ENABLE(ENCRYPTED_MEDIA)
-    if (gst_structure_has_name(structure, "application/x-cenc"))
+    if (gst_structure_has_name(structure, "application/x-cenc") || gst_structure_has_name(structure, "application/x-webm-enc"))
         return gst_structure_get_string(structure, "original-media-type");
 #endif
     return gst_structure_get_name(structure);
@@ -198,7 +198,7 @@ bool areEncryptedCaps(const GstCaps* caps)
         GST_WARNING("caps are empty");
         return false;
     }
-    return gst_structure_has_name(structure, "application/x-cenc");
+    return gst_structure_has_name(structure, "application/x-cenc") || gst_structure_has_name(structure, "application/x-webm-enc");
 #else
     UNUSED_PARAM(caps);
     return false;
@@ -290,7 +290,7 @@ bool initializeGStreamer(std::optional<Vector<String>>&& options)
 
 unsigned getGstPlayFlag(const char* nick)
 {
-    static GFlagsClass* flagsClass = static_cast<GFlagsClass*>(g_type_class_ref(g_type_from_name("GstPlayFlags")));
+    static GFlagsClass* flagsClass = static_cast<GFlagsClass*>(g_type_class_ref(g_type_from_name("GstBrcmPlayFlags")));
     ASSERT(flagsClass);
 
     GFlagsValue* flag = g_flags_get_value_by_nick(flagsClass, nick);

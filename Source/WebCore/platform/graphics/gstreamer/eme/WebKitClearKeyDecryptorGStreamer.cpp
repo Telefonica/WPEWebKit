@@ -44,7 +44,6 @@ struct _WebKitMediaClearKeyDecryptPrivate {
 };
 
 static void webKitMediaClearKeyDecryptorFinalize(GObject*);
-static gboolean webKitMediaClearKeyDecryptorHandleKeyResponse(WebKitMediaCommonEncryptionDecrypt* self, GstEvent*);
 static gboolean webKitMediaClearKeyDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt*, GstBuffer*);
 static gboolean webKitMediaClearKeyDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* iv, GstBuffer* sample, unsigned subSamplesCount, GstBuffer* subSamples);
 static void webKitMediaClearKeyDecryptorReleaseCipher(WebKitMediaCommonEncryptionDecrypt*);
@@ -56,12 +55,14 @@ static GstStaticPadTemplate sinkTemplate = GST_STATIC_PAD_TEMPLATE("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS("application/x-cenc, original-media-type=(string)video/x-h264, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_CLEARKEY_UUID "; "
-    "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_CLEARKEY_UUID));
+    "application/x-cenc, original-media-type=(string)audio/mpeg, protection-system=(string)" WEBCORE_GSTREAMER_EME_UTILITIES_CLEARKEY_UUID";"
+    "application/x-webm-enc, original-media-type=(string)video/x-vp8;"
+    "application/x-webm-enc, original-media-type=(string)video/x-vp9;"));
 
 static GstStaticPadTemplate srcTemplate = GST_STATIC_PAD_TEMPLATE("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS("video/x-h264; audio/mpeg"));
+    GST_STATIC_CAPS("video/x-h264; audio/mpeg; video/x-vp8; video/x-vp9"));
 
 #define webkit_media_clear_key_decrypt_parent_class parent_class
 G_DEFINE_TYPE(WebKitMediaClearKeyDecrypt, webkit_media_clear_key_decrypt, WEBKIT_TYPE_MEDIA_CENC_DECRYPT);
@@ -85,8 +86,6 @@ static void webkit_media_clear_key_decrypt_class_init(WebKitMediaClearKeyDecrypt
         "webkitclearkey", 0, "ClearKey decryptor");
 
     WebKitMediaCommonEncryptionDecryptClass* cencClass = WEBKIT_MEDIA_CENC_DECRYPT_CLASS(klass);
-    cencClass->protectionSystemId = WebCore::GStreamerEMEUtilities::s_ClearKeyUUID;
-    cencClass->handleKeyResponse = GST_DEBUG_FUNCPTR(webKitMediaClearKeyDecryptorHandleKeyResponse);
     cencClass->setupCipher = GST_DEBUG_FUNCPTR(webKitMediaClearKeyDecryptorSetupCipher);
     cencClass->decrypt = GST_DEBUG_FUNCPTR(webKitMediaClearKeyDecryptorDecrypt);
     cencClass->releaseCipher = GST_DEBUG_FUNCPTR(webKitMediaClearKeyDecryptorReleaseCipher);
@@ -110,42 +109,6 @@ static void webKitMediaClearKeyDecryptorFinalize(GObject* object)
     priv->~WebKitMediaClearKeyDecryptPrivate();
 
     GST_CALL_PARENT(G_OBJECT_CLASS, finalize, (object));
-}
-
-static gboolean webKitMediaClearKeyDecryptorHandleKeyResponse(WebKitMediaCommonEncryptionDecrypt* self, GstEvent* event)
-{
-    WebKitMediaClearKeyDecryptPrivate* priv = WEBKIT_MEDIA_CK_DECRYPT_GET_PRIVATE(WEBKIT_MEDIA_CK_DECRYPT(self));
-    const GstStructure* structure = gst_event_get_structure(event);
-
-    // Demand the `drm-cipher-clearkey` GstStructure.
-    if (!gst_structure_has_name(structure, "drm-cipher-clearkey"))
-        return FALSE;
-
-    // Retrieve the `key-ids` GStreamer value list.
-    const GValue* keyIDsList = gst_structure_get_value(structure, "key-ids");
-    ASSERT(keyIDsList && GST_VALUE_HOLDS_LIST(keyIDsList));
-    unsigned keyIDsListSize = gst_value_list_get_size(keyIDsList);
-
-    // Retrieve the `key-values` GStreamer value list.
-    const GValue* keyValuesList = gst_structure_get_value(structure, "key-values");
-    ASSERT(keyValuesList && GST_VALUE_HOLDS_LIST(keyValuesList));
-    unsigned keyValuesListSize = gst_value_list_get_size(keyValuesList);
-
-    // Bail if somehow the two lists don't match in size.
-    if (keyIDsListSize != keyValuesListSize)
-        return FALSE;
-
-    // Clear out the previous list of keys.
-    priv->keys.clear();
-
-    // Append the retrieved GstBuffer objects containing each key's ID and value to the list of Key objects.
-    for (unsigned i = 0; i < keyIDsListSize; ++i) {
-        GRefPtr<GstBuffer> keyIDBuffer(gst_value_get_buffer(gst_value_list_get_value(keyIDsList, i)));
-        GRefPtr<GstBuffer> keyValueBuffer(gst_value_get_buffer(gst_value_list_get_value(keyValuesList, i)));
-        priv->keys.append(Key { WTFMove(keyIDBuffer), WTFMove(keyValueBuffer) });
-    }
-
-    return TRUE;
 }
 
 static gboolean webKitMediaClearKeyDecryptorSetupCipher(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer)

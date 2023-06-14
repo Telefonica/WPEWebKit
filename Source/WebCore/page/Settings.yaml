@@ -115,12 +115,16 @@ javaScriptCanAccessClipboard:
   initial: false
 shouldPrintBackgrounds:
   initial: false
+shouldDrawsBackground:
+  initial: false
 usesDashboardBackwardCompatibilityMode:
   initial: false
   conditional: DASHBOARD_SUPPORT
 clipboardAccessPolicy:
   type: ClipboardAccessPolicy
   initial: ClipboardAccessPolicy::RequiresUserGesture
+backgroundColor:
+  initial: 0xffffffff
 
 textAreasAreResizable:
   initial: false
@@ -473,9 +477,10 @@ dataDetectorTypes:
 
 # Allow SourceBuffers to store up to 304MB each, enough for approximately five minutes
 # of 1080p video and stereo audio.
+# Álvaro Peña: Modified to 50 * 1024 * 1024
 maximumSourceBufferSize:
   type: int
-  initial: 318767104
+  initial: 52428800
   conditional: MEDIA_SOURCE
 
 serviceControlsEnabled:

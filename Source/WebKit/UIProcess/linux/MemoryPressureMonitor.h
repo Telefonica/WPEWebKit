@@ -48,6 +48,8 @@ public:
 private:
     MemoryPressureMonitor() = default;
     bool m_started { false };
+    int s_memoryPressurePercentageThreshold { 90 };
+    int s_memoryPressurePercentageThresholdCritical { 95 };
 };
 
 } // namespace WebKit

@@ -22,6 +22,7 @@ if (ENABLE_VIDEO OR ENABLE_WEB_AUDIO)
         platform/graphics/gstreamer/WebKitWebSourceGStreamer.cpp
 
         platform/graphics/gstreamer/eme/WebKitClearKeyDecryptorGStreamer.cpp
+        platform/graphics/gstreamer/eme/WebKitOpenCDMDecryptorGStreamer.cpp
         platform/graphics/gstreamer/eme/WebKitCommonEncryptionDecryptorGStreamer.cpp
 
         platform/graphics/gstreamer/mse/AppendPipeline.cpp
@@ -145,15 +146,19 @@ endif ()
 if (ENABLE_ENCRYPTED_MEDIA)
     list(APPEND WebCore_INCLUDE_DIRECTORIES
         "${WEBCORE_DIR}/platform/encryptedmedia/clearkey"
+        "${WEBCORE_DIR}/platform/encryptedmedia/opencdm"
         ${LIBGCRYPT_INCLUDE_DIRS}
+	${OPENCDM_INCLUDE_DIRS}
     )
     list(APPEND WebCore_SOURCES
         platform/encryptedmedia/clearkey/CDMClearKey.cpp
+        platform/encryptedmedia/opencdm/CDMOpenCDM.cpp
 
         platform/graphics/gstreamer/eme/CDMFactoryGStreamer.cpp
     )
     list(APPEND WebCore_LIBRARIES
         ${LIBGCRYPT_LIBRARIES} -lgpg-error
+        ${OPENCDM_LIBRARIES}
     )
 endif ()
 

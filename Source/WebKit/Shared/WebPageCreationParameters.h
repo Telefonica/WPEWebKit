@@ -185,6 +185,8 @@ struct WebPageCreationParameters {
 #if ENABLE(CONTENT_EXTENSIONS)
     Vector<std::pair<String, WebCompiledContentRuleListData>> contentRuleLists;
 #endif
+
+   WebCore::Color backgroundColor;
 };
 
 } // namespace WebKit

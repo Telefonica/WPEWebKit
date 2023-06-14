@@ -208,6 +208,7 @@ static unsigned categoryForVMTag(unsigned tag)
 void ResourceUsageThread::platformThreadBody(JSC::VM* vm, ResourceUsageData& data)
 {
     data.cpu = cpuUsage();
+    printf("MMP ResourceUsageThread::platformThreadBody\n");fflush(stdout);
 
     auto tags = pagesPerVMTag();
     std::array<TagInfo, MemoryCategory::NumberOfCategories> pagesPerCategory;
@@ -230,6 +231,9 @@ void ResourceUsageThread::platformThreadBody(JSC::VM* vm, ResourceUsageData& dat
     size_t currentGCOwnedExtra = vm->heap.extraMemorySize();
     size_t currentGCOwnedExternal = vm->heap.externalMemorySize();
     ASSERT(currentGCOwnedExternal <= currentGCOwnedExtra);
+    printf("MMP mm ResourceUsageThread::platformThreadBody currentGCHeapCapacity -%d-\n",currentGCHeapCapacity);fflush(stdout);
+    printf("MMP mm ResourceUsageThread::platformThreadBody currentGCOwnedExtra -%d-\n",currentGCOwnedExtra);fflush(stdout);
+    printf("MMP mm ResourceUsageThread::platformThreadBody currentGCOwnedExternal -%d-\n",currentGCOwnedExternal);fflush(stdout);
 
     data.categories[MemoryCategory::GCHeap].dirtySize = currentGCHeapCapacity;
     data.categories[MemoryCategory::GCOwned].dirtySize = currentGCOwnedExtra - currentGCOwnedExternal;

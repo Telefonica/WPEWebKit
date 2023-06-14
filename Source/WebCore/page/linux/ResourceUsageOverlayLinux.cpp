@@ -85,6 +85,7 @@ public:
 private:
     void paintContents(const GraphicsLayer*, GraphicsContext& context, GraphicsLayerPaintingPhase, const FloatRect& clip, GraphicsLayerPaintBehavior) override
     {
+         printf("MMP paintContents \n");fflush(stdout);
         GraphicsContextStateSaver stateSaver(context);
         context.fillRect(clip, Color(0.0f, 0.0f, 0.0f, 0.8f));
         context.setFillColor(Color(0.9f, 0.9f, 0.9f, 1.f));
@@ -93,31 +94,41 @@ private:
         String string =  "CPU: " + cpuUsageString(gData.cpu);
         context.drawText(m_textFont, TextRun(string), position);
         position.move(0, gFontSize + 2);
+        printf("MMP paintContents -%s-\n",string);fflush(stdout);
 
         string = "Memory: " + formatByteNumber(gData.totalDirtySize);
         context.drawText(m_textFont, TextRun(string), position);
         position.move(0, gFontSize + 2);
 
+        printf("MMP paintContents -%s-\n",string);fflush(stdout);
+
         string = "External: " + formatByteNumber(gData.totalExternalSize);
         context.drawText(m_textFont, TextRun(string), position);
         position.move(0, gFontSize + 2);
+
+        printf("MMP paintContents -%s-\n",string);fflush(stdout);
 
         string = "GC Heap: " + formatByteNumber(gData.categories[MemoryCategory::GCHeap].dirtySize);
         context.drawText(m_textFont, TextRun(string), position);
         position.move(0, gFontSize + 2);
 
+        printf("MMP paintContents -%s-\n",string);fflush(stdout);
         string = "GC owned: " + formatByteNumber(gData.categories[MemoryCategory::GCOwned].dirtySize);
         context.drawText(m_textFont, TextRun(string), position);
         position.move(0, gFontSize + 2);
 
+        printf("MMP paintContents -%s-\n",string);fflush(stdout);
         MonotonicTime now = MonotonicTime::now();
         string = "Eden GC: " + gcTimerString(gData.timeOfNextEdenCollection, now);
         context.drawText(m_textFont, TextRun(string), position);
         position.move(0, gFontSize + 2);
 
+        printf("MMP paintContents -%s-\n",string);fflush(stdout);
         string = "Full GC: " + gcTimerString(gData.timeOfNextFullCollection, now);
         context.drawText(m_textFont, TextRun(string), position);
         position.move(0, gFontSize + 2);
+
+        printf("MMP paintContents -%s-\n",string);fflush(stdout);
     }
 
     void notifyFlushRequired(const GraphicsLayer*) override

@@ -29,6 +29,10 @@
 #include "config.h"
 #include "ImageBuffer.h"
 
+#include <fstream>
+#include <sstream>
+
+
 #if USE(CAIRO)
 
 #include "BitmapImage.h"
@@ -99,6 +103,15 @@ ImageBufferData::ImageBufferData(const IntSize& size, RenderingMode renderingMod
 #endif
     }
 #endif
+    m_ImagebufferCounter++;
+    std::ofstream file("/tmp/imagebuferCounter");
+    if (file) 
+    {
+        std::stringstream ss;
+        ss << m_ImagebufferCounter;
+        file << ss.str();
+        file.close();
+    }
 }
 
 ImageBufferData::~ImageBufferData()
@@ -125,6 +138,15 @@ ImageBufferData::~ImageBufferData()
     if (previousActiveContext)
         previousActiveContext->makeContextCurrent();
 #endif
+    m_ImagebufferCounter--;
+    std::ofstream file("/tmp/imagebuferCounter");
+    if (file) 
+    {
+        std::stringstream ss;
+        ss << m_ImagebufferCounter;
+        file << ss.str();
+        file.close();
+    }
 }
 
 #if ENABLE(ACCELERATED_2D_CANVAS)

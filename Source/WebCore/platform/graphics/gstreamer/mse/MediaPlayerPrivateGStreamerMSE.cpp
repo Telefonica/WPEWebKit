@@ -57,6 +57,7 @@
 
 #if ENABLE(ENCRYPTED_MEDIA)
 #include "CDMClearKey.h"
+#include "CDMOpenCDM.h"
 #include "SharedBuffer.h"
 #endif
 
@@ -542,24 +543,9 @@ void MediaPlayerPrivateGStreamerMSE::updateStates()
                 m_readyState = MediaPlayer::HaveMetadata;
                 // FIXME: Should we manage NetworkState too?
                 GST_DEBUG("m_readyState=%s", dumpReadyState(m_readyState));
-            } else if (m_buffering) {
-                if (m_bufferingPercentage == 100) {
-                    GST_DEBUG("[Buffering] Complete.");
-                    m_buffering = false;
-                    m_readyState = MediaPlayer::HaveEnoughData;
-                    GST_DEBUG("m_readyState=%s", dumpReadyState(m_readyState));
-                    m_networkState = m_downloadFinished ? MediaPlayer::Idle : MediaPlayer::Loading;
-                } else {
-                    m_readyState = MediaPlayer::HaveCurrentData;
-                    GST_DEBUG("m_readyState=%s", dumpReadyState(m_readyState));
-                    m_networkState = MediaPlayer::Loading;
-                }
-            } else if (m_downloadFinished) {
-                m_readyState = MediaPlayer::HaveEnoughData;
-                GST_DEBUG("m_readyState=%s", dumpReadyState(m_readyState));
-                m_networkState = MediaPlayer::Loaded;
             } else {
-                m_readyState = MediaPlayer::HaveFutureData;
+                if (m_readyState < MediaPlayer::HaveFutureData)
+                    m_readyState = MediaPlayer::HaveFutureData;
                 GST_DEBUG("m_readyState=%s", dumpReadyState(m_readyState));
                 m_networkState = MediaPlayer::Loading;
             }
@@ -581,14 +567,14 @@ void MediaPlayerPrivateGStreamerMSE::updateStates()
                 m_volumeAndMuteInitialized = true;
             }
 
-            if (!seeking() && !m_buffering && !m_paused && m_playbackRate) {
+            if (!seeking() && !m_paused && m_playbackRate) {
                 GST_DEBUG("[Buffering] Restarting playback.");
                 changePipelineState(GST_STATE_PLAYING);
             }
         } else if (state == GST_STATE_PLAYING) {
             m_paused = false;
 
-            if ((m_buffering && !isLiveStream()) || !m_playbackRate) {
+            if (!m_playbackRate) {
                 GST_DEBUG("[Buffering] Pausing stream for buffering.");
                 changePipelineState(GST_STATE_PAUSED);
             }
@@ -755,8 +741,8 @@ const static HashSet<AtomicString>& codecSet()
         MediaPlayerPrivateGStreamerBase::initializeGStreamerAndRegisterWebKitElements();
         HashSet<AtomicString> set;
 
-        GList* audioDecoderFactories = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_AUDIO, GST_RANK_MARGINAL);
-        GList* videoDecoderFactories = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO, GST_RANK_MARGINAL);
+        GList* audioDecoderFactories = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_PARSER | GST_ELEMENT_FACTORY_TYPE_DECODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_AUDIO, GST_RANK_MARGINAL);
+        GList* videoDecoderFactories = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_PARSER | GST_ELEMENT_FACTORY_TYPE_DECODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO, GST_RANK_MARGINAL);
 
         enum ElementType {
             AudioDecoder = 0,
@@ -769,6 +755,7 @@ const static HashSet<AtomicString>& codecSet()
         };
 
         GstCapsWebKitMapping mapping[] = {
+            { VideoDecoder, "video/x-h265", { "x-h265", "hvc1*" ,"hev1*" } },
             { VideoDecoder, "video/x-h264,  profile=(string){ constrained-baseline, baseline }", { "x-h264", "avc*" } },
             { VideoDecoder, "video/mpeg, mpegversion=(int){1,2}, systemstream=(boolean)false", { "mpeg" } },
             { VideoDecoder, "video/x-vp8", { "vp8", "x-vp8" } },
@@ -893,7 +880,7 @@ MediaTime MediaPlayerPrivateGStreamerMSE::currentMediaTime() const
 {
     MediaTime position = MediaPlayerPrivateGStreamer::currentMediaTime();
 
-    if (m_eosPending && (paused() || (position >= durationMediaTime()))) {
+    if (m_eosPending && abs(position - durationMediaTime()) < MediaTime(GST_SECOND, GST_SECOND) && (!m_playbackProgress || position > durationMediaTime())) {
         if (m_networkState != MediaPlayer::Loaded) {
             m_networkState = MediaPlayer::Loaded;
             m_player->networkStateChanged();
@@ -902,7 +889,6 @@ MediaTime MediaPlayerPrivateGStreamerMSE::currentMediaTime() const
         m_eosPending = false;
         m_isEndReached = true;
         m_cachedPosition = m_mediaTimeDuration;
-        m_durationAtEOS = m_mediaTimeDuration;
         m_player->timeChanged();
     }
     return position;
@@ -928,36 +914,13 @@ MediaTime MediaPlayerPrivateGStreamerMSE::maxMediaTimeSeekable() const
 #if ENABLE(ENCRYPTED_MEDIA)
 void MediaPlayerPrivateGStreamerMSE::attemptToDecryptWithInstance(CDMInstance& instance)
 {
-    if (is<CDMInstanceClearKey>(instance)) {
-        auto& ckInstance = downcast<CDMInstanceClearKey>(instance);
-        if (ckInstance.keys().isEmpty())
-            return;
+    return;
+}
 
-        GValue keyIDList = G_VALUE_INIT, keyValueList = G_VALUE_INIT;
-        g_value_init(&keyIDList, GST_TYPE_LIST);
-        g_value_init(&keyValueList, GST_TYPE_LIST);
-
-        auto appendBuffer =
-            [](GValue* valueList, const SharedBuffer& buffer)
-            {
-                GValue* bufferValue = g_new0(GValue, 1);
-                g_value_init(bufferValue, GST_TYPE_BUFFER);
-                gst_value_take_buffer(bufferValue,
-                    gst_buffer_new_wrapped(g_memdup(buffer.data(), buffer.size()), buffer.size()));
-                gst_value_list_append_and_take_value(valueList, bufferValue);
-            };
-
-        for (auto& key : ckInstance.keys()) {
-            appendBuffer(&keyIDList, *key.keyIDData);
-            appendBuffer(&keyValueList, *key.keyValueData);
-        }
-
-        GUniquePtr<GstStructure> structure(gst_structure_new_empty("drm-cipher-clearkey"));
-        gst_structure_set_value(structure.get(), "key-ids", &keyIDList);
-        gst_structure_set_value(structure.get(), "key-values", &keyValueList);
-
+void MediaPlayerPrivateGStreamerMSE::dispatchDecryptionStructure(GUniquePtr<GstStructure>&& structure)
+{
+    if (m_playbackPipeline)
         gst_element_send_event(m_playbackPipeline->pipeline(), gst_event_new_custom(GST_EVENT_CUSTOM_DOWNSTREAM_OOB, structure.release()));
-    }
 }
 #endif
 

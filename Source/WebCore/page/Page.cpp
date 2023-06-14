@@ -262,7 +262,7 @@ Page::Page(PageConfiguration&& pageConfiguration)
 #endif
 {
     updateTimerThrottlingState();
-
+    printf("MMP Page!\n");fflush(stdout);
     m_pluginInfoProvider->addPage(*this);
     m_storageNamespaceProvider->addPage(*this);
     m_userContentProvider->addPage(*this);

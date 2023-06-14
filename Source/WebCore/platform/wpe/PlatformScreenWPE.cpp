@@ -28,6 +28,7 @@
 
 #include "FloatRect.h"
 #include "NotImplemented.h"
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -65,16 +66,36 @@ void setScreenDPIObserverHandler(Function<void()>&&, void*)
     notImplemented();
 }
 
+bool is1080(){
+    String s(getenv("WPE_NEXUS_FORMAT"));
+    String fullhd("1080");
+
+    if (!s.isEmpty()) {
+        if(s.contains(fullhd)){
+            return true; 
+        }else{
+            return false;
+        }
+    }else{
+        return false;
+    }
+
+}
+
 FloatRect screenRect(Widget*)
 {
-    notImplemented();
-    return FloatRect(0, 0, 1024, 640);
+    if(is1080())
+        return FloatRect(0, 0, 1920, 1080);
+    else
+        return FloatRect(0, 0, 1280, 720);
 }
 
 FloatRect screenAvailableRect(Widget*)
 {
-    notImplemented();
-    return FloatRect(0, 0, 1024, 640);
+    if(is1080())
+        return FloatRect(0, 0, 1920, 1080);
+    else
+        return FloatRect(0, 0, 1280, 720);
 }
 
 bool screenSupportsExtendedColor(Widget*)

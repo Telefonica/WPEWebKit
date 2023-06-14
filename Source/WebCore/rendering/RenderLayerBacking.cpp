@@ -1241,7 +1241,9 @@ void RenderLayerBacking::updateAfterDescendants()
     if (!m_owningLayer.isRenderViewLayer()) {
         bool didUpdateContentsRect = false;
         updateDirectlyCompositedBoxDecorations(contentsInfo, didUpdateContentsRect);
-        if (!didUpdateContentsRect && m_graphicsLayer->usesContentsLayer())
+        if (!didUpdateContentsRect && m_graphicsLayer->usesContentsLayer()
+            || is<RenderVideo>(renderer()
+        ))
             resetContentsRect();
     }
 

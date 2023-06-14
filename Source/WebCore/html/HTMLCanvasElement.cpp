@@ -59,6 +59,9 @@
 #include <wtf/RAMSize.h>
 #include <wtf/text/StringBuilder.h>
 
+#include <fstream>
+#include <sstream>
+
 #if ENABLE(MEDIA_STREAM)
 #include "CanvasCaptureMediaStreamTrack.h"
 #include "MediaStream.h"
@@ -117,6 +120,15 @@ HTMLCanvasElement::HTMLCanvasElement(const QualifiedName& tagName, Document& doc
     , CanvasBase(&document)
     , m_size(defaultWidth, defaultHeight)
 {
+    m_CanvasCounter++;
+    std::ofstream file("/tmp/canvasCounter");
+    if (file) 
+    {
+        std::stringstream ss;
+        ss << m_CanvasCounter;
+        file << ss.str();
+        file.close();
+    }
     ASSERT(hasTagName(canvasTag));
 }
 
@@ -148,6 +160,15 @@ HTMLCanvasElement::~HTMLCanvasElement()
     m_context = nullptr; // Ensure this goes away before the ImageBuffer.
 
     releaseImageBufferAndContext();
+    m_CanvasCounter--;
+    std::ofstream file("/tmp/canvasCounter");
+    if (file) 
+    {
+        std::stringstream ss;
+        ss << m_CanvasCounter;
+        file << ss.str();
+        file.close();
+    }
 }
 
 void HTMLCanvasElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
@@ -918,7 +939,7 @@ void HTMLCanvasElement::createImageBuffer() const
     if (!width() || !height())
         return;
 
-    RenderingMode renderingMode = shouldAccelerate(size()) ? Accelerated : Unaccelerated;
+    RenderingMode renderingMode = Unaccelerated;
 
     auto hostWindow = (document().view() && document().view()->root()) ? document().view()->root()->hostWindow() : nullptr;
     setImageBuffer(ImageBuffer::create(size(), renderingMode, 1, ColorSpaceSRGB, hostWindow));

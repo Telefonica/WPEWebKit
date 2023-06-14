@@ -1374,6 +1374,16 @@ void WebPageProxy::setDrawsBackground(bool drawsBackground)
         m_process->send(Messages::WebPage::SetDrawsBackground(drawsBackground), m_pageID);
 }
 
+void WebPageProxy::setBackgroundColor(const Color& color)
+{
+    if (m_backgroundColor == color)
+        return;
+
+    m_backgroundColor = color;
+    if (isValid())
+        m_process->send(Messages::WebPage::SetBackgroundColor(color), m_pageID);
+}
+
 void WebPageProxy::setTopContentInset(float contentInset)
 {
     if (m_topContentInset == contentInset)
@@ -6315,6 +6325,8 @@ WebPageCreationParameters WebPageProxy::creationParameters()
 #if ENABLE(APPLICATION_MANIFEST)
     parameters.applicationManifest = m_configuration->applicationManifest() ? std::optional<WebCore::ApplicationManifest>(m_configuration->applicationManifest()->applicationManifest()) : std::nullopt;
 #endif
+
+    parameters.backgroundColor = m_backgroundColor;
 
     m_process->addWebUserContentControllerProxy(m_userContentController, parameters);
 

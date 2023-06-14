@@ -66,7 +66,7 @@ public:
     double expiration() const;
     Ref<MediaKeyStatusMap> keyStatuses() const;
 
-    void generateRequest(const AtomicString&, const BufferSource&, Ref<DeferredPromise>&&);
+    void generateRequest(const AtomicString&, const BufferSource&, std::optional<BufferSource::VariantType>&&, Ref<DeferredPromise>&&);
     void load(const String&, Ref<DeferredPromise>&&);
     void update(const BufferSource&, Ref<DeferredPromise>&&);
     void close(Ref<DeferredPromise>&&);
@@ -80,6 +80,7 @@ public:
 private:
     MediaKeySession(ScriptExecutionContext&, WeakPtr<MediaKeys>&&, MediaKeySessionType, bool useDistinctiveIdentifier, Ref<CDM>&&, Ref<CDMInstance>&&);
     void enqueueMessage(MediaKeyMessageType, const SharedBuffer&);
+    void enqueueMessageWithTask(MessageType, Ref<SharedBuffer>&&) override;
     void updateExpiration(double);
     void sessionClosed();
     String mediaKeysStorageDirectory() const;

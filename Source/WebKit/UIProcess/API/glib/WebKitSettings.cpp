@@ -161,6 +161,8 @@ enum {
 #if PLATFORM(GTK)
     PROP_HARDWARE_ACCELERATION_POLICY,
 #endif
+    PROP_DRAWS_BACKGROUND,
+    PROP_BACKGROUND_COLOR
 };
 
 static void webKitSettingsDispose(GObject* object)
@@ -371,6 +373,12 @@ static void webKitSettingsSetProperty(GObject* object, guint propId, const GValu
         webkit_settings_set_hardware_acceleration_policy(settings, static_cast<WebKitHardwareAccelerationPolicy>(g_value_get_enum(value)));
         break;
 #endif
+    case PROP_DRAWS_BACKGROUND:
+        webkit_settings_set_draws_background(settings, g_value_get_boolean(value));
+        break;
+    case PROP_BACKGROUND_COLOR:
+        webkit_settings_set_background_color(settings, g_value_get_uint(value));
+        break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, propId, paramSpec);
         break;
@@ -547,6 +555,12 @@ static void webKitSettingsGetProperty(GObject* object, guint propId, GValue* val
         g_value_set_enum(value, webkit_settings_get_hardware_acceleration_policy(settings));
         break;
 #endif
+    case PROP_DRAWS_BACKGROUND:
+        g_value_set_boolean(value, webkit_settings_get_draws_background(settings));
+        break;
+    case PROP_BACKGROUND_COLOR:
+        g_value_set_uint(value, webkit_settings_get_background_color(settings));
+        break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, propId, paramSpec);
         break;
@@ -1414,6 +1428,32 @@ static void webkit_settings_class_init(WebKitSettingsClass* klass)
             WEBKIT_HARDWARE_ACCELERATION_POLICY_ON_DEMAND,
             readWriteConstructParamFlags));
 #endif // PLATFOTM(GTK)
+
+    /**
+     * WebKitSettings:draws-background:
+     *
+     * Whether page background should be painted or should be transparent
+     */
+    g_object_class_install_property(gObjectClass,
+                                    PROP_DRAWS_BACKGROUND,
+                                    g_param_spec_boolean("draws-background",
+                                                         _("Draws background"),
+                                                         _("Whether page background should be painted or should be transparent"),
+                                                         TRUE,
+                                                         readWriteConstructParamFlags));
+
+    /**
+     * WebKitSettings:background-color:
+     *
+     * Whether page background should be painted or should be transparent
+     */
+    g_object_class_install_property(gObjectClass,
+                                    PROP_BACKGROUND_COLOR,
+                                    g_param_spec_uint("background-color",
+                                                         _("background-color"),
+                                                         _("Whether page background should be painted on the specific Color"),
+                                                         0, G_MAXUINT, 0xffffffff,
+                                                         readWriteConstructParamFlags));
 }
 
 WebPreferences* webkitSettingsGetPreferences(WebKitSettings* settings)
@@ -3482,3 +3522,58 @@ guint32 webkit_settings_font_size_to_pixels(guint32 points)
     return std::round(points * WebCore::screenDPI() / 72);
 }
 #endif // PLATFORM(GTK)
+
+/**
+ * webkit_settings_get_draws_background:
+ * @settings: a #WebKitSettings
+ *
+ * Get the #WebKitSettings:draws-background property.
+ *
+ * Returns: %TRUE If background should be draw or %FALSE otherwise.
+ */
+gboolean webkit_settings_get_draws_background(WebKitSettings* settings)
+{
+    g_return_val_if_fail(WEBKIT_IS_SETTINGS(settings), FALSE);
+
+    return settings->priv->preferences->shouldDrawsBackground();
+}
+
+/**
+ * webkit_settings_set_draws_background:
+ * @settings: a #WebKitSettings
+ * @draws_background: Value to be set
+ *
+ * Set the #WebKitSettings:draws-background property.
+ */
+void webkit_settings_set_draws_background(WebKitSettings* settings, gboolean draws_background)
+{
+    g_return_if_fail(WEBKIT_IS_SETTINGS(settings));
+
+    WebKitSettingsPrivate* priv = settings->priv;
+    bool currentValue = priv->preferences->shouldDrawsBackground();
+    if (currentValue == draws_background)
+        return;
+
+    priv->preferences->setShouldDrawsBackground(draws_background);
+    g_object_notify(G_OBJECT(settings), "draws-background");
+}
+
+void webkit_settings_set_background_color(WebKitSettings* settings, uint32_t background_color)
+{
+    g_return_if_fail(WEBKIT_IS_SETTINGS(settings));
+
+    WebKitSettingsPrivate* priv = settings->priv;
+    bool currentValue = priv->preferences->backgroundColor();
+    if (currentValue == background_color)
+        return;
+
+    priv->preferences->setBackgroundColor(background_color);
+    g_object_notify(G_OBJECT(settings), "background-color");
+}
+ 
+uint32_t webkit_settings_get_background_color(WebKitSettings* settings)
+{
+    g_return_val_if_fail(WEBKIT_IS_SETTINGS(settings), 0xffffffff);
+
+    return settings->priv->preferences->backgroundColor();
+}

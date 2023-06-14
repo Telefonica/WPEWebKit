@@ -73,6 +73,9 @@ View::View(struct wpe_view_backend* backend, const API::PageConfiguration& baseC
         pool->startMemorySampler(0);
 #endif
 
+    m_pageProxy->setDrawsBackground(preferences->shouldDrawsBackground());
+    m_pageProxy->setBackgroundColor(WebCore::Color(preferences->backgroundColor()));
+
     m_compositingManagerProxy.initialize();
 
     static struct wpe_view_backend_client s_backendClient = {

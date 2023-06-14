@@ -187,6 +187,8 @@ private:
     bool m_usesDisplayListDrawing { false };
     bool m_tracksDisplayListReplay { false };
 
+    double m_CanvasCounter { 0 };
+
     mutable Lock m_imageBufferAssignmentLock;
     
     // m_createdImageBuffer means we tried to malloc the buffer.  We didn't necessarily get it.

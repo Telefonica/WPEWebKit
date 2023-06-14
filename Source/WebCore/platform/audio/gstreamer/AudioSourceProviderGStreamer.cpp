@@ -202,6 +202,12 @@ void AudioSourceProviderGStreamer::setClient(AudioSourceProviderClient* client)
     if (m_client)
         return;
 
+    //Brcmaudiosink is not compatible with AudioSourceProvider
+    if (!(m_audioSinkBin && GST_IS_BIN(m_audioSinkBin.get()))) {
+        g_info("The native audio sink used in this hardware platform is incompatible with AudioSourceProvider");
+        return;
+    }
+
     ASSERT(client);
     m_client = client;
 

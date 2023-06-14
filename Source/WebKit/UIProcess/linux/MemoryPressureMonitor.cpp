@@ -36,6 +36,10 @@
 #include <wtf/Threading.h>
 #include <wtf/UniStdExtras.h>
 
+#include <fstream>
+#include <sstream>
+#include <cstdio>
+
 namespace WebKit {
 
 static const size_t notSet = static_cast<size_t>(-1);
@@ -44,8 +48,6 @@ static const Seconds s_minPollingInterval { 1_s };
 static const Seconds s_maxPollingInterval { 5_s };
 static const double s_minUsedMemoryPercentageForPolling = 50;
 static const double s_maxUsedMemoryPercentageForPolling = 85;
-static const int s_memoryPresurePercentageThreshold = 90;
-static const int s_memoryPresurePercentageThresholdCritical = 95;
 
 static size_t lowWatermarkPages()
 {
@@ -219,10 +221,32 @@ void MemoryPressureMonitor::start()
         return;
 
     m_started = true;
+    printf("##MemoryPressureMonitor start\n");fflush(stdout);
+
+    String s_mempress(getenv("WPE_MEMPRESS_THRESHOLD"));
+    if (!s_mempress.isEmpty()) {
+        bool isInt = false;
+        int mempress = s_mempress.toIntStrict(&isInt);
+        if(isInt) 
+        {
+            if (mempress > 100) mempress = 100;
+            if (mempress < 0) mempress = 0;
+
+            s_memoryPressurePercentageThreshold = mempress;
+            s_memoryPressurePercentageThresholdCritical = (100 + s_memoryPressurePercentageThreshold) / 2;
+        }
+    }
+
+    fprintf(stdout, "Memory pressure threshold %d, Critical Threshold %d\n",
+                s_memoryPressurePercentageThreshold, s_memoryPressurePercentageThresholdCritical);fflush(stdout);
 
     Thread::create("MemoryPressureMonitor", [this] {
         Seconds pollInterval = s_maxPollingInterval;
+        printf("##MemoryPressureMonitor - thread created, to trigger a manual collection create the file /tmp/garbageCollector\n");fflush(stdout);
+        printf("##MemoryPressureMonitor - when the thread detects the file exists a garbbage collection will be released \n");fflush(stdout);
+        printf("##MemoryPressureMonitor - and the file will be deleted.\n");fflush(stdout);
         while (true) {
+
             sleep(pollInterval);
 
             int usedPercentage = systemMemoryUsedAsPercentage();
@@ -231,12 +255,25 @@ void MemoryPressureMonitor::start()
                 break;
             }
 
-            if (usedPercentage >= s_memoryPresurePercentageThreshold) {
-                bool isCritical = (usedPercentage >= s_memoryPresurePercentageThresholdCritical);
+            bool collected { false }; 
+            if (usedPercentage >= s_memoryPressurePercentageThreshold) {
+                bool isCritical = (usedPercentage >= s_memoryPressurePercentageThresholdCritical);
                 for (auto* processPool : WebProcessPool::allProcessPools())
                     processPool->sendMemoryPressureEvent(isCritical);
+                    collected = true;
             }
             pollInterval = pollIntervalForUsedMemoryPercentage(usedPercentage);
+
+            std::ifstream file("/tmp/garbageCollector", std::ios::binary);
+            if (!collected && file.good()) {
+                file.close();
+                std::remove("/tmp/garbageCollector");
+                printf("##MemoryPressureMonitor triggered manual garbage collection\n");fflush(stdout);
+                
+                for (auto* processPool : WebProcessPool::allProcessPools())
+                    processPool->sendMemoryPressureEvent(true);
+            }
+
         }
     })->detach();
 }

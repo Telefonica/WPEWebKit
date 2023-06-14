@@ -88,6 +88,7 @@ public:
         TypeStatistic scripts;
         TypeStatistic xslStyleSheets;
         TypeStatistic fonts;
+        TypeStatistic noTypeThings;
     };
 
     WEBCORE_EXPORT static MemoryCache& singleton();
@@ -177,6 +178,7 @@ private:
 
     LRUList& lruListFor(CachedResource&);
 
+    void storeStats();
     void dumpStats();
     void dumpLRULists(bool includeLive) const;
 
@@ -192,6 +194,9 @@ private:
     bool m_disabled { false };
     bool m_inPruneResources { false };
 
+    bool m_EnableLogs { false };
+    unsigned m_crMemoryCacheEvictedCount;
+    unsigned m_crMemoryCacheCount;
     unsigned m_capacity;
     unsigned m_minDeadCapacity { 0 };
     unsigned m_maxDeadCapacity;

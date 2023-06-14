@@ -204,6 +204,7 @@ void InspectorController::createLazyAgents()
     m_agents.append(std::make_unique<InspectorIndexedDBAgent>(pageContext, m_pageAgent));
 #endif
 #if ENABLE(RESOURCE_USAGE)
+    printf("MMP InspectorController::createLazyAgents\n");fflush(stdout);
     m_agents.append(std::make_unique<InspectorMemoryAgent>(pageContext));
 #endif
 }

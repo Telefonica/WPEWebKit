@@ -202,6 +202,9 @@ void calculateURLCacheSizes(CacheModel cacheModel, uint64_t diskFreeSize, unsign
     default:
         ASSERT_NOT_REACHED();
     };
+
+    // Álvaro Peña <alvaropg@gmail.com> Removed cache disk
+    urlCacheDiskCapacity = 0;
 }
 
 } // namespace WebKit

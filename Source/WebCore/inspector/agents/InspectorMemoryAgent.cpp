@@ -71,6 +71,7 @@ void InspectorMemoryAgent::disable(ErrorString&)
 
 void InspectorMemoryAgent::startTracking(ErrorString&)
 {
+    printf("MMP InspectorMemoryAgent::startTracking\n"); fflush(stdout);
     if (m_tracking)
         return;
 
@@ -106,6 +107,8 @@ void InspectorMemoryAgent::didHandleMemoryPressure(Critical critical)
 
 void InspectorMemoryAgent::collectSample(const ResourceUsageData& data)
 {
+
+    printf("MMP InspectorMemoryAgent::collectSample\n");fflush(stdout);
     auto javascriptCategory = Protocol::Memory::CategoryData::create()
         .setType(Protocol::Memory::CategoryData::Type::Javascript)
         .setSize(data.categories[MemoryCategory::GCHeap].totalSize() + data.categories[MemoryCategory::GCOwned].totalSize())
@@ -120,16 +123,19 @@ void InspectorMemoryAgent::collectSample(const ResourceUsageData& data)
         .setType(Protocol::Memory::CategoryData::Type::Images)
         .setSize(data.categories[MemoryCategory::Images].totalSize())
         .release();
+        printf("MMP InspectorMemoryAgent::collectSample Images \n");fflush(stdout);
 
     auto layersCategory = Protocol::Memory::CategoryData::create()
         .setType(Protocol::Memory::CategoryData::Type::Layers)
         .setSize(data.categories[MemoryCategory::Layers].totalSize())
         .release();
+        printf("MMP InspectorMemoryAgent::collectSample Layers \n");fflush(stdout);
 
     auto pageCategory = Protocol::Memory::CategoryData::create()
         .setType(Protocol::Memory::CategoryData::Type::Page)
         .setSize(data.categories[MemoryCategory::bmalloc].totalSize() + data.categories[MemoryCategory::LibcMalloc].totalSize())
         .release();
+        printf("MMP InspectorMemoryAgent::collectSample Page \n");fflush(stdout);
 
     auto otherCategory = Protocol::Memory::CategoryData::create()
         .setType(Protocol::Memory::CategoryData::Type::Other)
@@ -150,6 +156,7 @@ void InspectorMemoryAgent::collectSample(const ResourceUsageData& data)
         .release();
 
     m_frontendDispatcher->trackingUpdate(WTFMove(event));
+    printf("MMP m_frontendDispatcher->trackingUpdate(WTFMove(event));\n");fflush(stdout);
 }
 
 } // namespace Inspector

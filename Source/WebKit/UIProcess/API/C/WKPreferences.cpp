@@ -616,6 +616,16 @@ bool WKPreferencesGetShouldPrintBackgrounds(WKPreferencesRef preferencesRef)
     return toImpl(preferencesRef)->shouldPrintBackgrounds();
 }
 
+void WKPreferencesSetShouldDrawsBackground(WKPreferencesRef preferencesRef, bool flag)
+{
+    toImpl(preferencesRef)->setShouldDrawsBackground(flag);
+}
+
+bool WKPreferencesGetShouldDrawsBackground(WKPreferencesRef preferencesRef)
+{
+    return toImpl(preferencesRef)->shouldDrawsBackground();
+}
+
 void WKPreferencesSetDOMTimersThrottlingEnabled(WKPreferencesRef preferencesRef, bool enabled)
 {
     toImpl(preferencesRef)->setDOMTimersThrottlingEnabled(enabled);
@@ -624,6 +634,16 @@ void WKPreferencesSetDOMTimersThrottlingEnabled(WKPreferencesRef preferencesRef,
 bool WKPreferencesGetDOMTimersThrottlingEnabled(WKPreferencesRef preferencesRef)
 {
     return toImpl(preferencesRef)->domTimersThrottlingEnabled();
+}
+
+void WKPreferencesSetBackgroundColor(WKPreferencesRef preferencesRef, uint32_t color)
+{
+    toImpl(preferencesRef)->setBackgroundColor(color);
+}
+
+uint32_t WKPreferencesGetBackgroundColor(WKPreferencesRef preferencesRef)
+{
+    return toImpl(preferencesRef)->backgroundColor();
 }
 
 void WKPreferencesSetWebArchiveDebugModeEnabled(WKPreferencesRef preferencesRef, bool enabled)

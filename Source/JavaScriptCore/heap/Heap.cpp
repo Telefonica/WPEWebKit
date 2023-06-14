@@ -85,6 +85,10 @@
 #include <wtf/SimpleStats.h>
 #include <wtf/Threading.h>
 
+#include <iostream>
+#include <fstream>
+#include <sstream>
+
 #if PLATFORM(IOS)
 #include <bmalloc/bmalloc.h>
 #endif
@@ -2231,6 +2235,12 @@ void Heap::updateAllocationLimits()
         ASSERT(!checkedCurrentHeapSize.hasOverflowed() && checkedCurrentHeapSize.unsafeGet() == currentHeapSize);
     }
 
+    std::stringstream ss;
+    ss  << "bytesAllocatedThisCycle: " << m_bytesAllocatedThisCycle
+        << ", currentHeapSize: "       << currentHeapSize
+        << ", totalBytesVisited: "     << m_totalBytesVisited
+        << ", extraMemorySize: "       << extraMemorySize();
+
     if (verbose)
         dataLog("extraMemorySize() = ", extraMemorySize(), ", currentHeapSize = ", currentHeapSize, "\n");
     
@@ -2250,6 +2260,11 @@ void Heap::updateAllocationLimits()
         m_bytesAbandonedSinceLastFullCollect = 0;
         if (verbose)
             dataLog("Full: bytesAbandonedSinceLastFullCollect = ", 0, "\n");
+
+        ss  << ", m_maxHeapSize: "          << m_maxHeapSize
+            << ", maxEdenSize: "            << m_maxEdenSize
+            << ", sizeAfterLastFullCollect: " << currentHeapSize;
+
     } else {
         ASSERT(currentHeapSize >= m_sizeAfterLastCollect);
         // Theoretically, we shouldn't ever scan more memory than the heap size we planned to have.
@@ -2275,6 +2290,12 @@ void Heap::updateAllocationLimits()
             ASSERT(currentHeapSize >= m_sizeAfterLastFullCollect);
             m_fullActivityCallback->didAllocate(*this, currentHeapSize - m_sizeAfterLastFullCollect);
         }
+    }
+
+    std::ofstream file("/tmp/heapInfo");
+    if (file) {
+        file << ss.str();
+        file.close();
     }
 
 #if PLATFORM(IOS)

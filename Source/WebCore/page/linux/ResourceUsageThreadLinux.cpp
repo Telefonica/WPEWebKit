@@ -152,6 +152,7 @@ static float cpuUsage()
 
 void ResourceUsageThread::platformThreadBody(JSC::VM* vm, ResourceUsageData& data)
 {
+    printf("MMP ResourceUsageThread::platformThreadBody\n");fflush(stdout);
     data.cpu = cpuUsage();
 
     ProcessMemoryStatus memoryStatus;
@@ -162,6 +163,9 @@ void ResourceUsageThread::platformThreadBody(JSC::VM* vm, ResourceUsageData& dat
     size_t currentGCOwnedExtra = vm->heap.extraMemorySize();
     size_t currentGCOwnedExternal = vm->heap.externalMemorySize();
     RELEASE_ASSERT(currentGCOwnedExternal <= currentGCOwnedExtra);
+    printf("MMP ResourceUsageThread::platformThreadBody currentGCHeapCapacity -%d-\n",currentGCHeapCapacity);fflush(stdout);
+    printf("MMP ResourceUsageThread::platformThreadBody currentGCOwnedExtra -%d-\n",currentGCOwnedExtra);fflush(stdout);
+    printf("MMP ResourceUsageThread::platformThreadBody currentGCOwnedExternal -%d-\n",currentGCOwnedExternal);fflush(stdout);
 
     data.categories[MemoryCategory::GCHeap].dirtySize = currentGCHeapCapacity;
     data.categories[MemoryCategory::GCOwned].dirtySize = currentGCOwnedExtra - currentGCOwnedExternal;

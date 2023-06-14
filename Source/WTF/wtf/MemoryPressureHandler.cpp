@@ -118,8 +118,8 @@ static size_t thresholdForPolicy(MemoryUsagePolicy policy)
     const double conservativeThresholdFraction = 0.5;
     const double strictThresholdFraction = 0.65;
 #else
-    const double conservativeThresholdFraction = 0.33;
-    const double strictThresholdFraction = 0.5;
+    const double conservativeThresholdFraction = 0.40;
+    const double strictThresholdFraction = 0.55;
 #endif
 
     switch (policy) {

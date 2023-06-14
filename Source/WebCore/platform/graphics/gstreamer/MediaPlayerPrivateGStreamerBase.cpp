@@ -50,6 +50,8 @@
 #include "CDMInstance.h"
 #include "GStreamerEMEUtilities.h"
 #include "SharedBuffer.h"
+#include "opencdm/CDMOpenCDM.h"
+#include "WebKitOpenCDMDecryptorGStreamer.h"
 #include "WebKitClearKeyDecryptorGStreamer.h"
 #endif
 
@@ -137,11 +139,17 @@ GST_DEBUG_CATEGORY(webkit_media_player_debug);
 namespace WebCore {
 using namespace std;
 
+static const FloatSize s_holePunchDefaultFrameSize(1280, 720);
+
 void registerWebKitGStreamerElements()
 {
 #if ENABLE(ENCRYPTED_MEDIA)
     if (!webkitGstCheckVersion(1, 6, 1))
         return;
+
+    GRefPtr<GstElementFactory> decryptorFactory = adoptGRef(gst_element_factory_find("webkitopencdm"));
+    if (!decryptorFactory)
+        gst_element_register(0, "webkitopencdm", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_OPENCDM_DECRYPT);
 
     GRefPtr<GstElementFactory> clearKeyDecryptorFactory = adoptGRef(gst_element_factory_find("webkitclearkey"));
     if (!clearKeyDecryptorFactory)
@@ -204,6 +212,8 @@ class GstVideoFrameHolder : public TextureMapperPlatformLayerBuffer::UnmanagedBu
 public:
     explicit GstVideoFrameHolder(GstSample* sample, TextureMapperGL::Flags flags, bool gstGLEnabled)
     {
+        RELEASE_ASSERT(GST_IS_SAMPLE(sample));
+
         GstVideoInfo videoInfo;
         if (UNLIKELY(!getSampleVideoInfo(sample, videoInfo)))
             return;
@@ -251,7 +261,7 @@ public:
     {
         ASSERT(!m_textureID);
         GstVideoGLTextureUploadMeta* meta;
-        if ((meta = gst_buffer_get_video_gl_texture_upload_meta(m_buffer))) {
+        if (m_buffer && (meta = gst_buffer_get_video_gl_texture_upload_meta(m_buffer))) {
             if (meta->n_textures == 1) { // BRGx & BGRA formats use only one texture.
                 guint ids[4] = { texture.id(), 0, 0, 0 };
 
@@ -260,8 +270,15 @@ public:
             }
         }
 
+        if (!m_isMapped)
+            return;
+
         int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&m_videoFrame, 0);
         const void* srcData = GST_VIDEO_FRAME_PLANE_DATA(&m_videoFrame, 0);
+
+        if (!srcData)
+            return;
+            
         texture.updateContents(srcData, WebCore::IntRect(0, 0, m_size.width(), m_size.height()), WebCore::IntPoint(0, 0), stride);
     }
 
@@ -570,6 +587,8 @@ bool MediaPlayerPrivateGStreamerBase::ensureGstGLContext()
 // Returns the size of the video
 FloatSize MediaPlayerPrivateGStreamerBase::naturalSize() const
 {
+    return s_holePunchDefaultFrameSize;
+
     if (!hasVideo())
         return FloatSize();
 
@@ -755,6 +774,7 @@ PlatformLayer* MediaPlayerPrivateGStreamerBase::platformLayer() const
 #if USE(NICOSIA)
 void MediaPlayerPrivateGStreamerBase::swapBuffersIfNeeded()
 {
+    pushNextHolePunchBuffer();
 }
 #else
 RefPtr<TextureMapperPlatformLayerProxy> MediaPlayerPrivateGStreamerBase::proxy() const
@@ -764,6 +784,7 @@ RefPtr<TextureMapperPlatformLayerProxy> MediaPlayerPrivateGStreamerBase::proxy()
 
 void MediaPlayerPrivateGStreamerBase::swapBuffersIfNeeded()
 {
+    pushNextHolePunchBuffer();
 }
 #endif
 
@@ -946,6 +967,7 @@ void MediaPlayerPrivateGStreamerBase::flushCurrentBuffer()
 void MediaPlayerPrivateGStreamerBase::setSize(const IntSize& size)
 {
     m_size = size;
+    pushNextHolePunchBuffer();
 }
 
 void MediaPlayerPrivateGStreamerBase::paint(GraphicsContext& context, const FloatRect& rect)
@@ -1164,6 +1186,45 @@ void MediaPlayerPrivateGStreamerBase::ensureGLVideoSinkContext()
 }
 #endif // USE(GSTREAMER_GL)
 
+static void setRectangleToVideoSink(GstElement* videoSink, const IntRect& rect)
+{
+    // Here goes the platform-dependant code to set to the videoSink the size
+    // and position of the video rendering window. Mark them unused as default.
+    GValue window_set = {0, };
+    static char str[40];
+    snprintf(str, 40, "%d,%d,%d,%d", rect.x(), rect.y(), rect.width(), rect.height());
+    g_value_init(&window_set, G_TYPE_STRING);
+    g_value_set_static_string(&window_set, str);
+    g_object_set(videoSink, "window_set", str, nullptr);
+}
+
+class GStreamerHolePunchClient : public TextureMapperPlatformLayerBuffer::HolePunchClient {
+public:
+    GStreamerHolePunchClient(GRefPtr<GstElement>&& videoSink) : m_videoSink(WTFMove(videoSink)) { };
+    void setVideoRectangle(const IntRect& rect) final { setRectangleToVideoSink(m_videoSink.get(), rect); }
+private:
+    GRefPtr<GstElement> m_videoSink;
+};
+
+void MediaPlayerPrivateGStreamerBase::pushNextHolePunchBuffer()
+{
+    auto proxyOperation =
+        [this](TextureMapperPlatformLayerProxy& proxy)
+        {
+            LockHolder holder(proxy.lock());
+            std::unique_ptr<TextureMapperPlatformLayerBuffer> layerBuffer = std::make_unique<TextureMapperPlatformLayerBuffer>(0, m_size, TextureMapperGL::ShouldNotBlend, GL_DONT_CARE);
+            std::unique_ptr<GStreamerHolePunchClient> holePunchClient = std::make_unique<GStreamerHolePunchClient>(m_videoSink.get());
+            layerBuffer->setHolePunchClient(WTFMove(holePunchClient));
+            proxy.pushNextBuffer(WTFMove(layerBuffer));
+        };
+
+#if USE(NICOSIA)
+    proxyOperation(downcast<Nicosia::ContentLayerTextureMapperImpl>(m_nicosiaLayer->impl()).proxy());
+#else
+    proxyOperation(*m_platformLayerProxy);
+#endif
+}
+
 GstElement* MediaPlayerPrivateGStreamerBase::createVideoSink()
 {
     acceleratedRenderingStateChanged();
@@ -1172,6 +1233,16 @@ GstElement* MediaPlayerPrivateGStreamerBase::createVideoSink()
     if (m_renderingCanBeAccelerated)
         m_videoSink = createVideoSinkGL();
 #endif
+
+    m_videoSink = gst_element_factory_make("brcmvideosink", "brcmvideosink");
+
+    char *strZorder = nullptr;
+    int zOrder = 0;
+    if (strZorder = getenv("WPE_NEXUS_ZORDER"))
+        zOrder = atoi(strZorder) + 1;
+    g_object_set(m_videoSink.get(), "zorder", zOrder, nullptr);
+
+    pushNextHolePunchBuffer();
 
     if (!m_videoSink) {
         m_usingFallbackVideoSink = true;
@@ -1267,6 +1338,25 @@ unsigned MediaPlayerPrivateGStreamerBase::videoDecodedByteCount() const
 }
 
 #if ENABLE(ENCRYPTED_MEDIA)
+void MediaPlayerPrivateGStreamerBase::handleProtectionStructure(const GstStructure* structure)
+{
+    GST_DEBUG("Handling a protection structure");
+
+    GRefPtr<GstBuffer> data;
+    GUniqueOutPtr<char> eventKeySystemUUID;
+    gst_structure_get(structure, "init-data", GST_TYPE_BUFFER, &data.outPtr(), "key-system-uuid", G_TYPE_STRING, &eventKeySystemUUID.outPtr(), nullptr);
+
+    GstMappedBuffer mappedInitData(data.get(), GST_MAP_READ);
+    if (!mappedInitData) {
+        GST_WARNING("cannot map protection data");
+        return;
+    }
+
+    InitData initData(reinterpret_cast<const uint8_t*>(mappedInitData.data()), mappedInitData.size());
+    static const ASCIILiteral initDataType { !g_strcmp0(eventKeySystemUUID.get(), GST_PROTECTION_UNSPECIFIED_SYSTEM_ID) ? "webm"_s : "cenc"_s };
+    initializationDataEncounteredOld(WTF::String(initDataType), initData);
+}
+
 void MediaPlayerPrivateGStreamerBase::initializationDataEncountered(GstEvent* event)
 {
     // FIXME: Inform that we are waiting for a key.
@@ -1277,7 +1367,7 @@ void MediaPlayerPrivateGStreamerBase::initializationDataEncountered(GstEvent* ev
     // Check if the system key of the protection event is the same of the CDM instance.
     // For example: we can receive a new Widevine protection event but the CDM instance initialized with
     // Playready, so we ignore this event.
-    if (m_cdmInstance && g_strcmp0(GStreamerEMEUtilities::keySystemToUuid(m_cdmInstance->keySystem()), eventKeySystemUUID)) {
+    if (m_cdmInstance && g_strcmp0(eventKeySystemUUID, GST_PROTECTION_UNSPECIFIED_SYSTEM_ID) && g_strcmp0(GStreamerEMEUtilities::keySystemToUuid(m_cdmInstance->keySystem()), eventKeySystemUUID)) {
         GST_DEBUG("The protection event with UUID %s is ignored because it isn't supported by the CDM %s", eventKeySystemUUID, m_cdmInstance->keySystem().utf8().data());
         return;
     }
@@ -1299,8 +1389,19 @@ void MediaPlayerPrivateGStreamerBase::initializationDataEncountered(GstEvent* ev
 
         GST_DEBUG("scheduling initializationDataEncountered event for %s with init data size of %" G_GSIZE_FORMAT, eventKeySystemUUID.utf8().data(), initData.sizeInBytes());
         GST_MEMDUMP("init datas", reinterpret_cast<const uint8_t*>(initData.characters8()), initData.sizeInBytes());
-        weakThis->m_player->initializationDataEncountered("cenc"_s, ArrayBuffer::create(reinterpret_cast<const uint8_t*>(initData.characters8()), initData.sizeInBytes()));
+        weakThis->m_player->initializationDataEncountered((eventKeySystemUUID == GST_PROTECTION_UNSPECIFIED_SYSTEM_ID) ? "webm"_s : "cenc"_s,
+                ArrayBuffer::create(reinterpret_cast<const uint8_t*>(initData.characters8()), initData.sizeInBytes()));
     });
+}
+
+void MediaPlayerPrivateGStreamerBase::initializationDataEncounteredOld(const String& initDataType, const InitData& initData)
+{
+    ASSERT(isMainThread());
+
+    GST_TRACE("init data encountered of size %" G_GSIZE_FORMAT " with MD5 %s", initData.sizeInBytes(), GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
+    GST_MEMDUMP("init data", initData.characters8(), initData.sizeInBytes());
+
+    m_player->initializationDataEncountered(initDataType, ArrayBuffer::create(reinterpret_cast<const uint8_t*>(initData.characters8()), initData.sizeInBytes()));
 }
 
 void MediaPlayerPrivateGStreamerBase::cdmInstanceAttached(CDMInstance& instance)
@@ -1308,6 +1409,10 @@ void MediaPlayerPrivateGStreamerBase::cdmInstanceAttached(CDMInstance& instance)
     if (m_cdmInstance != &instance) {
         m_cdmInstance = &instance;
         GST_DEBUG_OBJECT(pipeline(), "CDM instance %p set", m_cdmInstance.get());
+        GRefPtr<GstContext> context = adoptGRef(gst_context_new("drm-cdm-instance", FALSE));
+        GstStructure* contextStructure = gst_context_writable_structure(context.get());
+        gst_structure_set(contextStructure, "cdm-instance", G_TYPE_POINTER, m_cdmInstance.get(), nullptr);
+        gst_element_set_context(GST_ELEMENT(m_pipeline.get()), context.get());
         m_protectionCondition.notifyAll();
     }
 }
@@ -1320,6 +1425,8 @@ void MediaPlayerPrivateGStreamerBase::cdmInstanceDetached(CDMInstance& instance)
     if (m_cdmInstance == &instance) {
         GST_DEBUG_OBJECT(pipeline(), "detaching CDM instance %p", m_cdmInstance.get());
         m_cdmInstance = nullptr;
+        GRefPtr<GstContext> context = adoptGRef(gst_context_new("drm-cdm-instance", FALSE));
+        gst_element_set_context(GST_ELEMENT(m_pipeline.get()), context.get());
         m_protectionCondition.notifyAll();
     }
 }

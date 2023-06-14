@@ -170,6 +170,8 @@ AppendPipeline::AppendPipeline(Ref<MediaSourceClientGStreamerMSE> mediaSourceCli
 
     gst_app_sink_set_emit_signals(GST_APP_SINK(m_appsink.get()), TRUE);
     gst_base_sink_set_sync(GST_BASE_SINK(m_appsink.get()), FALSE);
+    gst_base_sink_set_async_enabled(GST_BASE_SINK(m_appsink.get()), FALSE); // No prerolls, no async state changes.
+    gst_base_sink_set_drop_out_of_segment(GST_BASE_SINK(m_appsink.get()), FALSE);
     gst_base_sink_set_last_sample_enabled(GST_BASE_SINK(m_appsink.get()), FALSE);
 
     GRefPtr<GstPad> appsinkPad = adoptGRef(gst_element_get_static_pad(m_appsink.get(), "sink"));
@@ -188,7 +190,9 @@ AppendPipeline::AppendPipeline(Ref<MediaSourceClientGStreamerMSE> mediaSourceCli
 #if ENABLE(ENCRYPTED_MEDIA)
     m_appsinkPadEventProbeInformation.appendPipeline = this;
     m_appsinkPadEventProbeInformation.description = "appsink event probe";
-    m_appsinkPadEventProbeInformation.probeId = gst_pad_add_probe(appsinkPad.get(), GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, reinterpret_cast<GstPadProbeCallback>(appendPipelineAppsinkPadEventProbe), &m_appsinkPadEventProbeInformation, nullptr);
+    m_appsinkPadEventProbeInformation.probeId = gst_pad_add_probe(appsinkPad.get(), static_cast<GstPadProbeType>(static_cast<int>(GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) | static_cast<int>(GST_PAD_PROBE_TYPE_BUFFER)), reinterpret_cast<GstPadProbeCallback>(appendPipelineAppsinkPadEventProbe), &m_appsinkPadEventProbeInformation, nullptr);
+    m_cachedProtectionEvents = G_VALUE_INIT;
+    g_value_init(&m_cachedProtectionEvents, GST_TYPE_LIST);
 #endif
 
     // These signals won't be connected outside of the lifetime of "this".
@@ -262,6 +266,10 @@ AppendPipeline::~AppendPipeline()
 
     m_appsinkCaps = nullptr;
     m_demuxerSrcPadCaps = nullptr;
+
+#if ENABLE(ENCRYPTED_MEDIA)
+    g_value_unset(&m_cachedProtectionEvents);
+#endif
 };
 
 GstPadProbeReturn AppendPipeline::appsrcEndOfAppendCheckerProbe(GstPadProbeInfo* padProbeInfo)
@@ -330,6 +338,13 @@ void AppendPipeline::handleApplicationMessage(GstMessage* message)
         connectDemuxerSrcPadToAppsink(demuxerSrcPad.get());
         return;
     }
+
+#if ENABLE(ENCRYPTED_MEDIA)
+    if (gst_structure_has_name(structure, "demuxer-done-sending-protection-events")) {
+        demuxerIsDoneSendingProtectionEvents(structure);
+        return;
+    }
+#endif
 
     if (gst_structure_has_name(structure, "appsink-caps-changed")) {
         appsinkCapsChanged();
@@ -659,9 +674,9 @@ void AppendPipeline::appsinkNewSample(GRefPtr<GstSample>&& sample)
     }
 
     // Add a gap sample if a gap is detected before the first sample.
-    if (mediaSample->decodeTime() == MediaTime::zeroTime() && mediaSample->presentationTime() > MediaTime::zeroTime() && mediaSample->presentationTime() <= MediaTime(1, 10)) {
-        GST_DEBUG("Adding gap offset");
-        mediaSample->applyPtsOffset(MediaTime::zeroTime());
+    if (mediaSample->decodeTime() == MediaTime::zeroTime() && mediaSample->presentationTime() > MediaTime::zeroTime() && mediaSample->presentationTime() <= MediaTime(1, 10) && mediaSample->isSync()) {
+        GST_DEBUG("Extending first sample to make it start at PTS=0");
+        mediaSample->extendToTheBeginning();
     }
 
     m_sourceBufferPrivate->didReceiveSample(*mediaSample);
@@ -1074,23 +1089,87 @@ static GstPadProbeReturn appendPipelinePadProbeDebugInformation(GstPad*, GstPadP
 #endif
 
 #if ENABLE(ENCRYPTED_MEDIA)
+void AppendPipeline::cacheProtectionEvent(GstEvent* event)
+{
+    if (!m_isProcessingProtectionEvents) {
+        GST_TRACE("first event, resetting list");
+        m_isProcessingProtectionEvents = true;
+        g_value_reset(&m_cachedProtectionEvents);
+    }
+
+    GST_DEBUG("caching protection event %u on append pipeline appsink pad", GST_EVENT_SEQNUM(event));
+    GValue* eventValue = g_new0(GValue, 1);
+    g_value_init(eventValue, GST_TYPE_EVENT);
+    g_value_take_boxed(eventValue, event);
+    gst_value_list_append_and_take_value(&m_cachedProtectionEvents, eventValue);
+}
+
+void AppendPipeline::handleProtectedBufferProbeInformation(GstPadProbeInfo* info)
+{
+    ASSERT(GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_BUFFER);
+
+    bool wasProcessingProtectionEvents = m_isProcessingProtectionEvents;
+    m_isProcessingProtectionEvents = false;
+
+    unsigned listSize = gst_value_list_get_size(&m_cachedProtectionEvents);
+    if (!listSize)
+        return;
+
+    if (wasProcessingProtectionEvents) {
+        GST_TRACE("sending %u protection events to the main thread", listSize);
+        GstStructure* structure = gst_structure_new_empty("demuxer-done-sending-protection-events");
+        gst_structure_set_value(structure, "stream-encryption-events", &m_cachedProtectionEvents);
+        GstMessage* message = gst_message_new_application(GST_OBJECT(m_demux.get()), structure);
+        gst_bus_post(m_bus.get(), message);
+    }
+
+    GstBuffer* buffer = gst_pad_probe_info_get_buffer(info);
+    GstProtectionMeta* protectionMeta = reinterpret_cast<GstProtectionMeta*>(gst_buffer_get_protection_meta(buffer));
+    if (!protectionMeta)
+        return;
+
+    GST_DEBUG("adding %u protection events to buffer %p", listSize, buffer);
+    gst_structure_set_value(protectionMeta->info, "stream-encryption-events", &m_cachedProtectionEvents);
+}
+
 static GstPadProbeReturn appendPipelineAppsinkPadEventProbe(GstPad*, GstPadProbeInfo* info, struct PadProbeInformation *padProbeInformation)
 {
-    ASSERT(GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM);
-    GstEvent* event = gst_pad_probe_info_get_event(info);
-    GST_DEBUG("Handling event %s on append pipeline appsinkPad", GST_EVENT_TYPE_NAME(event));
     WebCore::AppendPipeline* appendPipeline = padProbeInformation->appendPipeline;
+    ASSERT(appendPipeline);
 
-    switch (GST_EVENT_TYPE(event)) {
-    case GST_EVENT_PROTECTION:
-        if (appendPipeline && appendPipeline->playerPrivate())
-            appendPipeline->playerPrivate()->handleProtectionEvent(event);
-        return GST_PAD_PROBE_DROP;
-    default:
-        break;
+    if (GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
+        GstEvent* event = gst_pad_probe_info_get_event(info);
+        GST_DEBUG("Handling event %s on append pipeline appsinkPad", GST_EVENT_TYPE_NAME(event));
+        switch (GST_EVENT_TYPE(event)) {
+        case GST_EVENT_PROTECTION:
+            appendPipeline->cacheProtectionEvent(event);
+            return GST_PAD_PROBE_HANDLED;
+        default:
+            break;
+        }
+    } else if (GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_BUFFER)
+        appendPipeline->handleProtectedBufferProbeInformation(info);
+    else {
+        ASSERT_NOT_REACHED();
     }
 
     return GST_PAD_PROBE_OK;
+}
+
+void AppendPipeline::demuxerIsDoneSendingProtectionEvents(const GstStructure* structure)
+{
+    const GValue* streamEncryptionEventsList = gst_structure_get_value(structure, "stream-encryption-events");
+    ASSERT(streamEncryptionEventsList && GST_VALUE_HOLDS_LIST(streamEncryptionEventsList));
+    unsigned streamEncryptionEventsListSize = gst_value_list_get_size(streamEncryptionEventsList);
+    GST_DEBUG("forwarding %u protection events to the player", streamEncryptionEventsListSize);
+    if (!streamEncryptionEventsListSize)
+        return;
+    Vector<GstEvent*> protectionEvents;
+    protectionEvents.reserveInitialCapacity(streamEncryptionEventsListSize);
+    for (unsigned i = 0; i < streamEncryptionEventsListSize; ++i) {
+        protectionEvents.uncheckedAppend(static_cast<GstEvent*>(g_value_get_boxed(gst_value_list_get_value(streamEncryptionEventsList, i))));
+	m_playerPrivate->handleProtectionEvent(static_cast<GstEvent*>(g_value_get_boxed(gst_value_list_get_value(streamEncryptionEventsList, i))));
+    }
 }
 #endif
 

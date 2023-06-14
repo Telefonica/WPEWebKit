@@ -326,7 +326,8 @@ RenderLayer::RenderLayer(RenderLayerModelObject& rendererLayerModelObject)
     // Non-stacking containers should have empty z-order lists. As this is already the case,
     // there is no need to dirty / recompute these lists.
     m_zOrderListsDirty = isStackingContainer();
-
+    
+    printf("MMP RenderLayer!\n");fflush(stdout);
     if (!renderer().firstChild()) {
         m_visibleContentStatusDirty = false;
         m_hasVisibleContent = renderer().style().visibility() == Visibility::Visible;

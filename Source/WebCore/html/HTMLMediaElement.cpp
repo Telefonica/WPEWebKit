@@ -28,6 +28,8 @@
 
 #if ENABLE(VIDEO)
 
+#include "CDMOpenCDM.h"
+
 #include "ApplicationCacheHost.h"
 #include "ApplicationCacheResource.h"
 #include "Attribute.h"
@@ -2525,6 +2527,15 @@ void HTMLMediaElement::setReadyState(MediaPlayer::ReadyState state)
         scheduleEvent(eventNames().durationchangeEvent);
         scheduleResizeEvent();
         scheduleEvent(eventNames().loadedmetadataEvent);
+
+        if (m_defaultPlaybackStartPosition > MediaTime::zeroTime()) {
+            // We reset it before to cause currentMediaTime() to return the actual current time (not
+            // defaultPlaybackPosition) and avoid the seek code to think that the seek was already done.
+            MediaTime seekTarget = m_defaultPlaybackStartPosition;
+            m_defaultPlaybackStartPosition = MediaTime::zeroTime();
+            seekInternal(seekTarget);
+        }
+
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
         if (hasEventListeners(eventNames().webkitplaybacktargetavailabilitychangedEvent))
             enqueuePlaybackTargetAvailabilityChangedEvent();
@@ -2563,8 +2574,12 @@ void HTMLMediaElement::setReadyState(MediaPlayer::ReadyState state)
     }
 
     if (m_readyState == HAVE_FUTURE_DATA && oldState <= HAVE_CURRENT_DATA && tracksAreReady) {
-        scheduleEvent(eventNames().canplayEvent);
-        shouldUpdateDisplayState = true;
+        if (mediaKeys() == nullptr 
+            or mediaKeys()->cdmInstance().areAllKeysReceived()) {
+
+            scheduleEvent(eventNames().canplayEvent);
+            shouldUpdateDisplayState = true;
+        }
     }
 
     if (m_readyState == HAVE_ENOUGH_DATA && oldState < HAVE_ENOUGH_DATA && tracksAreReady) {
@@ -2854,6 +2869,9 @@ void HTMLMediaElement::progressEventTimerFired()
     if (m_networkState != NETWORK_LOADING)
         return;
 
+    if (!m_player->supportsProgressMonitoring())
+        return;
+
     MonotonicTime time = MonotonicTime::now();
     Seconds timedelta = time - m_previousProgressTime;
 
@@ -2864,7 +2882,7 @@ void HTMLMediaElement::progressEventTimerFired()
         updateRenderer();
         if (hasMediaControls())
             mediaControls()->bufferingProgressed();
-    } else if (timedelta > 3_s && !m_sentStalledEvent) {
+    } else if (timedelta > 3_s && !m_sentStalledEvent && m_readyState < HAVE_ENOUGH_DATA) {
         scheduleEvent(eventNames().stalledEvent);
         m_sentStalledEvent = true;
         setShouldDelayLoadEvent(false);
@@ -3177,6 +3195,9 @@ MediaTime HTMLMediaElement::currentMediaTime() const
     static const MediaTime minCachedDeltaForWarning = MediaTime::create(1, 100);
 #endif
 
+    if (m_defaultPlaybackStartPosition != MediaTime::zeroTime())
+        return m_defaultPlaybackStartPosition;
+
     if (!m_player)
         return MediaTime::zeroTime();
 
@@ -3252,6 +3273,12 @@ ExceptionOr<void> HTMLMediaElement::setCurrentTimeForBindings(double time)
 {
     if (m_mediaController)
         return Exception { InvalidStateError };
+
+    if (m_readyState == HAVE_NOTHING || !m_player) {
+        m_defaultPlaybackStartPosition = MediaTime::createWithDouble(time);
+        return { };
+    }
+
     seek(MediaTime::createWithDouble(time));
     return { };
 }
@@ -3515,7 +3542,10 @@ void HTMLMediaElement::playInternal()
     if (m_paused) {
         m_paused = false;
         invalidateCachedTime();
-        m_playbackStartedTime = currentMediaTime().toDouble();
+        // This avoids the first timeUpdated event after playback starts, when currentTime is still
+        // the same as it was when the video was paused (and the time hasn't changed yet).
+        m_lastTimeUpdateEventMovieTime = currentMediaTime();
+        m_playbackStartedTime = m_lastTimeUpdateEventMovieTime.toDouble();
         scheduleEvent(eventNames().playEvent);
 
 #if ENABLE(MEDIA_SESSION)
@@ -3545,6 +3575,8 @@ void HTMLMediaElement::playInternal()
 #endif
         if (m_readyState <= HAVE_CURRENT_DATA)
             scheduleEvent(eventNames().waitingEvent);
+        else
+            scheduleNotifyAboutPlaying();
     } else if (m_readyState >= HAVE_FUTURE_DATA)
         scheduleResolvePendingPlayPromises();
 
@@ -5351,7 +5383,11 @@ void HTMLMediaElement::updatePlayState(UpdateState updateState)
                 m_firstTimePlaying = false;
             }
 
-            m_player->play();
+            if (mediaKeys() == nullptr 
+                or mediaKeys()->cdmInstance().areAllKeysReceived()) {
+
+                m_player->play();
+            }
         }
 
         if (hasMediaControls())

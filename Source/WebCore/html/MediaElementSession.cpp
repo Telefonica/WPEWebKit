@@ -787,8 +787,9 @@ bool MediaElementSession::requiresPlaybackTargetRouteMonitoring() const
 size_t MediaElementSession::maximumMediaSourceBufferSize(const SourceBuffer& buffer) const
 {
     // A good quality 1080p video uses 8,000 kbps and stereo audio uses 384 kbps, so assume 95% for video and 5% for audio.
-    const float bufferBudgetPercentageForVideo = .95;
-    const float bufferBudgetPercentageForAudio = .05;
+    // Álvaro Peña: When we reduce the MSE buffer size, we must to adjust this values, because our buffer limit is 50Mb
+    const float bufferBudgetPercentageForVideo = .83;
+    const float bufferBudgetPercentageForAudio = .17;
 
     size_t maximum = buffer.document().settings().maximumSourceBufferSize();
 

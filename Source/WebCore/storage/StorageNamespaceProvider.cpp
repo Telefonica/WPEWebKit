@@ -34,8 +34,12 @@
 
 namespace WebCore {
 
+// Álvaro Peña <alvaropg@gmail.com>: Changed from 5 to 10 the
+// size of the quota required by the Global HTML team for the
+// Movistar application...
+// https://jira.tid.es/browse/OPENSTB-12626
 // Suggested by the HTML5 spec.
-unsigned localStorageDatabaseQuotaInBytes = 5 * 1024 * 1024;
+unsigned localStorageDatabaseQuotaInBytes = 10 * 1024 * 1024;
 
 StorageNamespaceProvider::StorageNamespaceProvider()
 {

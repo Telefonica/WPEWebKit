@@ -207,7 +207,7 @@ public:
     bool HasGstDecoder()
     {
 
-        auto all_decoders = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODER,
+        auto all_decoders = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_PARSER | GST_ELEMENT_FACTORY_TYPE_DECODER,
             GST_RANK_MARGINAL);
         auto caps = adoptGRef(gst_caps_from_string(Caps()));
         auto decoders = gst_element_factory_list_filter(all_decoders,

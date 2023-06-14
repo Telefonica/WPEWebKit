@@ -623,6 +623,8 @@ WebPage::WebPage(uint64_t pageID, WebPageCreationParameters&& parameters)
     setViewportConfigurationViewLayoutSize(parameters.viewportConfigurationViewLayoutSize);
     setMaximumUnobscuredSize(parameters.maximumUnobscuredSize);
 #endif
+
+    setBackgroundColor(parameters.backgroundColor);
 }
 
 #if ENABLE(WEB_RTC)
@@ -2648,13 +2650,27 @@ void WebPage::setDrawsBackground(bool drawsBackground)
     m_drawsBackground = drawsBackground;
 
     if (FrameView* frameView = mainFrameView()) {
-        Color backgroundColor = drawsBackground ? Color::white : Color::transparent;
+        Color backgroundColor = drawsBackground ? m_backgroundColor : Color::transparent;
         bool isTransparent = !drawsBackground;
         frameView->updateBackgroundRecursively(backgroundColor, isTransparent);
     }
 
     m_drawingArea->pageBackgroundTransparencyChanged();
     m_drawingArea->setNeedsDisplay();
+}
+
+void WebPage::setBackgroundColor(const WebCore::Color& backgroundColor)
+{
+    if (m_backgroundColor == backgroundColor)
+        return;
+
+    m_backgroundColor = backgroundColor;
+
+    if (FrameView* frameView = mainFrameView()) {
+        Color backgroundColor = m_drawsBackground ? m_backgroundColor : Color::transparent;
+        bool isTransparent = !m_drawsBackground;
+        frameView->updateBackgroundRecursively(backgroundColor, isTransparent);
+    }
 }
 
 #if PLATFORM(COCOA)

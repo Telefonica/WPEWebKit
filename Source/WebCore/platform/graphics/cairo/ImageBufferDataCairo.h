@@ -92,6 +92,7 @@ public:
 #endif
     uint32_t m_texture;
 #endif
+    double m_ImagebufferCounter { 0 };
 };
 
 } // namespace WebCore

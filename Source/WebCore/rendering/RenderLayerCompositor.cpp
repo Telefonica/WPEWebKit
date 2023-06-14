@@ -2449,15 +2449,12 @@ bool RenderLayerCompositor::requiresCompositingForVideo(RenderLayerModelObject& 
         return false;
 
 #if ENABLE(VIDEO)
-    if (!is<RenderVideo>(renderer))
-        return false;
-
-    auto& video = downcast<RenderVideo>(renderer);
-    return (video.requiresImmediateCompositing() || video.shouldDisplayVideo()) && canAccelerateVideoRendering(video);
+    if (is<RenderVideo>(renderer))
+        return true;
 #else
     UNUSED_PARAM(renderer);
-    return false;
 #endif
+    return false;
 }
 
 bool RenderLayerCompositor::requiresCompositingForCanvas(RenderLayerModelObject& renderer) const

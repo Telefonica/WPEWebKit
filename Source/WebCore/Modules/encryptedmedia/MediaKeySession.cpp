@@ -112,8 +112,12 @@ Ref<MediaKeyStatusMap> MediaKeySession::keyStatuses() const
     return m_keyStatuses.copyRef();
 }
 
-void MediaKeySession::generateRequest(const AtomicString& initDataType, const BufferSource& initData, Ref<DeferredPromise>&& promise)
+void MediaKeySession::generateRequest(const AtomicString& initDataType, const BufferSource& initData, std::optional<BufferSource::VariantType>&& customInput, Ref<DeferredPromise>&& promise)
 {
+    std::optional<BufferSource> customData;
+    if (customInput)
+        customData = BufferSource(WTFMove(customInput.value()));
+
     // https://w3c.github.io/encrypted-media/#dom-mediakeysession-generaterequest
     // W3C Editor's Draft 09 November 2016
 
@@ -147,7 +151,7 @@ void MediaKeySession::generateRequest(const AtomicString& initDataType, const Bu
     // 8. Let session type be this object's session type.
     // 9. Let promise be a new promise.
     // 10. Run the following steps in parallel:
-    m_taskQueue.enqueueTask([this, initData = SharedBuffer::create(initData.data(), initData.length()), initDataType, promise = WTFMove(promise)] () mutable {
+    m_taskQueue.enqueueTask([this, initData = SharedBuffer::create(initData.data(), initData.length()), initDataType, customData = SharedBuffer::create(customData ? customData->data(): nullptr, customData ? customData->length() : 0), promise = WTFMove(promise)] () mutable {
         // 10.1. If the init data is not valid for initDataType, reject promise with a newly created TypeError.
         // 10.2. Let sanitized init data be a validated and sanitized version of init data.
         RefPtr<SharedBuffer> sanitizedInitData = m_implementation->sanitizeInitData(initDataType, initData);
@@ -194,7 +198,7 @@ void MediaKeySession::generateRequest(const AtomicString& initDataType, const Bu
             m_latestDecryptTime = 0;
         }
 
-        m_instance->requestLicense(m_sessionType, initDataType, WTFMove(initData), [this, weakThis = makeWeakPtr(*this), promise = WTFMove(promise)] (Ref<SharedBuffer>&& message, const String& sessionId, bool needsIndividualization, CDMInstance::SuccessValue succeeded) mutable {
+        m_instance->requestLicense(m_sessionType, initDataType, sanitizedInitData.releaseNonNull(), WTFMove(customData), [this, weakThis = makeWeakPtr(*this), promise = WTFMove(promise)] (Ref<SharedBuffer>&& message, const String& sessionId, bool needsIndividualization, CDMInstance::SuccessValue succeeded) mutable {
             if (!weakThis)
                 return;
 
@@ -599,6 +603,29 @@ void MediaKeySession::enqueueMessage(MediaKeyMessageType messageType, const Shar
     m_eventQueue.enqueueEvent(WTFMove(messageEvent));
 }
 
+void MediaKeySession::enqueueMessageWithTask(CDMInstanceClient::MessageType type, Ref<SharedBuffer>&& message)
+{
+    m_taskQueue.enqueueTask([this, type, message = WTFMove(message)] () mutable {
+        MediaKeyMessageType messageType;
+        switch (type) {
+        case CDMInstance::MessageType::LicenseRequest:
+            messageType = MediaKeyMessageType::LicenseRequest;
+            break;
+        case CDMInstance::MessageType::LicenseRenewal:
+            messageType = MediaKeyMessageType::LicenseRenewal;
+            break;
+        case CDMInstance::MessageType::LicenseRelease:
+            messageType = MediaKeyMessageType::LicenseRelease;
+            break;
+        case CDMInstance::MessageType::IndividualizationRequest:
+            messageType = MediaKeyMessageType::IndividualizationRequest;
+            break;
+        }
+
+        enqueueMessage(messageType, WTFMove(message));
+    });
+}
+
 void MediaKeySession::updateKeyStatuses(CDMInstanceClient::KeyStatusVector&& inputStatuses)
 {
     // https://w3c.github.io/encrypted-media/#update-key-statuses
@@ -651,9 +678,16 @@ void MediaKeySession::updateKeyStatuses(CDMInstanceClient::KeyStatusVector&& inp
         });
 }
 
-void MediaKeySession::updateExpiration(double)
+void MediaKeySession::updateExpiration(double expiration)
 {
-    notImplemented();
+    // https://w3c.github.io/encrypted-media/#update-expiration
+    // W3C Editor's Draft 09 November 2016
+
+    // Let the session be the associated MediaKeySession object.
+    // Let expiration time be NaN.
+    // If the new expiration time is not NaN, let expiration time be the new expiration time in milliseconds since 01 January 1970 UTC.
+    // Set the session's expiration attribute to expiration time.
+    m_expiration = expiration;
 }
 
 void MediaKeySession::sessionClosed()

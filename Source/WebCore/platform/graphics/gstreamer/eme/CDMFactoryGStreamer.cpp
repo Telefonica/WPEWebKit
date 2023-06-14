@@ -32,12 +32,14 @@
 #if ENABLE(ENCRYPTED_MEDIA)
 
 #include "CDMClearKey.h"
+#include "CDMOpenCDM.h"
 
 namespace WebCore {
 
 void CDMFactory::platformRegisterFactories(Vector<CDMFactory*>& factories)
 {
     factories.append(&CDMFactoryClearKey::singleton());
+    factories.append(&CDMFactoryOpenCDM::singleton());
 }
 
 } // namespace WebCore

@@ -440,6 +440,12 @@ bool MediaTime::isBetween(const MediaTime& a, const MediaTime& b) const
     return *this > a && *this < b;
 }
 
+const MediaTime& MediaTime::limitForLiveStream()
+{
+    static const MediaTime time = MediaTime::createWithFloat(RecordedContentMaximumLength, 1);
+    return time;
+}
+
 const MediaTime& MediaTime::zeroTime()
 {
     static const MediaTime* time = new MediaTime(0, 1, Valid);

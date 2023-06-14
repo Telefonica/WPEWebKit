@@ -712,6 +712,9 @@ public:
     bool makeGLContextCurrent();
 #endif
 
+    const WebCore::Color& backgroundColor() const { return m_backgroundColor; }
+    void setBackgroundColor(const WebCore::Color&);
+
 #if PLATFORM(WIN)
     PlatformWidget viewWidget();
 #endif
@@ -2080,6 +2083,8 @@ private:
     String m_accessibilityPlugID;
     WebCore::Color m_backgroundColor { WebCore::Color::white };
 #endif
+
+    WebCore::Color m_backgroundColor { WebCore::Color::white };
 
     int64_t m_spellDocumentTag { 0 }; // FIXME: use std::optional<>.
     bool m_hasSpellDocumentTag { false }; 

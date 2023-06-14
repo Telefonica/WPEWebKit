@@ -41,6 +41,15 @@ namespace WebCore {
 
 namespace {
     const uint32_t kCencMaxBoxSize = 64 * KB;
+    constexpr uint8_t playreadyXMLMagicOffset = 10;
+    // L("<WRMHEADER")
+    const uint8_t playreadyXMLMagic[] = { 0x3c, 0x00, 0x57, 0x00, 0x52, 0x00, 0x4d, 0x00, 0x48, 0x00, 0x45, 0x00, 0x41, 0x00, 0x44, 0x00, 0x45, 0x00, 0x52, 0x00 };
+    // ContentEncKeyID has this EBML code [47][E2] in WebM,
+    // as per spec the size of the ContentEncKeyID is encoded on 16 bits.
+    // https://matroska.org/technical/specs/index.html#ContentEncKeyID/
+    const uint32_t kWebMMaxContentEncKeyIDSize = 64 * KB; // 2^16
+    const uint32_t kKeyIdsMinKeyIdSizeInBytes = 1;
+    const uint32_t kKeyIdsMaxKeyIdSizeInBytes = 512;
 }
 
 static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsKeyids(const SharedBuffer& buffer)
@@ -72,6 +81,9 @@ static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsKeyids(const Shared
         Vector<char> keyIDData;
         if (!WTF::base64URLDecode(keyID, { keyIDData }))
             continue;
+
+        if (keyIDData.size() < kKeyIdsMinKeyIdSizeInBytes || keyIDData.size() > kKeyIdsMaxKeyIdSizeInBytes)
+            return std::nullopt;
 
         Ref<SharedBuffer> keyIDBuffer = SharedBuffer::create(WTFMove(keyIDData));
         keyIDs.append(WTFMove(keyIDBuffer));
@@ -108,6 +120,20 @@ static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsCenc(const SharedBu
     unsigned offset = 0;
     Vector<Ref<SharedBuffer>> keyIDs;
 
+    // FIXME: We have a problem here when it comes to Smooth Streaming
+    // manifests, the protection payload sent from mssdemux is the
+    // protection XML specified (ha!) here:
+    // https://msdn.microsoft.com/en-us/library/ee673439(v=vs.90).aspx
+    // That's just an XML blob, not a PSSH box. So the problem is that
+    // for "cenc" init datas, we have either a PSSH box or a Playready
+    // XML blob (not a PSSH box!). This seems to start with a magical
+    // sequence of 10 bytes which we'll use to early return here,
+    // Proper fix would be to synthesize PSSH boxes from qtdemux in
+    // these cases, but that would probably break the Playready CDM,
+    // what a mess.
+    if (buffer.size() > playreadyXMLMagicOffset + sizeof(playreadyXMLMagic) && !memcmp(buffer.data() + playreadyXMLMagicOffset, playreadyXMLMagic, sizeof(playreadyXMLMagic)))
+        return keyIDs;
+
     auto view = JSC::DataView::create(buffer.tryCreateArrayBuffer(), offset, buffer.size());
     while (auto optionalBoxType = ISOBox::peekBox(view, offset)) {
         auto& boxTypeName = optionalBoxType.value().first;
@@ -139,18 +165,25 @@ static RefPtr<SharedBuffer> sanitizeCenc(const SharedBuffer& buffer)
 
 static RefPtr<SharedBuffer> sanitizeWebM(const SharedBuffer& buffer)
 {
-    // 1. Format
-    // https://w3c.github.io/encrypted-media/format-registry/initdata/webm.html#format
-    notImplemented();
+    // Check if the buffer is a valid WebM initData.
+    // The WebM initData is the ContentEncKeyID, so should be less than kWebMMaxContentEncKeyIDSize.
+    if (buffer.isEmpty() || buffer.size() > kWebMMaxContentEncKeyIDSize)
+        return nullptr;
+
     return buffer.copy();
 }
 
-static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsWebM(const SharedBuffer&)
+static std::optional<Vector<Ref<SharedBuffer>>> extractKeyIDsWebM(const SharedBuffer& buffer)
 {
+    Vector<Ref<SharedBuffer>> keyIDs;
+    RefPtr<SharedBuffer> sanitizedBuffer = sanitizeWebM(buffer);
+    if (!sanitizedBuffer)
+        return std::nullopt;
+
     // 1. Format
     // https://w3c.github.io/encrypted-media/format-registry/initdata/webm.html#format
-    notImplemented();
-    return std::nullopt;
+    keyIDs.append(sanitizedBuffer.releaseNonNull());
+    return keyIDs;
 }
 
 InitDataRegistry& InitDataRegistry::shared()

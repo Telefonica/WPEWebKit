@@ -1206,6 +1206,7 @@ private:
 #endif
 
     void setDrawsBackground(bool);
+    void setBackgroundColor(const WebCore::Color &);
 
 #if PLATFORM(COCOA)
     void setTopContentInsetFenced(float, IPC::Attachment);

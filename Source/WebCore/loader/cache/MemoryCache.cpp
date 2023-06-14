@@ -46,6 +46,9 @@
 #include <wtf/SetForScope.h>
 #include <wtf/text/CString.h>
 
+#include <fstream>
+#include <sstream>
+
 namespace WebCore {
 
 static const int cDefaultCacheCapacity = 8192 * 1024;
@@ -63,8 +66,16 @@ MemoryCache::MemoryCache()
     : m_capacity(cDefaultCacheCapacity)
     , m_maxDeadCapacity(cDefaultCacheCapacity)
     , m_pruneTimer(*this, &MemoryCache::prune)
+    , m_crMemoryCacheEvictedCount(0)
+    , m_crMemoryCacheCount(0)
 {
     static_assert(sizeof(long long) > sizeof(unsigned), "Numerical overflow can happen when adjusting the size of the cached memory.");
+
+    std::ifstream file("/flash/MemoryCacheLogs", std::ios::binary);
+    if (file.good()) {
+        m_EnableLogs = true;
+        file.close();
+    }
 
     static std::once_flag onceFlag;
     std::call_once(onceFlag, [] {
@@ -122,8 +133,17 @@ bool MemoryCache::add(CachedResource& resource)
     resource.setInCache(true);
     
     resourceAccessed(resource);
+    m_crMemoryCacheCount++;
     
     LOG(ResourceLoading, "MemoryCache::add Added '%s', resource %p\n", resource.url().string().latin1().data(), &resource);
+
+    MemoryCache::singleton().storeStats();
+    LOG(ResourceLoading, "CRASHRUSH::MemoryCache::add m_crMemoryCacheCount:%u", m_crMemoryCacheCount);
+    if (m_EnableLogs) 
+    {
+        MemoryCache::singleton().dumpStats();
+        MemoryCache::singleton().dumpLRULists(true);
+    }
     return true;
 }
 
@@ -195,12 +215,15 @@ unsigned MemoryCache::deadCapacity() const
     unsigned capacity = m_capacity - std::min(m_liveSize, m_capacity); // Start with available capacity.
     capacity = std::max(capacity, m_minDeadCapacity); // Make sure it's above the minimum.
     capacity = std::min(capacity, m_maxDeadCapacity); // Make sure it's below the maximum.
+    LOG(ResourceLoading, "CRASHRUSH::MemoryCache::deadCapacity deadCapacity:%u", capacity);
     return capacity;
 }
 
 unsigned MemoryCache::liveCapacity() const 
 { 
     // Live resource capacity is whatever is left over after calculating dead resource capacity.
+    LOG(ResourceLoading, "CRASHRUSH::MemoryCache::liveCapacity m_capacity:%u", m_capacity);
+    LOG(ResourceLoading, "CRASHRUSH::MemoryCache::liveCapacity liveCapacity:%u", m_capacity - deadCapacity());
     return m_capacity - deadCapacity();
 }
 
@@ -412,13 +435,21 @@ void MemoryCache::setCapacities(unsigned minDeadBytes, unsigned maxDeadBytes, un
     m_minDeadCapacity = minDeadBytes;
     m_maxDeadCapacity = maxDeadBytes;
     m_capacity = totalBytes;
+
+    LOG(ResourceLoading, "CRASHRUSH::MemoryCache::setCapacities m_minDeadCapacity:%u", m_minDeadCapacity);
+    LOG(ResourceLoading, "CRASHRUSH::MemoryCache::setCapacities m_maxDeadCapacity:%u", m_maxDeadCapacity);
+    LOG(ResourceLoading, "CRASHRUSH::MemoryCache::setCapacities m_capacity:%u", m_capacity);
+
     prune();
 }
 
 void MemoryCache::remove(CachedResource& resource)
 {
     ASSERT(WTF::isMainThread());
-    LOG(ResourceLoading, "Evicting resource %p for '%s' from cache", &resource, resource.url().string().latin1().data());
+    m_crMemoryCacheEvictedCount++;
+    LOG(ResourceLoading, "[%s] Evicting resource %p for '%s' from cache", program_invocation_name, &resource, resource.url().string().latin1().data());
+    LOG(ResourceLoading, "CRASHRUSH::MemoryCache::remove m_crMemoryCacheEvictedCount:%u", m_crMemoryCacheEvictedCount);
+
     // The resource may have already been removed by someone other than our caller,
     // who needed a fresh copy for a reload. See <http://bugs.webkit.org/show_bug.cgi?id=12479#c6>.
     if (auto* resources = sessionResourceMap(resource.sessionID())) {
@@ -442,6 +473,13 @@ void MemoryCache::remove(CachedResource& resource)
     }
 
     resource.deleteIfPossible();
+
+    MemoryCache::singleton().storeStats();
+    if (m_EnableLogs) 
+    {
+        MemoryCache::singleton().dumpStats();
+        MemoryCache::singleton().dumpLRULists(true);
+    }
 }
 
 auto MemoryCache::lruListFor(CachedResource& resource) -> LRUList&
@@ -675,6 +713,7 @@ MemoryCache::Statistics MemoryCache::getStatistics()
                 stats.fonts.addResource(*resource);
                 break;
             default:
+                stats.noTypeThings.addResource(*resource);
                 break;
             }
         }
@@ -737,6 +776,30 @@ void MemoryCache::pruneSoon()
     m_pruneTimer.startOneShot(0_s);
 }
 
+void MemoryCache::storeStats()
+{
+    Statistics s = getStatistics();
+    unsigned countTotal = s.images.count + s.cssStyleSheets.count + s.scripts.count + s.fonts.count + s.noTypeThings.count;
+    unsigned sizeTotal = s.images.size + s.cssStyleSheets.size + s.scripts.size + s.fonts.size + s.noTypeThings.size;
+
+    std::stringstream ss;
+    ss  <<   "ImagesCount: " <<  s.images.count         << ", ImagesSize: " << s.images.size 
+        << ", CssCount: "    <<  s.cssStyleSheets.count << ", CssSize: "    << s.cssStyleSheets.size
+#if ENABLE(XSLT)
+        << ", XslCount: "    <<  s.xslStyleSheets.count << ", XslSize: "    << s.xslStyleSheets.size
+#endif
+        << ", JsCount: "     <<  s.scripts.count        << ", JsSize: "     << s.scripts.size
+        << ", FontsCount: "  <<  s.fonts.count          << ", FontsSize: "  << s.fonts.size
+        << ", OtherCount: "  <<  s.noTypeThings.count   << ", OtherSize: "  << s.noTypeThings.size
+        << ", countTotal: "  <<  countTotal             << ", sizeTotal: "  << sizeTotal;
+    
+    std::ofstream file("/tmp/memCacheInfo");
+    if (file) {
+        file << ss.str();
+        file.close();
+    }
+}
+
 void MemoryCache::dumpStats()
 {
     Statistics s = getStatistics();
@@ -750,12 +813,13 @@ void MemoryCache::dumpStats()
 #endif
     WTFLogAlways("%-13s %13d %13d %13d %13d\n", "JavaScript", s.scripts.count, s.scripts.size, s.scripts.liveSize, s.scripts.decodedSize);
     WTFLogAlways("%-13s %13d %13d %13d %13d\n", "Fonts", s.fonts.count, s.fonts.size, s.fonts.liveSize, s.fonts.decodedSize);
+    WTFLogAlways("%-13s %13d %13d %13d %13d\n", "Other", s.noTypeThings.count, s.noTypeThings.size, s.noTypeThings.liveSize, s.noTypeThings.decodedSize);
     WTFLogAlways("%-13s %-13s %-13s %-13s %-13s\n\n", "-------------", "-------------", "-------------", "-------------", "-------------");
 
-    unsigned countTotal = s.images.count + s.cssStyleSheets.count + s.scripts.count + s.fonts.count;
-    unsigned sizeTotal = s.images.size + s.cssStyleSheets.size + s.scripts.size + s.fonts.size;
-    unsigned liveSizeTotal = s.images.liveSize + s.cssStyleSheets.liveSize + s.scripts.liveSize + s.fonts.liveSize;
-    unsigned decodedSizeTotal = s.images.decodedSize + s.cssStyleSheets.decodedSize + s.scripts.decodedSize + s.fonts.decodedSize;
+    unsigned countTotal = s.images.count + s.cssStyleSheets.count + s.scripts.count + s.fonts.count + s.noTypeThings.count;
+    unsigned sizeTotal = s.images.size + s.cssStyleSheets.size + s.scripts.size + s.fonts.size + s.noTypeThings.size;
+    unsigned liveSizeTotal = s.images.liveSize + s.cssStyleSheets.liveSize + s.scripts.liveSize + s.fonts.liveSize + s.noTypeThings.liveSize;
+    unsigned decodedSizeTotal = s.images.decodedSize + s.cssStyleSheets.decodedSize + s.scripts.decodedSize + s.fonts.decodedSize + s.noTypeThings.decodedSize;
 #if ENABLE(XSLT)
     countTotal += s.xslStyleSheets.count;
     sizeTotal += s.xslStyleSheets.size;
@@ -775,7 +839,7 @@ void MemoryCache::dumpLRULists(bool includeLive) const
         WTFLogAlways("\nList %d:\n", i);
         for (auto* resource : *m_allResources[i]) {
             if (includeLive || !resource->hasClients())
-                WTFLogAlways("  %.100s %.1fK, %.1fK, accesses: %u, clients: %d\n", resource->url().string().utf8().data(), resource->decodedSize() / 1024.0f, (resource->encodedSize() + resource->overheadSize()) / 1024.0f, resource->accessCount(), resource->numberOfClients());
+                WTFLogAlways("  %s %.1fK, %.1fK, accesses: %u, clients: %d\n", resource->url().string().utf8().data(), resource->decodedSize() / 1024.0f, (resource->encodedSize() + resource->overheadSize()) / 1024.0f, resource->accessCount(), resource->numberOfClients());
         }
     }
 }

@@ -24,8 +24,15 @@
 
 #if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
 
+#include "GStreamerEMEUtilities.h"
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
+#include <wtf/RefPtr.h>
+
+namespace WebCore {
+class CDMInstance;
+class SharedBuffer;
+};
 
 G_BEGIN_DECLS
 
@@ -52,12 +59,15 @@ struct _WebKitMediaCommonEncryptionDecrypt {
 struct _WebKitMediaCommonEncryptionDecryptClass {
     GstBaseTransformClass parentClass;
 
-    const char* protectionSystemId;
-    gboolean (*handleKeyResponse)(WebKitMediaCommonEncryptionDecrypt*, GstEvent* event);
     gboolean (*setupCipher)(WebKitMediaCommonEncryptionDecrypt*, GstBuffer*);
-    gboolean (*decrypt)(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* ivBuffer, GstBuffer* buffer, unsigned subSamplesCount, GstBuffer* subSamplesBuffer);
+    gboolean (*decrypt)(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* keyIDBuffer, GstBuffer* ivBuffer, GstBuffer* buffer, unsigned subSamplesCount, GstBuffer* subSamplesBuffer);
     void (*releaseCipher)(WebKitMediaCommonEncryptionDecrypt*);
+    void (*receivedProtectionEvent)(WebKitMediaCommonEncryptionDecrypt*, unsigned);
+    gboolean (*handleKeyId)(WebKitMediaCommonEncryptionDecrypt*, const WebCore::SharedBuffer&);
+    gboolean (*attemptToDecryptWithLocalInstance)(WebKitMediaCommonEncryptionDecrypt*, const WebCore::SharedBuffer&);
 };
+
+RefPtr<WebCore::CDMInstance> webKitMediaCommonEncryptionDecryptCDMInstance(WebKitMediaCommonEncryptionDecrypt*);
 
 G_END_DECLS
 

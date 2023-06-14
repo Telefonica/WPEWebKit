@@ -63,10 +63,17 @@ GetOptions('include=s@' => \@idlDirectories,
            'numOfJobs=i' => \$numOfJobs,
            'showProgress' => \$showProgress);
 
+sub auxRegexForCygwinPathIfNeeded
+{
+    my $foo = $_;
+    $foo =~ s/\r?\n?$//;
+    return $foo;
+}
+
 $| = 1;
 my @idlFiles;
 open(my $fh, '<', $idlFilesList) or die "Cannot open $idlFilesList";
-@idlFiles = map { CygwinPathIfNeeded(s/\r?\n?$//r) } <$fh>;
+@idlFiles = map { CygwinPathIfNeeded(auxRegexForCygwinPathIfNeeded) } <$fh>;
 close($fh) or die;
 
 my %oldSupplements;
@@ -215,10 +222,17 @@ sub spawnCommand
     return $pid;
 }
 
+sub quoteCommandAuxRegex
+{
+    my $foo = $_;
+    $foo =~ s/([\\\"])/\\$1/g;
+    return $foo;
+}
+
 sub quoteCommand
 {
     return map {
-        '"' . s/([\\\"])/\\$1/gr . '"';
+        '"' . quoteCommandAuxRegex . '"';
     } @_;
 }
 

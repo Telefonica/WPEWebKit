@@ -49,6 +49,7 @@
 #include <wpe/WebKitWebContext.h>
 #include <wpe/WebKitWebResource.h>
 #include <wpe/WebKitWebViewBackend.h>
+#include <wpe/WebKitColor.h>
 #include <wpe/WebKitWebViewSessionState.h>
 #include <wpe/WebKitWindowProperties.h>
 
@@ -494,6 +495,13 @@ webkit_web_view_get_session_state                    (WebKitWebView             
 WEBKIT_API void
 webkit_web_view_restore_session_state                (WebKitWebView             *web_view,
                                                       WebKitWebViewSessionState *state);
+
+WEBKIT_API void
+webkit_web_view_set_background_color                 (WebKitWebView               *web_view,
+                                                      WebKitColor                 *color);
+WEBKIT_API void
+webkit_web_view_get_background_color                 (WebKitWebView               *web_view,
+                                                      WebKitColor                 *color);
 
 G_END_DECLS
 

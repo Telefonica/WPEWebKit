@@ -44,6 +44,10 @@
 #endif
 #endif
 
+#if ENABLE(ENCRYPTED_MEDIA)
+#include "GStreamerEMEUtilities.h"
+#endif
+
 typedef struct _GstStreamVolume GstStreamVolume;
 typedef struct _GstVideoInfo GstVideoInfo;
 typedef struct _GstGLContext GstGLContext;
@@ -152,6 +156,8 @@ public:
     void attemptToDecryptWithInstance(CDMInstance&) override;
     void dispatchCDMInstance();
     void initializationDataEncountered(GstEvent*);
+    void initializationDataEncounteredOld(const String&, const InitData&);
+    void handleProtectionStructure(const GstStructure*);
 #endif
 
     static bool supportsKeySystem(const String& keySystem, const String& mimeType);
@@ -170,6 +176,10 @@ public:
 protected:
     MediaPlayerPrivateGStreamerBase(MediaPlayer*);
     virtual GstElement* createVideoSink();
+
+    GstElement* createHolePunchVideoSink();
+    void pushNextHolePunchBuffer();
+    bool shouldIgnoreIntrinsicSize() final { return true; }
 
 #if USE(GSTREAMER_GL)
     static GstFlowReturn newSampleCallback(GstElement*, MediaPlayerPrivateGStreamerBase*);

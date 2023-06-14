@@ -27,6 +27,8 @@ messages -> WebPage LegacyReceiver {
 
     SetDrawsBackground(bool drawsBackground)
 
+    SetBackgroundColor(WebCore::Color color)
+
     AddConsoleMessage(uint64_t frameID, enum MessageSource messageSource, enum MessageLevel messageLevel, String message, uint64_t requestID)
     SendCSPViolationReport(uint64_t frameID, WebCore::URL reportURL, IPC::FormDataReference reportData)
     EnqueueSecurityPolicyViolationEvent(uint64_t frameID, WebCore::SecurityPolicyViolationEvent::Init eventInit)

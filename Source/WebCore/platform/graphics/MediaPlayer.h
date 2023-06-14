@@ -262,6 +262,7 @@ public:
     bool supportsPictureInPicture() const;
     bool supportsFullscreen() const;
     bool supportsScanning() const;
+    bool supportsProgressMonitoring() const;
     bool canSaveMediaData() const;
     bool requiresImmediateCompositing() const;
     bool doesHaveAttribute(const AtomicString&, AtomicString* value = nullptr) const;
@@ -564,6 +565,8 @@ public:
 
     void applicationWillResignActive();
     void applicationDidBecomeActive();
+
+    bool shouldIgnoreIntrinsicSize();
 
 #if ENABLE(VIDEO) && USE(AVFOUNDATION)
     WEBCORE_EXPORT AVPlayer *objCAVFoundationAVPlayer() const;

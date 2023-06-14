@@ -100,6 +100,7 @@ public:
     bool hasDoubleValue() const { return m_timeFlags & DoubleValue; }
     uint8_t timeFlags() const { return m_timeFlags; }
 
+    static const MediaTime& limitForLiveStream();
     static const MediaTime& zeroTime();
     static const MediaTime& invalidTime();
     static const MediaTime& positiveInfiniteTime();
@@ -123,7 +124,8 @@ public:
 
     static const uint32_t DefaultTimeScale = 10000000;
     static const uint32_t MaximumTimeScale;
-
+    static constexpr float RecordedContentMaximumLength = 700.0 * 60.0 * 60.0;
+    
     enum class RoundingFlags {
         HalfAwayFromZero = 0,
         TowardZero,

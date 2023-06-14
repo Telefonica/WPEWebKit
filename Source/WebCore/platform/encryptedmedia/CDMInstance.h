@@ -48,8 +48,10 @@ public:
     virtual ~CDMInstanceClient() = default;
 
     using KeyStatus = CDMKeyStatus;
+    using MessageType = CDMMessageType;
     using KeyStatusVector = Vector<std::pair<Ref<SharedBuffer>, KeyStatus>>;
     virtual void updateKeyStatuses(KeyStatusVector&&) = 0;
+    virtual void enqueueMessageWithTask(MessageType, Ref<SharedBuffer>&&) = 0;
 };
 
 class CDMInstance : public RefCounted<CDMInstance> {
@@ -60,6 +62,7 @@ public:
         Mock,
         ClearKey,
         FairPlayStreaming,
+        OpenCDM,
     };
 
     virtual ImplementationType implementationType() const = 0;
@@ -91,7 +94,7 @@ public:
     virtual void clearClient() { }
 
     using LicenseCallback = Function<void(Ref<SharedBuffer>&& message, const String& sessionId, bool needsIndividualization, SuccessValue succeeded)>;
-    virtual void requestLicense(LicenseType, const AtomicString& initDataType, Ref<SharedBuffer>&& initData, LicenseCallback) = 0;
+    virtual void requestLicense(LicenseType, const AtomicString& initDataType, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback) = 0;
 
     using KeyStatusVector = CDMInstanceClient::KeyStatusVector;
     using Message = std::pair<MessageType, Ref<SharedBuffer>>;
@@ -118,6 +121,11 @@ public:
     virtual void storeRecordOfKeyUsage(const String& sessionId) = 0;
 
     virtual const String& keySystem() const = 0;
+
+    /** Auxiliary funciton that informs to the player if all keys for decryption are received.
+     *  @deprecated It will not be necessary when introduced CDMProxy.
+     */
+    virtual bool areAllKeysReceived() const = 0;
 };
 
 } // namespace WebCore

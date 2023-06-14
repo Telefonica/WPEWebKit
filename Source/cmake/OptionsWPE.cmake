@@ -85,6 +85,13 @@ find_package(WebP REQUIRED)
 find_package(WPE REQUIRED)
 find_package(ZLIB REQUIRED)
 
+if (ENABLE_ENCRYPTED_MEDIA)
+  find_package(OpenCDM REQUIRED)
+  if (NOT OPENCDM_FOUND)
+    message(FATAL_ERROR "OpenCDM is needed for ENABLE_ENCRYPTED_MEDIA.")
+  endif ()
+endif ()
+
 if (USE_WOFF2)
     find_package(WOFF2Dec 1.0.2)
     if (NOT WOFF2DEC_FOUND)
