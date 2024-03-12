@@ -28,6 +28,7 @@
 #include "APISerializedScriptValue.h"
 #include "DataReference.h"
 #include "ImageOptions.h"
+#include "MemoryPressureMonitor.h"
 #include "NotificationService.h"
 #include "ProvisionalPageProxy.h"
 #include "WebCertificateInfo.h"
@@ -3200,6 +3201,12 @@ void webkit_web_view_load_uri(WebKitWebView* webView, const gchar* uri)
     g_return_if_fail(uri);
 
     getPage(webView).loadRequest(URL({ }, String::fromUTF8(uri)));
+}
+
+void webkit_web_view_memory_relief(WebKitWebView* webView)
+{
+    g_return_if_fail(WEBKIT_IS_WEB_VIEW(webView));
+    MemoryPressureMonitor::singleton().performManualMemoryRelief();
 }
 
 /**

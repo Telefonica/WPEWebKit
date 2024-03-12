@@ -348,6 +348,10 @@ webkit_web_view_load_uri                             (WebKitWebView             
                                                       const gchar               *uri);
 
 WEBKIT_API void
+webkit_web_view_memory_relief                        (WebKitWebView             *web_view);
+
+
+WEBKIT_API void
 webkit_web_view_load_html                            (WebKitWebView             *web_view,
                                                       const gchar               *content,
                                                       const gchar               *base_uri);

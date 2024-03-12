@@ -44,13 +44,21 @@ public:
     static MemoryPressureMonitor& singleton();
     void start();
     static bool disabled();
+    void performManualMemoryRelief();
 
     ~MemoryPressureMonitor();
 
 private:
+    enum MemReleaseType { NONE, GBC, FULL };
+
     MemoryPressureMonitor() = default;
+
+    MemReleaseType m_memReleaseType { MemReleaseType::NONE };
     bool m_started { false };
+    bool m_manualMemoryRelief { false };
     static bool s_disabled;
+    int m_memoryPressurePercentageThreshold { 55 };
+    int m_memoryPressurePercentageThresholdCritical { 60 };
 };
 
 class CGroupMemoryController {

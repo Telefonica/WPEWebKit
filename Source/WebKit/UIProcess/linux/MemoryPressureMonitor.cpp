@@ -48,13 +48,6 @@ static const Seconds s_minPollingInterval { 1_s };
 static const Seconds s_maxPollingInterval { 5_s };
 static const double s_minUsedMemoryPercentageForPolling = 50;
 static const double s_maxUsedMemoryPercentageForPolling = 85;
-#if PLATFORM(WPE)
-static const int s_memoryPresurePercentageThreshold = 80;
-static const int s_memoryPresurePercentageThresholdCritical = 85;
-#else
-static const int s_memoryPresurePercentageThreshold = 90;
-static const int s_memoryPresurePercentageThresholdCritical = 95;
-#endif
 // cgroups.7: The usual place for such mounts is under a tmpfs(5)
 // filesystem mounted at /sys/fs/cgroup.
 static const char* s_cgroupMemoryPath = "/sys/fs/cgroup/%s/%s/%s";
@@ -352,7 +345,33 @@ void MemoryPressureMonitor::start()
 
     m_started = true;
 
-    Thread::create("MemoryPressureMonitor", [] {
+    String s_mempress(String::fromLatin1(getenv("WPE_MEMPRESS_THRESHOLD")));
+    if (!s_mempress.isEmpty()) {
+        bool isInt = false;
+        int mempress = 0;
+        isInt = sscanf(s_mempress.utf8().data(), "%d", &mempress);
+        if(isInt)
+        {
+            if (mempress > 100) mempress = 100;
+            if (mempress < 0) mempress = 0;
+
+            m_memoryPressurePercentageThreshold = mempress;
+            m_memoryPressurePercentageThresholdCritical = (100 + m_memoryPressurePercentageThreshold) / 2;
+        }
+    }
+
+    fprintf(stdout, "Memory pressure threshold %d, Critical Threshold %d\n",
+                m_memoryPressurePercentageThreshold, m_memoryPressurePercentageThresholdCritical);fflush(stdout);
+
+    String memReleaseType(String::fromLatin1(getenv("MEM_RELEASE_TYPE")));
+    if (memReleaseType == String::fromLatin1("FULL")) {
+        m_memReleaseType = MemReleaseType::FULL;
+    }
+    else if(memReleaseType == String::fromLatin1("GBC")) {
+        m_memReleaseType = MemReleaseType::GBC;
+    }
+
+    Thread::create("MemoryPressureMonitor", [this] {
         FileHandle memInfoFile, zoneInfoFile, cgroupControllerFile;
         CGroupMemoryController memoryController = CGroupMemoryController();
         Seconds pollInterval = s_maxPollingInterval;
@@ -376,8 +395,21 @@ void MemoryPressureMonitor::start()
                 continue;
             }
 
-            if (usedPercentage >= s_memoryPresurePercentageThreshold) {
-                bool isCritical = (usedPercentage >= s_memoryPresurePercentageThresholdCritical);
+            if (m_manualMemoryRelief && m_memReleaseType != MemReleaseType::NONE) {
+                if (m_memReleaseType == MemReleaseType::FULL) {
+                    WTFLogAlways("MemoryPressureMonitor triggered manual FULL memory release\n");fflush(stdout);
+                    for (auto& processPool : WebProcessPool::allProcessPools())
+                        processPool->sendMemoryPressureEvent(true);
+                }
+                else {
+                    WTFLogAlways("MemoryPressureMonitor triggered manual GBC memory release\n");fflush(stdout);
+                    for (auto& processPool : WebProcessPool::allProcessPools())
+                        processPool->garbageCollectJavaScriptObjects();
+                }
+                m_manualMemoryRelief = false;
+            } else if (usedPercentage >= m_memoryPressurePercentageThreshold) {
+                bool isCritical = (usedPercentage >= m_memoryPressurePercentageThresholdCritical);
+
                 RunLoop::main().dispatch([isCritical] {
                     for (auto& processPool : WebProcessPool::allProcessPools())
                         processPool->sendMemoryPressureEvent(isCritical);
@@ -525,6 +557,12 @@ size_t CGroupMemoryController::getMemoryUsageWithCgroup()
         return value;
 
     return notSet;
+}
+
+void MemoryPressureMonitor::performManualMemoryRelief()
+{
+    WTFLogAlways("MemoryPressureMonitor performManualMemoryRelief");fflush(stdout);
+    m_manualMemoryRelief = true;
 }
 
 } // namespace WebKit

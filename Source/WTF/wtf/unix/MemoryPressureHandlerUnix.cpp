@@ -119,6 +119,7 @@ bool readToken(const char* filename, const char* key, size_t fileUnits, size_t &
     } while (!token.isEmpty());
 
     fclose(file);
+    result *= fileUnits;
     return validValue;
 }
 
