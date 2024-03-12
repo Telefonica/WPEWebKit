@@ -108,7 +108,9 @@ DecisionLogic::DecisionLogic(
       timescale_countdown_(
           tick_timer_->GetNewCountdown(kMinTimescaleInterval + 1)) {}
 
-DecisionLogic::~DecisionLogic() = default;
+DecisionLogic::~DecisionLogic()
+{
+}
 
 void DecisionLogic::SoftReset() {
   packet_length_samples_ = 0;

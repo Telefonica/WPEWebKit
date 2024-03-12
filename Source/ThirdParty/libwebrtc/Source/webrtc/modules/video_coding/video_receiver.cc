@@ -210,6 +210,7 @@ int32_t VideoReceiver::RequestKeyFrame() {
 int32_t VideoReceiver::Decode(const VCMEncodedFrame& frame) {
   RTC_DCHECK_RUN_ON(&decoder_thread_checker_);
   TRACE_EVENT0("webrtc", "VideoReceiver::Decode");
+
   // Change decoder if payload type has changed
   VCMGenericDecoder* decoder =
       _codecDataBase.GetDecoder(frame, &_decodedFrameCallback);

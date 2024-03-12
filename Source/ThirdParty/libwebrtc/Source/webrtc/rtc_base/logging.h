@@ -648,16 +648,14 @@ class LogMessage {
           << ::rtc::webrtc_logging_impl::LogMetadata(file, line, sev)
 
 #define RTC_LOG(sev)                          \
-  !::rtc::LogMessage::IsNoop<::rtc::sev>() && \
       RTC_LOG_FILE_LINE(::rtc::sev, __FILE__, __LINE__)
 
 #define RTC_LOG_IF(sev, condition)                           \
-  !::rtc::LogMessage::IsNoop<::rtc::sev>() && (condition) && \
       RTC_LOG_FILE_LINE(::rtc::sev, __FILE__, __LINE__)
 
 // The _V version is for when a variable is passed in.
 #define RTC_LOG_V(sev) \
-  !::rtc::LogMessage::IsNoop(sev) && RTC_LOG_FILE_LINE(sev, __FILE__, __LINE__)
+  RTC_LOG_FILE_LINE(sev, __FILE__, __LINE__)
 
 // The _F version prefixes the message with the current function name.
 #if (defined(__GNUC__) && !defined(NDEBUG)) || defined(WANT_PRETTY_LOG_F)
@@ -677,16 +675,18 @@ class LogMessage {
 #define RTC_LOG_CHECK_LEVEL_V(sev) ::rtc::LogCheckLevel(sev)
 
 inline bool LogCheckLevel(LoggingSeverity sev) {
-  return (LogMessage::GetMinLogSeverity() <= sev);
+  return true;
+  // return (LogMessage::GetMinLogSeverity() <= sev);
 }
 
 #define RTC_LOG_E(sev, ctx, err)                                 \
-  !::rtc::LogMessage::IsNoop<::rtc::sev>() &&                    \
-      ::rtc::webrtc_logging_impl::LogCall() &                    \
           ::rtc::webrtc_logging_impl::LogStreamer<>()            \
               << ::rtc::webrtc_logging_impl::LogMetadataErr {    \
     {__FILE__, __LINE__, ::rtc::sev}, ::rtc::ERRCTX_##ctx, (err) \
   }
+
+      //::rtc::webrtc_logging_impl::LogCall() &                   
+  // !::rtc::LogMessage::IsNoop<::rtc::sev>() &&                    
 
 #define RTC_LOG_T(sev) RTC_LOG(sev) << this << ": "
 

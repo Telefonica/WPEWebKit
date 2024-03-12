@@ -136,6 +136,10 @@ Source/third_party/abseil-cpp/absl/base/internal/strerror.cc
 Source/third_party/abseil-cpp/absl/base/internal/thread_identity.cc
 Source/third_party/abseil-cpp/absl/base/internal/low_level_alloc.cc
 Source/third_party/abseil-cpp/absl/base/log_severity.cc
+Source/third_party/abseil-cpp/absl/crc/crc32c.cc
+Source/third_party/abseil-cpp/absl/crc/internal/crc.cc
+Source/third_party/abseil-cpp/absl/crc/internal/crc_memcpy_x86_arm_combined.cc
+Source/third_party/abseil-cpp/absl/crc/internal/crc_x86_arm_combined.cc
 Source/third_party/boringssl/err_data.c
 Source/third_party/boringssl/src/crypto/asn1/a_bitstr.c
 Source/third_party/boringssl/src/crypto/asn1/a_bool.c
@@ -448,9 +452,13 @@ Source/webrtc/api/create_peerconnection_factory.cc
 Source/webrtc/api/crypto/crypto_options.cc
 Source/webrtc/api/data_channel_interface.cc
 Source/webrtc/api/dtls_transport_interface.cc
+Source/webrtc/api/enable_media.cc
+Source/webrtc/api/environment/environment_factory.cc
+Source/webrtc/api/field_trials_registry.cc
 Source/webrtc/api/ice_transport_factory.cc
 Source/webrtc/api/jsep.cc
 Source/webrtc/api/jsep_ice_candidate.cc
+Source/webrtc/api/legacy_stats_types.cc
 Source/webrtc/api/media_stream_interface.cc
 Source/webrtc/api/media_types.cc
 Source/webrtc/api/neteq/custom_neteq_factory.cc
@@ -459,10 +467,10 @@ Source/webrtc/api/neteq/neteq.cc
 Source/webrtc/api/neteq/tick_timer.cc
 Source/webrtc/api/peer_connection_interface.cc
 Source/webrtc/api/rtc_error.cc
-# Source/webrtc/api/rtc_event_log_output_file.cc
-# Source/webrtc/api/rtc_event_log/rtc_event.cc
-# Source/webrtc/api/rtc_event_log/rtc_event_log.cc
-# Source/webrtc/api/rtc_event_log/rtc_event_log_factory.cc
+# Source/webrtc/api/rtc_event_log_output_file.c
+Source/webrtc/api/rtc_event_log/rtc_event.cc
+Source/webrtc/api/rtc_event_log/rtc_event_log.cc
+Source/webrtc/api/rtc_event_log/rtc_event_log_factory.cc
 Source/webrtc/api/rtp_headers.cc
 Source/webrtc/api/rtp_packet_info.cc
 Source/webrtc/api/rtp_parameters.cc
@@ -488,6 +496,7 @@ Source/webrtc/api/video/builtin_video_bitrate_allocator_factory.cc
 Source/webrtc/api/video/color_space.cc
 Source/webrtc/api/video/encoded_frame.cc
 Source/webrtc/api/video/encoded_image.cc
+Source/webrtc/api/video/frame_buffer.cc
 Source/webrtc/api/video/hdr_metadata.cc
 Source/webrtc/api/video/i010_buffer.cc
 Source/webrtc/api/video/i420_buffer.cc
@@ -501,9 +510,11 @@ Source/webrtc/api/video/video_frame_buffer.cc
 Source/webrtc/api/video/video_frame_metadata.cc
 Source/webrtc/api/video/video_source_interface.cc
 Source/webrtc/api/video/video_timing.cc
+Source/webrtc/api/video_codecs/av1_profile.cc
 Source/webrtc/api/video_codecs/builtin_video_decoder_factory.cc
 Source/webrtc/api/video_codecs/builtin_video_encoder_factory.cc
 Source/webrtc/api/video_codecs/h264_profile_level_id.cc
+Source/webrtc/api/video_codecs/scalability_mode.cc
 Source/webrtc/api/video_codecs/sdp_video_format.cc
 Source/webrtc/api/video_codecs/video_codec.cc
 Source/webrtc/api/video_codecs/video_decoder.cc
@@ -541,6 +552,7 @@ Source/webrtc/call/audio_state.cc
 Source/webrtc/call/bitrate_allocator.cc
 Source/webrtc/call/call.cc
 Source/webrtc/call/call_config.cc
+Source/webrtc/call/create_call.cc
 Source/webrtc/call/degraded_call.cc
 Source/webrtc/call/fake_network_pipe.cc
 Source/webrtc/call/flexfec_receive_stream.cc
@@ -636,36 +648,38 @@ Source/webrtc/common_video/h265/h265_vps_parser.cc
 Source/webrtc/common_video/libyuv/webrtc_libyuv.cc
 Source/webrtc/common_video/video_frame_buffer.cc
 Source/webrtc/common_video/video_frame_buffer_pool.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_alr_state.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_audio_network_adaptation.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_audio_playout.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_audio_receive_stream_config.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_audio_send_stream_config.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_bwe_update_delay_based.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_bwe_update_loss_based.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_dtls_transport_state.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_dtls_writable_state.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_generic_ack_received.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_generic_packet_received.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_generic_packet_sent.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_ice_candidate_pair.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_probe_cluster_created.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_probe_result_failure.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_probe_result_success.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_route_change.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_rtcp_packet_incoming.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_rtcp_packet_outgoing.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_rtp_packet_incoming.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_rtp_packet_outgoing.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_video_receive_stream_config.cc
-# Source/webrtc/logging/rtc_event_log/events/rtc_event_video_send_stream_config.cc
-# Source/webrtc/logging/rtc_event_log/ice_logger.cc
-# Source/webrtc/logging/rtc_event_log/rtc_event_log_impl.cc
-# Source/webrtc/logging/rtc_event_log/rtc_event_processor.cc
-# Source/webrtc/logging/rtc_event_log/rtc_stream_config.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_alr_state.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_audio_network_adaptation.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_audio_playout.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_audio_receive_stream_config.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_audio_send_stream_config.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_bwe_update_delay_based.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_bwe_update_loss_based.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_dtls_transport_state.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_dtls_writable_state.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_generic_ack_received.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_generic_packet_received.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_generic_packet_sent.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_ice_candidate_pair.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_neteq_set_minimum_delay.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_probe_cluster_created.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_probe_result_failure.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_probe_result_success.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_route_change.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_rtcp_packet_incoming.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_rtcp_packet_outgoing.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_rtp_packet_incoming.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_rtp_packet_outgoing.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_video_receive_stream_config.cc
+Source/webrtc/logging/rtc_event_log/events/rtc_event_video_send_stream_config.cc
+Source/webrtc/logging/rtc_event_log/ice_logger.cc
+Source/webrtc/logging/rtc_event_log/rtc_event_log_impl.cc
+Source/webrtc/logging/rtc_event_log/rtc_event_processor.cc
+Source/webrtc/logging/rtc_event_log/rtc_stream_config.cc
 Source/webrtc/media/base/adapted_video_track_source.cc
 Source/webrtc/media/base/codec.cc
+Source/webrtc/media/base/media_channel_impl.cc
 Source/webrtc/media/base/media_constants.cc
 Source/webrtc/media/base/media_engine.cc
 Source/webrtc/media/base/rid_description.cc
@@ -686,6 +700,7 @@ Source/webrtc/media/engine/simulcast_encoder_adapter.cc
 Source/webrtc/media/engine/webrtc_media_engine.cc
 Source/webrtc/media/engine/webrtc_video_engine.cc
 Source/webrtc/media/engine/webrtc_voice_engine.cc
+Source/webrtc/media/sctp/dcsctp_transport.cc
 Source/webrtc/media/sctp/sctp_transport_factory.cc
 Source/webrtc/modules/async_audio_processing/async_audio_processing.cc
 Source/webrtc/modules/audio_coding/acm2/acm_receiver.cc
@@ -751,6 +766,7 @@ Source/webrtc/modules/audio_coding/neteq/nack_tracker.cc
 Source/webrtc/modules/audio_coding/neteq/neteq_impl.cc
 Source/webrtc/modules/audio_coding/neteq/normal.cc
 Source/webrtc/modules/audio_coding/neteq/packet.cc
+Source/webrtc/modules/audio_coding/neteq/packet_arrival_history.cc
 Source/webrtc/modules/audio_coding/neteq/packet_buffer.cc
 Source/webrtc/modules/audio_coding/neteq/post_decode_vad.cc
 Source/webrtc/modules/audio_coding/neteq/preemptive_expand.cc
@@ -799,6 +815,7 @@ Source/webrtc/modules/audio_processing/aec3/block_processor_metrics.cc
 Source/webrtc/modules/audio_processing/aec3/clockdrift_detector.cc
 Source/webrtc/modules/audio_processing/aec3/coarse_filter_update_gain.cc
 Source/webrtc/modules/audio_processing/aec3/comfort_noise_generator.cc
+Source/webrtc/modules/audio_processing/aec3/config_selector.cc
 Source/webrtc/modules/audio_processing/aec3/decimator.cc
 Source/webrtc/modules/audio_processing/aec3/dominant_nearend_detector.cc
 Source/webrtc/modules/audio_processing/aec3/downsampled_render_buffer.cc
@@ -817,6 +834,7 @@ Source/webrtc/modules/audio_processing/aec3/fullband_erle_estimator.cc
 Source/webrtc/modules/audio_processing/aec3/matched_filter.cc
 Source/webrtc/modules/audio_processing/aec3/matched_filter_lag_aggregator.cc
 Source/webrtc/modules/audio_processing/aec3/moving_average.cc
+Source/webrtc/modules/audio_processing/aec3/multi_channel_content_detector.cc
 Source/webrtc/modules/audio_processing/aec3/refined_filter_update_gain.cc
 Source/webrtc/modules/audio_processing/aec3/render_buffer.cc
 Source/webrtc/modules/audio_processing/aec3/render_delay_buffer.cc
@@ -847,11 +865,16 @@ Source/webrtc/modules/audio_processing/agc/agc.cc
 Source/webrtc/modules/audio_processing/agc/agc_manager_direct.cc
 Source/webrtc/modules/audio_processing/agc/loudness_histogram.cc
 Source/webrtc/modules/audio_processing/agc/utility.cc
+Source/webrtc/modules/audio_processing/agc2/adaptive_digital_gain_controller.cc
 Source/webrtc/modules/audio_processing/agc2/biquad_filter.cc
+Source/webrtc/modules/audio_processing/agc2/clipping_predictor.cc
+Source/webrtc/modules/audio_processing/agc2/clipping_predictor_level_buffer.cc
 Source/webrtc/modules/audio_processing/agc2/compute_interpolated_gain_curve.cc
 Source/webrtc/modules/audio_processing/agc2/cpu_features.cc
 Source/webrtc/modules/audio_processing/agc2/fixed_digital_level_estimator.cc
 Source/webrtc/modules/audio_processing/agc2/gain_applier.cc
+Source/webrtc/modules/audio_processing/agc2/input_volume_controller.cc
+Source/webrtc/modules/audio_processing/agc2/input_volume_stats_reporter.cc
 Source/webrtc/modules/audio_processing/agc2/interpolated_gain_curve.cc
 Source/webrtc/modules/audio_processing/agc2/limiter.cc
 Source/webrtc/modules/audio_processing/agc2/noise_level_estimator.cc
@@ -867,6 +890,8 @@ Source/webrtc/modules/audio_processing/agc2/rnn_vad/spectral_features.cc
 Source/webrtc/modules/audio_processing/agc2/rnn_vad/spectral_features_internal.cc
 Source/webrtc/modules/audio_processing/agc2/saturation_protector.cc
 Source/webrtc/modules/audio_processing/agc2/saturation_protector_buffer.cc
+Source/webrtc/modules/audio_processing/agc2/speech_level_estimator.cc
+Source/webrtc/modules/audio_processing/agc2/vad_wrapper.cc
 Source/webrtc/modules/audio_processing/agc2/vector_float_frame.cc
 Source/webrtc/modules/audio_processing/agc/agc.cc
 Source/webrtc/modules/audio_processing/agc/agc_manager_direct.cc
@@ -914,6 +939,7 @@ Source/webrtc/modules/audio_processing/transient/file_utils.cc
 Source/webrtc/modules/audio_processing/transient/moving_moments.cc
 Source/webrtc/modules/audio_processing/transient/transient_detector.cc
 Source/webrtc/modules/audio_processing/transient/transient_suppressor_impl.cc
+Source/webrtc/modules/audio_processing/transient/voice_probability_delay_unit.cc
 Source/webrtc/modules/audio_processing/transient/wpd_node.cc
 Source/webrtc/modules/audio_processing/transient/wpd_tree.cc
 Source/webrtc/modules/audio_processing/utility/cascaded_biquad_filter.cc
@@ -954,6 +980,7 @@ Source/webrtc/modules/pacing/bitrate_prober.cc
 Source/webrtc/modules/pacing/interval_budget.cc
 Source/webrtc/modules/pacing/pacing_controller.cc
 Source/webrtc/modules/pacing/packet_router.cc
+Source/webrtc/modules/pacing/prioritized_packet_queue.cc
 Source/webrtc/modules/pacing/task_queue_paced_sender.cc
 Source/webrtc/modules/remote_bitrate_estimator/aimd_rate_control.cc
 Source/webrtc/modules/remote_bitrate_estimator/bwe_defines.cc
@@ -975,11 +1002,14 @@ Source/webrtc/modules/rtp_rtcp/source/dtmf_queue.cc
 Source/webrtc/modules/rtp_rtcp/source/fec_private_tables_bursty.cc
 Source/webrtc/modules/rtp_rtcp/source/fec_private_tables_random.cc
 Source/webrtc/modules/rtp_rtcp/source/fec_test_helper.cc
+Source/webrtc/modules/rtp_rtcp/source/flexfec_03_header_reader_writer.cc
 Source/webrtc/modules/rtp_rtcp/source/flexfec_header_reader_writer.cc
 Source/webrtc/modules/rtp_rtcp/source/flexfec_receiver.cc
 Source/webrtc/modules/rtp_rtcp/source/flexfec_sender.cc
 Source/webrtc/modules/rtp_rtcp/source/forward_error_correction.cc
 Source/webrtc/modules/rtp_rtcp/source/forward_error_correction_internal.cc
+Source/webrtc/modules/rtp_rtcp/source/frame_object.cc
+Source/webrtc/modules/rtp_rtcp/source/leb128.cc
 Source/webrtc/modules/rtp_rtcp/source/packet_loss_stats.cc
 Source/webrtc/modules/rtp_rtcp/source/packet_sequencer.cc
 Source/webrtc/modules/rtp_rtcp/source/receive_statistics_impl.cc
@@ -1046,11 +1076,13 @@ Source/webrtc/modules/rtp_rtcp/source/rtp_sequence_number_map.cc
 Source/webrtc/modules/rtp_rtcp/source/rtp_util.cc
 Source/webrtc/modules/rtp_rtcp/source/rtp_video_header.cc
 Source/webrtc/modules/rtp_rtcp/source/rtp_video_layers_allocation_extension.cc
+Source/webrtc/modules/rtp_rtcp/source/rtp_video_stream_receiver_frame_transformer_delegate.cc
 Source/webrtc/modules/rtp_rtcp/source/source_tracker.cc
 Source/webrtc/modules/rtp_rtcp/source/time_util.cc
 Source/webrtc/modules/rtp_rtcp/source/tmmbr_help.cc
 Source/webrtc/modules/rtp_rtcp/source/ulpfec_generator.cc
 Source/webrtc/modules/rtp_rtcp/source/ulpfec_header_reader_writer.cc
+Source/webrtc/modules/rtp_rtcp/source/ulpfec_receiver.cc
 Source/webrtc/modules/rtp_rtcp/source/video_rtp_depacketizer.cc
 Source/webrtc/modules/rtp_rtcp/source/video_rtp_depacketizer_av1.cc
 Source/webrtc/modules/rtp_rtcp/source/video_rtp_depacketizer_generic.cc
@@ -1068,6 +1100,7 @@ Source/webrtc/modules/video_coding/codecs/vp8/libvpx_vp8_decoder.cc
 Source/webrtc/modules/video_coding/codecs/vp8/libvpx_vp8_encoder.cc
 Source/webrtc/modules/video_coding/codecs/vp8/screenshare_layers.cc
 Source/webrtc/modules/video_coding/codecs/vp8/temporal_layers_checker.cc
+Source/webrtc/modules/video_coding/codecs/vp8/vp8_scalability.cc
 Source/webrtc/modules/video_coding/codecs/vp9/svc_config.cc
 Source/webrtc/modules/video_coding/codecs/vp9/vp9.cc
 Source/webrtc/modules/video_coding/codecs/vp9/libvpx_vp9_decoder.cc
@@ -1077,6 +1110,7 @@ Source/webrtc/modules/video_coding/decoder_database.cc
 Source/webrtc/modules/video_coding/encoded_frame.cc
 Source/webrtc/modules/video_coding/fec_controller_default.cc
 Source/webrtc/modules/video_coding/frame_dependencies_calculator.cc
+Source/webrtc/modules/video_coding/frame_helpers.cc
 Source/webrtc/modules/video_coding/generic_decoder.cc
 Source/webrtc/modules/video_coding/h264_sprop_parameter_sets.cc
 Source/webrtc/modules/video_coding/h264_sps_pps_tracker.cc
@@ -1094,11 +1128,19 @@ Source/webrtc/modules/video_coding/rtp_vp8_ref_finder.cc
 Source/webrtc/modules/video_coding/rtp_vp9_ref_finder.cc
 Source/webrtc/modules/video_coding/svc/create_scalability_structure.cc
 Source/webrtc/modules/video_coding/svc/scalability_structure_full_svc.cc
+Source/webrtc/modules/video_coding/svc/scalability_mode_util.cc
 Source/webrtc/modules/video_coding/svc/scalability_structure_key_svc.cc
 Source/webrtc/modules/video_coding/svc/scalability_structure_l2t2_key_shift.cc
 Source/webrtc/modules/video_coding/svc/scalability_structure_simulcast.cc
 Source/webrtc/modules/video_coding/svc/scalable_video_controller_no_layering.cc
 Source/webrtc/modules/video_coding/svc/svc_rate_allocator.cc
+Source/webrtc/modules/video_coding/timing/decode_time_percentile_filter.cc
+Source/webrtc/modules/video_coding/timing/frame_delay_variation_kalman_filter.cc
+Source/webrtc/modules/video_coding/timing/jitter_estimator.cc
+Source/webrtc/modules/video_coding/timing/inter_frame_delay_variation_calculator.cc
+Source/webrtc/modules/video_coding/timing/rtt_filter.cc
+Source/webrtc/modules/video_coding/timing/timestamp_extrapolator.cc
+Source/webrtc/modules/video_coding/timing/timing.cc
 Source/webrtc/modules/video_coding/utility/bandwidth_quality_scaler.cc
 Source/webrtc/modules/video_coding/utility/decoded_frames_history.cc
 Source/webrtc/modules/video_coding/utility/frame_dropper.cc
@@ -1115,6 +1157,72 @@ Source/webrtc/modules/video_coding/video_coding_defines.cc
 Source/webrtc/modules/video_coding/video_coding_impl.cc
 Source/webrtc/modules/video_coding/video_receiver2.cc
 Source/webrtc/modules/video_coding/video_receiver.cc
+Source/webrtc/net/dcsctp/packet/chunk_validators.cc
+Source/webrtc/net/dcsctp/packet/chunk/abort_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/cookie_ack_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/cookie_echo_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/data_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/error_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/forward_tsn_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/heartbeat_ack_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/heartbeat_request_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/idata_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/iforward_tsn_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/init_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/init_ack_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/reconfig_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/sack_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/shutdown_ack_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/shutdown_chunk.cc
+Source/webrtc/net/dcsctp/packet/chunk/shutdown_complete_chunk.cc
+Source/webrtc/net/dcsctp/packet/crc32c.cc
+Source/webrtc/net/dcsctp/packet/error_cause/cookie_received_while_shutting_down_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/error_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/invalid_mandatory_parameter_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/invalid_stream_identifier_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/missing_mandatory_parameter_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/no_user_data_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/out_of_resource_error_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/protocol_violation_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/restart_of_an_association_with_new_address_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/stale_cookie_error_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/user_initiated_abort_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/unrecognized_chunk_type_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/unrecognized_parameter_cause.cc
+Source/webrtc/net/dcsctp/packet/error_cause/unresolvable_address_cause.cc
+Source/webrtc/net/dcsctp/packet/parameter/forward_tsn_supported_parameter.cc
+Source/webrtc/net/dcsctp/packet/parameter/heartbeat_info_parameter.cc
+Source/webrtc/net/dcsctp/packet/parameter/incoming_ssn_reset_request_parameter.cc
+Source/webrtc/net/dcsctp/packet/parameter/outgoing_ssn_reset_request_parameter.cc
+Source/webrtc/net/dcsctp/packet/parameter/parameter.cc
+Source/webrtc/net/dcsctp/packet/parameter/reconfiguration_response_parameter.cc
+Source/webrtc/net/dcsctp/packet/parameter/state_cookie_parameter.cc
+Source/webrtc/net/dcsctp/packet/parameter/supported_extensions_parameter.cc
+Source/webrtc/net/dcsctp/packet/parameter/zero_checksum_acceptable_chunk_parameter.cc
+Source/webrtc/net/dcsctp/packet/sctp_packet.cc
+Source/webrtc/net/dcsctp/public/text_pcap_packet_observer.cc
+Source/webrtc/net/dcsctp/packet/tlv_trait.cc
+Source/webrtc/net/dcsctp/public/dcsctp_socket_factory.cc
+Source/webrtc/net/dcsctp/rx/data_tracker.cc
+Source/webrtc/net/dcsctp/rx/interleaved_reassembly_streams.cc
+Source/webrtc/net/dcsctp/rx/reassembly_queue.cc
+Source/webrtc/net/dcsctp/rx/traditional_reassembly_streams.cc
+Source/webrtc/net/dcsctp/socket/callback_deferrer.cc
+Source/webrtc/net/dcsctp/socket/dcsctp_socket.cc
+Source/webrtc/net/dcsctp/socket/heartbeat_handler.cc
+Source/webrtc/net/dcsctp/socket/packet_sender.cc
+Source/webrtc/net/dcsctp/socket/state_cookie.cc
+Source/webrtc/net/dcsctp/socket/stream_reset_handler.cc
+Source/webrtc/net/dcsctp/socket/transmission_control_block.cc
+Source/webrtc/net/dcsctp/timer/task_queue_timeout.cc
+Source/webrtc/net/dcsctp/timer/timer.cc
+Source/webrtc/net/dcsctp/tx/outstanding_data.cc
+Source/webrtc/net/dcsctp/tx/retransmission_error_counter.cc
+Source/webrtc/net/dcsctp/tx/retransmission_queue.cc
+Source/webrtc/net/dcsctp/tx/retransmission_timeout.cc
+Source/webrtc/net/dcsctp/tx/rr_send_queue.cc
+Source/webrtc/net/dcsctp/tx/stream_scheduler.cc
 Source/webrtc/p2p/base/async_stun_tcp_socket.cc
 Source/webrtc/p2p/base/basic_async_resolver_factory.cc
 Source/webrtc/p2p/base/basic_ice_controller.cc
@@ -1126,6 +1234,7 @@ Source/webrtc/p2p/base/dtls_transport.cc
 Source/webrtc/p2p/base/dtls_transport_internal.cc
 Source/webrtc/p2p/base/ice_controller_interface.cc
 Source/webrtc/p2p/base/ice_credentials_iterator.cc
+Source/webrtc/p2p/base/ice_switch_reason.cc
 Source/webrtc/p2p/base/ice_transport_internal.cc
 Source/webrtc/p2p/base/p2p_constants.cc
 Source/webrtc/p2p/base/p2p_transport_channel.cc
@@ -1135,6 +1244,7 @@ Source/webrtc/p2p/base/port_allocator.cc
 Source/webrtc/p2p/base/port_interface.cc
 Source/webrtc/p2p/base/pseudo_tcp.cc
 Source/webrtc/p2p/base/regathering_controller.cc
+Source/webrtc/p2p/base/stun_dictionary.cc
 Source/webrtc/p2p/base/stun_port.cc
 Source/webrtc/p2p/base/stun_request.cc
 Source/webrtc/p2p/base/stun_server.cc
@@ -1143,6 +1253,7 @@ Source/webrtc/p2p/base/transport_description.cc
 Source/webrtc/p2p/base/transport_description_factory.cc
 Source/webrtc/p2p/base/turn_port.cc
 Source/webrtc/p2p/base/turn_server.cc
+Source/webrtc/p2p/base/wrapping_active_ice_controller.cc
 Source/webrtc/p2p/client/basic_port_allocator.cc
 Source/webrtc/p2p/client/turn_port_factory.cc
 Source/webrtc/pc/audio_rtp_receiver.cc
@@ -1163,6 +1274,7 @@ Source/webrtc/pc/jsep_session_description.cc
 Source/webrtc/pc/jsep_transport.cc
 Source/webrtc/pc/jsep_transport_collection.cc
 Source/webrtc/pc/jsep_transport_controller.cc
+Source/webrtc/pc/legacy_stats_collector.cc
 Source/webrtc/pc/local_audio_source.cc
 Source/webrtc/pc/media_protocol_names.cc
 Source/webrtc/pc/media_session.cc
@@ -1189,6 +1301,7 @@ Source/webrtc/pc/sdp_offer_answer.cc
 Source/webrtc/pc/sdp_utils.cc
 Source/webrtc/pc/session_description.cc
 Source/webrtc/pc/simulcast_description.cc
+Source/webrtc/pc/simulcast_sdp_serializer.cc
 Source/webrtc/pc/srtp_filter.cc
 Source/webrtc/pc/srtp_session.cc
 Source/webrtc/pc/srtp_transport.cc
@@ -1209,6 +1322,7 @@ Source/webrtc/rtc_base/async_socket.cc
 Source/webrtc/rtc_base/async_tcp_socket.cc
 Source/webrtc/rtc_base/async_udp_socket.cc
 Source/webrtc/rtc_base/bit_buffer.cc
+Source/webrtc/rtc_base/bitrate_tracker.cc
 Source/webrtc/rtc_base/bitstream_reader.cc
 Source/webrtc/rtc_base/boringssl_certificate.cc
 Source/webrtc/rtc_base/boringssl_identity.cc
@@ -1246,6 +1360,7 @@ Source/webrtc/rtc_base/fake_clock.cc
 Source/webrtc/rtc_base/fake_ssl_identity.cc
 Source/webrtc/rtc_base/file_rotating_stream.cc
 Source/webrtc/rtc_base/firewall_socket_server.cc
+Source/webrtc/rtc_base/frequency_tracker.cc
 Source/webrtc/rtc_base/helpers.cc
 Source/webrtc/rtc_base/http_common.cc
 Source/webrtc/rtc_base/ifaddrs_android.cc
@@ -1334,7 +1449,9 @@ Source/webrtc/rtc_base/time_utils.cc
 Source/webrtc/rtc_base/unique_id_generator.cc
 Source/webrtc/rtc_base/weak_ptr.cc
 Source/webrtc/rtc_base/zero_memory.cc
+Source/webrtc/stats/attribute.cc
 Source/webrtc/stats/rtc_stats.cc
+Source/webrtc/stats/rtc_stats_member.cc
 Source/webrtc/stats/rtcstats_objects.cc
 Source/webrtc/stats/rtc_stats_report.cc
 Source/webrtc/system_wrappers/source/clock.cc
@@ -1358,13 +1475,22 @@ Source/webrtc/video/adaptation/video_stream_encoder_resource_manager.cc
 Source/webrtc/video/alignment_adjuster.cc
 Source/webrtc/video/buffered_frame_decryptor.cc
 Source/webrtc/video/call_stats2.cc
+Source/webrtc/video/config/encoder_stream_factory.cc
+Source/webrtc/video/config/simulcast.cc
+Source/webrtc/video/config/video_encoder_config.cc
+Source/webrtc/video/decode_synchronizer.cc
 Source/webrtc/video/encoder_bitrate_adjuster.cc
 Source/webrtc/video/encoder_overshoot_detector.cc
 Source/webrtc/video/encoder_rtcp_feedback.cc
+Source/webrtc/video/frame_cadence_adapter.cc
+Source/webrtc/video/frame_decode_timing.cc
+Source/webrtc/video/frame_dumping_encoder.cc
 Source/webrtc/video/frame_dumping_decoder.cc
 Source/webrtc/video/frame_encode_metadata_writer.cc
 Source/webrtc/video/quality_limitation_reason_tracker.cc
 Source/webrtc/video/receive_statistics_proxy.cc
+Source/webrtc/video/render/incoming_video_stream.cc
+Source/webrtc/video/render/video_render_frames.cc
 Source/webrtc/video/report_block_stats.cc
 Source/webrtc/video/rtp_streams_synchronizer2.cc
 Source/webrtc/video/rtp_video_stream_receiver2.cc
@@ -1372,12 +1498,16 @@ Source/webrtc/video/send_delay_stats.cc
 Source/webrtc/video/send_statistics_proxy.cc
 Source/webrtc/video/stats_counter.cc
 Source/webrtc/video/stream_synchronization.cc
+Source/webrtc/video/task_queue_frame_decode_scheduler.cc
 Source/webrtc/video/transport_adapter.cc
+Source/webrtc/video/unique_timestamp_counter.cc
 Source/webrtc/video/video_quality_observer2.cc
+Source/webrtc/video/video_receive_stream_timeout_tracker.cc
 Source/webrtc/video/video_receive_stream2.cc
 Source/webrtc/video/video_send_stream.cc
 Source/webrtc/video/video_send_stream_impl.cc
 Source/webrtc/video/video_source_sink_controller.cc
+Source/webrtc/video/video_stream_buffer_controller.cc
 Source/webrtc/video/video_stream_decoder2.cc
 Source/webrtc/video/video_stream_encoder.cc
     $<TARGET_OBJECTS:libsrtp>
@@ -1671,6 +1801,7 @@ target_compile_definitions(webrtc PRIVATE
   WEBRTC_CODEC_ISAC
   WEBRTC_CODEC_OPUS
   WEBRTC_CODEC_RED
+  WEBRTC_HAVE_DCSCTP
   WEBRTC_HAVE_SCTP
   WEBRTC_HAVE_USRSCTP
   WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE

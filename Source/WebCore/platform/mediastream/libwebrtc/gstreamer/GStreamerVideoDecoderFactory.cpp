@@ -229,18 +229,19 @@ public:
         if (!GST_CLOCK_TIME_IS_VALID(m_firstBufferPts)) {
             GRefPtr<GstPad> srcpad = adoptGRef(gst_element_get_static_pad(m_src, "src"));
             m_firstBufferPts = (static_cast<guint64>(renderTimeMs)) * GST_MSECOND;
-            m_firstBufferDts = (static_cast<guint64>(inputImage.RtpTimestamp())) * GST_MSECOND;
+            m_firstBufferDts = (static_cast<guint64>(inputImage.video_timing().receive_start_ms)) * GST_MSECOND;
         }
+
 
         // FIXME- Use a GstBufferPool.
         auto buffer = adoptGRef(gstBufferNewWrappedFast(fastMemDup(inputImage.data(), inputImage.size()),
             inputImage.size()));
-        GST_BUFFER_DTS(buffer.get()) = (static_cast<guint64>(inputImage.RtpTimestamp()) * GST_MSECOND) - m_firstBufferDts;
+        GST_BUFFER_DTS(buffer.get()) = (static_cast<guint64>(inputImage.video_timing().receive_start_ms) * GST_MSECOND) - m_firstBufferDts;
         GST_BUFFER_PTS(buffer.get()) = (static_cast<guint64>(renderTimeMs) * GST_MSECOND) - m_firstBufferPts;
-        InputTimestamps timestamps = { inputImage.RtpTimestamp(), renderTimeMs };
+        InputTimestamps timestamps = { inputImage.video_timing().receive_start_ms, renderTimeMs };
         m_dtsPtsMap[GST_BUFFER_PTS(buffer.get())] = timestamps;
 
-        GST_LOG_OBJECT(pipeline(), "%" G_GINT64_FORMAT " Decoding: %" GST_PTR_FORMAT, renderTimeMs, buffer.get());
+        GST_INFO_OBJECT(pipeline(), "%" G_GINT64_FORMAT "/%" G_GINT64_FORMAT " Decoding: %" GST_PTR_FORMAT, renderTimeMs, inputImage.video_timing().receive_start_ms, buffer.get());
         auto sample = adoptGRef(gst_sample_new(buffer.get(), GetCapsForFrame(inputImage), nullptr, nullptr));
         switch (gst_app_src_push_sample(GST_APP_SRC(m_src), sample.get())) {
         case GST_FLOW_OK:
@@ -272,9 +273,8 @@ public:
             timestamps.timestamp, timestamps.renderTimeMs));
 
         GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
-        GST_LOG_OBJECT(pipeline(), "Output decoded frame! %d -> %" GST_PTR_FORMAT,
+        GST_INFO_OBJECT(pipeline(), "Output decoded frame! %d -> %" GST_PTR_FORMAT,
             frame->timestamp(), buffer);
-
         m_imageReadyCb->Decoded(*frame.get(), absl::optional<int32_t>(), absl::optional<uint8_t>());
 
         return WEBRTC_VIDEO_CODEC_OK;

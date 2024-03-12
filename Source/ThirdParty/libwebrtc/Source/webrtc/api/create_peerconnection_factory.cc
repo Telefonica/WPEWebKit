@@ -68,7 +68,6 @@ rtc::scoped_refptr<PeerConnectionFactoryInterface> CreatePeerConnectionFactory(
   dependencies.video_encoder_factory = std::move(video_encoder_factory);
   dependencies.video_decoder_factory = std::move(video_decoder_factory);
   EnableMedia(dependencies);
-
   return CreateModularPeerConnectionFactory(std::move(dependencies));
 }
 

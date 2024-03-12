@@ -204,7 +204,7 @@ LogMessage::LogMessage(const char* file,
 #endif
 
 LogMessage::~LogMessage() {
-  FinishPrintStream();
+  // LogCheckLevel();
 
   log_line_.set_message(print_stream_.Release());
 
@@ -441,9 +441,10 @@ void LogMessage::OutputToDebug(const LogLineRef& log_line) {
 
 // static
 bool LogMessage::IsNoop(LoggingSeverity severity) {
-  if (severity >= g_dbg_sev || severity >= g_min_sev)
-    return false;
-  return streams_empty_.load(std::memory_order_relaxed);
+  // if (severity >= g_dbg_sev || severity >= g_min_sev)
+  //   return false;
+  // return streams_empty_.load(std::memory_order_relaxed);
+  return false;
 }
 
 void LogMessage::FinishPrintStream() {

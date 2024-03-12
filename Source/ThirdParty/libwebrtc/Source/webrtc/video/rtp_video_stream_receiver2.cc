@@ -810,7 +810,6 @@ void RtpVideoStreamReceiver2::OnInsertedPacket(
         // Failed to assemble a frame. Discard and continue.
         continue;
       }
-
       const video_coding::PacketBuffer::Packet& last_packet = *packet;
       OnAssembledFrame(std::make_unique<RtpFrameObject>(
           first_packet->seq_num,                             //

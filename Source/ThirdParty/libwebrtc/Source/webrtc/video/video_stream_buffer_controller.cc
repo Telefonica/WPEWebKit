@@ -206,7 +206,6 @@ void VideoStreamBufferController::OnFrameReady(
   RTC_DCHECK_RUN_ON(&worker_sequence_checker_);
   RTC_CHECK(!frames.empty())
       << "Callers must ensure there is at least one frame to decode.";
-
   timeout_tracker_.OnEncodedFrameReleased();
 
   Timestamp now = clock_->CurrentTime();

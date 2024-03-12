@@ -76,6 +76,7 @@ bool VideoReceiver2::IsExternalDecoderRegistered(uint8_t payload_type) const {
 int32_t VideoReceiver2::Decode(const EncodedFrame* frame) {
   RTC_DCHECK_RUN_ON(&decoder_sequence_checker_);
   TRACE_EVENT0("webrtc", "VideoReceiver2::Decode");
+
   // Change decoder if payload type has changed.
   VCMGenericDecoder* decoder =
       codec_database_.GetDecoder(*frame, &decoded_frame_callback_);

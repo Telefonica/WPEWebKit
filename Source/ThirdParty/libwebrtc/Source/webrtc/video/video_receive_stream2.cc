@@ -845,7 +845,6 @@ VideoReceiveStream2::HandleEncodedFrameOnDecodeQueue(
       }
     }
   }
-
   int64_t frame_id = frame->Id();
   int decode_result = DecodeAndMaybeDispatchEncodedFrame(std::move(frame));
   if (decode_result == WEBRTC_VIDEO_CODEC_OK ||
@@ -900,7 +899,6 @@ int VideoReceiveStream2::DecodeAndMaybeDispatchEncodedFrame(
         !pending_resolution_.has_value())
       pending_resolution_.emplace();
   }
-
   int decode_result = video_receiver_.Decode(frame_ptr);
   if (decode_result < WEBRTC_VIDEO_CODEC_OK) {
     // Asynchronous decoders may delay error reporting, potentially resulting in

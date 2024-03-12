@@ -160,7 +160,6 @@ RtpVideoFrameAssembler::Impl::AssembleFrames(
       if (!bitstream) {
         continue;
       }
-
       const video_coding::PacketBuffer::Packet& last_packet = *packet;
       result.push_back(std::make_unique<RtpFrameObject>(
           first_packet->seq_num,                  //

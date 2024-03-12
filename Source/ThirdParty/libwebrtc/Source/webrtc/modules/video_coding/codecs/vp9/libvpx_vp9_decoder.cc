@@ -353,7 +353,6 @@ int LibvpxVp9Decoder::ReturnFrame(
         ExtractVP9ColorSpace(img->cs, img->range, img->bit_depth));
   }
   VideoFrame decoded_image = builder.build();
-
   decode_complete_callback_->Decoded(decoded_image, absl::nullopt, qp);
   return WEBRTC_VIDEO_CODEC_OK;
 }

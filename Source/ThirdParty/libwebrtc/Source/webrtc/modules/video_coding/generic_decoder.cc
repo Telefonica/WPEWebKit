@@ -89,7 +89,7 @@ VCMDecodedFrameCallback::FindFrameInfo(uint32_t rtp_timestamp) {
   });
   size_t dropped_frames = std::distance(frame_infos_.begin(), it);
 
-  if (it != frame_infos_.end() && it->rtp_timestamp == rtp_timestamp) {
+  if (it != frame_infos_.end() /*&& it->rtp_timestamp == rtp_timestamp*/) {
     // Frame was found and should also be removed from the queue.
     frame_info = std::move(*it);
     ++it;
@@ -120,12 +120,12 @@ void VCMDecodedFrameCallback::Decoded(VideoFrame& decodedImage,
     _receiveCallback->OnDroppedFrames(dropped_frames);
   }
 
-  if (!frame_info) {
-    RTC_LOG(LS_WARNING) << "Too many frames backed up in the decoder, dropping "
-                           "frame with timestamp "
-                        << decodedImage.timestamp();
-    return;
-  }
+  // if (!frame_info) {
+  //   RTC_LOG(LS_WARNING) << "Too many frames backed up in the decoder, dropping "
+  //                          "frame with timestamp "
+  //                       << decodedImage.timestamp();
+  //   return;
+  // }
 
   decodedImage.set_ntp_time_ms(frame_info->ntp_time_ms);
   decodedImage.set_packet_infos(frame_info->packet_infos);
@@ -317,7 +317,7 @@ int32_t VCMGenericDecoder::Decode(const EncodedImage& frame,
   }
   frame_info.frame_type = frame.FrameType();
   _callback->Map(std::move(frame_info));
-
+  
   int32_t ret = decoder_->Decode(frame, render_time_ms);
   VideoDecoder::DecoderInfo decoder_info = decoder_->GetDecoderInfo();
   if (decoder_info != decoder_info_) {

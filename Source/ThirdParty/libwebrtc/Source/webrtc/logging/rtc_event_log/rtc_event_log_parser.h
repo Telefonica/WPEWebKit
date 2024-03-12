@@ -60,8 +60,8 @@
 #include "external/webrtc/webrtc/logging/rtc_event_log/rtc_event_log.pb.h"
 #include "external/webrtc/webrtc/logging/rtc_event_log/rtc_event_log2.pb.h"
 #else
-#include "logging/rtc_event_log/rtc_event_log.pb.h"
-#include "logging/rtc_event_log/rtc_event_log2.pb.h"
+// #include "logging/rtc_event_log/rtc_event_log.pb.h"
+// #include "logging/rtc_event_log/rtc_event_log2.pb.h"
 #endif
 
 namespace webrtc {
@@ -279,36 +279,36 @@ class DereferencingVector {
   std::vector<T*> elems_;
 };
 
-// Conversion functions for version 2 of the wire format.
-BandwidthUsage GetRuntimeDetectorState(
-    rtclog2::DelayBasedBweUpdates::DetectorState detector_state);
+// // Conversion functions for version 2 of the wire format.
+// BandwidthUsage GetRuntimeDetectorState(
+//     rtclog2::DelayBasedBweUpdates::DetectorState detector_state);
 
-ProbeFailureReason GetRuntimeProbeFailureReason(
-    rtclog2::BweProbeResultFailure::FailureReason failure);
+// ProbeFailureReason GetRuntimeProbeFailureReason(
+//     rtclog2::BweProbeResultFailure::FailureReason failure);
 
-DtlsTransportState GetRuntimeDtlsTransportState(
-    rtclog2::DtlsTransportStateEvent::DtlsTransportState state);
+// DtlsTransportState GetRuntimeDtlsTransportState(
+//     rtclog2::DtlsTransportStateEvent::DtlsTransportState state);
 
-IceCandidatePairConfigType GetRuntimeIceCandidatePairConfigType(
-    rtclog2::IceCandidatePairConfig::IceCandidatePairConfigType type);
+// IceCandidatePairConfigType GetRuntimeIceCandidatePairConfigType(
+//     rtclog2::IceCandidatePairConfig::IceCandidatePairConfigType type);
 
-IceCandidateType GetRuntimeIceCandidateType(
-    rtclog2::IceCandidatePairConfig::IceCandidateType type);
+// IceCandidateType GetRuntimeIceCandidateType(
+//     rtclog2::IceCandidatePairConfig::IceCandidateType type);
 
-IceCandidatePairProtocol GetRuntimeIceCandidatePairProtocol(
-    rtclog2::IceCandidatePairConfig::Protocol protocol);
+// IceCandidatePairProtocol GetRuntimeIceCandidatePairProtocol(
+//     rtclog2::IceCandidatePairConfig::Protocol protocol);
 
-IceCandidatePairAddressFamily GetRuntimeIceCandidatePairAddressFamily(
-    rtclog2::IceCandidatePairConfig::AddressFamily address_family);
+// IceCandidatePairAddressFamily GetRuntimeIceCandidatePairAddressFamily(
+//     rtclog2::IceCandidatePairConfig::AddressFamily address_family);
 
-IceCandidateNetworkType GetRuntimeIceCandidateNetworkType(
-    rtclog2::IceCandidatePairConfig::NetworkType network_type);
+// IceCandidateNetworkType GetRuntimeIceCandidateNetworkType(
+//     rtclog2::IceCandidatePairConfig::NetworkType network_type);
 
-IceCandidatePairEventType GetRuntimeIceCandidatePairEventType(
-    rtclog2::IceCandidatePairEvent::IceCandidatePairEventType type);
+// IceCandidatePairEventType GetRuntimeIceCandidatePairEventType(
+//     rtclog2::IceCandidatePairEvent::IceCandidatePairEventType type);
 
-std::vector<RtpExtension> GetRuntimeRtpHeaderExtensionConfig(
-    const rtclog2::RtpHeaderExtensionConfig& proto_header_extensions);
+// std::vector<RtpExtension> GetRuntimeRtpHeaderExtensionConfig(
+//     const rtclog2::RtpHeaderExtensionConfig& proto_header_extensions);
 // End of conversion functions.
 
 class ParsedRtcEventLog {
@@ -668,8 +668,8 @@ class ParsedRtcEventLog {
   ABSL_MUST_USE_RESULT ParseStatus ParseStreamInternal(absl::string_view s);
   ABSL_MUST_USE_RESULT ParseStatus ParseStreamInternalV3(absl::string_view s);
 
-  ABSL_MUST_USE_RESULT ParseStatus
-  StoreParsedLegacyEvent(const rtclog::Event& event);
+  // ABSL_MUST_USE_RESULT ParseStatus
+  // StoreParsedLegacyEvent(const rtclog::Event& event);
 
   template <typename T>
   void StoreFirstAndLastTimestamp(const std::vector<T>& v);
@@ -681,103 +681,103 @@ class ParsedRtcEventLog {
   const RtpHeaderExtensionMap* GetRtpHeaderExtensionMap(bool incoming,
                                                         uint32_t ssrc);
 
-  // Reads packet, direction and packet length from the RTCP event at `index`,
-  // and stores the values in the corresponding output parameters.
-  // Each output parameter can be set to nullptr if that value isn't needed.
-  // NB: The packet must have space for at least IP_PACKET_SIZE bytes.
-  ParseStatus GetRtcpPacket(const rtclog::Event& event,
-                            PacketDirection* incoming,
-                            std::vector<uint8_t>* packet) const;
+  // // Reads packet, direction and packet length from the RTCP event at `index`,
+  // // and stores the values in the corresponding output parameters.
+  // // Each output parameter can be set to nullptr if that value isn't needed.
+  // // NB: The packet must have space for at least IP_PACKET_SIZE bytes.
+  // ParseStatus GetRtcpPacket(const rtclog::Event& event,
+  //                           PacketDirection* incoming,
+  //                           std::vector<uint8_t>* packet) const;
 
-  ParseStatusOr<rtclog::StreamConfig> GetVideoReceiveConfig(
-      const rtclog::Event& event) const;
-  ParseStatusOr<rtclog::StreamConfig> GetVideoSendConfig(
-      const rtclog::Event& event) const;
-  ParseStatusOr<rtclog::StreamConfig> GetAudioReceiveConfig(
-      const rtclog::Event& event) const;
-  ParseStatusOr<rtclog::StreamConfig> GetAudioSendConfig(
-      const rtclog::Event& event) const;
+  // ParseStatusOr<rtclog::StreamConfig> GetVideoReceiveConfig(
+  //     const rtclog::Event& event) const;
+  // ParseStatusOr<rtclog::StreamConfig> GetVideoSendConfig(
+  //     const rtclog::Event& event) const;
+  // ParseStatusOr<rtclog::StreamConfig> GetAudioReceiveConfig(
+  //     const rtclog::Event& event) const;
+  // ParseStatusOr<rtclog::StreamConfig> GetAudioSendConfig(
+  //     const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedAudioPlayoutEvent> GetAudioPlayout(
-      const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedAudioPlayoutEvent> GetAudioPlayout(
+  //     const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedBweLossBasedUpdate>
-  GetLossBasedBweUpdate(const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedBweLossBasedUpdate>
+  // GetLossBasedBweUpdate(const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedBweDelayBasedUpdate>
-  GetDelayBasedBweUpdate(const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedBweDelayBasedUpdate>
+  // GetDelayBasedBweUpdate(const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedAudioNetworkAdaptationEvent>
-  GetAudioNetworkAdaptation(const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedAudioNetworkAdaptationEvent>
+  // GetAudioNetworkAdaptation(const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedBweProbeClusterCreatedEvent>
-  GetBweProbeClusterCreated(const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedBweProbeClusterCreatedEvent>
+  // GetBweProbeClusterCreated(const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedBweProbeFailureEvent>
-  GetBweProbeFailure(const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedBweProbeFailureEvent>
+  // GetBweProbeFailure(const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedBweProbeSuccessEvent>
-  GetBweProbeSuccess(const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedBweProbeSuccessEvent>
+  // GetBweProbeSuccess(const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedAlrStateEvent> GetAlrState(
-      const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedAlrStateEvent> GetAlrState(
+  //     const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedIceCandidatePairConfig>
-  GetIceCandidatePairConfig(const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedIceCandidatePairConfig>
+  // GetIceCandidatePairConfig(const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedIceCandidatePairEvent>
-  GetIceCandidatePairEvent(const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedIceCandidatePairEvent>
+  // GetIceCandidatePairEvent(const rtclog::Event& event) const;
 
-  ParsedRtcEventLog::ParseStatusOr<LoggedRemoteEstimateEvent>
-  GetRemoteEstimateEvent(const rtclog::Event& event) const;
+  // ParsedRtcEventLog::ParseStatusOr<LoggedRemoteEstimateEvent>
+  // GetRemoteEstimateEvent(const rtclog::Event& event) const;
 
-  // Parsing functions for new format.
-  ParseStatus StoreAlrStateEvent(const rtclog2::AlrState& proto);
-  ParseStatus StoreAudioNetworkAdaptationEvent(
-      const rtclog2::AudioNetworkAdaptations& proto);
-  ParseStatus StoreAudioPlayoutEvent(const rtclog2::AudioPlayoutEvents& proto);
-  ParseStatus StoreAudioRecvConfig(const rtclog2::AudioRecvStreamConfig& proto);
-  ParseStatus StoreAudioSendConfig(const rtclog2::AudioSendStreamConfig& proto);
-  ParseStatus StoreBweDelayBasedUpdate(
-      const rtclog2::DelayBasedBweUpdates& proto);
-  ParseStatus StoreBweLossBasedUpdate(
-      const rtclog2::LossBasedBweUpdates& proto);
-  ParseStatus StoreBweProbeClusterCreated(
-      const rtclog2::BweProbeCluster& proto);
-  ParseStatus StoreBweProbeFailureEvent(
-      const rtclog2::BweProbeResultFailure& proto);
-  ParseStatus StoreBweProbeSuccessEvent(
-      const rtclog2::BweProbeResultSuccess& proto);
-  ParseStatus StoreDtlsTransportState(
-      const rtclog2::DtlsTransportStateEvent& proto);
-  ParseStatus StoreDtlsWritableState(const rtclog2::DtlsWritableState& proto);
-  ParsedRtcEventLog::ParseStatus StoreFrameDecodedEvents(
-      const rtclog2::FrameDecodedEvents& proto);
-  ParseStatus StoreGenericAckReceivedEvent(
-      const rtclog2::GenericAckReceived& proto);
-  ParseStatus StoreGenericPacketReceivedEvent(
-      const rtclog2::GenericPacketReceived& proto);
-  ParseStatus StoreGenericPacketSentEvent(
-      const rtclog2::GenericPacketSent& proto);
-  ParseStatus StoreIceCandidateEvent(
-      const rtclog2::IceCandidatePairEvent& proto);
-  ParseStatus StoreIceCandidatePairConfig(
-      const rtclog2::IceCandidatePairConfig& proto);
-  ParseStatus StoreIncomingRtcpPackets(
-      const rtclog2::IncomingRtcpPackets& proto);
-  ParseStatus StoreIncomingRtpPackets(const rtclog2::IncomingRtpPackets& proto);
-  ParseStatus StoreNetEqSetMinimumDelay(
-      const rtclog2::NetEqSetMinimumDelay& proto);
-  ParseStatus StoreOutgoingRtcpPackets(
-      const rtclog2::OutgoingRtcpPackets& proto);
-  ParseStatus StoreOutgoingRtpPackets(const rtclog2::OutgoingRtpPackets& proto);
-  ParseStatus StoreParsedNewFormatEvent(const rtclog2::EventStream& event);
-  ParseStatus StoreRouteChangeEvent(const rtclog2::RouteChange& proto);
-  ParseStatus StoreRemoteEstimateEvent(const rtclog2::RemoteEstimates& proto);
-  ParseStatus StoreStartEvent(const rtclog2::BeginLogEvent& proto);
-  ParseStatus StoreStopEvent(const rtclog2::EndLogEvent& proto);
-  ParseStatus StoreVideoRecvConfig(const rtclog2::VideoRecvStreamConfig& proto);
-  ParseStatus StoreVideoSendConfig(const rtclog2::VideoSendStreamConfig& proto);
+  // // Parsing functions for new format.
+  // ParseStatus StoreAlrStateEvent(const rtclog2::AlrState& proto);
+  // ParseStatus StoreAudioNetworkAdaptationEvent(
+  //     const rtclog2::AudioNetworkAdaptations& proto);
+  // ParseStatus StoreAudioPlayoutEvent(const rtclog2::AudioPlayoutEvents& proto);
+  // ParseStatus StoreAudioRecvConfig(const rtclog2::AudioRecvStreamConfig& proto);
+  // ParseStatus StoreAudioSendConfig(const rtclog2::AudioSendStreamConfig& proto);
+  // ParseStatus StoreBweDelayBasedUpdate(
+  //     const rtclog2::DelayBasedBweUpdates& proto);
+  // ParseStatus StoreBweLossBasedUpdate(
+  //     const rtclog2::LossBasedBweUpdates& proto);
+  // ParseStatus StoreBweProbeClusterCreated(
+  //     const rtclog2::BweProbeCluster& proto);
+  // ParseStatus StoreBweProbeFailureEvent(
+  //     const rtclog2::BweProbeResultFailure& proto);
+  // ParseStatus StoreBweProbeSuccessEvent(
+  //     const rtclog2::BweProbeResultSuccess& proto);
+  // ParseStatus StoreDtlsTransportState(
+  //     const rtclog2::DtlsTransportStateEvent& proto);
+  // ParseStatus StoreDtlsWritableState(const rtclog2::DtlsWritableState& proto);
+  // ParsedRtcEventLog::ParseStatus StoreFrameDecodedEvents(
+  //     const rtclog2::FrameDecodedEvents& proto);
+  // ParseStatus StoreGenericAckReceivedEvent(
+  //     const rtclog2::GenericAckReceived& proto);
+  // ParseStatus StoreGenericPacketReceivedEvent(
+  //     const rtclog2::GenericPacketReceived& proto);
+  // ParseStatus StoreGenericPacketSentEvent(
+  //     const rtclog2::GenericPacketSent& proto);
+  // ParseStatus StoreIceCandidateEvent(
+  //     const rtclog2::IceCandidatePairEvent& proto);
+  // ParseStatus StoreIceCandidatePairConfig(
+  //     const rtclog2::IceCandidatePairConfig& proto);
+  // ParseStatus StoreIncomingRtcpPackets(
+  //     const rtclog2::IncomingRtcpPackets& proto);
+  // ParseStatus StoreIncomingRtpPackets(const rtclog2::IncomingRtpPackets& proto);
+  // ParseStatus StoreNetEqSetMinimumDelay(
+  //     const rtclog2::NetEqSetMinimumDelay& proto);
+  // ParseStatus StoreOutgoingRtcpPackets(
+  //     const rtclog2::OutgoingRtcpPackets& proto);
+  // ParseStatus StoreOutgoingRtpPackets(const rtclog2::OutgoingRtpPackets& proto);
+  // ParseStatus StoreParsedNewFormatEvent(const rtclog2::EventStream& event);
+  // ParseStatus StoreRouteChangeEvent(const rtclog2::RouteChange& proto);
+  // ParseStatus StoreRemoteEstimateEvent(const rtclog2::RemoteEstimates& proto);
+  // ParseStatus StoreStartEvent(const rtclog2::BeginLogEvent& proto);
+  // ParseStatus StoreStopEvent(const rtclog2::EndLogEvent& proto);
+  // ParseStatus StoreVideoRecvConfig(const rtclog2::VideoRecvStreamConfig& proto);
+  // ParseStatus StoreVideoSendConfig(const rtclog2::VideoSendStreamConfig& proto);
   // End of new parsing functions.
 
   struct Stream {

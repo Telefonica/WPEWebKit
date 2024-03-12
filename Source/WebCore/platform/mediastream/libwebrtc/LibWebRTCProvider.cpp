@@ -185,8 +185,7 @@ void LibWebRTCProvider::setRTCLogging(WTFLogLevel level)
 static void initializePeerConnectionFactoryAndThreads(PeerConnectionFactoryAndThreads& factoryAndThreads)
 {
     ASSERT(!factoryAndThreads.networkThread);
-
-    factoryAndThreads.networkThread = factoryAndThreads.networkThreadWithSocketServer ? rtc::Thread::CreateWithSocketServer() : rtc::Thread::Create();
+    factoryAndThreads.networkThread = rtc::Thread::CreateWithSocketServer();
     factoryAndThreads.networkThread->SetName("WebKitWebRTCNetwork", nullptr);
     bool result = factoryAndThreads.networkThread->Start();
     ASSERT_UNUSED(result, result);
@@ -318,7 +317,6 @@ webrtc::PeerConnectionFactoryInterface* LibWebRTCProvider::factory()
     }
 
     auto& factoryAndThreads = getStaticFactoryAndThreads(m_useNetworkThreadWithSocketServer);
-
     m_factory = createPeerConnectionFactory(factoryAndThreads.networkThread.get(), factoryAndThreads.signalingThread.get());
 
     return m_factory.get();
@@ -370,12 +368,12 @@ rtc::scoped_refptr<webrtc::PeerConnectionInterface> LibWebRTCProvider::createPee
     ASSERT(m_useNetworkThreadWithSocketServer);
     auto& factoryAndThreads = getStaticFactoryAndThreads(m_useNetworkThreadWithSocketServer);
 
+    if (!factoryAndThreads.networkManager)
+        factoryAndThreads.networkManager = makeUniqueWithoutFastMallocCheck<rtc::BasicNetworkManager>(new rtc::PhysicalSocketServer());
+
     if (!factoryAndThreads.packetSocketFactory)
         factoryAndThreads.packetSocketFactory = makeUnique<BasicPacketSocketFactory>(*factoryAndThreads.networkThread);
     factoryAndThreads.packetSocketFactory->setDisableNonLocalhostConnections(m_disableNonLocalhostConnections);
-
-    if (!factoryAndThreads.networkManager)
-        factoryAndThreads.networkManager = makeUniqueWithoutFastMallocCheck<rtc::BasicNetworkManager>(new rtc::PhysicalSocketServer());
 
     return createPeerConnection(observer, *factoryAndThreads.networkManager, *factoryAndThreads.packetSocketFactory, WTFMove(configuration), nullptr);
 }

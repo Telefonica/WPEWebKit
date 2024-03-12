@@ -11,12 +11,14 @@
 
 #include <cstdint>
 
-#include "third_party/crc32c/src/include/crc32c/crc32c.h"
+//#include "third_party/crc32c/src/include/crc32c/crc32c.h"
+#include "third_party/abseil-cpp/absl/crc/crc32c.h"
 
 namespace dcsctp {
 
 uint32_t GenerateCrc32C(rtc::ArrayView<const uint8_t> data) {
-  uint32_t crc32c = crc32c_value(data.data(), data.size());
+  // uint32_t crc32c = crc32c_value(data.data(), data.size());
+  auto crc32c = static_cast<uint32_t>(absl::ComputeCrc32c(absl::string_view(data.data())));
 
   // Byte swapping for little endian byte order:
   uint8_t byte0 = crc32c;

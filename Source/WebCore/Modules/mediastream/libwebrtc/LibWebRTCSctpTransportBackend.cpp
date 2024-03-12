@@ -132,7 +132,6 @@ LibWebRTCSctpTransportBackend::~LibWebRTCSctpTransportBackend()
 
 UniqueRef<RTCDtlsTransportBackend> LibWebRTCSctpTransportBackend::dtlsTransportBackend()
 {
-    // [ACF]
     return makeUniqueRef<LibWebRTCDtlsTransportBackend>(WTFMove(m_dtlsBackend));
 }
 

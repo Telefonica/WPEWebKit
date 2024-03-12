@@ -219,11 +219,11 @@ class I210BufferBase : public I210BufferInterface {
 rtc::scoped_refptr<I420BufferInterface> I210BufferBase::ToI420() {
   rtc::scoped_refptr<I420Buffer> i420_buffer =
       I420Buffer::Create(width(), height());
-  libyuv::I210ToI420(DataY(), StrideY(), DataU(), StrideU(), DataV(), StrideV(),
-                     i420_buffer->MutableDataY(), i420_buffer->StrideY(),
-                     i420_buffer->MutableDataU(), i420_buffer->StrideU(),
-                     i420_buffer->MutableDataV(), i420_buffer->StrideV(),
-                     width(), height());
+  // libyuv::I210ToI420(DataY(), StrideY(), DataU(), StrideU(), DataV(), StrideV(),
+  //                    i420_buffer->MutableDataY(), i420_buffer->StrideY(),
+  //                    i420_buffer->MutableDataU(), i420_buffer->StrideU(),
+  //                    i420_buffer->MutableDataV(), i420_buffer->StrideV(),
+  //                    width(), height());
   return i420_buffer;
 }
 
@@ -235,11 +235,11 @@ class I410BufferBase : public I410BufferInterface {
 rtc::scoped_refptr<I420BufferInterface> I410BufferBase::ToI420() {
   rtc::scoped_refptr<I420Buffer> i420_buffer =
       I420Buffer::Create(width(), height());
-  libyuv::I410ToI420(DataY(), StrideY(), DataU(), StrideU(), DataV(), StrideV(),
-                     i420_buffer->MutableDataY(), i420_buffer->StrideY(),
-                     i420_buffer->MutableDataU(), i420_buffer->StrideU(),
-                     i420_buffer->MutableDataV(), i420_buffer->StrideV(),
-                     width(), height());
+  // libyuv::I410ToI420(DataY(), StrideY(), DataU(), StrideU(), DataV(), StrideV(),
+  //                    i420_buffer->MutableDataY(), i420_buffer->StrideY(),
+  //                    i420_buffer->MutableDataU(), i420_buffer->StrideU(),
+  //                    i420_buffer->MutableDataV(), i420_buffer->StrideV(),
+  //                    width(), height());
   return i420_buffer;
 }
 

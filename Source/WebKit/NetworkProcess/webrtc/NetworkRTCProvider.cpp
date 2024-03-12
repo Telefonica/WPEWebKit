@@ -180,21 +180,6 @@ void NetworkRTCProvider::createUDPSocket(LibWebRTCSocketIdentifier identifier, c
 
 void NetworkRTCProvider::createServerTCPSocket(LibWebRTCSocketIdentifier identifier, const RTCNetwork::SocketAddress& address, uint16_t minPort, uint16_t maxPort, int options)
 {
-    // ASSERT(m_rtcNetworkThread.IsCurrent());
-    // callOnMainRunLoop([this, protectedThis = Ref { *this }, identifier, address, minPort, maxPort, options] {
-    //     if (!m_connection)
-    //         return;
-
-    //     if (!m_isListeningSocketAuthorized) {
-    //         signalSocketIsClosed(identifier);
-    //         return;
-    //     }
-
-    //     callOnRTCNetworkThread([this, identifier, address = RTCNetwork::isolatedCopy(address.value), minPort, maxPort, options]() mutable {
-    //         std::unique_ptr<rtc::AsyncPacketSocket> socket(m_packetSocketFactory->CreateServerTcpSocket(address, minPort, maxPort, options));
-    //         createSocket(identifier, WTFMove(socket), Socket::Type::ServerTCP, m_ipcConnection.copyRef());
-    //     });
-    // });
 }
 
 #if !PLATFORM(COCOA)

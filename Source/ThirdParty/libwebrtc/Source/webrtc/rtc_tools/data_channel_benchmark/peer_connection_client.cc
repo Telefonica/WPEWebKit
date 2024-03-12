@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <string>
+#include <stdio>
 #include <utility>
 
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
@@ -137,7 +138,6 @@ PeerConnectionClient::PeerConnectionClient(
 PeerConnectionClient::~PeerConnectionClient() {
   Disconnect();
 }
-
 rtc::scoped_refptr<PeerConnectionFactoryInterface>
 PeerConnectionClient::CreateDefaultFactory(rtc::Thread* signaling_thread) {
   auto factory = webrtc::CreatePeerConnectionFactory(

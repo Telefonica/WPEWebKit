@@ -925,7 +925,6 @@ void BasicPortAllocatorSession::AddAllocatedPort(Port* port,
   RTC_DCHECK_RUN_ON(network_thread_);
   if (!port)
     return;
-
   RTC_LOG(LS_INFO) << "Adding allocated port for " << content_name();
   port->set_content_name(content_name());
   port->set_component(component());
@@ -1408,7 +1407,6 @@ void AllocationSequence::Stop() {
 void AllocationSequence::Process(int epoch) {
   RTC_DCHECK(rtc::Thread::Current() == session_->network_thread());
   const char* const PHASE_NAMES[kNumPhases] = {"Udp", "Relay", "Tcp"};
-
   if (epoch != epoch_)
     return;
 
@@ -1496,7 +1494,6 @@ void AllocationSequence::CreateUDPPorts() {
         }
       }
     }
-
     session_->AddAllocatedPort(port.release(), this);
   }
 }

@@ -1500,7 +1500,6 @@ int NetEqImpl::DecodeLoop(PacketList* packet_list,
                operation == Operation::kFastAccelerate ||
                operation == Operation::kMerge ||
                operation == Operation::kPreemptiveExpand);
-
     auto opt_result = packet_list->front().frame->Decode(
         rtc::ArrayView<int16_t>(&decoded_buffer_[*decoded_length],
                                 decoded_buffer_length_ - *decoded_length));

@@ -3032,7 +3032,30 @@ void MediaPlayerPrivateGStreamer::createGSTPlayBin(const URL& url)
     if (!m_audioSink)
         m_audioSink = createAudioSink();
 
-    g_object_set(m_pipeline.get(), "audio-sink", m_audioSink.get(), "video-sink", createVideoSink(), nullptr);
+#if ENABLE(MEDIA_STREAM)
+    // Stream is media source (normal one)
+    if (m_streamPrivate == NULL)
+    {
+        g_object_set(m_pipeline.get(), "video-sink", createVideoSink(), "audio-sink", createAudioSink(), nullptr);
+    }
+    // Stream is media stream (gaming environment)
+    else
+    {
+       // Setting environment variable to apply low latency settings in brcm plugins
+       g_setenv ("GST_LOW_LATENCY_MODE", "TRUE", FALSE);
+       if (m_streamPrivate->hasVideo())
+       {
+           g_object_set(m_pipeline.get(), "video-sink", createVideoSink(), nullptr);
+       }
+
+       if (m_streamPrivate->hasAudio())
+       {
+           g_object_set(m_pipeline.get(), "audio-sink", createAudioSink(), nullptr);
+       }
+   }
+#else
+   g_object_set(m_pipeline.get(), "video-sink", createVideoSink(), "audio-sink", createAudioSink(), nullptr);
+#endif
 
     if (m_shouldPreservePitch && !isMediaStream) {
         if (auto* scale = makeGStreamerElement("scaletempo", nullptr))

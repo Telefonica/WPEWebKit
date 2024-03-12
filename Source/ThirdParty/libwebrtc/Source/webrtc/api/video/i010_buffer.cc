@@ -112,13 +112,13 @@ rtc::scoped_refptr<I010Buffer> I010Buffer::Rotate(
   rtc::scoped_refptr<webrtc::I010Buffer> buffer =
       Create(rotated_width, rotated_height);
 
-  int res = libyuv::I010Rotate(
-      src.DataY(), src.StrideY(), src.DataU(), src.StrideU(), src.DataV(),
-      src.StrideV(), buffer->MutableDataY(), buffer->StrideY(),
-      buffer->MutableDataU(), buffer->StrideU(), buffer->MutableDataV(),
-      buffer->StrideV(), src.width(), src.height(),
-      static_cast<libyuv::RotationMode>(rotation));
-  RTC_DCHECK_EQ(res, 0);
+  // int res = libyuv::I420Rotate(
+  //     src.DataY(), src.StrideY(), src.DataU(), src.StrideU(), src.DataV(),
+  //     src.StrideV(), buffer->MutableDataY(), buffer->StrideY(),
+  //     buffer->MutableDataU(), buffer->StrideU(), buffer->MutableDataV(),
+  //     buffer->StrideV(), src.width(), src.height(),
+  //     static_cast<libyuv::RotationMode>(rotation));
+  // RTC_DCHECK_EQ(res, 0);
 
   return buffer;
 }
