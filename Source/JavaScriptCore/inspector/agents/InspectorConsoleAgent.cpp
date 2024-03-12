@@ -32,6 +32,9 @@
 #include "ScriptArguments.h"
 #include "ScriptCallStackFactory.h"
 #include <wtf/text/StringConcatenateNumbers.h>
+#include <wtf/JSONValues.h>
+
+#include <fstream>
 
 namespace Inspector {
 
@@ -199,6 +202,17 @@ void InspectorConsoleAgent::takeHeapSnapshot(const String& title)
         return;
 
     auto [timestamp, snapshotData] = WTFMove(result.value());
+    
+    if (!!title)
+    {
+        if (std::ofstream outfile(title.utf8().data());
+            outfile.is_open())
+        {
+            outfile << snapshotData.utf8().data();
+            outfile.close();
+        }
+    }
+
     m_frontendDispatcher->heapSnapshot(timestamp, snapshotData, title);
 }
 

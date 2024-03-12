@@ -46,7 +46,7 @@ void HeapSnapshotBuilder::resetNextAvailableObjectIdentifier() { HeapSnapshotBui
 HeapSnapshotBuilder::HeapSnapshotBuilder(HeapProfiler& profiler, SnapshotType type)
     : HeapAnalyzer()
     , m_profiler(profiler)
-    , m_snapshotType(type)
+    , m_snapshotType(SnapshotType::GCDebuggingSnapshot)
 {
 }
 
