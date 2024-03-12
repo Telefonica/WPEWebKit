@@ -886,6 +886,8 @@ bool HTMLCanvasElement::shouldAccelerate(const IntSize& size) const
 
 bool HTMLCanvasElement::shouldAccelerate(unsigned area) const
 {
+    return false;
+
     auto& settings = document().settings();
 
     if (area > settings.maximumAccelerated2dCanvasSize())
