@@ -25,6 +25,8 @@ if (NOT APPLE)
     endif ()
 endif ()
 
+add_compile_definitions(LIBYUV_DISABLE_NEON)
+
 set(webrtc_SOURCES
     Source/third_party/abseil-cpp/absl/strings/match.cc
     Source/third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
