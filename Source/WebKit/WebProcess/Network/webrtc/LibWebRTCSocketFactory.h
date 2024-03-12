@@ -59,7 +59,7 @@ public:
 
     LibWebRTCResolver* resolver(LibWebRTCResolverIdentifier identifier) { return m_resolvers.get(identifier); }
     std::unique_ptr<LibWebRTCResolver> takeResolver(LibWebRTCResolverIdentifier identifier) { return m_resolvers.take(identifier); }
-    rtc::AsyncResolverInterface* createAsyncResolver();
+    webrtc::AsyncDnsResolverInterface* createAsyncResolver();
     
     void disableNonLocalhostConnections() { m_disableNonLocalhostConnections = true; }
 

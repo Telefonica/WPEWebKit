@@ -32,6 +32,9 @@ class BasicIceController : public IceControllerInterface {
   void SetSelectedConnection(const Connection* selected_connection) override;
   void AddConnection(const Connection* connection) override;
   void OnConnectionDestroyed(const Connection* connection) override;
+  rtc::ArrayView<const Connection* const> GetConnections() const override {
+    return connections_;
+  }
   rtc::ArrayView<const Connection*> connections() const override {
     return rtc::ArrayView<const Connection*>(
         const_cast<const Connection**>(connections_.data()),
@@ -46,9 +49,9 @@ class BasicIceController : public IceControllerInterface {
                            NominationMode mode,
                            IceMode remote_ice_mode) const override;
 
-  SwitchResult ShouldSwitchConnection(IceControllerEvent reason,
+  SwitchResult ShouldSwitchConnection(IceSwitchReason reason,
                                       const Connection* connection) override;
-  SwitchResult SortAndSwitchConnection(IceControllerEvent reason) override;
+  SwitchResult SortAndSwitchConnection(IceSwitchReason reason) override;
 
   std::vector<const Connection*> PruneConnections() override;
 
@@ -136,7 +139,7 @@ class BasicIceController : public IceControllerInterface {
                          absl::optional<int64_t> receiving_unchanged_threshold,
                          bool* missed_receiving_unchanged_threshold) const;
 
-  SwitchResult HandleInitialSelectDampening(IceControllerEvent reason,
+  SwitchResult HandleInitialSelectDampening(IceSwitchReason reason,
                                             const Connection* new_connection);
 
   std::function<IceTransportState()> ice_transport_state_func_;

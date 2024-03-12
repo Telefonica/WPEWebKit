@@ -115,73 +115,73 @@ AudioDestinationGStreamer::AudioDestinationGStreamer(AudioIOCallback& callback, 
     , m_renderBus(AudioBus::create(numberOfOutputChannels, AudioUtilities::renderQuantumSize, false))
     , m_sampleRate(sampleRate)
 {
-    static Atomic<uint32_t> pipelineId;
-    m_pipeline = gst_pipeline_new(makeString("audio-destination-", pipelineId.exchangeAdd(1)).ascii().data());
-    connectSimpleBusMessageCallback(m_pipeline.get(), [this](GstMessage* message) {
-        this->handleMessage(message);
-    });
+//     static Atomic<uint32_t> pipelineId;
+//     m_pipeline = gst_pipeline_new(makeString("audio-destination-", pipelineId.exchangeAdd(1)).ascii().data());
+//     connectSimpleBusMessageCallback(m_pipeline.get(), [this](GstMessage* message) {
+//         this->handleMessage(message);
+//     });
 
-    m_src = GST_ELEMENT_CAST(g_object_new(WEBKIT_TYPE_WEB_AUDIO_SRC, "rate", sampleRate,
-        "bus", m_renderBus.get(), "destination", this, "frames", AudioUtilities::renderQuantumSize, nullptr));
+//     m_src = GST_ELEMENT_CAST(g_object_new(WEBKIT_TYPE_WEB_AUDIO_SRC, "rate", sampleRate,
+//         "bus", m_renderBus.get(), "destination", this, "frames", AudioUtilities::renderQuantumSize, nullptr));
 
-#if PLATFORM(AMLOGIC)
-    // autoaudiosink changes child element state to READY internally in auto detection phase
-    // that causes resource acquisition in some cases interrupting any playback already running.
-    // On Amlogic we need to set direct-mode=false prop before changing state to READY
-    // but this is not possible with autoaudiosink.
-    GRefPtr<GstElement> audioSink = makeGStreamerElement("amlhalasink", nullptr);
-    ASSERT_WITH_MESSAGE(audioSink, "amlhalasink should be available in the system but it is not");
-    g_object_set(audioSink.get(), "direct-mode", FALSE, nullptr);
-#else
-    GRefPtr<GstElement> audioSink = createPlatformAudioSink("music"_s);
-#endif
-    m_audioSinkAvailable = audioSink;
-    if (!audioSink) {
-        GST_ERROR("Failed to create GStreamer audio sink element");
-        return;
-    }
+// #if PLATFORM(AMLOGIC)
+//     // autoaudiosink changes child element state to READY internally in auto detection phase
+//     // that causes resource acquisition in some cases interrupting any playback already running.
+//     // On Amlogic we need to set direct-mode=false prop before changing state to READY
+//     // but this is not possible with autoaudiosink.
+//     GRefPtr<GstElement> audioSink = makeGStreamerElement("amlhalasink", nullptr);
+//     ASSERT_WITH_MESSAGE(audioSink, "amlhalasink should be available in the system but it is not");
+//     g_object_set(audioSink.get(), "direct-mode", FALSE, nullptr);
+// #else
+//     GRefPtr<GstElement> audioSink = createPlatformAudioSink("music"_s);
+// #endif
+//     m_audioSinkAvailable = audioSink;
+//     if (!audioSink) {
+//         GST_ERROR("Failed to create GStreamer audio sink element");
+//         return;
+//     }
 
-    // Probe platform early on for a working audio output device. This is not needed for the WebKit
-    // custom audio sink because it doesn't rely on autoaudiosink.
-    if (!WEBKIT_IS_AUDIO_SINK(audioSink.get())) {
-        g_signal_connect(audioSink.get(), "child-added", G_CALLBACK(+[](GstChildProxy*, GObject* object, gchar*, gpointer) {
-            if (GST_IS_AUDIO_BASE_SINK(object))
-                g_object_set(GST_AUDIO_BASE_SINK(object), "buffer-time", static_cast<gint64>(100000), nullptr);
+//     // Probe platform early on for a working audio output device. This is not needed for the WebKit
+//     // custom audio sink because it doesn't rely on autoaudiosink.
+//     if (!WEBKIT_IS_AUDIO_SINK(audioSink.get())) {
+//         g_signal_connect(audioSink.get(), "child-added", G_CALLBACK(+[](GstChildProxy*, GObject* object, gchar*, gpointer) {
+//             if (GST_IS_AUDIO_BASE_SINK(object))
+//                 g_object_set(GST_AUDIO_BASE_SINK(object), "buffer-time", static_cast<gint64>(100000), nullptr);
 
-#if PLATFORM(REALTEK)
-            if (!g_strcmp0(G_OBJECT_TYPE_NAME(object), "GstRTKAudioSink"))
-                g_object_set(object, "media-tunnel", FALSE, "audio-service", TRUE, nullptr);
-#endif
-        }), nullptr);
+// #if PLATFORM(REALTEK)
+//             if (!g_strcmp0(G_OBJECT_TYPE_NAME(object), "GstRTKAudioSink"))
+//                 g_object_set(object, "media-tunnel", FALSE, "audio-service", TRUE, nullptr);
+// #endif
+//         }), nullptr);
 
-        // Autoaudiosink does the real sink detection in the GST_STATE_NULL->READY transition
-        // so it's best to roll it to READY as soon as possible to ensure the underlying platform
-        // audiosink was loaded correctly.
-        GstStateChangeReturn stateChangeReturn = gst_element_set_state(audioSink.get(), GST_STATE_READY);
-        if (stateChangeReturn == GST_STATE_CHANGE_FAILURE) {
-            GST_ERROR("Failed to change autoaudiosink element state");
-            gst_element_set_state(audioSink.get(), GST_STATE_NULL);
-            m_audioSinkAvailable = false;
-            return;
-        }
-    }
+//         // Autoaudiosink does the real sink detection in the GST_STATE_NULL->READY transition
+//         // so it's best to roll it to READY as soon as possible to ensure the underlying platform
+//         // audiosink was loaded correctly.
+//         GstStateChangeReturn stateChangeReturn = gst_element_set_state(audioSink.get(), GST_STATE_READY);
+//         if (stateChangeReturn == GST_STATE_CHANGE_FAILURE) {
+//             GST_ERROR("Failed to change autoaudiosink element state");
+//             gst_element_set_state(audioSink.get(), GST_STATE_NULL);
+//             m_audioSinkAvailable = false;
+//             return;
+//         }
+//     }
 
-    GstElement* audioConvert = makeGStreamerElement("audioconvert", nullptr);
-    GstElement* audioResample = makeGStreamerElement("audioresample", nullptr);
-    gst_bin_add_many(GST_BIN_CAST(m_pipeline.get()), m_src.get(), audioConvert, audioResample, audioSink.get(), nullptr);
+//     GstElement* audioConvert = makeGStreamerElement("audioconvert", nullptr);
+//     GstElement* audioResample = makeGStreamerElement("audioresample", nullptr);
+//     gst_bin_add_many(GST_BIN_CAST(m_pipeline.get()), m_src.get(), audioConvert, audioResample, audioSink.get(), nullptr);
 
-    // Link src pads from webkitAudioSrc to audioConvert ! audioResample ! autoaudiosink.
-    gst_element_link_pads_full(m_src.get(), "src", audioConvert, "sink", GST_PAD_LINK_CHECK_NOTHING);
-    gst_element_link_pads_full(audioConvert, "src", audioResample, "sink", GST_PAD_LINK_CHECK_NOTHING);
-    gst_element_link_pads_full(audioResample, "src", audioSink.get(), "sink", GST_PAD_LINK_CHECK_NOTHING);
+//     // Link src pads from webkitAudioSrc to audioConvert ! audioResample ! autoaudiosink.
+//     gst_element_link_pads_full(m_src.get(), "src", audioConvert, "sink", GST_PAD_LINK_CHECK_NOTHING);
+//     gst_element_link_pads_full(audioConvert, "src", audioResample, "sink", GST_PAD_LINK_CHECK_NOTHING);
+//     gst_element_link_pads_full(audioResample, "src", audioSink.get(), "sink", GST_PAD_LINK_CHECK_NOTHING);
 }
 
 AudioDestinationGStreamer::~AudioDestinationGStreamer()
 {
-    GST_DEBUG_OBJECT(m_pipeline.get(), "Disposing");
-    disconnectSimpleBusMessageCallback(m_pipeline.get());
-    gst_element_set_state(m_pipeline.get(), GST_STATE_NULL);
-    notifyStopResult(true);
+    // GST_DEBUG_OBJECT(m_pipeline.get(), "Disposing");
+    // disconnectSimpleBusMessageCallback(m_pipeline.get());
+    // gst_element_set_state(m_pipeline.get(), GST_STATE_NULL);
+    // notifyStopResult(true);
 }
 
 unsigned AudioDestinationGStreamer::framesPerBuffer() const
@@ -206,92 +206,92 @@ bool AudioDestinationGStreamer::handleMessage(GstMessage* message)
 
 void AudioDestinationGStreamer::start(Function<void(Function<void()>&&)>&& dispatchToRenderThread, CompletionHandler<void(bool)>&& completionHandler)
 {
-    webkitWebAudioSourceSetDispatchToRenderThreadFunction(WEBKIT_WEB_AUDIO_SRC(m_src.get()), WTFMove(dispatchToRenderThread));
-    startRendering(WTFMove(completionHandler));
+    // webkitWebAudioSourceSetDispatchToRenderThreadFunction(WEBKIT_WEB_AUDIO_SRC(m_src.get()), WTFMove(dispatchToRenderThread));
+    // startRendering(WTFMove(completionHandler));
 }
 
 void AudioDestinationGStreamer::startRendering(CompletionHandler<void(bool)>&& completionHandler)
 {
-    ASSERT(m_audioSinkAvailable);
-    m_startupCompletionHandler = WTFMove(completionHandler);
-    GST_DEBUG_OBJECT(m_pipeline.get(), "Starting audio rendering, sink %s", m_audioSinkAvailable ? "available" : "not available");
+    // ASSERT(m_audioSinkAvailable);
+    // m_startupCompletionHandler = WTFMove(completionHandler);
+    // GST_DEBUG_OBJECT(m_pipeline.get(), "Starting audio rendering, sink %s", m_audioSinkAvailable ? "available" : "not available");
 
-    if (m_isPlaying) {
-        notifyStartupResult(true);
-        return;
-    }
+    // if (m_isPlaying) {
+    //     notifyStartupResult(true);
+    //     return;
+    // }
 
-    if (!m_audioSinkAvailable) {
-        notifyStartupResult(false);
-        return;
-    }
+    // if (!m_audioSinkAvailable) {
+    //     notifyStartupResult(false);
+    //     return;
+    // }
 
-    notifyStartupResult(webkitGstSetElementStateSynchronously(m_pipeline.get(), GST_STATE_PLAYING, [this](GstMessage* message) -> bool {
-        return handleMessage(message);
-    }));
+    // notifyStartupResult(webkitGstSetElementStateSynchronously(m_pipeline.get(), GST_STATE_PLAYING, [this](GstMessage* message) -> bool {
+    //     return handleMessage(message);
+    // }));
 }
 
 void AudioDestinationGStreamer::stop(CompletionHandler<void(bool)>&& completionHandler)
 {
-    stopRendering(WTFMove(completionHandler));
-    webkitWebAudioSourceSetDispatchToRenderThreadFunction(WEBKIT_WEB_AUDIO_SRC(m_src.get()), nullptr);
+    // stopRendering(WTFMove(completionHandler));
+    // webkitWebAudioSourceSetDispatchToRenderThreadFunction(WEBKIT_WEB_AUDIO_SRC(m_src.get()), nullptr);
 }
 
 void AudioDestinationGStreamer::stopRendering(CompletionHandler<void(bool)>&& completionHandler)
 {
-    ASSERT(m_audioSinkAvailable);
-    m_stopCompletionHandler = WTFMove(completionHandler);
-    GST_DEBUG_OBJECT(m_pipeline.get(), "Stopping audio rendering, sink %s", m_audioSinkAvailable ? "available" : "not available");
+    // ASSERT(m_audioSinkAvailable);
+    // m_stopCompletionHandler = WTFMove(completionHandler);
+    // GST_DEBUG_OBJECT(m_pipeline.get(), "Stopping audio rendering, sink %s", m_audioSinkAvailable ? "available" : "not available");
 
-    if (!m_isPlaying) {
-        GST_DEBUG_OBJECT(m_pipeline.get(), "Already stopped");
-        notifyStopResult(true);
-        return;
-    }
+    // if (!m_isPlaying) {
+    //     GST_DEBUG_OBJECT(m_pipeline.get(), "Already stopped");
+    //     notifyStopResult(true);
+    //     return;
+    // }
 
-    if (!m_audioSinkAvailable) {
-        notifyStopResult(false);
-        return;
-    }
+    // if (!m_audioSinkAvailable) {
+    //     notifyStopResult(false);
+    //     return;
+    // }
 
-    notifyStopResult(webkitGstSetElementStateSynchronously(m_pipeline.get(), GST_STATE_READY, [this](GstMessage* message) -> bool {
-        return handleMessage(message);
-    }));
+    // notifyStopResult(webkitGstSetElementStateSynchronously(m_pipeline.get(), GST_STATE_READY, [this](GstMessage* message) -> bool {
+    //     return handleMessage(message);
+    // }));
 }
 
 void AudioDestinationGStreamer::notifyStartupResult(bool success)
 {
-    if (success)
-        notifyIsPlaying(true);
+    // if (success)
+    //     notifyIsPlaying(true);
 
-    callOnMainThreadAndWait([this, completionHandler = WTFMove(m_startupCompletionHandler), success]() mutable {
-        GST_DEBUG_OBJECT(m_pipeline.get(), "Has start completion handler: %s", boolForPrinting(!!completionHandler));
-        if (completionHandler)
-            completionHandler(success);
-    });
+    // callOnMainThreadAndWait([this, completionHandler = WTFMove(m_startupCompletionHandler), success]() mutable {
+    //     GST_DEBUG_OBJECT(m_pipeline.get(), "Has start completion handler: %s", boolForPrinting(!!completionHandler));
+    //     if (completionHandler)
+    //         completionHandler(success);
+    // });
 }
 
 void AudioDestinationGStreamer::notifyStopResult(bool success)
 {
-    if (success)
-        notifyIsPlaying(false);
+    // if (success)
+    //     notifyIsPlaying(false);
 
-    callOnMainThreadAndWait([this, completionHandler = WTFMove(m_stopCompletionHandler), success]() mutable {
-        GST_DEBUG_OBJECT(m_pipeline.get(), "Has stop completion handler: %s", boolForPrinting(!!completionHandler));
-        if (completionHandler)
-            completionHandler(success);
-    });
+    // callOnMainThreadAndWait([this, completionHandler = WTFMove(m_stopCompletionHandler), success]() mutable {
+    //     GST_DEBUG_OBJECT(m_pipeline.get(), "Has stop completion handler: %s", boolForPrinting(!!completionHandler));
+    //     if (completionHandler)
+    //         completionHandler(success);
+    // });
 }
 
 void AudioDestinationGStreamer::notifyIsPlaying(bool isPlaying)
 {
-    if (m_isPlaying == isPlaying)
-        return;
+    // if (m_isPlaying == isPlaying)
+    //     return;
 
-    GST_DEBUG("Is playing: %s", boolForPrinting(isPlaying));
-    m_isPlaying = isPlaying;
-    if (m_callback)
-        m_callback->isPlayingDidChange();
+    // GST_DEBUG("Is playing: %s", boolForPrinting(isPlaying));
+    // m_isPlaying = isPlaying;
+    // if (m_callback)
+    //     m_callback->isPlayingDidChange();
 }
 
 } // namespace WebCore

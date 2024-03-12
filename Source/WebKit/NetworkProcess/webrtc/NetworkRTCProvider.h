@@ -71,7 +71,7 @@ struct SocketComparator {
     }
 };
 
-class NetworkRTCProvider : public rtc::MessageHandler, public IPC::Connection::ThreadMessageReceiverRefCounted {
+class NetworkRTCProvider : public IPC::Connection::ThreadMessageReceiverRefCounted {
 public:
     static Ref<NetworkRTCProvider> create(NetworkConnectionToWebProcess& connection)
     {
@@ -138,8 +138,6 @@ private:
     void addSocket(WebCore::LibWebRTCSocketIdentifier, std::unique_ptr<Socket>&&);
 
     void createSocket(WebCore::LibWebRTCSocketIdentifier, std::unique_ptr<rtc::AsyncPacketSocket>&&, Socket::Type, Ref<IPC::Connection>&&);
-
-    void OnMessage(rtc::Message*);
 
     // IPC::Connection::ThreadMessageReceiver
     void dispatchToThread(Function<void()>&&) final;

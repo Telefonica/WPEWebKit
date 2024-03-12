@@ -12,14 +12,22 @@
 
 #include <string>
 
+#include "absl/strings/string_view.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 @interface NSString (StdString)
 
-@property(nonatomic, readonly) std::string rtcStdString;
+@property(nonatomic, readonly) std::string stdString;
 
-+ (std::string)rtcStdStringForString:(NSString *)nsString;
-+ (NSString *)rtcStringForStdString:(const std::string &)stdString;
++ (std::string)stdStringForString:(NSString *)nsString;
++ (NSString *)stringForStdString:(const std::string &)stdString;
+
+@end
+
+@interface NSString (AbslStringView)
+
++ (NSString *)stringForAbslStringView:(const absl::string_view)abslStringView;
 
 @end
 

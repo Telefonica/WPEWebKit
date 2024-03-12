@@ -10,49 +10,18 @@
 
 #include "media/engine/webrtc_media_engine.h"
 
+#include <algorithm>
 #include <map>
-#include <memory>
+#include <string>
 #include <utility>
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/match.h"
-#include "media/engine/webrtc_voice_engine.h"
-
-#ifdef HAVE_WEBRTC_VIDEO
-#include "media/engine/webrtc_video_engine.h"
-#else
-#include "media/engine/null_webrtc_video_engine.h"
-#endif
+#include "media/base/media_constants.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 
 namespace cricket {
-
-std::unique_ptr<MediaEngineInterface> CreateMediaEngine(
-    MediaEngineDependencies dependencies) {
-  // TODO(sprang): Make populating `dependencies.trials` mandatory and remove
-  // these fallbacks.
-  std::unique_ptr<webrtc::WebRtcKeyValueConfig> fallback_trials(
-      dependencies.trials ? nullptr : new webrtc::FieldTrialBasedConfig());
-  const webrtc::WebRtcKeyValueConfig& trials =
-      dependencies.trials ? *dependencies.trials : *fallback_trials;
-  auto audio_engine = std::make_unique<WebRtcVoiceEngine>(
-      dependencies.task_queue_factory, std::move(dependencies.adm),
-      std::move(dependencies.audio_encoder_factory),
-      std::move(dependencies.audio_decoder_factory),
-      std::move(dependencies.audio_mixer),
-      std::move(dependencies.audio_processing),
-      dependencies.audio_frame_processor, trials);
-#ifdef HAVE_WEBRTC_VIDEO
-  auto video_engine = std::make_unique<WebRtcVideoEngine>(
-      std::move(dependencies.video_encoder_factory),
-      std::move(dependencies.video_decoder_factory), trials);
-#else
-  auto video_engine = std::make_unique<NullWebRtcVideoEngine>();
-#endif
-  return std::make_unique<CompositeMediaEngine>(std::move(fallback_trials),
-                                                std::move(audio_engine),
-                                                std::move(video_engine));
-}
-
 namespace {
 // Remove mutually exclusive extensions with lower priority.
 void DiscardRedundantExtensions(
@@ -137,7 +106,7 @@ std::vector<webrtc::RtpExtension> FilterRtpExtensions(
     const std::vector<webrtc::RtpExtension>& extensions,
     bool (*supported)(absl::string_view),
     bool filter_redundant_extensions,
-    const webrtc::WebRtcKeyValueConfig& trials) {
+    const webrtc::FieldTrialsView& trials) {
   // Don't check against old parameters; this should have been done earlier.
   RTC_DCHECK(ValidateRtpExtensions(extensions, {}));
   RTC_DCHECK(supported);

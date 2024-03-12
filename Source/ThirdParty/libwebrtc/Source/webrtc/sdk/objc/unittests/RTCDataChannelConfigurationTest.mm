@@ -9,6 +9,7 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <XCTest/XCTest.h>
 
 #include "rtc_base/gunit.h"
 
@@ -16,8 +17,7 @@
 #import "api/peerconnection/RTCDataChannelConfiguration.h"
 #import "helpers/NSString+StdString.h"
 
-@interface RTCDataChannelConfigurationTest : NSObject
-- (void)testConversionToNativeDataChannelInit;
+@interface RTCDataChannelConfigurationTest : XCTestCase
 @end
 
 @implementation RTCDataChannelConfigurationTest
@@ -30,8 +30,8 @@
   int channelId = 4;
   NSString *protocol = @"protocol";
 
-  RTCDataChannelConfiguration *dataChannelConfig =
-      [[RTCDataChannelConfiguration alloc] init];
+  RTC_OBJC_TYPE(RTCDataChannelConfiguration) *dataChannelConfig =
+      [[RTC_OBJC_TYPE(RTCDataChannelConfiguration) alloc] init];
   dataChannelConfig.isOrdered = isOrdered;
   dataChannelConfig.maxPacketLifeTime = maxPacketLifeTime;
   dataChannelConfig.maxRetransmits = maxRetransmits;
@@ -49,11 +49,3 @@
 }
 
 @end
-
-TEST(RTCDataChannelConfiguration, NativeDataChannelInitConversionTest) {
-  @autoreleasepool {
-    RTCDataChannelConfigurationTest *test =
-        [[RTCDataChannelConfigurationTest alloc] init];
-    [test testConversionToNativeDataChannelInit];
-  }
-}

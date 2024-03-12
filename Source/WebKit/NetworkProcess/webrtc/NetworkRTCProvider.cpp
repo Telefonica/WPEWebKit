@@ -180,21 +180,21 @@ void NetworkRTCProvider::createUDPSocket(LibWebRTCSocketIdentifier identifier, c
 
 void NetworkRTCProvider::createServerTCPSocket(LibWebRTCSocketIdentifier identifier, const RTCNetwork::SocketAddress& address, uint16_t minPort, uint16_t maxPort, int options)
 {
-    ASSERT(m_rtcNetworkThread.IsCurrent());
-    callOnMainRunLoop([this, protectedThis = Ref { *this }, identifier, address, minPort, maxPort, options] {
-        if (!m_connection)
-            return;
+    // ASSERT(m_rtcNetworkThread.IsCurrent());
+    // callOnMainRunLoop([this, protectedThis = Ref { *this }, identifier, address, minPort, maxPort, options] {
+    //     if (!m_connection)
+    //         return;
 
-        if (!m_isListeningSocketAuthorized) {
-            signalSocketIsClosed(identifier);
-            return;
-        }
+    //     if (!m_isListeningSocketAuthorized) {
+    //         signalSocketIsClosed(identifier);
+    //         return;
+    //     }
 
-        callOnRTCNetworkThread([this, identifier, address = RTCNetwork::isolatedCopy(address.value), minPort, maxPort, options]() mutable {
-            std::unique_ptr<rtc::AsyncPacketSocket> socket(m_packetSocketFactory->CreateServerTcpSocket(address, minPort, maxPort, options));
-            createSocket(identifier, WTFMove(socket), Socket::Type::ServerTCP, m_ipcConnection.copyRef());
-        });
-    });
+    //     callOnRTCNetworkThread([this, identifier, address = RTCNetwork::isolatedCopy(address.value), minPort, maxPort, options]() mutable {
+    //         std::unique_ptr<rtc::AsyncPacketSocket> socket(m_packetSocketFactory->CreateServerTcpSocket(address, minPort, maxPort, options));
+    //         createSocket(identifier, WTFMove(socket), Socket::Type::ServerTCP, m_ipcConnection.copyRef());
+    //     });
+    // });
 }
 
 #if !PLATFORM(COCOA)
@@ -408,7 +408,7 @@ void NetworkRTCProvider::closeListeningSockets(Function<void()>&& completionHand
     });
 }
 
-struct NetworkMessageData : public rtc::MessageData {
+struct NetworkMessageData {
     NetworkMessageData(Ref<NetworkRTCProvider>&& rtcProvider, Function<void()>&& callback)
         : rtcProvider(WTFMove(rtcProvider))
         , callback(WTFMove(callback))
@@ -417,17 +417,11 @@ struct NetworkMessageData : public rtc::MessageData {
     Function<void()> callback;
 };
 
-void NetworkRTCProvider::OnMessage(rtc::Message* message)
-{
-    ASSERT(message->message_id == 1);
-    auto* data = static_cast<NetworkMessageData*>(message->pdata);
-    data->callback();
-    delete data;
-}
-
 void NetworkRTCProvider::callOnRTCNetworkThread(Function<void()>&& callback)
 {
-    m_rtcNetworkThread.Post(RTC_FROM_HERE, this, 1, new NetworkMessageData(*this, WTFMove(callback)));
+    m_rtcNetworkThread.PostTask([callback = WTFMove(callback)](){
+        callback();
+    });
 }
 
 void NetworkRTCProvider::signalSocketIsClosed(LibWebRTCSocketIdentifier identifier)

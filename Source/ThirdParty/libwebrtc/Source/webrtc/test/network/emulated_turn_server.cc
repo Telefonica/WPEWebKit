@@ -14,17 +14,65 @@
 #include <utility>
 
 #include "api/packet_socket_factory.h"
+#include "rtc_base/network/received_packet.h"
 #include "rtc_base/strings/string_builder.h"
+#include "rtc_base/task_queue_for_test.h"
 
 namespace {
 
 static const char kTestRealm[] = "example.org";
 static const char kTestSoftware[] = "TestTurnServer";
 
+// A wrapper class for cricket::TurnServer to allocate sockets.
+class PacketSocketFactoryWrapper : public rtc::PacketSocketFactory {
+ public:
+  explicit PacketSocketFactoryWrapper(
+      webrtc::test::EmulatedTURNServer* turn_server)
+      : turn_server_(turn_server) {}
+  ~PacketSocketFactoryWrapper() override {}
+
+  // This method is called from TurnServer when making a TURN ALLOCATION.
+  // It will create a socket on the `peer_` endpoint.
+  rtc::AsyncPacketSocket* CreateUdpSocket(const rtc::SocketAddress& address,
+                                          uint16_t min_port,
+                                          uint16_t max_port) override {
+    return turn_server_->CreatePeerSocket();
+  }
+
+  rtc::AsyncListenSocket* CreateServerTcpSocket(
+      const rtc::SocketAddress& local_address,
+      uint16_t min_port,
+      uint16_t max_port,
+      int opts) override {
+    return nullptr;
+  }
+  rtc::AsyncPacketSocket* CreateClientTcpSocket(
+      const rtc::SocketAddress& local_address,
+      const rtc::SocketAddress& remote_address,
+      const rtc::ProxyInfo& proxy_info,
+      const std::string& user_agent,
+      const rtc::PacketSocketTcpOptions& tcp_options) override {
+    return nullptr;
+  }
+  std::unique_ptr<webrtc::AsyncDnsResolverInterface> CreateAsyncDnsResolver()
+      override {
+    return nullptr;
+  }
+
+ private:
+  webrtc::test::EmulatedTURNServer* turn_server_;
+};
+
+}  //  namespace
+
+namespace webrtc {
+namespace test {
+
 // A wrapper class for copying data between an AsyncPacketSocket and a
 // EmulatedEndpoint. This is used by the cricket::TurnServer when
 // sending data back into the emulated network.
-class AsyncPacketSocketWrapper : public rtc::AsyncPacketSocket {
+class EmulatedTURNServer::AsyncPacketSocketWrapper
+    : public rtc::AsyncPacketSocket {
  public:
   AsyncPacketSocketWrapper(webrtc::test::EmulatedTURNServer* turn_server,
                            webrtc::EmulatedEndpoint* endpoint,
@@ -55,6 +103,9 @@ class AsyncPacketSocketWrapper : public rtc::AsyncPacketSocket {
     return cb;
   }
   int Close() override { return 0; }
+  void NotifyPacketReceived(const rtc::ReceivedPacket& packet) {
+    rtc::AsyncPacketSocket::NotifyPacketReceived(packet);
+  }
 
   rtc::AsyncPacketSocket::State GetState() const override {
     return rtc::AsyncPacketSocket::STATE_BOUND;
@@ -70,57 +121,13 @@ class AsyncPacketSocketWrapper : public rtc::AsyncPacketSocket {
   const rtc::SocketAddress local_address_;
 };
 
-// A wrapper class for cricket::TurnServer to allocate sockets.
-class PacketSocketFactoryWrapper : public rtc::PacketSocketFactory {
- public:
-  explicit PacketSocketFactoryWrapper(
-      webrtc::test::EmulatedTURNServer* turn_server)
-      : turn_server_(turn_server) {}
-  ~PacketSocketFactoryWrapper() override {}
-
-  // This method is called from TurnServer when making a TURN ALLOCATION.
-  // It will create a socket on the |peer_| endpoint.
-  rtc::AsyncPacketSocket* CreateUdpSocket(const rtc::SocketAddress& address,
-                                          uint16_t min_port,
-                                          uint16_t max_port) override {
-    return turn_server_->CreatePeerSocket();
-  }
-
-  rtc::AsyncPacketSocket* CreateServerTcpSocket(
-      const rtc::SocketAddress& local_address,
-      uint16_t min_port,
-      uint16_t max_port,
-      int opts) override {
-    return nullptr;
-  }
-  rtc::AsyncPacketSocket* CreateClientTcpSocket(
-      const rtc::SocketAddress& local_address,
-      const rtc::SocketAddress& remote_address,
-      const rtc::ProxyInfo& proxy_info,
-      const std::string& user_agent,
-      const rtc::PacketSocketTcpOptions& tcp_options) override {
-    return nullptr;
-  }
-  rtc::AsyncResolverInterface* CreateAsyncResolver() override {
-    return nullptr;
-  }
-
- private:
-  webrtc::test::EmulatedTURNServer* turn_server_;
-};
-
-}  //  namespace
-
-namespace webrtc {
-namespace test {
-
 EmulatedTURNServer::EmulatedTURNServer(std::unique_ptr<rtc::Thread> thread,
                                        EmulatedEndpoint* client,
                                        EmulatedEndpoint* peer)
     : thread_(std::move(thread)), client_(client), peer_(peer) {
   ice_config_.username = "keso";
   ice_config_.password = "keso";
-  thread_->Invoke<void>(RTC_FROM_HERE, [=]() {
+  SendTask(thread_.get(), [=]() {
     RTC_DCHECK_RUN_ON(thread_.get());
     turn_server_ = std::make_unique<cricket::TurnServer>(thread_.get());
     turn_server_->set_realm(kTestRealm);
@@ -141,14 +148,14 @@ EmulatedTURNServer::EmulatedTURNServer(std::unique_ptr<rtc::Thread> thread,
 }
 
 void EmulatedTURNServer::Stop() {
-  thread_->Invoke<void>(RTC_FROM_HERE, [=]() {
+  SendTask(thread_.get(), [=]() {
     RTC_DCHECK_RUN_ON(thread_.get());
     sockets_.clear();
   });
 }
 
 EmulatedTURNServer::~EmulatedTURNServer() {
-  thread_->Invoke<void>(RTC_FROM_HERE, [=]() {
+  SendTask(thread_.get(), [=]() {
     RTC_DCHECK_RUN_ON(thread_.get());
     turn_server_.reset(nullptr);
   });
@@ -164,13 +171,12 @@ rtc::AsyncPacketSocket* EmulatedTURNServer::Wrap(EmulatedEndpoint* endpoint) {
 
 void EmulatedTURNServer::OnPacketReceived(webrtc::EmulatedIpPacket packet) {
   // Copy from EmulatedEndpoint to rtc::AsyncPacketSocket.
-  thread_->PostTask(RTC_FROM_HERE, [this, packet(std::move(packet))]() {
+  thread_->PostTask([this, packet(std::move(packet))]() {
     RTC_DCHECK_RUN_ON(thread_.get());
     auto it = sockets_.find(packet.to);
     if (it != sockets_.end()) {
-      it->second->SignalReadPacket(
-          it->second, reinterpret_cast<const char*>(packet.cdata()),
-          packet.size(), packet.from, packet.arrival_time.ms());
+      it->second->NotifyPacketReceived(
+          rtc::ReceivedPacket(packet.data, packet.from, packet.arrival_time));
     }
   });
 }

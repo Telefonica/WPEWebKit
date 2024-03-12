@@ -27,9 +27,9 @@
 #include "modules/audio_coding/neteq/audio_multi_vector.h"
 #include "modules/audio_coding/neteq/expand_uma_logger.h"
 #include "modules/audio_coding/neteq/packet.h"
+#include "modules/audio_coding/neteq/packet_buffer.h"
 #include "modules/audio_coding/neteq/random_vector.h"
 #include "modules/audio_coding/neteq/statistics_calculator.h"
-#include "rtc_base/constructor_magic.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread_annotations.h"
 
@@ -47,7 +47,6 @@ class Expand;
 class Merge;
 class NackTracker;
 class Normal;
-class PacketBuffer;
 class RedPayloadSplitter;
 class PostDecodeVad;
 class PreemptiveExpand;
@@ -124,6 +123,9 @@ class NetEqImpl : public webrtc::NetEq {
 
   ~NetEqImpl() override;
 
+  NetEqImpl(const NetEqImpl&) = delete;
+  NetEqImpl& operator=(const NetEqImpl&) = delete;
+
   // Inserts a new packet into NetEq. Returns 0 on success, -1 on failure.
   int InsertPacket(const RTPHeader& rtp_header,
                    rtc::ArrayView<const uint8_t> payload) override;
@@ -192,8 +194,6 @@ class NetEqImpl : public webrtc::NetEq {
 
   std::vector<uint16_t> GetNackList(int64_t round_trip_time_ms) const override;
 
-  std::vector<uint32_t> LastDecodedTimestamps() const override;
-
   int SyncBufferSizeMs() const override;
 
   // This accessor method is only intended for testing purposes.
@@ -213,6 +213,12 @@ class NetEqImpl : public webrtc::NetEq {
   // TODO(hlundin): Merge this with InsertPacket above?
   int InsertPacketInternal(const RTPHeader& rtp_header,
                            rtc::ArrayView<const uint8_t> payload)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  // Returns true if the payload type changed (this should be followed by
+  // resetting various state). Returns false if the current payload type is
+  // unknown or equal to `payload_type`.
+  bool MaybeChangePayloadType(uint8_t payload_type)
       RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Delivers 10 ms of audio data. The data is written to `audio_frame`.
@@ -376,6 +382,8 @@ class NetEqImpl : public webrtc::NetEq {
   size_t decoder_frame_length_ RTC_GUARDED_BY(mutex_);
   Mode last_mode_ RTC_GUARDED_BY(mutex_);
   Operation last_operation_ RTC_GUARDED_BY(mutex_);
+  absl::optional<AudioDecoder::SpeechType> last_decoded_type_
+      RTC_GUARDED_BY(mutex_);
   size_t decoded_buffer_length_ RTC_GUARDED_BY(mutex_);
   std::unique_ptr<int16_t[]> decoded_buffer_ RTC_GUARDED_BY(mutex_);
   uint32_t playout_timestamp_ RTC_GUARDED_BY(mutex_);
@@ -393,31 +401,11 @@ class NetEqImpl : public webrtc::NetEq {
       AudioFrame::kVadPassive;
   std::unique_ptr<TickTimer::Stopwatch> generated_noise_stopwatch_
       RTC_GUARDED_BY(mutex_);
-  std::vector<uint32_t> last_decoded_timestamps_ RTC_GUARDED_BY(mutex_);
   std::vector<RtpPacketInfo> last_decoded_packet_infos_ RTC_GUARDED_BY(mutex_);
   ExpandUmaLogger expand_uma_logger_ RTC_GUARDED_BY(mutex_);
   ExpandUmaLogger speech_expand_uma_logger_ RTC_GUARDED_BY(mutex_);
   bool no_time_stretching_ RTC_GUARDED_BY(mutex_);  // Only used for test.
   rtc::BufferT<int16_t> concealment_audio_ RTC_GUARDED_BY(mutex_);
-  // Data members used for adding extra delay to the output of NetEq.
-  // The delay in ms (which is 10 times the number of elements in
-  // output_delay_chain_).
-  const int output_delay_chain_ms_ RTC_GUARDED_BY(mutex_);
-  // Vector of AudioFrames which contains the delayed audio. Accessed as a
-  // circular buffer.
-  std::vector<AudioFrame> output_delay_chain_ RTC_GUARDED_BY(mutex_);
-  // Index into output_delay_chain_.
-  size_t output_delay_chain_ix_ RTC_GUARDED_BY(mutex_) = 0;
-  // Did output_delay_chain_ get populated yet?
-  bool output_delay_chain_empty_ RTC_GUARDED_BY(mutex_) = true;
-  // Contains the sample rate of the AudioFrame last emitted from the delay
-  // chain. If the extra output delay chain is not used, or if no audio has been
-  // emitted yet, the variable is empty.
-  absl::optional<int> delayed_last_output_sample_rate_hz_
-      RTC_GUARDED_BY(mutex_);
-
- private:
-  RTC_DISALLOW_COPY_AND_ASSIGN(NetEqImpl);
 };
 
 }  // namespace webrtc

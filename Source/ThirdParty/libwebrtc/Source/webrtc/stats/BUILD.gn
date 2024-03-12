@@ -16,7 +16,9 @@ rtc_library("rtc_stats") {
   visibility = [ "*" ]
   cflags = []
   sources = [
+    "attribute.cc",
     "rtc_stats.cc",
+    "rtc_stats_member.cc",
     "rtc_stats_report.cc",
     "rtcstats_objects.cc",
   ]
@@ -24,8 +26,10 @@ rtc_library("rtc_stats") {
   deps = [
     "../api:rtc_stats_api",
     "../rtc_base:checks",
-    "../rtc_base:rtc_base_approved",
+    "../rtc_base:macromagic",
+    "../rtc_base:stringutils",
   ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/types:variant" ]
 }
 
 rtc_library("rtc_stats_test_utils") {
@@ -58,14 +62,18 @@ if (rtc_include_tests && !build_with_chromium) {
       "../api:rtc_stats_api",
       "../rtc_base:checks",
       "../rtc_base:gunit_helpers",
-      "../rtc_base:rtc_base_approved",
       "../rtc_base:rtc_json",
       "../test:test_main",
       "../test:test_support",
     ]
 
     if (is_android) {
-      deps += [ "//testing/android/native_test:native_test_native_code" ]
+      use_default_launcher = false
+      deps += [
+        "//build/android/gtest_apk:native_test_instrumentation_test_runner_java",
+        "//testing/android/native_test:native_test_java",
+        "//testing/android/native_test:native_test_support",
+      ]
     }
   }
 }

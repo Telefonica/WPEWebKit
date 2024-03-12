@@ -15,29 +15,27 @@
 #include <vector>
 
 #include "absl/types/optional.h"
-#include "api/call/call_factory_interface.h"
 #include "api/jsep.h"
 #include "api/media_types.h"
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
+#include "api/sctp_transport_interface.h"
 #include "api/task_queue/default_task_queue_factory.h"
-#include "media/base/codec.h"
-#include "media/base/fake_media_engine.h"
-#include "media/base/media_constants.h"
-#include "media/base/media_engine.h"
-#include "media/sctp/sctp_transport_internal.h"
+#include "api/task_queue/task_queue_factory.h"
+#include "api/transport/sctp_transport_factory_interface.h"
 #include "p2p/base/p2p_constants.h"
 #include "p2p/base/port_allocator.h"
 #include "pc/media_session.h"
 #include "pc/peer_connection.h"
-#include "pc/peer_connection_factory.h"
 #include "pc/peer_connection_proxy.h"
 #include "pc/peer_connection_wrapper.h"
+#include "pc/sctp_transport.h"
 #include "pc/sdp_utils.h"
 #include "pc/session_description.h"
+#include "pc/test/enable_fake_media.h"
 #include "pc/test/mock_peer_connection_observers.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/ref_counted_object.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/thread.h"
 #include "test/gmock.h"
@@ -64,8 +62,7 @@ PeerConnectionFactoryDependencies CreatePeerConnectionFactoryDependencies() {
   deps.worker_thread = rtc::Thread::Current();
   deps.signaling_thread = rtc::Thread::Current();
   deps.task_queue_factory = CreateDefaultTaskQueueFactory();
-  deps.media_engine = std::make_unique<cricket::FakeMediaEngine>();
-  deps.call_factory = CreateCallFactory();
+  EnableFakeMedia(deps);
   deps.sctp_factory = std::make_unique<FakeSctpTransportFactory>();
   return deps;
 }
@@ -138,15 +135,15 @@ class PeerConnectionDataChannelBaseTest : public ::testing::Test {
     auto observer = std::make_unique<MockPeerConnectionObserver>();
     RTCConfiguration modified_config = config;
     modified_config.sdp_semantics = sdp_semantics_;
-    auto pc = pc_factory->CreatePeerConnection(modified_config, nullptr,
-                                               nullptr, observer.get());
-    if (!pc) {
+    auto result = pc_factory->CreatePeerConnectionOrError(
+        modified_config, PeerConnectionDependencies(observer.get()));
+    if (!result.ok()) {
       return nullptr;
     }
 
-    observer->SetPeerConnectionInterface(pc.get());
+    observer->SetPeerConnectionInterface(result.value().get());
     auto wrapper = std::make_unique<PeerConnectionWrapperForDataChannelTest>(
-        pc_factory, pc, std::move(observer));
+        pc_factory, result.MoveValue(), std::move(observer));
     wrapper->set_sctp_transport_factory(fake_sctp_transport_factory);
     return wrapper;
   }
@@ -159,7 +156,7 @@ class PeerConnectionDataChannelBaseTest : public ::testing::Test {
     if (!wrapper) {
       return nullptr;
     }
-    EXPECT_TRUE(wrapper->pc()->CreateDataChannel("dc", nullptr));
+    EXPECT_TRUE(wrapper->pc()->CreateDataChannelOrError("dc", nullptr).ok());
     return wrapper;
   }
 
@@ -222,7 +219,7 @@ TEST_P(PeerConnectionDataChannelTest, SctpContentAndTransportNameSetCorrectly) {
   // transport.
   caller->AddAudioTrack("a");
   caller->AddVideoTrack("v");
-  caller->pc()->CreateDataChannel("dc", nullptr);
+  caller->pc()->CreateDataChannelOrError("dc", nullptr);
 
   auto offer = caller->CreateOffer();
   const auto& offer_contents = offer->description()->contents();
@@ -280,15 +277,6 @@ TEST_P(PeerConnectionDataChannelTest,
       answer->description()->GetTransportInfoByName(data_content->name));
 }
 
-TEST_P(PeerConnectionDataChannelTest,
-       CreateDataChannelWithDtlsDisabledSucceeds) {
-  RTCConfiguration config;
-  config.enable_dtls_srtp.emplace(false);
-  auto caller = CreatePeerConnection();
-
-  EXPECT_TRUE(caller->pc()->CreateDataChannel("dc", nullptr));
-}
-
 TEST_P(PeerConnectionDataChannelTest, SctpPortPropagatedFromSdpToTransport) {
   constexpr int kNewSendPort = 9998;
   constexpr int kNewRecvPort = 7775;
@@ -340,7 +328,7 @@ TEST_P(PeerConnectionDataChannelTest, ObsoleteSdpSyntaxIfSet) {
 
 INSTANTIATE_TEST_SUITE_P(PeerConnectionDataChannelTest,
                          PeerConnectionDataChannelTest,
-                         Values(SdpSemantics::kPlanB,
+                         Values(SdpSemantics::kPlanB_DEPRECATED,
                                 SdpSemantics::kUnifiedPlan));
 
 }  // namespace webrtc

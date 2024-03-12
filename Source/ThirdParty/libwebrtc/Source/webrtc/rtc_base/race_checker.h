@@ -14,7 +14,6 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/platform_thread_types.h"
 #include "rtc_base/thread_annotations.h"
-#include <atomic>
 
 namespace rtc {
 
@@ -34,7 +33,7 @@ class RTC_LOCKABLE RaceChecker {
   void Release() const RTC_UNLOCK_FUNCTION();
 
   // Volatile to prevent code being optimized away in Acquire()/Release().
-  mutable std::atomic<int> access_count_ = 0;
+  mutable volatile int access_count_ = 0;
   mutable volatile PlatformThreadRef accessing_thread_;
 };
 
@@ -63,9 +62,14 @@ class RTC_SCOPED_LOCKABLE RaceCheckerScopeDoNothing {
 }  // namespace internal
 }  // namespace rtc
 
-#define RTC_CHECK_RUNS_SERIALIZED(x)               \
-  rtc::internal::RaceCheckerScope race_checker(x); \
-  RTC_CHECK(!race_checker.RaceDetected())
+#define RTC_CHECK_RUNS_SERIALIZED(x) RTC_CHECK_RUNS_SERIALIZED_NEXT(x, __LINE__)
+
+#define RTC_CHECK_RUNS_SERIALIZED_NEXT(x, suffix) \
+  RTC_CHECK_RUNS_SERIALIZED_IMPL(x, suffix)
+
+#define RTC_CHECK_RUNS_SERIALIZED_IMPL(x, suffix)          \
+  rtc::internal::RaceCheckerScope race_checker##suffix(x); \
+  RTC_CHECK(!race_checker##suffix.RaceDetected())
 
 #if RTC_DCHECK_IS_ON
 #define RTC_DCHECK_RUNS_SERIALIZED(x)              \

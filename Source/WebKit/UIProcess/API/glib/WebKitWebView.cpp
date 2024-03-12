@@ -3748,14 +3748,13 @@ void webkit_web_view_set_settings(WebKitWebView* webView, WebKitSettings* settin
 
     if (webView->priv->settings == settings)
         return;
-
     // The "settings" property is set on construction, and in that
     // case webkit_web_view_set_settings() will be called *before*
     // any settings have been assigned. In that case there are no
     // signal handlers to disconnect.
     if (webView->priv->settings)
         webkitWebViewDisconnectSettingsSignalHandlers(webView);
-
+        
     webView->priv->settings = settings;
     webkitWebViewUpdateSettings(webView);
     g_object_notify_by_pspec(G_OBJECT(webView), sObjProperties[PROP_SETTINGS]);

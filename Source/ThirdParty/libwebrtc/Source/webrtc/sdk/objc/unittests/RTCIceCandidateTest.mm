@@ -9,6 +9,7 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <XCTest/XCTest.h>
 
 #include <memory>
 
@@ -18,9 +19,7 @@
 #import "api/peerconnection/RTCIceCandidate.h"
 #import "helpers/NSString+StdString.h"
 
-@interface RTCIceCandidateTest : NSObject
-- (void)testCandidate;
-- (void)testInitFromNativeCandidate;
+@interface RTCIceCandidateTest : XCTestCase
 @end
 
 @implementation RTCIceCandidateTest
@@ -30,9 +29,8 @@
                    "fdff:2642:12a6:fe38:c001:beda:fcf9:51aa "
                    "59052 typ host generation 0";
 
-  RTCIceCandidate *candidate = [[RTCIceCandidate alloc] initWithSdp:sdp
-                                                      sdpMLineIndex:0
-                                                             sdpMid:@"audio"];
+  RTC_OBJC_TYPE(RTCIceCandidate) *candidate =
+      [[RTC_OBJC_TYPE(RTCIceCandidate) alloc] initWithSdp:sdp sdpMLineIndex:0 sdpMid:@"audio"];
 
   std::unique_ptr<webrtc::IceCandidateInterface> nativeCandidate =
       candidate.nativeCandidate;
@@ -48,11 +46,12 @@
   std::string sdp("candidate:4025901590 1 udp 2122265343 "
                   "fdff:2642:12a6:fe38:c001:beda:fcf9:51aa "
                   "59052 typ host generation 0");
-  webrtc::IceCandidateInterface *nativeCandidate =
-      webrtc::CreateIceCandidate("audio", 0, sdp, nullptr);
+  std::unique_ptr<webrtc::IceCandidateInterface> nativeCandidate(
+      webrtc::CreateIceCandidate("audio", 0, sdp, nullptr));
 
-  RTCIceCandidate *iceCandidate =
-      [[RTCIceCandidate alloc] initWithNativeCandidate:nativeCandidate];
+  RTC_OBJC_TYPE(RTCIceCandidate) *iceCandidate =
+      [[RTC_OBJC_TYPE(RTCIceCandidate) alloc] initWithNativeCandidate:nativeCandidate.get()];
+  EXPECT_NE(nativeCandidate.get(), iceCandidate.nativeCandidate.get());
   EXPECT_TRUE([@"audio" isEqualToString:iceCandidate.sdpMid]);
   EXPECT_EQ(0, iceCandidate.sdpMLineIndex);
 
@@ -60,17 +59,3 @@
 }
 
 @end
-
-TEST(RTCIceCandidateTest, CandidateTest) {
-  @autoreleasepool {
-    RTCIceCandidateTest *test = [[RTCIceCandidateTest alloc] init];
-    [test testCandidate];
-  }
-}
-
-TEST(RTCIceCandidateTest, InitFromCandidateTest) {
-  @autoreleasepool {
-    RTCIceCandidateTest *test = [[RTCIceCandidateTest alloc] init];
-    [test testInitFromNativeCandidate];
-  }
-}

@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "api/test/network_emulation_manager.h"
 #include "api/transport/stun.h"
 #include "p2p/base/turn_server.h"
@@ -39,7 +40,7 @@ class EmulatedTURNServer : public EmulatedTURNServerInterface,
                            public webrtc::EmulatedNetworkReceiverInterface {
  public:
   // Create an EmulatedTURNServer.
-  // |thread| is a thread that will be used to run cricket::TurnServer
+  // `thread` is a thread that will be used to run cricket::TurnServer
   // that expects all calls to be made from a single thread.
   EmulatedTURNServer(std::unique_ptr<rtc::Thread> thread,
                      EmulatedEndpoint* client,
@@ -57,10 +58,11 @@ class EmulatedTURNServer : public EmulatedTURNServerInterface,
   EmulatedEndpoint* GetPeerEndpoint() const override { return peer_; }
 
   // cricket::TurnAuthInterface
-  bool GetKey(const std::string& username,
-              const std::string& realm,
+  bool GetKey(absl::string_view username,
+              absl::string_view realm,
               std::string* key) override {
-    return cricket::ComputeStunCredentialHash(username, realm, username, key);
+    return cricket::ComputeStunCredentialHash(
+        std::string(username), std::string(realm), std::string(username), key);
   }
 
   rtc::AsyncPacketSocket* CreatePeerSocket() { return Wrap(peer_); }
@@ -82,7 +84,8 @@ class EmulatedTURNServer : public EmulatedTURNServerInterface,
   EmulatedEndpoint* const client_;
   EmulatedEndpoint* const peer_;
   std::unique_ptr<cricket::TurnServer> turn_server_ RTC_GUARDED_BY(&thread_);
-  std::map<rtc::SocketAddress, rtc::AsyncPacketSocket*> sockets_
+  class AsyncPacketSocketWrapper;
+  std::map<rtc::SocketAddress, AsyncPacketSocketWrapper*> sockets_
       RTC_GUARDED_BY(&thread_);
 
   // Wraps a EmulatedEndpoint in a AsyncPacketSocket to bridge interaction

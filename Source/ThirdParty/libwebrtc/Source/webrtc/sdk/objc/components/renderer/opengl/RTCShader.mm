@@ -10,11 +10,7 @@
 
 #import "RTCShader.h"
 
-#if TARGET_OS_IPHONE
 #import <OpenGLES/ES3/gl.h>
-#else
-#import <OpenGL/gl3.h>
-#endif
 
 #include <algorithm>
 #include <array>
@@ -36,7 +32,7 @@ const char kRTCVertexShaderSource[] =
   "    v_texcoord = texcoord;\n"
   "}\n";
 
-// Compiles a shader of the given |type| with GLSL source |source| and returns
+// Compiles a shader of the given `type` with GLSL source `source` and returns
 // the shader handle or 0 on error.
 GLuint RTCCreateShader(GLenum type, const GLchar *source) {
   GLuint shader = glCreateShader(type);
@@ -125,13 +121,6 @@ GLuint RTCCreateProgramFromFragmentSource(const char fragmentShaderSource[]) {
 }
 
 BOOL RTCCreateVertexBuffer(GLuint *vertexBuffer, GLuint *vertexArray) {
-#if !TARGET_OS_IPHONE
-  glGenVertexArrays(1, vertexArray);
-  if (*vertexArray == 0) {
-    return NO;
-  }
-  glBindVertexArray(*vertexArray);
-#endif
   glGenBuffers(1, vertexBuffer);
   if (*vertexBuffer == 0) {
     glDeleteVertexArrays(1, vertexArray);

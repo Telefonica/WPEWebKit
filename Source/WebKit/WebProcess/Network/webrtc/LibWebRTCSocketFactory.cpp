@@ -166,7 +166,7 @@ void LibWebRTCSocketFactory::forSocketInGroup(const void* socketGroup, const Fun
     }
 }
 
-rtc::AsyncResolverInterface* LibWebRTCSocketFactory::createAsyncResolver()
+webrtc::AsyncDnsResolverInterface* LibWebRTCSocketFactory::createAsyncResolver()
 {
     auto resolver = makeUnique<LibWebRTCResolver>();
     auto* resolverPointer = resolver.get();

@@ -2071,52 +2071,15 @@ set(WebCoreTestSupport_IDL_INCLUDES
 )
 
 set(WebCoreTestSupport_IDL_FILES
-    testing/GCObservation.idl
-    testing/InternalSettings.idl
-    testing/Internals.idl
-    testing/InternalsMapLike.idl
-    testing/InternalsSetLike.idl
-    testing/MallocStatistics.idl
-    testing/MemoryInfo.idl
-    testing/MockCDMFactory.idl
-    testing/MockContentFilterSettings.idl
-    testing/MockPageOverlay.idl
-    testing/ServiceWorkerInternals.idl
-    testing/TypeConversions.idl
 )
 
 list(APPEND WebCoreTestSupport_SOURCES
-    testing/GCObservation.cpp
-    testing/InternalSettings.cpp
-    testing/Internals.cpp
-    testing/InternalsMapLike.cpp
-    testing/InternalsSetLike.cpp
-    testing/MockCDMFactory.cpp
-    testing/MockGamepad.cpp
-    testing/MockGamepadProvider.cpp
-    testing/MockLibWebRTCPeerConnection.cpp
-    testing/MockPageOverlay.cpp
-    testing/MockPageOverlayClient.cpp
-    testing/ServiceWorkerInternals.cpp
-    testing/js/WebCoreTestSupport.cpp
 )
 
 if (ENABLE_WEBXR)
     list(APPEND WebCoreTestSupport_IDL_FILES
-        testing/FakeXRBoundsPoint.idl
-        testing/FakeXRButtonStateInit.idl
-        testing/FakeXRInputSourceInit.idl
-        testing/FakeXRRigidTransformInit.idl
-        testing/FakeXRViewInit.idl
-        testing/WebFakeXRDevice.idl
-        testing/WebFakeXRInputController.idl
-        testing/WebXRTest.idl
-        testing/XRSimulateUserActivationFunction.idl
     )
     list(APPEND WebCoreTestSupport_SOURCES
-        testing/WebFakeXRDevice.cpp
-        testing/WebFakeXRInputController.cpp
-        testing/WebXRTest.cpp
     )
 endif ()
 

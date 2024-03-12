@@ -9,6 +9,7 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <XCTest/XCTest.h>
 
 #include <memory>
 #include <vector>
@@ -18,25 +19,27 @@
 #import "api/peerconnection/RTCConfiguration+Private.h"
 #import "api/peerconnection/RTCConfiguration.h"
 #import "api/peerconnection/RTCCryptoOptions.h"
+#import "api/peerconnection/RTCIceCandidate.h"
 #import "api/peerconnection/RTCIceServer.h"
 #import "api/peerconnection/RTCMediaConstraints.h"
 #import "api/peerconnection/RTCPeerConnection.h"
 #import "api/peerconnection/RTCPeerConnectionFactory+Native.h"
 #import "api/peerconnection/RTCPeerConnectionFactory.h"
+#import "api/peerconnection/RTCSessionDescription.h"
 #import "helpers/NSString+StdString.h"
 
-@interface RTCPeerConnectionTest : NSObject
-- (void)testConfigurationGetter;
-- (void)testWithDependencies;
+@interface RTCPeerConnectionTests : XCTestCase
 @end
 
-@implementation RTCPeerConnectionTest
+@implementation RTCPeerConnectionTests
 
 - (void)testConfigurationGetter {
   NSArray *urlStrings = @[ @"stun:stun1.example.net" ];
-  RTCIceServer *server = [[RTCIceServer alloc] initWithURLStrings:urlStrings];
+  RTC_OBJC_TYPE(RTCIceServer) *server =
+      [[RTC_OBJC_TYPE(RTCIceServer) alloc] initWithURLStrings:urlStrings];
 
-  RTCConfiguration *config = [[RTCConfiguration alloc] init];
+  RTC_OBJC_TYPE(RTCConfiguration) *config = [[RTC_OBJC_TYPE(RTCConfiguration) alloc] init];
+  config.sdpSemantics = RTCSdpSemanticsUnifiedPlan;
   config.iceServers = @[ server ];
   config.iceTransportPolicy = RTCIceTransportPolicyRelay;
   config.bundlePolicy = RTCBundlePolicyMaxBundle;
@@ -54,18 +57,21 @@
       RTCContinualGatheringPolicyGatherContinually;
   config.shouldPruneTurnPorts = YES;
   config.activeResetSrtpParams = YES;
-  config.cryptoOptions = [[RTCCryptoOptions alloc] initWithSrtpEnableGcmCryptoSuites:YES
-                                                 srtpEnableAes128Sha1_32CryptoCipher:YES
-                                              srtpEnableEncryptedRtpHeaderExtensions:NO
-                                                        sframeRequireFrameEncryption:NO];
+  config.cryptoOptions =
+      [[RTC_OBJC_TYPE(RTCCryptoOptions) alloc] initWithSrtpEnableGcmCryptoSuites:YES
+                                             srtpEnableAes128Sha1_32CryptoCipher:YES
+                                          srtpEnableEncryptedRtpHeaderExtensions:NO
+                                                    sframeRequireFrameEncryption:NO];
 
-  RTCMediaConstraints *contraints = [[RTCMediaConstraints alloc] initWithMandatoryConstraints:@{}
-      optionalConstraints:nil];
-  RTCPeerConnectionFactory *factory = [[RTCPeerConnectionFactory alloc] init];
+  RTC_OBJC_TYPE(RTCMediaConstraints) *contraints =
+      [[RTC_OBJC_TYPE(RTCMediaConstraints) alloc] initWithMandatoryConstraints:@{}
+                                                           optionalConstraints:nil];
+  RTC_OBJC_TYPE(RTCPeerConnectionFactory) *factory =
+      [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc] init];
 
-  RTCConfiguration *newConfig;
+  RTC_OBJC_TYPE(RTCConfiguration) * newConfig;
   @autoreleasepool {
-    RTCPeerConnection *peerConnection =
+    RTC_OBJC_TYPE(RTCPeerConnection) *peerConnection =
         [factory peerConnectionWithConfiguration:config constraints:contraints delegate:nil];
     newConfig = peerConnection.configuration;
 
@@ -78,8 +84,8 @@
   }
 
   EXPECT_EQ([config.iceServers count], [newConfig.iceServers count]);
-  RTCIceServer *newServer = newConfig.iceServers[0];
-  RTCIceServer *origServer = config.iceServers[0];
+  RTC_OBJC_TYPE(RTCIceServer) *newServer = newConfig.iceServers[0];
+  RTC_OBJC_TYPE(RTCIceServer) *origServer = config.iceServers[0];
   std::string origUrl = origServer.urlStrings.firstObject.UTF8String;
   std::string url = newServer.urlStrings.firstObject.UTF8String;
   EXPECT_EQ(origUrl, url);
@@ -109,39 +115,90 @@
 
 - (void)testWithDependencies {
   NSArray *urlStrings = @[ @"stun:stun1.example.net" ];
-  RTCIceServer *server = [[RTCIceServer alloc] initWithURLStrings:urlStrings];
+  RTC_OBJC_TYPE(RTCIceServer) *server =
+      [[RTC_OBJC_TYPE(RTCIceServer) alloc] initWithURLStrings:urlStrings];
 
-  RTCConfiguration *config = [[RTCConfiguration alloc] init];
+  RTC_OBJC_TYPE(RTCConfiguration) *config = [[RTC_OBJC_TYPE(RTCConfiguration) alloc] init];
+  config.sdpSemantics = RTCSdpSemanticsUnifiedPlan;
   config.iceServers = @[ server ];
-  RTCMediaConstraints *contraints = [[RTCMediaConstraints alloc] initWithMandatoryConstraints:@{}
-                                                                          optionalConstraints:nil];
-  RTCPeerConnectionFactory *factory = [[RTCPeerConnectionFactory alloc] init];
+  RTC_OBJC_TYPE(RTCMediaConstraints) *contraints =
+      [[RTC_OBJC_TYPE(RTCMediaConstraints) alloc] initWithMandatoryConstraints:@{}
+                                                           optionalConstraints:nil];
+  RTC_OBJC_TYPE(RTCPeerConnectionFactory) *factory =
+      [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc] init];
 
-  RTCConfiguration *newConfig;
   std::unique_ptr<webrtc::PeerConnectionDependencies> pc_dependencies =
       std::make_unique<webrtc::PeerConnectionDependencies>(nullptr);
   @autoreleasepool {
-    RTCPeerConnection *peerConnection =
+    RTC_OBJC_TYPE(RTCPeerConnection) *peerConnection =
         [factory peerConnectionWithDependencies:config
                                     constraints:contraints
                                    dependencies:std::move(pc_dependencies)
                                        delegate:nil];
-    newConfig = peerConnection.configuration;
+    ASSERT_NE(peerConnection, nil);
   }
+}
+
+- (void)testWithInvalidSDP {
+  RTC_OBJC_TYPE(RTCPeerConnectionFactory) *factory =
+      [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc] init];
+
+  RTC_OBJC_TYPE(RTCConfiguration) *config = [[RTC_OBJC_TYPE(RTCConfiguration) alloc] init];
+  config.sdpSemantics = RTCSdpSemanticsUnifiedPlan;
+  RTC_OBJC_TYPE(RTCMediaConstraints) *contraints =
+      [[RTC_OBJC_TYPE(RTCMediaConstraints) alloc] initWithMandatoryConstraints:@{}
+                                                           optionalConstraints:nil];
+  RTC_OBJC_TYPE(RTCPeerConnection) *peerConnection =
+      [factory peerConnectionWithConfiguration:config constraints:contraints delegate:nil];
+
+  dispatch_semaphore_t negotiatedSem = dispatch_semaphore_create(0);
+  [peerConnection setRemoteDescription:[[RTC_OBJC_TYPE(RTCSessionDescription) alloc]
+                                           initWithType:RTCSdpTypeOffer
+                                                    sdp:@"invalid"]
+                     completionHandler:^(NSError *error) {
+                       ASSERT_NE(error, nil);
+                       if (error != nil) {
+                         dispatch_semaphore_signal(negotiatedSem);
+                       }
+                     }];
+
+  NSTimeInterval timeout = 5;
+  ASSERT_EQ(
+      0,
+      dispatch_semaphore_wait(negotiatedSem,
+                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC))));
+  [peerConnection close];
+}
+
+- (void)testWithInvalidIceCandidate {
+  RTC_OBJC_TYPE(RTCPeerConnectionFactory) *factory =
+      [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc] init];
+
+  RTC_OBJC_TYPE(RTCConfiguration) *config = [[RTC_OBJC_TYPE(RTCConfiguration) alloc] init];
+  config.sdpSemantics = RTCSdpSemanticsUnifiedPlan;
+  RTC_OBJC_TYPE(RTCMediaConstraints) *contraints =
+      [[RTC_OBJC_TYPE(RTCMediaConstraints) alloc] initWithMandatoryConstraints:@{}
+                                                           optionalConstraints:nil];
+  RTC_OBJC_TYPE(RTCPeerConnection) *peerConnection =
+      [factory peerConnectionWithConfiguration:config constraints:contraints delegate:nil];
+
+  dispatch_semaphore_t negotiatedSem = dispatch_semaphore_create(0);
+  [peerConnection addIceCandidate:[[RTC_OBJC_TYPE(RTCIceCandidate) alloc] initWithSdp:@"invalid"
+                                                                        sdpMLineIndex:-1
+                                                                               sdpMid:nil]
+                completionHandler:^(NSError *error) {
+                  ASSERT_NE(error, nil);
+                  if (error != nil) {
+                    dispatch_semaphore_signal(negotiatedSem);
+                  }
+                }];
+
+  NSTimeInterval timeout = 5;
+  ASSERT_EQ(
+      0,
+      dispatch_semaphore_wait(negotiatedSem,
+                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC))));
+  [peerConnection close];
 }
 
 @end
-
-TEST(RTCPeerConnectionTest, ConfigurationGetterTest) {
-  @autoreleasepool {
-    RTCPeerConnectionTest *test = [[RTCPeerConnectionTest alloc] init];
-    [test testConfigurationGetter];
-  }
-}
-
-TEST(RTCPeerConnectionTest, TestWithDependencies) {
-  @autoreleasepool {
-    RTCPeerConnectionTest *test = [[RTCPeerConnectionTest alloc] init];
-    [test testWithDependencies];
-  }
-}

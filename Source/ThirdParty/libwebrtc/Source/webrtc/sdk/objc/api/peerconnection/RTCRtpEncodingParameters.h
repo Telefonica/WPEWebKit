@@ -23,8 +23,7 @@ typedef NS_ENUM(NSInteger, RTCPriority) {
 };
 
 RTC_OBJC_EXPORT
-__attribute__((objc_runtime_name("WK_RTCRtpEncodingParameters")))
-@interface RTCRtpEncodingParameters : NSObject
+@interface RTC_OBJC_TYPE (RTCRtpEncodingParameters) : NSObject
 
 /** The idenfifier for the encoding layer. This is used in simulcast. */
 @property(nonatomic, copy, nullable) NSString *rid;
@@ -60,10 +59,17 @@ __attribute__((objc_runtime_name("WK_RTCRtpEncodingParameters")))
 /** The SSRC being used by this encoding. */
 @property(nonatomic, readonly, nullable) NSNumber *ssrc;
 
+/** The relative bitrate priority. */
+@property(nonatomic, assign) double bitratePriority;
+
 /** The relative DiffServ Code Point priority. */
 @property(nonatomic, assign) RTCPriority networkPriority;
 
-- (instancetype)init NS_DESIGNATED_INITIALIZER;
+/** Allow dynamic frame length changes for audio:
+ https://w3c.github.io/webrtc-extensions/#dom-rtcrtpencodingparameters-adaptiveptime */
+@property(nonatomic, assign) BOOL adaptiveAudioPacketTime;
+
+- (instancetype)init;
 
 @end
 

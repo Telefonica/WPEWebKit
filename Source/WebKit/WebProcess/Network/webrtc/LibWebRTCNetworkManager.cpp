@@ -114,13 +114,13 @@ void LibWebRTCNetworkManager::networksChanged(const Vector<RTCNetwork>& networks
     m_receivedNetworkList = true;
 
     WebCore::LibWebRTCProvider::callOnWebRTCNetworkThread([this, protectedThis = Ref { *this }, networks, ipv4, ipv6, forceSignaling] {
-        std::vector<rtc::Network*> networkList(networks.size());
+        std::vector<std::unique_ptr<rtc::Network>> networkList(networks.size());
         for (size_t index = 0; index < networks.size(); ++index)
-            networkList[index] = new rtc::Network(networks[index].value());
+            networkList[index] = std::move(std::make_unique<rtc::Network>(networks[index].value()));
 
         bool hasChanged;
         set_default_local_addresses(ipv4.value, ipv6.value);
-        MergeNetworkList(networkList, &hasChanged);
+        MergeNetworkList(std::move(networkList), &hasChanged);
         if (hasChanged || forceSignaling)
             SignalNetworksChanged();
     });

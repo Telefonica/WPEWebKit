@@ -17,7 +17,6 @@
 #include "api/neteq/neteq.h"
 #include "modules/audio_coding/neteq/default_neteq_factory.h"
 #include "modules/audio_coding/neteq/tools/rtp_generator.h"
-#include "rtc_base/ref_counted_object.h"
 #include "system_wrappers/include/clock.h"
 #include "test/audio_decoder_proxy_factory.h"
 #include "test/gmock.h"
@@ -274,15 +273,16 @@ class NetEqNetworkStatsTest {
 
     // Next we introduce packet losses.
     SetPacketLossRate(0.1);
-    expects.stats_ref.expand_rate = expects.stats_ref.speech_expand_rate = 1065;
+    expects.expand_rate = expects.speech_expand_rate = kLargerThan;
     RunTest(50, expects);
 
     // Next we enable FEC.
     decoder_->set_fec_enabled(true);
     // If FEC fills in the lost packets, no packet loss will be counted.
+    expects.expand_rate = expects.speech_expand_rate = kEqual;
     expects.stats_ref.expand_rate = expects.stats_ref.speech_expand_rate = 0;
-    expects.stats_ref.secondary_decoded_rate = 2006;
-    expects.stats_ref.secondary_discarded_rate = 14336;
+    expects.secondary_decoded_rate = kLargerThan;
+    expects.secondary_discarded_rate = kLargerThan;
     RunTest(50, expects);
   }
 

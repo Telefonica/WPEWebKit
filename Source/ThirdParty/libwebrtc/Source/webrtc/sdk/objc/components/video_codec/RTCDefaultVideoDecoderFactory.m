@@ -14,107 +14,70 @@
 #import "RTCVideoDecoderH264.h"
 #import "api/video_codec/RTCVideoCodecConstants.h"
 #import "api/video_codec/RTCVideoDecoderVP8.h"
-#import "base/RTCVideoCodecInfo.h"
-#if defined(RTC_ENABLE_VP9)
 #import "api/video_codec/RTCVideoDecoderVP9.h"
-#import "RTCVideoDecoderVTBVP9.h"
+#import "base/RTCVideoCodecInfo.h"
+
+#if defined(RTC_DAV1D_IN_INTERNAL_DECODER_FACTORY)
+#import "api/video_codec/RTCVideoDecoderAV1.h"  // nogncheck
 #endif
-#if !defined(RTC_DISABLE_H265)
-#import "RTCH265ProfileLevelId.h"
-#import "RTCVideoDecoderH265.h"
-#endif
 
-#import <VideoToolbox/VideoToolbox.h>
+@implementation RTC_OBJC_TYPE (RTCDefaultVideoDecoderFactory)
 
-@implementation RTCDefaultVideoDecoderFactory {
-  bool _supportsH265;
-  bool _supportsVP9Profile0;
-  bool _supportsVP9Profile2;
-  bool _supportsVP9VTB;
-}
-
-- (id)initWithH265:(bool)supportsH265 vp9Profile0:(bool)supportsVP9Profile0 vp9Profile2:(bool)supportsVP9Profile2 vp9VTB:(bool)supportsVP9VTB
-{
-  self = [super init];
-  if (self) {
-      _supportsH265 = supportsH265;
-      _supportsVP9Profile0 = supportsVP9Profile0;
-      _supportsVP9Profile2 = supportsVP9Profile2;
-      // Use kCMVideoCodecType_VP9 once added to CMFormatDescription.h
-      _supportsVP9VTB = (supportsVP9Profile0 || supportsVP9Profile2) && supportsVP9VTB;
-
-  }
-  return self;
-}
-
-- (NSArray<RTCVideoCodecInfo *> *)supportedCodecs {
-  NSMutableArray<RTCVideoCodecInfo *> *codecs = [[NSMutableArray alloc] initWithCapacity:5];
-
-  [codecs addObject: [[RTCVideoCodecInfo alloc] initWithName:kRTCVideoCodecH264Name parameters: @{
+- (NSArray<RTC_OBJC_TYPE(RTCVideoCodecInfo) *> *)supportedCodecs {
+  NSDictionary<NSString *, NSString *> *constrainedHighParams = @{
     @"profile-level-id" : kRTCMaxSupportedH264ProfileLevelConstrainedHigh,
     @"level-asymmetry-allowed" : @"1",
     @"packetization-mode" : @"1",
-  }]];
-  [codecs addObject: [[RTCVideoCodecInfo alloc] initWithName:kRTCVideoCodecH264Name parameters: @{
+  };
+  RTC_OBJC_TYPE(RTCVideoCodecInfo) *constrainedHighInfo =
+      [[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc] initWithName:kRTCVideoCodecH264Name
+                                                  parameters:constrainedHighParams];
+
+  NSDictionary<NSString *, NSString *> *constrainedBaselineParams = @{
     @"profile-level-id" : kRTCMaxSupportedH264ProfileLevelConstrainedBaseline,
     @"level-asymmetry-allowed" : @"1",
     @"packetization-mode" : @"1",
-  }]];
-  [codecs addObject: [[RTCVideoCodecInfo alloc] initWithName:kRTCVideoCodecH264Name parameters: @{
-    @"profile-level-id" : kRTCMaxSupportedH264ProfileLevelConstrainedHigh,
-    @"level-asymmetry-allowed" : @"1",
-    @"packetization-mode" : @"0",
-  }]];
-  [codecs addObject: [[RTCVideoCodecInfo alloc] initWithName:kRTCVideoCodecH264Name parameters: @{
-    @"profile-level-id" : kRTCMaxSupportedH264ProfileLevelConstrainedBaseline,
-    @"level-asymmetry-allowed" : @"1",
-    @"packetization-mode" : @"0",
-  }]];
+  };
+  RTC_OBJC_TYPE(RTCVideoCodecInfo) *constrainedBaselineInfo =
+      [[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc] initWithName:kRTCVideoCodecH264Name
+                                                  parameters:constrainedBaselineParams];
 
-#if !defined(RTC_DISABLE_H265)
-  if (_supportsH265) {
-    RTCVideoCodecInfo *h265Info = [[RTCVideoCodecInfo alloc] initWithName:kRTCVideoCodecH265Name];
-    [codecs addObject:h265Info];
+  RTC_OBJC_TYPE(RTCVideoCodecInfo) *vp8Info =
+      [[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc] initWithName:kRTCVideoCodecVp8Name];
+
+  NSMutableArray<RTC_OBJC_TYPE(RTCVideoCodecInfo) *> *result = [@[
+    constrainedHighInfo,
+    constrainedBaselineInfo,
+    vp8Info,
+  ] mutableCopy];
+
+  if ([RTC_OBJC_TYPE(RTCVideoDecoderVP9) isSupported]) {
+    [result
+        addObject:[[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc] initWithName:kRTCVideoCodecVp9Name]];
   }
+
+#if defined(RTC_DAV1D_IN_INTERNAL_DECODER_FACTORY)
+  [result addObject:[[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc] initWithName:kRTCVideoCodecAv1Name]];
 #endif
 
-  RTCVideoCodecInfo *vp8Info = [[RTCVideoCodecInfo alloc] initWithName:kRTCVideoCodecVp8Name];
-  [codecs addObject:vp8Info];
-
-#if defined(RTC_ENABLE_VP9)
-  if (_supportsVP9Profile0) {
-    [codecs addObject:[[RTCVideoCodecInfo alloc] initWithName:kRTCVideoCodecVp9Name parameters: @{
-      @"profile-id" : @"0",
-    }]];
-  }
-  if (_supportsVP9Profile2) {
-    [codecs addObject:[[RTCVideoCodecInfo alloc] initWithName:kRTCVideoCodecVp9Name parameters: @{
-      @"profile-id" : @"2",
-    }]];
-  }
-#endif
-
-  return codecs;
+  return result;
 }
 
-- (id<RTCVideoDecoder>)createDecoder:(RTCVideoCodecInfo *)info {
+- (id<RTC_OBJC_TYPE(RTCVideoDecoder)>)createDecoder:(RTC_OBJC_TYPE(RTCVideoCodecInfo) *)info {
   if ([info.name isEqualToString:kRTCVideoCodecH264Name]) {
-    return [[RTCVideoDecoderH264 alloc] init];
+    return [[RTC_OBJC_TYPE(RTCVideoDecoderH264) alloc] init];
   } else if ([info.name isEqualToString:kRTCVideoCodecVp8Name]) {
-    return [RTCVideoDecoderVP8 vp8Decoder];
-#if !defined(RTC_DISABLE_H265)
-  } else if ([info.name isEqualToString:kRTCVideoCodecH265Name]) {
-    return [[RTCVideoDecoderH265 alloc] init];
-#endif
-#if defined(RTC_ENABLE_VP9)
-  } else if ([info.name isEqualToString:kRTCVideoCodecVp9Name]) {
-      if (_supportsVP9VTB) {
-        return [[RTCVideoDecoderVTBVP9 alloc] init];
-      } else {
-        return [RTCVideoDecoderVP9 vp9Decoder];
-      }
-#endif
+    return [RTC_OBJC_TYPE(RTCVideoDecoderVP8) vp8Decoder];
+  } else if ([info.name isEqualToString:kRTCVideoCodecVp9Name] &&
+             [RTC_OBJC_TYPE(RTCVideoDecoderVP9) isSupported]) {
+    return [RTC_OBJC_TYPE(RTCVideoDecoderVP9) vp9Decoder];
   }
+
+#if defined(RTC_DAV1D_IN_INTERNAL_DECODER_FACTORY)
+  if ([info.name isEqualToString:kRTCVideoCodecAv1Name]) {
+    return [RTC_OBJC_TYPE(RTCVideoDecoderAV1) av1Decoder];
+  }
+#endif
 
   return nil;
 }

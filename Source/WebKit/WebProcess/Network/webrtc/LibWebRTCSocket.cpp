@@ -71,7 +71,7 @@ void LibWebRTCSocket::signalAddressReady(const rtc::SocketAddress& address)
 {
     m_localAddress = address;
     m_state = (m_type == Type::ClientTCP) ? STATE_CONNECTED : STATE_BOUND;
-    SignalAddressReady(this, m_localAddress);
+    // SignalAddressReady(this, m_localAddress);
 }
 
 void LibWebRTCSocket::signalReadPacket(const uint8_t* data, size_t size, rtc::SocketAddress&& address, int64_t timestamp)
@@ -80,7 +80,8 @@ void LibWebRTCSocket::signalReadPacket(const uint8_t* data, size_t size, rtc::So
         return;
 
     m_remoteAddress = WTFMove(address);
-    SignalReadPacket(this, reinterpret_cast<const char*>(data), size, m_remoteAddress, timestamp);
+
+    // SignalReadPacket(this, reinterpret_cast<const char*>(data), size, m_remoteAddress, timestamp);
 }
 
 void LibWebRTCSocket::signalSentPacket(int rtcPacketID, int64_t sendTimeMs)
@@ -92,26 +93,26 @@ void LibWebRTCSocket::signalSentPacket(int rtcPacketID, int64_t sendTimeMs)
     SignalSentPacket(this, rtc::SentPacket(rtcPacketID, sendTimeMs));
     if (m_shouldSignalReadyToSend) {
         m_shouldSignalReadyToSend = false;
-        SignalReadyToSend(this);
+        // SignalReadyToSend(this);
     }
 }
 
 void LibWebRTCSocket::signalConnect()
 {
     m_state = STATE_CONNECTED;
-    SignalConnect(this);
+    // SignalConnect(this);
 }
 
 void LibWebRTCSocket::signalClose(int error)
 {
     m_state = STATE_CLOSED;
-    SignalClose(this, error);
+    // SignalClose(this, error);
 }
 
 void LibWebRTCSocket::signalNewConnection(rtc::AsyncPacketSocket* newConnectionSocket)
 {
     ASSERT(m_type == Type::ServerTCP);
-    SignalNewConnection(this, newConnectionSocket);
+    // SignalNewConnection(this, newConnectionSocket);
 }
 
 bool LibWebRTCSocket::willSend(size_t size)

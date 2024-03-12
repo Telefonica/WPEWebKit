@@ -18,8 +18,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 /** Mutable version of RTCI420Buffer */
 RTC_OBJC_EXPORT
-__attribute__((objc_runtime_name("WK_RTCMutableI420Buffer")))
-@interface RTCMutableI420Buffer : RTCI420Buffer<RTCMutableI420Buffer>
+@interface RTC_OBJC_TYPE (RTCMutableI420Buffer) : RTC_OBJC_TYPE(RTCI420Buffer)<RTC_OBJC_TYPE(RTCMutableI420Buffer)>
 @end
 
 NS_ASSUME_NONNULL_END

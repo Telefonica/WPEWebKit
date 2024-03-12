@@ -13,5 +13,6 @@
 
 #include "media/base/media_constants.h"
 
-NSString *const kRTCVideoCodecVp8Name = @"VP8";
-NSString *const kRTCVideoCodecVp9Name = @"VP9";
+NSString *const kRTCVideoCodecVp8Name = @(cricket::kVp8CodecName);
+NSString *const kRTCVideoCodecVp9Name = @(cricket::kVp9CodecName);
+NSString *const kRTCVideoCodecAv1Name = @(cricket::kAv1CodecName);

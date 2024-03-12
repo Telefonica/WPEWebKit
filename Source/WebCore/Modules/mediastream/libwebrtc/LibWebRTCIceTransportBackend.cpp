@@ -113,7 +113,10 @@ void LibWebRTCIceTransportBackendObserver::start()
             return;
         internal->SignalIceTransportStateChanged.connect(this, &LibWebRTCIceTransportBackendObserver::onIceTransportStateChanged);
         internal->SignalGatheringState.connect(this, &LibWebRTCIceTransportBackendObserver::onGatheringStateChanged);
-        internal->SignalCandidatePairChanged.connect(this, &LibWebRTCIceTransportBackendObserver::onSelectedCandidatePairChanged);
+        // internal->SignalCandidatePairChanged.connect(this, &LibWebRTCIceTransportBackendObserver::onSelectedCandidatePairChanged);
+        internal->SetCandidatePairChangeCallback(
+            std::bind(&LibWebRTCIceTransportBackendObserver::onSelectedCandidatePairChanged, this, std::placeholders::_1)
+        );
 
         auto transportState = internal->GetIceTransportState();
         // We start observing a bit late and might miss the checking state. Synthesize it as needed.
@@ -144,7 +147,8 @@ void LibWebRTCIceTransportBackendObserver::stop()
             return;
         internal->SignalIceTransportStateChanged.disconnect(this);
         internal->SignalGatheringState.disconnect(this);
-        internal->SignalCandidatePairChanged.disconnect(this);
+        // internal->SignalCandidatePairChanged.disconnect(this);
+        internal->SetCandidatePairChangeCallback(nullptr);
     });
 }
 
@@ -171,6 +175,7 @@ void LibWebRTCIceTransportBackendObserver::onSelectedCandidatePairChanged(const 
 
 void LibWebRTCIceTransportBackendObserver::processSelectedCandidatePairChanged(const cricket::Candidate& local, const cricket::Candidate& remote)
 {
+
     callOnMainThread([protectedThis = Ref { *this }, localSdp = fromStdString(local.ToString()).isolatedCopy(), remoteSdp = fromStdString(remote.ToString()).isolatedCopy(), localFields = convertIceCandidate(local).isolatedCopy(), remoteFields = convertIceCandidate(remote).isolatedCopy()]() mutable {
         if (!protectedThis->m_client)
             return;

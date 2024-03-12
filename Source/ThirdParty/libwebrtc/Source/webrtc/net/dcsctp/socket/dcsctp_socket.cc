@@ -22,6 +22,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "api/array_view.h"
+#include "api/task_queue/task_queue_base.h"
 #include "net/dcsctp/packet/chunk/abort_chunk.h"
 #include "net/dcsctp/packet/chunk/chunk.h"
 #include "net/dcsctp/packet/chunk/cookie_ack_chunk.h"
@@ -55,12 +56,14 @@
 #include "net/dcsctp/packet/parameter/parameter.h"
 #include "net/dcsctp/packet/parameter/state_cookie_parameter.h"
 #include "net/dcsctp/packet/parameter/supported_extensions_parameter.h"
+#include "net/dcsctp/packet/parameter/zero_checksum_acceptable_chunk_parameter.h"
 #include "net/dcsctp/packet/sctp_packet.h"
 #include "net/dcsctp/packet/tlv_trait.h"
 #include "net/dcsctp/public/dcsctp_message.h"
 #include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/dcsctp_socket.h"
 #include "net/dcsctp/public/packet_observer.h"
+#include "net/dcsctp/public/types.h"
 #include "net/dcsctp/rx/data_tracker.h"
 #include "net/dcsctp/rx/reassembly_queue.h"
 #include "net/dcsctp/socket/callback_deferrer.h"
@@ -79,6 +82,8 @@
 
 namespace dcsctp {
 namespace {
+using ::webrtc::TimeDelta;
+using ::webrtc::Timestamp;
 
 // https://tools.ietf.org/html/rfc4960#section-5.1
 constexpr uint32_t kMinVerificationTag = 1;
@@ -88,8 +93,10 @@ constexpr uint32_t kMaxVerificationTag = std::numeric_limits<uint32_t>::max();
 constexpr uint32_t kMinInitialTsn = 0;
 constexpr uint32_t kMaxInitialTsn = std::numeric_limits<uint32_t>::max();
 
-Capabilities GetCapabilities(const DcSctpOptions& options,
-                             const Parameters& parameters) {
+Capabilities ComputeCapabilities(const DcSctpOptions& options,
+                                 uint16_t peer_nbr_outbound_streams,
+                                 uint16_t peer_nbr_inbound_streams,
+                                 const Parameters& parameters) {
   Capabilities capabilities;
   absl::optional<SupportedExtensionsParameter> supported_extensions =
       parameters.get<SupportedExtensionsParameter>();
@@ -112,6 +119,17 @@ Capabilities GetCapabilities(const DcSctpOptions& options,
       supported_extensions->supports(ReConfigChunk::kType)) {
     capabilities.reconfig = true;
   }
+
+  if (options.enable_zero_checksum &&
+      parameters.get<ZeroChecksumAcceptableChunkParameter>().has_value()) {
+    capabilities.zero_checksum = true;
+  }
+
+  capabilities.negotiated_maximum_incoming_streams = std::min(
+      options.announced_maximum_incoming_streams, peer_nbr_outbound_streams);
+  capabilities.negotiated_maximum_outgoing_streams = std::min(
+      options.announced_maximum_outgoing_streams, peer_nbr_inbound_streams);
+
   return capabilities;
 }
 
@@ -126,6 +144,9 @@ void AddCapabilityParameters(const DcSctpOptions& options,
   if (options.enable_message_interleaving) {
     chunk_types.push_back(IDataChunk::kType);
     chunk_types.push_back(IForwardTsnChunk::kType);
+  }
+  if (options.enable_zero_checksum) {
+    builder.Add(ZeroChecksumAcceptableChunkParameter());
   }
   builder.Add(SupportedExtensionsParameter(std::move(chunk_types)));
 }
@@ -162,38 +183,38 @@ DcSctpSocket::DcSctpSocket(absl::string_view log_prefix,
       packet_observer_(std::move(packet_observer)),
       options_(options),
       callbacks_(callbacks),
-      timer_manager_([this]() { return callbacks_.CreateTimeout(); }),
+      timer_manager_([this](webrtc::TaskQueueBase::DelayPrecision precision) {
+        return callbacks_.CreateTimeout(precision);
+      }),
       t1_init_(timer_manager_.CreateTimer(
           "t1-init",
           absl::bind_front(&DcSctpSocket::OnInitTimerExpiry, this),
-          TimerOptions(options.t1_init_timeout,
+          TimerOptions(options.t1_init_timeout.ToTimeDelta(),
                        TimerBackoffAlgorithm::kExponential,
                        options.max_init_retransmits))),
       t1_cookie_(timer_manager_.CreateTimer(
           "t1-cookie",
           absl::bind_front(&DcSctpSocket::OnCookieTimerExpiry, this),
-          TimerOptions(options.t1_cookie_timeout,
+          TimerOptions(options.t1_cookie_timeout.ToTimeDelta(),
                        TimerBackoffAlgorithm::kExponential,
                        options.max_init_retransmits))),
       t2_shutdown_(timer_manager_.CreateTimer(
           "t2-shutdown",
           absl::bind_front(&DcSctpSocket::OnShutdownTimerExpiry, this),
-          TimerOptions(options.t2_shutdown_timeout,
+          TimerOptions(options.t2_shutdown_timeout.ToTimeDelta(),
                        TimerBackoffAlgorithm::kExponential,
                        options.max_retransmissions))),
       packet_sender_(callbacks_,
                      absl::bind_front(&DcSctpSocket::OnSentPacket, this)),
-      send_queue_(
-          log_prefix_,
-          options_.max_send_buffer_size,
-          [this](StreamID stream_id) {
-            callbacks_.OnBufferedAmountLow(stream_id);
-          },
-          options_.total_buffered_amount_low_threshold,
-          [this]() { callbacks_.OnTotalBufferedAmountLow(); }) {}
+      send_queue_(log_prefix_,
+                  &callbacks_,
+                  options_.max_send_buffer_size,
+                  options_.mtu,
+                  options_.default_stream_priority,
+                  options_.total_buffered_amount_low_threshold) {}
 
 std::string DcSctpSocket::log_prefix() const {
-  return log_prefix_ + "[" + std::string(ToString(state_)) + "] ";
+  return log_prefix_ + "[" + std::string(ToString(state_)) + "] ";
 }
 
 bool DcSctpSocket::IsConsistent() const {
@@ -269,23 +290,20 @@ void DcSctpSocket::SendInit() {
                  connect_params_.initial_tsn, params_builder.Build());
   SctpPacket::Builder b(VerificationTag(0), options_);
   b.Add(init);
-  packet_sender_.Send(b);
-}
-
-void DcSctpSocket::MakeConnectionParameters() {
-  VerificationTag new_verification_tag(
-      callbacks_.GetRandomInt(kMinVerificationTag, kMaxVerificationTag));
-  TSN initial_tsn(callbacks_.GetRandomInt(kMinInitialTsn, kMaxInitialTsn));
-  connect_params_.initial_tsn = initial_tsn;
-  connect_params_.verification_tag = new_verification_tag;
+  // https://www.ietf.org/archive/id/draft-tuexen-tsvwg-sctp-zero-checksum-01.html#section-4.2
+  // "When an end point sends a packet containing an INIT chunk, it MUST include
+  // a correct CRC32c checksum in the packet containing the INIT chunk."
+  packet_sender_.Send(b, /*write_checksum=*/true);
 }
 
 void DcSctpSocket::Connect() {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
 
   if (state_ == State::kClosed) {
-    MakeConnectionParameters();
+    connect_params_.initial_tsn =
+        TSN(callbacks_.GetRandomInt(kMinInitialTsn, kMaxInitialTsn));
+    connect_params_.verification_tag = VerificationTag(
+        callbacks_.GetRandomInt(kMinVerificationTag, kMaxVerificationTag));
     RTC_DLOG(LS_INFO)
         << log_prefix()
         << rtc::StringFormat(
@@ -301,8 +319,29 @@ void DcSctpSocket::Connect() {
   RTC_DCHECK(IsConsistent());
 }
 
+void DcSctpSocket::CreateTransmissionControlBlock(
+    const Capabilities& capabilities,
+    VerificationTag my_verification_tag,
+    TSN my_initial_tsn,
+    VerificationTag peer_verification_tag,
+    TSN peer_initial_tsn,
+    size_t a_rwnd,
+    TieTag tie_tag) {
+  metrics_.uses_message_interleaving = capabilities.message_interleaving;
+  metrics_.uses_zero_checksum = capabilities.zero_checksum;
+  metrics_.negotiated_maximum_incoming_streams =
+      capabilities.negotiated_maximum_incoming_streams;
+  metrics_.negotiated_maximum_outgoing_streams =
+      capabilities.negotiated_maximum_outgoing_streams;
+  tcb_ = std::make_unique<TransmissionControlBlock>(
+      timer_manager_, log_prefix_, options_, capabilities, callbacks_,
+      send_queue_, my_verification_tag, my_initial_tsn, peer_verification_tag,
+      peer_initial_tsn, a_rwnd, tie_tag, packet_sender_,
+      [this]() { return state_ == State::kEstablished; });
+  RTC_DLOG(LS_VERBOSE) << log_prefix() << "Created TCB: " << tcb_->ToString();
+}
+
 void DcSctpSocket::RestoreFromState(const DcSctpSocketHandoverState& state) {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
 
   if (state_ != State::kClosed) {
@@ -320,18 +359,21 @@ void DcSctpSocket::RestoreFromState(const DcSctpSocketHandoverState& state) {
       capabilities.message_interleaving =
           state.capabilities.message_interleaving;
       capabilities.reconfig = state.capabilities.reconfig;
+      capabilities.zero_checksum = state.capabilities.zero_checksum;
+      capabilities.negotiated_maximum_incoming_streams =
+          state.capabilities.negotiated_maximum_incoming_streams;
+      capabilities.negotiated_maximum_outgoing_streams =
+          state.capabilities.negotiated_maximum_outgoing_streams;
 
       send_queue_.RestoreFromState(state);
 
-      tcb_ = std::make_unique<TransmissionControlBlock>(
-          timer_manager_, log_prefix_, options_, capabilities, callbacks_,
-          send_queue_, my_verification_tag, TSN(state.my_initial_tsn),
+      CreateTransmissionControlBlock(
+          capabilities, my_verification_tag, TSN(state.my_initial_tsn),
           VerificationTag(state.peer_verification_tag),
           TSN(state.peer_initial_tsn), static_cast<size_t>(0),
-          TieTag(state.tie_tag), packet_sender_,
-          [this]() { return state_ == State::kEstablished; }, &state);
-      RTC_DLOG(LS_VERBOSE) << log_prefix() << "Created peer TCB from state: "
-                           << tcb_->ToString();
+          TieTag(state.tie_tag));
+
+      tcb_->RestoreFromState(state);
 
       SetState(State::kEstablished, "restored from handover state");
       callbacks_.OnConnected();
@@ -342,7 +384,6 @@ void DcSctpSocket::RestoreFromState(const DcSctpSocketHandoverState& state) {
 }
 
 void DcSctpSocket::Shutdown() {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
 
   if (tcb_ != nullptr) {
@@ -371,7 +412,6 @@ void DcSctpSocket::Shutdown() {
 }
 
 void DcSctpSocket::Close() {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
 
   if (state_ != State::kClosed) {
@@ -417,17 +457,65 @@ void DcSctpSocket::InternalClose(ErrorKind error, absl::string_view message) {
   RTC_DCHECK(IsConsistent());
 }
 
+void DcSctpSocket::SetStreamPriority(StreamID stream_id,
+                                     StreamPriority priority) {
+  send_queue_.SetStreamPriority(stream_id, priority);
+}
+StreamPriority DcSctpSocket::GetStreamPriority(StreamID stream_id) const {
+  return send_queue_.GetStreamPriority(stream_id);
+}
+
 SendStatus DcSctpSocket::Send(DcSctpMessage message,
                               const SendOptions& send_options) {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
+  SendStatus send_status = InternalSend(message, send_options);
+  if (send_status != SendStatus::kSuccess)
+    return send_status;
+  Timestamp now = callbacks_.Now();
+  ++metrics_.tx_messages_count;
+  send_queue_.Add(now, std::move(message), send_options);
+  if (tcb_ != nullptr)
+    tcb_->SendBufferedPackets(now);
+  RTC_DCHECK(IsConsistent());
+  return SendStatus::kSuccess;
+}
 
+std::vector<SendStatus> DcSctpSocket::SendMany(
+    rtc::ArrayView<DcSctpMessage> messages,
+    const SendOptions& send_options) {
+  CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
+  Timestamp now = callbacks_.Now();
+  std::vector<SendStatus> send_statuses;
+  send_statuses.reserve(messages.size());
+  for (DcSctpMessage& message : messages) {
+    SendStatus send_status = InternalSend(message, send_options);
+    send_statuses.push_back(send_status);
+    if (send_status != SendStatus::kSuccess)
+      continue;
+    ++metrics_.tx_messages_count;
+    send_queue_.Add(now, std::move(message), send_options);
+  }
+  if (tcb_ != nullptr)
+    tcb_->SendBufferedPackets(now);
+  RTC_DCHECK(IsConsistent());
+  return send_statuses;
+}
+
+SendStatus DcSctpSocket::InternalSend(const DcSctpMessage& message,
+                                      const SendOptions& send_options) {
+  LifecycleId lifecycle_id = send_options.lifecycle_id;
   if (message.payload().empty()) {
+    if (lifecycle_id.IsSet()) {
+      callbacks_.OnLifecycleEnd(lifecycle_id);
+    }
     callbacks_.OnError(ErrorKind::kProtocolViolation,
                        "Unable to send empty message");
     return SendStatus::kErrorMessageEmpty;
   }
   if (message.payload().size() > options_.max_message_size) {
+    if (lifecycle_id.IsSet()) {
+      callbacks_.OnLifecycleEnd(lifecycle_id);
+    }
     callbacks_.OnError(ErrorKind::kProtocolViolation,
                        "Unable to send too large message");
     return SendStatus::kErrorMessageTooLarge;
@@ -438,30 +526,26 @@ SendStatus DcSctpSocket::Send(DcSctpMessage message,
     // "An endpoint should reject any new data request from its upper layer
     // if it is in the SHUTDOWN-PENDING, SHUTDOWN-SENT, SHUTDOWN-RECEIVED, or
     // SHUTDOWN-ACK-SENT state."
+    if (lifecycle_id.IsSet()) {
+      callbacks_.OnLifecycleEnd(lifecycle_id);
+    }
     callbacks_.OnError(ErrorKind::kWrongSequence,
                        "Unable to send message as the socket is shutting down");
     return SendStatus::kErrorShuttingDown;
   }
   if (send_queue_.IsFull()) {
+    if (lifecycle_id.IsSet()) {
+      callbacks_.OnLifecycleEnd(lifecycle_id);
+    }
     callbacks_.OnError(ErrorKind::kResourceExhaustion,
                        "Unable to send message as the send queue is full");
     return SendStatus::kErrorResourceExhaustion;
   }
-
-  TimeMs now = callbacks_.TimeMillis();
-  ++metrics_.tx_messages_count;
-  send_queue_.Add(now, std::move(message), send_options);
-  if (tcb_ != nullptr) {
-    tcb_->SendBufferedPackets(now);
-  }
-
-  RTC_DCHECK(IsConsistent());
   return SendStatus::kSuccess;
 }
 
 ResetStreamsStatus DcSctpSocket::ResetStreams(
     rtc::ArrayView<const StreamID> outgoing_streams) {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
 
   if (tcb_ == nullptr) {
@@ -476,78 +560,67 @@ ResetStreamsStatus DcSctpSocket::ResetStreams(
   }
 
   tcb_->stream_reset_handler().ResetStreams(outgoing_streams);
-  absl::optional<ReConfigChunk> reconfig =
-      tcb_->stream_reset_handler().MakeStreamResetRequest();
-  if (reconfig.has_value()) {
-    SctpPacket::Builder builder = tcb_->PacketBuilder();
-    builder.Add(*reconfig);
-    packet_sender_.Send(builder);
-  }
+  MaybeSendResetStreamsRequest();
 
   RTC_DCHECK(IsConsistent());
   return ResetStreamsStatus::kPerformed;
 }
 
 SocketState DcSctpSocket::state() const {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   switch (state_) {
     case State::kClosed:
       return SocketState::kClosed;
     case State::kCookieWait:
-      ABSL_FALLTHROUGH_INTENDED;
     case State::kCookieEchoed:
       return SocketState::kConnecting;
     case State::kEstablished:
       return SocketState::kConnected;
     case State::kShutdownPending:
-      ABSL_FALLTHROUGH_INTENDED;
     case State::kShutdownSent:
-      ABSL_FALLTHROUGH_INTENDED;
     case State::kShutdownReceived:
-      ABSL_FALLTHROUGH_INTENDED;
     case State::kShutdownAckSent:
       return SocketState::kShuttingDown;
   }
 }
 
 void DcSctpSocket::SetMaxMessageSize(size_t max_message_size) {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   options_.max_message_size = max_message_size;
 }
 
 size_t DcSctpSocket::buffered_amount(StreamID stream_id) const {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   return send_queue_.buffered_amount(stream_id);
 }
 
 size_t DcSctpSocket::buffered_amount_low_threshold(StreamID stream_id) const {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   return send_queue_.buffered_amount_low_threshold(stream_id);
 }
 
 void DcSctpSocket::SetBufferedAmountLowThreshold(StreamID stream_id,
                                                  size_t bytes) {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   send_queue_.SetBufferedAmountLowThreshold(stream_id, bytes);
 }
 
-Metrics DcSctpSocket::GetMetrics() const {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
-  Metrics metrics = metrics_;
-
-  if (tcb_ != nullptr) {
-    // Update the metrics with some stats that are extracted from
-    // sub-components.
-    metrics.cwnd_bytes = tcb_->cwnd();
-    metrics.srtt_ms = tcb_->current_srtt().value();
-    size_t packet_payload_size =
-        options_.mtu - SctpPacket::kHeaderSize - DataChunk::kHeaderSize;
-    metrics.unack_data_count =
-        tcb_->retransmission_queue().outstanding_items() +
-        (send_queue_.total_buffered_amount() + packet_payload_size - 1) /
-            packet_payload_size;
-    metrics.peer_rwnd_bytes = tcb_->retransmission_queue().rwnd();
+absl::optional<Metrics> DcSctpSocket::GetMetrics() const {
+  if (tcb_ == nullptr) {
+    return absl::nullopt;
   }
+
+  Metrics metrics = metrics_;
+  metrics.cwnd_bytes = tcb_->cwnd();
+  metrics.srtt_ms = tcb_->current_srtt().ms();
+  size_t packet_payload_size =
+      options_.mtu - SctpPacket::kHeaderSize - DataChunk::kHeaderSize;
+  metrics.unack_data_count =
+      tcb_->retransmission_queue().unacked_items() +
+      (send_queue_.total_buffered_amount() + packet_payload_size - 1) /
+          packet_payload_size;
+  metrics.peer_rwnd_bytes = tcb_->retransmission_queue().rwnd();
+  metrics.negotiated_maximum_incoming_streams =
+      tcb_->capabilities().negotiated_maximum_incoming_streams;
+  metrics.negotiated_maximum_incoming_streams =
+      tcb_->capabilities().negotiated_maximum_incoming_streams;
+  metrics.rtx_packets_count = tcb_->retransmission_queue().rtx_packets_count();
+  metrics.rtx_bytes_count = tcb_->retransmission_queue().rtx_bytes_count();
 
   return metrics;
 }
@@ -568,6 +641,16 @@ void DcSctpSocket::MaybeSendShutdownOnPacketReceived(const SctpPacket& packet) {
       t2_shutdown_->set_duration(tcb_->current_rto());
       t2_shutdown_->Start();
     }
+  }
+}
+
+void DcSctpSocket::MaybeSendResetStreamsRequest() {
+  absl::optional<ReConfigChunk> reconfig =
+      tcb_->stream_reset_handler().MakeStreamResetRequest();
+  if (reconfig.has_value()) {
+    SctpPacket::Builder builder = tcb_->PacketBuilder();
+    builder.Add(*reconfig);
+    packet_sender_.Send(builder);
   }
 }
 
@@ -672,7 +755,6 @@ bool DcSctpSocket::ValidatePacket(const SctpPacket& packet) {
 }
 
 void DcSctpSocket::HandleTimeout(TimeoutID timeout_id) {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
 
   timer_manager_.HandleTimeout(timeout_id);
@@ -686,17 +768,15 @@ void DcSctpSocket::HandleTimeout(TimeoutID timeout_id) {
 }
 
 void DcSctpSocket::ReceivePacket(rtc::ArrayView<const uint8_t> data) {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
 
   ++metrics_.rx_packets_count;
 
   if (packet_observer_ != nullptr) {
-    packet_observer_->OnReceivedPacket(callbacks_.TimeMillis(), data);
+    packet_observer_->OnReceivedPacket(TimeMs(callbacks_.Now().ms()), data);
   }
 
-  absl::optional<SctpPacket> packet =
-      SctpPacket::Parse(data, options_.disable_checksum_verification);
+  absl::optional<SctpPacket> packet = SctpPacket::Parse(data, options_);
   if (!packet.has_value()) {
     // https://tools.ietf.org/html/rfc4960#section-6.8
     // "The default procedure for handling invalid SCTP packets is to
@@ -738,7 +818,7 @@ void DcSctpSocket::ReceivePacket(rtc::ArrayView<const uint8_t> data) {
 }
 
 void DcSctpSocket::DebugPrintOutgoing(rtc::ArrayView<const uint8_t> payload) {
-  auto packet = SctpPacket::Parse(payload);
+  auto packet = SctpPacket::Parse(payload, options_);
   RTC_DCHECK(packet.has_value());
 
   for (const auto& desc : packet->descriptors()) {
@@ -799,7 +879,7 @@ bool DcSctpSocket::Dispatch(const CommonHeader& header,
       HandleIData(header, descriptor);
       break;
     case IForwardTsnChunk::kType:
-      HandleForwardTsn(header, descriptor);
+      HandleIForwardTsn(header, descriptor);
       break;
     default:
       return HandleUnrecognizedChunk(descriptor);
@@ -846,7 +926,7 @@ bool DcSctpSocket::HandleUnrecognizedChunk(
   return continue_processing;
 }
 
-absl::optional<DurationMs> DcSctpSocket::OnInitTimerExpiry() {
+TimeDelta DcSctpSocket::OnInitTimerExpiry() {
   RTC_DLOG(LS_VERBOSE) << log_prefix() << "Timer " << t1_init_->name()
                        << " has expired: " << t1_init_->expiration_count()
                        << "/" << t1_init_->options().max_restarts.value_or(-1);
@@ -858,10 +938,10 @@ absl::optional<DurationMs> DcSctpSocket::OnInitTimerExpiry() {
     InternalClose(ErrorKind::kTooManyRetries, "No INIT_ACK received");
   }
   RTC_DCHECK(IsConsistent());
-  return absl::nullopt;
+  return TimeDelta::Zero();
 }
 
-absl::optional<DurationMs> DcSctpSocket::OnCookieTimerExpiry() {
+TimeDelta DcSctpSocket::OnCookieTimerExpiry() {
   // https://tools.ietf.org/html/rfc4960#section-4
   // "If the T1-cookie timer expires, the endpoint MUST retransmit COOKIE
   // ECHO and restart the T1-cookie timer without changing state.  This MUST
@@ -876,16 +956,16 @@ absl::optional<DurationMs> DcSctpSocket::OnCookieTimerExpiry() {
   RTC_DCHECK(state_ == State::kCookieEchoed);
 
   if (t1_cookie_->is_running()) {
-    tcb_->SendBufferedPackets(callbacks_.TimeMillis());
+    tcb_->SendBufferedPackets(callbacks_.Now());
   } else {
     InternalClose(ErrorKind::kTooManyRetries, "No COOKIE_ACK received");
   }
 
   RTC_DCHECK(IsConsistent());
-  return absl::nullopt;
+  return TimeDelta::Zero();
 }
 
-absl::optional<DurationMs> DcSctpSocket::OnShutdownTimerExpiry() {
+TimeDelta DcSctpSocket::OnShutdownTimerExpiry() {
   RTC_DLOG(LS_VERBOSE) << log_prefix() << "Timer " << t2_shutdown_->name()
                        << " has expired: " << t2_shutdown_->expiration_count()
                        << "/"
@@ -905,7 +985,7 @@ absl::optional<DurationMs> DcSctpSocket::OnShutdownTimerExpiry() {
 
     InternalClose(ErrorKind::kTooManyRetries, "No SHUTDOWN_ACK received");
     RTC_DCHECK(IsConsistent());
-    return absl::nullopt;
+    return TimeDelta::Zero();
   }
 
   // https://tools.ietf.org/html/rfc4960#section-9.2
@@ -921,7 +1001,7 @@ void DcSctpSocket::OnSentPacket(rtc::ArrayView<const uint8_t> packet,
   // The packet observer is invoked even if the packet was failed to be sent, to
   // indicate an attempt was made.
   if (packet_observer_ != nullptr) {
-    packet_observer_->OnSentPacket(callbacks_.TimeMillis(), packet);
+    packet_observer_->OnSentPacket(TimeMs(callbacks_.Now().ms()), packet);
   }
 
   if (status == SendPacketStatus::kSuccess) {
@@ -1025,11 +1105,10 @@ void DcSctpSocket::HandleDataCommon(AnyDataChunk& chunk) {
     return;
   }
 
-  tcb_->data_tracker().Observe(tsn, immediate_ack);
-  tcb_->reassembly_queue().MaybeResetStreamsDeferred(
-      tcb_->data_tracker().last_cumulative_acked_tsn());
-  tcb_->reassembly_queue().Add(tsn, std::move(data));
-  DeliverReassembledMessages();
+  if (tcb_->data_tracker().Observe(tsn, immediate_ack)) {
+    tcb_->reassembly_queue().Add(tsn, std::move(data));
+    MaybeDeliverMessages();
+  }
 }
 
 void DcSctpSocket::HandleInit(const CommonHeader& header,
@@ -1077,11 +1156,16 @@ void DcSctpSocket::HandleInit(const CommonHeader& header,
   }
 
   TieTag tie_tag(0);
+  VerificationTag my_verification_tag;
+  TSN my_initial_tsn;
   if (state_ == State::kClosed) {
     RTC_DLOG(LS_VERBOSE) << log_prefix()
                          << "Received Init in closed state (normal)";
 
-    MakeConnectionParameters();
+    my_verification_tag = VerificationTag(
+        callbacks_.GetRandomInt(kMinVerificationTag, kMaxVerificationTag));
+    my_initial_tsn =
+        TSN(callbacks_.GetRandomInt(kMinInitialTsn, kMaxInitialTsn));
   } else if (state_ == State::kCookieWait || state_ == State::kCookieEchoed) {
     // https://tools.ietf.org/html/rfc4960#section-5.2.1
     // "This usually indicates an initialization collision, i.e., each
@@ -1094,6 +1178,8 @@ void DcSctpSocket::HandleInit(const CommonHeader& header,
     // endpoint) was sent."
     RTC_DLOG(LS_VERBOSE) << log_prefix()
                          << "Received Init indicating simultaneous connections";
+    my_verification_tag = connect_params_.verification_tag;
+    my_initial_tsn = connect_params_.initial_tsn;
   } else {
     RTC_DCHECK(tcb_ != nullptr);
     // https://tools.ietf.org/html/rfc4960#section-5.2.2
@@ -1108,17 +1194,16 @@ void DcSctpSocket::HandleInit(const CommonHeader& header,
                          << "Received Init indicating restarted connection";
     // Create a new verification tag - different from the previous one.
     for (int tries = 0; tries < 10; ++tries) {
-      connect_params_.verification_tag = VerificationTag(
+      my_verification_tag = VerificationTag(
           callbacks_.GetRandomInt(kMinVerificationTag, kMaxVerificationTag));
-      if (connect_params_.verification_tag != tcb_->my_verification_tag()) {
+      if (my_verification_tag != tcb_->my_verification_tag()) {
         break;
       }
     }
 
     // Make the initial TSN make a large jump, so that there is no overlap
     // with the old and new association.
-    connect_params_.initial_tsn =
-        TSN(*tcb_->retransmission_queue().next_tsn() + 1000000);
+    my_initial_tsn = TSN(*tcb_->retransmission_queue().next_tsn() + 1000000);
     tie_tag = tcb_->tie_tag();
   }
 
@@ -1128,26 +1213,31 @@ void DcSctpSocket::HandleInit(const CommonHeader& header,
              "Proceeding with connection. my_verification_tag=%08x, "
              "my_initial_tsn=%u, peer_verification_tag=%08x, "
              "peer_initial_tsn=%u",
-             *connect_params_.verification_tag, *connect_params_.initial_tsn,
-             *chunk->initiate_tag(), *chunk->initial_tsn());
+             *my_verification_tag, *my_initial_tsn, *chunk->initiate_tag(),
+             *chunk->initial_tsn());
 
-  Capabilities capabilities = GetCapabilities(options_, chunk->parameters());
+  Capabilities capabilities =
+      ComputeCapabilities(options_, chunk->nbr_outbound_streams(),
+                          chunk->nbr_inbound_streams(), chunk->parameters());
 
   SctpPacket::Builder b(chunk->initiate_tag(), options_);
   Parameters::Builder params_builder =
       Parameters::Builder().Add(StateCookieParameter(
-          StateCookie(chunk->initiate_tag(), chunk->initial_tsn(),
-                      chunk->a_rwnd(), tie_tag, capabilities)
+          StateCookie(chunk->initiate_tag(), my_verification_tag,
+                      chunk->initial_tsn(), my_initial_tsn, chunk->a_rwnd(),
+                      tie_tag, capabilities)
               .Serialize()));
   AddCapabilityParameters(options_, params_builder);
 
-  InitAckChunk init_ack(/*initiate_tag=*/connect_params_.verification_tag,
+  InitAckChunk init_ack(/*initiate_tag=*/my_verification_tag,
                         options_.max_receiver_window_buffer_size,
                         options_.announced_maximum_outgoing_streams,
                         options_.announced_maximum_incoming_streams,
-                        connect_params_.initial_tsn, params_builder.Build());
+                        my_initial_tsn, params_builder.Build());
   b.Add(init_ack);
-  packet_sender_.Send(b);
+  // If the peer has signaled that it supports zero checksum, INIT-ACK can then
+  // have its checksum as zero.
+  packet_sender_.Send(b, /*write_checksum=*/!capabilities.zero_checksum);
 }
 
 void DcSctpSocket::HandleInitAck(
@@ -1180,25 +1270,31 @@ void DcSctpSocket::HandleInitAck(
                   "InitAck chunk doesn't contain a cookie");
     return;
   }
-  Capabilities capabilities = GetCapabilities(options_, chunk->parameters());
+  Capabilities capabilities =
+      ComputeCapabilities(options_, chunk->nbr_outbound_streams(),
+                          chunk->nbr_inbound_streams(), chunk->parameters());
   t1_init_->Stop();
 
-  peer_implementation_ = DeterminePeerImplementation(cookie->data());
+  metrics_.peer_implementation = DeterminePeerImplementation(cookie->data());
 
-  tcb_ = std::make_unique<TransmissionControlBlock>(
-      timer_manager_, log_prefix_, options_, capabilities, callbacks_,
-      send_queue_, connect_params_.verification_tag,
-      connect_params_.initial_tsn, chunk->initiate_tag(), chunk->initial_tsn(),
-      chunk->a_rwnd(), MakeTieTag(callbacks_), packet_sender_,
-      [this]() { return state_ == State::kEstablished; });
-  RTC_DLOG(LS_VERBOSE) << log_prefix()
-                       << "Created peer TCB: " << tcb_->ToString();
+  // If the connection is re-established (peer restarted, but re-used old
+  // connection), make sure that all message identifiers are reset and any
+  // partly sent message is re-sent in full. The same is true when the socket
+  // is closed and later re-opened, which never happens in WebRTC, but is a
+  // valid operation on the SCTP level. Note that in case of handover, the
+  // send queue is already re-configured, and shouldn't be reset.
+  send_queue_.Reset();
+
+  CreateTransmissionControlBlock(capabilities, connect_params_.verification_tag,
+                                 connect_params_.initial_tsn,
+                                 chunk->initiate_tag(), chunk->initial_tsn(),
+                                 chunk->a_rwnd(), MakeTieTag(callbacks_));
 
   SetState(State::kCookieEchoed, "INIT_ACK received");
 
   // The connection isn't fully established just yet.
   tcb_->SetCookieEchoChunk(CookieEchoChunk(cookie->data()));
-  tcb_->SendBufferedPackets(callbacks_.TimeMillis());
+  tcb_->SendBufferedPackets(callbacks_.Now());
   t1_cookie_->Start();
 }
 
@@ -1223,13 +1319,13 @@ void DcSctpSocket::HandleCookieEcho(
       return;
     }
   } else {
-    if (header.verification_tag != connect_params_.verification_tag) {
+    if (header.verification_tag != cookie->my_tag()) {
       callbacks_.OnError(
           ErrorKind::kParseFailed,
           rtc::StringFormat(
               "Received CookieEcho with invalid verification tag: %08x, "
               "expected %08x",
-              *header.verification_tag, *connect_params_.verification_tag));
+              *header.verification_tag, *cookie->my_tag()));
       return;
     }
   }
@@ -1246,14 +1342,18 @@ void DcSctpSocket::HandleCookieEcho(
   }
 
   if (tcb_ == nullptr) {
-    tcb_ = std::make_unique<TransmissionControlBlock>(
-        timer_manager_, log_prefix_, options_, cookie->capabilities(),
-        callbacks_, send_queue_, connect_params_.verification_tag,
-        connect_params_.initial_tsn, cookie->initiate_tag(),
-        cookie->initial_tsn(), cookie->a_rwnd(), MakeTieTag(callbacks_),
-        packet_sender_, [this]() { return state_ == State::kEstablished; });
-    RTC_DLOG(LS_VERBOSE) << log_prefix()
-                         << "Created peer TCB: " << tcb_->ToString();
+    // If the connection is re-established (peer restarted, but re-used old
+    // connection), make sure that all message identifiers are reset and any
+    // partly sent message is re-sent in full. The same is true when the socket
+    // is closed and later re-opened, which never happens in WebRTC, but is a
+    // valid operation on the SCTP level. Note that in case of handover, the
+    // send queue is already re-configured, and shouldn't be reset.
+    send_queue_.Reset();
+
+    CreateTransmissionControlBlock(cookie->capabilities(), cookie->my_tag(),
+                                   cookie->my_initial_tsn(), cookie->peer_tag(),
+                                   cookie->peer_initial_tsn(), cookie->a_rwnd(),
+                                   MakeTieTag(callbacks_));
   }
 
   SctpPacket::Builder b = tcb_->PacketBuilder();
@@ -1263,7 +1363,7 @@ void DcSctpSocket::HandleCookieEcho(
   // "A COOKIE ACK chunk may be bundled with any pending DATA chunks (and/or
   // SACK chunks), but the COOKIE ACK chunk MUST be the first chunk in the
   // packet."
-  tcb_->SendBufferedPackets(b, callbacks_.TimeMillis());
+  tcb_->SendBufferedPackets(b, callbacks_.Now());
 }
 
 bool DcSctpSocket::HandleCookieEchoWithTCB(const CommonHeader& header,
@@ -1273,13 +1373,13 @@ bool DcSctpSocket::HandleCookieEchoWithTCB(const CommonHeader& header,
                        << *tcb_->my_verification_tag()
                        << ", peer_tag=" << *header.verification_tag
                        << ", tcb_tag=" << *tcb_->peer_verification_tag()
-                       << ", cookie_tag=" << *cookie.initiate_tag()
+                       << ", peer_tag=" << *cookie.peer_tag()
                        << ", local_tie_tag=" << *tcb_->tie_tag()
                        << ", peer_tie_tag=" << *cookie.tie_tag();
   // https://tools.ietf.org/html/rfc4960#section-5.2.4
   // "Handle a COOKIE ECHO when a TCB Exists"
   if (header.verification_tag != tcb_->my_verification_tag() &&
-      tcb_->peer_verification_tag() != cookie.initiate_tag() &&
+      tcb_->peer_verification_tag() != cookie.peer_tag() &&
       cookie.tie_tag() == tcb_->tie_tag()) {
     // "A) In this case, the peer may have restarted."
     if (state_ == State::kShutdownAckSent) {
@@ -1287,7 +1387,7 @@ bool DcSctpSocket::HandleCookieEchoWithTCB(const CommonHeader& header,
       // that the peer has restarted ...  it MUST NOT set up a new association
       // but instead resend the SHUTDOWN ACK and send an ERROR chunk with a
       // "Cookie Received While Shutting Down" error cause to its peer."
-      SctpPacket::Builder b(cookie.initiate_tag(), options_);
+      SctpPacket::Builder b(cookie.peer_tag(), options_);
       b.Add(ShutdownAckChunk());
       b.Add(ErrorChunk(Parameters::Builder()
                            .Add(CookieReceivedWhileShuttingDownCause())
@@ -1301,13 +1401,10 @@ bool DcSctpSocket::HandleCookieEchoWithTCB(const CommonHeader& header,
     RTC_DLOG(LS_VERBOSE) << log_prefix()
                          << "Received COOKIE-ECHO indicating a restarted peer";
 
-    // If a message was partly sent, and the peer restarted, resend it in
-    // full by resetting the send queue.
-    send_queue_.Reset();
     tcb_ = nullptr;
     callbacks_.OnConnectionRestarted();
   } else if (header.verification_tag == tcb_->my_verification_tag() &&
-             tcb_->peer_verification_tag() != cookie.initiate_tag()) {
+             tcb_->peer_verification_tag() != cookie.peer_tag()) {
     // TODO(boivie): Handle the peer_tag == 0?
     // "B) In this case, both sides may be attempting to start an
     // association at about the same time, but the peer endpoint started its
@@ -1317,7 +1414,7 @@ bool DcSctpSocket::HandleCookieEchoWithTCB(const CommonHeader& header,
         << "Received COOKIE-ECHO indicating simultaneous connections";
     tcb_ = nullptr;
   } else if (header.verification_tag != tcb_->my_verification_tag() &&
-             tcb_->peer_verification_tag() == cookie.initiate_tag() &&
+             tcb_->peer_verification_tag() == cookie.peer_tag() &&
              cookie.tie_tag() == TieTag(0)) {
     // "C) In this case, the local endpoint's cookie has arrived late.
     // Before it arrived, the local endpoint sent an INIT and received an
@@ -1330,7 +1427,7 @@ bool DcSctpSocket::HandleCookieEchoWithTCB(const CommonHeader& header,
         << "Received COOKIE-ECHO indicating a late COOKIE-ECHO. Discarding";
     return false;
   } else if (header.verification_tag == tcb_->my_verification_tag() &&
-             tcb_->peer_verification_tag() == cookie.initiate_tag()) {
+             tcb_->peer_verification_tag() == cookie.peer_tag()) {
     // "D) When both local and remote tags match, the endpoint should enter
     // the ESTABLISHED state, if it is in the COOKIE-ECHOED state.  It
     // should stop any cookie timer that may be running and send a COOKIE
@@ -1364,16 +1461,14 @@ void DcSctpSocket::HandleCookieAck(
   t1_cookie_->Stop();
   tcb_->ClearCookieEchoChunk();
   SetState(State::kEstablished, "COOKIE_ACK received");
-  tcb_->SendBufferedPackets(callbacks_.TimeMillis());
+  tcb_->SendBufferedPackets(callbacks_.Now());
   callbacks_.OnConnected();
 }
 
-void DcSctpSocket::DeliverReassembledMessages() {
-  if (tcb_->reassembly_queue().HasMessages()) {
-    for (auto& message : tcb_->reassembly_queue().FlushMessages()) {
-      ++metrics_.rx_messages_count;
-      callbacks_.OnMessageReceived(std::move(message));
-    }
+void DcSctpSocket::MaybeDeliverMessages() {
+  for (auto& message : tcb_->reassembly_queue().FlushMessages()) {
+    ++metrics_.rx_messages_count;
+    callbacks_.OnMessageReceived(std::move(message));
   }
 }
 
@@ -1382,11 +1477,22 @@ void DcSctpSocket::HandleSack(const CommonHeader& header,
   absl::optional<SackChunk> chunk = SackChunk::Parse(descriptor.data);
 
   if (ValidateParseSuccess(chunk) && ValidateHasTCB()) {
-    TimeMs now = callbacks_.TimeMillis();
+    Timestamp now = callbacks_.Now();
     SackChunk sack = ChunkValidators::Clean(*std::move(chunk));
 
     if (tcb_->retransmission_queue().HandleSack(now, sack)) {
       MaybeSendShutdownOrAck();
+      // Receiving an ACK may make the socket go into fast recovery mode.
+      // https://datatracker.ietf.org/doc/html/rfc4960#section-7.2.4
+      // "Determine how many of the earliest (i.e., lowest TSN) DATA chunks
+      // marked for retransmission will fit into a single packet, subject to
+      // constraint of the path MTU of the destination transport address to
+      // which the packet is being sent.  Call this value K. Retransmit those K
+      // DATA chunks in a single packet.  When a Fast Retransmit is being
+      // performed, the sender SHOULD ignore the value of cwnd and SHOULD NOT
+      // delay retransmission for this single packet."
+      tcb_->MaybeSendFastRetransmit();
+
       // Receiving an ACK will decrease outstanding bytes (maybe now below
       // cwnd?) or indicate packet loss that may result in sending FORWARD-TSN.
       tcb_->SendBufferedPackets(now);
@@ -1460,9 +1566,22 @@ void DcSctpSocket::HandleError(const CommonHeader& header,
 void DcSctpSocket::HandleReconfig(
     const CommonHeader& header,
     const SctpPacket::ChunkDescriptor& descriptor) {
+  Timestamp now = callbacks_.Now();
   absl::optional<ReConfigChunk> chunk = ReConfigChunk::Parse(descriptor.data);
   if (ValidateParseSuccess(chunk) && ValidateHasTCB()) {
     tcb_->stream_reset_handler().HandleReConfig(*std::move(chunk));
+    // Handling this response may result in outgoing stream resets finishing
+    // (either successfully or with failure). If there still are pending streams
+    // that were waiting for this request to finish, continue resetting them.
+    MaybeSendResetStreamsRequest();
+
+    // If a response was processed, pending to-be-reset streams may now have
+    // become unpaused. Try to send more DATA chunks.
+    tcb_->SendBufferedPackets(now);
+
+    // If it leaves "deferred reset processing", there may be chunks to deliver
+    // that were queued while waiting for the stream to reset.
+    MaybeDeliverMessages();
   }
 }
 
@@ -1601,18 +1720,17 @@ void DcSctpSocket::HandleForwardTsnCommon(const AnyForwardTsnChunk& chunk) {
                        "Received a FORWARD_TSN without announced peer support");
     return;
   }
-  tcb_->data_tracker().HandleForwardTsn(chunk.new_cumulative_tsn());
-  tcb_->reassembly_queue().Handle(chunk);
-  // A forward TSN - for ordered streams - may allow messages to be
-  // delivered.
-  DeliverReassembledMessages();
+  if (tcb_->data_tracker().HandleForwardTsn(chunk.new_cumulative_tsn())) {
+    tcb_->reassembly_queue().HandleForwardTsn(chunk.new_cumulative_tsn(),
+                                              chunk.skipped_streams());
+  }
 
-  // Processing a FORWARD_TSN might result in sending a SACK.
-  tcb_->MaybeSendSack();
+  // A forward TSN - for ordered streams - may allow messages to be delivered.
+  MaybeDeliverMessages();
 }
 
 void DcSctpSocket::MaybeSendShutdownOrAck() {
-  if (tcb_->retransmission_queue().outstanding_bytes() != 0) {
+  if (tcb_->retransmission_queue().unacked_bytes() != 0) {
     return;
   }
 
@@ -1653,7 +1771,6 @@ void DcSctpSocket::SendShutdownAck() {
 }
 
 HandoverReadinessStatus DcSctpSocket::GetHandoverReadiness() const {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   HandoverReadinessStatus status;
   if (state_ != State::kClosed && state_ != State::kEstablished) {
     status.Add(HandoverUnreadinessReason::kWrongConnectionState);
@@ -1667,7 +1784,6 @@ HandoverReadinessStatus DcSctpSocket::GetHandoverReadiness() const {
 
 absl::optional<DcSctpSocketHandoverState>
 DcSctpSocket::GetHandoverStateAndClose() {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
   CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
 
   if (!GetHandoverReadiness().IsReady()) {

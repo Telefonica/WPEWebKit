@@ -13,11 +13,12 @@
 
 #include <stddef.h>
 
+#include <cstdint>
 #include <memory>
 
+#include "api/array_view.h"
 #include "rtc_base/async_packet_socket.h"
 #include "rtc_base/buffer.h"
-#include "rtc_base/constructor_magic.h"
 #include "rtc_base/socket.h"
 #include "rtc_base/socket_address.h"
 
@@ -28,16 +29,18 @@ namespace rtc {
 // buffer them in user space.
 class AsyncTCPSocketBase : public AsyncPacketSocket {
  public:
-  AsyncTCPSocketBase(Socket* socket, bool listen, size_t max_packet_size);
+  AsyncTCPSocketBase(Socket* socket, size_t max_packet_size);
   ~AsyncTCPSocketBase() override;
+
+  AsyncTCPSocketBase(const AsyncTCPSocketBase&) = delete;
+  AsyncTCPSocketBase& operator=(const AsyncTCPSocketBase&) = delete;
 
   // Pure virtual methods to send and recv data.
   int Send(const void* pv,
            size_t cb,
            const rtc::PacketOptions& options) override = 0;
-  virtual void ProcessInput(char* data, size_t* len) = 0;
-  // Signals incoming connection.
-  virtual void HandleIncomingConnection(Socket* socket) = 0;
+  // Must return the number of bytes processed.
+  virtual size_t ProcessInput(rtc::ArrayView<const uint8_t> data) = 0;
 
   SocketAddress GetLocalAddress() const override;
   SocketAddress GetRemoteAddress() const override;
@@ -76,13 +79,10 @@ class AsyncTCPSocketBase : public AsyncPacketSocket {
   void OnCloseEvent(Socket* socket, int error);
 
   std::unique_ptr<Socket> socket_;
-  bool listen_;
   Buffer inbuf_;
   Buffer outbuf_;
   size_t max_insize_;
   size_t max_outsize_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(AsyncTCPSocketBase);
 };
 
 class AsyncTCPSocket : public AsyncTCPSocketBase {
@@ -93,17 +93,32 @@ class AsyncTCPSocket : public AsyncTCPSocketBase {
   static AsyncTCPSocket* Create(Socket* socket,
                                 const SocketAddress& bind_address,
                                 const SocketAddress& remote_address);
-  AsyncTCPSocket(Socket* socket, bool listen);
+  explicit AsyncTCPSocket(Socket* socket);
   ~AsyncTCPSocket() override {}
+
+  AsyncTCPSocket(const AsyncTCPSocket&) = delete;
+  AsyncTCPSocket& operator=(const AsyncTCPSocket&) = delete;
 
   int Send(const void* pv,
            size_t cb,
            const rtc::PacketOptions& options) override;
-  void ProcessInput(char* data, size_t* len) override;
-  void HandleIncomingConnection(Socket* socket) override;
+  size_t ProcessInput(rtc::ArrayView<const uint8_t>) override;
+};
+
+class AsyncTcpListenSocket : public AsyncListenSocket {
+ public:
+  explicit AsyncTcpListenSocket(std::unique_ptr<Socket> socket);
+
+  State GetState() const override;
+  SocketAddress GetLocalAddress() const override;
+
+  virtual void HandleIncomingConnection(rtc::Socket* socket);
 
  private:
-  RTC_DISALLOW_COPY_AND_ASSIGN(AsyncTCPSocket);
+  // Called by the underlying socket
+  void OnReadEvent(Socket* socket);
+
+  std::unique_ptr<Socket> socket_;
 };
 
 }  // namespace rtc

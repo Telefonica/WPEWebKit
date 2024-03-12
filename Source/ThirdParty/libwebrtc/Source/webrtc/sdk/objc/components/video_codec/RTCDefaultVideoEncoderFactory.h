@@ -16,15 +16,15 @@
 NS_ASSUME_NONNULL_BEGIN
 
 /** This encoder factory include support for all codecs bundled with WebRTC. If using custom
- *  codecs, create custom implementations of RTCVideoEncoderFactory and RTCVideoDecoderFactory.
+ *  codecs, create custom implementations of RTCVideoEncoderFactory and
+ *  RTCVideoDecoderFactory.
  */
 RTC_OBJC_EXPORT
-__attribute__((objc_runtime_name("WK_RTCDefaultVideoEncoderFactory")))
-@interface RTCDefaultVideoEncoderFactory : NSObject <RTCVideoEncoderFactory>
+@interface RTC_OBJC_TYPE (RTCDefaultVideoEncoderFactory) : NSObject <RTC_OBJC_TYPE(RTCVideoEncoderFactory)>
 
-- (id)initWithH265:(bool)supportH265 vp9Profile0:(bool)supportsVP9Profile0 vp9Profile2:(bool)supportsVP9Profile2 lowLatencyH264:(bool)useLowLatencyH264;
-+ (NSArray<RTCVideoCodecInfo *> *)supportedCodecs;
-+ (NSArray<RTCVideoCodecInfo *> *)supportedCodecsWithH265:(bool)supportsH265 vp9Profile0:(bool)supportsVP9Profile0 vp9Profile2:(bool)supportsVP9Profile2;
+@property(nonatomic, retain) RTC_OBJC_TYPE(RTCVideoCodecInfo) *preferredCodec;
+
++ (NSArray<RTC_OBJC_TYPE(RTCVideoCodecInfo) *> *)supportedCodecs;
 
 @end
 

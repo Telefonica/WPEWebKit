@@ -10,13 +10,13 @@
 
 #import <Foundation/Foundation.h>
 
+#import "base/RTCMacros.h"
 #import "base/RTCVideoDecoder.h"
 
 #include "api/video_codecs/video_decoder.h"
 #include "media/base/codec.h"
 
-__attribute__((objc_runtime_name("WK_RTCWrappedNativeVideoDecoder")))
-@interface RTCWrappedNativeVideoDecoder : NSObject <RTCVideoDecoder>
+@interface RTC_OBJC_TYPE (RTCWrappedNativeVideoDecoder) : NSObject <RTC_OBJC_TYPE (RTCVideoDecoder)>
 
 - (instancetype)initWithNativeDecoder:(std::unique_ptr<webrtc::VideoDecoder>)decoder;
 

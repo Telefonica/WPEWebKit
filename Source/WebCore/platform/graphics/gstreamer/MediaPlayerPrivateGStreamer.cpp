@@ -94,6 +94,7 @@
 #include <wtf/text/AtomString.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringConcatenateNumbers.h>
+#include <wtf/text/StringView.h>
 #include <wtf/UniStdExtras.h>
 #include <wtf/URL.h>
 #include <wtf/WallTime.h>
@@ -322,6 +323,10 @@ void MediaPlayerPrivateGStreamer::load(const String& urlString)
     URL url { urlString };
     if (url.protocolIsAbout()) {
         loadingFailed(MediaPlayer::NetworkState::FormatError, MediaPlayer::ReadyState::HaveNothing, true);
+        return;
+    }
+
+    if (urlString.endsWith(WTF::StringView::fromLatin1(".mp3"))) {
         return;
     }
 

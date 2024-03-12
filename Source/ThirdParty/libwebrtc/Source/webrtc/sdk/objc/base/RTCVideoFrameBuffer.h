@@ -14,20 +14,27 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@protocol RTCI420Buffer;
+@protocol RTC_OBJC_TYPE
+(RTCI420Buffer);
 
 // RTCVideoFrameBuffer is an ObjectiveC version of webrtc::VideoFrameBuffer.
 RTC_OBJC_EXPORT
-@protocol RTCVideoFrameBuffer <NSObject>
+@protocol RTC_OBJC_TYPE
+(RTCVideoFrameBuffer)<NSObject>
 
-@property(nonatomic, readonly) int width;
+    @property(nonatomic, readonly) int width;
 @property(nonatomic, readonly) int height;
 
-- (id<RTCI420Buffer>)toI420;
+- (id<RTC_OBJC_TYPE(RTCI420Buffer)>)toI420;
 
-#if defined(WEBRTC_WEBKIT_BUILD)
-- (void)close;
-#endif
+@optional
+- (id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)>)cropAndScaleWith:(int)offsetX
+                                                   offsetY:(int)offsetY
+                                                 cropWidth:(int)cropWidth
+                                                cropHeight:(int)cropHeight
+                                                scaleWidth:(int)scaleWidth
+                                               scaleHeight:(int)scaleHeight;
+
 @end
 
 NS_ASSUME_NONNULL_END

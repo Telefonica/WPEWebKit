@@ -12,19 +12,24 @@
 
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
+#include "rtc_base/thread.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface RTCPeerConnectionFactory ()
+@interface RTC_OBJC_TYPE (RTCPeerConnectionFactory)
+()
 
-/**
- * PeerConnectionFactoryInterface created and held by this
- * RTCPeerConnectionFactory object. This is needed to pass to the underlying
- * C++ APIs.
- */
-@property(nonatomic, readonly)
-    rtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface>
-        nativeFactory;
+    /**
+     * PeerConnectionFactoryInterface created and held by this
+     * RTCPeerConnectionFactory object. This is needed to pass to the underlying
+     * C++ APIs.
+     */
+    @property(nonatomic,
+              readonly) rtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> nativeFactory;
+
+@property(nonatomic, readonly) rtc::Thread* signalingThread;
+@property(nonatomic, readonly) rtc::Thread* workerThread;
+@property(nonatomic, readonly) rtc::Thread* networkThread;
 
 @end
 

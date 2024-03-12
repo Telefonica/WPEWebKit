@@ -97,7 +97,7 @@ static NSString *const shaderSource = MTL_STRINGIFY(
       cropHeight:(nonnull int *)cropHeight
            cropX:(nonnull int *)cropX
            cropY:(nonnull int *)cropY
-         ofFrame:(nonnull RTCVideoFrame *)frame {
+         ofFrame:(nonnull RTC_OBJC_TYPE(RTCVideoFrame) *)frame {
   *width = frame.width;
   *height = frame.height;
   *cropWidth = frame.width;
@@ -106,7 +106,7 @@ static NSString *const shaderSource = MTL_STRINGIFY(
   *cropY = 0;
 }
 
-- (BOOL)setupTexturesForFrame:(nonnull RTCVideoFrame *)frame {
+- (BOOL)setupTexturesForFrame:(nonnull RTC_OBJC_TYPE(RTCVideoFrame) *)frame {
   if (![super setupTexturesForFrame:frame]) {
     return NO;
   }
@@ -116,7 +116,14 @@ static NSString *const shaderSource = MTL_STRINGIFY(
     return NO;
   }
 
-  id<RTCI420Buffer> buffer = [frame.buffer toI420];
+  // Chroma size must be >= 1 as per the Apple documentation, so skip ?x1
+  // and 1x? frames.
+  // See: https://bugs.chromium.org/p/webrtc/issues/detail?id=14892
+  if (frame.width < 2 || frame.height < 2) {
+    return NO;
+  }
+
+  id<RTC_OBJC_TYPE(RTCI420Buffer)> buffer = [frame.buffer toI420];
 
   // Luma (y) texture.
   if (!_descriptor || _width != frame.width || _height != frame.height) {

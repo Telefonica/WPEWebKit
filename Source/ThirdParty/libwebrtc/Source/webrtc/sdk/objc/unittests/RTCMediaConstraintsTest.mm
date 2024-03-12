@@ -9,6 +9,7 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <XCTest/XCTest.h>
 
 #include <memory>
 
@@ -18,19 +19,18 @@
 #import "api/peerconnection/RTCMediaConstraints.h"
 #import "helpers/NSString+StdString.h"
 
-@interface RTCMediaConstraintsTest : NSObject
-- (void)testMediaConstraints;
+@interface RTCMediaConstraintsTests : XCTestCase
 @end
 
-@implementation RTCMediaConstraintsTest
+@implementation RTCMediaConstraintsTests
 
 - (void)testMediaConstraints {
   NSDictionary *mandatory = @{@"key1": @"value1", @"key2": @"value2"};
   NSDictionary *optional = @{@"key3": @"value3", @"key4": @"value4"};
 
-  RTCMediaConstraints *constraints = [[RTCMediaConstraints alloc]
-      initWithMandatoryConstraints:mandatory
-               optionalConstraints:optional];
+  RTC_OBJC_TYPE(RTCMediaConstraints) *constraints =
+      [[RTC_OBJC_TYPE(RTCMediaConstraints) alloc] initWithMandatoryConstraints:mandatory
+                                                           optionalConstraints:optional];
   std::unique_ptr<webrtc::MediaConstraints> nativeConstraints =
       [constraints nativeConstraints];
 
@@ -56,10 +56,3 @@
 }
 
 @end
-
-TEST(RTCMediaConstraintsTest, MediaConstraintsTest) {
-  @autoreleasepool {
-    RTCMediaConstraintsTest *test = [[RTCMediaConstraintsTest alloc] init];
-    [test testMediaConstraints];
-  }
-}

@@ -22,13 +22,8 @@ class RtpTransportControllerSendFactory
     : public RtpTransportControllerSendFactoryInterface {
  public:
   std::unique_ptr<RtpTransportControllerSendInterface> Create(
-      const RtpTransportConfig& config,
-      Clock* clock,
-      std::unique_ptr<ProcessThread> process_thread) override {
-    return std::make_unique<RtpTransportControllerSend>(
-        clock, config.event_log, config.network_state_predictor_factory,
-        config.network_controller_factory, config.bitrate_config,
-        std::move(process_thread), config.task_queue_factory, config.trials);
+      const RtpTransportConfig& config) override {
+    return std::make_unique<RtpTransportControllerSend>(config);
   }
 
   virtual ~RtpTransportControllerSendFactory() {}

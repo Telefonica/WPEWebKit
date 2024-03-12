@@ -14,9 +14,8 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <VideoToolbox/VideoToolbox.h>
-#include <string>
 
-#include "sdk/WebKit/VideoProcessingSoftLink.h"
+#include <string>
 
 // Convenience function for creating a dictionary.
 inline CFDictionaryRef CreateCFTypeDictionary(CFTypeRef* keys,
@@ -28,27 +27,22 @@ inline CFDictionaryRef CreateCFTypeDictionary(CFTypeRef* keys,
 }
 
 // Copies characters from a CFStringRef into a std::string.
-std::string CFStringToString(const CFStringRef cf_string);
+std::string CFStringToString(CFStringRef cf_string);
 
 // Convenience function for setting a VT property.
-void SetVTSessionProperty(VTCompressionSessionRef session, VCPCompressionSessionRef vcpSession,CFStringRef key, int32_t value);
+void SetVTSessionProperty(VTSessionRef session, CFStringRef key, int32_t value);
 
 // Convenience function for setting a VT property.
-void SetVTSessionProperty(VTCompressionSessionRef session, VCPCompressionSessionRef vcpSession,
+void SetVTSessionProperty(VTSessionRef session,
                           CFStringRef key,
                           uint32_t value);
 
 // Convenience function for setting a VT property.
-void SetVTSessionProperty(VTCompressionSessionRef session, VCPCompressionSessionRef vcpSession, CFStringRef key, bool value);
+void SetVTSessionProperty(VTSessionRef session, CFStringRef key, bool value);
 
 // Convenience function for setting a VT property.
-void SetVTSessionProperty(VTCompressionSessionRef session, VCPCompressionSessionRef vcpSession,
+void SetVTSessionProperty(VTSessionRef session,
                           CFStringRef key,
                           CFStringRef value);
-
-// Convenience function for setting a VT property.
-void SetVTSessionProperty(VTCompressionSessionRef session, VCPCompressionSessionRef vcpSession,
-                          CFStringRef key,
-                          CFArrayRef value);
 
 #endif  // SDK_OBJC_FRAMEWORK_CLASSES_VIDEOTOOLBOX_HELPERS_H_

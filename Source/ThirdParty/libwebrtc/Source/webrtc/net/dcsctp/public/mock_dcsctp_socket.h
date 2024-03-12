@@ -10,6 +10,8 @@
 #ifndef NET_DCSCTP_PUBLIC_MOCK_DCSCTP_SOCKET_H_
 #define NET_DCSCTP_PUBLIC_MOCK_DCSCTP_SOCKET_H_
 
+#include <vector>
+
 #include "net/dcsctp/public/dcsctp_socket.h"
 #include "test/gmock.h"
 
@@ -41,9 +43,25 @@ class MockDcSctpSocket : public DcSctpSocketInterface {
 
   MOCK_METHOD(void, SetMaxMessageSize, (size_t max_message_size), (override));
 
+  MOCK_METHOD(void,
+              SetStreamPriority,
+              (StreamID stream_id, StreamPriority priority),
+              (override));
+
+  MOCK_METHOD(StreamPriority,
+              GetStreamPriority,
+              (StreamID stream_id),
+              (const, override));
+
   MOCK_METHOD(SendStatus,
               Send,
               (DcSctpMessage message, const SendOptions& send_options),
+              (override));
+
+  MOCK_METHOD(std::vector<SendStatus>,
+              SendMany,
+              (rtc::ArrayView<DcSctpMessage> messages,
+               const SendOptions& send_options),
               (override));
 
   MOCK_METHOD(ResetStreamsStatus,
@@ -63,7 +81,7 @@ class MockDcSctpSocket : public DcSctpSocketInterface {
               (StreamID stream_id, size_t bytes),
               (override));
 
-  MOCK_METHOD(Metrics, GetMetrics, (), (const, override));
+  MOCK_METHOD(absl::optional<Metrics>, GetMetrics, (), (const, override));
 
   MOCK_METHOD(HandoverReadinessStatus,
               GetHandoverReadiness,
@@ -73,8 +91,6 @@ class MockDcSctpSocket : public DcSctpSocketInterface {
               GetHandoverStateAndClose,
               (),
               (override));
-
-  MOCK_METHOD(SctpImplementation, peer_implementation, (), (const));
 };
 
 }  // namespace dcsctp

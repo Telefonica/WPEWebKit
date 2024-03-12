@@ -22,7 +22,7 @@ namespace webrtc {
  */
 class PeerConnectionDelegateAdapter : public PeerConnectionObserver {
  public:
-  PeerConnectionDelegateAdapter(RTCPeerConnection *peerConnection);
+  PeerConnectionDelegateAdapter(RTC_OBJC_TYPE(RTCPeerConnection) * peerConnection);
   ~PeerConnectionDelegateAdapter() override;
 
   void OnSignalingChange(PeerConnectionInterface::SignalingState new_state) override;
@@ -48,6 +48,12 @@ class PeerConnectionDelegateAdapter : public PeerConnectionObserver {
 
   void OnIceCandidate(const IceCandidateInterface *candidate) override;
 
+  void OnIceCandidateError(const std::string &address,
+                           int port,
+                           const std::string &url,
+                           int error_code,
+                           const std::string &error_text) override;
+
   void OnIceCandidatesRemoved(const std::vector<cricket::Candidate> &candidates) override;
 
   void OnIceSelectedCandidatePairChanged(const cricket::CandidatePairChangeEvent &event) override;
@@ -58,15 +64,19 @@ class PeerConnectionDelegateAdapter : public PeerConnectionObserver {
   void OnRemoveTrack(rtc::scoped_refptr<RtpReceiverInterface> receiver) override;
 
  private:
-  __weak RTCPeerConnection *peer_connection_;
+  __weak RTC_OBJC_TYPE(RTCPeerConnection) * peer_connection_;
 };
 
 }  // namespace webrtc
+@protocol RTC_OBJC_TYPE
+(RTCSSLCertificateVerifier);
 
-@interface RTCPeerConnection ()
+@interface RTC_OBJC_TYPE (RTCPeerConnection)
+()
 
-/** The factory used to create this RTCPeerConnection */
-@property(nonatomic, readonly) RTCPeerConnectionFactory *factory;
+    /** The factory used to create this RTCPeerConnection */
+    @property(nonatomic, readonly) RTC_OBJC_TYPE(RTCPeerConnectionFactory) *
+    factory;
 
 /** The native PeerConnectionInterface created during construction. */
 @property(nonatomic, readonly) rtc::scoped_refptr<webrtc::PeerConnectionInterface>
@@ -75,56 +85,58 @@ class PeerConnectionDelegateAdapter : public PeerConnectionObserver {
 /** Initialize an RTCPeerConnection with a configuration, constraints, and
  *  delegate.
  */
-- (instancetype)initWithFactory:(RTCPeerConnectionFactory *)factory
-                  configuration:(RTCConfiguration *)configuration
-                    constraints:(RTCMediaConstraints *)constraints
-                       delegate:(nullable id<RTCPeerConnectionDelegate>)delegate;
+- (nullable instancetype)
+        initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+          configuration:(RTC_OBJC_TYPE(RTCConfiguration) *)configuration
+            constraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
+    certificateVerifier:(nullable id<RTC_OBJC_TYPE(RTCSSLCertificateVerifier)>)certificateVerifier
+               delegate:(nullable id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)>)delegate;
 
 /** Initialize an RTCPeerConnection with a configuration, constraints,
  *  delegate and PeerConnectionDependencies.
  */
-- (instancetype)initWithDependencies:(RTCPeerConnectionFactory *)factory
-                       configuration:(RTCConfiguration *)configuration
-                         constraints:(RTCMediaConstraints *)constraints
-                        dependencies:
-                            (std::unique_ptr<webrtc::PeerConnectionDependencies>)dependencies
-                            delegate:(nullable id<RTCPeerConnectionDelegate>)delegate
+- (nullable instancetype)
+    initWithDependencies:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+           configuration:(RTC_OBJC_TYPE(RTCConfiguration) *)configuration
+             constraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
+            dependencies:(std::unique_ptr<webrtc::PeerConnectionDependencies>)dependencies
+                delegate:(nullable id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)>)delegate
     NS_DESIGNATED_INITIALIZER;
 
 + (webrtc::PeerConnectionInterface::SignalingState)nativeSignalingStateForState:
-        (RTCSignalingState)state;
+    (RTCSignalingState)state;
 
 + (RTCSignalingState)signalingStateForNativeState:
-        (webrtc::PeerConnectionInterface::SignalingState)nativeState;
+    (webrtc::PeerConnectionInterface::SignalingState)nativeState;
 
 + (NSString *)stringForSignalingState:(RTCSignalingState)state;
 
 + (webrtc::PeerConnectionInterface::IceConnectionState)nativeIceConnectionStateForState:
-        (RTCIceConnectionState)state;
+    (RTCIceConnectionState)state;
 
 + (webrtc::PeerConnectionInterface::PeerConnectionState)nativeConnectionStateForState:
-        (RTCPeerConnectionState)state;
+    (RTCPeerConnectionState)state;
 
 + (RTCIceConnectionState)iceConnectionStateForNativeState:
-        (webrtc::PeerConnectionInterface::IceConnectionState)nativeState;
+    (webrtc::PeerConnectionInterface::IceConnectionState)nativeState;
 
 + (RTCPeerConnectionState)connectionStateForNativeState:
-        (webrtc::PeerConnectionInterface::PeerConnectionState)nativeState;
+    (webrtc::PeerConnectionInterface::PeerConnectionState)nativeState;
 
 + (NSString *)stringForIceConnectionState:(RTCIceConnectionState)state;
 
 + (NSString *)stringForConnectionState:(RTCPeerConnectionState)state;
 
 + (webrtc::PeerConnectionInterface::IceGatheringState)nativeIceGatheringStateForState:
-        (RTCIceGatheringState)state;
+    (RTCIceGatheringState)state;
 
 + (RTCIceGatheringState)iceGatheringStateForNativeState:
-        (webrtc::PeerConnectionInterface::IceGatheringState)nativeState;
+    (webrtc::PeerConnectionInterface::IceGatheringState)nativeState;
 
 + (NSString *)stringForIceGatheringState:(RTCIceGatheringState)state;
 
 + (webrtc::PeerConnectionInterface::StatsOutputLevel)nativeStatsOutputLevelForLevel:
-        (RTCStatsOutputLevel)level;
+    (RTCStatsOutputLevel)level;
 
 @end
 

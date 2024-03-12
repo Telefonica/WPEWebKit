@@ -33,6 +33,7 @@
 #include "NetworkRTCProvider.h"
 #include "WebRTCMonitorMessages.h"
 #include <webrtc/rtc_base/third_party/sigslot/sigslot.h>
+#include <webrtc/rtc_base/physical_socket_server.h>
 #include <wtf/Function.h>
 #include <wtf/WeakHashSet.h>
 
@@ -79,7 +80,7 @@ void NetworkManagerWrapper::addListener(NetworkRTCMonitor& monitor)
             return;
 
         RELEASE_LOG(WebRTC, "NetworkManagerWrapper startUpdating");
-        m_manager = makeUniqueWithoutFastMallocCheck<rtc::BasicNetworkManager>();
+        m_manager = makeUniqueWithoutFastMallocCheck<rtc::BasicNetworkManager>(new rtc::PhysicalSocketServer());
         m_manager->SignalNetworksChanged.connect(this, &NetworkManagerWrapper::onNetworksChanged);
         m_manager->StartUpdating();
     });
@@ -105,14 +106,14 @@ void NetworkManagerWrapper::onNetworksChanged()
 {
     RELEASE_LOG(WebRTC, "NetworkManagerWrapper::onNetworksChanged");
 
-    rtc::BasicNetworkManager::NetworkList networks;
+    std::vector<const rtc::Network*> networks;
 
     RTCNetwork::IPAddress ipv4;
     m_manager->GetDefaultLocalAddress(AF_INET, &ipv4.value);
     RTCNetwork::IPAddress ipv6;
     m_manager->GetDefaultLocalAddress(AF_INET6, &ipv6.value);
 
-    m_manager->GetNetworks(&networks);
+    networks = m_manager->GetNetworks();
 
     auto networkList = WTF::map(networks, [](auto& network) { return RTCNetwork { *network }; });
     Vector<RTCNetwork> filteredNetworkList;

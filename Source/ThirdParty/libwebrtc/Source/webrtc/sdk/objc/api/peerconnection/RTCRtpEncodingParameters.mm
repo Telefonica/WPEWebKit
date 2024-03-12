@@ -12,7 +12,7 @@
 
 #import "helpers/NSString+StdString.h"
 
-@implementation RTCRtpEncodingParameters
+@implementation RTC_OBJC_TYPE (RTCRtpEncodingParameters)
 
 @synthesize rid = _rid;
 @synthesize isActive = _isActive;
@@ -22,17 +22,20 @@
 @synthesize numTemporalLayers = _numTemporalLayers;
 @synthesize scaleResolutionDownBy = _scaleResolutionDownBy;
 @synthesize ssrc = _ssrc;
+@synthesize bitratePriority = _bitratePriority;
 @synthesize networkPriority = _networkPriority;
+@synthesize adaptiveAudioPacketTime = _adaptiveAudioPacketTime;
 
 - (instancetype)init {
-  return [super init];
+  webrtc::RtpEncodingParameters nativeParameters;
+  return [self initWithNativeParameters:nativeParameters];
 }
 
 - (instancetype)initWithNativeParameters:
     (const webrtc::RtpEncodingParameters &)nativeParameters {
-  if (self = [self init]) {
+  if (self = [super init]) {
     if (!nativeParameters.rid.empty()) {
-      _rid = [NSString rtcStringForStdString:nativeParameters.rid];
+      _rid = [NSString stringForStdString:nativeParameters.rid];
     }
     _isActive = nativeParameters.active;
     if (nativeParameters.max_bitrate_bps) {
@@ -56,8 +59,10 @@
     if (nativeParameters.ssrc) {
       _ssrc = [NSNumber numberWithUnsignedLong:*nativeParameters.ssrc];
     }
-    _networkPriority =
-        [RTCRtpEncodingParameters priorityFromNativePriority:nativeParameters.network_priority];
+    _bitratePriority = nativeParameters.bitrate_priority;
+    _networkPriority = [RTC_OBJC_TYPE(RTCRtpEncodingParameters)
+        priorityFromNativePriority:nativeParameters.network_priority];
+    _adaptiveAudioPacketTime = nativeParameters.adaptive_ptime;
   }
   return self;
 }
@@ -65,7 +70,7 @@
 - (webrtc::RtpEncodingParameters)nativeParameters {
   webrtc::RtpEncodingParameters parameters;
   if (_rid != nil) {
-    parameters.rid = [NSString rtcStdStringForString:_rid];
+    parameters.rid = [NSString stdStringForString:_rid];
   }
   parameters.active = _isActive;
   if (_maxBitrateBps != nil) {
@@ -87,8 +92,10 @@
   if (_ssrc != nil) {
     parameters.ssrc = absl::optional<uint32_t>(_ssrc.unsignedLongValue);
   }
+  parameters.bitrate_priority = _bitratePriority;
   parameters.network_priority =
-      [RTCRtpEncodingParameters nativePriorityFromPriority:_networkPriority];
+      [RTC_OBJC_TYPE(RTCRtpEncodingParameters) nativePriorityFromPriority:_networkPriority];
+  parameters.adaptive_ptime = _adaptiveAudioPacketTime;
   return parameters;
 }
 

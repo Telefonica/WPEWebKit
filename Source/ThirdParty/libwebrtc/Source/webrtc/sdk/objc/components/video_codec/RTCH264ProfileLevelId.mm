@@ -21,44 +21,31 @@
 
 namespace {
 
-#if !defined(WEBRTC_WEBKIT_BUILD)
 NSString *MaxSupportedProfileLevelConstrainedHigh();
 NSString *MaxSupportedProfileLevelConstrainedBaseline();
-#endif
 
 }  // namespace
 
-NSString *const kRTCVideoCodecH264Name = @"H264";
+NSString *const kRTCVideoCodecH264Name = @(cricket::kH264CodecName);
 NSString *const kRTCLevel31ConstrainedHigh = @"640c1f";
 NSString *const kRTCLevel31ConstrainedBaseline = @"42e01f";
-
-#if defined(WEBRTC_WEBKIT_BUILD)
-NSString *const kRTCMaxSupportedH264ProfileLevelConstrainedHigh =
-    @"640c1f";
-NSString *const kRTCMaxSupportedH264ProfileLevelConstrainedBaseline =
-    @"42e01f";
-#else
 NSString *const kRTCMaxSupportedH264ProfileLevelConstrainedHigh =
     MaxSupportedProfileLevelConstrainedHigh();
 NSString *const kRTCMaxSupportedH264ProfileLevelConstrainedBaseline =
     MaxSupportedProfileLevelConstrainedBaseline();
-#endif
 
 namespace {
 
-#if !defined(WEBRTC_WEBKIT_BUILD)
-
 #if defined(WEBRTC_IOS)
 
-using namespace webrtc::H264;
-
-NSString *MaxSupportedLevelForProfile(Profile profile) {
-  const absl::optional<ProfileLevelId> profileLevelId = [UIDevice maxSupportedH264Profile];
+NSString *MaxSupportedLevelForProfile(webrtc::H264Profile profile) {
+  const absl::optional<webrtc::H264ProfileLevelId> profileLevelId =
+      [UIDevice maxSupportedH264Profile];
   if (profileLevelId && profileLevelId->profile >= profile) {
     const absl::optional<std::string> profileString =
-        ProfileLevelIdToString(ProfileLevelId(profile, profileLevelId->level));
+        H264ProfileLevelIdToString(webrtc::H264ProfileLevelId(profile, profileLevelId->level));
     if (profileString) {
-      return [NSString rtcStringForStdString:*profileString];
+      return [NSString stringForStdString:*profileString];
     }
   }
   return nil;
@@ -67,7 +54,7 @@ NSString *MaxSupportedLevelForProfile(Profile profile) {
 
 NSString *MaxSupportedProfileLevelConstrainedBaseline() {
 #if defined(WEBRTC_IOS)
-  NSString *profile = MaxSupportedLevelForProfile(webrtc::H264::kProfileConstrainedBaseline);
+  NSString *profile = MaxSupportedLevelForProfile(webrtc::H264Profile::kProfileConstrainedBaseline);
   if (profile != nil) {
     return profile;
   }
@@ -77,7 +64,7 @@ NSString *MaxSupportedProfileLevelConstrainedBaseline() {
 
 NSString *MaxSupportedProfileLevelConstrainedHigh() {
 #if defined(WEBRTC_IOS)
-  NSString *profile = MaxSupportedLevelForProfile(webrtc::H264::kProfileConstrainedHigh);
+  NSString *profile = MaxSupportedLevelForProfile(webrtc::H264Profile::kProfileConstrainedHigh);
   if (profile != nil) {
     return profile;
   }
@@ -85,19 +72,18 @@ NSString *MaxSupportedProfileLevelConstrainedHigh() {
   return kRTCLevel31ConstrainedHigh;
 }
 
-#endif
-
 }  // namespace
 
-@interface RTCH264ProfileLevelId ()
+@interface RTC_OBJC_TYPE (RTCH264ProfileLevelId)
+()
 
-@property(nonatomic, assign) RTCH264Profile profile;
+    @property(nonatomic, assign) RTCH264Profile profile;
 @property(nonatomic, assign) RTCH264Level level;
 @property(nonatomic, strong) NSString *hexString;
 
 @end
 
-@implementation RTCH264ProfileLevelId
+@implementation RTC_OBJC_TYPE (RTCH264ProfileLevelId)
 
 @synthesize profile = _profile;
 @synthesize level = _level;

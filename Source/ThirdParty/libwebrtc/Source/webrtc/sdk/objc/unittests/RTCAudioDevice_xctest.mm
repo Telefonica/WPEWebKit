@@ -10,6 +10,8 @@
 
 #import <XCTest/XCTest.h>
 
+#include <stdlib.h>
+
 #include "api/task_queue/default_task_queue_factory.h"
 
 #import "sdk/objc/components/audio/RTCAudioSession+Private.h"
@@ -17,11 +19,12 @@
 #import "sdk/objc/native/src/audio/audio_device_ios.h"
 
 @interface RTCAudioDeviceTests : XCTestCase {
+  bool _testEnabled;
   rtc::scoped_refptr<webrtc::AudioDeviceModule> _audioDeviceModule;
   std::unique_ptr<webrtc::ios_adm::AudioDeviceIOS> _audio_device;
 }
 
-@property(nonatomic) RTCAudioSession *audioSession;
+@property(nonatomic) RTC_OBJC_TYPE(RTCAudioSession) * audioSession;
 
 @end
 
@@ -31,10 +34,20 @@
 
 - (void)setUp {
   [super setUp];
+#if defined(WEBRTC_IOS) && TARGET_OS_SIMULATOR
+  // TODO(peterhanspers): Reenable these tests on simulator.
+  // See bugs.webrtc.org/7812
+  _testEnabled = false;
+  if (::getenv("WEBRTC_IOS_RUN_AUDIO_TESTS") != nullptr) {
+    _testEnabled = true;
+  }
+#else
+  _testEnabled = true;
+#endif
 
   _audioDeviceModule = webrtc::CreateAudioDeviceModule();
-  _audio_device.reset(new webrtc::ios_adm::AudioDeviceIOS());
-  self.audioSession = [RTCAudioSession sharedInstance];
+  _audio_device.reset(new webrtc::ios_adm::AudioDeviceIOS(/*bypass_voice_processing=*/false));
+  self.audioSession = [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
 
   NSError *error = nil;
   [self.audioSession lockForConfiguration];
@@ -61,23 +74,24 @@
 
 // Verifies that the AudioDeviceIOS is_interrupted_ flag is reset correctly
 // after an iOS AVAudioSessionInterruptionTypeEnded notification event.
-// AudioDeviceIOS listens to RTCAudioSession interrupted notifications by:
+// AudioDeviceIOS listens to RTC_OBJC_TYPE(RTCAudioSession) interrupted notifications by:
 // - In AudioDeviceIOS.InitPlayOrRecord registers its audio_session_observer_
-//   callback with RTCAudioSession's delegate list.
-// - When RTCAudioSession receives an iOS audio interrupted notification, it
+//   callback with RTC_OBJC_TYPE(RTCAudioSession)'s delegate list.
+// - When RTC_OBJC_TYPE(RTCAudioSession) receives an iOS audio interrupted notification, it
 //   passes the notification to callbacks in its delegate list which sets
 //   AudioDeviceIOS's is_interrupted_ flag to true.
 // - When AudioDeviceIOS.ShutdownPlayOrRecord is called, its
 //   audio_session_observer_ callback is removed from RTCAudioSessions's
 //   delegate list.
-//   So if RTCAudioSession receives an iOS end audio interruption notification,
-//   AudioDeviceIOS is not notified as its callback is not in RTCAudioSession's
+//   So if RTC_OBJC_TYPE(RTCAudioSession) receives an iOS end audio interruption notification,
+//   AudioDeviceIOS is not notified as its callback is not in RTC_OBJC_TYPE(RTCAudioSession)'s
 //   delegate list. This causes AudioDeviceIOS's is_interrupted_ flag to be in
 //   the wrong (true) state and the audio session will ignore audio changes.
-// As RTCAudioSession keeps its own interrupted state, the fix is to initialize
-// AudioDeviceIOS's is_interrupted_ flag to RTCAudioSession's isInterrupted
+// As RTC_OBJC_TYPE(RTCAudioSession) keeps its own interrupted state, the fix is to initialize
+// AudioDeviceIOS's is_interrupted_ flag to RTC_OBJC_TYPE(RTCAudioSession)'s isInterrupted
 // flag in AudioDeviceIOS.InitPlayOrRecord.
 - (void)testInterruptedAudioSession {
+  XCTSkipIf(!_testEnabled);
   XCTAssertTrue(self.audioSession.isActive);
   XCTAssertTrue([self.audioSession.category isEqual:AVAudioSessionCategoryPlayAndRecord] ||
                 [self.audioSession.category isEqual:AVAudioSessionCategoryPlayback]);

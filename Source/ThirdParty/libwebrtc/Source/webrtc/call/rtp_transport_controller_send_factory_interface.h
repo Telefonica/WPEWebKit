@@ -14,19 +14,16 @@
 
 #include "call/rtp_transport_config.h"
 #include "call/rtp_transport_controller_send_interface.h"
-#include "modules/utility/include/process_thread.h"
 
 namespace webrtc {
 // A factory used for dependency injection on the send side of the transport
 // controller.
 class RtpTransportControllerSendFactoryInterface {
  public:
-  virtual std::unique_ptr<RtpTransportControllerSendInterface> Create(
-      const RtpTransportConfig& config,
-      Clock* clock,
-      std::unique_ptr<ProcessThread> process_thread) = 0;
+  virtual ~RtpTransportControllerSendFactoryInterface() = default;
 
-  virtual ~RtpTransportControllerSendFactoryInterface() {}
+  virtual std::unique_ptr<RtpTransportControllerSendInterface> Create(
+      const RtpTransportConfig& config) = 0;
 };
 }  // namespace webrtc
 #endif  // CALL_RTP_TRANSPORT_CONTROLLER_SEND_FACTORY_INTERFACE_H_

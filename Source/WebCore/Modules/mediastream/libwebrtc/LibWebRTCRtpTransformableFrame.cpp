@@ -85,13 +85,14 @@ RTCEncodedAudioFrameMetadata LibWebRTCRtpTransformableFrame::audioMetadata() con
 
     Vector<uint32_t> cssrcs;
     if (!m_isAudioSenderFrame) {
-        auto* audioFrame = static_cast<webrtc::TransformableAudioFrameInterface*>(m_rtcFrame.get());
-        auto& header = audioFrame->GetHeader();
-        if (header.numCSRCs) {
-            cssrcs.reserveInitialCapacity(header.numCSRCs);
-            for (size_t cptr = 0; cptr < header.numCSRCs; ++cptr)
-                cssrcs.uncheckedAppend(header.arrOfCSRCs[cptr]);
-        }
+        // [ACF]
+        // auto* audioFrame = static_cast<webrtc::TransformableAudioFrameInterface*>(m_rtcFrame.get());
+        // auto& header = audioFrame->GetHeader();
+        // if (header.numCSRCs) {
+        //     cssrcs.reserveInitialCapacity(header.numCSRCs);
+        //     for (size_t cptr = 0; cptr < header.numCSRCs; ++cptr)
+        //         cssrcs.uncheckedAppend(header.arrOfCSRCs[cptr]);
+        // }
     }
     return { m_rtcFrame->GetSsrc(), WTFMove(cssrcs) };
 }
@@ -101,7 +102,7 @@ RTCEncodedVideoFrameMetadata LibWebRTCRtpTransformableFrame::videoMetadata() con
     if (!m_rtcFrame)
         return { };
     auto* videoFrame = static_cast<webrtc::TransformableVideoFrameInterface*>(m_rtcFrame.get());
-    auto& metadata = videoFrame->GetMetadata();
+    auto metadata = videoFrame->Metadata();
 
     std::optional<int64_t> frameId;
     if (metadata.GetFrameId())
@@ -111,7 +112,7 @@ RTCEncodedVideoFrameMetadata LibWebRTCRtpTransformableFrame::videoMetadata() con
     for (auto value : metadata.GetFrameDependencies())
         dependencies.append(value);
 
-    return { frameId, WTFMove(dependencies), metadata.GetWidth(), metadata.GetHeight(), metadata.GetSpatialIndex(), metadata.GetTemporalIndex(), m_rtcFrame->GetSsrc() };
+    return RTCEncodedVideoFrameMetadata { frameId, WTFMove(dependencies), metadata.GetWidth(), metadata.GetHeight(), metadata.GetSpatialIndex(), metadata.GetTemporalIndex(), m_rtcFrame->GetSsrc() };
 }
 
 } // namespace WebCore

@@ -13,27 +13,19 @@
 
 #import <CoreVideo/CoreVideo.h>
 
-#include "common_video/include/video_frame_buffer.h"
-#include "rtc_base/synchronization/mutex.h"
+#import "base/RTCMacros.h"
 
-@protocol RTCVideoFrameBuffer;
+#include "common_video/include/video_frame_buffer.h"
+
+@protocol RTC_OBJC_TYPE
+(RTCVideoFrameBuffer);
 
 namespace webrtc {
 
-typedef CVPixelBufferRef (*GetBufferCallback)(void*);
-typedef void (*ReleaseBufferCallback)(void*);
-
 class ObjCFrameBuffer : public VideoFrameBuffer {
  public:
-  explicit ObjCFrameBuffer(id<RTCVideoFrameBuffer>);
+  explicit ObjCFrameBuffer(id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)>);
   ~ObjCFrameBuffer() override;
-
-  struct BufferProvider {
-    void *pointer { nullptr };
-    GetBufferCallback getBuffer { nullptr };
-    ReleaseBufferCallback releaseBuffer { nullptr };
-  };
-  ObjCFrameBuffer(BufferProvider, int width, int height);
 
   Type type() const override;
 
@@ -41,19 +33,22 @@ class ObjCFrameBuffer : public VideoFrameBuffer {
   int height() const override;
 
   rtc::scoped_refptr<I420BufferInterface> ToI420() override;
+  rtc::scoped_refptr<VideoFrameBuffer> CropAndScale(int offset_x,
+                                                    int offset_y,
+                                                    int crop_width,
+                                                    int crop_height,
+                                                    int scaled_width,
+                                                    int scaled_height) override;
 
-  id<RTCVideoFrameBuffer> wrapped_frame_buffer() const;
-  void* frame_buffer_provider() { return frame_buffer_provider_.pointer; }
+  id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)> wrapped_frame_buffer() const;
 
  private:
-  id<RTCVideoFrameBuffer> frame_buffer_;
-  BufferProvider frame_buffer_provider_;
+  id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)> frame_buffer_;
   int width_;
   int height_;
-  mutable webrtc::Mutex mutex_;
 };
 
-id<RTCVideoFrameBuffer> ToObjCVideoFrameBuffer(
+id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)> ToObjCVideoFrameBuffer(
     const rtc::scoped_refptr<VideoFrameBuffer>& buffer);
 
 }  // namespace webrtc

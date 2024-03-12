@@ -367,13 +367,13 @@ static void webKitWebAudioSrcRenderAndPushFrames(const GRefPtr<GstElement>& elem
         GST_BUFFER_FLAG_SET(buffer.get(), GST_BUFFER_FLAG_GAP);
 
     // Leak the buffer ref, because gst_app_src_push_buffer steals it.
-    GstFlowReturn ret = gst_app_src_push_buffer(GST_APP_SRC(priv->source.get()), buffer.leakRef());
-    if (ret != GST_FLOW_OK) {
-        // FLUSHING and EOS are not errors.
-        if (ret < GST_FLOW_EOS || ret == GST_FLOW_NOT_LINKED)
-            GST_ELEMENT_ERROR(src, CORE, PAD, ("Internal WebAudioSrc error"), ("Failed to push buffer on %s flow: %s", GST_OBJECT_NAME(priv->source.get()), gst_flow_get_name(ret)));
-        gst_task_stop(priv->task.get());
-    }
+    // GstFlowReturn ret = gst_app_src_push_buffer(GST_APP_SRC(priv->source.get()), buffer.leakRef());
+    // if (ret != GST_FLOW_OK) {
+    //     // FLUSHING and EOS are not errors.
+    //     if (ret < GST_FLOW_EOS || ret == GST_FLOW_NOT_LINKED)
+    //         GST_ELEMENT_ERROR(src, CORE, PAD, ("Internal WebAudioSrc error"), ("Failed to push buffer on %s flow: %s", GST_OBJECT_NAME(priv->source.get()), gst_flow_get_name(ret)));
+    //     gst_task_stop(priv->task.get());
+    // }
 }
 
 static void webKitWebAudioSrcRenderIteration(WebKitWebAudioSrc* src)

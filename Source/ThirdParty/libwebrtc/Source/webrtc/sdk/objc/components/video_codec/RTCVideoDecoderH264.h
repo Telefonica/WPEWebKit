@@ -14,9 +14,5 @@
 #import "RTCVideoDecoder.h"
 
 RTC_OBJC_EXPORT
-__attribute__((objc_runtime_name("WK_RTCVideoDecoderH264")))
-@interface RTCVideoDecoderH264 : NSObject <RTCVideoDecoder>
-- (NSInteger)decodeData:(const uint8_t *)data
-    size:(size_t)size
-    timeStamp:(uint32_t)timeStamp;
+@interface RTC_OBJC_TYPE (RTCVideoDecoderH264) : NSObject <RTC_OBJC_TYPE(RTCVideoDecoder)>
 @end

@@ -47,9 +47,14 @@ LibWebRTCSocketClient::LibWebRTCSocketClient(WebCore::LibWebRTCSocketIdentifier 
 {
     ASSERT(m_socket);
 
-    m_socket->SignalReadPacket.connect(this, &LibWebRTCSocketClient::signalReadPacket);
+    m_socket->RegisterReceivedPacketCallback([this](rtc::AsyncPacketSocket* packetSocket, const rtc::ReceivedPacket& packet)
+    {
+        signalReadPacket(packetSocket, packet.payload().data(), packet.payload().size(), packet.source_address(), packet.arrival_time()->us());
+    });
+
     m_socket->SignalSentPacket.connect(this, &LibWebRTCSocketClient::signalSentPacket);
-    m_socket->SignalClose.connect(this, &LibWebRTCSocketClient::signalClose);
+    // ACF: ??
+    // m_socket->SignalClose.connect(this, &LibWebRTCSocketClient::signalClose);
 
     switch (type) {
     case Type::ServerConnectionTCP:
@@ -60,7 +65,7 @@ LibWebRTCSocketClient::LibWebRTCSocketClient(WebCore::LibWebRTCSocketIdentifier 
         return;
     case Type::ServerTCP:
         m_socket->SignalConnect.connect(this, &LibWebRTCSocketClient::signalConnect);
-        m_socket->SignalNewConnection.connect(this, &LibWebRTCSocketClient::signalNewConnection);
+        // m_socket->SignalNewConnection.connect(this, &LibWebRTCSocketClient::signalNewConnection);
         signalAddressReady();
         return;
     case Type::UDP:

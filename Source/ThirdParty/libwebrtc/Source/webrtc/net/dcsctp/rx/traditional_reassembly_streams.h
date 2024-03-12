@@ -29,10 +29,8 @@ namespace dcsctp {
 // RFC4960 is to be followed.
 class TraditionalReassemblyStreams : public ReassemblyStreams {
  public:
-  TraditionalReassemblyStreams(
-      absl::string_view log_prefix,
-      OnAssembledMessage on_assembled_message,
-      const DcSctpSocketHandoverState* handover_state = nullptr);
+  TraditionalReassemblyStreams(absl::string_view log_prefix,
+                               OnAssembledMessage on_assembled_message);
 
   int Add(UnwrappedTSN tsn, Data data) override;
 
@@ -45,6 +43,7 @@ class TraditionalReassemblyStreams : public ReassemblyStreams {
 
   HandoverReadinessStatus GetHandoverReadiness() const override;
   void AddHandoverState(DcSctpSocketHandoverState& state) override;
+  void RestoreFromState(const DcSctpSocketHandoverState& state) override;
 
  private:
   using ChunkMap = std::map<UnwrappedTSN, Data>;
@@ -55,8 +54,8 @@ class TraditionalReassemblyStreams : public ReassemblyStreams {
     explicit StreamBase(TraditionalReassemblyStreams* parent)
         : parent_(*parent) {}
 
-    size_t AssembleMessage(const ChunkMap::iterator start,
-                           const ChunkMap::iterator end);
+    size_t AssembleMessage(ChunkMap::iterator start, ChunkMap::iterator end);
+    size_t AssembleMessage(UnwrappedTSN tsn, Data data);
     TraditionalReassemblyStreams& parent_;
   };
 
@@ -103,13 +102,18 @@ class TraditionalReassemblyStreams : public ReassemblyStreams {
     // Returns the number of bytes assembled if a message was assembled.
     size_t TryToAssembleMessage();
     size_t TryToAssembleMessages();
+    // Same as above but when inserting the first complete message avoid
+    // insertion into the map.
+    size_t TryToAssembleMessagesFastpath(UnwrappedSSN ssn,
+                                         UnwrappedTSN tsn,
+                                         Data data);
     // This must be an ordered container to be able to iterate in SSN order.
     std::map<UnwrappedSSN, ChunkMap> chunks_by_ssn_;
     UnwrappedSSN::Unwrapper ssn_unwrapper_;
     UnwrappedSSN next_ssn_;
   };
 
-  const std::string log_prefix_;
+  const absl::string_view log_prefix_;
 
   // Callback for when a message has been assembled.
   const OnAssembledMessage on_assembled_message_;

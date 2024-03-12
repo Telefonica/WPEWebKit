@@ -40,18 +40,33 @@
 #include <WebCore/Page.h>
 #include <WebCore/RegistrableDomain.h>
 #include <WebCore/Settings.h>
-#include <webrtc/api/async_resolver_factory.h>
+#include <webrtc/api/async_dns_resolver.h>
 #include <webrtc/pc/peer_connection_factory.h>
 
 namespace WebKit {
 using namespace WebCore;
 
-class AsyncResolverFactory : public webrtc::AsyncResolverFactory {
+class AsyncResolverFactory : public webrtc::AsyncDnsResolverFactoryInterface {
     WTF_MAKE_FAST_ALLOCATED;
 private:
-    rtc::AsyncResolverInterface* Create() final
+  std::unique_ptr<webrtc::AsyncDnsResolverInterface> CreateAndResolve(
+      const rtc::SocketAddress& addr,
+      absl::AnyInvocable<void()> callback)
     {
-        return WebProcess::singleton().libWebRTCNetwork().socketFactory().createAsyncResolver();
+        return Create();
+    }
+
+  std::unique_ptr<webrtc::AsyncDnsResolverInterface> CreateAndResolve(
+      const rtc::SocketAddress& addr,
+      int family,
+      absl::AnyInvocable<void()> callback)
+    {
+        return Create();
+    }
+
+    std::unique_ptr<webrtc::AsyncDnsResolverInterface> Create() final
+    {
+        return std::unique_ptr<webrtc::AsyncDnsResolverInterface>(WebProcess::singleton().libWebRTCNetwork().socketFactory().createAsyncResolver());
     }
 };
 
@@ -91,9 +106,10 @@ public:
 private:
     // SuspendableSocketFactory
     rtc::AsyncPacketSocket* CreateUdpSocket(const rtc::SocketAddress&, uint16_t minPort, uint16_t maxPort) final;
-    rtc::AsyncPacketSocket* CreateServerTcpSocket(const rtc::SocketAddress&, uint16_t minPort, uint16_t maxPort, int options) final;
+    rtc::AsyncListenSocket* CreateServerTcpSocket(const rtc::SocketAddress&, uint16_t minPort, uint16_t maxPort, int options) final;
     rtc::AsyncPacketSocket* CreateClientTcpSocket(const rtc::SocketAddress& localAddress, const rtc::SocketAddress& remoteAddress, const rtc::ProxyInfo&, const std::string&, const rtc::PacketSocketTcpOptions&) final;
-    rtc::AsyncResolverInterface* CreateAsyncResolver() final;
+    std::unique_ptr<webrtc::AsyncDnsResolverInterface> CreateAsyncDnsResolver();
+
     void suspend() final;
     void resume() final;
 
@@ -118,9 +134,10 @@ rtc::AsyncPacketSocket* RTCSocketFactory::CreateUdpSocket(const rtc::SocketAddre
     return WebProcess::singleton().libWebRTCNetwork().socketFactory().createUdpSocket(this, address, minPort, maxPort, m_pageIdentifier, m_isFirstParty, m_isRelayDisabled, m_domain);
 }
 
-rtc::AsyncPacketSocket* RTCSocketFactory::CreateServerTcpSocket(const rtc::SocketAddress& address, uint16_t minPort, uint16_t maxPort, int options)
+rtc::AsyncListenSocket* RTCSocketFactory::CreateServerTcpSocket(const rtc::SocketAddress& address, uint16_t minPort, uint16_t maxPort, int options)
 {
-    return WebProcess::singleton().libWebRTCNetwork().socketFactory().createServerTcpSocket(this, address, minPort, maxPort, options);
+    // ACF ??
+    return nullptr; //WebProcess::singleton().libWebRTCNetwork().socketFactory().createServerTcpSocket(this, address, minPort, maxPort, options);
 }
 
 rtc::AsyncPacketSocket* RTCSocketFactory::CreateClientTcpSocket(const rtc::SocketAddress& localAddress, const rtc::SocketAddress& remoteAddress, const rtc::ProxyInfo&, const std::string&, const rtc::PacketSocketTcpOptions& options)
@@ -128,9 +145,9 @@ rtc::AsyncPacketSocket* RTCSocketFactory::CreateClientTcpSocket(const rtc::Socke
     return WebProcess::singleton().libWebRTCNetwork().socketFactory().createClientTcpSocket(this, localAddress, remoteAddress, String { m_userAgent }, options, m_pageIdentifier, m_isFirstParty, m_isRelayDisabled, m_domain);
 }
 
-rtc::AsyncResolverInterface* RTCSocketFactory::CreateAsyncResolver()
+std::unique_ptr<webrtc::AsyncDnsResolverInterface> RTCSocketFactory::CreateAsyncDnsResolver()
 {
-    return WebProcess::singleton().libWebRTCNetwork().socketFactory().createAsyncResolver();
+    return std::unique_ptr<webrtc::AsyncDnsResolverInterface>(WebProcess::singleton().libWebRTCNetwork().socketFactory().createAsyncResolver());
 }
 
 void RTCSocketFactory::suspend()

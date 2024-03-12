@@ -20,10 +20,10 @@
 
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
+#include "api/enable_media.h"
 #include "api/peer_connection_interface.h"
 #include "api/rtc_event_log/rtc_event_log_factory.h"
 #include "api/task_queue/default_task_queue_factory.h"
-#include "media/engine/webrtc_media_engine.h"
 #include "modules/audio_processing/include/audio_processing.h"
 #include "sdk/objc/native/api/video_capturer.h"
 #include "sdk/objc/native/api/video_decoder_factory.h"
@@ -50,10 +50,9 @@ class SetRemoteSessionDescriptionObserver : public webrtc::SetRemoteDescriptionO
   void OnSetRemoteDescriptionComplete(webrtc::RTCError error) override;
 };
 
-class SetLocalSessionDescriptionObserver : public webrtc::SetSessionDescriptionObserver {
+class SetLocalSessionDescriptionObserver : public webrtc::SetLocalDescriptionObserverInterface {
  public:
-  void OnSuccess() override;
-  void OnFailure(webrtc::RTCError error) override;
+  void OnSetLocalDescriptionComplete(webrtc::RTCError error) override;
 };
 
 }  // namespace
@@ -119,38 +118,35 @@ void ObjCCallClient::CreatePeerConnectionFactory() {
   dependencies.worker_thread = worker_thread_.get();
   dependencies.signaling_thread = signaling_thread_.get();
   dependencies.task_queue_factory = webrtc::CreateDefaultTaskQueueFactory();
-  cricket::MediaEngineDependencies media_deps;
-  media_deps.task_queue_factory = dependencies.task_queue_factory.get();
-  media_deps.audio_encoder_factory = webrtc::CreateBuiltinAudioEncoderFactory();
-  media_deps.audio_decoder_factory = webrtc::CreateBuiltinAudioDecoderFactory();
-  media_deps.video_encoder_factory = webrtc::ObjCToNativeVideoEncoderFactory(
+  dependencies.audio_encoder_factory = webrtc::CreateBuiltinAudioEncoderFactory();
+  dependencies.audio_decoder_factory = webrtc::CreateBuiltinAudioDecoderFactory();
+  dependencies.video_encoder_factory = webrtc::ObjCToNativeVideoEncoderFactory(
       [[RTC_OBJC_TYPE(RTCDefaultVideoEncoderFactory) alloc] init]);
-  media_deps.video_decoder_factory = webrtc::ObjCToNativeVideoDecoderFactory(
+  dependencies.video_decoder_factory = webrtc::ObjCToNativeVideoDecoderFactory(
       [[RTC_OBJC_TYPE(RTCDefaultVideoDecoderFactory) alloc] init]);
-  media_deps.audio_processing = webrtc::AudioProcessingBuilder().Create();
-  dependencies.media_engine = cricket::CreateMediaEngine(std::move(media_deps));
-  RTC_LOG(LS_INFO) << "Media engine created: " << dependencies.media_engine.get();
-  dependencies.call_factory = webrtc::CreateCallFactory();
-  dependencies.event_log_factory =
-      std::make_unique<webrtc::RtcEventLogFactory>(dependencies.task_queue_factory.get());
+  dependencies.audio_processing = webrtc::AudioProcessingBuilder().Create();
+  webrtc::EnableMedia(dependencies);
+  dependencies.event_log_factory = std::make_unique<webrtc::RtcEventLogFactory>();
   pcf_ = webrtc::CreateModularPeerConnectionFactory(std::move(dependencies));
-  RTC_LOG(LS_INFO) << "PeerConnectionFactory created: " << pcf_;
+  RTC_LOG(LS_INFO) << "PeerConnectionFactory created: " << pcf_.get();
 }
 
 void ObjCCallClient::CreatePeerConnection() {
   webrtc::MutexLock lock(&pc_mutex_);
   webrtc::PeerConnectionInterface::RTCConfiguration config;
   config.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
-  // DTLS SRTP has to be disabled for loopback to work.
-  config.enable_dtls_srtp = false;
+  // Encryption has to be disabled for loopback to work.
+  webrtc::PeerConnectionFactoryInterface::Options options;
+  options.disable_encryption = true;
+  pcf_->SetOptions(options);
   webrtc::PeerConnectionDependencies pc_dependencies(pc_observer_.get());
   pc_ = pcf_->CreatePeerConnectionOrError(config, std::move(pc_dependencies)).MoveValue();
-  RTC_LOG(LS_INFO) << "PeerConnection created: " << pc_;
+  RTC_LOG(LS_INFO) << "PeerConnection created: " << pc_.get();
 
   rtc::scoped_refptr<webrtc::VideoTrackInterface> local_video_track =
-      pcf_->CreateVideoTrack("video", video_source_);
+      pcf_->CreateVideoTrack(video_source_, "video");
   pc_->AddTransceiver(local_video_track);
-  RTC_LOG(LS_INFO) << "Local video sink set up: " << local_video_track;
+  RTC_LOG(LS_INFO) << "Local video sink set up: " << local_video_track.get();
 
   for (const rtc::scoped_refptr<webrtc::RtpTransceiverInterface>& tranceiver :
        pc_->GetTransceivers()) {
@@ -158,7 +154,7 @@ void ObjCCallClient::CreatePeerConnection() {
     if (track && track->kind() == webrtc::MediaStreamTrackInterface::kVideoKind) {
       static_cast<webrtc::VideoTrackInterface*>(track.get())
           ->AddOrUpdateSink(remote_sink_.get(), rtc::VideoSinkWants());
-      RTC_LOG(LS_INFO) << "Remote video sink set up: " << track;
+      RTC_LOG(LS_INFO) << "Remote video sink set up: " << track.get();
       break;
     }
   }
@@ -166,7 +162,7 @@ void ObjCCallClient::CreatePeerConnection() {
 
 void ObjCCallClient::Connect() {
   webrtc::MutexLock lock(&pc_mutex_);
-  pc_->CreateOffer(new rtc::RefCountedObject<CreateOfferObserver>(pc_),
+  pc_->CreateOffer(rtc::make_ref_counted<CreateOfferObserver>(pc_).get(),
                    webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
 }
 
@@ -212,13 +208,14 @@ void CreateOfferObserver::OnSuccess(webrtc::SessionDescriptionInterface* desc) {
   RTC_LOG(LS_INFO) << "Created offer: " << sdp;
 
   // Ownership of desc was transferred to us, now we transfer it forward.
-  pc_->SetLocalDescription(new rtc::RefCountedObject<SetLocalSessionDescriptionObserver>(), desc);
+  pc_->SetLocalDescription(absl::WrapUnique(desc),
+                           rtc::make_ref_counted<SetLocalSessionDescriptionObserver>());
 
   // Generate a fake answer.
   std::unique_ptr<webrtc::SessionDescriptionInterface> answer(
       webrtc::CreateSessionDescription(webrtc::SdpType::kAnswer, sdp));
   pc_->SetRemoteDescription(std::move(answer),
-                            new rtc::RefCountedObject<SetRemoteSessionDescriptionObserver>());
+                            rtc::make_ref_counted<SetRemoteSessionDescriptionObserver>());
 }
 
 void CreateOfferObserver::OnFailure(webrtc::RTCError error) {
@@ -229,12 +226,8 @@ void SetRemoteSessionDescriptionObserver::OnSetRemoteDescriptionComplete(webrtc:
   RTC_LOG(LS_INFO) << "Set remote description: " << error.message();
 }
 
-void SetLocalSessionDescriptionObserver::OnSuccess() {
-  RTC_LOG(LS_INFO) << "Set local description success!";
-}
-
-void SetLocalSessionDescriptionObserver::OnFailure(webrtc::RTCError error) {
-  RTC_LOG(LS_INFO) << "Set local description failure: " << error.message();
+void SetLocalSessionDescriptionObserver::OnSetLocalDescriptionComplete(webrtc::RTCError error) {
+  RTC_LOG(LS_INFO) << "Set local description: " << error.message();
 }
 
 }  // namespace webrtc_examples

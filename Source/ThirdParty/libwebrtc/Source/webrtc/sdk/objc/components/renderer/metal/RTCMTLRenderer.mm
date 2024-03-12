@@ -153,12 +153,12 @@ static const NSInteger kMaxInflightBuffers = 1;
 }
 
 - (NSString *)shaderSource {
-  RTC_NOTREACHED() << "Virtual method not implemented in subclass.";
+  RTC_DCHECK_NOTREACHED() << "Virtual method not implemented in subclass.";
   return nil;
 }
 
 - (void)uploadTexturesToRenderEncoder:(id<MTLRenderCommandEncoder>)renderEncoder {
-  RTC_NOTREACHED() << "Virtual method not implemented in subclass.";
+  RTC_DCHECK_NOTREACHED() << "Virtual method not implemented in subclass.";
 }
 
 - (void)getWidth:(int *)width
@@ -167,11 +167,11 @@ static const NSInteger kMaxInflightBuffers = 1;
       cropHeight:(int *)cropHeight
            cropX:(int *)cropX
            cropY:(int *)cropY
-         ofFrame:(nonnull RTCVideoFrame *)frame {
-  RTC_NOTREACHED() << "Virtual method not implemented in subclass.";
+         ofFrame:(nonnull RTC_OBJC_TYPE(RTCVideoFrame) *)frame {
+  RTC_DCHECK_NOTREACHED() << "Virtual method not implemented in subclass.";
 }
 
-- (BOOL)setupTexturesForFrame:(nonnull RTCVideoFrame *)frame {
+- (BOOL)setupTexturesForFrame:(nonnull RTC_OBJC_TYPE(RTCVideoFrame) *)frame {
   // Apply rotation override if set.
   RTCVideoRotation rotation;
   NSValue *rotationOverride = self.rotationOverride;
@@ -311,7 +311,7 @@ static const NSInteger kMaxInflightBuffers = 1;
 
 #pragma mark - RTCMTLRenderer
 
-- (void)drawFrame:(RTCVideoFrame *)frame {
+- (void)drawFrame:(RTC_OBJC_TYPE(RTCVideoFrame) *)frame {
   @autoreleasepool {
     // Wait until the inflight (curently sent to GPU) command buffer
     // has completed the GPU work.
