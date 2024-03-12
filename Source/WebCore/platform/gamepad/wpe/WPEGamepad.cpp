@@ -73,7 +73,7 @@ void WPEGamepad::buttonPressedOrReleased(unsigned button, double value)
     m_lastUpdateTime = MonotonicTime::now();
     m_buttonValues[button].setValue(value);
 
-    WPEGamepadProvider::singleton().scheduleInputNotification(*this, value > 0 ? WPEGamepadProvider::ShouldMakeGamepadsVisible::Yes : WPEGamepadProvider::ShouldMakeGamepadsVisible::No);
+    WPEGamepadProvider::singleton().scheduleInputNotification(*this, WPEGamepadProvider::ShouldMakeGamepadsVisible::Yes);
 }
 
 void WPEGamepad::absoluteAxisChanged(unsigned axis, double value)

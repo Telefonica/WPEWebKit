@@ -38,7 +38,7 @@
 namespace WebCore {
 
 static const Seconds connectionDelayInterval { 500_ms };
-static const Seconds inputNotificationDelay { 50_ms };
+static const Seconds inputNotificationDelay { 1_ms };
 
 WPEGamepadProvider& WPEGamepadProvider::singleton()
 {
@@ -143,9 +143,8 @@ void WPEGamepadProvider::gamepadConnected(uintptr_t id)
             m_initialGamepadsConnectedTimer.startOneShot(0_s);
     }
 
-    auto eventVisibility = m_initialGamepadsConnected ? EventMakesGamepadsVisible::Yes : EventMakesGamepadsVisible::No;
     for (auto& client : m_clients)
-        client->platformGamepadConnected(*m_gamepadVector[index], eventVisibility);
+        client->platformGamepadConnected(*m_gamepadVector[index], EventMakesGamepadsVisible::Yes);
 }
 
 void WPEGamepadProvider::gamepadDisconnected(uintptr_t id)

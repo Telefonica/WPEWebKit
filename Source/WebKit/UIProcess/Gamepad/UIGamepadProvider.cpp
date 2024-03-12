@@ -39,7 +39,7 @@
 namespace WebKit {
 using namespace WebCore;
 
-static const Seconds maximumGamepadUpdateInterval { 1_s / 120. };
+static const Seconds maximumGamepadUpdateInterval { 1_ms };
 
 UIGamepadProvider& UIGamepadProvider::singleton()
 {
