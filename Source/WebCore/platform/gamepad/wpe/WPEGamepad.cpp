@@ -49,9 +49,9 @@ WPEGamepad::WPEGamepad(struct wpe_gamepad_provider* provider, uintptr_t gamepadI
 
     static const struct wpe_gamepad_client_interface s_client = {
         // button_event
-        [](void* data, enum wpe_gamepad_button button, bool pressed) {
+        [](void* data, enum wpe_gamepad_button button, double value) {
             auto& self = *static_cast<WPEGamepad*>(data);
-            self.buttonPressedOrReleased(static_cast<unsigned>(button), pressed);
+            self.buttonPressedOrReleased(static_cast<unsigned>(button), value);
         },
         // axis_event
         [](void* data, enum wpe_gamepad_axis axis, double value) {
@@ -68,12 +68,12 @@ WPEGamepad::~WPEGamepad()
     wpe_gamepad_set_client(m_gamepad.get(), nullptr, nullptr);
 }
 
-void WPEGamepad::buttonPressedOrReleased(unsigned button, bool pressed)
+void WPEGamepad::buttonPressedOrReleased(unsigned button, double value)
 {
     m_lastUpdateTime = MonotonicTime::now();
-    m_buttonValues[button].setValue(pressed ? 1.0 : 0.0);
+    m_buttonValues[button].setValue(value);
 
-    WPEGamepadProvider::singleton().scheduleInputNotification(*this, pressed ? WPEGamepadProvider::ShouldMakeGamepadsVisible::Yes : WPEGamepadProvider::ShouldMakeGamepadsVisible::No);
+    WPEGamepadProvider::singleton().scheduleInputNotification(*this, value > 0 ? WPEGamepadProvider::ShouldMakeGamepadsVisible::Yes : WPEGamepadProvider::ShouldMakeGamepadsVisible::No);
 }
 
 void WPEGamepad::absoluteAxisChanged(unsigned axis, double value)

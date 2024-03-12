@@ -46,7 +46,7 @@ public:
     const struct wpe_gamepad* wpeGamepad() const { return m_gamepad.get(); }
 
 private:
-    void buttonPressedOrReleased(unsigned, bool);
+    void buttonPressedOrReleased(unsigned, double);
     void absoluteAxisChanged(unsigned, double);
 
     Vector<SharedGamepadValue> m_buttonValues;
