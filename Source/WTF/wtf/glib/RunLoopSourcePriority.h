@@ -79,7 +79,7 @@ enum RunLoopSourcePriority {
     RunLoopDispatcher = 0,
     RunLoopTimer = 0,
 
-    MemoryPressureHandlerTimer = -10,
+    MemoryPressureHandlerTimer = -70,
 
     JavascriptTimer = 10,
     MainThreadSharedTimer = 10,

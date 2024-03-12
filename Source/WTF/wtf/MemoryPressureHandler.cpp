@@ -44,11 +44,11 @@ WTF_EXPORT_PRIVATE bool MemoryPressureHandler::ReliefLogger::s_loggingEnabled = 
 static const double s_conservativeThresholdFraction = 0.5;
 static const double s_strictThresholdFraction = 0.65;
 #else
-static const double s_conservativeThresholdFraction = 0.8;
-static const double s_strictThresholdFraction = 0.9;
+static const double s_conservativeThresholdFraction = 0.4;
+static const double s_strictThresholdFraction = 0.55;
 #endif
 static const std::optional<double> s_killThresholdFraction;
-static const Seconds s_pollInterval = 30_s;
+static const Seconds s_pollInterval = 1_s;
 
 // This file contains the amount of video memory used, and will be filled by some other
 // platform component. It's a text file containing an unsigned integer value.
