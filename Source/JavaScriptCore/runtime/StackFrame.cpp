@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,41 +28,52 @@
 
 #include "CodeBlock.h"
 #include "DebuggerPrimitives.h"
-#include "JSCInlines.h"
-#include <wtf/text/StringBuilder.h>
+#include "JSCellInlines.h"
+#include <wtf/text/StringConcatenateNumbers.h>
 
 namespace JSC {
 
 StackFrame::StackFrame(VM& vm, JSCell* owner, JSCell* callee)
     : m_callee(vm, owner, callee)
-    , m_bytecodeOffset(UINT_MAX)
 {
 }
 
-StackFrame::StackFrame(VM& vm, JSCell* owner, JSCell* callee, CodeBlock* codeBlock, unsigned bytecodeOffset)
+StackFrame::StackFrame(VM& vm, JSCell* owner, JSCell* callee, CodeBlock* codeBlock, BytecodeIndex bytecodeIndex)
     : m_callee(vm, owner, callee)
     , m_codeBlock(vm, owner, codeBlock)
-    , m_bytecodeOffset(bytecodeOffset)
+    , m_bytecodeIndex(bytecodeIndex)
 {
 }
 
-intptr_t StackFrame::sourceID() const
+StackFrame::StackFrame(Wasm::IndexOrName indexOrName)
+    : m_wasmFunctionIndexOrName(indexOrName)
+    , m_isWasmFrame(true)
+{
+}
+
+SourceID StackFrame::sourceID() const
 {
     if (!m_codeBlock)
         return noSourceID;
-    return m_codeBlock->ownerScriptExecutable()->sourceID();
+    return m_codeBlock->ownerExecutable()->sourceID();
 }
 
-String StackFrame::sourceURL() const
+String StackFrame::sourceURL(VM& vm) const
 {
     if (m_isWasmFrame)
-        return ASCIILiteral("[wasm code]");
+        return "[wasm code]"_s;
 
-    if (!m_codeBlock) {
-        return ASCIILiteral("[native code]");
+    if (!m_codeBlock)
+        return "[native code]"_s;
+
+    String sourceURL = m_codeBlock->ownerExecutable()->sourceURL();
+
+    if (vm.clientData && !sourceURL.startsWithIgnoringASCIICase("http"_s)) {
+        String overrideURL = vm.clientData->overrideSourceURL(*this, sourceURL);
+        if (!overrideURL.isNull())
+            return overrideURL;
     }
 
-    String sourceURL = m_codeBlock->ownerScriptExecutable()->sourceURL();
     if (!sourceURL.isNull())
         return sourceURL;
     return emptyString();
@@ -70,31 +81,30 @@ String StackFrame::sourceURL() const
 
 String StackFrame::functionName(VM& vm) const
 {
-    if (m_isWasmFrame) {
-        if (m_wasmFunctionIndexOrName.isEmpty())
-            return ASCIILiteral("wasm function");
-        return makeString("wasm function: ", makeString(m_wasmFunctionIndexOrName));
-    }
+    if (m_isWasmFrame)
+        return makeString(m_wasmFunctionIndexOrName);
 
     if (m_codeBlock) {
         switch (m_codeBlock->codeType()) {
         case EvalCode:
-            return ASCIILiteral("eval code");
+            return "eval code"_s;
         case ModuleCode:
-            return ASCIILiteral("module code");
+            return "module code"_s;
         case FunctionCode:
             break;
         case GlobalCode:
-            return ASCIILiteral("global code");
+            return "global code"_s;
         default:
             ASSERT_NOT_REACHED();
         }
     }
+
     String name;
     if (m_callee) {
         if (m_callee->isObject())
             name = getCalculatedDisplayName(vm, jsCast<JSObject*>(m_callee.get())).impl();
     }
+
     return name.isNull() ? emptyString() : name;
 }
 
@@ -109,47 +119,25 @@ void StackFrame::computeLineAndColumn(unsigned& line, unsigned& column) const
     int divot = 0;
     int unusedStartOffset = 0;
     int unusedEndOffset = 0;
-    m_codeBlock->expressionRangeForBytecodeOffset(m_bytecodeOffset, divot, unusedStartOffset, unusedEndOffset, line, column);
+    m_codeBlock->expressionRangeForBytecodeIndex(m_bytecodeIndex, divot, unusedStartOffset, unusedEndOffset, line, column);
 
-    ScriptExecutable* executable = m_codeBlock->ownerScriptExecutable();
-    if (executable->hasOverrideLineNumber())
-        line = executable->overrideLineNumber();
+    ScriptExecutable* executable = m_codeBlock->ownerExecutable();
+    if (std::optional<int> overrideLineNumber = executable->overrideLineNumber(m_codeBlock->vm()))
+        line = overrideLineNumber.value();
 }
 
 String StackFrame::toString(VM& vm) const
 {
-    StringBuilder traceBuild;
     String functionName = this->functionName(vm);
-    String sourceURL = this->sourceURL();
-    traceBuild.append(functionName);
-    if (!sourceURL.isEmpty()) {
-        if (!functionName.isEmpty())
-            traceBuild.append('@');
-        traceBuild.append(sourceURL);
-        if (hasLineAndColumnInfo()) {
-            unsigned line;
-            unsigned column;
-            computeLineAndColumn(line, column);
+    String sourceURL = this->sourceURL(vm);
 
-            traceBuild.append(':');
-            traceBuild.appendNumber(line);
-            traceBuild.append(':');
-            traceBuild.appendNumber(column);
-        }
-    }
-    return traceBuild.toString().impl();
-}
+    if (sourceURL.isEmpty() || !hasLineAndColumnInfo())
+        return makeString(functionName, '@', sourceURL);
 
-void StackFrame::visitChildren(SlotVisitor& visitor)
-{
-    // FIXME: We should do something here about Wasm::IndexOrName.
-    // https://bugs.webkit.org/show_bug.cgi?id=176644
-    
-    if (m_callee)
-        visitor.append(m_callee);
-    if (m_codeBlock)
-        visitor.append(m_codeBlock);
+    unsigned line;
+    unsigned column;
+    computeLineAndColumn(line, column);
+    return makeString(functionName, '@', sourceURL, ':', line, ':', column);
 }
 
 } // namespace JSC
-

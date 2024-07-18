@@ -1,7 +1,6 @@
-/* GStreamer EME Utilities class
- *
- * Copyright (C) 2017 Metrological
- * Copyright (C) 2017 Igalia S.L
+/*
+ * Copyright (C) 2021 Igalia S.L
+ * Copyright (C) 2021 Metrological Group B.V.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,50 +12,83 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * Library General Public License for more details.
  *
- * You should have received a copy of the GNU Library General Public
- * License along with this library; if not, write to the
- * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
+ * You should have received a copy of the GNU Library General Public License
+ * aint with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
 
 #include "config.h"
 #include "GStreamerEMEUtilities.h"
 
-#include <wtf/MD5.h>
 #include <wtf/text/Base64.h>
 
 #if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
 
+GST_DEBUG_CATEGORY_EXTERN(webkit_media_common_encryption_decrypt_debug_category);
+#define GST_CAT_DEFAULT webkit_media_common_encryption_decrypt_debug_category
+
 namespace WebCore {
 
-const char* GStreamerEMEUtilities::s_ClearKeyUUID = WEBCORE_GSTREAMER_EME_UTILITIES_CLEARKEY_UUID;
-const char* GStreamerEMEUtilities::s_ClearKeyKeySystem = "org.w3.clearkey";
-const char* GStreamerEMEUtilities::s_UnspecifiedUUID = GST_PROTECTION_UNSPECIFIED_SYSTEM_ID;
-const char* GStreamerEMEUtilities::s_UnspecifiedKeySystem = "org.webkit.unspecifiedkeysystem";
+struct GMarkupParseContextUserData {
+    bool isParsingPssh { false };
+    RefPtr<SharedBuffer> pssh;
+};
 
-#if USE(OPENCDM) || USE(PLAYREADY)
-const char* GStreamerEMEUtilities::s_PlayReadyUUID = WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID;
-std::array<const char*,2> GStreamerEMEUtilities::s_PlayReadyKeySystems = { "com.microsoft.playready", "com.youtube.playready" };
-#endif
-
-#if USE(OPENCDM)
-const char* GStreamerEMEUtilities::s_WidevineUUID = WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID;
-const char* GStreamerEMEUtilities::s_WidevineKeySystem = "com.widevine.alpha";
-#endif
-
-#if (!defined(GST_DISABLE_GST_DEBUG))
-String GStreamerEMEUtilities::initDataMD5(const InitData& initData)
+static void markupStartElement(GMarkupParseContext*, const gchar* elementName, const gchar**, const gchar**, gpointer userDataPtr, GError**)
 {
-    WTF::MD5 md5;
-    md5.addBytes(static_cast<const uint8_t*>(initData.characters8()), initData.length());
-
-    WTF::MD5::Digest digest;
-    md5.checksum(digest);
-
-    return WTF::base64URLEncode(&digest[0], WTF::MD5::hashSize);
-}
-#endif
-
+    GMarkupParseContextUserData* userData = static_cast<GMarkupParseContextUserData*>(userDataPtr);
+    if (g_str_has_suffix(elementName, "pssh"))
+        userData->isParsingPssh = true;
 }
 
+static void markupEndElement(GMarkupParseContext*, const gchar* elementName, gpointer userDataPtr, GError**)
+{
+    GMarkupParseContextUserData* userData = static_cast<GMarkupParseContextUserData*>(userDataPtr);
+    if (g_str_has_suffix(elementName, "pssh")) {
+        ASSERT(userData->isParsingPssh);
+        userData->isParsingPssh = false;
+    }
+}
+
+static void markupText(GMarkupParseContext*, const gchar* text, gsize textLength, gpointer userDataPtr, GError**)
+{
+    GMarkupParseContextUserData* userData = static_cast<GMarkupParseContextUserData*>(userDataPtr);
+    if (userData->isParsingPssh) {
+        std::optional<Vector<uint8_t>> pssh = base64Decode(text, textLength);
+        if (pssh.has_value())
+            userData->pssh = SharedBuffer::create(WTFMove(*pssh));
+    }
+}
+
+static void markupPassthrough(GMarkupParseContext*, const gchar*, gsize, gpointer, GError**)
+{
+}
+
+static void markupError(GMarkupParseContext*, GError*, gpointer)
+{
+}
+
+static GMarkupParser markupParser { markupStartElement, markupEndElement, markupText, markupPassthrough, markupError };
+
+RefPtr<SharedBuffer> InitData::extractCencIfNeeded(RefPtr<SharedBuffer>&& unparsedPayload)
+{
+    RefPtr<SharedBuffer> payload = WTFMove(unparsedPayload);
+    if (!payload || !payload->size())
+        return payload;
+
+    GMarkupParseContextUserData userData;
+    GUniquePtr<GMarkupParseContext> markupParseContext(g_markup_parse_context_new(&markupParser, (GMarkupParseFlags) 0, &userData, nullptr));
+
+    if (g_markup_parse_context_parse(markupParseContext.get(), payload->dataAsCharPtr(), payload->size(), nullptr)) {
+        if (userData.pssh)
+            payload = WTFMove(userData.pssh);
+        else
+            GST_WARNING("XML was parsed but we could not find a viable base64 encoded pssh box");
+    }
+
+    return payload;
+}
+
+}
 #endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)

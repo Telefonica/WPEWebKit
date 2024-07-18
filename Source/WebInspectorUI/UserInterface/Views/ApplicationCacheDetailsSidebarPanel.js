@@ -72,6 +72,16 @@ WI.ApplicationCacheDetailsSidebarPanel = class ApplicationCacheDetailsSidebarPan
         this.needsLayout();
     }
 
+    closed()
+    {
+        if (this.didInitialLayout) {
+            WI.applicationCacheManager.removeEventListener(WI.ApplicationCacheManager.Event.NetworkStateUpdated, this._networkStateUpdated, this);
+            WI.applicationCacheManager.removeEventListener(WI.ApplicationCacheManager.Event.FrameManifestStatusChanged, this._frameManifestStatusChanged, this);
+        }
+
+        super.closed();
+    }
+
     // Protected
 
     initialLayout()

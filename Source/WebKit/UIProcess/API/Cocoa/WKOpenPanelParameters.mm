@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,8 +25,11 @@
 
 #import "config.h"
 #import "WKOpenPanelParametersInternal.h"
+#import <WebCore/MIMETypeRegistry.h>
 
-#if WK_API_ENABLED && PLATFORM(MAC)
+#if PLATFORM(MAC)
+
+#import "WKNSArray.h"
 
 @implementation WKOpenPanelParameters
 
@@ -45,6 +48,25 @@
 - (API::Object&)_apiObject
 {
     return *_openPanelParameters;
+}
+
+@end
+
+@implementation WKOpenPanelParameters (WKPrivate)
+
+- (NSArray<NSString *> *)_acceptedMIMETypes
+{
+    return wrapper(_openPanelParameters->acceptMIMETypes());
+}
+
+- (NSArray<NSString *> *)_acceptedFileExtensions
+{
+    return wrapper(_openPanelParameters->acceptFileExtensions());
+}
+
+- (NSArray<NSString *> *)_allowedFileExtensions
+{
+    return wrapper(_openPanelParameters->allowedFileExtensions());
 }
 
 @end

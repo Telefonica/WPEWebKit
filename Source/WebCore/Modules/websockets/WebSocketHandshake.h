@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 Google Inc.  All rights reserved.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -30,15 +31,16 @@
 
 #pragma once
 
-#include "URL.h"
+#include "CookieRequestHeaderFieldProxy.h"
+#include <wtf/URL.h>
 #include "ResourceResponse.h"
 #include "WebSocketExtensionDispatcher.h"
 #include "WebSocketExtensionProcessor.h"
+#include <wtf/WeakPtr.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-class Document;
 class ResourceRequest;
 
 class WebSocketHandshake {
@@ -47,11 +49,12 @@ public:
     enum Mode {
         Incomplete, Normal, Failed, Connected
     };
-    WebSocketHandshake(const URL&, const String& protocol, Document*, bool allowCookies);
+    WebSocketHandshake(const URL&, const String& protocol, const String& userAgent, const String& clientOrigin, bool allowCookies, bool isAppInitiated);
     ~WebSocketHandshake();
 
     const URL& url() const;
     void setURL(const URL&);
+    URL httpURLForAuthenticationAndCookies() const;
     const String host() const;
 
     const String& clientProtocol() const;
@@ -59,16 +62,14 @@ public:
 
     bool secure() const;
 
-    String clientOrigin() const;
     String clientLocation() const;
 
-    CString clientHandshakeMessage();
-    ResourceRequest clientHandshakeRequest();
+    CString clientHandshakeMessage() const;
+    ResourceRequest clientHandshakeRequest(const Function<String(const URL&)>& cookieRequestHeaderFieldValue) const;
 
     void reset();
-    void clearDocument();
 
-    int readServerHandshake(const char* header, size_t len);
+    int readServerHandshake(const uint8_t* header, size_t len);
     Mode mode() const;
     String failureReason() const; // Returns a string indicating the reason of failure if mode() == Failed.
 
@@ -86,22 +87,23 @@ public:
     static String getExpectedWebSocketAccept(const String& secWebSocketKey);
 
 private:
-    URL httpURLForAuthenticationAndCookies() const;
 
-    int readStatusLine(const char* header, size_t headerLength, int& statusCode, String& statusText);
+    int readStatusLine(const uint8_t* header, size_t headerLength, int& statusCode, AtomString& statusText);
 
     // Reads all headers except for the two predefined ones.
-    const char* readHTTPHeaders(const char* start, const char* end);
+    const uint8_t* readHTTPHeaders(const uint8_t* start, const uint8_t* end);
     void processHeaders();
     bool checkResponseHeaders();
 
     URL m_url;
     String m_clientProtocol;
     bool m_secure;
-    Document* m_document;
 
     Mode m_mode;
+    String m_userAgent;
+    String m_clientOrigin;
     bool m_allowCookies;
+    bool m_isAppInitiated;
 
     ResourceResponse m_serverHandshakeResponse;
 

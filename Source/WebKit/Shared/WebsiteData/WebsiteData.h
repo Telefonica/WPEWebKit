@@ -25,9 +25,10 @@
 
 #pragma once
 
+#include <WebCore/RegistrableDomain.h>
 #include <WebCore/SecurityOriginData.h>
-#include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
+#include <wtf/OptionSet.h>
 #include <wtf/Vector.h>
 
 namespace IPC {
@@ -37,7 +38,9 @@ class Encoder;
 
 namespace WebKit {
 
-enum class WebsiteDataType;
+enum class WebsiteDataType : uint32_t;
+
+enum class WebsiteDataProcessType { Network, UI, Web };
 
 struct WebsiteData {
     struct Entry {
@@ -45,21 +48,28 @@ struct WebsiteData {
         WebsiteDataType type;
         uint64_t size;
 
+        Entry isolatedCopy() const &;
+        Entry isolatedCopy() &&;
+
         void encode(IPC::Encoder&) const;
         static std::optional<WebsiteData::Entry> decode(IPC::Decoder&);
     };
 
+    WebsiteData isolatedCopy() const &;
+    WebsiteData isolatedCopy() &&;
+
     Vector<Entry> entries;
     HashSet<String> hostNamesWithCookies;
 
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    HashSet<String> hostNamesWithPluginData;
+    HashSet<String> hostNamesWithHSTSCache;
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+    HashSet<WebCore::RegistrableDomain> registrableDomainsWithResourceLoadStatistics;
 #endif
 
-    HashSet<String> originsWithCredentials;
-
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, WebsiteData&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, WebsiteData&);
+    static WebsiteDataProcessType ownerProcess(WebsiteDataType);
+    static OptionSet<WebsiteDataType> filter(OptionSet<WebsiteDataType>, WebsiteDataProcessType);
 };
 
 }

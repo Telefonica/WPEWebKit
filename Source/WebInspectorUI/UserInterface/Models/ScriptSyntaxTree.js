@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,7 +33,7 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
 
         try {
             let sourceType = this._script.sourceType === WI.Script.SourceType.Module ? "module" : "script";
-            let esprimaSyntaxTree = esprima.parse(sourceText, {range: true, sourceType});
+            let esprimaSyntaxTree = esprima.parse(sourceText, {loc: true, range: true, sourceType});
             this._syntaxTree = this._createInternalSyntaxTree(esprimaSyntaxTree);
             this._parsedSuccessfully = true;
         } catch (error) {
@@ -79,37 +79,33 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
         return nodes;
     }
 
-    containersOfOffset(offset)
+    containersOfPosition(position)
     {
         console.assert(this._parsedSuccessfully);
         if (!this._parsedSuccessfully)
             return [];
 
         let allNodes = [];
-        const start = 0;
-        const end = 1;
 
         this.forEachNode((node, state) => {
-            if (node.range[end] < offset)
+            if (node.endPosition.isBefore(position))
                 state.skipChildNodes = true;
-            if (node.range[start] > offset)
+            else if (node.startPosition.isAfter(position))
                 state.shouldStopEarly = true;
-            if (node.range[start] <= offset && node.range[end] >= offset)
+            else
                 allNodes.push(node);
         });
 
         return allNodes;
     }
 
-    filterByRange(startOffset, endOffset)
+    filterByRange(startPosition, endPosition)
     {
         console.assert(this._parsedSuccessfully);
         if (!this._parsedSuccessfully)
             return [];
 
         var allNodes = [];
-        var start = 0;
-        var end = 1;
         function filterForNodesInRange(node, state)
         {
             // program start        range            program end
@@ -118,17 +114,21 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
 
             // If a node's range ends before the range we're interested in starts, we don't need to search any of its
             // enclosing ranges, because, by definition, those enclosing ranges are contained within this node's range.
-            if (node.range[end] < startOffset)
+            if (node.endPosition.isBefore(startPosition)) {
                 state.skipChildNodes = true;
+                return;
+            }
 
             // We are only interested in nodes whose start position is within our range.
-            if (startOffset <= node.range[start] && node.range[start] <= endOffset)
+            if (node.startPosition.isWithin(startPosition, endPosition)) {
                 allNodes.push(node);
+                return;
+            }
 
             // Once we see nodes that start beyond our range, we can quit traversing the AST. We can do this safely
             // because we know the AST is traversed using depth first search, so it will traverse into enclosing ranges
             // before it traverses into adjacent ranges.
-            if (node.range[start] > endOffset)
+            if (node.startPosition.isAfter(endPosition))
                 state.shouldStopEarly = true;
         }
 
@@ -172,12 +172,6 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
     {
         console.assert(node.type === WI.ScriptSyntaxTree.NodeType.FunctionDeclaration || node.type === WI.ScriptSyntaxTree.NodeType.FunctionExpression || node.type === WI.ScriptSyntaxTree.NodeType.MethodDefinition || node.type === WI.ScriptSyntaxTree.NodeType.ArrowFunctionExpression);
 
-        // COMPATIBILITY (iOS 9): Legacy Backends view the return type as being the opening "{" of the function body.
-        // After iOS 9, this is to move to the start of the function statement/expression. See below:
-        // FIXME: Need a better way to determine backend versions. Using DOM.pseudoElement because that was added after iOS 9.
-        if (!DOMAgent.hasEvent("pseudoElementAdded"))
-            return node.body.range[0];
-
         // "f" in "function". "s" in "set". "g" in "get". First letter in any method name for classes and object literals.
         // The "[" for computed methods in classes and object literals.
         return node.typeProfilingReturnDivot;
@@ -185,7 +179,7 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
 
     updateTypes(nodesToUpdate, callback)
     {
-        console.assert(RuntimeAgent.getRuntimeTypesForVariablesAtOffsets);
+        console.assert(this._script.target.hasCommand("Runtime.getRuntimeTypesForVariablesAtOffsets"));
         console.assert(Array.isArray(nodesToUpdate) && this._parsedSuccessfully);
 
         if (!this._parsedSuccessfully)
@@ -283,7 +277,6 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
                 case WI.ScriptSyntaxTree.NodeType.AssignmentPattern:
                     return gatherIdentifiers(node.left);
                 case WI.ScriptSyntaxTree.NodeType.RestElement:
-                case WI.ScriptSyntaxTree.NodeType.RestProperty:
                     return gatherIdentifiers(node.argument);
                 default:
                     console.assert(false, "Unexpected node type in variable declarator: " + node.type);
@@ -291,7 +284,7 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
             }
         }
 
-        console.assert(node.type === WI.ScriptSyntaxTree.NodeType.Identifier || node.type === WI.ScriptSyntaxTree.NodeType.ObjectPattern || node.type === WI.ScriptSyntaxTree.NodeType.ArrayPattern || node.type === WI.ScriptSyntaxTree.NodeType.RestElement || node.type === WI.ScriptSyntaxTree.NodeType.RestProperty);
+        console.assert(node.type === WI.ScriptSyntaxTree.NodeType.Identifier || node.type === WI.ScriptSyntaxTree.NodeType.ObjectPattern || node.type === WI.ScriptSyntaxTree.NodeType.ArrayPattern || node.type === WI.ScriptSyntaxTree.NodeType.RestElement);
 
         return gatherIdentifiers(node);
     }
@@ -425,9 +418,6 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
         case WI.ScriptSyntaxTree.NodeType.RestElement:
             this._recurse(node.argument, callback, state);
             break;
-        case WI.ScriptSyntaxTree.NodeType.RestProperty:
-            this._recurse(node.argument, callback, state);
-            break;
         case WI.ScriptSyntaxTree.NodeType.ReturnStatement:
             this._recurse(node.argument, callback, state);
             break;
@@ -435,9 +425,6 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
             this._recurseArray(node.expressions, callback, state);
             break;
         case WI.ScriptSyntaxTree.NodeType.SpreadElement:
-            this._recurse(node.argument, callback, state);
-            break;
-        case WI.ScriptSyntaxTree.NodeType.SpreadProperty:
             this._recurse(node.argument, callback, state);
             break;
         case WI.ScriptSyntaxTree.NodeType.SwitchStatement:
@@ -719,7 +706,8 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
                 type: WI.ScriptSyntaxTree.NodeType.ForOfStatement,
                 left: this._createInternalSyntaxTree(node.left),
                 right: this._createInternalSyntaxTree(node.right),
-                body: this._createInternalSyntaxTree(node.body)
+                body: this._createInternalSyntaxTree(node.body),
+                await: node.await
             };
             break;
         case "FunctionDeclaration":
@@ -843,18 +831,12 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
                 computed: node.computed
             };
             if (result.kind === "get" || result.kind === "set" || result.method)
-                result.value.typeProfilingReturnDivot = node.range[0];  // "g" in "get" or "s" in "set" or "[" in "['computed']" method or "m" in "methodName".
+                result.value.typeProfilingReturnDivot = node.range[0]; // "g" in "get" or "s" in "set" or "[" in "['computed']" method or "m" in "methodName".
             break;
         case "RestElement":
             result = {
                 type: WI.ScriptSyntaxTree.NodeType.RestElement,
                 argument: this._createInternalSyntaxTree(node.argument)
-            };
-            break;
-        case "RestProperty":
-            result = {
-                type: WI.ScriptSyntaxTree.NodeType.RestProperty,
-                argument: this._createInternalSyntaxTree(node.argument),
             };
             break;
         case "ReturnStatement":
@@ -872,12 +854,6 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
         case "SpreadElement":
             result = {
                 type: WI.ScriptSyntaxTree.NodeType.SpreadElement,
-                argument: this._createInternalSyntaxTree(node.argument),
-            };
-            break;
-        case "SpreadProperty":
-            result = {
-                type: WI.ScriptSyntaxTree.NodeType.SpreadProperty,
                 argument: this._createInternalSyntaxTree(node.argument),
             };
             break;
@@ -1057,6 +1033,10 @@ WI.ScriptSyntaxTree = class ScriptSyntaxTree
             return null;
         }
 
+        let {start, end} = node.loc;
+        result.startPosition = new WI.SourceCodePosition(start.line - 1, start.column);
+        result.endPosition = new WI.SourceCodePosition(end.line - 1, end.column);
+
         result.range = node.range;
         // This is an object for which you can add fields to an AST node without worrying about polluting the syntax-related fields of the node.
         result.attachments = {};
@@ -1120,11 +1100,9 @@ WI.ScriptSyntaxTree.NodeType = {
     Program: Symbol("program"),
     Property: Symbol("property"),
     RestElement: Symbol("rest-element"),
-    RestProperty: Symbol("rest-property"),
     ReturnStatement: Symbol("return-statement"),
     SequenceExpression: Symbol("sequence-expression"),
     SpreadElement: Symbol("spread-element"),
-    SpreadProperty: Symbol("spread-property"),
     Super: Symbol("super"),
     SwitchCase: Symbol("switch-case"),
     SwitchStatement: Symbol("switch-statement"),

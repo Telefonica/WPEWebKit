@@ -30,7 +30,7 @@
 @class NSString;
 @protocol DOMEventTarget;
 
-WEBKIT_CLASS_AVAILABLE_MAC(10_4)
+WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMMouseEvent : DOMUIEvent
 @property (readonly) int screenX;
 @property (readonly) int screenY;
@@ -40,7 +40,7 @@ WEBKIT_CLASS_AVAILABLE_MAC(10_4)
 @property (readonly) BOOL shiftKey;
 @property (readonly) BOOL altKey;
 @property (readonly) BOOL metaKey;
-@property (readonly) unsigned short button;
+@property (readonly) short button;
 @property (readonly, strong) id <DOMEventTarget> relatedTarget;
 @property (readonly) int offsetX WEBKIT_AVAILABLE_MAC(10_5);
 @property (readonly) int offsetY WEBKIT_AVAILABLE_MAC(10_5);

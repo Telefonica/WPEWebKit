@@ -35,6 +35,7 @@ extern "C" {
 
 #ifdef __OBJC__
 
+@class WKWebView;
 @class _WKRemoteObjectRegistry;
 
 @protocol _WKObservablePageState
@@ -59,7 +60,13 @@ WK_EXPORT _WKRemoteObjectRegistry *WKPageGetObjectRegistry(WKPageRef page);
 WK_EXPORT void WKPageSetFullscreenDelegate(WKPageRef page, id <_WKFullscreenDelegate>);
 WK_EXPORT id <_WKFullscreenDelegate> WKPageGetFullscreenDelegate(WKPageRef page);
 
-#endif
+@class WKNavigation;
+WK_EXPORT WKNavigation *WKPageLoadURLRequestReturningNavigation(WKPageRef page, WKURLRequestRef request);
+WK_EXPORT WKNavigation *WKPageLoadFileReturningNavigation(WKPageRef page, WKURLRef fileURL, WKURLRef resourceDirectoryURL);
+
+WK_EXPORT WKWebView *WKPageGetWebView(WKPageRef page);
+
+#endif // __OBJC__
 
 WK_EXPORT bool WKPageIsURLKnownHSTSHost(WKPageRef page, WKURLRef url);
 

@@ -29,19 +29,16 @@
 #import "WebFrameInternal.h"
 #import "WebFrameView.h"
 #import "WebHTMLViewInternal.h"
+#import <WebCore/DeprecatedGlobalSettings.h>
 #import <WebCore/Frame.h>
 #import <WebCore/FrameView.h>
 #import <WebCore/PlatformEventFactoryMac.h>
-#import <WebKitSystemInterface.h>
 
 using namespace WebCore;
 
-// FIXME: <rdar://problem/5898985> Mail expects a constant of this name to exist.
-const int WebCoreScrollbarAlwaysOn = ScrollbarAlwaysOn;
-
 #ifndef __OBJC2__
 // In <rdar://problem/7814899> we saw crashes because WebDynamicScrollBarsView increased in size, breaking ABI compatiblity.
-COMPILE_ASSERT(sizeof(WebDynamicScrollBarsView) == 0x8c, WebDynamicScrollBarsView_is_expected_size);
+static_assert(sizeof(WebDynamicScrollBarsView) == 0x8c, "WebDynamicScrollBarsView is expected size");
 #endif
 
 @interface NSScrollView(WebNSScrollViewDetails)
@@ -87,7 +84,7 @@ static Class customScrollerClass;
 
 + (Class)_horizontalScrollerClass
 {
-    if (Settings::mockScrollbarsEnabled() && customScrollerClass)
+    if (DeprecatedGlobalSettings::mockScrollbarsEnabled() && customScrollerClass)
         return customScrollerClass;
 
     return [super _horizontalScrollerClass];
@@ -95,7 +92,7 @@ static Class customScrollerClass;
 
 + (Class)_verticalScrollerClass
 {
-    if (Settings::mockScrollbarsEnabled() && customScrollerClass)
+    if (DeprecatedGlobalSettings::mockScrollbarsEnabled() && customScrollerClass)
         return customScrollerClass;
 
     return [super _horizontalScrollerClass];
@@ -136,10 +133,10 @@ static Class customScrollerClass;
 {
     if (_private->hScrollModeLocked)
         return;
-    if (flag && _private->hScroll == ScrollbarAlwaysOff)
-        _private->hScroll = ScrollbarAuto;
-    else if (!flag && _private->hScroll != ScrollbarAlwaysOff)
-        _private->hScroll = ScrollbarAlwaysOff;
+    if (flag && _private->hScroll == ScrollbarMode::AlwaysOff)
+        _private->hScroll = ScrollbarMode::Auto;
+    else if (!flag && _private->hScroll != ScrollbarMode::AlwaysOff)
+        _private->hScroll = ScrollbarMode::AlwaysOff;
     [self updateScrollers];
 }
 
@@ -303,12 +300,12 @@ static const unsigned cMaxUpdateScrollbarsPass = 2;
         newHasVerticalScroller = NO;
     }
 
-    if (_private->hScroll != ScrollbarAuto)
-        newHasHorizontalScroller = (_private->hScroll == ScrollbarAlwaysOn);
-    if (_private->vScroll != ScrollbarAuto)
-        newHasVerticalScroller = (_private->vScroll == ScrollbarAlwaysOn);
+    if (_private->hScroll != ScrollbarMode::Auto)
+        newHasHorizontalScroller = (_private->hScroll == ScrollbarMode::AlwaysOn);
+    if (_private->vScroll != ScrollbarMode::Auto)
+        newHasVerticalScroller = (_private->vScroll == ScrollbarMode::AlwaysOn);
 
-    if (!documentView || _private->suppressLayout || _private->suppressScrollers || (_private->hScroll != ScrollbarAuto && _private->vScroll != ScrollbarAuto)) {
+    if (!documentView || _private->suppressLayout || _private->suppressScrollers || (_private->hScroll != ScrollbarMode::Auto && _private->vScroll != ScrollbarMode::Auto)) {
         _private->horizontalScrollingAllowedButScrollerHidden = newHasHorizontalScroller && _private->alwaysHideHorizontalScroller;
         if (_private->horizontalScrollingAllowedButScrollerHidden)
             newHasHorizontalScroller = NO;
@@ -345,13 +342,13 @@ static const unsigned cMaxUpdateScrollbarsPass = 2;
     frameSize.width = ceilf(frameSize.width);
     frameSize.height = ceilf(frameSize.height);
 
-    if (_private->hScroll == ScrollbarAuto) {
+    if (_private->hScroll == ScrollbarMode::Auto) {
         newHasHorizontalScroller = documentSize.width > visibleSize.width;
         if (newHasHorizontalScroller && !_private->inUpdateScrollersLayoutPass && documentSize.height <= frameSize.height && documentSize.width <= frameSize.width)
             newHasHorizontalScroller = NO;
     }
 
-    if (_private->vScroll == ScrollbarAuto) {
+    if (_private->vScroll == ScrollbarMode::Auto) {
         newHasVerticalScroller = documentSize.height > visibleSize.height;
         if (newHasVerticalScroller && !_private->inUpdateScrollersLayoutPass && documentSize.height <= frameSize.height && documentSize.width <= frameSize.width)
             newHasVerticalScroller = NO;
@@ -359,9 +356,9 @@ static const unsigned cMaxUpdateScrollbarsPass = 2;
 
     // Unless in ScrollbarsAlwaysOn mode, if we ever turn one scrollbar off, always turn the other one off too.
     // Never ever try to both gain/lose a scrollbar in the same pass.
-    if (!newHasHorizontalScroller && hasHorizontalScroller && _private->vScroll != ScrollbarAlwaysOn)
+    if (!newHasHorizontalScroller && hasHorizontalScroller && _private->vScroll != ScrollbarMode::AlwaysOn)
         newHasVerticalScroller = NO;
-    if (!newHasVerticalScroller && hasVerticalScroller && _private->hScroll != ScrollbarAlwaysOn)
+    if (!newHasVerticalScroller && hasVerticalScroller && _private->hScroll != ScrollbarMode::AlwaysOn)
         newHasHorizontalScroller = NO;
 
     _private->horizontalScrollingAllowedButScrollerHidden = newHasHorizontalScroller && _private->alwaysHideHorizontalScroller;
@@ -441,12 +438,12 @@ static const unsigned cMaxUpdateScrollbarsPass = 2;
 
 - (BOOL)allowsHorizontalScrolling
 {
-    return _private->hScroll != ScrollbarAlwaysOff;
+    return _private->hScroll != ScrollbarMode::AlwaysOff;
 }
 
 - (BOOL)allowsVerticalScrolling
 {
-    return _private->vScroll != ScrollbarAlwaysOff;
+    return _private->vScroll != ScrollbarMode::AlwaysOff;
 }
 
 - (void)scrollingModes:(WebCore::ScrollbarMode*)hMode vertical:(WebCore::ScrollbarMode*)vMode
@@ -583,7 +580,9 @@ static const unsigned cMaxUpdateScrollbarsPass = 2;
 }
 
 // This object will be the parent of the web area in WK1, so it should not be ignored.
-- (BOOL)accessibilityIsIgnored 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
+- (BOOL)accessibilityIsIgnored
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     return NO;
 }

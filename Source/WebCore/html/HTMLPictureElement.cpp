@@ -27,10 +27,16 @@
 #include "HTMLPictureElement.h"
 
 #include "ElementChildIterator.h"
+#include "HTMLAnchorElement.h"
 #include "HTMLImageElement.h"
+#include "ImageLoader.h"
 #include "Logging.h"
+#include "Settings.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLPictureElement);
 
 HTMLPictureElement::HTMLPictureElement(const QualifiedName& tagName, Document& document)
     : HTMLElement(tagName, document)
@@ -39,14 +45,6 @@ HTMLPictureElement::HTMLPictureElement(const QualifiedName& tagName, Document& d
 
 HTMLPictureElement::~HTMLPictureElement()
 {
-    document().removeViewportDependentPicture(*this);
-}
-
-void HTMLPictureElement::didMoveToNewDocument(Document& oldDocument, Document& newDocument)
-{
-    oldDocument.removeViewportDependentPicture(*this);
-    HTMLElement::didMoveToNewDocument(oldDocument, newDocument);
-    sourcesChanged();
 }
 
 Ref<HTMLPictureElement> HTMLPictureElement::create(const QualifiedName& tagName, Document& document)
@@ -57,20 +55,29 @@ Ref<HTMLPictureElement> HTMLPictureElement::create(const QualifiedName& tagName,
 void HTMLPictureElement::sourcesChanged()
 {
     for (auto& element : childrenOfType<HTMLImageElement>(*this))
-        element.selectImageSource();
+        element.selectImageSource(RelevantMutation::Yes);
 }
 
-bool HTMLPictureElement::viewportChangeAffectedPicture() const
+void HTMLPictureElement::sourceDimensionAttributesChanged(const HTMLSourceElement& sourceElement)
 {
-    auto* documentElement = document().documentElement();
-    MediaQueryEvaluator evaluator { document().printing() ? "print" : "screen", document(), documentElement ? documentElement->computedStyle() : nullptr };
-    for (auto& result : m_viewportDependentMediaQueryResults) {
-        LOG(MediaQueries, "HTMLPictureElement %p viewportChangeAffectedPicture evaluating media queries", this);
-        if (evaluator.evaluate(result.expression) != result.result)
-            return true;
+    for (auto& element : childrenOfType<HTMLImageElement>(*this)) {
+        if (&sourceElement == element.sourceElement())
+            element.invalidateAttributeMapping();
     }
-    return false;
 }
+
+#if USE(SYSTEM_PREVIEW)
+bool HTMLPictureElement::isSystemPreviewImage()
+{
+    if (!document().settings().systemPreviewEnabled())
+        return false;
+
+    auto* parent = parentElement();
+    if (!is<HTMLAnchorElement>(parent))
+        return false;
+    return downcast<HTMLAnchorElement>(parent)->isSystemPreviewLink();
+}
+#endif
 
 }
 

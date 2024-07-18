@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,9 +26,10 @@
 #import "config.h"
 #import "SmartMagnificationController.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "SmartMagnificationControllerMessages.h"
+#import "UserInterfaceIdiom.h"
 #import "ViewGestureGeometryCollectorMessages.h"
 #import "WKContentView.h"
 #import "WKScrollView.h"
@@ -36,15 +37,6 @@
 #import "WebPageMessages.h"
 #import "WebPageProxy.h"
 #import "WebProcessProxy.h"
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-
-#import "UIKitSPI.h"
-
-#pragma clang diagnostic pop
-
-using namespace WebCore;
 
 static const float smartMagnificationPanScrollThresholdZoomedOut = 60;
 static const float smartMagnificationPanScrollThresholdIPhone = 100;
@@ -55,22 +47,23 @@ static const double smartMagnificationMaximumScale = 1.6;
 static const double smartMagnificationMinimumScale = 0;
 
 namespace WebKit {
+using namespace WebCore;
 
 SmartMagnificationController::SmartMagnificationController(WKContentView *contentView)
     : m_webPageProxy(*contentView.page)
     , m_contentView(contentView)
 {
-    m_webPageProxy.process().addMessageReceiver(Messages::SmartMagnificationController::messageReceiverName(), m_webPageProxy.pageID(), *this);
+    m_webPageProxy.process().addMessageReceiver(Messages::SmartMagnificationController::messageReceiverName(), m_webPageProxy.webPageID(), *this);
 }
 
 SmartMagnificationController::~SmartMagnificationController()
 {
-    m_webPageProxy.process().removeMessageReceiver(Messages::SmartMagnificationController::messageReceiverName(), m_webPageProxy.pageID());
+    m_webPageProxy.process().removeMessageReceiver(Messages::SmartMagnificationController::messageReceiverName(), m_webPageProxy.webPageID());
 }
 
 void SmartMagnificationController::handleSmartMagnificationGesture(FloatPoint origin)
 {
-    m_webPageProxy.process().send(Messages::ViewGestureGeometryCollector::CollectGeometryForSmartMagnificationGesture(origin), m_webPageProxy.pageID());
+    m_webPageProxy.send(Messages::ViewGestureGeometryCollector::CollectGeometryForSmartMagnificationGesture(origin));
 }
 
 void SmartMagnificationController::handleResetMagnificationGesture(FloatPoint origin)
@@ -78,27 +71,46 @@ void SmartMagnificationController::handleResetMagnificationGesture(FloatPoint or
     [m_contentView _zoomOutWithOrigin:origin];
 }
 
-void SmartMagnificationController::adjustSmartMagnificationTargetRectAndZoomScales(bool addMagnificationPadding, WebCore::FloatRect& targetRect, double& minimumScale, double& maximumScale)
+std::tuple<FloatRect, double, double> SmartMagnificationController::smartMagnificationTargetRectAndZoomScales(FloatRect targetRect, double minimumScale, double maximumScale, bool addMagnificationPadding)
 {
+    FloatRect outTargetRect = targetRect;
+    double outMinimumScale = minimumScale;
+    double outMaximumScale = maximumScale;
+
     if (addMagnificationPadding) {
-        targetRect.inflateX(smartMagnificationElementPadding * targetRect.width());
-        targetRect.inflateY(smartMagnificationElementPadding * targetRect.height());
+        outTargetRect.inflateX(smartMagnificationElementPadding * outTargetRect.width());
+        outTargetRect.inflateY(smartMagnificationElementPadding * outTargetRect.height());
     }
 
-    minimumScale = std::max(minimumScale, smartMagnificationMinimumScale);
-    maximumScale = std::min(maximumScale, smartMagnificationMaximumScale);
+    outMinimumScale = std::max(outMinimumScale, smartMagnificationMinimumScale);
+    outMaximumScale = std::min(outMaximumScale, smartMagnificationMaximumScale);
+
+    return { outTargetRect, outMinimumScale, outMaximumScale };
 }
 
-void SmartMagnificationController::didCollectGeometryForSmartMagnificationGesture(FloatPoint origin, FloatRect targetRect, FloatRect visibleContentRect, bool isReplacedElement, double viewportMinimumScale, double viewportMaximumScale)
+double SmartMagnificationController::zoomFactorForTargetRect(FloatRect targetRect, bool fitEntireRect, double viewportMinimumScale, double viewportMaximumScale)
+{
+    // FIXME: Share some of this code with didCollectGeometryForSmartMagnificationGesture?
+
+    auto [adjustedTargetRect, minimumScale, maximumScale] = smartMagnificationTargetRectAndZoomScales(targetRect, viewportMinimumScale, viewportMaximumScale, !fitEntireRect);
+
+    double currentScale = [m_contentView _contentZoomScale];
+    double targetScale = [m_contentView _targetContentZoomScaleForRect:adjustedTargetRect currentScale:currentScale fitEntireRect:fitEntireRect minimumScale:minimumScale maximumScale:maximumScale];
+
+    if (targetScale == currentScale)
+        targetScale = [m_contentView _initialScaleFactor];
+
+    return targetScale;
+}
+
+void SmartMagnificationController::didCollectGeometryForSmartMagnificationGesture(FloatPoint origin, FloatRect targetRect, FloatRect visibleContentRect, bool fitEntireRect, double viewportMinimumScale, double viewportMaximumScale)
 {
     if (targetRect.isEmpty()) {
         // FIXME: If we don't zoom, send the tap along to text selection (see <rdar://problem/6810344>).
         [m_contentView _zoomToInitialScaleWithOrigin:origin];
         return;
     }
-    double minimumScale = viewportMinimumScale;
-    double maximumScale = viewportMaximumScale;
-    adjustSmartMagnificationTargetRectAndZoomScales(!isReplacedElement, targetRect, minimumScale, maximumScale);
+    auto [adjustedTargetRect, minimumScale, maximumScale] = smartMagnificationTargetRectAndZoomScales(targetRect, viewportMinimumScale, viewportMaximumScale, !fitEntireRect);
 
     // FIXME: Check if text selection wants to consume the double tap before we attempt magnification.
 
@@ -107,29 +119,26 @@ void SmartMagnificationController::didCollectGeometryForSmartMagnificationGestur
     float minimumScrollDistance;
     if ([m_contentView bounds].size.width <= m_webPageProxy.unobscuredContentRect().width())
         minimumScrollDistance = smartMagnificationPanScrollThresholdZoomedOut;
-    else if (UICurrentUserInterfaceIdiomIsPad())
-        minimumScrollDistance = smartMagnificationPanScrollThresholdIPad;
-    else
+    else if (currentUserInterfaceIdiomIsSmallScreen())
         minimumScrollDistance = smartMagnificationPanScrollThresholdIPhone;
+    else
+        minimumScrollDistance = smartMagnificationPanScrollThresholdIPad;
 
     // For replaced elements like images, we want to fit the whole element
     // in the view, so scale it down enough to make both dimensions fit if possible.
     // For other elements, try to fit them horizontally.
-    if ([m_contentView _zoomToRect:targetRect withOrigin:origin fitEntireRect:isReplacedElement minimumScale:minimumScale maximumScale:maximumScale minimumScrollDistance:minimumScrollDistance])
+    if ([m_contentView _zoomToRect:adjustedTargetRect withOrigin:origin fitEntireRect:fitEntireRect minimumScale:minimumScale maximumScale:maximumScale minimumScrollDistance:minimumScrollDistance])
         return;
 
     // FIXME: If we still don't zoom, send the tap along to text selection (see <rdar://problem/6810344>).
     [m_contentView _zoomToInitialScaleWithOrigin:origin];
 }
 
-void SmartMagnificationController::magnify(FloatPoint origin, FloatRect targetRect, FloatRect visibleContentRect, double viewportMinimumScale, double viewportMaximumScale)
+void SmartMagnificationController::scrollToRect(FloatPoint origin, FloatRect targetRect)
 {
-    double maximumScale = viewportMaximumScale;
-    double minimumScale = viewportMinimumScale;
-    adjustSmartMagnificationTargetRectAndZoomScales(true, targetRect, minimumScale, maximumScale);
-    [m_contentView _zoomToRect:targetRect withOrigin:origin fitEntireRect:NO minimumScale:minimumScale maximumScale:maximumScale minimumScrollDistance:0];
+    [m_contentView _scrollToRect:targetRect withOrigin:origin minimumScrollDistance:0];
 }
 
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

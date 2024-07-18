@@ -8,16 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_WIN_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_WIN_H_
-
-#include <memory>
+#ifndef MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_WIN_H_
+#define MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_WIN_H_
 
 #include <windows.h>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/desktop_capture/desktop_frame.h"
-#include "webrtc/typedefs.h"
+#include <memory>
+
+#include "modules/desktop_capture/desktop_frame.h"
 
 namespace webrtc {
 
@@ -26,6 +24,9 @@ namespace webrtc {
 class DesktopFrameWin : public DesktopFrame {
  public:
   ~DesktopFrameWin() override;
+
+  DesktopFrameWin(const DesktopFrameWin&) = delete;
+  DesktopFrameWin& operator=(const DesktopFrameWin&) = delete;
 
   static std::unique_ptr<DesktopFrameWin>
   Create(DesktopSize size, SharedMemoryFactory* shared_memory_factory, HDC hdc);
@@ -41,11 +42,8 @@ class DesktopFrameWin : public DesktopFrame {
 
   HBITMAP bitmap_;
   std::unique_ptr<SharedMemory> owned_shared_memory_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(DesktopFrameWin);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_WIN_H_
-
+#endif  // MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_WIN_H_

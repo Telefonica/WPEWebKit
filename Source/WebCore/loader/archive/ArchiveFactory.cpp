@@ -46,12 +46,12 @@
 
 namespace WebCore {
 
-typedef RefPtr<Archive> RawDataCreationFunction(const URL&, SharedBuffer&);
+typedef RefPtr<Archive> RawDataCreationFunction(const URL&, FragmentedSharedBuffer&);
 typedef HashMap<String, RawDataCreationFunction*, ASCIICaseInsensitiveHash> ArchiveMIMETypesMap;
 
 // The create functions in the archive classes return RefPtr to concrete subclasses
 // of Archive. This adaptor makes the functions have a uniform return type.
-template<typename ArchiveClass> static RefPtr<Archive> archiveFactoryCreate(const URL& url, SharedBuffer& buffer)
+template<typename ArchiveClass> static RefPtr<Archive> archiveFactoryCreate(const URL& url, FragmentedSharedBuffer& buffer)
 {
     return ArchiveClass::create(url, buffer);
 }
@@ -61,12 +61,12 @@ static ArchiveMIMETypesMap createArchiveMIMETypesMap()
     ArchiveMIMETypesMap map;
 
 #if ENABLE(WEB_ARCHIVE) && USE(CF)
-    map.add(ASCIILiteral { "application/x-webarchive" }, archiveFactoryCreate<LegacyWebArchive>);
+    map.add("application/x-webarchive"_s, archiveFactoryCreate<LegacyWebArchive>);
 #endif
 
 #if ENABLE(MHTML)
-    map.add(ASCIILiteral { "multipart/related" }, archiveFactoryCreate<MHTMLArchive>);
-    map.add(ASCIILiteral { "application/x-mimearchive" }, archiveFactoryCreate<MHTMLArchive>);
+    map.add("multipart/related"_s, archiveFactoryCreate<MHTMLArchive>);
+    map.add("application/x-mimearchive"_s, archiveFactoryCreate<MHTMLArchive>);
 #endif
 
     return map;
@@ -78,12 +78,12 @@ static ArchiveMIMETypesMap& archiveMIMETypes()
     return map;
 }
 
-bool ArchiveFactory::isArchiveMimeType(const String& mimeType)
+bool ArchiveFactory::isArchiveMIMEType(const String& mimeType)
 {
     return !mimeType.isEmpty() && archiveMIMETypes().contains(mimeType);
 }
 
-RefPtr<Archive> ArchiveFactory::create(const URL& url, SharedBuffer* data, const String& mimeType)
+RefPtr<Archive> ArchiveFactory::create(const URL& url, FragmentedSharedBuffer* data, const String& mimeType)
 {
     if (!data)
         return nullptr;
@@ -95,9 +95,8 @@ RefPtr<Archive> ArchiveFactory::create(const URL& url, SharedBuffer* data, const
     return function(url, *data);
 }
 
-void ArchiveFactory::registerKnownArchiveMIMETypes()
+void ArchiveFactory::registerKnownArchiveMIMETypes(HashSet<String, ASCIICaseInsensitiveHash>& mimeTypes)
 {
-    auto& mimeTypes = MIMETypeRegistry::getSupportedNonImageMIMETypes();
     for (auto& mimeType : archiveMIMETypes().keys())
         mimeTypes.add(mimeType);
 }

@@ -3,6 +3,7 @@
  * Copyright (C) 2004, 2005 Rob Buis <buis@kde.org>
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
  * Copyright (C) 2014 Adobe Systems Incorporated. All rights reserved.
+ * Copyright (C) 2021-2022 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,37 +21,52 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef FEBlend_h
-#define FEBlend_h
+#pragma once
 
 #include "FilterEffect.h"
-
-#include "Filter.h"
+#include "GraphicsTypes.h"
 
 namespace WebCore {
 
 class FEBlend : public FilterEffect {
 public:
-    static Ref<FEBlend> create(Filter&, BlendMode);
+    WEBCORE_EXPORT static Ref<FEBlend> create(BlendMode);
 
-    BlendMode blendMode() const;
+    BlendMode blendMode() const { return m_mode; }
     bool setBlendMode(BlendMode);
 
-    void platformApplyGeneric(unsigned char* srcPixelArrayA, unsigned char* srcPixelArrayB, unsigned char* dstPixelArray,
-                           unsigned colorArrayLength);
-    void platformApplyNEON(unsigned char* srcPixelArrayA, unsigned char* srcPixelArrayB, unsigned char* dstPixelArray,
-                           unsigned colorArrayLength);
-    void platformApplySoftware() override;
-    void dump() override;
-
-    WTF::TextStream& externalRepresentation(WTF::TextStream&, int indention) const override;
+    template<class Encoder> void encode(Encoder&) const;
+    template<class Decoder> static std::optional<Ref<FEBlend>> decode(Decoder&);
 
 private:
-    FEBlend(Filter&, BlendMode);
+    FEBlend(BlendMode);
+
+    unsigned numberOfEffectInputs() const override { return 2; }
+
+    std::unique_ptr<FilterEffectApplier> createSoftwareApplier() const override;
+
+    WTF::TextStream& externalRepresentation(WTF::TextStream&, FilterRepresentation) const override;
 
     BlendMode m_mode;
 };
 
+template<class Encoder>
+void FEBlend::encode(Encoder& encoder) const
+{
+    encoder << m_mode;
+}
+
+template<class Decoder>
+std::optional<Ref<FEBlend>> FEBlend::decode(Decoder& decoder)
+{
+    std::optional<BlendMode> mode;
+    decoder >> mode;
+    if (!mode)
+        return std::nullopt;
+
+    return FEBlend::create(*mode);
+}
+
 } // namespace WebCore
 
-#endif // FEBlend_h
+SPECIALIZE_TYPE_TRAITS_FILTER_EFFECT(FEBlend)

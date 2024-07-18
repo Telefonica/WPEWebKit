@@ -27,37 +27,35 @@
 
 #include "XMLHttpRequest.h"
 #include <wtf/Forward.h>
-#include <wtf/RefCounted.h>
-#include <wtf/RefPtr.h>
 
 namespace WebCore {
 
-    class ScriptExecutionContext;
-    class XMLHttpRequest;
+class WebCoreOpaqueRoot;
 
-    class XMLHttpRequestUpload final : public XMLHttpRequestEventTarget {
-        WTF_MAKE_FAST_ALLOCATED;
-    public:
-        explicit XMLHttpRequestUpload(XMLHttpRequest*);
+class XMLHttpRequestUpload final : public XMLHttpRequestEventTarget {
+    WTF_MAKE_ISO_ALLOCATED(XMLHttpRequestUpload);
+public:
+    explicit XMLHttpRequestUpload(XMLHttpRequest&);
 
-        void ref() { m_xmlHttpRequest->ref(); }
-        void deref() { m_xmlHttpRequest->deref(); }
-        XMLHttpRequest* xmlHttpRequest() const { return m_xmlHttpRequest; }
+    void ref() { m_request.ref(); }
+    void deref() { m_request.deref(); }
 
-        EventTargetInterface eventTargetInterface() const override { return XMLHttpRequestUploadEventTargetInterfaceType; }
-        ScriptExecutionContext* scriptExecutionContext() const override { return m_xmlHttpRequest->scriptExecutionContext(); }
+    void dispatchProgressEvent(const AtomString& type, unsigned long long loaded, unsigned long long total);
 
-        void dispatchThrottledProgressEvent(bool lengthComputable, unsigned long long loaded, unsigned long long total);
-        void dispatchProgressEvent(const AtomicString &type);
+    bool hasRelevantEventListener() const;
 
-    private:
-        void refEventTarget() final { ref(); }
-        void derefEventTarget() final { deref(); }
+private:
+    // EventTarget.
+    void eventListenersDidChange() final;
+    void refEventTarget() final { ref(); }
+    void derefEventTarget() final { deref(); }
 
-        XMLHttpRequest* m_xmlHttpRequest;
-        bool m_lengthComputable;
-        unsigned long long m_loaded;
-        unsigned long long m_total;
-    };
+    EventTargetInterface eventTargetInterface() const final { return XMLHttpRequestUploadEventTargetInterfaceType; }
+    ScriptExecutionContext* scriptExecutionContext() const final { return m_request.scriptExecutionContext(); }
+
+    XMLHttpRequest& m_request;
+};
+
+WebCoreOpaqueRoot root(XMLHttpRequestUpload*);
     
 } // namespace WebCore

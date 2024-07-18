@@ -8,12 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_COMMON_AUDIO_SMOOTHING_FILTER_H_
-#define WEBRTC_COMMON_AUDIO_SMOOTHING_FILTER_H_
+#ifndef COMMON_AUDIO_SMOOTHING_FILTER_H_
+#define COMMON_AUDIO_SMOOTHING_FILTER_H_
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/optional.h"
-#include "webrtc/system_wrappers/include/clock.h"
+#include <stdint.h>
+
+#include "absl/types/optional.h"
 
 namespace webrtc {
 
@@ -21,7 +21,7 @@ class SmoothingFilter {
  public:
   virtual ~SmoothingFilter() = default;
   virtual void AddSample(float sample) = 0;
-  virtual rtc::Optional<float> GetAverage() = 0;
+  virtual absl::optional<float> GetAverage() = 0;
   virtual bool SetTimeConstantMs(int time_constant_ms) = 0;
 };
 
@@ -33,18 +33,23 @@ class SmoothingFilter {
 // assumed to equal the last received sample.
 class SmoothingFilterImpl final : public SmoothingFilter {
  public:
-  // |init_time_ms| is initialization time. It defines a period starting from
+  // `init_time_ms` is initialization time. It defines a period starting from
   // the arriving time of the first sample. During this period, the exponential
   // filter uses a varying time constant so that a smaller time constant will be
   // applied to the earlier samples. This is to allow the the filter to adapt to
   // earlier samples quickly. After the initialization period, the time constant
-  // will be set to |init_time_ms| first and can be changed through
-  // |SetTimeConstantMs|.
+  // will be set to `init_time_ms` first and can be changed through
+  // `SetTimeConstantMs`.
   explicit SmoothingFilterImpl(int init_time_ms);
+
+  SmoothingFilterImpl() = delete;
+  SmoothingFilterImpl(const SmoothingFilterImpl&) = delete;
+  SmoothingFilterImpl& operator=(const SmoothingFilterImpl&) = delete;
+
   ~SmoothingFilterImpl() override;
 
   void AddSample(float sample) override;
-  rtc::Optional<float> GetAverage() override;
+  absl::optional<float> GetAverage() override;
   bool SetTimeConstantMs(int time_constant_ms) override;
 
   // Methods used for unittests.
@@ -58,15 +63,13 @@ class SmoothingFilterImpl final : public SmoothingFilter {
   const float init_factor_;
   const float init_const_;
 
-  rtc::Optional<int64_t> init_end_time_ms_;
+  absl::optional<int64_t> init_end_time_ms_;
   float last_sample_;
   float alpha_;
   float state_;
   int64_t last_state_time_ms_;
-
-  RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(SmoothingFilterImpl);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_COMMON_AUDIO_SMOOTHING_FILTER_H_
+#endif  // COMMON_AUDIO_SMOOTHING_FILTER_H_

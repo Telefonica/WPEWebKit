@@ -26,57 +26,69 @@
 #include "config.h"
 #include "WebSQLiteDatabaseTracker.h"
 
-#include "NetworkProcess.h"
-#include "NetworkProcessProxyMessages.h"
-#include "WebProcess.h"
-#include "WebProcessProxyMessages.h"
 #include <WebCore/SQLiteDatabaseTracker.h>
-#include <wtf/MainThread.h>
-
-using namespace WebCore;
 
 namespace WebKit {
+using namespace WebCore;
 
-WebSQLiteDatabaseTracker::WebSQLiteDatabaseTracker(NetworkProcess& process)
-    : m_process(process)
-    , m_hysteresis([this](HysteresisState state) { hysteresisUpdated(state); })
-    , m_childProcessType(ChildProcessType::Network)
+WebSQLiteDatabaseTracker::WebSQLiteDatabaseTracker(IsHoldingLockedFilesHandler&& isHoldingLockedFilesHandler)
+    : m_isHoldingLockedFilesHandler(WTFMove(isHoldingLockedFilesHandler))
 {
+    ASSERT(RunLoop::isMain());
     SQLiteDatabaseTracker::setClient(this);
 }
 
-WebSQLiteDatabaseTracker::WebSQLiteDatabaseTracker(WebProcess& process)
-    : m_process(process)
-    , m_hysteresis([this](HysteresisState state) { hysteresisUpdated(state); })
-    , m_childProcessType(ChildProcessType::WebContent)
+WebSQLiteDatabaseTracker::~WebSQLiteDatabaseTracker()
 {
-    SQLiteDatabaseTracker::setClient(this);
+    ASSERT(RunLoop::isMain());
+    SQLiteDatabaseTracker::setClient(nullptr);
+
+    if (m_currentHystererisID)
+        setIsHoldingLockedFiles(false);
+}
+
+void WebSQLiteDatabaseTracker::setIsSuspended(bool isSuspended)
+{
+    ASSERT(RunLoop::isMain());
+
+    Locker locker { m_lock };
+    m_isSuspended = isSuspended;
 }
 
 void WebSQLiteDatabaseTracker::willBeginFirstTransaction()
 {
-    callOnMainThread([this] {
-        m_hysteresis.start();
-    });
+    Locker locker { m_lock };
+    if (m_currentHystererisID) {
+        // Cancel previous hysteresis task.
+        ++m_currentHystererisID;
+        return;
+    }
+
+    setIsHoldingLockedFiles(true);
 }
 
 void WebSQLiteDatabaseTracker::didFinishLastTransaction()
 {
-    callOnMainThread([this] {
-        m_hysteresis.stop();
+    Locker locker { m_lock };
+    RunLoop::main().dispatchAfter(1_s, [this, weakThis = WeakPtr { *this }, hystererisID = ++m_currentHystererisID] {
+        if (!weakThis)
+            return;
+
+        Locker locker { m_lock };
+        if (m_currentHystererisID != hystererisID)
+            return; // Cancelled.
+
+        m_currentHystererisID = 0;
+        setIsHoldingLockedFiles(false);
     });
 }
 
-void WebSQLiteDatabaseTracker::hysteresisUpdated(HysteresisState state)
+void WebSQLiteDatabaseTracker::setIsHoldingLockedFiles(bool isHoldingLockedFiles)
 {
-    switch (m_childProcessType) {
-    case ChildProcessType::WebContent:
-        m_process.parentProcessConnection()->send(Messages::WebProcessProxy::SetIsHoldingLockedFiles(state == HysteresisState::Started), 0);
-        break;
-    case ChildProcessType::Network:
-        m_process.parentProcessConnection()->send(Messages::NetworkProcessProxy::SetIsHoldingLockedFiles(state == HysteresisState::Started), 0);
-        break;
-    }
+    if (m_isSuspended)
+        return;
+
+    m_isHoldingLockedFilesHandler(isHoldingLockedFiles);
 }
 
 } // namespace WebKit

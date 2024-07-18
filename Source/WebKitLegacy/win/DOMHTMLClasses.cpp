@@ -362,8 +362,8 @@ HRESULT DOMHTMLDocument::close()
 {
     if (!m_document)
         return E_FAIL;
-
-    m_document->close();
+    Ref document { *m_document };
+    document->close();
     return S_OK;
 }
     
@@ -530,8 +530,7 @@ HRESULT DOMHTMLElement::setInnerText(_In_ BSTR text)
 {
     ASSERT(is<HTMLElement>(m_element));
     HTMLElement* htmlElement = downcast<HTMLElement>(m_element);
-    WTF::String textString(text, SysStringLen(text));
-    htmlElement->setInnerText(textString);
+    htmlElement->setInnerText(WTF::String(text, SysStringLen(text)));
     return S_OK;
 }
 
@@ -1185,7 +1184,7 @@ HRESULT DOMHTMLInputElement::setType(_In_ BSTR type)
 {
     ASSERT(is<HTMLInputElement>(m_element));
     HTMLInputElement& inputElement = downcast<HTMLInputElement>(*m_element);
-    WTF::String typeString(type, SysStringLen(type));
+    WTF::AtomString typeString(type, SysStringLen(type));
     inputElement.setType(typeString);
     return S_OK;
 }
@@ -1228,7 +1227,7 @@ HRESULT DOMHTMLInputElement::setValueForUser(_In_ BSTR value)
 {
     ASSERT(is<HTMLInputElement>(m_element));
     HTMLInputElement& inputElement = downcast<HTMLInputElement>(*m_element);
-    inputElement.setValueForUser(String(static_cast<UChar*>(value), SysStringLen(value)));
+    inputElement.setValueForUser(String(value, SysStringLen(value)));
     return S_OK;
 }
 
@@ -1326,8 +1325,8 @@ HRESULT DOMHTMLInputElement::replaceCharactersInRange(int startTarget, int endTa
     HTMLInputElement& inputElement = downcast<HTMLInputElement>(*m_element);
 
     String newValue = inputElement.value();
-    String webCoreReplacementString(static_cast<UChar*>(replacementString), SysStringLen(replacementString));
-    newValue.replace(startTarget, endTarget - startTarget, webCoreReplacementString);
+    String webCoreReplacementString(replacementString, SysStringLen(replacementString));
+    newValue = makeStringByReplacing(newValue, startTarget, endTarget - startTarget, webCoreReplacementString);
     inputElement.setValue(newValue);
     inputElement.setSelectionRange(index, newValue.length());
 

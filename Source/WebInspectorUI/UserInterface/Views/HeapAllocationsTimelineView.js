@@ -59,6 +59,11 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
             },
         };
 
+        this._importButtonNavigationItem = new WI.ButtonNavigationItem("import", WI.UIString("Import"), "Images/Import.svg", 15, 15);
+        this._importButtonNavigationItem.tooltip = WI.UIString("Import");
+        this._importButtonNavigationItem.buttonStyle = WI.ButtonNavigationItem.Style.ImageAndText;
+        this._importButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._importButtonNavigationItemClicked, this);
+
         let snapshotTooltip = WI.UIString("Take snapshot");
         this._takeHeapSnapshotButtonItem = new WI.ButtonNavigationItem("take-snapshot", snapshotTooltip, "Images/Camera.svg", 16, 16);
         this._takeHeapSnapshotButtonItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._takeHeapSnapshotClicked, this);
@@ -83,25 +88,32 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
         this._snapshotListPathComponent = new WI.HierarchicalPathComponent(WI.UIString("Snapshot List"), "snapshot-list-icon", "snapshot-list", false, false);
         this._snapshotListPathComponent.addEventListener(WI.HierarchicalPathComponent.Event.Clicked, this._snapshotListPathComponentClicked, this);
 
+        this._unseenRecords = [];
+        this._unseenRecordsBannerView = new WI.BannerView(WI.UIString("There are new snapshots that have been filtered", "There are new snapshots that have been filtered @ Heap Allocations Timeline View", "Message displayed in a banner when one or more snapshots that the user has not yet seen are being filtered."), {
+            actionButtonMessage: WI.UIString("Clear Filters", "Clear Filters @ Heap Allocations Timeline View", "Text for button that will clear both text filters and time range filters."),
+            showDismissButton: true,
+        });
+        this._unseenRecordsBannerView.addEventListener(WI.BannerView.Event.ActionButtonClicked, this._handleUnseenRecordsBannerClearFiltersClicked, this);
+        this._unseenRecordsBannerView.addEventListener(WI.BannerView.Event.DismissButtonClicked, this._handleUnseenRecordsBannerDismissClicked, this);
+
         this._dataGrid = new WI.TimelineDataGrid(columns);
         this._dataGrid.sortColumnIdentifier = "timestamp";
         this._dataGrid.sortOrder = WI.DataGrid.SortOrder.Ascending;
         this._dataGrid.createSettings("heap-allocations-timeline-view");
         this._dataGrid.addEventListener(WI.DataGrid.Event.SelectedNodeChanged, this._dataGridNodeSelected, this);
-
+        this.setupDataGrid(this._dataGrid);
         this.addSubview(this._dataGrid);
 
         this._contentViewContainer = new WI.ContentViewContainer;
         this._contentViewContainer.addEventListener(WI.ContentViewContainer.Event.CurrentContentViewDidChange, this._currentContentViewDidChange, this);
         WI.ContentView.addEventListener(WI.ContentView.Event.SelectionPathComponentsDidChange, this._contentViewSelectionPathComponentDidChange, this);
 
-        this._pendingRecords = [];
-        this._pendingZeroTimeDataGridNodes = [];
+        this._pendingRecords = Array.from(timeline.records);
 
         timeline.addEventListener(WI.Timeline.Event.RecordAdded, this._heapAllocationsTimelineRecordAdded, this);
 
         WI.HeapSnapshotProxy.addEventListener(WI.HeapSnapshotProxy.Event.Invalidated, this._heapSnapshotInvalidated, this);
-        WI.HeapSnapshotWorkerProxy.singleton().addEventListener("HeapSnapshot.CollectionEvent", this._heapSnapshotCollectionEvent, this);
+        WI.HeapSnapshotWorkerProxy.singleton().addEventListener(WI.HeapSnapshotWorkerProxy.Event.Collection, this._heapSnapshotCollectionEvent, this);
     }
 
     // Public
@@ -124,7 +136,6 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
         this._heapSnapshotDiff = null;
         this._cancelSelectComparisonHeapSnapshots();
 
-        this._contentViewContainer.hidden();
         this.removeSubview(this._contentViewContainer);
         this.addSubview(this._dataGrid);
 
@@ -140,7 +151,6 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
             this._snapshotListScrollTop = this._dataGrid.scrollContainer.scrollTop;
             this.removeSubview(this._dataGrid);
             this.addSubview(this._contentViewContainer);
-            this._contentViewContainer.shown();
         }
 
         this._showingSnapshotList = false;
@@ -149,6 +159,7 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
 
         for (let dataGridNode of this._dataGrid.children) {
             if (dataGridNode.record === heapSnapshotTimelineRecord) {
+                dataGridNode.hidden = false;
                 dataGridNode.select();
                 break;
             }
@@ -167,7 +178,6 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
         if (this._showingSnapshotList) {
             this.removeSubview(this._dataGrid);
             this.addSubview(this._contentViewContainer);
-            this._contentViewContainer.shown();
         }
 
         this._showingSnapshotList = false;
@@ -178,19 +188,19 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
 
     // Protected
 
-    // FIXME: <https://webkit.org/b/157582> Web Inspector: Heap Snapshot Views should be searchable
-    get showsFilterBar() { return this._showingSnapshotList; }
-
     get navigationItems()
     {
         if (this._showingSnapshotList) {
-            let items = [this._takeHeapSnapshotButtonItem, this._compareHeapSnapshotsButtonItem];
+            let items = [this._importButtonNavigationItem, this._takeHeapSnapshotButtonItem, this._compareHeapSnapshotsButtonItem];
             if (this._selectingComparisonHeapSnapshots)
                 items.push(this._compareHeapSnapshotHelpTextItem);
             return items;
         }
 
-        return this._contentViewContainer.currentContentView.navigationItems;
+        if (this._contentViewContainer.currentContentView)
+            return this._contentViewContainer.currentContentView.navigationItems;
+
+        return [];
     }
 
     get selectionPathComponents()
@@ -211,7 +221,10 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
             components.push(heapSnapshotPathComponent);
         }
 
-        return components.concat(this._contentViewContainer.currentContentView.selectionPathComponents);
+        if (this._contentViewContainer.currentContentView)
+            components.pushAll(this._contentViewContainer.currentContentView.selectionPathComponents);
+
+        return components;
     }
 
     selectRecord(record)
@@ -222,60 +235,39 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
             this.showHeapSnapshotList();
     }
 
-    shown()
-    {
-        super.shown();
-
-        this._dataGrid.shown();
-
-        if (!this._showingSnapshotList)
-            this._contentViewContainer.shown();
-    }
-
-    hidden()
-    {
-        super.hidden();
-
-        this._dataGrid.hidden();
-
-        if (!this._showingSnapshotList)
-            this._contentViewContainer.hidden();
-    }
-
     closed()
     {
-        console.assert(this.representedObject instanceof WI.Timeline);
-        this.representedObject.removeEventListener(null, null, this);
+        this.representedObject.removeEventListener(WI.Timeline.Event.RecordAdded, this._heapAllocationsTimelineRecordAdded, this);
 
         this._dataGrid.closed();
 
         this._contentViewContainer.closeAllContentViews();
 
-        WI.ContentView.removeEventListener(null, null, this);
-        WI.HeapSnapshotProxy.removeEventListener(null, null, this);
-        WI.HeapSnapshotWorkerProxy.singleton().removeEventListener("HeapSnapshot.CollectionEvent", this._heapSnapshotCollectionEvent, this);
+        WI.ContentView.removeEventListener(WI.ContentView.Event.SelectionPathComponentsDidChange, this._contentViewSelectionPathComponentDidChange, this);
+        WI.HeapSnapshotProxy.removeEventListener(WI.HeapSnapshotProxy.Event.Invalidated, this._heapSnapshotInvalidated, this);
+        WI.HeapSnapshotWorkerProxy.singleton().removeEventListener(WI.HeapSnapshotWorkerProxy.Event.Collection, this._heapSnapshotCollectionEvent, this);
     }
 
     layout()
     {
-        if (this._pendingZeroTimeDataGridNodes.length && this.zeroTime) {
-            for (let dataGridNode of this._pendingZeroTimeDataGridNodes)
-                dataGridNode.updateTimestamp(this.zeroTime);
-            this._pendingZeroTimeDataGridNodes = [];
-            this._dataGrid._sort();
+        super.layout();
+
+        if (!this._pendingRecords.length)
+            return;
+
+        for (let heapAllocationsTimelineRecord of this._pendingRecords) {
+            let dataGridNode = new WI.HeapAllocationsTimelineDataGridNode(heapAllocationsTimelineRecord, {
+                graphDataSource: this,
+                heapAllocationsView: this,
+            });
+            this._dataGrid.addRowInSortOrder(dataGridNode);
+            if (dataGridNode.hidden)
+                this._unseenRecords.push(dataGridNode);
         }
 
-        if (this._pendingRecords.length) {
-            for (let heapAllocationsTimelineRecord of this._pendingRecords) {
-                let dataGridNode = new WI.HeapAllocationsTimelineDataGridNode(heapAllocationsTimelineRecord, this.zeroTime, this);
-                this._dataGrid.addRowInSortOrder(null, dataGridNode);
-                if (!this.zeroTime)
-                    this._pendingZeroTimeDataGridNodes.push(dataGridNode);
-            }
-
-            this._pendingRecords = [];
-            this._updateCompareHeapSnapshotButton();
-        }
+        this._pendingRecords = [];
+        this._updateUnseenRecordsBannerView();
+        this._updateCompareHeapSnapshotButton();
     }
 
     reset()
@@ -286,13 +278,27 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
 
         this.showHeapSnapshotList();
         this._pendingRecords = [];
-        this._pendingZeroTimeDataGridNodes = [];
+        this._unseenRecords = [];
+        this._updateUnseenRecordsBannerView();
         this._updateCompareHeapSnapshotButton();
     }
 
     updateFilter(filters)
     {
-        this._dataGrid.filterText = filters ? filters.text : "";
+        if (this._showingSnapshotList) {
+            this._dataGrid.filterText = filters ? filters.text : "";
+            return;
+        }
+
+        console.assert(this._contentViewContainer.currentContentView);
+        this._contentViewContainer.currentContentView.updateFilter(filters);
+    }
+
+    filterDidChange()
+    {
+        super.filterDidChange();
+
+        this._updateUnseenRecordsBannerView();
     }
 
     // Private
@@ -382,13 +388,42 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
         this._compareHeapSnapshotsButtonItem.enabled = hasAtLeastTwoValidSnapshots;
     }
 
+    _updateUnseenRecordsBannerView()
+    {
+        this._unseenRecords = this._unseenRecords.filter((record) => record.hidden);
+        if (this._unseenRecords.length) {
+            if (this._unseenRecordsBannerView.parentView !== this)
+                this.insertSubviewBefore(this._unseenRecordsBannerView, this._dataGrid);
+        } else {
+            if (this._unseenRecordsBannerView.parentView === this)
+                this.removeSubview(this._unseenRecordsBannerView);
+        }
+    }
+
+    _importButtonNavigationItemClicked()
+    {
+        WI.FileUtilities.importText((result) => {
+            let snapshotStringData = result.text;
+            let workerProxy = WI.HeapSnapshotWorkerProxy.singleton();
+            workerProxy.createImportedSnapshot(snapshotStringData, result.filename, ({objectId, snapshot: serializedSnapshot}) => {
+                let snapshot = WI.HeapSnapshotProxy.deserialize(objectId, serializedSnapshot);
+                snapshot.snapshotStringData = snapshotStringData;
+                const timestamp = NaN;
+                WI.timelineManager.heapSnapshotAdded(timestamp, snapshot);
+                this.dispatchEventToListeners(WI.TimelineView.Event.NeedsEntireSelectedRange);
+            });
+        }, {multiple: true});
+    }
+
     _takeHeapSnapshotClicked()
     {
-        HeapAgent.snapshot(function(error, timestamp, snapshotStringData) {
+        WI.heapManager.snapshot((error, timestamp, snapshotStringData) => {
             let workerProxy = WI.HeapSnapshotWorkerProxy.singleton();
             workerProxy.createSnapshot(snapshotStringData, ({objectId, snapshot: serializedSnapshot}) => {
                 let snapshot = WI.HeapSnapshotProxy.deserialize(objectId, serializedSnapshot);
+                snapshot.snapshotStringData = snapshotStringData;
                 WI.timelineManager.heapSnapshotAdded(timestamp, snapshot);
+                this.dispatchEventToListeners(WI.TimelineView.Event.NeedsEntireSelectedRange);
             });
         });
     }
@@ -475,4 +510,18 @@ WI.HeapAllocationsTimelineView = class HeapAllocationsTimelineView extends WI.Ti
         this._selectingComparisonHeapSnapshots = false;
         this._compareHeapSnapshotsButtonItem.activated = false;
     }
+
+    _handleUnseenRecordsBannerClearFiltersClicked(event)
+    {
+        this.dispatchEventToListeners(WI.TimelineView.Event.NeedsFiltersCleared);
+        this.dispatchEventToListeners(WI.TimelineView.Event.NeedsEntireSelectedRange);
+    }
+
+    _handleUnseenRecordsBannerDismissClicked(event)
+    {
+        this._unseenRecords = [];
+        this._updateUnseenRecordsBannerView();
+    }
 };
+
+WI.HeapAllocationsTimelineView.ReferencePage = WI.ReferencePage.TimelinesTab.JavaScriptAllocationsTimeline;

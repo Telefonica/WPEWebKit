@@ -42,9 +42,6 @@ public:
     class TokenPtr;
     TokenPtr nextToken(SegmentedString&);
 
-    // Used by HTMLSourceTracker.
-    void setTokenAttributeBaseOffset(unsigned);
-
     // Returns a copy of any characters buffered internally by the tokenizer.
     // The tokenizer buffers characters when searching for the </script> token that terminates a script element.
     String bufferedCharacters() const;
@@ -62,7 +59,7 @@ public:
     //
     // This approximation is also the algorithm called for when parsing an HTML fragment.
     // https://html.spec.whatwg.org/multipage/syntax.html#parsing-html-fragments
-    void updateStateFor(const AtomicString& tagName);
+    void updateStateFor(const AtomString& tagName);
 
     void setForceNullCharacterReplacement(bool);
 
@@ -162,6 +159,8 @@ private:
 
     void bufferASCIICharacter(UChar);
     void bufferCharacter(UChar);
+    template<typename CharacterType> void bufferCharacters(Span<const CharacterType>);
+    void bufferCharacters(ASCIILiteral literal) { bufferCharacters(Span { literal.characters8(), literal.length() }); }
 
     bool emitAndResumeInDataState(SegmentedString&);
     bool emitAndReconsumeInDataState();
@@ -173,7 +172,7 @@ private:
     bool commitToCompleteEndTag(SegmentedString&);
 
     void appendToTemporaryBuffer(UChar);
-    bool temporaryBufferIs(const char*);
+    bool temporaryBufferIs(ASCIILiteral);
 
     // Sometimes we speculatively consume input characters and we don't know whether they represent
     // end tags or RCDATA, etc. These functions help manage these state.
@@ -282,11 +281,6 @@ inline HTMLToken* HTMLTokenizer::TokenPtr::operator->() const
 inline HTMLTokenizer::TokenPtr HTMLTokenizer::nextToken(SegmentedString& source)
 {
     return TokenPtr(processToken(source) ? &m_token : nullptr);
-}
-
-inline void HTMLTokenizer::setTokenAttributeBaseOffset(unsigned offset)
-{
-    m_token.setAttributeBaseOffset(offset);
 }
 
 inline size_t HTMLTokenizer::numberOfBufferedCharacters() const

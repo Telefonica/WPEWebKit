@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,8 +26,12 @@
 #pragma once
 
 #include "Options.h"
+#include <wtf/NumberOfCores.h>
+#include <wtf/StdIntExtras.h>
 
 namespace JSC {
+
+using UCPUStrictInt32 = UCPURegister;
 
 constexpr bool isARMv7IDIVSupported()
 {
@@ -38,9 +42,27 @@ constexpr bool isARMv7IDIVSupported()
 #endif
 }
 
+constexpr bool isARM()
+{
+#if CPU(ARM)
+    return true;
+#else
+    return false;
+#endif
+}
+
 constexpr bool isARM64()
 {
 #if CPU(ARM64)
+    return true;
+#else
+    return false;
+#endif
+}
+
+constexpr bool isARM64E()
+{
+#if CPU(ARM64E)
     return true;
 #else
     return false;
@@ -65,6 +87,24 @@ constexpr bool isX86_64()
 #endif
 }
 
+constexpr bool isMIPS()
+{
+#if CPU(MIPS)
+    return true;
+#else
+    return false;
+#endif
+}
+
+constexpr bool isRISCV64()
+{
+#if CPU(RISCV64)
+    return true;
+#else
+    return false;
+#endif
+}
+
 constexpr bool is64Bit()
 {
 #if USE(JSVALUE64)
@@ -79,13 +119,14 @@ constexpr bool is32Bit()
     return !is64Bit();
 }
 
-constexpr bool isMIPS()
+constexpr bool isAddress64Bit()
 {
-#if CPU(MIPS)
-    return true;
-#else
-    return false;
-#endif
+    return sizeof(void*) == 8;
+}
+
+constexpr bool isAddress32Bit()
+{
+    return !isAddress64Bit();
 }
 
 inline bool optimizeForARMv7IDIVSupported()
@@ -112,6 +153,38 @@ inline bool hasSensibleDoubleToInt()
 {
     return optimizeForX86();
 }
+
+#if (CPU(X86) || CPU(X86_64)) && OS(DARWIN)
+bool isKernTCSMAvailable();
+bool enableKernTCSM();
+int kernTCSMAwareNumberOfProcessorCores();
+int64_t hwL3CacheSize();
+int32_t hwPhysicalCPUMax();
+#else
+ALWAYS_INLINE bool isKernTCSMAvailable() { return false; }
+ALWAYS_INLINE bool enableKernTCSM() { return false; }
+ALWAYS_INLINE int kernTCSMAwareNumberOfProcessorCores() { return WTF::numberOfProcessorCores(); }
+ALWAYS_INLINE int64_t hwL3CacheSize() { return 0; }
+ALWAYS_INLINE int32_t hwPhysicalCPUMax() { return kernTCSMAwareNumberOfProcessorCores(); }
+#endif
+
+constexpr size_t prologueStackPointerDelta()
+{
+#if ENABLE(C_LOOP)
+    // Prologue saves the framePointerRegister and linkRegister
+    return 2 * sizeof(CPURegister);
+#elif CPU(X86_64)
+    // Prologue only saves the framePointerRegister
+    return sizeof(CPURegister);
+#elif CPU(ARM_THUMB2) || CPU(ARM64) || CPU(MIPS) || CPU(RISCV64)
+    // Prologue saves the framePointerRegister and linkRegister
+    return 2 * sizeof(CPURegister);
+#else
+#error unsupported architectures
+#endif
+}
+
+
 
 } // namespace JSC
 

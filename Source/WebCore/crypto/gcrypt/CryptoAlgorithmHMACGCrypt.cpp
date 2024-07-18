@@ -29,7 +29,7 @@
 #include "config.h"
 #include "CryptoAlgorithmHMAC.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 #include "CryptoKeyHMAC.h"
 #include <pal/crypto/gcrypt/Handle.h>
@@ -79,7 +79,7 @@ static std::optional<Vector<uint8_t>> calculateSignature(int algorithm, const Ve
         return std::nullopt;
 
     signature.resize(digestLength);
-    return WTFMove(signature);
+    return signature;
 }
 
 ExceptionOr<Vector<uint8_t>> CryptoAlgorithmHMAC::platformSign(const CryptoKeyHMAC& key, const Vector<uint8_t>& data)
@@ -109,4 +109,4 @@ ExceptionOr<bool> CryptoAlgorithmHMAC::platformVerify(const CryptoKeyHMAC& key, 
 
 }
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

@@ -33,7 +33,7 @@ namespace JSC {
 
 class HasOwnPropertyCache {
     static const uint32_t size = 2 * 1024;
-    static_assert(!(size & (size - 1)), "size should be a power of two.");
+    static_assert(hasOneBitSet(size), "size should be a power of two.");
 public:
     static const uint32_t mask = size - 1;
 
@@ -42,20 +42,8 @@ public:
         static ptrdiff_t offsetOfImpl() { return OBJECT_OFFSETOF(Entry, impl); }
         static ptrdiff_t offsetOfResult() { return OBJECT_OFFSETOF(Entry, result); }
 
-#if !COMPILER_SUPPORTS(NSDMI_FOR_AGGREGATES)
-        Entry() = default;
-        Entry(RefPtr<UniquedStringImpl>&& impl, StructureID structureID, bool result)
-            : impl { WTFMove(impl) }
-            , structureID { structureID }
-            , result { result }
-        {
-        }
-
-        Entry& operator=(Entry&& other) = default;
-#endif
-
         RefPtr<UniquedStringImpl> impl;
-        StructureID structureID { 0 };
+        StructureID structureID;
         bool result { false };
     };
 
@@ -91,7 +79,7 @@ public:
         return std::nullopt;
     }
 
-    ALWAYS_INLINE void tryAdd(VM& vm, PropertySlot& slot, JSObject* object, PropertyName propName, bool result)
+    ALWAYS_INLINE void tryAdd(PropertySlot& slot, JSObject* object, PropertyName propName, bool result)
     {
         if (parseIndex(propName))
             return;
@@ -99,10 +87,10 @@ public:
         if (!slot.isCacheable() && !slot.isUnset())
             return;
 
-        if (object->type() == PureForwardingProxyType || object->type() == ImpureProxyType)
+        if (object->type() == PureForwardingProxyType)
             return;
 
-        Structure* structure = object->structure(vm);
+        Structure* structure = object->structure();
         if (!structure->typeInfo().prohibitsPropertyCaching()
             && structure->propertyAccessesAreCacheable()
             && (!slot.isUnset() || structure->propertyAccessesAreCacheableForAbsence())) {

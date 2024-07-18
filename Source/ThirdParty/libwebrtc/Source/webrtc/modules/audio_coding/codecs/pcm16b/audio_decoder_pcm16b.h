@@ -8,17 +8,26 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_PCM16B_AUDIO_DECODER_PCM16B_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_PCM16B_AUDIO_DECODER_PCM16B_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_PCM16B_AUDIO_DECODER_PCM16B_H_
+#define MODULES_AUDIO_CODING_CODECS_PCM16B_AUDIO_DECODER_PCM16B_H_
 
-#include "webrtc/api/audio_codecs/audio_decoder.h"
-#include "webrtc/base/constructormagic.h"
+#include <stddef.h>
+#include <stdint.h>
+
+#include <vector>
+
+#include "api/audio_codecs/audio_decoder.h"
+#include "rtc_base/buffer.h"
 
 namespace webrtc {
 
 class AudioDecoderPcm16B final : public AudioDecoder {
  public:
   AudioDecoderPcm16B(int sample_rate_hz, size_t num_channels);
+
+  AudioDecoderPcm16B(const AudioDecoderPcm16B&) = delete;
+  AudioDecoderPcm16B& operator=(const AudioDecoderPcm16B&) = delete;
+
   void Reset() override;
   std::vector<ParseResult> ParsePayload(rtc::Buffer&& payload,
                                         uint32_t timestamp) override;
@@ -36,9 +45,8 @@ class AudioDecoderPcm16B final : public AudioDecoder {
  private:
   const int sample_rate_hz_;
   const size_t num_channels_;
-  RTC_DISALLOW_COPY_AND_ASSIGN(AudioDecoderPcm16B);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_CODECS_PCM16B_AUDIO_DECODER_PCM16B_H_
+#endif  // MODULES_AUDIO_CODING_CODECS_PCM16B_AUDIO_DECODER_PCM16B_H_

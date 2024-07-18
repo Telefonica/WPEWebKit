@@ -25,10 +25,14 @@
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
 #include "ProgressShadowElement.h"
+#include "PseudoClassChangeInvalidation.h"
 #include "RenderProgress.h"
 #include "ShadowRoot.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLProgressElement);
 
 using namespace HTMLNames;
 
@@ -38,14 +42,13 @@ const double HTMLProgressElement::InvalidPosition = -2;
 HTMLProgressElement::HTMLProgressElement(const QualifiedName& tagName, Document& document)
     : LabelableElement(tagName, document)
     , m_value(0)
+    , m_isDeterminate(false)
 {
     ASSERT(hasTagName(progressTag));
     setHasCustomStyleResolveCallbacks();
 }
 
-HTMLProgressElement::~HTMLProgressElement()
-{
-}
+HTMLProgressElement::~HTMLProgressElement() = default;
 
 Ref<HTMLProgressElement> HTMLProgressElement::create(const QualifiedName& tagName, Document& document)
 {
@@ -56,7 +59,7 @@ Ref<HTMLProgressElement> HTMLProgressElement::create(const QualifiedName& tagNam
 
 RenderPtr<RenderElement> HTMLProgressElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
-    if (!style.hasAppearance())
+    if (!style.hasEffectiveAppearance())
         return RenderElement::createFor(*this, WTFMove(style));
 
     return createRenderer<RenderProgress>(*this, WTFMove(style));
@@ -74,11 +77,12 @@ RenderProgress* HTMLProgressElement::renderProgress() const
     return downcast<RenderProgress>(descendantsOfType<Element>(*userAgentShadowRoot()).first()->renderer());
 }
 
-void HTMLProgressElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLProgressElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
-    if (name == valueAttr)
+    if (name == valueAttr) {
+        updateDeterminateState();
         didElementStateChange();
-    else if (name == maxAttr)
+    } else if (name == maxAttr)
         didElementStateChange();
     else
         LabelableElement::parseAttribute(name, value);
@@ -86,8 +90,8 @@ void HTMLProgressElement::parseAttribute(const QualifiedName& name, const Atomic
 
 void HTMLProgressElement::didAttachRenderers()
 {
-    if (RenderProgress* render = renderProgress())
-        render->updateFromElement();
+    if (RenderProgress* renderer = renderProgress())
+        renderer->updateFromElement();
 }
 
 double HTMLProgressElement::value() const
@@ -98,7 +102,7 @@ double HTMLProgressElement::value() const
 
 void HTMLProgressElement::setValue(double value)
 {
-    setAttributeWithoutSynchronization(valueAttr, AtomicString::number(value >= 0 ? value : 0));
+    setAttributeWithoutSynchronization(valueAttr, AtomString::number(value));
 }
 
 double HTMLProgressElement::max() const
@@ -109,7 +113,8 @@ double HTMLProgressElement::max() const
 
 void HTMLProgressElement::setMax(double max)
 {
-    setAttributeWithoutSynchronization(maxAttr, AtomicString::number(max > 0 ? max : 1));
+    if (max > 0)
+        setAttributeWithoutSynchronization(maxAttr, AtomString::number(max));
 }
 
 double HTMLProgressElement::position() const
@@ -119,28 +124,28 @@ double HTMLProgressElement::position() const
     return value() / max();
 }
 
-bool HTMLProgressElement::isDeterminate() const
+void HTMLProgressElement::updateDeterminateState()
 {
-    return hasAttributeWithoutSynchronization(valueAttr);
+    bool newIsDeterminate = hasAttributeWithoutSynchronization(valueAttr);
+    if (m_isDeterminate == newIsDeterminate)
+        return;
+    Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClassIndeterminate, !newIsDeterminate);
+    m_isDeterminate = newIsDeterminate;
 }
-    
+
 void HTMLProgressElement::didElementStateChange()
 {
     m_value->setWidthPercentage(position() * 100);
-    if (RenderProgress* render = renderProgress()) {
-        bool wasDeterminate = render->isDeterminate();
-        render->updateFromElement();
-        if (wasDeterminate != isDeterminate())
-            invalidateStyleForSubtree();
-    }
+    if (RenderProgress* renderer = renderProgress())
+        renderer->updateFromElement();
 }
 
-void HTMLProgressElement::didAddUserAgentShadowRoot(ShadowRoot* root)
+void HTMLProgressElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 {
     ASSERT(!m_value);
 
     auto inner = ProgressInnerElement::create(document());
-    root->appendChild(inner);
+    root.appendChild(inner);
 
     auto bar = ProgressBarElement::create(document());
     auto value = ProgressValueElement::create(document());

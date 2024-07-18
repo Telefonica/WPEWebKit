@@ -31,7 +31,7 @@
 #import "ExceptionHandlers.h"
 #import <WebCore/File.h>
 #import <WebCore/FileList.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/WebScriptObjectPrivate.h>
@@ -76,10 +76,12 @@ DOMFileList *kit(WebCore::FileList* value)
     if (!value)
         return nil;
     if (DOMFileList *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMFileList *wrapper = [[DOMFileList alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    auto wrapper = adoptNS([[DOMFileList alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
+
+#undef IMPL

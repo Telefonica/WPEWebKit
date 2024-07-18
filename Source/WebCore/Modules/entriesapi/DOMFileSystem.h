@@ -39,7 +39,8 @@ class FileSystemFileEntry;
 class FileSystemEntry;
 class ScriptExecutionContext;
 
-class DOMFileSystem : public ScriptWrappable, public RefCounted<DOMFileSystem> {
+class DOMFileSystem final : public ScriptWrappable, public RefCounted<DOMFileSystem> {
+    WTF_MAKE_ISO_ALLOCATED(DOMFileSystem);
 public:
     static Ref<FileSystemEntry> createEntryForFile(ScriptExecutionContext& context, Ref<File>&& file)
     {
@@ -52,16 +53,16 @@ public:
     const String& name() const { return m_name; }
     Ref<FileSystemDirectoryEntry> root(ScriptExecutionContext&);
 
-    using DirectoryListingCallback = WTF::Function<void(ExceptionOr<Vector<Ref<FileSystemEntry>>>&&)>;
+    using DirectoryListingCallback = Function<void(ExceptionOr<Vector<Ref<FileSystemEntry>>>&&)>;
     void listDirectory(ScriptExecutionContext&, FileSystemDirectoryEntry&, DirectoryListingCallback&&);
 
-    using GetParentCallback = WTF::Function<void(ExceptionOr<Ref<FileSystemDirectoryEntry>>&&)>;
+    using GetParentCallback = Function<void(ExceptionOr<Ref<FileSystemDirectoryEntry>>&&)>;
     void getParent(ScriptExecutionContext&, FileSystemEntry&, GetParentCallback&&);
 
-    using GetEntryCallback = WTF::Function<void(ExceptionOr<Ref<FileSystemEntry>>&&)>;
+    using GetEntryCallback = Function<void(ExceptionOr<Ref<FileSystemEntry>>&&)>;
     void getEntry(ScriptExecutionContext&, FileSystemDirectoryEntry&, const String& virtualPath, const FileSystemDirectoryEntry::Flags&, GetEntryCallback&&);
 
-    using GetFileCallback = WTF::Function<void(ExceptionOr<Ref<File>>&&)>;
+    using GetFileCallback = Function<void(ExceptionOr<Ref<File>>&&)>;
     void getFile(ScriptExecutionContext&, FileSystemFileEntry&, GetFileCallback&&);
 
 private:
@@ -74,7 +75,6 @@ private:
     Ref<File> m_file;
     String m_rootPath;
     Ref<WorkQueue> m_workQueue;
-
 };
 
 } // namespace WebCore

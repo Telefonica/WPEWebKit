@@ -20,10 +20,16 @@
 #include "config.h"
 #include "StyleSheet.h"
 
+#include <wtf/text/TextStream.h>
+
 namespace WebCore {
 
-StyleSheet::~StyleSheet()
+StyleSheet::~StyleSheet() = default;
+
+TextStream& operator<<(TextStream& ts, const StyleSheet& styleSheet)
 {
+    ts << styleSheet.debugDescription();
+    return ts;
 }
 
 }

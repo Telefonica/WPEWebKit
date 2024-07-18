@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,11 +27,8 @@
 
 #if ENABLE(MEDIA_STREAM) && PLATFORM(MAC)
 
-#include "CaptureDevice.h"
 #include "CaptureDeviceManager.h"
 #include <CoreAudio/CoreAudio.h>
-#include <wtf/HashMap.h>
-#include <wtf/RefPtr.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
@@ -41,25 +38,33 @@ class CoreAudioCaptureDevice;
 class CoreAudioCaptureDeviceManager final : public CaptureDeviceManager {
     friend class NeverDestroyed<CoreAudioCaptureDeviceManager>;
 public:
-    static CoreAudioCaptureDeviceManager& singleton();
+    WEBCORE_EXPORT static CoreAudioCaptureDeviceManager& singleton();
 
-    Vector<CaptureDevice>& captureDevices() final;
+    const Vector<CaptureDevice>& captureDevices() final;
+    std::optional<CaptureDevice> captureDeviceWithPersistentID(CaptureDevice::DeviceType, const String&);
 
-    Vector<CoreAudioCaptureDevice>& coreAudioCaptureDevices();
     std::optional<CoreAudioCaptureDevice> coreAudioDeviceWithUID(const String&);
+    const Vector<CaptureDevice>& speakerDevices() const { return m_speakerDevices; }
+
+    void setFilterTapEnabledDevices(bool doFiltering) { m_filterTapEnabledDevices = doFiltering; }
 
 private:
     CoreAudioCaptureDeviceManager() = default;
     ~CoreAudioCaptureDeviceManager() = default;
     
-    static OSStatus devicesChanged(AudioObjectID, UInt32, const AudioObjectPropertyAddress*, void*);
+    Vector<CoreAudioCaptureDevice>& coreAudioCaptureDevices();
 
-    void refreshAudioCaptureDevices();
+    enum class NotifyIfDevicesHaveChanged { Notify, DoNotNotify };
+    void refreshAudioCaptureDevices(NotifyIfDevicesHaveChanged);
+    void scheduleUpdateCaptureDevices();
 
-    Vector<CaptureDevice> m_devices;
+    Vector<CaptureDevice> m_captureDevices;
+    Vector<CaptureDevice> m_speakerDevices;
     Vector<CoreAudioCaptureDevice> m_coreAudioCaptureDevices;
+    bool m_wasRefreshAudioCaptureDevicesScheduled { false };
+    bool m_filterTapEnabledDevices { false };
 };
 
 } // namespace WebCore
 
-#endif // ENABLE(MEDIA_STREAM && PLATFORM(MAC)
+#endif // ENABLE(MEDIA_STREAM) && PLATFORM(MAC)

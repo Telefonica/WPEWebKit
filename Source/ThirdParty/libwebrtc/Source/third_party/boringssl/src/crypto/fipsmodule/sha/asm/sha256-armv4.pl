@@ -54,9 +54,11 @@ if ($flavour && $flavour ne "void") {
     ( $xlate="${dir}../../../perlasm/arm-xlate.pl" and -f $xlate) or
     die "can't locate arm-xlate.pl";
 
-    open STDOUT,"| \"$^X\" $xlate $flavour $output";
+    open OUT,"| \"$^X\" $xlate $flavour $output";
+    *STDOUT=*OUT;
 } else {
-    open STDOUT,">$output";
+    open OUT,">$output";
+    *STDOUT=*OUT;
 }
 
 $ctx="r0";	$t0="r0";
@@ -180,6 +182,11 @@ $code=<<___;
 # define __ARM_ARCH__ __LINUX_ARM_ARCH__
 # define __ARM_MAX_ARCH__ 7
 #endif
+
+@ Silence ARMv8 deprecated IT instruction warnings. This file is used by both
+@ ARMv7 and ARMv8 processors. It does have ARMv8-only code, but those
+@ instructions are manually-encoded. (See unsha256.)
+.arch  armv7-a
 
 .text
 #if defined(__thumb2__)
@@ -730,4 +737,4 @@ foreach (split($/,$code)) {
 	print $_,"\n";
 }
 
-close STDOUT; # enforce flush
+close STDOUT or die "error closing STDOUT"; # enforce flush

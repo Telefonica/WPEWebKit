@@ -9,32 +9,60 @@
  *
  */
 
-#ifndef WEBRTC_MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_H_
-#define WEBRTC_MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_H_
+#ifndef MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_H_
+#define MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_H_
 
-#include "webrtc/media/base/codec.h"
-#include "webrtc/modules/video_coding/include/video_codec_interface.h"
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "api/video_codecs/h264_profile_level_id.h"
+#include "api/video_codecs/scalability_mode.h"
+#include "media/base/codec.h"
+#include "modules/video_coding/include/video_codec_interface.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
+struct SdpVideoFormat;
+
+// Creates an H264 SdpVideoFormat entry with specified paramters.
+RTC_EXPORT SdpVideoFormat
+CreateH264Format(H264Profile profile,
+                 H264Level level,
+                 const std::string& packetization_mode,
+                 bool add_scalability_modes = false);
+
 // Set to disable the H.264 encoder/decoder implementations that are provided if
-// |rtc_use_h264| build flag is true (if false, this function does nothing).
+// `rtc_use_h264` build flag is true (if false, this function does nothing).
 // This function should only be called before or during WebRTC initialization
 // and is not thread-safe.
-void DisableRtcUseH264();
+RTC_EXPORT void DisableRtcUseH264();
 
-class H264Encoder : public VideoEncoder {
+// Returns a vector with all supported internal H264 encode profiles that we can
+// negotiate in SDP, in order of preference.
+std::vector<SdpVideoFormat> SupportedH264Codecs(
+    bool add_scalability_modes = false);
+
+// Returns a vector with all supported internal H264 decode profiles that we can
+// negotiate in SDP, in order of preference. This will be available for receive
+// only connections.
+std::vector<SdpVideoFormat> SupportedH264DecoderCodecs();
+
+class RTC_EXPORT H264Encoder : public VideoEncoder {
  public:
-  static H264Encoder* Create(const cricket::VideoCodec& codec);
+  static std::unique_ptr<H264Encoder> Create(const cricket::VideoCodec& codec);
+  static std::unique_ptr<H264Encoder> Create();
   // If H.264 is supported (any implementation).
   static bool IsSupported();
+  static bool SupportsScalabilityMode(ScalabilityMode scalability_mode);
 
   ~H264Encoder() override {}
 };
 
-class H264Decoder : public VideoDecoder {
+class RTC_EXPORT H264Decoder : public VideoDecoder {
  public:
-  static H264Decoder* Create();
+  static std::unique_ptr<H264Decoder> Create();
   static bool IsSupported();
 
   ~H264Decoder() override {}
@@ -42,4 +70,4 @@ class H264Decoder : public VideoDecoder {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_H_
+#endif  // MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_H_

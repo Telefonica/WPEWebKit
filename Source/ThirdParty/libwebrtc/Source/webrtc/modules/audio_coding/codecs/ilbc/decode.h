@@ -16,16 +16,20 @@
 
 ******************************************************************/
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_DECODE_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_DECODE_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_DECODE_H_
+#define MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_DECODE_H_
 
-#include "defines.h"
+#include <stdint.h>
+
+#include "absl/base/attributes.h"
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  *  main decoder function
  *---------------------------------------------------------------*/
 
 // Returns 0 on success, -1 on error.
+ABSL_MUST_USE_RESULT
 int WebRtcIlbcfix_DecodeImpl(
     int16_t* decblock,         /* (o) decoded signal block */
     const uint16_t* bytes,     /* (i) encoded signal bits */
@@ -33,6 +37,6 @@ int WebRtcIlbcfix_DecodeImpl(
                                            structure */
     int16_t mode               /* (i) 0: bad packet, PLC,
                                       1: normal */
-    ) RTC_WARN_UNUSED_RESULT;
+);
 
 #endif

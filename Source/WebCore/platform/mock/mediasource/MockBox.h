@@ -74,14 +74,14 @@ public:
 
     int32_t trackID() const { return m_trackID; }
 
-    const String& codec() const { return m_codec; }
+    const AtomString& codec() const { return m_codec; }
 
     enum TrackKind { Audio, Video, Text };
     TrackKind kind() const { return m_kind; }
 
-protected:
+private:
     uint8_t m_trackID;
-    String m_codec;
+    AtomString m_codec;
     TrackKind m_kind;
 };
 
@@ -102,7 +102,7 @@ public:
     MediaTime duration() const { return m_duration; }
     const Vector<MockTrackBox>& tracks() const { return m_tracks; }
 
-protected:
+private:
     MediaTime m_duration;
     Vector<MockTrackBox> m_tracks;
 };
@@ -157,7 +157,7 @@ public:
     bool isDelayed() const { return m_flags & IsDelayed; }
     bool isNonDisplaying() const { return m_flags & IsNonDisplaying; }
 
-protected:
+private:
     MediaTime m_presentationTimestamp;
     MediaTime m_decodeTimestamp;
     MediaTime m_duration;

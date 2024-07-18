@@ -23,15 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef CDMSessionAVStreamSession_h
-#define CDMSessionAVStreamSession_h
+#pragma once
 
 #include "CDMSessionMediaSourceAVFObjC.h"
 #include "SourceBufferPrivateAVFObjC.h"
 #include <wtf/RetainPtr.h>
 #include <wtf/WeakPtr.h>
 
-#if ENABLE(LEGACY_ENCRYPTED_MEDIA) && ENABLE(MEDIA_SOURCE)
+#if HAVE(AVSTREAMSESSION) && ENABLE(LEGACY_ENCRYPTED_MEDIA) && ENABLE(MEDIA_SOURCE)
 
 OBJC_CLASS AVStreamSession;
 OBJC_CLASS WebCDMSessionAVStreamSessionObserver;
@@ -41,15 +40,17 @@ namespace WebCore {
 class CDMPrivateMediaSourceAVFObjC;
 
 class CDMSessionAVStreamSession : public CDMSessionMediaSourceAVFObjC {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    CDMSessionAVStreamSession(const Vector<int>& protocolVersions, CDMPrivateMediaSourceAVFObjC&, CDMSessionClient*);
+    CDMSessionAVStreamSession(Vector<int>&& protocolVersions, CDMPrivateMediaSourceAVFObjC&, LegacyCDMSessionClient&);
     virtual ~CDMSessionAVStreamSession();
 
-    // CDMSession
-    CDMSessionType type() override { return CDMSessionTypeAVStreamSession; }
+    // LegacyCDMSession
+    LegacyCDMSessionType type() override { return CDMSessionTypeAVStreamSession; }
     RefPtr<Uint8Array> generateKeyRequest(const String& mimeType, Uint8Array* initData, String& destinationURL, unsigned short& errorCode, uint32_t& systemCode) override;
     void releaseKeys() override;
     bool update(Uint8Array*, RefPtr<Uint8Array>& nextMessage, unsigned short& errorCode, uint32_t& systemCode) override;
+    RefPtr<ArrayBuffer> cachedKeyForKeyID(const String&) const override;
 
     // CDMSessionMediaSourceAVFObjC
     void addParser(AVStreamDataParser*) override;
@@ -60,7 +61,10 @@ public:
 protected:
     RefPtr<Uint8Array> generateKeyReleaseMessage(unsigned short& errorCode, uint32_t& systemCode);
 
-    WeakPtrFactory<CDMSessionAVStreamSession> m_weakPtrFactory;
+#if !RELEASE_LOG_DISABLED
+    const char* logClassName() const { return "CDMSessionAVStreamSession"; }
+#endif
+
     RetainPtr<AVStreamSession> m_streamSession;
     RefPtr<Uint8Array> m_initData;
     RefPtr<Uint8Array> m_certificate;
@@ -70,7 +74,7 @@ protected:
     enum { Normal, KeyRelease } m_mode;
 };
 
-inline CDMSessionAVStreamSession* toCDMSessionAVStreamSession(CDMSession* session)
+inline CDMSessionAVStreamSession* toCDMSessionAVStreamSession(LegacyCDMSession* session)
 {
     if (!session || session->type() != CDMSessionTypeAVStreamSession)
         return nullptr;
@@ -80,5 +84,3 @@ inline CDMSessionAVStreamSession* toCDMSessionAVStreamSession(CDMSession* sessio
 }
 
 #endif
-
-#endif // CDMSessionAVStreamSession_h

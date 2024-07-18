@@ -8,52 +8,55 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_RENDER_DELAY_BUFFER_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_RENDER_DELAY_BUFFER_H_
+#ifndef MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_RENDER_DELAY_BUFFER_H_
+#define MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_RENDER_DELAY_BUFFER_H_
 
 #include <vector>
 
-#include "webrtc/modules/audio_processing/aec3/aec3_common.h"
-#include "webrtc/modules/audio_processing/aec3/downsampled_render_buffer.h"
-#include "webrtc/modules/audio_processing/aec3/render_buffer.h"
-#include "webrtc/modules/audio_processing/aec3/render_delay_buffer.h"
-#include "webrtc/test/gmock.h"
+#include "modules/audio_processing/aec3/aec3_common.h"
+#include "modules/audio_processing/aec3/downsampled_render_buffer.h"
+#include "modules/audio_processing/aec3/render_buffer.h"
+#include "modules/audio_processing/aec3/render_delay_buffer.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 namespace test {
 
 class MockRenderDelayBuffer : public RenderDelayBuffer {
  public:
-  explicit MockRenderDelayBuffer(int sample_rate_hz)
-      : render_buffer_(Aec3Optimization::kNone,
-                       NumBandsForRate(sample_rate_hz),
-                       kRenderDelayBufferSize,
-                       std::vector<size_t>(1, kAdaptiveFilterLength)) {
-    ON_CALL(*this, GetRenderBuffer())
-        .WillByDefault(
-            testing::Invoke(this, &MockRenderDelayBuffer::FakeGetRenderBuffer));
-    ON_CALL(*this, GetDownsampledRenderBuffer())
-        .WillByDefault(testing::Invoke(
-            this, &MockRenderDelayBuffer::FakeGetDownsampledRenderBuffer));
-  }
-  virtual ~MockRenderDelayBuffer() = default;
+  MockRenderDelayBuffer(int sample_rate_hz, size_t num_channels);
+  virtual ~MockRenderDelayBuffer();
 
-  MOCK_METHOD0(Reset, void());
-  MOCK_METHOD1(Insert, bool(const std::vector<std::vector<float>>& block));
-  MOCK_METHOD0(UpdateBuffers, bool());
-  MOCK_METHOD1(SetDelay, void(size_t delay));
-  MOCK_CONST_METHOD0(Delay, size_t());
-  MOCK_CONST_METHOD0(MaxDelay, size_t());
-  MOCK_CONST_METHOD0(IsBlockAvailable, bool());
-  MOCK_CONST_METHOD0(GetRenderBuffer, const RenderBuffer&());
-  MOCK_CONST_METHOD0(GetDownsampledRenderBuffer,
-                     const DownsampledRenderBuffer&());
+  MOCK_METHOD(void, Reset, (), (override));
+  MOCK_METHOD(RenderDelayBuffer::BufferingEvent,
+              Insert,
+              (const Block& block),
+              (override));
+  MOCK_METHOD(void, HandleSkippedCaptureProcessing, (), (override));
+  MOCK_METHOD(RenderDelayBuffer::BufferingEvent,
+              PrepareCaptureProcessing,
+              (),
+              (override));
+  MOCK_METHOD(bool, AlignFromDelay, (size_t delay), (override));
+  MOCK_METHOD(void, AlignFromExternalDelay, (), (override));
+  MOCK_METHOD(size_t, Delay, (), (const, override));
+  MOCK_METHOD(size_t, MaxDelay, (), (const, override));
+  MOCK_METHOD(RenderBuffer*, GetRenderBuffer, (), (override));
+  MOCK_METHOD(const DownsampledRenderBuffer&,
+              GetDownsampledRenderBuffer,
+              (),
+              (const, override));
+  MOCK_METHOD(void, SetAudioBufferDelay, (int delay_ms), (override));
+  MOCK_METHOD(bool, HasReceivedBufferDelay, (), (override));
 
  private:
-  const RenderBuffer& FakeGetRenderBuffer() const { return render_buffer_; }
+  RenderBuffer* FakeGetRenderBuffer() { return &render_buffer_; }
   const DownsampledRenderBuffer& FakeGetDownsampledRenderBuffer() const {
     return downsampled_render_buffer_;
   }
+  BlockBuffer block_buffer_;
+  SpectrumBuffer spectrum_buffer_;
+  FftBuffer fft_buffer_;
   RenderBuffer render_buffer_;
   DownsampledRenderBuffer downsampled_render_buffer_;
 };
@@ -61,4 +64,4 @@ class MockRenderDelayBuffer : public RenderDelayBuffer {
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_RENDER_DELAY_BUFFER_H_
+#endif  // MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_RENDER_DELAY_BUFFER_H_

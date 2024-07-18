@@ -8,12 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_RTP_RTCP_SOURCE_DTMF_QUEUE_H_
-#define WEBRTC_MODULES_RTP_RTCP_SOURCE_DTMF_QUEUE_H_
+#ifndef MODULES_RTP_RTCP_SOURCE_DTMF_QUEUE_H_
+#define MODULES_RTP_RTCP_SOURCE_DTMF_QUEUE_H_
+
+#include <stdint.h>
 
 #include <list>
 
-#include "webrtc/base/criticalsection.h"
+#include "rtc_base/synchronization/mutex.h"
 
 namespace webrtc {
 class DtmfQueue {
@@ -33,9 +35,9 @@ class DtmfQueue {
   bool PendingDtmf() const;
 
  private:
-  rtc::CriticalSection dtmf_critsect_;
+  mutable Mutex dtmf_mutex_;
   std::list<Event> queue_;
 };
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_RTP_RTCP_SOURCE_DTMF_QUEUE_H_
+#endif  // MODULES_RTP_RTCP_SOURCE_DTMF_QUEUE_H_

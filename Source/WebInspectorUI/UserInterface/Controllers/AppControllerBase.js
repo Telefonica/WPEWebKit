@@ -23,14 +23,9 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WI.DebuggableType = {
-    Web: "web",
-    JavaScript: "javascript"
-};
-
 WI.NotImplementedError = class NotImplementedError extends Error
 {
-    constructor(message="This method is not implemented.")
+    constructor(message = "This method is not implemented.")
     {
         super(message);
     }
@@ -46,10 +41,14 @@ WI.AppControllerBase = class AppControllerBase
     constructor()
     {
         this._initialized = false;
+
+        this._extensionController = new WI.WebInspectorExtensionController;
     }
 
-    get hasExtraDomains() { throw WI.NotImplementedError.subclassMustOverride(); }
+    // Public
+
     get debuggableType() { throw WI.NotImplementedError.subclassMustOverride(); }
+    get extensionController() { return this._extensionController; }
 
     // Since various members of the app controller depend on the global singleton to exist,
     // some initialization needs to happen after the app controller has been constructed.
@@ -62,5 +61,11 @@ WI.AppControllerBase = class AppControllerBase
 
         // FIXME: eventually all code within WI.loaded should be distributed elsewhere.
         WI.loaded();
+    }
+
+    isWebDebuggable()
+    {
+        return this.debuggableType === WI.DebuggableType.Page
+            || this.debuggableType === WI.DebuggableType.WebPage;
     }
 };

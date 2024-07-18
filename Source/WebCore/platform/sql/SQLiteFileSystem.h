@@ -31,6 +31,7 @@
 #ifndef SQLiteFileSystem_h
 #define SQLiteFileSystem_h
 
+#include <wtf/WallTime.h>
 #include <wtf/text/WTFString.h>
 
 struct sqlite3;
@@ -43,27 +44,17 @@ class SQLiteDatabase;
 // by the WebKit database code.
 class SQLiteFileSystem {
 public:
-    // Opens a database file.
-    //
-    // filemame - The name of the database file.
-    // database - The SQLite structure that represents the database stored
-    //            in the given file.
-    // forWebSQLDatabase - True, if and only if we're opening a Web SQL Database file.
-    //                     Used by Chromium to determine if the DB file needs to be opened
-    //                     using a custom VFS.
-    static int openDatabase(const String& filename, sqlite3** database, bool forWebSQLDatabase);
-
     // Creates an absolute file path given a directory and a file name.
     //
     // path - The directory.
     // fileName - The file name.
-    static String appendDatabaseFileNameToPath(const String& path, const String& fileName);
+    WEBCORE_EXPORT static String appendDatabaseFileNameToPath(StringView path, StringView fileName);
 
     // Makes sure the given directory exists, by creating all missing directories
     // on the given path.
     //
     // path - The directory.
-    static bool ensureDatabaseDirectoryExists(const String& path);
+    WEBCORE_EXPORT static bool ensureDatabaseDirectoryExists(const String& path);
 
     // If 'checkPathOnly' is false, then this method only checks if the given file exists.
     // If 'checkPathOnly' is true, then this method makes sure all directories on the
@@ -87,18 +78,22 @@ public:
     // Deletes a database file.
     //
     // fileName - The file name.
-    WEBCORE_EXPORT static bool deleteDatabaseFile(const String& fileName);
+    WEBCORE_EXPORT static bool deleteDatabaseFile(const String& filePath);
 
-#if PLATFORM(IOS)
+    // Moves a database file to a new place.
+    WEBCORE_EXPORT static bool moveDatabaseFile(const String& oldFilePath, const String& newFilePath);
+    WEBCORE_EXPORT static String computeHashForFileName(StringView filePath);
+
+#if PLATFORM(IOS_FAMILY)
     // Truncates a database file. Used when MobileSafariSettings deletes a database file,
     // since deleting the file nukes the POSIX file locks which would potentially cause Safari
     // to corrupt the new db if it's running in the background.
     static bool truncateDatabaseFile(sqlite3* database);
 #endif
     
-    static long long getDatabaseFileSize(const String& fileName);
-    static double databaseCreationTime(const String& fileName);
-    static double databaseModificationTime(const String& fileName);
+    WEBCORE_EXPORT static uint64_t databaseFileSize(const String& fileName);
+    WEBCORE_EXPORT static std::optional<WallTime> databaseCreationTime(const String& fileName);
+    WEBCORE_EXPORT static std::optional<WallTime> databaseModificationTime(const String& fileName);
 
 private:
     // do not instantiate this class

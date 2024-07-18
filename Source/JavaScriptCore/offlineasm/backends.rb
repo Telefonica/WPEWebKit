@@ -1,4 +1,4 @@
-# Copyright (C) 2011, 2016 Apple Inc. All rights reserved.
+# Copyright (C) 2011-2022 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -27,7 +27,13 @@ require "arm64"
 require "ast"
 require "x86"
 require "mips"
+require "riscv64"
 require "cloop"
+
+begin
+    require "arm64e"
+rescue LoadError
+end
 
 BACKENDS =
     [
@@ -35,12 +41,13 @@ BACKENDS =
      "X86_WIN",
      "X86_64",
      "X86_64_WIN",
-     "ARM",
      "ARMv7",
-     "ARMv7_TRADITIONAL",
      "ARM64",
+     "ARM64E",
      "MIPS",
-     "C_LOOP"
+     "RISCV64",
+     "C_LOOP",
+     "C_LOOP_WIN"
     ]
 
 # Keep the set of working backends separate from the set of backends that might be
@@ -54,12 +61,13 @@ WORKING_BACKENDS =
      "X86_WIN",
      "X86_64",
      "X86_64_WIN",
-     "ARM",
      "ARMv7",
-     "ARMv7_TRADITIONAL",
      "ARM64",
+     "ARM64E",
      "MIPS",
-     "C_LOOP"
+     "RISCV64",
+     "C_LOOP",
+     "C_LOOP_WIN"
     ]
 
 BACKEND_PATTERN = Regexp.new('\\A(' + BACKENDS.join(')|(') + ')\\Z')
@@ -71,6 +79,22 @@ BACKENDS.each {
     $validBackends[backend] = true
     $allBackends[backend] = true
 }
+
+def canonicalizeBackendNames(backendNames)
+    newBackendNames = []
+    backendNames.each {
+        | backendName |
+        backendName = backendName.upcase
+        if backendName =~ /ARM.*/
+            backendName.sub!(/ARMV7([KS]?)(.*)/) { | _ | 'ARMv7' + $1.downcase + $2 }
+            backendName = "ARM64" if backendName == "ARM64_32"
+        end
+        backendName = "X86" if backendName == "I386"
+        newBackendNames << backendName
+        newBackendNames << "ARMv7" if backendName.start_with?("ARMv7")
+    }
+    newBackendNames.uniq
+end
 
 def includeOnlyBackends(list)
     newValidBackends = {}
@@ -109,7 +133,8 @@ class Node
     def lower(name)
         begin
             $activeBackend = name
-            send("lower" + name)
+            send("prepareToLower", name)
+            send("lower#{name}")
         rescue => e
             raise LoweringError.new(e, codeOriginString)
         end
@@ -127,7 +152,7 @@ end
 
 class LocalLabel
     def lower(name)
-        $asm.putsLocalLabel "_offlineasm_#{self.name[1..-1]}"
+        $asm.putsLocalLabel "jsc_llint_#{self.name[1..-1]}"
     end
 end
 
@@ -147,11 +172,11 @@ end
 
 class LocalLabelReference
     def asmLabel
-        Assembler.localLabelReference("_offlineasm_"+name[1..-1])
+        Assembler.localLabelReference("jsc_llint_"+name[1..-1])
     end
 
     def cLabel
-        Assembler.cLocalLabelReference("_offlineasm_"+name[1..-1])
+        Assembler.cLocalLabelReference("jsc_llint_"+name[1..-1])
     end
 end
 

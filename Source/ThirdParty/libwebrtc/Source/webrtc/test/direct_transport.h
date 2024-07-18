@@ -7,111 +7,84 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#ifndef WEBRTC_TEST_DIRECT_TRANSPORT_H_
-#define WEBRTC_TEST_DIRECT_TRANSPORT_H_
+#ifndef TEST_DIRECT_TRANSPORT_H_
+#define TEST_DIRECT_TRANSPORT_H_
 
-#include <assert.h>
+#include <memory>
 
-#include <deque>
-
-#include "webrtc/api/call/transport.h"
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/event.h"
-#include "webrtc/base/platform_thread.h"
-#include "webrtc/call/call.h"
-#include "webrtc/test/fake_network_pipe.h"
+#include "api/call/transport.h"
+#include "api/sequence_checker.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/test/simulated_network.h"
+#include "call/call.h"
+#include "call/simulated_packet_receiver.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/task_utils/repeating_task.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
-class Clock;
 class PacketReceiver;
 
 namespace test {
+class Demuxer {
+ public:
+  explicit Demuxer(const std::map<uint8_t, MediaType>& payload_type_map);
+  ~Demuxer() = default;
 
+  Demuxer(const Demuxer&) = delete;
+  Demuxer& operator=(const Demuxer&) = delete;
+
+  MediaType GetMediaType(const uint8_t* packet_data,
+                         size_t packet_length) const;
+  const std::map<uint8_t, MediaType> payload_type_map_;
+};
+
+// Objects of this class are expected to be allocated and destroyed  on the
+// same task-queue - the one that's passed in via the constructor.
 class DirectTransport : public Transport {
  public:
-  DirectTransport(Call* send_call,
-                  const std::map<uint8_t, MediaType>& payload_type_map);
-  DirectTransport(const FakeNetworkPipe::Config& config,
+  DirectTransport(TaskQueueBase* task_queue,
+                  std::unique_ptr<SimulatedPacketReceiverInterface> pipe,
                   Call* send_call,
-                  const std::map<uint8_t, MediaType>& payload_type_map);
-  DirectTransport(const FakeNetworkPipe::Config& config,
-                  Call* send_call,
-                  std::unique_ptr<Demuxer> demuxer);
+                  const std::map<uint8_t, MediaType>& payload_type_map,
+                  rtc::ArrayView<const RtpExtension> audio_extensions,
+                  rtc::ArrayView<const RtpExtension> video_extensions);
 
-  // These deprecated variants always use ForceDemuxer.
-  RTC_DEPRECATED DirectTransport(Call* send_call, MediaType media_type)
-      : DirectTransport(
-            FakeNetworkPipe::Config(),
-            send_call,
-            std::unique_ptr<Demuxer>(new ForceDemuxer(media_type))) {}
-  RTC_DEPRECATED DirectTransport(const FakeNetworkPipe::Config& config,
-                                 Call* send_call,
-                                 MediaType media_type)
-      : DirectTransport(
-            config,
-            send_call,
-            std::unique_ptr<Demuxer>(new ForceDemuxer(media_type))) {}
+  ~DirectTransport() override;
 
-  // These deprecated variants always use MediaType::VIDEO.
-  RTC_DEPRECATED explicit DirectTransport(Call* send_call)
-      : DirectTransport(
-            FakeNetworkPipe::Config(),
-            send_call,
-            std::unique_ptr<Demuxer>(new ForceDemuxer(MediaType::VIDEO))) {}
-
-  RTC_DEPRECATED DirectTransport(const FakeNetworkPipe::Config& config,
-                                 Call* send_call)
-      : DirectTransport(
-            config,
-            send_call,
-            std::unique_ptr<Demuxer>(new ForceDemuxer(MediaType::VIDEO))) {}
-
-  ~DirectTransport();
-
-  void SetConfig(const FakeNetworkPipe::Config& config);
-
-  virtual void StopSending();
   // TODO(holmer): Look into moving this to the constructor.
   virtual void SetReceiver(PacketReceiver* receiver);
 
-  bool SendRtp(const uint8_t* data,
-               size_t length,
+  // Backwards compatibility using statements.
+  // TODO(https://bugs.webrtc.org/15410): Remove when not needed.
+  using Transport::SendRtcp;
+  using Transport::SendRtp;
+
+  bool SendRtp(rtc::ArrayView<const uint8_t> data,
                const PacketOptions& options) override;
-  bool SendRtcp(const uint8_t* data, size_t length) override;
+  bool SendRtcp(rtc::ArrayView<const uint8_t> data) override;
 
   int GetAverageDelayMs();
 
  private:
-  // TODO(minyue): remove when the deprecated ctors of DirectTransport that
-  // create ForceDemuxer are removed.
-  class ForceDemuxer : public Demuxer {
-   public:
-    explicit ForceDemuxer(MediaType media_type);
-    void SetReceiver(PacketReceiver* receiver) override;
-    void DeliverPacket(const NetworkPacket* packet,
-                       const PacketTime& packet_time) override;
+  void ProcessPackets() RTC_EXCLUSIVE_LOCKS_REQUIRED(&process_lock_);
+  void LegacySendPacket(const uint8_t* data, size_t length);
+  void Start();
 
-   private:
-    const MediaType media_type_;
-    PacketReceiver* packet_receiver_;
-    RTC_DISALLOW_COPY_AND_ASSIGN(ForceDemuxer);
-  };
-
-  static bool NetworkProcess(void* transport);
-  bool SendPackets();
-
-  rtc::CriticalSection lock_;
   Call* const send_call_;
-  rtc::Event packet_event_;
-  rtc::PlatformThread thread_;
-  Clock* const clock_;
 
-  bool shutting_down_;
+  TaskQueueBase* const task_queue_;
 
-  FakeNetworkPipe fake_network_;
+  Mutex process_lock_;
+  RepeatingTaskHandle next_process_task_ RTC_GUARDED_BY(&process_lock_);
+
+  const Demuxer demuxer_;
+  const std::unique_ptr<SimulatedPacketReceiverInterface> fake_network_;
+  const RtpHeaderExtensionMap audio_extensions_;
+  const RtpHeaderExtensionMap video_extensions_;
 };
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_DIRECT_TRANSPORT_H_
+#endif  // TEST_DIRECT_TRANSPORT_H_

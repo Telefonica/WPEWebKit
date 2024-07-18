@@ -25,28 +25,24 @@
 
 #pragma once
 
+#include "DOMWindow.h"
+#include <wtf/WeakPtr.h>
+
 namespace WebCore {
 
-class DOMWindow;
 class Frame;
 
 class DOMWindowProperty {
 public:
-    explicit DOMWindowProperty(Frame*);
-
-    virtual void disconnectFrameForDocumentSuspension();
-    virtual void reconnectFrameFromDocumentSuspension(Frame*);
-    virtual void willDestroyGlobalObjectInCachedFrame();
-    virtual void willDestroyGlobalObjectInFrame();
-    virtual void willDetachGlobalObjectFromFrame();
-
-    Frame* frame() const { return m_frame; }
+    WEBCORE_EXPORT Frame* frame() const;
+    DOMWindow* window() const;
 
 protected:
-    virtual ~DOMWindowProperty();
+    explicit DOMWindowProperty(DOMWindow*);
+    ~DOMWindowProperty() = default;
 
-    Frame* m_frame;
-    DOMWindow* m_associatedDOMWindow;
+private:
+    WeakPtr<DOMWindow> m_window;
 };
 
 } // namespace WebCore

@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef SharedTask_h
-#define SharedTask_h
+#pragma once
 
 #include <wtf/Ref.h>
 #include <wtf/ThreadSafeRefCounted.h>
@@ -59,9 +58,11 @@ namespace WTF {
 // state in member fields. This can be more natural if you want fine-grained control over what
 // state is shared between instances of the task.
 template<typename FunctionType> class SharedTask;
-template<typename ResultType, typename... ArgumentTypes>
-class SharedTask<ResultType (ArgumentTypes...)> : public ThreadSafeRefCounted<SharedTask<ResultType (ArgumentTypes...)>> {
+template<typename PassedResultType, typename... ArgumentTypes>
+class SharedTask<PassedResultType (ArgumentTypes...)> : public ThreadSafeRefCounted<SharedTask<PassedResultType (ArgumentTypes...)>> {
 public:
+    typedef PassedResultType ResultType;
+    
     SharedTask() { }
     virtual ~SharedTask() { }
 
@@ -72,7 +73,7 @@ public:
 // you don't want to use this class directly. Use createSharedTask() instead.
 template<typename FunctionType, typename Functor> class SharedTaskFunctor;
 template<typename ResultType, typename... ArgumentTypes, typename Functor>
-class SharedTaskFunctor<ResultType (ArgumentTypes...), Functor> : public SharedTask<ResultType (ArgumentTypes...)> {
+class SharedTaskFunctor<ResultType(ArgumentTypes...), Functor> final : public SharedTask<ResultType(ArgumentTypes...)> {
 public:
     SharedTaskFunctor(const Functor& functor)
         : m_functor(functor)
@@ -85,7 +86,7 @@ public:
     }
 
 private:
-    ResultType run(ArgumentTypes... arguments) override
+    ResultType run(ArgumentTypes... arguments) final
     {
         return m_functor(std::forward<ArgumentTypes>(arguments)...);
     }
@@ -118,7 +119,7 @@ Ref<SharedTask<FunctionType>> createSharedTask(const Functor& functor)
 template<typename FunctionType, typename Functor>
 Ref<SharedTask<FunctionType>> createSharedTask(Functor&& functor)
 {
-    return adoptRef(*new SharedTaskFunctor<FunctionType, Functor>(WTFMove(functor)));
+    return adoptRef(*new SharedTaskFunctor<FunctionType, Functor>(std::forward<Functor>(functor)));
 }
 
 } // namespace WTF
@@ -126,6 +127,3 @@ Ref<SharedTask<FunctionType>> createSharedTask(Functor&& functor)
 using WTF::createSharedTask;
 using WTF::SharedTask;
 using WTF::SharedTaskFunctor;
-
-#endif // SharedTask_h
-

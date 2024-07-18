@@ -8,36 +8,25 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_TEST_FIELD_TRIAL_H_
-#define WEBRTC_TEST_FIELD_TRIAL_H_
+#ifndef TEST_FIELD_TRIAL_H_
+#define TEST_FIELD_TRIAL_H_
 
 #include <string>
-#include <map>
+
+#include "absl/strings/string_view.h"
 
 namespace webrtc {
 namespace test {
-
-// Parses enabled field trials from a string config, such as the one passed
-// to chrome's argument --force-fieldtrials and initializes webrtc::field_trial
-// with such a config.
-//  E.g.:
-//    "WebRTC-experimentFoo/Enabled/WebRTC-experimentBar/Enabled100kbps/"
-//    Assigns the process to group "Enabled" on WebRTCExperimentFoo trial
-//    and to group "Enabled100kbps" on WebRTCExperimentBar.
-//
-//  E.g. invalid config:
-//    "WebRTC-experiment1/Enabled"  (note missing / separator at the end).
-//
-// Note: This method crashes with an error message if an invalid config is
-// passed to it. That can be used to find out if a binary is parsing the flags.
-void InitFieldTrialsFromString(const std::string& config);
 
 // This class is used to override field-trial configs within specific tests.
 // After this class goes out of scope previous field trials will be restored.
 class ScopedFieldTrials {
  public:
-  explicit ScopedFieldTrials(const std::string& config);
+  explicit ScopedFieldTrials(absl::string_view config);
+  ScopedFieldTrials(const ScopedFieldTrials&) = delete;
+  ScopedFieldTrials& operator=(const ScopedFieldTrials&) = delete;
   ~ScopedFieldTrials();
+
  private:
   std::string current_field_trials_;
   const char* previous_field_trials_;
@@ -46,4 +35,4 @@ class ScopedFieldTrials {
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_FIELD_TRIAL_H_
+#endif  // TEST_FIELD_TRIAL_H_

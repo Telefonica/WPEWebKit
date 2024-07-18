@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebPDFViewIOS.h"
 #import "WebDataSourceInternal.h"
@@ -34,8 +34,7 @@
 #import "WebPDFDocumentExtras.h"
 #import "WebPDFViewPlaceholder.h"
 #import <JavaScriptCore/JSContextRef.h>
-#import <JavaScriptCore/JSStringRef.h>
-#import <JavaScriptCore/JSStringRefCF.h>
+#import <JavaScriptCore/OpaqueJSString.h>
 #import <WebCore/Color.h>
 #import <WebCore/Frame.h>
 #import <WebCore/FrameLoader.h>
@@ -50,6 +49,7 @@
 #import <WebKitLegacy/WebNSViewExtras.h>
 #import <WebKitLegacy/WebViewPrivate.h>
 #import <wtf/Assertions.h>
+#import <wtf/NeverDestroyed.h>
 #import <wtf/StdLibExtras.h>
 
 using namespace WebCore;
@@ -60,38 +60,38 @@ static int comparePageRects(const void *key, const void *array);
 static const float PAGE_WIDTH_INSET     = 4.0 * 2.0;
 static const float PAGE_HEIGHT_INSET    = 4.0 * 2.0;
 
-static CGColorRef createCGColorWithDeviceWhite(CGFloat white, CGFloat alpha)
+static RetainPtr<CGColorRef> createCGColorWithDeviceWhite(CGFloat white, CGFloat alpha)
 {
-    static CGColorSpaceRef graySpace = CGColorSpaceCreateDeviceGray();
+    static NeverDestroyed<RetainPtr<CGColorSpaceRef>> graySpace = adoptCF(CGColorSpaceCreateDeviceGray());
     const CGFloat components[] = { white, alpha };
-    return CGColorCreate(graySpace, components);
+    return adoptCF(CGColorCreate(graySpace.get().get(), components));
 }
 
 @implementation WebPDFView {
     BOOL dataSourceHasBeenSet;
     CGPDFDocumentRef _PDFDocument;
-    NSString *_title;
+    RetainPtr<NSString> _title;
     CGRect *_pageRects;
 }
 
 + (NSArray *)supportedMIMETypes
 {
-    return [NSArray arrayWithObjects:
+    return @[
         @"text/pdf",
         @"application/pdf",
-        nil];
+    ];
 }
 
 + (CGColorRef)shadowColor
 {
-    static CGColorRef shadowColor = createCGColorWithDeviceWhite(0, 2.0 / 3);
-    return shadowColor;
+    static NeverDestroyed<RetainPtr<CGColorRef>> shadowColor = createCGColorWithDeviceWhite(0, 2.0 / 3);
+    return shadowColor.get().get();
 }
 
 + (CGColorRef)backgroundColor
 {
-    static CGColorRef backgroundColor = createCGColorWithDeviceWhite(204.0 / 255, 1);
-    return backgroundColor;
+    static NeverDestroyed<RetainPtr<CGColorRef>> backgroundColor = createCGColorWithDeviceWhite(204.0 / 255, 1);
+    return backgroundColor.get().get();
 }
 
 // This is a secret protocol for WebDataSource and WebFrameView to offer us the opportunity to do something different 
@@ -110,7 +110,6 @@ static CGColorRef createCGColorWithDeviceWhite(CGFloat white, CGFloat alpha)
     if (_PDFDocument != NULL)
         CGPDFDocumentRelease(_PDFDocument);
     free(_pageRects);
-    [_title release];
     [super dealloc];
 }
 
@@ -123,7 +122,7 @@ static CGColorRef createCGColorWithDeviceWhite(CGFloat white, CGFloat alpha)
     // Draw page.
     CGContextSaveGState(context);
     CGContextSetShadowWithColor(context, CGSizeMake(0.0f, 2.0f), 3.0f, [[self class] shadowColor]);
-    CGContextSetFillColorWithColor(context, cachedCGColor(Color::white));
+    CGContextSetFillColorWithColor(context, cachedCGColor(Color::white).get());
     CGContextFillRect(context, pageRect);
     CGContextRestoreGState(context);    
     
@@ -204,7 +203,7 @@ static CGColorRef createCGColorWithDeviceWhite(CGFloat white, CGFloat alpha)
         return;
 
     if (!_title)
-        _title = [[[[dataSource request] URL] lastPathComponent] copy];
+        _title = adoptNS([[[[dataSource request] URL] lastPathComponent] copy]);
 
     WAKView * superview = [self superview];
     
@@ -289,30 +288,26 @@ static CGColorRef createCGColorWithDeviceWhite(CGFloat white, CGFloat alpha)
     if (!_PDFDocument)
         return;
 
-    NSString *title = nil;
+    RetainPtr<CFStringRef> title;
 
     CGPDFDictionaryRef info = CGPDFDocumentGetInfo(_PDFDocument);
     CGPDFStringRef value;
     if (CGPDFDictionaryGetString(info, "Title", &value))
-        title = [(NSString *)CGPDFStringCopyTextString(value) autorelease];
+        title = adoptCF(CGPDFStringCopyTextString(value));
 
-    if ([title length]) {
-        [_title release];
-        _title = [title copy];
-        core([self _frame])->loader().client().dispatchDidReceiveTitle({ title, LTR });
+    if (title && CFStringGetLength(title.get())) {
+        _title = (NSString *)title.get();
+        core([self _frame])->loader().client().dispatchDidReceiveTitle({ _title.get(), TextDirection::LTR });
     }
 }
 
 - (void)finishedLoadingWithDataSource:(WebDataSource *)dataSource
 {
-    CGDataProviderRef provider = CGDataProviderCreateWithCFData((CFDataRef)[dataSource data]);
-
+    auto provider = adoptCF(CGDataProviderCreateWithCFData((CFDataRef)[dataSource data]));
     if (!provider) 
         return;
     
-    _PDFDocument = CGPDFDocumentCreateWithProvider(provider);
-    CGDataProviderRelease(provider);
-        
+    _PDFDocument = CGPDFDocumentCreateWithProvider(provider.get());
     if (!_PDFDocument)
         return;
     
@@ -321,19 +316,13 @@ static CGColorRef createCGColorWithDeviceWhite(CGFloat white, CGFloat alpha)
 
     NSArray *scripts = allScriptsInPDFDocument(_PDFDocument);
 
-    NSUInteger scriptCount = [scripts count];
-    if (!scriptCount)
+    if (![scripts count])
         return;
 
     JSGlobalContextRef ctx = JSGlobalContextCreate(0);
     JSObjectRef jsPDFDoc = makeJSPDFDoc(ctx, dataSource);
-
-    for (NSUInteger i = 0; i < scriptCount; ++i) {
-        JSStringRef script = JSStringCreateWithCFString((CFStringRef)[scripts objectAtIndex:i]);
-        JSEvaluateScript(ctx, script, jsPDFDoc, 0, 0, 0);
-        JSStringRelease(script);
-    }
-
+    for (NSString *script in scripts)
+        JSEvaluateScript(ctx, OpaqueJSString::tryCreate(script).get(), jsPDFDoc, nullptr, 0, nullptr);
     JSGlobalContextRelease(ctx);
 
     [self setNeedsDisplay:YES];
@@ -351,7 +340,7 @@ static CGColorRef createCGColorWithDeviceWhite(CGFloat white, CGFloat alpha)
 
 - (NSString *)title
 {
-    return _title;
+    return _title.get();
 }
 
 - (unsigned)pageNumberForRect:(CGRect)rect
@@ -403,4 +392,4 @@ static int comparePageRects(const void *key, const void *array)
     return CGRectGetMinY(*keyRect) > CGRectGetMaxY(*arrayRect) ? 1 : -1;
 }
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

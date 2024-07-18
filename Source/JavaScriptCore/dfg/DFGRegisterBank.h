@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -69,10 +69,10 @@ namespace JSC { namespace DFG {
 template<class BankInfo>
 class RegisterBank {
     typedef typename BankInfo::RegisterType RegID;
-    static const size_t NUM_REGS = BankInfo::numberOfRegisters;
+    static constexpr size_t NUM_REGS = BankInfo::numberOfRegisters;
 
     typedef uint32_t SpillHint;
-    static const SpillHint SpillHintInvalid = 0xffffffff;
+    static constexpr SpillHint SpillHintInvalid = 0xffffffff;
 
 public:
     RegisterBank()
@@ -137,6 +137,16 @@ public:
         ASSERT(currentLowest != NUM_REGS && currentSpillOrder != SpillHintInvalid);
         // There were no available registers; currentLowest will need to be spilled.
         return allocateInternal(currentLowest, spillMe);
+    }
+
+    uint32_t lockedCount() const
+    {
+        uint32_t count = 0;
+        for (uint32_t i = 0 ; i < NUM_REGS; ++i) {
+            if (m_data[i].lockCount)
+                ++count;
+        }
+        return count;
     }
 
     // Allocates the given register, even if this will force a spill.

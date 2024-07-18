@@ -26,60 +26,52 @@
 #import "config.h"
 #import "WKBackForwardListInternal.h"
 
-#if WK_API_ENABLED
-
 #import "WKBackForwardListItemInternal.h"
 #import "WKNSArray.h"
-
-using namespace WebKit;
+#import <WebCore/WebCoreObjCExtras.h>
 
 @implementation WKBackForwardList {
-    API::ObjectStorage<WebBackForwardList> _list;
+    API::ObjectStorage<WebKit::WebBackForwardList> _list;
 }
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKBackForwardList.class, self))
+        return;
+
     _list->~WebBackForwardList();
 
     [super dealloc];
 }
 
-static WKBackForwardListItem *toWKBackForwardListItem(WebBackForwardListItem* item)
-{
-    if (!item)
-        return nil;
-
-    return wrapper(*item);
-}
-
 - (WKBackForwardListItem *)currentItem
 {
-    return toWKBackForwardListItem(_list->currentItem());
+    return WebKit::wrapper(_list->currentItem());
 }
 
 - (WKBackForwardListItem *)backItem
 {
-    return toWKBackForwardListItem(_list->backItem());
+    return WebKit::wrapper(_list->backItem());
 }
 
 - (WKBackForwardListItem *)forwardItem
 {
-    return toWKBackForwardListItem(_list->forwardItem());
+    return WebKit::wrapper(_list->forwardItem());
 }
 
 - (WKBackForwardListItem *)itemAtIndex:(NSInteger)index
 {
-    return toWKBackForwardListItem(_list->itemAtIndex(index));
+    return WebKit::wrapper(_list->itemAtIndex(index));
 }
 
 - (NSArray *)backList
 {
-    return [wrapper(_list->backList().leakRef()) autorelease];
+    return WebKit::wrapper(_list->backList());
 }
 
 - (NSArray *)forwardList
 {
-    return [wrapper(_list->forwardList().leakRef()) autorelease];
+    return WebKit::wrapper(_list->forwardList());
 }
 
 #pragma mark WKObject protocol implementation
@@ -104,5 +96,3 @@ static WKBackForwardListItem *toWKBackForwardListItem(WebBackForwardListItem* it
 }
 
 @end
-
-#endif // WK_API_ENABLED

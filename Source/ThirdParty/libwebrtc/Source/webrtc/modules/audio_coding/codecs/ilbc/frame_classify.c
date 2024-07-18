@@ -16,8 +16,10 @@
 
 ******************************************************************/
 
-#include "defines.h"
-#include "constants.h"
+#include "modules/audio_coding/codecs/ilbc/frame_classify.h"
+
+#include "modules/audio_coding/codecs/ilbc/constants.h"
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  *  Classification of subframes to localize start state

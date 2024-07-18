@@ -7,14 +7,13 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#include "webrtc/modules/rtp_rtcp/include/rtp_header_extension_map.h"
+#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 
 #include <vector>
 
-#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
-#include "webrtc/modules/rtp_rtcp/source/rtp_header_extensions.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/typedefs.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/rtp_header_extensions.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
@@ -32,7 +31,7 @@ TEST(RtpHeaderExtensionTest, RegisterByType) {
 TEST(RtpHeaderExtensionTest, RegisterByUri) {
   RtpHeaderExtensionMap map;
 
-  EXPECT_TRUE(map.RegisterByUri(3, TransmissionOffset::kUri));
+  EXPECT_TRUE(map.RegisterByUri(3, TransmissionOffset::Uri()));
 
   EXPECT_TRUE(map.IsRegistered(TransmissionOffset::kId));
   EXPECT_EQ(3, map.GetId(TransmissionOffset::kId));
@@ -50,19 +49,26 @@ TEST(RtpHeaderExtensionTest, RegisterWithTrait) {
 }
 
 TEST(RtpHeaderExtensionTest, RegisterDuringContruction) {
-  const std::vector<RtpExtension> config = {{TransmissionOffset::kUri, 1},
-                                            {AbsoluteSendTime::kUri, 3}};
+  const std::vector<RtpExtension> config = {{TransmissionOffset::Uri(), 1},
+                                            {AbsoluteSendTime::Uri(), 3}};
   const RtpHeaderExtensionMap map(config);
 
   EXPECT_EQ(1, map.GetId(TransmissionOffset::kId));
   EXPECT_EQ(3, map.GetId(AbsoluteSendTime::kId));
 }
 
+TEST(RtpHeaderExtensionTest, RegisterTwoByteHeaderExtensions) {
+  RtpHeaderExtensionMap map;
+  // Two-byte header extension needed for id: [15-255].
+  EXPECT_TRUE(map.Register<TransmissionOffset>(18));
+  EXPECT_TRUE(map.Register<AbsoluteSendTime>(255));
+}
+
 TEST(RtpHeaderExtensionTest, RegisterIllegalArg) {
   RtpHeaderExtensionMap map;
-  // Valid range for id: [1-14].
+  // Valid range for id: [1-255].
   EXPECT_FALSE(map.Register<TransmissionOffset>(0));
-  EXPECT_FALSE(map.Register<TransmissionOffset>(15));
+  EXPECT_FALSE(map.Register<TransmissionOffset>(256));
 }
 
 TEST(RtpHeaderExtensionTest, Idempotent) {
@@ -71,8 +77,8 @@ TEST(RtpHeaderExtensionTest, Idempotent) {
   EXPECT_TRUE(map.Register<TransmissionOffset>(3));
   EXPECT_TRUE(map.Register<TransmissionOffset>(3));
 
-  map.Deregister(TransmissionOffset::kId);
-  map.Deregister(TransmissionOffset::kId);
+  map.Deregister(TransmissionOffset::Uri());
+  map.Deregister(TransmissionOffset::Uri());
 }
 
 TEST(RtpHeaderExtensionTest, NonUniqueId) {
@@ -81,17 +87,6 @@ TEST(RtpHeaderExtensionTest, NonUniqueId) {
 
   EXPECT_FALSE(map.Register<AudioLevel>(3));
   EXPECT_TRUE(map.Register<AudioLevel>(4));
-}
-
-TEST(RtpHeaderExtensionTest, GetTotalLength) {
-  RtpHeaderExtensionMap map;
-  constexpr RtpExtensionSize kExtensionSizes[] = {
-      {TransmissionOffset::kId, TransmissionOffset::kValueSizeBytes}};
-  EXPECT_EQ(0u, map.GetTotalLengthInBytes(kExtensionSizes));
-  EXPECT_TRUE(map.Register<TransmissionOffset>(3));
-  static constexpr size_t kRtpOneByteHeaderLength = 4;
-  EXPECT_EQ(kRtpOneByteHeaderLength + (TransmissionOffset::kValueSizeBytes + 1),
-            map.GetTotalLengthInBytes(kExtensionSizes));
 }
 
 TEST(RtpHeaderExtensionTest, GetType) {
@@ -109,6 +104,12 @@ TEST(RtpHeaderExtensionTest, GetId) {
   EXPECT_TRUE(map.Register<TransmissionOffset>(3));
 
   EXPECT_EQ(3, map.GetId(TransmissionOffset::kId));
+}
+
+TEST(RtpHeaderExtensionTest, RemapFails) {
+  RtpHeaderExtensionMap map;
+  EXPECT_TRUE(map.Register<TransmissionOffset>(3));
+  EXPECT_FALSE(map.Register<TransmissionOffset>(4));
 }
 
 }  // namespace webrtc

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,9 +29,21 @@
 #if ENABLE(APPLE_PAY)
 
 #import "ApplePayPaymentMethod.h"
+#import "ApplePayPaymentMethodType.h"
 #import <pal/spi/cocoa/PassKitSPI.h>
 
 namespace WebCore {
+
+static void finishConverting(PKPaymentMethod *paymentMethod, ApplePayPaymentMethod& result)
+{
+#if HAVE(PASSKIT_INSTALLMENTS)
+    if (NSString *bindToken = paymentMethod.bindToken)
+        result.bindToken = bindToken;
+#else
+    UNUSED_PARAM(paymentMethod);
+    UNUSED_PARAM(result);
+#endif
+}
 
 static ApplePayPaymentPass::ActivationState convert(PKPaymentPassActivationState paymentPassActivationState)
 {
@@ -81,8 +93,47 @@ static std::optional<ApplePayPaymentMethod::Type> convert(PKPaymentMethodType pa
     case PKPaymentMethodTypeStore:
         return ApplePayPaymentMethod::Type::Store;
     case PKPaymentMethodTypeUnknown:
+    default:
         return std::nullopt;
     }
+}
+
+static void convert(CNLabeledValue<CNPostalAddress*> *postalAddress, ApplePayPaymentContact &result)
+{
+    if (NSString *street = postalAddress.value.street)
+        result.addressLines = { String { street } };
+    result.subLocality = postalAddress.value.subLocality;
+    result.locality = postalAddress.value.city;
+    result.subAdministrativeArea = postalAddress.value.subAdministrativeArea;
+    result.administrativeArea = postalAddress.value.state;
+    result.postalCode = postalAddress.value.postalCode;
+    result.country = postalAddress.value.country;
+    result.countryCode = postalAddress.value.ISOCountryCode;
+}
+
+static std::optional<ApplePayPaymentContact> convert(CNContact *billingContact)
+{
+    if (!billingContact)
+        return std::nullopt;
+
+    ApplePayPaymentContact result;
+    
+    if (auto firstPhoneNumber = billingContact.phoneNumbers.firstObject)
+        result.phoneNumber = firstPhoneNumber.value.stringValue;
+    
+    if (auto firstEmailAddress = billingContact.emailAddresses.firstObject)
+        result.emailAddress = firstEmailAddress.value;
+    
+    result.givenName = billingContact.givenName;
+    result.familyName = billingContact.familyName;
+    
+    result.phoneticGivenName = billingContact.phoneticGivenName;
+    result.phoneticFamilyName = billingContact.phoneticFamilyName;
+    
+    if (CNLabeledValue<CNPostalAddress*> *firstPostalAddress = billingContact.postalAddresses.firstObject)
+        convert(firstPostalAddress, result);
+
+    return result;
 }
 
 static ApplePayPaymentMethod convert(PKPaymentMethod *paymentMethod)
@@ -93,16 +144,32 @@ static ApplePayPaymentMethod convert(PKPaymentMethod *paymentMethod)
         result.displayName = displayName;
     if (NSString *network = paymentMethod.network)
         result.network = network;
-
+    result.billingContact = convert(paymentMethod.billingAddress);
     result.type = convert(paymentMethod.type);
     result.paymentPass = convert(paymentMethod.paymentPass);
+
+    finishConverting(paymentMethod, result);
 
     return result;
 }
 
+PaymentMethod::PaymentMethod() = default;
+
+PaymentMethod::PaymentMethod(RetainPtr<PKPaymentMethod>&& pkPaymentMethod)
+    : m_pkPaymentMethod { WTFMove(pkPaymentMethod) }
+{
+}
+
+PaymentMethod::~PaymentMethod() = default;
+
 ApplePayPaymentMethod PaymentMethod::toApplePayPaymentMethod() const
 {
     return convert(m_pkPaymentMethod.get());
+}
+
+PKPaymentMethod *PaymentMethod::pkPaymentMethod() const
+{
+    return m_pkPaymentMethod.get();
 }
 
 }

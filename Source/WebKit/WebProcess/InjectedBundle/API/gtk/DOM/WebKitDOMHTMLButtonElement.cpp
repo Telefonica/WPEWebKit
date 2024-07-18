@@ -24,9 +24,10 @@
 #include "DOMObjectCache.h"
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
-#include "GObjectEventListener.h"
+#include <WebCore/ElementInlines.h>
 #include <WebCore/HTMLNames.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
+#include "GObjectEventListener.h"
 #include "WebKitDOMEventPrivate.h"
 #include "WebKitDOMEventTarget.h"
 #include "WebKitDOMHTMLButtonElementPrivate.h"
@@ -37,6 +38,8 @@
 #include "ConvertToUTF8String.h"
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 namespace WebKit {
 
@@ -86,24 +89,24 @@ static gboolean webkit_dom_html_button_element_remove_event_listener(WebKitDOMEv
     return WebKit::GObjectEventListener::removeEventListener(G_OBJECT(target), coreTarget, eventName, handler, useCapture);
 }
 
-static void webkit_dom_event_target_init(WebKitDOMEventTargetIface* iface)
+static void webkit_dom_html_button_element_dom_event_target_init(WebKitDOMEventTargetIface* iface)
 {
     iface->dispatch_event = webkit_dom_html_button_element_dispatch_event;
     iface->add_event_listener = webkit_dom_html_button_element_add_event_listener;
     iface->remove_event_listener = webkit_dom_html_button_element_remove_event_listener;
 }
 
-G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLButtonElement, webkit_dom_html_button_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_event_target_init))
+G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLButtonElement, webkit_dom_html_button_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_html_button_element_dom_event_target_init))
 
 enum {
-    PROP_0,
-    PROP_AUTOFOCUS,
-    PROP_DISABLED,
-    PROP_FORM,
-    PROP_TYPE,
-    PROP_NAME,
-    PROP_VALUE,
-    PROP_WILL_VALIDATE,
+    DOM_HTML_BUTTON_ELEMENT_PROP_0,
+    DOM_HTML_BUTTON_ELEMENT_PROP_AUTOFOCUS,
+    DOM_HTML_BUTTON_ELEMENT_PROP_DISABLED,
+    DOM_HTML_BUTTON_ELEMENT_PROP_FORM,
+    DOM_HTML_BUTTON_ELEMENT_PROP_TYPE,
+    DOM_HTML_BUTTON_ELEMENT_PROP_NAME,
+    DOM_HTML_BUTTON_ELEMENT_PROP_VALUE,
+    DOM_HTML_BUTTON_ELEMENT_PROP_WILL_VALIDATE,
 };
 
 static void webkit_dom_html_button_element_set_property(GObject* object, guint propertyId, const GValue* value, GParamSpec* pspec)
@@ -111,19 +114,19 @@ static void webkit_dom_html_button_element_set_property(GObject* object, guint p
     WebKitDOMHTMLButtonElement* self = WEBKIT_DOM_HTML_BUTTON_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_AUTOFOCUS:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_AUTOFOCUS:
         webkit_dom_html_button_element_set_autofocus(self, g_value_get_boolean(value));
         break;
-    case PROP_DISABLED:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_DISABLED:
         webkit_dom_html_button_element_set_disabled(self, g_value_get_boolean(value));
         break;
-    case PROP_TYPE:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_TYPE:
         webkit_dom_html_button_element_set_button_type(self, g_value_get_string(value));
         break;
-    case PROP_NAME:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_NAME:
         webkit_dom_html_button_element_set_name(self, g_value_get_string(value));
         break;
-    case PROP_VALUE:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_VALUE:
         webkit_dom_html_button_element_set_value(self, g_value_get_string(value));
         break;
     default:
@@ -137,25 +140,25 @@ static void webkit_dom_html_button_element_get_property(GObject* object, guint p
     WebKitDOMHTMLButtonElement* self = WEBKIT_DOM_HTML_BUTTON_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_AUTOFOCUS:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_AUTOFOCUS:
         g_value_set_boolean(value, webkit_dom_html_button_element_get_autofocus(self));
         break;
-    case PROP_DISABLED:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_DISABLED:
         g_value_set_boolean(value, webkit_dom_html_button_element_get_disabled(self));
         break;
-    case PROP_FORM:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_FORM:
         g_value_set_object(value, webkit_dom_html_button_element_get_form(self));
         break;
-    case PROP_TYPE:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_TYPE:
         g_value_take_string(value, webkit_dom_html_button_element_get_button_type(self));
         break;
-    case PROP_NAME:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_NAME:
         g_value_take_string(value, webkit_dom_html_button_element_get_name(self));
         break;
-    case PROP_VALUE:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_VALUE:
         g_value_take_string(value, webkit_dom_html_button_element_get_value(self));
         break;
-    case PROP_WILL_VALIDATE:
+    case DOM_HTML_BUTTON_ELEMENT_PROP_WILL_VALIDATE:
         g_value_set_boolean(value, webkit_dom_html_button_element_get_will_validate(self));
         break;
     default:
@@ -172,7 +175,7 @@ static void webkit_dom_html_button_element_class_init(WebKitDOMHTMLButtonElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_AUTOFOCUS,
+        DOM_HTML_BUTTON_ELEMENT_PROP_AUTOFOCUS,
         g_param_spec_boolean(
             "autofocus",
             "HTMLButtonElement:autofocus",
@@ -182,7 +185,7 @@ static void webkit_dom_html_button_element_class_init(WebKitDOMHTMLButtonElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_DISABLED,
+        DOM_HTML_BUTTON_ELEMENT_PROP_DISABLED,
         g_param_spec_boolean(
             "disabled",
             "HTMLButtonElement:disabled",
@@ -192,7 +195,7 @@ static void webkit_dom_html_button_element_class_init(WebKitDOMHTMLButtonElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_FORM,
+        DOM_HTML_BUTTON_ELEMENT_PROP_FORM,
         g_param_spec_object(
             "form",
             "HTMLButtonElement:form",
@@ -202,7 +205,7 @@ static void webkit_dom_html_button_element_class_init(WebKitDOMHTMLButtonElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_TYPE,
+        DOM_HTML_BUTTON_ELEMENT_PROP_TYPE,
         g_param_spec_string(
             "type",
             "HTMLButtonElement:type",
@@ -212,7 +215,7 @@ static void webkit_dom_html_button_element_class_init(WebKitDOMHTMLButtonElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_NAME,
+        DOM_HTML_BUTTON_ELEMENT_PROP_NAME,
         g_param_spec_string(
             "name",
             "HTMLButtonElement:name",
@@ -222,7 +225,7 @@ static void webkit_dom_html_button_element_class_init(WebKitDOMHTMLButtonElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_VALUE,
+        DOM_HTML_BUTTON_ELEMENT_PROP_VALUE,
         g_param_spec_string(
             "value",
             "HTMLButtonElement:value",
@@ -232,7 +235,7 @@ static void webkit_dom_html_button_element_class_init(WebKitDOMHTMLButtonElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_WILL_VALIDATE,
+        DOM_HTML_BUTTON_ELEMENT_PROP_WILL_VALIDATE,
         g_param_spec_boolean(
             "will-validate",
             "HTMLButtonElement:will-validate",
@@ -304,8 +307,7 @@ void webkit_dom_html_button_element_set_button_type(WebKitDOMHTMLButtonElement* 
     g_return_if_fail(WEBKIT_DOM_IS_HTML_BUTTON_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLButtonElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setType(convertedValue);
+    item->setType(WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_button_element_get_name(WebKitDOMHTMLButtonElement* self)
@@ -323,8 +325,7 @@ void webkit_dom_html_button_element_set_name(WebKitDOMHTMLButtonElement* self, c
     g_return_if_fail(WEBKIT_DOM_IS_HTML_BUTTON_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLButtonElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_button_element_get_value(WebKitDOMHTMLButtonElement* self)
@@ -342,8 +343,7 @@ void webkit_dom_html_button_element_set_value(WebKitDOMHTMLButtonElement* self, 
     g_return_if_fail(WEBKIT_DOM_IS_HTML_BUTTON_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLButtonElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::valueAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::valueAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gboolean webkit_dom_html_button_element_get_will_validate(WebKitDOMHTMLButtonElement* self)
@@ -354,3 +354,4 @@ gboolean webkit_dom_html_button_element_get_will_validate(WebKitDOMHTMLButtonEle
     gboolean result = item->willValidate();
     return result;
 }
+G_GNUC_END_IGNORE_DEPRECATIONS;

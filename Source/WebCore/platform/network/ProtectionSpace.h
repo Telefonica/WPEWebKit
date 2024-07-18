@@ -29,6 +29,8 @@
 #include "ProtectionSpaceCocoa.h"
 #elif USE(CFURLCONNECTION)
 #include "ProtectionSpaceCFNet.h"
+#elif USE(CURL)
+#include "ProtectionSpaceCurl.h"
 #else
 
 #include "ProtectionSpaceBase.h"
@@ -38,7 +40,7 @@ namespace WebCore {
 class ProtectionSpace : public ProtectionSpaceBase {
 public:
     ProtectionSpace() : ProtectionSpaceBase() { }
-    ProtectionSpace(const String& host, int port, ProtectionSpaceServerType serverType, const String& realm, ProtectionSpaceAuthenticationScheme authenticationScheme)
+    ProtectionSpace(const String& host, int port, ServerType serverType, const String& realm, AuthenticationScheme authenticationScheme)
         : ProtectionSpaceBase(host, port, serverType, realm, authenticationScheme)
     {
     }
@@ -47,5 +49,10 @@ public:
 };
 
 } // namespace WebCore
+
+namespace WTF {
+template<> struct DefaultHash<WebCore::ProtectionSpace>;
+template<> struct HashTraits<WebCore::ProtectionSpace>;
+}
 
 #endif

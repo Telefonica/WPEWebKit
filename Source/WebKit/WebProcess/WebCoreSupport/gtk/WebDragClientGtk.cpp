@@ -32,18 +32,16 @@
 #include "ShareableBitmap.h"
 #include "WebPage.h"
 #include "WebPageProxyMessages.h"
-#include "WebSelectionData.h"
 #include <WebCore/CairoOperations.h>
 #include <WebCore/DataTransfer.h>
 #include <WebCore/DragData.h>
 #include <WebCore/GraphicsContext.h>
 #include <WebCore/Pasteboard.h>
-#include <WebCore/PlatformContextCairo.h>
+#include <WebCore/SelectionData.h>
 #include <cairo.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 static RefPtr<ShareableBitmap> convertCairoSurfaceToShareableBitmap(cairo_surface_t* surface)
 {
@@ -51,12 +49,12 @@ static RefPtr<ShareableBitmap> convertCairoSurfaceToShareableBitmap(cairo_surfac
         return nullptr;
 
     IntSize imageSize(cairo_image_surface_get_width(surface), cairo_image_surface_get_height(surface));
-    RefPtr<ShareableBitmap> bitmap = ShareableBitmap::createShareable(imageSize, { });
+    auto bitmap = ShareableBitmap::create(imageSize, { });
     auto graphicsContext = bitmap->createGraphicsContext();
 
-    ASSERT(context.hasPlatformContext());
+    ASSERT(graphicsContext->hasPlatformContext());
     auto& state = graphicsContext->state();
-    Cairo::drawSurface(*graphicsContext->platformContext(), surface, IntRect(IntPoint(), imageSize), IntRect(IntPoint(), imageSize), state.imageInterpolationQuality, state.alpha, Cairo::ShadowState(state));
+    Cairo::drawSurface(*graphicsContext->platformContext(), surface, IntRect(IntPoint(), imageSize), IntRect(IntPoint(), imageSize), state.imageInterpolationQuality(), state.alpha(), Cairo::ShadowState(state));
     return bitmap;
 }
 
@@ -76,8 +74,7 @@ void WebDragClient::startDrag(DragItem item, DataTransfer& dataTransfer, Frame&)
 
     m_page->willStartDrag();
 
-    WebSelectionData selection(dataTransfer.pasteboard().selectionData());
-    m_page->send(Messages::WebPageProxy::StartDrag(selection, dataTransfer.sourceOperation(), handle));
+    m_page->send(Messages::WebPageProxy::StartDrag(dataTransfer.pasteboard().selectionData(), dataTransfer.sourceOperationMask(), handle, dataTransfer.dragLocation()));
 }
 
 }; // namespace WebKit.

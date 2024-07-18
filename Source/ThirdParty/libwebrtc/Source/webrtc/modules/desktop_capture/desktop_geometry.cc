@@ -8,15 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/desktop_geometry.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace webrtc {
 
 bool DesktopRect::Contains(const DesktopVector& point) const {
-  return point.x() >= left() && point.x() < right() &&
-         point.y() >= top() && point.y() < bottom();
+  return point.x() >= left() && point.x() < right() && point.y() >= top() &&
+         point.y() < bottom();
 }
 
 bool DesktopRect::ContainsRect(const DesktopRect& rect) const {
@@ -70,5 +71,9 @@ void DesktopRect::Extend(int32_t left_offset,
   bottom_ += bottom_offset;
 }
 
-}  // namespace webrtc
+void DesktopRect::Scale(double horizontal, double vertical) {
+  right_ += static_cast<int>(std::round(width() * (horizontal - 1)));
+  bottom_ += static_cast<int>(std::round(height() * (vertical - 1)));
+}
 
+}  // namespace webrtc

@@ -33,10 +33,8 @@
 #include "ActiveDOMObject.h"
 #include "EventTarget.h"
 #include "ExceptionOr.h"
-#include "Timer.h"
-#include "URL.h"
+#include <wtf/URL.h>
 #include "WebSocketChannelClient.h"
-#include <wtf/Deque.h>
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
 
@@ -51,16 +49,17 @@ class Blob;
 class ThreadableWebSocketChannel;
 
 class WebSocket final : public RefCounted<WebSocket>, public EventTargetWithInlineData, public ActiveDOMObject, private WebSocketChannelClient {
+    WTF_MAKE_ISO_ALLOCATED(WebSocket);
 public:
-    static const char* subprotocolSeparator();
+    static ASCIILiteral subprotocolSeparator();
 
     static ExceptionOr<Ref<WebSocket>> create(ScriptExecutionContext&, const String& url);
     static ExceptionOr<Ref<WebSocket>> create(ScriptExecutionContext&, const String& url, const String& protocol);
     static ExceptionOr<Ref<WebSocket>> create(ScriptExecutionContext&, const String& url, const Vector<String>& protocols);
     virtual ~WebSocket();
 
-    static HashSet<WebSocket*>& allActiveWebSockets(const LockHolder&);
-    static StaticLock& allActiveWebSocketsMutex();
+    static HashSet<WebSocket*>& allActiveWebSockets() WTF_REQUIRES_LOCK(s_allActiveWebSocketsLock);
+    static Lock& allActiveWebSocketsLock() WTF_RETURNS_LOCK(s_allActiveWebSocketsLock);
 
     enum State {
         CONNECTING = 0,
@@ -100,12 +99,9 @@ public:
 private:
     explicit WebSocket(ScriptExecutionContext&);
 
-    void resumeTimerFired();
-    void dispatchOrQueueErrorEvent();
-    void dispatchOrQueueEvent(Ref<Event>&&);
+    void dispatchErrorEventIfNeeded();
 
     void contextDestroyed() final;
-    bool canSuspendForDocumentSuspension() const final;
     void suspend(ReasonForSuspension) final;
     void resume() final;
     void stop() final;
@@ -117,9 +113,9 @@ private:
     void derefEventTarget() final { deref(); }
 
     void didConnect() final;
-    void didReceiveMessage(const String& message) final;
+    void didReceiveMessage(String&& message) final;
     void didReceiveBinaryData(Vector<uint8_t>&&) final;
-    void didReceiveMessageError() final;
+    void didReceiveMessageError(String&& reason) final;
     void didUpdateBufferedAmount(unsigned bufferedAmount) final;
     void didStartClosingHandshake() final;
     void didClose(unsigned unhandledBufferedAmount, ClosingHandshakeCompletionStatus, unsigned short code, const String& reason) final;
@@ -127,8 +123,11 @@ private:
 
     size_t getFramingOverhead(size_t payloadSize);
 
+    void failAsynchronously();
+
     enum class BinaryType { Blob, ArrayBuffer };
 
+    static Lock s_allActiveWebSocketsLock;
     RefPtr<ThreadableWebSocketChannel> m_channel;
 
     State m_state { CONNECTING };
@@ -139,10 +138,8 @@ private:
     String m_subprotocol;
     String m_extensions;
 
-    Timer m_resumeTimer;
-    bool m_shouldDelayEventFiring { false };
-    Deque<Ref<Event>> m_pendingEvents;
     bool m_dispatchedErrorEvent { false };
+    RefPtr<PendingActivity<WebSocket>> m_pendingActivity;
 };
 
 } // namespace WebCore

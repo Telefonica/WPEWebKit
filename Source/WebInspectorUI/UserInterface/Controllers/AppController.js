@@ -29,31 +29,48 @@ WI.AppController = class AppController extends WI.AppControllerBase
     {
         super();
 
-        this._hasExtraDomains = false;
-        this._debuggableType = InspectorFrontendHost.debuggableType() === "web" ? WI.DebuggableType.Web : WI.DebuggableType.JavaScript;
+        this._debuggableType = WI.DebuggableType.fromString(InspectorFrontendHost.debuggableInfo.debuggableType);
+        console.assert(this._debuggableType);
+        if (!this._debuggableType)
+            this._debuggableType = WI.DebuggableType.JavaScript;
     }
 
     // Properties.
 
-    get hasExtraDomains() { return this._hasExtraDomains; }
     get debuggableType() { return this._debuggableType; }
 
     // API.
 
     activateExtraDomains(domains)
     {
-        if (this._hasExtraDomains)
+        // COMPATIBILITY (iOS 14.0): Inspector.activateExtraDomains was removed in favor of a declared debuggable type
+
+        console.assert(this._debuggableType === WI.DebuggableType.JavaScript);
+        console.assert(WI.targets.length === 1);
+
+        let target = WI.mainTarget;
+        console.assert(target instanceof WI.DirectBackendTarget);
+        console.assert(target.type === WI.TargetType.JavaScript);
+
+        if (this._debuggableType === WI.DebuggableType.ITML || target.type === WI.TargetType.ITML)
             throw new Error("Extra domains have already been activated, cannot activate again.");
 
-        this._hasExtraDomains = true;
+        this._debuggableType = WI.DebuggableType.ITML;
+        target._type = WI.TargetType.ITML;
 
         for (let domain of domains) {
-            let agent = InspectorBackend.activateDomain(domain);
-            if (agent.enable)
-                agent.enable();
+            InspectorBackend.activateDomain(domain);
+
+            target.activateExtraDomain(domain);
+
+            let manager = WI.managers.find((manager) => manager.domains && manager.domains.includes(domain));
+            if (manager)
+                manager.activateExtraDomain(domain);
+            else if (target.hasCommand(domain + ".enable"))
+                target._agents[domain].enable();
         }
 
         // FIXME: all code within WI.activateExtraDomains should be distributed elsewhere.
-        WI.activateExtraDomains();
+        WI.activateExtraDomains(domains);
     }
 };

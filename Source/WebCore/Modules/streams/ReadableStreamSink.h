@@ -26,17 +26,15 @@
 
 #pragma once
 
-#if ENABLE(STREAMS_API)
-
 #include "ExceptionOr.h"
 #include <wtf/Function.h>
 #include <wtf/RefCounted.h>
+#include <wtf/Span.h>
 
 namespace WebCore {
 
 class BufferSource;
 class ReadableStream;
-class SharedBuffer;
 
 class ReadableStreamSink : public RefCounted<ReadableStreamSink> {
 public:
@@ -49,22 +47,19 @@ public:
 
 class ReadableStreamToSharedBufferSink final : public ReadableStreamSink {
 public:
-    using Callback = WTF::Function<void(ExceptionOr<RefPtr<SharedBuffer>>&&)>;
+    using Callback = Function<void(ExceptionOr<Span<const uint8_t>*>&&)>;
     static Ref<ReadableStreamToSharedBufferSink> create(Callback&& callback) { return adoptRef(*new ReadableStreamToSharedBufferSink(WTFMove(callback))); }
     void pipeFrom(ReadableStream&);
     void clearCallback() { m_callback = { }; }
 
 private:
-    ReadableStreamToSharedBufferSink(Callback&&);
+    explicit ReadableStreamToSharedBufferSink(Callback&&);
 
     void enqueue(const BufferSource&) final;
     void close() final;
     void error(String&&) final;
 
     Callback m_callback;
-    RefPtr<SharedBuffer> m_data;
 };
 
 } // namespace WebCore
-
-#endif // ENABLE(STREAMS_API)

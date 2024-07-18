@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@
 
 #include "B3SparseCollection.h"
 #include "BasicBlockLocation.h"
+#include "CheckPrivateBrandVariant.h"
 #include "CodeBlock.h"
 #include "DFGAdjacencyList.h"
 #include "DFGArithMode.h"
@@ -47,14 +48,20 @@
 #include "DFGTransition.h"
 #include "DFGUseKind.h"
 #include "DFGVariableAccessData.h"
-#include "GetByIdVariant.h"
+#include "DOMJITSignature.h"
+#include "DeleteByVariant.h"
+#include "GetByVariant.h"
 #include "JSCJSValue.h"
+#include "JSPropertyNameEnumerator.h"
 #include "Operands.h"
-#include "PutByIdVariant.h"
+#include "PrivateFieldPutKind.h"
+#include "PutByVariant.h"
+#include "SetPrivateBrandVariant.h"
 #include "SpeculatedType.h"
 #include "TypeLocation.h"
 #include "ValueProfile.h"
 #include <type_traits>
+#include <wtf/FastMalloc.h>
 #include <wtf/ListDump.h>
 #include <wtf/LoggingHashSet.h>
 
@@ -81,31 +88,61 @@ struct BasicBlock;
 struct StorageAccessData {
     PropertyOffset offset;
     unsigned identifierNumber;
-
-    // This needs to know the inferred type. For puts, this is necessary because we need to remember
-    // what check is needed. For gets, this is necessary because otherwise AI might forget what type is
-    // guaranteed.
-    InferredType::Descriptor inferredType;
 };
 
 struct MultiPutByOffsetData {
     unsigned identifierNumber;
-    Vector<PutByIdVariant, 2> variants;
+    Vector<PutByVariant, 2> variants;
     
     bool writesStructures() const;
     bool reallocatesStorage() const;
 };
 
-struct NewArrayBufferData {
-    unsigned startConstant;
-    unsigned numConstants;
-    unsigned vectorLengthHint;
-    IndexingType indexingType;
+struct MultiDeleteByOffsetData {
+    unsigned identifierNumber;
+    Vector<DeleteByVariant, 2> variants;
+
+    bool writesStructures() const;
+    bool allVariantsStoreEmpty() const;
 };
+
+struct MatchStructureVariant {
+    RegisteredStructure structure;
+    bool result;
+};
+
+struct MatchStructureData {
+    Vector<MatchStructureVariant, 2> variants;
+};
+
+struct NewArrayBufferData {
+    union {
+        struct {
+            unsigned vectorLengthHint;
+            unsigned indexingMode;
+        };
+        uint64_t asQuadWord;
+    };
+};
+static_assert(sizeof(IndexingType) <= sizeof(unsigned));
+static_assert(sizeof(NewArrayBufferData) == sizeof(uint64_t));
+
+struct DataViewData {
+    union {
+        struct {
+            uint8_t byteSize;
+            bool isSigned;
+            bool isFloatingPoint; // Used for the DataViewSet node.
+            TriState isLittleEndian;
+        };
+        uint64_t asQuadWord;
+    };
+};
+static_assert(sizeof(DataViewData) == sizeof(uint64_t));
 
 struct BranchTarget {
     BranchTarget()
-        : block(0)
+        : block(nullptr)
         , count(PNaN)
     {
     }
@@ -191,16 +228,16 @@ struct SwitchData {
     // constructing this should make sure to initialize everything they
     // care about manually.
     SwitchData()
-        : kind(static_cast<SwitchKind>(-1))
-        , switchTableIndex(UINT_MAX)
+        : switchTableIndex(UINT_MAX)
+        , kind(static_cast<SwitchKind>(-1))
         , didUseJumpTable(false)
     {
     }
     
     Vector<SwitchCase> cases;
     BranchTarget fallThrough;
+    size_t switchTableIndex;
     SwitchKind kind;
-    unsigned switchTableIndex;
     bool didUseJumpTable;
 };
 
@@ -228,13 +265,13 @@ struct StackAccessData {
     {
     }
     
-    StackAccessData(VirtualRegister local, FlushFormat format)
-        : local(local)
+    StackAccessData(Operand operand, FlushFormat format)
+        : operand(operand)
         , format(format)
     {
     }
     
-    VirtualRegister local;
+    Operand operand;
     VirtualRegister machineLocal;
     FlushFormat format;
     
@@ -242,10 +279,11 @@ struct StackAccessData {
 };
 
 struct CallDOMGetterData {
-    PropertySlot::GetValueFunc customAccessorGetter { nullptr };
+    FunctionPtr<CustomAccessorPtrTag> customAccessorGetter;
     const DOMJIT::GetterSetter* domJIT { nullptr };
     DOMJIT::CallDOMGetterSnippet* snippet { nullptr };
     unsigned identifierNumber { 0 };
+    const ClassInfo* requiredClassInfo { nullptr };
 };
 
 enum class BucketOwnerType : uint32_t {
@@ -256,8 +294,9 @@ enum class BucketOwnerType : uint32_t {
 // === Node ===
 //
 // Node represents a single operation in the data flow graph.
+DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(DFGNode);
 struct Node {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_STRUCT_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(DFGNode);
 public:
     static const char HashSetTemplateInstantiationString[];
     
@@ -425,11 +464,21 @@ public:
         m_flags = defaultFlags(op);
     }
 
-    void remove();
+    void remove(Graph&);
+    void removeWithoutChecks();
 
     void convertToCheckStructure(RegisteredStructureSet* set)
     {
         setOpAndDefaultFlags(CheckStructure);
+        m_opInfo = set;
+    }
+
+    void convertToCheckStructureOrEmpty(RegisteredStructureSet* set)
+    {
+        if (SpecCellCheck & SpecEmpty)
+            setOpAndDefaultFlags(CheckStructureOrEmpty);
+        else
+            setOpAndDefaultFlags(CheckStructure);
         m_opInfo = set;
     }
 
@@ -445,19 +494,27 @@ public:
         m_op = CheckStructureImmediate;
         children.setChild1(Edge(structure, CellUse));
     }
-    
-    void replaceWith(Node* other)
+
+    void convertCheckArrayOrEmptyToCheckArray()
     {
-        remove();
-        setReplacement(other);
+        ASSERT(op() == CheckArrayOrEmpty);
+        setOpAndDefaultFlags(CheckArray);
     }
+    
+    void replaceWith(Graph&, Node* other);
+    void replaceWithWithoutChecks(Node* other);
 
     void convertToIdentity();
     void convertToIdentityOn(Node*);
 
-    bool mustGenerate()
+    bool mustGenerate() const
     {
         return m_flags & NodeMustGenerate;
+    }
+
+    bool hasVarArgs() const
+    {
+        return m_flags & NodeHasVarArgs;
     }
     
     bool isConstant()
@@ -475,6 +532,7 @@ public:
     bool hasConstant()
     {
         switch (op()) {
+        case CheckIsConstant:
         case JSConstant:
         case DoubleConstant:
         case Int52Constant:
@@ -513,7 +571,7 @@ public:
             m_op = Int52Constant;
         else
             m_op = JSConstant;
-        m_flags &= ~NodeMustGenerate;
+        m_flags &= ~(NodeMustGenerate | NodeHasVarArgs);
         m_opInfo = value;
         children.reset();
     }
@@ -525,15 +583,6 @@ public:
         ASSERT(op() == GetIndexedPropertyStorage);
         m_op = ConstantStoragePointer;
         m_opInfo = pointer;
-        children.reset();
-    }
-    
-    void convertToGetLocalUnlinked(VirtualRegister local)
-    {
-        m_op = GetLocalUnlinked;
-        m_flags &= ~NodeMustGenerate;
-        m_opInfo = local.offset();
-        m_opInfo2 = VirtualRegister().offset();
         children.reset();
     }
     
@@ -556,7 +605,7 @@ public:
     
     void convertToGetByOffset(StorageAccessData& data, Edge storage, Edge base)
     {
-        ASSERT(m_op == GetById || m_op == GetByIdFlush || m_op == MultiGetByOffset);
+        ASSERT(m_op == GetById || m_op == GetByIdFlush || m_op == GetByIdDirect || m_op == GetByIdDirectFlush || m_op == GetPrivateNameById || m_op == MultiGetByOffset);
         m_opInfo = &data;
         children.setChild1(storage);
         children.setChild2(base);
@@ -566,16 +615,16 @@ public:
     
     void convertToMultiGetByOffset(MultiGetByOffsetData* data)
     {
-        ASSERT(m_op == GetById || m_op == GetByIdFlush);
+        RELEASE_ASSERT(m_op == GetById || m_op == GetByIdFlush || m_op == GetByIdDirect || m_op == GetByIdDirectFlush || m_op == GetPrivateNameById);
         m_opInfo = data;
         child1().setUseKind(CellUse);
         m_op = MultiGetByOffset;
-        ASSERT(m_flags & NodeMustGenerate);
+        RELEASE_ASSERT(m_flags & NodeMustGenerate);
     }
     
     void convertToPutByOffset(StorageAccessData& data, Edge storage, Edge base)
     {
-        ASSERT(m_op == PutById || m_op == PutByIdDirect || m_op == PutByIdFlush || m_op == MultiPutByOffset);
+        ASSERT(m_op == PutById || m_op == PutByIdDirect || m_op == PutByIdFlush || m_op == MultiPutByOffset || m_op == PutPrivateNameById);
         m_opInfo = &data;
         children.setChild3(children.child2());
         children.setChild2(base);
@@ -585,20 +634,14 @@ public:
     
     void convertToMultiPutByOffset(MultiPutByOffsetData* data)
     {
-        ASSERT(m_op == PutById || m_op == PutByIdDirect || m_op == PutByIdFlush);
+        ASSERT(m_op == PutById || m_op == PutByIdDirect || m_op == PutByIdFlush || m_op == PutPrivateNameById);
         m_opInfo = data;
         m_op = MultiPutByOffset;
     }
     
-    void convertToPutHint(const PromotedLocationDescriptor&, Node* base, Node* value);
-    
-    void convertToPutByOffsetHint();
-    void convertToPutStructureHint(Node* structure);
-    void convertToPutClosureVarHint();
-    
     void convertToPhantomNewObject()
     {
-        ASSERT(m_op == NewObject || m_op == MaterializeNewObject);
+        ASSERT(m_op == NewObject);
         m_op = PhantomNewObject;
         m_flags &= ~NodeHasVarArgs;
         m_flags |= NodeMustGenerate;
@@ -627,6 +670,17 @@ public:
         children = AdjacencyList();
     }
 
+    void convertToPhantomNewInternalFieldObject()
+    {
+        ASSERT(m_op == NewInternalFieldObject);
+        m_op = PhantomNewInternalFieldObject;
+        m_flags &= ~NodeHasVarArgs;
+        m_flags |= NodeMustGenerate;
+        m_opInfo = OpInfoWrapper();
+        m_opInfo2 = OpInfoWrapper();
+        children = AdjacencyList();
+    }
+
     void convertToPhantomNewAsyncFunction()
     {
         ASSERT(m_op == NewAsyncFunction);
@@ -649,7 +703,7 @@ public:
     
     void convertToPhantomCreateActivation()
     {
-        ASSERT(m_op == CreateActivation || m_op == MaterializeCreateActivation);
+        ASSERT(m_op == CreateActivation);
         m_op = PhantomCreateActivation;
         m_flags &= ~NodeHasVarArgs;
         m_flags |= NodeMustGenerate;
@@ -658,9 +712,18 @@ public:
         children = AdjacencyList();
     }
 
+    void convertToPhantomNewRegexp()
+    {
+        ASSERT(m_op == NewRegexp);
+        setOpAndDefaultFlags(PhantomNewRegexp);
+        m_opInfo = OpInfoWrapper();
+        m_opInfo2 = OpInfoWrapper();
+        children = AdjacencyList();
+    }
+
     void convertPhantomToPhantomLocal()
     {
-        ASSERT(m_op == Phantom && (child1()->op() == Phi || child1()->op() == SetLocal || child1()->op() == SetArgument));
+        ASSERT(m_op == Phantom && (child1()->op() == Phi || child1()->op() == SetLocal || child1()->op() == SetArgumentDefinitely));
         m_op = PhantomLocal;
         m_opInfo = child1()->m_opInfo; // Copy the variableAccessData.
         children.setChild1(Edge());
@@ -673,18 +736,9 @@ public:
         children = AdjacencyList();
     }
     
-    void convertToGetLocal(VariableAccessData* variable, Node* phi)
-    {
-        ASSERT(m_op == GetLocalUnlinked);
-        m_op = GetLocal;
-        m_opInfo = variable;
-        m_opInfo2 = OpInfoWrapper();
-        children.setChild1(Edge(phi));
-    }
-    
     void convertToToString()
     {
-        ASSERT(m_op == ToPrimitive);
+        ASSERT(m_op == ToPrimitive || m_op == StringValueOf || m_op == ToPropertyKey);
         m_op = ToString;
     }
 
@@ -696,7 +750,7 @@ public:
 
     void convertToCompareEqPtr(FrozenValue* cell, Edge node)
     {
-        ASSERT(m_op == CompareStrictEq);
+        ASSERT(m_op == CompareStrictEq || m_op == SameValue);
         setOpAndDefaultFlags(CompareEqPtr);
         children.setChild1(node);
         children.setChild2(Edge());
@@ -718,10 +772,73 @@ public:
         setOpAndDefaultFlags(GetGlobalThis);
         children.setChild1(Edge());
     }
+
+    void convertToCallObjectConstructor(FrozenValue* globalObject)
+    {
+        ASSERT(m_op == ToObject);
+        setOpAndDefaultFlags(CallObjectConstructor);
+        m_opInfo = globalObject;
+    }
+
+    void convertToNewStringObject(RegisteredStructure structure)
+    {
+        ASSERT(m_op == CallObjectConstructor || m_op == ToObject);
+        setOpAndDefaultFlags(NewStringObject);
+        m_opInfo = structure;
+        m_opInfo2 = OpInfoWrapper();
+    }
+
+    void convertToNewObject(RegisteredStructure structure)
+    {
+        ASSERT(m_op == CallObjectConstructor || m_op == CreateThis || m_op == ObjectCreate);
+        setOpAndDefaultFlags(NewObject);
+        children.reset();
+        m_opInfo = structure;
+        m_opInfo2 = OpInfoWrapper();
+    }
+
+    void convertToNewInternalFieldObject(RegisteredStructure structure)
+    {
+        ASSERT(m_op == CreatePromise);
+        setOpAndDefaultFlags(NewInternalFieldObject);
+        children.reset();
+        m_opInfo = structure;
+        m_opInfo2 = OpInfoWrapper();
+    }
+
+    void convertToNewInternalFieldObjectWithInlineFields(NodeType newOp, RegisteredStructure structure)
+    {
+        ASSERT(m_op == CreateAsyncGenerator || m_op == CreateGenerator);
+        setOpAndDefaultFlags(newOp);
+        children.reset();
+        m_opInfo = structure;
+        m_opInfo2 = OpInfoWrapper();
+    }
+
+    void convertToNewArrayBuffer(FrozenValue* immutableButterfly);
     
     void convertToDirectCall(FrozenValue*);
 
     void convertToCallDOM(Graph&);
+
+    void convertToRegExpExecNonGlobalOrStickyWithoutChecks(FrozenValue* regExp);
+    void convertToRegExpMatchFastGlobalWithoutChecks(FrozenValue* regExp);
+    void convertToRegExpTestInline(FrozenValue* globalObject, FrozenValue* regExp);
+
+    void convertToSetRegExpObjectLastIndex()
+    {
+        setOp(SetRegExpObjectLastIndex);
+        m_opInfo = false;
+    }
+
+    void convertToInById(CacheableIdentifier identifier)
+    {
+        ASSERT(m_op == InByVal);
+        setOpAndDefaultFlags(InById);
+        children.setChild2(Edge());
+        m_opInfo = identifier;
+        m_opInfo2 = OpInfoWrapper();
+    }
     
     JSValue asJSValue()
     {
@@ -794,21 +911,13 @@ public:
     }
      
     template<typename T>
-    T dynamicCastConstant(VM& vm)
+    T dynamicCastConstant()
     {
         if (!isCellConstant())
             return nullptr;
-        return jsDynamicCast<T>(vm, asCell());
+        return jsDynamicCast<T>(asCell());
     }
     
-    template<typename T>
-    T castConstant(VM& vm)
-    {
-        T result = dynamicCastConstant<T>(vm);
-        RELEASE_ASSERT(result);
-        return result;
-    }
-
     bool hasLazyJSValue()
     {
         return op() == LazyJSConstant;
@@ -833,6 +942,7 @@ public:
         switch (op()) {
         case GetMyArgumentByVal:
         case GetMyArgumentByValOutOfBounds:
+        case VarargsLength:
         case LoadVarargs:
         case ForwardVarargs:
         case CallVarargs:
@@ -854,9 +964,11 @@ public:
         switch (op()) {
         case GetMyArgumentByVal:
         case GetMyArgumentByValOutOfBounds:
+        case VarargsLength:
+            return child1();
         case LoadVarargs:
         case ForwardVarargs:
-            return child1();
+            return child2();
         case CallVarargs:
         case CallForwardVarargs:
         case ConstructVarargs:
@@ -876,7 +988,6 @@ public:
     {
         switch (op()) {
         case MovHint:
-        case ZombieHint:
             return true;
         default:
             return false;
@@ -895,7 +1006,7 @@ public:
     {
         VariableAccessData* result = m_opInfo.as<VariableAccessData*>();
         if (!result)
-            return 0;
+            return nullptr;
         return result->find();
     }
     
@@ -904,9 +1015,9 @@ public:
         return m_opInfo.as<VariableAccessData*>()->find();
     }
     
-    VirtualRegister local()
+    Operand operand()
     {
-        return variableAccessData()->local();
+        return variableAccessData()->operand();
     }
     
     VirtualRegister machineLocal()
@@ -914,13 +1025,11 @@ public:
         return variableAccessData()->machineLocal();
     }
     
-    bool hasUnlinkedLocal()
+    bool hasUnlinkedOperand()
     {
         switch (op()) {
-        case GetLocalUnlinked:
         case ExtractOSREntryLocal:
         case MovHint:
-        case ZombieHint:
         case KillStack:
             return true;
         default:
@@ -928,27 +1037,10 @@ public:
         }
     }
     
-    VirtualRegister unlinkedLocal()
+    Operand unlinkedOperand()
     {
-        ASSERT(hasUnlinkedLocal());
-        return VirtualRegister(m_opInfo.as<int32_t>());
-    }
-    
-    bool hasUnlinkedMachineLocal()
-    {
-        return op() == GetLocalUnlinked;
-    }
-    
-    void setUnlinkedMachineLocal(VirtualRegister reg)
-    {
-        ASSERT(hasUnlinkedMachineLocal());
-        m_opInfo2 = reg.offset();
-    }
-    
-    VirtualRegister unlinkedMachineLocal()
-    {
-        ASSERT(hasUnlinkedMachineLocal());
-        return VirtualRegister(m_opInfo2.as<int32_t>());
+        ASSERT(hasUnlinkedOperand());
+        return Operand::fromBits(m_opInfo.as<uint64_t>());
     }
     
     bool hasStackAccessData()
@@ -967,6 +1059,12 @@ public:
         ASSERT(hasStackAccessData());
         return m_opInfo.as<StackAccessData*>();
     }
+
+    unsigned argumentCountIncludingThis()
+    {
+        ASSERT(op() == SetArgumentCountIncludingThis);
+        return m_opInfo.as<unsigned>();
+    }
     
     bool hasPhi()
     {
@@ -984,25 +1082,46 @@ public:
         return op() == StoreBarrier || op() == FencedStoreBarrier;
     }
 
-    bool hasIdentifier()
+    bool hasCacheableIdentifier()
     {
         switch (op()) {
         case TryGetById:
         case GetById:
         case GetByIdFlush:
         case GetByIdWithThis:
+        case GetByIdDirect:
+        case GetByIdDirectFlush:
+        case GetPrivateNameById:
+        case DeleteById:
+        case InById:
         case PutById:
         case PutByIdFlush:
         case PutByIdDirect:
         case PutByIdWithThis:
+        case PutPrivateNameById:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    CacheableIdentifier cacheableIdentifier()
+    {
+        ASSERT(hasCacheableIdentifier());
+        return CacheableIdentifier::createFromRawBits(m_opInfo.as<uintptr_t>());
+    }
+
+    bool hasIdentifier()
+    {
+        switch (op()) {
         case PutGetterById:
         case PutSetterById:
         case PutGetterSetterById:
-        case DeleteById:
         case GetDynamicVar:
         case PutDynamicVar:
         case ResolveScopeForHoistingFuncDeclInEval:
         case ResolveScope:
+        case ToObject:
             return true;
         default:
             return false;
@@ -1071,12 +1190,12 @@ public:
     PromotedLocationDescriptor promotedLocationDescriptor();
     
     // This corrects the arithmetic node flags, so that irrelevant bits are
-    // ignored. In particular, anything other than ArithMul does not need
+    // ignored. In particular, anything other than ArithMul or ValueMul does not need
     // to know if it can speculate on negative zero.
     NodeFlags arithNodeFlags()
     {
         NodeFlags result = m_flags & NodeArithFlagsMask;
-        if (op() == ArithMul || op() == ArithDiv || op() == ArithMod || op() == ArithNegate || op() == ArithPow || op() == ArithRound || op() == ArithFloor || op() == ArithCeil || op() == ArithTrunc || op() == DoubleAsInt32)
+        if (op() == ArithMul || op() == ArithDiv || op() == ValueDiv || op() == ArithMod || op() == ArithNegate || op() == ArithPow || op() == ArithRound || op() == ArithFloor || op() == ArithCeil || op() == ArithTrunc || op() == DoubleAsInt32 || op() == ValueNegate || op() == ValueMul || op() == ValueDiv)
             return result;
         return result & ~NodeBytecodeNeedsNegZero;
     }
@@ -1091,35 +1210,55 @@ public:
         return m_flags & NodeMayHaveDoubleResult;
     }
     
-    bool mayHaveNonNumberResult()
+    bool mayHaveNonNumericResult()
     {
-        return m_flags & NodeMayHaveNonNumberResult;
+        return m_flags & NodeMayHaveNonNumericResult;
     }
 
-    bool hasConstantBuffer()
+    bool mayHaveBigInt32Result()
     {
-        return op() == NewArrayBuffer;
-    }
-    
-    NewArrayBufferData* newArrayBufferData()
-    {
-        ASSERT(hasConstantBuffer());
-        return m_opInfo.as<NewArrayBufferData*>();
-    }
-    
-    unsigned startConstant()
-    {
-        return newArrayBufferData()->startConstant;
-    }
-    
-    unsigned numConstants()
-    {
-        return newArrayBufferData()->numConstants;
+        return m_flags & NodeMayHaveBigInt32Result;
     }
 
+    bool mayHaveHeapBigIntResult()
+    {
+        return m_flags & NodeMayHaveHeapBigIntResult;
+    }
+
+    bool mayHaveBigIntResult()
+    {
+        return mayHaveBigInt32Result() || mayHaveHeapBigIntResult();
+    }
+
+    bool hasNewArrayBufferData()
+    {
+        return op() == NewArrayBuffer || op() == PhantomNewArrayBuffer;
+    }
+    
+    NewArrayBufferData newArrayBufferData()
+    {
+        ASSERT(hasNewArrayBufferData());
+        return m_opInfo2.asNewArrayBufferData();
+    }
+
+    unsigned hasVectorLengthHint()
+    {
+        switch (op()) {
+        case NewArray:
+        case NewArrayBuffer:
+        case PhantomNewArrayBuffer:
+            return true;
+        default:
+            return false;
+        }
+    }
+    
     unsigned vectorLengthHint()
     {
-        return newArrayBufferData()->vectorLengthHint;
+        ASSERT(hasVectorLengthHint());
+        if (op() == NewArray)
+            return m_opInfo2.as<unsigned>();
+        return newArrayBufferData().vectorLengthHint;
     }
     
     bool hasIndexingType()
@@ -1128,6 +1267,7 @@ public:
         case NewArray:
         case NewArrayWithSize:
         case NewArrayBuffer:
+        case PhantomNewArrayBuffer:
             return true;
         default:
             return false;
@@ -1151,8 +1291,16 @@ public:
     IndexingType indexingType()
     {
         ASSERT(hasIndexingType());
-        if (op() == NewArrayBuffer)
-            return newArrayBufferData()->indexingType;
+        if (op() == NewArrayBuffer || op() == PhantomNewArrayBuffer)
+            return static_cast<IndexingType>(newArrayBufferData().indexingMode) & IndexingTypeMask;
+        return static_cast<IndexingType>(m_opInfo.as<uint32_t>());
+    }
+
+    IndexingType indexingMode()
+    {
+        ASSERT(hasIndexingType());
+        if (op() == NewArrayBuffer || op() == PhantomNewArrayBuffer)
+            return static_cast<IndexingType>(newArrayBufferData().indexingMode);
         return static_cast<IndexingType>(m_opInfo.as<uint32_t>());
     }
     
@@ -1185,6 +1333,17 @@ public:
         return m_opInfo.as<unsigned>();
     }
 
+    bool hasIsInternalPromise()
+    {
+        return op() == CreatePromise;
+    }
+
+    bool isInternalPromise()
+    {
+        ASSERT(hasIsInternalPromise());
+        return m_opInfo2.as<bool>();
+    }
+
     void setIndexingType(IndexingType indexingType)
     {
         ASSERT(hasIndexingType());
@@ -1200,6 +1359,17 @@ public:
     {
         ASSERT(hasScopeOffset());
         return ScopeOffset(m_opInfo.as<uint32_t>());
+    }
+
+    unsigned hasInternalFieldIndex()
+    {
+        return op() == GetInternalField || op() == PutInternalField;
+    }
+
+    unsigned internalFieldIndex()
+    {
+        ASSERT(hasInternalFieldIndex());
+        return m_opInfo.as<uint32_t>();
     }
     
     bool hasDirectArgumentsOffset()
@@ -1248,13 +1418,19 @@ public:
     
     bool hasLoadVarargsData()
     {
-        return op() == LoadVarargs || op() == ForwardVarargs;
+        return op() == LoadVarargs || op() == ForwardVarargs || op() == VarargsLength;
     }
     
     LoadVarargsData* loadVarargsData()
     {
         ASSERT(hasLoadVarargsData());
         return m_opInfo.as<LoadVarargsData*>();
+    }
+
+    InlineCallFrame* argumentsInlineCallFrame()
+    {
+        ASSERT(op() == GetArgumentCountIncludingThis);
+        return m_opInfo.as<InlineCallFrame*>();
     }
 
     bool hasQueriedType()
@@ -1273,7 +1449,7 @@ public:
         return op() == IsCellWithType;
     }
 
-    SpeculatedType speculatedTypeForQuery()
+    std::optional<SpeculatedType> speculatedTypeForQuery()
     {
         return speculationFromJSType(queriedType());
     }
@@ -1283,6 +1459,11 @@ public:
         return !!result();
     }
     
+    bool hasInt32Result()
+    {
+        return result() == NodeResultInt32;
+    }
+
     bool hasInt52Result()
     {
         return result() == NodeResultInt52;
@@ -1292,7 +1473,30 @@ public:
     {
         return result() == NodeResultNumber;
     }
+
+    bool hasNumberOrAnyIntResult()
+    {
+        return hasNumberResult() || hasInt32Result() || hasInt52Result();
+    }
     
+    bool hasNumericResult()
+    {
+        switch (op()) {
+        case ValueSub:
+        case ValueMul:
+        case ValueBitAnd:
+        case ValueBitOr:
+        case ValueBitXor:
+        case ValueBitNot:
+        case ValueBitLShift:
+        case ValueBitRShift:
+        case ValueNegate:
+            return true;
+        default:
+            return false;
+        }
+    }
+
     bool hasDoubleResult()
     {
         return result() == NodeResultDouble;
@@ -1381,7 +1585,7 @@ public:
     {
         switch (op()) {
         case ForceOSRExit:
-        case CheckBadCell:
+        case CheckBadValue:
             return true;
         default:
             return false;
@@ -1416,6 +1620,24 @@ public:
     {
         ASSERT(isEntrySwitch());
         return m_opInfo.as<EntrySwitchData*>();
+    }
+
+    bool hasIntrinsic()
+    {
+        switch (op()) {
+        case CPUIntrinsic:
+        case DateGetTime:
+        case DateGetInt32OrNaN:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    Intrinsic intrinsic()
+    {
+        ASSERT(hasIntrinsic());
+        return m_opInfo.as<Intrinsic>();
     }
     
     unsigned numSuccessors()
@@ -1544,13 +1766,18 @@ public:
         case ArithFloor:
         case ArithCeil:
         case ArithTrunc:
-        case GetDirectPname:
         case GetById:
         case GetByIdFlush:
         case GetByIdWithThis:
+        case GetByIdDirect:
+        case GetByIdDirectFlush:
+        case GetPrototypeOf:
         case TryGetById:
+        case EnumeratorGetByVal:
         case GetByVal:
         case GetByValWithThis:
+        case GetPrivateName:
+        case GetPrivateNameById:
         case Call:
         case DirectCall:
         case TailCallInlinedCaller:
@@ -1566,17 +1793,32 @@ public:
         case GetByOffset:
         case MultiGetByOffset:
         case GetClosureVar:
+        case GetInternalField:
         case GetFromArguments:
         case GetArgument:
         case ArrayPop:
         case ArrayPush:
         case RegExpExec:
+        case RegExpExecNonGlobalOrSticky:
         case RegExpTest:
+        case RegExpTestInline:
+        case RegExpMatchFast:
+        case RegExpMatchFastGlobal:
         case GetGlobalVar:
         case GetGlobalLexicalVariable:
         case StringReplace:
         case StringReplaceRegExp:
         case ToNumber:
+        case ToNumeric:
+        case ToObject:
+        case CallNumberConstructor:
+        case ValueBitAnd:
+        case ValueBitOr:
+        case ValueBitXor:
+        case ValueBitNot:
+        case ValueBitLShift:
+        case ValueBitRShift:
+        case CallObjectConstructor:
         case LoadKeyFromMapBucket:
         case LoadValueFromMapBucket:
         case CallDOMGetter:
@@ -1592,7 +1834,11 @@ public:
         case AtomicsSub:
         case AtomicsXor:
         case GetDynamicVar:
-        case WeakMapGet:
+        case ExtractValueFromWeakMapGet:
+        case ToThis:
+        case DataViewGetInt:
+        case DataViewGetFloat:
+        case DateGetInt32OrNaN:
             return true;
         default:
             return false;
@@ -1632,7 +1878,8 @@ public:
     bool hasCellOperand()
     {
         switch (op()) {
-        case CheckCell:
+        case CheckIsConstant:
+            return isCell(child1().useKind());
         case OverridesHasInstance:
         case NewFunction:
         case NewGeneratorFunction:
@@ -1641,11 +1888,28 @@ public:
         case CreateActivation:
         case MaterializeCreateActivation:
         case NewRegexp:
+        case NewArrayBuffer:
+        case PhantomNewArrayBuffer:
         case CompareEqPtr:
+        case CallObjectConstructor:
         case DirectCall:
         case DirectTailCall:
         case DirectConstruct:
         case DirectTailCallInlinedCaller:
+        case RegExpExecNonGlobalOrSticky:
+        case RegExpMatchFastGlobal:
+        case RegExpTestInline:
+            return true;
+
+        default:
+            return false;
+        }
+    }
+
+    bool hasCellOperand2()
+    {
+        switch (op()) {
+        case RegExpTestInline:
             return true;
         default:
             return false;
@@ -1657,7 +1921,13 @@ public:
         ASSERT(hasCellOperand());
         return m_opInfo.as<FrozenValue*>();
     }
-    
+
+    FrozenValue* cellOperand2()
+    {
+        ASSERT(hasCellOperand2());
+        return m_opInfo2.as<FrozenValue*>();
+    }
+
     template<typename T>
     T castOperand()
     {
@@ -1692,9 +1962,81 @@ public:
         return m_opInfo.as<void*>();
     }
 
+    bool hasStorageChild() const
+    {
+        switch (op()) {
+        case EnumeratorGetByVal:
+        case GetByVal:
+        case PutByValDirect:
+        case PutByVal:
+        case PutByValAlias:
+        case AtomicsAdd:
+        case AtomicsAnd:
+        case AtomicsCompareExchange:
+        case AtomicsExchange:
+        case AtomicsLoad:
+        case AtomicsOr:
+        case AtomicsStore:
+        case AtomicsSub:
+        case AtomicsXor:
+        case ArrayPush:
+        case ArrayPop:
+        case GetArrayLength:
+        case GetTypedArrayLengthAsInt52:
+        case HasIndexedProperty:
+        case EnumeratorNextUpdateIndexAndMode:
+        case ArrayIndexOf:
+            return true;
+        default:
+            break;
+        }
+        return false;
+    }
+
+    unsigned storageChildIndex()
+    {
+        ASSERT(hasStorageChild());
+        switch (op()) {
+        case EnumeratorGetByVal:
+        case GetByVal:
+            return 2;
+        case PutByValDirect:
+        case PutByVal:
+        case PutByValAlias:
+            return 3;
+        case AtomicsAdd:
+        case AtomicsAnd:
+        case AtomicsCompareExchange:
+        case AtomicsExchange:
+        case AtomicsLoad:
+        case AtomicsOr:
+        case AtomicsStore:
+        case AtomicsSub:
+        case AtomicsXor:
+            return 2 + numExtraAtomicsArgs(op());
+        case ArrayPush:
+            return 0;
+
+        case ArrayPop:
+        case GetArrayLength:
+        case GetTypedArrayLengthAsInt52:
+            return 2;
+
+        case HasIndexedProperty:
+            return 2;
+
+        case EnumeratorNextUpdateIndexAndMode:
+            return 4;
+
+        default:
+            // FIXME: Add ArrayIndexOf but it does non-trivial things to determine storage edge.
+            RELEASE_ASSERT_NOT_REACHED();
+        }
+    }
+
     bool hasUidOperand()
     {
-        return op() == CheckStringIdent;
+        return op() == CheckIdent;
     }
 
     UniquedStringImpl* uidOperand()
@@ -1755,7 +2097,11 @@ public:
     {
         switch (op()) {
         case ArrayifyToStructure:
+        case MaterializeNewInternalFieldObject:
         case NewObject:
+        case NewGenerator:
+        case NewAsyncGenerator:
+        case NewInternalFieldObject:
         case NewStringObject:
             return true;
         default:
@@ -1808,11 +2154,34 @@ public:
         ASSERT(hasMultiPutByOffsetData());
         return *m_opInfo.as<MultiPutByOffsetData*>();
     }
+
+    bool hasMultiDeleteByOffsetData()
+    {
+        return op() == MultiDeleteByOffset;
+    }
+
+    MultiDeleteByOffsetData& multiDeleteByOffsetData()
+    {
+        ASSERT(hasMultiDeleteByOffsetData());
+        return *m_opInfo.as<MultiDeleteByOffsetData*>();
+    }
+    
+    bool hasMatchStructureData()
+    {
+        return op() == MatchStructure;
+    }
+    
+    MatchStructureData& matchStructureData()
+    {
+        ASSERT(hasMatchStructureData());
+        return *m_opInfo.as<MatchStructureData*>();
+    }
     
     bool hasObjectMaterializationData()
     {
         switch (op()) {
         case MaterializeNewObject:
+        case MaterializeNewInternalFieldObject:
         case MaterializeCreateActivation:
             return true;
 
@@ -1903,12 +2272,15 @@ public:
         case PhantomCreateRest:
         case PhantomSpread:
         case PhantomNewArrayWithSpread:
+        case PhantomNewArrayBuffer:
         case PhantomClonedArguments:
         case PhantomNewFunction:
         case PhantomNewGeneratorFunction:
         case PhantomNewAsyncFunction:
         case PhantomNewAsyncGeneratorFunction:
+        case PhantomNewInternalFieldObject:
         case PhantomCreateActivation:
+        case PhantomNewRegexp:
             return true;
         default:
             return false;
@@ -1920,15 +2292,22 @@ public:
         switch (op()) {
         case GetIndexedPropertyStorage:
         case GetArrayLength:
+        case GetTypedArrayLengthAsInt52:
         case GetVectorLength:
-        case In:
+        case InByVal:
         case PutByValDirect:
         case PutByVal:
         case PutByValAlias:
         case GetByVal:
+        case EnumeratorNextUpdateIndexAndMode:
+        case EnumeratorGetByVal:
+        case EnumeratorInByVal:
+        case EnumeratorHasOwnProperty:
         case StringCharAt:
         case StringCharCodeAt:
+        case StringCodePointAt:
         case CheckArray:
+        case CheckArrayOrEmpty:
         case Arrayify:
         case ArrayifyToStructure:
         case ArrayPush:
@@ -1966,7 +2345,67 @@ public:
         m_opInfo = arrayMode.asWord();
         return true;
     }
+
+    bool hasECMAMode()
+    {
+        switch (op()) {
+        case CallEval:
+        case DeleteById:
+        case DeleteByVal:
+        case PutById:
+        case PutByIdDirect:
+        case PutByIdFlush:
+        case PutByIdWithThis:
+        case PutByVal:
+        case PutByValAlias:
+        case PutByValDirect:
+        case PutByValWithThis:
+        case PutDynamicVar:
+        case ToThis:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    ECMAMode ecmaMode()
+    {
+        ASSERT(hasECMAMode());
+        switch (op()) {
+        case CallEval:
+        case DeleteByVal:
+        case PutByValWithThis:
+        case ToThis:
+            return ECMAMode::fromByte(m_opInfo.as<uint8_t>());
+        case DeleteById:
+        case PutById:
+        case PutByIdDirect:
+        case PutByIdFlush:
+        case PutByIdWithThis:
+        case PutByVal:
+        case PutByValAlias:
+        case PutByValDirect:
+        case PutDynamicVar:
+            return ECMAMode::fromByte(m_opInfo2.as<uint8_t>());
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+            return ECMAMode::strict();
+        }
+    }
     
+    bool hasPrivateFieldPutKind()
+    {
+        if (op() == PutPrivateName || op() == PutPrivateNameById)
+            return true;
+        return false;
+    }
+
+    PrivateFieldPutKind privateFieldPutKind()
+    {
+        ASSERT(hasPrivateFieldPutKind());
+        return PrivateFieldPutKind::fromByte(m_opInfo2.as<uint8_t>());
+    }
+
     bool hasArithMode()
     {
         switch (op()) {
@@ -2057,6 +2496,12 @@ public:
     {
         ASSERT(op() == InitializeEntrypointArguments);
         return m_opInfo.as<unsigned>();
+    }
+
+    DataViewData dataViewData()
+    {
+        ASSERT(op() == DataViewGetInt || op() == DataViewGetFloat || op() == DataViewSet);
+        return bitwise_cast<DataViewData>(m_opInfo.as<uint64_t>());
     }
 
     bool shouldGenerate()
@@ -2201,9 +2646,26 @@ public:
         return isInt32OrBooleanSpeculationExpectingDefined(prediction());
     }
     
-    bool shouldSpeculateAnyInt()
+    bool shouldSpeculateInt52()
     {
-        return isAnyIntSpeculation(prediction());
+        // We have to include SpecInt32Only here for two reasons:
+        // 1. We diligently write code that first checks if we should speculate Int32.
+        // For example:
+        // if (shouldSpeculateInt32()) ... 
+        // else if (shouldSpeculateInt52()) ...
+        // This means we it's totally valid to speculate Int52 when we're dealing
+        // with a type that's the union of Int32 and Int52.
+        //
+        // It would be a performance mistake to not include Int32 here because we obviously
+        // have variables that are the union of Int32 and Int52 values, and it's better
+        // to speculate Int52 than double in that situation.
+        //
+        // 2. We also write code where we ask if the inputs can be Int52, like if
+        // we know via profiling that an Add overflows, we may not emit an Int32 add.
+        // However, we only emit such an add if both inputs can be Int52, and Int32
+        // can trivially become Int52.
+        //
+        return enableInt52() && isInt32OrInt52Speculation(prediction());
     }
     
     bool shouldSpeculateDouble()
@@ -2295,6 +2757,23 @@ public:
     {
         return isSymbolSpeculation(prediction());
     }
+
+#if USE(BIGINT32)
+    bool shouldSpeculateBigInt32()
+    {
+        return isBigInt32Speculation(prediction());
+    }
+#endif
+
+    bool shouldSpeculateHeapBigInt()
+    {
+        return isHeapBigIntSpeculation(prediction());
+    }
+    
+    bool shouldSpeculateBigInt()
+    {
+        return isBigIntSpeculation(prediction());
+    }
     
     bool shouldSpeculateFinalObject()
     {
@@ -2309,6 +2788,11 @@ public:
     bool shouldSpeculateArray()
     {
         return isArraySpeculation(prediction());
+    }
+
+    bool shouldSpeculateFunction()
+    {
+        return isFunctionSpeculation(prediction());
     }
 
     bool shouldSpeculateProxyObject()
@@ -2405,6 +2889,26 @@ public:
     {
         return isNotCellSpeculation(prediction());
     }
+
+    bool shouldSpeculateNotCellNorBigInt()
+    {
+        return isNotCellNorBigIntSpeculation(prediction());
+    }
+
+    bool shouldSpeculateNotDouble()
+    {
+        return isNotDoubleSpeculation(prediction());
+    }
+
+    bool shouldSpeculateNeitherDoubleNorHeapBigIntNorString()
+    {
+        return isNeitherDoubleNorHeapBigIntNorStringSpeculation(prediction());
+    }
+
+    bool shouldSpeculateNeitherDoubleNorHeapBigInt()
+    {
+        return isNeitherDoubleNorHeapBigIntSpeculation(prediction());
+    }
     
     bool shouldSpeculateUntypedForArithmetic()
     {
@@ -2454,9 +2958,9 @@ public:
             && op2->shouldSpeculateInt32OrBooleanExpectingDefined();
     }
     
-    static bool shouldSpeculateAnyInt(Node* op1, Node* op2)
+    static bool shouldSpeculateInt52(Node* op1, Node* op2)
     {
-        return op1->shouldSpeculateAnyInt() && op2->shouldSpeculateAnyInt();
+        return enableInt52() && op1->shouldSpeculateInt52() && op2->shouldSpeculateInt52();
     }
     
     static bool shouldSpeculateNumber(Node* op1, Node* op2)
@@ -2481,6 +2985,23 @@ public:
         return op1->shouldSpeculateSymbol() && op2->shouldSpeculateSymbol();
     }
     
+    static bool shouldSpeculateBigInt(Node* op1, Node* op2)
+    {
+        return op1->shouldSpeculateBigInt() && op2->shouldSpeculateBigInt();
+    }
+
+#if USE(BIGINT32)
+    static bool shouldSpeculateBigInt32(Node* op1, Node* op2)
+    {
+        return op1->shouldSpeculateBigInt32() && op2->shouldSpeculateBigInt32();
+    }
+#endif
+
+    static bool shouldSpeculateHeapBigInt(Node* op1, Node* op2)
+    {
+        return op1->shouldSpeculateHeapBigInt() && op2->shouldSpeculateHeapBigInt();
+    }
+
     static bool shouldSpeculateFinalObject(Node* op1, Node* op2)
     {
         return op1->shouldSpeculateFinalObject() && op2->shouldSpeculateFinalObject();
@@ -2500,6 +3021,11 @@ public:
     {
         return nodeCanSpeculateInt52(arithNodeFlags(), source);
     }
+
+    bool canSpeculateBigInt32(RareCaseProfilingSource source)
+    {
+        return nodeCanSpeculateBigInt32(arithNodeFlags(), source);
+    }
     
     RareCaseProfilingSource sourceFor(PredictionPass pass)
     {
@@ -2516,6 +3042,11 @@ public:
     bool canSpeculateInt52(PredictionPass pass)
     {
         return canSpeculateInt52(sourceFor(pass));
+    }
+
+    bool canSpeculateBigInt32(PredictionPass pass)
+    {
+        return canSpeculateBigInt32(sourceFor(pass));
     }
 
     bool hasTypeLocation()
@@ -2553,11 +3084,12 @@ public:
 
     bool hasClassInfo() const
     {
-        return op() == CheckSubClass;
+        return op() == CheckJSCast || op() == CheckNotJSCast;
     }
 
     const ClassInfo* classInfo()
     {
+        ASSERT(hasClassInfo());
         return m_opInfo.as<const ClassInfo*>();
     }
 
@@ -2573,21 +3105,17 @@ public:
         return m_opInfo.as<const DOMJIT::Signature*>();
     }
 
-    bool hasInternalMethodType() const
+    const ClassInfo* requiredDOMJITClassInfo()
     {
-        return op() == HasIndexedProperty;
-    }
-
-    PropertySlot::InternalMethodType internalMethodType() const
-    {
-        ASSERT(hasInternalMethodType());
-        return static_cast<PropertySlot::InternalMethodType>(m_opInfo2.as<uint32_t>());
-    }
-
-    void setInternalMethodType(PropertySlot::InternalMethodType type)
-    {
-        ASSERT(hasInternalMethodType());
-        m_opInfo2 = static_cast<uint32_t>(type);
+        switch (op()) {
+        case CallDOMGetter:
+            return callDOMGetterData()->requiredClassInfo;
+        case CallDOM:
+            return signature()->classInfo;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+        }
+        return nullptr;
     }
 
     Node* replacement() const
@@ -2609,10 +3137,15 @@ public:
     {
         m_misc.epoch = epoch.toUnsigned();
     }
+    
+    bool hasNumberOfArgumentsToSkip()
+    {
+        return op() == CreateRest || op() == PhantomCreateRest || op() == GetRestLength || op() == GetMyArgumentByVal || op() == GetMyArgumentByValOutOfBounds;
+    }
 
     unsigned numberOfArgumentsToSkip()
     {
-        ASSERT(op() == CreateRest || op() == PhantomCreateRest || op() == GetRestLength || op() == GetMyArgumentByVal || op() == GetMyArgumentByValOutOfBounds);
+        ASSERT(hasNumberOfArgumentsToSkip());
         return m_opInfo.as<unsigned>();
     }
 
@@ -2629,7 +3162,7 @@ public:
 
     bool hasBucketOwnerType()
     {
-        return op() == GetMapBucketNext;
+        return op() == GetMapBucketNext || op() == LoadKeyFromMapBucket || op() == LoadValueFromMapBucket;
     }
 
     BucketOwnerType bucketOwnerType()
@@ -2649,10 +3182,117 @@ public:
         return m_opInfo.as<int32_t>();
     }
 
+    bool hasIgnoreLastIndexIsWritable()
+    {
+        return op() == SetRegExpObjectLastIndex;
+    }
+
+    bool ignoreLastIndexIsWritable()
+    {
+        ASSERT(hasIgnoreLastIndexIsWritable());
+        return m_opInfo.as<uint32_t>();
+    }
+
     uint32_t errorType()
     {
         ASSERT(op() == ThrowStaticError);
         return m_opInfo.as<uint32_t>();
+    }
+    
+    bool hasCallLinkStatus()
+    {
+        return op() == FilterCallLinkStatus;
+    }
+    
+    CallLinkStatus* callLinkStatus()
+    {
+        ASSERT(hasCallLinkStatus());
+        return m_opInfo.as<CallLinkStatus*>();
+    }
+    
+    bool hasGetByStatus()
+    {
+        return op() == FilterGetByStatus;
+    }
+    
+    GetByStatus* getByStatus()
+    {
+        ASSERT(hasGetByStatus());
+        return m_opInfo.as<GetByStatus*>();
+    }
+    
+    bool hasInByStatus()
+    {
+        return op() == FilterInByStatus;
+    }
+    
+    InByStatus* inByStatus()
+    {
+        ASSERT(hasInByStatus());
+        return m_opInfo.as<InByStatus*>();
+    }
+    
+    bool hasPutByStatus()
+    {
+        return op() == FilterPutByStatus;
+    }
+    
+    PutByStatus* putByStatus()
+    {
+        ASSERT(hasPutByStatus());
+        return m_opInfo.as<PutByStatus*>();
+    }
+
+    bool hasDeleteByStatus()
+    {
+        return op() == FilterDeleteByStatus;
+    }
+
+    DeleteByStatus* deleteByStatus()
+    {
+        ASSERT(hasDeleteByStatus());
+        return m_opInfo.as<DeleteByStatus*>();
+    }
+
+    bool hasCheckPrivateBrandStatus()
+    {
+        return op() == FilterCheckPrivateBrandStatus;
+    }
+
+    CheckPrivateBrandStatus* checkPrivateBrandStatus()
+    {
+        ASSERT(hasCheckPrivateBrandStatus());
+        return m_opInfo.as<CheckPrivateBrandStatus*>();
+    }
+
+    bool hasSetPrivateBrandStatus()
+    {
+        return op() == FilterSetPrivateBrandStatus;
+    }
+
+    SetPrivateBrandStatus* setPrivateBrandStatus()
+    {
+        ASSERT(hasSetPrivateBrandStatus());
+        return m_opInfo.as<SetPrivateBrandStatus*>();
+    }
+
+    bool hasEnumeratorMetadata() const
+    {
+        switch (op()) {
+        case EnumeratorNextUpdateIndexAndMode:
+        case EnumeratorNextUpdatePropertyName:
+        case EnumeratorHasOwnProperty:
+        case EnumeratorInByVal:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    OptionSet<JSPropertyNameEnumerator::Flag> enumeratorMetadata()
+    {
+        ASSERT(hasEnumeratorMetadata());
+        return OptionSet<JSPropertyNameEnumerator::Flag>::fromRaw(m_opInfo2.as<unsigned>());
     }
 
     void dumpChildren(PrintStream& out)
@@ -2667,8 +3307,6 @@ public:
             return;
         out.printf(", @%u", child3()->index());
     }
-    
-    // NB. This class must have a trivial destructor.
 
     NodeOrigin origin;
 
@@ -2680,7 +3318,7 @@ private:
 
     unsigned m_index { std::numeric_limits<unsigned>::max() };
     unsigned m_op : 10; // real type is NodeType
-    unsigned m_flags : 20;
+    unsigned m_flags : 21;
     // The virtual register number (spill location) associated with this .
     VirtualRegister m_virtualRegister;
     // The number of uses of the result of this operation (+1 for 'must generate' nodes, which have side-effects).
@@ -2717,6 +3355,11 @@ private:
             u.int64 = 0;
             u.pointer = bitwise_cast<void*>(structure);
         }
+        OpInfoWrapper(CacheableIdentifier identifier)
+        {
+            u.int64 = 0;
+            u.pointer = bitwise_cast<void*>(identifier.rawBits());
+        }
         OpInfoWrapper& operator=(uint32_t int32)
         {
             u.int64 = 0;
@@ -2752,6 +3395,17 @@ private:
             u.pointer = bitwise_cast<void*>(structure);
             return *this;
         }
+        OpInfoWrapper& operator=(CacheableIdentifier identifier)
+        {
+            u.int64 = 0;
+            u.pointer = bitwise_cast<void*>(identifier.rawBits());
+            return *this;
+        }
+        OpInfoWrapper& operator=(NewArrayBufferData newArrayBufferData)
+        {
+            u.int64 = bitwise_cast<uint64_t>(newArrayBufferData);
+            return *this;
+        }
         template <typename T>
         ALWAYS_INLINE auto as() const -> typename std::enable_if<std::is_pointer<T>::value && !std::is_const<typename std::remove_pointer<T>::type>::value, T>::type
         {
@@ -2763,7 +3417,7 @@ private:
             return static_cast<T>(u.constPointer);
         }
         template <typename T>
-        ALWAYS_INLINE auto as() const -> typename std::enable_if<(std::is_integral<T>::value || std::is_enum<T>::value) && sizeof(T) == 4, T>::type
+        ALWAYS_INLINE auto as() const -> typename std::enable_if<(std::is_integral<T>::value || std::is_enum<T>::value) && sizeof(T) <= 4, T>::type
         {
             return static_cast<T>(u.int32);
         }
@@ -2775,6 +3429,10 @@ private:
         ALWAYS_INLINE RegisteredStructure asRegisteredStructure() const
         {
             return bitwise_cast<RegisteredStructure>(u.pointer);
+        }
+        ALWAYS_INLINE NewArrayBufferData asNewArrayBufferData() const
+        {
+            return bitwise_cast<NewArrayBufferData>(u.int64);
         }
 
         union {
@@ -2825,7 +3483,7 @@ CString nodeListDump(const T& nodeList)
 }
 
 template<typename T>
-CString nodeMapDump(const T& nodeMap, DumpContext* context = 0)
+CString nodeMapDump(const T& nodeMap, DumpContext* context = nullptr)
 {
     Vector<typename T::KeyType> keys;
     for (
@@ -2841,7 +3499,7 @@ CString nodeMapDump(const T& nodeMap, DumpContext* context = 0)
 }
 
 template<typename T>
-CString nodeValuePairListDump(const T& nodeValuePairList, DumpContext* context = 0)
+CString nodeValuePairListDump(const T& nodeValuePairList, DumpContext* context = nullptr)
 {
     using V = typename T::ValueType;
     T sortedList = nodeValuePairList;

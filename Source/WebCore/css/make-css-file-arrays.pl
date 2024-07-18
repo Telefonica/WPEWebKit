@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 #
 #  Copyright (C) 2006 Apple Inc.
 #
@@ -21,6 +21,7 @@
 # Usage: make-css-file-arrays.pl <header> <output> <input> ...
 
 use strict;
+use warnings;
 use FindBin;
 use lib "$FindBin::Bin/../bindings/scripts";
 
@@ -77,8 +78,10 @@ for my $in (@ARGV) {
         print OUT "    ";
         my $j = 0;
         while ($j < 16 && $i < $length) {
+            my $character = ord substr $text, $i, 1;
+            die if $character >= 128;
             print OUT ", " unless $j == 0;
-            print OUT ord substr $text, $i, 1;
+            print OUT $character;
             ++$i;
             ++$j;
         }

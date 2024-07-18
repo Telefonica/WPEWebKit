@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,9 +28,14 @@
 #include "Connection.h"
 #include "CoordinateSystem.h"
 #include <JavaScriptCore/JSBase.h>
+#include <JavaScriptCore/PrivateName.h>
+#include <WebCore/FrameIdentifier.h>
+#include <WebCore/IntRect.h>
+#include <WebCore/PageIdentifier.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
+struct Cookie;
 class Element;
 }
 
@@ -38,8 +43,10 @@ namespace WebKit {
 
 class WebFrame;
 class WebPage;
+class WebAutomationDOMWindowObserver;
 
 class WebAutomationSessionProxy : public IPC::MessageReceiver {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebAutomationSessionProxy(const String& sessionIdentifier);
     ~WebAutomationSessionProxy();
@@ -47,33 +54,40 @@ public:
     String sessionIdentifier() const { return m_sessionIdentifier; }
 
     void didClearWindowObjectForFrame(WebFrame&);
+    void willDestroyGlobalObjectForFrame(WebCore::FrameIdentifier);
 
-    void didEvaluateJavaScriptFunction(uint64_t frameID, uint64_t callbackID, const String& result, const String& errorType);
+    void didEvaluateJavaScriptFunction(WebCore::FrameIdentifier, uint64_t callbackID, const String& result, const String& errorType);
 
 private:
+    JSObjectRef scriptObject(JSGlobalContextRef);
+    void setScriptObject(JSGlobalContextRef, JSObjectRef);
     JSObjectRef scriptObjectForFrame(WebFrame&);
     WebCore::Element* elementForNodeHandle(WebFrame&, const String&);
+
+    void ensureObserverForFrame(WebFrame&);
 
     // Implemented in generated WebAutomationSessionProxyMessageReceiver.cpp
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
 
     // Called by WebAutomationSessionProxy messages
-    void evaluateJavaScriptFunction(uint64_t pageID, uint64_t frameID, const String& function, Vector<String> arguments, bool expectsImplicitCallbackArgument, int callbackTimeout, uint64_t callbackID);
-    void resolveChildFrameWithOrdinal(uint64_t pageID, uint64_t frameID, uint32_t ordinal, uint64_t callbackID);
-    void resolveChildFrameWithNodeHandle(uint64_t pageID, uint64_t frameID, const String& nodeHandle, uint64_t callbackID);
-    void resolveChildFrameWithName(uint64_t pageID, uint64_t frameID, const String& name, uint64_t callbackID);
-    void resolveParentFrame(uint64_t pageID, uint64_t frameID, uint64_t callbackID);
-    void focusFrame(uint64_t pageID, uint64_t frameID);
-    void computeElementLayout(uint64_t pageID, uint64_t frameID, String nodeHandle, bool scrollIntoViewIfNeeded, CoordinateSystem, uint64_t callbackID);
-    void selectOptionElement(uint64_t pageID, uint64_t frameID, String nodeHandle, uint64_t callbackID);
-    void takeScreenshot(uint64_t pageID, uint64_t frameID, String nodeHandle, bool scrollIntoViewIfNeeded, bool clipToViewport, uint64_t callbackID);
-    void getCookiesForFrame(uint64_t pageID, uint64_t frameID, uint64_t callbackID);
-    void deleteCookie(uint64_t pageID, uint64_t frameID, String cookieName, uint64_t callbackID);
+    void evaluateJavaScriptFunction(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, const String& function, Vector<String> arguments, bool expectsImplicitCallbackArgument, std::optional<double> callbackTimeout, uint64_t callbackID);
+    void resolveChildFrameWithOrdinal(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, uint32_t ordinal, CompletionHandler<void(std::optional<String>, std::optional<WebCore::FrameIdentifier>)>&&);
+    void resolveChildFrameWithNodeHandle(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, const String& nodeHandle, CompletionHandler<void(std::optional<String>, std::optional<WebCore::FrameIdentifier>)>&&);
+    void resolveChildFrameWithName(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, const String& name, CompletionHandler<void(std::optional<String>, std::optional<WebCore::FrameIdentifier>)>&&);
+    void resolveParentFrame(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, CompletionHandler<void(std::optional<String>, std::optional<WebCore::FrameIdentifier>)>&&);
+    void computeElementLayout(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, String nodeHandle, bool scrollIntoViewIfNeeded, CoordinateSystem, CompletionHandler<void(std::optional<String>, WebCore::IntRect, std::optional<WebCore::IntPoint>, bool)>&&);
+    void selectOptionElement(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, String nodeHandle, CompletionHandler<void(std::optional<String>)>&&);
+    void setFilesForInputFileUpload(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, String nodeHandle, Vector<String>&& filenames, CompletionHandler<void(std::optional<String>)>&&);
+    void takeScreenshot(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, String nodeHandle, bool scrollIntoViewIfNeeded, bool clipToViewport, uint64_t callbackID);
+    void snapshotRectForScreenshot(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, String nodeHandle, bool scrollIntoViewIfNeeded, bool clipToViewport, CompletionHandler<void(std::optional<String>, WebCore::IntRect&&)>&&);
+    void getCookiesForFrame(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, CompletionHandler<void(std::optional<String>, Vector<WebCore::Cookie>)>&&);
+    void deleteCookie(WebCore::PageIdentifier, std::optional<WebCore::FrameIdentifier>, String cookieName, CompletionHandler<void(std::optional<String>)>&&);
 
     String m_sessionIdentifier;
+    JSC::PrivateName m_scriptObjectIdentifier;
 
-    HashMap<uint64_t, JSObjectRef> m_webFrameScriptObjectMap;
-    HashMap<uint64_t, Vector<uint64_t>> m_webFramePendingEvaluateJavaScriptCallbacksMap;
+    HashMap<WebCore::FrameIdentifier, Vector<uint64_t>> m_webFramePendingEvaluateJavaScriptCallbacksMap;
+    HashMap<WebCore::FrameIdentifier, RefPtr<WebAutomationDOMWindowObserver>> m_frameObservers;
 };
 
 } // namespace WebKit

@@ -26,21 +26,26 @@
 #include "config.h"
 #include "DeviceOrientationEvent.h"
 
+#include "DOMWindow.h"
+#include "DeviceOrientationAndMotionAccessController.h"
 #include "DeviceOrientationData.h"
+#include "Document.h"
+#include "JSDOMPromiseDeferred.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-DeviceOrientationEvent::~DeviceOrientationEvent()
-{
-}
+WTF_MAKE_ISO_ALLOCATED_IMPL(DeviceOrientationEvent);
+
+DeviceOrientationEvent::~DeviceOrientationEvent() = default;
 
 DeviceOrientationEvent::DeviceOrientationEvent()
     : m_orientation(DeviceOrientationData::create())
 {
 }
 
-DeviceOrientationEvent::DeviceOrientationEvent(const AtomicString& eventType, DeviceOrientationData* orientation)
-    : Event(eventType, false, false) // Can't bubble, not cancelable
+DeviceOrientationEvent::DeviceOrientationEvent(const AtomString& eventType, DeviceOrientationData* orientation)
+    : Event(eventType, CanBubble::No, IsCancelable::No)
     , m_orientation(orientation)
 {
 }
@@ -60,7 +65,7 @@ std::optional<double> DeviceOrientationEvent::gamma() const
     return m_orientation->gamma();
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 std::optional<double> DeviceOrientationEvent::compassHeading() const
 {
@@ -72,9 +77,9 @@ std::optional<double> DeviceOrientationEvent::compassAccuracy() const
     return m_orientation->compassAccuracy();
 }
 
-void DeviceOrientationEvent::initDeviceOrientationEvent(const AtomicString& type, bool bubbles, bool cancelable, std::optional<double> alpha, std::optional<double> beta, std::optional<double> gamma, std::optional<double> compassHeading, std::optional<double> compassAccuracy)
+void DeviceOrientationEvent::initDeviceOrientationEvent(const AtomString& type, bool bubbles, bool cancelable, std::optional<double> alpha, std::optional<double> beta, std::optional<double> gamma, std::optional<double> compassHeading, std::optional<double> compassAccuracy)
 {
-    if (dispatched())
+    if (isBeingDispatched())
         return;
 
     initEvent(type, bubbles, cancelable);
@@ -88,9 +93,9 @@ std::optional<bool> DeviceOrientationEvent::absolute() const
     return m_orientation->absolute();
 }
 
-void DeviceOrientationEvent::initDeviceOrientationEvent(const AtomicString& type, bool bubbles, bool cancelable, std::optional<double> alpha, std::optional<double> beta, std::optional<double> gamma, std::optional<bool> absolute)
+void DeviceOrientationEvent::initDeviceOrientationEvent(const AtomString& type, bool bubbles, bool cancelable, std::optional<double> alpha, std::optional<double> beta, std::optional<double> gamma, std::optional<bool> absolute)
 {
-    if (dispatched())
+    if (isBeingDispatched())
         return;
 
     initEvent(type, bubbles, cancelable);
@@ -110,5 +115,27 @@ EventInterface DeviceOrientationEvent::eventInterface() const
     return EventInterfaceType;
 #endif
 }
+
+#if ENABLE(DEVICE_ORIENTATION)
+void DeviceOrientationEvent::requestPermission(Document& document, PermissionPromise&& promise)
+{
+    auto* window = document.domWindow();
+    auto* page = document.page();
+    if (!window || !page)
+        return promise.reject(Exception { InvalidStateError, "No browsing context"_s });
+
+    String errorMessage;
+    if (!window->isAllowedToUseDeviceOrientation(errorMessage)) {
+        document.addConsoleMessage(MessageSource::JS, MessageLevel::Warning, makeString("Call to requestPermission() failed, reason: ", errorMessage, "."));
+        return promise.resolve(PermissionState::Denied);
+    }
+
+    document.deviceOrientationAndMotionAccessController().shouldAllowAccess(document, [promise = WTFMove(promise)](PermissionState permissionState) mutable {
+        if (permissionState == PermissionState::Prompt)
+            return promise.reject(Exception { NotAllowedError, "Requesting device orientation access requires a user gesture to prompt"_s });
+        promise.resolve(permissionState);
+    });
+}
+#endif
 
 } // namespace WebCore

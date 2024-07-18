@@ -27,25 +27,31 @@
 #include "GIFImageDecoder.h"
 #include "ICOImageDecoder.h"
 #include "JPEGImageDecoder.h"
+#include "NotImplemented.h"
 #include "PNGImageDecoder.h"
 #include "SharedBuffer.h"
+#if USE(AVIF)
+#include "AVIFImageDecoder.h"
+#endif
 #if USE(OPENJPEG)
 #include "JPEG2000ImageDecoder.h"
 #endif
 #if USE(WEBP)
 #include "WEBPImageDecoder.h"
 #endif
+#if USE(JPEGXL)
+#include "JPEGXLImageDecoder.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
 
-using namespace std;
 
 namespace WebCore {
 
 namespace {
 
-static unsigned copyFromSharedBuffer(char* buffer, unsigned bufferLength, const SharedBuffer& sharedBuffer)
+static unsigned copyFromSharedBuffer(char* buffer, unsigned bufferLength, const FragmentedSharedBuffer& sharedBuffer)
 {
     unsigned bytesExtracted = 0;
     for (const auto& element : sharedBuffer) {
@@ -77,6 +83,13 @@ bool matchesJPEGSignature(char* contents)
     return !memcmp(contents, "\xFF\xD8\xFF", 3);
 }
 
+#if USE(AVIF)
+bool matchesAVIFSignature(char* contents)
+{
+    return !memcmp(contents + 4, "\x66\x74\x79\x70", 4);
+}
+#endif
+
 #if USE(OPENJPEG)
 bool matchesJP2Signature(char* contents)
 {
@@ -97,6 +110,14 @@ bool matchesWebPSignature(char* contents)
 }
 #endif
 
+#if USE(JPEGXL)
+bool matchesJPEGXLSignature(const uint8_t* contents, size_t length)
+{
+    JxlSignature signature = JxlSignatureCheck(contents, length);
+    return signature != JXL_SIG_NOT_ENOUGH_BYTES && signature != JXL_SIG_INVALID;
+}
+#endif
+
 bool matchesBMPSignature(char* contents)
 {
     return !memcmp(contents, "BM", 2);
@@ -114,7 +135,7 @@ bool matchesCURSignature(char* contents)
 
 }
 
-RefPtr<ScalableImageDecoder> ScalableImageDecoder::create(SharedBuffer& data, AlphaOption alphaOption, GammaAndColorProfileOption gammaAndColorProfileOption)
+RefPtr<ScalableImageDecoder> ScalableImageDecoder::create(FragmentedSharedBuffer& data, AlphaOption alphaOption, GammaAndColorProfileOption gammaAndColorProfileOption)
 {
     static const unsigned lengthOfLongestSignature = 14; // To wit: "RIFF????WEBPVP"
     char contents[lengthOfLongestSignature];
@@ -134,6 +155,11 @@ RefPtr<ScalableImageDecoder> ScalableImageDecoder::create(SharedBuffer& data, Al
     if (matchesJPEGSignature(contents))
         return JPEGImageDecoder::create(alphaOption, gammaAndColorProfileOption);
 
+#if USE(AVIF)
+    if (matchesAVIFSignature(contents))
+        return AVIFImageDecoder::create(alphaOption, gammaAndColorProfileOption);
+#endif
+
 #if USE(OPENJPEG)
     if (matchesJP2Signature(contents))
         return JPEG2000ImageDecoder::create(JPEG2000ImageDecoder::Format::JP2, alphaOption, gammaAndColorProfileOption);
@@ -147,80 +173,51 @@ RefPtr<ScalableImageDecoder> ScalableImageDecoder::create(SharedBuffer& data, Al
         return WEBPImageDecoder::create(alphaOption, gammaAndColorProfileOption);
 #endif
 
+#if USE(JPEGXL)
+    if (matchesJPEGXLSignature(reinterpret_cast<const uint8_t*>(contents), length))
+        return JPEGXLImageDecoder::create(alphaOption, gammaAndColorProfileOption);
+#endif
+
     if (matchesBMPSignature(contents))
         return BMPImageDecoder::create(alphaOption, gammaAndColorProfileOption);
 
     return nullptr;
 }
 
-namespace {
-
-enum MatchType {
-    Exact,
-    UpperBound,
-    LowerBound
-};
-
-inline void fillScaledValues(Vector<int>& scaledValues, double scaleRate, int length)
-{
-    double inflateRate = 1. / scaleRate;
-    scaledValues.reserveCapacity(static_cast<int>(length * scaleRate + 0.5));
-    for (int scaledIndex = 0; ; ++scaledIndex) {
-        int index = static_cast<int>(scaledIndex * inflateRate + 0.5);
-        if (index >= length)
-            break;
-        scaledValues.append(index);
-    }
-}
-
-template <MatchType type> int getScaledValue(const Vector<int>& scaledValues, int valueToMatch, int searchStart)
-{
-    if (scaledValues.isEmpty())
-        return valueToMatch;
-
-    const int* dataStart = scaledValues.data();
-    const int* dataEnd = dataStart + scaledValues.size();
-    const int* matched = std::lower_bound(dataStart + searchStart, dataEnd, valueToMatch);
-    switch (type) {
-    case Exact:
-        return matched != dataEnd && *matched == valueToMatch ? matched - dataStart : -1;
-    case LowerBound:
-        return matched != dataEnd && *matched == valueToMatch ? matched - dataStart : matched - dataStart - 1;
-    case UpperBound:
-    default:
-        return matched != dataEnd ? matched - dataStart : -1;
-    }
-}
-
-}
-
 bool ScalableImageDecoder::frameIsCompleteAtIndex(size_t index) const
 {
+    Locker locker { m_lock };
     if (index >= m_frameBufferCache.size())
         return false;
 
-    return m_frameBufferCache[index].isComplete();
+    auto& frame = m_frameBufferCache[index];
+    return frame.isComplete();
 }
 
 bool ScalableImageDecoder::frameHasAlphaAtIndex(size_t index) const
 {
+    Locker locker { m_lock };
     if (m_frameBufferCache.size() <= index)
         return true;
-    if (m_frameBufferCache[index].isComplete())
-        return m_frameBufferCache[index].hasAlpha();
-    return true;
+
+    auto& frame = m_frameBufferCache[index];
+    if (!frame.isComplete())
+        return true;
+    return frame.hasAlpha();
 }
 
 unsigned ScalableImageDecoder::frameBytesAtIndex(size_t index, SubsamplingLevel) const
 {
+    Locker locker { m_lock };
     if (m_frameBufferCache.size() <= index)
         return 0;
     // FIXME: Use the dimension of the requested frame.
-    return (m_size.area() * sizeof(RGBA32)).unsafeGet();
+    return m_size.area() * sizeof(uint32_t);
 }
 
 Seconds ScalableImageDecoder::frameDurationAtIndex(size_t index) const
 {
+    Locker locker { m_lock };
     if (index >= m_frameBufferCache.size())
         return 0_s;
 
@@ -228,75 +225,30 @@ Seconds ScalableImageDecoder::frameDurationAtIndex(size_t index) const
     if (!frame.isComplete())
         return 0_s;
 
-    ImageFrame* buffer = const_cast<ScalableImageDecoder*>(this)->frameBufferAtIndex(index);
-    if (!buffer || buffer->isInvalid())
-        return 0_s;
-    
     // Many annoying ads specify a 0 duration to make an image flash as quickly as possible.
     // We follow Firefox's behavior and use a duration of 100 ms for any frames that specify
     // a duration of <= 10 ms. See <rdar://problem/7689300> and <http://webkit.org/b/36082>
     // for more information.
-    if (buffer->duration() < 11_ms)
+    Seconds duration = frame.duration();
+    if (duration < 11_ms)
         return 100_ms;
-    return buffer->duration();
+    return duration;
 }
 
-NativeImagePtr ScalableImageDecoder::createFrameImageAtIndex(size_t index, SubsamplingLevel, const DecodingOptions&)
+PlatformImagePtr ScalableImageDecoder::createFrameImageAtIndex(size_t index, SubsamplingLevel, const DecodingOptions&)
 {
+    Locker locker { m_lock };
     // Zero-height images can cause problems for some ports. If we have an empty image dimension, just bail.
     if (size().isEmpty())
         return nullptr;
 
-    ImageFrame* buffer = frameBufferAtIndex(index);
+    auto* buffer = frameBufferAtIndex(index);
     if (!buffer || buffer->isInvalid() || !buffer->hasBackingStore())
         return nullptr;
 
     // Return the buffer contents as a native image. For some ports, the data
     // is already in a native container, and this just increments its refcount.
     return buffer->backingStore()->image();
-}
-
-void ScalableImageDecoder::prepareScaleDataIfNecessary()
-{
-    m_scaled = false;
-    m_scaledColumns.clear();
-    m_scaledRows.clear();
-
-    int width = size().width();
-    int height = size().height();
-    int numPixels = height * width;
-    if (m_maxNumPixels <= 0 || numPixels <= m_maxNumPixels)
-        return;
-
-    m_scaled = true;
-    double scale = sqrt(m_maxNumPixels / (double)numPixels);
-    fillScaledValues(m_scaledColumns, scale, width);
-    fillScaledValues(m_scaledRows, scale, height);
-}
-
-int ScalableImageDecoder::upperBoundScaledX(int origX, int searchStart)
-{
-    return getScaledValue<UpperBound>(m_scaledColumns, origX, searchStart);
-}
-
-int ScalableImageDecoder::lowerBoundScaledX(int origX, int searchStart)
-{
-    return getScaledValue<LowerBound>(m_scaledColumns, origX, searchStart);
-}
-
-int ScalableImageDecoder::upperBoundScaledY(int origY, int searchStart)
-{
-    return getScaledValue<UpperBound>(m_scaledRows, origY, searchStart);
-}
-
-int ScalableImageDecoder::lowerBoundScaledY(int origY, int searchStart)
-{
-    return getScaledValue<LowerBound>(m_scaledRows, origY, searchStart);
-}
-
-int ScalableImageDecoder::scaledY(int origY, int searchStart)
-{
-    return getScaledValue<Exact>(m_scaledRows, origY, searchStart);
 }
 
 }

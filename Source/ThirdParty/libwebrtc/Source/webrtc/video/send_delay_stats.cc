@@ -8,23 +8,23 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/video/send_delay_stats.h"
+#include "video/send_delay_stats.h"
 
 #include <utility>
 
-#include "webrtc/base/logging.h"
-#include "webrtc/system_wrappers/include/metrics.h"
+#include "rtc_base/logging.h"
+#include "system_wrappers/include/metrics.h"
 
 namespace webrtc {
 namespace {
 // Packet with a larger delay are removed and excluded from the delay stats.
-// Set to larger than max histogram delay which is 10000.
-const int64_t kMaxSentPacketDelayMs = 11000;
-const size_t kMaxPacketMapSize = 2000;
+// Set to larger than max histogram delay which is 10 seconds.
+constexpr TimeDelta kMaxSentPacketDelay = TimeDelta::Seconds(11);
+constexpr size_t kMaxPacketMapSize = 2000;
 
 // Limit for the maximum number of streams to calculate stats for.
-const size_t kMaxSsrcMapSize = 50;
-const int kMinRequiredPeriodicSamples = 5;
+constexpr size_t kMaxSsrcMapSize = 50;
+constexpr int kMinRequiredPeriodicSamples = 5;
 }  // namespace
 
 SendDelayStats::SendDelayStats(Clock* clock)
@@ -32,86 +32,84 @@ SendDelayStats::SendDelayStats(Clock* clock)
 
 SendDelayStats::~SendDelayStats() {
   if (num_old_packets_ > 0 || num_skipped_packets_ > 0) {
-    LOG(LS_WARNING) << "Delay stats: number of old packets " << num_old_packets_
-                    << ", skipped packets " << num_skipped_packets_
-                    << ". Number of streams " << send_delay_counters_.size();
+    RTC_LOG(LS_WARNING) << "Delay stats: number of old packets "
+                        << num_old_packets_ << ", skipped packets "
+                        << num_skipped_packets_ << ". Number of streams "
+                        << send_delay_counters_.size();
   }
   UpdateHistograms();
 }
 
 void SendDelayStats::UpdateHistograms() {
-  rtc::CritScope lock(&crit_);
-  for (const auto& it : send_delay_counters_) {
-    AggregatedStats stats = it.second->GetStats();
+  MutexLock lock(&mutex_);
+  for (auto& [unused, counter] : send_delay_counters_) {
+    AggregatedStats stats = counter.GetStats();
     if (stats.num_samples >= kMinRequiredPeriodicSamples) {
       RTC_HISTOGRAM_COUNTS_10000("WebRTC.Video.SendDelayInMs", stats.average);
-      LOG(LS_INFO) << "WebRTC.Video.SendDelayInMs, " << stats.ToString();
+      RTC_LOG(LS_INFO) << "WebRTC.Video.SendDelayInMs, " << stats.ToString();
     }
   }
 }
 
 void SendDelayStats::AddSsrcs(const VideoSendStream::Config& config) {
-  rtc::CritScope lock(&crit_);
-  if (ssrcs_.size() > kMaxSsrcMapSize)
+  MutexLock lock(&mutex_);
+  if (send_delay_counters_.size() + config.rtp.ssrcs.size() > kMaxSsrcMapSize)
     return;
-  for (const auto& ssrc : config.rtp.ssrcs)
-    ssrcs_.insert(ssrc);
-}
-
-AvgCounter* SendDelayStats::GetSendDelayCounter(uint32_t ssrc) {
-  const auto& it = send_delay_counters_.find(ssrc);
-  if (it != send_delay_counters_.end())
-    return it->second.get();
-
-  AvgCounter* counter = new AvgCounter(clock_, nullptr, false);
-  send_delay_counters_[ssrc].reset(counter);
-  return counter;
+  for (uint32_t ssrc : config.rtp.ssrcs) {
+    send_delay_counters_.try_emplace(ssrc, clock_, nullptr, false);
+  }
 }
 
 void SendDelayStats::OnSendPacket(uint16_t packet_id,
-                                  int64_t capture_time_ms,
+                                  Timestamp capture_time,
                                   uint32_t ssrc) {
   // Packet sent to transport.
-  rtc::CritScope lock(&crit_);
-  if (ssrcs_.find(ssrc) == ssrcs_.end())
+  MutexLock lock(&mutex_);
+  auto it = send_delay_counters_.find(ssrc);
+  if (it == send_delay_counters_.end())
     return;
 
-  int64_t now = clock_->TimeInMilliseconds();
-  RemoveOld(now, &packets_);
+  Timestamp now = clock_->CurrentTime();
+  RemoveOld(now);
 
   if (packets_.size() > kMaxPacketMapSize) {
     ++num_skipped_packets_;
     return;
   }
-  packets_.insert(
-      std::make_pair(packet_id, Packet(ssrc, capture_time_ms, now)));
+  // `send_delay_counters_` is an std::map - adding new entries doesn't
+  // invalidate existent iterators, and it has pointer stability for values.
+  // Entries are never remove from the `send_delay_counters_`.
+  // Thus memorizing pointer to the AvgCounter is safe.
+  packets_.emplace(packet_id, Packet{.send_delay = &it->second,
+                                     .capture_time = capture_time,
+                                     .send_time = now});
 }
 
-bool SendDelayStats::OnSentPacket(int packet_id, int64_t time_ms) {
+bool SendDelayStats::OnSentPacket(int packet_id, Timestamp time) {
   // Packet leaving socket.
   if (packet_id == -1)
     return false;
 
-  rtc::CritScope lock(&crit_);
+  MutexLock lock(&mutex_);
   auto it = packets_.find(packet_id);
   if (it == packets_.end())
     return false;
 
   // TODO(asapersson): Remove SendSideDelayUpdated(), use capture -> sent.
   // Elapsed time from send (to transport) -> sent (leaving socket).
-  int diff_ms = time_ms - it->second.send_time_ms;
-  GetSendDelayCounter(it->second.ssrc)->Add(diff_ms);
+  TimeDelta diff = time - it->second.send_time;
+  it->second.send_delay->Add(diff.ms());
   packets_.erase(it);
   return true;
 }
 
-void SendDelayStats::RemoveOld(int64_t now, PacketMap* packets) {
-  while (!packets->empty()) {
-    auto it = packets->begin();
-    if (now - it->second.capture_time_ms < kMaxSentPacketDelayMs)
+void SendDelayStats::RemoveOld(Timestamp now) {
+  while (!packets_.empty()) {
+    auto it = packets_.begin();
+    if (now - it->second.capture_time < kMaxSentPacketDelay)
       break;
 
-    packets->erase(it);
+    packets_.erase(it);
     ++num_old_packets_;
   }
 }

@@ -33,6 +33,7 @@
 namespace WebCore {
 
 class MathMLOperatorElement final : public MathMLTokenElement {
+    WTF_MAKE_ISO_ALLOCATED(MathMLOperatorElement);
 public:
     static Ref<MathMLOperatorElement> create(const QualifiedName& tagName, Document&);
     struct OperatorChar {
@@ -55,7 +56,7 @@ private:
     MathMLOperatorElement(const QualifiedName& tagName, Document&);
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) final;
     void childrenChanged(const ChildChange&) final;
-    void parseAttribute(const QualifiedName&, const AtomicString&) final;
+    void parseAttribute(const QualifiedName&, const AtomString&) final;
 
     std::optional<OperatorChar> m_operatorChar;
 

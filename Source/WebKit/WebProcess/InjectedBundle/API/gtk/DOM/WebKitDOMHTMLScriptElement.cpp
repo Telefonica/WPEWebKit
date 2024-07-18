@@ -24,9 +24,10 @@
 #include "DOMObjectCache.h"
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
-#include "GObjectEventListener.h"
+#include <WebCore/ElementInlines.h>
 #include <WebCore/HTMLNames.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
+#include "GObjectEventListener.h"
 #include "WebKitDOMEventPrivate.h"
 #include "WebKitDOMEventTarget.h"
 #include "WebKitDOMHTMLScriptElementPrivate.h"
@@ -35,6 +36,8 @@
 #include "ConvertToUTF8String.h"
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 namespace WebKit {
 
@@ -84,24 +87,24 @@ static gboolean webkit_dom_html_script_element_remove_event_listener(WebKitDOMEv
     return WebKit::GObjectEventListener::removeEventListener(G_OBJECT(target), coreTarget, eventName, handler, useCapture);
 }
 
-static void webkit_dom_event_target_init(WebKitDOMEventTargetIface* iface)
+static void webkit_dom_html_script_element_dom_event_target_init(WebKitDOMEventTargetIface* iface)
 {
     iface->dispatch_event = webkit_dom_html_script_element_dispatch_event;
     iface->add_event_listener = webkit_dom_html_script_element_add_event_listener;
     iface->remove_event_listener = webkit_dom_html_script_element_remove_event_listener;
 }
 
-G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLScriptElement, webkit_dom_html_script_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_event_target_init))
+G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLScriptElement, webkit_dom_html_script_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_html_script_element_dom_event_target_init))
 
 enum {
-    PROP_0,
-    PROP_TEXT,
-    PROP_HTML_FOR,
-    PROP_EVENT,
-    PROP_CHARSET,
-    PROP_DEFER,
-    PROP_SRC,
-    PROP_TYPE,
+    DOM_HTML_SCRIPT_ELEMENT_PROP_0,
+    DOM_HTML_SCRIPT_ELEMENT_PROP_TEXT,
+    DOM_HTML_SCRIPT_ELEMENT_PROP_HTML_FOR,
+    DOM_HTML_SCRIPT_ELEMENT_PROP_EVENT,
+    DOM_HTML_SCRIPT_ELEMENT_PROP_CHARSET,
+    DOM_HTML_SCRIPT_ELEMENT_PROP_DEFER,
+    DOM_HTML_SCRIPT_ELEMENT_PROP_SRC,
+    DOM_HTML_SCRIPT_ELEMENT_PROP_TYPE,
 };
 
 static void webkit_dom_html_script_element_set_property(GObject* object, guint propertyId, const GValue* value, GParamSpec* pspec)
@@ -109,25 +112,25 @@ static void webkit_dom_html_script_element_set_property(GObject* object, guint p
     WebKitDOMHTMLScriptElement* self = WEBKIT_DOM_HTML_SCRIPT_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_TEXT:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_TEXT:
         webkit_dom_html_script_element_set_text(self, g_value_get_string(value));
         break;
-    case PROP_HTML_FOR:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_HTML_FOR:
         webkit_dom_html_script_element_set_html_for(self, g_value_get_string(value));
         break;
-    case PROP_EVENT:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_EVENT:
         webkit_dom_html_script_element_set_event(self, g_value_get_string(value));
         break;
-    case PROP_CHARSET:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_CHARSET:
         webkit_dom_html_script_element_set_charset(self, g_value_get_string(value));
         break;
-    case PROP_DEFER:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_DEFER:
         webkit_dom_html_script_element_set_defer(self, g_value_get_boolean(value));
         break;
-    case PROP_SRC:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_SRC:
         webkit_dom_html_script_element_set_src(self, g_value_get_string(value));
         break;
-    case PROP_TYPE:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_TYPE:
         webkit_dom_html_script_element_set_type_attr(self, g_value_get_string(value));
         break;
     default:
@@ -141,25 +144,25 @@ static void webkit_dom_html_script_element_get_property(GObject* object, guint p
     WebKitDOMHTMLScriptElement* self = WEBKIT_DOM_HTML_SCRIPT_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_TEXT:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_TEXT:
         g_value_take_string(value, webkit_dom_html_script_element_get_text(self));
         break;
-    case PROP_HTML_FOR:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_HTML_FOR:
         g_value_take_string(value, webkit_dom_html_script_element_get_html_for(self));
         break;
-    case PROP_EVENT:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_EVENT:
         g_value_take_string(value, webkit_dom_html_script_element_get_event(self));
         break;
-    case PROP_CHARSET:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_CHARSET:
         g_value_take_string(value, webkit_dom_html_script_element_get_charset(self));
         break;
-    case PROP_DEFER:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_DEFER:
         g_value_set_boolean(value, webkit_dom_html_script_element_get_defer(self));
         break;
-    case PROP_SRC:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_SRC:
         g_value_take_string(value, webkit_dom_html_script_element_get_src(self));
         break;
-    case PROP_TYPE:
+    case DOM_HTML_SCRIPT_ELEMENT_PROP_TYPE:
         g_value_take_string(value, webkit_dom_html_script_element_get_type_attr(self));
         break;
     default:
@@ -176,7 +179,7 @@ static void webkit_dom_html_script_element_class_init(WebKitDOMHTMLScriptElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_TEXT,
+        DOM_HTML_SCRIPT_ELEMENT_PROP_TEXT,
         g_param_spec_string(
             "text",
             "HTMLScriptElement:text",
@@ -186,7 +189,7 @@ static void webkit_dom_html_script_element_class_init(WebKitDOMHTMLScriptElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_HTML_FOR,
+        DOM_HTML_SCRIPT_ELEMENT_PROP_HTML_FOR,
         g_param_spec_string(
             "html-for",
             "HTMLScriptElement:html-for",
@@ -196,7 +199,7 @@ static void webkit_dom_html_script_element_class_init(WebKitDOMHTMLScriptElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_EVENT,
+        DOM_HTML_SCRIPT_ELEMENT_PROP_EVENT,
         g_param_spec_string(
             "event",
             "HTMLScriptElement:event",
@@ -206,7 +209,7 @@ static void webkit_dom_html_script_element_class_init(WebKitDOMHTMLScriptElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_CHARSET,
+        DOM_HTML_SCRIPT_ELEMENT_PROP_CHARSET,
         g_param_spec_string(
             "charset",
             "HTMLScriptElement:charset",
@@ -216,7 +219,7 @@ static void webkit_dom_html_script_element_class_init(WebKitDOMHTMLScriptElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_DEFER,
+        DOM_HTML_SCRIPT_ELEMENT_PROP_DEFER,
         g_param_spec_boolean(
             "defer",
             "HTMLScriptElement:defer",
@@ -226,7 +229,7 @@ static void webkit_dom_html_script_element_class_init(WebKitDOMHTMLScriptElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_SRC,
+        DOM_HTML_SCRIPT_ELEMENT_PROP_SRC,
         g_param_spec_string(
             "src",
             "HTMLScriptElement:src",
@@ -236,7 +239,7 @@ static void webkit_dom_html_script_element_class_init(WebKitDOMHTMLScriptElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_TYPE,
+        DOM_HTML_SCRIPT_ELEMENT_PROP_TYPE,
         g_param_spec_string(
             "type",
             "HTMLScriptElement:type",
@@ -265,8 +268,7 @@ void webkit_dom_html_script_element_set_text(WebKitDOMHTMLScriptElement* self, c
     g_return_if_fail(WEBKIT_DOM_IS_HTML_SCRIPT_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLScriptElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setText(convertedValue);
+    item->setText(WTF::String::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_script_element_get_html_for(WebKitDOMHTMLScriptElement* self)
@@ -284,8 +286,7 @@ void webkit_dom_html_script_element_set_html_for(WebKitDOMHTMLScriptElement* sel
     g_return_if_fail(WEBKIT_DOM_IS_HTML_SCRIPT_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLScriptElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::forAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::forAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_script_element_get_event(WebKitDOMHTMLScriptElement* self)
@@ -303,8 +304,7 @@ void webkit_dom_html_script_element_set_event(WebKitDOMHTMLScriptElement* self, 
     g_return_if_fail(WEBKIT_DOM_IS_HTML_SCRIPT_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLScriptElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::eventAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::eventAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_script_element_get_charset(WebKitDOMHTMLScriptElement* self)
@@ -322,8 +322,7 @@ void webkit_dom_html_script_element_set_charset(WebKitDOMHTMLScriptElement* self
     g_return_if_fail(WEBKIT_DOM_IS_HTML_SCRIPT_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLScriptElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::charsetAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::charsetAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gboolean webkit_dom_html_script_element_get_defer(WebKitDOMHTMLScriptElement* self)
@@ -358,8 +357,7 @@ void webkit_dom_html_script_element_set_src(WebKitDOMHTMLScriptElement* self, co
     g_return_if_fail(WEBKIT_DOM_IS_HTML_SCRIPT_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLScriptElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::srcAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::srcAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_script_element_get_type_attr(WebKitDOMHTMLScriptElement* self)
@@ -377,6 +375,6 @@ void webkit_dom_html_script_element_set_type_attr(WebKitDOMHTMLScriptElement* se
     g_return_if_fail(WEBKIT_DOM_IS_HTML_SCRIPT_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLScriptElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::typeAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::typeAttr, WTF::AtomString::fromUTF8(value));
 }
+G_GNUC_END_IGNORE_DEPRECATIONS;

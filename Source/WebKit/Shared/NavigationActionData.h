@@ -25,13 +25,20 @@
 
 #pragma once
 
-#include "WebEvent.h"
+#include "WebMouseEvent.h"
+#include <WebCore/BackForwardItemIdentifier.h>
 #include <WebCore/FloatPoint.h>
 #include <WebCore/FrameLoaderTypes.h>
+#include <WebCore/PrivateClickMeasurement.h>
+#include <WebCore/SecurityOriginData.h>
 
 namespace IPC {
 class Decoder;
 class Encoder;
+}
+
+namespace WebCore {
+typedef int SandboxFlags;
 }
 
 namespace WebKit {
@@ -41,15 +48,26 @@ struct NavigationActionData {
     static std::optional<NavigationActionData> decode(IPC::Decoder&);
 
     WebCore::NavigationType navigationType { WebCore::NavigationType::Other };
-    WebEvent::Modifiers modifiers { };
+    OptionSet<WebEvent::Modifier> modifiers;
     WebMouseEvent::Button mouseButton { WebMouseEvent::NoButton };
     WebMouseEvent::SyntheticClickType syntheticClickType { WebMouseEvent::NoTap };
-    uint64_t userGestureTokenIdentifier;
+    uint64_t userGestureTokenIdentifier { 0 };
     bool canHandleRequest { false };
     WebCore::ShouldOpenExternalURLsPolicy shouldOpenExternalURLsPolicy { WebCore::ShouldOpenExternalURLsPolicy::ShouldNotAllow };
     WTF::String downloadAttribute;
     WebCore::FloatPoint clickLocationInRootViewCoordinates;
     bool isRedirect { false };
+    bool treatAsSameOriginNavigation { false };
+    bool hasOpenedFrames { false };
+    bool openedByDOMWithOpener { false };
+    WebCore::SecurityOriginData requesterOrigin;
+    std::optional<WebCore::BackForwardItemIdentifier> targetBackForwardItemIdentifier;
+    std::optional<WebCore::BackForwardItemIdentifier> sourceBackForwardItemIdentifier;
+    WebCore::LockHistory lockHistory { WebCore::LockHistory::No };
+    WebCore::LockBackForwardList lockBackForwardList { WebCore::LockBackForwardList::No };
+    WTF::String clientRedirectSourceForHistory;
+    WebCore::SandboxFlags effectiveSandboxFlags { 0 };
+    std::optional<WebCore::PrivateClickMeasurement> privateClickMeasurement;
 };
 
 }

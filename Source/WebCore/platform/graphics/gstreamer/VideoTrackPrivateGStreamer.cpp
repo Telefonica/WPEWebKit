@@ -25,27 +25,152 @@
 
 #include "config.h"
 
-#if ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO) && USE(GSTREAMER)
 
 #include "VideoTrackPrivateGStreamer.h"
 
-#include <glib-object.h>
+#include "GStreamerCommon.h"
+#include "MediaPlayerPrivateGStreamer.h"
+#include <gst/pbutils/pbutils.h>
+#include <wtf/Scope.h>
 
 namespace WebCore {
 
-VideoTrackPrivateGStreamer::VideoTrackPrivateGStreamer(GRefPtr<GstElement> playbin, gint index, GRefPtr<GstPad> pad)
-    : TrackPrivateBaseGStreamer(this, index, pad)
-    , m_playbin(playbin)
+GST_DEBUG_CATEGORY(webkit_video_track_debug);
+#define GST_CAT_DEFAULT webkit_video_track_debug
+
+static void ensureDebugCategoryInitialized()
 {
-    // FIXME: Get a real ID from the tkhd atom.
-    m_id = "V" + String::number(index);
-    notifyTrackOfActiveChanged();
+    static std::once_flag debugRegisteredFlag;
+    std::call_once(debugRegisteredFlag, [] {
+        GST_DEBUG_CATEGORY_INIT(webkit_video_track_debug, "webkitvideotrack", 0, "WebKit Video Track");
+    });
+}
+
+VideoTrackPrivateGStreamer::VideoTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivateGStreamer> player, unsigned index, GRefPtr<GstPad>&& pad, bool shouldHandleStreamStartEvent)
+    : TrackPrivateBaseGStreamer(TrackPrivateBaseGStreamer::TrackType::Video, this, index, WTFMove(pad), shouldHandleStreamStartEvent)
+    , m_player(player)
+{
+    ensureDebugCategoryInitialized();
+    installUpdateConfigurationHandlers();
+}
+
+VideoTrackPrivateGStreamer::VideoTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivateGStreamer> player, unsigned index, GstStream* stream)
+    : TrackPrivateBaseGStreamer(TrackPrivateBaseGStreamer::TrackType::Video, this, index, stream)
+    , m_player(player)
+{
+    ensureDebugCategoryInitialized();
+    int kind;
+    auto tags = adoptGRef(gst_stream_get_tags(m_stream.get()));
+
+    if (tags && gst_tag_list_get_int(tags.get(), "webkit-media-stream-kind", &kind) && kind == static_cast<int>(VideoTrackPrivate::Kind::Main)) {
+        auto streamFlags = gst_stream_get_stream_flags(m_stream.get());
+        gst_stream_set_stream_flags(m_stream.get(), static_cast<GstStreamFlags>(streamFlags | GST_STREAM_FLAG_SELECT));
+    }
+
+    installUpdateConfigurationHandlers();
+
+    updateConfigurationFromCaps();
+    updateConfigurationFromTags();
+}
+
+void VideoTrackPrivateGStreamer::updateConfigurationFromTags()
+{
+    ASSERT(isMainThread());
+    GRefPtr<GstTagList> tags;
+
+    if (m_stream)
+        tags = adoptGRef(gst_stream_get_tags(m_stream.get()));
+    else if (m_pad)
+        tags = getAllTags(m_pad.get());
+
+    unsigned bitrate;
+    if (!tags || !gst_tag_list_get_uint(tags.get(), GST_TAG_BITRATE, &bitrate))
+        return;
+
+    if (m_stream)
+        GST_DEBUG_OBJECT(m_stream.get(), "Setting bitrate to %u", bitrate);
+    else if (m_pad)
+        GST_DEBUG_OBJECT(m_pad.get(), "Setting bitrate to %u", bitrate);
+
+    auto configuration = this->configuration();
+    configuration.bitrate = bitrate;
+    setConfiguration(WTFMove(configuration));
+}
+
+void VideoTrackPrivateGStreamer::updateConfigurationFromCaps()
+{
+    ASSERT(isMainThread());
+    GRefPtr<GstCaps> caps;
+
+    if (m_stream)
+        caps = adoptGRef(gst_stream_get_caps(m_stream.get()));
+    else if (m_pad)
+        caps = adoptGRef(gst_pad_get_current_caps(m_pad.get()));
+
+    if (!caps || !gst_caps_is_fixed(caps.get()))
+        return;
+
+    // We might be notified of RTP caps here, when an incoming video track is re-enabled. Since
+    // those caps most likely do not contain the information we need (width, height, colorimetry,
+    // ...), keep previous configuration and return early.
+    if (!doCapsHaveType(caps.get(), GST_VIDEO_CAPS_TYPE_PREFIX))
+        return;
+
+    if (m_stream)
+        GST_DEBUG_OBJECT(m_stream.get(), "Updating video configuration from %" GST_PTR_FORMAT, caps.get());
+    else if (m_pad)
+        GST_DEBUG_OBJECT(m_pad.get(), "Updating video configuration from %" GST_PTR_FORMAT, caps.get());
+
+    auto configuration = this->configuration();
+    auto scopeExit = makeScopeExit([&] {
+        setConfiguration(WTFMove(configuration));
+    });
+
+    if (areEncryptedCaps(caps.get())) {
+        if (auto videoResolution = getVideoResolutionFromCaps(caps.get())) {
+            configuration.width = videoResolution->width();
+            configuration.height = videoResolution->height();
+        }
+        return;
+    }
+
+    GstVideoInfo info;
+    if (gst_video_info_from_caps(&info, caps.get())) {
+        if (GST_VIDEO_INFO_FPS_N(&info))
+            gst_util_fraction_to_double(GST_VIDEO_INFO_FPS_N(&info), GST_VIDEO_INFO_FPS_D(&info), &configuration.framerate);
+
+        configuration.width = GST_VIDEO_INFO_WIDTH(&info);
+        configuration.height = GST_VIDEO_INFO_HEIGHT(&info);
+        configuration.colorSpace = videoColorSpaceFromInfo(info);
+    }
+
+#if GST_CHECK_VERSION(1, 20, 0)
+    GUniquePtr<char> codec(gst_codec_utils_caps_get_mime_codec(caps.get()));
+    GST_DEBUG_OBJECT(m_stream.get(), "Setting codec to %s", codec.get());
+    configuration.codec = String::fromLatin1(codec.get());
+#endif
+}
+
+VideoTrackPrivate::Kind VideoTrackPrivateGStreamer::kind() const
+{
+    if (m_stream && gst_stream_get_stream_flags(m_stream.get()) & GST_STREAM_FLAG_SELECT)
+        return VideoTrackPrivate::Kind::Main;
+
+    return VideoTrackPrivate::kind();
 }
 
 void VideoTrackPrivateGStreamer::disconnect()
 {
-    m_playbin.clear();
+    m_taskQueue.startAborting();
+
+    if (m_stream)
+        g_signal_handlers_disconnect_matched(m_stream.get(), G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+
+    m_player = nullptr;
     TrackPrivateBaseGStreamer::disconnect();
+
+    m_taskQueue.finishAborting();
 }
 
 void VideoTrackPrivateGStreamer::setSelected(bool selected)
@@ -54,10 +179,10 @@ void VideoTrackPrivateGStreamer::setSelected(bool selected)
         return;
     VideoTrackPrivate::setSelected(selected);
 
-    if (selected && m_playbin)
-        g_object_set(m_playbin.get(), "current-video", m_index, nullptr);
+    if (m_player)
+        m_player->updateEnabledVideoTrack();
 }
 
 } // namespace WebCore
 
-#endif // ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(VIDEO_TRACK)
+#endif // ENABLE(VIDEO) && USE(GSTREAMER)

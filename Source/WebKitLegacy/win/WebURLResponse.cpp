@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006-2018 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,16 +36,17 @@
 #endif
 
 #if USE(CFURLCONNECTION)
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
+#include <pal/spi/win/CFNetworkSPIWin.h>
 #endif
 
 #include <WebCore/BString.h>
-#include <WebCore/URL.h>
 #include <WebCore/LocalizedStrings.h>
+#include <WebCore/ResourceError.h>
 #include <WebCore/ResourceHandle.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <wchar.h>
+#include <wtf/URL.h>
 
 using namespace WebCore;
 
@@ -214,20 +215,20 @@ static String localizedShortDescriptionForStatusCode(int statusCode)
 WebURLResponse::WebURLResponse()
 {
     gClassCount++;
-    gClassNameCount().add("WebURLResponse");
+    gClassNameCount().add("WebURLResponse"_s);
 }
 
 WebURLResponse::~WebURLResponse()
 {
     gClassCount--;
-    gClassNameCount().remove("WebURLResponse");
+    gClassNameCount().remove("WebURLResponse"_s);
 }
 
 WebURLResponse* WebURLResponse::createInstance()
 {
     WebURLResponse* instance = new WebURLResponse();
     // fake an http response - so it has the IWebHTTPURLResponse interface
-    instance->m_response = ResourceResponse(WebCore::URL(ParsedURLString, "http://"), String(), 0, String());
+    instance->m_response = ResourceResponse(WTF::URL("http://"_s), String(), 0, String());
     instance->AddRef();
     return instance;
 }
@@ -259,7 +260,7 @@ HRESULT WebURLResponse::QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppv
         *ppvObject = static_cast<IWebURLResponse*>(this);
     else if (IsEqualGUID(riid, IID_IWebURLResponsePrivate))
         *ppvObject = static_cast<IWebURLResponsePrivate*>(this);
-    else if (m_response.isHTTP() && IsEqualGUID(riid, IID_IWebHTTPURLResponse))
+    else if (m_response.isInHTTPFamily() && IsEqualGUID(riid, IID_IWebHTTPURLResponse))
         *ppvObject = static_cast<IWebHTTPURLResponse*>(this);
     else
         return E_NOINTERFACE;
@@ -357,7 +358,7 @@ HRESULT WebURLResponse::URL(__deref_opt_out BSTR* result)
 
 HRESULT WebURLResponse::allHeaderFields(_COM_Outptr_opt_ IPropertyBag** headerFields)
 {
-    ASSERT(m_response.isHTTP());
+    ASSERT(m_response.isInHTTPFamily());
 
     if (!headerFields)
         return E_POINTER;
@@ -372,7 +373,7 @@ HRESULT WebURLResponse::allHeaderFields(_COM_Outptr_opt_ IPropertyBag** headerFi
 
 HRESULT WebURLResponse::localizedStringForStatusCode(int statusCode, __deref_opt_out BSTR* statusString)
 {
-    ASSERT(m_response.isHTTP());
+    ASSERT(m_response.isInHTTPFamily());
     if (!statusString)
         return E_POINTER;
 
@@ -386,7 +387,7 @@ HRESULT WebURLResponse::localizedStringForStatusCode(int statusCode, __deref_opt
 
 HRESULT WebURLResponse::statusCode(_Out_ int* statusCode)
 {
-    ASSERT(m_response.isHTTP());
+    ASSERT(m_response.isInHTTPFamily());
     if (statusCode)
         *statusCode = m_response.httpStatusCode();
     return S_OK;
@@ -410,10 +411,10 @@ HRESULT WebURLResponse::sslPeerCertificate(_Out_ ULONG_PTR* result)
     CFDictionaryRef dict = certificateDictionary();
     if (!dict)
         return E_FAIL;
-    void* data = wkGetSSLPeerCertificateDataBytePtr(dict);
+    const void* data = ResourceError::getSSLPeerCertificateDataBytePtr(dict);
     if (!data)
         return E_FAIL;
-    *result = reinterpret_cast<ULONG_PTR>(data);
+    *result = reinterpret_cast<ULONG_PTR>(const_cast<void*>(data));
 #endif
 
     return *result ? S_OK : E_FAIL;
@@ -484,7 +485,7 @@ CFDictionaryRef WebURLResponse::certificateDictionary() const
     CFURLResponseRef cfResponse = m_response.cfURLResponse();
     if (!cfResponse)
         return nullptr;
-    m_SSLCertificateInfo = wkGetSSLCertificateInfo(cfResponse);
+    m_SSLCertificateInfo = _CFURLResponseGetSSLCertificateContext(cfResponse);
     return m_SSLCertificateInfo.get();
 }
 #endif

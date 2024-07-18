@@ -45,15 +45,18 @@ public:
     
 private:
     explicit AccessibilityARIAGrid(RenderObject*);
+    bool isAccessibilityARIAGridInstance() const override { return true; }
 
     // ARIA treegrids and grids support selected rows.
-    bool supportsSelectedRows() override { return true; }
-    bool isMultiSelectable() const override { return true; }
+    bool supportsSelectedRows() const override { return true; }
+    bool isMultiSelectable() const override;
     bool computeIsTableExposableThroughAccessibility() const override { return true; }
     bool isAriaTable() const override { return true; }
     
-    void addRowDescendant(AccessibilityObject*, HashSet<AccessibilityObject*>& appendedRows, unsigned& columnCount);
-    bool addTableCellChild(AccessibilityObject*, HashSet<AccessibilityObject*>& appendedRows, unsigned& columnCount);
+    void addRowDescendant(AXCoreObject*, HashSet<AccessibilityObject*>& appendedRows, unsigned& columnCount);
+    bool addTableCellChild(AXCoreObject*, HashSet<AccessibilityObject*>& appendedRows, unsigned& columnCount);
 };
 
 } // namespace WebCore 
+
+SPECIALIZE_TYPE_TRAITS_ACCESSIBILITY(AccessibilityARIAGrid, isAccessibilityARIAGridInstance())

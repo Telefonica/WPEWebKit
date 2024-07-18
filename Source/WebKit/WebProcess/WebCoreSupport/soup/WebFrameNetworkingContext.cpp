@@ -28,48 +28,25 @@
 #include "WebFrameNetworkingContext.h"
 
 #include "NetworkSession.h"
-#include "SessionTracker.h"
+#include "NetworkSessionCreationParameters.h"
 #include "WebFrame.h"
 #include "WebPage.h"
+#include "WebsiteDataStoreParameters.h"
 #include <WebCore/FrameLoader.h>
 #include <WebCore/NetworkStorageSession.h>
 #include <WebCore/Settings.h>
 #include <WebCore/SoupNetworkSession.h>
-#include <pal/SessionID.h>
-
-using namespace WebCore;
 
 namespace WebKit {
+using namespace WebCore;
 
-void WebFrameNetworkingContext::ensurePrivateBrowsingSession(PAL::SessionID sessionID)
+void WebFrameNetworkingContext::ensureWebsiteDataStoreSession(const WebsiteDataStoreParameters&)
 {
-    ASSERT(RunLoop::isMain());
-    ASSERT(sessionID.isEphemeral());
-
-    if (NetworkStorageSession::storageSession(sessionID))
-        return;
-
-    NetworkStorageSession::ensurePrivateBrowsingSession(sessionID, String::number(sessionID.sessionID()));
-    SessionTracker::setSession(sessionID, NetworkSession::create(sessionID));
-}
-
-void WebFrameNetworkingContext::ensureWebsiteDataStoreSession(WebsiteDataStoreParameters&&)
-{
-    // FIXME: Implement
 }
 
 WebFrameNetworkingContext::WebFrameNetworkingContext(WebFrame* frame)
     : FrameNetworkingContext(frame->coreFrame())
 {
-}
-
-NetworkStorageSession& WebFrameNetworkingContext::storageSession() const
-{
-    if (frame()) {
-        if (auto* storageSession = NetworkStorageSession::storageSession(frame()->page()->sessionID()))
-            return *storageSession;
-    }
-    return NetworkStorageSession::defaultStorageSession();
 }
 
 WebFrameLoaderClient* WebFrameNetworkingContext::webFrameLoaderClient() const

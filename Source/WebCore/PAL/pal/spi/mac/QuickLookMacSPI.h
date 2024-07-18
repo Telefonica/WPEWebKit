@@ -23,7 +23,17 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import <QuickLookUI/QLPreviewItem.h>
+#import <Quartz/Quartz.h>
+
+#if USE(APPLE_INTERNAL_SDK)
+
+#if HAVE(CPP20_INCOMPATIBLE_INTERNAL_HEADERS)
+#define CGCOLORTAGGEDPOINTER_H_
+#endif
+
+#import <Quartz/QuartzPrivate.h>
+
+#else
 
 @protocol QLPreviewMenuItemDelegate <NSObject>
 @optional
@@ -51,3 +61,37 @@ typedef NS_ENUM(NSInteger, QLPreviewStyle) {
 @property (assign) id<QLPreviewMenuItemDelegate> delegate;
 @property QLPreviewStyle previewStyle;
 @end
+
+@interface QLItem : NSObject <QLPreviewItem>
+@property (nonatomic, copy) NSDictionary* previewOptions;
+@end
+
+#if HAVE(QUICKLOOK_PREVIEW_ACTIVITY)
+
+typedef NS_ENUM(NSInteger, QLPreviewActivity) {
+    QLPreviewActivityNone,
+    QLPreviewActivityMarkup,
+    QLPreviewActivityTrim,
+    QLPreviewActivityVisualSearch
+};
+
+#endif // HAVE(QUICKLOOK_PREVIEW_ACTIVITY)
+
+#endif // USE(APPLE_INTERNAL_SDK)
+
+#if HAVE(QUICKLOOK_PREVIEW_ITEM_DATA_PROVIDER)
+
+@class UTType;
+@interface QLItem (Staging_74299451)
+- (instancetype)initWithDataProvider:(id /* <QLPreviewItemDataProvider> */)data contentType:(UTType *)contentType previewTitle:(NSString *)previewTitle;
+@end
+
+#endif // HAVE(QUICKLOOK_PREVIEW_ITEM_DATA_PROVIDER)
+
+#if HAVE(QUICKLOOK_ITEM_PREVIEW_OPTIONS)
+
+@interface QLItem (Staging_77864637)
+@property (nonatomic, copy) NSDictionary *previewOptions;
+@end
+
+#endif // HAVE(QUICKLOOK_ITEM_PREVIEW_OPTIONS)

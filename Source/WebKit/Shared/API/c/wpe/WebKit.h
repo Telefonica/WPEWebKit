@@ -66,7 +66,6 @@
 #include <WebKit/WKBundlePageEditorClient.h>
 #include <WebKit/WKBundlePageFormClient.h>
 #include <WebKit/WKBundlePageFullScreenClient.h>
-#include <WebKit/WKBundlePageGroup.h>
 #include <WebKit/WKBundlePageLoaderClient.h>
 #include <WebKit/WKBundlePageOverlay.h>
 #include <WebKit/WKBundlePagePolicyClient.h>
@@ -82,8 +81,6 @@
 #include <WebKit/WKContextConfigurationRef.h>
 #include <WebKit/WKCredential.h>
 #include <WebKit/WKCredentialTypes.h>
-#include <WebKit/WKCookie.h>
-#include <WebKit/WKCookieManager.h>
 #include <WebKit/WKFrame.h>
 #include <WebKit/WKFrameInfoRef.h>
 #include <WebKit/WKFramePolicyListener.h>
@@ -96,13 +93,11 @@
 #include <WebKit/WKPageConfigurationRef.h>
 #include <WebKit/WKPageGroup.h>
 #include <WebKit/WKPreferencesRef.h>
-#include <WebKit/WKProxy.h>
 #include <WebKit/WKSessionStateRef.h>
 #include <WebKit/WKUserContentControllerRef.h>
 #include <WebKit/WKUserScriptRef.h>
 #include <WebKit/WKView.h>
 #include <WebKit/WKViewportAttributes.h>
-#include <WebKit/WKWebAutomationSession.h>
 #include <WebKit/WKWindowFeaturesRef.h>
 
 #endif // WPE_WebKit_h

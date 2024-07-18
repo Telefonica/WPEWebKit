@@ -26,30 +26,36 @@
 #include "config.h"
 #include "WebDriverService.h"
 
+#include <wtf/text/StringToIntegerConversion.h>
+
 namespace WebDriver {
 
 static bool parseVersion(const String& version, uint64_t& major, uint64_t& minor, uint64_t& micro)
 {
     major = minor = micro = 0;
 
-    Vector<String> tokens;
-    version.split(".", false, tokens);
-    bool ok;
+    Vector<String> tokens = version.split('.');
     switch (tokens.size()) {
-    case 3:
-        micro = tokens[2].toInt64(&ok);
-        if (!ok)
+    case 3: {
+        auto parsedMicro = parseIntegerAllowingTrailingJunk<uint64_t>(tokens[2]);
+        if (!parsedMicro)
             return false;
+        micro = *parsedMicro;
+    }
         FALLTHROUGH;
-    case 2:
-        minor = tokens[1].toInt64(&ok);
-        if (!ok)
+    case 2: {
+        auto parsedMinor = parseIntegerAllowingTrailingJunk<uint64_t>(tokens[1]);
+        if (!parsedMinor)
             return false;
+        minor = *parsedMinor;
+    }
         FALLTHROUGH;
-    case 1:
-        major = tokens[0].toInt64(&ok);
-        if (!ok)
+    case 1: {
+        auto parsedMajor = parseIntegerAllowingTrailingJunk<uint64_t>(tokens[0]);
+        if (!parsedMajor)
             return false;
+        major = *parsedMajor;
+    }
         break;
     default:
         return false;
@@ -72,6 +78,11 @@ bool WebDriverService::platformCompareBrowserVersions(const String& requiredVers
     return proposedMajor > requiredMajor
         || (proposedMajor == requiredMajor && proposedMinor > requiredMinor)
         || (proposedMajor == requiredMajor && proposedMinor == requiredMinor && proposedMicro >= requiredMicro);
+}
+
+bool WebDriverService::platformSupportProxyType(const String&) const
+{
+    return true;
 }
 
 } // namespace WebDriver

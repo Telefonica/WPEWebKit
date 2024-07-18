@@ -29,6 +29,7 @@
 // Things internal to the WebKit framework; not SPI.
 
 #import "WebHTMLViewPrivate.h"
+#import <wtf/NakedPtr.h>
 
 @class CALayer;
 @class WebFrame;
@@ -57,19 +58,20 @@ namespace WebCore {
 - (BOOL)_canSmartCopyOrDelete;
 
 - (WebFrame *)_frame;
+- (void)closeIfNotCurrentView;
 
 #if PLATFORM(MAC)
 - (void)_lookUpInDictionaryFromMenu:(id)sender;
-- (BOOL)_interpretKeyEvent:(WebCore::KeyboardEvent *)event savingCommands:(BOOL)savingCommands;
+- (BOOL)_interpretKeyEvent:(NakedPtr<WebCore::KeyboardEvent>)event savingCommands:(BOOL)savingCommands;
 - (DOMDocumentFragment *)_documentFragmentFromPasteboard:(NSPasteboard *)pasteboard;
 - (NSEvent *)_mouseDownEvent;
 - (BOOL)isGrammarCheckingEnabled;
 - (void)setGrammarCheckingEnabled:(BOOL)flag;
 - (void)toggleGrammarChecking:(id)sender;
-- (void)setPromisedDragTIFFDataSource:(WebCore::CachedImage*)source;
+- (void)setPromisedDragTIFFDataSource:(NakedPtr<WebCore::CachedImage>)source;
 #endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (BOOL)_handleEditingKeyEvent:(WebCore::KeyboardEvent *)event;
 #endif
 
@@ -85,7 +87,7 @@ namespace WebCore {
 - (BOOL)_web_isDrawingIntoAcceleratedLayer;
 #endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (void)_layoutIfNeeded;
 #endif
 
@@ -98,10 +100,12 @@ namespace WebCore {
 
 - (WebPluginController *)_pluginController;
 
+- (void)_executeSavedKeypressCommands;
+
 @end
 
 @interface WebHTMLView (RemovedAppKitSuperclassMethods)
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (void)delete:(id)sender;
 - (void)transpose:(id)sender;
 #endif

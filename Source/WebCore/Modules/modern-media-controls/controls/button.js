@@ -48,7 +48,7 @@ class Button extends LayoutItem
 
         this._enabled = true;
 
-        if (GestureRecognizer.SupportsTouches)
+        if (this.layoutTraits.supportsTouches())
             this._tapGestureRecognizer = new TapGestureRecognizer(this.element, this);
         else
             this.element.addEventListener("click", this);
@@ -129,6 +129,12 @@ class Button extends LayoutItem
         this._updateImageMetrics();
     }
 
+    get contextMenuOptions()
+    {
+        // Implemented by subclasses.
+        return {};
+    }
+
     // Protected
 
     handleEvent(event)
@@ -151,7 +157,7 @@ class Button extends LayoutItem
     commitProperty(propertyName)
     {
         if (propertyName === "maskImage")
-            this.image.element.style.webkitMaskImage = `url(${this._imageSource.src})`;
+            this.image.element.style.maskImage = `url(${this._imageSource.src})`;
         else
             super.commitProperty(propertyName);
     }
@@ -199,7 +205,7 @@ class Button extends LayoutItem
         let width = this._imageSource.width * this._scaleFactor;
         let height = this._imageSource.height * this._scaleFactor;
 
-        if (this._iconName.type === "png") {
+        if (this._iconName.type === "png" || this._iconName.type === "pdf") {
             width /= window.devicePixelRatio;
             height /= window.devicePixelRatio;
         }
@@ -223,5 +229,6 @@ Button.Styles = {
     Bar: "bar",
     Corner: "corner",
     Center: "center",
+    Rounded: "rounded",
     SmallCenter: "small-center"
 };

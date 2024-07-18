@@ -24,6 +24,7 @@
 #include "FloatPoint.h"
 #include "Path.h"
 #include "PathTraversalState.h"
+#include "SVGPathAbsoluteConverter.h"
 #include "SVGPathBlender.h"
 #include "SVGPathBuilder.h"
 #include "SVGPathByteStreamBuilder.h"
@@ -39,14 +40,16 @@
 
 namespace WebCore {
 
-bool buildPathFromString(const String& d, Path& result)
+Path buildPathFromString(const String& d)
 {
     if (d.isEmpty())
-        return true;
+        return { };
 
-    SVGPathBuilder builder(result);
+    Path path;
+    SVGPathBuilder builder(path);
     SVGPathStringSource source(d);
-    return SVGPathParser::parse(source, builder);
+    SVGPathParser::parse(source, builder);
+    return path;
 }
 
 String buildStringFromPath(const Path& path)
@@ -56,43 +59,19 @@ String buildStringFromPath(const Path& path)
     if (!path.isNull() && !path.isEmpty()) {
         path.apply([&builder] (const PathElement& element) {
             switch (element.type) {
-            case PathElementMoveToPoint:
-                builder.append('M');
-                builder.appendECMAScriptNumber(element.points[0].x());
-                builder.append(' ');
-                builder.appendECMAScriptNumber(element.points[0].y());
+            case PathElement::Type::MoveToPoint:
+                builder.append('M', element.points[0].x(), ' ', element.points[0].y());
                 break;
-            case PathElementAddLineToPoint:
-                builder.append('L');
-                builder.appendECMAScriptNumber(element.points[0].x());
-                builder.append(' ');
-                builder.appendECMAScriptNumber(element.points[0].y());
+            case PathElement::Type::AddLineToPoint:
+                builder.append('L', element.points[0].x(), ' ', element.points[0].y());
                 break;
-            case PathElementAddQuadCurveToPoint:
-                builder.append('Q');
-                builder.appendECMAScriptNumber(element.points[0].x());
-                builder.append(' ');
-                builder.appendECMAScriptNumber(element.points[0].y());
-                builder.append(',');
-                builder.appendECMAScriptNumber(element.points[1].x());
-                builder.append(' ');
-                builder.appendECMAScriptNumber(element.points[1].y());
+            case PathElement::Type::AddQuadCurveToPoint:
+                builder.append('Q', element.points[0].x(), ' ', element.points[0].y(), ',', element.points[1].x(), ' ', element.points[1].y());
                 break;
-            case PathElementAddCurveToPoint:
-                builder.append('C');
-                builder.appendECMAScriptNumber(element.points[0].x());
-                builder.append(' ');
-                builder.appendECMAScriptNumber(element.points[0].y());
-                builder.append(',');
-                builder.appendECMAScriptNumber(element.points[1].x());
-                builder.append(' ');
-                builder.appendECMAScriptNumber(element.points[1].y());
-                builder.append(',');
-                builder.appendECMAScriptNumber(element.points[2].x());
-                builder.append(' ');
-                builder.appendECMAScriptNumber(element.points[2].y());
+            case PathElement::Type::AddCurveToPoint:
+                builder.append('C', element.points[0].x(), ' ', element.points[0].y(), ',', element.points[1].x(), ' ', element.points[1].y(), ',', element.points[2].x(), ' ', element.points[2].y());
                 break;
-            case PathElementCloseSubpath:
+            case PathElement::Type::CloseSubpath:
                 builder.append('Z');
                 break;
             }
@@ -102,71 +81,45 @@ String buildStringFromPath(const Path& path)
     return builder.toString();
 }
 
-bool buildSVGPathByteStreamFromSVGPathSegListValues(const SVGPathSegListValues& list, SVGPathByteStream& result, PathParsingMode parsingMode)
+bool buildSVGPathByteStreamFromSVGPathSegList(const SVGPathSegList& list, SVGPathByteStream& stream, PathParsingMode parsingMode, bool checkForInitialMoveTo)
 {
-    result.clear();
+    stream.clear();
     if (list.isEmpty())
         return true;
 
     SVGPathSegListSource source(list);
-    return SVGPathParser::parseToByteStream(source, result, parsingMode);
+    return SVGPathParser::parseToByteStream(source, stream, parsingMode, checkForInitialMoveTo);
 }
 
-bool appendSVGPathByteStreamFromSVGPathSeg(RefPtr<SVGPathSeg>&& pathSeg, SVGPathByteStream& result, PathParsingMode parsingMode)
+Path buildPathFromByteStream(const SVGPathByteStream& stream)
 {
-    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=15412 - Implement normalized path segment lists!
-    ASSERT(parsingMode == UnalteredParsing);
+    if (stream.isEmpty())
+        return { };
 
-    SVGPathSegListValues appendedItemList(PathSegUnalteredRole);
-    appendedItemList.append(WTFMove(pathSeg));
-
-    SVGPathByteStream appendedByteStream;
-    SVGPathSegListSource source(appendedItemList);
-    bool ok = SVGPathParser::parseToByteStream(source, result, parsingMode, false);
-
-    if (ok)
-        result.append(appendedByteStream);
-
-    return ok;
+    Path path;
+    SVGPathBuilder builder(path);
+    SVGPathByteStreamSource source(stream);
+    SVGPathParser::parse(source, builder);
+    return path;
 }
 
-bool buildPathFromByteStream(const SVGPathByteStream& stream, Path& result)
+bool buildSVGPathSegListFromByteStream(const SVGPathByteStream& stream, SVGPathSegList& list, PathParsingMode mode)
 {
     if (stream.isEmpty())
         return true;
 
-    SVGPathBuilder builder(result);
+    SVGPathSegListBuilder builder(list);
     SVGPathByteStreamSource source(stream);
-    return SVGPathParser::parse(source, builder);
+    return SVGPathParser::parse(source, builder, mode);
 }
 
-bool buildSVGPathSegListValuesFromByteStream(const SVGPathByteStream& stream, SVGPathElement& element, SVGPathSegListValues& result, PathParsingMode parsingMode)
-{
-    if (stream.isEmpty())
-        return true;
-
-    SVGPathSegListBuilder builder(element, result, parsingMode == NormalizedParsing ? PathSegNormalizedRole : PathSegUnalteredRole);
-    SVGPathByteStreamSource source(stream);
-    return SVGPathParser::parse(source, builder, parsingMode);
-}
-
-bool buildStringFromByteStream(const SVGPathByteStream& stream, String& result, PathParsingMode parsingMode)
+bool buildStringFromByteStream(const SVGPathByteStream& stream, String& result, PathParsingMode parsingMode, bool checkForInitialMoveTo)
 {
     if (stream.isEmpty())
         return true;
 
     SVGPathByteStreamSource source(stream);
-    return SVGPathParser::parseToString(source, result, parsingMode);
-}
-
-bool buildStringFromSVGPathSegListValues(const SVGPathSegListValues& list, String& result, PathParsingMode parsingMode)
-{
-    result = String();
-    if (list.isEmpty())
-        return true;
-
-    SVGPathSegListSource source(list);
-    return SVGPathParser::parseToString(source, result, parsingMode);
+    return SVGPathParser::parseToString(source, result, parsingMode, checkForInitialMoveTo);
 }
 
 bool buildSVGPathByteStreamFromString(const String& d, SVGPathByteStream& result, PathParsingMode parsingMode)
@@ -202,63 +155,78 @@ bool buildAnimatedSVGPathByteStream(const SVGPathByteStream& fromStream, const S
 
 bool addToSVGPathByteStream(SVGPathByteStream& streamToAppendTo, const SVGPathByteStream& byStream, unsigned repeatCount)
 {
-    // Why return when streamToAppendTo is empty? Don't we still need to append?
+    // The byStream will be blended with streamToAppendTo. So streamToAppendTo has to have elements.
     if (streamToAppendTo.isEmpty() || byStream.isEmpty())
         return true;
 
-    // Is it OK to make the SVGPathByteStreamBuilder from a stream, and then clear that stream?
+    // builder is the destination of blending fromSource and bySource. The stream of builder
+    // (i.e. streamToAppendTo) has to be cleared before calling addAnimatedPath.
     SVGPathByteStreamBuilder builder(streamToAppendTo);
 
-    SVGPathByteStream fromStreamCopy = streamToAppendTo;
-    streamToAppendTo.clear();
+    SVGPathByteStream fromStreamCopy = WTFMove(streamToAppendTo);
 
     SVGPathByteStreamSource fromSource(fromStreamCopy);
     SVGPathByteStreamSource bySource(byStream);
     return SVGPathBlender::addAnimatedPath(fromSource, bySource, builder, repeatCount);
 }
 
-bool getSVGPathSegAtLengthFromSVGPathByteStream(const SVGPathByteStream& stream, float length, unsigned& pathSeg)
+unsigned getSVGPathSegAtLengthFromSVGPathByteStream(const SVGPathByteStream& stream, float length)
 {
     if (stream.isEmpty())
-        return false;
+        return 0;
 
     PathTraversalState traversalState(PathTraversalState::Action::SegmentAtLength);
     SVGPathTraversalStateBuilder builder(traversalState, length);
 
     SVGPathByteStreamSource source(stream);
-    bool ok = SVGPathParser::parse(source, builder);
-    pathSeg = builder.pathSegmentIndex();
-    return ok;
+    SVGPathParser::parse(source, builder);
+    return builder.pathSegmentIndex();
 }
 
-bool getTotalLengthOfSVGPathByteStream(const SVGPathByteStream& stream, float& totalLength)
+float getTotalLengthOfSVGPathByteStream(const SVGPathByteStream& stream)
 {
     if (stream.isEmpty())
-        return false;
+        return 0;
 
     PathTraversalState traversalState(PathTraversalState::Action::TotalLength);
 
     SVGPathTraversalStateBuilder builder(traversalState);
 
     SVGPathByteStreamSource source(stream);
-    bool ok = SVGPathParser::parse(source, builder);
-    totalLength = builder.totalLength();
-    return ok;
+    SVGPathParser::parse(source, builder);
+    return builder.totalLength();
 }
 
-bool getPointAtLengthOfSVGPathByteStream(const SVGPathByteStream& stream, float length, FloatPoint& point)
+FloatPoint getPointAtLengthOfSVGPathByteStream(const SVGPathByteStream& stream, float length)
 {
     if (stream.isEmpty())
-        return false;
+        return { };
 
     PathTraversalState traversalState(PathTraversalState::Action::VectorAtLength);
 
     SVGPathTraversalStateBuilder builder(traversalState, length);
 
     SVGPathByteStreamSource source(stream);
-    bool ok = SVGPathParser::parse(source, builder);
-    point = builder.currentPoint();
-    return ok;
+    SVGPathParser::parse(source, builder);
+    return builder.currentPoint();
+}
+
+std::unique_ptr<SVGPathByteStream> convertSVGPathByteStreamToAbsoluteCoordinates(const SVGPathByteStream& stream)
+{
+    auto result = makeUnique<SVGPathByteStream>();
+
+    if (stream.isEmpty())
+        return result;
+
+    SVGPathByteStreamBuilder builder(*result);
+    SVGPathAbsoluteConverter converter(builder);
+
+    SVGPathByteStreamSource source(stream);
+
+    if (!SVGPathParser::parse(source, converter, UnalteredParsing, false))
+        return nullptr;
+
+    return result;
 }
 
 }

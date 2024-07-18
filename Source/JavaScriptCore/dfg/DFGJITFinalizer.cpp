@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,14 +30,13 @@
 
 #include "CodeBlock.h"
 #include "CodeBlockWithJITType.h"
-#include "DFGCommon.h"
 #include "DFGPlan.h"
-#include "JSCInlines.h"
+#include "HeapInlines.h"
 #include "ProfilerDatabase.h"
 
 namespace JSC { namespace DFG {
 
-JITFinalizer::JITFinalizer(Plan& plan, Ref<JITCode>&& jitCode, std::unique_ptr<LinkBuffer> linkBuffer, MacroAssemblerCodePtr withArityCheck)
+JITFinalizer::JITFinalizer(Plan& plan, Ref<JITCode>&& jitCode, std::unique_ptr<LinkBuffer> linkBuffer, MacroAssemblerCodePtr<JSEntryPtrTag> withArityCheck)
     : Finalizer(plan)
     , m_jitCode(WTFMove(jitCode))
     , m_linkBuffer(WTFMove(linkBuffer))
@@ -56,48 +55,34 @@ size_t JITFinalizer::codeSize()
 
 bool JITFinalizer::finalize()
 {
-    m_jitCode->initializeCodeRef(
-        FINALIZE_DFG_CODE(*m_linkBuffer, ("DFG JIT code for %s", toCString(CodeBlockWithJITType(m_plan.codeBlock, JITCode::DFGJIT)).data())),
-        MacroAssemblerCodePtr());
-    
-    m_plan.codeBlock->setJITCode(m_jitCode.copyRef());
-    
-    finalizeCommon();
-    
-    return true;
-}
+    VM& vm = *m_plan.vm();
 
-bool JITFinalizer::finalizeFunction()
-{
-    RELEASE_ASSERT(!m_withArityCheck.isEmptyValue());
-    m_jitCode->initializeCodeRef(
-        FINALIZE_DFG_CODE(*m_linkBuffer, ("DFG JIT code for %s", toCString(CodeBlockWithJITType(m_plan.codeBlock, JITCode::DFGJIT)).data())),
-        m_withArityCheck);
-    m_plan.codeBlock->setJITCode(m_jitCode.copyRef());
-    
-    finalizeCommon();
-    
-    return true;
-}
+    WTF::crossModifyingCodeFence();
 
-void JITFinalizer::finalizeCommon()
-{
-    // Some JIT finalizers may have added more constants. Shrink-to-fit those things now.
-    m_plan.codeBlock->constants().shrinkToFit();
-    m_plan.codeBlock->constantsSourceCodeRepresentation().shrinkToFit();
-    
+    m_linkBuffer->runMainThreadFinalizationTasks();
+
+    CodeBlock* codeBlock = m_plan.codeBlock();
+
+    codeBlock->setJITCode(m_jitCode.copyRef());
+    codeBlock->setDFGJITData(m_plan.finalizeJITData(m_jitCode.get()));
+
 #if ENABLE(FTL_JIT)
-    m_jitCode->optimizeAfterWarmUp(m_plan.codeBlock);
+    m_jitCode->optimizeAfterWarmUp(codeBlock);
 #endif // ENABLE(FTL_JIT)
-    
-    if (UNLIKELY(m_plan.compilation))
-        m_plan.vm->m_perBytecodeProfiler->addCompilation(m_plan.codeBlock, *m_plan.compilation);
-    
-    if (!m_plan.willTryToTierUp)
-        m_plan.codeBlock->baselineVersion()->m_didFailFTLCompilation = true;
+
+    if (UNLIKELY(m_plan.compilation()))
+        vm.m_perBytecodeProfiler->addCompilation(codeBlock, *m_plan.compilation());
+
+    if (!m_plan.willTryToTierUp())
+        codeBlock->baselineVersion()->m_didFailFTLCompilation = true;
+
+    // The codeBlock is now responsible for keeping many things alive (e.g. frozen values)
+    // that were previously kept alive by the plan.
+    vm.writeBarrier(codeBlock);
+
+    return true;
 }
 
 } } // namespace JSC::DFG
 
 #endif // ENABLE(DFG_JIT)
-

@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2016 Devin Rousso <webkit@devinrousso.com>. All rights reserved.
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2020 Devin Rousso <webkit@devinrousso.com>. All rights reserved.
+ * Copyright (C) 2016-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,95 +24,93 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-.content-view.settings {
-    padding-bottom: 6vh;
+.content-view.tab.settings {
     overflow-y: auto;
 }
 
-.content-view.settings .navigation-bar {
-    position: -webkit-sticky;
+.content-view.tab.settings .navigation-bar {
+    position: sticky;
     top: 0;
-    z-index: 1;
-    background-color: white;
+    z-index: var(--z-index-header);
+    background-color: var(--background-color-content);
 }
 
-.content-view.settings .navigation-bar.invisible {
+.content-view.tab.settings .navigation-bar.invisible {
     visibility: hidden;
 }
 
-.content-view.settings .navigation-bar .item.radio.button.text-only {
+.content-view.tab.settings .navigation-bar .item.radio.button.text-only {
     color: inherit;
     background-color: inherit;
 }
 
-.content-view.settings .navigation-bar .item.radio.button.text-only.selected {
-    color: var(--selected-background-color)
+.content-view.tab.settings .navigation-bar .item.radio.button.text-only:before {
+    display: none;
 }
 
-.content-view.settings > .settings-view > .separator {
+.content-view.tab.settings .navigation-bar .item.radio.button.text-only.selected {
+    color: var(--glyph-color-active);
+}
+
+.content-view.tab.settings > .settings-view {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100% - var(--navigation-bar-height));
+    padding-bottom: 1em;
+    background-color: var(--background-color-alternate);
+    overflow-y: auto;
+}
+
+.content-view.tab.settings > .settings-view > .separator {
     height: 1em;
 }
 
-.content-view.settings > .settings-view > .container {
+.content-view.tab.settings > .settings-view > .container {
     display: flex;
     margin-top: 1em;
     font-size: 13px;
 }
 
-.content-view.settings > .settings-view > .container.hidden {
+.content-view.tab.settings > .settings-view > .container.hidden {
     display: none;
 }
 
-.content-view.settings > .settings-view > .container-centered {
+.content-view.tab.settings > .settings-view > .container-centered {
     display: block;
     text-align: center;
 }
 
-.content-view.settings > .settings-view > .container button {
+.content-view.tab.settings > .settings-view > .container button {
+    margin-inline-end: 4px;
     font-size: inherit;
 }
 
-.content-view.settings > .settings-view > .container > .title {
-    margin-top: 2px;
+.content-view.tab.settings > .settings-view > .container > .title {
     width: 50%;
+    margin-inline-end: 6px;
     text-align: end;
-
-    --setting-name-margin-end: 6px;
 }
 
-body[dir=ltr] .content-view.settings > .settings-view > .container > .title {
-    margin-right: var(--setting-name-margin-end);
-}
-
-body[dir=rtl] .content-view.settings > .settings-view > .container > .title {
-    margin-left: var(--setting-name-margin-end);
-}
-
-.content-view.settings > .settings-view > .container > .editor-group {
+.content-view.tab.settings > .settings-view > .container > .editor-group {
     display: flex;
     flex-direction: column;
 }
 
-.content-view.settings > .settings-view > .container > .editor-group > .editor input {
-    font-size: inherit;
+.content-view.tab.settings > .settings-view > .container > .editor-group > .setting-editor {
+    --settings-editor-child-margin-top: 0;
 }
 
-.content-view.settings > .settings-view > .container > .editor-group > .editor input[type="checkbox"] {
-    /* Vertically align <select> with the group title text. */
-    font-size: 16px;
-
-    --settings-input-checkbox-margin-end: 4px;
+.content-view.tab.settings > .settings-view > .container > .editor-group > .setting-editor:first-child > * {
+    margin-top: var(--settings-editor-child-margin-top);
 }
 
-body[dir=ltr] .content-view.settings > .settings-view > .container > .editor-group > .editor input[type="checkbox"] {
-    margin-right: var(--settings-input-checkbox-margin-end);
+.content-view.tab.settings > .settings-view > .container > .editor-group > .setting-editor input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    vertical-align: -1px;
 }
 
-body[dir=rtl] .content-view.settings > .settings-view > .container > .editor-group > .editor input[type="checkbox"] {
-    margin-left: var(--settings-input-checkbox-margin-end);
-}
-
-.content-view.settings > .settings-view > .container > .editor-group > .editor select {
+.content-view.tab.settings > .settings-view > .container > .editor-group > .setting-editor select {
     /*
     To set the font-size of <select> to be exactly 13px, it needs to be set to 16px.
     Setting the font-size to 13px actually sets it to 11px.
@@ -120,26 +118,43 @@ body[dir=rtl] .content-view.settings > .settings-view > .container > .editor-gro
     font-size: 16px;
 
     /* Vertically align <select> with the group title text. */
-    margin-top: 0;
+    --settings-editor-child-margin-top: -2px;
 }
 
-.content-view.settings > .settings-view > .container > .editor-group > .editor input[type="number"] {
-    /* Vertically align <input> with the group title text. */
-    margin-top: -1px;
-
+.content-view.tab.settings > .settings-view > .container > .editor-group > .setting-editor input[type="number"] {
     max-width: 48px;
+    margin-inline: 2px 5px;
+    padding-top: 0;
+    padding-bottom: 0;
     text-align: end;
+    vertical-align: 1px;
 
-    --settings-input-number-margin-start: 2px;
-    --settings-input-number-margin-end: 5px;
+    /* Vertically align <input> with the group title text. */
+    --settings-editor-child-margin-top: -2px;
 }
 
-body[dir=ltr] .content-view.settings > .settings-view > .container > .editor-group > .editor input[type="number"] {
-    margin-left: var(--settings-input-number-margin-start);
-    margin-right: var(--settings-input-number-margin-end);
+.content-view.tab.settings > .settings-view > .container > .editor-group > .setting-editor input[type="text"] {
+    padding-top: 0;
+    padding-bottom: 0;
+    vertical-align: 1px;
+
+    /* Vertically align <input> with the group title text. */
+    --settings-editor-child-margin-top: -2px;
 }
 
-body[dir=rtl] .content-view.settings > .settings-view > .container > .editor-group > .editor input[type="number"] {
-    margin-left: var(--settings-input-number-margin-end);
-    margin-right: var(--settings-input-number-margin-start);
+.content-view.tab.settings > .settings-view > .container.reference {
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    flex-grow: 1;
+}
+
+.content-view.tab.settings > .settings-view > .container.reference > a {
+    margin-inline-start: 16px; /* Balance the size of `.go-to-arrow` so that the text is visually centered. */
+    color: var(--text-color-secondary);
+}
+
+.content-view.tab.settings > .settings-view > .container.reference > a > .go-to-arrow {
+    margin: 0;
+    vertical-align: -0.25em;
 }

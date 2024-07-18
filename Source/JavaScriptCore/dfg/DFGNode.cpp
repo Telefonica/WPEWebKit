@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2014, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,11 +30,14 @@
 
 #include "DFGGraph.h"
 #include "DFGPromotedHeapLocation.h"
-#include "JSCInlines.h"
+#include "DOMJITSignature.h"
+#include "JSImmutableButterfly.h"
 
 namespace JSC { namespace DFG {
 
 const char Node::HashSetTemplateInstantiationString[] = "::JSC::DFG::Node*";
+
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(DFGNode);
 
 bool MultiPutByOffsetData::writesStructures() const
 {
@@ -52,6 +55,24 @@ bool MultiPutByOffsetData::reallocatesStorage() const
             return true;
     }
     return false;
+}
+
+bool MultiDeleteByOffsetData::writesStructures() const
+{
+    for (unsigned i = variants.size(); i--;) {
+        if (variants[i].writesStructures())
+            return true;
+    }
+    return false;
+}
+
+bool MultiDeleteByOffsetData::allVariantsStoreEmpty() const
+{
+    for (unsigned i = variants.size(); i--;) {
+        if (!variants[i].newStructure())
+            return false;
+    }
+    return true;
 }
 
 void BranchTarget::dump(PrintStream& out) const
@@ -72,7 +93,8 @@ bool Node::hasVariableAccessData(Graph& graph)
         return graph.m_form != SSA;
     case GetLocal:
     case SetLocal:
-    case SetArgument:
+    case SetArgumentDefinitely:
+    case SetArgumentMaybe:
     case Flush:
     case PhantomLocal:
         return true;
@@ -81,13 +103,71 @@ bool Node::hasVariableAccessData(Graph& graph)
     }
 }
 
-void Node::remove()
+void Node::remove(Graph& graph)
 {
-    ASSERT(!(flags() & NodeHasVarArgs));
-    
-    children = children.justChecks();
-    
+    switch (op()) {
+    case MultiGetByOffset: {
+        MultiGetByOffsetData& data = multiGetByOffsetData();
+        StructureSet set;
+        for (MultiGetByOffsetCase& getCase : data.cases) {
+            getCase.set().forEach(
+                [&] (RegisteredStructure structure) {
+                    set.add(structure.get());
+                });
+        }
+        convertToCheckStructure(graph.addStructureSet(set));
+        return;
+    }
+        
+    case MatchStructure: {
+        MatchStructureData& data = matchStructureData();
+        RegisteredStructureSet set;
+        for (MatchStructureVariant& variant : data.variants)
+            set.add(variant.structure);
+        convertToCheckStructure(graph.addStructureSet(set));
+        return;
+    }
+        
+    default:
+        if (flags() & NodeHasVarArgs) {
+            unsigned targetIndex = 0;
+            for (unsigned i = 0; i < numChildren(); ++i) {
+                Edge& edge = graph.varArgChild(this, i);
+                if (!edge)
+                    continue;
+                if (edge.willHaveCheck()) {
+                    Edge& dst = graph.varArgChild(this, targetIndex++);
+                    std::swap(dst, edge);
+                    continue;
+                }
+                edge = Edge();
+            }
+            setOpAndDefaultFlags(CheckVarargs);
+            children.setNumChildren(targetIndex);
+        } else {
+            children = children.justChecks();
+            setOpAndDefaultFlags(Check);
+        }
+        return;
+    }
+}
+
+void Node::removeWithoutChecks()
+{
+    children = AdjacencyList();
     setOpAndDefaultFlags(Check);
+}
+
+void Node::replaceWith(Graph& graph, Node* other)
+{
+    remove(graph);
+    setReplacement(other);
+}
+
+void Node::replaceWithWithoutChecks(Node* other)
+{
+    removeWithoutChecks();
+    setReplacement(other);
 }
 
 void Node::convertToIdentity()
@@ -102,6 +182,7 @@ void Node::convertToIdentity()
 void Node::convertToIdentityOn(Node* child)
 {
     children.reset();
+    clearFlags(NodeHasVarArgs);
     child1() = child->defaultEdge();
     NodeFlags output = canonicalResultRepresentation(this->result());
     NodeFlags input = canonicalResultRepresentation(child->result());
@@ -164,37 +245,15 @@ void Node::convertToLazyJSConstant(Graph& graph, LazyJSValue value)
     children.reset();
 }
 
-void Node::convertToPutHint(const PromotedLocationDescriptor& descriptor, Node* base, Node* value)
+void Node::convertToNewArrayBuffer(FrozenValue* immutableButterfly)
 {
-    m_op = PutHint;
-    m_opInfo = descriptor.imm1();
-    m_opInfo2 = descriptor.imm2();
-    child1() = base->defaultEdge();
-    child2() = value->defaultEdge();
-    child3() = Edge();
-}
-
-void Node::convertToPutStructureHint(Node* structure)
-{
-    ASSERT(m_op == PutStructure);
-    ASSERT(structure->castConstant<Structure*>(*structure->asCell()->vm()) == transition()->next.get());
-    convertToPutHint(StructurePLoc, child1().node(), structure);
-}
-
-void Node::convertToPutByOffsetHint()
-{
-    ASSERT(m_op == PutByOffset);
-    convertToPutHint(
-        PromotedLocationDescriptor(NamedPropertyPLoc, storageAccessData().identifierNumber),
-        child2().node(), child3().node());
-}
-
-void Node::convertToPutClosureVarHint()
-{
-    ASSERT(m_op == PutClosureVar);
-    convertToPutHint(
-        PromotedLocationDescriptor(ClosureVarPLoc, scopeOffset().offset()),
-        child1().node(), child2().node());
+    setOpAndDefaultFlags(NewArrayBuffer);
+    NewArrayBufferData data { };
+    data.indexingMode = immutableButterfly->cast<JSImmutableButterfly*>()->indexingMode();
+    data.vectorLengthHint = immutableButterfly->cast<JSImmutableButterfly*>()->toButterfly()->vectorLength();
+    children.reset();
+    m_opInfo = immutableButterfly;
+    m_opInfo2 = data.asQuadWord;
 }
 
 void Node::convertToDirectCall(FrozenValue* executable)
@@ -240,6 +299,37 @@ void Node::convertToCallDOM(Graph& graph)
 
     if (!signature()->effect.mustGenerate())
         clearFlags(NodeMustGenerate);
+}
+
+void Node::convertToRegExpExecNonGlobalOrStickyWithoutChecks(FrozenValue* regExp)
+{
+    ASSERT(op() == RegExpExec);
+    setOpAndDefaultFlags(RegExpExecNonGlobalOrSticky);
+    children.child1() = Edge(children.child1().node(), KnownCellUse);
+    children.child2() = Edge(children.child3().node(), KnownStringUse);
+    children.child3() = Edge();
+    m_opInfo = regExp;
+}
+
+void Node::convertToRegExpMatchFastGlobalWithoutChecks(FrozenValue* regExp)
+{
+    ASSERT(op() == RegExpMatchFast);
+    setOpAndDefaultFlags(RegExpMatchFastGlobal);
+    children.child1() = Edge(children.child1().node(), KnownCellUse);
+    children.child2() = Edge(children.child3().node(), KnownStringUse);
+    children.child3() = Edge();
+    m_opInfo = regExp;
+}
+
+void Node::convertToRegExpTestInline(FrozenValue* globalObject, FrozenValue* regExp)
+{
+    ASSERT(op() == RegExpTest);
+    setOpAndDefaultFlags(RegExpTestInline);
+    children.child1() = Edge(children.child1().node(), KnownCellUse);
+    children.child2() = Edge(children.child2().node(), RegExpObjectUse);
+    // We keep the existing child3.
+    m_opInfo = globalObject;
+    m_opInfo2 = regExp;
 }
 
 String Node::tryGetString(Graph& graph)
@@ -288,7 +378,7 @@ void printInternal(PrintStream& out, Node* node)
         out.print("-");
         return;
     }
-    out.print("@", node->index());
+    out.print("D@", node->index());
     if (node->hasDoubleResult())
         out.print("<Double>");
     else if (node->hasInt52Result())

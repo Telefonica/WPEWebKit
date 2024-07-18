@@ -40,12 +40,7 @@ template<> struct ClientTraits<WKViewClientBase> {
 };
 }
 
-WKViewRef WKViewCreate(WKPageConfigurationRef configuration)
-{
-    return toAPI(WKWPE::View::create(nullptr, *toImpl(configuration)));
-}
-
-WKViewRef WKViewCreateWithViewBackend(struct wpe_view_backend* backend, WKPageConfigurationRef configuration)
+WKViewRef WKViewCreate(struct wpe_view_backend* backend, WKPageConfigurationRef configuration)
 {
     return toAPI(WKWPE::View::create(backend, *toImpl(configuration)));
 }
@@ -53,16 +48,6 @@ WKViewRef WKViewCreateWithViewBackend(struct wpe_view_backend* backend, WKPageCo
 WKPageRef WKViewGetPage(WKViewRef view)
 {
     return toAPI(&toImpl(view)->page());
-}
-
-struct wpe_view_backend* WKViewGetViewBackend(WKViewRef view)
-{
-    return toImpl(view)->backend();
-}
-
-void WKViewSetViewState(WKViewRef view, WKViewState viewState)
-{
-    toImpl(view)->setViewState(toViewStateFlags(viewState));
 }
 
 void WKViewSetViewClient(WKViewRef view, const WKViewClientBase* client)
@@ -83,5 +68,5 @@ void WKViewSetViewClient(WKViewRef view, const WKViewClientBase* client)
         }
     };
 
-    toImpl(view)->setClient(std::make_unique<ViewClient>(client));
+    toImpl(view)->setClient(makeUnique<ViewClient>(client));
 }

@@ -8,107 +8,39 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/api/video/video_frame_buffer.h"
+#include "api/video/video_frame_buffer.h"
 
-#include "libyuv/convert.h"
-#include "webrtc/api/video/i420_buffer.h"
-#include "webrtc/base/checks.h"
+#include "api/video/i420_buffer.h"
+#include "api/video/i422_buffer.h"
+#include "api/video/i444_buffer.h"
+#include "api/video/nv12_buffer.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
-namespace {
-
-// TODO(magjed): Remove this class. It is only used for providing a default
-// implementation of ToI420() until external clients are updated. ToI420() will
-// then be made pure virtual. This adapter adapts a VideoFrameBuffer (which is
-// expected to be in I420 format) to I420BufferInterface. The reason this is
-// needed is because of the return type mismatch in NativeToI420Buffer (returns
-// VideoFrameBuffer) vs ToI420 (returns I420BufferInterface).
-class I420InterfaceAdapter : public I420BufferInterface {
- public:
-  explicit I420InterfaceAdapter(const VideoFrameBuffer* buffer)
-      : buffer_(buffer) {}
-
-  int width() const override { return buffer_->width(); }
-  int height() const override { return buffer_->height(); }
-
-  const uint8_t* DataY() const override { return buffer_->DataY(); }
-  const uint8_t* DataU() const override { return buffer_->DataU(); }
-  const uint8_t* DataV() const override { return buffer_->DataV(); }
-
-  int StrideY() const override { return buffer_->StrideY(); }
-  int StrideU() const override { return buffer_->StrideU(); }
-  int StrideV() const override { return buffer_->StrideV(); }
-
- private:
-  rtc::scoped_refptr<const VideoFrameBuffer> buffer_;
-};
-
-}  // namespace
-
-// TODO(magjed): The default implementations in VideoFrameBuffer are provided in
-// order to support the deprecated interface until external clients are updated.
-// Remove once done.
-VideoFrameBuffer::Type VideoFrameBuffer::type() const {
-  return native_handle() ? Type::kNative : Type::kI420;
+rtc::scoped_refptr<VideoFrameBuffer> VideoFrameBuffer::CropAndScale(
+    int offset_x,
+    int offset_y,
+    int crop_width,
+    int crop_height,
+    int scaled_width,
+    int scaled_height) {
+  rtc::scoped_refptr<I420Buffer> result =
+      I420Buffer::Create(scaled_width, scaled_height);
+  result->CropAndScaleFrom(*this->ToI420(), offset_x, offset_y, crop_width,
+                           crop_height);
+  return result;
 }
 
-const uint8_t* VideoFrameBuffer::DataY() const {
-  return GetI420()->DataY();
-}
-
-const uint8_t* VideoFrameBuffer::DataU() const {
-  return GetI420()->DataU();
-}
-
-const uint8_t* VideoFrameBuffer::DataV() const {
-  return GetI420()->DataV();
-}
-
-// Returns the number of bytes between successive rows for a given plane.
-int VideoFrameBuffer::StrideY() const {
-  return GetI420()->StrideY();
-}
-
-int VideoFrameBuffer::StrideU() const {
-  return GetI420()->StrideU();
-}
-
-int VideoFrameBuffer::StrideV() const {
-  return GetI420()->StrideV();
-}
-
-void* VideoFrameBuffer::native_handle() const {
-  RTC_DCHECK(type() != Type::kNative);
+const I420BufferInterface* VideoFrameBuffer::GetI420() const {
+  // Overridden by subclasses that can return an I420 buffer without any
+  // conversion, in particular, I420BufferInterface.
   return nullptr;
 }
 
-rtc::scoped_refptr<VideoFrameBuffer> VideoFrameBuffer::NativeToI420Buffer() {
-  return ToI420();
-}
-
-rtc::scoped_refptr<I420BufferInterface> VideoFrameBuffer::ToI420() {
-  return new rtc::RefCountedObject<I420InterfaceAdapter>(NativeToI420Buffer());
-}
-
-rtc::scoped_refptr<I420BufferInterface> VideoFrameBuffer::GetI420() {
-  RTC_CHECK(type() == Type::kI420);
-  // TODO(magjed): static_cast to I420BufferInterface instead once external
-  // clients are updated.
-  return new rtc::RefCountedObject<I420InterfaceAdapter>(this);
-}
-
-rtc::scoped_refptr<const I420BufferInterface> VideoFrameBuffer::GetI420()
-    const {
-  RTC_CHECK(type() == Type::kI420);
-  // TODO(magjed): static_cast to I420BufferInterface instead once external
-  // clients are updated.
-  return new rtc::RefCountedObject<I420InterfaceAdapter>(this);
-}
-
-I444BufferInterface* VideoFrameBuffer::GetI444() {
-  RTC_CHECK(type() == Type::kI444);
-  return static_cast<I444BufferInterface*>(this);
+const I420ABufferInterface* VideoFrameBuffer::GetI420A() const {
+  RTC_CHECK(type() == Type::kI420A);
+  return static_cast<const I420ABufferInterface*>(this);
 }
 
 const I444BufferInterface* VideoFrameBuffer::GetI444() const {
@@ -116,8 +48,64 @@ const I444BufferInterface* VideoFrameBuffer::GetI444() const {
   return static_cast<const I444BufferInterface*>(this);
 }
 
+const I422BufferInterface* VideoFrameBuffer::GetI422() const {
+  RTC_CHECK(type() == Type::kI422);
+  return static_cast<const I422BufferInterface*>(this);
+}
+
+const I010BufferInterface* VideoFrameBuffer::GetI010() const {
+  RTC_CHECK(type() == Type::kI010);
+  return static_cast<const I010BufferInterface*>(this);
+}
+
+const I210BufferInterface* VideoFrameBuffer::GetI210() const {
+  RTC_CHECK(type() == Type::kI210);
+  return static_cast<const I210BufferInterface*>(this);
+}
+
+const I410BufferInterface* VideoFrameBuffer::GetI410() const {
+  RTC_CHECK(type() == Type::kI410);
+  return static_cast<const I410BufferInterface*>(this);
+}
+
+const NV12BufferInterface* VideoFrameBuffer::GetNV12() const {
+  RTC_CHECK(type() == Type::kNV12);
+  return static_cast<const NV12BufferInterface*>(this);
+}
+
+rtc::scoped_refptr<VideoFrameBuffer> VideoFrameBuffer::GetMappedFrameBuffer(
+    rtc::ArrayView<Type> types) {
+  RTC_CHECK(type() == Type::kNative);
+  return nullptr;
+}
+
 VideoFrameBuffer::Type I420BufferInterface::type() const {
   return Type::kI420;
+}
+
+const char* VideoFrameBufferTypeToString(VideoFrameBuffer::Type type) {
+  switch (type) {
+    case VideoFrameBuffer::Type::kNative:
+      return "kNative";
+    case VideoFrameBuffer::Type::kI420:
+      return "kI420";
+    case VideoFrameBuffer::Type::kI420A:
+      return "kI420A";
+    case VideoFrameBuffer::Type::kI444:
+      return "kI444";
+    case VideoFrameBuffer::Type::kI422:
+      return "kI422";
+    case VideoFrameBuffer::Type::kI010:
+      return "kI010";
+    case VideoFrameBuffer::Type::kI210:
+      return "kI210";
+    case VideoFrameBuffer::Type::kI410:
+      return "kI410";
+    case VideoFrameBuffer::Type::kNV12:
+      return "kNV12";
+    default:
+      RTC_DCHECK_NOTREACHED();
+  }
 }
 
 int I420BufferInterface::ChromaWidth() const {
@@ -129,7 +117,15 @@ int I420BufferInterface::ChromaHeight() const {
 }
 
 rtc::scoped_refptr<I420BufferInterface> I420BufferInterface::ToI420() {
+  return rtc::scoped_refptr<I420BufferInterface>(this);
+}
+
+const I420BufferInterface* I420BufferInterface::GetI420() const {
   return this;
+}
+
+VideoFrameBuffer::Type I420ABufferInterface::type() const {
+  return Type::kI420A;
 }
 
 VideoFrameBuffer::Type I444BufferInterface::type() const {
@@ -144,15 +140,103 @@ int I444BufferInterface::ChromaHeight() const {
   return height();
 }
 
-rtc::scoped_refptr<I420BufferInterface> I444BufferInterface::ToI420() {
-  rtc::scoped_refptr<I420Buffer> i420_buffer =
-      I420Buffer::Create(width(), height());
-  libyuv::I444ToI420(DataY(), StrideY(), DataU(), StrideU(), DataV(), StrideV(),
-                     i420_buffer->MutableDataY(), i420_buffer->StrideY(),
-                     i420_buffer->MutableDataU(), i420_buffer->StrideU(),
-                     i420_buffer->MutableDataV(), i420_buffer->StrideV(),
-                     width(), height());
-  return i420_buffer;
+rtc::scoped_refptr<VideoFrameBuffer> I444BufferInterface::CropAndScale(
+    int offset_x,
+    int offset_y,
+    int crop_width,
+    int crop_height,
+    int scaled_width,
+    int scaled_height) {
+  rtc::scoped_refptr<I444Buffer> result =
+      I444Buffer::Create(scaled_width, scaled_height);
+  result->CropAndScaleFrom(*this, offset_x, offset_y, crop_width, crop_height);
+  return result;
+}
+
+VideoFrameBuffer::Type I422BufferInterface::type() const {
+  return Type::kI422;
+}
+
+int I422BufferInterface::ChromaWidth() const {
+  return (width() + 1) / 2;
+}
+
+int I422BufferInterface::ChromaHeight() const {
+  return height();
+}
+
+rtc::scoped_refptr<VideoFrameBuffer> I422BufferInterface::CropAndScale(
+    int offset_x,
+    int offset_y,
+    int crop_width,
+    int crop_height,
+    int scaled_width,
+    int scaled_height) {
+  rtc::scoped_refptr<I422Buffer> result =
+      I422Buffer::Create(scaled_width, scaled_height);
+  result->CropAndScaleFrom(*this, offset_x, offset_y, crop_width, crop_height);
+  return result;
+}
+
+VideoFrameBuffer::Type I010BufferInterface::type() const {
+  return Type::kI010;
+}
+
+int I010BufferInterface::ChromaWidth() const {
+  return (width() + 1) / 2;
+}
+
+int I010BufferInterface::ChromaHeight() const {
+  return (height() + 1) / 2;
+}
+
+VideoFrameBuffer::Type I210BufferInterface::type() const {
+  return Type::kI210;
+}
+
+int I210BufferInterface::ChromaWidth() const {
+  return (width() + 1) / 2;
+}
+
+int I210BufferInterface::ChromaHeight() const {
+  return height();
+}
+
+VideoFrameBuffer::Type I410BufferInterface::type() const {
+  return Type::kI410;
+}
+
+int I410BufferInterface::ChromaWidth() const {
+  return width();
+}
+
+int I410BufferInterface::ChromaHeight() const {
+  return height();
+}
+
+VideoFrameBuffer::Type NV12BufferInterface::type() const {
+  return Type::kNV12;
+}
+
+int NV12BufferInterface::ChromaWidth() const {
+  return (width() + 1) / 2;
+}
+
+int NV12BufferInterface::ChromaHeight() const {
+  return (height() + 1) / 2;
+}
+
+rtc::scoped_refptr<VideoFrameBuffer> NV12BufferInterface::CropAndScale(
+    int offset_x,
+    int offset_y,
+    int crop_width,
+    int crop_height,
+    int scaled_width,
+    int scaled_height) {
+  rtc::scoped_refptr<NV12Buffer> result =
+      NV12Buffer::Create(scaled_width, scaled_height);
+  result->CropAndScaleFrom(*this, offset_x, offset_y, crop_width, crop_height);
+  return result;
 }
 
 }  // namespace webrtc

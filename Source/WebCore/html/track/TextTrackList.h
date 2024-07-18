@@ -25,23 +25,25 @@
 
 #pragma once
 
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
 
 #include "TrackListBase.h"
+#include <wtf/MediaTime.h>
 
 namespace WebCore {
 
 class TextTrack;
 
 class TextTrackList final : public TrackListBase {
+    WTF_MAKE_ISO_ALLOCATED(TextTrackList);
 public:
-    static Ref<TextTrackList> create(HTMLMediaElement* element, ScriptExecutionContext* context)
+    static Ref<TextTrackList> create(ScriptExecutionContext* context)
     {
-        return adoptRef(*new TextTrackList(element, context));
+        auto list = adoptRef(*new TextTrackList(context));
+        list->suspendIfNeeded();
+        return list;
     }
     virtual ~TextTrackList();
-
-    void clearElement() override;
 
     unsigned length() const override;
     int getTrackIndex(TextTrack&);
@@ -49,24 +51,33 @@ public:
     bool contains(TrackBase&) const override;
 
     TextTrack* item(unsigned index) const;
-    TextTrack* getTrackById(const AtomicString&);
+    TextTrack* getTrackById(const AtomString&);
     TextTrack* lastItem() const { return item(length() - 1); }
 
     void append(Ref<TextTrack>&&);
     void remove(TrackBase&, bool scheduleEvent = true) override;
 
+    void setDuration(MediaTime duration) { m_duration = duration; }
+    const MediaTime& duration() const { return m_duration; }
+
     // EventTarget
     EventTargetInterface eventTargetInterface() const override;
 
 private:
-    TextTrackList(HTMLMediaElement*, ScriptExecutionContext*);
+    TextTrackList(ScriptExecutionContext*);
+    const char* activeDOMObjectName() const final;
 
     void invalidateTrackIndexesAfterTrack(TextTrack&);
 
     Vector<RefPtr<TrackBase>> m_addTrackTracks;
     Vector<RefPtr<TrackBase>> m_elementTracks;
+    MediaTime m_duration;
 };
 
 } // namespace WebCore
 
-#endif // ENABLE(VIDEO_TRACK)
+SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::TextTrackList)
+    static bool isType(const WebCore::TrackListBase& trackList) { return trackList.type() == WebCore::TrackListBase::TextTrackList; }
+SPECIALIZE_TYPE_TRAITS_END()
+
+#endif // ENABLE(VIDEO)

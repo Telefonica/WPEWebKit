@@ -26,14 +26,15 @@
 #include "WebKitDLL.h"
 #include "WebEditorClient.h"
 
+#include "DOMCoreClasses.h"
 #include "WebKit.h"
 #include "WebNotification.h"
 #include "WebNotificationCenter.h"
 #include "WebView.h"
-#include "DOMCoreClasses.h"
 #include <comutil.h>
 #include <WebCore/BString.h>
 #include <WebCore/Document.h>
+#include <WebCore/FrameDestructionObserverInlines.h>
 #include <WebCore/HTMLElement.h>
 #include <WebCore/HTMLInputElement.h>
 #include <WebCore/HTMLNames.h>
@@ -48,6 +49,7 @@
 #include <WebCore/UserTypingGestureIndicator.h>
 #include <WebCore/VisibleSelection.h>
 #include <wtf/text/StringView.h>
+#include <wtf/text/win/WCharStringExtras.h>
 
 using namespace WebCore;
 using namespace HTMLNames;
@@ -63,7 +65,7 @@ public:
 
 // WebEditorUndoTarget -------------------------------------------------------------
 
-class WebEditorUndoTarget : public IWebUndoTarget
+class WebEditorUndoTarget final : public IWebUndoTarget
 {
 public:
     WebEditorUndoTarget();
@@ -184,7 +186,7 @@ int WebEditorClient::spellCheckerDocumentTag()
     return 0;
 }
 
-bool WebEditorClient::shouldBeginEditing(WebCore::Range* range)
+bool WebEditorClient::shouldBeginEditing(const WebCore::SimpleRange& range)
 {
     COMPtr<IWebEditingDelegate> ed;
     if (FAILED(m_webView->editingDelegate(&ed)) || !ed.get())
@@ -199,7 +201,7 @@ bool WebEditorClient::shouldBeginEditing(WebCore::Range* range)
     return shouldBegin;
 }
 
-bool WebEditorClient::shouldEndEditing(Range* range)
+bool WebEditorClient::shouldEndEditing(const WebCore::SimpleRange& range)
 {
     COMPtr<IWebEditingDelegate> ed;
     if (FAILED(m_webView->editingDelegate(&ed)) || !ed.get())
@@ -239,12 +241,10 @@ void WebEditorClient::respondToChangedSelection(Frame*)
 
 void WebEditorClient::discardedComposition(Frame*)
 {
-    notImplemented();
 }
 
 void WebEditorClient::canceledComposition()
 {
-    notImplemented();
 }
 
 void WebEditorClient::didEndEditing()
@@ -256,20 +256,18 @@ void WebEditorClient::didEndEditing()
 
 void WebEditorClient::didWriteSelectionToPasteboard()
 {
-    notImplemented();
 }
 
-void WebEditorClient::willWriteSelectionToPasteboard(WebCore::Range*)
+void WebEditorClient::willWriteSelectionToPasteboard(const std::optional<WebCore::SimpleRange>&)
+{
+}
+
+void WebEditorClient::getClientPasteboardData(const std::optional<WebCore::SimpleRange>&, Vector<String>&, Vector<RefPtr<WebCore::SharedBuffer> >&)
 {
     notImplemented();
 }
 
-void WebEditorClient::getClientPasteboardDataForRange(WebCore::Range*, Vector<String>&, Vector<RefPtr<WebCore::SharedBuffer> >&)
-{
-    notImplemented();
-}
-
-bool WebEditorClient::shouldDeleteRange(Range* range)
+bool WebEditorClient::shouldDeleteRange(const std::optional<WebCore::SimpleRange>& range)
 {
     COMPtr<IWebEditingDelegate> ed;
     if (FAILED(m_webView->editingDelegate(&ed)) || !ed.get())
@@ -299,7 +297,7 @@ static WebViewInsertAction kit(EditorInsertAction action)
     return WebViewInsertActionTyped;
 }
 
-bool WebEditorClient::shouldInsertNode(Node* node, Range* insertingRange, EditorInsertAction givenAction)
+bool WebEditorClient::shouldInsertNode(Node& node, const std::optional<WebCore::SimpleRange>& insertingRange, EditorInsertAction givenAction)
 { 
     COMPtr<IWebEditingDelegate> editingDelegate;
     if (FAILED(m_webView->editingDelegate(&editingDelegate)) || !editingDelegate.get())
@@ -309,7 +307,7 @@ bool WebEditorClient::shouldInsertNode(Node* node, Range* insertingRange, Editor
     if (!insertingDOMRange)
         return true;
 
-    COMPtr<IDOMNode> insertDOMNode(AdoptCOM, DOMNode::createInstance(node));
+    COMPtr<IDOMNode> insertDOMNode(AdoptCOM, DOMNode::createInstance(&node));
     if (!insertDOMNode)
         return true;
 
@@ -323,7 +321,7 @@ bool WebEditorClient::shouldInsertNode(Node* node, Range* insertingRange, Editor
     return shouldInsert;
 }
 
-bool WebEditorClient::shouldInsertText(const String& str, Range* insertingRange, EditorInsertAction givenAction)
+bool WebEditorClient::shouldInsertText(const String& str, const std::optional<WebCore::SimpleRange>& insertingRange, EditorInsertAction givenAction)
 {
     COMPtr<IWebEditingDelegate> editingDelegate;
     if (FAILED(m_webView->editingDelegate(&editingDelegate)) || !editingDelegate.get())
@@ -341,7 +339,14 @@ bool WebEditorClient::shouldInsertText(const String& str, Range* insertingRange,
     return shouldInsert;
 }
 
-bool WebEditorClient::shouldChangeSelectedRange(WebCore::Range* currentRange, WebCore::Range* proposedRange, WebCore::EAffinity selectionAffinity, bool flag)
+static WebSelectionAffinity toWebSelectionAffinity(WebCore::Affinity affinity)
+{
+    if (affinity == WebCore::Affinity::Upstream)
+        return WebSelectionAffinityUpstream;
+    return WebSelectionAffinityDownstream;
+}
+
+bool WebEditorClient::shouldChangeSelectedRange(const std::optional<WebCore::SimpleRange>& currentRange, const std::optional<WebCore::SimpleRange>& proposedRange, WebCore::Affinity selectionAffinity, bool flag)
 {
     COMPtr<IWebEditingDelegate> ed;
     if (FAILED(m_webView->editingDelegate(&ed)) || !ed.get())
@@ -351,26 +356,23 @@ bool WebEditorClient::shouldChangeSelectedRange(WebCore::Range* currentRange, We
     COMPtr<IDOMRange> proposedIDOMRange(AdoptCOM, DOMRange::createInstance(proposedRange));
 
     BOOL shouldChange = FALSE;
-    if (FAILED(ed->shouldChangeSelectedDOMRange(m_webView, currentIDOMRange.get(), proposedIDOMRange.get(), static_cast<WebSelectionAffinity>(selectionAffinity), flag, &shouldChange)))
+    if (FAILED(ed->shouldChangeSelectedDOMRange(m_webView, currentIDOMRange.get(), proposedIDOMRange.get(), toWebSelectionAffinity(selectionAffinity), flag, &shouldChange)))
         return true;
 
     return shouldChange;
 }
 
-bool WebEditorClient::shouldApplyStyle(StyleProperties*, Range*)
+bool WebEditorClient::shouldApplyStyle(const StyleProperties&, const std::optional<SimpleRange>&)
 {
-    notImplemented();
     return true;
 }
 
 void WebEditorClient::didApplyStyle()
 {
-    notImplemented();
 }
 
-bool WebEditorClient::shouldMoveRangeAfterDelete(Range*, Range*)
+bool WebEditorClient::shouldMoveRangeAfterDelete(const WebCore::SimpleRange&, const WebCore::SimpleRange&)
 {
-    notImplemented();
     return true;
 }
 
@@ -390,15 +392,15 @@ bool WebEditorClient::isSelectTrailingWhitespaceEnabled(void) const
     return page->settings().selectTrailingWhitespaceEnabled();
 }
 
-void WebEditorClient::textFieldDidBeginEditing(Element* e)
+void WebEditorClient::textFieldDidBeginEditing(Element& e)
 {
     IWebFormDelegate* formDelegate;
     if (SUCCEEDED(m_webView->formDelegate(&formDelegate)) && formDelegate) {
-        IDOMElement* domElement = DOMElement::createInstance(e);
+        IDOMElement* domElement = DOMElement::createInstance(&e);
         if (domElement) {
             IDOMHTMLInputElement* domInputElement;
             if (SUCCEEDED(domElement->QueryInterface(IID_IDOMHTMLInputElement, (void**)&domInputElement))) {
-                formDelegate->textFieldDidBeginEditing(domInputElement, kit(e->document().frame()));
+                formDelegate->textFieldDidBeginEditing(domInputElement, kit(e.document().frame()));
                 domInputElement->Release();
             }
             domElement->Release();
@@ -407,15 +409,15 @@ void WebEditorClient::textFieldDidBeginEditing(Element* e)
     }
 }
 
-void WebEditorClient::textFieldDidEndEditing(Element* e)
+void WebEditorClient::textFieldDidEndEditing(Element& e)
 {
     IWebFormDelegate* formDelegate;
     if (SUCCEEDED(m_webView->formDelegate(&formDelegate)) && formDelegate) {
-        IDOMElement* domElement = DOMElement::createInstance(e);
+        IDOMElement* domElement = DOMElement::createInstance(&e);
         if (domElement) {
             IDOMHTMLInputElement* domInputElement;
             if (SUCCEEDED(domElement->QueryInterface(IID_IDOMHTMLInputElement, (void**)&domInputElement))) {
-                formDelegate->textFieldDidEndEditing(domInputElement, kit(e->document().frame()));
+                formDelegate->textFieldDidEndEditing(domInputElement, kit(e.document().frame()));
                 domInputElement->Release();
             }
             domElement->Release();
@@ -424,18 +426,18 @@ void WebEditorClient::textFieldDidEndEditing(Element* e)
     }
 }
 
-void WebEditorClient::textDidChangeInTextField(Element* e)
+void WebEditorClient::textDidChangeInTextField(Element& e)
 {
-    if (!UserTypingGestureIndicator::processingUserTypingGesture() || UserTypingGestureIndicator::focusedElementAtGestureStart() != e)
+    if (!UserTypingGestureIndicator::processingUserTypingGesture() || UserTypingGestureIndicator::focusedElementAtGestureStart() != &e)
         return;
 
     IWebFormDelegate* formDelegate;
     if (SUCCEEDED(m_webView->formDelegate(&formDelegate)) && formDelegate) {
-        IDOMElement* domElement = DOMElement::createInstance(e);
+        IDOMElement* domElement = DOMElement::createInstance(&e);
         if (domElement) {
             IDOMHTMLInputElement* domInputElement;
             if (SUCCEEDED(domElement->QueryInterface(IID_IDOMHTMLInputElement, (void**)&domInputElement))) {
-                formDelegate->textDidChangeInTextField(domInputElement, kit(e->document().frame()));
+                formDelegate->textDidChangeInTextField(domInputElement, kit(e.document().frame()));
                 domInputElement->Release();
             }
             domElement->Release();
@@ -444,19 +446,19 @@ void WebEditorClient::textDidChangeInTextField(Element* e)
     }
 }
 
-bool WebEditorClient::doTextFieldCommandFromEvent(Element* e, KeyboardEvent* ke)
+bool WebEditorClient::doTextFieldCommandFromEvent(Element& e, KeyboardEvent* ke)
 {
     BOOL result = FALSE;
     IWebFormDelegate* formDelegate;
     if (SUCCEEDED(m_webView->formDelegate(&formDelegate)) && formDelegate) {
-        IDOMElement* domElement = DOMElement::createInstance(e);
+        IDOMElement* domElement = DOMElement::createInstance(&e);
         if (domElement) {
             IDOMHTMLInputElement* domInputElement;
             if (SUCCEEDED(domElement->QueryInterface(IID_IDOMHTMLInputElement, (void**)&domInputElement))) {
-                String command = m_webView->interpretKeyEvent(ke);
+                auto command = String::fromLatin1(m_webView->interpretKeyEvent(ke));
                 // We allow empty commands here because the app code actually depends on this being called for all key presses.
                 // We may want to revisit this later because it doesn't really make sense to send an empty command.
-                formDelegate->doPlatformCommand(domInputElement, BString(command), kit(e->document().frame()), &result);
+                formDelegate->doPlatformCommand(domInputElement, BString(command), kit(e.document().frame()), &result);
                 domInputElement->Release();
             }
             domElement->Release();
@@ -466,17 +468,17 @@ bool WebEditorClient::doTextFieldCommandFromEvent(Element* e, KeyboardEvent* ke)
     return !!result;
 }
 
-void WebEditorClient::textWillBeDeletedInTextField(Element* e)
+void WebEditorClient::textWillBeDeletedInTextField(Element& e)
 {
     // We're using the deleteBackward command for all deletion operations since the autofill code treats all deletions the same way.
     IWebFormDelegate* formDelegate;
     if (SUCCEEDED(m_webView->formDelegate(&formDelegate)) && formDelegate) {
-        IDOMElement* domElement = DOMElement::createInstance(e);
+        IDOMElement* domElement = DOMElement::createInstance(&e);
         if (domElement) {
             IDOMHTMLInputElement* domInputElement;
             if (SUCCEEDED(domElement->QueryInterface(IID_IDOMHTMLInputElement, (void**)&domInputElement))) {
                 BOOL result;
-                formDelegate->doPlatformCommand(domInputElement, BString(L"DeleteBackward"), kit(e->document().frame()), &result);
+                formDelegate->doPlatformCommand(domInputElement, BString(L"DeleteBackward"), kit(e.document().frame()), &result);
                 domInputElement->Release();
             }
             domElement->Release();
@@ -485,15 +487,15 @@ void WebEditorClient::textWillBeDeletedInTextField(Element* e)
     }
 }
 
-void WebEditorClient::textDidChangeInTextArea(Element* e)
+void WebEditorClient::textDidChangeInTextArea(Element& e)
 {
     IWebFormDelegate* formDelegate;
     if (SUCCEEDED(m_webView->formDelegate(&formDelegate)) && formDelegate) {
-        IDOMElement* domElement = DOMElement::createInstance(e);
+        IDOMElement* domElement = DOMElement::createInstance(&e);
         if (domElement) {
             IDOMHTMLTextAreaElement* domTextAreaElement;
             if (SUCCEEDED(domElement->QueryInterface(IID_IDOMHTMLTextAreaElement, (void**)&domTextAreaElement))) {
-                formDelegate->textDidChangeInTextArea(domTextAreaElement, kit(e->document().frame()));
+                formDelegate->textDidChangeInTextArea(domTextAreaElement, kit(e.document().frame()));
                 domTextAreaElement->Release();
             }
             domElement->Release();
@@ -502,7 +504,7 @@ void WebEditorClient::textDidChangeInTextArea(Element* e)
     }
 }
 
-class WebEditorUndoCommand : public IWebUndoCommand
+class WebEditorUndoCommand final : public IWebUndoCommand
 {
 public:
     WebEditorUndoCommand(UndoStep&, bool isUndo);
@@ -520,9 +522,9 @@ private:
 };
 
 WebEditorUndoCommand::WebEditorUndoCommand(UndoStep& step, bool isUndo)
-    : m_step(step)
-    , m_isUndo(isUndo) 
-    , m_refCount(1)
+    : m_refCount(1)
+    , m_step(step)
+    , m_isUndo(isUndo)
 { 
 }
 
@@ -567,61 +569,63 @@ ULONG WebEditorUndoCommand::Release()
 static String undoNameForEditAction(EditAction editAction)
 {
     switch (editAction) {
-    case EditActionUnspecified:
-    case EditActionInsertReplacement:
+    case EditAction::Unspecified:
+    case EditAction::InsertReplacement:
         return String();
-    case EditActionSetColor: return WEB_UI_STRING_KEY("Set Color", "Set Color (Undo action name)", "Undo action name");
-    case EditActionSetBackgroundColor: return WEB_UI_STRING_KEY("Set Background Color", "Set Background Color (Undo action name)", "Undo action name");
-    case EditActionTurnOffKerning: return WEB_UI_STRING_KEY("Turn Off Kerning", "Turn Off Kerning (Undo action name)", "Undo action name");
-    case EditActionTightenKerning: return WEB_UI_STRING_KEY("Tighten Kerning", "Tighten Kerning (Undo action name)", "Undo action name");
-    case EditActionLoosenKerning: return WEB_UI_STRING_KEY("Loosen Kerning", "Loosen Kerning (Undo action name)", "Undo action name");
-    case EditActionUseStandardKerning: return WEB_UI_STRING_KEY("Use Standard Kerning", "Use Standard Kerning (Undo action name)", "Undo action name");
-    case EditActionTurnOffLigatures: return WEB_UI_STRING_KEY("Turn Off Ligatures", "Turn Off Ligatures (Undo action name)", "Undo action name");
-    case EditActionUseStandardLigatures: return WEB_UI_STRING_KEY("Use Standard Ligatures", "Use Standard Ligatures (Undo action name)", "Undo action name");
-    case EditActionUseAllLigatures: return WEB_UI_STRING_KEY("Use All Ligatures", "Use All Ligatures (Undo action name)", "Undo action name");
-    case EditActionRaiseBaseline: return WEB_UI_STRING_KEY("Raise Baseline", "Raise Baseline (Undo action name)", "Undo action name");
-    case EditActionLowerBaseline: return WEB_UI_STRING_KEY("Lower Baseline", "Lower Baseline (Undo action name)", "Undo action name");
-    case EditActionSetTraditionalCharacterShape: return WEB_UI_STRING_KEY("Set Traditional Character Shape", "Set Traditional Character Shape (Undo action name)", "Undo action name");
-    case EditActionSetFont: return WEB_UI_STRING_KEY("Set Font", "Set Font (Undo action name)", "Undo action name");
-    case EditActionChangeAttributes: return WEB_UI_STRING_KEY("Change Attributes", "Change Attributes (Undo action name)", "Undo action name");
-    case EditActionAlignLeft: return WEB_UI_STRING_KEY("Align Left", "Align Left (Undo action name)", "Undo action name");
-    case EditActionAlignRight: return WEB_UI_STRING_KEY("Align Right", "Align Right (Undo action name)", "Undo action name");
-    case EditActionCenter: return WEB_UI_STRING_KEY("Center", "Center (Undo action name)", "Undo action name");
-    case EditActionJustify: return WEB_UI_STRING_KEY("Justify", "Justify (Undo action name)", "Undo action name");
-    case EditActionSetWritingDirection: return WEB_UI_STRING_KEY("Set Writing Direction", "Set Writing Direction (Undo action name)", "Undo action name");
-    case EditActionSubscript: return WEB_UI_STRING_KEY("Subscript", "Subscript (Undo action name)", "Undo action name");
-    case EditActionSuperscript: return WEB_UI_STRING_KEY("Superscript", "Superscript (Undo action name)", "Undo action name");
-    case EditActionBold: return WEB_UI_STRING_KEY("Bold", "Bold (Undo action name)", "Undo action name");
-    case EditActionItalics: return WEB_UI_STRING_KEY("Italics", "Italics (Undo action name)", "Undo action name");
-    case EditActionUnderline: return WEB_UI_STRING_KEY("Underline", "Underline (Undo action name)", "Undo action name");
-    case EditActionOutline: return WEB_UI_STRING_KEY("Outline", "Outline (Undo action name)", "Undo action name");
-    case EditActionUnscript: return WEB_UI_STRING_KEY("Unscript", "Unscript (Undo action name)", "Undo action name");
-    case EditActionDeleteByDrag: return WEB_UI_STRING_KEY("Drag", "Drag (Undo action name)", "Undo action name");
-    case EditActionCut: return WEB_UI_STRING_KEY("Cut", "Cut (Undo action name)", "Undo action name");
-    case EditActionPaste: return WEB_UI_STRING_KEY("Paste", "Paste (Undo action name)", "Undo action name");
-    case EditActionPasteFont: return WEB_UI_STRING_KEY("Paste Font", "Paste Font (Undo action name)", "Undo action name");
-    case EditActionPasteRuler: return WEB_UI_STRING_KEY("Paste Ruler", "Paste Ruler (Undo action name)", "Undo action name");
-    case EditActionTypingDeleteSelection:
-    case EditActionTypingDeleteBackward:
-    case EditActionTypingDeleteForward:
-    case EditActionTypingDeleteWordBackward:
-    case EditActionTypingDeleteWordForward:
-    case EditActionTypingDeleteLineBackward:
-    case EditActionTypingDeleteLineForward:
-    case EditActionTypingInsertText:
-    case EditActionTypingInsertLineBreak:
-    case EditActionTypingInsertParagraph:
+    case EditAction::SetColor: return WEB_UI_STRING_KEY("Set Color", "Set Color (Undo action name)", "Undo action name");
+    case EditAction::SetBackgroundColor: return WEB_UI_STRING_KEY("Set Background Color", "Set Background Color (Undo action name)", "Undo action name");
+    case EditAction::TurnOffKerning: return WEB_UI_STRING_KEY("Turn Off Kerning", "Turn Off Kerning (Undo action name)", "Undo action name");
+    case EditAction::TightenKerning: return WEB_UI_STRING_KEY("Tighten Kerning", "Tighten Kerning (Undo action name)", "Undo action name");
+    case EditAction::LoosenKerning: return WEB_UI_STRING_KEY("Loosen Kerning", "Loosen Kerning (Undo action name)", "Undo action name");
+    case EditAction::UseStandardKerning: return WEB_UI_STRING_KEY("Use Standard Kerning", "Use Standard Kerning (Undo action name)", "Undo action name");
+    case EditAction::TurnOffLigatures: return WEB_UI_STRING_KEY("Turn Off Ligatures", "Turn Off Ligatures (Undo action name)", "Undo action name");
+    case EditAction::UseStandardLigatures: return WEB_UI_STRING_KEY("Use Standard Ligatures", "Use Standard Ligatures (Undo action name)", "Undo action name");
+    case EditAction::UseAllLigatures: return WEB_UI_STRING_KEY("Use All Ligatures", "Use All Ligatures (Undo action name)", "Undo action name");
+    case EditAction::RaiseBaseline: return WEB_UI_STRING_KEY("Raise Baseline", "Raise Baseline (Undo action name)", "Undo action name");
+    case EditAction::LowerBaseline: return WEB_UI_STRING_KEY("Lower Baseline", "Lower Baseline (Undo action name)", "Undo action name");
+    case EditAction::SetTraditionalCharacterShape: return WEB_UI_STRING_KEY("Set Traditional Character Shape", "Set Traditional Character Shape (Undo action name)", "Undo action name");
+    case EditAction::SetFont: return WEB_UI_STRING_KEY("Set Font", "Set Font (Undo action name)", "Undo action name");
+    case EditAction::ChangeAttributes: return WEB_UI_STRING_KEY("Change Attributes", "Change Attributes (Undo action name)", "Undo action name");
+    case EditAction::AlignLeft: return WEB_UI_STRING_KEY("Align Left", "Align Left (Undo action name)", "Undo action name");
+    case EditAction::AlignRight: return WEB_UI_STRING_KEY("Align Right", "Align Right (Undo action name)", "Undo action name");
+    case EditAction::Center: return WEB_UI_STRING_KEY("Center", "Center (Undo action name)", "Undo action name");
+    case EditAction::Justify: return WEB_UI_STRING_KEY("Justify", "Justify (Undo action name)", "Undo action name");
+    case EditAction::SetInlineWritingDirection:
+    case EditAction::SetBlockWritingDirection:
+        return WEB_UI_STRING_KEY("Set Writing Direction", "Set Writing Direction (Undo action name)", "Undo action name");
+    case EditAction::Subscript: return WEB_UI_STRING_KEY("Subscript", "Subscript (Undo action name)", "Undo action name");
+    case EditAction::Superscript: return WEB_UI_STRING_KEY("Superscript", "Superscript (Undo action name)", "Undo action name");
+    case EditAction::Bold: return WEB_UI_STRING_KEY("Bold", "Bold (Undo action name)", "Undo action name");
+    case EditAction::Italics: return WEB_UI_STRING_KEY("Italics", "Italics (Undo action name)", "Undo action name");
+    case EditAction::Underline: return WEB_UI_STRING_KEY("Underline", "Underline (Undo action name)", "Undo action name");
+    case EditAction::Outline: return WEB_UI_STRING_KEY("Outline", "Outline (Undo action name)", "Undo action name");
+    case EditAction::Unscript: return WEB_UI_STRING_KEY("Unscript", "Unscript (Undo action name)", "Undo action name");
+    case EditAction::DeleteByDrag: return WEB_UI_STRING_KEY("Drag", "Drag (Undo action name)", "Undo action name");
+    case EditAction::Cut: return WEB_UI_STRING_KEY("Cut", "Cut (Undo action name)", "Undo action name");
+    case EditAction::Paste: return WEB_UI_STRING_KEY("Paste", "Paste (Undo action name)", "Undo action name");
+    case EditAction::PasteFont: return WEB_UI_STRING_KEY("Paste Font", "Paste Font (Undo action name)", "Undo action name");
+    case EditAction::PasteRuler: return WEB_UI_STRING_KEY("Paste Ruler", "Paste Ruler (Undo action name)", "Undo action name");
+    case EditAction::TypingDeleteSelection:
+    case EditAction::TypingDeleteBackward:
+    case EditAction::TypingDeleteForward:
+    case EditAction::TypingDeleteWordBackward:
+    case EditAction::TypingDeleteWordForward:
+    case EditAction::TypingDeleteLineBackward:
+    case EditAction::TypingDeleteLineForward:
+    case EditAction::TypingInsertText:
+    case EditAction::TypingInsertLineBreak:
+    case EditAction::TypingInsertParagraph:
         return WEB_UI_STRING_KEY("Typing", "Typing (Undo action name)", "Undo action name");
-    case EditActionCreateLink: return WEB_UI_STRING_KEY("Create Link", "Create Link (Undo action name)", "Undo action name");
-    case EditActionUnlink: return WEB_UI_STRING_KEY("Unlink", "Unlink (Undo action name)", "Undo action name");
-    case EditActionInsertUnorderedList:
-    case EditActionInsertOrderedList:
+    case EditAction::CreateLink: return WEB_UI_STRING_KEY("Create Link", "Create Link (Undo action name)", "Undo action name");
+    case EditAction::Unlink: return WEB_UI_STRING_KEY("Unlink", "Unlink (Undo action name)", "Undo action name");
+    case EditAction::InsertUnorderedList:
+    case EditAction::InsertOrderedList:
         return WEB_UI_STRING_KEY("Insert List", "Insert List (Undo action name)", "Undo action name");
-    case EditActionFormatBlock: return WEB_UI_STRING_KEY("Formatting", "Format Block (Undo action name)", "Undo action name");
-    case EditActionIndent: return WEB_UI_STRING_KEY("Indent", "Indent (Undo action name)", "Undo action name");
-    case EditActionOutdent: return WEB_UI_STRING_KEY("Outdent", "Outdent (Undo action name)", "Undo action name");
+    case EditAction::FormatBlock: return WEB_UI_STRING_KEY("Formatting", "Format Block (Undo action name)", "Undo action name");
+    case EditAction::Indent: return WEB_UI_STRING_KEY("Indent", "Indent (Undo action name)", "Undo action name");
+    case EditAction::Outdent: return WEB_UI_STRING_KEY("Outdent", "Outdent (Undo action name)", "Undo action name");
+    default: return String();
     }
-    return String();
 }
 
 void WebEditorClient::registerUndoStep(UndoStep& step)
@@ -712,13 +716,13 @@ void WebEditorClient::redo()
     }
 }
 
-void WebEditorClient::handleKeyboardEvent(KeyboardEvent* evt)
+void WebEditorClient::handleKeyboardEvent(KeyboardEvent& event)
 {
-    if (m_webView->handleEditingKeyboardEvent(evt))
-        evt->setDefaultHandled();
+    if (m_webView->handleEditingKeyboardEvent(event))
+        event.setDefaultHandled();
 }
 
-void WebEditorClient::handleInputMethodKeydown(KeyboardEvent* )
+void WebEditorClient::handleInputMethodKeydown(KeyboardEvent&)
 {
 }
 
@@ -756,14 +760,7 @@ void WebEditorClient::checkSpellingOfString(StringView text, int* misspellingLoc
         return;
 
     initViewSpecificSpelling(m_webView);
-    ed->checkSpellingOfString(m_webView, text.upconvertedCharacters(), text.length(), misspellingLocation, misspellingLength);
-}
-
-String WebEditorClient::getAutoCorrectSuggestionForMisspelledWord(const String& inputWord)
-{
-    // This method can be implemented using customized algorithms for the particular browser.
-    // Currently, it computes an empty string.
-    return String();
+    ed->checkSpellingOfString(m_webView, wcharFrom(text.upconvertedCharacters()), text.length(), misspellingLocation, misspellingLength);
 }
 
 void WebEditorClient::checkGrammarOfString(StringView text, Vector<GrammarDetail>& details, int* badGrammarLocation, int* badGrammarLength)
@@ -778,7 +775,7 @@ void WebEditorClient::checkGrammarOfString(StringView text, Vector<GrammarDetail
 
     initViewSpecificSpelling(m_webView);
     COMPtr<IEnumWebGrammarDetails> enumDetailsObj;
-    if (FAILED(ed->checkGrammarOfString(m_webView, text.upconvertedCharacters(), text.length(), &enumDetailsObj, badGrammarLocation, badGrammarLength)))
+    if (FAILED(ed->checkGrammarOfString(m_webView, wcharFrom(text.upconvertedCharacters()), text.length(), &enumDetailsObj, badGrammarLocation, badGrammarLength)))
         return;
 
     while (true) {
@@ -787,14 +784,18 @@ void WebEditorClient::checkGrammarOfString(StringView text, Vector<GrammarDetail
         if (enumDetailsObj->Next(1, &detailObj, &fetched) != S_OK)
             break;
 
-        GrammarDetail detail;
-        if (FAILED(detailObj->length(&detail.length)))
+        int length;
+        if (FAILED(detailObj->length(&length)))
             continue;
-        if (FAILED(detailObj->location(&detail.location)))
+        int location;
+        if (FAILED(detailObj->location(&location)))
             continue;
         BString userDesc;
         if (FAILED(detailObj->userDescription(&userDesc)))
             continue;
+
+        GrammarDetail detail;
+        detail.range = CharacterRange(location, length);
         detail.userDescription = String(userDesc, SysStringLen(userDesc));
 
         COMPtr<IEnumSpellingGuesses> enumGuessesObj;
@@ -823,7 +824,7 @@ void WebEditorClient::updateSpellingUIWithGrammarString(const String& string, co
         guessesBSTRs.append(guess.release());
     }
     BString userDescriptionBSTR(detail.userDescription);
-    ed->updateSpellingUIWithGrammarString(BString(string), detail.location, detail.length, userDescriptionBSTR, guessesBSTRs.data(), (int)guessesBSTRs.size());
+    ed->updateSpellingUIWithGrammarString(BString(string), detail.range.location, detail.range.length, userDescriptionBSTR, guessesBSTRs.data(), (int)guessesBSTRs.size());
     for (unsigned i = 0; i < guessesBSTRs.size(); i++)
         SysFreeString(guessesBSTRs[i]);
 }
@@ -884,7 +885,7 @@ void WebEditorClient::willSetInputMethodState()
 {
 }
 
-void WebEditorClient::setInputMethodState(bool enabled)
+void WebEditorClient::setInputMethodState(WebCore::Element* element)
 {
-    m_webView->setInputMethodState(enabled);
+    m_webView->setInputMethodState(element && element->shouldUseInputMethod());
 }

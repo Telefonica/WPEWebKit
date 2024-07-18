@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,42 +26,31 @@
 #pragma once
 
 #include "DisallowScope.h"
-#include "Heap.h"
+#include <wtf/NeverDestroyed.h>
 #include <wtf/ThreadSpecific.h>
 
 namespace JSC {
 
+class Heap;
+class VM;
+
 class DeferGC {
     WTF_MAKE_NONCOPYABLE(DeferGC);
+    WTF_FORBID_HEAP_ALLOCATION;
 public:
-    DeferGC(Heap& heap)
-        : m_heap(heap)
-    {
-        m_heap.incrementDeferralDepth();
-    }
-    
-    ~DeferGC()
-    {
-        m_heap.decrementDeferralDepthAndGCIfNeeded();
-    }
+    DeferGC(VM&);
+    ~DeferGC();
 
 private:
-    Heap& m_heap;
+    VM& m_vm;
 };
 
 class DeferGCForAWhile {
     WTF_MAKE_NONCOPYABLE(DeferGCForAWhile);
+    WTF_FORBID_HEAP_ALLOCATION;
 public:
-    DeferGCForAWhile(Heap& heap)
-        : m_heap(heap)
-    {
-        m_heap.incrementDeferralDepth();
-    }
-    
-    ~DeferGCForAWhile()
-    {
-        m_heap.decrementDeferralDepth();
-    }
+    DeferGCForAWhile(VM&);
+    ~DeferGCForAWhile();
 
 private:
     Heap& m_heap;
@@ -69,37 +58,33 @@ private:
 
 class DisallowGC : public DisallowScope<DisallowGC> {
     WTF_MAKE_NONCOPYABLE(DisallowGC);
+    WTF_FORBID_HEAP_ALLOCATION;
     typedef DisallowScope<DisallowGC> Base;
 public:
-#ifdef NDEBUG
-
-    ALWAYS_INLINE DisallowGC(bool = false) { }
-    ALWAYS_INLINE static void initialize() { }
-
-#else // not NDEBUG
-
-    DisallowGC(bool enabled = true)
-        : Base(enabled)
-    { }
+#if ASSERT_ENABLED
+    DisallowGC() = default;
 
     static void initialize()
     {
-        WTF::threadSpecificKeyCreate(&s_scopeReentryCount, 0);
+        s_scopeReentryCount.construct();
     }
 
 private:
-    static uintptr_t scopeReentryCount()
+    static unsigned scopeReentryCount()
     {
-        return reinterpret_cast<uintptr_t>(WTF::threadSpecificGet(s_scopeReentryCount));
+        return *s_scopeReentryCount.get();
     }
-    static void setScopeReentryCount(uintptr_t value)
+    static void setScopeReentryCount(unsigned value)
     {
-        WTF::threadSpecificSet(s_scopeReentryCount, reinterpret_cast<void*>(value));
+        *s_scopeReentryCount.get() = value;
     }
     
-    JS_EXPORT_PRIVATE static WTF::ThreadSpecificKey s_scopeReentryCount;
+    JS_EXPORT_PRIVATE static LazyNeverDestroyed<ThreadSpecific<unsigned, WTF::CanBeGCThread::True>> s_scopeReentryCount;
 
-#endif // NDEBUG
+#else
+    ALWAYS_INLINE DisallowGC() { } // We need this to placate Clang due to unused warnings.
+    ALWAYS_INLINE static void initialize() { }
+#endif // ASSERT_ENABLED
     
     friend class DisallowScope<DisallowGC>;
 };

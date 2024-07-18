@@ -45,14 +45,16 @@ WI.ProbeDetailsSidebarPanel = class ProbeDetailsSidebarPanel extends WI.DetailsS
     {
         for (let probeSet of this._inspectedProbeSets) {
             let removedSection = this._probeSetSections.get(probeSet);
-            removedSection.element.remove();
+            if (removedSection)
+                removedSection.element.remove();
         }
 
         this._inspectedProbeSets = newProbeSets;
 
         for (let probeSet of newProbeSets) {
             let shownSection = this._probeSetSections.get(probeSet);
-            this.contentView.element.appendChild(shownSection.element);
+            if (shownSection)
+                this.contentView.element.appendChild(shownSection.element);
         }
     }
 
@@ -66,6 +68,11 @@ WI.ProbeDetailsSidebarPanel = class ProbeDetailsSidebarPanel extends WI.DetailsS
         });
 
         inspectedProbeSets.sort(function sortBySourceLocation(aProbeSet, bProbeSet) {
+            if (!(aProbeSet instanceof WI.JavaScriptBreakpoint))
+                return 1;
+            if (!(bProbeSet instanceof WI.JavaScriptBreakpoint))
+                return -1;
+
             var aLocation = aProbeSet.breakpoint.sourceCodeLocation;
             var bLocation = bProbeSet.breakpoint.sourceCodeLocation;
             var comparisonResult = aLocation.sourceCode.displayName.extendedLocaleCompare(bLocation.sourceCode.displayName);
@@ -84,18 +91,29 @@ WI.ProbeDetailsSidebarPanel = class ProbeDetailsSidebarPanel extends WI.DetailsS
         return !!this._inspectedProbeSets.length;
     }
 
+    closed()
+    {
+        if (this.didInitialLayout) {
+            WI.debuggerManager.removeEventListener(WI.DebuggerManager.Event.ProbeSetAdded, this._probeSetAdded, this);
+            WI.debuggerManager.removeEventListener(WI.DebuggerManager.Event.ProbeSetRemoved, this._probeSetRemoved, this);
+        }
+
+        super.closed();
+    }
+
     // Protected
 
     initialLayout()
     {
         super.initialLayout();
 
-        WI.probeManager.addEventListener(WI.ProbeManager.Event.ProbeSetAdded, this._probeSetAdded, this);
-        WI.probeManager.addEventListener(WI.ProbeManager.Event.ProbeSetRemoved, this._probeSetRemoved, this);
+        WI.debuggerManager.addEventListener(WI.DebuggerManager.Event.ProbeSetAdded, this._probeSetAdded, this);
+        WI.debuggerManager.addEventListener(WI.DebuggerManager.Event.ProbeSetRemoved, this._probeSetRemoved, this);
 
-        // Initialize sidebar sections for probe sets that already exist.
-        for (var probeSet of WI.probeManager.probeSets)
+        for (let probeSet of new Set([...this._inspectedProbeSets, ...WI.debuggerManager.probeSets]))
             this._probeSetAdded(probeSet);
+
+        this.inspectedProbeSets = this._inspectedProbeSets;
     }
 
     sizeDidChange()

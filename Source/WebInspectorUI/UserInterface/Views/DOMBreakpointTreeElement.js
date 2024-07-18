@@ -23,130 +23,19 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WI.DOMBreakpointTreeElement = class DOMBreakpointTreeElement extends WI.GeneralTreeElement
+WI.DOMBreakpointTreeElement = class DOMBreakpointTreeElement extends WI.BreakpointTreeElement
 {
-    constructor(breakpoint, className, title)
+    constructor(breakpoint, {classNames, title} = {})
     {
         console.assert(breakpoint instanceof WI.DOMBreakpoint);
 
-        if (!className)
-            className = WI.BreakpointTreeElement.GenericLineIconStyleClassName;
+        if (!Array.isArray(classNames))
+            classNames = [];
+        classNames.push("dom", breakpoint.type);
 
         if (!title)
-            title = WI.DOMBreakpointTreeElement.displayNameForType(breakpoint.type);
+            title = breakpoint.displayName;
 
-        super(["breakpoint", className], title, null, breakpoint);
-
-        this._statusImageElement = document.createElement("img");
-        this._statusImageElement.classList.add("status-image", "resolved");
-        this.status = this._statusImageElement;
-
-        breakpoint.addEventListener(WI.DOMBreakpoint.Event.DisabledStateDidChange, this._updateStatus, this);
-
-        this._updateStatus();
-    }
-
-    // Static
-
-    static displayNameForType(type)
-    {
-        switch (type) {
-        case WI.DOMBreakpoint.Type.SubtreeModified:
-            return WI.UIString("Subtree Modified");
-        case WI.DOMBreakpoint.Type.AttributeModified:
-            return WI.UIString("Attribute Modified");
-        case WI.DOMBreakpoint.Type.NodeRemoved:
-            return WI.UIString("Node Removed");
-        default:
-            console.error("Unexpected DOM breakpoint type: " + type);
-            return null;
-        }
-    }
-
-    // Protected
-
-    onattach()
-    {
-        super.onattach();
-
-        this._boundStatusImageElementClicked = this._statusImageElementClicked.bind(this);
-        this._boundStatusImageElementFocused = this._statusImageElementFocused.bind(this);
-        this._boundStatusImageElementMouseDown = this._statusImageElementMouseDown.bind(this);
-
-        this._statusImageElement.addEventListener("click", this._boundStatusImageElementClicked);
-        this._statusImageElement.addEventListener("focus", this._boundStatusImageElementFocused);
-        this._statusImageElement.addEventListener("mousedown", this._boundStatusImageElementMouseDown);
-    }
-
-    ondetach()
-    {
-        super.ondetach();
-
-        this._statusImageElement.removeEventListener("click", this._boundStatusImageElementClicked);
-        this._statusImageElement.removeEventListener("focus", this._boundStatusImageElementFocused);
-        this._statusImageElement.removeEventListener("mousedown", this._boundStatusImageElementMouseDown);
-
-        this._boundStatusImageElementClicked = null;
-        this._boundStatusImageElementFocused = null;
-        this._boundStatusImageElementMouseDown = null;
-    }
-
-    ondelete()
-    {
-        WI.domDebuggerManager.removeDOMBreakpoint(this.representedObject);
-        return true;
-    }
-
-    onenter()
-    {
-        this._toggleBreakpoint();
-        return true;
-    }
-
-    onspace()
-    {
-        this._toggleBreakpoint();
-        return true;
-    }
-
-    populateContextMenu(contextMenu, event)
-    {
-        let breakpoint = this.representedObject;
-        let label = breakpoint.disabled ? WI.UIString("Enable Breakpoint") : WI.UIString("Disable Breakpoint");
-        contextMenu.appendItem(label, this._toggleBreakpoint.bind(this));
-
-        contextMenu.appendSeparator();
-        contextMenu.appendItem(WI.UIString("Delete Breakpoint"), function() {
-            WI.domDebuggerManager.removeDOMBreakpoint(breakpoint);
-        });
-    }
-
-    // Private
-
-    _statusImageElementClicked(event)
-    {
-        this._toggleBreakpoint();
-    }
-
-    _statusImageElementFocused(event)
-    {
-        // Prevent tree outline focus.
-        event.stopPropagation();
-    }
-
-    _statusImageElementMouseDown(event)
-    {
-        // Prevent tree element selection.
-        event.stopPropagation();
-    }
-
-    _toggleBreakpoint()
-    {
-        this.representedObject.disabled = !this.representedObject.disabled;
-    }
-
-    _updateStatus()
-    {
-        this._statusImageElement.classList.toggle("disabled", this.representedObject.disabled);
+        super(breakpoint, {classNames, title});
     }
 };

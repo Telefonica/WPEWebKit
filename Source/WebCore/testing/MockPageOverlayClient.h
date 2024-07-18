@@ -25,14 +25,15 @@
 
 #pragma once
 
-#include "Frame.h"
 #include "MockPageOverlay.h"
 #include "PageOverlay.h"
 #include <wtf/HashSet.h>
 
 namespace WebCore {
 
-class MainFrame;
+class Frame;
+class Page;
+enum class LayerTreeAsTextOptions : uint16_t;
 
 class MockPageOverlayClient final : public PageOverlay::Client {
     friend class NeverDestroyed<MockPageOverlayClient>;
@@ -41,12 +42,12 @@ public:
 
     explicit MockPageOverlayClient();
 
-    Ref<MockPageOverlay> installOverlay(MainFrame&, PageOverlay::OverlayType);
+    Ref<MockPageOverlay> installOverlay(Page&, PageOverlay::OverlayType);
     void uninstallAllOverlays();
 
-    String layerTreeAsText(MainFrame&, LayerTreeFlags);
+    String layerTreeAsText(Page&, OptionSet<LayerTreeAsTextOptions>);
 
-    virtual ~MockPageOverlayClient() { }
+    virtual ~MockPageOverlayClient() = default;
 
 private:
     void willMoveToPage(PageOverlay&, Page*) override;

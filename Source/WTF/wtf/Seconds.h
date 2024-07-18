@@ -23,19 +23,23 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WTF_Seconds_h
-#define WTF_Seconds_h
+#pragma once
 
+#include <optional>
+#include <wtf/FastMalloc.h>
 #include <wtf/MathExtras.h>
 
 namespace WTF {
 
+class ApproximateTime;
 class MonotonicTime;
 class PrintStream;
+class TextStream;
 class TimeWithDynamicClockType;
 class WallTime;
 
-class Seconds {
+class Seconds final {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     constexpr Seconds() { }
     
@@ -53,11 +57,11 @@ public:
     constexpr double nanoseconds() const { return microseconds() * 1000; }
 
     // Keep in mind that Seconds is held in double. If the value is not in range of 53bit integer, the result may not be precise.
-    template<typename T> T minutesAs() const { static_assert(std::is_integral<T>::value, ""); return clampToAccepting64<T>(minutes()); }
-    template<typename T> T secondsAs() const { static_assert(std::is_integral<T>::value, ""); return clampToAccepting64<T>(seconds()); }
-    template<typename T> T millisecondsAs() const { static_assert(std::is_integral<T>::value, ""); return clampToAccepting64<T>(milliseconds()); }
-    template<typename T> T microsecondsAs() const { static_assert(std::is_integral<T>::value, ""); return clampToAccepting64<T>(microseconds()); }
-    template<typename T> T nanosecondsAs() const { static_assert(std::is_integral<T>::value, ""); return clampToAccepting64<T>(nanoseconds()); }
+    template<typename T> T minutesAs() const { static_assert(std::is_integral<T>::value); return clampToAccepting64<T>(minutes()); }
+    template<typename T> T secondsAs() const { static_assert(std::is_integral<T>::value); return clampToAccepting64<T>(seconds()); }
+    template<typename T> T millisecondsAs() const { static_assert(std::is_integral<T>::value); return clampToAccepting64<T>(milliseconds()); }
+    template<typename T> T microsecondsAs() const { static_assert(std::is_integral<T>::value); return clampToAccepting64<T>(microseconds()); }
+    template<typename T> T nanosecondsAs() const { static_assert(std::is_integral<T>::value); return clampToAccepting64<T>(nanoseconds()); }
     
     static constexpr Seconds fromMinutes(double minutes)
     {
@@ -87,6 +91,11 @@ public:
     static constexpr Seconds infinity()
     {
         return Seconds(std::numeric_limits<double>::infinity());
+    }
+
+    static constexpr Seconds nan()
+    {
+        return Seconds(std::numeric_limits<double>::quiet_NaN());
     }
     
     explicit constexpr operator bool() const { return !!m_value; }
@@ -171,10 +180,12 @@ public:
     
     WTF_EXPORT_PRIVATE WallTime operator+(WallTime) const;
     WTF_EXPORT_PRIVATE MonotonicTime operator+(MonotonicTime) const;
+    WTF_EXPORT_PRIVATE ApproximateTime operator+(ApproximateTime) const;
     WTF_EXPORT_PRIVATE TimeWithDynamicClockType operator+(const TimeWithDynamicClockType&) const;
     
     WTF_EXPORT_PRIVATE WallTime operator-(WallTime) const;
     WTF_EXPORT_PRIVATE MonotonicTime operator-(MonotonicTime) const;
+    WTF_EXPORT_PRIVATE ApproximateTime operator-(ApproximateTime) const;
     WTF_EXPORT_PRIVATE TimeWithDynamicClockType operator-(const TimeWithDynamicClockType&) const;
     
     constexpr bool operator==(Seconds other) const
@@ -209,8 +220,56 @@ public:
     
     WTF_EXPORT_PRIVATE void dump(PrintStream&) const;
     
+    Seconds isolatedCopy() const
+    {
+        return *this;
+    }
+
+    template<class Encoder>
+    void encode(Encoder& encoder) const
+    {
+        encoder << m_value;
+    }
+
+    template<class Decoder>
+    static std::optional<Seconds> decode(Decoder& decoder)
+    {
+        std::optional<double> seconds;
+        decoder >> seconds;
+        if (!seconds)
+            return std::nullopt;
+        return Seconds(*seconds);
+    }
+
+    template<class Decoder>
+    static WARN_UNUSED_RETURN bool decode(Decoder& decoder, Seconds& seconds)
+    {
+        double value;
+        if (!decoder.decode(value))
+            return false;
+
+        seconds = Seconds(value);
+        return true;
+    }
+
+    struct MarkableTraits;
+
 private:
     double m_value { 0 };
+};
+
+WTF_EXPORT_PRIVATE void sleep(Seconds);
+
+struct Seconds::MarkableTraits {
+    static bool isEmptyValue(Seconds seconds)
+    {
+        return std::isnan(seconds.value());
+    }
+
+    static constexpr Seconds emptyValue()
+    {
+        return Seconds::nan();
+    }
 };
 
 inline namespace seconds_literals {
@@ -277,9 +336,21 @@ constexpr Seconds operator"" _ns(unsigned long long nanoseconds)
 
 } // inline seconds_literals
 
-WTF_EXPORT_PRIVATE void sleep(Seconds);
+inline Seconds operator*(double scalar, Seconds seconds)
+{
+    return Seconds(scalar * seconds.value());
+}
+
+inline Seconds operator/(double scalar, Seconds seconds)
+{
+    return Seconds(scalar / seconds.value());
+}
+
+WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, Seconds);
 
 } // namespace WTF
+
+using WTF::sleep;
 
 namespace std {
 
@@ -302,5 +373,3 @@ inline bool isfinite(WTF::Seconds seconds)
 
 using namespace WTF::seconds_literals;
 using WTF::Seconds;
-
-#endif // WTF_Seconds_h

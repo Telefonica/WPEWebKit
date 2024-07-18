@@ -28,8 +28,12 @@
 #include "ElementIterator.h"
 #include "HTMLFieldSetElement.h"
 #include "HTMLNames.h"
+#include "SelectionRestorationMode.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLLegendElement);
 
 inline HTMLLegendElement::HTMLLegendElement(const QualifiedName& tagName, Document& document)
     : HTMLElement(tagName, document)
@@ -42,7 +46,7 @@ Ref<HTMLLegendElement> HTMLLegendElement::create(const QualifiedName& tagName, D
     return adoptRef(*new HTMLLegendElement(tagName, document));
 }
 
-HTMLFormControlElement* HTMLLegendElement::associatedControl()
+RefPtr<HTMLFormControlElement> HTMLLegendElement::associatedControl()
 {
     // Check if there's a fieldset belonging to this legend.
     auto enclosingFieldset = ancestorsOfType<HTMLFieldSetElement>(*this).first();
@@ -54,25 +58,26 @@ HTMLFormControlElement* HTMLLegendElement::associatedControl()
     return descendantsOfType<HTMLFormControlElement>(*enclosingFieldset).first();
 }
 
-void HTMLLegendElement::focus(bool restorePreviousSelection, FocusDirection direction)
+void HTMLLegendElement::focus(const FocusOptions& options)
 {
     if (document().haveStylesheetsLoaded()) {
         document().updateLayoutIgnorePendingStylesheets();
         if (isFocusable()) {
-            Element::focus(restorePreviousSelection, direction);
+            Element::focus({ options.selectionRestorationMode, options.direction });
             return;
         }
     }
 
     // To match other browsers' behavior, never restore previous selection.
-    if (auto* control = associatedControl())
-        control->focus(false, direction);
+    if (auto control = associatedControl())
+        control->focus({ SelectionRestorationMode::SelectAll, options.direction });
 }
 
-void HTMLLegendElement::accessKeyAction(bool sendMouseEvents)
+bool HTMLLegendElement::accessKeyAction(bool sendMouseEvents)
 {
-    if (auto* control = associatedControl())
-        control->accessKeyAction(sendMouseEvents);
+    if (auto control = associatedControl())
+        return control->accessKeyAction(sendMouseEvents);
+    return false;
 }
 
 HTMLFormElement* HTMLLegendElement::form() const
@@ -80,7 +85,7 @@ HTMLFormElement* HTMLLegendElement::form() const
     // According to the specification, If the legend has a fieldset element as
     // its parent, then the form attribute must return the same value as the
     // form attribute on that fieldset element. Otherwise, it must return null.
-    auto* fieldset = parentNode();
+    RefPtr fieldset = parentNode();
     if (!is<HTMLFieldSetElement>(fieldset))
         return nullptr;
     return downcast<HTMLFieldSetElement>(*fieldset).form();

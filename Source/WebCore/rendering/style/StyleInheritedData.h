@@ -30,13 +30,19 @@
 
 namespace WebCore {
 
+DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(StyleInheritedData);
 class StyleInheritedData : public RefCounted<StyleInheritedData> {
+    WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(StyleInheritedData);
 public:
     static Ref<StyleInheritedData> create() { return adoptRef(*new StyleInheritedData); }
     Ref<StyleInheritedData> copy() const;
 
     bool operator==(const StyleInheritedData&) const;
     bool operator!=(const StyleInheritedData& other) const { return !(*this == other); }
+
+    bool fastPathInheritedEqual(const StyleInheritedData&) const;
+    bool nonFastPathInheritedEqual(const StyleInheritedData&) const;
+    void fastPathInheritFrom(const StyleInheritedData&);
 
     float horizontalBorderSpacing;
     float verticalBorderSpacing;

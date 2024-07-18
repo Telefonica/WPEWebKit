@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -82,14 +82,20 @@ typedef NS_ENUM(NSInteger, WebMediaCaptureType) {
 - (void)webView:(WebView *)webView elementDidFocusNode:(DOMNode *)node;
 - (void)webView:(WebView *)webView elementDidBlurNode:(DOMNode *)node;
 
-// PageCache support
+// BackForwardCache support
 - (void)webViewDidRestoreFromPageCache:(WebView *)webView;
 
+#if TARGET_OS_IPHONE
+- (WAKView *)webView:(WebView *)webView plugInViewWithArguments:(NSDictionary *)arguments fromPlugInPackage:(WebPluginPackage *)package;
+#else
 - (NSView *)webView:(WebView *)webView plugInViewWithArguments:(NSDictionary *)arguments fromPlugInPackage:(WebPluginPackage *)package;
+#endif
 - (void)webView:(WebView *)webView willShowFullScreenForPlugInView:(id)plugInView;
 - (void)webView:(WebView *)webView didHideFullScreenForPlugInView:(id)plugInView;
 - (void)webView:(WebView *)aWebView didReceiveMessage:(NSDictionary *)aMessage;
 - (void)addInputString:(NSString *)str withFlags:(NSUInteger)flags;
+- (BOOL)handleKeyTextCommandForCurrentEvent;
+- (BOOL)handleKeyAppCommandForCurrentEvent;
 // FIXME: remove deleteFromInput when UIKit implements deleteFromInputWithFlags.
 - (void)deleteFromInput;
 - (void)deleteFromInputWithFlags:(NSUInteger)flags;
@@ -124,11 +130,14 @@ typedef NS_ENUM(NSInteger, WebMediaCaptureType) {
 - (CGPoint)interactionLocation;
 - (void)showPlaybackTargetPicker:(BOOL)hasVideo fromRect:(CGRect)elementRect;
 
-#if ENABLE_ORIENTATION_EVENTS
+- (BOOL)shouldRevealCurrentSelectionAfterInsertion;
+
+- (BOOL)shouldSuppressPasswordEcho;
+
+#if defined(ENABLE_ORIENTATION_EVENTS) && ENABLE_ORIENTATION_EVENTS
 - (int)deviceOrientation;
 #endif
 
-- (BOOL)isUnperturbedDictationResultMarker:(id)metadataForMarker;
 - (void)webView:(WebView *)webView addMessageToConsole:(NSDictionary *)message withSource:(NSString *)source;
 @end
 

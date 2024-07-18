@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,8 +27,9 @@
 
 #if ENABLE(APPLE_PAY)
 
-#import <WebCore/URL.h>
+#import <wtf/CompletionHandler.h>
 #import <wtf/MainThread.h>
+#import <wtf/URL.h>
 
 WebPaymentCoordinatorClient::WebPaymentCoordinatorClient()
 {
@@ -38,9 +39,9 @@ WebPaymentCoordinatorClient::~WebPaymentCoordinatorClient()
 {
 }
 
-bool WebPaymentCoordinatorClient::supportsVersion(unsigned)
+std::optional<String> WebPaymentCoordinatorClient::validatedPaymentNetwork(const String&)
 {
-    return false;
+    return std::nullopt;
 }
 
 bool WebPaymentCoordinatorClient::canMakePayments()
@@ -48,21 +49,21 @@ bool WebPaymentCoordinatorClient::canMakePayments()
     return false;
 }
 
-void WebPaymentCoordinatorClient::canMakePaymentsWithActiveCard(const String&, const String&, WTF::Function<void (bool)>&& completionHandler)
+void WebPaymentCoordinatorClient::canMakePaymentsWithActiveCard(const String&, const String&, CompletionHandler<void(bool)>&& completionHandler)
 {
-    callOnMainThread([completionHandler = WTFMove(completionHandler)] {
+    callOnMainThread([completionHandler = WTFMove(completionHandler)]() mutable {
         completionHandler(false);
     });
 }
 
-void WebPaymentCoordinatorClient::openPaymentSetup(const String&, const String&, WTF::Function<void (bool)>&& completionHandler)
+void WebPaymentCoordinatorClient::openPaymentSetup(const String&, const String&, CompletionHandler<void(bool)>&& completionHandler)
 {
-    callOnMainThread([completionHandler = WTFMove(completionHandler)] {
+    callOnMainThread([completionHandler = WTFMove(completionHandler)]() mutable {
         completionHandler(false);
     });
 }
 
-bool WebPaymentCoordinatorClient::showPaymentUI(const WebCore::URL&, const Vector<WebCore::URL>&, const WebCore::ApplePaySessionPaymentRequest&)
+bool WebPaymentCoordinatorClient::showPaymentUI(const URL&, const Vector<URL>&, const WebCore::ApplePaySessionPaymentRequest&)
 {
     return false;
 }
@@ -71,19 +72,27 @@ void WebPaymentCoordinatorClient::completeMerchantValidation(const WebCore::Paym
 {
 }
 
-void WebPaymentCoordinatorClient::completeShippingMethodSelection(std::optional<WebCore::ShippingMethodUpdate>&&)
+void WebPaymentCoordinatorClient::completeShippingMethodSelection(std::optional<WebCore::ApplePayShippingMethodUpdate>&&)
 {
 }
 
-void WebPaymentCoordinatorClient::completeShippingContactSelection(std::optional<WebCore::ShippingContactUpdate>&&)
+void WebPaymentCoordinatorClient::completeShippingContactSelection(std::optional<WebCore::ApplePayShippingContactUpdate>&&)
 {
 }
 
-void WebPaymentCoordinatorClient::completePaymentMethodSelection(std::optional<WebCore::PaymentMethodUpdate>&&)
+void WebPaymentCoordinatorClient::completePaymentMethodSelection(std::optional<WebCore::ApplePayPaymentMethodUpdate>&&)
 {
 }
 
-void WebPaymentCoordinatorClient::completePaymentSession(std::optional<WebCore::PaymentAuthorizationResult>&&)
+#if ENABLE(APPLE_PAY_COUPON_CODE)
+
+void WebPaymentCoordinatorClient::completeCouponCodeChange(std::optional<WebCore::ApplePayCouponCodeUpdate>&&)
+{
+}
+
+#endif // ENABLE(APPLE_PAY_COUPON_CODE)
+
+void WebPaymentCoordinatorClient::completePaymentSession(WebCore::ApplePayPaymentAuthorizationResult&&)
 {
 }
 

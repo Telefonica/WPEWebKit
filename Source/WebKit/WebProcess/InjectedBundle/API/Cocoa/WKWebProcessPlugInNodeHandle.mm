@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,21 +26,23 @@
 #import "config.h"
 #import "WKWebProcessPlugInNodeHandleInternal.h"
 
+#import "CocoaImage.h"
 #import "WKSharedAPICast.h"
 #import "WKWebProcessPlugInFrameInternal.h"
+#import "WebImage.h"
+#import <WebCore/HTMLTextFormControlElement.h>
 #import <WebCore/IntRect.h>
-#import <WebKit/WebImage.h>
-
-#if WK_API_ENABLED
-
-using namespace WebKit;
+#import <WebCore/NativeImage.h>
+#import <WebCore/WebCoreObjCExtras.h>
 
 @implementation WKWebProcessPlugInNodeHandle {
-    API::ObjectStorage<InjectedBundleNodeHandle> _nodeHandle;
+    API::ObjectStorage<WebKit::InjectedBundleNodeHandle> _nodeHandle;
 }
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKWebProcessPlugInNodeHandle.class, self))
+        return;
     _nodeHandle->~InjectedBundleNodeHandle();
     [super dealloc];
 }
@@ -48,62 +50,40 @@ using namespace WebKit;
 + (WKWebProcessPlugInNodeHandle *)nodeHandleWithJSValue:(JSValue *)value inContext:(JSContext *)context
 {
     JSContextRef contextRef = [context JSGlobalContextRef];
-    JSObjectRef objectRef = JSValueToObject(contextRef, [value JSValueRef], 0);
-    auto nodeHandle = InjectedBundleNodeHandle::getOrCreate(contextRef, objectRef);
-    if (!nodeHandle)
-        return nil;
-
-    return [wrapper(*nodeHandle.leakRef()) autorelease];
+    JSObjectRef objectRef = JSValueToObject(contextRef, [value JSValueRef], nullptr);
+    return WebKit::wrapper(WebKit::InjectedBundleNodeHandle::getOrCreate(contextRef, objectRef));
 }
 
 - (WKWebProcessPlugInFrame *)htmlIFrameElementContentFrame
 {
-    auto frame = _nodeHandle->htmlIFrameElementContentFrame();
-    if (!frame)
-        return nil;
-
-    return [wrapper(*frame.leakRef()) autorelease];
+    return WebKit::wrapper(_nodeHandle->htmlIFrameElementContentFrame());
 }
 
-#if PLATFORM(IOS)
-- (UIImage *)renderedImageWithOptions:(WKSnapshotOptions)options
+- (CocoaImage *)renderedImageWithOptions:(WKSnapshotOptions)options
 {
     return [self renderedImageWithOptions:options width:nil];
 }
 
-- (UIImage *)renderedImageWithOptions:(WKSnapshotOptions)options width:(NSNumber *)width
+- (CocoaImage *)renderedImageWithOptions:(WKSnapshotOptions)options width:(NSNumber *)width
 {
     std::optional<float> optionalWidth;
     if (width)
         optionalWidth = width.floatValue;
 
-    RefPtr<WebImage> image = _nodeHandle->renderedImage(toSnapshotOptions(options), options & kWKSnapshotOptionsExcludeOverflow, optionalWidth);
+    auto image = _nodeHandle->renderedImage(WebKit::toSnapshotOptions(options), options & kWKSnapshotOptionsExcludeOverflow, optionalWidth);
     if (!image)
         return nil;
 
-    return [[[UIImage alloc] initWithCGImage:image->bitmap().makeCGImage().get()] autorelease];
-}
-#endif
-
-#if PLATFORM(MAC)
-- (NSImage *)renderedImageWithOptions:(WKSnapshotOptions)options
-{
-    return [self renderedImageWithOptions:options width:nil];
-}
-
-- (NSImage *)renderedImageWithOptions:(WKSnapshotOptions)options width:(NSNumber *)width
-{
-    std::optional<float> optionalWidth;
-    if (width)
-        optionalWidth = width.floatValue;
-
-    RefPtr<WebImage> image = _nodeHandle->renderedImage(toSnapshotOptions(options), options & kWKSnapshotOptionsExcludeOverflow, optionalWidth);
-    if (!image)
+    auto nativeImage = image->copyNativeImage(WebCore::DontCopyBackingStore);
+    if (!nativeImage)
         return nil;
 
-    return [[[NSImage alloc] initWithCGImage:image->bitmap().makeCGImage().get() size:NSZeroSize] autorelease];
-}
+#if USE(APPKIT)
+    return adoptNS([[NSImage alloc] initWithCGImage:nativeImage->platformImage().get() size:NSZeroSize]).autorelease();
+#else
+    return adoptNS([[UIImage alloc] initWithCGImage:nativeImage->platformImage().get()]).autorelease();
 #endif
+}
 
 - (CGRect)elementBounds
 {
@@ -115,9 +95,90 @@ using namespace WebKit;
     return _nodeHandle->isHTMLInputElementAutoFilled();
 }
 
+- (BOOL)HTMLInputElementIsAutoFilledAndViewable
+{
+    return _nodeHandle->isHTMLInputElementAutoFilledAndViewable();
+}
+
+- (BOOL)HTMLInputElementIsAutoFilledAndObscured
+{
+    return _nodeHandle->isHTMLInputElementAutoFilledAndObscured();
+}
+
 - (void)setHTMLInputElementIsAutoFilled:(BOOL)isAutoFilled
 {
     _nodeHandle->setHTMLInputElementAutoFilled(isAutoFilled);
+}
+
+- (void)setHTMLInputElementIsAutoFilledAndViewable:(BOOL)isAutoFilledAndViewable
+{
+    _nodeHandle->setHTMLInputElementAutoFilledAndViewable(isAutoFilledAndViewable);
+}
+
+- (void)setHTMLInputElementIsAutoFilledAndObscured:(BOOL)isAutoFilledAndObscured
+{
+    _nodeHandle->setHTMLInputElementAutoFilledAndObscured(isAutoFilledAndObscured);
+}
+
+- (BOOL)isHTMLInputElementAutoFillButtonEnabled
+{
+    return _nodeHandle->isHTMLInputElementAutoFillButtonEnabled();
+}
+
+static WebCore::AutoFillButtonType toAutoFillButtonType(_WKAutoFillButtonType autoFillButtonType)
+{
+    switch (autoFillButtonType) {
+    case _WKAutoFillButtonTypeNone:
+        return WebCore::AutoFillButtonType::None;
+    case _WKAutoFillButtonTypeContacts:
+        return WebCore::AutoFillButtonType::Contacts;
+    case _WKAutoFillButtonTypeCredentials:
+        return WebCore::AutoFillButtonType::Credentials;
+    case _WKAutoFillButtonTypeStrongPassword:
+        return WebCore::AutoFillButtonType::StrongPassword;
+    case _WKAutoFillButtonTypeCreditCard:
+        return WebCore::AutoFillButtonType::CreditCard;
+    case _WKAutoFillButtonTypeLoading:
+        return WebCore::AutoFillButtonType::Loading;
+    }
+    ASSERT_NOT_REACHED();
+    return WebCore::AutoFillButtonType::None;
+}
+
+static _WKAutoFillButtonType toWKAutoFillButtonType(WebCore::AutoFillButtonType autoFillButtonType)
+{
+    switch (autoFillButtonType) {
+    case WebCore::AutoFillButtonType::None:
+        return _WKAutoFillButtonTypeNone;
+    case WebCore::AutoFillButtonType::Contacts:
+        return _WKAutoFillButtonTypeContacts;
+    case WebCore::AutoFillButtonType::Credentials:
+        return _WKAutoFillButtonTypeCredentials;
+    case WebCore::AutoFillButtonType::StrongPassword:
+        return _WKAutoFillButtonTypeStrongPassword;
+    case WebCore::AutoFillButtonType::CreditCard:
+        return _WKAutoFillButtonTypeCreditCard;
+    case WebCore::AutoFillButtonType::Loading:
+        return _WKAutoFillButtonTypeLoading;
+    }
+    ASSERT_NOT_REACHED();
+    return _WKAutoFillButtonTypeNone;
+
+}
+
+- (void)setHTMLInputElementAutoFillButtonEnabledWithButtonType:(_WKAutoFillButtonType)autoFillButtonType
+{
+    _nodeHandle->setHTMLInputElementAutoFillButtonEnabled(toAutoFillButtonType(autoFillButtonType));
+}
+
+- (_WKAutoFillButtonType)htmlInputElementAutoFillButtonType
+{
+    return toWKAutoFillButtonType(_nodeHandle->htmlInputElementAutoFillButtonType());
+}
+
+- (_WKAutoFillButtonType)htmlInputElementLastAutoFillButtonType
+{
+    return toWKAutoFillButtonType(_nodeHandle->htmlInputElementLastAutoFillButtonType());
 }
 
 - (BOOL)HTMLInputElementIsUserEdited
@@ -130,6 +191,16 @@ using namespace WebKit;
     return _nodeHandle->htmlTextAreaElementLastChangeWasUserEdit();
 }
 
+- (BOOL)isSelectElement
+{
+    return _nodeHandle->isSelectElement();
+}
+
+- (BOOL)isSelectableTextNode
+{
+    return _nodeHandle->isSelectableTextNode();
+}
+
 - (BOOL)isTextField
 {
     return _nodeHandle->isTextField();
@@ -137,19 +208,15 @@ using namespace WebKit;
 
 - (WKWebProcessPlugInNodeHandle *)HTMLTableCellElementCellAbove
 {
-    auto nodeHandle = _nodeHandle->htmlTableCellElementCellAbove();
-    if (!nodeHandle)
-        return nil;
-
-    return [wrapper(*nodeHandle.leakRef()) autorelease];
+    return WebKit::wrapper(_nodeHandle->htmlTableCellElementCellAbove());
 }
 
 - (WKWebProcessPlugInFrame *)frame
 {
-    return [wrapper(*_nodeHandle->document()->documentFrame().leakRef()) autorelease];
+    return WebKit::wrapper(_nodeHandle->document()->documentFrame());
 }
 
-- (InjectedBundleNodeHandle&)_nodeHandle
+- (WebKit::InjectedBundleNodeHandle&)_nodeHandle
 {
     return *_nodeHandle;
 }
@@ -162,5 +229,3 @@ using namespace WebKit;
 }
 
 @end
-
-#endif // WK_API_ENABLED

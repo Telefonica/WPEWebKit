@@ -24,11 +24,25 @@
 #include "HTMLMetaElement.h"
 
 #include "Attribute.h"
+#include "Color.h"
 #include "Document.h"
+#include "ElementInlines.h"
+#include "Frame.h"
+#include "FrameView.h"
 #include "HTMLHeadElement.h"
 #include "HTMLNames.h"
+#include "HTMLParserIdioms.h"
+#include "MediaList.h"
+#include "MediaQueryEvaluator.h"
+#include "MediaQueryParser.h"
+#include "RenderStyle.h"
+#include "Settings.h"
+#include "StyleResolveForDocument.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLMetaElement);
 
 using namespace HTMLNames;
 
@@ -48,63 +62,140 @@ Ref<HTMLMetaElement> HTMLMetaElement::create(const QualifiedName& tagName, Docum
     return adoptRef(*new HTMLMetaElement(tagName, document));
 }
 
-void HTMLMetaElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+bool HTMLMetaElement::mediaAttributeMatches()
 {
-    if (name == http_equivAttr)
-        process();
-    else if (name == contentAttr)
-        process();
-    else if (name == nameAttr) {
-        // Do nothing
-    } else
-        HTMLElement::parseAttribute(name, value);
+    auto& document = this->document();
+
+    if (!m_media)
+        m_media = MediaQuerySet::create(attributeWithoutSynchronization(mediaAttr).convertToASCIILowercase(), MediaQueryParserContext(document));
+
+    std::optional<RenderStyle> documentStyle;
+    if (document.hasLivingRenderTree())
+        documentStyle = Style::resolveForDocument(document);
+
+    String mediaType;
+    if (auto* frame = document.frame()) {
+        if (auto* frameView = frame->view())
+            mediaType = frameView->mediaType();
+    }
+
+    return MediaQueryEvaluator(mediaType, document, documentStyle ? &*documentStyle : nullptr).evaluate(*m_media);
 }
 
-Node::InsertionNotificationRequest HTMLMetaElement::insertedInto(ContainerNode& insertionPoint)
+const Color& HTMLMetaElement::contentColor()
 {
-    HTMLElement::insertedInto(insertionPoint);
-    if (insertionPoint.isConnected())
+    if (!m_contentColor)
+        m_contentColor = CSSParser::parseColorWithoutContext(content());
+    return *m_contentColor;
+}
+
+void HTMLMetaElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason reason)
+{
+    HTMLElement::attributeChanged(name, oldValue, newValue, reason);
+
+    if (!isInDocumentTree())
+        return;
+
+    if (name == nameAttr) {
+        if (equalLettersIgnoringASCIICase(oldValue, "theme-color"_s) && !equalLettersIgnoringASCIICase(newValue, "theme-color"_s))
+            document().metaElementThemeColorChanged(*this);
+        return;
+    }
+}
+
+void HTMLMetaElement::parseAttribute(const QualifiedName& name, const AtomString& value)
+{
+    if (name == nameAttr) {
         process();
-    return InsertionDone;
+        return;
+    }
+
+    if (name == contentAttr) {
+        m_contentColor = std::nullopt;
+        process();
+        return;
+    }
+
+    if (name == http_equivAttr) {
+        process();
+        return;
+    }
+
+    if (name == mediaAttr) {
+        m_media = nullptr;
+        process();
+        return;
+    }
+
+    HTMLElement::parseAttribute(name, value);
+}
+
+Node::InsertedIntoAncestorResult HTMLMetaElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
+{
+    HTMLElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    if (insertionType.connectedToDocument)
+        return InsertedIntoAncestorResult::NeedsPostInsertionCallback;
+    return InsertedIntoAncestorResult::Done;
+}
+
+void HTMLMetaElement::didFinishInsertingNode()
+{
+    process();
+}
+
+void HTMLMetaElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
+{
+    HTMLElement::removedFromAncestor(removalType, oldParentOfRemovedTree);
+
+    if (removalType.disconnectedFromDocument && equalLettersIgnoringASCIICase(name(), "theme-color"_s))
+        oldParentOfRemovedTree.document().metaElementThemeColorChanged(*this);
 }
 
 void HTMLMetaElement::process()
 {
-    // Changing a meta tag while it's not in the tree shouldn't have any effect on the document.
-    if (!isConnected())
+    // Changing a meta tag while it's not in the document tree shouldn't have any effect on the document.
+    if (!isInDocumentTree())
         return;
 
-    const AtomicString& contentValue = attributeWithoutSynchronization(contentAttr);
+    const AtomString& contentValue = attributeWithoutSynchronization(contentAttr);
     if (contentValue.isNull())
         return;
 
-    if (equalLettersIgnoringASCIICase(name(), "viewport"))
+    if (equalLettersIgnoringASCIICase(name(), "viewport"_s))
         document().processViewport(contentValue, ViewportArguments::ViewportMeta);
-#if PLATFORM(IOS)
-    else if (equalLettersIgnoringASCIICase(name(), "format-detection"))
+    else if (document().settings().disabledAdaptationsMetaTagEnabled() && equalLettersIgnoringASCIICase(name(), "disabled-adaptations"_s))
+        document().processDisabledAdaptations(contentValue);
+#if ENABLE(DARK_MODE_CSS)
+    else if (equalLettersIgnoringASCIICase(name(), "color-scheme"_s) || equalLettersIgnoringASCIICase(name(), "supported-color-schemes"_s))
+        document().processColorScheme(contentValue);
+#endif
+    else if (equalLettersIgnoringASCIICase(name(), "theme-color"_s))
+        document().metaElementThemeColorChanged(*this);
+#if PLATFORM(IOS_FAMILY)
+    else if (equalLettersIgnoringASCIICase(name(), "format-detection"_s))
         document().processFormatDetection(contentValue);
-    else if (equalLettersIgnoringASCIICase(name(), "apple-mobile-web-app-orientations"))
+    else if (equalLettersIgnoringASCIICase(name(), "apple-mobile-web-app-orientations"_s))
         document().processWebAppOrientations();
 #endif
-    else if (equalLettersIgnoringASCIICase(name(), "referrer"))
-        document().processReferrerPolicy(contentValue);
+    else if (equalLettersIgnoringASCIICase(name(), "referrer"_s))
+        document().processReferrerPolicy(contentValue, ReferrerPolicySource::MetaTag);
 
-    const AtomicString& httpEquivValue = attributeWithoutSynchronization(http_equivAttr);
+    const AtomString& httpEquivValue = attributeWithoutSynchronization(http_equivAttr);
     if (!httpEquivValue.isNull())
-        document().processHttpEquiv(httpEquivValue, contentValue, isDescendantOf(document().head()));
+        document().processMetaHttpEquiv(httpEquivValue, contentValue, isDescendantOf(document().head()));
 }
 
-const AtomicString& HTMLMetaElement::content() const
+const AtomString& HTMLMetaElement::content() const
 {
     return attributeWithoutSynchronization(contentAttr);
 }
 
-const AtomicString& HTMLMetaElement::httpEquiv() const
+const AtomString& HTMLMetaElement::httpEquiv() const
 {
     return attributeWithoutSynchronization(http_equivAttr);
 }
 
-const AtomicString& HTMLMetaElement::name() const
+const AtomString& HTMLMetaElement::name() const
 {
     return getNameAttribute();
 }

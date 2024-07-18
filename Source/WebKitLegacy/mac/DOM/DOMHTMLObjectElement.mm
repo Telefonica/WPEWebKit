@@ -34,12 +34,12 @@
 #import <WebCore/HTMLFormElement.h>
 #import <WebCore/HTMLNames.h>
 #import <WebCore/HTMLObjectElement.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/RenderElement.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::HTMLObjectElement*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -126,7 +126,7 @@
 - (NSString *)data
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getURLAttribute(WebCore::HTMLNames::dataAttr);
+    return IMPL->getURLAttribute(WebCore::HTMLNames::dataAttr).string();
 }
 
 - (void)setData:(NSString *)newData
@@ -258,3 +258,5 @@
 }
 
 @end
+
+#undef IMPL

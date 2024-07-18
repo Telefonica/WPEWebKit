@@ -27,111 +27,63 @@
 #pragma once
 
 #include <wtf/Assertions.h>
+#include <wtf/Expected.h>
 #include <wtf/JSONValues.h>
+#include <wtf/text/WTFString.h>
 
 namespace Inspector {
 
 namespace Protocol {
 
-template<typename T> struct BindingTraits;
+using ErrorString = String;
 
-template<typename T>
-class OptOutput {
-public:
-    OptOutput() : m_assigned(false) { }
+template <typename T>
+using ErrorStringOr = Expected<T, ErrorString>;
 
-    void operator=(T value)
-    {
-        m_value = value;
-        m_assigned = true;
-    }
+template<typename> struct BindingTraits;
 
-    bool isAssigned() const { return m_assigned; }
-
-    T getValue()
-    {
-        ASSERT(isAssigned());
-        return m_value;
-    }
-
-private:
-    T m_value;
-    bool m_assigned;
-
-    WTF_MAKE_NONCOPYABLE(OptOutput);
-};
-
-// Helper methods for Protocol and other JSON types are provided by
-// specializations of BindingTraits<T>. Some are generated for protocol types.
-
-template<typename T>
-struct BindingTraits {
-    typedef T BindingType;
-
-    static void push(JSON::Array&, BindingType&);
-    static JSON::Value::Type typeTag();
-    static RefPtr<T> runtimeCast(RefPtr<JSON::Object>&&);
-#if !ASSERT_DISABLED
-    static void assertValueHasExpectedType(JSON::Value*);
-#endif // !ASSERT_DISABLED
-};
-
-template<JSON::Value::Type TYPE>
-struct PrimitiveBindingTraits {
-#if !ASSERT_DISABLED
+template<JSON::Value::Type type> struct PrimitiveBindingTraits {
     static void assertValueHasExpectedType(JSON::Value* value)
     {
-        ASSERT_ARG(value, value && value->type() == TYPE);
+        ASSERT_UNUSED(value, value);
+        ASSERT_UNUSED(value, value->type() == type);
     }
-#endif // !ASSERT_DISABLED
 };
 
-template<typename T>
-struct BindingTraits<JSON::ArrayOf<T>> {
-    static RefPtr<JSON::ArrayOf<T>> runtimeCast(RefPtr<JSON::Value>&& value)
+template<typename T> struct BindingTraits<JSON::ArrayOf<T>> {
+    static Ref<JSON::ArrayOf<T>> runtimeCast(Ref<JSON::Value>&& value)
     {
-        ASSERT_ARG(value, value);
-        RefPtr<JSON::Array> array;
-        bool castSucceeded = value->asArray(array);
-        ASSERT_UNUSED(castSucceeded, castSucceeded);
-#if !ASSERT_DISABLED
-        assertValueHasExpectedType(array.get());
-#endif // !ASSERT_DISABLED
-        COMPILE_ASSERT(sizeof(JSON::ArrayOf<T>) == sizeof(JSON::Array), type_cast_problem);
-        return static_cast<JSON::ArrayOf<T>*>(static_cast<JSON::ArrayBase*>(array.get()));
+        auto array = value->asArray();
+        BindingTraits<JSON::ArrayOf<T>>::assertValueHasExpectedType(array.get());
+        static_assert(sizeof(JSON::ArrayOf<T>) == sizeof(JSON::Array), "type cast problem");
+        return static_reference_cast<JSON::ArrayOf<T>>(static_reference_cast<JSON::ArrayBase>(array.releaseNonNull()));
     }
 
-#if !ASSERT_DISABLED
     static void assertValueHasExpectedType(JSON::Value* value)
     {
-        ASSERT_ARG(value, value);
-        RefPtr<JSON::Array> array;
-        bool castSucceeded = value->asArray(array);
-        ASSERT_UNUSED(castSucceeded, castSucceeded);
+        ASSERT_UNUSED(value, value);
+#if ASSERT_ENABLED
+        auto array = value->asArray();
+        ASSERT(array);
         for (unsigned i = 0; i < array->length(); i++)
-            BindingTraits<T>::assertValueHasExpectedType(array->get(i).get());
+            BindingTraits<T>::assertValueHasExpectedType(array->get(i).ptr());
+#endif
     }
-#endif // !ASSERT_DISABLED
 };
 
-template<>
-struct BindingTraits<JSON::Value> {
-#if !ASSERT_DISABLED
+template<> struct BindingTraits<JSON::Value> {
     static void assertValueHasExpectedType(JSON::Value*)
     {
     }
-#endif // !ASSERT_DISABLED
 };
 
-template<> struct BindingTraits<JSON::Array> : public PrimitiveBindingTraits<JSON::Value::Type::Array> { };
-template<> struct BindingTraits<JSON::Object> : public PrimitiveBindingTraits<JSON::Value::Type::Object> { };
-template<> struct BindingTraits<String> : public PrimitiveBindingTraits<JSON::Value::Type::String> { };
-template<> struct BindingTraits<bool> : public PrimitiveBindingTraits<JSON::Value::Type::Boolean> { };
-template<> struct BindingTraits<double> : public PrimitiveBindingTraits<JSON::Value::Type::Double> { };
-template<> struct BindingTraits<int> : public PrimitiveBindingTraits<JSON::Value::Type::Integer> { };
+template<> struct BindingTraits<JSON::Array> : PrimitiveBindingTraits<JSON::Value::Type::Array> { };
+template<> struct BindingTraits<JSON::Object> : PrimitiveBindingTraits<JSON::Value::Type::Object> { };
+template<> struct BindingTraits<String> : PrimitiveBindingTraits<JSON::Value::Type::String> { };
+template<> struct BindingTraits<bool> : PrimitiveBindingTraits<JSON::Value::Type::Boolean> { };
+template<> struct BindingTraits<double> : PrimitiveBindingTraits<JSON::Value::Type::Double> { };
+template<> struct BindingTraits<int> : PrimitiveBindingTraits<JSON::Value::Type::Integer> { };
 
-} // namespace Protocol
-
-using Protocol::BindingTraits;
+}
 
 } // namespace Inspector

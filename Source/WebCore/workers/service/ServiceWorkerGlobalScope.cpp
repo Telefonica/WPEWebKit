@@ -28,15 +28,188 @@
 
 #if ENABLE(SERVICE_WORKER)
 
+#include "Document.h"
+#include "EventLoop.h"
+#include "EventNames.h"
+#include "ExtendableEvent.h"
+#include "Frame.h"
+#include "FrameLoader.h"
+#include "FrameLoaderClient.h"
+#include "JSDOMPromiseDeferred.h"
+#include "NotificationEvent.h"
+#include "PushEvent.h"
+#include "SWContextManager.h"
+#include "ServiceWorker.h"
+#include "ServiceWorkerClient.h"
+#include "ServiceWorkerClients.h"
+#include "ServiceWorkerContainer.h"
+#include "ServiceWorkerThread.h"
+#include "ServiceWorkerWindowClient.h"
+#include "WebCoreJSClientData.h"
+#include "WorkerNavigator.h"
+#include <wtf/IsoMallocInlines.h>
+
 namespace WebCore {
 
-ServiceWorkerRegistration& ServiceWorkerGlobalScope::registration()
+WTF_MAKE_ISO_ALLOCATED_IMPL(ServiceWorkerGlobalScope);
+
+Ref<ServiceWorkerGlobalScope> ServiceWorkerGlobalScope::create(ServiceWorkerContextData&& contextData, ServiceWorkerData&& workerData, const WorkerParameters& params, Ref<SecurityOrigin>&& origin, ServiceWorkerThread& thread, Ref<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy* connectionProxy, SocketProvider* socketProvider, std::unique_ptr<NotificationClient>&& notificationClient)
 {
-    return m_registration;
+    auto scope = adoptRef(*new ServiceWorkerGlobalScope { WTFMove(contextData), WTFMove(workerData), params, WTFMove(origin), thread, WTFMove(topOrigin), connectionProxy, socketProvider, WTFMove(notificationClient) });
+    scope->applyContentSecurityPolicyResponseHeaders(params.contentSecurityPolicyResponseHeaders);
+    scope->notifyServiceWorkerPageOfCreationIfNecessary();
+    return scope;
 }
 
-void ServiceWorkerGlobalScope::skipWaiting(Ref<DeferredPromise>&&)
+ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(ServiceWorkerContextData&& contextData, ServiceWorkerData&& workerData, const WorkerParameters& params, Ref<SecurityOrigin>&& origin, ServiceWorkerThread& thread, Ref<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy* connectionProxy, SocketProvider* socketProvider, std::unique_ptr<NotificationClient>&& notificationClient)
+    : WorkerGlobalScope(WorkerThreadType::ServiceWorker, params, WTFMove(origin), thread, WTFMove(topOrigin), connectionProxy, socketProvider)
+    , m_contextData(WTFMove(contextData))
+    , m_registration(ServiceWorkerRegistration::getOrCreate(*this, navigator().serviceWorker(), WTFMove(m_contextData.registration)))
+    , m_serviceWorker(ServiceWorker::getOrCreate(*this, WTFMove(workerData)))
+    , m_clients(ServiceWorkerClients::create())
+    , m_notificationClient(WTFMove(notificationClient))
+    , m_userGestureTimer(*this, &ServiceWorkerGlobalScope::resetUserGesture)
 {
+}
+
+ServiceWorkerGlobalScope::~ServiceWorkerGlobalScope()
+{
+    // NotificationClient might have some interactions pending with the main thread,
+    // so it should also be destroyed there.
+    callOnMainThread([notificationClient = WTFMove(m_notificationClient)] { });
+}
+
+void ServiceWorkerGlobalScope::dispatchPushEvent(PushEvent& pushEvent)
+{
+    ASSERT(!m_pushEvent);
+    m_pushEvent = &pushEvent;
+    dispatchEvent(pushEvent);
+    m_pushEvent = nullptr;
+}
+
+void ServiceWorkerGlobalScope::notifyServiceWorkerPageOfCreationIfNecessary()
+{
+    auto serviceWorkerPage = this->serviceWorkerPage();
+    if (!serviceWorkerPage)
+        return;
+
+    ASSERT(isMainThread());
+    serviceWorkerPage->setServiceWorkerGlobalScope(*this);
+
+    Vector<Ref<DOMWrapperWorld>> worlds;
+    static_cast<JSVMClientData*>(vm().clientData)->getAllWorlds(worlds);
+    for (auto& world : worlds)
+        serviceWorkerPage->mainFrame().loader().client().dispatchServiceWorkerGlobalObjectAvailable(world);
+}
+
+Page* ServiceWorkerGlobalScope::serviceWorkerPage()
+{
+    if (!m_contextData.serviceWorkerPageIdentifier)
+        return nullptr;
+
+    RELEASE_ASSERT(isMainThread());
+    return Page::serviceWorkerPage(*m_contextData.serviceWorkerPageIdentifier);
+}
+
+void ServiceWorkerGlobalScope::skipWaiting(Ref<DeferredPromise>&& promise)
+{
+    uint64_t requestIdentifier = ++m_lastRequestIdentifier;
+    m_pendingSkipWaitingPromises.add(requestIdentifier, WTFMove(promise));
+
+    callOnMainThread([workerThread = Ref { thread() }, requestIdentifier]() mutable {
+        if (auto* connection = SWContextManager::singleton().connection()) {
+            auto identifier = workerThread->identifier();
+            connection->skipWaiting(identifier, [workerThread = WTFMove(workerThread), requestIdentifier] {
+                workerThread->runLoop().postTask([requestIdentifier](auto& context) {
+                    auto& scope = downcast<ServiceWorkerGlobalScope>(context);
+                    scope.eventLoop().queueTask(TaskSource::DOMManipulation, [scope = Ref { scope }, requestIdentifier]() mutable {
+                        if (auto promise = scope->m_pendingSkipWaitingPromises.take(requestIdentifier))
+                            promise->resolve();
+                    });
+                });
+            });
+        }
+    });
+}
+
+EventTargetInterface ServiceWorkerGlobalScope::eventTargetInterface() const
+{
+    return ServiceWorkerGlobalScopeEventTargetInterfaceType;
+}
+
+ServiceWorkerThread& ServiceWorkerGlobalScope::thread()
+{
+    return static_cast<ServiceWorkerThread&>(WorkerGlobalScope::thread());
+}
+
+// https://w3c.github.io/ServiceWorker/#update-service-worker-extended-events-set-algorithm
+void ServiceWorkerGlobalScope::updateExtendedEventsSet(ExtendableEvent* newEvent)
+{
+    ASSERT(isContextThread());
+    ASSERT(!newEvent || !newEvent->isBeingDispatched());
+    bool hadPendingEvents = hasPendingEvents();
+    m_extendedEvents.removeAllMatching([](auto& event) {
+        return !event->pendingPromiseCount();
+    });
+
+    if (newEvent && newEvent->pendingPromiseCount()) {
+        m_extendedEvents.append(*newEvent);
+        newEvent->whenAllExtendLifetimePromisesAreSettled([this](auto&&) {
+            this->updateExtendedEventsSet();
+        });
+        // Clear out the event's target as it is the WorkerGlobalScope and we do not want to keep it
+        // alive unnecessarily.
+        newEvent->setTarget(nullptr);
+    }
+
+    bool hasPendingEvents = this->hasPendingEvents();
+    if (hasPendingEvents == hadPendingEvents)
+        return;
+
+    callOnMainThread([threadIdentifier = thread().identifier(), hasPendingEvents] {
+        if (auto* connection = SWContextManager::singleton().connection())
+            connection->setServiceWorkerHasPendingEvents(threadIdentifier, hasPendingEvents);
+    });
+}
+
+const ServiceWorkerContextData::ImportedScript* ServiceWorkerGlobalScope::scriptResource(const URL& url) const
+{
+    auto iterator = m_contextData.scriptResourceMap.find(url);
+    return iterator == m_contextData.scriptResourceMap.end() ? nullptr : &iterator->value;
+}
+
+void ServiceWorkerGlobalScope::setScriptResource(const URL& url, ServiceWorkerContextData::ImportedScript&& script)
+{
+    callOnMainThread([threadIdentifier = thread().identifier(), url = url.isolatedCopy(), script = script.isolatedCopy()] {
+        if (auto* connection = SWContextManager::singleton().connection())
+            connection->setScriptResource(threadIdentifier, url, script);
+    });
+
+    m_contextData.scriptResourceMap.set(url, WTFMove(script));
+}
+
+void ServiceWorkerGlobalScope::didSaveScriptsToDisk(ScriptBuffer&& script, HashMap<URL, ScriptBuffer>&& importedScripts)
+{
+    // These scripts should be identical to the ones we have. However, these are mmap'd so using them helps reduce dirty memory usage.
+    updateSourceProviderBuffers(script, importedScripts);
+
+    if (script) {
+        ASSERT(m_contextData.script == script);
+        m_contextData.script = WTFMove(script);
+    }
+    for (auto& pair : importedScripts) {
+        auto it = m_contextData.scriptResourceMap.find(pair.key);
+        if (it == m_contextData.scriptResourceMap.end())
+            continue;
+        ASSERT(it->value.script == pair.value); // Do a memcmp to make sure the scripts are identical.
+        it->value.script = WTFMove(pair.value);
+    }
+}
+
+void ServiceWorkerGlobalScope::recordUserGesture()
+{
+    m_isProcessingUserGesture = true;
+    m_userGestureTimer.startOneShot(userGestureLifetime);
 }
 
 } // namespace WebCore

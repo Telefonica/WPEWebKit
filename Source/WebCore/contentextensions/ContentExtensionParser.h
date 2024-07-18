@@ -34,12 +34,16 @@
 
 namespace WebCore {
 
+struct CSSParserContext;
+
 namespace ContentExtensions {
 
 class ContentExtensionRule;
 
-Expected<Vector<ContentExtensionRule>, std::error_code> parseRuleList(String&&);
+WEBCORE_EXPORT Expected<Vector<ContentExtensionRule>, std::error_code> parseRuleList(const String&);
 WEBCORE_EXPORT bool isValidCSSSelector(const String&);
+
+CSSParserContext contentExtensionCSSParserContext();
 
 } // namespace ContentExtensions
 } // namespace WebCore

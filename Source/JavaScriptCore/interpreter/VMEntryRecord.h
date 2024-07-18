@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,8 +29,10 @@
 
 namespace JSC {
 
-struct VMEntryFrame;
-class ExecState;
+struct EntryFrame;
+class CallFrame;
+class JSGlobalObject;
+class JSObject;
 class VM;
 
 struct VMEntryRecord {
@@ -38,38 +40,26 @@ struct VMEntryRecord {
      * This record stored in a vmEntryTo{JavaScript,Host} allocated frame. It is allocated on the stack
      * after callee save registers where local variables would go.
      */
-    VM* m_vm;
-    ExecState* m_prevTopCallFrame;
-    VMEntryFrame* m_prevTopVMEntryFrame;
+    VM* const m_vm;
+    CallFrame* const m_prevTopCallFrame;
+    EntryFrame* const m_prevTopEntryFrame;
+    JSObject* const m_callee;
 
-#if ENABLE(JIT) && NUMBER_OF_CALLEE_SAVES_REGISTERS > 0
-    intptr_t calleeSaveRegistersBuffer[NUMBER_OF_CALLEE_SAVES_REGISTERS];
+    JSObject* callee() const { return m_callee; }
+
+#if !ENABLE(C_LOOP) && NUMBER_OF_CALLEE_SAVES_REGISTERS > 0
+    CPURegister calleeSaveRegistersBuffer[NUMBER_OF_CALLEE_SAVES_REGISTERS];
+#elif ENABLE(C_LOOP)
+    CPURegister calleeSaveRegistersBuffer[1];
 #endif
 
-    ExecState* prevTopCallFrame() { return m_prevTopCallFrame; }
-    SUPPRESS_ASAN ExecState* unsafePrevTopCallFrame() { return m_prevTopCallFrame; }
+    CallFrame* prevTopCallFrame() { return m_prevTopCallFrame; }
+    SUPPRESS_ASAN CallFrame* unsafePrevTopCallFrame() { return m_prevTopCallFrame; }
 
-    VMEntryFrame* prevTopVMEntryFrame() { return m_prevTopVMEntryFrame; }
-    SUPPRESS_ASAN VMEntryFrame* unsafePrevTopVMEntryFrame() { return m_prevTopVMEntryFrame; }
+    EntryFrame* prevTopEntryFrame() { return m_prevTopEntryFrame; }
+    SUPPRESS_ASAN EntryFrame* unsafePrevTopEntryFrame() { return m_prevTopEntryFrame; }
 };
 
-extern "C" VMEntryRecord* vmEntryRecord(VMEntryFrame*);
-
-struct VMEntryFrame {
-#if ENABLE(JIT) && NUMBER_OF_CALLEE_SAVES_REGISTERS > 0
-    static ptrdiff_t vmEntryRecordOffset()
-    {
-        VMEntryFrame* fakeVMEntryFrame = reinterpret_cast<VMEntryFrame*>(0x1000);
-        VMEntryRecord* record = vmEntryRecord(fakeVMEntryFrame);
-        return static_cast<ptrdiff_t>(
-            reinterpret_cast<char*>(record) - reinterpret_cast<char*>(fakeVMEntryFrame));
-    }
-
-    static ptrdiff_t calleeSaveRegistersBufferOffset()
-    {
-        return vmEntryRecordOffset() + OBJECT_OFFSETOF(VMEntryRecord, calleeSaveRegistersBuffer);
-    }
-#endif
-};
+extern "C" VMEntryRecord* vmEntryRecord(EntryFrame*);
 
 } // namespace JSC

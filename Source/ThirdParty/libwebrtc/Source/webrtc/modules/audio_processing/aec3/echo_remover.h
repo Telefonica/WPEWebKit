@@ -8,38 +8,55 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_ECHO_REMOVER_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_ECHO_REMOVER_H_
+#ifndef MODULES_AUDIO_PROCESSING_AEC3_ECHO_REMOVER_H_
+#define MODULES_AUDIO_PROCESSING_AEC3_ECHO_REMOVER_H_
 
 #include <vector>
 
-#include "webrtc/base/optional.h"
-#include "webrtc/modules/audio_processing/aec3/echo_path_variability.h"
-#include "webrtc/modules/audio_processing/aec3/render_buffer.h"
+#include "absl/types/optional.h"
+#include "api/audio/echo_canceller3_config.h"
+#include "api/audio/echo_control.h"
+#include "modules/audio_processing/aec3/block.h"
+#include "modules/audio_processing/aec3/delay_estimate.h"
+#include "modules/audio_processing/aec3/echo_path_variability.h"
+#include "modules/audio_processing/aec3/render_buffer.h"
 
 namespace webrtc {
 
 // Class for removing the echo from the capture signal.
 class EchoRemover {
  public:
-  static EchoRemover* Create(int sample_rate_hz);
+  static EchoRemover* Create(const EchoCanceller3Config& config,
+                             int sample_rate_hz,
+                             size_t num_render_channels,
+                             size_t num_capture_channels);
   virtual ~EchoRemover() = default;
+
+  // Get current metrics.
+  virtual void GetMetrics(EchoControl::Metrics* metrics) const = 0;
 
   // Removes the echo from a block of samples from the capture signal. The
   // supplied render signal is assumed to be pre-aligned with the capture
   // signal.
   virtual void ProcessCapture(
-      const rtc::Optional<size_t>& echo_path_delay_samples,
-      const EchoPathVariability& echo_path_variability,
+      EchoPathVariability echo_path_variability,
       bool capture_signal_saturation,
-      const RenderBuffer& render_buffer,
-      std::vector<std::vector<float>>* capture) = 0;
+      const absl::optional<DelayEstimate>& external_delay,
+      RenderBuffer* render_buffer,
+      Block* linear_output,
+      Block* capture) = 0;
 
   // Updates the status on whether echo leakage is detected in the output of the
   // echo remover.
   virtual void UpdateEchoLeakageStatus(bool leakage_detected) = 0;
+
+  // Specifies whether the capture output will be used. The purpose of this is
+  // to allow the echo remover to deactivate some of the processing when the
+  // resulting output is anyway not used, for instance when the endpoint is
+  // muted.
+  virtual void SetCaptureOutputUsage(bool capture_output_used) = 0;
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_ECHO_REMOVER_H_
+#endif  // MODULES_AUDIO_PROCESSING_AEC3_ECHO_REMOVER_H_

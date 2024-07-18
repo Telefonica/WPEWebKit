@@ -8,9 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/acm2/call_statistics.h"
+#include "modules/audio_coding/acm2/call_statistics.h"
 
-#include "webrtc/base/checks.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -28,7 +28,11 @@ void CallStatistics::DecodedByNetEq(AudioFrame::SpeechType speech_type,
       break;
     }
     case AudioFrame::kPLC: {
-      ++decoding_stat_.decoded_plc;
+      ++decoding_stat_.decoded_neteq_plc;
+      break;
+    }
+    case AudioFrame::kCodecPLC: {
+      ++decoding_stat_.decoded_codec_plc;
       break;
     }
     case AudioFrame::kCNG: {
@@ -40,8 +44,8 @@ void CallStatistics::DecodedByNetEq(AudioFrame::SpeechType speech_type,
       break;
     }
     case AudioFrame::kUndefined: {
-      // If the audio is decoded by NetEq, |kUndefined| is not an option.
-      RTC_NOTREACHED();
+      // If the audio is decoded by NetEq, `kUndefined` is not an option.
+      RTC_DCHECK_NOTREACHED();
     }
   }
 }

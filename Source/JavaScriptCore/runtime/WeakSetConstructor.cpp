@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2016 Apple, Inc. All rights reserved.
+ * Copyright (C) 2015-2017 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,73 +26,77 @@
 #include "config.h"
 #include "WeakSetConstructor.h"
 
-#include "Error.h"
 #include "IteratorOperations.h"
 #include "JSCInlines.h"
-#include "JSGlobalObject.h"
-#include "JSObjectInlines.h"
 #include "JSWeakSet.h"
+#include "WeakMapImplInlines.h"
 #include "WeakSetPrototype.h"
 
 namespace JSC {
 
-const ClassInfo WeakSetConstructor::s_info = { "Function", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(WeakSetConstructor) };
+const ClassInfo WeakSetConstructor::s_info = { "Function"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(WeakSetConstructor) };
 
 void WeakSetConstructor::finishCreation(VM& vm, WeakSetPrototype* prototype)
 {
-    Base::finishCreation(vm, prototype->classInfo(vm)->className);
+    Base::finishCreation(vm, 0, "WeakSet"_s, PropertyAdditionMode::WithoutStructureTransition);
     putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(0), PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly);
 }
 
-static EncodedJSValue JSC_HOST_CALL callWeakSet(ExecState* exec)
+static JSC_DECLARE_HOST_FUNCTION(callWeakSet);
+static JSC_DECLARE_HOST_FUNCTION(constructWeakSet);
+
+WeakSetConstructor::WeakSetConstructor(VM& vm, Structure* structure)
+    : Base(vm, structure, callWeakSet, constructWeakSet)
 {
-    VM& vm = exec->vm();
-    auto scope = DECLARE_THROW_SCOPE(vm);
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(exec, scope, "WeakSet"));
 }
 
-static EncodedJSValue JSC_HOST_CALL constructWeakSet(ExecState* exec)
+JSC_DEFINE_HOST_FUNCTION(callWeakSet, (JSGlobalObject* globalObject, CallFrame*))
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "WeakSet"));
+}
+
+JSC_DEFINE_HOST_FUNCTION(constructWeakSet, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    JSGlobalObject* globalObject = asInternalFunction(exec->jsCallee())->globalObject();
-    Structure* weakSetStructure = InternalFunction::createSubclassStructure(exec, exec->newTarget(), globalObject->weakSetStructure());
-    RETURN_IF_EXCEPTION(scope, encodedJSValue());
-    JSWeakSet* weakSet = JSWeakSet::create(exec, weakSetStructure);
-    JSValue iterable = exec->argument(0);
+    JSObject* newTarget = asObject(callFrame->newTarget());
+    Structure* weakSetStructure = JSC_GET_DERIVED_STRUCTURE(vm, weakSetStructure, newTarget, callFrame->jsCallee());
+    RETURN_IF_EXCEPTION(scope, { });
+
+    JSWeakSet* weakSet = JSWeakSet::create(vm, weakSetStructure);
+    JSValue iterable = callFrame->argument(0);
     if (iterable.isUndefinedOrNull())
         return JSValue::encode(weakSet);
 
-    JSValue adderFunction = weakSet->JSObject::get(exec, vm.propertyNames->add);
+    JSValue adderFunction = weakSet->JSObject::get(globalObject, vm.propertyNames->add);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
-    CallData adderFunctionCallData;
-    CallType adderFunctionCallType = getCallData(adderFunction, adderFunctionCallData);
-    if (adderFunctionCallType == CallType::None)
-        return JSValue::encode(throwTypeError(exec, scope));
+    auto adderFunctionCallData = JSC::getCallData(adderFunction);
+    if (adderFunctionCallData.type == CallData::Type::None)
+        return throwVMTypeError(globalObject, scope, "'add' property of a WeakSet should be callable."_s);
+
+    bool canPerformFastAdd = adderFunctionCallData.type == CallData::Type::Native && adderFunctionCallData.native.function == protoFuncWeakSetAdd;
 
     scope.release();
-    forEachInIterable(exec, iterable, [&](VM&, ExecState* exec, JSValue nextValue) {
+    forEachInIterable(globalObject, iterable, [&](VM&, JSGlobalObject* globalObject, JSValue nextValue) {
+        if (canPerformFastAdd) {
+            if (nextValue.isObject())
+                weakSet->add(vm, asObject(nextValue));
+            else
+                throwTypeError(asObject(adderFunction)->globalObject(), scope, WeakSetInvalidValueError);
+            return;
+        }
+
         MarkedArgumentBuffer arguments;
         arguments.append(nextValue);
-        call(exec, adderFunction, adderFunctionCallType, adderFunctionCallData, weakSet, arguments);
+        ASSERT(!arguments.hasOverflowed());
+        call(globalObject, adderFunction, adderFunctionCallData, weakSet, arguments);
     });
 
     return JSValue::encode(weakSet);
-}
-
-ConstructType WeakSetConstructor::getConstructData(JSCell*, ConstructData& constructData)
-{
-    constructData.native.function = constructWeakSet;
-    return ConstructType::Host;
-}
-
-CallType WeakSetConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = callWeakSet;
-    return CallType::Host;
 }
 
 }

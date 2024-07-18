@@ -33,6 +33,7 @@
 #include "CachedResourceRequestInitiators.h"
 #include "ContentSecurityPolicy.h"
 #include "FetchBody.h"
+#include "FetchBodyConsumer.h"
 #include "FetchLoaderClient.h"
 #include "FetchRequest.h"
 #include "ResourceError.h"
@@ -45,24 +46,35 @@
 
 namespace WebCore {
 
+FetchLoader::~FetchLoader()
+{
+    if (!m_urlForReading.isEmpty())
+        ThreadableBlobRegistry::unregisterBlobURL(m_urlForReading);
+}
+
 void FetchLoader::start(ScriptExecutionContext& context, const Blob& blob)
 {
-    auto urlForReading = BlobURL::createPublicURL(context.securityOrigin());
-    if (urlForReading.isEmpty()) {
-        m_client.didFail({ errorDomainWebKitInternal, 0, URL(), ASCIILiteral("Could not create URL for Blob") });
+    return startLoadingBlobURL(context, blob.url());
+}
+
+void FetchLoader::startLoadingBlobURL(ScriptExecutionContext& context, const URL& blobURL)
+{
+    m_urlForReading = BlobURL::createPublicURL(context.securityOrigin());
+    if (m_urlForReading.isEmpty()) {
+        m_client.didFail({ errorDomainWebKitInternal, 0, URL(), "Could not create URL for Blob"_s });
         return;
     }
 
-    ThreadableBlobRegistry::registerBlobURL(context.securityOrigin(), urlForReading, blob.url());
+    ThreadableBlobRegistry::registerBlobURL(context.securityOrigin(), context.policyContainer(), m_urlForReading, blobURL);
 
-    ResourceRequest request(urlForReading);
+    ResourceRequest request(m_urlForReading);
     request.setInitiatorIdentifier(context.resourceRequestIdentifier());
-    request.setHTTPMethod("GET");
+    request.setHTTPMethod("GET"_s);
 
     ThreadableLoaderOptions options;
-    options.sendLoadCallbacks = SendCallbacks;
-    options.dataBufferingPolicy = DoNotBufferData;
-    options.preflightPolicy = ConsiderPreflight;
+    options.sendLoadCallbacks = SendCallbackPolicy::SendCallbacks;
+    options.dataBufferingPolicy = DataBufferingPolicy::DoNotBufferData;
+    options.preflightPolicy = PreflightPolicy::Consider;
     options.credentials = FetchOptions::Credentials::Include;
     options.mode = FetchOptions::Mode::SameOrigin;
     options.contentSecurityPolicyEnforcement = ContentSecurityPolicyEnforcement::DoNotEnforce;
@@ -71,15 +83,19 @@ void FetchLoader::start(ScriptExecutionContext& context, const Blob& blob)
     m_isStarted = m_loader;
 }
 
-void FetchLoader::start(ScriptExecutionContext& context, const FetchRequest& request)
+void FetchLoader::start(ScriptExecutionContext& context, const FetchRequest& request, const String& initiator)
 {
-    ThreadableLoaderOptions options(request.fetchOptions(), ConsiderPreflight,
+    ResourceLoaderOptions resourceLoaderOptions = request.fetchOptions();
+    resourceLoaderOptions.preflightPolicy = PreflightPolicy::Consider;
+    ThreadableLoaderOptions options(resourceLoaderOptions,
         context.shouldBypassMainWorldContentSecurityPolicy() ? ContentSecurityPolicyEnforcement::DoNotEnforce : ContentSecurityPolicyEnforcement::EnforceConnectSrcDirective,
-        String(cachedResourceRequestInitiators().fetch),
+        String(initiator),
         ResponseFilteringPolicy::Disable);
-    options.sendLoadCallbacks = SendCallbacks;
-    options.dataBufferingPolicy = DoNotBufferData;
+    options.sendLoadCallbacks = SendCallbackPolicy::SendCallbacks;
+    options.dataBufferingPolicy = DataBufferingPolicy::DoNotBufferData;
     options.sameOriginDataURLFlag = SameOriginDataURLFlag::Set;
+    options.navigationPreloadIdentifier = request.navigationPreloadIdentifier();
+    options.contentEncodingSniffingPolicy = ContentEncodingSniffingPolicy::Disable;
 
     ResourceRequest fetchRequest = request.resourceRequest();
 
@@ -89,16 +105,18 @@ void FetchLoader::start(ScriptExecutionContext& context, const FetchRequest& req
     contentSecurityPolicy.upgradeInsecureRequestIfNeeded(fetchRequest, ContentSecurityPolicy::InsecureRequestType::Load);
 
     if (!context.shouldBypassMainWorldContentSecurityPolicy() && !contentSecurityPolicy.allowConnectToSource(fetchRequest.url())) {
-        m_client.didFail({ errorDomainWebKitInternal, 0, fetchRequest.url(), ASCIILiteral("Not allowed by ContentSecurityPolicy"), ResourceError::Type::AccessControl });
+        m_client.didFail({ errorDomainWebKitInternal, 0, fetchRequest.url(), "Not allowed by ContentSecurityPolicy"_s, ResourceError::Type::AccessControl });
         return;
     }
 
     String referrer = request.internalRequestReferrer();
-    if (referrer == "no-referrer") {
+    if (referrer == "no-referrer"_s) {
         options.referrerPolicy = ReferrerPolicy::NoReferrer;
         referrer = String();
     } else
-        referrer = (referrer == "client") ? context.url().strippedForUseAsReferrer() : URL(context.url(), referrer).strippedForUseAsReferrer();
+        referrer = (referrer == "client"_s) ? context.url().strippedForUseAsReferrer() : URL(context.url(), referrer).strippedForUseAsReferrer();
+    if (options.referrerPolicy == ReferrerPolicy::EmptyString)
+        options.referrerPolicy = context.referrerPolicy();
 
     m_loader = ThreadableLoader::create(context, *this, WTFMove(fetchRequest), options, WTFMove(referrer));
     m_isStarted = m_loader;
@@ -118,7 +136,7 @@ void FetchLoader::stop()
         m_loader->cancel();
 }
 
-RefPtr<SharedBuffer> FetchLoader::startStreaming()
+RefPtr<FragmentedSharedBuffer> FetchLoader::startStreaming()
 {
     ASSERT(m_consumer);
     auto firstChunk = m_consumer->takeData();
@@ -126,23 +144,23 @@ RefPtr<SharedBuffer> FetchLoader::startStreaming()
     return firstChunk;
 }
 
-void FetchLoader::didReceiveResponse(unsigned long, const ResourceResponse& response)
+void FetchLoader::didReceiveResponse(ResourceLoaderIdentifier, const ResourceResponse& response)
 {
     m_client.didReceiveResponse(response);
 }
 
-void FetchLoader::didReceiveData(const char* value, int size)
+void FetchLoader::didReceiveData(const SharedBuffer& buffer)
 {
     if (!m_consumer) {
-        m_client.didReceiveData(value, size);
+        m_client.didReceiveData(buffer);
         return;
     }
-    m_consumer->append(value, size);
+    m_consumer->append(buffer);
 }
 
-void FetchLoader::didFinishLoading(unsigned long)
+void FetchLoader::didFinishLoading(ResourceLoaderIdentifier, const NetworkLoadMetrics& metrics)
 {
-    m_client.didSucceed();
+    m_client.didSucceed(metrics);
 }
 
 void FetchLoader::didFail(const ResourceError& error)

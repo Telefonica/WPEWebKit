@@ -29,31 +29,47 @@
 #include "WebFullScreenManagerProxy.h"
 
 struct wpe_view_backend;
+typedef struct _AtkObject AtkObject;
 
 namespace WKWPE {
 class View;
 }
 
+namespace WebCore {
+enum class DOMPasteAccessCategory : uint8_t;
+enum class DOMPasteAccessResponse : uint8_t;
+}
+
 namespace WebKit {
 
-class ScrollGestureController;
+struct InputMethodState;
+struct UserMessage;
+
+enum class UndoOrRedo : bool;
 
 class PageClientImpl final : public PageClient
 #if ENABLE(FULLSCREEN_API)
     , public WebFullScreenManagerProxyClient
 #endif
-    {
+{
 public:
     PageClientImpl(WKWPE::View&);
     virtual ~PageClientImpl();
 
     struct wpe_view_backend* viewBackend();
 
+#if ENABLE(ACCESSIBILITY)
+    AtkObject* accessible();
+#endif
+
+    void sendMessageToWebView(UserMessage&&, CompletionHandler<void(UserMessage&&)>&&);
+    void setInputMethodState(std::optional<InputMethodState>&&);
+
 private:
     // PageClient
-    std::unique_ptr<DrawingAreaProxy> createDrawingAreaProxy() override;
+    std::unique_ptr<DrawingAreaProxy> createDrawingAreaProxy(WebProcessProxy&) override;
     void setViewNeedsDisplay(const WebCore::Region&) override;
-    void requestScroll(const WebCore::FloatPoint&, const WebCore::IntPoint&, bool) override;
+    void requestScroll(const WebCore::FloatPoint&, const WebCore::IntPoint&, WebCore::ScrollIsAnimated) override;
     WebCore::FloatPoint viewScrollPosition() override;
     WebCore::IntSize viewSize() override;
     bool isViewWindowActive() override;
@@ -68,7 +84,7 @@ private:
     void toolTipChanged(const String&, const String&) override;
 
     void didCommitLoadForMainFrame(const String&, bool) override;
-    void handleDownloadRequest(DownloadProxy*) override;
+    void handleDownloadRequest(DownloadProxy&) override;
 
     void didChangeContentSize(const WebCore::IntSize&) override;
 
@@ -76,15 +92,17 @@ private:
     void setCursorHiddenUntilMouseMoves(bool) override;
     void didChangeViewportProperties(const WebCore::ViewportAttributes&) override;
 
-    void registerEditCommand(Ref<WebEditCommandProxy>&&, WebPageProxy::UndoOrRedo) override;
+    void registerEditCommand(Ref<WebEditCommandProxy>&&, UndoOrRedo) override;
     void clearAllEditCommands() override;
-    bool canUndoRedo(WebPageProxy::UndoOrRedo) override;
-    void executeUndoRedo(WebPageProxy::UndoOrRedo) override;
+    bool canUndoRedo(UndoOrRedo) override;
+    void executeUndoRedo(UndoOrRedo) override;
 
     WebCore::FloatRect convertToDeviceSpace(const WebCore::FloatRect&) override;
     WebCore::FloatRect convertToUserSpace(const WebCore::FloatRect&) override;
     WebCore::IntPoint screenToRootView(const WebCore::IntPoint&) override;
     WebCore::IntRect rootViewToScreen(const WebCore::IntRect&) override;
+    WebCore::IntPoint accessibilityScreenToRootView(const WebCore::IntPoint&) override;
+    WebCore::IntRect rootViewToAccessibilityScreen(const WebCore::IntRect&) override;
 
     void doneWithKeyEvent(const NativeWebKeyboardEvent&, bool) override;
 #if ENABLE(TOUCH_EVENTS)
@@ -94,7 +112,7 @@ private:
 
     RefPtr<WebPopupMenuProxy> createPopupMenuProxy(WebPageProxy&) override;
 #if ENABLE(CONTEXT_MENUS)
-    RefPtr<WebContextMenuProxy> createContextMenuProxy(WebPageProxy&, const ContextMenuContextData&, const UserData&) override;
+    Ref<WebContextMenuProxy> createContextMenuProxy(WebPageProxy&, ContextMenuContextData&&, const UserData&) override;
 #endif
 
     void enterAcceleratedCompositingMode(const LayerTreeContext&) override;
@@ -110,9 +128,10 @@ private:
     void willRecordNavigationSnapshot(WebBackForwardListItem&) override;
     void didRemoveNavigationGestureSnapshot() override;
 
+    void didStartProvisionalLoadForMainFrame() override;
     void didFirstVisuallyNonEmptyLayoutForMainFrame() override;
-    void didFinishLoadForMainFrame() override;
-    void didFailLoadForMainFrame() override;
+    void didFinishNavigation(API::Navigation*) override;
+    void didFailNavigation(API::Navigation*) override;
     void didSameDocumentNavigationForMainFrame(SameDocumentNavigationType) override;
 
     void didChangeBackgroundColor() override;
@@ -128,23 +147,27 @@ private:
 
     void didRestoreScrollPosition() override;
 
-    WebCore::UserInterfaceLayoutDirection userInterfaceLayoutDirection() override;
-
-    JSGlobalContextRef javascriptGlobalContext() override;
-
 #if ENABLE(FULLSCREEN_API)
-    virtual WebFullScreenManagerProxyClient& fullScreenManagerProxyClient() final;
-    virtual void closeFullScreenManager() override;
-    virtual bool isFullScreen() override;
-    virtual void enterFullScreen() override;
-    virtual void exitFullScreen() override;
-    virtual void beganEnterFullScreen(const WebCore::IntRect& initialFrame, const WebCore::IntRect& finalFrame) override;
-    virtual void beganExitFullScreen(const WebCore::IntRect& initialFrame, const WebCore::IntRect& finalFrame) override;
+    WebFullScreenManagerProxyClient& fullScreenManagerProxyClient() final;
+
+    void closeFullScreenManager() override;
+    bool isFullScreen() override;
+    void enterFullScreen() override;
+    void exitFullScreen() override;
+    void beganEnterFullScreen(const WebCore::IntRect& initialFrame, const WebCore::IntRect& finalFrame) override;
+    void beganExitFullScreen(const WebCore::IntRect& initialFrame, const WebCore::IntRect& finalFrame) override;
 #endif
 
-    WKWPE::View& m_view;
+    IPC::Attachment hostFileDescriptor() final;
+    void requestDOMPasteAccess(WebCore::DOMPasteAccessCategory, const WebCore::IntRect&, const String&, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&&) final;
 
-    std::unique_ptr<ScrollGestureController> m_scrollGestureController;
+    WebCore::UserInterfaceLayoutDirection userInterfaceLayoutDirection() override;
+
+    void didChangeWebPageID() const override;
+
+    void selectionDidChange() override;
+
+    WKWPE::View& m_view;
 };
 
 } // namespace WebKit

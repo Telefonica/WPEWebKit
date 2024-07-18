@@ -8,79 +8,108 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_COMMON_VIDEO_INCLUDE_VIDEO_FRAME_BUFFER_H_
-#define WEBRTC_COMMON_VIDEO_INCLUDE_VIDEO_FRAME_BUFFER_H_
+#ifndef COMMON_VIDEO_INCLUDE_VIDEO_FRAME_BUFFER_H_
+#define COMMON_VIDEO_INCLUDE_VIDEO_FRAME_BUFFER_H_
 
-#include <memory>
+#include <stdint.h>
 
-#include "webrtc/api/video/video_frame_buffer.h"
-#include "webrtc/base/callback.h"
-#include "webrtc/base/scoped_ref_ptr.h"
+#include <functional>
+
+#include "api/scoped_refptr.h"
+#include "api/video/video_frame_buffer.h"
 
 namespace webrtc {
 
-// Base class for native-handle buffer is a wrapper around a |native_handle|.
-// This is used for convenience as most native-handle implementations can share
-// many VideoFrame implementations, but need to implement a few others (such
-// as their own destructors or conversion methods back to software I420).
-class NativeHandleBuffer : public VideoFrameBuffer {
- public:
-  NativeHandleBuffer(void* native_handle, int width, int height);
+rtc::scoped_refptr<I420BufferInterface> WrapI420Buffer(
+    int width,
+    int height,
+    const uint8_t* y_plane,
+    int y_stride,
+    const uint8_t* u_plane,
+    int u_stride,
+    const uint8_t* v_plane,
+    int v_stride,
+    std::function<void()> no_longer_used);
 
-  Type type() const override;
-  int width() const override;
-  int height() const override;
-  const uint8_t* DataY() const override;
-  const uint8_t* DataU() const override;
-  const uint8_t* DataV() const override;
-  int StrideY() const override;
-  int StrideU() const override;
-  int StrideV() const override;
+rtc::scoped_refptr<I422BufferInterface> WrapI422Buffer(
+    int width,
+    int height,
+    const uint8_t* y_plane,
+    int y_stride,
+    const uint8_t* u_plane,
+    int u_stride,
+    const uint8_t* v_plane,
+    int v_stride,
+    std::function<void()> no_longer_used);
 
-  void* native_handle() const override;
+rtc::scoped_refptr<I444BufferInterface> WrapI444Buffer(
+    int width,
+    int height,
+    const uint8_t* y_plane,
+    int y_stride,
+    const uint8_t* u_plane,
+    int u_stride,
+    const uint8_t* v_plane,
+    int v_stride,
+    std::function<void()> no_longer_used);
 
- protected:
-  void* native_handle_;
-  const int width_;
-  const int height_;
-};
+rtc::scoped_refptr<I420ABufferInterface> WrapI420ABuffer(
+    int width,
+    int height,
+    const uint8_t* y_plane,
+    int y_stride,
+    const uint8_t* u_plane,
+    int u_stride,
+    const uint8_t* v_plane,
+    int v_stride,
+    const uint8_t* a_plane,
+    int a_stride,
+    std::function<void()> no_longer_used);
 
-class WrappedI420Buffer : public I420BufferInterface {
- public:
-  WrappedI420Buffer(int width,
-                    int height,
-                    const uint8_t* y_plane,
-                    int y_stride,
-                    const uint8_t* u_plane,
-                    int u_stride,
-                    const uint8_t* v_plane,
-                    int v_stride,
-                    const rtc::Callback0<void>& no_longer_used);
-  int width() const override;
-  int height() const override;
+rtc::scoped_refptr<PlanarYuvBuffer> WrapYuvBuffer(
+    VideoFrameBuffer::Type type,
+    int width,
+    int height,
+    const uint8_t* y_plane,
+    int y_stride,
+    const uint8_t* u_plane,
+    int u_stride,
+    const uint8_t* v_plane,
+    int v_stride,
+    std::function<void()> no_longer_used);
 
-  const uint8_t* DataY() const override;
-  const uint8_t* DataU() const override;
-  const uint8_t* DataV() const override;
-  int StrideY() const override;
-  int StrideU() const override;
-  int StrideV() const override;
+rtc::scoped_refptr<I010BufferInterface> WrapI010Buffer(
+    int width,
+    int height,
+    const uint16_t* y_plane,
+    int y_stride,
+    const uint16_t* u_plane,
+    int u_stride,
+    const uint16_t* v_plane,
+    int v_stride,
+    std::function<void()> no_longer_used);
 
- private:
-  friend class rtc::RefCountedObject<WrappedI420Buffer>;
-  ~WrappedI420Buffer() override;
+rtc::scoped_refptr<I210BufferInterface> WrapI210Buffer(
+    int width,
+    int height,
+    const uint16_t* y_plane,
+    int y_stride,
+    const uint16_t* u_plane,
+    int u_stride,
+    const uint16_t* v_plane,
+    int v_stride,
+    std::function<void()> no_longer_used);
 
-  const int width_;
-  const int height_;
-  const uint8_t* const y_plane_;
-  const uint8_t* const u_plane_;
-  const uint8_t* const v_plane_;
-  const int y_stride_;
-  const int u_stride_;
-  const int v_stride_;
-  rtc::Callback0<void> no_longer_used_cb_;
-};
-
+rtc::scoped_refptr<I410BufferInterface> WrapI410Buffer(
+    int width,
+    int height,
+    const uint16_t* y_plane,
+    int y_stride,
+    const uint16_t* u_plane,
+    int u_stride,
+    const uint16_t* v_plane,
+    int v_stride,
+    std::function<void()> no_longer_used);
 }  // namespace webrtc
 
-#endif  // WEBRTC_COMMON_VIDEO_INCLUDE_VIDEO_FRAME_BUFFER_H_
+#endif  // COMMON_VIDEO_INCLUDE_VIDEO_FRAME_BUFFER_H_

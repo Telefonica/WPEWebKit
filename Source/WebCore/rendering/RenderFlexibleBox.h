@@ -38,6 +38,7 @@ namespace WebCore {
 class FlexItem;
     
 class RenderFlexibleBox : public RenderBlock {
+    WTF_MAKE_ISO_ALLOCATED(RenderFlexibleBox);
 public:
     RenderFlexibleBox(Element&, RenderStyle&&);
     RenderFlexibleBox(Document&, RenderStyle&&);
@@ -45,17 +46,18 @@ public:
 
     bool isFlexibleBox() const override { return true; }
 
-    const char* renderName() const override;
+    ASCIILiteral renderName() const override;
 
     bool avoidsFloats() const final { return true; }
     bool canDropAnonymousBlockChild() const final { return false; }
-    void layoutBlock(bool relayoutChildren, LayoutUnit pageLogicalHeight = 0) final;
+    void layoutBlock(bool relayoutChildren, LayoutUnit pageLogicalHeight = 0_lu) final;
 
-    int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const override;
-    std::optional<int> firstLineBaseline() const override;
-    std::optional<int> inlineBlockBaseline(LineDirectionMode) const override;
+    LayoutUnit baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const override;
+    std::optional<LayoutUnit> firstLineBaseline() const override;
+    std::optional<LayoutUnit> inlineBlockBaseline(LineDirectionMode) const override;
 
     void styleDidChange(StyleDifference, const RenderStyle*) override;
+    bool hitTestChildren(const HitTestRequest&, HitTestResult&, const HitTestLocation&, const LayoutPoint& adjustedLocation, HitTestAction) override;
     void paintChildren(PaintInfo& forSelf, const LayoutPoint&, PaintInfo& forChild, bool usePrintRect) override;
 
     bool isHorizontalFlow() const;
@@ -67,9 +69,7 @@ public:
 
     virtual bool isFlexibleBoxImpl() const { return false; };
     
-    std::optional<LayoutUnit> crossSizeForPercentageResolution(const RenderBox&);
-    std::optional<LayoutUnit> mainSizeForPercentageResolution(const RenderBox&);
-    std::optional<LayoutUnit> childLogicalHeightForPercentageResolution(const RenderBox&);
+    bool useChildOverridingLogicalHeightForPercentageResolution(const RenderBox&);
     
     void clearCachedMainSizeForChild(const RenderBox& child);
     
@@ -87,9 +87,15 @@ public:
     // be laid out again.
     bool setStaticPositionForPositionedLayout(const RenderBox&);
 
+    enum class GapType { BetweenLines, BetweenItems };
+    LayoutUnit computeGap(GapType) const;
+
+    bool shouldApplyMinBlockSizeAutoForChild(const RenderBox&) const;
+
 protected:
     void computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const override;
-    void computePreferredLogicalWidths() override;
+
+    bool shouldResetChildLogicalHeightBeforeLayout(const RenderBox&) const override { return m_shouldResetChildLogicalHeightBeforeLayout; }
 
 private:
     enum FlexSign {
@@ -106,22 +112,26 @@ private:
 
     struct LineContext;
     
-    bool hasOrthogonalFlow(const RenderBox& child) const;
+    bool mainAxisIsChildInlineAxis(const RenderBox&) const;
     bool isColumnFlow() const;
+    bool isColumnOrRowReverse() const;
     bool isLeftToRightFlow() const;
     bool isMultiline() const;
     Length flexBasisForChild(const RenderBox& child) const;
+    Length mainSizeLengthForChild(SizeType, const RenderBox&) const;
+    Length crossSizeLengthForChild(SizeType, const RenderBox&) const;
+    bool shouldApplyMinSizeAutoForChild(const RenderBox&) const;
     LayoutUnit crossAxisExtentForChild(const RenderBox& child) const;
-    LayoutUnit crossAxisIntrinsicExtentForChild(const RenderBox& child) const;
-    LayoutUnit childIntrinsicLogicalHeight(const RenderBox& child) const;
-    LayoutUnit childIntrinsicLogicalWidth(const RenderBox& child) const;
+    LayoutUnit crossAxisIntrinsicExtentForChild(RenderBox& child);
+    LayoutUnit childIntrinsicLogicalHeight(RenderBox& child) const;
+    LayoutUnit childIntrinsicLogicalWidth(RenderBox& child);
     LayoutUnit mainAxisExtentForChild(const RenderBox& child) const;
     LayoutUnit mainAxisContentExtentForChildIncludingScrollbar(const RenderBox& child) const;
     LayoutUnit crossAxisExtent() const;
     LayoutUnit mainAxisExtent() const;
     LayoutUnit crossAxisContentExtent() const;
     LayoutUnit mainAxisContentExtent(LayoutUnit contentLogicalHeight);
-    std::optional<LayoutUnit> computeMainAxisExtentForChild(const RenderBox& child, SizeType, const Length& size);
+    std::optional<LayoutUnit> computeMainAxisExtentForChild(RenderBox& child, SizeType, const Length& size);
     WritingMode transformedWritingMode() const;
     LayoutUnit flowAwareBorderStart() const;
     LayoutUnit flowAwareBorderEnd() const;
@@ -135,37 +145,46 @@ private:
     LayoutUnit flowAwareMarginEndForChild(const RenderBox& child) const;
     LayoutUnit flowAwareMarginBeforeForChild(const RenderBox& child) const;
     LayoutUnit crossAxisMarginExtentForChild(const RenderBox& child) const;
+    LayoutUnit mainAxisMarginExtentForChild(const RenderBox& child) const;
     LayoutUnit crossAxisScrollbarExtent() const;
     LayoutUnit crossAxisScrollbarExtentForChild(const RenderBox& child) const;
     LayoutPoint flowAwareLocationForChild(const RenderBox& child) const;
-    bool useChildAspectRatio(const RenderBox& child) const;
+    bool childHasComputableAspectRatio(const RenderBox&) const;
+    bool childHasComputableAspectRatioAndCrossSizeIsConsideredDefinite(const RenderBox&);
+    bool crossAxisIsPhysicalWidth() const;
+    bool childCrossSizeShouldUseContainerCrossSize(const RenderBox& child) const;
+    LayoutUnit computeCrossSizeForChildUsingContainerCrossSize(const RenderBox& child) const;
+    void computeChildIntrinsicLogicalWidths(RenderObject&, LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const override;
     LayoutUnit computeMainSizeFromAspectRatioUsing(const RenderBox& child, Length crossSizeLength) const;
     void setFlowAwareLocationForChild(RenderBox& child, const LayoutPoint&);
-    LayoutUnit computeInnerFlexBaseSizeForChild(RenderBox& child, LayoutUnit mainAxisBorderAndPadding, bool relayoutChildren);
+    LayoutUnit computeFlexBaseSizeForChild(RenderBox& child, LayoutUnit mainAxisBorderAndPadding, bool relayoutChildren);
+    void maybeCacheChildMainIntrinsicSize(RenderBox& child, bool relayoutChildren);
     void adjustAlignmentForChild(RenderBox& child, LayoutUnit);
     ItemPosition alignmentForChild(const RenderBox& child) const;
-    bool mainAxisLengthIsDefinite(const RenderBox& child, const Length& flexBasis) const;
-    bool crossAxisLengthIsDefinite(const RenderBox& child, const Length& flexBasis) const;
+    bool canComputePercentageFlexBasis(const RenderBox& child, const Length& flexBasis, UpdatePercentageHeightDescendants);
+    bool childMainSizeIsDefinite(const RenderBox&, const Length& flexBasis);
+    bool childCrossSizeIsDefinite(const RenderBox&, const Length& flexBasis);
     bool needToStretchChildLogicalHeight(const RenderBox& child) const;
-    bool childHasIntrinsicMainAxisSize(const RenderBox& child) const;
-    EOverflow mainAxisOverflowForChild(const RenderBox& child) const;
-    EOverflow crossAxisOverflowForChild(const RenderBox& child) const;
+    bool childHasIntrinsicMainAxisSize(const RenderBox& child);
+    Overflow mainAxisOverflowForChild(const RenderBox& child) const;
+    Overflow crossAxisOverflowForChild(const RenderBox& child) const;
     void cacheChildMainSize(const RenderBox& child);
-    
+    bool useChildOverridingCrossSizeForPercentageResolution(const RenderBox&);
+    bool useChildOverridingMainSizeForPercentageResolution(const RenderBox&);
+
     void layoutFlexItems(bool relayoutChildren);
     LayoutUnit autoMarginOffsetInMainAxis(const Vector<FlexItem>&, LayoutUnit& availableFreeSpace);
     void updateAutoMarginsInMainAxis(RenderBox& child, LayoutUnit autoMarginOffset);
     bool hasAutoMarginsInCrossAxis(const RenderBox& child) const;
     bool updateAutoMarginsInCrossAxis(RenderBox& child, LayoutUnit availableAlignmentSpace);
-    void repositionLogicalHeightDependentFlexItems(Vector<LineContext>&);
-    LayoutUnit clientLogicalBottomAfterRepositioning();
+    void repositionLogicalHeightDependentFlexItems(Vector<LineContext>&, LayoutUnit gapBetweenLines);
     
     LayoutUnit availableAlignmentSpaceForChild(LayoutUnit lineCrossAxisExtent, const RenderBox& child);
     LayoutUnit marginBoxAscentForChild(const RenderBox& child);
     
     LayoutUnit computeChildMarginValue(Length margin);
     void prepareOrderIteratorAndMargins();
-    LayoutUnit adjustChildSizeForMinAndMax(const RenderBox& child, LayoutUnit childSize);
+    std::pair<LayoutUnit, LayoutUnit> computeFlexItemMinMaxSizes(RenderBox& child);
     LayoutUnit adjustChildSizeForAspectRatioCrossAxisMinAndMax(const RenderBox& child, LayoutUnit childSize);
     FlexItem constructFlexItem(RenderBox&, bool relayoutChildren);
     
@@ -174,11 +193,11 @@ private:
     void freezeViolations(Vector<FlexItem*>&, LayoutUnit& availableFreeSpace, double& totalFlexGrow, double& totalFlexShrink, double& totalWeightedFlexShrink);
     
     void resetAutoMarginsAndLogicalTopInCrossAxis(RenderBox& child);
-    void setOverrideMainAxisContentSizeForChild(RenderBox& child, LayoutUnit childPreferredSize);
+    void setOverridingMainSizeForChild(RenderBox&, LayoutUnit);
     void prepareChildForPositionedLayout(RenderBox& child);
-    void layoutAndPlaceChildren(LayoutUnit& crossAxisOffset, Vector<FlexItem>&, LayoutUnit availableFreeSpace, bool relayoutChildren, Vector<LineContext>&);
-    void layoutColumnReverse(const Vector<FlexItem>&, LayoutUnit crossAxisOffset, LayoutUnit availableFreeSpace);
-    void alignFlexLines(Vector<LineContext>&);
+    void layoutAndPlaceChildren(LayoutUnit& crossAxisOffset, Vector<FlexItem>&, LayoutUnit availableFreeSpace, bool relayoutChildren, Vector<LineContext>&, LayoutUnit gapBetweenItems);
+    void layoutColumnReverse(const Vector<FlexItem>&, LayoutUnit crossAxisOffset, LayoutUnit availableFreeSpace, LayoutUnit gapBetweenItems);
+    void alignFlexLines(Vector<LineContext>&, LayoutUnit gapBetweenLines);
     void alignChildren(const Vector<LineContext>&);
     void applyStretchAlignmentToChild(RenderBox& child, LayoutUnit lineCrossAxisExtent);
     void flipForRightToLeftColumn(const Vector<LineContext>& lineContexts);
@@ -186,6 +205,14 @@ private:
     
     void appendChildFrameRects(ChildFrameRects&);
     void repaintChildrenDuringLayoutIfMoved(const ChildFrameRects&);
+
+    bool childHasPercentHeightDescendants(const RenderBox&) const;
+
+    void resetHasDefiniteHeight() { m_hasDefiniteHeight = SizeDefiniteness::Unknown; }
+
+#if ENABLE(LAYOUT_FORMATTING_CONTEXT)
+    void layoutUsingFlexFormattingContext();
+#endif
 
     // This is used to cache the preferred size for orthogonal flow children so we
     // don't have to relayout to get it
@@ -201,13 +228,14 @@ private:
     // the first layout likely did not use the correct value for percentage
     // sizing of children.
     HashSet<const RenderBox*> m_relaidOutChildren;
-    
+
     mutable OrderIterator m_orderIterator { *this };
     int m_numberOfInFlowChildrenOnFirstLine { -1 };
     
     // This is SizeIsUnknown outside of layoutBlock()
-    mutable SizeDefiniteness m_hasDefiniteHeight { SizeDefiniteness::Unknown };
+    SizeDefiniteness m_hasDefiniteHeight { SizeDefiniteness::Unknown };
     bool m_inLayout { false };
+    bool m_shouldResetChildLogicalHeightBeforeLayout { false };
 };
 
 } // namespace WebCore

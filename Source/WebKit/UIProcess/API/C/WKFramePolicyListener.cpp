@@ -30,7 +30,9 @@
 #include "WKAPICast.h"
 #include "WebFramePolicyListenerProxy.h"
 #include "WebFrameProxy.h"
-#include "WebsitePolicies.h"
+#include "WebProcessPool.h"
+#include "WebsiteDataStore.h"
+#include "WebsitePoliciesData.h"
 
 using namespace WebKit;
 
@@ -41,12 +43,27 @@ WKTypeID WKFramePolicyListenerGetTypeID()
 
 void WKFramePolicyListenerUse(WKFramePolicyListenerRef policyListenerRef)
 {
-    toImpl(policyListenerRef)->use({ });
+    toImpl(policyListenerRef)->use();
+}
+
+void WKFramePolicyListenerUseInNewProcess(WKFramePolicyListenerRef policyListenerRef)
+{
+    toImpl(policyListenerRef)->use(nullptr, ProcessSwapRequestedByClient::Yes);
+}
+
+static void useWithPolicies(WKFramePolicyListenerRef policyListenerRef, WKWebsitePoliciesRef websitePolicies, ProcessSwapRequestedByClient processSwapRequestedByClient)
+{
+    toImpl(policyListenerRef)->use(toImpl(websitePolicies), processSwapRequestedByClient);
 }
 
 void WKFramePolicyListenerUseWithPolicies(WKFramePolicyListenerRef policyListenerRef, WKWebsitePoliciesRef websitePolicies)
 {
-    toImpl(policyListenerRef)->use(toImpl(websitePolicies)->websitePolicies());
+    useWithPolicies(policyListenerRef, websitePolicies, ProcessSwapRequestedByClient::No);
+}
+
+void WKFramePolicyListenerUseInNewProcessWithPolicies(WKFramePolicyListenerRef policyListenerRef, WKWebsitePoliciesRef websitePolicies)
+{
+    useWithPolicies(policyListenerRef, websitePolicies, ProcessSwapRequestedByClient::Yes);
 }
 
 void WKFramePolicyListenerDownload(WKFramePolicyListenerRef policyListenerRef)

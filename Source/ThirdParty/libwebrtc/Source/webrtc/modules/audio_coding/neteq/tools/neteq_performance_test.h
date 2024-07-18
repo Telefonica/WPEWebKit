@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_NETEQ_TOOLS_NETEQ_PERFORMANCE_TEST_H_
-#define WEBRTC_MODULES_AUDIO_CODING_NETEQ_TOOLS_NETEQ_PERFORMANCE_TEST_H_
+#ifndef MODULES_AUDIO_CODING_NETEQ_TOOLS_NETEQ_PERFORMANCE_TEST_H_
+#define MODULES_AUDIO_CODING_NETEQ_TOOLS_NETEQ_PERFORMANCE_TEST_H_
 
-#include "webrtc/typedefs.h"
+#include <stdint.h>
 
 namespace webrtc {
 namespace test {
@@ -19,9 +19,9 @@ namespace test {
 class NetEqPerformanceTest {
  public:
   // Runs a performance test with parameters as follows:
-  //   |runtime_ms|: the simulation time, i.e., the duration of the audio data.
-  //   |lossrate|: drop one out of |lossrate| packets, e.g., one out of 10.
-  //   |drift_factor|: clock drift in [0, 1].
+  //   `runtime_ms`: the simulation time, i.e., the duration of the audio data.
+  //   `lossrate`: drop one out of `lossrate` packets, e.g., one out of 10.
+  //   `drift_factor`: clock drift in [0, 1].
   // Returns the runtime in ms.
   static int64_t Run(int runtime_ms, int lossrate, double drift_factor);
 };
@@ -29,4 +29,4 @@ class NetEqPerformanceTest {
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_TOOLS_NETEQ_PERFORMANCE_TEST_H_
+#endif  // MODULES_AUDIO_CODING_NETEQ_TOOLS_NETEQ_PERFORMANCE_TEST_H_

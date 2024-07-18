@@ -33,27 +33,49 @@
 #pragma once
 
 #include <wtf/Forward.h>
-#include <wtf/Optional.h>
+#include <wtf/Markable.h>
 
 namespace WebCore {
 
-enum class LinkIconType;
+class Document;
+enum class LinkIconType : uint8_t;
 
 struct LinkRelAttribute {
-    bool isStyleSheet { false };
-    std::optional<LinkIconType> iconType;
-    bool isAlternate { false };
-    bool isDNSPrefetch { false };
-    bool isLinkPreload { false };
-#if ENABLE(LINK_PREFETCH)
-    bool isLinkPrefetch { false };
-    bool isLinkSubresource { false };
+    Markable<LinkIconType, EnumMarkableTraits<LinkIconType>> iconType;
+    bool isStyleSheet : 1;
+    bool isAlternate : 1;
+    bool isDNSPrefetch : 1;
+    bool isLinkPreload : 1;
+    bool isLinkPreconnect : 1;
+    bool isLinkPrefetch : 1;
+#if ENABLE(APPLICATION_MANIFEST)
+    bool isApplicationManifest : 1;
 #endif
 
     LinkRelAttribute();
-    explicit LinkRelAttribute(const String&);
+    LinkRelAttribute(Document&, const String&);
 
-    static bool isSupported(StringView);
+    static bool isSupported(Document&, StringView);
 };
+
+inline bool operator==(const LinkRelAttribute& left, const LinkRelAttribute& right)
+{
+    return left.iconType == right.iconType
+        && left.isStyleSheet == right.isStyleSheet
+        && left.isAlternate == right.isAlternate
+        && left.isDNSPrefetch == right.isDNSPrefetch
+        && left.isLinkPreload == right.isLinkPreload
+        && left.isLinkPreconnect == right.isLinkPreconnect
+        && left.isLinkPrefetch == right.isLinkPrefetch
+#if ENABLE(APPLICATION_MANIFEST)
+        && left.isApplicationManifest == right.isApplicationManifest
+#endif
+        ;
+}
+
+inline bool operator!=(const LinkRelAttribute& left, const LinkRelAttribute& right)
+{
+    return !(left == right);
+}
 
 }

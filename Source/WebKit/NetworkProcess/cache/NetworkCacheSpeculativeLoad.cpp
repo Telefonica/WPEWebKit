@@ -25,15 +25,16 @@
 
 #include "config.h"
 
-#if ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
+#if ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION) || ENABLE(NETWORK_CACHE_STALE_WHILE_REVALIDATE)
 #include "NetworkCacheSpeculativeLoad.h"
 
 #include "Logging.h"
 #include "NetworkCache.h"
 #include "NetworkLoad.h"
+#include "NetworkProcess.h"
 #include "NetworkSession.h"
+#include <WebCore/NetworkStorageSession.h>
 #include <pal/SessionID.h>
-#include <wtf/CurrentTime.h>
 #include <wtf/RunLoop.h>
 
 namespace WebKit {
@@ -41,26 +42,34 @@ namespace NetworkCache {
 
 using namespace WebCore;
 
-SpeculativeLoad::SpeculativeLoad(Cache& cache, const GlobalFrameID& frameID, const ResourceRequest& request, std::unique_ptr<NetworkCache::Entry> cacheEntryForValidation, RevalidationCompletionHandler&& completionHandler)
+SpeculativeLoad::SpeculativeLoad(Cache& cache, const GlobalFrameID& globalFrameID, const ResourceRequest& request, std::unique_ptr<NetworkCache::Entry> cacheEntryForValidation, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain, RevalidationCompletionHandler&& completionHandler)
     : m_cache(cache)
-    , m_frameID(frameID)
     , m_completionHandler(WTFMove(completionHandler))
     , m_originalRequest(request)
-    , m_bufferedDataForCache(SharedBuffer::create())
+    , m_bufferedDataForCache(FragmentedSharedBuffer::create())
     , m_cacheEntry(WTFMove(cacheEntryForValidation))
 {
     ASSERT(!m_cacheEntry || m_cacheEntry->needsValidation());
 
+    auto* networkSession = m_cache->networkProcess().networkSession(m_cache->sessionID());
+    if (!networkSession) {
+        RunLoop::main().dispatch([completionHandler = WTFMove(m_completionHandler)]() mutable {
+            completionHandler(nullptr);
+        });
+        return;
+    }
+
     NetworkLoadParameters parameters;
-    parameters.sessionID = PAL::SessionID::defaultSessionID();
+    parameters.webPageProxyID = globalFrameID.webPageProxyID;
+    parameters.webPageID = globalFrameID.webPageID;
+    parameters.webFrameID = globalFrameID.frameID;
     parameters.storedCredentialsPolicy = StoredCredentialsPolicy::Use;
-    parameters.contentSniffingPolicy = DoNotSniffContent;
+    parameters.contentSniffingPolicy = ContentSniffingPolicy::DoNotSniffContent;
+    parameters.contentEncodingSniffingPolicy = ContentEncodingSniffingPolicy::Default;
     parameters.request = m_originalRequest;
-#if USE(NETWORK_SESSION)
-    m_networkLoad = std::make_unique<NetworkLoad>(*this, WTFMove(parameters), NetworkSession::defaultSession());
-#else
-    m_networkLoad = std::make_unique<NetworkLoad>(*this, WTFMove(parameters));
-#endif
+    parameters.isNavigatingToAppBoundDomain = isNavigatingToAppBoundDomain;
+    m_networkLoad = makeUnique<NetworkLoad>(*this, nullptr, WTFMove(parameters), *networkSession);
+    m_networkLoad->startWithScheduling();
 }
 
 SpeculativeLoad::~SpeculativeLoad()
@@ -68,11 +77,25 @@ SpeculativeLoad::~SpeculativeLoad()
     ASSERT(!m_networkLoad);
 }
 
+void SpeculativeLoad::cancel()
+{
+    if (!m_networkLoad)
+        return;
+    m_networkLoad->cancel();
+    m_networkLoad = nullptr;
+    m_completionHandler(nullptr);
+}
+
 void SpeculativeLoad::willSendRedirectedRequest(ResourceRequest&& request, ResourceRequest&& redirectRequest, ResourceResponse&& redirectResponse)
 {
     LOG(NetworkCacheSpeculativePreloading, "Speculative redirect %s -> %s", request.url().string().utf8().data(), redirectRequest.url().string().utf8().data());
 
-    m_cacheEntry = m_cache->storeRedirect(request, redirectResponse, redirectRequest);
+    std::optional<Seconds> maxAgeCap;
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+    if (auto* networkStorageSession = m_cache->networkProcess().storageSession(m_cache->sessionID()))
+        maxAgeCap = networkStorageSession->maxAgeCacheCap(request);
+#endif
+    m_cacheEntry = m_cache->storeRedirect(request, redirectResponse, redirectRequest, maxAgeCap);
     // Create a synthetic cache entry if we can't store.
     if (!m_cacheEntry)
         m_cacheEntry = m_cache->makeRedirectEntry(request, redirectResponse, redirectRequest);
@@ -81,33 +104,34 @@ void SpeculativeLoad::willSendRedirectedRequest(ResourceRequest&& request, Resou
     didComplete();
 }
 
-auto SpeculativeLoad::didReceiveResponse(ResourceResponse&& receivedResponse) -> ShouldContinueDidReceiveResponse
+void SpeculativeLoad::didReceiveResponse(ResourceResponse&& receivedResponse, PrivateRelayed privateRelayed, ResponseCompletionHandler&& completionHandler)
 {
     m_response = receivedResponse;
+    m_privateRelayed = privateRelayed;
 
     if (m_response.isMultipart())
-        m_bufferedDataForCache = nullptr;
+        m_bufferedDataForCache.reset();
 
     bool validationSucceeded = m_response.httpStatusCode() == 304; // 304 Not Modified
     if (validationSucceeded && m_cacheEntry)
-        m_cacheEntry = m_cache->update(m_originalRequest, m_frameID, *m_cacheEntry, m_response);
+        m_cacheEntry = m_cache->update(m_originalRequest, *m_cacheEntry, m_response, privateRelayed);
     else
         m_cacheEntry = nullptr;
 
-    return ShouldContinueDidReceiveResponse::Yes;
+    completionHandler(PolicyAction::Use);
 }
 
-void SpeculativeLoad::didReceiveBuffer(Ref<SharedBuffer>&& buffer, int reportedEncodedDataLength)
+void SpeculativeLoad::didReceiveBuffer(const WebCore::FragmentedSharedBuffer& buffer, int reportedEncodedDataLength)
 {
     ASSERT(!m_cacheEntry);
 
     if (m_bufferedDataForCache) {
         // Prevent memory growth in case of streaming data.
         const size_t maximumCacheBufferSize = 10 * 1024 * 1024;
-        if (m_bufferedDataForCache->size() + buffer->size() <= maximumCacheBufferSize)
-            m_bufferedDataForCache->append(buffer.get());
+        if (m_bufferedDataForCache.size() + buffer.size() <= maximumCacheBufferSize)
+            m_bufferedDataForCache.append(buffer);
         else
-            m_bufferedDataForCache = nullptr;
+            m_bufferedDataForCache.reset();
     }
 }
 
@@ -116,21 +140,14 @@ void SpeculativeLoad::didFinishLoading(const WebCore::NetworkLoadMetrics&)
     if (m_didComplete)
         return;
     if (!m_cacheEntry && m_bufferedDataForCache) {
-        m_cacheEntry = m_cache->store(m_originalRequest, m_response, m_bufferedDataForCache.copyRef(), [](auto& mappedBody) { });
+        m_cacheEntry = m_cache->store(m_originalRequest, m_response, m_privateRelayed, m_bufferedDataForCache.get(), [](auto& mappedBody) { });
         // Create a synthetic cache entry if we can't store.
         if (!m_cacheEntry && isStatusCodeCacheableByDefault(m_response.httpStatusCode()))
-            m_cacheEntry = m_cache->makeEntry(m_originalRequest, m_response, WTFMove(m_bufferedDataForCache));
+            m_cacheEntry = m_cache->makeEntry(m_originalRequest, m_response, m_privateRelayed, m_bufferedDataForCache.take());
     }
 
     didComplete();
 }
-
-#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
-void SpeculativeLoad::canAuthenticateAgainstProtectionSpaceAsync(const WebCore::ProtectionSpace&)
-{
-    m_networkLoad->continueCanAuthenticateAgainstProtectionSpace(false);
-}
-#endif
 
 void SpeculativeLoad::didFailLoading(const ResourceError&)
 {
@@ -157,7 +174,44 @@ void SpeculativeLoad::didComplete()
     m_completionHandler(WTFMove(m_cacheEntry));
 }
 
+#if !LOG_DISABLED
+
+static void dumpHTTPHeadersDiff(const HTTPHeaderMap& headersA, const HTTPHeaderMap& headersB)
+{
+    auto aEnd = headersA.end();
+    for (auto it = headersA.begin(); it != aEnd; ++it) {
+        String valueB = headersB.get(it->key);
+        if (valueB.isNull())
+            LOG(NetworkCacheSpeculativePreloading, "* '%s' HTTP header is only in first request (value: %s)", it->key.utf8().data(), it->value.utf8().data());
+        else if (it->value != valueB)
+            LOG(NetworkCacheSpeculativePreloading, "* '%s' HTTP header differs in both requests: %s != %s", it->key.utf8().data(), it->value.utf8().data(), valueB.utf8().data());
+    }
+    auto bEnd = headersB.end();
+    for (auto it = headersB.begin(); it != bEnd; ++it) {
+        if (!headersA.contains(it->key))
+            LOG(NetworkCacheSpeculativePreloading, "* '%s' HTTP header is only in second request (value: %s)", it->key.utf8().data(), it->value.utf8().data());
+    }
+}
+
+#endif
+
+bool requestsHeadersMatch(const ResourceRequest& speculativeValidationRequest, const ResourceRequest& actualRequest)
+{
+    ASSERT(!actualRequest.isConditional());
+    ResourceRequest speculativeRequest = speculativeValidationRequest;
+    speculativeRequest.makeUnconditional();
+
+    if (speculativeRequest.httpHeaderFields() != actualRequest.httpHeaderFields()) {
+        LOG(NetworkCacheSpeculativePreloading, "Cannot reuse speculatively validated entry because HTTP headers used for validation do not match");
+#if !LOG_DISABLED
+        dumpHTTPHeadersDiff(speculativeRequest.httpHeaderFields(), actualRequest.httpHeaderFields());
+#endif
+        return false;
+    }
+    return true;
+}
+
 } // namespace NetworkCache
 } // namespace WebKit
 
-#endif // ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
+#endif // ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION) || ENABLE(NETWORK_CACHE_STALE_WHILE_REVALIDATE)

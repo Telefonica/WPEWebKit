@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,7 +25,7 @@
 
 #pragma once
 
-#include "DFGCompilationMode.h"
+#include "JITCompilationMode.h"
 
 #if ENABLE(DFG_JIT)
 
@@ -38,7 +38,9 @@ namespace JSC { namespace DFG {
 struct Node;
 
 typedef uint32_t BlockIndex;
-static const BlockIndex NoBlock = UINT_MAX;
+static constexpr BlockIndex NoBlock = UINT_MAX;
+
+extern const char* const tierName;
 
 // Use RefChildren if the child ref counts haven't already been adjusted using
 // other means and either of the following is true:
@@ -64,17 +66,17 @@ enum SwitchKind {
     SwitchCell
 };
 
-inline bool verboseCompilationEnabled(CompilationMode mode = DFGMode)
+inline bool verboseCompilationEnabled(JITCompilationMode mode = JITCompilationMode::DFG)
 {
     return Options::verboseCompilation() || Options::dumpGraphAtEachPhase() || (isFTL(mode) && Options::verboseFTLCompilation());
 }
 
-inline bool logCompilationChanges(CompilationMode mode = DFGMode)
+inline bool logCompilationChanges(JITCompilationMode mode = JITCompilationMode::DFG)
 {
     return verboseCompilationEnabled(mode) || Options::logCompilationChanges();
 }
 
-inline bool shouldDumpGraphAtEachPhase(CompilationMode mode)
+inline bool shouldDumpGraphAtEachPhase(JITCompilationMode mode = JITCompilationMode::DFG)
 {
     if (isFTL(mode))
         return Options::dumpGraphAtEachPhase() || Options::dumpDFGFTLGraphAtEachPhase();
@@ -83,14 +85,14 @@ inline bool shouldDumpGraphAtEachPhase(CompilationMode mode)
 
 inline bool validationEnabled()
 {
-#if !ASSERT_DISABLED
+#if ASSERT_ENABLED
     return true;
 #else
     return Options::validateGraph() || Options::validateGraphAtEachPhase();
 #endif
 }
 
-inline bool enableInt52()
+inline bool constexpr enableInt52()
 {
 #if USE(JSVALUE64)
     return true;
@@ -156,10 +158,10 @@ enum OptimizationFixpointState { BeforeFixpoint, FixpointNotConverged, FixpointC
 // Describes the form you can expect the entire graph to be in.
 enum GraphForm {
     // LoadStore form means that basic blocks may freely use GetLocal, SetLocal,
-    // GetLocalUnlinked, and Flush for accessing local variables and indicating
-    // where their live ranges ought to be. Data flow between local accesses is
-    // implicit. Liveness is only explicit at block heads (variablesAtHead).
-    // This is only used by the DFG simplifier and is only preserved by same.
+    // and Flush for accessing local variables and indicating where their live
+    // ranges ought to be. Data flow between local accesses is implicit. Liveness
+    // is only explicit at block heads (variablesAtHead). This is only used by
+    // the DFG simplifier and is only preserved by same.
     //
     // For example, LoadStore form gives no easy way to determine which SetLocal's
     // flow into a GetLocal. As well, LoadStore form implies no restrictions on
@@ -173,7 +175,7 @@ enum GraphForm {
     // most likely) then it implies that the local is still live but that it need
     // not be stored to the stack necessarily. This implies that Phantom can
     // reference nodes that have no result, as long as those nodes are valid
-    // GetLocal children (i.e. Phi, SetLocal, SetArgument).
+    // GetLocal children (i.e. Phi, SetLocal, SetArgumentDefinitely, SetArgumentMaybe).
     //
     // LoadStore form also implies that Phis need not have children. By default,
     // they end up having no children if you enter LoadStore using the canonical
@@ -357,7 +359,7 @@ inline CapabilityLevel leastUpperBound(CapabilityLevel a, CapabilityLevel b)
 }
 
 // Unconditionally disable DFG disassembly support if the DFG is not compiled in.
-inline bool shouldDumpDisassembly(CompilationMode mode = DFGMode)
+inline bool shouldDumpDisassembly(JITCompilationMode mode = JITCompilationMode::DFG)
 {
 #if ENABLE(DFG_JIT)
     return Options::dumpDisassembly() || Options::dumpDFGDisassembly() || (isFTL(mode) && Options::dumpFTLDisassembly());

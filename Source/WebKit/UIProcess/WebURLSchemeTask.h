@@ -25,31 +25,51 @@
 
 #pragma once
 
+#include "APIObject.h"
+#include "WebProcessProxy.h"
 #include <WebCore/ResourceRequest.h>
+#include <WebCore/ResourceResponse.h>
+#include <WebCore/SharedBuffer.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/InstanceCounted.h>
+#include <wtf/Lock.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+
+namespace API {
+class FrameInfo;
+}
 
 namespace WebCore {
 class ResourceError;
 class ResourceResponse;
-class SharedBuffer;
 }
 
 namespace WebKit {
 
+struct URLSchemeTaskParameters;
 class WebURLSchemeHandler;
 class WebPageProxy;
 
-class WebURLSchemeTask : public RefCounted<WebURLSchemeTask>, public InstanceCounted<WebURLSchemeTask> {
+using SyncLoadCompletionHandler = CompletionHandler<void(const WebCore::ResourceResponse&, const WebCore::ResourceError&, const Vector<uint8_t>&)>;
+
+class WebURLSchemeTask : public API::ObjectImpl<API::Object::Type::URLSchemeTask>, public InstanceCounted<WebURLSchemeTask> {
     WTF_MAKE_NONCOPYABLE(WebURLSchemeTask);
 public:
-    static Ref<WebURLSchemeTask> create(WebURLSchemeHandler&, WebPageProxy&, uint64_t identifier, const WebCore::ResourceRequest&);
+    static Ref<WebURLSchemeTask> create(WebURLSchemeHandler&, WebPageProxy&, WebProcessProxy&, WebCore::PageIdentifier, URLSchemeTaskParameters&&, SyncLoadCompletionHandler&&);
 
-    uint64_t identifier() const { return m_identifier; }
-    uint64_t pageID() const { return m_pageIdentifier; }
+    ~WebURLSchemeTask();
 
-    const WebCore::ResourceRequest& request() const { return m_request; }
+    WebCore::ResourceLoaderIdentifier resourceLoaderID() const { ASSERT(RunLoop::isMain()); return m_resourceLoaderID; }
+    WebPageProxyIdentifier pageProxyID() const { ASSERT(RunLoop::isMain()); return m_pageProxyID; }
+    WebCore::PageIdentifier webPageID() const { ASSERT(RunLoop::isMain()); return m_webPageID; }
+    WebProcessProxy* process() { ASSERT(RunLoop::isMain()); return m_process.get(); }
+    WebCore::ResourceRequest request() const;
+    API::FrameInfo& frameInfo() const { return m_frameInfo.get(); }
+
+#if PLATFORM(COCOA)
+    NSURLRequest *nsRequest() const;
+#endif
 
     enum class ExceptionType {
         DataAlreadySent,
@@ -57,28 +77,46 @@ public:
         RedirectAfterResponse,
         TaskAlreadyStopped,
         NoResponseSent,
+        WaitingForRedirectCompletionHandler,
         None,
     };
+    ExceptionType willPerformRedirection(WebCore::ResourceResponse&&, WebCore::ResourceRequest&&,  Function<void(WebCore::ResourceRequest&&)>&&);
     ExceptionType didPerformRedirection(WebCore::ResourceResponse&&, WebCore::ResourceRequest&&);
     ExceptionType didReceiveResponse(const WebCore::ResourceResponse&);
-    ExceptionType didReceiveData(Ref<WebCore::SharedBuffer>);
+    ExceptionType didReceiveData(const WebCore::SharedBuffer&);
     ExceptionType didComplete(const WebCore::ResourceError&);
 
     void stop();
     void pageDestroyed();
 
+    void suppressTaskStoppedExceptions() { m_shouldSuppressTaskStoppedExceptions = true; }
+
+    bool waitingForRedirectCompletionHandlerCallback() const { return m_waitingForRedirectCompletionHandlerCallback; }
+
 private:
-    WebURLSchemeTask(WebURLSchemeHandler&, WebPageProxy&, uint64_t identifier, const WebCore::ResourceRequest&);
+    WebURLSchemeTask(WebURLSchemeHandler&, WebPageProxy&, WebProcessProxy&, WebCore::PageIdentifier, URLSchemeTaskParameters&&, SyncLoadCompletionHandler&&);
+
+    bool isSync() const { return !!m_syncCompletionHandler; }
 
     Ref<WebURLSchemeHandler> m_urlSchemeHandler;
-    WebPageProxy* m_page;
-    uint64_t m_identifier;
-    uint64_t m_pageIdentifier;
-    WebCore::ResourceRequest m_request;
+    RefPtr<WebProcessProxy> m_process;
+    WebCore::ResourceLoaderIdentifier m_resourceLoaderID;
+    WebPageProxyIdentifier m_pageProxyID;
+    WebCore::PageIdentifier m_webPageID;
+    WebCore::ResourceRequest m_request WTF_GUARDED_BY_LOCK(m_requestLock);
+    Ref<API::FrameInfo> m_frameInfo;
+    mutable Lock m_requestLock;
     bool m_stopped { false };
     bool m_responseSent { false };
     bool m_dataSent { false };
     bool m_completed { false };
+    bool m_shouldSuppressTaskStoppedExceptions { false };
+
+    SyncLoadCompletionHandler m_syncCompletionHandler;
+    WebCore::ResourceResponse m_syncResponse;
+    WebCore::SharedBufferBuilder m_syncData;
+
+    bool m_waitingForRedirectCompletionHandlerCallback { false };
 };
 
 } // namespace WebKit

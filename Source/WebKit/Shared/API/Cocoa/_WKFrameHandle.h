@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,15 +23,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import <Foundation/Foundation.h>
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
-#import <Foundation/Foundation.h>
-
-WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
+WK_CLASS_AVAILABLE(macos(10.10), ios(8.0))
 @interface _WKFrameHandle : NSObject <NSCopying, NSSecureCoding>
 
-@end
+@property (nonatomic, readonly) uint64_t frameID WK_API_AVAILABLE(macos(12.0), ios(15.0));
 
-#endif // WK_API_ENABLED
+@end

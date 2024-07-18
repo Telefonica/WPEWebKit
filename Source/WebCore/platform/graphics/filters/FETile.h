@@ -2,6 +2,7 @@
  * Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005 Rob Buis <buis@kde.org>
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
+ * Copyright (C) 2021-2022 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,31 +20,28 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef FETile_h
-#define FETile_h
+#pragma once
 
 #include "FilterEffect.h"
-#include "Filter.h"
 
 namespace WebCore {
     
 class FETile : public FilterEffect {
 public:
-    static Ref<FETile> create(Filter&);
-
-    void platformApplySoftware() override;
-    void dump() override;
-
-    void determineAbsolutePaintRect() override { setAbsolutePaintRect(enclosingIntRect(maxEffectRect())); }
-
-    FilterEffectType filterEffectType() const override { return FilterEffectTypeTile; }
-
-    WTF::TextStream& externalRepresentation(WTF::TextStream&, int indention) const override;
+    WEBCORE_EXPORT static Ref<FETile> create();
 
 private:
-    FETile(Filter&);
+    FETile();
+
+    FloatRect calculateImageRect(const Filter&, const FilterImageVector& inputs, const FloatRect& primitiveSubregion) const override;
+
+    bool resultIsAlphaImage(const FilterImageVector& inputs) const override;
+
+    std::unique_ptr<FilterEffectApplier> createSoftwareApplier() const override;
+
+    WTF::TextStream& externalRepresentation(WTF::TextStream&, FilterRepresentation) const override;
 };
 
 } // namespace WebCore
 
-#endif // FETile_h
+SPECIALIZE_TYPE_TRAITS_FILTER_EFFECT(FETile)

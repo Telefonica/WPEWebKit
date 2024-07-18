@@ -31,16 +31,17 @@
 #pragma once
 
 #include <wtf/Forward.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
-class WebSocketChannelClient {
+class WebSocketChannelClient : public CanMakeWeakPtr<WebSocketChannelClient> {
 public:
-    virtual ~WebSocketChannelClient() { }
+    virtual ~WebSocketChannelClient() = default;
     virtual void didConnect() = 0;
-    virtual void didReceiveMessage(const String&) = 0;
+    virtual void didReceiveMessage(String&&) = 0;
     virtual void didReceiveBinaryData(Vector<uint8_t>&&) = 0;
-    virtual void didReceiveMessageError() = 0;
+    virtual void didReceiveMessageError(String&&) = 0;
     virtual void didUpdateBufferedAmount(unsigned bufferedAmount) = 0;
     virtual void didStartClosingHandshake() = 0;
     enum ClosingHandshakeCompletionStatus {
@@ -51,7 +52,7 @@ public:
     virtual void didUpgradeURL() = 0;
 
 protected:
-    WebSocketChannelClient() { }
+    WebSocketChannelClient() = default;
 };
 
 } // namespace WebCore

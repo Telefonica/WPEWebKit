@@ -28,12 +28,25 @@
 
 #if ENABLE(SERVICE_WORKER)
 
+#include "Document.h"
+#include "Frame.h"
+#include "FrameLoader.h"
+#include "FrameLoaderClient.h"
+#include "LegacySchemeRegistry.h"
+#include "Page.h"
+#include "SWClientConnection.h"
+
 namespace WebCore {
 
 static ServiceWorkerProvider* sharedProvider;
 
+ServiceWorkerProvider::~ServiceWorkerProvider()
+{
+}
+
 ServiceWorkerProvider& ServiceWorkerProvider::singleton()
 {
+    ASSERT(isMainThread());
     RELEASE_ASSERT(sharedProvider);
     return *sharedProvider;
 }

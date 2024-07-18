@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,12 +26,12 @@
 #include "config.h"
 #include "VMEntryScope.h"
 
-#include "DisallowVMReentry.h"
 #include "Options.h"
 #include "SamplingProfiler.h"
 #include "VM.h"
+#include "WasmCapabilities.h"
+#include "WasmMachineThreads.h"
 #include "Watchdog.h"
-#include <wtf/StackBounds.h>
 #include <wtf/SystemTracing.h>
 
 namespace JSC {
@@ -40,31 +40,49 @@ VMEntryScope::VMEntryScope(VM& vm, JSGlobalObject* globalObject)
     : m_vm(vm)
     , m_globalObject(globalObject)
 {
-    ASSERT(!DisallowVMReentry::isInEffectOnCurrentThread());
-    ASSERT(Thread::current().stack().isGrowingDownward());
     if (!vm.entryScope) {
         vm.entryScope = this;
 
+        auto& thread = Thread::current();
+        if (UNLIKELY(!thread.isJSThread())) {
+            Thread::registerJSThread(thread);
+
+#if ENABLE(WEBASSEMBLY)
+                if (Wasm::isSupported())
+                    Wasm::startTrackingCurrentThread();
+#endif
+
+#if HAVE(MACH_EXCEPTIONS)
+                registerThreadForMachExceptionHandling(thread);
+#endif
+        }
+
+        vm.firePrimitiveGigacageEnabledIfNecessary();
+
         // Reset the date cache between JS invocations to force the VM to
         // observe time zone changes.
-        vm.resetDateCache();
+        vm.resetDateCacheIfNecessary();
 
-        if (vm.watchdog())
+        if (UNLIKELY(vm.watchdog()))
             vm.watchdog()->enteredVM();
 
 #if ENABLE(SAMPLING_PROFILER)
-        if (SamplingProfiler* samplingProfiler = vm.samplingProfiler())
-            samplingProfiler->noticeVMEntry();
+        {
+            SamplingProfiler* samplingProfiler = vm.samplingProfiler();
+            if (UNLIKELY(samplingProfiler))
+                samplingProfiler->noticeVMEntry();
+        }
 #endif
-        TracePoint(VMEntryScopeStart);
+        if (UNLIKELY(Options::useTracePoints()))
+            tracePoint(VMEntryScopeStart);
     }
 
     vm.clearLastException();
 }
 
-void VMEntryScope::addDidPopListener(std::function<void ()> listener)
+void VMEntryScope::addDidPopListener(Function<void ()>&& listener)
 {
-    m_didPopListeners.append(listener);
+    m_didPopListeners.append(WTFMove(listener));
 }
 
 VMEntryScope::~VMEntryScope()
@@ -72,15 +90,33 @@ VMEntryScope::~VMEntryScope()
     if (m_vm.entryScope != this)
         return;
 
-    TracePoint(VMEntryScopeEnd);
+    ASSERT_WITH_MESSAGE(!m_vm.hasCheckpointOSRSideState(), "Exitting the VM but pending checkpoint side state still available");
 
-    if (m_vm.watchdog())
+    if (UNLIKELY(Options::useTracePoints()))
+        tracePoint(VMEntryScopeEnd);
+    
+    if (UNLIKELY(m_vm.watchdog()))
         m_vm.watchdog()->exitedVM();
 
     m_vm.entryScope = nullptr;
 
     for (auto& listener : m_didPopListeners)
         listener();
+
+    // If the trap bit is still set at this point, then it means that VMTraps::handleTraps()
+    // has not yet been called for this termination request. As a result, we've not thrown a
+    // TerminationException yet. Some client code relies on detecting the presence of the
+    // TerminationException in order to signal that a termination was requested. As a result,
+    // we want to stay in the TerminationInProgress state until VMTraps::handleTraps() (which
+    // clears the trap bit) gets called, and the TerminationException gets thrown.
+    //
+    // Note: perhaps there's a better way for the client to know that a termination was
+    // requested (after all, the request came from the client). However, this is how the
+    // client code currently works. Changing that will take some significant effort to hunt
+    // down all the places in client code that currently rely on this behavior.
+    if (!m_vm.traps().needHandling(VMTraps::NeedTermination))
+        m_vm.setTerminationInProgress(false);
+    m_vm.clearScratchBuffers();
 }
 
 } // namespace JSC

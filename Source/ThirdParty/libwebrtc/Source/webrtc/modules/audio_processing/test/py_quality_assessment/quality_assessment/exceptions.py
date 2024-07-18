@@ -5,18 +5,41 @@
 # tree. An additional intellectual property rights grant can be found
 # in the file PATENTS.  All contributing project authors may
 # be found in the AUTHORS file in the root of the source tree.
-
 """Exception classes.
 """
 
 
 class FileNotFoundError(Exception):
-  """File not found exeception.
+    """File not found exception.
   """
-  pass
+    pass
 
 
 class SignalProcessingException(Exception):
-  """Signal processing exeception.
+    """Signal processing exception.
   """
-  pass
+    pass
+
+
+class InputMixerException(Exception):
+    """Input mixer exception.
+  """
+    pass
+
+
+class InputSignalCreatorException(Exception):
+    """Input signal creator exception.
+  """
+    pass
+
+
+class EvaluationScoreException(Exception):
+    """Evaluation score exception.
+  """
+    pass
+
+
+class InitializationException(Exception):
+    """Initialization exception.
+  """
+    pass

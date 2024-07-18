@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 2000 Harri Porten (porten@kde.org)
  *  Copyright (C) 2006 Jon Shier (jshier@iastate.edu)
- *  Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reseved.
+ *  Copyright (C) 2003-2017 Apple Inc. All rights reseved.
  *  Copyright (C) 2006 Alexey Proskuryakov (ap@webkit.org)
  *  Copyright (C) 2009 Google Inc. All rights reseved.
  *
@@ -29,22 +29,22 @@
 #include "DOMWrapperWorld.h"
 #include "Document.h"
 #include "Frame.h"
+#include "FrameDestructionObserverInlines.h"
 #include "FrameLoader.h"
 #include "JSDOMExceptionHandling.h"
 #include "JSDOMWindow.h"
-#include "JSMainThreadExecState.h"
-#include "JSMainThreadExecStateInstrumentation.h"
+#include "JSExecState.h"
+#include "JSExecStateInstrumentation.h"
 #include "JSWorkerGlobalScope.h"
 #include "ScriptController.h"
 #include "ScriptExecutionContext.h"
 #include "ScriptSourceCode.h"
 #include "WorkerGlobalScope.h"
 #include "WorkerThread.h"
-#include <runtime/JSLock.h>
-
-using namespace JSC;
+#include <JavaScriptCore/JSLock.h>
 
 namespace WebCore {
+using namespace JSC;
 
 std::unique_ptr<ScheduledAction> ScheduledAction::create(DOMWrapperWorld& isolatedWorld, JSC::Strong<JSC::Unknown>&& function)
 {
@@ -69,11 +69,9 @@ ScheduledAction::ScheduledAction(DOMWrapperWorld& isolatedWorld, String&& code)
 {
 }
 
-ScheduledAction::~ScheduledAction()
-{
-}
+ScheduledAction::~ScheduledAction() = default;
 
-void ScheduledAction::addArguments(Vector<JSC::Strong<JSC::Unknown>>&& arguments)
+void ScheduledAction::addArguments(FixedVector<JSC::Strong<JSC::Unknown>>&& arguments)
 {
     m_arguments = WTFMove(arguments);
 }
@@ -94,31 +92,40 @@ void ScheduledAction::execute(ScriptExecutionContext& context)
 void ScheduledAction::executeFunctionInContext(JSGlobalObject* globalObject, JSValue thisValue, ScriptExecutionContext& context)
 {
     ASSERT(m_function);
-    JSLockHolder lock(context.vm());
+    VM& vm = context.vm();
+    JSLockHolder lock(vm);
+    auto catchScope = DECLARE_CATCH_SCOPE(vm);
 
-    CallData callData;
-    CallType callType = getCallData(m_function.get(), callData);
-    if (callType == CallType::None)
+    auto callData = JSC::getCallData(m_function.get());
+    if (callData.type == CallData::Type::None)
         return;
 
-    ExecState* exec = globalObject->globalExec();
+    JSGlobalObject* lexicalGlobalObject = globalObject;
 
     MarkedArgumentBuffer arguments;
     for (auto& argument : m_arguments)
         arguments.append(argument.get());
+    if (UNLIKELY(arguments.hasOverflowed())) {
+        {
+            auto throwScope = DECLARE_THROW_SCOPE(vm);
+            throwOutOfMemoryError(lexicalGlobalObject, throwScope);
+        }
+        NakedPtr<JSC::Exception> exception = catchScope.exception();
+        catchScope.clearException();
+        reportException(lexicalGlobalObject, exception);
+        return;
+    }
 
-    InspectorInstrumentationCookie cookie = JSMainThreadExecState::instrumentFunctionCall(&context, callType, callData);
+    JSExecState::instrumentFunction(&context, callData);
 
     NakedPtr<JSC::Exception> exception;
-    if (is<Document>(context))
-        JSMainThreadExecState::profiledCall(exec, JSC::ProfilingReason::Other, m_function.get(), callType, callData, thisValue, arguments, exception);
-    else
-        JSC::profiledCall(exec, JSC::ProfilingReason::Other, m_function.get(), callType, callData, thisValue, arguments, exception);
-
-    InspectorInstrumentation::didCallFunction(cookie, &context);
+    JSExecState::profiledCall(lexicalGlobalObject, JSC::ProfilingReason::Other, m_function.get(), callData, thisValue, arguments, exception);
+    EXCEPTION_ASSERT(!catchScope.exception());
+    
+    InspectorInstrumentation::didCallFunction(&context);
 
     if (exception)
-        reportException(exec, exception);
+        reportException(lexicalGlobalObject, exception);
 }
 
 void ScheduledAction::execute(Document& document)
@@ -132,23 +139,23 @@ void ScheduledAction::execute(Document& document)
         return;
 
     if (m_function)
-        executeFunctionInContext(window, window->proxy(), document);
+        executeFunctionInContext(window, &window->proxy(), document);
     else
-        frame->script().executeScriptInWorld(m_isolatedWorld, m_code);
+        frame->script().executeScriptInWorldIgnoringException(m_isolatedWorld, m_code);
 }
 
 void ScheduledAction::execute(WorkerGlobalScope& workerGlobalScope)
 {
     // In a Worker, the execution should always happen on a worker thread.
-    ASSERT(workerGlobalScope.thread().threadID() == currentThread());
+    ASSERT(workerGlobalScope.thread().thread() == &Thread::current());
 
-    WorkerScriptController* scriptController = workerGlobalScope.script();
+    auto* scriptController = workerGlobalScope.script();
 
     if (m_function) {
-        JSWorkerGlobalScope* contextWrapper = scriptController->workerGlobalScopeWrapper();
+        auto* contextWrapper = scriptController->globalScopeWrapper();
         executeFunctionInContext(contextWrapper, contextWrapper, workerGlobalScope);
     } else {
-        ScriptSourceCode code(m_code, workerGlobalScope.url());
+        ScriptSourceCode code(m_code, URL(workerGlobalScope.url()));
         scriptController->evaluate(code);
     }
 }

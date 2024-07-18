@@ -25,8 +25,6 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <Foundation/Foundation.h>
 
 @protocol _WKFindDelegate <NSObject>
@@ -37,6 +35,7 @@
 - (void)_webView:(WKWebView *)webView didFindMatches:(NSUInteger)matches forString:(NSString *)string withMatchIndex:(NSInteger)matchIndex;
 - (void)_webView:(WKWebView *)webView didFailToFindString:(NSString *)string;
 
-@end
+- (void)_webView:(WKWebView *)webView didAddLayerForFindOverlay:(CALayer *)layer;
+- (void)_webViewDidRemoveLayerForFindOverlay:(WKWebView *)webView;
 
-#endif
+@end

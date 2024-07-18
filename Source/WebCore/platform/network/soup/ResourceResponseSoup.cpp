@@ -24,13 +24,58 @@
 
 #include "ResourceResponse.h"
 
+#include "GUniquePtrSoup.h"
 #include "HTTPHeaderNames.h"
 #include "HTTPParsers.h"
 #include "MIMETypeRegistry.h"
+#include "SoupVersioning.h"
+#include "URLSoup.h"
+#include <unicode/uset.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
+
+ResourceResponse::ResourceResponse(SoupMessage* soupMessage, const CString& sniffedContentType)
+{
+    m_url = soupURIToURL(soup_message_get_uri(soupMessage));
+
+    switch (soup_message_get_http_version(soupMessage)) {
+    case SOUP_HTTP_1_0:
+        m_httpVersion = "HTTP/1.0"_s;
+        break;
+    case SOUP_HTTP_1_1:
+        m_httpVersion = "HTTP/1.1"_s;
+        break;
+#if SOUP_CHECK_VERSION(2, 99, 3)
+    case SOUP_HTTP_2_0:
+        m_httpVersion = "HTTP/2"_s;
+        break;
+#endif
+    }
+
+    m_httpStatusCode = soup_message_get_status(soupMessage);
+    setHTTPStatusText(AtomString::fromLatin1(soup_message_get_reason_phrase(soupMessage)));
+
+    m_certificate = soup_message_get_tls_peer_certificate(soupMessage);
+    m_tlsErrors = soup_message_get_tls_peer_certificate_errors(soupMessage);
+
+    auto* responseHeaders = soup_message_get_response_headers(soupMessage);
+    updateFromSoupMessageHeaders(responseHeaders);
+
+    String contentType;
+    const char* officialType = soup_message_headers_get_one(responseHeaders, "Content-Type");
+    if (!sniffedContentType.isNull() && m_httpStatusCode != SOUP_STATUS_NOT_MODIFIED && sniffedContentType != officialType)
+        contentType = String::fromLatin1(sniffedContentType.data());
+    else
+        contentType = String::fromLatin1(officialType);
+    setMimeType(AtomString { extractMIMETypeFromMediaType(contentType) });
+    if (m_mimeType.isEmpty() && m_httpStatusCode != SOUP_STATUS_NOT_MODIFIED)
+        setMimeType(AtomString { MIMETypeRegistry::mimeTypeForPath(m_url.path()) });
+    setTextEncodingName(extractCharsetFromMediaType(contentType).toAtomString());
+
+    setExpectedContentLength(soup_message_headers_get_content_length(responseHeaders));
+}
 
 void ResourceResponse::updateSoupMessageHeaders(SoupMessageHeaders* soupHeaders) const
 {
@@ -38,77 +83,69 @@ void ResourceResponse::updateSoupMessageHeaders(SoupMessageHeaders* soupHeaders)
         soup_message_headers_append(soupHeaders, header.key.utf8().data(), header.value.utf8().data());
 }
 
-void ResourceResponse::updateFromSoupMessage(SoupMessage* soupMessage)
+void ResourceResponse::updateFromSoupMessageHeaders(SoupMessageHeaders* soupHeaders)
 {
-    m_url = URL(soup_message_get_uri(soupMessage));
-
-    switch (soup_message_get_http_version(soupMessage)) {
-    case SOUP_HTTP_1_0:
-        m_httpVersion = AtomicString("HTTP/1.0", AtomicString::ConstructFromLiteral);
-        break;
-    case SOUP_HTTP_1_1:
-        m_httpVersion = AtomicString("HTTP/1.1", AtomicString::ConstructFromLiteral);
-        break;
-    }
-    m_httpStatusCode = soupMessage->status_code;
-    setHTTPStatusText(soupMessage->reason_phrase);
-
-    m_soupFlags = soup_message_get_flags(soupMessage);
-
-    GTlsCertificate* certificate = 0;
-    soup_message_get_https_status(soupMessage, &certificate, &m_tlsErrors);
-    m_certificate = certificate;
-
-    updateFromSoupMessageHeaders(soupMessage->response_headers);
-}
-
-void ResourceResponse::updateFromSoupMessageHeaders(const SoupMessageHeaders* messageHeaders)
-{
-    SoupMessageHeaders* headers = const_cast<SoupMessageHeaders*>(messageHeaders);
     SoupMessageHeadersIter headersIter;
     const char* headerName;
     const char* headerValue;
-
-    // updateFromSoupMessage could be called several times for the same ResourceResponse object,
-    // thus, we need to clear old header values and update m_httpHeaderFields from soupMessage headers.
-    m_httpHeaderFields.clear();
-
-    soup_message_headers_iter_init(&headersIter, headers);
+    soup_message_headers_iter_init(&headersIter, soupHeaders);
     while (soup_message_headers_iter_next(&headersIter, &headerName, &headerValue))
-        addHTTPHeaderField(String(headerName), String(headerValue));
-
-    String contentType;
-    const char* officialType = soup_message_headers_get_one(headers, "Content-Type");
-    if (!m_sniffedContentType.isEmpty() && m_sniffedContentType != officialType)
-        contentType = m_sniffedContentType;
-    else
-        contentType = officialType;
-    setMimeType(extractMIMETypeFromMediaType(contentType));
-    setTextEncodingName(extractCharsetFromMediaType(contentType));
-
-    setExpectedContentLength(soup_message_headers_get_content_length(headers));
+        addHTTPHeaderField(String::fromLatin1(headerName), String::fromLatin1(headerValue));
 }
 
-CertificateInfo ResourceResponse::platformCertificateInfo() const
+CertificateInfo ResourceResponse::platformCertificateInfo(Span<const std::byte>) const
 {
     return CertificateInfo(m_certificate.get(), m_tlsErrors);
+}
+
+static String sanitizeFilename(const String& filename)
+{
+    if (filename.isEmpty())
+        return filename;
+
+    // Strip leading/trailing whitespaces, path separators and dots
+    auto result = filename.stripLeadingAndTrailingCharacters([](UChar character) -> bool {
+        return isSpaceOrNewline(character) || character == '/' || character == '\\' || character == '.';
+    });
+
+    if (result.isEmpty())
+        return result;
+
+    // Replace control, formatting and dangerous characters in filenames.
+    static USet* illegalCharacterSet = nullptr;
+    if (!illegalCharacterSet) {
+        UErrorCode errorCode = U_ZERO_ERROR;
+        String illegalCharacters = "[[\"~*/:<>?\\\\|][:Cc:][:Cf:]]"_s;
+        illegalCharacterSet = uset_openPattern(StringView(illegalCharacters).upconvertedCharacters(), illegalCharacters.length(), &errorCode);
+        ASSERT(U_SUCCESS(errorCode));
+    }
+
+    HashSet<UChar32> illegalCharactersInFilename;
+    for (unsigned i = 0; i < result.length(); ++i) {
+        auto character = result[i];
+        if (uset_contains(illegalCharacterSet, character))
+            illegalCharactersInFilename.add(character);
+    }
+    for (auto character : illegalCharactersInFilename)
+        result = makeStringByReplacingAll(result, character, '_');
+
+    return result;
 }
 
 String ResourceResponse::platformSuggestedFilename() const
 {
     String contentDisposition(httpHeaderField(HTTPHeaderName::ContentDisposition));
     if (contentDisposition.isEmpty())
-        return String();
+        return { };
 
     if (contentDisposition.is8Bit())
         contentDisposition = String::fromUTF8WithLatin1Fallback(contentDisposition.characters8(), contentDisposition.length());
-    SoupMessageHeaders* soupHeaders = soup_message_headers_new(SOUP_MESSAGE_HEADERS_RESPONSE);
-    soup_message_headers_append(soupHeaders, "Content-Disposition", contentDisposition.utf8().data());
+    GUniquePtr<SoupMessageHeaders> soupHeaders(soup_message_headers_new(SOUP_MESSAGE_HEADERS_RESPONSE));
+    soup_message_headers_append(soupHeaders.get(), "Content-Disposition", contentDisposition.utf8().data());
     GRefPtr<GHashTable> params;
-    soup_message_headers_get_content_disposition(soupHeaders, nullptr, &params.outPtr());
-    soup_message_headers_free(soupHeaders);
-    char* filename = params ? static_cast<char*>(g_hash_table_lookup(params.get(), "filename")) : nullptr;
-    return filename ? String::fromUTF8(filename) : String();
+    soup_message_headers_get_content_disposition(soupHeaders.get(), nullptr, &params.outPtr());
+    auto filename = params ? String::fromUTF8(static_cast<char*>(g_hash_table_lookup(params.get(), "filename"))) : String();
+    return sanitizeFilename(filename);
 }
 
 }

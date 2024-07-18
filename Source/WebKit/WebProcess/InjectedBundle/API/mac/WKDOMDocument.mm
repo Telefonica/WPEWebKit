@@ -26,12 +26,31 @@
 #import "config.h"
 #import "WKDOMDocument.h"
 
-#if WK_API_ENABLED
-
 #import "WKDOMInternals.h"
 #import <WebCore/Document.h>
+#import <WebCore/DocumentFragment.h>
 #import <WebCore/HTMLElement.h>
+#import <WebCore/SimpleRange.h>
 #import <WebCore/Text.h>
+#import <WebCore/markup.h>
+#import <wtf/NakedRef.h>
+
+@interface WKDOMDocumentParserYieldToken : NSObject
+
+@end
+
+@implementation WKDOMDocumentParserYieldToken {
+    std::unique_ptr<WebCore::DocumentParserYieldToken> _token;
+}
+
+- (instancetype)initWithDocument:(NakedRef<WebCore::Document>)document
+{
+    if (self = [super init])
+        _token = document->createParserYieldToken();
+    return self;
+}
+
+@end
 
 @implementation WKDOMDocument
 
@@ -54,6 +73,19 @@
     return WebKit::toWKDOMElement(downcast<WebCore::Document>(*_impl).bodyOrFrameset());
 }
 
-@end
+- (WKDOMNode *)createDocumentFragmentWithMarkupString:(NSString *)markupString baseURL:(NSURL *)baseURL
+{
+    return WebKit::toWKDOMNode(createFragmentFromMarkup(downcast<WebCore::Document>(*_impl), markupString, baseURL.absoluteString).ptr());
+}
 
-#endif // WK_API_ENABLED
+- (WKDOMNode *)createDocumentFragmentWithText:(NSString *)text
+{
+    return WebKit::toWKDOMNode(createFragmentFromText(makeRangeSelectingNodeContents(downcast<WebCore::Document>(*_impl)), text).ptr());
+}
+
+- (id)parserYieldToken
+{
+    return adoptNS([[WKDOMDocumentParserYieldToken alloc] initWithDocument:downcast<WebCore::Document>(*_impl)]).autorelease();
+}
+
+@end

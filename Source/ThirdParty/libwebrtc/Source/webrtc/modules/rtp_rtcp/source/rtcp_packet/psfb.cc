@@ -8,13 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/psfb.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/psfb.h"
 
-#include "webrtc/modules/rtp_rtcp/source/byte_io.h"
+#include "modules/rtp_rtcp/source/byte_io.h"
 
 namespace webrtc {
 namespace rtcp {
 constexpr uint8_t Psfb::kPacketType;
+constexpr uint8_t Psfb::kAfbMessageType;
 constexpr size_t Psfb::kCommonFeedbackLength;
 // RFC 4585: Feedback format.
 //
@@ -33,13 +34,13 @@ constexpr size_t Psfb::kCommonFeedbackLength;
 //   :                                                               :
 
 void Psfb::ParseCommonFeedback(const uint8_t* payload) {
-  sender_ssrc_ = ByteReader<uint32_t>::ReadBigEndian(&payload[0]);
-  media_ssrc_ = ByteReader<uint32_t>::ReadBigEndian(&payload[4]);
+  SetSenderSsrc(ByteReader<uint32_t>::ReadBigEndian(&payload[0]));
+  SetMediaSsrc(ByteReader<uint32_t>::ReadBigEndian(&payload[4]));
 }
 
 void Psfb::CreateCommonFeedback(uint8_t* payload) const {
-  ByteWriter<uint32_t>::WriteBigEndian(&payload[0], sender_ssrc_);
-  ByteWriter<uint32_t>::WriteBigEndian(&payload[4], media_ssrc_);
+  ByteWriter<uint32_t>::WriteBigEndian(&payload[0], sender_ssrc());
+  ByteWriter<uint32_t>::WriteBigEndian(&payload[4], media_ssrc());
 }
 
 }  // namespace rtcp

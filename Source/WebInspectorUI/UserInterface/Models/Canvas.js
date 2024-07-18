@@ -25,26 +25,34 @@
 
 WI.Canvas = class Canvas extends WI.Object
 {
-    constructor(identifier, contextType, frame, {domNode, cssCanvasName, contextAttributes, memoryCost} = {})
+    constructor(identifier, contextType, {domNode, cssCanvasName, contextAttributes, memoryCost, stackTrace} = {})
     {
         super();
 
         console.assert(identifier);
         console.assert(contextType);
-        console.assert(frame instanceof WI.Frame);
+        console.assert(!stackTrace || stackTrace instanceof WI.StackTrace, stackTrace);
 
         this._identifier = identifier;
         this._contextType = contextType;
-        this._frame = frame;
         this._domNode = domNode || null;
         this._cssCanvasName = cssCanvasName || "";
         this._contextAttributes = contextAttributes || {};
+        this._extensions = new Set;
         this._memoryCost = memoryCost || NaN;
+        this._stackTrace = stackTrace || null;
 
-        this._cssCanvasClientNodes = null;
-        this._shaderProgramCollection = new WI.Collection(WI.Collection.TypeVerifier.ShaderProgram);
+        this._clientNodes = null;
+        this._shaderProgramCollection = new WI.ShaderProgramCollection;
+        this._recordingCollection = new WI.RecordingCollection;
 
-        this._nextShaderProgramDisplayNumber = 1;
+        this._nextShaderProgramDisplayNumber = null;
+
+        this._requestNodePromise = null;
+
+        this._recordingState = WI.Canvas.RecordingState.Inactive;
+        this._recordingFrames = [];
+        this._recordingBufferUsed = 0;
     }
 
     // Static
@@ -53,28 +61,38 @@ WI.Canvas = class Canvas extends WI.Object
     {
         let contextType = null;
         switch (payload.contextType) {
-        case CanvasAgent.ContextType.Canvas2D:
+        case InspectorBackend.Enum.Canvas.ContextType.Canvas2D:
             contextType = WI.Canvas.ContextType.Canvas2D;
             break;
-        case CanvasAgent.ContextType.WebGL:
+        case InspectorBackend.Enum.Canvas.ContextType.BitmapRenderer:
+            contextType = WI.Canvas.ContextType.BitmapRenderer;
+            break;
+        case InspectorBackend.Enum.Canvas.ContextType.WebGL:
             contextType = WI.Canvas.ContextType.WebGL;
             break;
-        case CanvasAgent.ContextType.WebGL2:
+        case InspectorBackend.Enum.Canvas.ContextType.WebGL2:
             contextType = WI.Canvas.ContextType.WebGL2;
             break;
-        case CanvasAgent.ContextType.WebGPU:
+        case InspectorBackend.Enum.Canvas.ContextType.WebGPU:
             contextType = WI.Canvas.ContextType.WebGPU;
+            break;
+        case InspectorBackend.Enum.Canvas.ContextType.WebMetal:
+            contextType = WI.Canvas.ContextType.WebMetal;
             break;
         default:
             console.error("Invalid canvas context type", payload.contextType);
         }
 
-        let frame = WI.frameResourceManager.frameForIdentifier(payload.frameId);
-        return new WI.Canvas(payload.canvasId, contextType, frame, {
-            domNode: payload.nodeId ? WI.domTreeManager.nodeForId(payload.nodeId) : null,
+        // COMPATIBILITY (macOS 13.0, iOS 16.0): `backtrace` was renamed to `stackTrace`.
+        if (payload.backtrace)
+            payload.stackTrace = {callFrames: payload.backtrace};
+
+        return new WI.Canvas(payload.canvasId, contextType, {
+            domNode: payload.nodeId ? WI.domManager.nodeForId(payload.nodeId) : null,
             cssCanvasName: payload.cssCanvasName,
             contextAttributes: payload.contextAttributes,
             memoryCost: payload.memoryCost,
+            stackTrace: WI.StackTrace.fromPayload(WI.assumingMainTarget(), payload.stackTrace),
         });
     }
 
@@ -83,34 +101,67 @@ WI.Canvas = class Canvas extends WI.Object
         switch (contextType) {
         case WI.Canvas.ContextType.Canvas2D:
             return WI.UIString("2D");
+        case WI.Canvas.ContextType.BitmapRenderer:
+            return WI.UIString("Bitmap Renderer", "Canvas Context Type Bitmap Renderer", "Bitmap Renderer is a type of rendering context associated with a <canvas> element");
         case WI.Canvas.ContextType.WebGL:
             return WI.unlocalizedString("WebGL");
         case WI.Canvas.ContextType.WebGL2:
             return WI.unlocalizedString("WebGL2");
         case WI.Canvas.ContextType.WebGPU:
-            return WI.unlocalizedString("WebGPU");
-        default:
-            console.error("Invalid canvas context type", contextType);
+            return WI.unlocalizedString("Web GPU");
+        case WI.Canvas.ContextType.WebMetal:
+            return WI.unlocalizedString("WebMetal");
         }
+
+        console.assert(false, "Unknown canvas context type", contextType);
+        return null;
+    }
+
+    static displayNameForColorSpace(colorSpace)
+    {
+        switch(colorSpace) {
+        case WI.Canvas.ColorSpace.SRGB:
+            return WI.unlocalizedString("sRGB");
+        case WI.Canvas.ColorSpace.DisplayP3:
+            return WI.unlocalizedString("Display P3");
+        }
+
+        console.assert(false, "Unknown canvas color space", colorSpace);
+        return null;
     }
 
     static resetUniqueDisplayNameNumbers()
     {
-        WI.Canvas._nextUniqueDisplayNameNumber = 1;
+        Canvas._nextContextUniqueDisplayNameNumber = 1;
+        Canvas._nextDeviceUniqueDisplayNameNumber = 1;
+    }
+
+    static supportsRequestContentForContextType(contextType)
+    {
+        switch (contextType) {
+        case Canvas.ContextType.WebGPU:
+        case Canvas.ContextType.WebMetal:
+            return false;
+        }
+        return true;
     }
 
     // Public
 
     get identifier() { return this._identifier; }
     get contextType() { return this._contextType; }
-    get frame() { return this._frame; }
     get cssCanvasName() { return this._cssCanvasName; }
     get contextAttributes() { return this._contextAttributes; }
+    get extensions() { return this._extensions; }
+    get stackTrace() { return this._stackTrace; }
     get shaderProgramCollection() { return this._shaderProgramCollection; }
+    get recordingCollection() { return this._recordingCollection; }
+    get recordingFrameCount() { return this._recordingFrames.length; }
+    get recordingBufferUsed() { return this._recordingBufferUsed; }
 
-    get isRecording()
+    get recordingActive()
     {
-        return WI.canvasManager.recordingCanvas === this;
+        return this._recordingState !== WI.Canvas.RecordingState.Inactive;
     }
 
     get memoryCost()
@@ -131,7 +182,7 @@ WI.Canvas = class Canvas extends WI.Object
     get displayName()
     {
         if (this._cssCanvasName)
-            return WI.UIString("CSS canvas “%s”").format(this._cssCanvasName);
+            return WI.UIString("CSS canvas \u201C%s\u201D").format(this._cssCanvasName);
 
         if (this._domNode) {
             let idSelector = this._domNode.escapedIdSelector;
@@ -139,74 +190,181 @@ WI.Canvas = class Canvas extends WI.Object
                 return WI.UIString("Canvas %s").format(idSelector);
         }
 
+        if (this._contextType === Canvas.ContextType.WebGPU) {
+            if (!this._uniqueDisplayNameNumber)
+                this._uniqueDisplayNameNumber = Canvas._nextDeviceUniqueDisplayNameNumber++;
+            return WI.UIString("Device %d").format(this._uniqueDisplayNameNumber);
+        }
+
         if (!this._uniqueDisplayNameNumber)
-            this._uniqueDisplayNameNumber = this.constructor._nextUniqueDisplayNameNumber++;
+            this._uniqueDisplayNameNumber = Canvas._nextContextUniqueDisplayNameNumber++;
         return WI.UIString("Canvas %d").format(this._uniqueDisplayNameNumber);
     }
 
-    requestNode(callback)
+    requestNode()
     {
-        if (this._domNode) {
-            callback(this._domNode);
-            return;
+        if (!this._requestNodePromise) {
+            this._requestNodePromise = new Promise((resolve, reject) => {
+                WI.domManager.ensureDocument();
+
+                let target = WI.assumingMainTarget();
+                target.CanvasAgent.requestNode(this._identifier, (error, nodeId) => {
+                    if (error) {
+                        resolve(null);
+                        return;
+                    }
+
+                    this._domNode = WI.domManager.nodeForId(nodeId);
+                    if (!this._domNode) {
+                        resolve(null);
+                        return;
+                    }
+
+                    resolve(this._domNode);
+                });
+            });
         }
-
-        WI.domTreeManager.ensureDocument();
-
-        CanvasAgent.requestNode(this._identifier, (error, nodeId) => {
-            if (error) {
-                callback(null);
-                return;
-            }
-
-            this._domNode = WI.domTreeManager.nodeForId(nodeId);
-            callback(this._domNode);
-        });
+        return this._requestNodePromise;
     }
 
-    requestContent(callback)
+    requestContent()
     {
-        CanvasAgent.requestContent(this._identifier, (error, content) => {
-            if (error) {
-                callback(null);
-                return;
-            }
+        if (!Canvas.supportsRequestContentForContextType(this._contextType))
+            return Promise.resolve(null);
 
-            callback(content);
-        });
+        let target = WI.assumingMainTarget();
+        return target.CanvasAgent.requestContent(this._identifier).then((result) => result.content).catch((error) => console.error(error));
     }
 
-    requestCSSCanvasClientNodes(callback)
+    requestClientNodes(callback)
     {
-        if (!this._cssCanvasName) {
-            callback([]);
+        if (this._clientNodes) {
+            callback(this._clientNodes);
             return;
         }
 
-        if (this._cssCanvasClientNodes) {
-            callback(this._cssCanvasClientNodes);
-            return;
-        }
+        WI.domManager.ensureDocument();
 
-        WI.domTreeManager.ensureDocument();
-
-        CanvasAgent.requestCSSCanvasClientNodes(this._identifier, (error, clientNodeIds) => {
+        let wrappedCallback = (error, clientNodeIds) => {
             if (error) {
                 callback([]);
                 return;
             }
 
             clientNodeIds = Array.isArray(clientNodeIds) ? clientNodeIds : [];
-            this._cssCanvasClientNodes = clientNodeIds.map((clientNodeId) => WI.domTreeManager.nodeForId(clientNodeId));
+            this._clientNodes = clientNodeIds.map((clientNodeId) => WI.domManager.nodeForId(clientNodeId));
+            callback(this._clientNodes);
+        };
 
-            callback(this._cssCanvasClientNodes);
+        let target = WI.assumingMainTarget();
+
+        // COMPATIBILITY (iOS 13): Canvas.requestCSSCanvasClientNodes was renamed to Canvas.requestClientNodes.
+        if (!target.hasCommand("Canvas.requestClientNodes")) {
+            target.CanvasAgent.requestCSSCanvasClientNodes(this._identifier, wrappedCallback);
+            return;
+        }
+
+        target.CanvasAgent.requestClientNodes(this._identifier, wrappedCallback);
+    }
+
+    requestSize()
+    {
+        function calculateSize(domNode) {
+            function getAttributeValue(name) {
+                let value = Number(domNode.getAttribute(name));
+                if (!Number.isInteger(value) || value < 0)
+                    return NaN;
+                return value;
+            }
+
+            return {
+                width: getAttributeValue("width"),
+                height: getAttributeValue("height")
+            };
+        }
+
+        function getPropertyValue(remoteObject, name) {
+            return new Promise((resolve, reject) => {
+                remoteObject.getProperty(name, (error, result) => {
+                    if (error) {
+                        reject(error);
+                        return;
+                    }
+                    resolve(result);
+                });
+            });
+        }
+
+        return this.requestNode().then((domNode) => {
+            if (!domNode)
+                return null;
+
+            let size = calculateSize(domNode);
+            if (!isNaN(size.width) && !isNaN(size.height))
+                return size;
+
+            // Since the "width" and "height" properties of canvas elements are more than just
+            // attributes, we need to invoke the getter for each to get the actual value.
+            //  - https://html.spec.whatwg.org/multipage/canvas.html#attr-canvas-width
+            //  - https://html.spec.whatwg.org/multipage/canvas.html#attr-canvas-height
+            let remoteObject = null;
+            return WI.RemoteObject.resolveNode(domNode).then((object) => {
+                remoteObject = object;
+                return Promise.all([getPropertyValue(object, "width"), getPropertyValue(object, "height")]);
+            }).then((values) => {
+                let width = values[0].value;
+                let height = values[1].value;
+                values[0].release();
+                values[1].release();
+                remoteObject.release();
+                return {width, height};
+            });
         });
+    }
+
+    startRecording(singleFrame)
+    {
+        let target = WI.assumingMainTarget();
+
+        let handleStartRecording = (error) => {
+            if (error) {
+                console.error(error);
+                return;
+            }
+
+            this._recordingState = WI.Canvas.RecordingState.ActiveFrontend;
+
+            // COMPATIBILITY (iOS 12.1): Canvas.recordingStarted did not exist yet
+            if (target.hasEvent("Canvas.recordingStarted"))
+                return;
+
+            this._recordingFrames = [];
+            this._recordingBufferUsed = 0;
+
+            this.dispatchEventToListeners(WI.Canvas.Event.RecordingStarted);
+        };
+
+        // COMPATIBILITY (iOS 12.1): `frameCount` did not exist yet.
+        if (target.hasCommand("Canvas.startRecording", "singleFrame")) {
+            target.CanvasAgent.startRecording(this._identifier, singleFrame, handleStartRecording);
+            return;
+        }
+
+        if (singleFrame) {
+            const frameCount = 1;
+            target.CanvasAgent.startRecording(this._identifier, frameCount, handleStartRecording);
+        } else
+            target.CanvasAgent.startRecording(this._identifier, handleStartRecording);
+    }
+
+    stopRecording()
+    {
+        let target = WI.assumingMainTarget();
+        target.CanvasAgent.stopRecording(this._identifier);
     }
 
     saveIdentityToCookie(cookie)
     {
-        cookie[WI.Canvas.FrameURLCookieKey] = this._frame.url.hash;
-
         if (this._cssCanvasName)
             cookie[WI.Canvas.CSSCanvasNameCookieKey] = this._cssCanvasName;
         else if (this._domNode)
@@ -214,41 +372,123 @@ WI.Canvas = class Canvas extends WI.Object
 
     }
 
-    cssCanvasClientNodesChanged()
+    enableExtension(extension)
     {
         // Called from WI.CanvasManager.
 
-        if (!this._cssCanvasName)
-            return;
+        this._extensions.add(extension);
 
-        this._cssCanvasClientNodes = null;
-
-        this.dispatchEventToListeners(WI.Canvas.Event.CSSCanvasClientNodesChanged);
+        this.dispatchEventToListeners(WI.Canvas.Event.ExtensionEnabled, {extension});
     }
 
-    nextShaderProgramDisplayNumber()
+    clientNodesChanged()
+    {
+        // Called from WI.CanvasManager.
+
+        this._clientNodes = null;
+
+        this.dispatchEventToListeners(Canvas.Event.ClientNodesChanged);
+    }
+
+    recordingStarted(initiator)
+    {
+        // Called from WI.CanvasManager.
+
+        if (initiator === InspectorBackend.Enum.Recording.Initiator.Console)
+            this._recordingState = WI.Canvas.RecordingState.ActiveConsole;
+        else if (initiator === InspectorBackend.Enum.Recording.Initiator.AutoCapture)
+            this._recordingState = WI.Canvas.RecordingState.ActiveAutoCapture;
+        else {
+            console.assert(initiator === InspectorBackend.Enum.Recording.Initiator.Frontend);
+            this._recordingState = WI.Canvas.RecordingState.ActiveFrontend;
+        }
+
+        this._recordingFrames = [];
+        this._recordingBufferUsed = 0;
+
+        this.dispatchEventToListeners(WI.Canvas.Event.RecordingStarted);
+    }
+
+    recordingProgress(framesPayload, bufferUsed)
+    {
+        // Called from WI.CanvasManager.
+
+        this._recordingFrames.pushAll(framesPayload.map(WI.RecordingFrame.fromPayload));
+
+        this._recordingBufferUsed = bufferUsed;
+
+        this.dispatchEventToListeners(WI.Canvas.Event.RecordingProgress);
+    }
+
+    recordingFinished(recordingPayload)
+    {
+        // Called from WI.CanvasManager.
+
+        let initiatedByUser = this._recordingState === WI.Canvas.RecordingState.ActiveFrontend;
+
+        // COMPATIBILITY (iOS 12.1): Canvas.recordingStarted did not exist yet
+        if (!initiatedByUser && !InspectorBackend.hasEvent("Canvas.recordingStarted"))
+            initiatedByUser = !!this.recordingActive;
+
+        let recording = recordingPayload ? WI.Recording.fromPayload(recordingPayload, this._recordingFrames) : null;
+        if (recording) {
+            recording.source = this;
+            recording.createDisplayName(recordingPayload.name);
+
+            this._recordingCollection.add(recording);
+        }
+
+        this._recordingState = WI.Canvas.RecordingState.Inactive;
+        this._recordingFrames = [];
+        this._recordingBufferUsed = 0;
+
+        this.dispatchEventToListeners(WI.Canvas.Event.RecordingStopped, {recording, initiatedByUser});
+    }
+
+    nextShaderProgramDisplayNumberForProgramType(programType)
     {
         // Called from WI.ShaderProgram.
 
-        return this._nextShaderProgramDisplayNumber++;
+        if (!this._nextShaderProgramDisplayNumber)
+            this._nextShaderProgramDisplayNumber = {};
+
+        this._nextShaderProgramDisplayNumber[programType] = (this._nextShaderProgramDisplayNumber[programType] || 0) + 1;
+        return this._nextShaderProgramDisplayNumber[programType];
     }
 };
 
-WI.Canvas._nextUniqueDisplayNameNumber = 1;
+WI.Canvas._nextContextUniqueDisplayNameNumber = 1;
+WI.Canvas._nextDeviceUniqueDisplayNameNumber = 1;
 
 WI.Canvas.FrameURLCookieKey = "canvas-frame-url";
 WI.Canvas.CSSCanvasNameCookieKey = "canvas-css-canvas-name";
 
 WI.Canvas.ContextType = {
     Canvas2D: "canvas-2d",
+    BitmapRenderer: "bitmaprenderer",
     WebGL: "webgl",
     WebGL2: "webgl2",
     WebGPU: "webgpu",
+    WebMetal: "webmetal",
 };
 
-WI.Canvas.ResourceSidebarType = "resource-type-canvas";
+WI.Canvas.ColorSpace = {
+    SRGB: "srgb",
+    DisplayP3: "display-p3",
+};
+
+WI.Canvas.RecordingState = {
+    Inactive: "canvas-recording-state-inactive",
+    ActiveFrontend: "canvas-recording-state-active-frontend",
+    ActiveConsole: "canvas-recording-state-active-console",
+    ActiveAutoCapture: "canvas-recording-state-active-auto-capture",
+};
 
 WI.Canvas.Event = {
     MemoryChanged: "canvas-memory-changed",
-    CSSCanvasClientNodesChanged: "canvas-css-canvas-client-nodes-changed",
+    ExtensionEnabled: "canvas-extension-enabled",
+    ClientNodesChanged: "canvas-client-nodes-changed",
+    RecordingStarted: "canvas-recording-started",
+    RecordingProgress: "canvas-recording-progress",
+    RecordingStopped: "canvas-recording-stopped",
 };

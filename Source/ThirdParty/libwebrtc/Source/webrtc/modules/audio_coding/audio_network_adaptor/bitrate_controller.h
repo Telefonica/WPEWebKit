@@ -8,11 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_BITRATE_CONTROLLER_H_
-#define WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_BITRATE_CONTROLLER_H_
+#ifndef MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_BITRATE_CONTROLLER_H_
+#define MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_BITRATE_CONTROLLER_H_
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/audio_coding/audio_network_adaptor/controller.h"
+#include <stddef.h>
+
+#include "absl/types/optional.h"
+#include "modules/audio_coding/audio_network_adaptor/controller.h"
+#include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor_config.h"
 
 namespace webrtc {
 namespace audio_network_adaptor {
@@ -20,15 +23,23 @@ namespace audio_network_adaptor {
 class BitrateController final : public Controller {
  public:
   struct Config {
-    Config(int initial_bitrate_bps, int initial_frame_length_ms);
+    Config(int initial_bitrate_bps,
+           int initial_frame_length_ms,
+           int fl_increase_overhead_offset,
+           int fl_decrease_overhead_offset);
     ~Config();
     int initial_bitrate_bps;
     int initial_frame_length_ms;
+    int fl_increase_overhead_offset;
+    int fl_decrease_overhead_offset;
   };
 
   explicit BitrateController(const Config& config);
 
   ~BitrateController() override;
+
+  BitrateController(const BitrateController&) = delete;
+  BitrateController& operator=(const BitrateController&) = delete;
 
   void UpdateNetworkMetrics(const NetworkMetrics& network_metrics) override;
 
@@ -38,12 +49,11 @@ class BitrateController final : public Controller {
   const Config config_;
   int bitrate_bps_;
   int frame_length_ms_;
-  rtc::Optional<int> target_audio_bitrate_bps_;
-  rtc::Optional<size_t> overhead_bytes_per_packet_;
-  RTC_DISALLOW_COPY_AND_ASSIGN(BitrateController);
+  absl::optional<int> target_audio_bitrate_bps_;
+  absl::optional<size_t> overhead_bytes_per_packet_;
 };
 
 }  // namespace audio_network_adaptor
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_BITRATE_CONTROLLER_H_
+#endif  // MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_BITRATE_CONTROLLER_H_

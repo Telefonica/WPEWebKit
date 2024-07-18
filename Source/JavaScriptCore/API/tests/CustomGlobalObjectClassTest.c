@@ -23,6 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "config.h"
 #include "CustomGlobalObjectClassTest.h"
 
 #include <JavaScriptCore/JSObjectRefPrivate.h>
@@ -54,7 +55,7 @@ static JSStaticFunction bridgedFunctions[] = {
 static JSClassRef bridgedObjectClass = NULL;
 static JSClassDefinition bridgedClassDef;
 
-static JSClassRef jsClassRef()
+static JSClassRef jsClassRef(void)
 {
     if (!bridgedObjectClass) {
         bridgedClassDef = kJSClassDefinitionEmpty;
@@ -65,7 +66,7 @@ static JSClassRef jsClassRef()
     return bridgedObjectClass;
 }
 
-void customGlobalObjectClassTest()
+void customGlobalObjectClassTest(void)
 {
     JSClassRef bridgedObjectJsClassRef = jsClassRef();
     JSGlobalContextRef globalContext = JSGlobalContextCreate(bridgedObjectJsClassRef);
@@ -100,9 +101,11 @@ void customGlobalObjectClassTest()
     JSStringRelease(script);
 
     assertTrue(executedCallback, "Executed custom global object callback");
+
+    JSGlobalContextRelease(globalContext);
 }
 
-void globalObjectSetPrototypeTest()
+void globalObjectSetPrototypeTest(void)
 {
     JSClassDefinition definition = kJSClassDefinitionEmpty;
     definition.className = "Global";
@@ -115,9 +118,10 @@ void globalObjectSetPrototypeTest()
     JSObjectSetPrototype(context, object, above);
     JSValueRef prototypeAfterChangingAttempt = JSObjectGetPrototype(context, object);
     assertTrue(JSValueIsStrictEqual(context, prototypeAfterChangingAttempt, originalPrototype), "Global object's [[Prototype]] cannot be changed after instantiating it");
+    JSGlobalContextRelease(context);
 }
 
-void globalObjectPrivatePropertyTest()
+void globalObjectPrivatePropertyTest(void)
 {
     JSClassDefinition definition = kJSClassDefinitionEmpty;
     definition.className = "Global";
@@ -136,4 +140,5 @@ void globalObjectPrivatePropertyTest()
     assertTrue(JSValueIsNull(context, result), "Deleted private property is indeed no longer present");
 
     JSStringRelease(privateName);
+    JSGlobalContextRelease(context);
 }

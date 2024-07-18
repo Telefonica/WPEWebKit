@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,30 +28,23 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "VM.h"
-#include <mutex>
-#include <wtf/FastTLS.h>
-
 namespace JSC { namespace Wasm {
 
-Context* loadContext(VM& vm)
+uint64_t* Context::scratchBufferForSize(size_t size)
 {
-#if ENABLE(FAST_TLS_JIT)
-    if (useFastTLSForContext())
-        return bitwise_cast<Context*>(_pthread_getspecific_direct(WTF_WASM_CONTEXT_KEY));
-#endif
-    return vm.wasmContext;
-}
+    if (!size)
+        return nullptr;
 
-void storeContext(VM& vm, Context* context)
-{
-#if ENABLE(FAST_TLS_JIT)
-    if (useFastTLSForContext())
-        _pthread_setspecific_direct(WTF_WASM_CONTEXT_KEY, bitwise_cast<void*>(context));
-#endif
-    vm.wasmContext = context;
-    if (context)
-        context->setCachedStackLimit(vm.softStackLimit());
+    Locker locker { m_scratchBufferLock };
+    if (size > m_sizeOfLastScratchBuffer) {
+        m_sizeOfLastScratchBuffer = size * 2;
+
+        auto newBuffer = makeUniqueArray<uint64_t>(m_sizeOfLastScratchBuffer);
+        RELEASE_ASSERT(newBuffer);
+        m_scratchBuffers.append(WTFMove(newBuffer));
+    }
+    // Scanning scratch buffers for GC is not necessary since while performing OSR entry, we do not perform GC.
+    return m_scratchBuffers.last().get();
 }
 
 } } // namespace JSC::Wasm

@@ -35,9 +35,14 @@ WI.ScopeBar = class ScopeBar extends WI.NavigationItem
         this._defaultItem = defaultItem;
         this._shouldGroupNonExclusiveItems = shouldGroupNonExclusiveItems || false;
 
+        for (let item of this._items)
+            item.scopeBar = this;
+
         this._minimumWidth = 0;
 
         this._populate();
+
+        this._element.addEventListener("keydown", this._handleKeyDown.bind(this));
     }
 
     // Public
@@ -89,6 +94,19 @@ WI.ScopeBar = class ScopeBar extends WI.NavigationItem
         return this._items.some((item) => item.selected && item !== this._defaultItem);
     }
 
+    resetToDefault()
+    {
+        let selectedItems = this.selectedItems;
+        if (selectedItems.length === 1 && selectedItems[0] === this._defaultItem)
+            return;
+
+        for (let item of this._items)
+            item.selected = false;
+        this._defaultItem.selected = true;
+
+        this.dispatchEventToListeners(WI.ScopeBar.Event.SelectionChanged);
+    }
+
     // Private
 
     _populate()
@@ -120,10 +138,12 @@ WI.ScopeBar = class ScopeBar extends WI.NavigationItem
             }
         }
 
-        if (!this.selectedItems.length && this._defaultItem)
-            this._defaultItem.selected = true;
+        if (this._defaultItem) {
+            if (!this.selectedItems.length)
+                this._defaultItem.selected = true;
 
-        this._element.classList.toggle("default-item-selected", this._defaultItem.selected);
+            this._element.classList.toggle("default-item-selected", this._defaultItem.selected);
+        }
     }
 
     _itemSelectionDidChange(event)
@@ -139,7 +159,7 @@ WI.ScopeBar = class ScopeBar extends WI.NavigationItem
                     item.selected = false;
             }
         } else {
-            var replacesCurrentSelection = this._shouldGroupNonExclusiveItems || !event.data.withModifier;
+            let replacesCurrentSelection = this._shouldGroupNonExclusiveItems || !event.data.extendSelection;
             for (var i = 0; i < this._items.length; ++i) {
                 item = this._items[i];
                 if (item.exclusive && item !== sender && sender.selected)
@@ -149,12 +169,41 @@ WI.ScopeBar = class ScopeBar extends WI.NavigationItem
             }
         }
 
-        // If nothing is selected anymore, select the default item.
-        if (!this.selectedItems.length && this._defaultItem)
-            this._defaultItem.selected = true;
+        if (this._defaultItem) {
+            if (!this.selectedItems.length)
+                this._defaultItem.selected = true;
 
-        this._element.classList.toggle("default-item-selected", this._defaultItem.selected);
+            this._element.classList.toggle("default-item-selected", this._defaultItem.selected);
+        }
+
         this.dispatchEventToListeners(WI.ScopeBar.Event.SelectionChanged);
+    }
+
+    _handleKeyDown(event)
+    {
+        if (event.code === "ArrowLeft" || event.code === "ArrowRight") {
+            event.stop();
+            let focusedIndex = -1;
+
+            for (let i = 0; i < this._items.length; ++i) {
+                let element = this._items[i].element;
+                if (element === document.activeElement) {
+                    focusedIndex = i;
+                    break;
+                }
+            }
+
+            if (focusedIndex === -1)
+                return;
+
+            let delta = (event.code === "ArrowLeft") ? -1 : 1;
+            if (WI.resolveLayoutDirectionForElement(this._element) === WI.LayoutDirection.RTL)
+                delta *= -1;
+
+            focusedIndex += delta;
+            focusedIndex = (focusedIndex + this._items.length) % this._items.length;
+            this._items[focusedIndex].element.focus();
+        }
     }
 };
 

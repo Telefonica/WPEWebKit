@@ -8,9 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/common_video/h264/h264_bitstream_parser.h"
+#include "common_video/h264/h264_bitstream_parser.h"
 
-#include "webrtc/test/gtest.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
@@ -28,9 +28,9 @@ uint8_t kH264BitstreamChunk[] = {
 };
 
 uint8_t kH264BitstreamChunkCabac[] = {
-  0x00, 0x00, 0x00, 0x01, 0x27, 0x64, 0x00, 0x0d, 0xac, 0x52, 0x30, 0x50,
-  0x7e, 0xc0, 0x5a, 0x81, 0x01, 0x01, 0x18, 0x56, 0xbd, 0xef, 0x80, 0x80,
-  0x00, 0x00, 0x00, 0x01, 0x28, 0xfe, 0x09, 0x8b,
+    0x00, 0x00, 0x00, 0x01, 0x27, 0x64, 0x00, 0x0d, 0xac, 0x52, 0x30,
+    0x50, 0x7e, 0xc0, 0x5a, 0x81, 0x01, 0x01, 0x18, 0x56, 0xbd, 0xef,
+    0x80, 0x80, 0x00, 0x00, 0x00, 0x01, 0x28, 0xfe, 0x09, 0x8b,
 };
 
 // Contains enough of the image slice to contain slice QP.
@@ -40,49 +40,45 @@ uint8_t kH264BitstreamNextImageSliceChunk[] = {
 
 // Contains enough of the image slice to contain slice QP.
 uint8_t kH264BitstreamNextImageSliceChunkCabac[] = {
-  0x00, 0x00, 0x00, 0x01, 0x21, 0xe1, 0x05, 0x11, 0x3f, 0x9a, 0xae, 0x46,
-  0x70, 0xbf, 0xc1, 0x4a, 0x16, 0x8f, 0x51, 0xf4, 0xca, 0xfb, 0xa3, 0x65,
+    0x00, 0x00, 0x00, 0x01, 0x21, 0xe1, 0x05, 0x11, 0x3f, 0x9a, 0xae, 0x46,
+    0x70, 0xbf, 0xc1, 0x4a, 0x16, 0x8f, 0x51, 0xf4, 0xca, 0xfb, 0xa3, 0x65,
 };
 
 TEST(H264BitstreamParserTest, ReportsNoQpWithoutParsedSlices) {
   H264BitstreamParser h264_parser;
-  int qp;
-  EXPECT_FALSE(h264_parser.GetLastSliceQp(&qp));
+  EXPECT_FALSE(h264_parser.GetLastSliceQp().has_value());
 }
 
 TEST(H264BitstreamParserTest, ReportsNoQpWithOnlyParsedPpsAndSpsSlices) {
   H264BitstreamParser h264_parser;
-  h264_parser.ParseBitstream(kH264SpsPps, sizeof(kH264SpsPps));
-  int qp;
-  EXPECT_FALSE(h264_parser.GetLastSliceQp(&qp));
+  h264_parser.ParseBitstream(kH264SpsPps);
+  EXPECT_FALSE(h264_parser.GetLastSliceQp().has_value());
 }
 
 TEST(H264BitstreamParserTest, ReportsLastSliceQpForImageSlices) {
   H264BitstreamParser h264_parser;
-  h264_parser.ParseBitstream(kH264BitstreamChunk, sizeof(kH264BitstreamChunk));
-  int qp;
-  ASSERT_TRUE(h264_parser.GetLastSliceQp(&qp));
-  EXPECT_EQ(35, qp);
+  h264_parser.ParseBitstream(kH264BitstreamChunk);
+  absl::optional<int> qp = h264_parser.GetLastSliceQp();
+  ASSERT_TRUE(qp.has_value());
+  EXPECT_EQ(35, *qp);
 
   // Parse an additional image slice.
-  h264_parser.ParseBitstream(kH264BitstreamNextImageSliceChunk,
-                             sizeof(kH264BitstreamNextImageSliceChunk));
-  ASSERT_TRUE(h264_parser.GetLastSliceQp(&qp));
-  EXPECT_EQ(37, qp);
+  h264_parser.ParseBitstream(kH264BitstreamNextImageSliceChunk);
+  qp = h264_parser.GetLastSliceQp();
+  ASSERT_TRUE(qp.has_value());
+  EXPECT_EQ(37, *qp);
 }
 
 TEST(H264BitstreamParserTest, ReportsLastSliceQpForCABACImageSlices) {
   H264BitstreamParser h264_parser;
-  h264_parser.ParseBitstream(kH264BitstreamChunkCabac,
-                             sizeof(kH264BitstreamChunkCabac));
-  int qp;
-  EXPECT_FALSE(h264_parser.GetLastSliceQp(&qp));
+  h264_parser.ParseBitstream(kH264BitstreamChunkCabac);
+  EXPECT_FALSE(h264_parser.GetLastSliceQp().has_value());
 
   // Parse an additional image slice.
-  h264_parser.ParseBitstream(kH264BitstreamNextImageSliceChunkCabac,
-                             sizeof(kH264BitstreamNextImageSliceChunkCabac));
-  ASSERT_TRUE(h264_parser.GetLastSliceQp(&qp));
-  EXPECT_EQ(24, qp);
+  h264_parser.ParseBitstream(kH264BitstreamNextImageSliceChunkCabac);
+  absl::optional<int> qp = h264_parser.GetLastSliceQp();
+  ASSERT_TRUE(qp.has_value());
+  EXPECT_EQ(24, *qp);
 }
 
 }  // namespace webrtc

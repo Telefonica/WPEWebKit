@@ -26,8 +26,7 @@
 #import "config.h"
 #import "DiagnosticLoggingClient.h"
 
-#if WK_API_ENABLED
-
+#import "APIDictionary.h"
 #import "WKSharedAPICast.h"
 #import "_WKDiagnosticLoggingDelegate.h"
 
@@ -51,6 +50,8 @@ void DiagnosticLoggingClient::setDelegate(id <_WKDiagnosticLoggingDelegate> dele
     m_delegateMethods.webviewLogDiagnosticMessageWithResult = [delegate respondsToSelector:@selector(_webView:logDiagnosticMessageWithResult:description:result:)];
     m_delegateMethods.webviewLogDiagnosticMessageWithValue = [delegate respondsToSelector:@selector(_webView:logDiagnosticMessageWithValue:description:value:)];
     m_delegateMethods.webviewLogDiagnosticMessageWithEnhancedPrivacy = [delegate respondsToSelector:@selector(_webView:logDiagnosticMessageWithEnhancedPrivacy:description:)];
+    m_delegateMethods.webviewLogDiagnosticMessageWithValueDictionary = [delegate respondsToSelector:@selector(_webView:logDiagnosticMessage:description:valueDictionary:)];
+    m_delegateMethods.webviewLogDiagnosticMessageWithDomain = [delegate respondsToSelector:@selector(_webView:logDiagnosticMessageWithDomain:domain:)];
 }
 
 void DiagnosticLoggingClient::logDiagnosticMessage(WebKit::WebPageProxy*, const WTF::String& message, const WTF::String& description)
@@ -68,6 +69,14 @@ static _WKDiagnosticLoggingResultType toWKDiagnosticLoggingResultType(WebCore::D
         return _WKDiagnosticLoggingResultFail;
     case WebCore::DiagnosticLoggingResultNoop:
         return _WKDiagnosticLoggingResultNoop;
+    }
+}
+
+static _WKDiagnosticLoggingDomain toWKDiagnosticLoggingDomain(WebCore::DiagnosticLoggingDomain domain)
+{
+    switch (domain) {
+    case WebCore::DiagnosticLoggingDomain::Media:
+        return _WKDiagnosticLoggingDomainMedia;
     }
 }
 
@@ -89,6 +98,16 @@ void DiagnosticLoggingClient::logDiagnosticMessageWithEnhancedPrivacy(WebKit::We
         [m_delegate.get() _webView:m_webView logDiagnosticMessageWithEnhancedPrivacy:message description:description];
 }
 
-} // namespace WebKit
+void DiagnosticLoggingClient::logDiagnosticMessageWithValueDictionary(WebPageProxy*, const String& message, const String& description, Ref<API::Dictionary>&& valueDictionary)
+{
+    if (m_delegateMethods.webviewLogDiagnosticMessageWithValueDictionary)
+        [m_delegate.get() _webView:m_webView logDiagnosticMessage:message description:description valueDictionary:static_cast<NSDictionary*>(valueDictionary->wrapper())];
+}
 
-#endif // WK_API_ENABLED
+void DiagnosticLoggingClient::logDiagnosticMessageWithDomain(WebPageProxy*, const String& message, WebCore::DiagnosticLoggingDomain domain)
+{
+    if (m_delegateMethods.webviewLogDiagnosticMessageWithDomain)
+        [m_delegate.get() _webView:m_webView logDiagnosticMessageWithDomain:message domain:toWKDiagnosticLoggingDomain(domain)];
+}
+
+} // namespace WebKit

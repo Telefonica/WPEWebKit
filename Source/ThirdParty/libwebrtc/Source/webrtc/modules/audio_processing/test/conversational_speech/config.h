@@ -8,19 +8,21 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_CONFIG_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_CONFIG_H_
+#ifndef MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_CONFIG_H_
+#define MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_CONFIG_H_
 
 #include <string>
+
+#include "absl/strings/string_view.h"
 
 namespace webrtc {
 namespace test {
 namespace conversational_speech {
 
 struct Config {
-  Config(const std::string& audiotracks_path,
-         const std::string& timing_filepath,
-         const std::string& output_path)
+  Config(absl::string_view audiotracks_path,
+         absl::string_view timing_filepath,
+         absl::string_view output_path)
       : audiotracks_path_(audiotracks_path),
         timing_filepath_(timing_filepath),
         output_path_(output_path) {}
@@ -38,4 +40,4 @@ struct Config {
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_CONFIG_H_
+#endif  // MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_CONFIG_H_

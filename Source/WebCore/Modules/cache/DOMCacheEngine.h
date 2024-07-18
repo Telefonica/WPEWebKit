@@ -31,30 +31,38 @@
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
 #include "SharedBuffer.h"
+#include <wtf/CompletionHandler.h>
 
 namespace WebCore {
+
+class ScriptExecutionContext;
 
 struct CacheQueryOptions;
 
 namespace DOMCacheEngine {
 
-enum class Error {
+enum class Error : uint8_t {
     NotImplemented,
     ReadDisk,
     WriteDisk,
-    Internal
+    QuotaExceeded,
+    Internal,
+    Stopped,
+    CORP
 };
 
-WEBCORE_EXPORT Exception errorToException(Error);
+Exception convertToException(Error);
+Exception convertToExceptionAndLog(ScriptExecutionContext*, Error);
 
 WEBCORE_EXPORT bool queryCacheMatch(const ResourceRequest& request, const ResourceRequest& cachedRequest, const ResourceResponse&, const CacheQueryOptions&);
 WEBCORE_EXPORT bool queryCacheMatch(const ResourceRequest& request, const URL& url, bool hasVaryStar, const HashMap<String, String>& varyHeaders, const CacheQueryOptions&);
 
-using ResponseBody = Variant<std::nullptr_t, Ref<FormData>, Ref<SharedBuffer>>;
+using ResponseBody = std::variant<std::nullptr_t, Ref<FormData>, Ref<SharedBuffer>>;
 ResponseBody isolatedResponseBody(const ResponseBody&);
 WEBCORE_EXPORT ResponseBody copyResponseBody(const ResponseBody&);
 
 struct Record {
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
     WEBCORE_EXPORT Record copy() const;
 
     uint64_t identifier;
@@ -68,21 +76,26 @@ struct Record {
     FetchHeaders::Guard responseHeadersGuard;
     ResourceResponse response;
     ResponseBody responseBody;
+    uint64_t responseBodySize;
 };
 
 struct CacheInfo {
     uint64_t identifier;
     String name;
+
+    CacheInfo isolatedCopy() const & { return { identifier, name.isolatedCopy() }; }
+    CacheInfo isolatedCopy() && { return { identifier, WTFMove(name).isolatedCopy() }; }
 };
 
 struct CacheInfos {
-    CacheInfos isolatedCopy();
+    Vector<CacheInfo> infos;
+    uint64_t updateCounter;
 
     template<class Encoder> void encode(Encoder&) const;
     template<class Decoder> static std::optional<CacheInfos> decode(Decoder&);
 
-    Vector<CacheInfo> infos;
-    uint64_t updateCounter;
+    CacheInfos isolatedCopy() const & { return { crossThreadCopy(infos), updateCounter }; }
+    CacheInfos isolatedCopy() && { return { crossThreadCopy(WTFMove(infos)), updateCounter }; }
 };
 
 struct CacheIdentifierOperationResult {
@@ -95,19 +108,19 @@ struct CacheIdentifierOperationResult {
 };
 
 using CacheIdentifierOrError = Expected<CacheIdentifierOperationResult, Error>;
-using CacheIdentifierCallback = WTF::Function<void(const CacheIdentifierOrError&)>;
+using CacheIdentifierCallback = CompletionHandler<void(const CacheIdentifierOrError&)>;
 
 using RecordIdentifiersOrError = Expected<Vector<uint64_t>, Error>;
-using RecordIdentifiersCallback = WTF::Function<void(RecordIdentifiersOrError&&)>;
+using RecordIdentifiersCallback = CompletionHandler<void(RecordIdentifiersOrError&&)>;
 
 
 using CacheInfosOrError = Expected<CacheInfos, Error>;
-using CacheInfosCallback = WTF::Function<void(CacheInfosOrError&&)>;
+using CacheInfosCallback = CompletionHandler<void(CacheInfosOrError&&)>;
 
 using RecordsOrError = Expected<Vector<Record>, Error>;
-using RecordsCallback = WTF::Function<void(RecordsOrError&&)>;
+using RecordsCallback = CompletionHandler<void(RecordsOrError&&)>;
 
-using CompletionCallback = WTF::Function<void(std::optional<Error>&&)>;
+using CompletionCallback = CompletionHandler<void(std::optional<Error>&&)>;
 
 template<class Encoder> inline void CacheInfos::encode(Encoder& encoder) const
 {
@@ -121,12 +134,12 @@ template<class Decoder> inline std::optional<CacheInfos> CacheInfos::decode(Deco
     decoder >> infos;
     if (!infos)
         return std::nullopt;
-    
+
     std::optional<uint64_t> updateCounter;
     decoder >> updateCounter;
     if (!updateCounter)
         return std::nullopt;
-    
+
     return {{ WTFMove(*infos), WTFMove(*updateCounter) }};
 }
 
@@ -142,7 +155,7 @@ template<class Decoder> inline std::optional<CacheIdentifierOperationResult> Cac
     decoder >> identifier;
     if (!identifier)
         return std::nullopt;
-    
+
     std::optional<bool> hadStorageError;
     decoder >> hadStorageError;
     if (!hadStorageError)
@@ -161,7 +174,10 @@ template<> struct EnumTraits<WebCore::DOMCacheEngine::Error> {
         WebCore::DOMCacheEngine::Error::NotImplemented,
         WebCore::DOMCacheEngine::Error::ReadDisk,
         WebCore::DOMCacheEngine::Error::WriteDisk,
-        WebCore::DOMCacheEngine::Error::Internal
+        WebCore::DOMCacheEngine::Error::QuotaExceeded,
+        WebCore::DOMCacheEngine::Error::Internal,
+        WebCore::DOMCacheEngine::Error::Stopped,
+        WebCore::DOMCacheEngine::Error::CORP
     >;
 };
 }

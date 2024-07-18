@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,16 +25,29 @@
 
 #import "_WKUserStyleSheet.h"
 
-#if WK_API_ENABLED
-
 #import "APIUserStyleSheet.h"
+
+namespace WebKit {
+
+template<> struct WrapperTraits<API::UserStyleSheet> {
+    using WrapperClass = _WKUserStyleSheet;
+};
+
+}
 
 namespace API {
 
-inline _WKUserStyleSheet *wrapper(UserStyleSheet& userStyleSheet)
+inline WebCore::UserStyleLevel toWebCoreUserStyleLevel(_WKUserStyleLevel level)
 {
-    ASSERT([userStyleSheet.wrapper() isKindOfClass:[_WKUserStyleSheet class]]);
-    return (_WKUserStyleSheet *)userStyleSheet.wrapper();
+    switch (level) {
+    case _WKUserStyleUserLevel:
+        return WebCore::UserStyleUserLevel;
+    case _WKUserStyleAuthorLevel:
+        return WebCore::UserStyleAuthorLevel;
+    }
+
+    ASSERT_NOT_REACHED();
+    return WebCore::UserStyleUserLevel;
 }
 
 }
@@ -44,5 +57,3 @@ inline _WKUserStyleSheet *wrapper(UserStyleSheet& userStyleSheet)
     API::ObjectStorage<API::UserStyleSheet> _userStyleSheet;
 }
 @end
-
-#endif

@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WebGestureEvent_h
-#define WebGestureEvent_h
+#pragma once
 
 #if ENABLE(MAC_GESTURE_EVENTS)
 
@@ -45,7 +44,7 @@ namespace WebKit {
 class WebGestureEvent : public WebEvent {
 public:
     WebGestureEvent() { }
-    WebGestureEvent(WebEvent::Type type, Modifiers modifiers, WallTime timestamp, WebCore::IntPoint position, float gestureScale, float gestureRotation)
+    WebGestureEvent(WebEvent::Type type, OptionSet<WebEvent::Modifier> modifiers, WallTime timestamp, WebCore::IntPoint position, float gestureScale, float gestureRotation)
         : WebEvent(type, modifiers, timestamp)
         , m_position(position)
         , m_gestureScale(gestureScale)
@@ -60,7 +59,7 @@ public:
     float gestureRotation() const { return m_gestureRotation; }
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, WebGestureEvent&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, WebGestureEvent&);
     
 private:
     bool isGestureEventType(Type) const;
@@ -73,5 +72,3 @@ private:
 } // namespace WebKit
 
 #endif // ENABLE(MAC_GESTURE_EVENTS)
-
-#endif // WebGestureEvent_h

@@ -22,14 +22,13 @@
 #include <wtf/glib/GUniquePtr.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
+#include <wtf/unicode/CharacterNames.h>
 
 namespace WebCore {
 
-static void replaceNonBreakingSpaceWithSpace(String& str)
+static void replaceNonBreakingSpaceWithSpace(String& string)
 {
-    static const UChar NonBreakingSpaceCharacter = 0xA0;
-    static const UChar SpaceCharacter = ' ';
-    str.replace(NonBreakingSpaceCharacter, SpaceCharacter);
+    string = makeStringByReplacingAll(string, noBreakSpace, space);
 }
 
 void SelectionData::setText(const String& newText)
@@ -47,24 +46,21 @@ void SelectionData::setURIList(const String& uriListString)
 
     // Line separator is \r\n per RFC 2483 - however, for compatibility
     // reasons we also allow just \n here.
-    Vector<String> uriList;
-    uriListString.split('\n', uriList);
 
     // Process the input and copy the first valid URL into the url member.
     // In case no URLs can be found, subsequent calls to getData("URL")
     // will get an empty string. This is in line with the HTML5 spec (see
     // "The DragEvent and DataTransfer interfaces"). Also extract all filenames
     // from the URI list.
-    bool setURL = false;
-    for (size_t i = 0; i < uriList.size(); ++i) {
-        String& line = uriList[i];
+    bool setURL = hasURL();
+    for (auto& line : uriListString.split('\n')) {
         line = line.stripWhiteSpace();
         if (line.isEmpty())
             continue;
         if (line[0] == '#')
             continue;
 
-        URL url = URL(URL(), line);
+        URL url { line };
         if (url.isValid()) {
             if (!setURL) {
                 m_url = url;
@@ -82,12 +78,18 @@ void SelectionData::setURIList(const String& uriListString)
 void SelectionData::setURL(const URL& url, const String& label)
 {
     m_url = url;
-    m_uriList = url;
-    setText(url.string());
+    if (m_uriList.isEmpty())
+        m_uriList = url.string();
+
+    if (!hasText())
+        setText(url.string());
+
+    if (hasMarkup())
+        return;
 
     String actualLabel(label);
     if (actualLabel.isEmpty())
-        actualLabel = url;
+        actualLabel = url.string();
 
     StringBuilder markup;
     markup.append("<a href=\"");
@@ -105,7 +107,7 @@ const String& SelectionData::urlLabel() const
         return text();
 
     if (hasURL())
-        return url();
+        return url().string();
 
     return emptyString();
 }
@@ -117,8 +119,9 @@ void SelectionData::clearAllExceptFilenames()
     clearURIList();
     clearURL();
     clearImage();
+    clearCustomData();
+    clearBuffers();
 
-    m_unknownTypeData.clear();
     m_canSmartReplace = false;
 }
 

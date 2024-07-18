@@ -15,8 +15,6 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
-import org.chromium.base.test.util.DisabledTest;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -25,23 +23,24 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLog;
+import org.robolectric.RobolectricTestRunner;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class TCPChannelClientTest {
   private static final int PORT = 8888;
   /**
-   * How long we wait before trying to connect to the server. Chosen quite arbitrarily and
-   * could be made smaller if need be.
+   * How long we wait before trying to connect to the server. Note: was
+   * previously only 10, which was too short (tests were flaky).
    */
-  private static final int SERVER_WAIT = 10;
-  private static final int CONNECT_TIMEOUT = 100;
-  private static final int SEND_TIMEOUT = 100;
-  private static final int DISCONNECT_TIMEOUT = 100;
+  private static final int SERVER_WAIT = 300;
+  private static final int CONNECT_TIMEOUT = 1000;
+  private static final int SEND_TIMEOUT = 1000;
+  private static final int DISCONNECT_TIMEOUT = 1000;
   private static final int TERMINATION_TIMEOUT = 1000;
   private static final String TEST_MESSAGE_SERVER = "Hello, Server!";
   private static final String TEST_MESSAGE_CLIENT = "Hello, Client!";
@@ -97,10 +96,7 @@ public class TCPChannelClientTest {
     verify(clientEvents, timeout(CONNECT_TIMEOUT)).onTCPConnected(false);
   }
 
-  // @Test
-  // Disabled because it fails when IPv6 is not supported on the bot.
-  // TODO(ehmaldonado): Enable when bugs.webrtc.org/6437 is fixed.
-  @DisabledTest
+  @Test
   public void testConnectIPv6() {
     setUpIPv6Server();
     try {

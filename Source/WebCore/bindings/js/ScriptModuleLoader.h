@@ -25,47 +25,59 @@
 
 #pragma once
 
-#include "CachedModuleScriptLoader.h"
-#include "CachedModuleScriptLoaderClient.h"
-#include "URL.h"
-#include "URLHash.h"
-#include <runtime/JSCJSValue.h>
+#include "ModuleScriptLoader.h"
+#include "ModuleScriptLoaderClient.h"
+#include <JavaScriptCore/JSCJSValue.h>
+#include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/RobinHoodHashMap.h>
+#include <wtf/URLHash.h>
 
 namespace JSC {
 
-class ExecState;
+class CallFrame;
 class JSGlobalObject;
 class JSInternalPromise;
 class JSModuleLoader;
+class JSModuleRecord;
 class SourceOrigin;
 
 }
 
 namespace WebCore {
 
-class Document;
 class JSDOMGlobalObject;
+class ScriptExecutionContext;
 
-class ScriptModuleLoader final : private CachedModuleScriptLoaderClient {
+class ScriptModuleLoader final : private ModuleScriptLoaderClient {
     WTF_MAKE_NONCOPYABLE(ScriptModuleLoader); WTF_MAKE_FAST_ALLOCATED;
 public:
-    explicit ScriptModuleLoader(Document&);
+    enum class OwnerType : uint8_t { Document, WorkerOrWorklet };
+    enum class ModuleType : uint8_t { Invalid, JavaScript, WebAssembly };
+    explicit ScriptModuleLoader(ScriptExecutionContext&, OwnerType);
     ~ScriptModuleLoader();
 
-    Document& document() { return m_document; }
+    UniqueRef<ScriptModuleLoader> shadowRealmLoader(JSC::JSGlobalObject* realmGlobal) const;
 
-    JSC::JSInternalPromise* resolve(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSValue moduleName, JSC::JSValue importerModuleKey, JSC::JSValue scriptFetcher);
-    JSC::JSInternalPromise* fetch(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSValue moduleKey, JSC::JSValue scriptFetcher);
-    JSC::JSValue evaluate(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSValue moduleKey, JSC::JSValue moduleRecord, JSC::JSValue scriptFetcher);
-    JSC::JSInternalPromise* importModule(JSC::JSGlobalObject*, JSC::ExecState*, JSC::JSModuleLoader*, JSC::JSString*, const JSC::SourceOrigin&);
+    ScriptExecutionContext& context() { return m_context; }
+
+    JSC::Identifier resolve(JSC::JSGlobalObject*, JSC::JSModuleLoader*, JSC::JSValue moduleName, JSC::JSValue importerModuleKey, JSC::JSValue scriptFetcher);
+    JSC::JSInternalPromise* fetch(JSC::JSGlobalObject*, JSC::JSModuleLoader*, JSC::JSValue moduleKey, JSC::JSValue parameters, JSC::JSValue scriptFetcher);
+    JSC::JSValue evaluate(JSC::JSGlobalObject*, JSC::JSModuleLoader*, JSC::JSValue moduleKey, JSC::JSValue moduleRecord, JSC::JSValue scriptFetcher, JSC::JSValue awaitedValue, JSC::JSValue resumeMode);
+    JSC::JSInternalPromise* importModule(JSC::JSGlobalObject*, JSC::JSModuleLoader*, JSC::JSString*, JSC::JSValue parameters, const JSC::SourceOrigin&);
+    JSC::JSObject* createImportMetaProperties(JSC::JSGlobalObject*, JSC::JSModuleLoader*, JSC::JSValue, JSC::JSModuleRecord*, JSC::JSValue);
 
 private:
-    void notifyFinished(CachedModuleScriptLoader&, RefPtr<DeferredPromise>) final;
+    void notifyFinished(ModuleScriptLoader&, URL&&, Ref<DeferredPromise>) final;
 
-    Document& m_document;
-    HashMap<URL, URL> m_requestURLToResponseURLMap;
-    HashSet<Ref<CachedModuleScriptLoader>> m_loaders;
+    URL moduleURL(JSC::JSGlobalObject&, JSC::JSValue);
+    URL responseURLFromRequestURL(JSC::JSGlobalObject&, JSC::JSValue);
+
+    ScriptExecutionContext& m_context;
+    MemoryCompactRobinHoodHashMap<String, URL> m_requestURLToResponseURLMap;
+    HashSet<Ref<ModuleScriptLoader>> m_loaders;
+    OwnerType m_ownerType;
+    JSC::JSGlobalObject* m_shadowRealmGlobal { nullptr };
 };
 
 } // namespace WebCore

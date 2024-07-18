@@ -66,7 +66,7 @@ struct ViewportArguments {
     enum Type {
         // These are ordered in increasing importance.
         Implicit,
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
         PluginDocument,
         ImageDocument,
 #endif
@@ -74,13 +74,11 @@ struct ViewportArguments {
         CSSDeviceAdaptation
     } type;
 
-    enum {
-        ValueAuto = -1,
-        ValueDeviceWidth = -2,
-        ValueDeviceHeight = -3,
-        ValuePortrait = -4,
-        ValueLandscape = -5
-    };
+    static constexpr int ValueAuto = -1;
+    static constexpr int ValueDeviceWidth = -2;
+    static constexpr int ValueDeviceHeight = -3;
+    static constexpr int ValuePortrait = -4;
+    static constexpr int ValueLandscape = -5;
 
     explicit ViewportArguments(Type type = Implicit)
         : type(type)
@@ -143,8 +141,10 @@ WEBCORE_EXPORT void restrictMinimumScaleFactorToViewportSize(ViewportAttributes&
 WEBCORE_EXPORT void restrictScaleFactorToInitialScaleIfNotUserScalable(ViewportAttributes& result);
 WEBCORE_EXPORT float computeMinimumScaleFactorForContentContained(const ViewportAttributes& result, const IntSize& viewportSize, const IntSize& contentSize);
 
+typedef Function<void(ViewportErrorCode, const String&)> ViewportErrorHandler;
 void setViewportFeature(ViewportArguments&, Document&, StringView key, StringView value);
+WEBCORE_EXPORT void setViewportFeature(ViewportArguments&, StringView key, StringView value, const ViewportErrorHandler&);
 
-WTF::TextStream& operator<<(WTF::TextStream&, const ViewportArguments&);
+WEBCORE_EXPORT WTF::TextStream& operator<<(WTF::TextStream&, const ViewportArguments&);
 
 } // namespace WebCore

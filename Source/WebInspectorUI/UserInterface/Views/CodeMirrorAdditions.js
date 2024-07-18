@@ -272,6 +272,32 @@
                     state._expectLink = true;
                 } else if (hexColorRegex.test(stream.current()))
                     style = style + " hex-color";
+            } else if (style === "error") {
+                if (state.state=== "atBlock" || state.state === "atBlock_parens") {
+                    switch (stream.current()) {
+                    case "prefers-color-scheme":
+                    case     "light":
+                    case     "dark":
+                    case "prefers-reduced-motion":
+                    case     "reduce":
+                    case     "no-preference":
+                    case "inverted-colors":
+                    case     "inverted":
+                    case "color-gamut":
+                    case     "p3":
+                    case     "rec2020":
+                    case "display-mode":
+                    case     "fullscreen":
+                    case     "standalone":
+                    case     "minimal-ui":
+                    case     "browser":
+                    case /*-webkit-*/"video-playable-inline":
+                    case /*-webkit-*/"transform-2d":
+                    case /*-webkit-*/"transform-3d":
+                        style = "property";
+                        break;
+                    }
+                }
             } else if (state._expectLink) {
                 delete state._expectLink;
 
@@ -299,26 +325,16 @@
         return style && (style + " m-" + (this.alternateName || this.name));
     }
 
-    function extendedToken(stream, state)
+    function extendedJavaScriptToken(stream, state)
     {
         // CodeMirror moves the original token function to _token when we extended it.
         // So call it to get the style that we will add an additional class name to.
         var style = this._token(stream, state);
+
+        if (style === "number" && stream.current().endsWith("n"))
+            style += " bigint";
+
         return style && (style + " m-" + (this.alternateName || this.name));
-    }
-
-    function extendedCSSRuleStartState(base)
-    {
-        // CodeMirror moves the original token function to _startState when we extended it.
-        // So call it to get the original start state that we will modify.
-        var state = this._startState(base);
-
-        // Start off the state stack like it has already parsed a rule. This causes everything
-        // after to be parsed as properties in a rule.
-        state.state = "block";
-        state.context.type = "block";
-
-        return state;
     }
 
     function scrollCursorIntoView(codeMirror, event)
@@ -348,16 +364,14 @@
 
     CodeMirror.extendMode("css", {token: extendedCSSToken});
     CodeMirror.extendMode("xml", {token: extendedXMLToken});
-    CodeMirror.extendMode("javascript", {token: extendedToken});
-
-    CodeMirror.defineMode("css-rule", CodeMirror.modes.css);
-    CodeMirror.extendMode("css-rule", {token: extendedCSSToken, startState: extendedCSSRuleStartState, alternateName: "css"});
+    CodeMirror.extendMode("javascript", {token: extendedJavaScriptToken});
 
     CodeMirror.defineInitHook(function(codeMirror) {
         codeMirror.on("scrollCursorIntoView", scrollCursorIntoView);
     });
 
-    const maximumNeighboringWhitespaceCharacters = 16;
+    let whitespaceStyleElement = null;
+    let whitespaceCountsWithStyling = new Set;
     CodeMirror.defineOption("showWhitespaceCharacters", false, function(cm, value, old) {
         if (!value || (old && old !== CodeMirror.Init)) {
             cm.removeOverlay("whitespace");
@@ -369,10 +383,27 @@
             token(stream) {
                 if (stream.peek() === " ") {
                     let count = 0;
-                    while (count < maximumNeighboringWhitespaceCharacters && stream.peek() === " ") {
+                    while (stream.peek() === " ") {
                         ++count;
                         stream.next();
                     }
+
+                    if (!whitespaceCountsWithStyling.has(count)) {
+                        whitespaceCountsWithStyling.add(count);
+
+                        if (!whitespaceStyleElement)
+                            whitespaceStyleElement = document.head.appendChild(document.createElement("style"));
+
+                        const middleDot = "\\00B7";
+
+                        let styleText = whitespaceStyleElement.textContent;
+                        styleText += `.show-whitespace-characters .CodeMirror .cm-whitespace-${count}::before {`;
+                        styleText += `content: "${middleDot.repeat(count)}";`;
+                        styleText += `}`;
+
+                        whitespaceStyleElement.textContent = styleText;
+                    }
+
                     return `whitespace whitespace-${count}`;
                 }
 
@@ -386,7 +417,7 @@
 
     CodeMirror.defineExtension("hasLineClass", function(line, where, className) {
         // This matches the arguments to addLineClass and removeLineClass.
-        var classProperty = (where === "text" ? "textClass" : (where === "background" ? "bgClass" : "wrapClass"));
+        var classProperty = where === "text" ? "textClass" : (where === "background" ? "bgClass" : "wrapClass");
         var lineInfo = this.lineInfo(line);
         if (!lineInfo)
             return false;
@@ -618,6 +649,17 @@
         fallthrough: mac ? "macDefault" : "pcDefault"
     };
 
+    {
+        // CodeMirror's default behavior is to always insert a tab ("\t") regardless of `indentWithTabs`.
+        let original = CodeMirror.commands.insertTab;
+        CodeMirror.commands.insertTab = function(cm) {
+            if (cm.options.indentWithTabs)
+                original(cm);
+            else
+                CodeMirror.commands.insertSoftTab(cm);
+        };
+    }
+
     // Register some extra MIME-types for CodeMirror. These are in addition to the
     // ones CodeMirror already registers, like text/html, text/javascript, etc.
     var extraXMLTypes = ["text/xml", "text/xsl"];
@@ -640,6 +682,10 @@
     extraJSONTypes.forEach(function(type) {
         CodeMirror.defineMIME(type, {name: "javascript", json: true});
     });
+
+    // FIXME: Add WHLSL specific modes.
+    CodeMirror.defineMIME("x-pipeline/x-compute", CodeMirror.resolveMode("x-shader/x-vertex"));
+    CodeMirror.defineMIME("x-pipeline/x-render", CodeMirror.resolveMode("x-shader/x-vertex"));
 })();
 
 WI.compareCodeMirrorPositions = function(a, b)
@@ -679,4 +725,34 @@ WI.walkTokens = function(cm, mode, initialPosition, callback)
 
     if (!abort)
         callback(null);
+};
+
+WI.tokenizeCSSValue = function(cssValue)
+{
+    const rulePrefix = "*{X:";
+    let cssRule = rulePrefix + cssValue + "}";
+    let tokens = [];
+
+    let mode = CodeMirror.getMode({indentUnit: 0}, "text/css");
+    let state = CodeMirror.startState(mode);
+    let stream = new CodeMirror.StringStream(cssRule);
+
+    function processToken(token, tokenType, column) {
+        if (column < rulePrefix.length)
+            return;
+
+        if (token === "}" && !tokenType)
+            return;
+
+        tokens.push({value: token, type: tokenType});
+    }
+
+    while (!stream.eol()) {
+        let style = mode.token(stream, state);
+        let value = stream.current();
+        processToken(value, style, stream.start);
+        stream.start = stream.pos;
+    }
+
+    return tokens;
 };

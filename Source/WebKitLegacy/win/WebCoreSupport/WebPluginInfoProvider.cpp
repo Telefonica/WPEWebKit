@@ -25,8 +25,6 @@
 
 #include "WebPluginInfoProvider.h"
 
-#include "PluginDatabase.h"
-
 using namespace WebCore;
 
 WebPluginInfoProvider& WebPluginInfoProvider::singleton()
@@ -46,43 +44,14 @@ WebPluginInfoProvider::~WebPluginInfoProvider()
 
 void WebPluginInfoProvider::refreshPlugins()
 {
-    PluginDatabase::installedPlugins()->refresh();
 }
 
-void WebPluginInfoProvider::getPluginInfo(WebCore::Page& page, Vector<WebCore::PluginInfo>& outPlugins)
+Vector<WebCore::PluginInfo> WebPluginInfoProvider::pluginInfo(WebCore::Page& page, std::optional<Vector<WebCore::SupportedPluginIdentifier>>&)
 {
-    const Vector<PluginPackage*>& plugins = PluginDatabase::installedPlugins()->plugins();
-
-    outPlugins.resize(plugins.size());
-
-    for (size_t i = 0; i < plugins.size(); ++i) {
-        PluginPackage* package = plugins[i];
-
-        PluginInfo info;
-        info.name = package->name();
-        info.file = package->fileName();
-        info.desc = package->description();
-
-        const MIMEToDescriptionsMap& mimeToDescriptions = package->mimeToDescriptions();
-
-        info.mimes.reserveCapacity(mimeToDescriptions.size());
-
-        MIMEToDescriptionsMap::const_iterator end = mimeToDescriptions.end();
-        for (MIMEToDescriptionsMap::const_iterator it = mimeToDescriptions.begin(); it != end; ++it) {
-            MimeClassInfo mime;
-
-            mime.type = it->key;
-            mime.desc = it->value;
-            mime.extensions = package->mimeToExtensions().get(mime.type);
-
-            info.mimes.append(mime);
-        }
-
-        outPlugins[i] = info;
-    }
+    return { };
 }
 
-void WebPluginInfoProvider::getWebVisiblePluginInfo(WebCore::Page& page, Vector<WebCore::PluginInfo>& plugins)
+Vector<WebCore::PluginInfo> WebPluginInfoProvider::webVisiblePluginInfo(WebCore::Page& page, const URL&)
 {
-    getPluginInfo(page, plugins);
+    return { };
 }

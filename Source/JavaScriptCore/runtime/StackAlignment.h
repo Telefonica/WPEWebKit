@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,15 +25,16 @@
 
 #pragma once
 
+#include "CallFrame.h"
 #include "JSCJSValue.h"
 #include <wtf/MathExtras.h>
 
 namespace JSC {
 
 // NB. Different platforms may have different requirements here. But 16 bytes is very common.
-inline constexpr unsigned stackAlignmentBytes() { return 16; }
+constexpr unsigned stackAlignmentBytes() { return 16; }
 
-inline constexpr unsigned stackAlignmentRegisters()
+constexpr unsigned stackAlignmentRegisters()
 {
     return stackAlignmentBytes() / sizeof(EncodedJSValue);
 }
@@ -50,6 +51,16 @@ inline unsigned roundArgumentCountToAlignFrame(unsigned argumentCount)
 inline unsigned roundLocalRegisterCountForFramePointerOffset(unsigned localRegisterCount)
 {
     return WTF::roundUpToMultipleOf(stackAlignmentRegisters(), localRegisterCount + CallerFrameAndPC::sizeInRegisters) - CallerFrameAndPC::sizeInRegisters;
+}
+
+inline unsigned argumentCountForStackSize(unsigned sizeInBytes)
+{
+    unsigned sizeInRegisters = sizeInBytes / sizeof(void*);
+
+    if (sizeInRegisters <= CallFrame::headerSizeInRegisters)
+        return 0;
+
+    return sizeInRegisters - CallFrame::headerSizeInRegisters;
 }
 
 inline unsigned logStackAlignmentRegisters()

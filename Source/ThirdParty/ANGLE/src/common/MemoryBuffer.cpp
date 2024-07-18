@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2014 The ANGLE Project Authors. All rights reserved.
+// Copyright 2014 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -15,22 +15,24 @@ namespace angle
 {
 
 // MemoryBuffer implementation.
-MemoryBuffer::MemoryBuffer() : mSize(0), mData(nullptr)
-{
-}
-
 MemoryBuffer::~MemoryBuffer()
 {
-    free(mData);
-    mData = nullptr;
+    if (mData)
+    {
+        free(mData);
+        mData = nullptr;
+    }
 }
 
 bool MemoryBuffer::resize(size_t size)
 {
     if (size == 0)
     {
-        free(mData);
-        mData = nullptr;
+        if (mData)
+        {
+            free(mData);
+            mData = nullptr;
+        }
         mSize = 0;
         return true;
     }
@@ -41,7 +43,7 @@ bool MemoryBuffer::resize(size_t size)
     }
 
     // Only reallocate if the size has changed.
-    uint8_t *newMemory = reinterpret_cast<uint8_t*>(malloc(sizeof(uint8_t) * size));
+    uint8_t *newMemory = static_cast<uint8_t *>(malloc(sizeof(uint8_t) * size));
     if (newMemory == nullptr)
     {
         return false;
@@ -60,33 +62,67 @@ bool MemoryBuffer::resize(size_t size)
     return true;
 }
 
-size_t MemoryBuffer::size() const
+void MemoryBuffer::fill(uint8_t datum)
 {
-    return mSize;
+    if (!empty())
+    {
+        std::fill(mData, mData + mSize, datum);
+    }
 }
 
-const uint8_t *MemoryBuffer::data() const
+MemoryBuffer::MemoryBuffer(MemoryBuffer &&other) : MemoryBuffer()
 {
-    return mData;
+    *this = std::move(other);
 }
 
-uint8_t *MemoryBuffer::data()
+MemoryBuffer &MemoryBuffer::operator=(MemoryBuffer &&other)
 {
-    ASSERT(mData);
-    return mData;
+    std::swap(mSize, other.mSize);
+    std::swap(mData, other.mData);
+    return *this;
 }
+
+namespace
+{
+static constexpr uint32_t kDefaultScratchBufferLifetime = 1000u;
+
+}  // anonymous namespace
 
 // ScratchBuffer implementation.
+ScratchBuffer::ScratchBuffer() : ScratchBuffer(kDefaultScratchBufferLifetime) {}
 
-ScratchBuffer::ScratchBuffer(uint32_t lifetime) : mLifetime(lifetime), mResetCounter(lifetime)
+ScratchBuffer::ScratchBuffer(uint32_t lifetime) : mLifetime(lifetime), mResetCounter(lifetime) {}
+
+ScratchBuffer::~ScratchBuffer() {}
+
+ScratchBuffer::ScratchBuffer(ScratchBuffer &&other)
 {
+    *this = std::move(other);
 }
 
-ScratchBuffer::~ScratchBuffer()
+ScratchBuffer &ScratchBuffer::operator=(ScratchBuffer &&other)
 {
+    std::swap(mLifetime, other.mLifetime);
+    std::swap(mResetCounter, other.mResetCounter);
+    std::swap(mScratchMemory, other.mScratchMemory);
+    return *this;
 }
 
 bool ScratchBuffer::get(size_t requestedSize, MemoryBuffer **memoryBufferOut)
+{
+    return getImpl(requestedSize, memoryBufferOut, Optional<uint8_t>::Invalid());
+}
+
+bool ScratchBuffer::getInitialized(size_t requestedSize,
+                                   MemoryBuffer **memoryBufferOut,
+                                   uint8_t initValue)
+{
+    return getImpl(requestedSize, memoryBufferOut, Optional<uint8_t>(initValue));
+}
+
+bool ScratchBuffer::getImpl(size_t requestedSize,
+                            MemoryBuffer **memoryBufferOut,
+                            Optional<uint8_t> initValue)
 {
     if (mScratchMemory.size() == requestedSize)
     {
@@ -100,14 +136,17 @@ bool ScratchBuffer::get(size_t requestedSize, MemoryBuffer **memoryBufferOut)
         tick();
     }
 
-    if (mResetCounter == 0 || mScratchMemory.size() < requestedSize)
+    if (mScratchMemory.size() < requestedSize)
     {
-        mScratchMemory.resize(0);
         if (!mScratchMemory.resize(requestedSize))
         {
             return false;
         }
         mResetCounter = mLifetime;
+        if (initValue.valid())
+        {
+            mScratchMemory.fill(initValue.value());
+        }
     }
 
     ASSERT(mScratchMemory.size() >= requestedSize);
@@ -121,13 +160,20 @@ void ScratchBuffer::tick()
     if (mResetCounter > 0)
     {
         --mResetCounter;
+        if (mResetCounter == 0)
+        {
+            clear();
+        }
     }
 }
 
 void ScratchBuffer::clear()
 {
     mResetCounter = mLifetime;
-    mScratchMemory.resize(0);
+    if (mScratchMemory.size() > 0)
+    {
+        mScratchMemory.clear();
+    }
 }
 
 }  // namespace angle

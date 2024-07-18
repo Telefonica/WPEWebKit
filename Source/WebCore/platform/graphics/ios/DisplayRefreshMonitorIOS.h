@@ -23,10 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef DisplayRefreshMonitorIOS_h
-#define DisplayRefreshMonitorIOS_h
+#pragma once
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
+#if PLATFORM(IOS_FAMILY)
 
 #include "DisplayRefreshMonitor.h"
 #include <wtf/RetainPtr.h>
@@ -44,16 +43,21 @@ public:
     
     virtual ~DisplayRefreshMonitorIOS();
 
-    void displayLinkFired();
-    bool requestRefreshCallback() override;
+    void displayLinkCallbackFired();
 
 private:
     explicit DisplayRefreshMonitorIOS(PlatformDisplayID);
+
+    void stop() final;
+    bool startNotificationMechanism() final;
+    void stopNotificationMechanism() final;
+    std::optional<FramesPerSecond> displayNominalFramesPerSecond() final;
+
     RetainPtr<WebDisplayLinkHandler> m_handler;
+    DisplayUpdate m_currentUpdate;
+    bool m_displayLinkIsActive { false };
 };
 
-}
+} // namespace WebCore
 
-#endif // USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-
-#endif
+#endif // PLATFORM(IOS_FAMILY)

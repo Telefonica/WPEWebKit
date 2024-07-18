@@ -8,21 +8,26 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_TEST_MOCK_TRANSPORT_H_
-#define WEBRTC_TEST_MOCK_TRANSPORT_H_
+#ifndef TEST_MOCK_TRANSPORT_H_
+#define TEST_MOCK_TRANSPORT_H_
 
-#include "webrtc/api/call/transport.h"
-#include "webrtc/test/gmock.h"
+#include "api/call/transport.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
 class MockTransport : public Transport {
  public:
-  MOCK_METHOD3(SendRtp,
-               bool(const uint8_t* data,
-                    size_t len,
-                    const PacketOptions& options));
-  MOCK_METHOD2(SendRtcp, bool(const uint8_t* data, size_t len));
+  MockTransport();
+  ~MockTransport();
+
+  MOCK_METHOD(bool,
+              SendRtp,
+              (rtc::ArrayView<const uint8_t>, const PacketOptions&),
+              (override));
+  MOCK_METHOD(bool, SendRtcp, (rtc::ArrayView<const uint8_t>), (override));
 };
+
 }  // namespace webrtc
-#endif  // WEBRTC_TEST_MOCK_TRANSPORT_H_
+
+#endif  // TEST_MOCK_TRANSPORT_H_

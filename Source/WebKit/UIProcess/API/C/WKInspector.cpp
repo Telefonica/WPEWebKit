@@ -26,17 +26,17 @@
 #include "config.h"
 #include "WKInspector.h"
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 
 #include "WKAPICast.h"
-#include "WebInspectorProxy.h"
+#include "WebInspectorUIProxy.h"
 #include "WebPageProxy.h"
 
 using namespace WebKit;
 
 WKTypeID WKInspectorGetTypeID()
 {
-    return toAPI(WebInspectorProxy::APIType);
+    return toAPI(WebInspectorUIProxy::APIType);
 }
 
 WKPageRef WKInspectorGetPage(WKInspectorRef inspectorRef)
@@ -117,7 +117,6 @@ bool WKInspectorIsProfilingPage(WKInspectorRef inspectorRef)
 
 void WKInspectorTogglePageProfiling(WKInspectorRef inspectorRef)
 {
-    toImpl(inspectorRef)->showTimelines();
     toImpl(inspectorRef)->togglePageProfiling();
 }
 
@@ -131,4 +130,4 @@ void WKInspectorToggleElementSelection(WKInspectorRef inspectorRef)
     toImpl(inspectorRef)->toggleElementSelection();
 }
 
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)

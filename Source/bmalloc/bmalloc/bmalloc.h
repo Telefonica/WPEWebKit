@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,93 +23,152 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#pragma once
+
 #include "AvailableMemory.h"
 #include "Cache.h"
+#include "DebugHeap.h"
 #include "Gigacage.h"
 #include "Heap.h"
+#include "IsoTLS.h"
+#include "Mutex.h"
 #include "PerHeapKind.h"
-#include "PerProcess.h"
 #include "Scavenger.h"
-#include "StaticMutex.h"
+
+#if BUSE(LIBPAS)
+#include "bmalloc_heap_inlines.h"
+#endif
 
 namespace bmalloc {
 namespace api {
 
-// Returns null on failure.
-inline void* tryMalloc(size_t size, HeapKind kind = HeapKind::Primary)
+#if BUSE(LIBPAS)
+extern pas_primitive_heap_ref gigacageHeaps[Gigacage::NumberOfKinds];
+
+inline pas_primitive_heap_ref& heapForKind(Gigacage::Kind kind)
 {
+    RELEASE_BASSERT(static_cast<unsigned>(kind) < Gigacage::NumberOfKinds);
+    return gigacageHeaps[static_cast<unsigned>(kind)];
+}
+#endif
+
+// Returns null on failure.
+BINLINE void* tryMalloc(size_t size, HeapKind kind = HeapKind::Primary)
+{
+#if BUSE(LIBPAS)
+    if (!isGigacage(kind))
+        return bmalloc_try_allocate_inline(size);
+    return bmalloc_try_allocate_auxiliary_inline(&heapForKind(gigacageKind(kind)), size);
+#else
     return Cache::tryAllocate(kind, size);
+#endif
 }
 
 // Crashes on failure.
-inline void* malloc(size_t size, HeapKind kind = HeapKind::Primary)
+BINLINE void* malloc(size_t size, HeapKind kind = HeapKind::Primary)
 {
+#if BUSE(LIBPAS)
+    if (!isGigacage(kind))
+        return bmalloc_allocate_inline(size);
+    return bmalloc_allocate_auxiliary_inline(&heapForKind(gigacageKind(kind)), size);
+#else
     return Cache::allocate(kind, size);
+#endif
+}
+
+BEXPORT void* mallocOutOfLine(size_t size, HeapKind kind = HeapKind::Primary);
+
+// Returns null on failure.
+BINLINE void* tryMemalign(size_t alignment, size_t size, HeapKind kind = HeapKind::Primary)
+{
+#if BUSE(LIBPAS)
+    if (!isGigacage(kind))
+        return bmalloc_try_allocate_with_alignment_inline(size, alignment);
+    return bmalloc_try_allocate_auxiliary_with_alignment_inline(
+        &heapForKind(gigacageKind(kind)), size, alignment);
+#else
+    return Cache::tryAllocate(kind, alignment, size);
+#endif
+}
+
+// Crashes on failure.
+BINLINE void* memalign(size_t alignment, size_t size, HeapKind kind = HeapKind::Primary)
+{
+#if BUSE(LIBPAS)
+    if (!isGigacage(kind))
+        return bmalloc_allocate_with_alignment_inline(size, alignment);
+    return bmalloc_allocate_auxiliary_with_alignment_inline(
+        &heapForKind(gigacageKind(kind)), size, alignment);
+#else
+    return Cache::allocate(kind, alignment, size);
+#endif
 }
 
 // Returns null on failure.
-inline void* tryMemalign(size_t alignment, size_t size, HeapKind kind = HeapKind::Primary)
+BINLINE void* tryRealloc(void* object, size_t newSize, HeapKind kind = HeapKind::Primary)
 {
-    return Cache::tryAllocate(kind, alignment, size);
+#if BUSE(LIBPAS)
+    if (!isGigacage(kind)) {
+        return bmalloc_try_reallocate_inline(
+            object, newSize, pas_reallocate_free_if_successful);
+    }
+    return bmalloc_try_reallocate_auxiliary_inline(
+        object, &heapForKind(gigacageKind(kind)), newSize, pas_reallocate_free_if_successful);
+#else
+    return Cache::tryReallocate(kind, object, newSize);
+#endif
 }
 
 // Crashes on failure.
-inline void* memalign(size_t alignment, size_t size, HeapKind kind = HeapKind::Primary)
+BINLINE void* realloc(void* object, size_t newSize, HeapKind kind = HeapKind::Primary)
 {
-    return Cache::allocate(kind, alignment, size);
-}
-
-// Crashes on failure.
-inline void* realloc(void* object, size_t newSize, HeapKind kind = HeapKind::Primary)
-{
+#if BUSE(LIBPAS)
+    if (!isGigacage(kind))
+        return bmalloc_reallocate_inline(object, newSize, pas_reallocate_free_if_successful);
+    return bmalloc_reallocate_auxiliary_inline(
+        object, &heapForKind(gigacageKind(kind)), newSize, pas_reallocate_free_if_successful);
+#else
     return Cache::reallocate(kind, object, newSize);
+#endif
 }
 
-// Returns null for failure
-inline void* tryLargeMemalignVirtual(size_t alignment, size_t size, HeapKind kind = HeapKind::Primary)
-{
-    Heap& heap = PerProcess<PerHeapKind<Heap>>::get()->at(kind);
-    std::lock_guard<StaticMutex> lock(Heap::mutex());
-    return heap.allocateLarge(lock, alignment, size, AllocationKind::Virtual);
-}
+// Returns null on failure.
+// This API will give you zeroed pages that are ready to be used. These pages
+// will page fault on first access. It returns to you memory that initially only
+// uses up virtual address space, not `size` bytes of physical memory.
+BEXPORT void* tryLargeZeroedMemalignVirtual(size_t alignment, size_t size, HeapKind kind = HeapKind::Primary);
 
-inline void free(void* object, HeapKind kind = HeapKind::Primary)
+BINLINE void free(void* object, HeapKind kind = HeapKind::Primary)
 {
+#if BUSE(LIBPAS)
+    BUNUSED(kind);
+    bmalloc_deallocate_inline(object);
+#else
     Cache::deallocate(kind, object);
+#endif
 }
 
-inline void freeLargeVirtual(void* object, HeapKind kind = HeapKind::Primary)
-{
-    Heap& heap = PerProcess<PerHeapKind<Heap>>::get()->at(kind);
-    std::lock_guard<StaticMutex> lock(Heap::mutex());
-    heap.deallocateLarge(lock, object, AllocationKind::Virtual);
-}
+BEXPORT void freeOutOfLine(void* object, HeapKind kind = HeapKind::Primary);
 
-inline void scavengeThisThread()
-{
-    for (unsigned i = numHeaps; i--;)
-        Cache::scavenge(static_cast<HeapKind>(i));
-}
+BEXPORT void freeLargeVirtual(void* object, size_t, HeapKind kind = HeapKind::Primary);
 
-inline void scavenge()
-{
-    scavengeThisThread();
+BEXPORT void scavengeThisThread();
 
-    PerProcess<Scavenger>::get()->scavenge();
-}
+BEXPORT void scavenge();
 
-inline bool isEnabled(HeapKind kind = HeapKind::Primary)
-{
-    std::unique_lock<StaticMutex> lock(Heap::mutex());
-    return !PerProcess<PerHeapKind<Heap>>::getFastCase()->at(kind).debugHeap();
-}
+BEXPORT bool isEnabled(HeapKind kind = HeapKind::Primary);
+
+// ptr must be aligned to vmPageSizePhysical and size must be divisible 
+// by vmPageSizePhysical.
+BEXPORT void decommitAlignedPhysical(void* object, size_t, HeapKind = HeapKind::Primary);
+BEXPORT void commitAlignedPhysical(void* object, size_t, HeapKind = HeapKind::Primary);
     
 inline size_t availableMemory()
 {
     return bmalloc::availableMemory();
 }
     
-#if BPLATFORM(IOS)
+#if BPLATFORM(IOS_FAMILY) || BOS(LINUX) || BOS(FREEBSD)
 inline size_t memoryFootprint()
 {
     return bmalloc::memoryFootprint();
@@ -122,12 +181,13 @@ inline double percentAvailableMemoryInUse()
 #endif
 
 #if BOS(DARWIN)
-inline void setScavengerThreadQOSClass(qos_class_t overrideClass)
-{
-    std::unique_lock<StaticMutex> lock(Heap::mutex());
-    PerProcess<Scavenger>::get()->setScavengerThreadQOSClass(overrideClass);
-}
+BEXPORT void setScavengerThreadQOSClass(qos_class_t overrideClass);
 #endif
+
+BEXPORT void enableMiniMode();
+
+// Used for debugging only.
+BEXPORT void disableScavenger();
 
 } // namespace api
 } // namespace bmalloc

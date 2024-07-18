@@ -26,14 +26,15 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import <QuartzCore/CALayer.h>
 #import <WebKitLegacy/WAKAppKitStubs.h>
 #import <WebKitLegacy/WAKView.h>
 #endif
+#import <wtf/NakedPtr.h>
 
 @class WebNodeHighlightView;
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 @class WebView;
 #endif
 
@@ -41,7 +42,7 @@ namespace WebCore {
     class InspectorController;
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 @interface WebHighlightLayer : CALayer {
     WebNodeHighlightView *_view;
     WebView *_webView;
@@ -52,16 +53,16 @@ namespace WebCore {
 
 @interface WebNodeHighlight : NSObject {
     NSView *_targetView;
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     NSWindow *_highlightWindow;
 #else
     WebHighlightLayer *_highlightLayer;
 #endif
     WebNodeHighlightView *_highlightView;
-    WebCore::InspectorController* _inspectorController;
+    NakedPtr<WebCore::InspectorController> _inspectorController;
     id _delegate;
 }
-- (id)initWithTargetView:(NSView *)targetView inspectorController:(WebCore::InspectorController*)inspectorController;
+- (id)initWithTargetView:(NSView *)targetView inspectorController:(NakedPtr<WebCore::InspectorController>)inspectorController;
 
 - (void)setDelegate:(id)delegate;
 - (id)delegate;
@@ -72,9 +73,9 @@ namespace WebCore {
 - (NSView *)targetView;
 - (WebNodeHighlightView *)highlightView;
 
-- (WebCore::InspectorController*)inspectorController;
+- (NakedPtr<WebCore::InspectorController>)inspectorController;
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 - (void)setNeedsUpdateInTargetViewRect:(NSRect)rect;
 #else
 - (void)setNeedsDisplay;

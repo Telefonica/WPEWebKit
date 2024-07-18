@@ -25,36 +25,45 @@
  */
 
 #include "config.h"
-#include "WebProcessMainUnix.h"
+#include "WebProcessMain.h"
 
-#include "ChildProcessMain.h"
+#include "AuxiliaryProcessMain.h"
 #include "WebProcess.h"
-#include <WebCore/SoupNetworkSession.h>
-#include <gtk/gtk.h>
+#include <WebCore/GtkVersioning.h>
 #include <libintl.h>
-#include <libsoup/soup.h>
-#include <wtf/CurrentTime.h>
 
 #if PLATFORM(X11)
 #include <X11/Xlib.h>
 #endif
 
-using namespace WebCore;
+#if USE(GSTREAMER)
+#include <gst/gst.h>
+#endif
+
+#if USE(GCRYPT)
+#include <pal/crypto/gcrypt/Initialization.h>
+#endif
 
 namespace WebKit {
+using namespace WebCore;
 
-class WebProcessMain final: public ChildProcessMainBase {
+class WebProcessMainGtk final: public AuxiliaryProcessMainBase<WebProcess> {
 public:
     bool platformInitialize() override
     {
-#ifndef NDEBUG
+#if USE(GCRYPT)
+        PAL::GCrypt::initialize();
+#endif
+
+#if ENABLE(DEVELOPER_MODE)
         if (g_getenv("WEBKIT2_PAUSE_WEB_PROCESS_ON_LAUNCH"))
             g_usleep(30 * G_USEC_PER_SEC);
 #endif
 
-#if (USE(COORDINATED_GRAPHICS_THREADED) || USE(GSTREAMER_GL)) && PLATFORM(X11)
+#if (USE(COORDINATED_GRAPHICS) || USE(GSTREAMER_GL)) && PLATFORM(X11)
         XInitThreads();
 #endif
+
         gtk_init(nullptr, nullptr);
 
         bindtextdomain(GETTEXT_PACKAGE, LOCALEDIR);
@@ -62,11 +71,31 @@ public:
 
         return true;
     }
+
+    void platformFinalize() override
+    {
+#if USE(GSTREAMER)
+        gst_deinit();
+#endif
+    }
 };
 
-int WebProcessMainUnix(int argc, char** argv)
+int WebProcessMain(int argc, char** argv)
 {
-    return ChildProcessMain<WebProcess, WebProcessMain>(argc, argv);
+#if USE(ATSPI)
+    // Disable ATK/GTK accessibility support in the WebProcess.
+#if USE(GTK4)
+    g_setenv("GTK_A11Y", "none", TRUE);
+#else
+    g_setenv("NO_AT_BRIDGE", "1", TRUE);
+#endif
+#endif
+
+    // Ignore the GTK_THEME environment variable, the theme is always set by the UI process now.
+    // This call needs to happen before any threads begin execution
+    unsetenv("GTK_THEME");
+
+    return AuxiliaryProcessMain<WebProcessMainGtk>(argc, argv);
 }
 
 } // namespace WebKit

@@ -23,34 +23,25 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebUIKitSupport.h"
 
 #import "WebDatabaseManagerInternal.h"
-#import "WebKitSystemInterface.h"
 #import "WebLocalizableStringsInternal.h"
 #import "WebPlatformStrategies.h"
-#import "WebSystemInterface.h"
+#import "WebPreferencesDefinitions.h"
 #import "WebViewPrivate.h"
+#import <JavaScriptCore/InitializeThreading.h>
 #import <WebCore/BreakLines.h>
 #import <WebCore/PathUtilities.h>
 #import <WebCore/ResourceRequest.h>
 #import <WebCore/Settings.h>
 #import <WebCore/WebBackgroundTaskController.h>
-#import <WebCore/WebCoreSystemInterface.h>
 #import <WebCore/WebCoreThreadSystemInterface.h>
 #import <wtf/spi/darwin/dyldSPI.h>
 
-#import <runtime/InitializeThreading.h>
-
 using namespace WebCore;
-
-static inline bool linkedOnOrAfterIOS5()
-{
-    static bool s_linkedOnOrAfterIOS5 = dyld_get_program_sdk_version() >= DYLD_IOS_VERSION_5_0;
-    return s_linkedOnOrAfterIOS5;
-}
 
 // See <rdar://problem/7902473> Optimize WebLocalizedString for why we do this on a background thread on a timer callback
 static void LoadWebLocalizedStringsTimerCallback(CFRunLoopTimerRef timer, void *info)
@@ -64,9 +55,8 @@ static void LoadWebLocalizedStringsTimerCallback(CFRunLoopTimerRef timer, void *
 
 static void LoadWebLocalizedStrings()
 {
-    CFRunLoopTimerRef timer = CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent(), 0, 0, 0, &LoadWebLocalizedStringsTimerCallback, NULL);
-    CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes);
-    CFRelease(timer);
+    auto timer = adoptCF(CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent(), 0, 0, 0, &LoadWebLocalizedStringsTimerCallback, NULL));
+    CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer.get(), kCFRunLoopCommonModes);
 }
 
 void WebKitInitialize(void)
@@ -79,7 +69,6 @@ void WebKitInitialize(void)
     webkitInitialized = true;
     InitWebCoreThreadSystemInterface();
     [WebView enableWebThread];
-    InitWebCoreSystemInterface();
 
     // Initialize our platform strategies.
     WebPlatformStrategies::initializeIfNecessary();
@@ -90,7 +79,6 @@ void WebKitInitialize(void)
     
     // This needs to be called before any requests are made in the process, <rdar://problem/9691871>
     WebCore::initializeHTTPConnectionSettingsOnStartup();
-    WebCore::enableURLSchemeCanonicalization(linkedOnOrAfterIOS5());
 }
 
 void WebKitSetIsClassic(BOOL flag)
@@ -100,7 +88,7 @@ void WebKitSetIsClassic(BOOL flag)
 
 float WebKitGetMinimumZoomFontSize(void)
 {
-    return WebCore::Settings::defaultMinimumZoomFontSize();
+    return DEFAULT_VALUE_FOR_MinimumZoomFontSize;
 }
 
 int WebKitGetLastLineBreakInBuffer(UChar *characters, int position, int length)
@@ -115,7 +103,7 @@ int WebKitGetLastLineBreakInBuffer(UChar *characters, int position, int length)
 
 const char *WebKitPlatformSystemRootDirectory(void)
 {
-#if PLATFORM(IOS_SIMULATOR)
+#if PLATFORM(IOS_FAMILY_SIMULATOR)
     static const char *platformSystemRootDirectory = nil;
     if (!platformSystemRootDirectory) {
         char *simulatorRoot = getenv("IPHONE_SIMULATOR_ROOT");
@@ -166,4 +154,4 @@ CGPathRef WebKitCreatePathWithShrinkWrappedRects(NSArray* cgRects, CGFloat radiu
     return CGPathRetain(PathUtilities::pathWithShrinkWrappedRects(rects, radius).platformPath());
 }
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

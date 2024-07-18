@@ -28,20 +28,20 @@
 #include "WebKitDLL.h"
 
 #include <WebCore/BString.h>
-#include <WebCore/URL.h>
+#include <wtf/URL.h>
 
 using namespace WebCore;
 
 inline WebUserContentURLPattern::WebUserContentURLPattern()
 {
     ++gClassCount;
-    gClassNameCount().add("WebUserContentURLPattern");
+    gClassNameCount().add("WebUserContentURLPattern"_s);
 }
 
 WebUserContentURLPattern::~WebUserContentURLPattern()
 {
     --gClassCount;
-    gClassNameCount().remove("WebUserContentURLPattern");
+    gClassNameCount().remove("WebUserContentURLPattern"_s);
 }
 
 COMPtr<WebUserContentURLPattern> WebUserContentURLPattern::createInstance()

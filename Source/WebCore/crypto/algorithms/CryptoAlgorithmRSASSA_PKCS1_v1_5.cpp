@@ -26,21 +26,23 @@
 #include "config.h"
 #include "CryptoAlgorithmRSASSA_PKCS1_v1_5.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 #include "CryptoAlgorithmRsaHashedImportParams.h"
 #include "CryptoAlgorithmRsaHashedKeyGenParams.h"
 #include "CryptoKeyPair.h"
 #include "CryptoKeyRSA.h"
-#include <wtf/Variant.h>
+#include <variant>
 
 namespace WebCore {
 
-static const char* const ALG1 = "RS1";
-static const char* const ALG224 = "RS224";
-static const char* const ALG256 = "RS256";
-static const char* const ALG384 = "RS384";
-static const char* const ALG512 = "RS512";
+namespace CryptoAlgorithmRSASSA_PKCS1_v1_5Internal {
+static constexpr auto ALG1 = "RS1"_s;
+static constexpr auto ALG224 = "RS224"_s;
+static constexpr auto ALG256 = "RS256"_s;
+static constexpr auto ALG384 = "RS384"_s;
+static constexpr auto ALG512 = "RS512"_s;
+}
 
 Ref<CryptoAlgorithm> CryptoAlgorithmRSASSA_PKCS1_v1_5::create()
 {
@@ -52,27 +54,27 @@ CryptoAlgorithmIdentifier CryptoAlgorithmRSASSA_PKCS1_v1_5::identifier() const
     return s_identifier;
 }
 
-void CryptoAlgorithmRSASSA_PKCS1_v1_5::sign(std::unique_ptr<CryptoAlgorithmParameters>&&, Ref<CryptoKey>&& key, Vector<uint8_t>&& data, VectorCallback&& callback, ExceptionCallback&& exceptionCallback, ScriptExecutionContext& context, WorkQueue& workQueue)
+void CryptoAlgorithmRSASSA_PKCS1_v1_5::sign(const CryptoAlgorithmParameters&, Ref<CryptoKey>&& key, Vector<uint8_t>&& data, VectorCallback&& callback, ExceptionCallback&& exceptionCallback, ScriptExecutionContext& context, WorkQueue& workQueue)
 {
     if (key->type() != CryptoKeyType::Private) {
         exceptionCallback(InvalidAccessError);
         return;
     }
 
-    dispatchOperation(workQueue, context, WTFMove(callback), WTFMove(exceptionCallback),
+    dispatchOperationInWorkQueue(workQueue, context, WTFMove(callback), WTFMove(exceptionCallback),
         [key = WTFMove(key), data = WTFMove(data)] {
             return platformSign(downcast<CryptoKeyRSA>(key.get()), data);
         });
 }
 
-void CryptoAlgorithmRSASSA_PKCS1_v1_5::verify(std::unique_ptr<CryptoAlgorithmParameters>&&, Ref<CryptoKey>&& key, Vector<uint8_t>&& signature, Vector<uint8_t>&& data, BoolCallback&& callback, ExceptionCallback&& exceptionCallback, ScriptExecutionContext& context, WorkQueue& workQueue)
+void CryptoAlgorithmRSASSA_PKCS1_v1_5::verify(const CryptoAlgorithmParameters&, Ref<CryptoKey>&& key, Vector<uint8_t>&& signature, Vector<uint8_t>&& data, BoolCallback&& callback, ExceptionCallback&& exceptionCallback, ScriptExecutionContext& context, WorkQueue& workQueue)
 {
     if (key->type() != CryptoKeyType::Public) {
         exceptionCallback(InvalidAccessError);
         return;
     }
 
-    dispatchOperation(workQueue, context, WTFMove(callback), WTFMove(exceptionCallback),
+    dispatchOperationInWorkQueue(workQueue, context, WTFMove(callback), WTFMove(exceptionCallback),
         [key = WTFMove(key), signature = WTFMove(signature), data = WTFMove(data)] {
             return platformVerify(downcast<CryptoKeyRSA>(key.get()), signature, data);
         });
@@ -98,21 +100,22 @@ void CryptoAlgorithmRSASSA_PKCS1_v1_5::generateKey(const CryptoAlgorithmParamete
     CryptoKeyRSA::generatePair(CryptoAlgorithmIdentifier::RSASSA_PKCS1_v1_5, rsaParameters.hashIdentifier, true, rsaParameters.modulusLength, rsaParameters.publicExponentVector(), extractable, usages, WTFMove(keyPairCallback), WTFMove(failureCallback), &context);
 }
 
-void CryptoAlgorithmRSASSA_PKCS1_v1_5::importKey(CryptoKeyFormat format, KeyData&& data, const std::unique_ptr<CryptoAlgorithmParameters>&& parameters, bool extractable, CryptoKeyUsageBitmap usages, KeyCallback&& callback, ExceptionCallback&& exceptionCallback)
+void CryptoAlgorithmRSASSA_PKCS1_v1_5::importKey(CryptoKeyFormat format, KeyData&& data, const CryptoAlgorithmParameters& parameters, bool extractable, CryptoKeyUsageBitmap usages, KeyCallback&& callback, ExceptionCallback&& exceptionCallback)
 {
-    ASSERT(parameters);
-    const auto& rsaParameters = downcast<CryptoAlgorithmRsaHashedImportParams>(*parameters);
+    using namespace CryptoAlgorithmRSASSA_PKCS1_v1_5Internal;
+
+    const auto& rsaParameters = downcast<CryptoAlgorithmRsaHashedImportParams>(parameters);
 
     RefPtr<CryptoKeyRSA> result;
     switch (format) {
     case CryptoKeyFormat::Jwk: {
-        JsonWebKey key = WTFMove(WTF::get<JsonWebKey>(data));
+        JsonWebKey key = WTFMove(std::get<JsonWebKey>(data));
 
         if (usages && ((!key.d.isNull() && (usages ^ CryptoKeyUsageSign)) || (key.d.isNull() && (usages ^ CryptoKeyUsageVerify)))) {
             exceptionCallback(SyntaxError);
             return;
         }
-        if (usages && !key.use.isNull() && key.use != "sig") {
+        if (usages && !key.use.isNull() && key.use != "sig"_s) {
             exceptionCallback(DataError);
             return;
         }
@@ -151,7 +154,7 @@ void CryptoAlgorithmRSASSA_PKCS1_v1_5::importKey(CryptoKeyFormat format, KeyData
             return;
         }
         // FIXME: <webkit.org/b/165436>
-        result = CryptoKeyRSA::importSpki(rsaParameters.identifier, rsaParameters.hashIdentifier, WTFMove(WTF::get<Vector<uint8_t>>(data)), extractable, usages);
+        result = CryptoKeyRSA::importSpki(rsaParameters.identifier, rsaParameters.hashIdentifier, WTFMove(std::get<Vector<uint8_t>>(data)), extractable, usages);
         break;
     }
     case CryptoKeyFormat::Pkcs8: {
@@ -160,7 +163,7 @@ void CryptoAlgorithmRSASSA_PKCS1_v1_5::importKey(CryptoKeyFormat format, KeyData
             return;
         }
         // FIXME: <webkit.org/b/165436>
-        result = CryptoKeyRSA::importPkcs8(parameters->identifier, rsaParameters.hashIdentifier, WTFMove(WTF::get<Vector<uint8_t>>(data)), extractable, usages);
+        result = CryptoKeyRSA::importPkcs8(parameters.identifier, rsaParameters.hashIdentifier, WTFMove(std::get<Vector<uint8_t>>(data)), extractable, usages);
         break;
     }
     default:
@@ -177,6 +180,7 @@ void CryptoAlgorithmRSASSA_PKCS1_v1_5::importKey(CryptoKeyFormat format, KeyData
 
 void CryptoAlgorithmRSASSA_PKCS1_v1_5::exportKey(CryptoKeyFormat format, Ref<CryptoKey>&& key, KeyDataCallback&& callback, ExceptionCallback&& exceptionCallback)
 {
+    using namespace CryptoAlgorithmRSASSA_PKCS1_v1_5Internal;
     const auto& rsaKey = downcast<CryptoKeyRSA>(key.get());
 
     if (!rsaKey.keySizeInBits()) {
@@ -238,4 +242,4 @@ void CryptoAlgorithmRSASSA_PKCS1_v1_5::exportKey(CryptoKeyFormat format, Ref<Cry
 
 }
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

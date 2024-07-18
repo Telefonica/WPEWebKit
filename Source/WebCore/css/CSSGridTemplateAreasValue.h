@@ -43,7 +43,7 @@ public:
         return adoptRef(*new CSSGridTemplateAreasValue(gridAreaMap, rowCount, columnCount));
     }
 
-    ~CSSGridTemplateAreasValue() { }
+    ~CSSGridTemplateAreasValue() = default;
 
     String customCSSText() const;
 
@@ -52,6 +52,8 @@ public:
     size_t columnCount() const { return m_columnCount; }
 
     bool equals(const CSSGridTemplateAreasValue&) const;
+
+    String stringForRow(size_t row);
 
 private:
     CSSGridTemplateAreasValue(const NamedGridAreaMap&, size_t rowCount, size_t columnCount);

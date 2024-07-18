@@ -29,15 +29,16 @@
  */
 
 [
-    Constructor(MutationCallback callback),
     CustomIsReachable,
-    ImplementationLacksVTable,
     LegacyWindowAlias=WebKitMutationObserver,
-    JSCustomMarkFunction
+    JSCustomMarkFunction,
+    Exposed=Window
 ] interface MutationObserver {
-    [MayThrowException] void observe(Node target, optional MutationObserverInit options);
-    void disconnect();
-    sequence<MutationRecord> takeRecords();
+    constructor(MutationCallback callback);
+
+    undefined observe(Node target, optional MutationObserverInit options);
+    undefined disconnect();
+    [ResultField=records] sequence<MutationRecord> takeRecords();
 };
 
 dictionary MutationObserverInit {
@@ -47,5 +48,5 @@ dictionary MutationObserverInit {
     boolean subtree = false;
     boolean attributeOldValue;
     boolean characterDataOldValue;
-    sequence<DOMString> attributeFilter;
+    sequence<[AtomString] DOMString> attributeFilter;
 };

@@ -30,6 +30,7 @@ namespace WebCore {
 struct FrameEdgeInfo;
 
 class RenderFrame final : public RenderFrameBase {
+    WTF_MAKE_ISO_ALLOCATED(RenderFrame);
 public:
     RenderFrame(HTMLFrameElement&, RenderStyle&&);
 
@@ -41,7 +42,7 @@ public:
 private:
     void frameOwnerElement() const = delete;
 
-    const char* renderName() const final { return "RenderFrame"; }
+    ASCIILiteral renderName() const final { return "RenderFrame"_s; }
     bool isFrame() const final { return true; }
 };
 

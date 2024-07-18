@@ -31,10 +31,12 @@
 
 #include "RegularExpression.h"
 #include "Yarr.h"
+#include "YarrFlags.h"
 #include "YarrInterpreter.h"
 #include <wtf/BumpPointerAllocator.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/StringBuilder.h>
+#include <wtf/text/TextPosition.h>
 
 using namespace JSC::Yarr;
 
@@ -43,7 +45,7 @@ namespace ContentSearchUtilities {
 
 static const char regexSpecialCharacters[] = "[](){}+-*.,?\\^$|";
 
-static String createSearchRegexSource(const String& text)
+static String escapeStringForRegularExpressionSource(const String& text)
 {
     StringBuilder result;
 
@@ -73,23 +75,23 @@ TextPosition textPositionFromOffset(size_t offset, const Vector<size_t>& lineEnd
     return TextPosition(OrdinalNumber::fromZeroBasedInt(lineIndex), OrdinalNumber::fromZeroBasedInt(column));
 }
 
-static Vector<std::pair<size_t, String>> getRegularExpressionMatchesByLines(const JSC::Yarr::RegularExpression& regex, const String& text)
+static Vector<std::pair<size_t, String>> getRegularExpressionMatchesByLines(const RegularExpression& regex, const String& text)
 {
     Vector<std::pair<size_t, String>> result;
     if (text.isEmpty())
         return result;
 
-    std::unique_ptr<Vector<size_t>> endings(lineEndings(text));
-    size_t size = endings->size();
+    auto endings = lineEndings(text);
+    size_t size = endings.size();
     size_t start = 0;
 
     for (size_t lineNumber = 0; lineNumber < size; ++lineNumber) {
-        size_t nextStart = endings->at(lineNumber);
-        String line = text.substring(start, nextStart - start);
+        size_t nextStart = endings[lineNumber];
+        auto line = StringView(text).substring(start, nextStart - start);
 
         int matchLength;
         if (regex.match(line, 0, &matchLength) != -1)
-            result.append(std::pair<size_t, String>(lineNumber, line));
+            result.append({ lineNumber, line.toString() });
 
         start = nextStart;
     }
@@ -97,43 +99,54 @@ static Vector<std::pair<size_t, String>> getRegularExpressionMatchesByLines(cons
     return result;
 }
 
-std::unique_ptr<Vector<size_t>> lineEndings(const String& text)
+Vector<size_t> lineEndings(const String& text)
 {
-    auto result = std::make_unique<Vector<size_t>>();
+    Vector<size_t> result;
 
     size_t start = 0;
     while (start < text.length()) {
         size_t nextStart = text.find('\n', start);
         if (nextStart == notFound || nextStart == (text.length() - 1)) {
-            result->append(text.length());
+            result.append(text.length());
             break;
         }
 
         nextStart += 1;
-        result->append(nextStart);
+        result.append(nextStart);
         start = nextStart;
     }
 
-    result->append(text.length());
+    result.append(text.length());
 
     return result;
 }
 
-static Ref<Inspector::Protocol::GenericTypes::SearchMatch> buildObjectForSearchMatch(size_t lineNumber, const String& lineContent)
+static Ref<Protocol::GenericTypes::SearchMatch> buildObjectForSearchMatch(size_t lineNumber, const String& lineContent)
 {
-    return Inspector::Protocol::GenericTypes::SearchMatch::create()
+    return Protocol::GenericTypes::SearchMatch::create()
         .setLineNumber(lineNumber)
         .setLineContent(lineContent)
         .release();
 }
 
-JSC::Yarr::RegularExpression createSearchRegex(const String& query, bool caseSensitive, bool isRegex)
+RegularExpression createRegularExpressionForSearchString(const String& searchString, bool caseSensitive, SearchStringType type)
 {
-    String regexSource = isRegex ? query : createSearchRegexSource(query);
-    return JSC::Yarr::RegularExpression(regexSource, caseSensitive ? TextCaseSensitive : TextCaseInsensitive);
+    String pattern;
+    switch (type) {
+    case SearchStringType::Regex:
+        pattern = searchString;
+        break;
+    case SearchStringType::ExactString:
+        pattern = makeString('^', escapeStringForRegularExpressionSource(searchString), '$');
+        break;
+    case SearchStringType::ContainsString:
+        pattern = escapeStringForRegularExpressionSource(searchString);
+        break;
+    }
+    return RegularExpression(pattern, caseSensitive ? TextCaseSensitive : TextCaseInsensitive);
 }
 
-int countRegularExpressionMatches(const JSC::Yarr::RegularExpression& regex, const String& content)
+int countRegularExpressionMatches(const RegularExpression& regex, const String& content)
 {
     if (content.isEmpty())
         return 0;
@@ -152,42 +165,33 @@ int countRegularExpressionMatches(const JSC::Yarr::RegularExpression& regex, con
     return result;
 }
 
-Ref<JSON::ArrayOf<Inspector::Protocol::GenericTypes::SearchMatch>> searchInTextByLines(const String& text, const String& query, const bool caseSensitive, const bool isRegex)
+Ref<JSON::ArrayOf<Protocol::GenericTypes::SearchMatch>> searchInTextByLines(const String& text, const String& query, const bool caseSensitive, const bool isRegex)
 {
-    auto result = JSON::ArrayOf<Inspector::Protocol::GenericTypes::SearchMatch>::create();
-
-    JSC::Yarr::RegularExpression regex = ContentSearchUtilities::createSearchRegex(query, caseSensitive, isRegex);
-    Vector<std::pair<size_t, String>> matches = getRegularExpressionMatchesByLines(regex, text);
-
-    for (const auto& match : matches) {
-        Ref<Inspector::Protocol::GenericTypes::SearchMatch> matchObject = buildObjectForSearchMatch(match.first, match.second);
-        result->addItem(WTFMove(matchObject));
-    }
-
+    auto result = JSON::ArrayOf<Protocol::GenericTypes::SearchMatch>::create();
+    auto searchStringType = isRegex ? ContentSearchUtilities::SearchStringType::Regex : ContentSearchUtilities::SearchStringType::ContainsString;
+    auto regex = ContentSearchUtilities::createRegularExpressionForSearchString(query, caseSensitive, searchStringType);
+    for (const auto& match : getRegularExpressionMatchesByLines(regex, text))
+        result->addItem(buildObjectForSearchMatch(match.first, match.second));
     return result;
 }
 
-static String stylesheetCommentPattern(const String& name)
+static String findMagicComment(const String& content, ASCIILiteral patternString)
 {
-    // "/*# <name>=<value> */" and deprecated "/*@"
-    return "/\\*[#@][\040\t]" + name + "=[\040\t]*([^\\s\'\"]*)[\040\t]*\\*/";
-}
+    if (content.isEmpty())
+        return String();
 
-static String findMagicComment(const String& content, const String& patternString)
-{
-    ASSERT(!content.isNull());
-    const char* error = nullptr;
-    JSC::Yarr::YarrPattern pattern(patternString, JSC::RegExpFlags::FlagMultiline, &error);
-    ASSERT(!error);
+    JSC::Yarr::ErrorCode error { JSC::Yarr::ErrorCode::NoError };
+    YarrPattern pattern(patternString, JSC::Yarr::Flags::Multiline, error);
+    ASSERT(!hasError(error));
     BumpPointerAllocator regexAllocator;
-    auto bytecodePattern = JSC::Yarr::byteCompile(pattern, &regexAllocator);
-    ASSERT(bytecodePattern);
+    JSC::Yarr::ErrorCode ignoredErrorCode = JSC::Yarr::ErrorCode::NoError;
+    auto bytecodePattern = byteCompile(pattern, &regexAllocator, ignoredErrorCode);
+    RELEASE_ASSERT(bytecodePattern);
 
     ASSERT(pattern.m_numSubpatterns == 1);
-    Vector<int, 4> matches;
-    matches.grow(4);
-    unsigned result = JSC::Yarr::interpret(bytecodePattern.get(), content, 0, reinterpret_cast<unsigned*>(matches.data()));
-    if (result == JSC::Yarr::offsetNoMatch)
+    std::array<unsigned, 4> matches;
+    unsigned result = interpret(bytecodePattern.get(), content, 0, matches.data());
+    if (result == offsetNoMatch)
         return String();
 
     ASSERT(matches[2] > 0 && matches[3] > 0);
@@ -196,7 +200,8 @@ static String findMagicComment(const String& content, const String& patternStrin
 
 String findStylesheetSourceMapURL(const String& content)
 {
-    return findMagicComment(content, stylesheetCommentPattern(ASCIILiteral("sourceMappingURL")));
+    // "/*# <name>=<value> */" and deprecated "/*@"
+    return findMagicComment(content, "/\\*[#@][\040\t]sourceMappingURL=[\040\t]*([^\\s\'\"]*)[\040\t]*\\*/"_s);
 }
 
 } // namespace ContentSearchUtilities

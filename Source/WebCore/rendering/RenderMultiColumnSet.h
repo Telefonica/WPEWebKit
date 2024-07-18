@@ -26,8 +26,8 @@
 #pragma once
 
 #include "LayerFragment.h"
-#include "RenderMultiColumnFlowThread.h"
-#include "RenderRegionSet.h"
+#include "RenderFragmentContainerSet.h"
+#include "RenderMultiColumnFlow.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
@@ -40,31 +40,32 @@ namespace WebCore {
 // for the 2nd to n-1 pages, and then one last column set that will hold the shorter columns on the final page (that may have to be balanced
 // as well).
 //
-// Column spans result in the creation of new column sets as well, since a spanning region has to be placed in between the column sets that
+// Column spans result in the creation of new column sets as well, since a spanning fragment has to be placed in between the column sets that
 // come before and after the span.
-class RenderMultiColumnSet final : public RenderRegionSet {
+class RenderMultiColumnSet final : public RenderFragmentContainerSet {
+    WTF_MAKE_ISO_ALLOCATED(RenderMultiColumnSet);
 public:
-    RenderMultiColumnSet(RenderFlowThread&, RenderStyle&&);
+    RenderMultiColumnSet(RenderFragmentedFlow&, RenderStyle&&);
 
     RenderBlockFlow* multiColumnBlockFlow() const { return downcast<RenderBlockFlow>(parent()); }
-    RenderMultiColumnFlowThread* multiColumnFlowThread() const { return static_cast<RenderMultiColumnFlowThread*>(flowThread()); }
+    RenderMultiColumnFlow* multiColumnFlow() const { return static_cast<RenderMultiColumnFlow*>(fragmentedFlow()); }
 
     RenderMultiColumnSet* nextSiblingMultiColumnSet() const;
     RenderMultiColumnSet* previousSiblingMultiColumnSet() const;
 
     // Return the first object in the flow thread that's rendered inside this set.
-    RenderObject* firstRendererInFlowThread() const;
+    RenderObject* firstRendererInFragmentedFlow() const;
     // Return the last object in the flow thread that's rendered inside this set.
-    RenderObject* lastRendererInFlowThread() const;
+    RenderObject* lastRendererInFragmentedFlow() const;
 
     // Return true if the specified renderer (descendant of the flow thread) is inside this column set.
-    bool containsRendererInFlowThread(const RenderObject&) const;
+    bool containsRendererInFragmentedFlow(const RenderObject&) const;
 
-    void setLogicalTopInFlowThread(LayoutUnit);
-    LayoutUnit logicalTopInFlowThread() const { return isHorizontalWritingMode() ? flowThreadPortionRect().y() : flowThreadPortionRect().x(); }
-    void setLogicalBottomInFlowThread(LayoutUnit);
-    LayoutUnit logicalBottomInFlowThread() const { return isHorizontalWritingMode() ? flowThreadPortionRect().maxY() : flowThreadPortionRect().maxX(); }
-    LayoutUnit logicalHeightInFlowThread() const { return isHorizontalWritingMode() ? flowThreadPortionRect().height() : flowThreadPortionRect().width(); }
+    void setLogicalTopInFragmentedFlow(LayoutUnit);
+    LayoutUnit logicalTopInFragmentedFlow() const { return isHorizontalWritingMode() ? fragmentedFlowPortionRect().y() : fragmentedFlowPortionRect().x(); }
+    void setLogicalBottomInFragmentedFlow(LayoutUnit);
+    LayoutUnit logicalBottomInFragmentedFlow() const { return isHorizontalWritingMode() ? fragmentedFlowPortionRect().maxY() : fragmentedFlowPortionRect().maxX(); }
+    LayoutUnit logicalHeightInFragmentedFlow() const { return isHorizontalWritingMode() ? fragmentedFlowPortionRect().height() : fragmentedFlowPortionRect().width(); }
 
     unsigned computedColumnCount() const { return m_computedColumnCount; }
     LayoutUnit computedColumnWidth() const { return m_computedColumnWidth; }
@@ -81,6 +82,15 @@ public:
 
     void updateMinimumColumnHeight(LayoutUnit height) { m_minimumColumnHeight = std::max(height, m_minimumColumnHeight); }
     LayoutUnit minimumColumnHeight() const { return m_minimumColumnHeight; }
+
+    void updateSpaceShortageForSizeContainment(LayoutUnit shortage)
+    {
+        if (m_spaceShortageForSizeContainment <= 0) {
+            m_spaceShortageForSizeContainment = shortage;
+            return;
+        }
+        m_spaceShortageForSizeContainment = std::min(shortage, m_spaceShortageForSizeContainment);
+    }
 
     unsigned forcedBreaksCount() const { return m_contentRuns.size(); }
     void clearForcedBreaks();
@@ -109,7 +119,7 @@ public:
     // when advancing to the next column set or spanner.
     void endFlow(RenderBlock* container, LayoutUnit bottomInContainer);
     // Has this set been flowed in this layout pass?
-    bool hasBeenFlowed() const { return logicalBottomInFlowThread() != RenderFlowThread::maxLogicalHeight(); }
+    bool hasBeenFlowed() const { return logicalBottomInFragmentedFlow() != RenderFragmentedFlow::maxLogicalHeight(); }
 
     bool requiresBalancing() const;
 
@@ -121,19 +131,22 @@ public:
         ClampHitTestTranslationToColumns,
         DoNotClampHitTestTranslationToColumns
     };
-    LayoutPoint translateRegionPointToFlowThread(const LayoutPoint & logicalPoint, ColumnHitTestTranslationMode = DoNotClampHitTestTranslationToColumns) const;
+    LayoutPoint translateFragmentPointToFragmentedFlow(const LayoutPoint & logicalPoint, ColumnHitTestTranslationMode = DoNotClampHitTestTranslationToColumns) const;
 
     void updateHitTestResult(HitTestResult&, const LayoutPoint&) override;
     
     LayoutRect columnRectAt(unsigned index) const;
     unsigned columnCount() const;
 
-protected:
+    LayoutUnit columnGap() const;
+
+private:
     void addOverflowFromChildren() override;
     
-private:
     bool isRenderMultiColumnSet() const override { return true; }
     void layout() override;
+
+    Node* nodeForHitTest() const override;
 
     LogicalExtentComputedValues computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop) const override;
 
@@ -144,26 +157,27 @@ private:
 
     LayoutUnit pageLogicalTopForOffset(LayoutUnit offset) const override;
 
-    LayoutUnit logicalHeightOfAllFlowThreadContent() const override { return logicalHeightInFlowThread(); }
+    LayoutUnit logicalHeightOfAllFragmentedFlowContent() const override { return logicalHeightInFragmentedFlow(); }
 
-    void repaintFlowThreadContent(const LayoutRect& repaintRect) override;
+    void repaintFragmentedFlowContent(const LayoutRect& repaintRect) override;
 
     void collectLayerFragments(LayerFragments&, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRect) override;
 
-    void adjustRegionBoundsFromFlowThreadPortionRect(LayoutRect& regionBounds) const override;
+    void adjustFragmentBoundsFromFragmentedFlowPortionRect(LayoutRect& fragmentBounds) const override;
 
-    VisiblePosition positionForPoint(const LayoutPoint&, const RenderRegion*) override;
+    Vector<LayoutRect> fragmentRectsForFlowContentRect(const LayoutRect&) final;
 
-    const char* renderName() const override;
+    VisiblePosition positionForPoint(const LayoutPoint&, const RenderFragmentContainer*) override;
+
+    ASCIILiteral renderName() const override;
 
     LayoutUnit calculateMaxColumnHeight() const;
-    LayoutUnit columnGap() const;
 
     LayoutUnit columnLogicalLeft(unsigned) const;
     LayoutUnit columnLogicalTop(unsigned) const;
 
-    LayoutRect flowThreadPortionRectAt(unsigned index) const;
-    LayoutRect flowThreadPortionOverflowRect(const LayoutRect& flowThreadPortion, unsigned index, unsigned colCount, LayoutUnit colGap);
+    LayoutRect fragmentedFlowPortionRectAt(unsigned index) const;
+    LayoutRect fragmentedFlowPortionOverflowRect(const LayoutRect& fragmentedFlowPortion, unsigned index, unsigned colCount, LayoutUnit colGap);
 
     LayoutUnit initialBlockOffsetForPainting() const;
 
@@ -172,6 +186,8 @@ private:
         AssumeNewColumns // Allow column indices outside the range of already existing columns.
     };
     unsigned columnIndexAtOffset(LayoutUnit, ColumnIndexCalculationMode = ClampToExistingColumns) const;
+
+    std::pair<unsigned, unsigned> firstAndLastColumnsFromOffsets(LayoutUnit topOffset, LayoutUnit bottomOffset) const;
 
     void setAndConstrainColumnHeight(LayoutUnit);
 
@@ -186,16 +202,17 @@ private:
 
     LayoutUnit calculateBalancedHeight(bool initial) const;
 
-    unsigned m_computedColumnCount; // Used column count (the resulting 'N' from the pseudo-algorithm in the multicol spec)
+    unsigned m_computedColumnCount { 1 }; // Used column count (the resulting 'N' from the pseudo-algorithm in the multicol spec)
     LayoutUnit m_computedColumnWidth; // Used column width (the resulting 'W' from the pseudo-algorithm in the multicol spec)
     LayoutUnit m_computedColumnHeight;
     LayoutUnit m_availableColumnHeight;
-    bool m_columnHeightComputed;
+    bool m_columnHeightComputed { false };
 
     // The following variables are used when balancing the column set.
     LayoutUnit m_maxColumnHeight; // Maximum column height allowed.
     LayoutUnit m_minSpaceShortage; // The smallest amout of space shortage that caused a column break.
     LayoutUnit m_minimumColumnHeight;
+    LayoutUnit m_spaceShortageForSizeContainment; // The shortage space that keeps size containment monolithic.
 
     // A run of content without explicit (forced) breaks; i.e. a flow thread portion between two
     // explicit breaks, between flow thread start and an explicit break, between an explicit break
@@ -208,7 +225,7 @@ private:
     public:
         ContentRun(LayoutUnit breakOffset)
             : m_breakOffset(breakOffset)
-            , m_assumedImplicitBreaks(0) { }
+        { }
 
         unsigned assumedImplicitBreaks() const { return m_assumedImplicitBreaks; }
         void assumeAnotherImplicitBreak() { m_assumedImplicitBreaks++; }
@@ -216,11 +233,11 @@ private:
 
         // Return the column height that this content run would require, considering the implicit
         // breaks assumed so far.
-        LayoutUnit columnLogicalHeight(LayoutUnit startOffset) const { return ceilf(float(m_breakOffset - startOffset) / float(m_assumedImplicitBreaks + 1)); }
+        LayoutUnit columnLogicalHeight(LayoutUnit startOffset) const { return LayoutUnit(ceilf(float(m_breakOffset - startOffset) / float(m_assumedImplicitBreaks + 1))); }
 
     private:
         LayoutUnit m_breakOffset; // Flow thread offset where this run ends.
-        unsigned m_assumedImplicitBreaks; // Number of implicit breaks in this run assumed so far.
+        unsigned m_assumedImplicitBreaks { 0 }; // Number of implicit breaks in this run assumed so far.
     };
     Vector<ContentRun, 1> m_contentRuns;
 };

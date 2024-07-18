@@ -25,22 +25,20 @@
 
 #include "config.h"
 
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
 
 #include "VideoTrackList.h"
 
 #include "VideoTrack.h"
 
-using namespace WebCore;
+namespace WebCore {
 
-VideoTrackList::VideoTrackList(HTMLMediaElement* element, ScriptExecutionContext* context)
-    : TrackListBase(element, context)
+VideoTrackList::VideoTrackList(ScriptExecutionContext* context)
+    : TrackListBase(context, TrackListBase::VideoTrackList)
 {
 }
 
-VideoTrackList::~VideoTrackList()
-{
-}
+VideoTrackList::~VideoTrackList() = default;
 
 void VideoTrackList::append(Ref<VideoTrack>&& track)
 {
@@ -54,8 +52,8 @@ void VideoTrackList::append(Ref<VideoTrack>&& track)
     }
     m_inbandTracks.insert(insertionIndex, track.ptr());
 
-    ASSERT(!track->mediaElement() || track->mediaElement() == mediaElement());
-    track->setMediaElement(mediaElement());
+    if (!track->trackList())
+        track->setTrackList(*this);
 
     scheduleAddTrackEvent(WTFMove(track));
 }
@@ -67,7 +65,7 @@ VideoTrack* VideoTrackList::item(unsigned index) const
     return nullptr;
 }
 
-VideoTrack* VideoTrackList::getTrackById(const AtomicString& id) const
+VideoTrack* VideoTrackList::getTrackById(const AtomString& id) const
 {
     for (auto& inbandTracks : m_inbandTracks) {
         auto& track = downcast<VideoTrack>(*inbandTracks);
@@ -96,4 +94,10 @@ EventTargetInterface VideoTrackList::eventTargetInterface() const
     return VideoTrackListEventTargetInterfaceType;
 }
 
+const char* VideoTrackList::activeDOMObjectName() const
+{
+    return "VideoTrackList";
+}
+
+} // namespace WebCore
 #endif

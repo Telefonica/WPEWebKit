@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS) && ENABLE(DATA_DETECTION)
+#if PLATFORM(IOS_FAMILY) && ENABLE(DATA_DETECTION)
 
 #import <UIKit/UIKit.h>
 #import <wtf/SoftLinking.h>
@@ -31,6 +31,9 @@
 #if USE(APPLE_INTERNAL_SDK)
 
 #import <DataDetectorsUI/DDAction.h>
+#if HAVE(LINK_PREVIEW) && USE(UICONTEXTMENU)
+#import <DataDetectorsUI/DDContextMenuAction.h>
+#endif
 #import <DataDetectorsUI/DDDetectionController.h>
 
 #else
@@ -45,6 +48,16 @@
 - (NSString *)localizedName;
 @property (readonly) NSString *actionUTI;
 @end
+
+#if HAVE(LINK_PREVIEW) && USE(UICONTEXTMENU)
+@class UIContextMenuConfiguration;
+@interface DDContextMenuAction
++ (NSDictionary *)updateContext:(NSDictionary *)context withSourceRect:(CGRect)sourceRect;
++ (UIContextMenuConfiguration *)contextMenuConfigurationForURL:(NSURL *)URL identifier:(NSString *)identifier selectedText:(NSString *)selectedText results:(NSArray *) results inView: (UIView *) view context:(NSDictionary *)context menuIdentifier:(NSString *)menuIdentifier;
++ (UIContextMenuConfiguration *)contextMenuConfigurationWithResult:(DDResultRef)result inView:(UIView *)view context:(NSDictionary *)context menuIdentifier:(NSString *)menuIdentifier;
++ (UIContextMenuConfiguration *)contextMenuConfigurationWithURL:(NSURL *)URL inView:(UIView *)view context:(NSDictionary *)context menuIdentifier:(NSString *)menuIdentifier;
+@end
+#endif
 
 @protocol DDDetectionControllerInteractionDelegate <NSObject>
 @end
@@ -62,10 +75,22 @@
 
 #endif
 
+@interface DDDetectionController (Staging_48014858)
+- (NSString *)titleForURL:(NSURL *)url results:(NSArray *)results context:(NSDictionary *)context;
+- (DDAction *)defaultActionForURL:(NSURL *)url results:(NSArray *)results context:(NSDictionary *)context;
+- (void)interactionDidStartForURL:(NSURL *)url;
+- (BOOL)shouldImmediatelyLaunchDefaultActionForURL:(NSURL *)url;
+@end
+
 SOFT_LINK_PRIVATE_FRAMEWORK(DataDetectorsUI)
+#if HAVE(LINK_PREVIEW) && USE(UICONTEXTMENU)
+SOFT_LINK_CLASS(DataDetectorsUI, DDContextMenuAction);
+SOFT_LINK_CLASS(DataDetectorsUI, DDContextMenuConfiguration);
+#endif
 SOFT_LINK_CLASS(DataDetectorsUI, DDDetectionController)
 SOFT_LINK_CONSTANT(DataDetectorsUI, kDataDetectorsLeadingText, const NSString *)
-SOFT_LINK_CONSTANT(DataDetectorsUI, kDataDetectorsTrailingText, const NSString *)
 SOFT_LINK_CONSTANT(DataDetectorsUI, kDataDetectorsReferenceDateKey, const NSString *)
+SOFT_LINK_CONSTANT(DataDetectorsUI, kDataDetectorsSourceRectKey, const NSString *)
+SOFT_LINK_CONSTANT(DataDetectorsUI, kDataDetectorsTrailingText, const NSString *)
 
 #endif

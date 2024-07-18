@@ -23,14 +23,15 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef APIContextMenuClient_h
-#define APIContextMenuClient_h
+#pragma once
 
 #if ENABLE(CONTEXT_MENUS)
 
+#include "WKBase.h"
+#include "WebContextMenuItem.h"
 #include "WebContextMenuListenerProxy.h"
 #include "WebHitTestResultData.h"
-#include <WebKit/WKBase.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
 #include <wtf/RefPtr.h>
 
@@ -41,7 +42,6 @@ class IntPoint;
 }
 
 namespace WebKit {
-class WebContextMenuItem;
 class WebContextMenuItemData;
 class WebPageProxy;
 }
@@ -49,21 +49,21 @@ class WebPageProxy;
 namespace API {
 
 class ContextMenuClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~ContextMenuClient() { }
 
-    virtual bool getContextMenuFromProposedMenu(WebKit::WebPageProxy&, const Vector<RefPtr<WebKit::WebContextMenuItem>>& /* proposedMenu */, Vector<RefPtr<WebKit::WebContextMenuItem>>& /* customMenu */, const WebKit::WebHitTestResultData&, API::Object* /* userData */) { return false; }
-    virtual bool getContextMenuFromProposedMenuAsync(WebKit::WebPageProxy&, const Vector<RefPtr<WebKit::WebContextMenuItem>>& /* proposedMenu */, WebKit::WebContextMenuListenerProxy*, const WebKit::WebHitTestResultData&, API::Object* /* userData */) { return false; }
+    virtual void getContextMenuFromProposedMenu(WebKit::WebPageProxy&, Vector<Ref<WebKit::WebContextMenuItem>>&& proposedMenu, WebKit::WebContextMenuListenerProxy& listener, const WebKit::WebHitTestResultData&, API::Object* /* userData */) { listener.useContextMenuItems(WTFMove(proposedMenu)); }
     virtual void customContextMenuItemSelected(WebKit::WebPageProxy&, const WebKit::WebContextMenuItemData&) { }
-    virtual bool showContextMenu(WebKit::WebPageProxy&, const WebCore::IntPoint&, const Vector<RefPtr<WebKit::WebContextMenuItem>>&) { return false; }
+    virtual void showContextMenu(WebKit::WebPageProxy&, const WebCore::IntPoint&, const Vector<Ref<WebKit::WebContextMenuItem>>&) { }
+    virtual bool canShowContextMenu() const { return false; }
     virtual bool hideContextMenu(WebKit::WebPageProxy&) { return false; }
 
 #if PLATFORM(MAC)
-    virtual RetainPtr<NSMenu> menuFromProposedMenu(WebKit::WebPageProxy&, NSMenu *menu, const WebKit::WebHitTestResultData&, API::Object*) { return menu; }
+    virtual void menuFromProposedMenu(WebKit::WebPageProxy&, NSMenu *menu, const WebKit::WebHitTestResultData&, API::Object*, CompletionHandler<void(RetainPtr<NSMenu>&&)>&& completionHandler) { completionHandler(menu); }
 #endif
 };
 
 } // namespace API
 
 #endif // ENABLE(CONTEXT_MENUS)
-#endif // APIContextMenuClient_h

@@ -27,35 +27,72 @@
 #include "config.h"
 #include "Font.h"
 
-#if !PLATFORM(IOS)
-#include <ApplicationServices/ApplicationServices.h>
-#else
 #include <CoreText/CoreText.h>
-#endif
+#include <pal/spi/cf/CoreTextSPI.h>
 
 namespace WebCore {
 
-CFDictionaryRef Font::getCFStringAttributes(bool enableKerning, FontOrientation orientation) const
+static CTParagraphStyleRef paragraphStyleWithCompositionLanguageNone()
 {
-    auto& attributesDictionary = enableKerning ? m_kernedCFStringAttributes : m_nonKernedCFStringAttributes;
-    if (attributesDictionary)
-        return attributesDictionary.get();
+    static LazyNeverDestroyed<RetainPtr<CTParagraphStyleRef>> paragraphStyle;
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [&] {
+        paragraphStyle.construct(CTParagraphStyleCreate(nullptr, 0));
+        CTParagraphStyleSetCompositionLanguage(paragraphStyle.get().get(), kCTCompositionLanguageNone);
+    });
+    return paragraphStyle.get().get();
+}
 
-    attributesDictionary = adoptCF(CFDictionaryCreateMutable(kCFAllocatorDefault, 4, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
-    CFMutableDictionaryRef mutableAttributes = (CFMutableDictionaryRef)attributesDictionary.get();
+static CFNumberRef zeroValue()
+{
+    static LazyNeverDestroyed<RetainPtr<CFNumberRef>> zeroValue;
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [&] {
+        const float zero = 0;
+        zeroValue.construct(adoptCF(CFNumberCreate(kCFAllocatorDefault, kCFNumberFloatType, &zero)));
+    });
+    return zeroValue.get().get();
+}
 
-    CFDictionarySetValue(mutableAttributes, kCTFontAttributeName, platformData().ctFont());
+RetainPtr<CFDictionaryRef> Font::getCFStringAttributes(bool enableKerning, FontOrientation orientation, const AtomString& locale) const
+{
+    CFTypeRef keys[5];
+    CFTypeRef values[5];
+
+    keys[0] = kCTFontAttributeName;
+    values[0] = platformData().ctFont();
+    size_t count = 1;
+
+#if USE(CTFONTSHAPEGLYPHS)
+    RetainPtr<CFStringRef> localeString;
+    if (!locale.isEmpty()) {
+        localeString = locale.string().createCFString();
+        keys[count] = kCTLanguageAttributeName;
+        values[count] = localeString.get();
+        ++count;
+    }
+#else
+    UNUSED_PARAM(locale);
+#endif
+    keys[count] = kCTParagraphStyleAttributeName;
+    values[count] = paragraphStyleWithCompositionLanguageNone();
+    ++count;
 
     if (!enableKerning) {
-        const float zero = 0;
-        static CFNumberRef zeroKerningValue = CFNumberCreate(kCFAllocatorDefault, kCFNumberFloatType, &zero);
-        CFDictionarySetValue(mutableAttributes, kCTKernAttributeName, zeroKerningValue);
+        keys[count] = kCTKernAttributeName;
+        values[count] = zeroValue();
+        ++count;
     }
 
-    if (orientation == Vertical)
-        CFDictionarySetValue(mutableAttributes, kCTVerticalFormsAttributeName, kCFBooleanTrue);
+    if (orientation == FontOrientation::Vertical) {
+        keys[count] = kCTVerticalFormsAttributeName;
+        values[count] = kCFBooleanTrue;
+        ++count;
+    }
 
-    return attributesDictionary.get();
+    ASSERT(count <= WTF_ARRAY_LENGTH(keys));
+
+    return adoptCF(CFDictionaryCreate(kCFAllocatorDefault, keys, values, count, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
 }
 
 } // namespace WebCore

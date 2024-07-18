@@ -30,31 +30,21 @@
 
 #include "ContentData.h"
 #include "InspectorInstrumentation.h"
+#include "KeyframeEffectStack.h"
 #include "RenderElement.h"
 #include "RenderImage.h"
 #include "RenderQuote.h"
 #include "StyleResolver.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(PseudoElement);
+
 const QualifiedName& pseudoElementTagName()
 {
-    static NeverDestroyed<QualifiedName> name(nullAtom(), "<pseudo>", nullAtom());
+    static NeverDestroyed<QualifiedName> name(nullAtom(), "<pseudo>"_s, nullAtom());
     return name;
-}
-
-String PseudoElement::pseudoElementNameForEvents(PseudoId pseudoId)
-{
-    static NeverDestroyed<const String> after(MAKE_STATIC_STRING_IMPL("::after"));
-    static NeverDestroyed<const String> before(MAKE_STATIC_STRING_IMPL("::before"));
-    switch (pseudoId) {
-    case AFTER:
-        return after;
-    case BEFORE:
-        return before;
-    default:
-        return emptyString();
-    }
 }
 
 PseudoElement::PseudoElement(Element& host, PseudoId pseudoId)
@@ -62,7 +52,7 @@ PseudoElement::PseudoElement(Element& host, PseudoId pseudoId)
     , m_hostElement(&host)
     , m_pseudoId(pseudoId)
 {
-    ASSERT(pseudoId == BEFORE || pseudoId == AFTER);
+    ASSERT(pseudoId == PseudoId::Before || pseudoId == PseudoId::After);
     setHasCustomStyleResolveCallbacks();
 }
 
@@ -71,16 +61,34 @@ PseudoElement::~PseudoElement()
     ASSERT(!m_hostElement);
 }
 
+Ref<PseudoElement> PseudoElement::create(Element& host, PseudoId pseudoId)
+{
+    auto pseudoElement = adoptRef(*new PseudoElement(host, pseudoId));
+
+    InspectorInstrumentation::pseudoElementCreated(host.document().page(), pseudoElement.get());
+
+    return pseudoElement;
+}
+
 void PseudoElement::clearHostElement()
 {
     InspectorInstrumentation::pseudoElementDestroyed(document().page(), *this);
 
+    Styleable::fromElement(*this).elementWasRemoved();
+    
     m_hostElement = nullptr;
 }
 
 bool PseudoElement::rendererIsNeeded(const RenderStyle& style)
 {
-    return pseudoElementRendererIsNeeded(&style);
+    if (pseudoElementRendererIsNeeded(&style))
+        return true;
+
+    if (m_hostElement) {
+        if (auto* stack = m_hostElement->keyframeEffectStack(pseudoId()))
+            return stack->requiresPseudoElement();
+    }
+    return false;
 }
 
 } // namespace

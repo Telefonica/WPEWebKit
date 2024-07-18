@@ -33,7 +33,7 @@ class Text;
 
 class InsertIntoTextNodeCommand : public SimpleEditCommand {
 public:
-    static Ref<InsertIntoTextNodeCommand> create(Ref<Text>&& node, unsigned offset, const String& text, EditAction editingAction = EditActionInsert)
+    static Ref<InsertIntoTextNodeCommand> create(Ref<Text>&& node, unsigned offset, const String& text, EditAction editingAction = EditAction::Insert)
     {
         return adoptRef(*new InsertIntoTextNodeCommand(WTFMove(node), offset, text, editingAction));
     }
@@ -46,12 +46,10 @@ protected:
 private:
     void doApply() override;
     void doUnapply() override;
-#if PLATFORM(IOS)
     void doReapply() override;
-#endif
     
 #ifndef NDEBUG
-    void getNodesInCommand(HashSet<Node*>&) override;
+    void getNodesInCommand(HashSet<Ref<Node>>&) override;
 #endif
     
     Ref<Text> m_node;

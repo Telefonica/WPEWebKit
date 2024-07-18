@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,14 +26,14 @@
 #import "config.h"
 #import "WindowServerConnection.h"
 
-#import "WebKitSystemInterface.h"
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
+
 #import "WebProcessPool.h"
 #import <pal/spi/cg/CoreGraphicsSPI.h>
 
 namespace WebKit {
 
-#if HAVE(WINDOW_SERVER_OCCLUSION_NOTIFICATIONS)
-
+#if PLATFORM(MAC)
 void WindowServerConnection::applicationWindowModificationsStopped(bool stopped)
 {
     if (m_applicationWindowModificationsHaveStopped == stopped)
@@ -44,11 +44,20 @@ void WindowServerConnection::applicationWindowModificationsStopped(bool stopped)
 
 void WindowServerConnection::windowServerConnectionStateChanged()
 {
-    for (auto* processPool : WebProcessPool::allProcessPools())
+    for (auto& processPool : WebProcessPool::allProcessPools())
         processPool->windowServerConnectionStateChanged();
 }
-
 #endif
+
+void WindowServerConnection::hardwareConsoleStateChanged(HardwareConsoleState state)
+{
+    if (state == m_connectionState)
+        return;
+
+    m_connectionState = state;
+    for (auto& processPool : WebProcessPool::allProcessPools())
+        processPool->hardwareConsoleStateChanged();
+}
 
 WindowServerConnection& WindowServerConnection::singleton()
 {
@@ -56,7 +65,7 @@ WindowServerConnection& WindowServerConnection::singleton()
     return windowServerConnection;
 }
 
-#if HAVE(WINDOW_SERVER_OCCLUSION_NOTIFICATIONS)
+#if PLATFORM(MAC)
 static bool registerOcclusionNotificationHandler(CGSNotificationType type, CGSNotifyConnectionProcPtr handler)
 {
     CGSConnectionID mainConnection = CGSMainConnectionID();
@@ -76,7 +85,7 @@ static bool registerOcclusionNotificationHandler(CGSNotificationType type, CGSNo
 WindowServerConnection::WindowServerConnection()
     : m_applicationWindowModificationsHaveStopped(false)
 {
-#if HAVE(WINDOW_SERVER_OCCLUSION_NOTIFICATIONS)
+#if PLATFORM(MAC)
     struct OcclusionNotificationHandler {
         CGSNotificationType notificationType;
         CGSNotifyConnectionProcPtr handler;
@@ -102,7 +111,32 @@ WindowServerConnection::WindowServerConnection()
         ASSERT_WITH_MESSAGE(result, "Registration of \"%s\" notification handler failed.\n", occlusionNotificationHandler.name);
     }
 #endif
+
+    static auto consoleWillDisconnect = [](CGSNotificationType, void*, uint32_t, void*) {
+        WindowServerConnection::singleton().hardwareConsoleStateChanged(HardwareConsoleState::Disconnected);
+    };
+    static auto consoleWillConnect = [](CGSNotificationType, void*, uint32_t, void*) {
+        WindowServerConnection::singleton().hardwareConsoleStateChanged(HardwareConsoleState::Connected);
+    };
+
+    struct ConnectionStateNotificationHandler {
+        CGSNotificationType notificationType;
+        CGSNotifyProcPtr handler;
+        const char* name;
+    };
+
+    static const ConnectionStateNotificationHandler connectionStateNotificationHandlers[] = {
+        { kCGSessionConsoleWillDisconnect, consoleWillDisconnect, "Console Disconnected" },
+        { kCGSessionConsoleConnect, consoleWillConnect, "Console Connected" },
+    };
+
+    for (const auto& connectionStateNotificationHandler : connectionStateNotificationHandlers) {
+        auto error = CGSRegisterNotifyProc(connectionStateNotificationHandler.handler, connectionStateNotificationHandler.notificationType, nullptr);
+        UNUSED_PARAM(error);
+        ASSERT_WITH_MESSAGE(!error, "Registration of \"%s\" notification handler failed.\n", connectionStateNotificationHandler.name);
+    }
 }
 
 } // namespace WebKit
 
+#endif // PLATFORM(MAC) || PLATFORM(MACCATALYST)

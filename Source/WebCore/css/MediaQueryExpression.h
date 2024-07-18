@@ -27,7 +27,7 @@
 
 #pragma once
 
-#include "CSSParserToken.h"
+#include "CSSParserTokenRange.h"
 #include "CSSValue.h"
 #include <memory>
 
@@ -36,29 +36,32 @@ class TextStream;
 }
 
 namespace WebCore {
+    
+struct MediaQueryParserContext;
 
 class MediaQueryExpression {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    explicit MediaQueryExpression(const String& mediaFeature, const Vector<CSSParserToken, 4>& tokenList);
+    explicit MediaQueryExpression(const String& mediaFeature, CSSParserTokenRange&, MediaQueryParserContext&);
 
-    const AtomicString& mediaFeature() const;
+    const AtomString& mediaFeature() const;
     CSSValue* value() const;
 
     bool isValid() const;
+    bool isViewportDependent() const;
 
     String serialize() const;
 
     bool operator==(const MediaQueryExpression&) const;
 
 private:
-    AtomicString m_mediaFeature;
+    AtomString m_mediaFeature;
     RefPtr<CSSValue> m_value;
     bool m_isValid { false };
     mutable String m_serializationCache;
 };
 
-inline const AtomicString& MediaQueryExpression::mediaFeature() const
+inline const AtomString& MediaQueryExpression::mediaFeature() const
 {
     return m_mediaFeature;
 }

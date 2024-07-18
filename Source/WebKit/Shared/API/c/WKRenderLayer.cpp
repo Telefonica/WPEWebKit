@@ -1,137 +1,95 @@
 /*
- * Copyright (C) 2012 Apple Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
- */
+* Copyright (C) 2012-2020 Apple Inc. All rights reserved.
+*
+* Redistribution and use in source and binary forms, with or without
+* modification, are permitted provided that the following conditions
+* are met:
+* 1. Redistributions of source code must retain the above copyright
+*    notice, this list of conditions and the following disclaimer.
+* 2. Redistributions in binary form must reproduce the above copyright
+*    notice, this list of conditions and the following disclaimer in the
+*    documentation and/or other materials provided with the distribution.
+*
+* THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
+* AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+* THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+* PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
+* BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+* CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+* SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+* INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+* CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+* ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+* THE POSSIBILITY OF SUCH DAMAGE.
+*/
 
 #include "config.h"
 #include "WKRenderLayer.h"
 
 #include "APIArray.h"
 #include "WKAPICast.h"
-#include "WebRenderLayer.h"
 
-using namespace WebCore;
-using namespace WebKit;
-
-WKTypeID WKRenderLayerGetTypeID()
+// These functions should be kept around for compatibility with SafariForWebKitDevelopment.
+void WKRenderLayerGetTypeID()
 {
-    return toAPI(WebRenderLayer::APIType);
 }
 
-WKRenderObjectRef WKRenderLayerGetRenderer(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerGetRenderer()
 {
-    return toAPI(toImpl(renderLayerRef)->renderer());
 }
 
-WKStringRef WKRenderLayerCopyRendererName(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerCopyRendererName()
 {
-    return toCopiedAPI(toImpl(renderLayerRef)->renderer()->name());
 }
 
-WKStringRef WKRenderLayerCopyElementTagName(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerCopyElementTagName()
 {
-    WebRenderLayer* renderLayer = toImpl(renderLayerRef);
-    if (!renderLayer->renderer()->elementTagName().isNull())
-        return toCopiedAPI(renderLayer->renderer()->elementTagName());
-
-    return nullptr;
 }
 
-WKStringRef WKRenderLayerCopyElementID(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerCopyElementID()
 {
-    WebRenderLayer* renderLayer = toImpl(renderLayerRef);
-    if (!renderLayer->renderer()->elementID().isNull())
-        return toCopiedAPI(renderLayer->renderer()->elementID());
-
-    return nullptr;
 }
 
-WKArrayRef WKRenderLayerGetElementClassNames(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerGetElementClassNames()
 {
-    return toAPI(toImpl(renderLayerRef)->renderer()->elementClassNames());
 }
 
-WKRect WKRenderLayerGetAbsoluteBounds(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerGetAbsoluteBounds()
 {
-    IntRect bounds = toImpl(renderLayerRef)->absoluteBoundingBox();
-    return WKRectMake(bounds.x(), bounds.y(), bounds.width(), bounds.height());
 }
 
-bool WKRenderLayerIsClipping(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerIsClipping()
 {
-    return toImpl(renderLayerRef)->isClipping();
 }
 
-bool WKRenderLayerIsClipped(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerIsClipped()
 {
-    return toImpl(renderLayerRef)->isClipped();
 }
 
-bool WKRenderLayerIsReflection(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerIsReflection()
 {
-    return toImpl(renderLayerRef)->isReflection();
 }
 
-WKCompositingLayerType WKRenderLayerGetCompositingLayerType(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerGetCompositingLayerType()
 {
-    switch (toImpl(renderLayerRef)->compositingLayerType()) {
-    case WebRenderLayer::None:
-        return kWKCompositingLayerTypeNone;
-    case WebRenderLayer::Normal:
-        return kWKCompositingLayerTypeNormal;
-    case WebRenderLayer::Tiled:
-        return kWKCompositingLayerTypeTiled;
-    case WebRenderLayer::Media:
-        return kWKCompositingLayerTypeMedia;
-    case WebRenderLayer::Container:
-        return kWKCompositingLayerTypeContainer;
-    }
-
-    ASSERT_NOT_REACHED();
-    return kWKCompositingLayerTypeNone;
 }
 
-WK_EXPORT double WKRenderLayerGetBackingStoreMemoryEstimate(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerGetBackingStoreMemoryEstimate()
 {
-    return toImpl(renderLayerRef)->backingStoreMemoryEstimate();
 }
 
-WKArrayRef WKRenderLayerGetNegativeZOrderList(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerGetNegativeZOrderList()
 {
-    return toAPI(toImpl(renderLayerRef)->negativeZOrderList());
 }
 
-WKArrayRef WKRenderLayerGetNormalFlowList(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerGetNormalFlowList()
 {
-    return toAPI(toImpl(renderLayerRef)->normalFlowList());
 }
 
-WKArrayRef WKRenderLayerGetPositiveZOrderList(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerGetPositiveZOrderList()
 {
-    return toAPI(toImpl(renderLayerRef)->positiveZOrderList());
 }
 
-WKRenderLayerRef WKRenderLayerGetFrameContentsLayer(WKRenderLayerRef renderLayerRef)
+void WKRenderLayerGetFrameContentsLayer()
 {
-    return toAPI(toImpl(renderLayerRef)->frameContentsLayer());
 }

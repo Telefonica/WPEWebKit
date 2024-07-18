@@ -29,10 +29,9 @@
 #if ENABLE(DFG_JIT)
 
 #include "DFGAtTailAbstractState.h"
-#include "DFGGraph.h"
 #include "DFGNode.h"
 #include "DFGNullAbstractState.h"
-#include "Operations.h"
+#include "JSCJSValueInlines.h"
 
 namespace JSC { namespace DFG {
 
@@ -47,7 +46,8 @@ ExitMode mayExitImpl(Graph& graph, Node* node, StateType& state)
     // This is a carefully curated list of nodes that definitely do not exit. We try to be very
     // conservative when maintaining this list, because adding new node types to it doesn't
     // generally make things a lot better but it might introduce subtle bugs.
-    case SetArgument:
+    case SetArgumentDefinitely:
+    case SetArgumentMaybe:
     case JSConstant:
     case DoubleConstant:
     case LazyJSConstant:
@@ -58,26 +58,31 @@ ExitMode mayExitImpl(Graph& graph, Node* node, StateType& state)
     case Flush:
     case Phantom:
     case Check:
+    case CheckVarargs:
     case Identity:
     case IdentityWithProfile:
     case GetLocal:
     case LoopHint:
     case Phi:
     case Upsilon:
-    case ZombieHint:
     case ExitOK:
     case BottomValue:
     case PutHint:
     case PhantomNewObject:
+    case PhantomNewInternalFieldObject:
     case PutStack:
     case KillStack:
     case GetStack:
     case GetCallee:
+    case SetCallee:
     case GetArgumentCountIncludingThis:
+    case SetArgumentCountIncludingThis:
     case GetRestLength:
     case GetScope:
     case PhantomLocal:
     case CountExecution:
+    case SuperSamplerBegin:
+    case SuperSamplerEnd:
     case Jump:
     case EntrySwitch:
     case Branch:
@@ -87,6 +92,8 @@ ExitMode mayExitImpl(Graph& graph, Node* node, StateType& state)
     case ValueRep:
     case ExtractOSREntryLocal:
     case ExtractCatchLocal:
+    case ClearCatchLocals:
+    case ToBoolean:
     case LogicalNot:
     case NotifyWrite:
     case PutStructure:
@@ -94,10 +101,21 @@ ExitMode mayExitImpl(Graph& graph, Node* node, StateType& state)
     case FencedStoreBarrier:
     case PutByOffset:
     case PutClosureVar:
+    case PutInternalField:
     case RecordRegExpCachedResult:
     case NukeStructureAndSetButterfly:
+    case FilterCallLinkStatus:
+    case FilterGetByStatus:
+    case FilterPutByStatus:
+    case FilterInByStatus:
+    case FilterDeleteByStatus:
+    case FilterCheckPrivateBrandStatus:
+    case FilterSetPrivateBrandStatus:
+    case EnumeratorNextExtractMode:
+    case EnumeratorNextExtractIndex:
         break;
 
+    case EnumeratorNextUpdatePropertyName:
     case StrCat:
     case Call:
     case Construct:
@@ -109,14 +127,26 @@ ExitMode mayExitImpl(Graph& graph, Node* node, StateType& state)
     case CreateActivation:
     case MaterializeCreateActivation:
     case MaterializeNewObject:
+    case MaterializeNewInternalFieldObject:
     case NewFunction:
     case NewGeneratorFunction:
     case NewAsyncFunction:
     case NewAsyncGeneratorFunction:
     case NewStringObject:
+    case NewInternalFieldObject:
+    case NewRegexp:
     case ToNumber:
+    case ToNumeric:
+    case ToObject:
+    case RegExpExecNonGlobalOrSticky:
+    case RegExpMatchFastGlobal:
         result = ExitsForExceptions;
         break;
+
+    case SetRegExpObjectLastIndex:
+        if (node->ignoreLastIndexIsWritable())
+            break;
+        return Exits;
 
     default:
         // If in doubt, return true.
@@ -153,13 +183,6 @@ ExitMode mayExitImpl(Graph& graph, Node* node, StateType& state)
             // ObjectUse then it will.
             case ObjectUse:
             case ObjectOrOtherUse:
-                result = Exits;
-                break;
-                
-            // These are shady because they check the structure even if the type of the child node
-            // passes the StringObject type filter.
-            case StringObjectUse:
-            case StringOrStringObjectUse:
                 result = Exits;
                 break;
                 

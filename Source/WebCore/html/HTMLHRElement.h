@@ -27,6 +27,7 @@
 namespace WebCore {
 
 class HTMLHRElement final : public HTMLElement {
+    WTF_MAKE_ISO_ALLOCATED(HTMLHRElement);
 public:
     static Ref<HTMLHRElement> create(Document&);
     static Ref<HTMLHRElement> create(const QualifiedName&, Document&);
@@ -34,8 +35,8 @@ public:
 private:
     HTMLHRElement(const QualifiedName&, Document&);
 
-    bool isPresentationAttribute(const QualifiedName&) const final;
-    void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStyleProperties&) final;
+    bool hasPresentationalHintsForAttribute(const QualifiedName&) const final;
+    void collectPresentationalHintsForAttribute(const QualifiedName&, const AtomString&, MutableStyleProperties&) final;
     bool canContainRangeEndPoint() const final;
 };
 

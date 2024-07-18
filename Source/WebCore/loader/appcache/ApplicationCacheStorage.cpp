@@ -30,18 +30,18 @@
 #include "ApplicationCacheGroup.h"
 #include "ApplicationCacheHost.h"
 #include "ApplicationCacheResource.h"
-#include "FileSystem.h"
 #include "SQLiteDatabaseTracker.h"
 #include "SQLiteStatement.h"
 #include "SQLiteTransaction.h"
 #include "SecurityOrigin.h"
 #include "SecurityOriginData.h"
-#include "URL.h"
+#include <wtf/FileSystem.h>
 #include <wtf/StdLibExtras.h>
-#include <wtf/StringExtras.h>
+#include <wtf/URL.h>
 #include <wtf/UUID.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
+#include <wtf/text/StringConcatenateNumbers.h>
 
 namespace WebCore {
 
@@ -85,15 +85,10 @@ private:
 
 static unsigned urlHostHash(const URL& url)
 {
-    unsigned hostStart = url.hostStart();
-    unsigned hostEnd = url.hostEnd();
-
-    const String& urlString = url.string();
-
-    if (urlString.is8Bit())
-        return AlreadyHashed::avoidDeletedValue(StringHasher::computeHashAndMaskTop8Bits(urlString.characters8() + hostStart, hostEnd - hostStart));
-    
-    return AlreadyHashed::avoidDeletedValue(StringHasher::computeHashAndMaskTop8Bits(urlString.characters16() + hostStart, hostEnd - hostStart));
+    StringView host = url.host();
+    if (host.is8Bit())
+        return AlreadyHashed::avoidDeletedValue(StringHasher::computeHashAndMaskTop8Bits(host.characters8(), host.length()));
+    return AlreadyHashed::avoidDeletedValue(StringHasher::computeHashAndMaskTop8Bits(host.characters16(), host.length()));
 }
 
 ApplicationCacheGroup* ApplicationCacheStorage::loadCacheGroup(const URL& manifestURL)
@@ -104,13 +99,13 @@ ApplicationCacheGroup* ApplicationCacheStorage::loadCacheGroup(const URL& manife
     if (!m_database.isOpen())
         return nullptr;
 
-    SQLiteStatement statement(m_database, "SELECT id, manifestURL, newestCache FROM CacheGroups WHERE newestCache IS NOT NULL AND manifestURL=?");
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatement("SELECT id, manifestURL, newestCache FROM CacheGroups WHERE newestCache IS NOT NULL AND manifestURL=?"_s);
+    if (!statement)
         return nullptr;
     
-    statement.bindText(1, manifestURL);
+    statement->bindText(1, manifestURL.string());
    
-    int result = statement.step();
+    int result = statement->step();
     if (result == SQLITE_DONE)
         return nullptr;
     
@@ -119,14 +114,14 @@ ApplicationCacheGroup* ApplicationCacheStorage::loadCacheGroup(const URL& manife
         return nullptr;
     }
     
-    unsigned newestCacheStorageID = static_cast<unsigned>(statement.getColumnInt64(2));
+    unsigned newestCacheStorageID = static_cast<unsigned>(statement->columnInt64(2));
 
     auto cache = loadCache(newestCacheStorageID);
     if (!cache)
         return nullptr;
         
     auto& group = *new ApplicationCacheGroup(*this, manifestURL);
-    group.setStorageID(static_cast<unsigned>(statement.getColumnInt64(0)));
+    group.setStorageID(static_cast<unsigned>(statement->columnInt64(0)));
     group.setNewestCache(cache.releaseNonNull());
     return &group;
 }    
@@ -135,7 +130,7 @@ ApplicationCacheGroup* ApplicationCacheStorage::findOrCreateCacheGroup(const URL
 {
     ASSERT(!manifestURL.hasFragmentIdentifier());
 
-    auto result = m_cachesInMemory.add(manifestURL, nullptr);
+    auto result = m_cachesInMemory.add(manifestURL.string(), nullptr);
     if (!result.isNewEntry) {
         ASSERT(result.iterator->value);
         return result.iterator->value;
@@ -156,7 +151,7 @@ ApplicationCacheGroup* ApplicationCacheStorage::findOrCreateCacheGroup(const URL
 
 ApplicationCacheGroup* ApplicationCacheStorage::findInMemoryCacheGroup(const URL& manifestURL) const
 {
-    return m_cachesInMemory.get(manifestURL);
+    return m_cachesInMemory.get(manifestURL.string());
 }
 
 void ApplicationCacheStorage::loadManifestHostHashes()
@@ -177,12 +172,12 @@ void ApplicationCacheStorage::loadManifestHostHashes()
         return;
 
     // Fetch the host hashes.
-    SQLiteStatement statement(m_database, "SELECT manifestHostHash FROM CacheGroups");    
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatement("SELECT manifestHostHash FROM CacheGroups"_s);
+    if (!statement)
         return;
     
-    while (statement.step() == SQLITE_ROW)
-        m_cacheHostSet.add(static_cast<unsigned>(statement.getColumnInt64(0)));
+    while (statement->step() == SQLITE_ROW)
+        m_cacheHostSet.add(static_cast<unsigned>(statement->columnInt64(0)));
 }    
 
 ApplicationCacheGroup* ApplicationCacheStorage::cacheGroupForURL(const URL& url)
@@ -203,7 +198,7 @@ ApplicationCacheGroup* ApplicationCacheStorage::cacheGroupForURL(const URL& url)
             continue;
         
         if (ApplicationCache* cache = group->newestCache()) {
-            ApplicationCacheResource* resource = cache->resourceForURL(url);
+            ApplicationCacheResource* resource = cache->resourceForURL(url.string());
             if (!resource)
                 continue;
             if (resource->type() & ApplicationCacheResource::Foreign)
@@ -218,15 +213,15 @@ ApplicationCacheGroup* ApplicationCacheStorage::cacheGroupForURL(const URL& url)
     SQLiteTransactionInProgressAutoCounter transactionCounter;
 
     // Check the database. Look for all cache groups with a newest cache.
-    SQLiteStatement statement(m_database, "SELECT id, manifestURL, newestCache FROM CacheGroups WHERE newestCache IS NOT NULL");
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatement("SELECT id, manifestURL, newestCache FROM CacheGroups WHERE newestCache IS NOT NULL"_s);
+    if (!statement)
         return nullptr;
     
     int result;
-    while ((result = statement.step()) == SQLITE_ROW) {
-        URL manifestURL = URL(ParsedURLString, statement.getColumnText(1));
+    while ((result = statement->step()) == SQLITE_ROW) {
+        URL manifestURL = URL({ }, statement->columnText(1));
 
-        if (m_cachesInMemory.contains(manifestURL))
+        if (m_cachesInMemory.contains(manifestURL.string()))
             continue;
 
         if (!protocolHostAndPortAreEqual(url, manifestURL))
@@ -234,21 +229,21 @@ ApplicationCacheGroup* ApplicationCacheStorage::cacheGroupForURL(const URL& url)
 
         // We found a cache group that matches. Now check if the newest cache has a resource with
         // a matching URL.
-        unsigned newestCacheID = static_cast<unsigned>(statement.getColumnInt64(2));
+        unsigned newestCacheID = static_cast<unsigned>(statement->columnInt64(2));
         auto cache = loadCache(newestCacheID);
         if (!cache)
             continue;
 
-        auto* resource = cache->resourceForURL(url);
+        auto* resource = cache->resourceForURL(url.string());
         if (!resource)
             continue;
         if (resource->type() & ApplicationCacheResource::Foreign)
             continue;
 
         auto& group = *new ApplicationCacheGroup(*this, manifestURL);
-        group.setStorageID(static_cast<unsigned>(statement.getColumnInt64(0)));
+        group.setStorageID(static_cast<unsigned>(statement->columnInt64(0)));
         group.setNewestCache(cache.releaseNonNull());
-        m_cachesInMemory.set(group.manifestURL(), &group);
+        m_cachesInMemory.set(group.manifestURL().string(), &group);
 
         return &group;
     }
@@ -271,11 +266,11 @@ ApplicationCacheGroup* ApplicationCacheStorage::fallbackCacheGroupForURL(const U
 
         if (ApplicationCache* cache = group->newestCache()) {
             URL fallbackURL;
-            if (cache->isURLInOnlineWhitelist(url))
+            if (cache->isURLInOnlineAllowlist(url))
                 continue;
             if (!cache->urlMatchesFallbackNamespace(url, &fallbackURL))
                 continue;
-            if (cache->resourceForURL(fallbackURL)->type() & ApplicationCacheResource::Foreign)
+            if (cache->resourceForURL(fallbackURL.string())->type() & ApplicationCacheResource::Foreign)
                 continue;
             return group;
         }
@@ -285,15 +280,15 @@ ApplicationCacheGroup* ApplicationCacheStorage::fallbackCacheGroupForURL(const U
         return nullptr;
         
     // Check the database. Look for all cache groups with a newest cache.
-    SQLiteStatement statement(m_database, "SELECT id, manifestURL, newestCache FROM CacheGroups WHERE newestCache IS NOT NULL");
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatement("SELECT id, manifestURL, newestCache FROM CacheGroups WHERE newestCache IS NOT NULL"_s);
+    if (!statement)
         return nullptr;
     
     int result;
-    while ((result = statement.step()) == SQLITE_ROW) {
-        URL manifestURL = URL(ParsedURLString, statement.getColumnText(1));
+    while ((result = statement->step()) == SQLITE_ROW) {
+        URL manifestURL = URL({ }, statement->columnText(1));
 
-        if (m_cachesInMemory.contains(manifestURL))
+        if (m_cachesInMemory.contains(manifestURL.string()))
             continue;
 
         // Fallback namespaces always have the same origin as manifest URL, so we can avoid loading caches that cannot match.
@@ -302,22 +297,22 @@ ApplicationCacheGroup* ApplicationCacheStorage::fallbackCacheGroupForURL(const U
 
         // We found a cache group that matches. Now check if the newest cache has a resource with
         // a matching fallback namespace.
-        unsigned newestCacheID = static_cast<unsigned>(statement.getColumnInt64(2));
+        unsigned newestCacheID = static_cast<unsigned>(statement->columnInt64(2));
         auto cache = loadCache(newestCacheID);
 
         URL fallbackURL;
-        if (cache->isURLInOnlineWhitelist(url))
+        if (cache->isURLInOnlineAllowlist(url))
             continue;
         if (!cache->urlMatchesFallbackNamespace(url, &fallbackURL))
             continue;
-        if (cache->resourceForURL(fallbackURL)->type() & ApplicationCacheResource::Foreign)
+        if (cache->resourceForURL(fallbackURL.string())->type() & ApplicationCacheResource::Foreign)
             continue;
 
         auto& group = *new ApplicationCacheGroup(*this, manifestURL);
-        group.setStorageID(static_cast<unsigned>(statement.getColumnInt64(0)));
+        group.setStorageID(static_cast<unsigned>(statement->columnInt64(0)));
         group.setNewestCache(cache.releaseNonNull());
 
-        m_cachesInMemory.set(group.manifestURL(), &group);
+        m_cachesInMemory.set(group.manifestURL().string(), &group);
 
         return &group;
     }
@@ -332,13 +327,13 @@ void ApplicationCacheStorage::cacheGroupDestroyed(ApplicationCacheGroup& group)
 {
     if (group.isObsolete()) {
         ASSERT(!group.storageID());
-        ASSERT(m_cachesInMemory.get(group.manifestURL()) != &group);
+        ASSERT(m_cachesInMemory.get(group.manifestURL().string()) != &group);
         return;
     }
 
-    ASSERT(m_cachesInMemory.get(group.manifestURL()) == &group);
+    ASSERT(m_cachesInMemory.get(group.manifestURL().string()) == &group);
 
-    m_cachesInMemory.remove(group.manifestURL());
+    m_cachesInMemory.remove(group.manifestURL().string());
     
     // If the cache group is half-created, we don't want it in the saved set (as it is not stored in database).
     if (!group.storageID())
@@ -347,19 +342,14 @@ void ApplicationCacheStorage::cacheGroupDestroyed(ApplicationCacheGroup& group)
 
 void ApplicationCacheStorage::cacheGroupMadeObsolete(ApplicationCacheGroup& group)
 {
-    ASSERT(m_cachesInMemory.get(group.manifestURL()) == &group);
+    ASSERT(m_cachesInMemory.get(group.manifestURL().string()) == &group);
     ASSERT(m_cacheHostSet.contains(urlHostHash(group.manifestURL())));
 
     if (auto* newestCache = group.newestCache())
         remove(newestCache);
 
-    m_cachesInMemory.remove(group.manifestURL());
+    m_cachesInMemory.remove(group.manifestURL().string());
     m_cacheHostSet.remove(urlHostHash(group.manifestURL()));
-}
-
-const String& ApplicationCacheStorage::cacheDirectory() const
-{
-    return m_cacheDirectory;
 }
 
 void ApplicationCacheStorage::setMaximumSize(int64_t size)
@@ -380,11 +370,11 @@ bool ApplicationCacheStorage::isMaximumSizeReached() const
 int64_t ApplicationCacheStorage::spaceNeeded(int64_t cacheToSave)
 {
     int64_t spaceNeeded = 0;
-    long long fileSize = 0;
-    if (!getFileSize(m_cacheFile, fileSize))
+    auto fileSize = FileSystem::fileSize(m_cacheFile);
+    if (!fileSize)
         return 0;
 
-    int64_t currentSize = fileSize + flatFileAreaSize();
+    int64_t currentSize = *fileSize + flatFileAreaSize();
 
     // Determine the amount of free space we have available.
     int64_t totalAvailableSize = 0;
@@ -427,17 +417,17 @@ bool ApplicationCacheStorage::calculateQuotaForOrigin(const SecurityOrigin& orig
     // If an Origin record doesn't exist, then the COUNT will be 0 and quota will be 0.
     // Using the count to determine if a record existed or not is a safe way to determine
     // if a quota of 0 is real, from the record, or from null.
-    SQLiteStatement statement(m_database, "SELECT COUNT(quota), quota FROM Origins WHERE origin=?");
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatement("SELECT COUNT(quota), quota FROM Origins WHERE origin=?"_s);
+    if (!statement)
         return false;
 
-    statement.bindText(1, SecurityOriginData::fromSecurityOrigin(origin).databaseIdentifier());
-    int result = statement.step();
+    statement->bindText(1, origin.data().databaseIdentifier());
+    int result = statement->step();
 
     // Return the quota, or if it was null the default.
     if (result == SQLITE_ROW) {
-        bool wasNoRecord = statement.getColumnInt64(0) == 0;
-        quota = wasNoRecord ? m_defaultOriginQuota : statement.getColumnInt64(1);
+        bool wasNoRecord = !statement->columnInt64(0);
+        quota = wasNoRecord ? m_defaultOriginQuota : statement->columnInt64(1);
         return true;
     }
 
@@ -445,25 +435,25 @@ bool ApplicationCacheStorage::calculateQuotaForOrigin(const SecurityOrigin& orig
     return false;
 }
 
-bool ApplicationCacheStorage::calculateUsageForOrigin(const SecurityOrigin* origin, int64_t& usage)
+bool ApplicationCacheStorage::calculateUsageForOrigin(const SecurityOriginData& origin, int64_t& usage)
 {
     SQLiteTransactionInProgressAutoCounter transactionCounter;
 
     // If an Origins record doesn't exist, then the SUM will be null,
     // which will become 0, as expected, when converting to a number.
-    SQLiteStatement statement(m_database, "SELECT SUM(Caches.size)"
-                                          "  FROM CacheGroups"
-                                          " INNER JOIN Origins ON CacheGroups.origin = Origins.origin"
-                                          " INNER JOIN Caches ON CacheGroups.id = Caches.cacheGroup"
-                                          " WHERE Origins.origin=?");
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatement("SELECT SUM(Caches.size)"
+                                                 " FROM CacheGroups"
+                                                 " INNER JOIN Origins ON CacheGroups.origin = Origins.origin"
+                                                 " INNER JOIN Caches ON CacheGroups.id = Caches.cacheGroup"
+                                                 " WHERE Origins.origin=?"_s);
+    if (!statement)
         return false;
 
-    statement.bindText(1, SecurityOriginData::fromSecurityOrigin(*origin).databaseIdentifier());
-    int result = statement.step();
+    statement->bindText(1, origin.databaseIdentifier());
+    int result = statement->step();
 
     if (result == SQLITE_ROW) {
-        usage = statement.getColumnInt64(0);
+        usage = statement->columnInt64(0);
         return true;
     }
 
@@ -481,40 +471,40 @@ bool ApplicationCacheStorage::calculateRemainingSizeForOriginExcludingCache(cons
 
     // Remaining size = total origin quota - size of all caches with origin excluding the provided cache.
     // Keep track of the number of caches so we can tell if the result was a calculation or not.
-    const char* query;
     int64_t excludingCacheIdentifier = cache ? cache->storageID() : 0;
-    if (excludingCacheIdentifier != 0) {
-        query = "SELECT COUNT(Caches.size), Origins.quota - SUM(Caches.size)"
-                "  FROM CacheGroups"
-                " INNER JOIN Origins ON CacheGroups.origin = Origins.origin"
-                " INNER JOIN Caches ON CacheGroups.id = Caches.cacheGroup"
-                " WHERE Origins.origin=?"
-                "   AND Caches.id!=?";
-    } else {
-        query = "SELECT COUNT(Caches.size), Origins.quota - SUM(Caches.size)"
-                "  FROM CacheGroups"
-                " INNER JOIN Origins ON CacheGroups.origin = Origins.origin"
-                " INNER JOIN Caches ON CacheGroups.id = Caches.cacheGroup"
-                " WHERE Origins.origin=?";
-    }
+    auto query = [excludingCacheIdentifier]() {
+        if (excludingCacheIdentifier) {
+            return "SELECT COUNT(Caches.size), Origins.quota - SUM(Caches.size)"
+                    "  FROM CacheGroups"
+                    " INNER JOIN Origins ON CacheGroups.origin = Origins.origin"
+                    " INNER JOIN Caches ON CacheGroups.id = Caches.cacheGroup"
+                    " WHERE Origins.origin=?"
+                    "   AND Caches.id!=?"_s;
+        }
+        return "SELECT COUNT(Caches.size), Origins.quota - SUM(Caches.size)"
+               "  FROM CacheGroups"
+               " INNER JOIN Origins ON CacheGroups.origin = Origins.origin"
+               " INNER JOIN Caches ON CacheGroups.id = Caches.cacheGroup"
+               " WHERE Origins.origin=?"_s;
+    }();
 
-    SQLiteStatement statement(m_database, query);
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatement(query);
+    if (!statement)
         return false;
 
-    statement.bindText(1, SecurityOriginData::fromSecurityOrigin(origin).databaseIdentifier());
+    statement->bindText(1, origin.data().databaseIdentifier());
     if (excludingCacheIdentifier != 0)
-        statement.bindInt64(2, excludingCacheIdentifier);
-    int result = statement.step();
+        statement->bindInt64(2, excludingCacheIdentifier);
+    int result = statement->step();
 
     // If the count was 0 that then we have to query the origin table directly
     // for its quota. Otherwise we can use the calculated value.
     if (result == SQLITE_ROW) {
-        int64_t numberOfCaches = statement.getColumnInt64(0);
+        int64_t numberOfCaches = statement->columnInt64(0);
         if (numberOfCaches == 0)
             calculateQuotaForOrigin(origin, remainingSize);
         else
-            remainingSize = statement.getColumnInt64(1);
+            remainingSize = statement->columnInt64(1);
         return true;
     }
 
@@ -533,25 +523,24 @@ bool ApplicationCacheStorage::storeUpdatedQuotaForOrigin(const SecurityOrigin* o
     if (!ensureOriginRecord(origin))
         return false;
 
-    SQLiteStatement updateStatement(m_database, "UPDATE Origins SET quota=? WHERE origin=?");
-    if (updateStatement.prepare() != SQLITE_OK)
+    auto updateStatement = m_database.prepareStatement("UPDATE Origins SET quota=? WHERE origin=?"_s);
+    if (!updateStatement)
         return false;
 
-    updateStatement.bindInt64(1, quota);
-    updateStatement.bindText(2, SecurityOriginData::fromSecurityOrigin(*origin).databaseIdentifier());
+    updateStatement->bindInt64(1, quota);
+    updateStatement->bindText(2, origin->data().databaseIdentifier());
 
-    return executeStatement(updateStatement);
+    return executeStatement(updateStatement.value());
 }
 
-bool ApplicationCacheStorage::executeSQLCommand(const String& sql)
+bool ApplicationCacheStorage::executeSQLCommand(ASCIILiteral sql)
 {
     ASSERT(SQLiteDatabaseTracker::hasTransactionInProgress());
     ASSERT(m_database.isOpen());
     
     bool result = m_database.executeCommand(sql);
     if (!result)
-        LOG_ERROR("Application Cache Storage: failed to execute statement \"%s\" error \"%s\"", 
-                  sql.utf8().data(), m_database.lastErrorMsg());
+        LOG_ERROR("Application Cache Storage: failed to execute statement \"%s\" error \"%s\"", sql.characters(), m_database.lastErrorMsg());
 
     return result;
 }
@@ -565,7 +554,8 @@ void ApplicationCacheStorage::verifySchemaVersion()
 {
     ASSERT(SQLiteDatabaseTracker::hasTransactionInProgress());
 
-    int version = SQLiteStatement(m_database, "PRAGMA user_version").getColumnInt(0);
+    auto versionStatement = m_database.prepareStatement("PRAGMA user_version"_s);
+    int version = versionStatement ? versionStatement->columnInt(0) : 0;
     if (version == schemaVersion)
         return;
 
@@ -577,15 +567,11 @@ void ApplicationCacheStorage::verifySchemaVersion()
     SQLiteTransaction setDatabaseVersion(m_database);
     setDatabaseVersion.begin();
 
-    char userVersionSQL[32];
-    int unusedNumBytes = snprintf(userVersionSQL, sizeof(userVersionSQL), "PRAGMA user_version=%d", schemaVersion);
-    ASSERT_UNUSED(unusedNumBytes, static_cast<int>(sizeof(userVersionSQL)) >= unusedNumBytes);
-
-    SQLiteStatement statement(m_database, userVersionSQL);
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatementSlow(makeString("PRAGMA user_version=", schemaVersion));
+    if (!statement)
         return;
     
-    executeStatement(statement);
+    executeStatement(statement.value());
     setDatabaseVersion.commit();
 }
     
@@ -600,11 +586,11 @@ void ApplicationCacheStorage::openDatabase(bool createIfDoesNotExist)
     if (m_cacheDirectory.isNull())
         return;
 
-    m_cacheFile = pathByAppendingComponent(m_cacheDirectory, "ApplicationCache.db");
-    if (!createIfDoesNotExist && !fileExists(m_cacheFile))
+    m_cacheFile = FileSystem::pathByAppendingComponent(m_cacheDirectory, "ApplicationCache.db"_s);
+    if (!createIfDoesNotExist && !FileSystem::fileExists(m_cacheFile))
         return;
 
-    makeAllDirectories(m_cacheDirectory);
+    FileSystem::makeAllDirectories(m_cacheDirectory);
     m_database.open(m_cacheFile);
     
     if (!m_database.isOpen())
@@ -614,39 +600,39 @@ void ApplicationCacheStorage::openDatabase(bool createIfDoesNotExist)
     
     // Create tables
     executeSQLCommand("CREATE TABLE IF NOT EXISTS CacheGroups (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                      "manifestHostHash INTEGER NOT NULL ON CONFLICT FAIL, manifestURL TEXT UNIQUE ON CONFLICT FAIL, newestCache INTEGER, origin TEXT)");
-    executeSQLCommand("CREATE TABLE IF NOT EXISTS Caches (id INTEGER PRIMARY KEY AUTOINCREMENT, cacheGroup INTEGER, size INTEGER)");
-    executeSQLCommand("CREATE TABLE IF NOT EXISTS CacheWhitelistURLs (url TEXT NOT NULL ON CONFLICT FAIL, cache INTEGER NOT NULL ON CONFLICT FAIL)");
-    executeSQLCommand("CREATE TABLE IF NOT EXISTS CacheAllowsAllNetworkRequests (wildcard INTEGER NOT NULL ON CONFLICT FAIL, cache INTEGER NOT NULL ON CONFLICT FAIL)");
+                      "manifestHostHash INTEGER NOT NULL ON CONFLICT FAIL, manifestURL TEXT UNIQUE ON CONFLICT FAIL, newestCache INTEGER, origin TEXT)"_s);
+    executeSQLCommand("CREATE TABLE IF NOT EXISTS Caches (id INTEGER PRIMARY KEY AUTOINCREMENT, cacheGroup INTEGER, size INTEGER)"_s);
+    executeSQLCommand("CREATE TABLE IF NOT EXISTS CacheWhitelistURLs (url TEXT NOT NULL ON CONFLICT FAIL, cache INTEGER NOT NULL ON CONFLICT FAIL)"_s);
+    executeSQLCommand("CREATE TABLE IF NOT EXISTS CacheAllowsAllNetworkRequests (wildcard INTEGER NOT NULL ON CONFLICT FAIL, cache INTEGER NOT NULL ON CONFLICT FAIL)"_s);
     executeSQLCommand("CREATE TABLE IF NOT EXISTS FallbackURLs (namespace TEXT NOT NULL ON CONFLICT FAIL, fallbackURL TEXT NOT NULL ON CONFLICT FAIL, "
-                      "cache INTEGER NOT NULL ON CONFLICT FAIL)");
-    executeSQLCommand("CREATE TABLE IF NOT EXISTS CacheEntries (cache INTEGER NOT NULL ON CONFLICT FAIL, type INTEGER, resource INTEGER NOT NULL)");
+                      "cache INTEGER NOT NULL ON CONFLICT FAIL)"_s);
+    executeSQLCommand("CREATE TABLE IF NOT EXISTS CacheEntries (cache INTEGER NOT NULL ON CONFLICT FAIL, type INTEGER, resource INTEGER NOT NULL)"_s);
     executeSQLCommand("CREATE TABLE IF NOT EXISTS CacheResources (id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL ON CONFLICT FAIL, "
-                      "statusCode INTEGER NOT NULL, responseURL TEXT NOT NULL, mimeType TEXT, textEncodingName TEXT, headers TEXT, data INTEGER NOT NULL ON CONFLICT FAIL)");
-    executeSQLCommand("CREATE TABLE IF NOT EXISTS CacheResourceData (id INTEGER PRIMARY KEY AUTOINCREMENT, data BLOB, path TEXT)");
-    executeSQLCommand("CREATE TABLE IF NOT EXISTS DeletedCacheResources (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT)");
-    executeSQLCommand("CREATE TABLE IF NOT EXISTS Origins (origin TEXT UNIQUE ON CONFLICT IGNORE, quota INTEGER NOT NULL ON CONFLICT FAIL)");
+                      "statusCode INTEGER NOT NULL, responseURL TEXT NOT NULL, mimeType TEXT, textEncodingName TEXT, headers TEXT, data INTEGER NOT NULL ON CONFLICT FAIL)"_s);
+    executeSQLCommand("CREATE TABLE IF NOT EXISTS CacheResourceData (id INTEGER PRIMARY KEY AUTOINCREMENT, data BLOB, path TEXT)"_s);
+    executeSQLCommand("CREATE TABLE IF NOT EXISTS DeletedCacheResources (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT)"_s);
+    executeSQLCommand("CREATE TABLE IF NOT EXISTS Origins (origin TEXT UNIQUE ON CONFLICT IGNORE, quota INTEGER NOT NULL ON CONFLICT FAIL)"_s);
 
-    // When a cache is deleted, all its entries and its whitelist should be deleted.
+    // When a cache is deleted, all its entries and its allowlist should be deleted.
     executeSQLCommand("CREATE TRIGGER IF NOT EXISTS CacheDeleted AFTER DELETE ON Caches"
                       " FOR EACH ROW BEGIN"
                       "  DELETE FROM CacheEntries WHERE cache = OLD.id;"
                       "  DELETE FROM CacheWhitelistURLs WHERE cache = OLD.id;"
                       "  DELETE FROM CacheAllowsAllNetworkRequests WHERE cache = OLD.id;"
                       "  DELETE FROM FallbackURLs WHERE cache = OLD.id;"
-                      " END");
+                      " END"_s);
 
     // When a cache entry is deleted, its resource should also be deleted.
     executeSQLCommand("CREATE TRIGGER IF NOT EXISTS CacheEntryDeleted AFTER DELETE ON CacheEntries"
                       " FOR EACH ROW BEGIN"
                       "  DELETE FROM CacheResources WHERE id = OLD.resource;"
-                      " END");
+                      " END"_s);
 
     // When a cache resource is deleted, its data blob should also be deleted.
     executeSQLCommand("CREATE TRIGGER IF NOT EXISTS CacheResourceDeleted AFTER DELETE ON CacheResources"
                       " FOR EACH ROW BEGIN"
                       "  DELETE FROM CacheResourceData WHERE id = OLD.data;"
-                      " END");
+                      " END"_s);
     
     // When a cache resource is deleted, if it contains a non-empty path, that path should
     // be added to the DeletedCacheResources table so the flat file at that path can
@@ -655,7 +641,7 @@ void ApplicationCacheStorage::openDatabase(bool createIfDoesNotExist)
                       " FOR EACH ROW"
                       " WHEN OLD.path NOT NULL BEGIN"
                       "  INSERT INTO DeletedCacheResources (path) values (OLD.path);"
-                      " END");
+                      " END"_s);
 }
 
 bool ApplicationCacheStorage::executeStatement(SQLiteStatement& statement)
@@ -663,8 +649,7 @@ bool ApplicationCacheStorage::executeStatement(SQLiteStatement& statement)
     ASSERT(SQLiteDatabaseTracker::hasTransactionInProgress());
     bool result = statement.executeCommand();
     if (!result)
-        LOG_ERROR("Application Cache Storage: failed to execute statement \"%s\" error \"%s\"", 
-                  statement.query().utf8().data(), m_database.lastErrorMsg());
+        LOG_ERROR("Application Cache Storage: failed to execute statement, error \"%s\"", m_database.lastErrorMsg());
     
     return result;
 }    
@@ -679,17 +664,17 @@ bool ApplicationCacheStorage::store(ApplicationCacheGroup* group, GroupStorageID
     // a cache group with an identical manifest URL and associated cache entries. We want to remove
     // this cache group and its associated cache entries so that we can create it again (below) as
     // a way to repair it.
-    deleteCacheGroupRecord(group->manifestURL());
+    deleteCacheGroupRecord(group->manifestURL().string());
 
-    SQLiteStatement statement(m_database, "INSERT INTO CacheGroups (manifestHostHash, manifestURL, origin) VALUES (?, ?, ?)");
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatement("INSERT INTO CacheGroups (manifestHostHash, manifestURL, origin) VALUES (?, ?, ?)"_s);
+    if (!statement)
         return false;
 
-    statement.bindInt64(1, urlHostHash(group->manifestURL()));
-    statement.bindText(2, group->manifestURL());
-    statement.bindText(3, SecurityOriginData::fromSecurityOrigin(group->origin()).databaseIdentifier());
+    statement->bindInt64(1, urlHostHash(group->manifestURL()));
+    statement->bindText(2, group->manifestURL().string());
+    statement->bindText(3, group->origin().data().databaseIdentifier());
 
-    if (!executeStatement(statement))
+    if (!executeStatement(statement.value()))
         return false;
 
     unsigned groupStorageID = static_cast<unsigned>(m_database.lastInsertRowID());
@@ -709,14 +694,14 @@ bool ApplicationCacheStorage::store(ApplicationCache* cache, ResourceStorageIDJo
     ASSERT(cache->group()->storageID() != 0);
     ASSERT(storageIDJournal);
     
-    SQLiteStatement statement(m_database, "INSERT INTO Caches (cacheGroup, size) VALUES (?, ?)");
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatement("INSERT INTO Caches (cacheGroup, size) VALUES (?, ?)"_s);
+    if (!statement)
         return false;
 
-    statement.bindInt64(1, cache->group()->storageID());
-    statement.bindInt64(2, cache->estimatedSizeInStorage());
+    statement->bindInt64(1, cache->group()->storageID());
+    statement->bindInt64(2, cache->estimatedSizeInStorage());
 
-    if (!executeStatement(statement))
+    if (!executeStatement(statement.value()))
         return false;
     
     unsigned cacheStorageID = static_cast<unsigned>(m_database.lastInsertRowID());
@@ -732,30 +717,32 @@ bool ApplicationCacheStorage::store(ApplicationCache* cache, ResourceStorageIDJo
         storageIDJournal->add(resource.get(), oldStorageID);
     }
     
-    // Store the online whitelist
-    const Vector<URL>& onlineWhitelist = cache->onlineWhitelist();
+    // Store the online allowlist
+    const Vector<URL>& onlineAllowlist = cache->onlineAllowlist();
     {
-        for (auto& whitelistURL : onlineWhitelist) {
-            SQLiteStatement statement(m_database, "INSERT INTO CacheWhitelistURLs (url, cache) VALUES (?, ?)");
-            statement.prepare();
+        for (auto& allowlistURL : onlineAllowlist) {
+            auto statement = m_database.prepareStatement("INSERT INTO CacheWhitelistURLs (url, cache) VALUES (?, ?)"_s);
+            if (!statement)
+                return false;
 
-            statement.bindText(1, whitelistURL);
-            statement.bindInt64(2, cacheStorageID);
+            statement->bindText(1, allowlistURL.string());
+            statement->bindInt64(2, cacheStorageID);
 
-            if (!executeStatement(statement))
+            if (!executeStatement(statement.value()))
                 return false;
         }
     }
 
-    // Store online whitelist wildcard flag.
+    // Store online allowlist wildcard flag.
     {
-        SQLiteStatement statement(m_database, "INSERT INTO CacheAllowsAllNetworkRequests (wildcard, cache) VALUES (?, ?)");
-        statement.prepare();
+        auto statement = m_database.prepareStatement("INSERT INTO CacheAllowsAllNetworkRequests (wildcard, cache) VALUES (?, ?)"_s);
+        if (!statement)
+            return false;
 
-        statement.bindInt64(1, cache->allowsAllNetworkRequests());
-        statement.bindInt64(2, cacheStorageID);
+        statement->bindInt64(1, cache->allowsAllNetworkRequests());
+        statement->bindInt64(2, cacheStorageID);
 
-        if (!executeStatement(statement))
+        if (!executeStatement(statement.value()))
             return false;
     }
     
@@ -763,14 +750,15 @@ bool ApplicationCacheStorage::store(ApplicationCache* cache, ResourceStorageIDJo
     const FallbackURLVector& fallbackURLs = cache->fallbackURLs();
     {
         for (auto& fallbackURL : fallbackURLs) {
-            SQLiteStatement statement(m_database, "INSERT INTO FallbackURLs (namespace, fallbackURL, cache) VALUES (?, ?, ?)");
-            statement.prepare();
+            auto statement = m_database.prepareStatement("INSERT INTO FallbackURLs (namespace, fallbackURL, cache) VALUES (?, ?, ?)"_s);
+            if (!statement)
+                return false;
 
-            statement.bindText(1, fallbackURL.first);
-            statement.bindText(2, fallbackURL.second);
-            statement.bindInt64(3, cacheStorageID);
+            statement->bindText(1, fallbackURL.first.string());
+            statement->bindText(2, fallbackURL.second.string());
+            statement->bindInt64(3, cacheStorageID);
 
-            if (!executeStatement(statement))
+            if (!executeStatement(statement.value()))
                 return false;
         }
     }
@@ -792,14 +780,13 @@ bool ApplicationCacheStorage::store(ApplicationCacheResource* resource, unsigned
         return false;
 
     // First, insert the data
-    SQLiteStatement dataStatement(m_database, "INSERT INTO CacheResourceData (data, path) VALUES (?, ?)");
-    if (dataStatement.prepare() != SQLITE_OK)
+    auto dataStatement = m_database.prepareStatement("INSERT INTO CacheResourceData (data, path) VALUES (?, ?)"_s);
+    if (!dataStatement)
         return false;
-    
 
     String fullPath;
     if (!resource->path().isEmpty())
-        dataStatement.bindText(2, pathGetFileName(resource->path()));
+        dataStatement->bindText(2, FileSystem::pathFileName(resource->path()));
     else if (shouldStoreResourceAsFlatFile(resource)) {
         // First, check to see if creating the flat file would violate the maximum total quota. We don't need
         // to check the per-origin quota here, as it was already checked in storeNewestCache().
@@ -808,32 +795,32 @@ bool ApplicationCacheStorage::store(ApplicationCacheResource* resource, unsigned
             return false;
         }
         
-        String flatFileDirectory = pathByAppendingComponent(m_cacheDirectory, m_flatFileSubdirectoryName);
-        makeAllDirectories(flatFileDirectory);
+        String flatFileDirectory = FileSystem::pathByAppendingComponent(m_cacheDirectory, m_flatFileSubdirectoryName);
+        FileSystem::makeAllDirectories(flatFileDirectory);
 
-        String extension;
+        StringView extension;
         
         String fileName = resource->response().suggestedFilename();
         size_t dotIndex = fileName.reverseFind('.');
         if (dotIndex != notFound && dotIndex < (fileName.length() - 1))
-            extension = fileName.substring(dotIndex);
+            extension = StringView(fileName).substring(dotIndex);
 
         String path;
         if (!writeDataToUniqueFileInDirectory(resource->data(), flatFileDirectory, path, extension))
             return false;
         
-        fullPath = pathByAppendingComponent(flatFileDirectory, path);
+        fullPath = FileSystem::pathByAppendingComponent(flatFileDirectory, path);
         resource->setPath(fullPath);
-        dataStatement.bindText(2, path);
+        dataStatement->bindText(2, path);
     } else {
         if (resource->data().size())
-            dataStatement.bindBlob(1, resource->data().data(), resource->data().size());
+            dataStatement->bindBlob(1, resource->data().makeContiguous().get());
     }
     
-    if (!dataStatement.executeCommand()) {
+    if (!dataStatement->executeCommand()) {
         // Clean up the file which we may have written to:
         if (!fullPath.isEmpty())
-            deleteFile(fullPath);
+            FileSystem::deleteFile(fullPath);
 
         return false;
     }
@@ -854,43 +841,43 @@ bool ApplicationCacheStorage::store(ApplicationCacheResource* resource, unsigned
     
     String headers = stringBuilder.toString();
     
-    SQLiteStatement resourceStatement(m_database, "INSERT INTO CacheResources (url, statusCode, responseURL, headers, data, mimeType, textEncodingName) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    if (resourceStatement.prepare() != SQLITE_OK)
+    auto resourceStatement = m_database.prepareStatement("INSERT INTO CacheResources (url, statusCode, responseURL, headers, data, mimeType, textEncodingName) VALUES (?, ?, ?, ?, ?, ?, ?)"_s);
+    if (!resourceStatement)
         return false;
     
     // The same ApplicationCacheResource are used in ApplicationCacheResource::size()
     // to calculate the approximate size of an ApplicationCacheResource object. If
     // you change the code below, please also change ApplicationCacheResource::size().
-    resourceStatement.bindText(1, resource->url());
-    resourceStatement.bindInt64(2, resource->response().httpStatusCode());
-    resourceStatement.bindText(3, resource->response().url());
-    resourceStatement.bindText(4, headers);
-    resourceStatement.bindInt64(5, dataId);
-    resourceStatement.bindText(6, resource->response().mimeType());
-    resourceStatement.bindText(7, resource->response().textEncodingName());
+    resourceStatement->bindText(1, resource->url().string());
+    resourceStatement->bindInt64(2, resource->response().httpStatusCode());
+    resourceStatement->bindText(3, resource->response().url().string());
+    resourceStatement->bindText(4, headers);
+    resourceStatement->bindInt64(5, dataId);
+    resourceStatement->bindText(6, resource->response().mimeType());
+    resourceStatement->bindText(7, resource->response().textEncodingName());
 
-    if (!executeStatement(resourceStatement))
+    if (!executeStatement(resourceStatement.value()))
         return false;
 
     unsigned resourceId = static_cast<unsigned>(m_database.lastInsertRowID());
     
     // Finally, insert the cache entry
-    SQLiteStatement entryStatement(m_database, "INSERT INTO CacheEntries (cache, type, resource) VALUES (?, ?, ?)");
-    if (entryStatement.prepare() != SQLITE_OK)
+    auto entryStatement = m_database.prepareStatement("INSERT INTO CacheEntries (cache, type, resource) VALUES (?, ?, ?)"_s);
+    if (!entryStatement)
         return false;
     
-    entryStatement.bindInt64(1, cacheStorageID);
-    entryStatement.bindInt64(2, resource->type());
-    entryStatement.bindInt64(3, resourceId);
+    entryStatement->bindInt64(1, cacheStorageID);
+    entryStatement->bindInt64(2, resource->type());
+    entryStatement->bindInt64(3, resourceId);
     
-    if (!executeStatement(entryStatement))
+    if (!executeStatement(entryStatement.value()))
         return false;
-    
+
     // Did we successfully write the resource data to a file? If so,
     // release the resource's data and free up a potentially large amount
     // of memory:
     if (!fullPath.isEmpty())
-        resource->data().clear();
+        resource->clear();
 
     resource->setStorageID(resourceId);
     return true;
@@ -904,14 +891,14 @@ bool ApplicationCacheStorage::storeUpdatedType(ApplicationCacheResource* resourc
     ASSERT(resource->storageID());
 
     // First, insert the data
-    SQLiteStatement entryStatement(m_database, "UPDATE CacheEntries SET type=? WHERE resource=?");
-    if (entryStatement.prepare() != SQLITE_OK)
+    auto entryStatement = m_database.prepareStatement("UPDATE CacheEntries SET type=? WHERE resource=?"_s);
+    if (!entryStatement)
         return false;
 
-    entryStatement.bindInt64(1, resource->type());
-    entryStatement.bindInt64(2, resource->storageID());
+    entryStatement->bindInt64(1, resource->type());
+    entryStatement->bindInt64(2, resource->storageID());
 
-    return executeStatement(entryStatement);
+    return executeStatement(entryStatement.value());
 }
 
 bool ApplicationCacheStorage::store(ApplicationCacheResource* resource, ApplicationCache* cache)
@@ -937,14 +924,14 @@ bool ApplicationCacheStorage::store(ApplicationCacheResource* resource, Applicat
     }
 
     // A resource was added to the cache. Update the total data size for the cache.
-    SQLiteStatement sizeUpdateStatement(m_database, "UPDATE Caches SET size=size+? WHERE id=?");
-    if (sizeUpdateStatement.prepare() != SQLITE_OK)
+    auto sizeUpdateStatement = m_database.prepareStatement("UPDATE Caches SET size=size+? WHERE id=?"_s);
+    if (!sizeUpdateStatement)
         return false;
 
-    sizeUpdateStatement.bindInt64(1, resource->estimatedSizeInStorage());
-    sizeUpdateStatement.bindInt64(2, cache->storageID());
+    sizeUpdateStatement->bindInt64(1, resource->estimatedSizeInStorage());
+    sizeUpdateStatement->bindInt64(2, cache->storageID());
 
-    if (!executeStatement(sizeUpdateStatement))
+    if (!executeStatement(sizeUpdateStatement.value()))
         return false;
     
     storeResourceTransaction.commit();
@@ -954,13 +941,13 @@ bool ApplicationCacheStorage::store(ApplicationCacheResource* resource, Applicat
 bool ApplicationCacheStorage::ensureOriginRecord(const SecurityOrigin* origin)
 {
     ASSERT(SQLiteDatabaseTracker::hasTransactionInProgress());
-    SQLiteStatement insertOriginStatement(m_database, "INSERT INTO Origins (origin, quota) VALUES (?, ?)");
-    if (insertOriginStatement.prepare() != SQLITE_OK)
+    auto insertOriginStatement = m_database.prepareStatement("INSERT INTO Origins (origin, quota) VALUES (?, ?)"_s);
+    if (!insertOriginStatement)
         return false;
 
-    insertOriginStatement.bindText(1, SecurityOriginData::fromSecurityOrigin(*origin).databaseIdentifier());
-    insertOriginStatement.bindInt64(2, m_defaultOriginQuota);
-    if (!executeStatement(insertOriginStatement))
+    insertOriginStatement->bindText(1, origin->data().databaseIdentifier());
+    insertOriginStatement->bindInt64(2, m_defaultOriginQuota);
+    if (!executeStatement(insertOriginStatement.value()))
         return false;
 
     return true;
@@ -1037,16 +1024,16 @@ bool ApplicationCacheStorage::storeNewestCache(ApplicationCacheGroup& group, App
     
     // Update the newest cache in the group.
     
-    SQLiteStatement statement(m_database, "UPDATE CacheGroups SET newestCache=? WHERE id=?");
-    if (statement.prepare() != SQLITE_OK) {
+    auto statement = m_database.prepareStatement("UPDATE CacheGroups SET newestCache=? WHERE id=?"_s);
+    if (!statement) {
         failureReason = DiskOrOperationFailure;
         return false;
     }
     
-    statement.bindInt64(1, group.newestCache()->storageID());
-    statement.bindInt64(2, group.storageID());
+    statement->bindInt64(1, group.newestCache()->storageID());
+    statement->bindInt64(2, group.storageID());
     
-    if (!executeStatement(statement)) {
+    if (!executeStatement(statement.value())) {
         failureReason = DiskOrOperationFailure;
         return false;
     }
@@ -1067,12 +1054,12 @@ bool ApplicationCacheStorage::storeNewestCache(ApplicationCacheGroup& group)
 template<typename CharacterType>
 static inline void parseHeader(const CharacterType* header, unsigned headerLength, ResourceResponse& response)
 {
-    ASSERT(find(header, headerLength, ':') != notFound);
-    unsigned colonPosition = find(header, headerLength, ':');
+    ASSERT(WTF::find(header, headerLength, ':') != notFound);
+    unsigned colonPosition = WTF::find(header, headerLength, ':');
 
-    // Save memory by putting the header names into atomic strings so each is stored only once,
-    // even though the setHTTPHeaderField function does not require an atomic string.
-    AtomicString headerName { header, colonPosition };
+    // Save memory by putting the header names into atom strings so each is stored only once,
+    // even though the setHTTPHeaderField function does not require an atom string.
+    AtomString headerName { header, colonPosition };
     String headerValue { header + colonPosition + 1, headerLength - colonPosition - 1 };
 
     response.setHTTPHeaderField(headerName, headerValue);
@@ -1104,49 +1091,45 @@ static inline void parseHeaders(const String& headers, ResourceResponse& respons
 RefPtr<ApplicationCache> ApplicationCacheStorage::loadCache(unsigned storageID)
 {
     ASSERT(SQLiteDatabaseTracker::hasTransactionInProgress());
-    SQLiteStatement cacheStatement(m_database,
-                                   "SELECT url, statusCode, type, mimeType, textEncodingName, headers, CacheResourceData.data, CacheResourceData.path FROM CacheEntries INNER JOIN CacheResources ON CacheEntries.resource=CacheResources.id "
-                                   "INNER JOIN CacheResourceData ON CacheResourceData.id=CacheResources.data WHERE CacheEntries.cache=?");
-    if (cacheStatement.prepare() != SQLITE_OK) {
+    auto cacheStatement = m_database.prepareStatement(
+        "SELECT url, statusCode, type, mimeType, textEncodingName, headers, CacheResourceData.data, CacheResourceData.path FROM CacheEntries INNER JOIN CacheResources ON CacheEntries.resource=CacheResources.id "
+        "INNER JOIN CacheResourceData ON CacheResourceData.id=CacheResources.data WHERE CacheEntries.cache=?"_s);
+    if (!cacheStatement) {
         LOG_ERROR("Could not prepare cache statement, error \"%s\"", m_database.lastErrorMsg());
         return nullptr;
     }
     
-    cacheStatement.bindInt64(1, storageID);
+    cacheStatement->bindInt64(1, storageID);
 
     auto cache = ApplicationCache::create();
 
-    String flatFileDirectory = pathByAppendingComponent(m_cacheDirectory, m_flatFileSubdirectoryName);
+    String flatFileDirectory = FileSystem::pathByAppendingComponent(m_cacheDirectory, m_flatFileSubdirectoryName);
 
     int result;
-    while ((result = cacheStatement.step()) == SQLITE_ROW) {
-        URL url(ParsedURLString, cacheStatement.getColumnText(0));
+    while ((result = cacheStatement->step()) == SQLITE_ROW) {
+        URL url({ }, cacheStatement->columnText(0));
         
-        int httpStatusCode = cacheStatement.getColumnInt(1);
+        int httpStatusCode = cacheStatement->columnInt(1);
 
-        unsigned type = static_cast<unsigned>(cacheStatement.getColumnInt64(2));
-
-        Vector<char> blob;
-        cacheStatement.getColumnBlobAsVector(6, blob);
+        unsigned type = static_cast<unsigned>(cacheStatement->columnInt64(2));
+        auto data = SharedBuffer::create(cacheStatement->columnBlob(6));
         
-        auto data = SharedBuffer::create(WTFMove(blob));
-        
-        String path = cacheStatement.getColumnText(7);
+        String path = cacheStatement->columnText(7);
         long long size = 0;
         if (path.isEmpty())
             size = data->size();
         else {
-            path = pathByAppendingComponent(flatFileDirectory, path);
-            getFileSize(path, size);
+            path = FileSystem::pathByAppendingComponent(flatFileDirectory, path);
+            size = FileSystem::fileSize(path).value_or(0);
         }
         
-        String mimeType = cacheStatement.getColumnText(3);
-        String textEncodingName = cacheStatement.getColumnText(4);
+        String mimeType = cacheStatement->columnText(3);
+        String textEncodingName = cacheStatement->columnText(4);
         
         ResourceResponse response(url, mimeType, size, textEncodingName);
         response.setHTTPStatusCode(httpStatusCode);
 
-        String headers = cacheStatement.getColumnText(5);
+        String headers = cacheStatement->columnText(5);
         parseHeaders(headers, response);
         
         auto resource = ApplicationCacheResource::create(url, response, type, WTFMove(data), path);
@@ -1165,45 +1148,45 @@ RefPtr<ApplicationCache> ApplicationCacheStorage::loadCache(unsigned storageID)
         return nullptr;
     }
 
-    // Load the online whitelist
-    SQLiteStatement whitelistStatement(m_database, "SELECT url FROM CacheWhitelistURLs WHERE cache=?");
-    if (whitelistStatement.prepare() != SQLITE_OK)
+    // Load the online allowlist
+    auto allowlistStatement = m_database.prepareStatement("SELECT url FROM CacheWhitelistURLs WHERE cache=?"_s);
+    if (!allowlistStatement)
         return nullptr;
-    whitelistStatement.bindInt64(1, storageID);
+    allowlistStatement->bindInt64(1, storageID);
     
-    Vector<URL> whitelist;
-    while ((result = whitelistStatement.step()) == SQLITE_ROW) 
-        whitelist.append(URL(ParsedURLString, whitelistStatement.getColumnText(0)));
+    Vector<URL> allowlist;
+    while ((result = allowlistStatement->step()) == SQLITE_ROW)
+        allowlist.append(URL({ }, allowlistStatement->columnText(0)));
 
     if (result != SQLITE_DONE)
-        LOG_ERROR("Could not load cache online whitelist, error \"%s\"", m_database.lastErrorMsg());
+        LOG_ERROR("Could not load cache online allowlist, error \"%s\"", m_database.lastErrorMsg());
 
-    cache->setOnlineWhitelist(whitelist);
+    cache->setOnlineAllowlist(allowlist);
 
-    // Load online whitelist wildcard flag.
-    SQLiteStatement whitelistWildcardStatement(m_database, "SELECT wildcard FROM CacheAllowsAllNetworkRequests WHERE cache=?");
-    if (whitelistWildcardStatement.prepare() != SQLITE_OK)
+    // Load online allowlist wildcard flag.
+    auto allowlistWildcardStatement = m_database.prepareStatement("SELECT wildcard FROM CacheAllowsAllNetworkRequests WHERE cache=?"_s);
+    if (!allowlistWildcardStatement)
         return nullptr;
-    whitelistWildcardStatement.bindInt64(1, storageID);
+    allowlistWildcardStatement->bindInt64(1, storageID);
     
-    result = whitelistWildcardStatement.step();
+    result = allowlistWildcardStatement->step();
     if (result != SQLITE_ROW)
-        LOG_ERROR("Could not load cache online whitelist wildcard flag, error \"%s\"", m_database.lastErrorMsg());
+        LOG_ERROR("Could not load cache online allowlist wildcard flag, error \"%s\"", m_database.lastErrorMsg());
 
-    cache->setAllowsAllNetworkRequests(whitelistWildcardStatement.getColumnInt64(0));
+    cache->setAllowsAllNetworkRequests(allowlistWildcardStatement->columnInt64(0));
 
-    if (whitelistWildcardStatement.step() != SQLITE_DONE)
-        LOG_ERROR("Too many rows for online whitelist wildcard flag");
+    if (allowlistWildcardStatement->step() != SQLITE_DONE)
+        LOG_ERROR("Too many rows for online allowlist wildcard flag");
 
     // Load fallback URLs.
-    SQLiteStatement fallbackStatement(m_database, "SELECT namespace, fallbackURL FROM FallbackURLs WHERE cache=?");
-    if (fallbackStatement.prepare() != SQLITE_OK)
+    auto fallbackStatement = m_database.prepareStatement("SELECT namespace, fallbackURL FROM FallbackURLs WHERE cache=?"_s);
+    if (!fallbackStatement)
         return nullptr;
-    fallbackStatement.bindInt64(1, storageID);
+    fallbackStatement->bindInt64(1, storageID);
     
     FallbackURLVector fallbackURLs;
-    while ((result = fallbackStatement.step()) == SQLITE_ROW) 
-        fallbackURLs.append(std::make_pair(URL(ParsedURLString, fallbackStatement.getColumnText(0)), URL(ParsedURLString, fallbackStatement.getColumnText(1))));
+    while ((result = fallbackStatement->step()) == SQLITE_ROW)
+        fallbackURLs.append(std::make_pair(URL({ }, fallbackStatement->columnText(0)), URL({ }, fallbackStatement->columnText(1))));
 
     if (result != SQLITE_DONE)
         LOG_ERROR("Could not load fallback URLs, error \"%s\"", m_database.lastErrorMsg());
@@ -1212,7 +1195,7 @@ RefPtr<ApplicationCache> ApplicationCacheStorage::loadCache(unsigned storageID)
     
     cache->setStorageID(storageID);
 
-    return WTFMove(cache);
+    return cache;
 }    
     
 void ApplicationCacheStorage::remove(ApplicationCache* cache)
@@ -1230,23 +1213,23 @@ void ApplicationCacheStorage::remove(ApplicationCache* cache)
     ASSERT(cache->group()->storageID());
 
     // All associated data will be deleted by database triggers.
-    SQLiteStatement statement(m_database, "DELETE FROM Caches WHERE id=?");
-    if (statement.prepare() != SQLITE_OK)
+    auto statement = m_database.prepareStatement("DELETE FROM Caches WHERE id=?"_s);
+    if (!statement)
         return;
     
-    statement.bindInt64(1, cache->storageID());
-    executeStatement(statement);
+    statement->bindInt64(1, cache->storageID());
+    executeStatement(statement.value());
 
     cache->clearStorageID();
 
     if (cache->group()->newestCache() == cache) {
         // Currently, there are no triggers on the cache group, which is why the cache had to be removed separately above.
-        SQLiteStatement groupStatement(m_database, "DELETE FROM CacheGroups WHERE id=?");
-        if (groupStatement.prepare() != SQLITE_OK)
+        auto groupStatement = m_database.prepareStatement("DELETE FROM CacheGroups WHERE id=?"_s);
+        if (!groupStatement)
             return;
         
-        groupStatement.bindInt64(1, cache->group()->storageID());
-        executeStatement(groupStatement);
+        groupStatement->bindInt64(1, cache->group()->storageID());
+        executeStatement(groupStatement.value());
 
         cache->group()->clearStorageID();
     }
@@ -1264,9 +1247,9 @@ void ApplicationCacheStorage::empty()
         return;
     
     // Clear cache groups, caches, cache resources, and origins.
-    executeSQLCommand("DELETE FROM CacheGroups");
-    executeSQLCommand("DELETE FROM Caches");
-    executeSQLCommand("DELETE FROM Origins");
+    executeSQLCommand("DELETE FROM CacheGroups"_s);
+    executeSQLCommand("DELETE FROM Caches"_s);
+    executeSQLCommand("DELETE FROM Origins"_s);
     
     // Clear the storage IDs for the caches in memory.
     // The caches will still work, but cached resources will not be saved to disk 
@@ -1285,115 +1268,86 @@ void ApplicationCacheStorage::deleteTables()
     
 bool ApplicationCacheStorage::shouldStoreResourceAsFlatFile(ApplicationCacheResource* resource)
 {
-    return resource->response().mimeType().startsWith("audio/", false) 
-        || resource->response().mimeType().startsWith("video/", false);
+    auto& type = resource->response().mimeType();
+    return startsWithLettersIgnoringASCIICase(type, "audio/"_s) || startsWithLettersIgnoringASCIICase(type, "video/"_s);
 }
     
-bool ApplicationCacheStorage::writeDataToUniqueFileInDirectory(SharedBuffer& data, const String& directory, String& path, const String& fileExtension)
+bool ApplicationCacheStorage::writeDataToUniqueFileInDirectory(FragmentedSharedBuffer& data, const String& directory, String& path, StringView fileExtension)
 {
     String fullPath;
     
     do {
-        path = encodeForFileName(createCanonicalUUIDString()) + fileExtension;
-        // Guard against the above function being called on a platform which does not implement
-        // createCanonicalUUIDString().
-        ASSERT(!path.isEmpty());
+        path = makeString(UUID::createVersion4(), fileExtension);
         if (path.isEmpty())
             return false;
         
-        fullPath = pathByAppendingComponent(directory, path);
-    } while (directoryName(fullPath) != directory || fileExists(fullPath));
+        fullPath = FileSystem::pathByAppendingComponent(directory, path);
+    } while (FileSystem::parentPath(fullPath) != directory || FileSystem::fileExists(fullPath));
     
-    PlatformFileHandle handle = openFile(fullPath, OpenForWrite);
+    FileSystem::PlatformFileHandle handle = FileSystem::openFile(fullPath, FileSystem::FileOpenMode::Write);
     if (!handle)
         return false;
     
-    int64_t writtenBytes = writeToFile(handle, data.data(), data.size());
-    closeFile(handle);
+    int64_t writtenBytes = 0;
+    data.forEachSegment([&](auto& segment) {
+        writtenBytes += FileSystem::writeToFile(handle, segment.data(), segment.size());
+    });
+    FileSystem::closeFile(handle);
     
     if (writtenBytes != static_cast<int64_t>(data.size())) {
-        deleteFile(fullPath);
+        FileSystem::deleteFile(fullPath);
         return false;
     }
     
     return true;
 }
 
-bool ApplicationCacheStorage::getManifestURLs(Vector<URL>* urls)
+std::optional<Vector<URL>> ApplicationCacheStorage::manifestURLs()
 {
     SQLiteTransactionInProgressAutoCounter transactionCounter;
 
-    ASSERT(urls);
     openDatabase(false);
     if (!m_database.isOpen())
-        return false;
+        return std::nullopt;
 
-    SQLiteStatement selectURLs(m_database, "SELECT manifestURL FROM CacheGroups");
+    auto selectURLs = m_database.prepareStatement("SELECT manifestURL FROM CacheGroups"_s);
+    if (!selectURLs)
+        return std::nullopt;
 
-    if (selectURLs.prepare() != SQLITE_OK)
-        return false;
+    Vector<URL> urls;
+    while (selectURLs->step() == SQLITE_ROW)
+        urls.append(URL({ }, selectURLs->columnText(0)));
 
-    while (selectURLs.step() == SQLITE_ROW)
-        urls->append(URL(ParsedURLString, selectURLs.getColumnText(0)));
-
-    return true;
-}
-
-bool ApplicationCacheStorage::cacheGroupSize(const String& manifestURL, int64_t* size)
-{
-    SQLiteTransactionInProgressAutoCounter transactionCounter;
-
-    ASSERT(size);
-    openDatabase(false);
-    if (!m_database.isOpen())
-        return false;
-
-    SQLiteStatement statement(m_database, "SELECT sum(Caches.size) FROM Caches INNER JOIN CacheGroups ON Caches.cacheGroup=CacheGroups.id WHERE CacheGroups.manifestURL=?");
-    if (statement.prepare() != SQLITE_OK)
-        return false;
-
-    statement.bindText(1, manifestURL);
-
-    int result = statement.step();
-    if (result == SQLITE_DONE)
-        return false;
-
-    if (result != SQLITE_ROW) {
-        LOG_ERROR("Could not get the size of the cache group, error \"%s\"", m_database.lastErrorMsg());
-        return false;
-    }
-
-    *size = statement.getColumnInt64(0);
-    return true;
+    return urls;
 }
 
 bool ApplicationCacheStorage::deleteCacheGroupRecord(const String& manifestURL)
 {
     ASSERT(SQLiteDatabaseTracker::hasTransactionInProgress());
-    SQLiteStatement idStatement(m_database, "SELECT id FROM CacheGroups WHERE manifestURL=?");
-    if (idStatement.prepare() != SQLITE_OK)
+    auto idStatement = m_database.prepareStatement("SELECT id FROM CacheGroups WHERE manifestURL=?"_s);
+    if (!idStatement)
         return false;
 
-    idStatement.bindText(1, manifestURL);
+    idStatement->bindText(1, manifestURL);
 
-    int result = idStatement.step();
+    int result = idStatement->step();
     if (result != SQLITE_ROW)
         return false;
 
-    int64_t groupId = idStatement.getColumnInt64(0);
+    int64_t groupId = idStatement->columnInt64(0);
 
-    SQLiteStatement cacheStatement(m_database, "DELETE FROM Caches WHERE cacheGroup=?");
-    if (cacheStatement.prepare() != SQLITE_OK)
+    auto cacheStatement = m_database.prepareStatement("DELETE FROM Caches WHERE cacheGroup=?"_s);
+    if (!cacheStatement)
         return false;
 
-    SQLiteStatement groupStatement(m_database, "DELETE FROM CacheGroups WHERE id=?");
-    if (groupStatement.prepare() != SQLITE_OK)
+    auto groupStatement = m_database.prepareStatement("DELETE FROM CacheGroups WHERE id=?"_s);
+    if (!groupStatement)
         return false;
 
-    cacheStatement.bindInt64(1, groupId);
-    executeStatement(cacheStatement);
-    groupStatement.bindInt64(1, groupId);
-    executeStatement(groupStatement);
+    cacheStatement->bindInt64(1, groupId);
+    executeStatement(cacheStatement.value());
+    groupStatement->bindInt64(1, groupId);
+    executeStatement(groupStatement.value());
     return true;
 }
 
@@ -1404,8 +1358,7 @@ bool ApplicationCacheStorage::deleteCacheGroup(const String& manifestURL)
     SQLiteTransaction deleteTransaction(m_database);
 
     // Check to see if the group is in memory.
-    auto* group = m_cachesInMemory.get(manifestURL);
-    if (group)
+    if (auto* group = m_cachesInMemory.get(manifestURL))
         cacheGroupMadeObsolete(*group);
     else {
         // The cache group is not in memory, so remove it from the disk.
@@ -1449,35 +1402,35 @@ void ApplicationCacheStorage::checkForDeletedResources()
         return;
 
     // Select only the paths in DeletedCacheResources that do not also appear in CacheResourceData:
-    SQLiteStatement selectPaths(m_database, "SELECT DeletedCacheResources.path "
+    auto selectPaths = m_database.prepareStatement("SELECT DeletedCacheResources.path "
         "FROM DeletedCacheResources "
         "LEFT JOIN CacheResourceData "
         "ON DeletedCacheResources.path = CacheResourceData.path "
-        "WHERE (SELECT DeletedCacheResources.path == CacheResourceData.path) IS NULL");
+        "WHERE (SELECT DeletedCacheResources.path == CacheResourceData.path) IS NULL"_s);
     
-    if (selectPaths.prepare() != SQLITE_OK)
+    if (!selectPaths)
         return;
     
-    if (selectPaths.step() != SQLITE_ROW)
+    if (selectPaths->step() != SQLITE_ROW)
         return;
     
     do {
-        String path = selectPaths.getColumnText(0);
+        String path = selectPaths->columnText(0);
         if (path.isEmpty())
             continue;
         
-        String flatFileDirectory = pathByAppendingComponent(m_cacheDirectory, m_flatFileSubdirectoryName);
-        String fullPath = pathByAppendingComponent(flatFileDirectory, path);
+        String flatFileDirectory = FileSystem::pathByAppendingComponent(m_cacheDirectory, m_flatFileSubdirectoryName);
+        String fullPath = FileSystem::pathByAppendingComponent(flatFileDirectory, path);
         
         // Don't exit the flatFileDirectory! This should only happen if the "path" entry contains a directory 
         // component, but protect against it regardless.
-        if (directoryName(fullPath) != flatFileDirectory)
+        if (FileSystem::parentPath(fullPath) != flatFileDirectory)
             continue;
         
-        deleteFile(fullPath);
-    } while (selectPaths.step() == SQLITE_ROW);
+        FileSystem::deleteFile(fullPath);
+    } while (selectPaths->step() == SQLITE_ROW);
     
-    executeSQLCommand("DELETE FROM DeletedCacheResources");
+    executeSQLCommand("DELETE FROM DeletedCacheResources"_s);
 }
     
 long long ApplicationCacheStorage::flatFileAreaSize()
@@ -1486,36 +1439,34 @@ long long ApplicationCacheStorage::flatFileAreaSize()
     if (!m_database.isOpen())
         return 0;
     
-    SQLiteStatement selectPaths(m_database, "SELECT path FROM CacheResourceData WHERE path NOT NULL");
-
-    if (selectPaths.prepare() != SQLITE_OK) {
+    auto selectPaths = m_database.prepareStatement("SELECT path FROM CacheResourceData WHERE path NOT NULL"_s);
+    if (!selectPaths) {
         LOG_ERROR("Could not load flat file cache resource data, error \"%s\"", m_database.lastErrorMsg());
         return 0;
     }
 
     long long totalSize = 0;
-    String flatFileDirectory = pathByAppendingComponent(m_cacheDirectory, m_flatFileSubdirectoryName);
-    while (selectPaths.step() == SQLITE_ROW) {
-        String path = selectPaths.getColumnText(0);
-        String fullPath = pathByAppendingComponent(flatFileDirectory, path);
-        long long pathSize = 0;
-        if (!getFileSize(fullPath, pathSize))
-            continue;
-        totalSize += pathSize;
+    String flatFileDirectory = FileSystem::pathByAppendingComponent(m_cacheDirectory, m_flatFileSubdirectoryName);
+    while (selectPaths->step() == SQLITE_ROW) {
+        auto fullPath = FileSystem::pathByAppendingComponent(flatFileDirectory, selectPaths->columnText(0));
+        totalSize += FileSystem::fileSize(fullPath).value_or(0);
     }
     
     return totalSize;
 }
 
-void ApplicationCacheStorage::getOriginsWithCache(HashSet<RefPtr<SecurityOrigin>>& origins)
+HashSet<SecurityOriginData> ApplicationCacheStorage::originsWithCache()
 {
-    Vector<URL> urls;
-    getManifestURLs(&urls);
+    auto urls = manifestURLs();
+    if (!urls)
+        return { };
 
     // Multiple manifest URLs might share the same SecurityOrigin, so we might be creating extra, wasted origins here.
     // The current schema doesn't allow for a more efficient way of building this list.
-    for (auto& url : urls)
-        origins.add(SecurityOrigin::create(url));
+    HashSet<SecurityOriginData> origins;
+    for (auto& url : *urls)
+        origins.add(SecurityOriginData::fromURL(url));
+    return origins;
 }
 
 void ApplicationCacheStorage::deleteAllEntries()
@@ -1526,55 +1477,45 @@ void ApplicationCacheStorage::deleteAllEntries()
 
 void ApplicationCacheStorage::deleteAllCaches()
 {
-    HashSet<RefPtr<SecurityOrigin>> origins;
-
-    getOriginsWithCache(origins);
+    auto origins = originsWithCache();
     for (auto& origin : origins)
-        deleteCacheForOrigin(*origin);
+        deleteCacheForOrigin(origin);
 
     vacuumDatabaseFile();
 }
 
-void ApplicationCacheStorage::deleteCacheForOrigin(const SecurityOrigin& securityOrigin)
+void ApplicationCacheStorage::deleteCacheForOrigin(const SecurityOriginData& securityOrigin)
 {
-    Vector<URL> urls;
-    if (!getManifestURLs(&urls)) {
+    auto urls = manifestURLs();
+    if (!urls) {
         LOG_ERROR("Failed to retrieve ApplicationCache manifest URLs");
         return;
     }
 
-    URL originURL(URL(), securityOrigin.toString());
+    URL originURL = securityOrigin.toURL();
 
-    for (const auto& url : urls) {
+    for (const auto& url : *urls) {
         if (!protocolHostAndPortAreEqual(url, originURL))
             continue;
 
         if (auto* group = findInMemoryCacheGroup(url))
             group->makeObsolete();
         else
-            deleteCacheGroup(url);
+            deleteCacheGroup(url.string());
     }
 }
 
-int64_t ApplicationCacheStorage::diskUsageForOrigin(const SecurityOrigin& securityOrigin)
+int64_t ApplicationCacheStorage::diskUsageForOrigin(const SecurityOriginData& securityOrigin)
 {
     int64_t usage = 0;
-    calculateUsageForOrigin(&securityOrigin, usage);
+    calculateUsageForOrigin(securityOrigin, usage);
     return usage;
 }
 
 ApplicationCacheStorage::ApplicationCacheStorage(const String& cacheDirectory, const String& flatFileSubdirectoryName)
     : m_cacheDirectory(cacheDirectory)
     , m_flatFileSubdirectoryName(flatFileSubdirectoryName)
-    , m_maximumSize(ApplicationCacheStorage::noQuota())
-    , m_isMaximumSizeReached(false)
-    , m_defaultOriginQuota(ApplicationCacheStorage::noQuota())
 {
 }
 
-Ref<ApplicationCacheStorage> ApplicationCacheStorage::create(const String& cacheDirectory, const String& flatFileSubdirectoryName)
-{
-    return adoptRef(*new ApplicationCacheStorage(cacheDirectory, flatFileSubdirectoryName));
-}
-
-}
+} // namespace WebCore

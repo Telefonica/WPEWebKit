@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,17 +28,34 @@
 #if ENABLE(PAYMENT_REQUEST)
 
 #include "Event.h"
-
-namespace JSC {
-class JSPromise;
-}
+#include "PaymentRequestUpdateEventInit.h"
 
 namespace WebCore {
 
-class PaymentRequestUpdateEvent final : public Event {
+class DOMPromise;
+struct PaymentRequestUpdateEventInit;
+
+class PaymentRequestUpdateEvent : public Event {
+    WTF_MAKE_ISO_ALLOCATED(PaymentRequestUpdateEvent);
 public:
+    template <typename... Args> static Ref<PaymentRequestUpdateEvent> create(Args&&... args)
+    {
+        return adoptRef(*new PaymentRequestUpdateEvent(std::forward<Args>(args)...));
+    }
     ~PaymentRequestUpdateEvent();
-    void updateWith(JSC::JSPromise*);
+    ExceptionOr<void> updateWith(Ref<DOMPromise>&&);
+
+    bool didCallUpdateWith() const { return m_waitForUpdate; }
+
+protected:
+    explicit PaymentRequestUpdateEvent(const AtomString& type);
+    PaymentRequestUpdateEvent(const AtomString& type, const PaymentRequestUpdateEventInit&);
+
+    // Event
+    EventInterface eventInterface() const override;
+
+private:
+    bool m_waitForUpdate { false };
 };
 
 } // namespace WebCore

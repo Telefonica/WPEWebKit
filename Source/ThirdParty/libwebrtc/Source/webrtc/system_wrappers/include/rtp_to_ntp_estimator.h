@@ -8,65 +8,65 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_SYSTEM_WRAPPERS_INCLUDE_RTP_TO_NTP_ESTIMATOR_H_
-#define WEBRTC_SYSTEM_WRAPPERS_INCLUDE_RTP_TO_NTP_ESTIMATOR_H_
+#ifndef SYSTEM_WRAPPERS_INCLUDE_RTP_TO_NTP_ESTIMATOR_H_
+#define SYSTEM_WRAPPERS_INCLUDE_RTP_TO_NTP_ESTIMATOR_H_
+
+#include <stdint.h>
 
 #include <list>
 
-#include "webrtc/system_wrappers/include/ntp_time.h"
-#include "webrtc/typedefs.h"
+#include "absl/types/optional.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/numerics/sequence_number_unwrapper.h"
+#include "system_wrappers/include/ntp_time.h"
 
 namespace webrtc {
-// Class for converting an RTP timestamp to the NTP domain in milliseconds.
+
+// Converts an RTP timestamp to the NTP domain.
 // The class needs to be trained with (at least 2) RTP/NTP timestamp pairs from
 // RTCP sender reports before the convertion can be done.
 class RtpToNtpEstimator {
  public:
-  RtpToNtpEstimator();
-  ~RtpToNtpEstimator();
+  static constexpr int kMaxInvalidSamples = 3;
+
+  RtpToNtpEstimator() = default;
+  RtpToNtpEstimator(const RtpToNtpEstimator&) = delete;
+  RtpToNtpEstimator& operator=(const RtpToNtpEstimator&) = delete;
+  ~RtpToNtpEstimator() = default;
+
+  enum UpdateResult { kInvalidMeasurement, kSameMeasurement, kNewMeasurement };
+  // Updates measurements with RTP/NTP timestamp pair from a RTCP sender report.
+  UpdateResult UpdateMeasurements(NtpTime ntp, uint32_t rtp_timestamp);
+
+  // Converts an RTP timestamp to the NTP domain.
+  // Returns invalid NtpTime (i.e. NtpTime(0)) on failure.
+  NtpTime Estimate(uint32_t rtp_timestamp) const;
+
+  // Returns estimated rtp_timestamp frequency, or 0 on failure.
+  double EstimatedFrequencyKhz() const;
+
+ private:
+  // Estimated parameters from RTP and NTP timestamp pairs in `measurements_`.
+  // Defines linear estimation: NtpTime (in units of 1s/2^32) =
+  //   `Parameters::slope` * rtp_timestamp + `Parameters::offset`.
+  struct Parameters {
+    double slope;
+    double offset;
+  };
 
   // RTP and NTP timestamp pair from a RTCP SR report.
   struct RtcpMeasurement {
-    RtcpMeasurement(uint32_t ntp_secs, uint32_t ntp_frac, uint32_t timestamp);
-    bool IsEqual(const RtcpMeasurement& other) const;
-
     NtpTime ntp_time;
-    uint32_t rtp_timestamp;
+    int64_t unwrapped_rtp_timestamp;
   };
 
-  // Estimated parameters from RTP and NTP timestamp pairs in |measurements_|.
-  struct Parameters {
-    double frequency_khz = 0.0;
-    double offset_ms = 0.0;
-    bool calculated = false;
-  };
-
-  // Updates measurements with RTP/NTP timestamp pair from a RTCP sender report.
-  // |new_rtcp_sr| is set to true if a new report is added.
-  bool UpdateMeasurements(uint32_t ntp_secs,
-                          uint32_t ntp_frac,
-                          uint32_t rtp_timestamp,
-                          bool* new_rtcp_sr);
-
-  // Converts an RTP timestamp to the NTP domain in milliseconds.
-  // Returns true on success, false otherwise.
-  bool Estimate(int64_t rtp_timestamp, int64_t* rtp_timestamp_ms) const;
-
-  const Parameters& params() const { return params_; }
-
- private:
   void UpdateParameters();
 
+  int consecutive_invalid_samples_ = 0;
   std::list<RtcpMeasurement> measurements_;
-  Parameters params_;
+  absl::optional<Parameters> params_;
+  mutable RtpTimestampUnwrapper unwrapper_;
 };
-
-// Returns:
-//  1: forward wrap around.
-//  0: no wrap around.
-// -1: backwards wrap around (i.e. reordering).
-int CheckForWrapArounds(uint32_t new_timestamp, uint32_t old_timestamp);
-
 }  // namespace webrtc
 
-#endif  // WEBRTC_SYSTEM_WRAPPERS_INCLUDE_RTP_TO_NTP_ESTIMATOR_H_
+#endif  // SYSTEM_WRAPPERS_INCLUDE_RTP_TO_NTP_ESTIMATOR_H_

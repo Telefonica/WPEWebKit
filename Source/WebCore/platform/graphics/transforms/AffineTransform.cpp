@@ -31,34 +31,12 @@
 #include "FloatQuad.h"
 #include "FloatRect.h"
 #include "IntRect.h"
+#include "Region.h"
 #include "TransformationMatrix.h"
+#include <wtf/MathExtras.h>
 #include <wtf/text/TextStream.h>
 
-#include <wtf/MathExtras.h>
-
 namespace WebCore {
-
-#if COMPILER(MSVC)
-AffineTransform::AffineTransform()
-{
-    m_transform = { 1, 0, 0, 1, 0, 0 };
-}
-
-AffineTransform::AffineTransform(double a, double b, double c, double d, double e, double f)
-{
-    m_transform = { a, b, c, d, e, f };
-}
-#else
-AffineTransform::AffineTransform()
-    : m_transform { { 1, 0, 0, 1, 0, 0 } }
-{
-}
-
-AffineTransform::AffineTransform(double a, double b, double c, double d, double e, double f)
-    : m_transform{ { a, b, c, d, e, f } }
-{
-}
-#endif
 
 void AffineTransform::makeIdentity()
 {
@@ -84,12 +62,12 @@ bool AffineTransform::isIdentity() const
 
 double AffineTransform::xScale() const
 {
-    return sqrt(m_transform[0] * m_transform[0] + m_transform[1] * m_transform[1]);
+    return std::hypot(m_transform[0], m_transform[1]);
 }
 
 double AffineTransform::yScale() const
 {
-    return sqrt(m_transform[2] * m_transform[2] + m_transform[3] * m_transform[3]);
+    return std::hypot(m_transform[2], m_transform[3]);
 }
 
 static double det(const std::array<double, 6>& transform)
@@ -334,7 +312,22 @@ FloatQuad AffineTransform::mapQuad(const FloatQuad& q) const
     return result;
 }
 
-void AffineTransform::blend(const AffineTransform& from, double progress)
+Region AffineTransform::mapRegion(const Region& region) const
+{
+    if (isIdentityOrTranslation()) {
+        Region mappedRegion(region);
+        mappedRegion.translate(roundedIntSize(FloatSize(narrowPrecisionToFloat(m_transform[4]), narrowPrecisionToFloat(m_transform[5]))));
+        return mappedRegion;
+    }
+
+    Region mappedRegion;
+    for (auto& rect : region.rects())
+        mappedRegion.unite(mapRect(rect));
+
+    return mappedRegion;
+}
+
+void AffineTransform::blend(const AffineTransform& from, double progress, CompositeOperation compositeOperation)
 {
     DecomposedType srA, srB;
 
@@ -368,6 +361,18 @@ void AffineTransform::blend(const AffineTransform& from, double progress)
     srA.remainderD += progress * (srB.remainderD - srA.remainderD);
     srA.translateX += progress * (srB.translateX - srA.translateX);
     srA.translateY += progress * (srB.translateY - srA.translateY);
+
+    if (compositeOperation != CompositeOperation::Replace) {
+        srA.scaleX += srA.scaleX;
+        srA.scaleY += srA.scaleY;
+        srA.angle += srA.angle;
+        srA.remainderA += srA.remainderA;
+        srA.remainderB += srA.remainderB;
+        srA.remainderC += srA.remainderC;
+        srA.remainderD += srA.remainderD;
+        srA.translateX += srA.translateX;
+        srA.translateY += srA.translateY;
+    }
 
     this->recompose(srA);
 }

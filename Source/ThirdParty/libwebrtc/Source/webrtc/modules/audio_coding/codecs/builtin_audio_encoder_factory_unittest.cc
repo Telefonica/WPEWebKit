@@ -8,13 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "api/audio_codecs/builtin_audio_encoder_factory.h"
+
 #include <limits>
 #include <memory>
 #include <vector>
 
-#include "webrtc/api/audio_codecs/builtin_audio_encoder_factory.h"
-#include "webrtc/test/gmock.h"
-#include "webrtc/test/gtest.h"
+#include "rtc_base/numerics/safe_conversions.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
@@ -42,7 +44,7 @@ TEST_P(AudioEncoderFactoryTest, CanConstructAllSupportedEncoders) {
   auto supported_encoders = factory->GetSupportedEncoders();
   for (const auto& spec : supported_encoders) {
     auto info = factory->QueryAudioEncoder(spec.format);
-    auto encoder = factory->MakeAudioEncoder(127, spec.format);
+    auto encoder = factory->MakeAudioEncoder(127, spec.format, absl::nullopt);
     EXPECT_TRUE(encoder);
     EXPECT_EQ(encoder->SampleRateHz(), info->sample_rate_hz);
     EXPECT_EQ(encoder->NumChannels(), info->num_channels);
@@ -55,11 +57,12 @@ TEST_P(AudioEncoderFactoryTest, CanRunAllSupportedEncoders) {
   auto factory = GetParam();
   auto supported_encoders = factory->GetSupportedEncoders();
   for (const auto& spec : supported_encoders) {
-    auto encoder = factory->MakeAudioEncoder(kTestPayloadType, spec.format);
+    auto encoder =
+        factory->MakeAudioEncoder(kTestPayloadType, spec.format, absl::nullopt);
     EXPECT_TRUE(encoder);
     encoder->Reset();
-    const int num_samples =
-        encoder->SampleRateHz() * encoder->NumChannels() / 100;
+    const int num_samples = rtc::checked_cast<int>(
+        encoder->SampleRateHz() * encoder->NumChannels() / 100);
     rtc::Buffer out;
     rtc::BufferT<int16_t> audio;
     audio.SetData(num_samples, [](rtc::ArrayView<int16_t> audio) {
@@ -101,9 +104,9 @@ TEST_P(AudioEncoderFactoryTest, CanRunAllSupportedEncoders) {
   }
 }
 
-INSTANTIATE_TEST_CASE_P(BuiltinAudioEncoderFactoryTest,
-                        AudioEncoderFactoryTest,
-                        ::testing::Values(CreateBuiltinAudioEncoderFactory()));
+INSTANTIATE_TEST_SUITE_P(BuiltinAudioEncoderFactoryTest,
+                         AudioEncoderFactoryTest,
+                         ::testing::Values(CreateBuiltinAudioEncoderFactory()));
 
 TEST(BuiltinAudioEncoderFactoryTest, SupportsTheExpectedFormats) {
   using ::testing::ElementsAreArray;
@@ -114,6 +117,7 @@ TEST(BuiltinAudioEncoderFactoryTest, SupportsTheExpectedFormats) {
 
   const std::vector<SdpAudioFormat> supported_formats = [&specs] {
     std::vector<SdpAudioFormat> formats;
+    formats.reserve(specs.size());
     for (const auto& spec : specs) {
       formats.push_back(spec.format);
     }
@@ -130,9 +134,7 @@ TEST(BuiltinAudioEncoderFactoryTest, SupportsTheExpectedFormats) {
 #ifdef WEBRTC_CODEC_ISAC
     {"isac", 32000, 1},
 #endif
-#ifdef WEBRTC_CODEC_G722
     {"G722", 8000, 1},
-#endif
 #ifdef WEBRTC_CODEC_ILBC
     {"ilbc", 8000, 1},
 #endif
@@ -142,4 +144,35 @@ TEST(BuiltinAudioEncoderFactoryTest, SupportsTheExpectedFormats) {
 
   ASSERT_THAT(supported_formats, ElementsAreArray(expected_formats));
 }
+
+// Tests that using more channels than the maximum does not work.
+TEST(BuiltinAudioEncoderFactoryTest, MaxNrOfChannels) {
+  rtc::scoped_refptr<AudioEncoderFactory> aef =
+      CreateBuiltinAudioEncoderFactory();
+  std::vector<std::string> codecs = {
+#ifdef WEBRTC_CODEC_OPUS
+    "opus",
+#endif
+#if defined(WEBRTC_CODEC_ISAC) || defined(WEBRTC_CODEC_ISACFX)
+    "isac",
+#endif
+#ifdef WEBRTC_CODEC_ILBC
+    "ilbc",
+#endif
+    "pcmu",
+    "pcma",
+    "l16",
+    "G722",
+    "G711",
+  };
+
+  for (auto codec : codecs) {
+    EXPECT_FALSE(aef->MakeAudioEncoder(
+        /*payload_type=*/111,
+        /*format=*/
+        SdpAudioFormat(codec, 32000, AudioEncoder::kMaxNumberOfChannels + 1),
+        /*codec_pair_id=*/absl::nullopt));
+  }
+}
+
 }  // namespace webrtc

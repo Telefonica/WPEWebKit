@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBDatabaseInfo.h"
 #include "IDBKeyData.h"
 #include "IDBTransactionInfo.h"
@@ -45,6 +43,7 @@ class MemoryObjectStore;
 typedef HashMap<IDBKeyData, ThreadSafeDataBuffer, IDBKeyDataHash, IDBKeyDataHashTraits> KeyValueMap;
 
 class MemoryBackingStoreTransaction {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     static std::unique_ptr<MemoryBackingStoreTransaction> create(MemoryIDBBackingStore&, const IDBTransactionInfo&);
 
@@ -103,5 +102,3 @@ private:
 
 } // namespace IDBServer
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

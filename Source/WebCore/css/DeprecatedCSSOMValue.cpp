@@ -30,27 +30,6 @@
 #include "DeprecatedCSSOMValueList.h"
 
 namespace WebCore {
-    
-template<class ChildClassType>
-inline static bool compareCSSOMValues(const DeprecatedCSSOMValue& first, const DeprecatedCSSOMValue& second)
-{
-    return static_cast<const ChildClassType&>(first).equals(static_cast<const ChildClassType&>(second));
-}
-
-bool DeprecatedCSSOMValue::equals(const DeprecatedCSSOMValue& other) const
-{
-    if (m_classType == other.m_classType) {
-        switch (m_classType) {
-        case DeprecatedComplexValueClass:
-            return compareCSSOMValues<DeprecatedCSSOMComplexValue>(*this, other);
-        case DeprecatedPrimitiveValueClass:
-            return compareCSSOMValues<DeprecatedCSSOMPrimitiveValue>(*this, other);
-        case DeprecatedValueListClass:
-            return compareCSSOMValues<DeprecatedCSSOMValueList>(*this, other);
-        }
-    }
-    return false;
-}
 
 void DeprecatedCSSOMValue::destroy()
 {
@@ -80,7 +59,7 @@ unsigned DeprecatedCSSOMValue::cssValueType() const
     case DeprecatedPrimitiveValueClass:
         return downcast<DeprecatedCSSOMPrimitiveValue>(*this).cssValueType();
     case DeprecatedValueListClass:
-        return downcast<DeprecatedCSSOMValueList>(*this).cssValueType();
+        return CSS_VALUE_LIST;
     }
     ASSERT_NOT_REACHED();
     return CSS_CUSTOM;
@@ -97,7 +76,7 @@ String DeprecatedCSSOMValue::cssText() const
         return downcast<DeprecatedCSSOMValueList>(*this).cssText();
     }
     ASSERT_NOT_REACHED();
-    return "";
+    return emptyString();
 }
 
 }

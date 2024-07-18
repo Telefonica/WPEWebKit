@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,13 +28,11 @@
 
 #include "HandleBlock.h"
 #include "HandleBlockInlines.h"
-#include "JSObject.h"
-#include "JSCInlines.h"
-#include <wtf/DataLog.h>
+#include "JSCJSValueInlines.h"
 
 namespace JSC {
 
-HandleSet::HandleSet(VM* vm)
+HandleSet::HandleSet(VM& vm)
     : m_vm(vm)
 {
     grow();
@@ -58,51 +56,32 @@ void HandleSet::grow()
     }
 }
 
-void HandleSet::visitStrongHandles(SlotVisitor& visitor)
+template<typename Visitor>
+void HandleSet::visitStrongHandles(Visitor& visitor)
 {
-    Node* end = m_strongList.end();
-    for (Node* node = m_strongList.begin(); node != end; node = node->next()) {
+    for (Node& node : m_strongList) {
 #if ENABLE(GC_VALIDATION)
-        RELEASE_ASSERT(isLiveNode(node));
+        RELEASE_ASSERT(isLiveNode(&node));
 #endif
-        visitor.appendUnbarriered(*node->slot());
+        visitor.appendUnbarriered(*node.slot());
     }
 }
 
-void HandleSet::writeBarrier(HandleSlot slot, const JSValue& value)
-{
-    if (!value == !*slot && slot->isCell() == value.isCell())
-        return;
-
-    Node* node = toNode(slot);
-#if ENABLE(GC_VALIDATION)
-    RELEASE_ASSERT(isLiveNode(node));
-#endif
-    SentinelLinkedList<Node>::remove(node);
-    if (!value || !value.isCell()) {
-        m_immediateList.push(node);
-        return;
-    }
-
-    m_strongList.push(node);
-#if ENABLE(GC_VALIDATION)
-    RELEASE_ASSERT(isLiveNode(node));
-#endif
-}
+template void HandleSet::visitStrongHandles(AbstractSlotVisitor&);
+template void HandleSet::visitStrongHandles(SlotVisitor&);
 
 unsigned HandleSet::protectedGlobalObjectCount()
 {
     unsigned count = 0;
-    Node* end = m_strongList.end();
-    for (Node* node = m_strongList.begin(); node != end; node = node->next()) {
-        JSValue value = *node->slot();
+    for (Node& node : m_strongList) {
+        JSValue value = *node.slot();
         if (value.isObject() && asObject(value.asCell())->isGlobalObject())
             count++;
     }
     return count;
 }
 
-#if ENABLE(GC_VALIDATION) || !ASSERT_DISABLED
+#if ENABLE(GC_VALIDATION) || ASSERT_ENABLED
 bool HandleSet::isLiveNode(Node* node)
 {
     if (node->prev()->next() != node)
@@ -112,6 +91,6 @@ bool HandleSet::isLiveNode(Node* node)
         
     return true;
 }
-#endif
+#endif // ENABLE(GC_VALIDATION) || ASSERT_ENABLED
 
 } // namespace JSC

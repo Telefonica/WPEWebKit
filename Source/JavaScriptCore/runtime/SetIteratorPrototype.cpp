@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2016 Apple, Inc. All rights reserved.
+ * Copyright (C) 2013-2019 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,16 +31,15 @@
 
 namespace JSC {
 
-const ClassInfo SetIteratorPrototype::s_info = { "Set Iterator", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(SetIteratorPrototype) };
+const ClassInfo SetIteratorPrototype::s_info = { "Set Iterator"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(SetIteratorPrototype) };
 
 void SetIteratorPrototype::finishCreation(VM& vm, JSGlobalObject* globalObject)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
-    vm.prototypeMap.addPrototype(this);
+    ASSERT(inherits(info()));
 
-    JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION("next", setIteratorPrototypeNextCodeGenerator, static_cast<unsigned>(PropertyAttribute::DontEnum));
-    putDirectWithoutTransition(vm, vm.propertyNames->toStringTagSymbol, jsString(&vm, "Set Iterator"), PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly);
+    JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION(vm.propertyNames->next, setIteratorPrototypeNextCodeGenerator, static_cast<unsigned>(PropertyAttribute::DontEnum));
+    JSC_TO_STRING_TAG_WITHOUT_TRANSITION();
 }
 
 }

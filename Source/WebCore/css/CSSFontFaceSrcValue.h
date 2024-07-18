@@ -27,25 +27,29 @@
 
 #include "CSSValue.h"
 #include "CachedResourceHandle.h"
+#include "ResourceLoaderOptions.h"
 #include <wtf/Function.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class CachedFont;
-class Document;
+class FontLoadRequest;
 class SVGFontFaceElement;
+class ScriptExecutionContext;
 
 class CSSFontFaceSrcValue final : public CSSValue {
 public:
-    static Ref<CSSFontFaceSrcValue> create(const String& resource)
+    static Ref<CSSFontFaceSrcValue> create(const String& resource, LoadedFromOpaqueSource loadedFromOpaqueSource)
     {
-        return adoptRef(*new CSSFontFaceSrcValue(resource, false));
+        return adoptRef(*new CSSFontFaceSrcValue(resource, false, loadedFromOpaqueSource));
     }
     static Ref<CSSFontFaceSrcValue> createLocal(const String& resource)
     {
-        return adoptRef(*new CSSFontFaceSrcValue(resource, true));
+        return adoptRef(*new CSSFontFaceSrcValue(resource, true, LoadedFromOpaqueSource::No));
     }
+
+    ~CSSFontFaceSrcValue();
 
     const String& resource() const { return m_resource; }
     const String& format() const { return m_format; }
@@ -55,42 +59,37 @@ public:
 
     bool isSupportedFormat() const;
 
-#if ENABLE(SVG_FONTS)
     bool isSVGFontFaceSrc() const;
     bool isSVGFontTarget() const;
 
-    SVGFontFaceElement* svgFontFaceElement() const { return m_svgFontFaceElement; }
-    void setSVGFontFaceElement(SVGFontFaceElement* element) { m_svgFontFaceElement = element; }
-#endif
+    SVGFontFaceElement* svgFontFaceElement() const;
+    void setSVGFontFaceElement(SVGFontFaceElement*);
 
     String customCSSText() const;
 
-    bool traverseSubresources(const WTF::Function<bool (const CachedResource&)>& handler) const;
+    bool traverseSubresources(const Function<bool(const CachedResource&)>& handler) const;
 
-    CachedFont* cachedFont(Document*, bool isSVG, bool isInitiatingElementInUserAgentShadowTree);
+    std::unique_ptr<FontLoadRequest> fontLoadRequest(ScriptExecutionContext*, bool isSVG, bool isInitiatingElementInUserAgentShadowTree);
 
     bool equals(const CSSFontFaceSrcValue&) const;
 
 private:
-    CSSFontFaceSrcValue(const String& resource, bool local)
+    CSSFontFaceSrcValue(const String& resource, bool local, LoadedFromOpaqueSource loadedFromOpaqueSource)
         : CSSValue(FontFaceSrcClass)
         , m_resource(resource)
         , m_isLocal(local)
-#if ENABLE(SVG_FONTS)
+        , m_loadedFromOpaqueSource(loadedFromOpaqueSource)
         , m_svgFontFaceElement(0)
-#endif
     {
     }
 
     String m_resource;
     String m_format;
     bool m_isLocal;
+    LoadedFromOpaqueSource m_loadedFromOpaqueSource { LoadedFromOpaqueSource::No };
 
     CachedResourceHandle<CachedFont> m_cachedFont;
-
-#if ENABLE(SVG_FONTS)
-    SVGFontFaceElement* m_svgFontFaceElement;
-#endif
+    WeakPtr<SVGFontFaceElement> m_svgFontFaceElement;
 };
 
 } // namespace WebCore

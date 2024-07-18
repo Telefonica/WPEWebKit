@@ -64,12 +64,14 @@ typedef enum
 struct _WebKitEditorState {
     GObject parent;
 
+    /*< private >*/
     WebKitEditorStatePrivate *priv;
 };
 
 struct _WebKitEditorStateClass {
     GObjectClass parent_class;
 
+    /*< private >*/
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
@@ -81,6 +83,21 @@ webkit_editor_state_get_type              (void);
 
 WEBKIT_API guint
 webkit_editor_state_get_typing_attributes (WebKitEditorState *editor_state);
+
+WEBKIT_API gboolean
+webkit_editor_state_is_cut_available      (WebKitEditorState *editor_state);
+
+WEBKIT_API gboolean
+webkit_editor_state_is_copy_available     (WebKitEditorState *editor_state);
+
+WEBKIT_API gboolean
+webkit_editor_state_is_paste_available    (WebKitEditorState *editor_state);
+
+WEBKIT_API gboolean
+webkit_editor_state_is_undo_available     (WebKitEditorState *editor_state);
+
+WEBKIT_API gboolean
+webkit_editor_state_is_redo_available     (WebKitEditorState *editor_state);
 
 G_END_DECLS
 

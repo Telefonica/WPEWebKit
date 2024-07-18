@@ -31,11 +31,13 @@
     DOMString emailAddress;
     DOMString givenName;
     DOMString familyName;
-    [Conditional=APPLE_PAY_SESSION_V3] DOMString phoneticGivenName;
-    [Conditional=APPLE_PAY_SESSION_V3] DOMString phoneticFamilyName;
+    DOMString phoneticGivenName;
+    DOMString phoneticFamilyName;
     sequence<DOMString> addressLines;
+    DOMString subLocality;
     DOMString locality;
     DOMString postalCode;
+    DOMString subAdministrativeArea;
     DOMString administrativeArea;
     DOMString country;
     DOMString countryCode;

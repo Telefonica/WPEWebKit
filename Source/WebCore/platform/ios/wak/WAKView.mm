@@ -26,7 +26,7 @@
 #import "config.h"
 #import "WAKViewInternal.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "GraphicsContext.h"
 #import "WAKClipView.h"
@@ -38,21 +38,22 @@
 #import "WebCoreThreadMessage.h"
 #import "WebEvent.h"
 #import <wtf/Assertions.h>
+#import <wtf/NeverDestroyed.h>
 
 WEBCORE_EXPORT NSString *WAKViewFrameSizeDidChangeNotification =   @"WAKViewFrameSizeDidChangeNotification";
 WEBCORE_EXPORT NSString *WAKViewDidScrollNotification =            @"WAKViewDidScrollNotification";
 
-static WAKView *globalFocusView = nil;
+static RetainPtr<WAKView>& globalFocusView()
+{
+    static NeverDestroyed<RetainPtr<WAKView>> _globalFocusView;
+    return _globalFocusView;
+}
+
 static CGInterpolationQuality sInterpolationQuality;
 
 static void setGlobalFocusView(WAKView *view)
 {
-    if (view == globalFocusView)
-        return;
-
-    [view retain];
-    [globalFocusView release];
-    globalFocusView = view;
+    globalFocusView() = view;
 }
 
 static WAKScrollView *enclosingScrollView(WAKView *view)
@@ -130,47 +131,34 @@ static void notificationCallback (WKViewRef v, WKViewNotificationType type, void
 
 - (BOOL)_selfHandleEvent:(WebEvent *)event
 {
-    WebEventType type = event.type;
-    
-    switch (type) {
-        case WebEventMouseDown: {
-            [self mouseDown:event];
-            break;
-        }
-        case WebEventMouseUp: {
-            [self mouseUp:event];
-            break;
-        }
-        case WebEventMouseMoved: {
-            [self mouseMoved:event];
-            break;
-        }
-        case WebEventKeyDown: {
-            [self keyDown:event];
-            break;
-        }
-        case WebEventKeyUp: {
-            [self keyUp:event];
-            break;
-        }
-        case WebEventScrollWheel: {
-            [self scrollWheel:event];
-            break;
-        }
+    switch (event.type) {
+    case WebEventMouseDown:
+        [self mouseDown:event];
+        return YES;
+    case WebEventMouseUp:
+        [self mouseUp:event];
+        return YES;
+    case WebEventMouseMoved:
+        [self mouseMoved:event];
+        return YES;
+    case WebEventKeyDown:
+        [self keyDown:event];
+        return YES;
+    case WebEventKeyUp:
+        [self keyUp:event];
+        return YES;
+    case WebEventScrollWheel:
+        [self scrollWheel:event];
+        return YES;
+    case WebEventTouchBegin:
+    case WebEventTouchChange:
+    case WebEventTouchEnd:
+    case WebEventTouchCancel:
 #if ENABLE(TOUCH_EVENTS)
-        case WebEventTouchBegin:
-        case WebEventTouchChange:
-        case WebEventTouchEnd:
-        case WebEventTouchCancel: {
-            [self touch:event];
-            break;
-        }
+        [self touch:event];
 #endif
-        default:
-            ASSERT_NOT_REACHED();
-            break;
+        return YES;
     }
-    return YES;
 }
 
 - (NSResponder *)nextResponder
@@ -210,7 +198,7 @@ static void invalidateGStateCallback(WKViewRef view)
 {
     ASSERT(_viewRef);
     if (_viewRef->isa.classInfo == &WKViewClassInfo)
-        return [[[WAKView alloc] _initWithViewRef:_viewRef] autorelease];
+        return adoptNS([[WAKView alloc] _initWithViewRef:_viewRef]).autorelease();
     WKError ("unable to create wrapper for %s\n", _viewRef->isa.classInfo->name);
     return nil;
 }
@@ -221,7 +209,7 @@ static void invalidateGStateCallback(WKViewRef view)
     if (!self)
         return nil;
 
-    viewRef = (WKViewRef)WKRetain (viewR);
+    viewRef = static_cast<WKViewRef>(const_cast<void*>(WKRetain(viewR)));
     viewRef->wrapper = (void *)self;
 
     return self;
@@ -250,7 +238,7 @@ static void invalidateGStateCallback(WKViewRef view)
 
 - (void)dealloc
 {
-    [[[subviewReferences copy] autorelease] makeObjectsPerformSelector:@selector(removeFromSuperview)];
+    [adoptNS([subviewReferences copy]) makeObjectsPerformSelector:@selector(removeFromSuperview)];
 
     if (viewRef) {
         _WKViewSetViewContext (viewRef, 0);
@@ -259,7 +247,7 @@ static void invalidateGStateCallback(WKViewRef view)
     }
     
     [subviewReferences release];
-    
+
     [super dealloc];
 }
 
@@ -288,7 +276,7 @@ static void _WAKCopyWrapper(const void *value, void *context)
         return;
     
     NSMutableArray *array = (NSMutableArray *)context;
-    WAKView *view = WAKViewForWKViewRef((WKViewRef)value);
+    WAKView *view = WAKViewForWKViewRef(static_cast<WKViewRef>(const_cast<void*>(value)));
     if (view)
         [array addObject:view];
 }
@@ -297,15 +285,15 @@ static void _WAKCopyWrapper(const void *value, void *context)
 {
     CFArrayRef subviews = WKViewGetSubviews([self _viewRef]);
     if (!subviews)
-        return [NSArray array];
+        return @[ ];
     
     CFIndex count = CFArrayGetCount(subviews);
     if (count == 0)
-        return [NSArray array];
+        return @[ ];
     
     NSMutableArray *result = [NSMutableArray arrayWithCapacity:count];
     if (!result)
-        return [NSArray array];
+        return @[ ];
     
     CFArrayApplyFunction(subviews, CFRangeMake(0, count), _WAKCopyWrapper, (void*)result);
     
@@ -341,13 +329,12 @@ static void _WAKCopyWrapper(const void *value, void *context)
 
 - (void)addSubview:(WAKView *)subview
 {
-    [subview retain];
+    auto protectedSubView = retainPtr(subview);
     [subview removeFromSuperview];
     WKViewAddSubview (viewRef, [subview _viewRef]);
     
     // Keep a reference to subview so it sticks around.
     [[self _subviewReferences] addObject:subview];
-    [subview release];
 }
 
 - (void)willRemoveSubview:(WAKView *)subview
@@ -357,10 +344,9 @@ static void _WAKCopyWrapper(const void *value, void *context)
 
 - (void)removeFromSuperview
 {
-    WAKView *oldSuperview = [[self superview] retain];
+    RetainPtr<WAKView> oldSuperview = [self superview];
     WKViewRemoveFromSuperview (viewRef);
     [[oldSuperview _subviewReferences] removeObject:self];
-    [oldSuperview release];
 }
 
 - (void)viewDidMoveToWindow
@@ -422,7 +408,7 @@ static void _WAKCopyWrapper(const void *value, void *context)
 
 + (WAKView *)focusView
 {
-    return globalFocusView;
+    return globalFocusView().get();
 }
 
 - (NSRect)bounds
@@ -484,15 +470,15 @@ static void _WAKCopyWrapper(const void *value, void *context)
 static CGInterpolationQuality toCGInterpolationQuality(WebCore::InterpolationQuality quality)
 {
     switch (quality) {
-    case WebCore::InterpolationDefault:
+    case WebCore::InterpolationQuality::Default:
         return kCGInterpolationDefault;
-    case WebCore::InterpolationNone:
+    case WebCore::InterpolationQuality::DoNotInterpolate:
         return kCGInterpolationNone;
-    case WebCore::InterpolationLow:
+    case WebCore::InterpolationQuality::Low:
         return kCGInterpolationLow;
-    case WebCore::InterpolationMedium:
+    case WebCore::InterpolationQuality::Medium:
         return kCGInterpolationMedium;
-    case WebCore::InterpolationHigh:
+    case WebCore::InterpolationQuality::High:
         return kCGInterpolationHigh;
     default:
         ASSERT_NOT_REACHED();
@@ -776,22 +762,20 @@ static CGInterpolationQuality toCGInterpolationQuality(WebCore::InterpolationQua
 
 - (void)_appendDescriptionToString:(NSMutableString *)info atLevel:(int)level
 {
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    @autoreleasepool {
+        if ([info length])
+            [info appendString:@"\n"];
 
-    if ([info length] != 0)
-        [info appendString:@"\n"];
+        for (int i = 1; i <= level; i++)
+            [info appendString:@"   | "];
 
-    for (int i = 1; i <= level; i++)
-        [info appendString:@"   | "];
+        [info appendString:[self description]];
 
-    [info appendString:[self description]];
-
-    for (WAKView *subview in [self subviews])
-        [subview _appendDescriptionToString:info atLevel:level + 1];
-
-    [pool release];
+        for (WAKView *subview in [self subviews])
+            [subview _appendDescriptionToString:info atLevel:level + 1];
+    }
 }
 
 @end
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

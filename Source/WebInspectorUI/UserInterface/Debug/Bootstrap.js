@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015 University of Washington.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,10 +24,24 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// This function is invoked after the inspector has loaded.
-WI.runBootstrapOperations = function() {
-    WI.showDebugUISetting = new WI.Setting("show-debug-ui", false);
+WI.isEngineeringBuild = true;
 
+// Disable Pause in Internal Scripts if Show Internal Scripts is dibbled.
+WI.settings.engineeringShowInternalScripts.addEventListener(WI.Setting.Event.Changed, function(event) {
+    if (!WI.settings.engineeringShowInternalScripts.value)
+        WI.settings.engineeringPauseForInternalScripts.value = false;
+}, WI.settings.engineeringPauseForInternalScripts);
+
+// Enable Show Internal Scripts if Pause in Internal Scripts is enabled.
+WI.settings.engineeringPauseForInternalScripts.addEventListener(WI.Setting.Event.Changed, function(event) {
+    if (WI.settings.engineeringPauseForInternalScripts.value)
+        WI.settings.engineeringShowInternalScripts.value = true;
+}, WI.settings.engineeringShowInternalScripts);
+
+WI.showDebugUISetting = new WI.Setting("show-debug-ui", false);
+
+// This function is invoked after the inspector has loaded and has a backend target.
+WI.runBootstrapOperations = function() {
     // Toggle Debug UI setting.
     new WI.KeyboardShortcut(WI.KeyboardShortcut.Modifier.Option | WI.KeyboardShortcut.Modifier.Shift | WI.KeyboardShortcut.Modifier.CommandOrControl, "D", () => {
         WI.showDebugUISetting.value = !WI.showDebugUISetting.value;
@@ -34,41 +49,133 @@ WI.runBootstrapOperations = function() {
 
     // Reload the Web Inspector.
     new WI.KeyboardShortcut(WI.KeyboardShortcut.Modifier.Option | WI.KeyboardShortcut.Modifier.Shift | WI.KeyboardShortcut.Modifier.CommandOrControl, "R", () => {
-        window.location.reload();
+        InspectorFrontendHost.reopen();
     });
 
-    const dumpMessagesToolTip = WI.unlocalizedString("Enable dump inspector messages to console");
+    // Toggle Inspector Messages Filtering.
+    let ignoreChangesToState = false;
+    const DumpMessagesState = {Off: "off", Filtering: "filtering", Everything: "everything"};
+    const dumpMessagesToolTip = WI.unlocalizedString("Enable dump inspector messages to console.\nShift-click to dump all inspector messages with no filtering.");
     const dumpMessagesActivatedToolTip = WI.unlocalizedString("Disable dump inspector messages to console");
-    let dumpMessagesToolbarItem = new WI.ActivateButtonToolbarItem("dump-messages", dumpMessagesToolTip, dumpMessagesActivatedToolTip, "Images/Console.svg");
-    dumpMessagesToolbarItem.activated = InspectorBackend.dumpInspectorProtocolMessages;
-    dumpMessagesToolbarItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, () => {
-        InspectorBackend.dumpInspectorProtocolMessages = !InspectorBackend.dumpInspectorProtocolMessages;
-        dumpMessagesToolbarItem.activated = InspectorBackend.dumpInspectorProtocolMessages;
-    });
-    WI.settings.autoLogProtocolMessages.addEventListener(WI.Setting.Event.Changed, () => {
-        dumpMessagesToolbarItem.activated = InspectorBackend.dumpInspectorProtocolMessages;
-    });
-    WI.toolbar.addToolbarItem(dumpMessagesToolbarItem, WI.Toolbar.Section.CenterRight);
+    let dumpMessagesTabBarNavigationItem = new WI.ActivateButtonNavigationItem("dump-messages", dumpMessagesToolTip, dumpMessagesActivatedToolTip, "Images/Console.svg");
 
-    let inspectionLevel = InspectorFrontendHost ? InspectorFrontendHost.inspectionLevel() : 1;
-    const inspectInspectorToolTip = WI.unlocalizedString("Open Web Inspector [%d]").format(inspectionLevel + 1);
-    let inspectInspectorToolbarItem = new WI.ButtonToolbarItem("inspect-inspector", inspectInspectorToolTip);
-    inspectInspectorToolbarItem.element.textContent = inspectionLevel + 1;
-    inspectInspectorToolbarItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, () => {
-        InspectorFrontendHost.inspectInspector();
-    });
-    WI.toolbar.addToolbarItem(inspectInspectorToolbarItem, WI.Toolbar.Section.CenterRight);
-
-    function updateDebugUI()
-    {
-        dumpMessagesToolbarItem.hidden = !WI.showDebugUISetting.value;
-        inspectInspectorToolbarItem.hidden = !WI.showDebugUISetting.value;
+    function dumpMessagesCurrentState() {
+        if (!InspectorBackend.dumpInspectorProtocolMessages)
+            return DumpMessagesState.Off;
+        if (InspectorBackend.filterMultiplexingBackendInspectorProtocolMessages)
+            return DumpMessagesState.Filtering;
+        return DumpMessagesState.Everything;
     }
 
-    WI.showDebugUISetting.addEventListener(WI.Setting.Event.Changed, () => {
+    function applyDumpMessagesState(state) {
+        ignoreChangesToState = true;
+        switch (state) {
+        case DumpMessagesState.Off:
+            InspectorBackend.dumpInspectorProtocolMessages = false;
+            InspectorBackend.filterMultiplexingBackendInspectorProtocolMessages = false;
+            dumpMessagesTabBarNavigationItem.activated = false;
+            dumpMessagesTabBarNavigationItem.element.style.removeProperty("color");
+            break;
+        case DumpMessagesState.Filtering:
+            InspectorBackend.dumpInspectorProtocolMessages = true;
+            InspectorBackend.filterMultiplexingBackendInspectorProtocolMessages = true;
+            dumpMessagesTabBarNavigationItem.activated = true;
+            dumpMessagesTabBarNavigationItem.element.style.removeProperty("color");
+            break;
+        case DumpMessagesState.Everything:
+            InspectorBackend.dumpInspectorProtocolMessages = true;
+            InspectorBackend.filterMultiplexingBackendInspectorProtocolMessages = false;
+            dumpMessagesTabBarNavigationItem.activated = true;
+            dumpMessagesTabBarNavigationItem.element.style.color = "rgb(164, 41, 154)";
+            break;
+        }
+        ignoreChangesToState = false;
+    }
+
+    dumpMessagesTabBarNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, function(event) {
+        let nextState;
+        switch (dumpMessagesCurrentState()) {
+        case DumpMessagesState.Off:
+            nextState = WI.modifierKeys.shiftKey ? DumpMessagesState.Everything : DumpMessagesState.Filtering;
+            break;
+        case DumpMessagesState.Filtering:
+            nextState = WI.modifierKeys.shiftKey ? DumpMessagesState.Everything : DumpMessagesState.Off;
+            break;
+        case DumpMessagesState.Everything:
+            nextState = DumpMessagesState.Off;
+            break;
+        }
+        applyDumpMessagesState(nextState);
+    }, dumpMessagesTabBarNavigationItem);
+    WI.settings.protocolAutoLogMessages.addEventListener(WI.Setting.Event.Changed, function(event) {
+        if (ignoreChangesToState)
+            return;
+        applyDumpMessagesState(dumpMessagesCurrentState());
+    }, dumpMessagesTabBarNavigationItem);
+    applyDumpMessagesState(dumpMessagesCurrentState());
+
+    // Next Level Inspector.
+    let inspectionLevel = InspectorFrontendHost.inspectionLevel;
+    const inspectInspectorToolTip = WI.unlocalizedString("Open Web Inspector [%d]").format(inspectionLevel + 1);
+    let inspectInspectorTabBarNavigationItem = new WI.ButtonNavigationItem("inspect-inspector", inspectInspectorToolTip);
+    inspectInspectorTabBarNavigationItem.element.textContent = inspectionLevel + 1;
+    inspectInspectorTabBarNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, function(event) {
+        InspectorFrontendHost.inspectInspector();
+    }, inspectInspectorTabBarNavigationItem);
+
+    let groupNavigationItem = new WI.GroupNavigationItem([
+        dumpMessagesTabBarNavigationItem,
+        inspectInspectorTabBarNavigationItem,
+    ]);
+    WI.tabBar.addNavigationItemAfter(groupNavigationItem);
+
+    function setFocusDebugOutline() {
+        document.body.classList.toggle("focus-debug", WI.settings.debugOutlineFocusedElement.value);
+    }
+    WI.settings.debugOutlineFocusedElement.addEventListener(WI.Setting.Event.Changed, setFocusDebugOutline, WI.settings.debugOutlineFocusedElement);
+    setFocusDebugOutline();
+
+    function updateDebugUI() {
+        groupNavigationItem.hidden = !WI.showDebugUISetting.value;
+        WI.tabBar.needsLayout();
+    }
+
+    function updateMockWebExtensionTab() {
+        let mockData = {
+            extensionID: "1234567890ABCDEF",
+            extensionBundleIdentifier: "org.webkit.WebInspector.MockExtension",
+            displayName: WI.unlocalizedString("Mock Extension"),
+            tabName: WI.unlocalizedString("Mock"),
+            tabIconURL: "Images/Info.svg",
+            sourceURL: "Debug/MockWebExtensionTab.html",
+        };
+
+        // Simulates the steps taken by WebInspectorUIExtensionController to create an extension tab in WebInspectorUI.
+        if (!WI.settings.engineeringShowMockWebExtensionTab.value) {
+            if (WI.sharedApp.extensionController.registeredExtensionIDs.has(mockData.extensionID))
+                InspectorFrontendAPI.unregisterExtension(mockData.extensionID);
+
+            return;
+        }
+
+        let error = InspectorFrontendAPI.registerExtension(mockData.extensionID, mockData.extensionBundleIdentifier, mockData.displayName);
+        if (error) {
+            WI.reportInternalError("Problem creating mock web extension: " + error);
+            return;
+        }
+
+        let result = InspectorFrontendAPI.createTabForExtension(mockData.extensionID, mockData.tabName, mockData.tabIconURL, mockData.sourceURL);
+        if (!result?.extensionTabID) {
+            WI.reportInternalError("Problem creating mock web extension tab: " + result);
+            return;
+        }
+    }
+    WI.settings.engineeringShowMockWebExtensionTab.addEventListener(WI.Setting.Event.Changed, updateMockWebExtensionTab, WI.settings.engineeringShowMockWebExtensionTab);
+    updateMockWebExtensionTab();
+
+    WI.showDebugUISetting.addEventListener(WI.Setting.Event.Changed, function(event) {
         updateDebugUI();
-        WI.notifications.dispatchEventToListeners(WI.Notification.DebugUIEnabledDidChange);
-    });
+    }, groupNavigationItem);
 
     updateDebugUI();
 };

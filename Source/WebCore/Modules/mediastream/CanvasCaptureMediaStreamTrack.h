@@ -26,28 +26,32 @@
 
 #if ENABLE(MEDIA_STREAM)
 
-#include "HTMLCanvasElement.h"
+#include "CanvasBase.h"
 #include "MediaStreamTrack.h"
 #include "Timer.h"
 #include <wtf/TypeCasts.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
+class Document;
 class HTMLCanvasElement;
 class Image;
-class ScriptExecutionContext;
 
 class CanvasCaptureMediaStreamTrack final : public MediaStreamTrack {
+    WTF_MAKE_ISO_ALLOCATED(CanvasCaptureMediaStreamTrack);
 public:
-    static Ref<CanvasCaptureMediaStreamTrack> create(ScriptExecutionContext&, Ref<HTMLCanvasElement>&&, std::optional<double>&& frameRequestRate);
+    static Ref<CanvasCaptureMediaStreamTrack> create(Document&, Ref<HTMLCanvasElement>&&, std::optional<double>&& frameRequestRate);
 
     HTMLCanvasElement& canvas() { return m_canvas.get(); }
-    void requestFrame() { m_source->requestFrame(); }
+    void requestFrame() { static_cast<Source&>(source()).requestFrame(); }
 
     RefPtr<MediaStreamTrack> clone() final;
 
 private:
-    class Source final : public RealtimeMediaSource, private CanvasObserver {
+    const char* activeDOMObjectName() const override;
+
+    class Source final : public RealtimeMediaSource, private CanvasObserver, private CanvasDisplayBufferObserver {
     public:
         static Ref<Source> create(HTMLCanvasElement&, std::optional<double>&& frameRequestRate);
         
@@ -57,36 +61,39 @@ private:
     private:
         Source(HTMLCanvasElement&, std::optional<double>&&);
 
-        // CanvasObserver API
-        void canvasChanged(HTMLCanvasElement&, const FloatRect&) final;
-        void canvasResized(HTMLCanvasElement&) final;
-        void canvasDestroyed(HTMLCanvasElement&) final;
+        // CanvasObserver overrides.
+        void canvasChanged(CanvasBase&, const std::optional<FloatRect>&) final;
+        void canvasResized(CanvasBase&) final;
+        void canvasDestroyed(CanvasBase&) final;
 
-        // RealtimeMediaSource API
+        // CanvasDisplayBufferObserver overrides.
+        void canvasDisplayBufferPrepared(CanvasBase&) final;
+
+        // RealtimeMediaSource overrides.
         void startProducingData() final;
         void stopProducingData()  final;
-        const RealtimeMediaSourceCapabilities& capabilities() const final { return RealtimeMediaSourceCapabilities::emptyCapabilities(); }
-        const RealtimeMediaSourceSettings& settings() const final { return m_settings; }
-        bool applySize(const IntSize&) final { return true; }
-
+        const RealtimeMediaSourceCapabilities& capabilities() final { return RealtimeMediaSourceCapabilities::emptyCapabilities(); }
+        const RealtimeMediaSourceSettings& settings() final;
+        void settingsDidChange(OptionSet<RealtimeMediaSourceSettings::Flag>) final;
+        void scheduleCaptureCanvas();
         void captureCanvas();
         void requestFrameTimerFired();
 
         bool m_shouldEmitFrame { true };
         std::optional<double> m_frameRequestRate;
         Timer m_requestFrameTimer;
-        Timer m_canvasChangedTimer;
-        RealtimeMediaSourceSettings m_settings;
+        Timer m_captureCanvasTimer;
+        std::optional<RealtimeMediaSourceSettings> m_currentSettings;
         HTMLCanvasElement* m_canvas;
         RefPtr<Image> m_currentImage;
     };
 
-    CanvasCaptureMediaStreamTrack(ScriptExecutionContext&, Ref<HTMLCanvasElement>&&, Ref<Source>&&);
+    CanvasCaptureMediaStreamTrack(Document&, Ref<HTMLCanvasElement>&&, Ref<Source>&&);
+    CanvasCaptureMediaStreamTrack(Document&, Ref<HTMLCanvasElement>&&, Ref<MediaStreamTrackPrivate>&&);
 
     bool isCanvas() const final { return true; }
 
     Ref<HTMLCanvasElement> m_canvas;
-    Ref<Source> m_source;
 };
 
 }

@@ -32,6 +32,7 @@
 #include "COMEnumVariant.h"
 #include "COMPropertyBag.h"
 #include "MarshallingHelpers.h"
+#include "WebDatabaseProvider.h"
 #include "WebNotificationCenter.h"
 #include "WebPreferences.h"
 #include "WebSecurityOrigin.h"
@@ -39,25 +40,23 @@
 #include <WebCore/COMPtr.h>
 #include <WebCore/DatabaseManager.h>
 #include <WebCore/DatabaseTracker.h>
-#include <WebCore/FileSystem.h>
 #include <WebCore/SecurityOrigin.h>
 #include <WebCore/SecurityOriginData.h>
+#include <wtf/FileSystem.h>
 #include <wtf/MainThread.h>
-
-#if ENABLE(INDEXED_DATABASE)
-#include "WebDatabaseProvider.h"
-#endif
 
 using namespace WebCore;
 
+#if USE(CF)
 static CFStringRef WebDatabaseDirectoryDefaultsKey = CFSTR("WebDatabaseDirectory");
+#endif
 
 static inline bool isEqual(LPCWSTR s1, LPCWSTR s2)
 {
     return !wcscmp(s1, s2);
 }
 
-class DatabaseDetailsPropertyBag : public IPropertyBag {
+class DatabaseDetailsPropertyBag final : public IPropertyBag {
     WTF_MAKE_NONCOPYABLE(DatabaseDetailsPropertyBag);
 public:
     static DatabaseDetailsPropertyBag* createInstance(const DatabaseDetails&);
@@ -161,13 +160,13 @@ WebDatabaseManager* WebDatabaseManager::createInstance()
 WebDatabaseManager::WebDatabaseManager()
 {
     gClassCount++;
-    gClassNameCount().add("WebDatabaseManager");
+    gClassNameCount().add("WebDatabaseManager"_s);
 }
 
 WebDatabaseManager::~WebDatabaseManager()
 {
     gClassCount--;
-    gClassNameCount().remove("WebDatabaseManager");
+    gClassNameCount().remove("WebDatabaseManager"_s);
 }
 
 // IUnknown ------------------------------------------------------------------------
@@ -256,7 +255,7 @@ HRESULT WebDatabaseManager::databasesWithOrigin(_In_opt_ IWebSecurityOrigin* ori
     if (!webSecurityOrigin)
         return E_FAIL;
 
-    auto databaseNames = DatabaseTracker::singleton().databaseNames(SecurityOriginData::fromSecurityOrigin(*webSecurityOrigin->securityOrigin()));
+    auto databaseNames = DatabaseTracker::singleton().databaseNames(webSecurityOrigin->securityOrigin()->data());
 
     COMPtr<COMEnumVariant<Vector<String>>> enumVariant(AdoptCOM, COMEnumVariant<Vector<String>>::adopt(databaseNames));
 
@@ -311,7 +310,7 @@ HRESULT WebDatabaseManager::deleteOrigin(_In_opt_ IWebSecurityOrigin* origin)
     if (!webSecurityOrigin)
         return E_FAIL;
 
-    DatabaseTracker::singleton().deleteOrigin(SecurityOriginData::fromSecurityOrigin(*webSecurityOrigin->securityOrigin()));
+    DatabaseTracker::singleton().deleteOrigin(webSecurityOrigin->securityOrigin()->data());
 
     return S_OK;
 }
@@ -331,20 +330,19 @@ HRESULT WebDatabaseManager::deleteDatabase(_In_ BSTR databaseName, _In_opt_ IWeb
     if (!webSecurityOrigin)
         return E_FAIL;
 
-    DatabaseTracker::singleton().deleteDatabase(SecurityOriginData::fromSecurityOrigin(*webSecurityOrigin->securityOrigin()), String(databaseName, SysStringLen(databaseName)));
+    DatabaseTracker::singleton().deleteDatabase(webSecurityOrigin->securityOrigin()->data(), String(databaseName, SysStringLen(databaseName)));
 
     return S_OK;
 }
 
 HRESULT WebDatabaseManager::deleteAllIndexedDatabases()
 {
-#if ENABLE(INDEXED_DATABASE)
     WebDatabaseProvider::singleton().deleteAllDatabases();
-#endif
     return S_OK;
 }
 
 class DidModifyOriginData {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(DidModifyOriginData);
 public:
     static void dispatchToMainThread(WebDatabaseManager* databaseManager, const SecurityOriginData& origin)
@@ -396,7 +394,7 @@ HRESULT WebDatabaseManager::setQuota(_In_ BSTR origin, unsigned long long quota)
     if (this != s_sharedWebDatabaseManager)
         return E_FAIL;
 
-    DatabaseTracker::singleton().setQuota(SecurityOriginData::fromSecurityOrigin(SecurityOrigin::createFromString(origin)), quota);
+    DatabaseTracker::singleton().setQuota(SecurityOrigin::createFromString(origin)->data(), quota);
 
     return S_OK;
 }
@@ -428,7 +426,7 @@ static WTF::String databasesDirectory()
         return static_cast<CFStringRef>(directoryPref.get());
 #endif
 
-    return WebCore::pathByAppendingComponent(WebCore::localUserSpecificStorageDirectory(), "Databases");
+    return FileSystem::pathByAppendingComponent(FileSystem::localUserSpecificStorageDirectory(), "Databases"_s);
 }
 
 void WebKitInitializeWebDatabasesIfNecessary()

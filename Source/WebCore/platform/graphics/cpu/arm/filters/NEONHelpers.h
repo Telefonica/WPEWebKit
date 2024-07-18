@@ -24,8 +24,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef NEONHelpers_h
-#define NEONHelpers_h
+#pragma once
 
 #if HAVE(ARM_NEON_INTRINSICS)
 
@@ -33,7 +32,7 @@
 
 namespace WebCore {
 
-inline float32x4_t loadRGBA8AsFloat(uint32_t* source)
+inline float32x4_t loadRGBA8AsFloat(const uint32_t* source)
 {
     uint32x2_t temporary1 = {0, 0};
     temporary1 = vset_lane_u32(*source, temporary1, 0);
@@ -51,5 +50,3 @@ inline void storeFloatAsRGBA8(float32x4_t data, uint32_t* destination)
 } // namespace WebCore
 
 #endif // HAVE(ARM_NEON_INTRINSICS)
-
-#endif // NEONHelpers_h

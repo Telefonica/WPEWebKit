@@ -26,21 +26,29 @@
 #include "config.h"
 #include "TextureMapperPlatformLayerBuffer.h"
 
+#if USE(COORDINATED_GRAPHICS)
+
+#include "FloatRect.h"
+#include "GLContext.h"
 #include "NotImplemented.h"
 
 namespace WebCore {
 
 TextureMapperPlatformLayerBuffer::TextureMapperPlatformLayerBuffer(RefPtr<BitmapTexture>&& texture, TextureMapperGL::Flags flags)
-    : m_texture(WTFMove(texture))
-    , m_textureID(0)
-    , m_internalFormat(GL_DONT_CARE)
+    : m_variant(RGBTexture { 0 })
+    , m_texture(WTFMove(texture))
     , m_extraFlags(flags)
     , m_hasManagedTexture(true)
 {
 }
 
 TextureMapperPlatformLayerBuffer::TextureMapperPlatformLayerBuffer(GLuint textureID, const IntSize& size, TextureMapperGL::Flags flags, GLint internalFormat)
-    : m_textureID(textureID)
+    : TextureMapperPlatformLayerBuffer({ RGBTexture { textureID } }, size, flags, internalFormat)
+{
+}
+
+TextureMapperPlatformLayerBuffer::TextureMapperPlatformLayerBuffer(TextureVariant&& variant, const IntSize& size, TextureMapperGL::Flags flags, GLint internalFormat)
+    : m_variant(WTFMove(variant))
     , m_size(size)
     , m_internalFormat(internalFormat)
     , m_extraFlags(flags)
@@ -48,21 +56,53 @@ TextureMapperPlatformLayerBuffer::TextureMapperPlatformLayerBuffer(GLuint textur
 {
 }
 
+TextureMapperPlatformLayerBuffer::~TextureMapperPlatformLayerBuffer()
+{
+    if (m_sync)
+        glDeleteSync(static_cast<GLsync>(m_sync));
+}
+
 bool TextureMapperPlatformLayerBuffer::canReuseWithoutReset(const IntSize& size, GLint internalFormat)
 {
     return m_texture && (m_texture->size() == size) && (static_cast<BitmapTextureGL*>(m_texture.get())->internalFormat() == internalFormat || internalFormat == GL_DONT_CARE);
 }
 
-std::unique_ptr<TextureMapperPlatformLayerBuffer> TextureMapperPlatformLayerBuffer::clone(TextureMapperGL& texmapGL)
+std::unique_ptr<TextureMapperPlatformLayerBuffer> TextureMapperPlatformLayerBuffer::clone()
 {
-    if (m_hasManagedTexture || !m_textureID) {
+    if (m_hasManagedTexture) {
         notImplemented();
         return nullptr;
     }
-    RefPtr<BitmapTexture> texture = texmapGL.createTexture(m_internalFormat);
-    texture->reset(m_size);
-    static_cast<BitmapTextureGL&>(*texture).copyFromExternalTexture(m_textureID);
-    return std::make_unique<TextureMapperPlatformLayerBuffer>(WTFMove(texture), m_extraFlags);
+
+    // If there's no current GLContext in the compositor thread (nonCompositedWebGL mode), we can't perform any
+    // OpenGL operation, which means no cloning. This is used to free the GStreamer buffers and keep the last frame
+    // visible, but this is not necessary when nonCompositedWebGL is enabled (the video is painted as texture
+    // or using hole punch), so returning nullptr is fine.
+    if (!GLContext::current())
+        return nullptr;
+
+    return WTF::switchOn(m_variant,
+        [&](const RGBTexture& texture) mutable -> std::unique_ptr<TextureMapperPlatformLayerBuffer> {
+            if (!texture.id) {
+                notImplemented();
+                return nullptr;
+            }
+
+            auto clonedTexture = BitmapTextureGL::create(TextureMapperContextAttributes::get(), m_internalFormat);
+            clonedTexture->reset(m_size);
+            static_cast<BitmapTextureGL&>(clonedTexture.get()).copyFromExternalTexture(texture.id);
+            return makeUnique<TextureMapperPlatformLayerBuffer>(WTFMove(clonedTexture), m_extraFlags);
+        },
+        [](const YUVTexture&) -> std::unique_ptr<TextureMapperPlatformLayerBuffer>
+        {
+            notImplemented();
+            return nullptr;
+        },
+        [](const ExternalOESTexture&) -> std::unique_ptr<TextureMapperPlatformLayerBuffer>
+        {
+            notImplemented();
+            return nullptr;
+        });
 }
 
 void TextureMapperPlatformLayerBuffer::paintToTextureMapper(TextureMapper& textureMapper, const FloatRect& targetRect, const TransformationMatrix& modelViewMatrix, float opacity)
@@ -71,18 +111,101 @@ void TextureMapperPlatformLayerBuffer::paintToTextureMapper(TextureMapper& textu
 
     if (m_hasManagedTexture) {
         ASSERT(m_texture);
-        BitmapTextureGL& texture = static_cast<BitmapTextureGL&>(*m_texture);
-        texmapGL.drawTexture(texture.id(), m_extraFlags | (texture.isOpaque() ? 0 : TextureMapperGL::ShouldBlend), texture.size(), targetRect, modelViewMatrix, opacity);
+        BitmapTextureGL* textureGL = static_cast<BitmapTextureGL*>(m_texture.get());
+#if USE(ANGLE)
+        textureGL->updatePendingContents(IntRect(IntPoint(), textureGL->contentSize()), IntPoint());
+#endif
+        texmapGL.drawTexture(textureGL->id(), m_extraFlags | textureGL->colorConvertFlags(), textureGL->size(), targetRect, modelViewMatrix, opacity);
         return;
     }
 
-    if (m_extraFlags & TextureMapperGL::ShouldOverwriteRect)
-        texmapGL.drawSolidColor(targetRect, modelViewMatrix, Color(0, 0, 0, 0), false);
-    else if (!m_textureID)
-        texmapGL.drawSolidColor(targetRect, modelViewMatrix, Color(.0, .0, .0, opacity), true);
-    else {
-        texmapGL.drawTexture(m_textureID, m_extraFlags, m_size, targetRect, modelViewMatrix, opacity);
+    if (m_extraFlags & TextureMapperGL::ShouldNotBlend) {
+        ASSERT(!m_texture);
+        notifyPositionToHolePunchClient(targetRect, modelViewMatrix);
+        texmapGL.drawSolidColor(targetRect, modelViewMatrix, Color::transparentBlack, false);
+        return;
+    }
+
+#if USE(GSTREAMER_GL)
+    if (m_unmanagedBufferDataHolder)
+        m_unmanagedBufferDataHolder->waitForCPUSync();
+#endif // USE(GSTREAMER_GL)
+
+    if (m_sync) {
+        glWaitSync(static_cast<GLsync>(m_sync), 0, GL_TIMEOUT_IGNORED);
+        glDeleteSync(static_cast<GLsync>(m_sync));
+        glFlush();
+        m_sync = nullptr;
+    }
+
+    WTF::switchOn(m_variant,
+        [&](const RGBTexture& texture) {
+            ASSERT(texture.id);
+            texmapGL.drawTexture(texture.id, m_extraFlags, m_size, targetRect, modelViewMatrix, opacity);
+        },
+        [&](const YUVTexture& texture) {
+            switch (texture.numberOfPlanes) {
+            case 1:
+                ASSERT(texture.yuvPlane[0] == texture.yuvPlane[1] && texture.yuvPlane[1] == texture.yuvPlane[2]);
+                ASSERT(texture.yuvPlaneOffset[0] == 2 && texture.yuvPlaneOffset[1] == 1 && !texture.yuvPlaneOffset[2]);
+                texmapGL.drawTexturePackedYUV(texture.planes[texture.yuvPlane[0]],
+                    texture.yuvToRgbMatrix, m_extraFlags, m_size, targetRect, modelViewMatrix, opacity);
+                break;
+            case 2:
+                ASSERT(!texture.yuvPlaneOffset[0]);
+                texmapGL.drawTextureSemiPlanarYUV(std::array<GLuint, 2> { texture.planes[texture.yuvPlane[0]], texture.planes[texture.yuvPlane[1]] }, !!texture.yuvPlaneOffset[1],
+                    texture.yuvToRgbMatrix, m_extraFlags, m_size, targetRect, modelViewMatrix, opacity);
+                break;
+            case 3:
+                ASSERT(!texture.yuvPlaneOffset[0] && !texture.yuvPlaneOffset[1] && !texture.yuvPlaneOffset[2]);
+                texmapGL.drawTexturePlanarYUV(std::array<GLuint, 3> { texture.planes[texture.yuvPlane[0]], texture.planes[texture.yuvPlane[1]], texture.planes[texture.yuvPlane[2]] },
+                    texture.yuvToRgbMatrix, m_extraFlags, m_size, targetRect, modelViewMatrix, opacity, std::nullopt);
+                break;
+            case 4:
+                ASSERT(!texture.yuvPlaneOffset[0] && !texture.yuvPlaneOffset[1] && !texture.yuvPlaneOffset[2]);
+                texmapGL.drawTexturePlanarYUV(std::array<GLuint, 3> { texture.planes[texture.yuvPlane[0]], texture.planes[texture.yuvPlane[1]], texture.planes[texture.yuvPlane[2]] },
+                    texture.yuvToRgbMatrix, m_extraFlags, m_size, targetRect, modelViewMatrix, opacity, texture.planes[texture.yuvPlane[3]]);
+                break;
+            }
+        },
+        [&](const ExternalOESTexture& texture) {
+            ASSERT(texture.id);
+            texmapGL.drawTextureExternalOES(texture.id, m_extraFlags, targetRect, modelViewMatrix, opacity);
+        });
+}
+
+void TextureMapperPlatformLayerBuffer::notifyPositionToHolePunchClient(const FloatRect& targetRect, const TransformationMatrix& modelViewMatrix)
+{
+    if (m_holePunchClient)
+        m_holePunchClient->setVideoRectangle(enclosingIntRect(modelViewMatrix.mapRect(targetRect)));
+}
+
+bool TextureMapperPlatformLayerBuffer::isHolePunchBuffer()
+{
+    return (m_extraFlags & TextureMapperGL::ShouldNotBlend) && !m_texture;
+}
+
+void TextureMapperPlatformLayerBuffer::addFenceSyncIfAvailable()
+{
+    static unsigned version = 0;
+    static std::once_flag onceFlag;
+
+    std::call_once(onceFlag, []() {
+        GLContext* context = GLContext::current();
+        if (!context) {
+            context = PlatformDisplay::sharedDisplayForCompositing().sharingGLContext();
+            context->makeContextCurrent();
+        }
+        version = context->version();
+    });
+
+    if (version >= 300 && glFenceSync) {
+        // GLES 3, so fences are available and we can use them.
+        m_sync = static_cast<void*>(glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0));
+        glFlush();
     }
 }
 
 } // namespace WebCore
+
+#endif // USE(COORDINATED_GRAPHICS)

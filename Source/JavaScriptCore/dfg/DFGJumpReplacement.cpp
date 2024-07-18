@@ -29,20 +29,22 @@
 #if ENABLE(DFG_JIT)
 
 #include "MacroAssembler.h"
-#include "JSCInlines.h"
 #include "Options.h"
 
 namespace JSC { namespace DFG {
 
 void JumpReplacement::fire()
 {
-    if (Options::dumpDisassembly())
-        dataLogF("Firing jump replacement watchpoint from %p, to %p.\n", m_source.dataLocation(), m_destination.dataLocation());
+    dataLogLnIf(Options::dumpDisassembly(),
+        "Firing jump replacement watchpoint from ", RawPointer(m_source.dataLocation()),
+        " to ", RawPointer(m_destination.dataLocation()));
     MacroAssembler::replaceWithJump(m_source, m_destination);
 }
 
 void JumpReplacement::installVMTrapBreakpoint()
 {
+    dataLogLnIf(Options::dumpDisassembly(),
+        "Inserting VMTrap breakpoint at ", RawPointer(m_source.dataLocation()));
 #if ENABLE(SIGNAL_BASED_VM_TRAPS)
     MacroAssembler::replaceWithVMHalt(m_source);
 #else

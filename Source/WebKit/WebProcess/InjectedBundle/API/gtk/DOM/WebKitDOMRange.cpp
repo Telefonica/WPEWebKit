@@ -24,7 +24,8 @@
 #include "DOMObjectCache.h"
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
+#include <WebCore/TextIterator.h>
 #include "WebKitDOMDocumentFragmentPrivate.h"
 #include "WebKitDOMNodePrivate.h"
 #include "WebKitDOMPrivate.h"
@@ -39,6 +40,8 @@
 typedef struct _WebKitDOMRangePrivate {
     RefPtr<WebCore::Range> coreObject;
 } WebKitDOMRangePrivate;
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 namespace WebKit {
 
@@ -69,14 +72,14 @@ WebKitDOMRange* wrapRange(WebCore::Range* coreObject)
 G_DEFINE_TYPE(WebKitDOMRange, webkit_dom_range, WEBKIT_DOM_TYPE_OBJECT)
 
 enum {
-    PROP_0,
-    PROP_START_CONTAINER,
-    PROP_START_OFFSET,
-    PROP_END_CONTAINER,
-    PROP_END_OFFSET,
-    PROP_COLLAPSED,
-    PROP_COMMON_ANCESTOR_CONTAINER,
-    PROP_TEXT,
+    DOM_RANGE_PROP_0,
+    DOM_RANGE_PROP_START_CONTAINER,
+    DOM_RANGE_PROP_START_OFFSET,
+    DOM_RANGE_PROP_END_CONTAINER,
+    DOM_RANGE_PROP_END_OFFSET,
+    DOM_RANGE_PROP_COLLAPSED,
+    DOM_RANGE_PROP_COMMON_ANCESTOR_CONTAINER,
+    DOM_RANGE_PROP_TEXT,
 };
 
 static void webkit_dom_range_finalize(GObject* object)
@@ -94,25 +97,25 @@ static void webkit_dom_range_get_property(GObject* object, guint propertyId, GVa
     WebKitDOMRange* self = WEBKIT_DOM_RANGE(object);
 
     switch (propertyId) {
-    case PROP_START_CONTAINER:
+    case DOM_RANGE_PROP_START_CONTAINER:
         g_value_set_object(value, webkit_dom_range_get_start_container(self, nullptr));
         break;
-    case PROP_START_OFFSET:
+    case DOM_RANGE_PROP_START_OFFSET:
         g_value_set_long(value, webkit_dom_range_get_start_offset(self, nullptr));
         break;
-    case PROP_END_CONTAINER:
+    case DOM_RANGE_PROP_END_CONTAINER:
         g_value_set_object(value, webkit_dom_range_get_end_container(self, nullptr));
         break;
-    case PROP_END_OFFSET:
+    case DOM_RANGE_PROP_END_OFFSET:
         g_value_set_long(value, webkit_dom_range_get_end_offset(self, nullptr));
         break;
-    case PROP_COLLAPSED:
+    case DOM_RANGE_PROP_COLLAPSED:
         g_value_set_boolean(value, webkit_dom_range_get_collapsed(self, nullptr));
         break;
-    case PROP_COMMON_ANCESTOR_CONTAINER:
+    case DOM_RANGE_PROP_COMMON_ANCESTOR_CONTAINER:
         g_value_set_object(value, webkit_dom_range_get_common_ancestor_container(self, nullptr));
         break;
-    case PROP_TEXT:
+    case DOM_RANGE_PROP_TEXT:
         g_value_take_string(value, webkit_dom_range_get_text(self));
         break;
     default:
@@ -142,7 +145,7 @@ static void webkit_dom_range_class_init(WebKitDOMRangeClass* requestClass)
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_START_CONTAINER,
+        DOM_RANGE_PROP_START_CONTAINER,
         g_param_spec_object(
             "start-container",
             "Range:start-container",
@@ -152,7 +155,7 @@ static void webkit_dom_range_class_init(WebKitDOMRangeClass* requestClass)
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_START_OFFSET,
+        DOM_RANGE_PROP_START_OFFSET,
         g_param_spec_long(
             "start-offset",
             "Range:start-offset",
@@ -162,7 +165,7 @@ static void webkit_dom_range_class_init(WebKitDOMRangeClass* requestClass)
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_END_CONTAINER,
+        DOM_RANGE_PROP_END_CONTAINER,
         g_param_spec_object(
             "end-container",
             "Range:end-container",
@@ -172,7 +175,7 @@ static void webkit_dom_range_class_init(WebKitDOMRangeClass* requestClass)
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_END_OFFSET,
+        DOM_RANGE_PROP_END_OFFSET,
         g_param_spec_long(
             "end-offset",
             "Range:end-offset",
@@ -182,7 +185,7 @@ static void webkit_dom_range_class_init(WebKitDOMRangeClass* requestClass)
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_COLLAPSED,
+        DOM_RANGE_PROP_COLLAPSED,
         g_param_spec_boolean(
             "collapsed",
             "Range:collapsed",
@@ -192,7 +195,7 @@ static void webkit_dom_range_class_init(WebKitDOMRangeClass* requestClass)
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_COMMON_ANCESTOR_CONTAINER,
+        DOM_RANGE_PROP_COMMON_ANCESTOR_CONTAINER,
         g_param_spec_object(
             "common-ancestor-container",
             "Range:common-ancestor-container",
@@ -202,7 +205,7 @@ static void webkit_dom_range_class_init(WebKitDOMRangeClass* requestClass)
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_TEXT,
+        DOM_RANGE_PROP_TEXT,
         g_param_spec_string(
             "text",
             "Range:text",
@@ -353,9 +356,7 @@ gshort webkit_dom_range_compare_boundary_points(WebKitDOMRange* self, gushort ho
     g_return_val_if_fail(WEBKIT_DOM_IS_RANGE(self), 0);
     g_return_val_if_fail(WEBKIT_DOM_IS_RANGE(sourceRange), 0);
     g_return_val_if_fail(!error || !*error, 0);
-    WebCore::Range* item = WebKit::core(self);
-    WebCore::Range* convertedSourceRange = WebKit::core(sourceRange);
-    auto result = item->compareBoundaryPointsForBindings(how, *convertedSourceRange);
+    auto result = WebKit::core(self)->compareBoundaryPoints(how, *WebKit::core(sourceRange));
     if (result.hasException()) {
         auto description = WebCore::DOMException::description(result.releaseException().code());
         g_set_error_literal(error, g_quark_from_string("WEBKIT_DOM"), description.legacyCode, description.name);
@@ -506,15 +507,7 @@ gboolean webkit_dom_range_intersects_node(WebKitDOMRange* self, WebKitDOMNode* r
     g_return_val_if_fail(WEBKIT_DOM_IS_RANGE(self), FALSE);
     g_return_val_if_fail(WEBKIT_DOM_IS_NODE(refNode), FALSE);
     g_return_val_if_fail(!error || !*error, FALSE);
-    WebCore::Range* item = WebKit::core(self);
-    WebCore::Node* convertedRefNode = WebKit::core(refNode);
-    auto result = item->intersectsNode(*convertedRefNode);
-    if (result.hasException()) {
-        auto description = WebCore::DOMException::description(result.releaseException().code());
-        g_set_error_literal(error, g_quark_from_string("WEBKIT_DOM"), description.legacyCode, description.name);
-        return false;
-    }
-    return result.releaseReturnValue();
+    return WebKit::core(self)->intersectsNode(*WebKit::core(refNode));
 }
 
 gshort webkit_dom_range_compare_point(WebKitDOMRange* self, WebKitDOMNode* refNode, glong offset, GError** error)
@@ -630,8 +623,9 @@ gchar* webkit_dom_range_get_text(WebKitDOMRange* self)
 {
     WebCore::JSMainThreadNullState state;
     g_return_val_if_fail(WEBKIT_DOM_IS_RANGE(self), 0);
-    WebCore::Range* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->text());
-    return result;
+    auto range = makeSimpleRange(*WebKit::core(self));
+    range.start.document().updateLayout();
+    return convertToUTF8String(plainText(range));
 }
 
+G_GNUC_END_IGNORE_DEPRECATIONS;

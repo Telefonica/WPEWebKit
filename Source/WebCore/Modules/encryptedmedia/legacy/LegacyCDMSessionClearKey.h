@@ -26,31 +26,31 @@
 #pragma once
 
 #include "LegacyCDMSession.h"
-#include <wtf/HashMap.h>
+#include <wtf/RobinHoodHashMap.h>
 #include <wtf/text/WTFString.h>
 
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA)
 
 namespace WebCore {
 
-class CDMSessionClearKey : public CDMSession {
+class CDMSessionClearKey final : public LegacyCDMSession {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    CDMSessionClearKey(CDMSessionClient*);
+    CDMSessionClearKey(LegacyCDMSessionClient&);
     virtual ~CDMSessionClearKey();
 
     // CDMSessionPrivate
-    CDMSessionType type() override { return CDMSessionTypeClearKey; }
-    void setClient(CDMSessionClient* client) override { m_client = client; }
+    LegacyCDMSessionType type() override { return CDMSessionTypeClearKey; }
     const String& sessionId() const override { return m_sessionId; }
     RefPtr<Uint8Array> generateKeyRequest(const String& mimeType, Uint8Array*, String&, unsigned short&, uint32_t&) override;
     void releaseKeys() override;
     bool update(Uint8Array*, RefPtr<Uint8Array>&, unsigned short&, uint32_t&) override;
     RefPtr<ArrayBuffer> cachedKeyForKeyID(const String&) const override;
 
-protected:
-    CDMSessionClient* m_client;
+private:
+    WeakPtr<LegacyCDMSessionClient> m_client;
     RefPtr<Uint8Array> m_initData;
-    HashMap<String, Vector<uint8_t>> m_cachedKeys;
+    MemoryCompactRobinHoodHashMap<String, Vector<uint8_t>> m_cachedKeys;
     String m_sessionId;
 };
 

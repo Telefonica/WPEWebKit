@@ -28,7 +28,7 @@
 
 #include <unknwn.h>
 
-class WebKitClassFactory : public IClassFactory
+class WebKitClassFactory final : public IClassFactory
 {
 public:
     WebKitClassFactory(CLSID targetClass);
@@ -43,7 +43,7 @@ public:
     virtual HRESULT STDMETHODCALLTYPE CreateInstance(_In_opt_ IUnknown* pUnkOuter, _In_ REFIID riid, _COM_Outptr_ void** ppvObject);
     virtual HRESULT STDMETHODCALLTYPE LockServer(BOOL);
 
-protected:
+private:
     ULONG m_refCount { 0 };
     CLSID m_targetClass;
 };

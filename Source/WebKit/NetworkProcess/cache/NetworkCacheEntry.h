@@ -23,29 +23,27 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef NetworkCacheEntry_h
-#define NetworkCacheEntry_h
-
-#if ENABLE(NETWORK_CACHE)
+#pragma once
 
 #include "NetworkCacheStorage.h"
+#include "PrivateRelayed.h"
 #include "ShareableResource.h"
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/Seconds.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
-class SharedBuffer;
+class FragmentedSharedBuffer;
 }
 
-namespace WebKit {
-namespace NetworkCache {
+namespace WebKit::NetworkCache {
 
 class Entry {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    Entry(const Key&, const WebCore::ResourceResponse&, RefPtr<WebCore::SharedBuffer>&&, const Vector<std::pair<String, String>>& varyingRequestHeaders);
+    Entry(const Key&, const WebCore::ResourceResponse&, PrivateRelayed, RefPtr<WebCore::FragmentedSharedBuffer>&&, const Vector<std::pair<String, String>>& varyingRequestHeaders);
     Entry(const Key&, const WebCore::ResourceResponse&, const WebCore::ResourceRequest& redirectRequest, const Vector<std::pair<String, String>>& varyingRequestHeaders);
     explicit Entry(const Storage::Record&);
     Entry(const Entry&);
@@ -53,12 +51,13 @@ public:
     Storage::Record encodeAsStorageRecord() const;
     static std::unique_ptr<Entry> decodeStorageRecord(const Storage::Record&);
 
+    PrivateRelayed privateRelayed() const { return m_privateRelayed; }
     const Key& key() const { return m_key; }
-    std::chrono::system_clock::time_point timeStamp() const { return m_timeStamp; }
+    WallTime timeStamp() const { return m_timeStamp; }
     const WebCore::ResourceResponse& response() const { return m_response; }
     const Vector<std::pair<String, String>>& varyingRequestHeaders() const { return m_varyingRequestHeaders; }
 
-    WebCore::SharedBuffer* buffer() const;
+    WebCore::FragmentedSharedBuffer* buffer() const;
     const std::optional<WebCore::ResourceRequest>& redirectRequest() const { return m_redirectRequest; }
 
 #if ENABLE(SHAREABLE_RESOURCE)
@@ -72,6 +71,11 @@ public:
 
     void asJSON(StringBuilder&, const Storage::RecordInfo&) const;
 
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+    bool hasReachedPrevalentResourceAgeCap() const;
+    void capMaxAge(const Seconds);
+#endif
+
 private:
     void initializeBufferFromStorageRecord() const;
 #if ENABLE(SHAREABLE_RESOURCE)
@@ -79,21 +83,20 @@ private:
 #endif
 
     Key m_key;
-    std::chrono::system_clock::time_point m_timeStamp;
+    WallTime m_timeStamp;
     WebCore::ResourceResponse m_response;
     Vector<std::pair<String, String>> m_varyingRequestHeaders;
 
     std::optional<WebCore::ResourceRequest> m_redirectRequest;
-    mutable RefPtr<WebCore::SharedBuffer> m_buffer;
+    mutable RefPtr<WebCore::FragmentedSharedBuffer> m_buffer;
 #if ENABLE(SHAREABLE_RESOURCE)
     mutable ShareableResource::Handle m_shareableResourceHandle;
 #endif
 
     Storage::Record m_sourceStorageRecord { };
+    
+    std::optional<Seconds> m_maxAgeCap;
+    PrivateRelayed m_privateRelayed { PrivateRelayed::No };
 };
 
 }
-}
-
-#endif
-#endif

@@ -8,13 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_NETEQ_DTMF_TONE_GENERATOR_H_
-#define WEBRTC_MODULES_AUDIO_CODING_NETEQ_DTMF_TONE_GENERATOR_H_
+#ifndef MODULES_AUDIO_CODING_NETEQ_DTMF_TONE_GENERATOR_H_
+#define MODULES_AUDIO_CODING_NETEQ_DTMF_TONE_GENERATOR_H_
 
+#include <stddef.h>
+#include <stdint.h>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/audio_coding/neteq/audio_multi_vector.h"
-#include "webrtc/typedefs.h"
+#include "modules/audio_coding/neteq/audio_multi_vector.h"
 
 namespace webrtc {
 
@@ -28,6 +28,10 @@ class DtmfToneGenerator {
 
   DtmfToneGenerator();
   virtual ~DtmfToneGenerator() {}
+
+  DtmfToneGenerator(const DtmfToneGenerator&) = delete;
+  DtmfToneGenerator& operator=(const DtmfToneGenerator&) = delete;
+
   virtual int Init(int fs, int event, int attenuation);
   virtual void Reset();
   virtual int Generate(size_t num_samples, AudioMultiVector* output);
@@ -38,7 +42,7 @@ class DtmfToneGenerator {
   static const int kCoeff2[4][16];  // 2nd oscillator model coefficient table.
   static const int kInitValue1[4][16];  // Initialization for 1st oscillator.
   static const int kInitValue2[4][16];  // Initialization for 2nd oscillator.
-  static const int kAmplitude[64];  // Amplitude for 0 through -63 dBm0.
+  static const int kAmplitude[64];      // Amplitude for 0 through -63 dBm0.
   static const int16_t kAmpMultiplier = 23171;  // 3 dB attenuation (in Q15).
 
   bool initialized_;            // True if generator is initialized properly.
@@ -47,9 +51,7 @@ class DtmfToneGenerator {
   int amplitude_;               // Amplitude for this event.
   int16_t sample_history1_[2];  // Last 2 samples for the 1st oscillator.
   int16_t sample_history2_[2];  // Last 2 samples for the 2nd oscillator.
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(DtmfToneGenerator);
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_DTMF_TONE_GENERATOR_H_
+#endif  // MODULES_AUDIO_CODING_NETEQ_DTMF_TONE_GENERATOR_H_

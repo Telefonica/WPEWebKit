@@ -43,11 +43,9 @@
 #import <WebCore/FrameLoaderTypes.h>
 #import <WebCore/SecurityOrigin.h>
 #import <wtf/Assertions.h>
-#import <wtf/ObjcRuntimeExtras.h>
+#import <wtf/ObjCRuntimeExtras.h>
 
-using namespace WebCore;
-
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 @interface WebPluginController (SecretsIKnow)
 - (WebFrame *)webFrame; // FIXME: This file calls -[WebPluginController webFrame], which is not declared in WebPluginController.h.  Merge issue?  Are the plug-in files out of date?
 @end
@@ -74,7 +72,7 @@ using namespace WebCore;
 
 + (id)checkWithRequest:(NSURLRequest *)request target:(NSString *)target resultObject:(id)obj selector:(SEL)selector controller:(id <WebPluginContainerCheckController>)controller contextInfo:(id)contextInfo /*optional*/
 {
-    return [[[self alloc] initWithRequest:request target:target resultObject:obj selector:selector controller:controller contextInfo:contextInfo] autorelease];
+    return adoptNS([[self alloc] initWithRequest:request target:target resultObject:obj selector:selector controller:controller contextInfo:contextInfo]).autorelease();
 }
 
 - (void)dealloc
@@ -84,12 +82,12 @@ using namespace WebCore;
     [super dealloc];
 }
 
-- (void)_continueWithPolicy:(PolicyAction)policy
+- (void)_continueWithPolicy:(WebCore::PolicyAction)policy
 {
     if (_contextInfo)
-        wtfObjcMsgSend<void>(_resultObject, _resultSelector, (policy == PolicyAction::Use), _contextInfo);
+        wtfObjCMsgSend<void>(_resultObject, _resultSelector, (policy == WebCore::PolicyAction::Use), _contextInfo);
     else     
-        wtfObjcMsgSend<void>(_resultObject, _resultSelector, (policy == PolicyAction::Use));
+        wtfObjCMsgSend<void>(_resultObject, _resultSelector, (policy == WebCore::PolicyAction::Use));
 
     // this will call indirectly call cancel
     [_controller _webPluginContainerCancelCheckIfAllowedToLoadRequest:self];
@@ -97,10 +95,10 @@ using namespace WebCore;
 
 - (BOOL)_isForbiddenFileLoad
 {
-    Frame* coreFrame = core([_controller webFrame]);
+    auto* coreFrame = core([_controller webFrame]);
     ASSERT(coreFrame);
     if (!coreFrame->document()->securityOrigin().canDisplay([_request URL])) {
-        [self _continueWithPolicy:PolicyAction::Ignore];
+        [self _continueWithPolicy:WebCore::PolicyAction::Ignore];
         return YES;
     }
 
@@ -109,11 +107,11 @@ using namespace WebCore;
 
 - (NSDictionary *)_actionInformationWithURL:(NSURL *)URL
 {
-    return [NSDictionary dictionaryWithObjectsAndKeys:
-               [NSNumber numberWithInt:WebNavigationTypePlugInRequest], WebActionNavigationTypeKey,
-               [NSNumber numberWithInt:0], WebActionModifierFlagsKey,
-               URL, WebActionOriginalURLKey,
-               nil];
+    return @{
+        WebActionNavigationTypeKey: @(WebNavigationTypePlugInRequest),
+        WebActionModifierFlagsKey: @(0),
+        WebActionOriginalURLKey: URL,
+    };
 }
 
 - (void)_askPolicyDelegate

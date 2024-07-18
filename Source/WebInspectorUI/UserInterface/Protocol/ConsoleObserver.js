@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WI.ConsoleObserver = class ConsoleObserver
+WI.ConsoleObserver = class ConsoleObserver extends InspectorBackend.Dispatcher
 {
     // Events defined by the "Console" domain.
 
@@ -35,17 +35,17 @@ WI.ConsoleObserver = class ConsoleObserver
         if (message.type === "assert" && !message.text)
             message.text = WI.UIString("Assertion");
 
-        WI.logManager.messageWasAdded(this.target, message.source, message.level, message.text, message.type, message.url, message.line, message.column || 0, message.repeatCount, message.parameters, message.stackTrace, message.networkRequestId);
+        WI.consoleManager.messageWasAdded(this._target, message.source, message.level, message.text, message.type, message.url, message.line, message.column || 0, message.repeatCount, message.parameters, message.stackTrace, message.networkRequestId, message.timestamp);
     }
 
     messageRepeatCountUpdated(count)
     {
-        WI.logManager.messageRepeatCountUpdated(count);
+        WI.consoleManager.messageRepeatCountUpdated(count);
     }
 
     messagesCleared()
     {
-        WI.logManager.messagesCleared();
+        WI.consoleManager.messagesCleared();
     }
 
     heapSnapshot(timestamp, snapshotStringData, title)
@@ -53,6 +53,7 @@ WI.ConsoleObserver = class ConsoleObserver
         let workerProxy = WI.HeapSnapshotWorkerProxy.singleton();
         workerProxy.createSnapshot(snapshotStringData, title || null, ({objectId, snapshot: serializedSnapshot}) => {
             let snapshot = WI.HeapSnapshotProxy.deserialize(objectId, serializedSnapshot);
+            snapshot.snapshotStringData = snapshotStringData;
             WI.timelineManager.heapSnapshotAdded(timestamp, snapshot);
         });
     }

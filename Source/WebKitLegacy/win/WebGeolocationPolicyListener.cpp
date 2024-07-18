@@ -42,13 +42,13 @@ WebGeolocationPolicyListener::WebGeolocationPolicyListener(RefPtr<Geolocation>&&
     , m_geolocation(WTFMove(geolocation))
 {
     gClassCount++;
-    gClassNameCount().add("WebGeolocationPolicyListener");
+    gClassNameCount().add("WebGeolocationPolicyListener"_s);
 }
 
 WebGeolocationPolicyListener::~WebGeolocationPolicyListener()
 {
     gClassCount--;
-    gClassNameCount().remove("WebGeolocationPolicyListener");
+    gClassNameCount().remove("WebGeolocationPolicyListener"_s);
 }
 
 // IUnknown -------------------------------------------------------------------
@@ -87,12 +87,12 @@ ULONG WebGeolocationPolicyListener::Release()
 
 HRESULT WebGeolocationPolicyListener::allow()
 {
-    m_geolocation->setIsAllowed(true);
+    m_geolocation->setIsAllowed(true, { });
     return S_OK;
 }
 
 HRESULT WebGeolocationPolicyListener::deny()
 {
-    m_geolocation->setIsAllowed(false);
+    m_geolocation->setIsAllowed(false, { });
     return S_OK;
 }

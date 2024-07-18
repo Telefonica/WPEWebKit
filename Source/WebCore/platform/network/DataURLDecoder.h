@@ -23,22 +23,17 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef DataURLDecoder_h
-#define DataURLDecoder_h
+#pragma once
 
-
-#include <wtf/Function.h>
-#include <wtf/Optional.h>
 #include <wtf/text/WTFString.h>
 
-#if HAVE(RUNLOOP_TIMER)
-#include <wtf/RunLoopTimer.h>
+#if USE(COCOA_EVENT_LOOP)
+#include <wtf/SchedulePair.h>
 #endif
 
 namespace WebCore {
 
-class SharedBuffer;
-class URL;
+class FragmentedSharedBuffer;
 
 namespace DataURLDecoder {
 
@@ -46,20 +41,20 @@ struct Result {
     String mimeType;
     String charset;
     String contentType;
-    RefPtr<SharedBuffer> data;
+    Vector<uint8_t> data;
 };
 
-using DecodeCompletionHandler = WTF::Function<void (std::optional<Result>)>;
+using DecodeCompletionHandler = Function<void(std::optional<Result>)>;
 struct ScheduleContext {
-#if HAVE(RUNLOOP_TIMER)
+#if USE(COCOA_EVENT_LOOP)
     SchedulePairHashSet scheduledPairs;
 #endif
 };
 
-void decode(const URL&, const ScheduleContext&, DecodeCompletionHandler&&);
+enum class Mode { Legacy, ForgivingBase64 };
+void decode(const URL&, const ScheduleContext&, Mode, DecodeCompletionHandler&&);
+WEBCORE_EXPORT std::optional<Result> decode(const URL&, Mode);
 
 }
 
 }
-
-#endif

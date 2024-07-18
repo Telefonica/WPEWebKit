@@ -8,22 +8,20 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_SCREEN_CAPTURER_WIN_MAGNIFIER_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_SCREEN_CAPTURER_WIN_MAGNIFIER_H_
+#ifndef MODULES_DESKTOP_CAPTURE_WIN_SCREEN_CAPTURER_WIN_MAGNIFIER_H_
+#define MODULES_DESKTOP_CAPTURE_WIN_SCREEN_CAPTURER_WIN_MAGNIFIER_H_
+
+#include <magnification.h>
+#include <wincodec.h>
+#include <windows.h>
 
 #include <memory>
 
-#include <windows.h>
-#include <magnification.h>
-#include <wincodec.h>
-
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/desktop_capture/desktop_capturer.h"
-#include "webrtc/modules/desktop_capture/screen_capture_frame_queue.h"
-#include "webrtc/modules/desktop_capture/screen_capturer_helper.h"
-#include "webrtc/modules/desktop_capture/shared_desktop_frame.h"
-#include "webrtc/modules/desktop_capture/win/scoped_thread_desktop.h"
-#include "webrtc/system_wrappers/include/atomic32.h"
+#include "modules/desktop_capture/desktop_capturer.h"
+#include "modules/desktop_capture/screen_capture_frame_queue.h"
+#include "modules/desktop_capture/screen_capturer_helper.h"
+#include "modules/desktop_capture/shared_desktop_frame.h"
+#include "modules/desktop_capture/win/scoped_thread_desktop.h"
 
 namespace webrtc {
 
@@ -42,6 +40,10 @@ class ScreenCapturerWinMagnifier : public DesktopCapturer {
  public:
   ScreenCapturerWinMagnifier();
   ~ScreenCapturerWinMagnifier() override;
+
+  ScreenCapturerWinMagnifier(const ScreenCapturerWinMagnifier&) = delete;
+  ScreenCapturerWinMagnifier& operator=(const ScreenCapturerWinMagnifier&) =
+      delete;
 
   // Overridden from ScreenCapturer:
   void Start(Callback* callback) override;
@@ -81,7 +83,7 @@ class ScreenCapturerWinMagnifier : public DesktopCapturer {
                                                RECT clipped,
                                                HRGN dirty);
 
-  // Captures the screen within |rect| in the desktop coordinates. Returns true
+  // Captures the screen within `rect` in the desktop coordinates. Returns true
   // if succeeded.
   // It can only capture the primary screen for now. The magnification library
   // crashes under some screen configurations (e.g. secondary screen on top of
@@ -96,10 +98,8 @@ class ScreenCapturerWinMagnifier : public DesktopCapturer {
   // Called by OnMagImageScalingCallback to output captured data.
   void OnCaptured(void* data, const MAGIMAGEHEADER& header);
 
-  // Makes sure the current frame exists and matches |size|.
+  // Makes sure the current frame exists and matches `size`.
   void CreateCurrentFrameIfNecessary(const DesktopSize& size);
-
-  static Atomic32 tls_index_;
 
   Callback* callback_ = nullptr;
   std::unique_ptr<SharedMemoryFactory> shared_memory_factory_;
@@ -133,10 +133,8 @@ class ScreenCapturerWinMagnifier : public DesktopCapturer {
   // True if the last OnMagImageScalingCallback was called and handled
   // successfully. Reset at the beginning of each CaptureImage call.
   bool magnifier_capture_succeeded_ = true;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(ScreenCapturerWinMagnifier);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_SCREEN_CAPTURER_WIN_MAGNIFIER_H_
+#endif  // MODULES_DESKTOP_CAPTURE_WIN_SCREEN_CAPTURER_WIN_MAGNIFIER_H_

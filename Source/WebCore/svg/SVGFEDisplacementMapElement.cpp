@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 Oliver Hunt <oliver@nerget.com>
+ * Copyright (C) 2018-2022 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,35 +21,27 @@
 #include "config.h"
 #include "SVGFEDisplacementMapElement.h"
 
-#include "FilterEffect.h"
-#include "SVGFilterBuilder.h"
+#include "FEDisplacementMap.h"
 #include "SVGNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-// Animated property definitions
-DEFINE_ANIMATED_STRING(SVGFEDisplacementMapElement, SVGNames::inAttr, In1, in1)
-DEFINE_ANIMATED_STRING(SVGFEDisplacementMapElement, SVGNames::in2Attr, In2, in2)
-DEFINE_ANIMATED_ENUMERATION(SVGFEDisplacementMapElement, SVGNames::xChannelSelectorAttr, XChannelSelector, xChannelSelector, ChannelSelectorType)
-DEFINE_ANIMATED_ENUMERATION(SVGFEDisplacementMapElement, SVGNames::yChannelSelectorAttr, YChannelSelector, yChannelSelector, ChannelSelectorType)
-DEFINE_ANIMATED_NUMBER(SVGFEDisplacementMapElement, SVGNames::scaleAttr, Scale, scale)
-
-BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGFEDisplacementMapElement)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(in1)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(in2)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(xChannelSelector)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(yChannelSelector)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(scale)
-    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGFilterPrimitiveStandardAttributes)
-END_REGISTER_ANIMATED_PROPERTIES
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFEDisplacementMapElement);
 
 inline SVGFEDisplacementMapElement::SVGFEDisplacementMapElement(const QualifiedName& tagName, Document& document)
     : SVGFilterPrimitiveStandardAttributes(tagName, document)
-    , m_xChannelSelector(CHANNEL_A)
-    , m_yChannelSelector(CHANNEL_A)
 {
     ASSERT(hasTagName(SVGNames::feDisplacementMapTag));
-    registerAnimatedPropertiesForSVGFEDisplacementMapElement();
+
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        PropertyRegistry::registerProperty<SVGNames::inAttr, &SVGFEDisplacementMapElement::m_in1>();
+        PropertyRegistry::registerProperty<SVGNames::in2Attr, &SVGFEDisplacementMapElement::m_in2>();
+        PropertyRegistry::registerProperty<SVGNames::xChannelSelectorAttr, ChannelSelectorType, &SVGFEDisplacementMapElement::m_xChannelSelector>();
+        PropertyRegistry::registerProperty<SVGNames::yChannelSelectorAttr, ChannelSelectorType, &SVGFEDisplacementMapElement::m_yChannelSelector>();
+        PropertyRegistry::registerProperty<SVGNames::scaleAttr, &SVGFEDisplacementMapElement::m_scale>();
+    });
 }
 
 Ref<SVGFEDisplacementMapElement> SVGFEDisplacementMapElement::create(const QualifiedName& tagName, Document& document)
@@ -56,49 +49,49 @@ Ref<SVGFEDisplacementMapElement> SVGFEDisplacementMapElement::create(const Quali
     return adoptRef(*new SVGFEDisplacementMapElement(tagName, document));
 }
 
-void SVGFEDisplacementMapElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void SVGFEDisplacementMapElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == SVGNames::xChannelSelectorAttr) {
         auto propertyValue = SVGPropertyTraits<ChannelSelectorType>::fromString(value);
         if (propertyValue > 0)
-            setXChannelSelectorBaseValue(propertyValue);
+            m_xChannelSelector->setBaseValInternal<ChannelSelectorType>(propertyValue);
         return;
     }
 
     if (name == SVGNames::yChannelSelectorAttr) {
         auto propertyValue = SVGPropertyTraits<ChannelSelectorType>::fromString(value);
         if (propertyValue > 0)
-            setYChannelSelectorBaseValue(propertyValue);
+            m_yChannelSelector->setBaseValInternal<ChannelSelectorType>(propertyValue);
         return;
     }
 
     if (name == SVGNames::inAttr) {
-        setIn1BaseValue(value);
+        m_in1->setBaseValInternal(value);
         return;
     }
 
     if (name == SVGNames::in2Attr) {
-        setIn2BaseValue(value);
+        m_in2->setBaseValInternal(value);
         return;
     }
 
     if (name == SVGNames::scaleAttr) {
-        setScaleBaseValue(value.toFloat());
+        m_scale->setBaseValInternal(value.toFloat());
         return;
     }
 
     SVGFilterPrimitiveStandardAttributes::parseAttribute(name, value);
 }
 
-bool SVGFEDisplacementMapElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)
+bool SVGFEDisplacementMapElement::setFilterEffectAttribute(FilterEffect& effect, const QualifiedName& attrName)
 {
-    FEDisplacementMap* displacementMap = static_cast<FEDisplacementMap*>(effect);
+    auto& feDisplacementMap = downcast<FEDisplacementMap>(effect);
     if (attrName == SVGNames::xChannelSelectorAttr)
-        return displacementMap->setXChannelSelector(xChannelSelector());
+        return feDisplacementMap.setXChannelSelector(xChannelSelector());
     if (attrName == SVGNames::yChannelSelectorAttr)
-        return displacementMap->setYChannelSelector(yChannelSelector());
+        return feDisplacementMap.setYChannelSelector(yChannelSelector());
     if (attrName == SVGNames::scaleAttr)
-        return displacementMap->setScale(scale());
+        return feDisplacementMap.setScale(scale());
 
     ASSERT_NOT_REACHED();
     return false;
@@ -106,35 +99,24 @@ bool SVGFEDisplacementMapElement::setFilterEffectAttribute(FilterEffect* effect,
 
 void SVGFEDisplacementMapElement::svgAttributeChanged(const QualifiedName& attrName)
 {
+    if (attrName == SVGNames::inAttr || attrName == SVGNames::in2Attr) {
+        InstanceInvalidationGuard guard(*this);
+        updateSVGRendererForElementChange();
+        return;
+    }
+
     if (attrName == SVGNames::xChannelSelectorAttr || attrName == SVGNames::yChannelSelectorAttr || attrName == SVGNames::scaleAttr) {
         InstanceInvalidationGuard guard(*this);
         primitiveAttributeChanged(attrName);
         return;
     }
 
-    if (attrName == SVGNames::inAttr || attrName == SVGNames::in2Attr) {
-        InstanceInvalidationGuard guard(*this);
-        invalidate();
-        return;
-    }
-
     SVGFilterPrimitiveStandardAttributes::svgAttributeChanged(attrName);
 }
 
-RefPtr<FilterEffect> SVGFEDisplacementMapElement::build(SVGFilterBuilder* filterBuilder, Filter& filter)
+RefPtr<FilterEffect> SVGFEDisplacementMapElement::createFilterEffect(const FilterEffectVector&, const GraphicsContext&) const
 {
-    FilterEffect* input1 = filterBuilder->getEffectById(in1());
-    FilterEffect* input2 = filterBuilder->getEffectById(in2());
-    
-    if (!input1 || !input2)
-        return nullptr;
-
-    RefPtr<FilterEffect> effect = FEDisplacementMap::create(filter, xChannelSelector(), yChannelSelector(), scale());
-    FilterEffectVector& inputEffects = effect->inputEffects();
-    inputEffects.reserveCapacity(2);
-    inputEffects.append(input1);
-    inputEffects.append(input2);    
-    return effect;
+    return FEDisplacementMap::create(xChannelSelector(), yChannelSelector(), scale());
 }
 
-}
+} // namespace WebCore

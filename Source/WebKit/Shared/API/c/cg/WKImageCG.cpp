@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,20 +28,25 @@
 
 #include "ShareableBitmap.h"
 #include "WKSharedAPICast.h"
+#include "WKString.h"
 #include "WebImage.h"
 #include <WebCore/ColorSpace.h>
 #include <WebCore/GraphicsContext.h>
-
-using namespace WebKit;
-using namespace WebCore;
+#include <WebCore/ImageBufferUtilitiesCG.h>
+#include <WebCore/NativeImage.h>
 
 CGImageRef WKImageCreateCGImage(WKImageRef imageRef)
 {
-    WebImage* webImage = toImpl(imageRef);
+    WebKit::WebImage* webImage = WebKit::toImpl(imageRef);
     if (!webImage)
         return nullptr;
 
-    return webImage->bitmap().makeCGImageCopy().leakRef();
+    auto nativeImage = webImage->copyNativeImage();
+    if (!nativeImage)
+        return nullptr;
+
+    auto platformImage = nativeImage->platformImage();
+    return platformImage.leakRef();
 }
 
 WKImageRef WKImageCreateFromCGImage(CGImageRef imageRef, WKImageOptions options)
@@ -49,12 +54,22 @@ WKImageRef WKImageCreateFromCGImage(CGImageRef imageRef, WKImageOptions options)
     if (!imageRef)
         return nullptr;
     
-    IntSize imageSize(CGImageGetWidth(imageRef), CGImageGetHeight(imageRef));
-    auto webImage = WebImage::create(imageSize, toImageOptions(options));
+    auto nativeImage = WebCore::NativeImage::create(imageRef);
+    WebCore::IntSize imageSize = nativeImage->size();
+    auto webImage = WebKit::WebImage::create(imageSize, WebKit::toImageOptions(options), WebCore::DestinationColorSpace::SRGB());
 
-    auto graphicsContext = webImage->bitmap().createGraphicsContext();
-    FloatRect rect(FloatPoint(0, 0), imageSize);
-    graphicsContext->clearRect(rect);
-    graphicsContext->drawNativeImage(imageRef, imageSize, rect, rect);
+    auto& graphicsContext = webImage->context();
+
+    WebCore::FloatRect rect(WebCore::FloatPoint(0, 0), imageSize);
+
+    graphicsContext.clearRect(rect);
+    graphicsContext.drawNativeImage(*nativeImage, imageSize, rect, rect);
     return toAPI(webImage.leakRef());
+}
+
+WKStringRef WKImageCreateDataURLFromImage(CGImageRef imageRef)
+{
+    String mimeType { "image/png"_s };
+    auto value = WebCore::dataURL(imageRef, mimeType, { });
+    return WKStringCreateWithUTF8CString(value.utf8().data());
 }

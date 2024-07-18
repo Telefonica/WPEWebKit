@@ -38,9 +38,8 @@ class ApplicationCache;
 class ApplicationCacheGroup;
 class ApplicationCacheHost;
 class ApplicationCacheResource;
-class URL;
 class SecurityOrigin;
-class SharedBuffer;
+class FragmentedSharedBuffer;
 template<typename> class StorageIDJournal;
 
 class ApplicationCacheStorage : public RefCounted<ApplicationCacheStorage> {
@@ -51,10 +50,12 @@ public:
         DiskOrOperationFailure
     };
 
-    WEBCORE_EXPORT static Ref<ApplicationCacheStorage> create(const String& cacheDirectory, const String& flatFileSubdirectoryName);
+    static Ref<ApplicationCacheStorage> create(const String& cacheDirectory, const String& flatFileSubdirectoryName)
+    {
+        return adoptRef(*new ApplicationCacheStorage(cacheDirectory, flatFileSubdirectoryName));
+    }
 
-    const String& cacheDirectory() const;
-    
+
     WEBCORE_EXPORT void setMaximumSize(int64_t size);
     WEBCORE_EXPORT int64_t maximumSize() const;
     bool isMaximumSizeReached() const;
@@ -62,7 +63,7 @@ public:
 
     int64_t defaultOriginQuota() const { return m_defaultOriginQuota; }
     WEBCORE_EXPORT void setDefaultOriginQuota(int64_t quota);
-    WEBCORE_EXPORT bool calculateUsageForOrigin(const SecurityOrigin*, int64_t& usage);
+    WEBCORE_EXPORT bool calculateUsageForOrigin(const SecurityOriginData&, int64_t& usage);
     WEBCORE_EXPORT bool calculateQuotaForOrigin(const SecurityOrigin&, int64_t& quota);
     bool calculateRemainingSizeForOriginExcludingCache(const SecurityOrigin&, ApplicationCache*, int64_t& remainingSize);
     WEBCORE_EXPORT bool storeUpdatedQuotaForOrigin(const SecurityOrigin*, int64_t quota);
@@ -72,7 +73,6 @@ public:
     ApplicationCacheGroup* fallbackCacheGroupForURL(const URL&); // Cache that has a fallback entry to load a main resource from if normal loading fails.
 
     ApplicationCacheGroup* findOrCreateCacheGroup(const URL& manifestURL);
-    ApplicationCacheGroup* findInMemoryCacheGroup(const URL& manifestURL) const;
     void cacheGroupDestroyed(ApplicationCacheGroup&);
     void cacheGroupMadeObsolete(ApplicationCacheGroup&);
 
@@ -86,31 +86,30 @@ public:
 
     WEBCORE_EXPORT void empty();
 
-    bool getManifestURLs(Vector<URL>* urls);
-    bool cacheGroupSize(const String& manifestURL, int64_t* size);
-    bool deleteCacheGroup(const String& manifestURL);
-    WEBCORE_EXPORT void vacuumDatabaseFile();
-
-    WEBCORE_EXPORT void getOriginsWithCache(HashSet<RefPtr<SecurityOrigin>, SecurityOriginHash>&);
+    WEBCORE_EXPORT HashSet<SecurityOriginData> originsWithCache();
     WEBCORE_EXPORT void deleteAllEntries();
 
     // FIXME: This should be consolidated with deleteAllEntries().
     WEBCORE_EXPORT void deleteAllCaches();
 
     // FIXME: This should be consolidated with deleteCacheGroup().
-    WEBCORE_EXPORT void deleteCacheForOrigin(const SecurityOrigin&);
+    WEBCORE_EXPORT void deleteCacheForOrigin(const SecurityOriginData&);
 
     // FIXME: This should be consolidated with calculateUsageForOrigin().
-    WEBCORE_EXPORT int64_t diskUsageForOrigin(const SecurityOrigin&);
+    WEBCORE_EXPORT int64_t diskUsageForOrigin(const SecurityOriginData&);
 
     static int64_t unknownQuota() { return -1; }
     static int64_t noQuota() { return std::numeric_limits<int64_t>::max(); }
 
 private:
-    ApplicationCacheStorage(const String& cacheDirectory, const String& flatFileSubdirectoryName);
+    WEBCORE_EXPORT ApplicationCacheStorage(const String& cacheDirectory, const String& flatFileSubdirectoryName);
 
     RefPtr<ApplicationCache> loadCache(unsigned storageID);
     ApplicationCacheGroup* loadCacheGroup(const URL& manifestURL);
+    std::optional<Vector<URL>> manifestURLs();
+    ApplicationCacheGroup* findInMemoryCacheGroup(const URL& manifestURL) const;
+    bool deleteCacheGroup(const String& manifestURL);
+    void vacuumDatabaseFile();
     
     using ResourceStorageIDJournal = StorageIDJournal<ApplicationCacheResource>;
     using GroupStorageIDJournal = StorageIDJournal<ApplicationCacheGroup>;
@@ -121,9 +120,9 @@ private:
     bool deleteCacheGroupRecord(const String& manifestURL);
 
     bool ensureOriginRecord(const SecurityOrigin*);
-    bool shouldStoreResourceAsFlatFile(ApplicationCacheResource*);
+    static bool shouldStoreResourceAsFlatFile(ApplicationCacheResource*);
     void deleteTables();
-    bool writeDataToUniqueFileInDirectory(SharedBuffer&, const String& directory, String& outFilename, const String& fileExtension);
+    bool writeDataToUniqueFileInDirectory(FragmentedSharedBuffer&, const String& directory, String& outFilename, StringView fileExtension);
 
     void loadManifestHostHashes();
     
@@ -132,7 +131,7 @@ private:
     void openDatabase(bool createIfDoesNotExist);
     
     bool executeStatement(SQLiteStatement&);
-    bool executeSQLCommand(const String&);
+    bool executeSQLCommand(ASCIILiteral);
 
     void checkForMaxSizeReached();
     void checkForDeletedResources();
@@ -142,10 +141,10 @@ private:
     const String m_flatFileSubdirectoryName;
     String m_cacheFile;
 
-    int64_t m_maximumSize;
-    bool m_isMaximumSizeReached;
+    int64_t m_maximumSize { noQuota() };
+    bool m_isMaximumSizeReached { false };
 
-    int64_t m_defaultOriginQuota;
+    int64_t m_defaultOriginQuota { noQuota() };
 
     SQLiteDatabase m_database;
 
@@ -155,7 +154,7 @@ private:
     
     HashMap<String, ApplicationCacheGroup*> m_cachesInMemory; // Excludes obsolete cache groups.
 
-    friend class WTF::NeverDestroyed<ApplicationCacheStorage>;
+    friend class NeverDestroyed<ApplicationCacheStorage>;
 };
 
 } // namespace WebCore

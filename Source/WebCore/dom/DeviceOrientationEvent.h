@@ -25,15 +25,20 @@
 
 #pragma once
 
+#include "DeviceOrientationOrMotionPermissionState.h"
 #include "Event.h"
+#include "IDLTypes.h"
 
 namespace WebCore {
 
 class DeviceOrientationData;
+class Document;
+template<typename IDLType> class DOMPromiseDeferred;
 
 class DeviceOrientationEvent final : public Event {
+    WTF_MAKE_ISO_ALLOCATED(DeviceOrientationEvent);
 public:
-    static Ref<DeviceOrientationEvent> create(const AtomicString& eventType, DeviceOrientationData* orientation)
+    static Ref<DeviceOrientationEvent> create(const AtomString& eventType, DeviceOrientationData* orientation)
     {
         return adoptRef(*new DeviceOrientationEvent(eventType, orientation));
     }
@@ -49,20 +54,26 @@ public:
     std::optional<double> beta() const;
     std::optional<double> gamma() const;
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     std::optional<double> compassHeading() const;
     std::optional<double> compassAccuracy() const;
 
-    void initDeviceOrientationEvent(const AtomicString& type, bool bubbles, bool cancelable, std::optional<double> alpha, std::optional<double> beta, std::optional<double> gamma, std::optional<double> compassHeading, std::optional<double> compassAccuracy);
+    void initDeviceOrientationEvent(const AtomString& type, bool bubbles, bool cancelable, std::optional<double> alpha, std::optional<double> beta, std::optional<double> gamma, std::optional<double> compassHeading, std::optional<double> compassAccuracy);
 #else
     std::optional<bool> absolute() const;
 
-    void initDeviceOrientationEvent(const AtomicString& type, bool bubbles, bool cancelable, std::optional<double> alpha, std::optional<double> beta, std::optional<double> gamma, std::optional<bool> absolute);
+    void initDeviceOrientationEvent(const AtomString& type, bool bubbles, bool cancelable, std::optional<double> alpha, std::optional<double> beta, std::optional<double> gamma, std::optional<bool> absolute);
+#endif
+
+#if ENABLE(DEVICE_ORIENTATION)
+    using PermissionState = DeviceOrientationOrMotionPermissionState;
+    using PermissionPromise = DOMPromiseDeferred<IDLEnumeration<PermissionState>>;
+    static void requestPermission(Document&, PermissionPromise&&);
 #endif
 
 private:
     DeviceOrientationEvent();
-    DeviceOrientationEvent(const AtomicString& eventType, DeviceOrientationData*);
+    DeviceOrientationEvent(const AtomString& eventType, DeviceOrientationData*);
 
     EventInterface eventInterface() const override;
 

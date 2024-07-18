@@ -53,6 +53,9 @@
 
 #include <gtest/gtest.h>
 
+#include <openssl/mem.h>
+#include <openssl/rand.h>
+
 
 static uint8_t FromBool8(bool b) {
   return b ? CONSTTIME_TRUE_8 : CONSTTIME_FALSE_8;
@@ -132,5 +135,37 @@ TEST(ConstantTimeTest, Test) {
       EXPECT_EQ(a, constant_time_select_8(CONSTTIME_TRUE_8, a, b));
       EXPECT_EQ(b, constant_time_select_8(CONSTTIME_FALSE_8, a, b));
     }
+  }
+}
+
+TEST(ConstantTimeTest, MemCmp) {
+  uint8_t buf[256], copy[256];
+  RAND_bytes(buf, sizeof(buf));
+
+  OPENSSL_memcpy(copy, buf, sizeof(buf));
+  EXPECT_EQ(0, CRYPTO_memcmp(buf, copy, sizeof(buf)));
+
+  for (size_t i = 0; i < sizeof(buf); i++) {
+    for (uint8_t bit = 1; bit != 0; bit <<= 1) {
+      OPENSSL_memcpy(copy, buf, sizeof(buf));
+      copy[i] ^= bit;
+      EXPECT_NE(0, CRYPTO_memcmp(buf, copy, sizeof(buf)));
+    }
+  }
+}
+
+TEST(ConstantTimeTest, ValueBarrier) {
+  for (int i = 0; i < 10; i++) {
+    crypto_word_t word;
+    RAND_bytes(reinterpret_cast<uint8_t *>(&word), sizeof(word));
+    EXPECT_EQ(word, value_barrier_w(word));
+
+    uint32_t u32;
+    RAND_bytes(reinterpret_cast<uint8_t *>(&u32), sizeof(u32));
+    EXPECT_EQ(u32, value_barrier_u32(u32));
+
+    uint64_t u64;
+    RAND_bytes(reinterpret_cast<uint8_t *>(&u64), sizeof(u64));
+    EXPECT_EQ(u64, value_barrier_u64(u64));
   }
 }

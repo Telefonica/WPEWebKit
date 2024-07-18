@@ -29,26 +29,33 @@
 #if ENABLE(WEB_RTC)
 
 #include "Blob.h"
-#include "Event.h"
 #include "EventNames.h"
+#include "ExceptionCode.h"
+#include "Logging.h"
 #include "MessageEvent.h"
-#include "RTCDataChannelHandler.h"
+#include "RTCDataChannelRemoteHandler.h"
+#include "RTCDataChannelRemoteHandlerConnection.h"
+#include "RTCErrorEvent.h"
 #include "ScriptExecutionContext.h"
-#include <runtime/ArrayBuffer.h>
-#include <runtime/ArrayBufferView.h>
+#include "SharedBuffer.h"
+#include <JavaScriptCore/ArrayBufferView.h>
+#include <wtf/IsoMallocInlines.h>
+#include <wtf/Lock.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
 
-static const AtomicString& blobKeyword()
+WTF_MAKE_ISO_ALLOCATED_IMPL(RTCDataChannel);
+
+static const AtomString& blobKeyword()
 {
-    static NeverDestroyed<AtomicString> blob("blob", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> blob("blob"_s);
     return blob;
 }
 
-static const AtomicString& arraybufferKeyword()
+static const AtomString& arraybufferKeyword()
 {
-    static NeverDestroyed<AtomicString> arraybuffer("arraybuffer", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> arraybuffer("arraybuffer"_s);
     return arraybuffer;
 }
 
@@ -57,29 +64,57 @@ Ref<RTCDataChannel> RTCDataChannel::create(ScriptExecutionContext& context, std:
     ASSERT(handler);
     auto channel = adoptRef(*new RTCDataChannel(context, WTFMove(handler), WTFMove(label), WTFMove(options)));
     channel->suspendIfNeeded();
-    channel->m_handler->setClient(channel.get());
-    channel->setPendingActivity(channel.ptr());
+    queueTaskKeepingObjectAlive(channel.get(), TaskSource::Networking, [channel = channel.ptr()] {
+        if (!channel->m_isDetachable)
+            return;
+        channel->m_isDetachable = false;
+        if (!channel->m_handler)
+            return;
+        if (auto* context = channel->scriptExecutionContext())
+            channel->m_handler->setClient(*channel, context->identifier());
+    });
     return channel;
+}
+
+NetworkSendQueue RTCDataChannel::createMessageQueue(ScriptExecutionContext& context, RTCDataChannel& channel)
+{
+    return { context, [&channel](auto& utf8) {
+        if (!channel.m_handler->sendStringData(utf8))
+            channel.scriptExecutionContext()->addConsoleMessage(MessageSource::JS, MessageLevel::Error, "Error sending string through RTCDataChannel."_s);
+    }, [&channel](auto& span) {
+        if (!channel.m_handler->sendRawData(span.data(), span.size()))
+            channel.scriptExecutionContext()->addConsoleMessage(MessageSource::JS, MessageLevel::Error, "Error sending binary data through RTCDataChannel."_s);
+    }, [&channel](ExceptionCode errorCode) {
+        if (auto* context = channel.scriptExecutionContext()) {
+            auto code = static_cast<int>(errorCode);
+            context->addConsoleMessage(MessageSource::JS, MessageLevel::Error, makeString("Error ", code, " in retrieving a blob data to be sent through RTCDataChannel."));
+        }
+        return NetworkSendQueue::Continue::Yes;
+    } };
 }
 
 RTCDataChannel::RTCDataChannel(ScriptExecutionContext& context, std::unique_ptr<RTCDataChannelHandler>&& handler, String&& label, RTCDataChannelInit&& options)
     : ActiveDOMObject(&context)
     , m_handler(WTFMove(handler))
-    , m_scheduledEventTimer(*this, &RTCDataChannel::scheduledEventTimerFired)
+    , m_identifier(RTCDataChannelIdentifier { Process::identifier(), ObjectIdentifier<RTCDataChannelLocalIdentifierType>::generateThreadSafe() })
+    , m_contextIdentifier(context.isDocument() ? ScriptExecutionContextIdentifier { } : context.identifier())
     , m_label(WTFMove(label))
     , m_options(WTFMove(options))
+    , m_messageQueue(createMessageQueue(context, *this))
 {
 }
 
-size_t RTCDataChannel::bufferedAmount() const
+RTCDataChannel::~RTCDataChannel() = default;
+
+std::optional<unsigned short> RTCDataChannel::id() const
 {
-    // FIXME: We should compute our own bufferedAmount and not count on m_handler which is made null at closing time.
-    if (m_stopped)
-        return 0;
-    return m_handler->bufferedAmount();
+    if (!m_options.id && m_handler)
+        const_cast<RTCDataChannel*>(this)->m_options.id = m_handler->id();
+
+    return m_options.id;
 }
 
-const AtomicString& RTCDataChannel::binaryType() const
+const AtomString& RTCDataChannel::binaryType() const
 {
     switch (m_binaryType) {
     case BinaryType::Blob:
@@ -92,15 +127,17 @@ const AtomicString& RTCDataChannel::binaryType() const
     return emptyAtom();
 }
 
-ExceptionOr<void> RTCDataChannel::setBinaryType(const AtomicString& binaryType)
+ExceptionOr<void> RTCDataChannel::setBinaryType(const AtomString& binaryType)
 {
-    if (binaryType == blobKeyword())
-        return Exception { NotSupportedError };
+    if (binaryType == blobKeyword()) {
+        m_binaryType = BinaryType::Blob;
+        return { };
+    }
     if (binaryType == arraybufferKeyword()) {
         m_binaryType = BinaryType::ArrayBuffer;
         return { };
     }
-    return Exception { TypeMismatchError };
+    return Exception { SyntaxError };
 }
 
 ExceptionOr<void> RTCDataChannel::send(const String& data)
@@ -108,45 +145,41 @@ ExceptionOr<void> RTCDataChannel::send(const String& data)
     if (m_readyState != RTCDataChannelState::Open)
         return Exception { InvalidStateError };
 
-    if (!m_handler->sendStringData(data)) {
-        // FIXME: Decide what the right exception here is.
-        return Exception { SyntaxError };
-    }
-
+    // FIXME: We might want to use strict conversion like WebSocket.
+    auto utf8 = data.utf8();
+    m_bufferedAmount += utf8.length();
+    m_messageQueue.enqueue(WTFMove(utf8));
     return { };
 }
 
-ExceptionOr<void> RTCDataChannel::sendRawData(const char* data, size_t length)
+ExceptionOr<void> RTCDataChannel::send(ArrayBuffer& data)
 {
     if (m_readyState != RTCDataChannelState::Open)
         return Exception { InvalidStateError };
 
-    if (!length)
-        return { };
-
-    if (!m_handler->sendRawData(data, length)) {
-        // FIXME: Decide what the right exception here is.
-        return Exception { SyntaxError };
-    }
-
+    m_bufferedAmount += data.byteLength();
+    m_messageQueue.enqueue(data, 0, data.byteLength());
     return { };
-}
-
-
-ExceptionOr<void> RTCDataChannel::send(ArrayBuffer& data)
-{
-    return sendRawData(static_cast<const char*>(data.data()), data.byteLength());
 }
 
 ExceptionOr<void> RTCDataChannel::send(ArrayBufferView& data)
 {
-    return sendRawData(static_cast<const char*>(data.baseAddress()), data.byteLength());
+    if (m_readyState != RTCDataChannelState::Open)
+        return Exception { InvalidStateError };
+
+    m_bufferedAmount += data.byteLength();
+    m_messageQueue.enqueue(*data.unsharedBuffer(), data.byteOffset(), data.byteLength());
+    return { };
 }
 
-ExceptionOr<void> RTCDataChannel::send(Blob&)
+ExceptionOr<void> RTCDataChannel::send(Blob& blob)
 {
-    // FIXME: Implement.
-    return Exception { NotSupportedError };
+    if (m_readyState != RTCDataChannelState::Open)
+        return Exception { InvalidStateError };
+
+    m_bufferedAmount += blob.size();
+    m_messageQueue.enqueue(blob);
+    return { };
 }
 
 void RTCDataChannel::close()
@@ -154,98 +187,180 @@ void RTCDataChannel::close()
     if (m_stopped)
         return;
 
-    m_stopped = true;
-    m_readyState = RTCDataChannelState::Closed;
+    if (m_readyState == RTCDataChannelState::Closing || m_readyState == RTCDataChannelState::Closed)
+        return;
 
-    m_handler->close();
-    m_handler = nullptr;
-    unsetPendingActivity(this);
+    m_readyState = RTCDataChannelState::Closing;
+
+    m_messageQueue.clear();
+
+    if (m_handler)
+        m_handler->close();
+}
+
+bool RTCDataChannel::virtualHasPendingActivity() const
+{
+    return !m_stopped;
 }
 
 void RTCDataChannel::didChangeReadyState(RTCDataChannelState newState)
 {
-    if (m_stopped || m_readyState == RTCDataChannelState::Closed || m_readyState == newState)
-        return;
+    queueTaskKeepingObjectAlive(*this, TaskSource::Networking, [this, newState] {
+        if (m_stopped || m_readyState == RTCDataChannelState::Closed || m_readyState == newState)
+            return;
 
-    m_readyState = newState;
+        if (m_readyState == RTCDataChannelState::Closing && newState == RTCDataChannelState::Open)
+            return;
 
-    switch (m_readyState) {
-    case RTCDataChannelState::Open:
-        scheduleDispatchEvent(Event::create(eventNames().openEvent, false, false));
-        break;
-    case RTCDataChannelState::Closed:
-        scheduleDispatchEvent(Event::create(eventNames().closeEvent, false, false));
-        break;
-    default:
-        break;
-    }
+        m_readyState = newState;
+
+        switch (m_readyState) {
+        case RTCDataChannelState::Connecting:
+            ASSERT_NOT_REACHED();
+            break;
+        case RTCDataChannelState::Open:
+            dispatchEvent(Event::create(eventNames().openEvent, Event::CanBubble::No, Event::IsCancelable::No));
+            break;
+        case RTCDataChannelState::Closing:
+            dispatchEvent(Event::create(eventNames().closingEvent, Event::CanBubble::No, Event::IsCancelable::No));
+            break;
+        case RTCDataChannelState::Closed:
+            dispatchEvent(Event::create(eventNames().closeEvent, Event::CanBubble::No, Event::IsCancelable::No));
+            m_stopped = true;
+            break;
+        }
+    });
 }
 
 void RTCDataChannel::didReceiveStringData(const String& text)
 {
-    if (m_stopped)
-        return;
-
     scheduleDispatchEvent(MessageEvent::create(text));
 }
 
-void RTCDataChannel::didReceiveRawData(const char* data, size_t dataLength)
+void RTCDataChannel::didReceiveRawData(const uint8_t* data, size_t dataLength)
 {
-    if (m_stopped)
+    switch (m_binaryType) {
+    case BinaryType::Blob:
+        scheduleDispatchEvent(MessageEvent::create(Blob::create(scriptExecutionContext(), Vector { data, dataLength }, emptyString()), { }));
         return;
-
-    if (m_binaryType == BinaryType::Blob) {
-        // FIXME: Implement.
-        return;
-    }
-
-    if (m_binaryType == BinaryType::ArrayBuffer) {
+    case BinaryType::ArrayBuffer:
         scheduleDispatchEvent(MessageEvent::create(ArrayBuffer::create(data, dataLength)));
         return;
     }
     ASSERT_NOT_REACHED();
 }
 
-void RTCDataChannel::didDetectError()
+void RTCDataChannel::didDetectError(Ref<RTCError>&& error)
 {
-    if (m_stopped)
-        return;
-
-    scheduleDispatchEvent(Event::create(eventNames().errorEvent, false, false));
+    scheduleDispatchEvent(RTCErrorEvent::create(eventNames().errorEvent, WTFMove(error)));
 }
 
 void RTCDataChannel::bufferedAmountIsDecreasing(size_t amount)
 {
-    if (m_stopped)
-        return;
-
-    if (amount <= m_bufferedAmountLowThreshold)
-        scheduleDispatchEvent(Event::create(eventNames().bufferedamountlowEvent, false, false));
+    queueTaskKeepingObjectAlive(*this, TaskSource::Networking, [this, amount] {
+        auto previousBufferedAmount = m_bufferedAmount;
+        m_bufferedAmount -= amount;
+        if (previousBufferedAmount > m_bufferedAmountLowThreshold && m_bufferedAmount <= m_bufferedAmountLowThreshold)
+            dispatchEvent(Event::create(eventNames().bufferedamountlowEvent, Event::CanBubble::No, Event::IsCancelable::No));
+    });
 }
 
 void RTCDataChannel::stop()
 {
+    removeFromDataChannelLocalMapIfNeeded();
+
+    id();
     close();
+    m_stopped = true;
+    m_handler = nullptr;
 }
 
 void RTCDataChannel::scheduleDispatchEvent(Ref<Event>&& event)
 {
-    m_scheduledEvents.append(WTFMove(event));
-
-    if (!m_scheduledEventTimer.isActive())
-        m_scheduledEventTimer.startOneShot(0_s);
-}
-
-void RTCDataChannel::scheduledEventTimerFired()
-{
     if (m_stopped)
         return;
 
-    Vector<Ref<Event>> events;
-    events.swap(m_scheduledEvents);
+    // https://w3c.github.io/webrtc-pc/#operation
+    queueTaskToDispatchEvent(*this, TaskSource::Networking, WTFMove(event));
+}
 
-    for (auto& event : events)
-        dispatchEvent(event);
+static Lock s_rtcDataChannelLocalMapLock;
+static HashMap<RTCDataChannelLocalIdentifier, std::unique_ptr<RTCDataChannelHandler>>& rtcDataChannelLocalMap() WTF_REQUIRES_LOCK(s_rtcDataChannelLocalMapLock)
+{
+    ASSERT(s_rtcDataChannelLocalMapLock.isHeld());
+    static LazyNeverDestroyed<HashMap<RTCDataChannelLocalIdentifier, std::unique_ptr<RTCDataChannelHandler>>> map;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        map.construct();
+    });
+    return map;
+}
+
+bool RTCDataChannel::canDetach() const
+{
+    return m_isDetachable && !m_isDetached && !m_bufferedAmount && m_readyState != RTCDataChannelState::Closed;
+}
+
+std::unique_ptr<DetachedRTCDataChannel> RTCDataChannel::detach()
+{
+    ASSERT(canDetach());
+
+    auto state = m_readyState;
+
+    m_isDetachable = false;
+    m_isDetached = true;
+    m_readyState = RTCDataChannelState::Closed;
+
+    Locker locker { s_rtcDataChannelLocalMapLock };
+    rtcDataChannelLocalMap().add(identifier().channelIdentifier, WTFMove(m_handler));
+
+    return makeUnique<DetachedRTCDataChannel>(identifier(), String { label() }, RTCDataChannelInit { options() }, state);
+}
+
+void RTCDataChannel::removeFromDataChannelLocalMapIfNeeded()
+{
+    if (!m_isDetached)
+        return;
+
+    Locker locker { s_rtcDataChannelLocalMapLock };
+    rtcDataChannelLocalMap().remove(identifier().channelIdentifier);
+}
+
+std::unique_ptr<RTCDataChannelHandler> RTCDataChannel::handlerFromIdentifier(RTCDataChannelLocalIdentifier channelIdentifier)
+{
+    Locker locker { s_rtcDataChannelLocalMapLock };
+    return rtcDataChannelLocalMap().take(channelIdentifier);
+}
+
+static Ref<RTCDataChannel> createClosedChannel(ScriptExecutionContext& context, String&& label, RTCDataChannelInit&& options)
+{
+    auto channel = RTCDataChannel::create(context, nullptr, WTFMove(label), WTFMove(options));
+    channel->close();
+    return channel;
+}
+
+Ref<RTCDataChannel> RTCDataChannel::create(ScriptExecutionContext& context, RTCDataChannelIdentifier identifier, String&& label, RTCDataChannelInit&& options, RTCDataChannelState state)
+{
+    RTCDataChannelRemoteHandler* remoteHandlerPtr = nullptr;
+    std::unique_ptr<RTCDataChannelHandler> handler;
+    if (identifier.processIdentifier == Process::identifier())
+        handler = RTCDataChannel::handlerFromIdentifier(identifier.channelIdentifier);
+    else {
+        auto remoteHandler = RTCDataChannelRemoteHandler::create(identifier, context.createRTCDataChannelRemoteHandlerConnection());
+        remoteHandlerPtr = remoteHandler.get();
+        handler = WTFMove(remoteHandler);
+    }
+
+    if (!handler)
+        return createClosedChannel(context, WTFMove(label), WTFMove(options));
+
+    auto channel = RTCDataChannel::create(context, WTFMove(handler), WTFMove(label), WTFMove(options));
+    channel->m_readyState = state;
+
+    if (remoteHandlerPtr)
+        remoteHandlerPtr->setLocalIdentifier(channel->identifier());
+
+    return channel;
 }
 
 } // namespace WebCore

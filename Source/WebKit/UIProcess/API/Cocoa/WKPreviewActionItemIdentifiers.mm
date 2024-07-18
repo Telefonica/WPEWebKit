@@ -23,10 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "WKPreviewActionItemIdentifiers.h"
+#import "config.h"
+#import "WKPreviewActionItemIdentifiers.h"
 
-#if WK_API_ENABLED && PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 NSString * const WKPreviewActionItemIdentifierOpen = @"WKPreviewActionItemIdentifierOpen";
 NSString * const WKPreviewActionItemIdentifierAddToReadingList = @"WKPreviewActionItemIdentifierAddToReadingList";

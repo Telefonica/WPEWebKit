@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,16 +26,21 @@
 #pragma once
 
 #include "MessageReceiver.h"
+#include "StorageAreaIdentifier.h"
+#include "StorageAreaImplIdentifier.h"
+#include "StorageAreaMapIdentifier.h"
 #include <WebCore/SecurityOrigin.h>
 #include <WebCore/StorageArea.h>
 #include <wtf/Forward.h>
 #include <wtf/HashCountedSet.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 class SecurityOrigin;
 class StorageMap;
+struct ClientOrigin;
 }
 
 namespace WebKit {
@@ -43,61 +48,70 @@ namespace WebKit {
 class StorageAreaImpl;
 class StorageNamespaceImpl;
 
-class StorageAreaMap : public RefCounted<StorageAreaMap>, private IPC::MessageReceiver {
+class StorageAreaMap final : public IPC::MessageReceiver {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    static Ref<StorageAreaMap> create(StorageNamespaceImpl*, Ref<WebCore::SecurityOrigin>&&);
+    StorageAreaMap(StorageNamespaceImpl&, Ref<const WebCore::SecurityOrigin>&&);
     ~StorageAreaMap();
 
-    WebCore::StorageType storageType() const { return m_storageType; }
+    WebCore::StorageType type() const { return m_type; }
 
     unsigned length();
     String key(unsigned index);
     String item(const String& key);
-    void setItem(WebCore::Frame* sourceFrame, StorageAreaImpl* sourceArea, const String& key, const String& value, bool& quotaException);
-    void removeItem(WebCore::Frame* sourceFrame, StorageAreaImpl* sourceArea, const String& key);
-    void clear(WebCore::Frame* sourceFrame, StorageAreaImpl* sourceArea);
+    void setItem(WebCore::Frame& sourceFrame, StorageAreaImpl* sourceArea, const String& key, const String& value, bool& quotaException);
+    void removeItem(WebCore::Frame& sourceFrame, StorageAreaImpl* sourceArea, const String& key);
+    void clear(WebCore::Frame& sourceFrame, StorageAreaImpl* sourceArea);
     bool contains(const String& key);
 
+    // IPC::MessageReceiver
+    void didReceiveMessage(IPC::Connection&, IPC::Decoder&) final;
+
     const WebCore::SecurityOrigin& securityOrigin() const { return m_securityOrigin.get(); }
+    StorageAreaMapIdentifier identifier() const { return m_identifier; }
+
+    void connect();
+    void disconnect();
+    void incrementUseCount();
+    void decrementUseCount();
 
 private:
-    StorageAreaMap(StorageNamespaceImpl*, Ref<WebCore::SecurityOrigin>&&);
+    void didSetItem(uint64_t mapSeed, const String& key, bool hasError, HashMap<String, String>&&);
+    void didRemoveItem(uint64_t mapSeed, const String& key);
+    void didClear(uint64_t mapSeed);
 
-    // IPC::MessageReceiver
-    void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
+    // Message handlers.
+    void dispatchStorageEvent(const std::optional<StorageAreaImplIdentifier>& sourceStorageAreaID, const String& key, const String& oldValue, const String& newValue, const String& urlString, uint64_t messageIdentifier);
+    void clearCache(uint64_t messageIdentifier);
 
-    void didGetValues(uint64_t storageMapSeed);
-    void didSetItem(uint64_t storageMapSeed, const String& key, bool quotaError);
-    void didRemoveItem(uint64_t storageMapSeed, const String& key);
-    void didClear(uint64_t storageMapSeed);
+    void syncOneItem(const String& key, const String& value);
+    void syncItems(HashMap<String, String>&&);
+    WebCore::StorageMap& ensureMap();
+    WebCore::StorageType computeStorageType() const;
+    WebCore::ClientOrigin clientOrigin() const;
 
-    void dispatchStorageEvent(uint64_t sourceStorageAreaID, const String& key, const String& oldValue, const String& newValue, const String& urlString);
-    void clearCache();
-
-    void resetValues();
-    void loadValuesIfNeeded();
-
-    bool shouldApplyChangeForKey(const String& key) const;
     void applyChange(const String& key, const String& newValue);
+    void dispatchSessionStorageEvent(const std::optional<StorageAreaImplIdentifier>&, const String& key, const String& oldValue, const String& newValue, const String& urlString);
+    void dispatchLocalStorageEvent(const std::optional<StorageAreaImplIdentifier>&, const String& key, const String& oldValue, const String& newValue, const String& urlString);
 
-    void dispatchSessionStorageEvent(uint64_t sourceStorageAreaID, const String& key, const String& oldValue, const String& newValue, const String& urlString);
-    void dispatchLocalStorageEvent(uint64_t sourceStorageAreaID, const String& key, const String& oldValue, const String& newValue, const String& urlString);
+    enum class SendMode : bool { Async, Sync };
+    void sendConnectMessage(SendMode);
+    void connectSync();
+    void didConnect(StorageAreaIdentifier, HashMap<String, String>&&, uint64_t messageIdentifier);
 
-    Ref<StorageNamespaceImpl> m_storageNamespace;
-
-    uint64_t m_storageMapID;
-
-    WebCore::StorageType m_storageType;
-    uint64_t m_storageNamespaceID;
-    unsigned m_quotaInBytes;
-    Ref<WebCore::SecurityOrigin> m_securityOrigin;
-
-    RefPtr<WebCore::StorageMap> m_storageMap;
-
-    uint64_t m_currentSeed;
-    bool m_hasPendingClear;
-    bool m_hasPendingGetValues;
+    StorageAreaMapIdentifier m_identifier;
+    uint64_t m_lastHandledMessageIdentifier { 0 };
+    StorageNamespaceImpl& m_namespace;
+    Ref<const WebCore::SecurityOrigin> m_securityOrigin;
+    std::unique_ptr<WebCore::StorageMap> m_map;
+    std::optional<StorageAreaIdentifier> m_remoteAreaIdentifier;
     HashCountedSet<String> m_pendingValueChanges;
+    uint64_t m_currentSeed { 1 };
+    unsigned m_quotaInBytes;
+    WebCore::StorageType m_type;
+    uint64_t m_useCount { 0 };
+    bool m_hasPendingClear { false };
+    bool m_isWaitingForConnectReply { false };
 };
 
 } // namespace WebKit

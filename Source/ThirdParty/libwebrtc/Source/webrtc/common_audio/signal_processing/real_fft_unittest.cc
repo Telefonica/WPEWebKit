@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/common_audio/signal_processing/include/real_fft.h"
-#include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/typedefs.h"
+#include "common_audio/signal_processing/include/real_fft.h"
+
+#include "common_audio/signal_processing/include/signal_processing_library.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 namespace {
@@ -27,27 +27,19 @@ const int kFreqDataLength = (1 << kOrder) + 2;
 const int kComplexFftDataLength = 2 << kOrder;
 // Reference data for time signal.
 const int16_t kRefData[kTimeDataLength] = {
-  11739, 6848, -8688, 31980, -30295, 25242, 27085, 19410,
-  -26299, 15607, -10791, 11778, -23819, 14498, -25772, 10076,
-  1173, 6848, -8688, 31980, -30295, 2522, 27085, 19410,
-  -2629, 5607, -3, 1178, -23819, 1498, -25772, 10076
-};
+    11739,  6848,  -8688,  31980, -30295, 25242, 27085,  19410,
+    -26299, 15607, -10791, 11778, -23819, 14498, -25772, 10076,
+    1173,   6848,  -8688,  31980, -30295, 2522,  27085,  19410,
+    -2629,  5607,  -3,     1178,  -23819, 1498,  -25772, 10076};
 
-class RealFFTTest : public ::testing::Test {
- protected:
-  RealFFTTest() {
-    WebRtcSpl_Init();
-  }
-};
-
-TEST_F(RealFFTTest, CreateFailsOnBadInput) {
+TEST(RealFFTTest, CreateFailsOnBadInput) {
   RealFFT* fft = WebRtcSpl_CreateRealFFT(11);
   EXPECT_TRUE(fft == nullptr);
   fft = WebRtcSpl_CreateRealFFT(-1);
   EXPECT_TRUE(fft == nullptr);
 }
 
-TEST_F(RealFFTTest, RealAndComplexMatch) {
+TEST(RealFFTTest, RealAndComplexMatch) {
   int i = 0;
   int j = 0;
   int16_t real_fft_time[kTimeDataLength] = {0};

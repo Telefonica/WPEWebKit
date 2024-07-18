@@ -22,14 +22,19 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef WebFullScreenManager_h
-#define WebFullScreenManager_h
+
+#pragma once
 
 #if ENABLE(FULLSCREEN_API)
 
+#include "WebCoreArgumentCoders.h"
+#include <WebCore/EventListener.h>
 #include <WebCore/IntRect.h>
+#include <WebCore/LengthBox.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/RunLoop.h>
+#include <wtf/WeakPtr.h>
 
 namespace IPC {
 class Connection;
@@ -40,13 +45,14 @@ namespace WebCore {
 class IntRect;
 class Element;
 class GraphicsLayer;
+class HTMLVideoElement;
 }
 
 namespace WebKit {
 
 class WebPage;
 
-class WebFullScreenManager : public RefCounted<WebFullScreenManager> {
+class WebFullScreenManager final : public WebCore::EventListener {
 public:
     static Ref<WebFullScreenManager> create(WebPage*);
     virtual ~WebFullScreenManager();
@@ -64,28 +70,58 @@ public:
 
     WebCore::Element* element();
 
-    void close();
+    void videoControlsManagerDidChange();
+
+    bool operator==(const WebCore::EventListener& listener) const final { return this == &listener; }
 
 protected:
     WebFullScreenManager(WebPage*);
 
+    void setPIPStandbyElement(WebCore::HTMLVideoElement*);
+
     void setAnimatingFullScreen(bool);
+    void requestEnterFullScreen();
     void requestExitFullScreen();
     void saveScrollPosition();
     void restoreScrollPosition();
+    void setFullscreenInsets(const WebCore::FloatBoxExtent&);
+    void setFullscreenAutoHideDuration(Seconds);
+    void setFullscreenControlsHidden(bool);
 
     void didReceiveWebFullScreenManagerMessage(IPC::Connection&, IPC::Decoder&);
 
     WebCore::IntRect m_initialFrame;
     WebCore::IntRect m_finalFrame;
     WebCore::IntPoint m_scrollPosition;
-    float m_topContentInset;
+    float m_topContentInset { 0 };
     RefPtr<WebPage> m_page;
     RefPtr<WebCore::Element> m_element;
+#if ENABLE(VIDEO)
+    RefPtr<WebCore::HTMLVideoElement> m_pipStandbyElement;
+#endif
+
+private:
+    void close();
+
+    void handleEvent(WebCore::ScriptExecutionContext&, WebCore::Event&) final;
+
+    void setElement(WebCore::Element&);
+
+#if ENABLE(VIDEO)
+    void scheduleTextRecognitionForMainVideo();
+    void endTextRecognitionForMainVideoIfNeeded();
+    void mainVideoElementTextRecognitionTimerFired();
+    void updateMainVideoElement();
+    void setMainVideoElement(RefPtr<WebCore::HTMLVideoElement>&&);
+
+    WeakPtr<WebCore::HTMLVideoElement> m_mainVideoElement;
+    RunLoop::Timer<WebFullScreenManager> m_mainVideoElementTextRecognitionTimer;
+    bool m_isPerformingTextRecognitionInMainVideo { false };
+#endif // ENABLE(VIDEO)
+
+    bool m_closing { false };
 };
 
 } // namespace WebKit
 
 #endif // ENABLE(FULLSCREEN_API)
-
-#endif // WebFullScreenManager_h

@@ -8,30 +8,71 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_API_TEST_MOCK_RTPSENDER_H_
-#define WEBRTC_API_TEST_MOCK_RTPSENDER_H_
+#ifndef API_TEST_MOCK_RTPSENDER_H_
+#define API_TEST_MOCK_RTPSENDER_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
-#include "webrtc/api/rtpsenderinterface.h"
-#include "webrtc/test/gmock.h"
+#include "api/rtp_sender_interface.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
-class MockRtpSender : public rtc::RefCountedObject<RtpSenderInterface> {
+class MockRtpSender : public RtpSenderInterface {
  public:
-  MOCK_METHOD1(SetTrack, bool(MediaStreamTrackInterface*));
-  MOCK_CONST_METHOD0(track, rtc::scoped_refptr<MediaStreamTrackInterface>());
-  MOCK_CONST_METHOD0(ssrc, uint32_t());
-  MOCK_CONST_METHOD0(media_type, cricket::MediaType());
-  MOCK_CONST_METHOD0(id, std::string());
-  MOCK_CONST_METHOD0(stream_ids, std::vector<std::string>());
-  MOCK_CONST_METHOD0(GetParameters, RtpParameters());
-  MOCK_METHOD1(SetParameters, bool(const RtpParameters&));
-  MOCK_CONST_METHOD0(GetDtmfSender, rtc::scoped_refptr<DtmfSenderInterface>());
+  static rtc::scoped_refptr<MockRtpSender> Create() {
+    return rtc::make_ref_counted<MockRtpSender>();
+  }
+
+  MOCK_METHOD(bool, SetTrack, (MediaStreamTrackInterface*), (override));
+  MOCK_METHOD(rtc::scoped_refptr<MediaStreamTrackInterface>,
+              track,
+              (),
+              (const, override));
+  MOCK_METHOD(rtc::scoped_refptr<DtlsTransportInterface>,
+              dtls_transport,
+              (),
+              (const override));
+  MOCK_METHOD(uint32_t, ssrc, (), (const, override));
+  MOCK_METHOD(cricket::MediaType, media_type, (), (const, override));
+  MOCK_METHOD(std::string, id, (), (const, override));
+  MOCK_METHOD(std::vector<std::string>, stream_ids, (), (const, override));
+  MOCK_METHOD(void, SetStreams, (const std::vector<std::string>&), (override));
+  MOCK_METHOD(std::vector<RtpEncodingParameters>,
+              init_send_encodings,
+              (),
+              (const, override));
+  MOCK_METHOD(RtpParameters, GetParameters, (), (const, override));
+  MOCK_METHOD(RTCError, SetParameters, (const RtpParameters&), (override));
+  MOCK_METHOD(void,
+              SetParametersAsync,
+              (const RtpParameters&, SetParametersCallback),
+              (override));
+  MOCK_METHOD(rtc::scoped_refptr<DtmfSenderInterface>,
+              GetDtmfSender,
+              (),
+              (const, override));
+  MOCK_METHOD(void,
+              SetFrameEncryptor,
+              (rtc::scoped_refptr<FrameEncryptorInterface>),
+              (override));
+  MOCK_METHOD(rtc::scoped_refptr<FrameEncryptorInterface>,
+              GetFrameEncryptor,
+              (),
+              (const, override));
+  MOCK_METHOD(void,
+              SetEncoderToPacketizerFrameTransformer,
+              (rtc::scoped_refptr<FrameTransformerInterface>),
+              (override));
+  MOCK_METHOD(void,
+              SetEncoderSelector,
+              (std::unique_ptr<VideoEncoderFactory::EncoderSelectorInterface>),
+              (override));
 };
 
+static_assert(!std::is_abstract_v<rtc::RefCountedObject<MockRtpSender>>, "");
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_TEST_MOCK_RTPSENDER_H_
+#endif  // API_TEST_MOCK_RTPSENDER_H_

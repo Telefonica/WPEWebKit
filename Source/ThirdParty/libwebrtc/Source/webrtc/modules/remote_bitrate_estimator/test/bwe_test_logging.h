@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_TEST_BWE_TEST_LOGGING_H_
-#define WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_TEST_BWE_TEST_LOGGING_H_
+#ifndef MODULES_REMOTE_BITRATE_ESTIMATOR_TEST_BWE_TEST_LOGGING_H_
+#define MODULES_REMOTE_BITRATE_ESTIMATOR_TEST_BWE_TEST_LOGGING_H_
 
 // To enable BWE logging, run this command from trunk/ :
 // build/gyp_chromium --depth=. webrtc/modules/modules.gyp
@@ -46,38 +46,38 @@
 // Log *contexts* are names concatenated with '_' between them, with the name
 // of the logged/plotted string/value last. Plot *time* is inherited down the
 // tree. A branch is enabled by default but can be *disabled* to reduce output.
-// The difference between the LOG and PLOT macros is that PLOT prefixes the line
-// so it can be easily filtered, plus it outputs the current time.
+// The difference between the RTC_LOG and PLOT macros is that PLOT prefixes the
+// line so it can be easily filtered, plus it outputs the current time.
 
 #if !(BWE_TEST_LOGGING_COMPILE_TIME_ENABLE)
 
 // Set a thread-global base logging context. This name will be prepended to all
 // hierarchical contexts.
-// |name| is a char*, std::string or uint32_t to name the context.
+// `name` is a char*, std::string or uint32_t to name the context.
 #define BWE_TEST_LOGGING_GLOBAL_CONTEXT(name)
 
 // Thread-globally allow/disallow logging.
-// |enable| is expected to be a bool.
+// `enable` is expected to be a bool.
 #define BWE_TEST_LOGGING_GLOBAL_ENABLE(enabled)
 
 // Insert a (hierarchical) logging context.
-// |name| is a char*, std::string or uint32_t to name the context.
+// `name` is a char*, std::string or uint32_t to name the context.
 #define BWE_TEST_LOGGING_CONTEXT(name)
 
 // Allow/disallow logging down the call tree from this point. Logging must be
 // enabled all the way to the root of the call tree to take place.
-// |enable| is expected to be a bool.
+// `enable` is expected to be a bool.
 #define BWE_TEST_LOGGING_ENABLE(enabled)
 
 // Set current time (only affects PLOT output). Down the call tree, the latest
 // time set always takes precedence.
-// |time| is an int64_t time in ms, or -1 to inherit time from previous context.
+// `time` is an int64_t time in ms, or -1 to inherit time from previous context.
 #define BWE_TEST_LOGGING_TIME(time)
 
 // Print to stdout, e.g.:
 //   Context1_Context2_Name  printf-formated-string
-// |name| is a char*, std::string or uint32_t to name the log line.
-// |format| is a printf format string.
+// `name` is a char*, std::string or uint32_t to name the log line.
+// `format` is a printf format string.
 // |_1...| are arguments for printf.
 #define BWE_TEST_LOGGING_LOG1(name, format, _1)
 #define BWE_TEST_LOGGING_LOG2(name, format, _1, _2)
@@ -87,12 +87,12 @@
 
 // Print to stdout in tab-separated format suitable for plotting, e.g.:
 //   PLOT figure Context1_Context2_Name  time  value
-// |figure| is a figure id. Different figures are plotted in different windows.
-// |name| is a char*, std::string or uint32_t to name the plotted value.
-// |time| is an int64_t time in ms, or -1 to inherit time from previous context.
-// |value| is a double precision float to be plotted.
-// |ssrc| identifies the source of a stream
-// |alg_name| is an optional argument, a string
+// `figure` is a figure id. Different figures are plotted in different windows.
+// `name` is a char*, std::string or uint32_t to name the plotted value.
+// `time` is an int64_t time in ms, or -1 to inherit time from previous context.
+// `value` is a double precision float to be plotted.
+// `ssrc` identifies the source of a stream
+// `alg_name` is an optional argument, a string
 #define BWE_TEST_LOGGING_PLOT(figure, name, time, value)
 #define BWE_TEST_LOGGING_PLOT_WITH_NAME(figure, name, time, value, alg_name)
 #define BWE_TEST_LOGGING_PLOT_WITH_SSRC(figure, name, time, value, ssrc)
@@ -101,13 +101,13 @@
 
 // Print to stdout in tab-separated format suitable for plotting, e.g.:
 //   BAR figure Context1_Context2_Name  x_left  width  value
-// |figure| is a figure id. Different figures are plotted in different windows.
-// |name| is a char*, std::string or uint32_t to name the plotted value.
-// |value| is a double precision float to be plotted.
-// |ylow| and |yhigh| are double precision float for the error line.
-// |title| is a string and refers to the error label.
-// |ymax| is a double precision float for the limit horizontal line.
-// |limit_title| is a string and refers to the limit label.
+// `figure` is a figure id. Different figures are plotted in different windows.
+// `name` is a char*, std::string or uint32_t to name the plotted value.
+// `value` is a double precision float to be plotted.
+// `ylow` and `yhigh` are double precision float for the error line.
+// `title` is a string and refers to the error label.
+// `ymax` is a double precision float for the limit horizontal line.
+// `limit_title` is a string and refers to the limit label.
 #define BWE_TEST_LOGGING_BAR(figure, name, value, flow_id)
 #define BWE_TEST_LOGGING_ERRORBAR(figure, name, value, ylow, yhigh, \
                                   error_title, flow_id)
@@ -116,9 +116,9 @@
 
 #define BWE_TEST_LOGGING_BASELINEBAR(figure, name, value, flow_id)
 
-// |num_flows| is an integer refering to the number of RMCAT flows in the
+// `num_flows` is an integer refering to the number of RMCAT flows in the
 // scenario.
-// Define |x_label| and |y_label| for plots.
+// Define `x_label` and `y_label` for plots.
 #define BWE_TEST_LOGGING_LABEL(figure, x_label, y_label, num_flows)
 
 #else  // BWE_TEST_LOGGING_COMPILE_TIME_ENABLE
@@ -128,61 +128,58 @@
 #include <stack>
 #include <string>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/common_types.h"
+#include "rtc_base/synchronization/mutex.h"
 
-#define BWE_TEST_LOGGING_GLOBAL_CONTEXT(name) \
-    do { \
-      webrtc::testing::bwe::Logging::GetInstance()->SetGlobalContext(name); \
-    } while (0)
+#define BWE_TEST_LOGGING_GLOBAL_CONTEXT(name)                             \
+  do {                                                                    \
+    webrtc::testing::bwe::Logging::GetInstance()->SetGlobalContext(name); \
+  } while (0)
 
-#define BWE_TEST_LOGGING_GLOBAL_ENABLE(enabled) \
-    do { \
-      webrtc::testing::bwe::Logging::GetInstance()->SetGlobalEnable(enabled); \
-    } while (0)
+#define BWE_TEST_LOGGING_GLOBAL_ENABLE(enabled)                             \
+  do {                                                                      \
+    webrtc::testing::bwe::Logging::GetInstance()->SetGlobalEnable(enabled); \
+  } while (0)
 
-#define __BWE_TEST_LOGGING_CONTEXT_NAME(ctx, line) ctx ## line
+#define __BWE_TEST_LOGGING_CONTEXT_NAME(ctx, line) ctx##line
 #define __BWE_TEST_LOGGING_CONTEXT_DECLARE(ctx, line, name, time, enabled) \
-    webrtc::testing::bwe::Logging::Context \
-        __BWE_TEST_LOGGING_CONTEXT_NAME(ctx, line)(name, time, enabled)
+  webrtc::testing::bwe::Logging::Context __BWE_TEST_LOGGING_CONTEXT_NAME(  \
+      ctx, line)(name, time, enabled)
 
 #define BWE_TEST_LOGGING_CONTEXT(name) \
-    __BWE_TEST_LOGGING_CONTEXT_DECLARE(__bwe_log_, __LINE__, name, -1, true)
-#define BWE_TEST_LOGGING_ENABLE(enabled) \
-    __BWE_TEST_LOGGING_CONTEXT_DECLARE(__bwe_log_, __LINE__, "", -1, \
-                                       static_cast<bool>(enabled))
-#define BWE_TEST_LOGGING_TIME(time) \
-    __BWE_TEST_LOGGING_CONTEXT_DECLARE(__bwe_log_, __LINE__, "", \
-                                       static_cast<int64_t>(time), true)
+  __BWE_TEST_LOGGING_CONTEXT_DECLARE(__bwe_log_, __LINE__, name, -1, true)
+#define BWE_TEST_LOGGING_ENABLE(enabled)                           \
+  __BWE_TEST_LOGGING_CONTEXT_DECLARE(__bwe_log_, __LINE__, "", -1, \
+                                     static_cast<bool>(enabled))
+#define BWE_TEST_LOGGING_TIME(time)                            \
+  __BWE_TEST_LOGGING_CONTEXT_DECLARE(__bwe_log_, __LINE__, "", \
+                                     static_cast<int64_t>(time), true)
 
-#define BWE_TEST_LOGGING_LOG1(name, format, _1) \
-    do { \
-      BWE_TEST_LOGGING_CONTEXT(name); \
-      webrtc::testing::bwe::Logging::GetInstance()->Log(format, _1); \
-    } while (0)
-#define BWE_TEST_LOGGING_LOG2(name, format, _1, _2) \
-    do { \
-      BWE_TEST_LOGGING_CONTEXT(name); \
-      webrtc::testing::bwe::Logging::GetInstance()->Log(format, _1, _2); \
-    } while (0)
-#define BWE_TEST_LOGGING_LOG3(name, format, _1, _2, _3) \
-    do { \
-      BWE_TEST_LOGGING_CONTEXT(name); \
-      webrtc::testing::bwe::Logging::GetInstance()->Log(format, _1, _2, _3); \
-    } while (0)
-#define BWE_TEST_LOGGING_LOG4(name, format, _1, _2, _3, _4) \
-    do { \
-      BWE_TEST_LOGGING_CONTEXT(name); \
-      webrtc::testing::bwe::Logging::GetInstance()->Log(format, _1, _2, _3, \
-                                                        _4); \
-    } while (0)
-#define BWE_TEST_LOGGING_LOG5(name, format, _1, _2, _3, _4, _5) \
-    do {\
-      BWE_TEST_LOGGING_CONTEXT(name); \
-      webrtc::testing::bwe::Logging::GetInstance()->Log(format, _1, _2, _3, \
-                                                        _4, _5); \
-    } while (0)
+#define BWE_TEST_LOGGING_LOG1(name, format, _1)                    \
+  do {                                                             \
+    BWE_TEST_LOGGING_CONTEXT(name);                                \
+    webrtc::testing::bwe::Logging::GetInstance()->Log(format, _1); \
+  } while (0)
+#define BWE_TEST_LOGGING_LOG2(name, format, _1, _2)                    \
+  do {                                                                 \
+    BWE_TEST_LOGGING_CONTEXT(name);                                    \
+    webrtc::testing::bwe::Logging::GetInstance()->Log(format, _1, _2); \
+  } while (0)
+#define BWE_TEST_LOGGING_LOG3(name, format, _1, _2, _3)                    \
+  do {                                                                     \
+    BWE_TEST_LOGGING_CONTEXT(name);                                        \
+    webrtc::testing::bwe::Logging::GetInstance()->Log(format, _1, _2, _3); \
+  } while (0)
+#define BWE_TEST_LOGGING_LOG4(name, format, _1, _2, _3, _4)                    \
+  do {                                                                         \
+    BWE_TEST_LOGGING_CONTEXT(name);                                            \
+    webrtc::testing::bwe::Logging::GetInstance()->Log(format, _1, _2, _3, _4); \
+  } while (0)
+#define BWE_TEST_LOGGING_LOG5(name, format, _1, _2, _3, _4, _5)               \
+  do {                                                                        \
+    BWE_TEST_LOGGING_CONTEXT(name);                                           \
+    webrtc::testing::bwe::Logging::GetInstance()->Log(format, _1, _2, _3, _4, \
+                                                      _5);                    \
+  } while (0)
 
 #define BWE_TEST_LOGGING_PLOT(figure, name, time, value)                     \
   do {                                                                       \
@@ -265,9 +262,11 @@ class Logging {
     Context(uint32_t name, int64_t timestamp_ms, bool enabled);
     Context(const std::string& name, int64_t timestamp_ms, bool enabled);
     Context(const char* name, int64_t timestamp_ms, bool enabled);
+
+    Context() = delete;
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
     ~Context();
-   private:
-    RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(Context);
   };
 
   static Logging* GetInstance();
@@ -277,7 +276,12 @@ class Logging {
   void SetGlobalContext(const char* name);
   void SetGlobalEnable(bool enabled);
 
-  void Log(const char format[], ...);
+#if defined(__GNUC__)
+  // Note: Implicit `this` argument counts as the first argument.
+  __attribute__((__format__(__printf__, 2, 3)))
+#endif
+  void
+  Log(const char format[], ...);
   void Plot(int figure, const std::string& name, double value);
   void Plot(int figure,
             const std::string& name,
@@ -327,25 +331,30 @@ class Logging {
     bool enabled;
   };
   struct ThreadState {
+    ThreadState();
+    ~ThreadState();
     State global_state;
     std::stack<State> stack;
   };
   typedef std::map<uint32_t, ThreadState> ThreadMap;
 
   Logging();
-  void PushState(const std::string& append_to_tag, int64_t timestamp_ms,
+  ~Logging();
+
+  Logging(const Logging&) = delete;
+  Logging& operator=(const Logging&) = delete;
+
+  void PushState(const std::string& append_to_tag,
+                 int64_t timestamp_ms,
                  bool enabled);
   void PopState();
 
-  static Logging g_Logging;
-  rtc::CriticalSection crit_sect_;
+  Mutex mutex_;
   ThreadMap thread_map_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(Logging);
 };
 }  // namespace bwe
 }  // namespace testing
 }  // namespace webrtc
 
 #endif  // BWE_TEST_LOGGING_COMPILE_TIME_ENABLE
-#endif  // WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_TEST_BWE_TEST_LOGGING_H_
+#endif  // MODULES_REMOTE_BITRATE_ESTIMATOR_TEST_BWE_TEST_LOGGING_H_

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,26 +28,22 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
 
 namespace JSC {
 
-JSWebAssemblyRuntimeError* JSWebAssemblyRuntimeError::create(ExecState* exec, VM& vm, Structure* structure, const String& message)
+JSObject* createJSWebAssemblyRuntimeError(JSGlobalObject* globalObject, VM& vm, const String& message)
 {
-    auto* instance = new (NotNull, allocateCell<JSWebAssemblyRuntimeError>(vm.heap)) JSWebAssemblyRuntimeError(vm, structure);
-    instance->m_sourceAppender = defaultSourceAppender;
-    bool useCurrentFrame = true;
-    instance->finishCreation(exec, vm, message, useCurrentFrame);
-    return instance;
+    ASSERT(!message.isEmpty());
+    return ErrorInstance::create(globalObject, vm, globalObject->webAssemblyRuntimeErrorStructure(), message, JSValue(), defaultSourceAppender, TypeNothing, ErrorType::Error, true);
 }
 
-JSWebAssemblyRuntimeError::JSWebAssemblyRuntimeError(VM& vm, Structure* structure)
-    : Base(vm, structure)
+JSObject* createJSWebAssemblyRuntimeError(JSGlobalObject* globalObject, VM& vm, Wasm::ExceptionType type)
 {
+    ErrorInstance* error = ErrorInstance::create(globalObject, vm, globalObject->webAssemblyRuntimeErrorStructure(), Wasm::errorMessageForExceptionType(type), JSValue(), defaultSourceAppender, TypeNothing, ErrorType::Error, true);
+    error->setCatchableFromWasm(false);
+    return error;
 }
-
-const ClassInfo JSWebAssemblyRuntimeError::s_info = { "WebAssembly.RuntimeError", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSWebAssemblyRuntimeError) };
-
     
 } // namespace JSC
 

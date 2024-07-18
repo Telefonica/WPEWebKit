@@ -70,12 +70,14 @@ typedef struct _WebKitSettingsPrivate WebKitSettingsPrivate;
 struct _WebKitSettings {
     GObject parent_instance;
 
+    /*< private >*/
     WebKitSettingsPrivate *priv;
 };
 
 struct _WebKitSettingsClass {
     GObjectClass parent_class;
 
+    /*< private >*/
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
@@ -133,31 +135,31 @@ webkit_settings_get_enable_html5_database                      (WebKitSettings *
 WEBKIT_API void
 webkit_settings_set_enable_html5_database                      (WebKitSettings *settings,
                                                                 gboolean        enabled);
-WEBKIT_API gboolean
+WEBKIT_DEPRECATED gboolean
 webkit_settings_get_enable_xss_auditor                         (WebKitSettings *settings);
 
-WEBKIT_API void
+WEBKIT_DEPRECATED void
 webkit_settings_set_enable_xss_auditor                         (WebKitSettings *settings,
                                                                 gboolean        enabled);
 
-WEBKIT_API gboolean
+WEBKIT_DEPRECATED gboolean
 webkit_settings_get_enable_frame_flattening                    (WebKitSettings *settings);
 
-WEBKIT_API void
+WEBKIT_DEPRECATED void
 webkit_settings_set_enable_frame_flattening                    (WebKitSettings *settings,
                                                                 gboolean        enabled);
 
-WEBKIT_API gboolean
+WEBKIT_DEPRECATED gboolean
 webkit_settings_get_enable_plugins                             (WebKitSettings *settings);
 
-WEBKIT_API void
+WEBKIT_DEPRECATED void
 webkit_settings_set_enable_plugins                             (WebKitSettings *settings,
                                                                 gboolean        enabled);
 
-WEBKIT_API gboolean
+WEBKIT_DEPRECATED gboolean
 webkit_settings_get_enable_java                                (WebKitSettings *settings);
 
-WEBKIT_API void
+WEBKIT_DEPRECATED void
 webkit_settings_set_enable_java                                (WebKitSettings *settings,
                                                                 gboolean        enabled);
 
@@ -395,10 +397,10 @@ WEBKIT_API void
 webkit_settings_set_enable_smooth_scrolling                    (WebKitSettings *settings,
                                                                 gboolean        enabled);
 
-WEBKIT_API gboolean
+WEBKIT_DEPRECATED gboolean
 webkit_settings_get_enable_accelerated_2d_canvas               (WebKitSettings *settings);
 
-WEBKIT_API void
+WEBKIT_DEPRECATED void
 webkit_settings_set_enable_accelerated_2d_canvas               (WebKitSettings *settings,
                                                                 gboolean        enabled);
 
@@ -417,6 +419,13 @@ webkit_settings_set_enable_media_stream                        (WebKitSettings *
                                                                 gboolean        enabled);
 
 WEBKIT_API gboolean
+webkit_settings_get_enable_mock_capture_devices                (WebKitSettings *settings);
+
+WEBKIT_API void
+webkit_settings_set_enable_mock_capture_devices                (WebKitSettings *settings,
+                                                                gboolean        enabled);
+
+WEBKIT_API gboolean
 webkit_settings_get_enable_spatial_navigation                  (WebKitSettings *settings);
 
 WEBKIT_API void
@@ -428,6 +437,20 @@ webkit_settings_get_enable_mediasource                         (WebKitSettings *
 
 WEBKIT_API void
 webkit_settings_set_enable_mediasource                         (WebKitSettings *settings,
+                                                                gboolean        enabled);
+
+WEBKIT_API gboolean
+webkit_settings_get_enable_encrypted_media                     (WebKitSettings *settings);
+
+WEBKIT_API void
+webkit_settings_set_enable_encrypted_media                     (WebKitSettings *settings,
+                                                                gboolean        enabled);
+
+WEBKIT_API gboolean
+webkit_settings_get_enable_media_capabilities                  (WebKitSettings *settings);
+
+WEBKIT_API void
+webkit_settings_set_enable_media_capabilities                  (WebKitSettings *settings,
                                                                 gboolean        enabled);
 
 WEBKIT_API gboolean
@@ -444,12 +467,60 @@ WEBKIT_API void
 webkit_settings_set_allow_universal_access_from_file_urls      (WebKitSettings *settings,
                                                                 gboolean        allowed);
 
+WEBKIT_API gboolean
+webkit_settings_get_allow_top_navigation_to_data_urls          (WebKitSettings *settings);
+
+WEBKIT_API void
+webkit_settings_set_allow_top_navigation_to_data_urls          (WebKitSettings *settings,
+                                                                gboolean        allowed);
+
 WEBKIT_API WebKitHardwareAccelerationPolicy
 webkit_settings_get_hardware_acceleration_policy               (WebKitSettings *settings);
 
 WEBKIT_API void
 webkit_settings_set_hardware_acceleration_policy               (WebKitSettings *settings,
                                                                 WebKitHardwareAccelerationPolicy policy);
+
+WEBKIT_API gboolean
+webkit_settings_get_enable_back_forward_navigation_gestures    (WebKitSettings *settings);
+
+WEBKIT_API void
+webkit_settings_set_enable_back_forward_navigation_gestures    (WebKitSettings *settings,
+                                                                gboolean        enabled);
+
+WEBKIT_API guint32
+webkit_settings_font_size_to_points                            (guint32 pixels);
+
+WEBKIT_API guint32
+webkit_settings_font_size_to_pixels                            (guint32 points);
+
+WEBKIT_API gboolean
+webkit_settings_get_enable_javascript_markup                   (WebKitSettings *settings);
+
+WEBKIT_API void
+webkit_settings_set_enable_javascript_markup                   (WebKitSettings *settings,
+                                                                gboolean        enabled);
+
+WEBKIT_API gboolean
+webkit_settings_get_enable_media                               (WebKitSettings *settings);
+
+WEBKIT_API void
+webkit_settings_set_enable_media                               (WebKitSettings *settings,
+                                                                gboolean        enabled);
+
+WEBKIT_API const gchar *
+webkit_settings_get_media_content_types_requiring_hardware_support (WebKitSettings *settings);
+
+WEBKIT_API void
+webkit_settings_set_media_content_types_requiring_hardware_support (WebKitSettings *settings,
+                                                                    const gchar *content_types);
+
+WEBKIT_API gboolean
+webkit_settings_get_enable_webrtc                              (WebKitSettings *settings);
+
+WEBKIT_API void
+webkit_settings_set_enable_webrtc                              (WebKitSettings *settings,
+                                                                gboolean enabled);
 
 G_END_DECLS
 

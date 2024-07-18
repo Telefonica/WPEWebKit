@@ -35,18 +35,20 @@
 #include "AsyncFileStream.h"
 #include "BlobData.h"
 #include "FileStream.h"
-#include "FileSystem.h"
 #include "HTTPHeaderNames.h"
 #include "HTTPParsers.h"
 #include "ParsedContentRange.h"
-#include "URL.h"
 #include "ResourceError.h"
 #include "ResourceHandleClient.h"
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
+#include "SecurityOrigin.h"
 #include "SharedBuffer.h"
+#include <wtf/CompletionHandler.h>
+#include <wtf/FileSystem.h>
 #include <wtf/MainThread.h>
 #include <wtf/Ref.h>
+#include <wtf/URL.h>
 
 namespace WebCore {
 
@@ -57,13 +59,13 @@ static const int httpPartialContent = 206;
 static const int httpNotAllowed = 403;
 static const int httpRequestedRangeNotSatisfiable = 416;
 static const int httpInternalError = 500;
-static const char* httpOKText = "OK";
-static const char* httpPartialContentText = "Partial Content";
-static const char* httpNotAllowedText = "Not Allowed";
-static const char* httpRequestedRangeNotSatisfiableText = "Requested Range Not Satisfiable";
-static const char* httpInternalErrorText = "Internal Server Error";
+static constexpr auto httpOKText = "OK"_s;
+static constexpr auto httpPartialContentText = "Partial Content"_s;
+static constexpr auto httpNotAllowedText = "Not Allowed"_s;
+static constexpr auto httpRequestedRangeNotSatisfiableText = "Requested Range Not Satisfiable"_s;
+static constexpr auto httpInternalErrorText = "Internal Server Error"_s;
 
-static const char* const webKitBlobResourceDomain = "WebKitBlobResource";
+static constexpr auto webKitBlobResourceDomain = "WebKitBlobResource"_s;
 
 ///////////////////////////////////////////////////////////////////////////////
 // BlobResourceSynchronousLoader
@@ -72,29 +74,48 @@ namespace {
 
 class BlobResourceSynchronousLoader : public ResourceHandleClient {
 public:
-    BlobResourceSynchronousLoader(ResourceError&, ResourceResponse&, Vector<char>&);
+    BlobResourceSynchronousLoader(ResourceError&, ResourceResponse&, Vector<uint8_t>&);
 
-    void didReceiveResponse(ResourceHandle*, ResourceResponse&&) override;
-    void didFail(ResourceHandle*, const ResourceError&) override;
+    void didReceiveResponseAsync(ResourceHandle*, ResourceResponse&&, CompletionHandler<void()>&&) final;
+    void didFail(ResourceHandle*, const ResourceError&) final;
+    void willSendRequestAsync(ResourceHandle*, ResourceRequest&&, ResourceResponse&&, CompletionHandler<void(ResourceRequest&&)>&&) final;
+#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
+    void canAuthenticateAgainstProtectionSpaceAsync(ResourceHandle*, const ProtectionSpace&, CompletionHandler<void(bool)>&&) final;
+#endif
 
 private:
     ResourceError& m_error;
     ResourceResponse& m_response;
-    Vector<char>& m_data;
+    Vector<uint8_t>& m_data;
 };
 
-BlobResourceSynchronousLoader::BlobResourceSynchronousLoader(ResourceError& error, ResourceResponse& response, Vector<char>& data)
+BlobResourceSynchronousLoader::BlobResourceSynchronousLoader(ResourceError& error, ResourceResponse& response, Vector<uint8_t>& data)
     : m_error(error)
     , m_response(response)
     , m_data(data)
 {
 }
 
-void BlobResourceSynchronousLoader::didReceiveResponse(ResourceHandle* handle, ResourceResponse&& response)
+void BlobResourceSynchronousLoader::willSendRequestAsync(ResourceHandle*, ResourceRequest&& request, ResourceResponse&&, CompletionHandler<void(ResourceRequest&&)>&& completionHandler)
+{
+    ASSERT_NOT_REACHED();
+    completionHandler(WTFMove(request));
+}
+
+#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
+void BlobResourceSynchronousLoader::canAuthenticateAgainstProtectionSpaceAsync(ResourceHandle*, const ProtectionSpace&, CompletionHandler<void(bool)>&& completionHandler)
+{
+    ASSERT_NOT_REACHED();
+    completionHandler(false);
+}
+#endif
+
+void BlobResourceSynchronousLoader::didReceiveResponseAsync(ResourceHandle* handle, ResourceResponse&& response, CompletionHandler<void()>&& completionHandler)
 {
     // We cannot handle the size that is more than maximum integer.
     if (response.expectedContentLength() > INT_MAX) {
-        m_error = ResourceError(webKitBlobResourceDomain, static_cast<int>(BlobResourceHandle::Error::NotReadableError), response.url(), "File is too large");
+        m_error = ResourceError(webKitBlobResourceDomain, static_cast<int>(BlobResourceHandle::Error::NotReadableError), response.url(), "File is too large"_s);
+        completionHandler();
         return;
     }
 
@@ -103,6 +124,7 @@ void BlobResourceSynchronousLoader::didReceiveResponse(ResourceHandle* handle, R
     // Read all the data.
     m_data.resize(static_cast<size_t>(response.expectedContentLength()));
     static_cast<BlobResourceHandle*>(handle)->readSync(m_data.data(), static_cast<int>(m_data.size()));
+    completionHandler();
 }
 
 void BlobResourceSynchronousLoader::didFail(ResourceHandle*, const ResourceError& error)
@@ -120,10 +142,10 @@ Ref<BlobResourceHandle> BlobResourceHandle::createAsync(BlobData* blobData, cons
     return adoptRef(*new BlobResourceHandle(blobData, request, client, true));
 }
 
-void BlobResourceHandle::loadResourceSynchronously(BlobData* blobData, const ResourceRequest& request, ResourceError& error, ResourceResponse& response, Vector<char>& data)
+void BlobResourceHandle::loadResourceSynchronously(BlobData* blobData, const ResourceRequest& request, ResourceError& error, ResourceResponse& response, Vector<uint8_t>& data)
 {
-    if (!equalLettersIgnoringASCIICase(request.httpMethod(), "get")) {
-        error = ResourceError(webKitBlobResourceDomain, static_cast<int>(Error::MethodNotAllowed), response.url(), "Request method must be GET");
+    if (!equalLettersIgnoringASCIICase(request.httpMethod(), "get"_s)) {
+        error = ResourceError(webKitBlobResourceDomain, static_cast<int>(Error::MethodNotAllowed), response.url(), "Request method must be GET"_s);
         return;
     }
 
@@ -133,19 +155,17 @@ void BlobResourceHandle::loadResourceSynchronously(BlobData* blobData, const Res
 }
 
 BlobResourceHandle::BlobResourceHandle(BlobData* blobData, const ResourceRequest& request, ResourceHandleClient* client, bool async)
-    : ResourceHandle(nullptr, request, client, false, false)
-    , m_blobData(blobData)
-    , m_async(async)
+    : ResourceHandle { nullptr, request, client, false /* defersLoading */, false /* shouldContentSniff */, ContentEncodingSniffingPolicy::Default, nullptr /* sourceOrigin */, false /* isMainFrameNavigation */ }
+    , m_blobData { blobData }
+    , m_async { async }
 {
     if (m_async)
-        m_asyncStream = std::make_unique<AsyncFileStream>(*this);
+        m_asyncStream = makeUnique<AsyncFileStream>(*this);
     else
-        m_stream = std::make_unique<FileStream>();
+        m_stream = makeUnique<FileStream>();
 }
 
-BlobResourceHandle::~BlobResourceHandle()
-{
-}
+BlobResourceHandle::~BlobResourceHandle() = default;
 
 void BlobResourceHandle::cancel()
 {
@@ -157,15 +177,6 @@ void BlobResourceHandle::cancel()
     ResourceHandle::cancel();
 }
 
-void BlobResourceHandle::continueDidReceiveResponse()
-{
-    ASSERT(m_async);
-    ASSERT(usesAsyncCallbacks());
-
-    m_buffer.resize(bufferSize);
-    readAsync();
-}
-
 void BlobResourceHandle::start()
 {
     if (!m_async) {
@@ -174,7 +185,7 @@ void BlobResourceHandle::start()
     }
 
     // Finish this async call quickly and return.
-    callOnMainThread([protectedThis = makeRef(*this)]() mutable {
+    callOnMainThread([protectedThis = Ref { *this }]() mutable {
         protectedThis->doStart();
     });
 }
@@ -187,7 +198,7 @@ void BlobResourceHandle::doStart()
     if (erroredOrAborted())
         return;
 
-    if (!equalLettersIgnoringASCIICase(firstRequest().httpMethod(), "get")) {
+    if (!equalLettersIgnoringASCIICase(firstRequest().httpMethod(), "get"_s)) {
         notifyFail(Error::MethodNotAllowed);
         return;
     }
@@ -228,10 +239,6 @@ void BlobResourceHandle::getSizeForNext()
         if (m_async) {
             Ref<BlobResourceHandle> protectedThis(*this);
             notifyResponse();
-            if (!usesAsyncCallbacks()) {
-                m_buffer.resize(bufferSize);
-                readAsync();
-            }
         }
         return;
     }
@@ -314,7 +321,7 @@ void BlobResourceHandle::seek()
         m_totalRemainingSize -= m_rangeOffset;
 }
 
-int BlobResourceHandle::readSync(char* buf, int length)
+int BlobResourceHandle::readSync(uint8_t* buf, int length)
 {
     ASSERT(isMainThread());
 
@@ -362,7 +369,7 @@ int BlobResourceHandle::readSync(char* buf, int length)
     return result;
 }
 
-int BlobResourceHandle::readDataSync(const BlobDataItem& item, char* buf, int length)
+int BlobResourceHandle::readDataSync(const BlobDataItem& item, void* buf, int length)
 {
     ASSERT(isMainThread());
 
@@ -372,7 +379,7 @@ int BlobResourceHandle::readDataSync(const BlobDataItem& item, char* buf, int le
     int bytesToRead = (length > remaining) ? static_cast<int>(remaining) : length;
     if (bytesToRead > m_totalRemainingSize)
         bytesToRead = static_cast<int>(m_totalRemainingSize);
-    memcpy(buf, item.data().data() + item.offset() + m_currentItemReadSize, bytesToRead);
+    memcpy(buf, item.data()->data() + item.offset() + m_currentItemReadSize, bytesToRead);
     m_totalRemainingSize -= bytesToRead;
 
     m_currentItemReadSize += bytesToRead;
@@ -384,7 +391,7 @@ int BlobResourceHandle::readDataSync(const BlobDataItem& item, char* buf, int le
     return bytesToRead;
 }
 
-int BlobResourceHandle::readFileSync(const BlobDataItem& item, char* buf, int length)
+int BlobResourceHandle::readFileSync(const BlobDataItem& item, void* buf, int length)
 {
     ASSERT(isMainThread());
 
@@ -422,7 +429,6 @@ int BlobResourceHandle::readFileSync(const BlobDataItem& item, char* buf, int le
 void BlobResourceHandle::readAsync()
 {
     ASSERT(isMainThread());
-    ASSERT(m_async);
 
     // Do not continue if the request is aborted or an error occurs.
     if (erroredOrAborted())
@@ -446,22 +452,24 @@ void BlobResourceHandle::readAsync()
 void BlobResourceHandle::readDataAsync(const BlobDataItem& item)
 {
     ASSERT(isMainThread());
-    ASSERT(m_async);
-    ASSERT(item.data().data());
+    ASSERT(item.data());
 
     Ref<BlobResourceHandle> protectedThis(*this);
 
     long long bytesToRead = item.length() - m_currentItemReadSize;
+    ASSERT(bytesToRead >= 0);
     if (bytesToRead > m_totalRemainingSize)
         bytesToRead = m_totalRemainingSize;
-    consumeData(reinterpret_cast<const char*>(item.data().data()->data()) + item.offset() + m_currentItemReadSize, static_cast<int>(bytesToRead));
+
+    auto* data = item.data()->data() + item.offset() + m_currentItemReadSize;
     m_currentItemReadSize = 0;
+
+    consumeData(data, static_cast<int>(bytesToRead));
 }
 
 void BlobResourceHandle::readFileAsync(const BlobDataItem& item)
 {
     ASSERT(isMainThread());
-    ASSERT(m_async);
 
     if (m_fileOpened) {
         m_asyncStream->read(m_buffer.data(), m_buffer.size());
@@ -499,7 +507,7 @@ void BlobResourceHandle::didRead(int bytesRead)
     consumeData(m_buffer.data(), bytesRead);
 }
 
-void BlobResourceHandle::consumeData(const char* data, int bytesRead)
+void BlobResourceHandle::consumeData(const uint8_t* data, int bytesRead)
 {
     ASSERT(m_async);
     Ref<BlobResourceHandle> protectedThis(*this);
@@ -562,27 +570,37 @@ void BlobResourceHandle::notifyResponseOnSuccess()
     ASSERT(isMainThread());
 
     bool isRangeRequest = m_rangeOffset != kPositionNotSpecified;
-    ResourceResponse response(firstRequest().url(), m_blobData->contentType(), m_totalRemainingSize, String());
+    ResourceResponse response(firstRequest().url(), extractMIMETypeFromMediaType(m_blobData->contentType()), m_totalRemainingSize, String());
     response.setHTTPStatusCode(isRangeRequest ? httpPartialContent : httpOK);
     response.setHTTPStatusText(isRangeRequest ? httpPartialContentText : httpOKText);
 
     response.setHTTPHeaderField(HTTPHeaderName::ContentType, m_blobData->contentType());
     response.setHTTPHeaderField(HTTPHeaderName::ContentLength, String::number(m_totalRemainingSize));
+    addCrossOriginOpenerPolicyHeaders(response, m_blobData->policyContainer().crossOriginOpenerPolicy);
+    addCrossOriginEmbedderPolicyHeaders(response, m_blobData->policyContainer().crossOriginEmbedderPolicy);
 
-    if (isRangeRequest)
-        response.setHTTPHeaderField(HTTPHeaderName::ContentRange, ParsedContentRange(m_rangeOffset, m_rangeEnd, m_totalSize).headerValue());
+    if (isRangeRequest) {
+        auto rangeEnd = m_rangeEnd;
+        if (rangeEnd == kPositionNotSpecified)
+            rangeEnd = m_totalSize - 1;
+
+        response.setHTTPHeaderField(HTTPHeaderName::ContentRange, ParsedContentRange(m_rangeOffset, rangeEnd, m_totalSize).headerValue());
+    }
     // FIXME: If a resource identified with a blob: URL is a File object, user agents must use that file's name attribute,
     // as if the response had a Content-Disposition header with the filename parameter set to the File's name attribute.
     // Notably, this will affect a name suggested in "File Save As".
 
-    didReceiveResponse(WTFMove(response));
+    client()->didReceiveResponseAsync(this, WTFMove(response), [this, protectedThis = Ref { *this }] {
+        m_buffer.resize(bufferSize);
+        readAsync();
+    });
 }
 
 void BlobResourceHandle::notifyResponseOnError()
 {
     ASSERT(m_errorCode != Error::NoError);
 
-    ResourceResponse response(firstRequest().url(), "text/plain", 0, String());
+    ResourceResponse response(firstRequest().url(), "text/plain"_s, 0, String());
     switch (m_errorCode) {
     case Error::RangeError:
         response.setHTTPStatusCode(httpRequestedRangeNotSatisfiable);
@@ -598,13 +616,16 @@ void BlobResourceHandle::notifyResponseOnError()
         break;
     }
 
-    didReceiveResponse(WTFMove(response));
+    client()->didReceiveResponseAsync(this, WTFMove(response), [this, protectedThis = Ref { *this }] {
+        m_buffer.resize(bufferSize);
+        readAsync();
+    });
 }
 
-void BlobResourceHandle::notifyReceiveData(const char* data, int bytesRead)
+void BlobResourceHandle::notifyReceiveData(const uint8_t* data, int bytesRead)
 {
     if (client())
-        client()->didReceiveBuffer(this, SharedBuffer::create(reinterpret_cast<const uint8_t*>(data), bytesRead), bytesRead);
+        client()->didReceiveBuffer(this, SharedBuffer::create(data, bytesRead), bytesRead);
 }
 
 void BlobResourceHandle::notifyFail(Error errorCode)
@@ -621,7 +642,7 @@ static void doNotifyFinish(BlobResourceHandle& handle)
     if (!handle.client())
         return;
 
-    handle.client()->didFinishLoading(&handle);
+    handle.client()->didFinishLoading(&handle, { });
 }
 
 void BlobResourceHandle::notifyFinish()
@@ -633,7 +654,7 @@ void BlobResourceHandle::notifyFinish()
 
     // Schedule to notify the client from a standalone function because the client might dispose the handle immediately from the callback function
     // while we still have BlobResourceHandle calls in the stack.
-    callOnMainThread([protectedThis = makeRef(*this)]() mutable {
+    callOnMainThread([protectedThis = Ref { *this }]() mutable {
         doNotifyFinish(protectedThis);
     });
 

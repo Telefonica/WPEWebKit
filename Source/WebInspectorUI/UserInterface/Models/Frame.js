@@ -38,10 +38,9 @@ WI.Frame = class Frame extends WI.Object
 
         this._resourceCollection = new WI.ResourceCollection;
         this._provisionalResourceCollection = new WI.ResourceCollection;
-        this._extraScriptCollection = new WI.Collection(WI.Collection.TypeVerifier.Script);
-        this._canvasCollection = new WI.Collection(WI.Collection.TypeVerifier.Canvas);
+        this._extraScriptCollection = new WI.ScriptCollection;
 
-        this._childFrameCollection = new WI.Collection(WI.Collection.TypeVerifier.Frame);
+        this._childFrameCollection = new WI.FrameCollection;
         this._childFrameIdentifierMap = new Map;
 
         this._parentFrame = null;
@@ -59,7 +58,6 @@ WI.Frame = class Frame extends WI.Object
 
     get resourceCollection() { return this._resourceCollection; }
     get extraScriptCollection() { return this._extraScriptCollection; }
-    get canvasCollection() { return this._canvasCollection; }
     get childFrameCollection() { return this._childFrameCollection; }
 
     initialize(name, securityOrigin, loaderIdentifier, mainResource)
@@ -135,7 +133,6 @@ WI.Frame = class Frame extends WI.Object
         this._resourceCollection = this._provisionalResourceCollection;
         this._provisionalResourceCollection = new WI.ResourceCollection;
         this._extraScriptCollection.clear();
-        this._canvasCollection.clear();
 
         this.clearExecutionContexts(true);
         this.clearProvisionalLoad(true);
@@ -190,7 +187,12 @@ WI.Frame = class Frame extends WI.Object
 
     get url()
     {
-        return this._mainResource._url;
+        return this._mainResource.url;
+    }
+
+    get urlComponents()
+    {
+        return this._mainResource.urlComponents;
     }
 
     get domTree()
@@ -221,9 +223,11 @@ WI.Frame = class Frame extends WI.Object
 
     addExecutionContext(context)
     {
-        var changedPageContext = this._executionContextList.add(context);
+        this._executionContextList.add(context);
 
-        if (changedPageContext)
+        this.dispatchEventToListeners(WI.Frame.Event.ExecutionContextAdded, {context});
+
+        if (this._executionContextList.pageExecutionContext === context)
             this.dispatchEventToListeners(WI.Frame.Event.PageExecutionContextChanged);
     }
 
@@ -269,11 +273,15 @@ WI.Frame = class Frame extends WI.Object
 
     markDOMContentReadyEvent(timestamp)
     {
+        console.assert(isNaN(this._domContentReadyEventTimestamp));
+
         this._domContentReadyEventTimestamp = timestamp || NaN;
     }
 
     markLoadEvent(timestamp)
     {
+        console.assert(isNaN(this._loadEventTimestamp));
+
         this._loadEventTimestamp = timestamp || NaN;
     }
 
@@ -344,7 +352,7 @@ WI.Frame = class Frame extends WI.Object
     {
         this._detachFromParentFrame();
 
-        for (let childFrame of this._childFrameCollection.items)
+        for (let childFrame of this._childFrameCollection)
             childFrame.removeAllChildFrames();
 
         this._childFrameCollection.clear();
@@ -353,30 +361,22 @@ WI.Frame = class Frame extends WI.Object
         this.dispatchEventToListeners(WI.Frame.Event.AllChildFramesRemoved);
     }
 
-    resourceForURL(url, recursivelySearchChildFrames)
+    resourcesForURL(url, recursivelySearchChildFrames)
     {
-        var resource = this._resourceCollection.resourceForURL(url);
-        if (resource)
-            return resource;
+        let resources = this._resourceCollection.resourcesForURL(url);
 
         // Check the main resources of the child frames for the requested URL.
-        for (let childFrame of this._childFrameCollection.items) {
-            resource = childFrame.mainResource;
-            if (resource.url === url)
-                return resource;
+        for (let childFrame of this._childFrameCollection) {
+            if (childFrame.mainResource.url === url)
+                resources.add(childFrame.mainResource);
         }
 
-        if (!recursivelySearchChildFrames)
-            return null;
-
-        // Recursively search resources of child frames.
-        for (let childFrame of this._childFrameCollection.items) {
-            resource = childFrame.resourceForURL(url, true);
-            if (resource)
-                return resource;
+        if (recursivelySearchChildFrames) {
+            for (let childFrame of this._childFrameCollection)
+                resources.addAll(childFrame.resourcesForURL(url, recursivelySearchChildFrames));
         }
 
-        return null;
+        return resources;
     }
 
     resourceCollectionForType(type)
@@ -422,11 +422,10 @@ WI.Frame = class Frame extends WI.Object
     {
         // This does not remove provisional resources, use clearProvisionalLoad for that.
 
-        let resources = this._resourceCollection.items;
-        if (!resources.size)
+        if (!this._resourceCollection.size)
             return;
 
-        for (let resource of resources)
+        for (let resource of this._resourceCollection)
             this._disassociateWithResource(resource);
 
         this._resourceCollection.clear();
@@ -504,6 +503,7 @@ WI.Frame.Event = {
     ChildFrameWasRemoved: "frame-child-frame-was-removed",
     AllChildFramesRemoved: "frame-all-child-frames-removed",
     PageExecutionContextChanged: "frame-page-execution-context-changed",
+    ExecutionContextAdded: "frame-execution-context-added",
     ExecutionContextsCleared: "frame-execution-contexts-cleared"
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,7 +28,6 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "FunctionPrototype.h"
 #include "JSCInlines.h"
 #include "JSWebAssemblyLinkError.h"
 #include "WebAssemblyLinkErrorPrototype.h"
@@ -37,64 +36,59 @@
 
 namespace JSC {
 
-const ClassInfo WebAssemblyLinkErrorConstructor::s_info = { "Function", &Base::s_info, &constructorTableWebAssemblyLinkError, nullptr, CREATE_METHOD_TABLE(WebAssemblyLinkErrorConstructor) };
+const ClassInfo WebAssemblyLinkErrorConstructor::s_info = { "Function"_s, &Base::s_info, &constructorTableWebAssemblyLinkError, nullptr, CREATE_METHOD_TABLE(WebAssemblyLinkErrorConstructor) };
+
+static JSC_DECLARE_HOST_FUNCTION(constructJSWebAssemblyLinkError);
+static JSC_DECLARE_HOST_FUNCTION(callJSWebAssemblyLinkError);
 
 /* Source for WebAssemblyLinkErrorConstructor.lut.h
  @begin constructorTableWebAssemblyLinkError
  @end
  */
 
-static EncodedJSValue JSC_HOST_CALL constructJSWebAssemblyLinkError(ExecState* exec)
+JSC_DEFINE_HOST_FUNCTION(constructJSWebAssemblyLinkError, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
-    auto& vm = exec->vm();
+    auto& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    JSValue message = exec->argument(0);
-    auto* structure = InternalFunction::createSubclassStructure(exec, exec->newTarget(), asInternalFunction(exec->jsCallee())->globalObject()->WebAssemblyLinkErrorStructure());
-    RETURN_IF_EXCEPTION(scope, encodedJSValue());
-    return JSValue::encode(JSWebAssemblyLinkError::create(exec, vm, structure, message));
+    JSValue message = callFrame->argument(0);
+    JSValue options = callFrame->argument(1);
+
+    JSObject* newTarget = asObject(callFrame->newTarget());
+    Structure* structure = JSC_GET_DERIVED_STRUCTURE(vm, webAssemblyLinkErrorStructure, newTarget, callFrame->jsCallee());
+    RETURN_IF_EXCEPTION(scope, { });
+
+    RELEASE_AND_RETURN(scope, JSValue::encode(ErrorInstance::create(globalObject, structure, message, options, nullptr, TypeNothing, ErrorType::Error, false)));
 }
 
-static EncodedJSValue JSC_HOST_CALL callJSWebAssemblyLinkError(ExecState* exec)
+JSC_DEFINE_HOST_FUNCTION(callJSWebAssemblyLinkError, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
-    JSValue message = exec->argument(0);
-    Structure* errorStructure = asInternalFunction(exec->jsCallee())->globalObject()->WebAssemblyLinkErrorStructure();
-    return JSValue::encode(ErrorInstance::create(exec, errorStructure, message, nullptr, TypeNothing, false));
+    JSValue message = callFrame->argument(0);
+    JSValue options = callFrame->argument(1);
+    Structure* errorStructure = globalObject->webAssemblyLinkErrorStructure();
+    return JSValue::encode(ErrorInstance::create(globalObject, errorStructure, message, options, nullptr, TypeNothing, ErrorType::Error, false));
 }
 
 WebAssemblyLinkErrorConstructor* WebAssemblyLinkErrorConstructor::create(VM& vm, Structure* structure, WebAssemblyLinkErrorPrototype* thisPrototype)
 {
-    auto* constructor = new (NotNull, allocateCell<WebAssemblyLinkErrorConstructor>(vm.heap)) WebAssemblyLinkErrorConstructor(vm, structure);
+    auto* constructor = new (NotNull, allocateCell<WebAssemblyLinkErrorConstructor>(vm)) WebAssemblyLinkErrorConstructor(vm, structure);
     constructor->finishCreation(vm, thisPrototype);
     return constructor;
 }
 
 Structure* WebAssemblyLinkErrorConstructor::createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
 {
-    return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+    return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
 }
 
 void WebAssemblyLinkErrorConstructor::finishCreation(VM& vm, WebAssemblyLinkErrorPrototype* prototype)
 {
-    Base::finishCreation(vm, ASCIILiteral("LinkError"));
+    Base::finishCreation(vm, 1, "LinkError"_s, PropertyAdditionMode::WithoutStructureTransition);
     putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum | PropertyAttribute::DontDelete);
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum | PropertyAttribute::DontDelete);
 }
 
 WebAssemblyLinkErrorConstructor::WebAssemblyLinkErrorConstructor(VM& vm, Structure* structure)
-    : Base(vm, structure)
+    : Base(vm, structure, callJSWebAssemblyLinkError, constructJSWebAssemblyLinkError)
 {
-}
-
-ConstructType WebAssemblyLinkErrorConstructor::getConstructData(JSCell*, ConstructData& constructData)
-{
-    constructData.native.function = constructJSWebAssemblyLinkError;
-    return ConstructType::Host;
-}
-
-CallType WebAssemblyLinkErrorConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = callJSWebAssemblyLinkError;
-    return CallType::Host;
 }
 
 } // namespace JSC

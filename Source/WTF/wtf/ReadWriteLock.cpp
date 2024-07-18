@@ -24,40 +24,31 @@
  */
 
 #include "config.h"
-#include "ReadWriteLock.h"
+#include <wtf/ReadWriteLock.h>
 
 #include <wtf/Locker.h>
 
 namespace WTF {
 
-void ReadWriteLockBase::construct()
+void ReadWriteLock::readLock()
 {
-    m_lock.construct();
-    m_cond.construct();
-    m_isWriteLocked = false;
-    m_numReaders = 0;
-    m_numWaitingWriters = 0;
-}
-
-void ReadWriteLockBase::readLock()
-{
-    auto locker = holdLock(m_lock);
+    Locker locker { m_lock };
     while (m_isWriteLocked || m_numWaitingWriters)
         m_cond.wait(m_lock);
     m_numReaders++;
 }
 
-void ReadWriteLockBase::readUnlock()
+void ReadWriteLock::readUnlock()
 {
-    auto locker = holdLock(m_lock);
+    Locker locker { m_lock };
     m_numReaders--;
     if (!m_numReaders)
         m_cond.notifyAll();
 }
 
-void ReadWriteLockBase::writeLock()
+void ReadWriteLock::writeLock()
 {
-    auto locker = holdLock(m_lock);
+    Locker locker { m_lock };
     while (m_isWriteLocked || m_numReaders) {
         m_numWaitingWriters++;
         m_cond.wait(m_lock);
@@ -66,9 +57,9 @@ void ReadWriteLockBase::writeLock()
     m_isWriteLocked = true;
 }
 
-void ReadWriteLockBase::writeUnlock()
+void ReadWriteLock::writeUnlock()
 {
-    auto locker = holdLock(m_lock);
+    Locker locker { m_lock };
     m_isWriteLocked = false;
     m_cond.notifyAll();
 }

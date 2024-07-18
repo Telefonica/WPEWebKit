@@ -22,14 +22,16 @@
 #include "config.h"
 #include "Chrome.h"
 
+#include "AppHighlight.h"
 #include "ChromeClient.h"
+#include "ContactInfo.h"
+#include "ContactsRequestData.h"
 #include "DOMWindow.h"
 #include "Document.h"
 #include "DocumentType.h"
-#include "FileIconLoader.h"
-#include "FileChooser.h"
 #include "FileList.h"
 #include "FloatRect.h"
+#include "Frame.h"
 #include "FrameLoaderClient.h"
 #include "FrameTree.h"
 #include "Geolocation.h"
@@ -39,21 +41,29 @@
 #include "HitTestResult.h"
 #include "Icon.h"
 #include "InspectorInstrumentation.h"
-#include "MainFrame.h"
 #include "Page.h"
 #include "PageGroupLoadDeferrer.h"
 #include "PopupOpeningObserver.h"
 #include "RenderObject.h"
 #include "ResourceHandle.h"
 #include "Settings.h"
+#include "ShareData.h"
 #include "StorageNamespace.h"
 #include "WindowFeatures.h"
-#include <runtime/VM.h>
+#include <JavaScriptCore/VM.h>
 #include <wtf/SetForScope.h>
 #include <wtf/Vector.h>
 
 #if ENABLE(INPUT_TYPE_COLOR)
 #include "ColorChooser.h"
+#endif
+
+#if ENABLE(DATALIST_ELEMENT)
+#include "DataListSuggestionPicker.h"
+#endif
+
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+#include "DateTimeChooser.h"
 #endif
 
 namespace WebCore {
@@ -92,13 +102,6 @@ void Chrome::scroll(const IntSize& scrollDelta, const IntRect& rectToScroll, con
     InspectorInstrumentation::didScroll(m_page);
 }
 
-#if USE(COORDINATED_GRAPHICS)
-void Chrome::delegatedScrollRequested(const IntPoint& scrollPoint)
-{
-    m_client.delegatedScrollRequested(scrollPoint);
-}
-#endif
-
 IntPoint Chrome::screenToRootView(const IntPoint& point) const
 {
     return m_client.screenToRootView(point);
@@ -109,8 +112,6 @@ IntRect Chrome::rootViewToScreen(const IntRect& rect) const
     return m_client.rootViewToScreen(rect);
 }
     
-#if PLATFORM(IOS)
-
 IntPoint Chrome::accessibilityScreenToRootView(const IntPoint& point) const
 {
     return m_client.accessibilityScreenToRootView(point);
@@ -120,8 +121,6 @@ IntRect Chrome::rootViewToAccessibilityScreen(const IntRect& rect) const
 {
     return m_client.rootViewToAccessibilityScreen(rect);
 }
-
-#endif
 
 PlatformPageClient Chrome::platformPageClient() const
 {
@@ -133,9 +132,14 @@ void Chrome::contentsSizeChanged(Frame& frame, const IntSize& size) const
     m_client.contentsSizeChanged(frame, size);
 }
 
-void Chrome::scrollRectIntoView(const IntRect& rect) const
+void Chrome::scrollContainingScrollViewsToRevealRect(const IntRect& rect) const
 {
-    m_client.scrollRectIntoView(rect);
+    m_client.scrollContainingScrollViewsToRevealRect(rect);
+}
+
+void Chrome::scrollMainFrameToRevealRect(const IntRect& rect) const
+{
+    m_client.scrollMainFrameToRevealRect(rect);
 }
 
 void Chrome::setWindowRect(const FloatRect& rect) const
@@ -183,16 +187,16 @@ void Chrome::focusedFrameChanged(Frame* frame) const
     m_client.focusedFrameChanged(frame);
 }
 
-Page* Chrome::createWindow(Frame& frame, const FrameLoadRequest& request, const WindowFeatures& features, const NavigationAction& action) const
+Page* Chrome::createWindow(Frame& frame, const WindowFeatures& features, const NavigationAction& action) const
 {
-    Page* newPage = m_client.createWindow(frame, request, features, action);
+    Page* newPage = m_client.createWindow(frame, features, action);
     if (!newPage)
         return nullptr;
 
-    if (auto* oldSessionStorage = m_page.sessionStorage(false))
-        newPage->setSessionStorage(oldSessionStorage->copy(newPage));
-    if (auto* oldEphemeralLocalStorage = m_page.ephemeralLocalStorage(false))
-        newPage->setEphemeralLocalStorage(oldEphemeralLocalStorage->copy(newPage));
+    if (!features.noopener && !features.noreferrer) {
+        if (auto* oldSessionStorage = m_page.sessionStorage(false))
+            newPage->setSessionStorage(oldSessionStorage->copy(*newPage));
+    }
 
     return newPage;
 }
@@ -215,7 +219,7 @@ void Chrome::runModal() const
 
     // JavaScript that runs within the nested event loop must not be run in the context of the
     // script that called showModalDialog. Null out entryScope to break the connection.
-    SetForScope<JSC::VMEntryScope*> entryScopeNullifier { m_page.mainFrame().document()->vm().entryScope, nullptr };
+    SetForScope entryScopeNullifier { m_page.mainFrame().document()->vm().entryScope, nullptr };
 
     TimerBase::fireTimersInNestedEventLoop();
     m_client.runModal();
@@ -280,9 +284,9 @@ bool Chrome::runBeforeUnloadConfirmPanel(const String& message, Frame& frame)
     return m_client.runBeforeUnloadConfirmPanel(message, frame);
 }
 
-void Chrome::closeWindowSoon()
+void Chrome::closeWindow()
 {
-    m_client.closeWindowSoon();
+    m_client.closeWindow();
 }
 
 void Chrome::runJavaScriptAlert(Frame& frame, const String& message)
@@ -331,17 +335,20 @@ void Chrome::setStatusbarText(Frame& frame, const String& status)
 void Chrome::mouseDidMoveOverElement(const HitTestResult& result, unsigned modifierFlags)
 {
     if (result.innerNode() && result.innerNode()->document().isDNSPrefetchEnabled())
-        m_page.mainFrame().loader().client().prefetchDNS(result.absoluteLinkURL().host());
-    m_client.mouseDidMoveOverElement(result, modifierFlags);
+        m_page.mainFrame().loader().client().prefetchDNS(result.absoluteLinkURL().host().toString());
+
+    String toolTip;
+    TextDirection toolTipDirection;
+    getToolTip(result, toolTip, toolTipDirection);
+    m_client.mouseDidMoveOverElement(result, modifierFlags, toolTip, toolTipDirection);
 
     InspectorInstrumentation::mouseDidMoveOverElement(m_page, result, modifierFlags);
 }
 
-void Chrome::setToolTip(const HitTestResult& result)
+void Chrome::getToolTip(const HitTestResult& result, String& toolTip, TextDirection& toolTipDirection)
 {
     // First priority is a potential toolTip representing a spelling or grammar error
-    TextDirection toolTipDirection;
-    String toolTip = result.spellingToolTip(toolTipDirection);
+    toolTip = result.spellingToolTip(toolTipDirection);
 
     // Next priority is a toolTip from a URL beneath the mouse (if preference is set to show those).
     if (toolTip.isEmpty() && m_page.settings().showsURLsInToolTips()) {
@@ -355,7 +362,7 @@ void Chrome::setToolTip(const HitTestResult& result)
                         if (form->renderer())
                             toolTipDirection = form->renderer()->style().direction();
                         else
-                            toolTipDirection = LTR;
+                            toolTipDirection = TextDirection::LTR;
                     }
                 }
             }
@@ -366,7 +373,7 @@ void Chrome::setToolTip(const HitTestResult& result)
             // FIXME: Need to pass this URL through userVisibleString once that's in WebCore
             toolTip = result.absoluteLinkURL().string();
             // URL always display as LTR.
-            toolTipDirection = LTR;
+            toolTipDirection = TextDirection::LTR;
         }
     }
 
@@ -386,14 +393,12 @@ void Chrome::setToolTip(const HitTestResult& result)
                 // FIXME: We should obtain text direction of tooltip from
                 // ChromeClient or platform. As of October 2011, all client
                 // implementations don't use text direction information for
-                // ChromeClient::setToolTip. We'll work on tooltip text
+                // ChromeClient::mouseDidMoveOverElement. We'll work on tooltip text
                 // direction during bidi cleanup in form inputs.
-                toolTipDirection = LTR;
+                toolTipDirection = TextDirection::LTR;
             }
         }
     }
-
-    m_client.setToolTip(toolTip, toolTipDirection);
 }
 
 bool Chrome::print(Frame& frame)
@@ -401,11 +406,11 @@ bool Chrome::print(Frame& frame)
     // FIXME: This should have PageGroupLoadDeferrer, like runModal() or runJavaScriptAlert(), because it's no different from those.
 
     if (frame.document()->isSandboxed(SandboxModals)) {
-        frame.document()->domWindow()->printErrorMessage("Use of window.print is not allowed in a sandboxed frame when the allow-modals flag is not set.");
+        frame.document()->domWindow()->printErrorMessage("Use of window.print is not allowed in a sandboxed frame when the allow-modals flag is not set."_s);
         return false;
     }
 
-    m_client.print(frame);
+    m_client.print(frame, frame.document()->titleWithDirection());
     return true;
 }
 
@@ -423,8 +428,39 @@ void Chrome::disableSuddenTermination()
 
 std::unique_ptr<ColorChooser> Chrome::createColorChooser(ColorChooserClient& client, const Color& initialColor)
 {
+#if PLATFORM(IOS_FAMILY)
+    UNUSED_PARAM(client);
+    UNUSED_PARAM(initialColor);
+    return nullptr;
+#else
     notifyPopupOpeningObservers();
     return m_client.createColorChooser(client, initialColor);
+#endif
+}
+
+#endif
+
+#if ENABLE(DATALIST_ELEMENT)
+
+std::unique_ptr<DataListSuggestionPicker> Chrome::createDataListSuggestionPicker(DataListSuggestionsClient& client)
+{
+    notifyPopupOpeningObservers();
+    return m_client.createDataListSuggestionPicker(client);
+}
+
+#endif
+
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+
+std::unique_ptr<DateTimeChooser> Chrome::createDateTimeChooser(DateTimeChooserClient& client)
+{
+#if PLATFORM(IOS_FAMILY)
+    UNUSED_PARAM(client);
+    return nullptr;
+#else
+    notifyPopupOpeningObservers();
+    return m_client.createDateTimeChooser(client);
+#endif
 }
 
 #endif
@@ -433,6 +469,16 @@ void Chrome::runOpenPanel(Frame& frame, FileChooser& fileChooser)
 {
     notifyPopupOpeningObservers();
     m_client.runOpenPanel(frame, fileChooser);
+}
+
+void Chrome::showShareSheet(ShareDataWithParsedURL& shareData, CompletionHandler<void(bool)>&& callback)
+{
+    m_client.showShareSheet(shareData, WTFMove(callback));
+}
+
+void Chrome::showContactPicker(const ContactsRequestData& requestData, CompletionHandler<void(std::optional<Vector<ContactInfo>>&&)>&& callback)
+{
+    m_client.showContactPicker(requestData, WTFMove(callback));
 }
 
 void Chrome::loadIconForFiles(const Vector<String>& filenames, FileIconLoader& loader)
@@ -450,73 +496,67 @@ FloatSize Chrome::availableScreenSize() const
     return m_client.availableScreenSize();
 }
 
+FloatSize Chrome::overrideScreenSize() const
+{
+    return m_client.overrideScreenSize();
+}
+
+void Chrome::dispatchDisabledAdaptationsDidChange(const OptionSet<DisabledAdaptations>& disabledAdaptations) const
+{
+    m_client.dispatchDisabledAdaptationsDidChange(disabledAdaptations);
+}
+
 void Chrome::dispatchViewportPropertiesDidChange(const ViewportArguments& arguments) const
 {
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     if (m_isDispatchViewportDataDidChangeSuppressed)
         return;
 #endif
     m_client.dispatchViewportPropertiesDidChange(arguments);
 }
 
+#if ENABLE(APP_HIGHLIGHTS)
+void Chrome::storeAppHighlight(AppHighlight&& highlight) const
+{
+    m_client.storeAppHighlight(WTFMove(highlight));
+}
+#endif
+
 void Chrome::setCursor(const Cursor& cursor)
 {
-#if ENABLE(CURSOR_SUPPORT)
     m_client.setCursor(cursor);
-#else
-    UNUSED_PARAM(cursor);
-#endif
 }
 
 void Chrome::setCursorHiddenUntilMouseMoves(bool hiddenUntilMouseMoves)
 {
-#if ENABLE(CURSOR_SUPPORT)
     m_client.setCursorHiddenUntilMouseMoves(hiddenUntilMouseMoves);
-#else
-    UNUSED_PARAM(hiddenUntilMouseMoves);
+}
+
+RefPtr<ImageBuffer> Chrome::createImageBuffer(const FloatSize& size, RenderingMode renderingMode, RenderingPurpose purpose, float resolutionScale, const DestinationColorSpace& colorSpace, PixelFormat pixelFormat, bool avoidBackendSizeCheck) const
+{
+    return m_client.createImageBuffer(size, renderingMode, purpose, resolutionScale, colorSpace, pixelFormat, avoidBackendSizeCheck);
+}
+
+#if ENABLE(WEBGL)
+RefPtr<GraphicsContextGL> Chrome::createGraphicsContextGL(const GraphicsContextGLAttributes& attributes) const
+{
+    return m_client.createGraphicsContextGL(attributes);
+}
 #endif
+
+RefPtr<PAL::WebGPU::GPU> Chrome::createGPUForWebGPU() const
+{
+    return m_client.createGPUForWebGPU();
 }
 
 PlatformDisplayID Chrome::displayID() const
 {
-    return m_displayID;
+    return m_page.displayID();
 }
 
-uint64_t Chrome::nativeWindowID() const
+void Chrome::windowScreenDidChange(PlatformDisplayID displayID, std::optional<FramesPerSecond> nominalFrameInterval)
 {
-    return m_client.nativeWindowID();
-}
-
-void Chrome::windowScreenDidChange(PlatformDisplayID displayID)
-{
-    if (displayID == m_displayID)
-        return;
-
-    m_displayID = displayID;
-
-    for (Frame* frame = &m_page.mainFrame(); frame; frame = frame->tree().traverseNext()) {
-        if (frame->document())
-            frame->document()->windowScreenDidChange(displayID);
-    }
-}
-
-// --------
-
-#if ENABLE(DASHBOARD_SUPPORT)
-void ChromeClient::annotatedRegionsChanged()
-{
-}
-#endif
-
-bool ChromeClient::shouldReplaceWithGeneratedFileForUpload(const String&, String&)
-{
-    return false;
-}
-
-String ChromeClient::generateReplacementFile(const String&)
-{
-    ASSERT_NOT_REACHED();
-    return String();
+    m_page.windowScreenDidChange(displayID, nominalFrameInterval);
 }
 
 bool Chrome::selectItemWritingDirectionIsNatural()
@@ -548,14 +588,14 @@ bool Chrome::requiresFullscreenForVideoPlayback()
 
 void Chrome::didReceiveDocType(Frame& frame)
 {
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     UNUSED_PARAM(frame);
 #else
     if (!frame.isMainFrame())
         return;
 
     auto* doctype = frame.document()->doctype();
-    m_client.didReceiveMobileDocType(doctype && doctype->publicId().containsIgnoringASCIICase("xhtml mobile"));
+    m_client.didReceiveMobileDocType(doctype && doctype->publicId().containsIgnoringASCIICase("xhtml mobile"_s));
 #endif
 }
 
@@ -575,6 +615,11 @@ void Chrome::notifyPopupOpeningObservers() const
     const Vector<PopupOpeningObserver*> observers(m_popupOpeningObservers);
     for (auto& observer : observers)
         observer->willOpenPopup();
+}
+
+uint64_t Chrome::nativeWindowID() const
+{
+    return m_client.nativeWindowID();
 }
 
 } // namespace WebCore

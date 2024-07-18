@@ -6,8 +6,10 @@
 package runner
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -248,6 +250,16 @@ func X509KeyPair(certPEMBlock, keyPEMBlock []byte) (cert Certificate, err error)
 			err = errors.New("crypto/tls: private key does not match public key")
 			return
 		}
+	case ed25519.PublicKey:
+		priv, ok := cert.PrivateKey.(ed25519.PrivateKey)
+		if !ok {
+			err = errors.New("crypto/tls: private key type does not match public key type")
+			return
+		}
+		if !bytes.Equal(priv[32:], pub) {
+			err = errors.New("crypto/tls: private key does not match public key")
+			return
+		}
 	default:
 		err = errors.New("crypto/tls: unknown public key algorithm")
 		return
@@ -265,7 +277,7 @@ func parsePrivateKey(der []byte) (crypto.PrivateKey, error) {
 	}
 	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
 		switch key := key.(type) {
-		case *rsa.PrivateKey, *ecdsa.PrivateKey:
+		case *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey:
 			return key, nil
 		default:
 			return nil, errors.New("crypto/tls: found unknown private key type in PKCS#8 wrapping")

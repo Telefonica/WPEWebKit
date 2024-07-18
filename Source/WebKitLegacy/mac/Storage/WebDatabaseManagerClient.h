@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007,2012 Apple Inc.  All rights reserved.
+ * Copyright (C) 2007-2021 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,16 +24,19 @@
  */
 
 #import <WebCore/DatabaseManagerClient.h>
+#import <wtf/NeverDestroyed.h>
+
+namespace WebKit {
 
 class WebDatabaseManagerClient final : public WebCore::DatabaseManagerClient {
 public:
-    static WebDatabaseManagerClient* sharedWebDatabaseManagerClient();
+    static WebDatabaseManagerClient& sharedWebDatabaseManagerClient();
     
     virtual ~WebDatabaseManagerClient();
     void dispatchDidModifyOrigin(const WebCore::SecurityOriginData&) final;
     void dispatchDidModifyDatabase(const WebCore::SecurityOriginData&, const WTF::String& databaseIdentifier) final;
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     void dispatchDidAddNewOrigin() final;
     void dispatchDidDeleteDatabase() final;
     void dispatchDidDeleteDatabaseOrigin() final;
@@ -43,9 +46,10 @@ public:
 #endif
 
 private:
+    friend NeverDestroyed<WebDatabaseManagerClient>;
     WebDatabaseManagerClient();
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     void databaseOriginsDidChange();
 
     bool m_isHandlingNewDatabaseOriginNotification { false };
@@ -53,3 +57,5 @@ private:
     bool m_isHandlingDeleteDatabaseOriginNotification { false };
 #endif
 };
+
+} // namespace WebKit

@@ -18,6 +18,8 @@
 #include <openssl/bio.h>
 #include <openssl/err.h>
 
+#if !defined(OPENSSL_TRUSTY)
+
 #include <fcntl.h>
 #include <string.h>
 #include <sys/types.h>
@@ -53,7 +55,11 @@ int bio_ip_and_port_to_socket_and_addr(int *out_sock,
   ret = getaddrinfo(hostname, port_str, &hint, &result);
   if (ret != 0) {
     OPENSSL_PUT_ERROR(SYS, 0);
+#if defined(OPENSSL_WINDOWS)
+    ERR_add_error_data(1, gai_strerrorA(ret));
+#else
     ERR_add_error_data(1, gai_strerror(ret));
+#endif
     return 0;
   }
 
@@ -112,3 +118,5 @@ int bio_sock_error(int sock) {
   }
   return error;
 }
+
+#endif  // OPENSSL_TRUSTY

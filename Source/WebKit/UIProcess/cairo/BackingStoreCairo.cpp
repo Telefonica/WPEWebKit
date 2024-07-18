@@ -32,39 +32,33 @@
 #include "WebPageProxy.h"
 #include <WebCore/BackingStoreBackendCairoImpl.h>
 #include <WebCore/CairoUtilities.h>
-#include <WebCore/GraphicsContextImplCairo.h>
-#include <WebCore/PlatformContextCairo.h>
+#include <WebCore/GraphicsContextCairo.h>
 #include <WebCore/RefPtrCairo.h>
 #include <cairo.h>
 
-#if PLATFORM(GTK)
-#include <gtk/gtk.h>
-#endif
-
-#if PLATFORM(GTK) && PLATFORM(X11) && defined(GDK_WINDOWING_X11)
+#if PLATFORM(GTK) && PLATFORM(X11) && defined(GDK_WINDOWING_X11) && !USE(GTK4)
 #include <WebCore/BackingStoreBackendCairoX11.h>
 #include <WebCore/PlatformDisplayX11.h>
 #include <gdk/gdkx.h>
 #endif
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 std::unique_ptr<BackingStoreBackendCairo> BackingStore::createBackend()
 {
-#if PLATFORM(GTK) && PLATFORM(X11) && defined(GDK_WINDOWING_X11)
+#if PLATFORM(GTK) && PLATFORM(X11) && defined(GDK_WINDOWING_X11) && !USE(GTK4)
     const auto& sharedDisplay = PlatformDisplay::sharedDisplay();
     if (is<PlatformDisplayX11>(sharedDisplay)) {
         GdkVisual* visual = gtk_widget_get_visual(m_webPageProxy.viewWidget());
         GdkScreen* screen = gdk_visual_get_screen(visual);
         ASSERT(downcast<PlatformDisplayX11>(sharedDisplay).native() == GDK_SCREEN_XDISPLAY(screen));
-        return std::make_unique<BackingStoreBackendCairoX11>(GDK_WINDOW_XID(gdk_screen_get_root_window(screen)),
+        return makeUnique<BackingStoreBackendCairoX11>(GDK_WINDOW_XID(gdk_screen_get_root_window(screen)),
             GDK_VISUAL_XVISUAL(visual), gdk_visual_get_depth(visual), m_size, m_deviceScaleFactor);
     }
 #endif
 
-    return std::make_unique<BackingStoreBackendCairoImpl>(m_size, m_deviceScaleFactor);
+    return makeUnique<BackingStoreBackendCairoImpl>(m_size, m_deviceScaleFactor);
 }
 
 void BackingStore::paint(cairo_t* context, const IntRect& rect)
@@ -88,20 +82,15 @@ void BackingStore::incorporateUpdate(ShareableBitmap* bitmap, const UpdateInfo& 
 
     // Paint all update rects.
     IntPoint updateRectLocation = updateInfo.updateRectBounds.location();
-    RefPtr<cairo_t> cairoContext = adoptRef(cairo_create(m_backend->surface()));
-    GraphicsContext graphicsContext(GraphicsContextImplCairo::createFactory(cairoContext.get()));
+    GraphicsContextCairo graphicsContext(m_backend->surface());
+
+    // When m_webPageProxy.drawsBackground() is false, bitmap contains transparent parts as a background of the webpage.
+    // For such case, bitmap must be drawn using CompositeOperator::Copy to overwrite the existing surface.
+    graphicsContext.setCompositeOperation(WebCore::CompositeOperator::Copy);
+
     for (const auto& updateRect : updateInfo.updateRects) {
         IntRect srcRect = updateRect;
         srcRect.move(-updateRectLocation.x(), -updateRectLocation.y());
-#if PLATFORM(GTK)
-        if (!m_webPageProxy.drawsBackground()) {
-            const WebCore::Color color = m_webPageProxy.backgroundColor();
-            if (!color.isOpaque())
-                graphicsContext.clearRect(srcRect);
-            if (color.isVisible())
-                graphicsContext.fillRect(srcRect, color);
-        }
-#endif
         bitmap->paint(graphicsContext, deviceScaleFactor(), updateRect.location(), srcRect);
     }
 }

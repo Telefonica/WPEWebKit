@@ -8,20 +8,20 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_SHARED_MEMORY_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_SHARED_MEMORY_H_
+#ifndef MODULES_DESKTOP_CAPTURE_SHARED_MEMORY_H_
+#define MODULES_DESKTOP_CAPTURE_SHARED_MEMORY_H_
 
 #include <stddef.h>
 
 #if defined(WEBRTC_WIN)
-#include <windows.h>
+// Forward declare HANDLE in a windows.h compatible way so that we can avoid
+// including windows.h.
+typedef void* HANDLE;
 #endif
 
 #include <memory>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/thread_checker.h"
-#include "webrtc/typedefs.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
@@ -31,7 +31,7 @@ namespace webrtc {
 // for video frames must extend this class with creation and destruction logic
 // specific for the target platform and then call
 // DesktopCapturer::SetSharedMemoryFactory().
-class SharedMemory {
+class RTC_EXPORT SharedMemory {
  public:
 #if defined(WEBRTC_WIN)
   typedef HANDLE Handle;
@@ -53,6 +53,9 @@ class SharedMemory {
 
   virtual ~SharedMemory() {}
 
+  SharedMemory(const SharedMemory&) = delete;
+  SharedMemory& operator=(const SharedMemory&) = delete;
+
  protected:
   SharedMemory(void* data, size_t size, Handle handle, int id);
 
@@ -60,9 +63,6 @@ class SharedMemory {
   const size_t size_;
   const Handle handle_;
   const int id_;
-
- private:
-  RTC_DISALLOW_COPY_AND_ASSIGN(SharedMemory);
 };
 
 // Interface used to create SharedMemory instances.
@@ -71,13 +71,12 @@ class SharedMemoryFactory {
   SharedMemoryFactory() {}
   virtual ~SharedMemoryFactory() {}
 
-  virtual std::unique_ptr<SharedMemory> CreateSharedMemory(size_t size) = 0;
+  SharedMemoryFactory(const SharedMemoryFactory&) = delete;
+  SharedMemoryFactory& operator=(const SharedMemoryFactory&) = delete;
 
- private:
-  RTC_DISALLOW_COPY_AND_ASSIGN(SharedMemoryFactory);
+  virtual std::unique_ptr<SharedMemory> CreateSharedMemory(size_t size) = 0;
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_SHARED_MEMORY_H_
-
+#endif  // MODULES_DESKTOP_CAPTURE_SHARED_MEMORY_H_

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include "JSCPtrTag.h"
+
 namespace JSC {
 
 namespace LLInt {
@@ -33,19 +35,34 @@ namespace LLInt {
 extern "C" {
     void llintPCRangeStart();
     void llintPCRangeEnd();
+#if ENABLE(WEBASSEMBLY)
+    void wasmLLIntPCRangeStart();
+    void wasmLLIntPCRangeEnd();
+#endif
 }
 
 ALWAYS_INLINE bool isLLIntPC(void* pc)
 {
     uintptr_t pcAsInt = bitwise_cast<uintptr_t>(pc);
-    uintptr_t llintStart = bitwise_cast<uintptr_t>(llintPCRangeStart);
-    uintptr_t llintEnd = bitwise_cast<uintptr_t>(llintPCRangeEnd);
+    uintptr_t llintStart = untagCodePtr<uintptr_t, CFunctionPtrTag>(llintPCRangeStart);
+    uintptr_t llintEnd = untagCodePtr<uintptr_t, CFunctionPtrTag>(llintPCRangeEnd);
     RELEASE_ASSERT(llintStart < llintEnd);
     return llintStart <= pcAsInt && pcAsInt <= llintEnd;
 }
 
-#if ENABLE(JIT)
-static const GPRReg LLIntPC = GPRInfo::regT4;
+#if ENABLE(WEBASSEMBLY)
+ALWAYS_INLINE bool isWasmLLIntPC(void* pc)
+{
+    uintptr_t pcAsInt = bitwise_cast<uintptr_t>(pc);
+    uintptr_t start = untagCodePtr<uintptr_t, CFunctionPtrTag>(wasmLLIntPCRangeStart);
+    uintptr_t end = untagCodePtr<uintptr_t, CFunctionPtrTag>(wasmLLIntPCRangeEnd);
+    RELEASE_ASSERT(start < end);
+    return start <= pcAsInt && pcAsInt <= end;
+}
+#endif
+
+#if !ENABLE(C_LOOP)
+static constexpr GPRReg LLIntPC = GPRInfo::regT4;
 #endif
 
 } } // namespace JSC::LLInt

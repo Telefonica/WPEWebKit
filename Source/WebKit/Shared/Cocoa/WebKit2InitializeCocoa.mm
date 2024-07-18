@@ -26,15 +26,17 @@
 #import "config.h"
 #import "WebKit2Initialize.h"
 
-#import "LogInitialization.h"
-#import "WebSystemInterface.h"
-#import <WebCore/LogInitialization.h>
+#import <JavaScriptCore/InitializeThreading.h>
+#import <WebCore/CommonAtomStrings.h>
+#import <WebCore/WebCoreJITOperations.h>
 #import <mutex>
-#import <runtime/InitializeThreading.h>
+#import <wtf/GenerateProfiles.h>
 #import <wtf/MainThread.h>
-#import <wtf/RunLoop.h>
+#import <wtf/RefCounted.h>
+#import <wtf/WorkQueue.h>
+#import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import <WebCore/WebCoreThreadSystemInterface.h>
 #endif
 
@@ -42,31 +44,36 @@ namespace WebKit {
 
 static std::once_flag flag;
 
+enum class WebKitProfileTag { };
+
 static void runInitializationCode(void* = nullptr)
 {
-    InitWebCoreSystemInterface();
-#if PLATFORM(IOS)
+    RELEASE_ASSERT_WITH_MESSAGE([NSThread isMainThread], "InitializeWebKit2 should be called on the main thread");
+
+    WebCore::initializeCommonAtomStrings();
+#if PLATFORM(IOS_FAMILY)
     InitWebCoreThreadSystemInterface();
 #endif
 
-    JSC::initializeThreading();
-    RunLoop::initializeMainRunLoop();
+    JSC::initialize();
+    WTF::initializeMainThread();
 
-#if !LOG_DISABLED || !RELEASE_LOG_DISABLED
-    WebCore::initializeLogChannelsIfNecessary();
-    WebKit::initializeLogChannelsIfNecessary();
-#endif // !LOG_DISABLED || !RELEASE_LOG_DISABLED
+    WTF::RefCountedBase::enableThreadingChecksGlobally();
+
+    WebCore::populateJITOperations();
+
+    WTF::registerProfileGenerationCallback<WebKitProfileTag>("WebKit");
 }
 
 void InitializeWebKit2()
 {
-    // Make sure the initialization code is run only once and on the main thread since things like RunLoop::initializeMainRunLoop()
+    // Make sure the initialization code is run only once and on the main thread since things like initializeMainThread()
     // are only safe to call on the main thread.
     std::call_once(flag, [] {
-        if ([NSThread isMainThread])
+        if ([NSThread isMainThread] || linkedOnOrAfterSDKWithBehavior(SDKAlignedBehavior::InitializeWebKit2MainThreadAssertion))
             runInitializationCode();
         else
-            dispatch_sync_f(dispatch_get_main_queue(), nullptr, runInitializationCode);
+            WorkQueue::main().dispatchSync([] { runInitializationCode(); });
     });
 }
 

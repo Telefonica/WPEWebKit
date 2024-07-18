@@ -8,26 +8,26 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_COMMON_AUDIO_VAD_MOCK_MOCK_VAD_H_
-#define WEBRTC_COMMON_AUDIO_VAD_MOCK_MOCK_VAD_H_
+#ifndef COMMON_AUDIO_VAD_MOCK_MOCK_VAD_H_
+#define COMMON_AUDIO_VAD_MOCK_MOCK_VAD_H_
 
-#include "webrtc/common_audio/vad/include/vad.h"
-#include "webrtc/test/gmock.h"
+#include "common_audio/vad/include/vad.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
 class MockVad : public Vad {
  public:
-  virtual ~MockVad() { Die(); }
-  MOCK_METHOD0(Die, void());
+  ~MockVad() override { Die(); }
+  MOCK_METHOD(void, Die, ());
 
-  MOCK_METHOD3(VoiceActivity,
-               enum Activity(const int16_t* audio,
-                             size_t num_samples,
-                             int sample_rate_hz));
-  MOCK_METHOD0(Reset, void());
+  MOCK_METHOD(enum Activity,
+              VoiceActivity,
+              (const int16_t* audio, size_t num_samples, int sample_rate_hz),
+              (override));
+  MOCK_METHOD(void, Reset, (), (override));
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_COMMON_AUDIO_VAD_MOCK_MOCK_VAD_H_
+#endif  // COMMON_AUDIO_VAD_MOCK_MOCK_VAD_H_

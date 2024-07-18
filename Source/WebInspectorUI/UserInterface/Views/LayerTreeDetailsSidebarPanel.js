@@ -36,20 +36,18 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
 
     // DetailsSidebarPanel Overrides.
 
-    shown()
+    attached()
     {
+        super.attached();
+
         WI.layerTreeManager.addEventListener(WI.LayerTreeManager.Event.LayerTreeDidChange, this._layerTreeDidChange, this);
-
-        console.assert(this.parentSidebar);
-
-        super.shown();
     }
 
-    hidden()
+    detached()
     {
         WI.layerTreeManager.removeEventListener(WI.LayerTreeManager.Event.LayerTreeDidChange, this._layerTreeDidChange, this);
 
-        super.hidden();
+        super.detached();
     }
 
     // DOMDetailsSidebarPanel Overrides
@@ -65,8 +63,6 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
     {
         super.initialLayout();
 
-        WI.showShadowDOMSetting.addEventListener(WI.Setting.Event.Changed, this._showShadowDOMSettingChanged, this);
-
         this._buildLayerInfoSection();
         this._buildDataGridSection();
         this._buildBottomBar();
@@ -76,10 +72,12 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
     {
         super.layout();
 
-        if (!this.domNode)
+        if (!this.domNode || this.domNode.destroyed)
             return;
 
-        WI.layerTreeManager.layersForNode(this.domNode, (layerForNode, childLayers) => {
+        WI.layerTreeManager.layersForNode(this.domNode, (layers) => {
+            let layerForNode = layers[0] && layers[0].nodeId === this.domNode.id && !layers[0].isGeneratedContent ? layers[0] : null;
+            let childLayers = layers.slice(layerForNode ? 1 : 0);
             this._unfilteredChildLayers = childLayers;
             this._updateDisplayWithLayers(layerForNode, childLayers);
         });
@@ -98,12 +96,6 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
     _layerTreeDidChange(event)
     {
         this.needsLayout();
-    }
-
-    _showShadowDOMSettingChanged(event)
-    {
-        if (this.selected)
-            this._updateDisplayWithLayers(this._layerForNode, this._unfilteredChildLayers);
     }
 
     _buildLayerInfoSection()
@@ -134,10 +126,10 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
         columns.name.title = WI.UIString("Node");
         columns.name.sortable = false;
 
-        columns.paintCount.title = WI.UIString("Paints");
+        columns.paintCount.title = WI.UIString("Paints", "Paints @ Column title", "A count of how many times an element was painted (rendered)");
         columns.paintCount.sortable = true;
         columns.paintCount.aligned = "right";
-        columns.paintCount.width = "50px";
+        columns.paintCount.width = "70px";
 
         columns.memory.title = WI.UIString("Memory");
         columns.memory.sortable = true;
@@ -198,7 +190,7 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
             this._highlightSelectedNode();
             this._showPopoverForSelectedNode();
         } else {
-            WI.domTreeManager.hideDOMNodeHighlight();
+            WI.domManager.hideDOMNodeHighlight();
             this._hidePopover();
         }
     }
@@ -211,7 +203,7 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
 
     _dataGridLostFocus(event)
     {
-        WI.domTreeManager.hideDOMNodeHighlight();
+        WI.domManager.hideDOMNodeHighlight();
         this._hidePopover();
     }
 
@@ -229,19 +221,18 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
 
         var layer = dataGridNode.layer;
         if (layer.isGeneratedContent || layer.isReflection || layer.isAnonymous)
-            WI.domTreeManager.highlightRect(layer.bounds, true);
-        else
-            WI.domTreeManager.highlightDOMNode(layer.nodeId);
+            WI.domManager.highlightRect(layer.bounds, true);
+        else {
+            let domNode = WI.domManager.nodeForId(layer.nodeId);
+            if (domNode)
+                domNode.highlight();
+            else
+                WI.domManager.hideDOMNodeHighlight();
+        }
     }
 
     _updateDisplayWithLayers(layerForNode, childLayers)
     {
-        if (!WI.showShadowDOMSetting.value) {
-            childLayers = childLayers.filter(function(layer) {
-                return !layer.isInShadowTree;
-            });
-        }
-
         this._updateLayerInfoSection(layerForNode);
         this._updateDataGrid(layerForNode, childLayers);
         this._updateMetrics(layerForNode, childLayers);
@@ -347,9 +338,9 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
         var targetFrame = WI.Rect.rectFromClientRect(dataGridNode.element.getBoundingClientRect());
 
         if (content)
-            popover.content = content;
-
-        popover.present(targetFrame.pad(2), [WI.RectEdge.MIN_X]);
+            this._popover.presentNewContentWithFrame(content, targetFrame.pad(2), [WI.RectEdge.MIN_X]);
+        else
+            popover.present(targetFrame.pad(2), [WI.RectEdge.MIN_X]);
     }
 
     _hidePopover()
@@ -398,8 +389,10 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
             addReason(WI.UIString("Element is a plug-in"));
         if (compositingReasons.iFrame)
             addReason(WI.UIString("Element is <iframe>"));
+        if (compositingReasons.model)
+            addReason(WI.UIString("Element is <model>"));
         if (compositingReasons.backfaceVisibilityHidden)
-            addReason(WI.UIString("Element has “backface-visibility: hidden” style"));
+            addReason(WI.UIString("Element has \u201Cbackface-visibility: hidden\u201D style"));
         if (compositingReasons.clipsCompositingDescendants)
             addReason(WI.UIString("Element clips compositing descendants"));
         if (compositingReasons.animation)
@@ -407,11 +400,11 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
         if (compositingReasons.filters)
             addReason(WI.UIString("Element has CSS filters applied"));
         if (compositingReasons.positionFixed)
-            addReason(WI.UIString("Element has “position: fixed” style"));
+            addReason(WI.UIString("Element has \u201Cposition: fixed\u201D style"));
         if (compositingReasons.positionSticky)
-            addReason(WI.UIString("Element has “position: sticky” style"));
+            addReason(WI.UIString("Element has \u201Cposition: sticky\u201D style"));
         if (compositingReasons.overflowScrollingTouch)
-            addReason(WI.UIString("Element has “-webkit-overflow-scrolling: touch” style"));
+            addReason(WI.UIString("Element has \u201C-webkit-overflow-scrolling: touch\u201D style"));
         if (compositingReasons.stacking)
             addReason(WI.UIString("Element may overlap another compositing element"));
         if (compositingReasons.overlap)
@@ -423,7 +416,7 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
         if (compositingReasons.opacityWithCompositedDescendants)
             addReason(WI.UIString("Element has opacity applied and composited descendants"));
         if (compositingReasons.maskWithCompositedDescendants)
-            addReason(WI.UIString("Element is masked and composited descendants"));
+            addReason(WI.UIString("Element is masked and has composited descendants"));
         if (compositingReasons.reflectionWithCompositedDescendants)
             addReason(WI.UIString("Element has a reflection and composited descendants"));
         if (compositingReasons.filterWithCompositedDescendants)
@@ -435,12 +428,12 @@ WI.LayerTreeDetailsSidebarPanel = class LayerTreeDetailsSidebarPanel extends WI.
         if (compositingReasons.perspective)
             addReason(WI.UIString("Element has perspective applied"));
         if (compositingReasons.preserve3D)
-            addReason(WI.UIString("Element has “transform-style: preserve-3d” style"));
+            addReason(WI.UIString("Element has \u201Ctransform-style: preserve-3d\u201D style"));
         if (compositingReasons.willChange)
-            addReason(WI.UIString("Element has “will-change” style with includes opacity, transform, transform-style, perspective, filter or backdrop-filter"));
+            addReason(WI.UIString("Element has \u201Cwill-change\u201D style which includes opacity, transform, transform-style, perspective, filter or backdrop-filter"));
         if (compositingReasons.root)
             addReason(WI.UIString("Element is the root element"));
         if (compositingReasons.blending)
-            addReason(WI.UIString("Element has “blend-mode” style"));
+            addReason(WI.UIString("Element has \u201Cblend-mode\u201D style"));
     }
 };

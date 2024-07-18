@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 Google Inc. All rights reserved.
+ * Copyright (C) 2011-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,19 +25,25 @@
  */
 
 [
-    Conditional=VIDEO_TRACK,
+    Conditional=VIDEO,
     CustomIsReachable,
     CustomToJSObject,
     JSCustomMarkFunction,
     SkipVTableValidation,
+    LegacyFactoryFunctionEnabledBySetting=GenericCueAPIEnabled,
+    Exposed=Window
 ] interface TextTrackCue : EventTarget {
+    [CallWith=CurrentDocument] constructor(double startTime, double endTime, DocumentFragment cueNode);
+
     readonly attribute TextTrack track;
 
-    attribute DOMString id;
+    attribute [AtomString] DOMString id;
     attribute double startTime;
     attribute double endTime;
     attribute boolean pauseOnExit;
 
     attribute EventHandler onenter;
     attribute EventHandler onexit;
+
+    [EnabledBySetting=GenericCueAPIEnabled] DocumentFragment getCueAsHTML();
 };

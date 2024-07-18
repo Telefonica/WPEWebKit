@@ -61,6 +61,16 @@ static const struct argument kArguments[] = {
         "-ocsp-response", kOptionalArgument, "OCSP response file to send",
     },
     {
+        "-echconfig-key",
+        kOptionalArgument,
+        "File containing the private key corresponding to the ECHConfig.",
+    },
+    {
+        "-echconfig",
+        kOptionalArgument,
+        "File containing one ECHConfig.",
+    },
+    {
         "-loop", kBooleanArgument,
         "The server will continue accepting new sequential connections.",
     },
@@ -68,17 +78,26 @@ static const struct argument kArguments[] = {
         "-early-data", kBooleanArgument, "Allow early data",
     },
     {
+        "-www", kBooleanArgument,
+        "The server will print connection information in response to a "
+        "HTTP GET request.",
+    },
+    {
+        "-debug", kBooleanArgument,
+        "Print debug information about the handshake",
+    },
+    {
+        "-require-any-client-cert", kBooleanArgument,
+        "The server will require a client certificate.",
+    },
+    {
+        "-jdk11-workaround", kBooleanArgument,
+        "Enable the JDK 11 workaround",
+    },
+    {
         "", kOptionalArgument, "",
     },
 };
-
-struct FileCloser {
-  void operator()(FILE *file) {
-    fclose(file);
-  }
-};
-
-using ScopedFILE = std::unique_ptr<FILE, FileCloser>;
 
 static bool LoadOCSPResponse(SSL_CTX *ctx, const char *filename) {
   ScopedFILE f(fopen(filename, "rb"));
@@ -139,6 +158,61 @@ static bssl::UniquePtr<X509> MakeSelfSignedCert(EVP_PKEY *evp_pkey,
   return x509;
 }
 
+static void InfoCallback(const SSL *ssl, int type, int value) {
+  switch (type) {
+    case SSL_CB_HANDSHAKE_START:
+      fprintf(stderr, "Handshake started.\n");
+      break;
+    case SSL_CB_HANDSHAKE_DONE:
+      fprintf(stderr, "Handshake done.\n");
+      break;
+    case SSL_CB_ACCEPT_LOOP:
+      fprintf(stderr, "Handshake progress: %s\n", SSL_state_string_long(ssl));
+      break;
+  }
+}
+
+static FILE *g_keylog_file = nullptr;
+
+static void KeyLogCallback(const SSL *ssl, const char *line) {
+  fprintf(g_keylog_file, "%s\n", line);
+  fflush(g_keylog_file);
+}
+
+static bool HandleWWW(SSL *ssl) {
+  bssl::UniquePtr<BIO> bio(BIO_new(BIO_s_mem()));
+  if (!bio) {
+    fprintf(stderr, "Cannot create BIO for response\n");
+    return false;
+  }
+
+  BIO_puts(bio.get(), "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n");
+  PrintConnectionInfo(bio.get(), ssl);
+
+  char request[4];
+  size_t request_len = 0;
+  while (request_len < sizeof(request)) {
+    int ssl_ret =
+        SSL_read(ssl, request + request_len, sizeof(request) - request_len);
+    if (ssl_ret <= 0) {
+      int ssl_err = SSL_get_error(ssl, ssl_ret);
+      PrintSSLError(stderr, "Error while reading", ssl_err, ssl_ret);
+      return false;
+    }
+    request_len += static_cast<size_t>(ssl_ret);
+  }
+
+  // Assume simple HTTP request, print status.
+  if (memcmp(request, "GET ", 4) == 0) {
+    const uint8_t *response;
+    size_t response_len;
+    if (BIO_mem_contents(bio.get(), &response, &response_len)) {
+      SSL_write(ssl, response, response_len);
+    }
+  }
+  return true;
+}
+
 bool Server(const std::vector<std::string> &args) {
   if (!InitSocketLibrary()) {
     return false;
@@ -152,6 +226,16 @@ bool Server(const std::vector<std::string> &args) {
   }
 
   bssl::UniquePtr<SSL_CTX> ctx(SSL_CTX_new(TLS_method()));
+
+  const char *keylog_file = getenv("SSLKEYLOGFILE");
+  if (keylog_file) {
+    g_keylog_file = fopen(keylog_file, "a");
+    if (g_keylog_file == nullptr) {
+      perror("fopen");
+      return false;
+    }
+    SSL_CTX_set_keylog_callback(ctx.get(), KeyLogCallback);
+  }
 
   // Server authentication is required.
   if (args_map.count("-key") != 0) {
@@ -183,6 +267,47 @@ bool Server(const std::vector<std::string> &args) {
     }
     if (!SSL_CTX_use_certificate(ctx.get(), cert.get())) {
       fprintf(stderr, "Failed to set certificate.\n");
+      return false;
+    }
+  }
+
+  if (args_map.count("-echconfig-key") + args_map.count("-echconfig") == 1) {
+    fprintf(stderr,
+            "-echconfig and -echconfig-key must be specified together.\n");
+    return false;
+  }
+
+  if (args_map.count("-echconfig-key") != 0) {
+    std::string echconfig_key_path = args_map["-echconfig-key"];
+    std::string echconfig_path = args_map["-echconfig"];
+
+    // Load the ECH private key.
+    ScopedFILE echconfig_key_file(fopen(echconfig_key_path.c_str(), "rb"));
+    std::vector<uint8_t> echconfig_key;
+    if (echconfig_key_file == nullptr ||
+        !ReadAll(&echconfig_key, echconfig_key_file.get())) {
+      fprintf(stderr, "Error reading %s\n", echconfig_key_path.c_str());
+      return false;
+    }
+
+    // Load the ECHConfig.
+    ScopedFILE echconfig_file(fopen(echconfig_path.c_str(), "rb"));
+    std::vector<uint8_t> echconfig;
+    if (echconfig_file == nullptr ||
+        !ReadAll(&echconfig, echconfig_file.get())) {
+      fprintf(stderr, "Error reading %s\n", echconfig_path.c_str());
+      return false;
+    }
+
+    bssl::UniquePtr<SSL_ECH_SERVER_CONFIG_LIST> configs(
+        SSL_ECH_SERVER_CONFIG_LIST_new());
+    if (!configs ||
+        !SSL_ECH_SERVER_CONFIG_LIST_add(configs.get(),
+                                        /*is_retry_config=*/1, echconfig.data(),
+                                        echconfig.size(), echconfig_key.data(),
+                                        echconfig_key.size()) ||
+        !SSL_CTX_set1_ech_server_config_list(ctx.get(), configs.get())) {
+      fprintf(stderr, "Error setting server's ECHConfig and private key\n");
       return false;
     }
   }
@@ -233,10 +358,27 @@ bool Server(const std::vector<std::string> &args) {
     SSL_CTX_set_early_data_enabled(ctx.get(), 1);
   }
 
+  if (args_map.count("-debug") != 0) {
+    SSL_CTX_set_info_callback(ctx.get(), InfoCallback);
+  }
+
+  if (args_map.count("-require-any-client-cert") != 0) {
+    SSL_CTX_set_verify(
+        ctx.get(), SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
+    SSL_CTX_set_cert_verify_callback(
+        ctx.get(), [](X509_STORE_CTX *store, void *arg) -> int { return 1; },
+        nullptr);
+  }
+
+  Listener listener;
+  if (!listener.Init(args_map["-accept"])) {
+    return false;
+  }
+
   bool result = true;
   do {
     int sock = -1;
-    if (!Accept(&sock, args_map["-accept"])) {
+    if (!listener.Accept(&sock)) {
       return false;
     }
 
@@ -244,19 +386,27 @@ bool Server(const std::vector<std::string> &args) {
     bssl::UniquePtr<SSL> ssl(SSL_new(ctx.get()));
     SSL_set_bio(ssl.get(), bio, bio);
 
+    if (args_map.count("-jdk11-workaround") != 0) {
+      SSL_set_jdk11_workaround(ssl.get(), 1);
+    }
+
     int ret = SSL_accept(ssl.get());
     if (ret != 1) {
       int ssl_err = SSL_get_error(ssl.get(), ret);
-      fprintf(stderr, "Error while connecting: %d\n", ssl_err);
-      ERR_print_errors_cb(PrintErrorCallback, stderr);
+      PrintSSLError(stderr, "Error while connecting", ssl_err, ret);
       result = false;
       continue;
     }
 
     fprintf(stderr, "Connected.\n");
-    PrintConnectionInfo(ssl.get());
+    bssl::UniquePtr<BIO> bio_stderr(BIO_new_fp(stderr, BIO_NOCLOSE));
+    PrintConnectionInfo(bio_stderr.get(), ssl.get());
 
-    result = TransferData(ssl.get(), sock);
+    if (args_map.count("-www") != 0) {
+      result = HandleWWW(ssl.get());
+    } else {
+      result = TransferData(ssl.get(), sock);
+    }
   } while (args_map.count("-loop") != 0);
 
   return result;

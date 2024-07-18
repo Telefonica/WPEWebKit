@@ -29,10 +29,10 @@
 using namespace WebKit;
 
 /**
- * SECTION: WebKitHitTestResult
- * @Short_description: Result of a Hit Test
- * @Title: WebKitHitTestResult
+ * WebKitHitTestResult:
  * @See_also: #WebKitWebView
+ *
+ * Result of a Hit Test.
  *
  * A Hit Test is an operation to get context information about a given
  * point in a #WebKitWebView. #WebKitHitTestResult represents the
@@ -52,7 +52,6 @@ using namespace WebKit;
  * When the mouse is moved over a #WebKitWebView a Hit Test is performed
  * for the mouse coordinates and #WebKitWebView::mouse-target-changed
  * signal is emitted with a #WebKitHitTestResult.
- *
  */
 
 enum {
@@ -238,7 +237,7 @@ WebKitHitTestResult* webkitHitTestResultCreate(const WebHitTestResultData& hitTe
     if (hitTestResult.isContentEditable)
         context |= WEBKIT_HIT_TEST_RESULT_CONTEXT_EDITABLE;
 
-    if (hitTestResult.isScrollbar)
+    if (hitTestResult.isScrollbar != WebHitTestResultData::IsScrollbar::No)
         context |= WEBKIT_HIT_TEST_RESULT_CONTEXT_SCROLLBAR;
 
     if (hitTestResult.isSelected)
@@ -262,8 +261,9 @@ static bool stringIsEqualToCString(const String& string, const CString& cString)
 bool webkitHitTestResultCompare(WebKitHitTestResult* hitTestResult, const WebHitTestResultData& webHitTestResult)
 {
     WebKitHitTestResultPrivate* priv = hitTestResult->priv;
+    bool isScrollbar = webHitTestResult.isScrollbar != WebHitTestResultData::IsScrollbar::No;
     return webHitTestResult.isContentEditable == webkit_hit_test_result_context_is_editable(hitTestResult)
-        && webHitTestResult.isScrollbar == webkit_hit_test_result_context_is_scrollbar(hitTestResult)
+        && isScrollbar == webkit_hit_test_result_context_is_scrollbar(hitTestResult)
         && webHitTestResult.isSelected == webkit_hit_test_result_context_is_selection(hitTestResult)
         && stringIsEqualToCString(webHitTestResult.absoluteLinkURL, priv->linkURI)
         && stringIsEqualToCString(webHitTestResult.linkTitle, priv->linkTitle)

@@ -8,25 +8,22 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_API_TEST_MOCK_AUDIO_MIXER_H_
-#define WEBRTC_API_TEST_MOCK_AUDIO_MIXER_H_
+#ifndef API_TEST_MOCK_AUDIO_MIXER_H_
+#define API_TEST_MOCK_AUDIO_MIXER_H_
 
-#include "webrtc/api/audio/audio_mixer.h"
-
-#include "webrtc/test/gmock.h"
+#include "api/audio/audio_mixer.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 namespace test {
 
 class MockAudioMixer : public AudioMixer {
  public:
-  MOCK_METHOD1(AddSource, bool(Source* audio_source));
-  MOCK_METHOD1(RemoveSource, void(Source* audio_source));
-  MOCK_METHOD2(Mix,
-               void(size_t number_of_channels,
-                    AudioFrame* audio_frame_for_mixing));
+  MOCK_METHOD(bool, AddSource, (Source*), (override));
+  MOCK_METHOD(void, RemoveSource, (Source*), (override));
+  MOCK_METHOD(void, Mix, (size_t number_of_channels, AudioFrame*), (override));
 };
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_TEST_MOCK_AUDIO_MIXER_H_
+#endif  // API_TEST_MOCK_AUDIO_MIXER_H_

@@ -27,12 +27,20 @@
 
 #if PLATFORM(COCOA)
 
+#include <CoreAudio/CoreAudioTypes.h>
+
 #if USE(APPLE_INTERNAL_SDK)
 #include <CoreAudio/AudioHardwarePriv.h>
 #else
 
 #if PLATFORM(MAC)
 #include <CoreAudio/AudioHardware.h>
+
+CF_ENUM(AudioObjectPropertySelector)
+{
+    kAudioDevicePropertyTapEnabled = 'tapd',
+};
+
 #else
 
 WTF_EXTERN_C_BEGIN
@@ -55,7 +63,8 @@ CF_ENUM(AudioObjectPropertyScope)
 
 CF_ENUM(AudioObjectPropertySelector)
 {
-    kAudioHardwarePropertyDefaultInputDevice = 'dIn '
+    kAudioHardwarePropertyDefaultInputDevice = 'dIn ',
+    kAudioDevicePropertyTapEnabled = 'tapd',
 };
 
 CF_ENUM(int)

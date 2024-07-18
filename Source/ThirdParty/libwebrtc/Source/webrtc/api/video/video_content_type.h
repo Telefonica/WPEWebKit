@@ -8,19 +8,29 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_API_VIDEO_VIDEO_CONTENT_TYPE_H_
-#define WEBRTC_API_VIDEO_VIDEO_CONTENT_TYPE_H_
+#ifndef API_VIDEO_VIDEO_CONTENT_TYPE_H_
+#define API_VIDEO_VIDEO_CONTENT_TYPE_H_
 
 #include <stdint.h>
 
 namespace webrtc {
 
+// VideoContentType stored as a single byte, which is sent over the network
+// in the rtp-hdrext/video-content-type extension.
+// Only the lowest bit is used, per the enum.
 enum class VideoContentType : uint8_t {
   UNSPECIFIED = 0,
   SCREENSHARE = 1,
-  TOTAL_CONTENT_TYPES  // Must be the last value in the enum.
 };
+
+namespace videocontenttypehelpers {
+bool IsScreenshare(const VideoContentType& content_type);
+
+bool IsValidContentType(uint8_t value);
+
+const char* ToString(const VideoContentType& content_type);
+}  // namespace videocontenttypehelpers
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_VIDEO_VIDEO_CONTENT_TYPE_H_
+#endif  // API_VIDEO_VIDEO_CONTENT_TYPE_H_

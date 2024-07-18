@@ -30,24 +30,16 @@ WI.SettingEditor = class SettingEditor extends WI.Object
         super();
 
         this._type = type;
-        this._label = label;
         this._value = null;
 
         this._editorElement = this._createEditorElement(options);
         console.assert(this._editorElement);
 
         this._element = document.createElement("div");
-        this._element.classList.add("editor");
+        this._element.classList.add("setting-editor");
         this._element.append(this._editorElement);
 
-        if (this._label) {
-            this._editorElement.id = "setting-editor-" + WI.SettingEditor._nextEditorIdentifier++;
-            let labelElement = document.createElement("label");
-            labelElement.setAttribute("for", this._editorElement.id);
-            labelElement.textContent = label;
-
-            this._element.append(labelElement);
-        }
+        this.label = label;
     }
 
     static createForSetting(setting, label, options)
@@ -64,7 +56,12 @@ WI.SettingEditor = class SettingEditor extends WI.Object
 
         let editor = new WI.SettingEditor(type, label, options);
         editor.value = setting.value;
-        editor.addEventListener(WI.SettingEditor.Event.ValueDidChange, () => { setting.value = editor.value; });
+        editor.addEventListener(WI.SettingEditor.Event.ValueDidChange, function(event) {
+            this.value = editor.value;
+        }, setting);
+        setting.addEventListener(WI.Setting.Event.Changed, function(event) {
+            this.value = setting.value;
+        }, editor);
 
         return editor;
     }
@@ -73,7 +70,36 @@ WI.SettingEditor = class SettingEditor extends WI.Object
 
     get element() { return this._element; }
     get type() { return this._type; }
-    get label() { return this._label; }
+
+    get label()
+    {
+        return this._label;
+    }
+
+    set label(label)
+    {
+        if (label === this._label)
+            return;
+
+        this._label = label;
+
+        if (!this._label) {
+            if (this._labelElement)
+                this._labelElement.remove();
+
+            this._editorElement.removeAttribute("id");
+            this._labelElement = null;
+            return;
+        }
+
+        if (!this._labelElement) {
+            this._editorElement.id = "setting-editor-" + WI.SettingEditor._nextEditorIdentifier++;
+            this._labelElement = this._element.appendChild(document.createElement("label"));
+            this._labelElement.setAttribute("for", this._editorElement.id);
+        }
+
+        this._labelElement.textContent = this._label;
+    }
 
     get value()
     {
@@ -88,7 +114,7 @@ WI.SettingEditor = class SettingEditor extends WI.Object
         let oldValue = this._value;
         this._value = value;
 
-        if (this._type == WI.SettingEditor.Type.Checkbox)
+        if (this._type === WI.SettingEditor.Type.Checkbox)
             this._editorElement.checked = !!this._value;
         else
             this._editorElement.value = this._value;
@@ -137,6 +163,11 @@ WI.SettingEditor = class SettingEditor extends WI.Object
                 keyValuePairs = options.values.map((value) => [value, value]);
 
             for (let [key, value] of keyValuePairs) {
+                if (key === WI.SettingEditor.SelectSpacerKey) {
+                    editorElement.appendChild(document.createElement("hr"));
+                    continue;
+                }
+
                 let optionElement = editorElement.appendChild(document.createElement("option"));
                 optionElement.value = key;
                 optionElement.textContent = value;
@@ -160,6 +191,8 @@ WI.SettingEditor.Type = {
     Numeric: "setting-editor-type-numeric",
     Select: "setting-editor-type-select",
 };
+
+WI.SettingEditor.SelectSpacerKey = Symbol("setting-editor-select-spacer-key");
 
 WI.SettingEditor.Event = {
     ValueDidChange: "value-did-change",

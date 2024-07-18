@@ -8,12 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_TRANSIENT_WPD_NODE_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_TRANSIENT_WPD_NODE_H_
+#ifndef MODULES_AUDIO_PROCESSING_TRANSIENT_WPD_NODE_H_
+#define MODULES_AUDIO_PROCESSING_TRANSIENT_WPD_NODE_H_
 
+#include <cstddef>
 #include <memory>
-
-#include "webrtc/typedefs.h"
 
 namespace webrtc {
 
@@ -27,7 +26,7 @@ class WPDNode {
   WPDNode(size_t length, const float* coefficients, size_t coefficients_length);
   ~WPDNode();
 
-  // Updates the node data. |parent_data| / 2 must be equals to |length_|.
+  // Updates the node data. `parent_data` / 2 must be equals to `length_`.
   // Returns 0 if correct, and -1 otherwise.
   int Update(const float* parent_data, size_t parent_data_length);
 
@@ -44,4 +43,4 @@ class WPDNode {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_TRANSIENT_WPD_NODE_H_
+#endif  // MODULES_AUDIO_PROCESSING_TRANSIENT_WPD_NODE_H_

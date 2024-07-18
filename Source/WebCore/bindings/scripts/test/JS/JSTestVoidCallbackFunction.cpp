@@ -24,6 +24,7 @@
 
 #include "JSTestVoidCallbackFunction.h"
 
+#include "JSDOMConvertBase.h"
 #include "JSDOMConvertBoolean.h"
 #include "JSDOMConvertBufferSource.h"
 #include "JSDOMConvertInterface.h"
@@ -36,9 +37,9 @@
 #include "ScriptExecutionContext.h"
 #include "SerializedScriptValue.h"
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 JSTestVoidCallbackFunction::JSTestVoidCallbackFunction(JSObject* callback, JSDOMGlobalObject* globalObject)
     : TestVoidCallbackFunction(globalObject->scriptExecutionContext())
@@ -60,7 +61,7 @@ JSTestVoidCallbackFunction::~JSTestVoidCallbackFunction()
 #endif
 }
 
-CallbackResult<typename IDLVoid::ImplementationType> JSTestVoidCallbackFunction::handleEvent(typename IDLFloat32Array::ParameterType arrayParam, typename IDLSerializedScriptValue<SerializedScriptValue>::ParameterType srzParam, typename IDLDOMString::ParameterType strArg, typename IDLBoolean::ParameterType boolParam, typename IDLLong::ParameterType longParam, typename IDLInterface<TestNode>::ParameterType testNodeParam)
+CallbackResult<typename IDLUndefined::ImplementationType> JSTestVoidCallbackFunction::handleEvent(typename IDLFloat32Array::ParameterType arrayParam, typename IDLSerializedScriptValue<SerializedScriptValue>::ParameterType srzParam, typename IDLDOMString::ParameterType strArg, typename IDLBoolean::ParameterType boolParam, typename IDLLong::ParameterType longParam, typename IDLInterface<TestNode>::ParameterType testNodeParam)
 {
     if (!canInvokeCallback())
         return CallbackResultType::UnableToExecute;
@@ -71,20 +72,21 @@ CallbackResult<typename IDLVoid::ImplementationType> JSTestVoidCallbackFunction:
     auto& vm = globalObject.vm();
 
     JSLockHolder lock(vm);
-    auto& state = *globalObject.globalExec();
+    auto& lexicalGlobalObject = globalObject;
     JSValue thisValue = jsUndefined();
     MarkedArgumentBuffer args;
-    args.append(toJS<IDLFloat32Array>(state, globalObject, arrayParam));
-    args.append(toJS<IDLSerializedScriptValue<SerializedScriptValue>>(state, globalObject, srzParam));
-    args.append(toJS<IDLDOMString>(state, strArg));
+    args.append(toJS<IDLFloat32Array>(lexicalGlobalObject, globalObject, arrayParam));
+    args.append(toJS<IDLSerializedScriptValue<SerializedScriptValue>>(lexicalGlobalObject, globalObject, srzParam));
+    args.append(toJS<IDLDOMString>(lexicalGlobalObject, strArg));
     args.append(toJS<IDLBoolean>(boolParam));
     args.append(toJS<IDLLong>(longParam));
-    args.append(toJS<IDLInterface<TestNode>>(state, globalObject, testNodeParam));
+    args.append(toJS<IDLInterface<TestNode>>(lexicalGlobalObject, globalObject, testNodeParam));
+    ASSERT(!args.hasOverflowed());
 
     NakedPtr<JSC::Exception> returnedException;
     m_data->invokeCallback(thisValue, args, JSCallbackData::CallbackType::Function, Identifier(), returnedException);
     if (returnedException) {
-        reportException(&state, returnedException);
+        reportException(&lexicalGlobalObject, returnedException);
         return CallbackResultType::ExceptionThrown;
      }
 

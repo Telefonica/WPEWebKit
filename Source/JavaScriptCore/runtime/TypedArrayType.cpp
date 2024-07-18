@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,50 +26,15 @@
 #include "config.h"
 #include "TypedArrayType.h"
 
-#include "JSDataView.h"
 #include "JSTypedArrayConstructors.h"
-#include "JSTypedArrays.h"
 
 namespace JSC {
-
-JSType typeForTypedArrayType(TypedArrayType type)
-{
-    switch (type) {
-    case NotTypedArray:
-        RELEASE_ASSERT_NOT_REACHED();
-        return UnspecifiedType;
-    case TypeInt8:
-        return Int8ArrayType;
-    case TypeUint8:
-        return Uint8ArrayType;
-    case TypeUint8Clamped:
-        return Uint8ClampedArrayType;
-    case TypeInt16:
-        return Int16ArrayType;
-    case TypeUint16:
-        return Uint16ArrayType;
-    case TypeInt32:
-        return Int32ArrayType;
-    case TypeUint32:
-        return Uint32ArrayType;
-    case TypeFloat32:
-        return Float32ArrayType;
-    case TypeFloat64:
-        return Float64ArrayType;
-    case TypeDataView:
-        return DataViewType;
-
-    default:
-        RELEASE_ASSERT_NOT_REACHED();
-        return UnspecifiedType;
-    }
-}
 
 const ClassInfo* constructorClassInfoForType(TypedArrayType type)
 {
     switch (type) {
     case NotTypedArray:
-        return 0;
+        return nullptr;
     case TypeInt8:
         return JSInt8ArrayConstructor::info();
     case TypeUint8:
@@ -88,11 +53,15 @@ const ClassInfo* constructorClassInfoForType(TypedArrayType type)
         return JSFloat32ArrayConstructor::info();
     case TypeFloat64:
         return JSFloat64ArrayConstructor::info();
+    case TypeBigInt64:
+        return JSBigInt64ArrayConstructor::info();
+    case TypeBigUint64:
+        return JSBigUint64ArrayConstructor::info();
     case TypeDataView:
         return JSDataViewConstructor::info();
     }
     RELEASE_ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
 } // namespace JSC
@@ -133,6 +102,12 @@ void printInternal(PrintStream& out, TypedArrayType type)
         return;
     case TypeFloat64:
         out.print("TypeFloat64");
+        return;
+    case TypeBigInt64:
+        out.print("TypeBigInt64");
+        return;
+    case TypeBigUint64:
+        out.print("TypeBigUint64");
         return;
     case TypeDataView:
         out.print("TypeDataView");

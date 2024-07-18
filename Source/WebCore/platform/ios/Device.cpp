@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,42 +26,34 @@
 #include "config.h"
 #include "Device.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
+#include <mutex>
+#include <pal/spi/ios/MobileGestaltSPI.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-MGDeviceClass deviceClass()
+bool deviceClassIsSmallScreen()
 {
-    static MGDeviceClass deviceClass = [] {
-        int deviceClassNumber = MGGetSInt32Answer(kMGQDeviceClassNumber, MGDeviceClassInvalid);
-        switch (deviceClassNumber) {
-        case MGDeviceClassInvalid:
-        case MGDeviceClassiPhone:
-        case MGDeviceClassiPod:
-        case MGDeviceClassiPad:
-        case MGDeviceClassAppleTV:
-        case MGDeviceClassWatch:
-            break;
-        default:
-            ASSERT_NOT_REACHED();
-        }
-        return static_cast<MGDeviceClass>(deviceClassNumber);
-    }();
-    return deviceClass;
+    static auto deviceClass = MGGetSInt32Answer(kMGQDeviceClassNumber, MGDeviceClassInvalid);
+    return deviceClass == MGDeviceClassiPhone || deviceClass == MGDeviceClassiPod || deviceClass == MGDeviceClassWatch;
 }
 
-const String& deviceName()
+String deviceName()
 {
 #if TARGET_OS_IOS
-    static const NeverDestroyed<String> deviceName = adoptCF(static_cast<CFStringRef>(MGCopyAnswer(kMGQDeviceName, nullptr))).get();
+    static NeverDestroyed<RetainPtr<CFStringRef>> deviceName;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [] {
+        deviceName.get() = adoptCF(static_cast<CFStringRef>(MGCopyAnswer(kMGQDeviceName, nullptr)));
+    });
+    return deviceName.get().get();
 #else
-    static const NeverDestroyed<String> deviceName = ASCIILiteral { "iPhone" };
+    return "iPhone"_s;
 #endif
-    return deviceName;
 }
 
 bool deviceHasIPadCapability()
@@ -72,4 +64,4 @@ bool deviceHasIPadCapability()
 
 } // namespace WebCore
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

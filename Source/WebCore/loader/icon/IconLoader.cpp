@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006-2017 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,6 +33,7 @@
 #include "Document.h"
 #include "DocumentLoader.h"
 #include "Frame.h"
+#include "FrameDestructionObserverInlines.h"
 #include "FrameLoader.h"
 #include "FrameLoaderClient.h"
 #include "Logging.h"
@@ -71,12 +72,24 @@ void IconLoader::startLoading()
     auto resourceRequestURL = resourceRequest.url();
 #endif
 
-    CachedResourceRequest request(WTFMove(resourceRequest), ResourceLoaderOptions(SendCallbacks, SniffContent, BufferData, StoredCredentialsPolicy::DoNotUse, ClientCredentialPolicy::CannotAskClientForCredentials, FetchOptions::Credentials::Omit, DoSecurityCheck, FetchOptions::Mode::NoCors, DoNotIncludeCertificateInfo, ContentSecurityPolicyImposition::DoPolicyCheck, DefersLoadingPolicy::AllowDefersLoading, CachingPolicy::AllowCaching));
+    CachedResourceRequest request(WTFMove(resourceRequest), ResourceLoaderOptions(
+        SendCallbackPolicy::SendCallbacks,
+        ContentSniffingPolicy::SniffContent,
+        DataBufferingPolicy::BufferData,
+        StoredCredentialsPolicy::DoNotUse,
+        ClientCredentialPolicy::CannotAskClientForCredentials,
+        FetchOptions::Credentials::Omit,
+        SecurityCheckPolicy::DoSecurityCheck,
+        FetchOptions::Mode::NoCors,
+        CertificateInfoPolicy::DoNotIncludeCertificateInfo,
+        ContentSecurityPolicyImposition::DoPolicyCheck,
+        DefersLoadingPolicy::AllowDefersLoading,
+        CachingPolicy::AllowCaching));
 
     request.setInitiator(cachedResourceRequestInitiators().icon);
 
     auto cachedResource = frame->document()->cachedResourceLoader().requestIcon(WTFMove(request));
-    m_resource = cachedResource.valueOr(nullptr);
+    m_resource = cachedResource.value_or(nullptr);
     if (m_resource)
         m_resource->addClient(*this);
     else
@@ -91,7 +104,7 @@ void IconLoader::stopLoading()
     }
 }
 
-void IconLoader::notifyFinished(CachedResource& resource)
+void IconLoader::notifyFinished(CachedResource& resource, const NetworkLoadMetrics&)
 {
     ASSERT_UNUSED(resource, &resource == m_resource);
 
@@ -102,9 +115,8 @@ void IconLoader::notifyFinished(CachedResource& resource)
     if (status && (status < 200 || status > 299))
         data = nullptr;
 
-    static const char pdfMagicNumber[] = "%PDF";
-    static unsigned pdfMagicNumberLength = sizeof(pdfMagicNumber) - 1;
-    if (data && data->size() >= pdfMagicNumberLength && !memcmp(data->data(), pdfMagicNumber, pdfMagicNumberLength)) {
+    constexpr uint8_t pdfMagicNumber[] = { '%', 'P', 'D', 'F' };
+    if (data && data->startsWith(Span { pdfMagicNumber, std::size(pdfMagicNumber) })) {
         LOG(IconDatabase, "IconLoader::finishLoading() - Ignoring icon at %s because it appears to be a PDF", m_resource->url().string().ascii().data());
         data = nullptr;
     }

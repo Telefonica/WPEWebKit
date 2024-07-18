@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2018, 2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,11 +25,14 @@
 
 #pragma once
 
-#include "WebEvent.h"
+#if ENABLE(WEBDRIVER_ACTIONS_API)
+
+#include <WebCore/FrameIdentifier.h>
+#include <WebCore/IntPoint.h>
+#include <WebCore/IntSize.h>
+#include <variant>
 #include <wtf/CompletionHandler.h>
-#include <wtf/HashSet.h>
-#include <wtf/Optional.h>
-#include <wtf/RefCounted.h>
+#include <wtf/ListHashSet.h>
 #include <wtf/RunLoop.h>
 #include <wtf/Seconds.h>
 #include <wtf/Vector.h>
@@ -38,6 +41,7 @@
 namespace Inspector { namespace Protocol { namespace Automation {
 enum class ErrorMessage;
 enum class KeyboardInteractionType;
+enum class MouseButton;
 enum class MouseInteraction;
 enum class MouseMoveOrigin;
 enum class VirtualKey;
@@ -52,9 +56,10 @@ class WebPageProxy;
 
 using KeyboardInteraction = Inspector::Protocol::Automation::KeyboardInteractionType;
 using VirtualKey = Inspector::Protocol::Automation::VirtualKey;
-using VirtualKeySet = HashSet<VirtualKey, WTF::IntHash<VirtualKey>, WTF::StrongEnumHashTraits<VirtualKey>>;
-using CharKey = char; // For WebDriver, this only needs to support ASCII characters on 102-key keyboard.
-using MouseButton = WebMouseEvent::Button;
+using VirtualKeyMap = HashMap<VirtualKey, VirtualKey, WTF::IntHash<VirtualKey>, WTF::StrongEnumHashTraits<VirtualKey>>;
+using CharKey = UChar32;
+using CharKeySet = ListHashSet<CharKey>;
+using MouseButton = Inspector::Protocol::Automation::MouseButton;
 using MouseInteraction = Inspector::Protocol::Automation::MouseInteraction;
 using MouseMoveOrigin = Inspector::Protocol::Automation::MouseMoveOrigin;
 
@@ -63,15 +68,24 @@ enum class SimulatedInputSourceType {
     Keyboard,
     Mouse,
     Touch,
+    Wheel,
+    Pen,
+};
+
+enum class TouchInteraction {
+    TouchDown,
+    MoveTo,
+    LiftUp,
 };
 
 struct SimulatedInputSourceState {
-    std::optional<CharKey> pressedCharKey;
-    VirtualKeySet pressedVirtualKeys;
+    CharKeySet pressedCharKeys;
+    VirtualKeyMap pressedVirtualKeys;
     std::optional<MouseButton> pressedMouseButton;
     std::optional<MouseMoveOrigin> origin;
     std::optional<String> nodeHandle;
     std::optional<WebCore::IntPoint> location;
+    std::optional<WebCore::IntSize> scrollDelta;
     std::optional<Seconds> duration;
 
     static SimulatedInputSourceState emptyStateForSourceType(SimulatedInputSourceType);
@@ -103,8 +117,8 @@ public:
     explicit SimulatedInputKeyFrame(Vector<StateEntry>&&);
     Seconds maximumDuration() const;
 
-    static SimulatedInputKeyFrame keyFrameFromStateOfInputSources(HashSet<Ref<SimulatedInputSource>>&);
-    static SimulatedInputKeyFrame keyFrameToResetInputSources(HashSet<Ref<SimulatedInputSource>>&);
+    static SimulatedInputKeyFrame keyFrameFromStateOfInputSources(const HashMap<String, Ref<SimulatedInputSource>>&);
+    static SimulatedInputKeyFrame keyFrameToResetInputSources(const HashMap<String, Ref<SimulatedInputSource>>&);
 
     Vector<StateEntry> states;
 };
@@ -115,9 +129,19 @@ public:
     class Client {
     public:
         virtual ~Client() { }
-        virtual void simulateMouseInteraction(WebPageProxy&, MouseInteraction, WebMouseEvent::Button, const WebCore::IntPoint& locationInView, AutomationCompletionHandler&&) = 0;
-        virtual void simulateKeyboardInteraction(WebPageProxy&, KeyboardInteraction, WTF::Variant<VirtualKey, CharKey>&&, AutomationCompletionHandler&&) = 0;
-        virtual void viewportInViewCenterPointOfElement(WebPageProxy&, uint64_t frameID, const String& nodeHandle, Function<void (std::optional<WebCore::IntPoint>, std::optional<AutomationCommandError>)>&&) = 0;
+#if ENABLE(WEBDRIVER_MOUSE_INTERACTIONS)
+        virtual void simulateMouseInteraction(WebPageProxy&, MouseInteraction, MouseButton, const WebCore::IntPoint& locationInView, const String& pointerType, AutomationCompletionHandler&&) = 0;
+#endif
+#if ENABLE(WEBDRIVER_TOUCH_INTERACTIONS)
+        virtual void simulateTouchInteraction(WebPageProxy&, TouchInteraction, const WebCore::IntPoint& locationInView, std::optional<Seconds> duration, AutomationCompletionHandler&&) = 0;
+#endif
+#if ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
+        virtual void simulateKeyboardInteraction(WebPageProxy&, KeyboardInteraction, std::variant<VirtualKey, CharKey>&&, AutomationCompletionHandler&&) = 0;
+#endif
+#if ENABLE(WEBDRIVER_WHEEL_INTERACTIONS)
+        virtual void simulateWheelInteraction(WebPageProxy&, const WebCore::IntPoint& locationInView, const WebCore::IntSize& delta, AutomationCompletionHandler&&) = 0;
+#endif
+        virtual void viewportInViewCenterPointOfElement(WebPageProxy&, std::optional<WebCore::FrameIdentifier>, const String& nodeHandle, Function<void (std::optional<WebCore::IntPoint>, std::optional<AutomationCommandError>)>&&) = 0;
     };
 
     static Ref<SimulatedInputDispatcher> create(WebPageProxy& page, SimulatedInputDispatcher::Client& client)
@@ -127,7 +151,7 @@ public:
 
     ~SimulatedInputDispatcher();
 
-    void run(uint64_t frameID, Vector<SimulatedInputKeyFrame>&& keyFrames, HashSet<Ref<SimulatedInputSource>>& inputSources, AutomationCompletionHandler&&);
+    void run(std::optional<WebCore::FrameIdentifier>, Vector<SimulatedInputKeyFrame>&& keyFrames, const HashMap<String, Ref<SimulatedInputSource>>& inputSources, AutomationCompletionHandler&&);
     void cancel();
 
     bool isActive() const;
@@ -150,13 +174,12 @@ private:
     WebPageProxy& m_page;
     SimulatedInputDispatcher::Client& m_client;
 
-    std::optional<uint64_t> m_frameID;
+    std::optional<WebCore::FrameIdentifier> m_frameID;
     AutomationCompletionHandler m_runCompletionHandler;
     AutomationCompletionHandler m_keyFrameTransitionCompletionHandler;
     RunLoop::Timer<SimulatedInputDispatcher> m_keyFrameTransitionDurationTimer;
 
     Vector<SimulatedInputKeyFrame> m_keyframes;
-    HashSet<Ref<SimulatedInputSource>> m_inputSources;
 
     // The position within m_keyframes.
     unsigned m_keyframeIndex { 0 };
@@ -167,3 +190,5 @@ private:
 };
 
 } // namespace WebKit
+
+#endif // ENABLE(WEBDRIVER_ACTIONS_API)

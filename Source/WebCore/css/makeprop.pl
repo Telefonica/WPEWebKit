@@ -1,9 +1,9 @@
-#! /usr/bin/perl
+#! /usr/bin/env perl
 #
 #   This file is part of the WebKit project
 #
 #   Copyright (C) 1999 Waldo Bastian (bastian@kde.org)
-#   Copyright (C) 2007-2017 Apple Inc. All rights reserved.
+#   Copyright (C) 2007-2018 Apple Inc. All rights reserved.
 #   Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
 #   Copyright (C) 2010 Andras Becsi (abecsi@inf.u-szeged.hu), University of Szeged
 #   Copyright (C) 2013 Google Inc. All rights reserved.
@@ -31,8 +31,10 @@ use File::Spec;
 use Getopt::Long;
 use JSON::PP;
 
-sub addProperty($$);
+sub isLogical;
+sub skippedFromComputedStyle;
 sub isPropertyEnabled($$);
+sub addProperty($$);
 sub removeInactiveCodegenProperties($$);
 
 my $inputFile = "CSSProperties.json";
@@ -53,30 +55,57 @@ my $input;
 my $jsonDecoder = JSON::PP->new->utf8;
 my $jsonHashRef = $jsonDecoder->decode($input);
 my $propertiesHashRef = $jsonHashRef->{properties};
-my @allNames = keys(%$propertiesHashRef);
+my @allNames = sort keys(%$propertiesHashRef);
 die "We've reached more than 1024 CSS properties, please make sure to update CSSProperty/StylePropertyMetadata accordingly" if @allNames > 1024;
 
 my %defines = map { $_ => 1 } split(/ /, $defines);
 
 my @names;
-my @internalProprerties;
+my @internalProperties;
+my %runtimeFlags;
+my %settingsFlags;
 my $numPredefinedProperties = 2;
-my %nameIsInherited;
+my %nameIsColorProperty;
+my %nameIsDescriptorOnly;
+my %nameIsTopPriority;
 my %nameIsHighPriority;
+my %nameIsDeferred;
+my %nameIsInherited;
+my %namePriorityShouldSink;
+my %logicalPropertyGroups;
+my %logicalPropertyGroupResolvers = (
+    "logical" => {
+        # Order matches LogicalBoxAxis enum in Source/WebCore/platform/text/WritingMode.h.
+        "axis" => ["inline", "block"],
+        # Order matches LogicalBoxSide enum in Source/WebCore/platform/text/WritingMode.h.
+        "side" => ["block-start", "inline-end", "block-end", "inline-start"],
+        # Order matches LogicalBoxCorner enum in Source/WebCore/platform/text/WritingMode.h.
+        "corner" => ["start-start", "start-end", "end-start", "end-end"],
+    },
+    "physical" => {
+        # Order matches BoxAxis enum in Source/WebCore/platform/text/WritingMode.h.
+        "axis" => ["horizontal", "vertical"],
+        # Order matches BoxSide enum in Source/WebCore/platform/text/WritingMode.h.
+        "side" => ["top", "right", "bottom", "left"],
+        # Order matches BoxCorner enum in Source/WebCore/platform/text/WritingMode.h.
+        "corner" => ["top-left", "top-right", "bottom-right", "bottom-left"],
+    },
+);
 my %propertiesWithStyleBuilderOptions;
 my %styleBuilderOptions = (
-    "animatable" => 1, # Defined in Source/WebCore/css/StyleBuilderConverter.h
+    "animatable" => 1, # Defined in Source/WebCore/style/StyleBuilderConverter.h
     "auto-functions" => 1,
+    "computable" => 1,
     "conditional-converter" => 1,
     "converter" => 1,
     "custom" => 1,
+    "fast-path-inherited" => 1,
     "fill-layer-property" => 1,
     "font-property" => 1,
     "getter" => 1,
     "initial" => 1,
     "longhands" => 1,
     "name-for-methods" => 1,
-    "no-default-color" => 1,
     "svg" => 1,
     "skip-builder" => 1,
     "setter" => 1,
@@ -84,6 +113,9 @@ my %styleBuilderOptions = (
 );
 my %nameToId;
 my %nameToAliases;
+my %synonyms;
+my %namesToSynonyms;
+my %relatedProperty;
 
 for my $name (@allNames) {
     my $value = $propertiesHashRef->{$name};
@@ -97,6 +129,27 @@ for my $name (@allNames) {
     } else {
         die "$name does not have a supported value type. Only dictionary types are supported.";
     }
+}
+
+while (my ($groupName, $logicalPropertyGroup) = each %logicalPropertyGroups) {
+    my $kind = $logicalPropertyGroup->{"kind"};
+    while (my ($logic, $resolversForLogic) = each %logicalPropertyGroupResolvers) {
+        my $properties = $logicalPropertyGroup->{$logic};
+        if (!$properties) {
+            die "Logical property group \"$groupName\" has no \"$logic\" property.";
+        }
+        for my $resolver (@{ $resolversForLogic->{$kind} }) {
+            if (!$properties->{$resolver}) {
+                die "Logical property group \"$groupName\" requires a \"$resolver\" property.";
+            }
+        }
+    }
+}
+
+sub uniq(@)
+{
+    my %hash = map { $_, 1 } @_;
+    return keys %hash;
 }
 
 sub matchEnableFlags($)
@@ -150,6 +203,53 @@ sub removeInactiveCodegenProperties($$)
     $propertyValue->{"codegen-properties"} = $matching_codegen_options;
 }
 
+sub skippedFromComputedStyle
+{
+  my $name = shift;
+  my $options = $propertiesWithStyleBuilderOptions{$name};
+
+  if (grep { $_ eq $name } @internalProperties) {
+    die "$name can't be computable since it's internal" if $options->{"computable"};
+    return 1;
+  }
+
+  return !$options->{"computable"} if exists($options->{"computable"});
+
+  return 1 if exists($options->{"skip-builder"}) and not isLogical($name);
+
+  if (exists($options->{"longhands"})) {
+    my @longhands = @{$options->{"longhands"}};
+    # Skip properties if they have a non-internal longhand property.
+    foreach my $longhand (@longhands) {
+      return 1 if !skippedFromComputedStyle($longhand);
+    }
+  }
+
+  return 0;
+}
+
+
+sub isLogical
+{
+    my $name = shift;
+    my $logicalPropertyGroup = $propertiesHashRef->{$name}->{"codegen-properties"}->{"logical-property-group"};
+
+    if (!$logicalPropertyGroup) {
+        return 0;
+    }
+
+    my $resolver = $logicalPropertyGroup->{"resolver"};
+    for my $logicalResolvers (values %{ $logicalPropertyGroupResolvers{"logical"} }) {
+        for my $logicalResolver (@{ $logicalResolvers }) {
+            if ($resolver eq $logicalResolver) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
 sub isPropertyEnabled($$)
 {
     my ($name, $propertyValue) = @_;
@@ -170,15 +270,20 @@ sub isPropertyEnabled($$)
     return matchEnableFlags($codegen_properties->{"enable-if"});
 }
 
+sub nameToId
+{
+    my $name = shift;
+    $name =~ s/(^[^-])|-(.)/uc($1||$2)/ge;
+    return $name;
+}
+
 sub addProperty($$)
 {
     my ($name, $optionsHashRef) = @_;
 
     push @names, $name;
 
-    my $id = $name;
-    $id =~ s/(^[^-])|-(.)/uc($1||$2)/ge;
-    $nameToId{$name} = $id;
+    $nameToId{$name} = nameToId($name);
 
     for my $optionName (keys %{$optionsHashRef}) {
         if ($optionName eq "codegen-properties") {
@@ -190,23 +295,76 @@ sub addProperty($$)
                     next;
                 } elsif ($codegenOptionName eq "comment") {
                     next;
+                } elsif ($codegenOptionName eq "top-priority") {
+                    die "$name has top priority, but no comment to justify" if not (exists $codegenProperties->{"comment"});
+                    die "$name is a shorthand, but has top-priority" if exists $codegenProperties->{"longhands"};
+                    $nameIsTopPriority{$name} = 1;
                 } elsif ($codegenOptionName eq "high-priority") {
+                    die "$name can't have conflicting top/high priority" if !!$nameIsTopPriority{$name};
+                    die "$name is a shorthand, but has high-priority" if exists $codegenProperties->{"longhands"};
                     $nameIsHighPriority{$name} = 1;
+                } elsif ($codegenOptionName eq "sink-priority") {
+                    die "$name is a shorthand, but has sink-priority" if exists $codegenProperties->{"longhands"};
+                    $namePriorityShouldSink{$name} = 1;
+                } elsif ($codegenOptionName eq "related-property") {
+                    $nameIsDeferred{$name} = 1;
+                    $relatedProperty{$name} = $codegenProperties->{"related-property"}
                 } elsif ($codegenOptionName eq "aliases") {
                     $nameToAliases{$name} = $codegenProperties->{"aliases"};
+                } elsif ($codegenOptionName eq "synonym") {
+                    $synonyms{$name} = 1;
+                    push @{$namesToSynonyms{$codegenProperties->{"synonym"}}}, $name;
                 } elsif ($styleBuilderOptions{$codegenOptionName}) {
                     $propertiesWithStyleBuilderOptions{$name}{$codegenOptionName} = $codegenProperties->{$codegenOptionName};
                 } elsif ($codegenOptionName eq "internal-only") {
                     # internal-only properties exist to make it easier to parse compound properties (e.g. background-repeat) as if they were shorthands.
-                    push @internalProprerties, $name
+                    push @internalProperties, $name
+                } elsif ($codegenOptionName eq "runtime-flag") {
+                    $runtimeFlags{$name} = $codegenProperties->{"runtime-flag"};
+                } elsif ($codegenOptionName eq "settings-flag") {
+                    $settingsFlags{$name} = $codegenProperties->{"settings-flag"};
+                } elsif ($codegenOptionName eq "color-property") {
+                    $nameIsColorProperty{$name} = 1;
+                } elsif ($codegenOptionName eq "logical-property-group") {
+                    die "Shorthand property $name can't belong to a logical property group\n" if exists $codegenProperties->{"longhands"};
+                    $nameIsDeferred{$name} = 1;
+                    my $groupName = $codegenProperties->{$codegenOptionName}{"name"};
+                    my $resolver = $codegenProperties->{$codegenOptionName}{"resolver"};
+                    my $kind;
+                    my $logic;
+                    while (my ($currentLogic, $resolversForLogic) = each %logicalPropertyGroupResolvers) {
+                        while (my ($currentKind, $resolverList) = each %{ $resolversForLogic }) {
+                            for my $currentResolver (@{ $resolverList }) {
+                                if ($currentResolver eq $resolver) {
+                                    $kind = $currentKind;
+                                    $logic = $currentLogic;
+                                }
+                            }
+                        }
+                    }
+                    if (!$kind) {
+                        die "Unrecognized resolver \"$resolver\" for codegen property \"$codegenOptionName\" for $name property.";
+                    }
+                    my $otherKind = $logicalPropertyGroups{$groupName}{"kind"};
+                    if ($otherKind && $otherKind ne $kind) {
+                        die "Logical property group \"$groupName\" has resolvers of different kinds: $kind and $otherKind.";
+                    }
+                    $logicalPropertyGroups{$groupName}{"kind"} = $kind;
+                    my $otherName = $logicalPropertyGroups{$groupName}{$logic}{$resolver};
+                    if ($otherName) {
+                        die "Logical property group \"$groupName\" has multiple \"$resolver\" properties: $name and $otherName.";
+                    }
+                    $logicalPropertyGroups{$groupName}{$logic}{$resolver} = $name;
+                } elsif ($codegenOptionName eq "descriptor-only") {
+                    $nameIsDescriptorOnly{$name} = 1;
                 } else {
                     die "Unrecognized codegen property \"$codegenOptionName\" for $name property.";
                 }
             }
         } elsif ($optionName eq "animatable") {
-             $propertiesWithStyleBuilderOptions{$name}{"animatable"} = $optionsHashRef->{"animatable"};
+            $propertiesWithStyleBuilderOptions{$name}{"animatable"} = $optionsHashRef->{"animatable"};
         } elsif ($optionName eq "inherited") {
-            $nameIsInherited{$name} = 1;
+            $nameIsInherited{$name} = $optionsHashRef->{"inherited"};
         } elsif ($optionName eq "values") {
             # FIXME: Implement.
         }
@@ -216,12 +374,40 @@ sub addProperty($$)
 
 sub sortByDescendingPriorityAndName
 {
-    # Sort names with high priority to the front
+    # Sort shorthands to the back
+    if (exists $propertiesWithStyleBuilderOptions{$a}{"longhands"} < exists $propertiesWithStyleBuilderOptions{$b}{"longhands"}) {
+        return -1;
+    }
+    if (exists $propertiesWithStyleBuilderOptions{$a}{"longhands"} > exists $propertiesWithStyleBuilderOptions{$b}{"longhands"}) {
+        return 1;
+    }
+    # Sort longhands with top priority to the front
+    if (!!$nameIsTopPriority{$a} < !!$nameIsTopPriority{$b}) {
+        return 1;
+    }
+    if (!!$nameIsTopPriority{$a} > !!$nameIsTopPriority{$b}) {
+        return -1;
+    }
+    # Sort longhands with high priority to the front
     if (!!$nameIsHighPriority{$a} < !!$nameIsHighPriority{$b}) {
         return 1;
     }
     if (!!$nameIsHighPriority{$a} > !!$nameIsHighPriority{$b}) {
         return -1;
+    }
+    # Sort deferred longhands to the back, before shorthands
+    if (!!$nameIsDeferred{$a} < !!$nameIsDeferred{$b}) {
+        return -1;
+    }
+    if (!!$nameIsDeferred{$a} > !!$nameIsDeferred{$b}) {
+        return 1;
+    }
+    # Sort sunken names at the end of their priority bucket
+    if (!!$namePriorityShouldSink{$a} < !!$namePriorityShouldSink{$b}) {
+        return -1;
+    }
+    if (!!$namePriorityShouldSink{$a} > !!$namePriorityShouldSink{$b}) {
+        return 1;
     }
     # Sort names without leading '-' to the front
     if (substr($a, 0, 1) eq "-" && substr($b, 0, 1) ne "-") {
@@ -243,18 +429,19 @@ print GPERF << "EOF";
 #include \"CSSProperty.h\"
 #include \"CSSPropertyNames.h\"
 #include \"HashTools.h\"
+#include "DeprecatedGlobalSettings.h"
+#include "Settings.h"
+#include <wtf/ASCIICType.h>
+#include <wtf/FixedVector.h>
+#include <wtf/Hasher.h>
+#include <wtf/text/AtomString.h>
+#include <wtf/text/WTFString.h>
 #include <string.h>
 
-#include <wtf/ASCIICType.h>
-#include <wtf/text/AtomicString.h>
-#include <wtf/text/WTFString.h>
+IGNORE_WARNINGS_BEGIN(\"implicit-fallthrough\")
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored \"-Wunknown-pragmas\"
-#pragma clang diagnostic ignored \"-Wdeprecated-register\"
-#pragma clang diagnostic ignored \"-Wimplicit-fallthrough\"
-#endif
+// Older versions of gperf like to use the `register` keyword.
+#define register
 
 namespace WebCore {
 
@@ -264,9 +451,9 @@ static_assert(numCSSProperties + 1 <= 65535, "CSSPropertyID should fit into uint
 
 EOF
 
-print GPERF "const char* const propertyNameStrings[numCSSProperties] = {\n";
+print GPERF "constexpr ASCIILiteral propertyNameStrings[numCSSProperties] = {\n";
 foreach my $name (@names) {
-  print GPERF "    \"$name\",\n";
+  print GPERF "    \"$name\"_s,\n";
 }
 print GPERF "};\n\n";
 
@@ -307,12 +494,12 @@ const Property* findProperty(const char* str, unsigned int len)
     return CSSPropertyNamesHash::findPropertyImpl(str, len);
 }
 
-bool isInternalCSSProperty(const CSSPropertyID id)
+bool isInternalCSSProperty(CSSPropertyID id)
 {
     switch (id) {
 EOF
 
-foreach my $name (sort @internalProprerties) {
+foreach my $name (sort @internalProperties) {
   print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
 }
 
@@ -323,17 +510,94 @@ print GPERF << "EOF";
     }
 }
 
-const char* getPropertyName(CSSPropertyID id)
+EOF
+
+if (%runtimeFlags) {
+  print GPERF << "EOF";
+static bool isEnabledCSSProperty(CSSPropertyID id)
+{
+    switch (id) {
+EOF
+  foreach my $name (sort keys %runtimeFlags) {
+    print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+    print GPERF "        return DeprecatedGlobalSettings::" . $runtimeFlags{$name} . "Enabled();\n";
+  }
+  print GPERF << "EOF";
+    default:
+        return true;
+    }
+EOF
+} else {
+  print GPERF << "EOF";
+static bool isEnabledCSSProperty(CSSPropertyID)
+{
+    return true;
+EOF
+}
+
+print GPERF << "EOF";
+}
+
+static bool isCSSPropertyEnabledBySettings(CSSPropertyID id, const Settings* settings)
+{
+    if (!settings)
+        return true;
+
+    switch (id) {
+EOF
+
+foreach my $name (sort keys %settingsFlags) {
+  print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+  print GPERF "        return settings->" . $settingsFlags{$name} . "();\n";
+}
+
+print GPERF << "EOF";
+    default:
+        return true;
+    }
+}
+
+static bool isCSSPropertyEnabledByCSSPropertySettings(CSSPropertyID id, const CSSPropertySettings* settings)
+{
+    if (!settings)
+        return true;
+
+    switch (id) {
+EOF
+
+foreach my $name (keys %settingsFlags) {
+  print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+  print GPERF "        return settings->" . $settingsFlags{$name} . ";\n";
+}
+
+print GPERF << "EOF";
+    default:
+        return true;
+    }
+    return true;
+}
+
+bool isCSSPropertyExposed(CSSPropertyID id, const Settings* settings)
+{
+    return isEnabledCSSProperty(id) && isCSSPropertyEnabledBySettings(id, settings) && !isInternalCSSProperty(id);
+}
+
+bool isCSSPropertyExposed(CSSPropertyID id, const CSSPropertySettings* settings)
+{
+    return isEnabledCSSProperty(id) && isCSSPropertyEnabledByCSSPropertySettings(id, settings) && !isInternalCSSProperty(id);
+}
+
+ASCIILiteral getPropertyName(CSSPropertyID id)
 {
     if (id < firstCSSProperty)
-        return 0;
+        return { };
     int index = id - firstCSSProperty;
     if (index >= numCSSProperties)
-        return 0;
+        return { };
     return propertyNameStrings[index];
 }
 
-const AtomicString& getPropertyNameAtomicString(CSSPropertyID id)
+const AtomString& getPropertyNameAtomString(CSSPropertyID id)
 {
     if (id < firstCSSProperty)
         return nullAtom();
@@ -341,19 +605,17 @@ const AtomicString& getPropertyNameAtomicString(CSSPropertyID id)
     if (index >= numCSSProperties)
         return nullAtom();
 
-    static AtomicString* propertyStrings = new AtomicString[numCSSProperties]; // Intentionally never destroyed.
-    AtomicString& propertyString = propertyStrings[index];
-    if (propertyString.isNull()) {
-        const char* propertyName = propertyNameStrings[index];
-        propertyString = AtomicString(propertyName, strlen(propertyName), AtomicString::ConstructFromLiteral);
-    }
+    static AtomString* propertyStrings = new AtomString[numCSSProperties]; // Intentionally never destroyed.
+    AtomString& propertyString = propertyStrings[index];
+    if (propertyString.isNull())
+        propertyString = propertyNameStrings[index];
     return propertyString;
 }
 
 String getPropertyNameString(CSSPropertyID id)
 {
-    // We share the StringImpl with the AtomicStrings.
-    return getPropertyNameAtomicString(id).string();
+    // We share the StringImpl with the AtomStrings.
+    return getPropertyNameAtomString(id).string();
 }
 
 String getJSPropertyName(CSSPropertyID id)
@@ -375,7 +637,7 @@ String getJSPropertyName(CSSPropertyID id)
         *resultPointer++ = character;
     }
     *resultPointer = '\\0';
-    return WTF::String(result);
+    return String::fromLatin1(result);
 }
 
 static const bool isInheritedPropertyTable[numCSSProperties + $numPredefinedProperties] = {
@@ -399,11 +661,279 @@ bool CSSProperty::isInheritedProperty(CSSPropertyID id)
     return isInheritedPropertyTable[id];
 }
 
+EOF
+
+if (%relatedProperty) {
+    print GPERF << "EOF";
+CSSPropertyID getRelatedPropertyId(const CSSPropertyID id)
+{
+    switch (id) {
+EOF
+    for my $name (@names) {
+        if (!$relatedProperty{$name}) {
+            next;
+        }
+        my $related = $relatedProperty{$name};
+        die "Property $name has an unknown related property: $related\n" if !exists($nameToId{$related});
+        die "High priority property $name can't have a related property: $related\n" if $nameIsHighPriority{$name};
+        die "Shorthand property $name can't have a related property: $related\n" if exists $propertiesWithStyleBuilderOptions{$name}{"longhands"};
+        die "Property $name can't have itself as a related property\n" if $related eq $name;
+        die "Property $name has $related as a related property, but it's not reciprocal\n" if $relatedProperty{$related} ne $name;
+        print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+        print GPERF "        return CSSPropertyID::CSSProperty" . $nameToId{$related} . ";\n";
+    }
+    print GPERF << "EOF";
+    default:
+        return CSSPropertyID::CSSPropertyInvalid;
+    }
+EOF
+} else {
+    print GPERF << "EOF";
+CSSPropertyID getRelatedPropertyId(const CSSPropertyID)
+{
+    return CSSPropertyID::CSSPropertyInvalid;
+EOF
+}
+
+print GPERF << "EOF";
+}
+
+Vector<String> CSSProperty::aliasesForProperty(CSSPropertyID id)
+{
+    switch (id) {
+EOF
+
+for my $name (@names) {
+    if (!$nameToAliases{$name}) {
+        next;
+    }
+    print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+    print GPERF "        return { \"" . join("\"_s, \"", @{$nameToAliases{$name}}) . "\"_s };\n";
+}
+
+print GPERF << "EOF";
+    default:
+        return { };
+    }
+}
+
+bool CSSProperty::isColorProperty(CSSPropertyID id)
+{
+    switch (id) {
+EOF
+for my $name (@names) {
+    if (!$nameIsColorProperty{$name}) {
+        next;
+    }
+    print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+}
+
+print GPERF << "EOF";
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool CSSProperty::isDirectionAwareProperty(CSSPropertyID id)
+{
+    switch (id) {
+EOF
+for my $groupName (sort keys %logicalPropertyGroups) {
+    my $logicalPropertyGroup = $logicalPropertyGroups{$groupName};
+    for my $name (sort values %{ $logicalPropertyGroup->{"logical"} }) {
+        print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+    }
+}
+
+print GPERF << "EOF";
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool CSSProperty::isInLogicalPropertyGroup(CSSPropertyID id)
+{
+    switch (id) {
+EOF
+
+for my $groupName (sort keys %logicalPropertyGroups) {
+    my $logicalPropertyGroup = $logicalPropertyGroups{$groupName};
+    for my $kind ("logical", "physical") {
+        for my $name (sort values %{ $logicalPropertyGroup->{$kind} }) {
+            print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+        }
+    }
+}
+
+print GPERF << "EOF";
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool CSSProperty::areInSameLogicalPropertyGroupWithDifferentMappingLogic(CSSPropertyID id1, CSSPropertyID id2)
+{
+    switch (id1) {
+EOF
+
+for my $groupName (sort keys %logicalPropertyGroups) {
+    my $logicalPropertyGroup = $logicalPropertyGroups{$groupName};
+    my $logical = $logicalPropertyGroup->{"logical"};
+    my $physical = $logicalPropertyGroup->{"physical"};
+    for my $first ($logical, $physical) {
+        my $second = $first eq $logical ? $physical : $logical;
+        for my $resolver (sort keys %{ $first }) {
+            my $name = $first->{$resolver};
+            print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+        }
+        print GPERF "        switch (id2) {\n";
+        for my $resolver (sort keys %{ $second }) {
+            my $name = $second->{$resolver};
+            print GPERF "        case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+        }
+        print GPERF << "EOF";
+            return true;
+        default:
+            return false;
+        }
+EOF
+    }
+}
+
+print GPERF << "EOF";
+    default:
+        return false;
+    }
+}
+
+CSSPropertyID CSSProperty::resolveDirectionAwareProperty(CSSPropertyID propertyID, TextDirection direction, WritingMode writingMode)
+{
+    auto textflow = makeTextFlow(writingMode, direction);
+    switch (propertyID) {
+EOF
+
+for my $groupName (sort keys %logicalPropertyGroups) {
+    my $logicalPropertyGroup = $logicalPropertyGroups{$groupName};
+    for my $resolver (sort keys %{ $logicalPropertyGroup->{"logical"} }) {
+        my $name = $logicalPropertyGroup->{"logical"}->{$resolver};
+        my $kind = $logicalPropertyGroup->{"kind"};
+        my $kindId = nameToId($kind);
+        my $resolverEnum = "LogicalBox" . $kindId . "::" . nameToId($resolver);
+        my $physicals = $logicalPropertyGroupResolvers{"physical"}->{$kind};
+        my @properties = map { "CSSProperty" . $nameToId{$logicalPropertyGroup->{"physical"}{$_}} } @{ $physicals };
+        print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ": {\n";
+        print GPERF "        static constexpr CSSPropertyID properties[" . scalar(@properties) . "] = { " . join(", ", @properties) . " };\n";
+        print GPERF "        return properties[static_cast<size_t>(mapLogical" . $kindId . "ToPhysical" . $kindId . "(textflow, " . $resolverEnum . "))];\n";
+        print GPERF "    }\n";
+    }
+}
+
+print GPERF << "EOF";
+    default:
+        return propertyID;
+    }
+}
+
+CSSPropertyID CSSProperty::unresolvePhysicalProperty(CSSPropertyID propertyID, TextDirection direction, WritingMode writingMode)
+{
+    auto textflow = makeTextFlow(writingMode, direction);
+    switch (propertyID) {
+EOF
+
+for my $groupName (sort keys %logicalPropertyGroups) {
+    my $logicalPropertyGroup = $logicalPropertyGroups{$groupName};
+    for my $resolver (sort keys %{ $logicalPropertyGroup->{"physical"} }) {
+        my $name = $logicalPropertyGroup->{"physical"}->{$resolver};
+        my $kind = $logicalPropertyGroup->{"kind"};
+        my $kindId = nameToId($kind);
+        my $resolverEnum = "Box" . $kindId . "::" . nameToId($resolver);
+        my $logicals = $logicalPropertyGroupResolvers{"logical"}->{$kind};
+        my @properties = map { "CSSProperty" . $nameToId{$logicalPropertyGroup->{"logical"}{$_}} } @{ $logicals };
+        print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ": {\n";
+        print GPERF "        static constexpr CSSPropertyID properties[" . scalar(@properties) . "] = { " . join(", ", @properties) . " };\n";
+        print GPERF "        return properties[static_cast<size_t>(mapPhysical" . $kindId . "ToLogical" . $kindId . "(textflow, " . $resolverEnum . "))];\n";
+        print GPERF "    }\n";
+    }
+}
+
+print GPERF << "EOF";
+    default:
+        return propertyID;
+    }
+}
+
+bool CSSProperty::isDescriptorOnly(CSSPropertyID id)
+{
+    switch (id) {
+EOF
+for my $name (@names) {
+    if (!$nameIsDescriptorOnly{$name}) {
+        next;
+    }
+    print GPERF "    case CSSPropertyID::CSSProperty" . $nameToId{$name} . ":\n";
+}
+
+print GPERF << "EOF";
+        return true;
+    default:
+        return false;
+    }
+}
+
+CSSPropertySettings::CSSPropertySettings(const Settings& settings)
+EOF
+
+my $nthSetting = 0;
+foreach my $name (sort(uniq(values %settingsFlags))) {
+    print GPERF "    ";
+    if ($nthSetting == 0) {
+        print GPERF ": ";
+    } else {
+        print GPERF ", ";
+    }
+    print GPERF $name . " { settings." . $name . "() }\n";
+    $nthSetting += 1;
+}
+
+print GPERF << "EOF";
+{
+}
+
+bool operator==(const CSSPropertySettings& a, const CSSPropertySettings& b)
+{
+    return true
+EOF
+
+foreach my $name (sort(uniq(values %settingsFlags))) {
+    print GPERF "        && a." . $name . " == b." . $name . "\n";
+}
+
+print GPERF << "EOF";
+    ;
+}
+
+void add(Hasher& hasher, const CSSPropertySettings& settings)
+{
+    unsigned bits = 0
+EOF
+
+$nthSetting = 0;
+foreach my $name (sort(uniq(values %settingsFlags))) {
+    print GPERF "        | settings." . $name . " << " . $nthSetting . "\n";
+    $nthSetting += 1;
+}
+
+print GPERF << "EOF";
+    ;
+    add(hasher, bits);
+}
+
 } // namespace WebCore
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+IGNORE_WARNINGS_END
 EOF
 
 close GPERF;
@@ -415,15 +945,13 @@ print HEADER << "EOF";
 #pragma once
 
 #include <string.h>
+#include <wtf/Forward.h>
 #include <wtf/HashFunctions.h>
 #include <wtf/HashTraits.h>
 
-namespace WTF {
-class AtomicString;
-class String;
-}
-
 namespace WebCore {
+
+class Settings;
 
 enum CSSPropertyID : uint16_t {
     CSSPropertyInvalid = 0,
@@ -433,9 +961,34 @@ EOF
 my $first = $numPredefinedProperties;
 my $i = $numPredefinedProperties;
 my $maxLen = 0;
+my $firstTopPriorityPropertyName;
+my $lastTopPriorityPropertyName;
+my $firstHighPriorityPropertyName;
 my $lastHighPriorityPropertyName;
+my $firstLowPriorityPropertyName;
+my $lastLowPriorityPropertyName;
+my $firstDeferredPropertyName;
+my $lastDeferredPropertyName;
+my $firstShorthandPropertyName;
+my $lastShorthandPropertyName;
 foreach my $name (@names) {
-  $lastHighPriorityPropertyName = $name if $nameIsHighPriority{$name}; # Assumes that @names is sorted by descending priorities.
+  # Assumes that @names is sorted by descending priorities.
+  if (exists $propertiesWithStyleBuilderOptions{$name}{"longhands"}) {
+    $firstShorthandPropertyName = $name if !$firstShorthandPropertyName;
+    $lastShorthandPropertyName = $name;
+  } elsif ($nameIsTopPriority{$name}) {
+    $firstTopPriorityPropertyName = $name if !$firstTopPriorityPropertyName;
+    $lastTopPriorityPropertyName = $name;
+  } elsif ($nameIsHighPriority{$name}) {
+    $firstHighPriorityPropertyName = $name if !$firstHighPriorityPropertyName;
+    $lastHighPriorityPropertyName = $name;
+  } elsif (!$nameIsDeferred{$name}) {
+    $firstLowPriorityPropertyName = $name if !$firstLowPriorityPropertyName;
+    $lastLowPriorityPropertyName = $name;
+  } else {
+    $firstDeferredPropertyName = $name if !$firstDeferredPropertyName;
+    $lastDeferredPropertyName = $name;
+  }
   print HEADER "    CSSProperty" . $nameToId{$name} . " = " . $i . ",\n";
   $i = $i + 1;
   if (length($name) > $maxLen) {
@@ -450,15 +1003,67 @@ print HEADER "const int firstCSSProperty = $first;\n";
 print HEADER "const int numCSSProperties = $num;\n";
 print HEADER "const int lastCSSProperty = $last;\n";
 print HEADER "const size_t maxCSSPropertyNameLength = $maxLen;\n";
+print HEADER "const CSSPropertyID firstTopPriorityProperty = CSSProperty" . $nameToId{$firstTopPriorityPropertyName} . ";\n";
+print HEADER "const CSSPropertyID lastTopPriorityProperty = CSSProperty" . $nameToId{$lastTopPriorityPropertyName} . ";\n";
+print HEADER "const CSSPropertyID firstHighPriorityProperty = CSSProperty" . $nameToId{$firstHighPriorityPropertyName} . ";\n";
 print HEADER "const CSSPropertyID lastHighPriorityProperty = CSSProperty" . $nameToId{$lastHighPriorityPropertyName} . ";\n";
+print HEADER "const CSSPropertyID firstLowPriorityProperty = CSSProperty" . $nameToId{$firstLowPriorityPropertyName} . ";\n";
+print HEADER "const CSSPropertyID lastLowPriorityProperty = CSSProperty" . $nameToId{$lastLowPriorityPropertyName} . ";\n";
+print HEADER "const CSSPropertyID firstDeferredProperty = CSSProperty" . $nameToId{$firstDeferredPropertyName} . ";\n";
+print HEADER "const CSSPropertyID lastDeferredProperty = CSSProperty" . $nameToId{$lastDeferredPropertyName} . ";\n";
+print HEADER "const CSSPropertyID firstShorthandProperty = CSSProperty" . $nameToId{$firstShorthandPropertyName} . ";\n";
+print HEADER "const CSSPropertyID lastShorthandProperty = CSSProperty" . $nameToId{$lastShorthandPropertyName} . ";\n\n";
+
+print HEADER "static const CSSPropertyID computedPropertyIDs[] = {\n";
+my $numComputedPropertyIDs = 0;
+sub sortWithPrefixedPropertiesLast
+{
+    my $aStartsWithPrefix = substr($a, 0, 1) eq "-";
+    my $bStartsWithPrefix = substr($b, 0, 1) eq "-";
+    if ($aStartsWithPrefix && !$bStartsWithPrefix) {
+        return 1;
+    }
+    if (!$aStartsWithPrefix && $bStartsWithPrefix) {
+        return -1;
+    }
+    return $a cmp $b;
+}
+
+foreach my $name (sort sortWithPrefixedPropertiesLast @names) {
+  next if skippedFromComputedStyle($name);
+  print HEADER "    CSSProperty" . $nameToId{$name} . ",\n";
+  $numComputedPropertyIDs += 1;
+}
+print HEADER "};\n";
+print HEADER "const size_t numComputedPropertyIDs = $numComputedPropertyIDs;\n";
 
 print HEADER << "EOF";
 
-bool isInternalCSSProperty(const CSSPropertyID);
-const char* getPropertyName(CSSPropertyID);
-const WTF::AtomicString& getPropertyNameAtomicString(CSSPropertyID id);
-WTF::String getPropertyNameString(CSSPropertyID id);
-WTF::String getJSPropertyName(CSSPropertyID);
+struct CSSPropertySettings {
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+EOF
+
+foreach my $name (sort(uniq(values %settingsFlags))) {
+  print HEADER "    bool " . $name . " { false };\n";
+}
+
+print HEADER << "EOF";
+    CSSPropertySettings() = default;
+    explicit CSSPropertySettings(const Settings&);
+};
+
+bool operator==(const CSSPropertySettings&, const CSSPropertySettings&);
+inline bool operator!=(const CSSPropertySettings& a, const CSSPropertySettings& b) { return !(a == b); }
+void add(Hasher&, const CSSPropertySettings&);
+
+bool isInternalCSSProperty(CSSPropertyID);
+bool isCSSPropertyExposed(CSSPropertyID, const Settings*);
+bool isCSSPropertyExposed(CSSPropertyID, const CSSPropertySettings*);
+ASCIILiteral getPropertyName(CSSPropertyID);
+const AtomString& getPropertyNameAtomString(CSSPropertyID id);
+String getPropertyNameString(CSSPropertyID id);
+String getJSPropertyName(CSSPropertyID);
+CSSPropertyID getRelatedPropertyId(CSSPropertyID id);
 
 inline CSSPropertyID convertToCSSPropertyID(int value)
 {
@@ -469,10 +1074,9 @@ inline CSSPropertyID convertToCSSPropertyID(int value)
 } // namespace WebCore
 
 namespace WTF {
-template<> struct DefaultHash<WebCore::CSSPropertyID> { typedef IntHash<unsigned> Hash; };
+template<> struct DefaultHash<WebCore::CSSPropertyID> : IntHash<unsigned> { };
 template<> struct HashTraits<WebCore::CSSPropertyID> : GenericHashTraits<WebCore::CSSPropertyID> {
     static const bool emptyValueIsZero = true;
-    static const bool needsDestruction = false;
     static void constructDeletedValue(WebCore::CSSPropertyID& slot) { slot = static_cast<WebCore::CSSPropertyID>(WebCore::lastCSSProperty + 1); }
     static bool isDeletedValue(WebCore::CSSPropertyID value) { return value == (WebCore::lastCSSProperty + 1); }
 };
@@ -483,14 +1087,14 @@ EOF
 close HEADER;
 
 #
-# StyleBuilder.cpp generator.
+# StyleBuilderGenerated.cpp generator.
 #
 
 sub getScopeForFunction {
   my $name = shift;
   my $builderFunction = shift;
 
-  return $propertiesWithStyleBuilderOptions{$name}{"custom"}{$builderFunction} ? "StyleBuilderCustom" : "StyleBuilderFunctions";
+  return $propertiesWithStyleBuilderOptions{$name}{"custom"}{$builderFunction} ? "BuilderCustom" : "BuilderFunctions";
 }
 
 sub getNameForMethods {
@@ -508,21 +1112,21 @@ sub getAutoGetter {
   my $name = shift;
   my $renderStyle = shift;
 
-  return $renderStyle . "->hasAuto" . getNameForMethods($name) . "()";
+  return $renderStyle . ".hasAuto" . getNameForMethods($name) . "()";
 }
 
 sub getAutoSetter {
   my $name = shift;
   my $renderStyle = shift;
 
-  return $renderStyle . "->setHasAuto" . getNameForMethods($name) . "()";
+  return $renderStyle . ".setHasAuto" . getNameForMethods($name) . "()";
 }
 
 sub getVisitedLinkSetter {
   my $name = shift;
   my $renderStyle = shift;
 
-  return $renderStyle . "->setVisitedLink" . getNameForMethods($name);
+  return $renderStyle . ".setVisitedLink" . getNameForMethods($name);
 }
 
 sub getClearFunction {
@@ -578,8 +1182,8 @@ sub getLayersAccessorFunction {
 sub getFillLayerType {
 my $name = shift;
 
-  return "BackgroundFillLayer" if $name =~ /background-/;
-  return "MaskFillLayer" if $name =~ /mask-/;
+  return "FillLayerType::Background" if $name =~ /background-/;
+  return "FillLayerType::Mask" if $name =~ /mask-/;
 }
 
 sub getFillLayerMapfunction {
@@ -628,7 +1232,7 @@ sub colorFromPrimitiveValue {
   my $primitiveValue = shift;
   my $forVisitedLink = @_ ? shift : NOT_FOR_VISITED_LINK;
 
-  return "styleResolver.colorFromPrimitiveValue(" . $primitiveValue . ", /* forVisitedLink */ " . ($forVisitedLink ? "true" : "false") . ")";
+  return "builderState.colorFromPrimitiveValue(" . $primitiveValue . ", ForVisitedLink::" . ($forVisitedLink ? "Yes" : "No") . ")";
 }
 
 use constant {
@@ -642,12 +1246,12 @@ sub generateColorValueSetter {
   my $indent = shift;
   my $valueIsPrimitive = @_ ? shift : VALUE_IS_COLOR;
 
-  my $style = "styleResolver.style()";
-  my $setterContent .= $indent . "if (styleResolver.applyPropertyToRegularStyle())\n";
-  my $setValue = $style . "->" . $propertiesWithStyleBuilderOptions{$name}{"setter"};
+  my $style = "builderState.style()";
+  my $setterContent .= $indent . "if (builderState.applyPropertyToRegularStyle())\n";
+  my $setValue = $style . "." . $propertiesWithStyleBuilderOptions{$name}{"setter"};
   my $color = $valueIsPrimitive ? colorFromPrimitiveValue($value) : $value;
   $setterContent .= $indent . "    " . $setValue . "(" . $color . ");\n";
-  $setterContent .= $indent . "if (styleResolver.applyPropertyToVisitedLinkStyle())\n";
+  $setterContent .= $indent . "if (builderState.applyPropertyToVisitedLinkStyle())\n";
   $color = $valueIsPrimitive ? colorFromPrimitiveValue($value, FOR_VISITED_LINK) : $value;
   $setterContent .= $indent . "    " . getVisitedLinkSetter($name, $style) . "(" . $color . ");\n";
 
@@ -660,7 +1264,7 @@ sub handleCurrentColorValue {
   my $indent = shift;
 
   my $code = $indent . "if (" . $primitiveValue . ".valueID() == CSSValueCurrentcolor) {\n";
-  $code .= $indent . "    applyInherit" . $nameToId{$name} . "(styleResolver);\n";
+  $code .= $indent . "    applyInherit" . $nameToId{$name} . "(builderState);\n";
   $code .= $indent . "    return;\n";
   $code .= $indent . "}\n";
   return $code;
@@ -671,17 +1275,14 @@ sub generateAnimationPropertyInitialValueSetter {
   my $indent = shift;
 
   my $setterContent = "";
-  $setterContent .= $indent . "AnimationList& list = styleResolver.style()->" . getEnsureAnimationsOrTransitionsMethod($name) . "();\n";
+  $setterContent .= $indent . "AnimationList& list = builderState.style()." . getEnsureAnimationsOrTransitionsMethod($name) . "();\n";
   $setterContent .= $indent . "if (list.isEmpty())\n";
   $setterContent .= $indent . "    list.append(Animation::create());\n";
   my $setter = $propertiesWithStyleBuilderOptions{$name}{"setter"};
   my $initial = $propertiesWithStyleBuilderOptions{$name}{"initial"};
   $setterContent .= $indent . "list.animation(0)." . $setter . "(Animation::" . $initial . "());\n";
-  if ($name eq "-webkit-transition-property") {
-    $setterContent .= $indent . "list.animation(0).setAnimationMode(Animation::AnimateAll);\n";
-  }
-  $setterContent .= $indent . "for (size_t i = 1; i < list.size(); ++i)\n";
-  $setterContent .= $indent . "    list.animation(i)." . getClearFunction($name) . "();\n";
+  $setterContent .= $indent . "for (auto& animation : list)\n";
+  $setterContent .= $indent . "    animation->" . getClearFunction($name) . "();\n";
 
   return $setterContent;
 }
@@ -691,8 +1292,8 @@ sub generateAnimationPropertyInheritValueSetter {
   my $indent = shift;
 
   my $setterContent = "";
-  $setterContent .= $indent . "auto& list = styleResolver.style()->" . getEnsureAnimationsOrTransitionsMethod($name) . "();\n";
-  $setterContent .= $indent . "auto* parentList = styleResolver.parentStyle()->" . getAnimationsOrTransitionsMethod($name) . "();\n";
+  $setterContent .= $indent . "auto& list = builderState.style()." . getEnsureAnimationsOrTransitionsMethod($name) . "();\n";
+  $setterContent .= $indent . "auto* parentList = builderState.parentStyle()." . getAnimationsOrTransitionsMethod($name) . "();\n";
   $setterContent .= $indent . "size_t i = 0, parentSize = parentList ? parentList->size() : 0;\n";
   $setterContent .= $indent . "for ( ; i < parentSize && parentList->animation(i)." . getTestFunction($name) . "(); ++i) {\n";
   $setterContent .= $indent . "    if (list.size() <= i)\n";
@@ -700,7 +1301,6 @@ sub generateAnimationPropertyInheritValueSetter {
   my $getter = $propertiesWithStyleBuilderOptions{$name}{"getter"};
   my $setter = $propertiesWithStyleBuilderOptions{$name}{"setter"};
   $setterContent .= $indent . "    list.animation(i)." . $setter . "(parentList->animation(i)." . $getter . "());\n";
-  $setterContent .= $indent . "    list.animation(i).setAnimationMode(parentList->animation(i).animationMode());\n";
   $setterContent .= $indent . "}\n";
   $setterContent .= "\n";
   $setterContent .= $indent . "// Reset any remaining animations to not have the property set.\n";
@@ -715,20 +1315,20 @@ sub generateAnimationPropertyValueSetter {
   my $indent = shift;
 
   my $setterContent = "";
-  $setterContent .= $indent . "AnimationList& list = styleResolver.style()->" . getEnsureAnimationsOrTransitionsMethod($name) . "();\n";
+  $setterContent .= $indent . "AnimationList& list = builderState.style()." . getEnsureAnimationsOrTransitionsMethod($name) . "();\n";
   $setterContent .= $indent . "size_t childIndex = 0;\n";
   $setterContent .= $indent . "if (is<CSSValueList>(value)) {\n";
   $setterContent .= $indent . "    /* Walk each value and put it into an animation, creating new animations as needed. */\n";
   $setterContent .= $indent . "    for (auto& currentValue : downcast<CSSValueList>(value)) {\n";
   $setterContent .= $indent . "        if (childIndex <= list.size())\n";
   $setterContent .= $indent . "            list.append(Animation::create());\n";
-  $setterContent .= $indent . "        styleResolver.styleMap()->" . getAnimationMapfunction($name) . "(list.animation(childIndex), currentValue);\n";
+  $setterContent .= $indent . "        builderState.styleMap()." . getAnimationMapfunction($name) . "(list.animation(childIndex), currentValue);\n";
   $setterContent .= $indent . "        ++childIndex;\n";
   $setterContent .= $indent . "    }\n";
   $setterContent .= $indent . "} else {\n";
   $setterContent .= $indent . "    if (list.isEmpty())\n";
   $setterContent .= $indent . "        list.append(Animation::create());\n";
-  $setterContent .= $indent . "    styleResolver.styleMap()->" . getAnimationMapfunction($name) . "(list.animation(childIndex), value);\n";
+  $setterContent .= $indent . "    builderState.styleMap()." . getAnimationMapfunction($name) . "(list.animation(childIndex), value);\n";
   $setterContent .= $indent . "    childIndex = 1;\n";
   $setterContent .= $indent . "}\n";
   $setterContent .= $indent . "for ( ; childIndex < list.size(); ++childIndex) {\n";
@@ -751,11 +1351,11 @@ sub generateFillLayerPropertyInitialValueSetter {
 
   my $setterContent = "";
   $setterContent .= $indent . "// Check for (single-layer) no-op before clearing anything.\n";
-  $setterContent .= $indent . "auto& layers = styleResolver.style()->" . getLayersFunction($name) . "();\n";
+  $setterContent .= $indent . "auto& layers = builderState.style()." . getLayersFunction($name) . "();\n";
   $setterContent .= $indent . "if (!layers.next() && (!layers." . $testFunction . "() || layers." . $getter . "() == $initial))\n";
   $setterContent .= $indent . "    return;\n";
   $setterContent .= "\n";
-  $setterContent .= $indent . "auto* child = &styleResolver.style()->" . getLayersAccessorFunction($name) . "();\n";
+  $setterContent .= $indent . "auto* child = &builderState.style()." . getLayersAccessorFunction($name) . "();\n";
   $setterContent .= $indent . "child->" . $setter . "(" . $initial . ");\n";
   $setterContent .= $indent . "for (child = child->next(); child; child = child->next())\n";
   $setterContent .= $indent . "    child->" . $clearFunction . "();\n";
@@ -774,14 +1374,14 @@ sub generateFillLayerPropertyInheritValueSetter {
 
   my $setterContent = "";
   $setterContent .= $indent . "// Check for no-op before copying anything.\n";
-  $setterContent .= $indent . "if (styleResolver.parentStyle()->" . getLayersFunction($name) ."() == styleResolver.style()->" . getLayersFunction($name) . "())\n";
+  $setterContent .= $indent . "if (builderState.parentStyle()." . getLayersFunction($name) ."() == builderState.style()." . getLayersFunction($name) . "())\n";
   $setterContent .= $indent . "    return;\n";
   $setterContent .= "\n";
-  $setterContent .= $indent . "auto* child = &styleResolver.style()->" . getLayersAccessorFunction($name) . "();\n";
+  $setterContent .= $indent . "auto* child = &builderState.style()." . getLayersAccessorFunction($name) . "();\n";
   $setterContent .= $indent . "FillLayer* previousChild = nullptr;\n";
-  $setterContent .= $indent . "for (auto* parent = &styleResolver.parentStyle()->" . getLayersFunction($name) . "(); parent && parent->" . $testFunction . "(); parent = parent->next()) {\n";
+  $setterContent .= $indent . "for (auto* parent = &builderState.parentStyle()." . getLayersFunction($name) . "(); parent && parent->" . $testFunction . "(); parent = parent->next()) {\n";
   $setterContent .= $indent . "    if (!child) {\n";
-  $setterContent .= $indent . "        previousChild->setNext(std::make_unique<FillLayer>(" . getFillLayerType($name) . "));\n";
+  $setterContent .= $indent . "        previousChild->setNext(FillLayer::create(" . getFillLayerType($name) . "));\n";
   $setterContent .= $indent . "        child = previousChild->next();\n";
   $setterContent .= $indent . "    }\n";
   $setterContent .= $indent . "    child->" . $setter . "(parent->" . $getter . "());\n";
@@ -798,24 +1398,22 @@ sub generateFillLayerPropertyValueSetter {
   my $name = shift;
   my $indent = shift;
 
-  my $CSSPropertyId = "CSSProperty" . $nameToId{$name};
-
   my $setterContent = "";
-  $setterContent .= $indent . "auto* child = &styleResolver.style()->" . getLayersAccessorFunction($name) . "();\n";
+  $setterContent .= $indent . "auto* child = &builderState.style()." . getLayersAccessorFunction($name) . "();\n";
   $setterContent .= $indent . "FillLayer* previousChild = nullptr;\n";
   $setterContent .= $indent . "if (is<CSSValueList>(value) && !is<CSSImageSetValue>(value)) {\n";
   $setterContent .= $indent . "    // Walk each value and put it into a layer, creating new layers as needed.\n";
   $setterContent .= $indent . "    for (auto& item : downcast<CSSValueList>(value)) {\n";
   $setterContent .= $indent . "        if (!child) {\n";
-  $setterContent .= $indent . "            previousChild->setNext(std::make_unique<FillLayer>(" . getFillLayerType($name) . "));\n";
+  $setterContent .= $indent . "            previousChild->setNext(FillLayer::create(" . getFillLayerType($name) . "));\n";
   $setterContent .= $indent . "            child = previousChild->next();\n";
   $setterContent .= $indent . "        }\n";
-  $setterContent .= $indent . "        styleResolver.styleMap()->" . getFillLayerMapfunction($name) . "(" . $CSSPropertyId . ", *child, item);\n";
+  $setterContent .= $indent . "        builderState.styleMap()." . getFillLayerMapfunction($name) . "(propertyID, *child, item);\n";
   $setterContent .= $indent . "        previousChild = child;\n";
   $setterContent .= $indent . "        child = child->next();\n";
   $setterContent .= $indent . "    }\n";
   $setterContent .= $indent . "} else {\n";
-  $setterContent .= $indent . "    styleResolver.styleMap()->" . getFillLayerMapfunction($name) . "(" . $CSSPropertyId . ", *child, value);\n";
+  $setterContent .= $indent . "    builderState.styleMap()." . getFillLayerMapfunction($name) . "(propertyID, *child, value);\n";
   $setterContent .= $indent . "    child = child->next();\n";
   $setterContent .= $indent . "}\n";
   $setterContent .= $indent . "for (; child; child = child->next())\n";
@@ -831,7 +1429,7 @@ sub generateSetValueStatement
 
   my $isSVG = exists $propertiesWithStyleBuilderOptions{$name}{"svg"};
   my $setter = $propertiesWithStyleBuilderOptions{$name}{"setter"};
-  return "styleResolver.style()->" .  ($isSVG ? "accessSVGStyle()." : "") . $setter . "(" . $value . ")";
+  return "builderState.style()." .  ($isSVG ? "accessSVGStyle()." : "") . $setter . "(" . $value . ")";
 }
 
 sub generateInitialValueSetter {
@@ -842,9 +1440,9 @@ sub generateInitialValueSetter {
   my $initial = $propertiesWithStyleBuilderOptions{$name}{"initial"};
   my $isSVG = exists $propertiesWithStyleBuilderOptions{$name}{"svg"};
   my $setterContent = "";
-  $setterContent .= $indent . "static void applyInitial" . $nameToId{$name} . "(StyleResolver& styleResolver)\n";
+  $setterContent .= $indent . "static void applyInitial" . $nameToId{$name} . "(BuilderState& builderState)\n";
   $setterContent .= $indent . "{\n";
-  my $style = "styleResolver.style()";
+  my $style = "builderState.style()";
   if (exists $propertiesWithStyleBuilderOptions{$name}{"auto-functions"}) {
     $setterContent .= $indent . "    " . getAutoSetter($name, $style) . ";\n";
   } elsif (exists $propertiesWithStyleBuilderOptions{$name}{"visited-link-color-support"}) {
@@ -853,15 +1451,19 @@ sub generateInitialValueSetter {
   } elsif (exists $propertiesWithStyleBuilderOptions{$name}{"animatable"}) {
     $setterContent .= generateAnimationPropertyInitialValueSetter($name, $indent . "    ");
   } elsif (exists $propertiesWithStyleBuilderOptions{$name}{"font-property"}) {
-    $setterContent .= $indent . "    auto fontDescription = styleResolver.fontDescription();\n";
+    $setterContent .= $indent . "    auto fontDescription = builderState.fontDescription();\n";
     $setterContent .= $indent . "    fontDescription." . $setter . "(FontCascadeDescription::" . $initial . "());\n";
-    $setterContent .= $indent . "    styleResolver.setFontDescription(fontDescription);\n";
+    $setterContent .= $indent . "    builderState.setFontDescription(WTFMove(fontDescription));\n";
   } elsif (exists $propertiesWithStyleBuilderOptions{$name}{"fill-layer-property"}) {
     $setterContent .= generateFillLayerPropertyInitialValueSetter($name, $indent . "    ");
   } else {
     my $initialValue = ($isSVG ? "SVGRenderStyle" : "RenderStyle") . "::" . $initial . "()";
     $setterContent .= $indent . "    " . generateSetValueStatement($name, $initialValue) . ";\n";
   }
+  if (exists($propertiesWithStyleBuilderOptions{$name}{"fast-path-inherited"})) {
+    $setterContent .= $indent . "    builderState.style().setDisallowsFastPathInheritance();\n";
+  }
+
   $setterContent .= $indent . "}\n";
 
   return $setterContent;
@@ -872,11 +1474,11 @@ sub generateInheritValueSetter {
   my $indent = shift;
 
   my $setterContent = "";
-  $setterContent .= $indent . "static void applyInherit" . $nameToId{$name} . "(StyleResolver& styleResolver)\n";
+  $setterContent .= $indent . "static void applyInherit" . $nameToId{$name} . "(BuilderState& builderState)\n";
   $setterContent .= $indent . "{\n";
   my $isSVG = exists $propertiesWithStyleBuilderOptions{$name}{"svg"};
-  my $parentStyle = "styleResolver.parentStyle()";
-  my $style = "styleResolver.style()";
+  my $parentStyle = "builderState.parentStyle()";
+  my $style = "builderState.style()";
   my $getter = $propertiesWithStyleBuilderOptions{$name}{"getter"};
   my $setter = $propertiesWithStyleBuilderOptions{$name}{"setter"};
   my $didCallSetValue = 0;
@@ -886,28 +1488,27 @@ sub generateInheritValueSetter {
     $setterContent .= $indent . "        return;\n";
     $setterContent .= $indent . "    }\n";
   } elsif (exists $propertiesWithStyleBuilderOptions{$name}{"visited-link-color-support"}) {
-    $setterContent .= $indent . "    Color color = " . $parentStyle . "->" . $getter . "();\n";
-    if (!exists($propertiesWithStyleBuilderOptions{$name}{"no-default-color"})) {
-      $setterContent .= $indent . "    if (!color.isValid())\n";
-      $setterContent .= $indent . "        color = " . $parentStyle . "->color();\n";
-    }
+    $setterContent .= $indent . "    Color color = " . $parentStyle . "." . $getter . "();\n";
     $setterContent .= generateColorValueSetter($name, "color", $indent . "    ");
     $didCallSetValue = 1;
   } elsif (exists $propertiesWithStyleBuilderOptions{$name}{"animatable"}) {
     $setterContent .= generateAnimationPropertyInheritValueSetter($name, $indent . "    ");
     $didCallSetValue = 1;
   } elsif (exists $propertiesWithStyleBuilderOptions{$name}{"font-property"}) {
-    $setterContent .= $indent . "    auto fontDescription = styleResolver.fontDescription();\n";
-    $setterContent .= $indent . "    fontDescription." . $setter . "(styleResolver.parentFontDescription()." . $getter . "());\n";
-    $setterContent .= $indent . "    styleResolver.setFontDescription(fontDescription);\n";
+    $setterContent .= $indent . "    auto fontDescription = builderState.fontDescription();\n";
+    $setterContent .= $indent . "    fontDescription." . $setter . "(builderState.parentFontDescription()." . $getter . "());\n";
+    $setterContent .= $indent . "    builderState.setFontDescription(WTFMove(fontDescription));\n";
     $didCallSetValue = 1;
   } elsif (exists $propertiesWithStyleBuilderOptions{$name}{"fill-layer-property"}) {
     $setterContent .= generateFillLayerPropertyInheritValueSetter($name, $indent . "    ");
     $didCallSetValue = 1;
   }
   if (!$didCallSetValue) {
-    my $inheritedValue = $parentStyle . "->" . ($isSVG ? "svgStyle()." : "") .  $getter . "()";
+    my $inheritedValue = $parentStyle . "." . ($isSVG ? "svgStyle()." : "") .  $getter . "()";
     $setterContent .= $indent . "    " . generateSetValueStatement($name, "forwardInheritedValue(" . $inheritedValue . ")") . ";\n";
+  }
+  if (exists($propertiesWithStyleBuilderOptions{$name}{"fast-path-inherited"})) {
+    $setterContent .= $indent . "    builderState.style().setDisallowsFastPathInheritance();\n";
   }
   $setterContent .= $indent . "}\n";
 
@@ -918,21 +1519,29 @@ sub generateValueSetter {
   my $name = shift;
   my $indent = shift;
 
+  my $valueApplierFirstArgument = "";
+  if (exists $propertiesWithStyleBuilderOptions{$name}{"fill-layer-property"}) {
+    $valueApplierFirstArgument = "CSSPropertyID propertyID, ";
+  }
+
   my $setterContent = "";
-  $setterContent .= $indent . "static void applyValue" . $nameToId{$name} . "(StyleResolver& styleResolver, CSSValue& value)\n";
+  $setterContent .= $indent . "static void applyValue" . $nameToId{$name} . "(" . $valueApplierFirstArgument . "BuilderState& builderState, CSSValue& value)\n";
   $setterContent .= $indent . "{\n";
+
   my $convertedValue;
   if (exists($propertiesWithStyleBuilderOptions{$name}{"converter"})) {
-    $convertedValue = "StyleBuilderConverter::convert" . $propertiesWithStyleBuilderOptions{$name}{"converter"} . "(styleResolver, value)";
+    $convertedValue = "BuilderConverter::convert" . $propertiesWithStyleBuilderOptions{$name}{"converter"} . "(builderState, value)";
   } elsif (exists($propertiesWithStyleBuilderOptions{$name}{"conditional-converter"})) {
-    $setterContent .= $indent . "    auto convertedValue = StyleBuilderConverter::convert" . $propertiesWithStyleBuilderOptions{$name}{"conditional-converter"} . "(styleResolver, value);\n";
+    $setterContent .= $indent . "    auto convertedValue = BuilderConverter::convert" . $propertiesWithStyleBuilderOptions{$name}{"conditional-converter"} . "(builderState, value);\n";
     $convertedValue = "WTFMove(convertedValue.value())";
+  } elsif ($nameIsColorProperty{$name}) {
+    $convertedValue = colorFromPrimitiveValue("downcast<CSSPrimitiveValue>(value)");
   } else {
     $convertedValue = "downcast<CSSPrimitiveValue>(value)";
   }
 
   my $setter = $propertiesWithStyleBuilderOptions{$name}{"setter"};
-  my $style = "styleResolver.style()";
+  my $style = "builderState.style()";
   my $didCallSetValue = 0;
   if (exists $propertiesWithStyleBuilderOptions{$name}{"auto-functions"}) {
     $setterContent .= $indent . "    if (downcast<CSSPrimitiveValue>(value).valueID() == CSSValueAuto) {\n";
@@ -951,9 +1560,9 @@ sub generateValueSetter {
     $setterContent .= generateAnimationPropertyValueSetter($name, $indent . "    ");
     $didCallSetValue = 1;
   } elsif (exists $propertiesWithStyleBuilderOptions{$name}{"font-property"}) {
-    $setterContent .= $indent . "    auto fontDescription = styleResolver.fontDescription();\n";
+    $setterContent .= $indent . "    auto fontDescription = builderState.fontDescription();\n";
     $setterContent .= $indent . "    fontDescription." . $setter . "(" . $convertedValue . ");\n";
-    $setterContent .= $indent . "    styleResolver.setFontDescription(fontDescription);\n";
+    $setterContent .= $indent . "    builderState.setFontDescription(WTFMove(fontDescription));\n";
     $didCallSetValue = 1;
   } elsif (exists $propertiesWithStyleBuilderOptions{$name}{"fill-layer-property"}) {
     $setterContent .= generateFillLayerPropertyValueSetter($name, $indent . "    ");
@@ -966,29 +1575,33 @@ sub generateValueSetter {
     }
     $setterContent .= $indent . "    " . generateSetValueStatement($name, $convertedValue) . ";\n";
   }
+  if (exists($propertiesWithStyleBuilderOptions{$name}{"fast-path-inherited"})) {
+    $setterContent .= $indent . "    builderState.style().setDisallowsFastPathInheritance();\n";
+  }
   $setterContent .= $indent . "}\n";
 
   return $setterContent;
 }
 
-open STYLEBUILDER, ">StyleBuilder.cpp" || die "Could not open StyleBuilder.cpp for writing";
+open STYLEBUILDER, ">StyleBuilderGenerated.cpp" || die "Could not open StyleBuilderGenerated.cpp for writing";
 print STYLEBUILDER << "EOF";
 /* This file is automatically generated from $inputFile by makeprop, do not edit */
 
 #include "config.h"
-#include "StyleBuilder.h"
+#include "StyleBuilderGenerated.h"
 
 #include "CSSPrimitiveValueMappings.h"
 #include "CSSProperty.h"
 #include "RenderStyle.h"
+#include "StyleBuilderState.h"
 #include "StyleBuilderConverter.h"
 #include "StyleBuilderCustom.h"
 #include "StylePropertyShorthand.h"
-#include "StyleResolver.h"
 
 namespace WebCore {
+namespace Style {
 
-class StyleBuilderFunctions {
+class BuilderFunctions {
 public:
 EOF
 
@@ -996,6 +1609,8 @@ foreach my $name (@names) {
   # Skip Shorthand properties and properties that do not use the StyleBuilder.
   next if (exists $propertiesWithStyleBuilderOptions{$name}{"longhands"});
   next if (exists $propertiesWithStyleBuilderOptions{$name}{"skip-builder"});
+  next if (exists $synonyms{$name});
+  die "Property $name is logical but doesn't have skip-builder\n" if isLogical($name);
 
   my $indent = "    ";
   if (!$propertiesWithStyleBuilderOptions{$name}{"custom"}{"Initial"}) {
@@ -1012,26 +1627,46 @@ foreach my $name (@names) {
 print STYLEBUILDER << "EOF";
 };
 
-void StyleBuilder::applyProperty(CSSPropertyID property, StyleResolver& styleResolver, CSSValue& value, bool isInitial, bool isInherit)
+void BuilderGenerated::applyProperty(CSSPropertyID property, BuilderState& builderState, CSSValue& value, bool isInitial, bool isInherit, const CSSRegisteredCustomProperty* registered)
 {
     switch (property) {
     case CSSPropertyInvalid:
-    case CSSPropertyCustom:
         break;
+    case CSSPropertyCustom: {
+        auto& customProperty = downcast<CSSCustomPropertyValue>(value);
+        if (isInitial)
+            BuilderCustom::applyInitialCustomProperty(builderState, registered, customProperty.name());
+        else if (isInherit)
+            BuilderCustom::applyInheritCustomProperty(builderState, registered, customProperty.name());
+        else
+            BuilderCustom::applyValueCustomProperty(builderState, registered, customProperty);
+        break;
+    }
 EOF
 
 foreach my $name (@names) {
+  next if (exists $synonyms{$name});
+
   print STYLEBUILDER "    case CSSProperty" . $nameToId{$name} . ":\n";
+
+  my $valueApplierFirstArgument = "";
+  if (exists $propertiesWithStyleBuilderOptions{$name}{"fill-layer-property"}) {
+    $valueApplierFirstArgument = "property, ";
+  }
+  foreach my $synonym (@{$namesToSynonyms{$name}}) {
+    print STYLEBUILDER "    case CSSProperty" . $nameToId{$synonym} . ":\n";
+  }
+
   if (exists $propertiesWithStyleBuilderOptions{$name}{"longhands"}) {
     print STYLEBUILDER "        ASSERT(isShorthandCSSProperty(property));\n";
     print STYLEBUILDER "        ASSERT_NOT_REACHED();\n";
   } elsif (!exists $propertiesWithStyleBuilderOptions{$name}{"skip-builder"}) {
     print STYLEBUILDER "        if (isInitial)\n";
-    print STYLEBUILDER "            " . getScopeForFunction($name, "Initial") . "::applyInitial" . $nameToId{$name} . "(styleResolver);\n";
+    print STYLEBUILDER "            " . getScopeForFunction($name, "Initial") . "::applyInitial" . $nameToId{$name} . "(builderState);\n";
     print STYLEBUILDER "        else if (isInherit)\n";
-    print STYLEBUILDER "            " . getScopeForFunction($name, "Inherit") . "::applyInherit" . $nameToId{$name} . "(styleResolver);\n";
+    print STYLEBUILDER "            " . getScopeForFunction($name, "Inherit") . "::applyInherit" . $nameToId{$name} . "(builderState);\n";
     print STYLEBUILDER "        else\n";
-    print STYLEBUILDER "            " . getScopeForFunction($name, "Value") . "::applyValue" . $nameToId{$name} . "(styleResolver, value);\n";
+    print STYLEBUILDER "            " . getScopeForFunction($name, "Value") . "::applyValue" . $nameToId{$name} . "(" . $valueApplierFirstArgument . "builderState, value);\n";
   }
   print STYLEBUILDER "        break;\n";
 }
@@ -1040,6 +1675,7 @@ print STYLEBUILDER << "EOF";
     };
 }
 
+} // namespace Style
 } // namespace WebCore
 EOF
 
@@ -1186,3 +1822,151 @@ if (not $gperf) {
     $gperf = $ENV{GPERF} ? $ENV{GPERF} : "gperf";
 }
 system("\"$gperf\" --key-positions=\"*\" -D -n -s 2 CSSPropertyNames.gperf --output-file=CSSPropertyNames.cpp") == 0 || die "calling gperf failed: $?";
+
+# Generate CSSStyleDeclaration+PropertyNames.idl
+
+# https://drafts.csswg.org/cssom/#css-property-to-idl-attribute
+sub cssPropertyToIDLAttribute($$$)
+{
+    my $property = shift;
+    my $lowercaseFirst = shift;
+    my $uppercaseFirst = shift;
+
+    my $output = "";
+    my $uppercaseNext = $uppercaseFirst;
+
+    if ($lowercaseFirst) {
+        $property = substr($property, 1);
+    }
+
+    foreach my $character (split //, $property) {
+        if ($character eq "-") {
+            $uppercaseNext = 1;
+        } elsif ($uppercaseNext) {
+            $uppercaseNext = 0;
+            $output .= uc $character;
+        } else {
+            $output .= $character;
+        }
+    }
+
+    return $output;
+}
+
+my %namesAndAliasesToName;
+foreach my $name (@names) {
+    if (grep { $_ eq $name } @internalProperties) {
+        next;
+    }
+    $namesAndAliasesToName{$name} = $name;
+    for my $alias (@{$nameToAliases{$name}}) {
+        $namesAndAliasesToName{$alias} = $name;
+    }
+}
+my @namesAndAliases = sort keys(%namesAndAliasesToName);
+
+open CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL, ">", "CSSStyleDeclaration+PropertyNames.idl" or die "Could not open CSSStyleDeclaration+PropertyNames.idl for writing\n";
+print CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL << "EOF";
+// This file is automatically generated from $inputFile by the makeprop.pl script. Do not edit it.
+
+typedef USVString CSSOMString;
+
+partial interface CSSStyleDeclaration {
+
+EOF
+
+print CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL << "EOF";
+    // For each CSS property property that is a supported CSS property, the following
+    // partial interface applies where camel-cased attribute is obtained by running the
+    // CSS property to IDL attribute algorithm for property.
+    // Example: font-size -> element.style.fontSize
+    // Example: -webkit-transform -> element.style.WebkitTransform
+    // [CEReactions] attribute [LegacyNullToEmptyString] CSSOMString _camel_cased_attribute;
+EOF
+
+foreach my $nameOrAlias (@namesAndAliases) {
+    my $camelCasedAttributeName = cssPropertyToIDLAttribute($nameOrAlias, 0, 0);
+    my $name = $namesAndAliasesToName{$nameOrAlias};
+    my $propertyId = $nameToId{$namesAndAliasesToName{$name}};
+
+    my @extendedAttributeValues = ("DelegateToSharedSyntheticAttribute=propertyValueForCamelCasedIDLAttribute", "CallWith=PropertyName");
+    push(@extendedAttributeValues, "EnabledBySetting=${settingsFlags{$name}}") if $settingsFlags{$name};
+    push(@extendedAttributeValues, "EnabledByDeprecatedGlobalSetting=Enabled${runtimeFlags{$name}}") if $runtimeFlags{$name};
+    my $extendedAttributes = join(", ", @extendedAttributeValues);
+
+    print CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL "    [CEReactions, ${extendedAttributes}] attribute [LegacyNullToEmptyString] CSSOMString ${camelCasedAttributeName};\n";
+}
+
+print CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL << "EOF";
+
+    // For each CSS property property that is a supported CSS property and that begins
+    // with the string -webkit-, the following partial interface applies where webkit-cased
+    // attribute is obtained by running the CSS property to IDL attribute algorithm for
+    // property, with the lowercase first flag set.
+    // Example: -webkit-transform -> element.style.webkitTransform
+    // [CEReactions] attribute [LegacyNullToEmptyString] CSSOMString _webkit_cased_attribute;
+EOF
+
+foreach my $nameOrAlias (grep { $_ =~ /^\-webkit\-/ } @namesAndAliases) {
+    my $webkitCasedAttributeName = cssPropertyToIDLAttribute($nameOrAlias, 1, 0);
+    my $name = $namesAndAliasesToName{$nameOrAlias};
+    my $propertyId = $nameToId{$namesAndAliasesToName{$name}};
+
+    my @extendedAttributeValues = ("DelegateToSharedSyntheticAttribute=propertyValueForWebKitCasedIDLAttribute", "CallWith=PropertyName");
+    push(@extendedAttributeValues, "EnabledBySetting=${settingsFlags{$name}}") if $settingsFlags{$name};
+    push(@extendedAttributeValues, "EnabledByDeprecatedGlobalSetting=Enabled${runtimeFlags{$name}}") if $runtimeFlags{$name};
+    my $extendedAttributes = join(", ", @extendedAttributeValues);
+
+    print CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL "    [CEReactions, ${extendedAttributes}] attribute [LegacyNullToEmptyString] CSSOMString ${webkitCasedAttributeName};\n";
+}
+
+print CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL << "EOF";
+
+    // For each CSS property property that is a supported CSS property, except for
+    // properties that have no "-" (U+002D) in the property name, the following partial
+    // interface applies where dashed attribute is property.
+    // Example: font-size -> element.style['font-size']
+    // Example: -webkit-transform -> element.style.['-webkit-transform']
+    // [CEReactions] attribute [LegacyNullToEmptyString] CSSOMString _dashed_attribute;
+EOF
+foreach my $nameOrAlias (grep { $_ =~ /\-/ } @namesAndAliases) {
+    my $dashedAttributeName = $nameOrAlias;
+    my $name = $namesAndAliasesToName{$nameOrAlias};
+    my $propertyId = $nameToId{$namesAndAliasesToName{$name}};
+
+    my @extendedAttributeValues = ("DelegateToSharedSyntheticAttribute=propertyValueForDashedIDLAttribute", "CallWith=PropertyName");
+    push(@extendedAttributeValues, "EnabledBySetting=${settingsFlags{$name}}") if $settingsFlags{$name};
+    push(@extendedAttributeValues, "EnabledByDeprecatedGlobalSetting=Enabled${runtimeFlags{$name}}") if $runtimeFlags{$name};
+    my $extendedAttributes = join(", ", @extendedAttributeValues);
+
+    print CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL "    [CEReactions, ${extendedAttributes}] attribute [LegacyNullToEmptyString] CSSOMString ${dashedAttributeName};\n";
+}
+
+# Everything below here is non-standard.
+
+print CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL << "EOF";
+
+    // Non-standard. Special case properties starting with -epub- like is done for
+    // -webkit-, where attribute is obtained by running the CSS property to IDL attribute
+    // algorithm for property, with the lowercase first flag set.
+    // Example: -epub-caption-side -> element.style.epubCaptionSide
+EOF
+foreach my $nameOrAlias (grep { $_ =~ /^\-epub\-/ } @namesAndAliases) {
+    my $epubCasedAttributeName = cssPropertyToIDLAttribute($nameOrAlias, 1, 0);
+    my $name = $namesAndAliasesToName{$nameOrAlias};
+    my $propertyId = $nameToId{$namesAndAliasesToName{$name}};
+
+    my @extendedAttributeValues = ("DelegateToSharedSyntheticAttribute=propertyValueForEpubCasedIDLAttribute", "CallWith=PropertyName");
+    push(@extendedAttributeValues, "EnabledBySetting=${settingsFlags{$name}}") if $settingsFlags{$name};
+    push(@extendedAttributeValues, "EnabledByDeprecatedGlobalSetting=Enabled${runtimeFlags{$name}}") if $runtimeFlags{$name};
+    my $extendedAttributes = join(", ", @extendedAttributeValues);
+
+    print CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL "    [CEReactions, ${extendedAttributes}] attribute [LegacyNullToEmptyString] CSSOMString ${epubCasedAttributeName};\n";
+}
+
+print CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL << "EOF";
+};
+
+EOF
+
+close CSS_STYLE_DECLARATION_PROPERTY_NAMES_IDL;

@@ -11,11 +11,10 @@
 // Modified from the Chromium original here:
 // src/media/base/sinc_resampler_unittest.cc
 
-#ifndef WEBRTC_COMMON_AUDIO_RESAMPLER_SINUSOIDAL_LINEAR_CHIRP_SOURCE_H_
-#define WEBRTC_COMMON_AUDIO_RESAMPLER_SINUSOIDAL_LINEAR_CHIRP_SOURCE_H_
+#ifndef COMMON_AUDIO_RESAMPLER_SINUSOIDAL_LINEAR_CHIRP_SOURCE_H_
+#define COMMON_AUDIO_RESAMPLER_SINUSOIDAL_LINEAR_CHIRP_SOURCE_H_
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/common_audio/resampler/sinc_resampler.h"
+#include "common_audio/resampler/sinc_resampler.h"
 
 namespace webrtc {
 
@@ -24,21 +23,25 @@ namespace webrtc {
 // resampler for the specific sample rate conversion being used.
 class SinusoidalLinearChirpSource : public SincResamplerCallback {
  public:
-  // |delay_samples| can be used to insert a fractional sample delay into the
+  // `delay_samples` can be used to insert a fractional sample delay into the
   // source.  It will produce zeros until non-negative time is reached.
-  SinusoidalLinearChirpSource(int sample_rate, size_t samples,
-                              double max_frequency, double delay_samples);
+  SinusoidalLinearChirpSource(int sample_rate,
+                              size_t samples,
+                              double max_frequency,
+                              double delay_samples);
 
-  virtual ~SinusoidalLinearChirpSource() {}
+  ~SinusoidalLinearChirpSource() override {}
+
+  SinusoidalLinearChirpSource(const SinusoidalLinearChirpSource&) = delete;
+  SinusoidalLinearChirpSource& operator=(const SinusoidalLinearChirpSource&) =
+      delete;
 
   void Run(size_t frames, float* destination) override;
 
   double Frequency(size_t position);
 
  private:
-  enum {
-    kMinFrequency = 5
-  };
+  static constexpr int kMinFrequency = 5;
 
   int sample_rate_;
   size_t total_samples_;
@@ -46,10 +49,8 @@ class SinusoidalLinearChirpSource : public SincResamplerCallback {
   double k_;
   size_t current_index_;
   double delay_samples_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(SinusoidalLinearChirpSource);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_COMMON_AUDIO_RESAMPLER_SINUSOIDAL_LINEAR_CHIRP_SOURCE_H_
+#endif  // COMMON_AUDIO_RESAMPLER_SINUSOIDAL_LINEAR_CHIRP_SOURCE_H_

@@ -23,9 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WTF_TimeWithDynamicClockType_h
-#define WTF_TimeWithDynamicClockType_h
+#pragma once
 
+#include <wtf/ApproximateTime.h>
 #include <wtf/ClockType.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/WallTime.h>
@@ -34,7 +34,8 @@ namespace WTF {
 
 class PrintStream;
 
-class TimeWithDynamicClockType {
+class TimeWithDynamicClockType final {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     TimeWithDynamicClockType() { }
     
@@ -49,7 +50,13 @@ public:
         , m_type(ClockType::Monotonic)
     {
     }
-    
+
+    TimeWithDynamicClockType(ApproximateTime time)
+        : m_value(time.secondsSinceEpoch().value())
+        , m_type(ClockType::Approximate)
+    {
+    }
+
     static TimeWithDynamicClockType fromRawSeconds(double value, ClockType type)
     {
         TimeWithDynamicClockType result;
@@ -73,6 +80,7 @@ public:
     // Asserts that the time is of the type you want.
     WTF_EXPORT_PRIVATE WallTime wallTime() const;
     WTF_EXPORT_PRIVATE MonotonicTime monotonicTime() const;
+    WTF_EXPORT_PRIVATE ApproximateTime approximateTime() const;
     
     WTF_EXPORT_PRIVATE WallTime approximateWallTime() const;
     WTF_EXPORT_PRIVATE MonotonicTime approximateMonotonicTime() const;
@@ -160,5 +168,3 @@ inline bool isfinite(WTF::TimeWithDynamicClockType time)
 using WTF::TimeWithDynamicClockType;
 using WTF::hasElapsed;
 using WTF::sleep;
-
-#endif // WTF_TimeWithDynamicClockType_h

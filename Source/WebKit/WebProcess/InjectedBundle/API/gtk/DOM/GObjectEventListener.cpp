@@ -25,9 +25,8 @@
 #include <WebCore/Event.h>
 #include <wtf/HashMap.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 GObjectEventListener::GObjectEventListener(GObject* target, EventTarget* coreTarget, const char* domEventName, GClosure* handler, bool capture)
     : EventListener(GObjectEventListenerType)
@@ -59,13 +58,14 @@ void GObjectEventListener::gobjectDestroyed()
     // and later use-after-free with the m_handler = 0; assignment.
     RefPtr<GObjectEventListener> protectedThis(this);
 
-    m_coreTarget->removeEventListener(m_domEventName.data(), *this, m_capture);
+    m_coreTarget->removeEventListener(AtomString::fromLatin1(m_domEventName.data()), *this, m_capture);
     m_coreTarget = nullptr;
     m_handler = nullptr;
 }
 
 void GObjectEventListener::handleEvent(ScriptExecutionContext&, Event& event)
 {
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
     GValue parameters[2] = { G_VALUE_INIT, G_VALUE_INIT };
     g_value_init(&parameters[0], WEBKIT_DOM_TYPE_EVENT_TARGET);
     g_value_set_object(&parameters[0], m_target);
@@ -77,6 +77,7 @@ void GObjectEventListener::handleEvent(ScriptExecutionContext&, Event& event)
     g_closure_invoke(m_handler.get(), 0, 2, parameters, NULL);
     g_value_unset(parameters + 0);
     g_value_unset(parameters + 1);
+    G_GNUC_END_IGNORE_DEPRECATIONS;
 }
 
 bool GObjectEventListener::operator==(const EventListener& listener) const

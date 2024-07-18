@@ -22,15 +22,17 @@
 
 #include "WebKitNetworkProxySettingsPrivate.h"
 #include <WebCore/SoupNetworkProxySettings.h>
+#include <wtf/URL.h>
 #include <wtf/glib/WTFGType.h>
+#include <wtf/text/WTFString.h>
 
 using namespace WebCore;
 
 /**
- * SECTION: WebKitNetworkProxySettings
- * @Short_description: Network Proxy Settings
- * @Title: WebKitNetworkProxySettings
+ * WebKitNetworkProxySettings:
  * @See_also: #WebKitWebContext
+ *
+ * Configures network proxies.
  *
  * WebKitNetworkProxySettings can be used to provide a custom proxy configuration
  * to a #WebKitWebContext. You need to call webkit_web_context_set_network_proxy_settings()
@@ -63,7 +65,7 @@ const SoupNetworkProxySettings& webkitNetworkProxySettingsGetNetworkProxySetting
 /**
  * webkit_network_proxy_settings_new:
  * @default_proxy_uri: (allow-none): the default proxy URI to use, or %NULL.
- * @ignore_hosts: (allow-none): an optional list of hosts/IP addresses to not use a proxy for.
+ * @ignore_hosts: (allow-none) (array zero-terminated=1): an optional list of hosts/IP addresses to not use a proxy for.
  *
  * Create a new #WebKitNetworkProxySettings with the given @default_proxy_uri and @ignore_hosts.
  *
@@ -105,8 +107,10 @@ WebKitNetworkProxySettings* webkit_network_proxy_settings_new(const char* defaul
 {
     WebKitNetworkProxySettings* proxySettings = static_cast<WebKitNetworkProxySettings*>(fastMalloc(sizeof(WebKitNetworkProxySettings)));
     new (proxySettings) WebKitNetworkProxySettings;
-    if (defaultProxyURI)
+    if (defaultProxyURI) {
+        g_return_val_if_fail(URL(String::fromUTF8(defaultProxyURI)).isValid(), nullptr);
         proxySettings->settings.defaultProxyURL = defaultProxyURI;
+    }
     if (ignoreHosts)
         proxySettings->settings.ignoreHosts.reset(g_strdupv(const_cast<char**>(ignoreHosts)));
     return proxySettings;
@@ -153,7 +157,9 @@ void webkit_network_proxy_settings_free(WebKitNetworkProxySettings* proxySetting
  * @scheme: the URI scheme to add a proxy for
  * @proxy_uri: the proxy URI to use for @uri_scheme
  *
- * Adds a URI-scheme-specific proxy. URIs whose scheme matches @uri_scheme will be proxied via @proxy_uri.
+ * Adds a URI-scheme-specific proxy.
+ *
+ * URIs whose scheme matches @uri_scheme will be proxied via @proxy_uri.
  * As with the default proxy URI, if @proxy_uri starts with "socks://", it will be treated as referring to
  * all three of the socks5, socks4a, and socks4 proxy types.
  *
@@ -164,6 +170,7 @@ void webkit_network_proxy_settings_add_proxy_for_scheme(WebKitNetworkProxySettin
     g_return_if_fail(proxySettings);
     g_return_if_fail(scheme);
     g_return_if_fail(proxyURI);
+    g_return_if_fail(URL(String::fromUTF8(proxyURI)).isValid());
 
     proxySettings->settings.proxyMap.add(scheme, proxyURI);
 }

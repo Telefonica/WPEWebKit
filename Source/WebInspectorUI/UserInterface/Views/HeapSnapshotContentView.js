@@ -33,9 +33,19 @@ WI.HeapSnapshotContentView = class HeapSnapshotContentView extends WI.ContentVie
 
         this.element.classList.add("heap-snapshot");
 
+        this._exportButtonNavigationItem = new WI.ButtonNavigationItem("export", WI.UIString("Export"), "Images/Export.svg", 15, 15);
+        this._exportButtonNavigationItem.tooltip = WI.UIString("Export (%s)").format(WI.saveKeyboardShortcut.displayName);
+        this._exportButtonNavigationItem.buttonStyle = WI.ButtonNavigationItem.Style.ImageAndText;
+        this._exportButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.High;
+        this._exportButtonNavigationItem.enabled = WI.FileUtilities.canSave(WI.FileUtilities.SaveMode.SingleFile);
+        this._exportButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, function(event) {
+            this._exportSnapshot();
+        }, this);
+
         this._dataGrid = new WI.DataGrid(columns);
         this._dataGrid.sortColumnIdentifier = "retainedSize";
         this._dataGrid.sortOrder = WI.DataGrid.SortOrder.Descending;
+        this._dataGrid.filterDelegate = this;
         this._dataGrid.createSettings(identifier);
         this._dataGrid.addEventListener(WI.DataGrid.Event.SortChanged, this._sortDataGrid, this);
 
@@ -50,20 +60,49 @@ WI.HeapSnapshotContentView = class HeapSnapshotContentView extends WI.ContentVie
         this._dataGrid.updateLayout();
     }
 
+    // Public
+
+    updateFilter(filters)
+    {
+        this._dataGrid.filterText = filters ? filters.text : "";
+    }
+
+    // DataGrid filter delegate
+
+    dataGridMatchNodeAgainstCustomFilters(node)
+    {
+        console.assert(node);
+        if (node instanceof WI.HeapSnapshotInstanceFetchMoreDataGridNode)
+            return false;
+        return true;
+    }
+
+    dataGridMatchShouldPopulateWhenFilteringNode(node)
+    {
+        return true;
+    }
+
     // Protected
 
-    shown()
+    get navigationItems()
     {
-        super.shown();
+        if (this.representedObject instanceof WI.HeapSnapshotProxy)
+            return [this._exportButtonNavigationItem];
+        return [];
+    }
+
+    attached()
+    {
+        super.attached();
 
         this._heapSnapshotDataGridTree.shown();
     }
 
-    hidden()
+    detached()
     {
-        super.hidden();
-
         this._heapSnapshotDataGridTree.hidden();
+
+        super.detached();
     }
 
     get scrollableElements()
@@ -72,6 +111,30 @@ WI.HeapSnapshotContentView = class HeapSnapshotContentView extends WI.ContentVie
     }
 
     // Private
+
+    _exportSnapshot()
+    {
+        if (!this.representedObject.snapshotStringData) {
+            InspectorFrontendHost.beep();
+            return;
+        }
+
+        let date = new Date;
+        let values = [
+            date.getFullYear(),
+            Number.zeroPad(date.getMonth() + 1, 2),
+            Number.zeroPad(date.getDate(), 2),
+            Number.zeroPad(date.getHours(), 2),
+            Number.zeroPad(date.getMinutes(), 2),
+            Number.zeroPad(date.getSeconds(), 2),
+        ];
+
+        const forceSaveAs = true;
+        WI.FileUtilities.save(WI.FileUtilities.SaveMode.SingleFile, {
+            content: this.representedObject.snapshotStringData,
+            suggestedName: WI.UIString("Heap Snapshot %s-%s-%s at %s.%s.%s").format(...values) + ".json",
+        }, forceSaveAs);
+    }
 
     _sortDataGrid()
     {

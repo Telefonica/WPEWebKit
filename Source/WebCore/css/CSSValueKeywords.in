@@ -5,13 +5,14 @@ inherit
 initial
 unset
 revert
+revert-layer
 
 //
 // CSS_PROP_OUTLINE_STYLE
 // CSS_PROP_BORDER_TOP_STYLE
 // CSS_PROP_BORDER_BOTTOM_STYLE
 // CSS_PROP_BORDER_LEFT_STYLE
-// The order here must match the order of the EBorderStyle enum in RenderStyleConstants.h.
+// The order here must match the order of the BorderStyle enum in RenderStyleConstants.h.
 none
 hidden
 inset
@@ -26,6 +27,7 @@ double
 //
 // CSS_PROP_FONT:
 //
+// This needs to be kept in sync with SystemFontDatabase::FontShorthand.
 caption
 icon
 menu
@@ -35,7 +37,7 @@ small-caption
 -webkit-small-control
 -webkit-control
 
-#if defined(WTF_PLATFORM_IOS) && WTF_PLATFORM_IOS
+#if defined(WTF_PLATFORM_COCOA) && WTF_PLATFORM_COCOA
 -apple-system-headline
 -apple-system-body
 -apple-system-subheadline
@@ -195,6 +197,7 @@ transparent
 -webkit-activelink
 activeborder
 activecaption
+activetext
 appworkspace
 background
 buttonface
@@ -202,7 +205,11 @@ buttonhighlight
 buttonshadow
 buttontext
 activebuttontext
+canvas
+canvastext
 captiontext
+field
+fieldtext
 graytext
 highlight
 highlighttext
@@ -211,6 +218,7 @@ inactivecaption
 inactivecaptiontext
 infobackground
 infotext
+linktext
 luminance
 menutext
 scrollbar
@@ -219,9 +227,30 @@ threedface
 threedhighlight
 threedlightshadow
 threedshadow
+visitedtext
 window
 windowframe
 windowtext
+#if (defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC) || (defined(WTF_PLATFORM_IOS_FAMILY) && WTF_PLATFORM_IOS_FAMILY)
+-apple-system-header-text
+-apple-system-text-background
+-apple-system-control-background
+-apple-system-placeholder-text
+-apple-system-label
+-apple-system-secondary-label
+-apple-system-tertiary-label
+-apple-system-quaternary-label
+-apple-system-grid
+-apple-system-separator
+-apple-system-container-border
+-apple-system-background
+-apple-system-secondary-background
+-apple-system-tertiary-background
+-apple-system-grouped-background
+-apple-system-secondary-grouped-background
+-apple-system-tertiary-grouped-background
+-apple-system-selected-content-background
+-apple-system-unemphasized-selected-content-background
 -apple-wireless-playback-target-active
 -apple-system-blue
 -apple-system-brown
@@ -232,6 +261,31 @@ windowtext
 -apple-system-purple
 -apple-system-red
 -apple-system-yellow
+-apple-system-app-highlight-background
+#endif
+#if defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC
+-apple-system-alternate-selected-text
+-apple-system-control-accent
+-apple-system-even-alternating-content-background
+-apple-system-odd-alternating-content-background
+-apple-system-selected-text
+-apple-system-unemphasized-selected-text
+-apple-system-selected-text-background
+-apple-system-unemphasized-selected-text-background
+-apple-system-find-highlight-background
+#endif
+#if defined(WTF_PLATFORM_IOS_FAMILY) && WTF_PLATFORM_IOS_FAMILY
+-apple-system-indigo
+-apple-system-teal
+-apple-system-opaque-fill
+-apple-system-opaque-secondary-fill
+-apple-system-opaque-secondary-fill-disabled
+-apple-system-opaque-tertiary-fill
+-apple-system-opaque-separator
+#endif
+#if (defined(WTF_PLATFORM_MAC) && WTF_PLATFORM_MAC) || (defined(WTF_PLATFORM_IOS_FAMILY) && WTF_PLATFORM_IOS_FAMILY) || (defined(HAVE_OS_DARK_MODE_SUPPORT) && HAVE_OS_DARK_MODE_SUPPORT)
+-webkit-control-background
+#endif
 -webkit-focus-ring-color
 currentcolor
 //
@@ -279,7 +333,7 @@ bottom
 -webkit-baseline-middle
 //
 // CSS_PROP_TEXT_ALIGN:
-// The order here must match the order of the ETextAlign enum in RenderStyleConstants.h.
+// The order here must match the order of the TextAlignMode enum in RenderStyleConstants.h.
 //
 -webkit-auto
 left
@@ -289,7 +343,11 @@ justify
 -webkit-left
 -webkit-right
 -webkit-center
+match-parent
 -webkit-match-parent
+-internal-th-center
+//start
+//end
 //
 // CSS_PROP_TEXT_JUSTIFY:
 //
@@ -298,13 +356,21 @@ justify
 inter-word
 distribute
 //
+// CSS_PROP_CLEAR:
+// CSS_PROP_FLOAT:
+// none
+// left
+// right
+inline-start
+inline-end
+//
 // CSS_PROP_LIST_STYLE_POSITION:
 //
 outside
 inside
 //
 // CSS_PROP_LIST_STYLE_TYPE:
-// The order here must match the order of the EListStyleType enum in RenderStyleConstants.h.
+// The order here must match the order of the ListStyleType enum in RenderStyleConstants.h.
 //
 disc
 circle
@@ -386,15 +452,28 @@ hiragana
 katakana
 hiragana-iroha
 katakana-iroha
+cjk-decimal
+tamil
+disclosure-open
+disclosure-closed
+japanese-informal
+japanese-formal
+korean-hangul-formal
+korean-hanja-informal
+korean-hanja-formal
+simp-chinese-informal
+simp-chinese-formal
+trad-chinese-informal
+trad-chinese-formal
+ethiopic-numeric
 //none
 //
 // CSS_PROP_DISPLAY:
-// The order here must match the order of the EDisplay enum in RenderStyleConstants.h.
+// The order here must match the order of the DisplayType enum in RenderStyleConstants.h.
 //
 inline
 block
 list-item
-compact
 inline-block
 table
 inline-table
@@ -409,16 +488,18 @@ table-caption
 -webkit-box
 -webkit-inline-box
 flex
--webkit-flex
 inline-flex
--webkit-inline-flex
 contents
 grid
 inline-grid
+flow-root
+flow
+-webkit-inline-flex
+-webkit-flex
 //none
 //
 // CSS_PROP_CURSOR:
-// The order here must match the order of the ECursor enum in RenderStyleConstants.h.
+// The order here must match the order of the CursorType enum in RenderStyleConstants.h.
 //
 auto
 default
@@ -527,7 +608,6 @@ no-close-quote
 no-open-quote
 nowrap
 open-quote
-overlay
 overline
 portrait
 pre
@@ -734,6 +814,11 @@ keep-all
 break-word
 
 //
+// CSS_PROP_WHITE_SPACE
+//
+break-spaces
+
+//
 // CSS_PROP__KHTML_NBSP_MODE
 //
 space
@@ -746,6 +831,7 @@ loose
 // normal
 strict
 after-white-space
+anywhere
 
 // -webkit-appearance
 // The order here must match the order in the ControlPart enum in ThemeTypes.h.
@@ -755,70 +841,24 @@ radio
 push-button
 square-button
 button
-button-bevel
 default-button
-inner-spin-button
 listbox
-listitem
-media-controls-background
-media-controls-dark-bar-background
-media-controls-fullscreen-background
-media-controls-light-bar-background
-media-current-time-display
-media-enter-fullscreen-button
-media-exit-fullscreen-button
-media-fullscreen-volume-slider
-media-fullscreen-volume-slider-thumb
-media-mute-button
-media-overlay-play-button
-media-play-button
-media-return-to-realtime-button
-media-rewind-button
-media-seek-back-button
-media-seek-forward-button
-media-slider
-media-sliderthumb
-media-time-remaining-display
-media-toggle-closed-captions-button
-media-volume-slider
-media-volume-slider-container
-media-volume-slider-mute-button
-media-volume-sliderthumb
 menulist
 menulist-button
-menulist-text
-menulist-textfield
 meter
 progress-bar
-progress-bar-value
 slider-horizontal
 slider-vertical
-sliderthumb-horizontal
-sliderthumb-vertical
-caret
 searchfield
-searchfield-decoration
-searchfield-results-decoration
-searchfield-results-button
-searchfield-cancel-button
-snapshotted-plugin-overlay
-textfield
-relevancy-level-indicator
-continuous-capacity-level-indicator
-discrete-capacity-level-indicator
-rating-level-indicator
-#if defined(ENABLE_SERVICE_CONTROLS) && ENABLE_SERVICE_CONTROLS
-image-controls-button
-#endif
 #if defined(ENABLE_APPLE_PAY) && ENABLE_APPLE_PAY
 -apple-pay-button
 #endif
-textarea
 #if defined(ENABLE_ATTACHMENT_ELEMENT) && ENABLE_ATTACHMENT_ELEMENT
 attachment
 borderless-attachment
 #endif
-caps-lock-indicator
+textarea
+textfield
 
 //
 // CSS_PROP_BORDER_IMAGE
@@ -841,6 +881,20 @@ padding
 padding-box
 
 //
+// CSS_PROP_MASK_CLIP
+//
+// Same as background-clip above, except with some extra values.
+no-clip
+
+//
+// CSS_PROP_MASK_COMPOSITE
+//
+add
+subtract
+intersect
+exclude
+
+//
 // Variables Implementation
 //
 var
@@ -849,7 +903,6 @@ var
 //
 // Environment Variables
 //
-constant
 env
 
 //
@@ -857,7 +910,6 @@ env
 //
 avoid-column
 avoid-page
-avoid-region
 page
 recto
 region
@@ -867,6 +919,7 @@ verso
 margin-box
 
 // clip-path
+stroke-box
 view-box
 
 //
@@ -880,11 +933,6 @@ cover
 //
 logical
 visual
-
-//
-// CSS_PROP__WEBKIT_BORDER_FIT
-//
-lines
 
 //
 // CSS_PROP__WEBKIT_ANIMATION_DIRECTION
@@ -916,6 +964,9 @@ paused
 //
 flat
 preserve-3d
+#if defined(ENABLE_CSS_TRANSFORM_STYLE_OPTIMIZED_3D) && ENABLE_CSS_TRANSFORM_STYLE_OPTIMIZED_3D
+optimized-3d
+#endif
 
 //
 // CSS_PROP__WEBKIT_TRANSITION_TIMING_FUNCTION
@@ -928,30 +979,25 @@ ease-out
 ease-in-out
 step-start
 step-end
+jump-start
+jump-end
+jump-none
+jump-both
+// start
+// end
+
+//
+// animation-composition
+//
+// add
+accumulate
+replace
 
 //
 // CSS_PROP_ZOOM
 //
 document
 reset
-
-#if defined(ENABLE_CSS_DEVICE_ADAPTATION) && ENABLE_CSS_DEVICE_ADAPTATION
-//
-// CSS_PROP_USER_ZOOM
-//
-// fixed
-zoom
-
-//
-// CSS_PROP_MIN_WIDTH
-// CSS_PROP_MAX_WIDTH
-// CSS_PROP_MIN_HEIGHT
-// CSS_PROP_MAX_HEIGHT
-//
-// auto
-device-width
-device-height
-#endif
 
 //
 // CSS_PROP_POINTER_EVENTS
@@ -963,6 +1009,7 @@ visibleStroke
 painted
 fill
 stroke
+bounding-box
 //all
 //none
 
@@ -1000,11 +1047,7 @@ no-limit
 manual
 // auto
 
-#if defined(ENABLE_LETTERPRESS) && ENABLE_LETTERPRESS
--webkit-letterpress
-#endif
-
-#if defined(ENABLE_ACCELERATED_OVERFLOW_SCROLLING) && ENABLE_ACCELERATED_OVERFLOW_SCROLLING
+#if defined(ENABLE_OVERFLOW_SCROLLING_TOUCH) && ENABLE_OVERFLOW_SCROLLING_TOUCH
 // -webkit-overflow-scrolling
 // auto
 touch
@@ -1029,11 +1072,18 @@ after
 before
 inter-character
 
-// -webkit-text-emphasis-position
+// -webkit-text-combine
+// horizontal
+
+// text-combine-upright
+// all
+// none
+
+// text-emphasis-position
 over
 under
 
-// -webkit-text-emphasis-style
+// text-emphasis-style
 filled
 open
 dot
@@ -1086,7 +1136,6 @@ at
 // closest-side
 // farthest-side
 
-#if defined(ENABLE_CSS_SCROLL_SNAP)
 // -webkit-scroll-snap-points-x
 // -webkit-scroll-snap-points-y
 elements
@@ -1094,12 +1143,9 @@ elements
 // -webkit-scroll-snap-type
 mandatory
 proximity
-x
-y
-#endif
+// x
+// y
 
-// -webkit-region-fragment
-// auto
 break
 
 wrap
@@ -1110,6 +1156,7 @@ edges
 alphabetic
 
 // position
+sticky
 -webkit-sticky
 
 // (pointer:) media feature
@@ -1120,13 +1167,16 @@ fine
 // (hover:) media feature.
 // none
 hover
-on-demand
+
+// (scan:) media feature.
+progressive
+interlace
 
 // blend modes
 // normal
 multiply
 screen
-// overlay
+overlay
 darken
 lighten
 color-dodge
@@ -1159,8 +1209,10 @@ cross-fade
 image-set
 linear-gradient
 radial-gradient
+conic-gradient
 repeating-linear-gradient
 repeating-radial-gradient
+repeating-conic-gradient
 -webkit-canvas
 -webkit-cross-fade
 -webkit-gradient
@@ -1172,7 +1224,9 @@ repeating-radial-gradient
 -webkit-named-image
 filter
 -webkit-filter
-dashboard-region
+#if defined(ENABLE_CSS_PAINTING_API) && ENABLE_CSS_PAINTING_API
+paint
+#endif
 
 // deprecated gradients
 from
@@ -1209,13 +1263,38 @@ url
 cubic-bezier
 spring
 steps
+apple-invert-lightness
 
 // colors
 rgb
 rgba
 hsl
 hsla
+hwb
+lab
+lch
+oklab
+oklch
 //color
+
+// relative color identifiers
+// from
+r
+g
+b
+h
+s
+l
+// h
+w
+// b
+// l
+a
+// b
+// l
+c
+// h
+// alpha
 
 // transform
 matrix
@@ -1243,6 +1322,8 @@ translate3d
 // transform-box
 // border-box
 // view-box
+// stroke-box
+// content-box
 fill-box
 
 // motion path
@@ -1252,9 +1333,33 @@ calc
 -webkit-calc
 min
 max
+clamp
+pow
+sqrt
+hypot
+sin
+cos
+e
+pi
+exp
+log
+asin
+acos
+atan
+atan2
+abs
+sign
+mod
+rem
+to-zero
+nearest
+infinity
+-infinity
+NaN
+
+from-image
 
 #if defined(ENABLE_CSS_IMAGE_RESOLUTION) && ENABLE_CSS_IMAGE_RESOLUTION
-from-image
 snap
 #endif
 
@@ -1273,28 +1378,18 @@ span
 
 // grid-template-{columns|rows}
 minmax
+subgrid
 
 // grid-auto-flow
 auto-flow
 dense
 
-#if defined(ENABLE_CSS3_TEXT) && ENABLE_CSS3_TEXT
 // text-indent
--webkit-each-line
--webkit-hanging
-#endif
+each-line
+// hanging
 
 // -webkit-column-fill
 balance
-
-// -webkit-aspect-ratio
-from-dimensions
-from-intrinsic
-
-#if defined(ENABLE_CSS_TRAILING_WORD) && ENABLE_CSS_TRAILING_WORD
-// -apple-trailing-word
--webkit-partially-balanced
-#endif
 
 #if defined(ENABLE_APPLE_PAY) && ENABLE_APPLE_PAY
 // -apple-pay-button-style
@@ -1305,6 +1400,19 @@ plain
 buy
 set-up
 donate
+check-out
+book
+subscribe
+#if defined(ENABLE_APPLE_PAY_NEW_BUTTON_TYPES) && ENABLE_APPLE_PAY_NEW_BUTTON_TYPES
+reload
+add-money
+top-up
+order
+rent
+support
+contribute
+tip
+#endif
 #endif
 
 // font-synthesis
@@ -1315,10 +1423,20 @@ style
 scroll-position
 //contents
 
-#if defined(ENABLE_TOUCH_EVENTS) && ENABLE_TOUCH_EVENTS
 // touch-action
+// auto
+// none
 manipulation
-#endif
+pan-x
+pan-y
+pinch-zoom
+
+// scroll-behavior
+// auto
+smooth
+
+// overscroll-behavior
+// contain
 
 // hanging-punctuation
 allow-end
@@ -1329,14 +1447,73 @@ last
 // color-gamut
 p3
 rec2020
+sRGB
 
 // color() function
-sRGB
+a98-rgb
 display-p3
+prophoto-rgb
+// rec2020
+// sRGB
+srgb-linear
+xyz
+xyz-d50
+xyz-d65
+
+// color-contast()
+color-contrast
+vs
+AA
+AA-large
+AAA
+AAA-large
+
+// color-mix()
+color-mix
+
+// color-space-interpolation
+in
+// srgb
+// srgb-linear
+// lab
+// oklab
+// xyz
+// xyz-d50
+// xyz-d65
+// hsl
+// hwb
+// lch
+// oklch
+shorter
+longer
+increasing
+decreasing
+specified
+// hue
+
+// prefers-default-appearance
+prefers
+// no-preference
 
 // prefers-reduced-motion
 reduce
 no-preference
+
+// prefers-contrast
+more
+less
+// no-preference
+
+// prefers-color-scheme, font-palette
+light
+dark
+
+#if defined(ENABLE_DARK_MODE_CSS) && ENABLE_DARK_MODE_CSS
+// color-scheme
+only
+// light
+// dark
+#endif
 
 // auto-repeat
 auto-fill
@@ -1348,3 +1525,87 @@ auto-fit
 swap
 fallback
 optional
+
+#if defined(ENABLE_APPLICATION_MANIFEST) && ENABLE_APPLICATION_MANIFEST
+fullscreen
+standalone
+minimal-ui
+browser
+#endif
+
+// text-decoration-thickness, text-underline-offset
+from-font
+
+// dynamic-range
+standard
+high
+
+// @counter-style `system` descriptor values
+// https://www.w3.org/TR/css-counter-styles-3/#counter-style-system
+cyclic
+numeric
+// alphabetic
+symbolic
+additive
+// fixed
+extends
+
+// @counter-style `speak-as` descriptor values
+// https://www.w3.org/TR/css-counter-styles-3/#counter-style-speak-as
+// auto
+bullets
+numbers
+words
+// spell-out
+
+// @supports selector()
+// https://drafts.csswg.org/css-conditional-4/#typedef-supports-selector-fn
+selector
+
+// math-style
+// normal
+compact
+
+// mask-type, mask-mode
+// alpha
+// luminance
+match-source
+
+// rotate
+x
+y
+z
+
+// contain
+// none
+// strict
+// content
+size
+layout
+#if !(defined(ENABLE_CSS_PAINTING_API) && ENABLE_CSS_PAINTING_API)
+paint
+#endif
+
+// container-type
+// normal
+// size
+inline-size
+
+// offset-path
+// https://drafts.fxtf.org/motion-1/#offset-path-property
+ray
+// closest-side
+// closest-corner
+// farthest-side
+// farthest-corner
+sides
+// contain
+
+// for @media/@supports/@container
+and
+or
+not
+
+// overflow-anchor
+// none
+// auto

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,8 +27,10 @@
 
 #if ENABLE(WEB_RTC)
 
-#include "LibWebRTCProvider.h"
+#include "Document.h"
+#include "RTCNetworkManager.h"
 #include "RTCPeerConnection.h"
+#include "WebRTCProvider.h"
 
 namespace WebCore {
 
@@ -44,6 +46,7 @@ void RTCController::reset(bool shouldFilterICECandidates)
     for (RTCPeerConnection& connection : m_peerConnections)
         connection.clearController();
     m_peerConnections.clear();
+    m_filteringDisabledOrigins.clear();
 }
 
 void RTCController::remove(RTCPeerConnection& connection)
@@ -53,31 +56,82 @@ void RTCController::remove(RTCPeerConnection& connection)
     });
 }
 
+static inline bool matchDocumentOrigin(Document& document, SecurityOrigin& topOrigin, SecurityOrigin& clientOrigin)
+{
+    if (topOrigin.isSameOriginAs(document.securityOrigin()))
+        return true;
+    return topOrigin.isSameOriginAs(document.topOrigin()) && clientOrigin.isSameOriginAs(document.securityOrigin());
+}
+
+bool RTCController::shouldDisableICECandidateFiltering(Document& document)
+{
+    if (!m_shouldFilterICECandidates)
+        return true;
+    return notFound != m_filteringDisabledOrigins.findIf([&] (const auto& origin) {
+        return matchDocumentOrigin(document, origin.topOrigin, origin.clientOrigin);
+    });
+}
+
 void RTCController::add(RTCPeerConnection& connection)
 {
+    auto& document = downcast<Document>(*connection.scriptExecutionContext());
+    if (auto* networkManager = document.rtcNetworkManager())
+        networkManager->setICECandidateFiltering(!shouldDisableICECandidateFiltering(document));
+
     m_peerConnections.append(connection);
-    if (!m_shouldFilterICECandidates)
+    if (shouldDisableICECandidateFiltering(downcast<Document>(*connection.scriptExecutionContext())))
         connection.disableICECandidateFiltering();
 }
 
-void RTCController::disableICECandidateFiltering()
+void RTCController::disableICECandidateFilteringForAllOrigins()
 {
-    if (!LibWebRTCProvider::webRTCAvailable())
+    if (!WebRTCProvider::webRTCAvailable())
         return;
 
     m_shouldFilterICECandidates = false;
-    for (RTCPeerConnection& connection : m_peerConnections)
+    for (RTCPeerConnection& connection : m_peerConnections) {
+        if (auto* document = downcast<Document>(connection.scriptExecutionContext())) {
+            if (auto* networkManager = document->rtcNetworkManager())
+                networkManager->setICECandidateFiltering(false);
+        }
         connection.disableICECandidateFiltering();
+    }
+}
+
+void RTCController::disableICECandidateFilteringForDocument(Document& document)
+{
+    if (!WebRTCProvider::webRTCAvailable())
+        return;
+
+    if (auto* networkManager = document.rtcNetworkManager())
+        networkManager->setICECandidateFiltering(false);
+
+    m_filteringDisabledOrigins.append(PeerConnectionOrigin { document.topOrigin(), document.securityOrigin() });
+    for (RTCPeerConnection& connection : m_peerConnections) {
+        if (auto* peerConnectionDocument = downcast<Document>(connection.scriptExecutionContext())) {
+            if (matchDocumentOrigin(*peerConnectionDocument, document.topOrigin(), document.securityOrigin())) {
+                if (auto* networkManager = peerConnectionDocument->rtcNetworkManager())
+                    networkManager->setICECandidateFiltering(false);
+                connection.disableICECandidateFiltering();
+            }
+        }
+    }
 }
 
 void RTCController::enableICECandidateFiltering()
 {
-    if (!LibWebRTCProvider::webRTCAvailable())
+    if (!WebRTCProvider::webRTCAvailable())
         return;
 
+    m_filteringDisabledOrigins.clear();
     m_shouldFilterICECandidates = true;
-    for (RTCPeerConnection& connection : m_peerConnections)
+    for (RTCPeerConnection& connection : m_peerConnections) {
         connection.enableICECandidateFiltering();
+        if (auto* document = downcast<Document>(connection.scriptExecutionContext())) {
+            if (auto* networkManager = document->rtcNetworkManager())
+                networkManager->setICECandidateFiltering(true);
+        }
+    }
 }
 
 } // namespace WebCore

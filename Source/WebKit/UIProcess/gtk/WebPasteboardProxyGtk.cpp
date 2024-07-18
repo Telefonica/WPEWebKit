@@ -26,28 +26,50 @@
 #include "config.h"
 #include "WebPasteboardProxy.h"
 
+#include "Clipboard.h"
+#include "SharedBufferReference.h"
 #include "WebFrameProxy.h"
-#include "WebSelectionData.h"
+#include <WebCore/Pasteboard.h>
+#include <WebCore/PasteboardCustomData.h>
+#include <WebCore/PasteboardItemInfo.h>
 #include <WebCore/PlatformPasteboard.h>
+#include <WebCore/SelectionData.h>
+#include <wtf/ListHashSet.h>
 #include <wtf/SetForScope.h>
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
-
-void WebPasteboardProxy::writeToClipboard(const String& pasteboardName, const WebSelectionData& selection)
+void WebPasteboardProxy::getTypes(const String& pasteboardName, CompletionHandler<void(Vector<String>&&)>&& completionHandler)
 {
-    SetForScope<WebFrameProxy*> frameWritingToClipboard(m_frameWritingToClipboard, m_primarySelectionOwner);
-    PlatformPasteboard(pasteboardName).writeToClipboard(selection.selectionData, [this] {
-        if (m_frameWritingToClipboard == m_primarySelectionOwner)
-            return;
-        setPrimarySelectionOwner(nullptr);
+    Clipboard::get(pasteboardName).formats(WTFMove(completionHandler));
+}
+
+void WebPasteboardProxy::readText(const String& pasteboardName, CompletionHandler<void(String&&)>&& completionHandler)
+{
+    Clipboard::get(pasteboardName).readText(WTFMove(completionHandler));
+}
+
+void WebPasteboardProxy::readFilePaths(const String& pasteboardName, CompletionHandler<void(Vector<String>&&)>&& completionHandler)
+{
+    Clipboard::get(pasteboardName).readFilePaths(WTFMove(completionHandler));
+}
+
+void WebPasteboardProxy::readBuffer(const String& pasteboardName, const String& pasteboardType, CompletionHandler<void(RefPtr<SharedBuffer>&&)>&& completionHandler)
+{
+    Clipboard::get(pasteboardName).readBuffer(pasteboardType.utf8().data(), [completionHandler = WTFMove(completionHandler)](auto&& buffer) mutable {
+        completionHandler(WTFMove(buffer));
     });
 }
 
-void WebPasteboardProxy::readFromClipboard(const String& pasteboardName, WebSelectionData& selection)
+void WebPasteboardProxy::writeToClipboard(const String& pasteboardName, SelectionData&& selectionData)
 {
-    selection = WebSelectionData(PlatformPasteboard(pasteboardName).readFromClipboard());
+    Clipboard::get(pasteboardName).write(WTFMove(selectionData), [](int64_t) { });
+}
+
+void WebPasteboardProxy::clearClipboard(const String& pasteboardName)
+{
+    Clipboard::get(pasteboardName).clear();
 }
 
 void WebPasteboardProxy::setPrimarySelectionOwner(WebFrameProxy* frame)
@@ -65,6 +87,136 @@ void WebPasteboardProxy::didDestroyFrame(WebFrameProxy* frame)
 {
     if (frame == m_primarySelectionOwner)
         m_primarySelectionOwner = nullptr;
+}
+
+void WebPasteboardProxy::typesSafeForDOMToReadAndWrite(IPC::Connection&, const String& pasteboardName, const String& origin, std::optional<WebCore::PageIdentifier>, CompletionHandler<void(Vector<String>&&)>&& completionHandler)
+{
+    auto& clipboard = Clipboard::get(pasteboardName);
+    clipboard.readBuffer(PasteboardCustomData::gtkType(), [&clipboard, origin, completionHandler = WTFMove(completionHandler)](auto&& buffer) mutable {
+        ListHashSet<String> domTypes;
+        auto customData = PasteboardCustomData::fromSharedBuffer(WTFMove(buffer));
+        if (customData.origin() == origin) {
+            for (auto& type : customData.orderedTypes())
+                domTypes.add(type);
+        }
+
+        clipboard.formats([domTypes = WTFMove(domTypes), completionHandler = WTFMove(completionHandler)](Vector<String>&& formats) mutable {
+            for (const auto& format : formats) {
+                if (format == PasteboardCustomData::gtkType())
+                    continue;
+
+                if (Pasteboard::isSafeTypeForDOMToReadAndWrite(format))
+                    domTypes.add(format);
+            }
+
+            completionHandler(copyToVector(domTypes));
+        });
+    });
+}
+
+void WebPasteboardProxy::writeCustomData(IPC::Connection&, const Vector<PasteboardCustomData>& data, const String& pasteboardName, std::optional<WebCore::PageIdentifier>, CompletionHandler<void(int64_t)>&& completionHandler)
+{
+    auto& clipboard = Clipboard::get(pasteboardName);
+    if (data.isEmpty() || data.size() > 1) {
+        // We don't support more than one custom item in the clipboard.
+        completionHandler(clipboard.changeCount());
+        return;
+    }
+
+    SelectionData selectionData;
+    const auto& customData = data[0];
+    customData.forEachPlatformStringOrBuffer([&selectionData] (auto& type, auto& stringOrBuffer) {
+        if (std::holds_alternative<Ref<SharedBuffer>>(stringOrBuffer)) {
+            selectionData.addBuffer(type, std::get<Ref<SharedBuffer>>(stringOrBuffer));
+        } else if (std::holds_alternative<String>(stringOrBuffer)) {
+            if (type == "text/plain"_s)
+                selectionData.setText(std::get<String>(stringOrBuffer));
+            else if (type == "text/html"_s)
+                selectionData.setMarkup(std::get<String>(stringOrBuffer));
+            else if (type == "text/uri-list"_s)
+                selectionData.setURIList(std::get<String>(stringOrBuffer));
+        }
+    });
+
+    if (customData.hasSameOriginCustomData() || !customData.origin().isEmpty())
+        selectionData.setCustomData(customData.createSharedBuffer());
+
+    clipboard.write(WTFMove(selectionData), WTFMove(completionHandler));
+}
+
+static WebCore::PasteboardItemInfo pasteboardIemInfoFromFormats(Vector<String>&& formats)
+{
+    WebCore::PasteboardItemInfo info;
+    if (formats.contains("text/plain"_s) || formats.contains("text/plain;charset=utf-8"_s))
+        info.webSafeTypesByFidelity.append("text/plain"_s);
+    if (formats.contains("text/html"_s))
+        info.webSafeTypesByFidelity.append("text/html"_s);
+    if (formats.contains("text/uri-list"_s))
+        info.webSafeTypesByFidelity.append("text/uri-list"_s);
+    if (formats.contains("image/png"_s))
+        info.webSafeTypesByFidelity.append("image/png"_s);
+    info.platformTypesByFidelity = WTFMove(formats);
+    return info;
+}
+
+void WebPasteboardProxy::allPasteboardItemInfo(IPC::Connection&, const String& pasteboardName, int64_t changeCount, std::optional<WebCore::PageIdentifier>, CompletionHandler<void(std::optional<Vector<WebCore::PasteboardItemInfo>>&&)>&& completionHandler)
+{
+    auto& clipboard = Clipboard::get(pasteboardName);
+    if (changeCount != clipboard.changeCount()) {
+        completionHandler(std::nullopt);
+        return;
+    }
+
+    clipboard.formats([completionHandler = WTFMove(completionHandler)](Vector<String>&& formats) mutable {
+        completionHandler(Vector<WebCore::PasteboardItemInfo> { pasteboardIemInfoFromFormats(WTFMove(formats)) });
+    });
+}
+
+void WebPasteboardProxy::informationForItemAtIndex(IPC::Connection&, size_t index, const String& pasteboardName, int64_t changeCount, std::optional<WebCore::PageIdentifier>, CompletionHandler<void(std::optional<WebCore::PasteboardItemInfo>&&)>&& completionHandler)
+{
+    auto& clipboard = Clipboard::get(pasteboardName);
+    if (changeCount != clipboard.changeCount() || index) {
+        completionHandler(std::nullopt);
+        return;
+    }
+
+    clipboard.formats([completionHandler = WTFMove(completionHandler)](Vector<String>&& formats) mutable {
+        completionHandler(pasteboardIemInfoFromFormats(WTFMove(formats)));
+    });
+}
+
+void WebPasteboardProxy::getPasteboardItemsCount(IPC::Connection&, const String& pasteboardName, std::optional<WebCore::PageIdentifier>, CompletionHandler<void(uint64_t)>&& completionHandler)
+{
+    Clipboard::get(pasteboardName).formats([completionHandler = WTFMove(completionHandler)](Vector<String>&& formats) mutable {
+        completionHandler(formats.isEmpty() ? 0 : 1);
+    });
+}
+
+void WebPasteboardProxy::readURLFromPasteboard(IPC::Connection&, size_t index, const String& pasteboardName, std::optional<WebCore::PageIdentifier>, CompletionHandler<void(String&& url, String&& title)>&& completionHandler)
+{
+    if (index) {
+        completionHandler({ }, { });
+        return;
+    }
+
+    Clipboard::get(pasteboardName).readURL(WTFMove(completionHandler));
+}
+
+void WebPasteboardProxy::readBufferFromPasteboard(IPC::Connection&, std::optional<size_t> index, const String& pasteboardType, const String& pasteboardName, std::optional<WebCore::PageIdentifier>, CompletionHandler<void(RefPtr<WebCore::SharedBuffer>&&)>&& completionHandler)
+{
+    if (index && index.value()) {
+        completionHandler({ });
+        return;
+    }
+
+    Clipboard::get(pasteboardName).readBuffer(pasteboardType.utf8().data(), [completionHandler = WTFMove(completionHandler)](auto&& buffer) mutable {
+        completionHandler(WTFMove(buffer));
+    });
+}
+
+void WebPasteboardProxy::getPasteboardChangeCount(IPC::Connection&, const String& pasteboardName, CompletionHandler<void(int64_t)>&& completionHandler)
+{
+    completionHandler(Clipboard::get(pasteboardName).changeCount());
 }
 
 } // namespace WebKit

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2013, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,22 +27,40 @@
 #include "Disassembler.h"
 
 #include "MacroAssemblerCodeRef.h"
+#include <variant>
 #include <wtf/Condition.h>
 #include <wtf/DataLog.h>
 #include <wtf/Deque.h>
 #include <wtf/Lock.h>
 #include <wtf/NeverDestroyed.h>
-#include <wtf/StringPrintStream.h>
 #include <wtf/Threading.h>
 
 namespace JSC {
 
-void disassemble(const MacroAssemblerCodePtr& codePtr, size_t size, const char* prefix, PrintStream& out)
+namespace Disassembler {
+
+Lock labelMapLock;
+
+using LabelMap = HashMap<void*, std::variant<CString, const char*>>;
+LazyNeverDestroyed<LabelMap> labelMap;
+
+static LabelMap& ensureLabelMap() WTF_REQUIRES_LOCK(labelMapLock)
 {
-    if (tryToDisassemble(codePtr, size, prefix, out))
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [] {
+        labelMap.construct();
+    });
+    return labelMap.get();
+}
+
+} // namespace Disassembler
+
+void disassemble(const MacroAssemblerCodePtr<DisassemblyPtrTag>& codePtr, size_t size, void* codeStart, void* codeEnd, const char* prefix, PrintStream& out)
+{
+    if (tryToDisassemble(codePtr, size, codeStart, codeEnd, prefix, out))
         return;
     
-    out.printf("%sdisassembly not available for range %p...%p\n", prefix, codePtr.executableAddress(), static_cast<char*>(codePtr.executableAddress()) + size);
+    out.printf("%sdisassembly not available for range %p...%p\n", prefix, codePtr.untaggedExecutableAddress(), codePtr.untaggedExecutableAddress<char*>() + size);
 }
 
 namespace {
@@ -64,8 +82,10 @@ public:
     }
     
     char* header { nullptr };
-    MacroAssemblerCodeRef codeRef;
+    MacroAssemblerCodeRef<DisassemblyPtrTag> codeRef;
     size_t size { 0 };
+    void* codeStart { nullptr };
+    void* codeEnd { nullptr };
     const char* prefix { nullptr };
 };
 
@@ -78,14 +98,14 @@ public:
     
     void enqueue(std::unique_ptr<DisassemblyTask> task)
     {
-        LockHolder locker(m_lock);
+        Locker locker { m_lock };
         m_queue.append(WTFMove(task));
         m_condition.notifyAll();
     }
     
     void waitUntilEmpty()
     {
-        LockHolder locker(m_lock);
+        Locker locker { m_lock };
         while (!m_queue.isEmpty() || m_working)
             m_condition.wait(m_lock);
     }
@@ -96,7 +116,7 @@ private:
         for (;;) {
             std::unique_ptr<DisassemblyTask> task;
             {
-                LockHolder locker(m_lock);
+                Locker locker { m_lock };
                 m_working = false;
                 m_condition.notifyAll();
                 while (m_queue.isEmpty())
@@ -106,13 +126,13 @@ private:
             }
 
             dataLog(task->header);
-            disassemble(task->codeRef.code(), task->size, task->prefix, WTF::dataFile());
+            disassemble(task->codeRef.code(), task->size, task->codeStart, task->codeEnd, task->prefix, WTF::dataFile());
         }
     }
     
     Lock m_lock;
     Condition m_condition;
-    Deque<std::unique_ptr<DisassemblyTask>> m_queue;
+    Deque<std::unique_ptr<DisassemblyTask>> m_queue WTF_GUARDED_BY_LOCK(m_lock);
     bool m_working { false };
 };
 
@@ -120,20 +140,26 @@ bool hadAnyAsynchronousDisassembly = false;
 
 AsynchronousDisassembler& asynchronousDisassembler()
 {
-    static NeverDestroyed<AsynchronousDisassembler> disassembler;
-    hadAnyAsynchronousDisassembly = true;
+    static LazyNeverDestroyed<AsynchronousDisassembler> disassembler;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        disassembler.construct();
+        hadAnyAsynchronousDisassembly = true;
+    });
     return disassembler.get();
 }
 
 } // anonymous namespace
 
 void disassembleAsynchronously(
-    const CString& header, const MacroAssemblerCodeRef& codeRef, size_t size, const char* prefix)
+    const CString& header, const MacroAssemblerCodeRef<DisassemblyPtrTag>& codeRef, size_t size, void* codeStart, void* codeEnd, const char* prefix)
 {
-    std::unique_ptr<DisassemblyTask> task = std::make_unique<DisassemblyTask>();
+    std::unique_ptr<DisassemblyTask> task = makeUnique<DisassemblyTask>();
     task->header = strdup(header.data()); // Yuck! We need this because CString does racy refcounting.
     task->codeRef = codeRef;
     task->size = size;
+    task->codeStart = codeStart;
+    task->codeEnd = codeEnd;
     task->prefix = prefix;
     
     asynchronousDisassembler().enqueue(WTFMove(task));
@@ -145,6 +171,30 @@ void waitForAsynchronousDisassembly()
         return;
     
     asynchronousDisassembler().waitUntilEmpty();
+}
+
+void registerLabel(void* thunkAddress, CString&& label)
+{
+    Locker lock { Disassembler::labelMapLock };
+    Disassembler::ensureLabelMap().add(thunkAddress, WTFMove(label));
+}
+
+void registerLabel(void* address, const char* label)
+{
+    Locker lock { Disassembler::labelMapLock };
+    Disassembler::ensureLabelMap().add(address, label);
+}
+
+const char* labelFor(void* thunkAddress)
+{
+    Locker lock { Disassembler::labelMapLock };
+    auto& map = Disassembler::ensureLabelMap();
+    auto it = map.find(thunkAddress);
+    if (it == map.end())
+        return nullptr;
+    if (std::holds_alternative<CString>(it->value))
+        return std::get<CString>(it->value).data();
+    return std::get<const char*>(it->value);
 }
 
 } // namespace JSC

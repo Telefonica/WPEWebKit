@@ -29,12 +29,15 @@ WI.LayoutTimelineOverviewGraph = class LayoutTimelineOverviewGraph extends WI.Ti
     {
         super(timelineOverview);
 
-        this.element.classList.add("layout");
+        this.element.classList.add("layout-overview");
 
         this._layoutTimeline = timeline;
         this._layoutTimeline.addEventListener(WI.Timeline.Event.RecordAdded, this._layoutTimelineRecordAdded, this);
 
         this.reset();
+
+        for (let record of this._layoutTimeline.records)
+            this._processRecord(record);
     }
 
     // Public
@@ -61,11 +64,29 @@ WI.LayoutTimelineOverviewGraph = class LayoutTimelineOverviewGraph extends WI.Ti
 
     layout()
     {
-        if (!this.visible)
+        super.layout();
+
+        if (this.hidden)
             return;
 
         this._updateRowLayout(this._timelinePaintRecordRow);
         this._updateRowLayout(this._timelineLayoutRecordRow);
+    }
+
+    updateSelectedRecord()
+    {
+        super.updateSelectedRecord();
+
+        for (let recordRow of [this._timelineLayoutRecordRow, this._timelinePaintRecordRow]) {
+            for (let recordBar of recordRow.recordBars) {
+                if (recordBar.records.includes(this.selectedRecord)) {
+                    this.selectedRecordBar = recordBar;
+                    return;
+                }
+            }
+        }
+
+        this.selectedRecordBar = null;
     }
 
     // Private
@@ -79,7 +100,7 @@ WI.LayoutTimelineOverviewGraph = class LayoutTimelineOverviewGraph extends WI.Ti
         {
             var timelineRecordBar = row.recordBars[recordBarIndex];
             if (!timelineRecordBar)
-                timelineRecordBar = row.recordBars[recordBarIndex] = new WI.TimelineRecordBar(records, renderMode);
+                timelineRecordBar = row.recordBars[recordBarIndex] = new WI.TimelineRecordBar(this, records, renderMode);
             else {
                 timelineRecordBar.renderMode = renderMode;
                 timelineRecordBar.records = records;
@@ -102,14 +123,19 @@ WI.LayoutTimelineOverviewGraph = class LayoutTimelineOverviewGraph extends WI.Ti
 
     _layoutTimelineRecordAdded(event)
     {
-        var layoutTimelineRecord = event.data.record;
+        let layoutTimelineRecord = event.data.record;
         console.assert(layoutTimelineRecord instanceof WI.LayoutTimelineRecord);
 
+        this._processRecord(layoutTimelineRecord);
+
+        this.needsLayout();
+    }
+
+    _processRecord(layoutTimelineRecord)
+    {
         if (layoutTimelineRecord.eventType === WI.LayoutTimelineRecord.EventType.Paint || layoutTimelineRecord.eventType === WI.LayoutTimelineRecord.EventType.Composite)
             this._timelinePaintRecordRow.records.push(layoutTimelineRecord);
         else
             this._timelineLayoutRecordRow.records.push(layoutTimelineRecord);
-
-        this.needsLayout();
     }
 };

@@ -25,22 +25,19 @@
 
 #pragma once
 
-#if HAVE(AVSAMPLEBUFFERGENERATOR)
+#if HAVE(AVASSETREADER)
 
 #include "ImageDecoder.h"
-#include <map>
+#include "SampleMap.h"
 #include <wtf/Lock.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
 OBJC_CLASS AVAssetTrack;
-OBJC_CLASS AVSampleBufferGenerator;
-OBJC_CLASS AVSampleCursor;
+OBJC_CLASS AVAssetReader;
 OBJC_CLASS AVURLAsset;
 OBJC_CLASS WebCoreSharedBufferResourceLoaderDelegate;
 typedef struct opaqueCMSampleBuffer* CMSampleBufferRef;
-typedef struct OpaqueVTImageRotationSession* VTImageRotationSessionRef;
-typedef struct __CVPixelBufferPool* CVPixelBufferPoolRef;
 
 namespace WTF {
 class MediaTime;
@@ -48,80 +45,81 @@ class MediaTime;
 
 namespace WebCore {
 
+class ContentType;
+class ImageDecoderAVFObjCSample;
+class ImageRotationSessionVT;
 class PixelBufferConformerCV;
 class WebCoreDecompressionSession;
 
 class ImageDecoderAVFObjC : public ImageDecoder {
 public:
-    static RefPtr<ImageDecoderAVFObjC> create(SharedBuffer&, const String& mimeType, AlphaOption, GammaAndColorProfileOption);
+    WEBCORE_EXPORT static RefPtr<ImageDecoderAVFObjC> create(const FragmentedSharedBuffer&, const String& mimeType, AlphaOption, GammaAndColorProfileOption);
     virtual ~ImageDecoderAVFObjC();
 
+    WEBCORE_EXPORT static bool supportsMediaType(MediaType);
+    static bool supportsContainerType(const String&);
+
     size_t bytesDecodedToDetermineProperties() const override { return 0; }
-    static bool canDecodeType(const String& mimeType);
+    WEBCORE_EXPORT static bool canDecodeType(const String& mimeType);
 
     const String& mimeType() const { return m_mimeType; }
 
+    WEBCORE_EXPORT void setEncodedDataStatusChangeCallback(Function<void(EncodedDataStatus)>&&) final;
     EncodedDataStatus encodedDataStatus() const final;
-    IntSize size() const final;
-    size_t frameCount() const final;
+    WEBCORE_EXPORT IntSize size() const final;
+    WEBCORE_EXPORT size_t frameCount() const final;
     RepetitionCount repetitionCount() const final;
     String uti() const final;
     String filenameExtension() const final;
     std::optional<IntPoint> hotSpot() const final { return std::nullopt; }
+    String accessibilityDescription() const final { return String(); }
 
     IntSize frameSizeAtIndex(size_t, SubsamplingLevel = SubsamplingLevel::Default) const final;
     bool frameIsCompleteAtIndex(size_t) const final;
-    ImageOrientation frameOrientationAtIndex(size_t) const final;
+    ImageDecoder::FrameMetadata frameMetadataAtIndex(size_t) const final;
 
     Seconds frameDurationAtIndex(size_t) const final;
     bool frameHasAlphaAtIndex(size_t) const final;
     bool frameAllowSubsamplingAtIndex(size_t) const final;
     unsigned frameBytesAtIndex(size_t, SubsamplingLevel = SubsamplingLevel::Default) const final;
 
-    NativeImagePtr createFrameImageAtIndex(size_t, SubsamplingLevel = SubsamplingLevel::Default, const DecodingOptions& = DecodingMode::Synchronous) final;
+    WEBCORE_EXPORT PlatformImagePtr createFrameImageAtIndex(size_t, SubsamplingLevel = SubsamplingLevel::Default, const DecodingOptions& = DecodingOptions(DecodingMode::Synchronous)) final;
 
-    void setExpectedContentSize(long long) final;
-    void setData(SharedBuffer&, bool allDataReceived) final;
+    WEBCORE_EXPORT void setExpectedContentSize(long long) final;
+    WEBCORE_EXPORT void setData(const FragmentedSharedBuffer&, bool allDataReceived) final;
     bool isAllDataReceived() const final { return m_isAllDataReceived; }
-    void clearFrameBufferCache(size_t) final;
+    WEBCORE_EXPORT void clearFrameBufferCache(size_t) final;
 
-    struct RotationProperties {
-        bool flipX { false };
-        bool flipY { false };
-        unsigned angle { 0 };
-
-        bool isIdentity() const { return !flipX && !flipY && !angle; }
-    };
+    bool hasTrack() const { return !!m_track; }
+    WEBCORE_EXPORT Vector<ImageDecoder::FrameInfo> frameInfos() const;
 
 private:
-    ImageDecoderAVFObjC(SharedBuffer&, const String& mimeType, AlphaOption, GammaAndColorProfileOption);
+    ImageDecoderAVFObjC(const FragmentedSharedBuffer&, const String& mimeType, AlphaOption, GammaAndColorProfileOption);
 
     AVAssetTrack *firstEnabledTrack();
-    void readSampleMetadata();
+    void readSamples();
     void readTrackMetadata();
     bool storeSampleBuffer(CMSampleBufferRef);
     void advanceCursor();
     void setTrack(AVAssetTrack *);
 
+    const ImageDecoderAVFObjCSample* sampleAtIndex(size_t) const;
+    bool sampleIsComplete(const ImageDecoderAVFObjCSample&) const;
+
     String m_mimeType;
     String m_uti;
     RetainPtr<AVURLAsset> m_asset;
     RetainPtr<AVAssetTrack> m_track;
-    RetainPtr<AVSampleCursor> m_cursor;
-    RetainPtr<AVSampleBufferGenerator> m_generator;
     RetainPtr<WebCoreSharedBufferResourceLoaderDelegate> m_loader;
-    RetainPtr<VTImageRotationSessionRef> m_rotationSession;
-    RetainPtr<CVPixelBufferPoolRef> m_rotationPool;
+    std::unique_ptr<ImageRotationSessionVT> m_imageRotationSession;
     Ref<WebCoreDecompressionSession> m_decompressionSession;
+    Function<void(EncodedDataStatus)> m_encodedDataStatusChangedCallback;
 
-    struct SampleData;
-    std::map<WTF::MediaTime, size_t> m_presentationTimeToIndex;
-    Vector<SampleData> m_sampleData;
+    SampleMap m_sampleData;
+    DecodeOrderSampleMap::iterator m_cursor;
     Lock m_sampleGeneratorLock;
     bool m_isAllDataReceived { false };
-    long long m_expectedContentSize { 0 };
     std::optional<IntSize> m_size;
-    std::optional<RotationProperties> m_rotation;
 };
 
 }

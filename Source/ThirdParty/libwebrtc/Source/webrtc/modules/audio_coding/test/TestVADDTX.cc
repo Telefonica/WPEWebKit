@@ -8,83 +8,115 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/test/TestVADDTX.h"
+#include "modules/audio_coding/test/TestVADDTX.h"
 
 #include <string>
 
-#include "webrtc/modules/audio_coding/codecs/audio_format_conversion.h"
-#include "webrtc/modules/audio_coding/test/PCMFile.h"
-#include "webrtc/modules/audio_coding/test/utility.h"
-#include "webrtc/test/testsupport/fileutils.h"
-#include "webrtc/typedefs.h"
+#include "absl/strings/match.h"
+#include "absl/strings/string_view.h"
+#include "api/audio_codecs/audio_decoder_factory_template.h"
+#include "api/audio_codecs/audio_encoder_factory_template.h"
+#include "api/audio_codecs/ilbc/audio_decoder_ilbc.h"
+#include "api/audio_codecs/ilbc/audio_encoder_ilbc.h"
+#include "api/audio_codecs/opus/audio_decoder_opus.h"
+#include "api/audio_codecs/opus/audio_encoder_opus.h"
+#include "modules/audio_coding/codecs/cng/audio_encoder_cng.h"
+#include "modules/audio_coding/test/PCMFile.h"
+#include "rtc_base/strings/string_builder.h"
+#include "test/gtest.h"
+#include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 
-#ifdef WEBRTC_CODEC_ISAC
-const CodecInst kIsacWb = {103, "ISAC", 16000, 480, 1, 32000};
-const CodecInst kIsacSwb = {104, "ISAC", 32000, 960, 1, 56000};
-#endif
-
-#ifdef WEBRTC_CODEC_ILBC
-const CodecInst kIlbc = {102, "ILBC", 8000, 240, 1, 13300};
-#endif
-
-#ifdef WEBRTC_CODEC_OPUS
-const CodecInst kOpus = {120, "opus", 48000, 960, 1, 64000};
-const CodecInst kOpusStereo = {120, "opus", 48000, 960, 2, 64000};
-#endif
-
-ActivityMonitor::ActivityMonitor() {
+MonitoringAudioPacketizationCallback::MonitoringAudioPacketizationCallback(
+    AudioPacketizationCallback* next)
+    : next_(next) {
   ResetStatistics();
 }
 
-int32_t ActivityMonitor::InFrameType(FrameType frame_type) {
-  counter_[frame_type]++;
-  return 0;
+int32_t MonitoringAudioPacketizationCallback::SendData(
+    AudioFrameType frame_type,
+    uint8_t payload_type,
+    uint32_t timestamp,
+    const uint8_t* payload_data,
+    size_t payload_len_bytes,
+    int64_t absolute_capture_timestamp_ms) {
+  counter_[static_cast<int>(frame_type)]++;
+  return next_->SendData(frame_type, payload_type, timestamp, payload_data,
+                         payload_len_bytes, absolute_capture_timestamp_ms);
 }
 
-void ActivityMonitor::PrintStatistics() {
+void MonitoringAudioPacketizationCallback::PrintStatistics() {
   printf("\n");
-  printf("kEmptyFrame       %u\n", counter_[kEmptyFrame]);
-  printf("kAudioFrameSpeech %u\n", counter_[kAudioFrameSpeech]);
-  printf("kAudioFrameCN     %u\n", counter_[kAudioFrameCN]);
-  printf("kVideoFrameKey    %u\n", counter_[kVideoFrameKey]);
-  printf("kVideoFrameDelta  %u\n", counter_[kVideoFrameDelta]);
+  printf("kEmptyFrame       %u\n",
+         counter_[static_cast<int>(AudioFrameType::kEmptyFrame)]);
+  printf("kAudioFrameSpeech %u\n",
+         counter_[static_cast<int>(AudioFrameType::kAudioFrameSpeech)]);
+  printf("kAudioFrameCN     %u\n",
+         counter_[static_cast<int>(AudioFrameType::kAudioFrameCN)]);
   printf("\n\n");
 }
 
-void ActivityMonitor::ResetStatistics() {
+void MonitoringAudioPacketizationCallback::ResetStatistics() {
   memset(counter_, 0, sizeof(counter_));
 }
 
-void ActivityMonitor::GetStatistics(uint32_t* counter) {
+void MonitoringAudioPacketizationCallback::GetStatistics(uint32_t* counter) {
   memcpy(counter, counter_, sizeof(counter_));
 }
 
 TestVadDtx::TestVadDtx()
-    : acm_send_(AudioCodingModule::Create(0)),
-      acm_receive_(AudioCodingModule::Create(1)),
-      channel_(new Channel),
-      monitor_(new ActivityMonitor) {
-  EXPECT_EQ(0, acm_send_->RegisterTransportCallback(channel_.get()));
+    : encoder_factory_(
+          CreateAudioEncoderFactory<AudioEncoderIlbc, AudioEncoderOpus>()),
+      decoder_factory_(
+          CreateAudioDecoderFactory<AudioDecoderIlbc, AudioDecoderOpus>()),
+      acm_send_(AudioCodingModule::Create()),
+      acm_receive_(std::make_unique<acm2::AcmReceiver>(
+          acm2::AcmReceiver::Config(decoder_factory_))),
+      channel_(std::make_unique<Channel>()),
+      packetization_callback_(
+          std::make_unique<MonitoringAudioPacketizationCallback>(
+              channel_.get())) {
+  EXPECT_EQ(
+      0, acm_send_->RegisterTransportCallback(packetization_callback_.get()));
   channel_->RegisterReceiverACM(acm_receive_.get());
-  EXPECT_EQ(0, acm_send_->RegisterVADCallback(monitor_.get()));
 }
 
-void TestVadDtx::RegisterCodec(CodecInst codec_param) {
-  // Set the codec for sending and receiving.
-  EXPECT_EQ(0, acm_send_->RegisterSendCodec(codec_param));
-  EXPECT_EQ(true, acm_receive_->RegisterReceiveCodec(
-                      codec_param.pltype, CodecInstToSdp(codec_param)));
-  channel_->SetIsStereo(codec_param.channels > 1);
+bool TestVadDtx::RegisterCodec(const SdpAudioFormat& codec_format,
+                               absl::optional<Vad::Aggressiveness> vad_mode) {
+  constexpr int payload_type = 17, cn_payload_type = 117;
+  bool added_comfort_noise = false;
+
+  auto encoder = encoder_factory_->MakeAudioEncoder(payload_type, codec_format,
+                                                    absl::nullopt);
+  if (vad_mode.has_value() &&
+      !absl::EqualsIgnoreCase(codec_format.name, "opus")) {
+    AudioEncoderCngConfig config;
+    config.speech_encoder = std::move(encoder);
+    config.num_channels = 1;
+    config.payload_type = cn_payload_type;
+    config.vad_mode = vad_mode.value();
+    encoder = CreateComfortNoiseEncoder(std::move(config));
+    added_comfort_noise = true;
+  }
+  channel_->SetIsStereo(encoder->NumChannels() > 1);
+  acm_send_->SetEncoder(std::move(encoder));
+
+  std::map<int, SdpAudioFormat> receive_codecs = {{payload_type, codec_format}};
+  acm_receive_->SetCodecs(receive_codecs);
+
+  return added_comfort_noise;
 }
 
 // Encoding a file and see if the numbers that various packets occur follow
 // the expectation.
-void TestVadDtx::Run(std::string in_filename, int frequency, int channels,
-                     std::string out_filename, bool append,
+void TestVadDtx::Run(absl::string_view in_filename,
+                     int frequency,
+                     int channels,
+                     absl::string_view out_filename,
+                     bool append,
                      const int* expects) {
-  monitor_->ResetStatistics();
+  packetization_callback_->ResetStatistics();
 
   PCMFile in_file;
   in_file.Open(in_filename, frequency, "rb");
@@ -110,7 +142,7 @@ void TestVadDtx::Run(std::string in_filename, int frequency, int channels,
     time_stamp_ += frame_size_samples;
     EXPECT_GE(acm_send_->Add10MsData(audio_frame), 0);
     bool muted;
-    acm_receive_->PlayoutData10Ms(kOutputFreqHz, &audio_frame, &muted);
+    acm_receive_->GetAudio(kOutputFreqHz, &audio_frame, &muted);
     ASSERT_FALSE(muted);
     out_file.Write10MsData(audio_frame);
   }
@@ -119,12 +151,12 @@ void TestVadDtx::Run(std::string in_filename, int frequency, int channels,
   out_file.Close();
 
 #ifdef PRINT_STAT
-  monitor_->PrintStatistics();
+  packetization_callback_->PrintStatistics();
 #endif
 
-  uint32_t stats[5];
-  monitor_->GetStatistics(stats);
-  monitor_->ResetStatistics();
+  uint32_t stats[3];
+  packetization_callback_->GetStatistics(stats);
+  packetization_callback_->ResetStatistics();
 
   for (const auto& st : stats) {
     int i = &st - stats;  // Calculate the current position in stats.
@@ -142,138 +174,66 @@ void TestVadDtx::Run(std::string in_filename, int frequency, int channels,
 }
 
 // Following is the implementation of TestWebRtcVadDtx.
-TestWebRtcVadDtx::TestWebRtcVadDtx()
-    : vad_enabled_(false),
-      dtx_enabled_(false),
-      output_file_num_(0) {
-}
+TestWebRtcVadDtx::TestWebRtcVadDtx() : output_file_num_(0) {}
 
 void TestWebRtcVadDtx::Perform() {
-  // Go through various test cases.
-#ifdef WEBRTC_CODEC_ISAC
-  // Register iSAC WB as send codec
-  RegisterCodec(kIsacWb);
-  RunTestCases();
-
-  // Register iSAC SWB as send codec
-  RegisterCodec(kIsacSwb);
-  RunTestCases();
-#endif
-
-#ifdef WEBRTC_CODEC_ILBC
-  // Register iLBC as send codec
-  RegisterCodec(kIlbc);
-  RunTestCases();
-#endif
-
-#ifdef WEBRTC_CODEC_OPUS
-  // Register Opus as send codec
-  RegisterCodec(kOpus);
-  RunTestCases();
-#endif
+  RunTestCases({"ILBC", 8000, 1});
+  RunTestCases({"opus", 48000, 2});
 }
 
 // Test various configurations on VAD/DTX.
-void TestWebRtcVadDtx::RunTestCases() {
-  // #1 DTX = OFF, VAD = OFF, VADNormal
-  SetVAD(false, false, VADNormal);
-  Test(true);
+void TestWebRtcVadDtx::RunTestCases(const SdpAudioFormat& codec_format) {
+  Test(/*new_outfile=*/true,
+       /*expect_dtx_enabled=*/RegisterCodec(codec_format, absl::nullopt));
 
-  // #2 DTX = ON, VAD = ON, VADAggr
-  SetVAD(true, true, VADAggr);
-  Test(false);
+  Test(/*new_outfile=*/false,
+       /*expect_dtx_enabled=*/RegisterCodec(codec_format, Vad::kVadAggressive));
 
-  // #3 DTX = ON, VAD = ON, VADLowBitrate
-  SetVAD(true, true, VADLowBitrate);
-  Test(false);
+  Test(/*new_outfile=*/false,
+       /*expect_dtx_enabled=*/RegisterCodec(codec_format, Vad::kVadLowBitrate));
 
-  // #4 DTX = ON, VAD = ON, VADVeryAggr
-  SetVAD(true, true, VADVeryAggr);
-  Test(false);
+  Test(/*new_outfile=*/false, /*expect_dtx_enabled=*/RegisterCodec(
+           codec_format, Vad::kVadVeryAggressive));
 
-  // #5 DTX = ON, VAD = ON, VADNormal
-  SetVAD(true, true, VADNormal);
-  Test(false);
+  Test(/*new_outfile=*/false,
+       /*expect_dtx_enabled=*/RegisterCodec(codec_format, Vad::kVadNormal));
 }
 
 // Set the expectation and run the test.
-void TestWebRtcVadDtx::Test(bool new_outfile) {
-  int expects[] = {-1, 1, dtx_enabled_, 0, 0};
+void TestWebRtcVadDtx::Test(bool new_outfile, bool expect_dtx_enabled) {
+  int expects[] = {-1, 1, expect_dtx_enabled, 0, 0};
   if (new_outfile) {
     output_file_num_++;
   }
-  std::stringstream out_filename;
-  out_filename << webrtc::test::OutputPath()
-               << "testWebRtcVadDtx_outFile_"
-               << output_file_num_
-               << ".pcm";
-  Run(webrtc::test::ResourcePath("audio_coding/testfile32kHz", "pcm"),
-      32000, 1, out_filename.str(), !new_outfile, expects);
-}
-
-void TestWebRtcVadDtx::SetVAD(bool enable_dtx, bool enable_vad,
-                              ACMVADMode vad_mode) {
-  ACMVADMode mode;
-  EXPECT_EQ(0, acm_send_->SetVAD(enable_dtx, enable_vad, vad_mode));
-  EXPECT_EQ(0, acm_send_->VAD(&dtx_enabled_, &vad_enabled_, &mode));
-
-  auto codec_param = acm_send_->SendCodec();
-  ASSERT_TRUE(codec_param);
-  if (STR_CASE_CMP(codec_param->plname, "opus") == 0) {
-    // If send codec is Opus, WebRTC VAD/DTX cannot be used.
-    enable_dtx = enable_vad = false;
-  }
-
-  EXPECT_EQ(dtx_enabled_ , enable_dtx); // DTX should be set as expected.
-
-  if (dtx_enabled_) {
-    EXPECT_TRUE(vad_enabled_); // WebRTC DTX cannot run without WebRTC VAD.
-  } else {
-    // Using no DTX should not affect setting of VAD.
-    EXPECT_EQ(enable_vad, vad_enabled_);
-  }
+  rtc::StringBuilder out_filename;
+  out_filename << webrtc::test::OutputPath() << "testWebRtcVadDtx_outFile_"
+               << output_file_num_ << ".pcm";
+  Run(webrtc::test::ResourcePath("audio_coding/testfile32kHz", "pcm"), 32000, 1,
+      out_filename.str(), !new_outfile, expects);
 }
 
 // Following is the implementation of TestOpusDtx.
 void TestOpusDtx::Perform() {
-#ifdef WEBRTC_CODEC_ISAC
-  // If we set other codec than Opus, DTX cannot be switched on.
-  RegisterCodec(kIsacWb);
-  EXPECT_EQ(-1, acm_send_->EnableOpusDtx());
-  EXPECT_EQ(0, acm_send_->DisableOpusDtx());
-#endif
-
-#ifdef WEBRTC_CODEC_OPUS
   int expects[] = {0, 1, 0, 0, 0};
 
   // Register Opus as send codec
-  std::string out_filename = webrtc::test::OutputPath() +
-      "testOpusDtx_outFile_mono.pcm";
-  RegisterCodec(kOpus);
-  EXPECT_EQ(0, acm_send_->DisableOpusDtx());
+  std::string out_filename =
+      webrtc::test::OutputPath() + "testOpusDtx_outFile_mono.pcm";
+  RegisterCodec({"opus", 48000, 2}, absl::nullopt);
+  acm_send_->ModifyEncoder([](std::unique_ptr<AudioEncoder>* encoder_ptr) {
+    (*encoder_ptr)->SetDtx(false);
+  });
 
-  Run(webrtc::test::ResourcePath("audio_coding/testfile32kHz", "pcm"),
-      32000, 1, out_filename, false, expects);
+  Run(webrtc::test::ResourcePath("audio_coding/testfile32kHz", "pcm"), 32000, 1,
+      out_filename, false, expects);
 
-  EXPECT_EQ(0, acm_send_->EnableOpusDtx());
-  expects[kEmptyFrame] = 1;
-  Run(webrtc::test::ResourcePath("audio_coding/testfile32kHz", "pcm"),
-      32000, 1, out_filename, true, expects);
-
-  // Register stereo Opus as send codec
-  out_filename = webrtc::test::OutputPath() + "testOpusDtx_outFile_stereo.pcm";
-  RegisterCodec(kOpusStereo);
-  EXPECT_EQ(0, acm_send_->DisableOpusDtx());
-  expects[kEmptyFrame] = 0;
-  Run(webrtc::test::ResourcePath("audio_coding/teststereo32kHz", "pcm"),
-      32000, 2, out_filename, false, expects);
-
-  EXPECT_EQ(0, acm_send_->EnableOpusDtx());
-
-  expects[kEmptyFrame] = 1;
-  Run(webrtc::test::ResourcePath("audio_coding/teststereo32kHz", "pcm"),
-      32000, 2, out_filename, true, expects);
-#endif
+  acm_send_->ModifyEncoder([](std::unique_ptr<AudioEncoder>* encoder_ptr) {
+    (*encoder_ptr)->SetDtx(true);
+  });
+  expects[static_cast<int>(AudioFrameType::kEmptyFrame)] = 1;
+  expects[static_cast<int>(AudioFrameType::kAudioFrameCN)] = 1;
+  Run(webrtc::test::ResourcePath("audio_coding/testfile32kHz", "pcm"), 32000, 1,
+      out_filename, true, expects);
 }
 
 }  // namespace webrtc

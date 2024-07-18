@@ -23,7 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if ENABLE(WEBASSEMBLY)
+#pragma once
+
+#if ENABLE(WEBASSEMBLY_B3JIT)
 
 #include "B3Origin.h"
 #include "WasmFormat.h"
@@ -41,6 +43,10 @@ public:
         ASSERT(static_cast<uint32_t>(offset) == offset);
         packedData = (static_cast<uint64_t>(opcode) << 32) | offset;
     }
+    OpcodeOrigin(B3::Origin origin)
+        : packedData(bitwise_cast<uint64_t>(origin))
+    {
+    }
 
     void dump(PrintStream&) const;
 
@@ -54,4 +60,4 @@ private:
 
 } } // namespace JSC::Wasm
 
-#endif // ENABLE(WEBASSEMBLY)
+#endif // ENABLE(WEBASSEMBLY_B3JIT)

@@ -23,10 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "WKNSData.h"
+#import "config.h"
+#import "WKNSData.h"
 
-#if WK_API_ENABLED
+#import <WebCore/WebCoreObjCExtras.h>
 
 @implementation WKNSData {
     API::ObjectStorage<API::Data> _data;
@@ -34,6 +34,9 @@
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKNSData.class, self))
+        return;
+
     _data->~Data();
 
     [super dealloc];
@@ -66,5 +69,3 @@
 }
 
 @end
-
-#endif // WK_API_ENABLED

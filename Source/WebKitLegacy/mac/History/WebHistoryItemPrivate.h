@@ -26,6 +26,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import <CoreGraphics/CoreGraphics.h>
 #import <WebKitLegacy/WebHistoryItem.h>
 
 #if TARGET_OS_IPHONE
@@ -67,11 +68,6 @@ extern NSString *WebViewportFitCoverValue;
 - (NSDictionary *)dictionaryRepresentationIncludingChildren:(BOOL)includesChildren;
 #endif
 
-// Transient properties may be of any ObjC type.  They are intended to be used to store state per back/forward list entry.
-// The properties will not be persisted; when the history item is removed, the properties will be lost.
-- (id)_transientPropertyForKey:(NSString *)key;
-- (void)_setTransientProperty:(id)property forKey:(NSString *)key;
-
 #if TARGET_OS_IPHONE
 - (void)_setScale:(float)scale isInitial:(BOOL)aFlag;
 - (float)_scale;
@@ -82,7 +78,7 @@ extern NSString *WebViewportFitCoverValue;
 - (void)_setScrollPoint:(CGPoint)scrollPoint;
 #endif
 
-- (BOOL)_isInPageCache;
+- (BOOL)_isInBackForwardCache;
 - (BOOL)_hasCachedPageExpired;
 
 @end

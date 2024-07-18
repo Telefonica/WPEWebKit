@@ -8,19 +8,28 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_OPUS_AUDIO_DECODER_OPUS_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_OPUS_AUDIO_DECODER_OPUS_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_OPUS_AUDIO_DECODER_OPUS_H_
+#define MODULES_AUDIO_CODING_CODECS_OPUS_AUDIO_DECODER_OPUS_H_
 
-#include "webrtc/api/audio_codecs/audio_decoder.h"
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/audio_coding/codecs/opus/opus_interface.h"
+#include <stddef.h>
+#include <stdint.h>
+
+#include <vector>
+
+#include "api/audio_codecs/audio_decoder.h"
+#include "modules/audio_coding/codecs/opus/opus_interface.h"
+#include "rtc_base/buffer.h"
 
 namespace webrtc {
 
-class AudioDecoderOpus final : public AudioDecoder {
+class AudioDecoderOpusImpl final : public AudioDecoder {
  public:
-  explicit AudioDecoderOpus(size_t num_channels);
-  ~AudioDecoderOpus() override;
+  explicit AudioDecoderOpusImpl(size_t num_channels,
+                                int sample_rate_hz = 48000);
+  ~AudioDecoderOpusImpl() override;
+
+  AudioDecoderOpusImpl(const AudioDecoderOpusImpl&) = delete;
+  AudioDecoderOpusImpl& operator=(const AudioDecoderOpusImpl&) = delete;
 
   std::vector<ParseResult> ParsePayload(rtc::Buffer&& payload,
                                         uint32_t timestamp) override;
@@ -47,9 +56,9 @@ class AudioDecoderOpus final : public AudioDecoder {
  private:
   OpusDecInst* dec_state_;
   const size_t channels_;
-  RTC_DISALLOW_COPY_AND_ASSIGN(AudioDecoderOpus);
+  const int sample_rate_hz_;
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_CODECS_OPUS_AUDIO_DECODER_OPUS_H_
+#endif  // MODULES_AUDIO_CODING_CODECS_OPUS_AUDIO_DECODER_OPUS_H_

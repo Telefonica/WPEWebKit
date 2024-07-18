@@ -26,13 +26,16 @@
 #include "config.h"
 #include "InsertIntoTextNodeCommand.h"
 
+#include "CompositeEditCommand.h"
 #include "Document.h"
+#include "Editor.h"
+#include "EditorClient.h"
 #include "Frame.h"
 #include "RenderText.h"
 #include "Settings.h"
 #include "Text.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #include "RenderText.h"
 #endif
 
@@ -50,7 +53,8 @@ InsertIntoTextNodeCommand::InsertIntoTextNodeCommand(Ref<Text>&& node, unsigned 
 
 void InsertIntoTextNodeCommand::doApply()
 {
-    bool passwordEchoEnabled = frame().settings().passwordEchoEnabled();
+    bool passwordEchoEnabled = document().settings().passwordEchoEnabled() && !document().editor().client()->shouldSuppressPasswordEcho();
+
     if (passwordEchoEnabled)
         document().updateLayoutIgnorePendingStylesheets();
 
@@ -61,22 +65,18 @@ void InsertIntoTextNodeCommand::doApply()
         if (RenderText* renderText = m_node->renderer())
             renderText->momentarilyRevealLastTypedCharacter(m_offset + m_text.length());
     }
-
+    
     m_node->insertData(m_offset, m_text);
 }
 
-#if PLATFORM(IOS)
-
-// FIXME: Why would reapply be iOS-specific?
 void InsertIntoTextNodeCommand::doReapply()
 {
-    // FIXME: Shouldn't this have a hasEditableStyle check?
+    if (!m_node->hasEditableStyle())
+        return;
 
     m_node->insertData(m_offset, m_text);
 }
 
-#endif
-    
 void InsertIntoTextNodeCommand::doUnapply()
 {
     if (!m_node->hasEditableStyle())
@@ -87,7 +87,7 @@ void InsertIntoTextNodeCommand::doUnapply()
 
 #ifndef NDEBUG
 
-void InsertIntoTextNodeCommand::getNodesInCommand(HashSet<Node*>& nodes)
+void InsertIntoTextNodeCommand::getNodesInCommand(HashSet<Ref<Node>>& nodes)
 {
     addNodeAndDescendants(m_node.ptr(), nodes);
 }

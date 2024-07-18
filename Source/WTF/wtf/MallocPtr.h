@@ -23,8 +23,11 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef MallocPtr_h
-#define MallocPtr_h
+#pragma once
+
+#include <utility>
+#include <wtf/FastMalloc.h>
+#include <wtf/Noncopyable.h>
 
 // MallocPtr is a smart pointer class that calls fastFree in its destructor.
 // It is intended to be used for pointers where the C++ lifetime semantics
@@ -32,15 +35,12 @@
 
 namespace WTF {
 
-template<typename T> class MallocPtr {
+template<typename T, typename Malloc = FastMalloc> class MallocPtr {
+    WTF_MAKE_NONCOPYABLE(MallocPtr);
 public:
-    MallocPtr()
-        : m_ptr(nullptr)
-    {
-    }
+    MallocPtr() = default;
 
-    MallocPtr(std::nullptr_t)
-        : m_ptr(nullptr)
+    constexpr MallocPtr(std::nullptr_t)
     {
     }
 
@@ -51,7 +51,7 @@ public:
 
     ~MallocPtr()
     {
-        fastFree(m_ptr);
+        Malloc::free(m_ptr);
     }
 
     T* get() const
@@ -62,6 +62,11 @@ public:
     T *leakPtr() WARN_UNUSED_RETURN
     {
         return std::exchange(m_ptr, nullptr);
+    }
+
+    explicit operator bool() const
+    {
+        return m_ptr;
     }
 
     bool operator!() const
@@ -93,19 +98,39 @@ public:
         std::swap(m_ptr, other.m_ptr);
     }
 
-    template<typename U> friend MallocPtr<U> adoptMallocPtr(U*);
+    template<typename U, typename OtherMalloc> friend MallocPtr<U, OtherMalloc> adoptMallocPtr(U*);
 
     static MallocPtr malloc(size_t size)
     {
-        MallocPtr mallocPtr;
-        mallocPtr.m_ptr = static_cast<T*>(fastMalloc(size));
+        return MallocPtr {
+            static_cast<T*>(Malloc::malloc(size))
+        };
+    }
 
-        return mallocPtr;
+    static MallocPtr zeroedMalloc(size_t size)
+    {
+        return MallocPtr {
+            static_cast<T*>(Malloc::zeroedMalloc(size))
+        };
+    }
+
+    static MallocPtr tryMalloc(size_t size)
+    {
+        return MallocPtr {
+            static_cast<T*>(Malloc::tryMalloc(size))
+        };
+    }
+
+    static MallocPtr tryZeroedMalloc(size_t size)
+    {
+        return MallocPtr {
+            static_cast<T*>(Malloc::tryZeroedMalloc(size))
+        };
     }
 
     void realloc(size_t newSize)
     {
-        m_ptr = static_cast<T*>(fastRealloc(m_ptr, newSize));
+        m_ptr = static_cast<T*>(Malloc::realloc(m_ptr, newSize));
     }
 
 private:
@@ -114,17 +139,17 @@ private:
     {
     }
 
-    T* m_ptr;
+    T* m_ptr { nullptr };
 };
 
-template<typename U> MallocPtr<U> adoptMallocPtr(U* ptr)
+static_assert(sizeof(MallocPtr<int>) == sizeof(int*));
+
+template<typename U, typename OtherMalloc> MallocPtr<U, OtherMalloc> adoptMallocPtr(U* ptr)
 {
-    return MallocPtr<U>(ptr);
+    return MallocPtr<U, OtherMalloc>(ptr);
 }
 
 } // namespace WTF
 
 using WTF::MallocPtr;
 using WTF::adoptMallocPtr;
-
-#endif // MallocPtr_h

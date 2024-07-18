@@ -32,6 +32,7 @@
 #include <WebCore/BitmapInfo.h>
 #include <WebCore/Color.h>
 #include <WebCore/GraphicsContext.h>
+#include <WebCore/GraphicsContextWin.h>
 #include <WebCore/HWndDC.h>
 #include <WebCore/InspectorController.h>
 #include <WebCore/Page.h>
@@ -41,6 +42,7 @@
 
 using namespace WebCore;
 
+LRESULT CALLBACK OverlayWndProc(HWND, UINT, WPARAM, LPARAM);
 static LPCTSTR kOverlayWindowClassName = TEXT("WebNodeHighlightWindowClass");
 static ATOM registerOverlayClass();
 static LPCTSTR kWebNodeHighlightPointerProp = TEXT("WebNodeHighlightPointer");
@@ -156,7 +158,8 @@ void WebNodeHighlight::update()
 
     ::SelectObject(hdc.get(), hbmp.get());
 
-    GraphicsContext context(hdc.get());
+    GraphicsContextWin context(hdc.get());
+    context.scale(m_inspectedWebView->page()->deviceScaleFactor());
     m_inspectedWebView->page()->inspectorController().drawHighlight(context);
 
     BLENDFUNCTION bf;

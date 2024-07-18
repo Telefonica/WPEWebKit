@@ -30,7 +30,7 @@
 #include "FloatSize.h"
 #include "Image.h"
 #include "SVGImage.h"
-#include "URL.h"
+#include <wtf/URL.h>
 
 namespace WebCore {
 
@@ -41,9 +41,9 @@ public:
         return adoptRef(*new SVGImageForContainer(image, containerSize, containerZoom, initialFragmentURL));
     }
 
-    bool isSVGImage() const final { return true; }
+    bool isSVGImageForContainer() const final { return true; }
 
-    FloatSize size() const final;
+    FloatSize size(ImageOrientation = ImageOrientation::FromImage) const final;
 
     bool usesContainerSize() const final { return m_image->usesContainerSize(); }
     bool hasRelativeWidth() const final { return m_image->hasRelativeWidth(); }
@@ -53,23 +53,17 @@ public:
         m_image->computeIntrinsicDimensions(intrinsicWidth, intrinsicHeight, intrinsicRatio);
     }
 
-    ImageDrawResult draw(GraphicsContext&, const FloatRect&, const FloatRect&, CompositeOperator, BlendMode, DecodingMode, ImageOrientationDescription) final;
+    ImageDrawResult draw(GraphicsContext&, const FloatRect&, const FloatRect&, const ImagePaintingOptions& = { }) final;
 
-    void drawPattern(GraphicsContext&, const FloatRect&, const FloatRect&, const AffineTransform&, const FloatPoint&, const FloatSize&, CompositeOperator, BlendMode) final;
+    void drawPattern(GraphicsContext&, const FloatRect&, const FloatRect&, const AffineTransform&, const FloatPoint&, const FloatSize&, const ImagePaintingOptions& = { }) final;
 
     // FIXME: Implement this to be less conservative.
     bool currentFrameKnownToBeOpaque() const final { return false; }
 
-    NativeImagePtr nativeImageForCurrentFrame(const GraphicsContext* = nullptr) final;
+    RefPtr<NativeImage> nativeImageForCurrentFrame() final;
 
 private:
-    SVGImageForContainer(SVGImage* image, const FloatSize& containerSize, float containerZoom, const URL& initialFragmentURL)
-        : m_image(image)
-        , m_containerSize(containerSize)
-        , m_containerZoom(containerZoom)
-        , m_initialFragmentURL(initialFragmentURL)
-    {
-    }
+    WEBCORE_EXPORT SVGImageForContainer(SVGImage*, const FloatSize& containerSize, float containerZoom, const URL& initialFragmentURL);
 
     void destroyDecodedData(bool /*destroyAll*/ = true) final { }
 
@@ -80,3 +74,5 @@ private:
 };
 
 } // namespace WebCore
+
+SPECIALIZE_TYPE_TRAITS_IMAGE(SVGImageForContainer)

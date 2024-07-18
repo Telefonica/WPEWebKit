@@ -26,33 +26,45 @@
 #pragma once
 
 #include "Connection.h"
+#include "DataReference.h"
 #include "MessageSender.h"
 #include "ShareableResource.h"
+#include "WebPageProxyIdentifier.h"
+#include "WebResourceInterceptController.h"
+#include <WebCore/FrameIdentifier.h>
+#include <WebCore/PageIdentifier.h>
+#include <WebCore/ResourceLoaderIdentifier.h>
+#include <wtf/MonotonicTime.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
 
 namespace IPC {
-class DataReference;
+class FormDataReference;
+class SharedBufferReference;
 }
 
 namespace WebCore {
+class ContentFilterUnblockHandler;
 class NetworkLoadMetrics;
 class ResourceError;
 class ResourceLoader;
 class ResourceRequest;
 class ResourceResponse;
+class SubstituteData;
+enum class MainFrameMainResource : bool;
 }
 
 namespace WebKit {
 
-typedef uint64_t ResourceLoadIdentifier;
+enum class PrivateRelayed : bool;
 
 class WebResourceLoader : public RefCounted<WebResourceLoader>, public IPC::MessageSender {
 public:
     struct TrackingParameters {
-        uint64_t pageID { 0 };
-        uint64_t frameID { 0 };
-        ResourceLoadIdentifier resourceID { 0 };
+        WebPageProxyIdentifier webPageProxyID;
+        WebCore::PageIdentifier pageID;
+        WebCore::FrameIdentifier frameID;
+        WebCore::ResourceLoaderIdentifier resourceID;
     };
 
     static Ref<WebResourceLoader> create(Ref<WebCore::ResourceLoader>&&, const TrackingParameters&);
@@ -65,29 +77,46 @@ public:
 
     void detachFromCoreLoader();
 
-    bool isAlwaysOnLoggingAllowed() const;
-
 private:
     WebResourceLoader(Ref<WebCore::ResourceLoader>&&, const TrackingParameters&);
 
     // IPC::MessageSender
-    IPC::Connection* messageSenderConnection() override;
-    uint64_t messageSenderDestinationID() override;
+    IPC::Connection* messageSenderConnection() const override;
+    uint64_t messageSenderDestinationID() const override;
 
-    void willSendRequest(WebCore::ResourceRequest&&, WebCore::ResourceResponse&&);
+    void willSendRequest(WebCore::ResourceRequest&&, IPC::FormDataReference&& requestBody, WebCore::ResourceResponse&&);
     void didSendData(uint64_t bytesSent, uint64_t totalBytesToBeSent);
-    void didReceiveResponse(const WebCore::ResourceResponse&, bool needsContinueDidReceiveResponseMessage);
-    void didReceiveData(const IPC::DataReference&, int64_t encodedDataLength);
-    void didRetrieveDerivedData(const String& type, const IPC::DataReference&);
-    void didFinishResourceLoad(const WebCore::NetworkLoadMetrics&);
+    void didReceiveResponse(WebCore::ResourceResponse&&, PrivateRelayed, bool needsContinueDidReceiveResponseMessage, std::optional<WebCore::NetworkLoadMetrics>&&);
+    void didReceiveData(IPC::SharedBufferReference&& data, int64_t encodedDataLength);
+    void didFinishResourceLoad(WebCore::NetworkLoadMetrics&&);
     void didFailResourceLoad(const WebCore::ResourceError&);
+    void didFailServiceWorkerLoad(const WebCore::ResourceError&);
+    void serviceWorkerDidNotHandle();
+    void didBlockAuthenticationChallenge();
+    void setWorkerStart(MonotonicTime value) { m_workerStart = value; }
+
+    void stopLoadingAfterXFrameOptionsOrContentSecurityPolicyDenied(const WebCore::ResourceResponse&);
+
+    WebCore::MainFrameMainResource mainFrameMainResource() const;
+    
 #if ENABLE(SHAREABLE_RESOURCE)
     void didReceiveResource(const ShareableResource::Handle&);
 #endif
 
+#if ENABLE(CONTENT_FILTERING_IN_NETWORKING_PROCESS)
+    void contentFilterDidBlockLoad(const WebCore::ContentFilterUnblockHandler&, String&& unblockRequestDeniedScript, const WebCore::ResourceError&, const URL& blockedPageURL, WebCore::SubstituteData&&);
+#endif
+    
     RefPtr<WebCore::ResourceLoader> m_coreLoader;
     TrackingParameters m_trackingParameters;
+    WebResourceInterceptController m_interceptController;
     size_t m_numBytesReceived { 0 };
+
+#if ASSERT_ENABLED
+    bool m_isProcessingNetworkResponse { false };
+#endif
+
+    MonotonicTime m_workerStart;
 };
 
 } // namespace WebKit

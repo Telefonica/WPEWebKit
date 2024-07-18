@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Igalia S.L.
+ * Copyright (C) 2014, 2020 Igalia S.L.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,6 +21,8 @@
 #include "WebKitUserContentManager.h"
 
 #include "APISerializedScriptValue.h"
+#include "InjectUserScriptImmediately.h"
+#include "WebKitInitialize.h"
 #include "WebKitJavascriptResultPrivate.h"
 #include "WebKitUserContentManagerPrivate.h"
 #include "WebKitUserContentPrivate.h"
@@ -46,9 +48,9 @@ struct _WebKitUserContentManagerPrivate {
 };
 
 /**
- * SECTION:WebKitUserContentManager
- * @short_description: Manages user-defined content which affects web pages.
- * @title: WebKitUserContentManager
+ * WebKitUserContentManager:
+ *
+ * Manages user-defined content which affects web pages.
  *
  * Using a #WebKitUserContentManager user CSS style sheets can be set to
  * be injected in the web pages loaded by a #WebKitWebView, by
@@ -77,6 +79,8 @@ static guint signals[LAST_SIGNAL] = { 0, };
 
 static void webkit_user_content_manager_class_init(WebKitUserContentManagerClass* klass)
 {
+    webkitInitialize();
+
     GObjectClass* gObjectClass = G_OBJECT_CLASS(klass);
 
     /**
@@ -85,8 +89,8 @@ static void webkit_user_content_manager_class_init(WebKitUserContentManagerClass
      * @js_result: the #WebKitJavascriptResult holding the value received from the JavaScript world.
      *
      * This signal is emitted when JavaScript in a web view calls
-     * <code>window.webkit.messageHandlers.&lt;name&gt;.postMessage()</code>, after registering
-     * <code>&lt;name&gt;</code> using
+     * <code>window.webkit.messageHandlers.<name>.postMessage()</code>, after registering
+     * <code><name></code> using
      * webkit_user_content_manager_register_script_message_handler()
      *
      * Since: 2.8
@@ -122,6 +126,7 @@ WebKitUserContentManager* webkit_user_content_manager_new()
  * @stylesheet: A #WebKitUserStyleSheet
  *
  * Adds a #WebKitUserStyleSheet to the given #WebKitUserContentManager.
+ *
  * The same #WebKitUserStyleSheet can be reused with multiple
  * #WebKitUserContentManager instances.
  *
@@ -132,6 +137,24 @@ void webkit_user_content_manager_add_style_sheet(WebKitUserContentManager* manag
     g_return_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager));
     g_return_if_fail(styleSheet);
     manager->priv->userContentController->addUserStyleSheet(webkitUserStyleSheetGetUserStyleSheet(styleSheet));
+}
+
+/**
+ * webkit_user_content_manager_remove_style_sheet:
+ * @manager: A #WebKitUserContentManager
+ * @stylesheet: A #WebKitUserStyleSheet
+ *
+ * Removes a #WebKitUserStyleSheet from the given #WebKitUserContentManager.
+ *
+ * See also webkit_user_content_manager_remove_all_style_sheets().
+ *
+ * Since: 2.32
+ */
+void webkit_user_content_manager_remove_style_sheet(WebKitUserContentManager* manager, WebKitUserStyleSheet* styleSheet)
+{
+    g_return_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager));
+    g_return_if_fail(styleSheet);
+    manager->priv->userContentController->removeUserStyleSheet(webkitUserStyleSheetGetUserStyleSheet(styleSheet));
 }
 
 /**
@@ -154,6 +177,7 @@ void webkit_user_content_manager_remove_all_style_sheets(WebKitUserContentManage
  * @script: A #WebKitUserScript
  *
  * Adds a #WebKitUserScript to the given #WebKitUserContentManager.
+ *
  * The same #WebKitUserScript can be reused with multiple
  * #WebKitUserContentManager instances.
  *
@@ -163,7 +187,25 @@ void webkit_user_content_manager_add_script(WebKitUserContentManager* manager, W
 {
     g_return_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager));
     g_return_if_fail(script);
-    manager->priv->userContentController->addUserScript(webkitUserScriptGetUserScript(script));
+    manager->priv->userContentController->addUserScript(webkitUserScriptGetUserScript(script), InjectUserScriptImmediately::No);
+}
+
+/**
+ * webkit_user_content_manager_remove_script:
+ * @manager: A #WebKitUserContentManager
+ * @script: A #WebKitUserScript
+ *
+ * Removes a #WebKitUserScript from the given #WebKitUserContentManager.
+ *
+ * See also webkit_user_content_manager_remove_all_scripts().
+ *
+ * Since: 2.32
+ */
+void webkit_user_content_manager_remove_script(WebKitUserContentManager* manager, WebKitUserScript* script)
+{
+    g_return_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager));
+    g_return_if_fail(script);
+    manager->priv->userContentController->removeUserScript(webkitUserScriptGetUserScript(script));
 }
 
 /**
@@ -171,6 +213,8 @@ void webkit_user_content_manager_add_script(WebKitUserContentManager* manager, W
  * @manager: A #WebKitUserContentManager
  *
  * Removes all user scripts from the given #WebKitUserContentManager
+ *
+ * See also webkit_user_content_manager_remove_script().
  *
  * Since: 2.6
  */
@@ -181,6 +225,7 @@ void webkit_user_content_manager_remove_all_scripts(WebKitUserContentManager* ma
 }
 
 class ScriptMessageClientGtk final : public WebScriptMessageHandler::Client {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     ScriptMessageClientGtk(WebKitUserContentManager* manager, const char* handlerName)
         : m_handlerName(g_quark_from_string(handlerName))
@@ -188,13 +233,22 @@ public:
     {
     }
 
-    void didPostMessage(WebPageProxy& page, const FrameInfoData&, WebCore::SerializedScriptValue& serializedScriptValue) override
+    void didPostMessage(WebPageProxy&, FrameInfoData&&, API::ContentWorld&, WebCore::SerializedScriptValue& serializedScriptValue) override
     {
-        WebKitJavascriptResult* jsResult = webkitJavascriptResultCreate(page.javascriptGlobalContext(), serializedScriptValue);
+        WebKitJavascriptResult* jsResult = webkitJavascriptResultCreate(serializedScriptValue);
         g_signal_emit(m_manager, signals[SCRIPT_MESSAGE_RECEIVED], m_handlerName, jsResult);
         webkit_javascript_result_unref(jsResult);
     }
 
+    bool supportsAsyncReply() override
+    {
+        return false;
+    }
+    
+    void didPostMessageWithAsyncReply(WebPageProxy&, FrameInfoData&&, API::ContentWorld&, WebCore::SerializedScriptValue&, WTF::Function<void(API::SerializedScriptValue*, const String&)>&&) override
+    {
+    }
+    
     virtual ~ScriptMessageClientGtk() { }
 
 private:
@@ -207,8 +261,10 @@ private:
  * @manager: A #WebKitUserContentManager
  * @name: Name of the script message channel
  *
- * Registers a new user script message handler. After it is registered,
- * scripts can use `window.webkit.messageHandlers.&lt;name&gt;.postMessage(value)`
+ * Registers a new user script message handler.
+ *
+ * After it is registered,
+ * scripts can use `window.webkit.messageHandlers.<name>.postMessage(value)`
  * to send messages. Those messages are received by connecting handlers
  * to the #WebKitUserContentManager::script-message-received signal. The
  * handler name is used as the detail of the signal. To avoid race
@@ -216,13 +272,13 @@ private:
  * receive the signals, it is recommended to connect to the signal
  * *before* registering the handler name:
  *
- * <informalexample><programlisting>
+ * ```c
  * WebKitWebView *view = webkit_web_view_new ();
  * WebKitUserContentManager *manager = webkit_web_view_get_user_content_manager ();
  * g_signal_connect (manager, "script-message-received::foobar",
  *                   G_CALLBACK (handle_script_message), NULL);
  * webkit_user_content_manager_register_script_message_handler (manager, "foobar");
- * </programlisting></informalexample>
+ * ```
  *
  * Registering a script message handler will fail if the requested
  * name has been already registered before.
@@ -237,7 +293,7 @@ gboolean webkit_user_content_manager_register_script_message_handler(WebKitUserC
     g_return_val_if_fail(name, FALSE);
 
     Ref<WebScriptMessageHandler> handler =
-        WebScriptMessageHandler::create(std::make_unique<ScriptMessageClientGtk>(manager, name), String::fromUTF8(name), API::UserContentWorld::normalWorld());
+        WebScriptMessageHandler::create(makeUnique<ScriptMessageClientGtk>(manager, name), AtomString::fromUTF8(name), API::ContentWorld::pageContentWorld());
     return manager->priv->userContentController->addUserScriptMessageHandler(handler.get());
 }
 
@@ -249,11 +305,11 @@ gboolean webkit_user_content_manager_register_script_message_handler(WebKitUserC
  * Unregisters a previously registered message handler.
  *
  * Note that this does *not* disconnect handlers for the
- * #WebKitUserContentManager::script-message-received signal,
+ * #WebKitUserContentManager::script-message-received signal;
  * they will be kept connected, but the signal will not be emitted
  * unless the handler name is registered again.
  *
- * See also webkit_user_content_manager_register_script_message_handler()
+ * See also webkit_user_content_manager_register_script_message_handler().
  *
  * Since: 2.8
  */
@@ -261,7 +317,141 @@ void webkit_user_content_manager_unregister_script_message_handler(WebKitUserCon
 {
     g_return_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager));
     g_return_if_fail(name);
-    manager->priv->userContentController->removeUserMessageHandlerForName(String::fromUTF8(name), API::UserContentWorld::normalWorld());
+    manager->priv->userContentController->removeUserMessageHandlerForName(String::fromUTF8(name), API::ContentWorld::pageContentWorld());
+}
+
+/**
+ * webkit_user_content_manager_register_script_message_handler_in_world:
+ * @manager: A #WebKitUserContentManager
+ * @name: Name of the script message channel
+ * @world_name: the name of a #WebKitScriptWorld
+ *
+ * Registers a new user script message handler in script world.
+ *
+ * Registers a new user script message handler in script world with name @world_name.
+ * See webkit_user_content_manager_register_script_message_handler() for full description.
+ *
+ * Registering a script message handler will fail if the requested
+ * name has been already registered before.
+ *
+ * Returns: %TRUE if message handler was registered successfully, or %FALSE otherwise.
+ *
+ * Since: 2.22
+ */
+gboolean webkit_user_content_manager_register_script_message_handler_in_world(WebKitUserContentManager* manager, const char* name, const char* worldName)
+{
+    g_return_val_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager), FALSE);
+    g_return_val_if_fail(name, FALSE);
+    g_return_val_if_fail(worldName, FALSE);
+
+    Ref<WebScriptMessageHandler> handler =
+        WebScriptMessageHandler::create(makeUnique<ScriptMessageClientGtk>(manager, name), AtomString::fromUTF8(name), webkitContentWorld(worldName));
+    return manager->priv->userContentController->addUserScriptMessageHandler(handler.get());
+}
+
+/**
+ * webkit_user_content_manager_unregister_script_message_handler_in_world:
+ * @manager: A #WebKitUserContentManager
+ * @name: Name of the script message channel
+ * @world_name: the name of a #WebKitScriptWorld
+ *
+ * Unregisters a previously registered message handler in script world with name @world_name.
+ *
+ * Note that this does *not* disconnect handlers for the
+ * #WebKitUserContentManager::script-message-received signal;
+ * they will be kept connected, but the signal will not be emitted
+ * unless the handler name is registered again.
+ *
+ * See also webkit_user_content_manager_register_script_message_handler_in_world().
+ *
+ * Since: 2.22
+ */
+void webkit_user_content_manager_unregister_script_message_handler_in_world(WebKitUserContentManager* manager, const char* name, const char* worldName)
+{
+    g_return_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager));
+    g_return_if_fail(name);
+    g_return_if_fail(worldName);
+
+    manager->priv->userContentController->removeUserMessageHandlerForName(String::fromUTF8(name), webkitContentWorld(worldName));
+}
+
+/**
+ * webkit_user_content_manager_add_filter:
+ * @manager: A #WebKitUserContentManager
+ * @filter: A #WebKitUserContentFilter
+ *
+ * Adds a #WebKitUserContentFilter to the given #WebKitUserContentManager.
+ *
+ * The same #WebKitUserContentFilter can be reused with multiple
+ * #WebKitUserContentManager instances.
+ *
+ * Filters need to be saved and loaded from #WebKitUserContentFilterStore.
+ *
+ * Since: 2.24
+ */
+void webkit_user_content_manager_add_filter(WebKitUserContentManager* manager, WebKitUserContentFilter* filter)
+{
+    g_return_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager));
+    g_return_if_fail(filter);
+#if ENABLE(CONTENT_EXTENSIONS)
+    manager->priv->userContentController->addContentRuleList(webkitUserContentFilterGetContentRuleList(filter));
+#endif
+}
+
+/**
+ * webkit_user_content_manager_remove_filter:
+ * @manager: A #WebKitUserContentManager
+ * @filter: A #WebKitUserContentFilter
+ *
+ * Removes a filter from the given #WebKitUserContentManager.
+ *
+ * Since 2.24
+ */
+void webkit_user_content_manager_remove_filter(WebKitUserContentManager* manager, WebKitUserContentFilter* filter)
+{
+    g_return_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager));
+    g_return_if_fail(filter);
+#if ENABLE(CONTENT_EXTENSIONS)
+    manager->priv->userContentController->removeContentRuleList(webkitUserContentFilterGetContentRuleList(filter).name());
+#endif
+}
+
+/**
+ * webkit_user_content_manager_remove_filter_by_id:
+ * @manager: A #WebKitUserContentManager
+ * @filter_id: Filter identifier
+ *
+ * Removes a filter by the given identifier.
+ *
+ * Removes a filter from the given #WebKitUserContentManager given the
+ * identifier of a #WebKitUserContentFilter as returned by
+ * webkit_user_content_filter_get_identifier().
+ *
+ * Since: 2.26
+ */
+void webkit_user_content_manager_remove_filter_by_id(WebKitUserContentManager* manager, const char* filterId)
+{
+    g_return_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager));
+    g_return_if_fail(filterId);
+#if ENABLE(CONTENT_EXTENSIONS)
+    manager->priv->userContentController->removeContentRuleList(String::fromUTF8(filterId));
+#endif
+}
+
+/**
+ * webkit_user_content_manager_remove_all_filters:
+ * @manager: A #WebKitUserContentManager
+ *
+ * Removes all content filters from the given #WebKitUserContentManager.
+ *
+ * Since: 2.24
+ */
+void webkit_user_content_manager_remove_all_filters(WebKitUserContentManager* manager)
+{
+    g_return_if_fail(WEBKIT_IS_USER_CONTENT_MANAGER(manager));
+#if ENABLE(CONTENT_EXTENSIONS)
+    manager->priv->userContentController->removeAllContentRuleLists();
+#endif
 }
 
 WebUserContentControllerProxy* webkitUserContentManagerGetUserContentControllerProxy(WebKitUserContentManager* manager)

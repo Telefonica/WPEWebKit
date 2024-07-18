@@ -40,6 +40,7 @@ class RenderMathMLOperator;
 class MathMLPresentationElement;
 
 class RenderMathMLBlock : public RenderBlock {
+    WTF_MAKE_ISO_ALLOCATED(RenderMathMLBlock);
 public:
     RenderMathMLBlock(MathMLPresentationElement&, RenderStyle&&);
     RenderMathMLBlock(Document&, RenderStyle&&);
@@ -56,38 +57,40 @@ public:
     // embellished operator, and omits any embellishments.
     // FIXME: We don't yet handle all the cases in the MathML spec. See
     // https://bugs.webkit.org/show_bug.cgi?id=78617.
-    virtual RenderMathMLOperator* unembellishedOperator() { return 0; }
+    virtual RenderMathMLOperator* unembellishedOperator() const { return 0; }
 
-    int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const override;
+    LayoutUnit baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const override;
 
 #if ENABLE(DEBUG_MATH_LAYOUT)
     virtual void paint(PaintInfo&, const LayoutPoint&);
 #endif
 
 protected:
+    void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override;
+
     LayoutUnit ruleThicknessFallback() const
     {
         // This function returns a value for the default rule thickness (TeX's \xi_8) to be used as a fallback when we lack a MATH table.
         // This arbitrary value of 0.05em was used in early WebKit MathML implementations for the thickness of the fraction bars.
         // Note that Gecko has a slower but more accurate version that measures the thickness of U+00AF MACRON to be more accurate and otherwise fallback to some arbitrary value.
-        return 0.05f * style().fontCascade().size();
+        return LayoutUnit(0.05f * style().fontCascade().size());
     }
 
     LayoutUnit mathAxisHeight() const;
-    LayoutUnit mirrorIfNeeded(LayoutUnit horizontalOffset, LayoutUnit boxWidth = 0) const;
+    LayoutUnit mirrorIfNeeded(LayoutUnit horizontalOffset, LayoutUnit boxWidth = 0_lu) const;
     LayoutUnit mirrorIfNeeded(LayoutUnit horizontalOffset, const RenderBox& child) const { return mirrorIfNeeded(horizontalOffset, child.logicalWidth()); }
 
     static LayoutUnit ascentForChild(const RenderBox& child)
     {
-        return child.firstLineBaseline().value_or(child.logicalHeight());
+        return child.firstLineBaseline().value_or(child.logicalHeight().toInt());
     }
 
-    void layoutBlock(bool relayoutChildren, LayoutUnit pageLogicalHeight = 0) override;
-    void layoutInvalidMarkup();
+    void layoutBlock(bool relayoutChildren, LayoutUnit pageLogicalHeight = 0_lu) override;
+    void layoutInvalidMarkup(bool relayoutChildren);
 
 private:
     bool isRenderMathMLBlock() const final { return true; }
-    const char* renderName() const override { return "RenderMathMLBlock"; }
+    ASCIILiteral renderName() const override { return "RenderMathMLBlock"_s; }
     bool avoidsFloats() const final { return true; }
     bool canDropAnonymousBlockChild() const final { return false; }
     void layoutItems(bool relayoutChildren);
@@ -96,6 +99,7 @@ private:
 };
 
 class RenderMathMLTable final : public RenderTable {
+    WTF_MAKE_ISO_ALLOCATED(RenderMathMLTable);
 public:
     explicit RenderMathMLTable(MathMLElement& element, RenderStyle&& style)
         : RenderTable(element, WTFMove(style))
@@ -108,8 +112,8 @@ public:
 
 private:
     bool isRenderMathMLTable() const final { return true; }
-    const char* renderName() const final { return "RenderMathMLTable"; }
-    std::optional<int> firstLineBaseline() const final;
+    ASCIILiteral renderName() const final { return "RenderMathMLTable"_s; }
+    std::optional<LayoutUnit> firstLineBaseline() const final;
 
     Ref<MathMLStyle> m_mathMLStyle;
 };

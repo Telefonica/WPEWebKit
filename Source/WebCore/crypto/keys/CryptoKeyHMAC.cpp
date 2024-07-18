@@ -26,7 +26,7 @@
 #include "config.h"
 #include "CryptoKeyHMAC.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 #include "CryptoAlgorithmHmacKeyParams.h"
 #include "CryptoAlgorithmRegistry.h"
@@ -67,9 +67,7 @@ CryptoKeyHMAC::CryptoKeyHMAC(Vector<uint8_t>&& key, CryptoAlgorithmIdentifier ha
 {
 }
 
-CryptoKeyHMAC::~CryptoKeyHMAC()
-{
-}
+CryptoKeyHMAC::~CryptoKeyHMAC() = default;
 
 RefPtr<CryptoKeyHMAC> CryptoKeyHMAC::generate(size_t lengthBits, CryptoAlgorithmIdentifier hash, bool extractable, CryptoKeyUsageBitmap usages)
 {
@@ -101,30 +99,30 @@ RefPtr<CryptoKeyHMAC> CryptoKeyHMAC::importRaw(size_t lengthBits, CryptoAlgorith
 
 RefPtr<CryptoKeyHMAC> CryptoKeyHMAC::importJwk(size_t lengthBits, CryptoAlgorithmIdentifier hash, JsonWebKey&& keyData, bool extractable, CryptoKeyUsageBitmap usages, CheckAlgCallback&& callback)
 {
-    if (keyData.kty != "oct")
+    if (keyData.kty != "oct"_s)
         return nullptr;
     if (keyData.k.isNull())
         return nullptr;
-    Vector<uint8_t> octetSequence;
-    if (!base64URLDecode(keyData.k, octetSequence))
+    auto octetSequence = base64URLDecode(keyData.k);
+    if (!octetSequence)
         return nullptr;
     if (!callback(hash, keyData.alg))
         return nullptr;
-    if (usages && !keyData.use.isNull() && keyData.use != "sig")
+    if (usages && !keyData.use.isNull() && keyData.use != "sig"_s)
         return nullptr;
     if (keyData.key_ops && ((keyData.usages & usages) != usages))
         return nullptr;
     if (keyData.ext && !keyData.ext.value() && extractable)
         return nullptr;
 
-    return CryptoKeyHMAC::importRaw(lengthBits, hash, WTFMove(octetSequence), extractable, usages);
+    return CryptoKeyHMAC::importRaw(lengthBits, hash, WTFMove(*octetSequence), extractable, usages);
 }
 
 JsonWebKey CryptoKeyHMAC::exportJwk() const
 {
     JsonWebKey result;
-    result.kty = "oct";
-    result.k = base64URLEncode(m_key);
+    result.kty = "oct"_s;
+    result.k = base64URLEncodeToString(m_key);
     result.key_ops = usages();
     result.ext = extractable();
     return result;
@@ -152,4 +150,4 @@ auto CryptoKeyHMAC::algorithm() const -> KeyAlgorithm
 
 } // namespace WebCore
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

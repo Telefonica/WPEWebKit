@@ -8,15 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/vad/standalone_vad.h"
+#include "modules/audio_processing/vad/standalone_vad.h"
 
 #include <string.h>
 
 #include <memory>
 
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/testsupport/fileutils.h"
+#include "test/gtest.h"
+#include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 
@@ -32,7 +31,7 @@ TEST(StandaloneVadTest, Api) {
   for (size_t n = 0; n < kMaxNumFrames; n++)
     EXPECT_EQ(0, vad->AddAudio(data, kLength10Ms));
 
-  // Pretend |p| is shorter that it should be.
+  // Pretend `p` is shorter that it should be.
   EXPECT_EQ(-1, vad->GetActivity(p, kMaxNumFrames - 1));
 
   EXPECT_EQ(0, vad->GetActivity(p, kMaxNumFrames));

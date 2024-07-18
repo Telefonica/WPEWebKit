@@ -8,13 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/common_video/h264/sps_parser.h"
+#include "common_video/h264/sps_parser.h"
 
-#include "webrtc/base/arraysize.h"
-#include "webrtc/base/bitbuffer.h"
-#include "webrtc/base/buffer.h"
-#include "webrtc/common_video/h264/h264_common.h"
-#include "webrtc/test/gtest.h"
+#include "common_video/h264/h264_common.h"
+#include "rtc_base/arraysize.h"
+#include "rtc_base/bit_buffer.h"
+#include "rtc_base/buffer.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
@@ -43,6 +43,8 @@ static const size_t kSpsBufferMaxSize = 256;
 void GenerateFakeSps(uint16_t width,
                      uint16_t height,
                      int id,
+                     uint32_t log2_max_frame_num_minus4,
+                     uint32_t log2_max_pic_order_cnt_lsb_minus4,
                      rtc::Buffer* out_buffer) {
   uint8_t rbsp[kSpsBufferMaxSize] = {0};
   rtc::BitBufferWriter writer(rbsp, kSpsBufferMaxSize);
@@ -57,12 +59,12 @@ void GenerateFakeSps(uint16_t width,
   // Profile is not special, so we skip all the chroma format settings.
 
   // Now some bit magic.
-  // log2_max_frame_num_minus4: ue(v). 0 is fine.
-  writer.WriteExponentialGolomb(0);
+  // log2_max_frame_num_minus4: ue(v).
+  writer.WriteExponentialGolomb(log2_max_frame_num_minus4);
   // pic_order_cnt_type: ue(v). 0 is the type we want.
   writer.WriteExponentialGolomb(0);
   // log2_max_pic_order_cnt_lsb_minus4: ue(v). 0 is fine.
-  writer.WriteExponentialGolomb(0);
+  writer.WriteExponentialGolomb(log2_max_pic_order_cnt_lsb_minus4);
   // max_num_ref_frames: ue(v). 0 is fine.
   writer.WriteExponentialGolomb(0);
   // gaps_in_frame_num_value_allowed_flag: u(1).
@@ -104,71 +106,129 @@ void GenerateFakeSps(uint16_t width,
     byte_count++;
   }
 
+  out_buffer->Clear();
   H264::WriteRbsp(rbsp, byte_count, out_buffer);
 }
 
-class H264SpsParserTest : public ::testing::Test {
- public:
-  H264SpsParserTest() {}
-  virtual ~H264SpsParserTest() {}
-
-  rtc::Optional<SpsParser::SpsState> sps_;
-};
-
-TEST_F(H264SpsParserTest, TestSampleSPSHdLandscape) {
+TEST(H264SpsParserTest, TestSampleSPSHdLandscape) {
   // SPS for a 1280x720 camera capture from ffmpeg on osx. Contains
   // emulation bytes but no cropping.
   const uint8_t buffer[] = {0x7A, 0x00, 0x1F, 0xBC, 0xD9, 0x40, 0x50, 0x05,
                             0xBA, 0x10, 0x00, 0x00, 0x03, 0x00, 0xC0, 0x00,
                             0x00, 0x2A, 0xE0, 0xF1, 0x83, 0x19, 0x60};
-  EXPECT_TRUE(
-      static_cast<bool>(sps_ = SpsParser::ParseSps(buffer, arraysize(buffer))));
-  EXPECT_EQ(1280u, sps_->width);
-  EXPECT_EQ(720u, sps_->height);
+  absl::optional<SpsParser::SpsState> sps =
+      SpsParser::ParseSps(buffer, arraysize(buffer));
+  ASSERT_TRUE(sps.has_value());
+  EXPECT_EQ(1280u, sps->width);
+  EXPECT_EQ(720u, sps->height);
 }
 
-TEST_F(H264SpsParserTest, TestSampleSPSVgaLandscape) {
+TEST(H264SpsParserTest, TestSampleSPSVgaLandscape) {
   // SPS for a 640x360 camera capture from ffmpeg on osx. Contains emulation
   // bytes and cropping (360 isn't divisible by 16).
   const uint8_t buffer[] = {0x7A, 0x00, 0x1E, 0xBC, 0xD9, 0x40, 0xA0, 0x2F,
                             0xF8, 0x98, 0x40, 0x00, 0x00, 0x03, 0x01, 0x80,
                             0x00, 0x00, 0x56, 0x83, 0xC5, 0x8B, 0x65, 0x80};
-  EXPECT_TRUE(
-      static_cast<bool>(sps_ = SpsParser::ParseSps(buffer, arraysize(buffer))));
-  EXPECT_EQ(640u, sps_->width);
-  EXPECT_EQ(360u, sps_->height);
+  absl::optional<SpsParser::SpsState> sps =
+      SpsParser::ParseSps(buffer, arraysize(buffer));
+  ASSERT_TRUE(sps.has_value());
+  EXPECT_EQ(640u, sps->width);
+  EXPECT_EQ(360u, sps->height);
 }
 
-TEST_F(H264SpsParserTest, TestSampleSPSWeirdResolution) {
+TEST(H264SpsParserTest, TestSampleSPSWeirdResolution) {
   // SPS for a 200x400 camera capture from ffmpeg on osx. Horizontal and
   // veritcal crop (neither dimension is divisible by 16).
   const uint8_t buffer[] = {0x7A, 0x00, 0x0D, 0xBC, 0xD9, 0x43, 0x43, 0x3E,
                             0x5E, 0x10, 0x00, 0x00, 0x03, 0x00, 0x60, 0x00,
                             0x00, 0x15, 0xA0, 0xF1, 0x42, 0x99, 0x60};
-  EXPECT_TRUE(
-      static_cast<bool>(sps_ = SpsParser::ParseSps(buffer, arraysize(buffer))));
-  EXPECT_EQ(200u, sps_->width);
-  EXPECT_EQ(400u, sps_->height);
+  absl::optional<SpsParser::SpsState> sps =
+      SpsParser::ParseSps(buffer, arraysize(buffer));
+  ASSERT_TRUE(sps.has_value());
+  EXPECT_EQ(200u, sps->width);
+  EXPECT_EQ(400u, sps->height);
 }
 
-TEST_F(H264SpsParserTest, TestSyntheticSPSQvgaLandscape) {
+TEST(H264SpsParserTest, TestSyntheticSPSQvgaLandscape) {
   rtc::Buffer buffer;
-  GenerateFakeSps(320u, 180u, 1, &buffer);
-  EXPECT_TRUE(static_cast<bool>(
-      sps_ = SpsParser::ParseSps(buffer.data(), buffer.size())));
-  EXPECT_EQ(320u, sps_->width);
-  EXPECT_EQ(180u, sps_->height);
-  EXPECT_EQ(1u, sps_->id);
+  GenerateFakeSps(320u, 180u, 1, 0, 0, &buffer);
+  absl::optional<SpsParser::SpsState> sps =
+      SpsParser::ParseSps(buffer.data(), buffer.size());
+  ASSERT_TRUE(sps.has_value());
+  EXPECT_EQ(320u, sps->width);
+  EXPECT_EQ(180u, sps->height);
+  EXPECT_EQ(1u, sps->id);
 }
 
-TEST_F(H264SpsParserTest, TestSyntheticSPSWeirdResolution) {
+TEST(H264SpsParserTest, TestSyntheticSPSWeirdResolution) {
   rtc::Buffer buffer;
-  GenerateFakeSps(156u, 122u, 2, &buffer);
+  GenerateFakeSps(156u, 122u, 2, 0, 0, &buffer);
+  absl::optional<SpsParser::SpsState> sps =
+      SpsParser::ParseSps(buffer.data(), buffer.size());
+  ASSERT_TRUE(sps.has_value());
+  EXPECT_EQ(156u, sps->width);
+  EXPECT_EQ(122u, sps->height);
+  EXPECT_EQ(2u, sps->id);
+}
+
+TEST(H264SpsParserTest, TestSampleSPSWithScalingLists) {
+  // SPS from a 1920x1080 video. Contains scaling lists (and vertical cropping).
+  const uint8_t buffer[] = {0x64, 0x00, 0x2a, 0xad, 0x84, 0x01, 0x0c, 0x20,
+                            0x08, 0x61, 0x00, 0x43, 0x08, 0x02, 0x18, 0x40,
+                            0x10, 0xc2, 0x00, 0x84, 0x3b, 0x50, 0x3c, 0x01,
+                            0x13, 0xf2, 0xcd, 0xc0, 0x40, 0x40, 0x50, 0x00,
+                            0x00, 0x00, 0x10, 0x00, 0x00, 0x01, 0xe8, 0x40};
+  absl::optional<SpsParser::SpsState> sps =
+      SpsParser::ParseSps(buffer, arraysize(buffer));
+  ASSERT_TRUE(sps.has_value());
+  EXPECT_EQ(1920u, sps->width);
+  EXPECT_EQ(1080u, sps->height);
+}
+
+TEST(H264SpsParserTest, TestLog2MaxFrameNumMinus4) {
+  rtc::Buffer buffer;
+  GenerateFakeSps(320u, 180u, 1, 0, 0, &buffer);
+  absl::optional<SpsParser::SpsState> sps =
+      SpsParser::ParseSps(buffer.data(), buffer.size());
+  ASSERT_TRUE(sps.has_value());
+  EXPECT_EQ(320u, sps->width);
+  EXPECT_EQ(180u, sps->height);
+  EXPECT_EQ(1u, sps->id);
+  EXPECT_EQ(4u, sps->log2_max_frame_num);
+
+  GenerateFakeSps(320u, 180u, 1, 12, 0, &buffer);
+  sps = SpsParser::ParseSps(buffer.data(), buffer.size());
+  ASSERT_TRUE(sps.has_value());
+  EXPECT_EQ(320u, sps->width);
+  EXPECT_EQ(180u, sps->height);
+  EXPECT_EQ(1u, sps->id);
+  EXPECT_EQ(16u, sps->log2_max_frame_num);
+
+  GenerateFakeSps(320u, 180u, 1, 13, 0, &buffer);
+  EXPECT_FALSE(SpsParser::ParseSps(buffer.data(), buffer.size()));
+}
+
+TEST(H264SpsParserTest, TestLog2MaxPicOrderCntMinus4) {
+  rtc::Buffer buffer;
+  GenerateFakeSps(320u, 180u, 1, 0, 0, &buffer);
+  absl::optional<SpsParser::SpsState> sps =
+      SpsParser::ParseSps(buffer.data(), buffer.size());
+  ASSERT_TRUE(sps.has_value());
+  EXPECT_EQ(320u, sps->width);
+  EXPECT_EQ(180u, sps->height);
+  EXPECT_EQ(1u, sps->id);
+  EXPECT_EQ(4u, sps->log2_max_pic_order_cnt_lsb);
+
+  GenerateFakeSps(320u, 180u, 1, 0, 12, &buffer);
   EXPECT_TRUE(static_cast<bool>(
-      sps_ = SpsParser::ParseSps(buffer.data(), buffer.size())));
-  EXPECT_EQ(156u, sps_->width);
-  EXPECT_EQ(122u, sps_->height);
-  EXPECT_EQ(2u, sps_->id);
+      sps = SpsParser::ParseSps(buffer.data(), buffer.size())));
+  EXPECT_EQ(320u, sps->width);
+  EXPECT_EQ(180u, sps->height);
+  EXPECT_EQ(1u, sps->id);
+  EXPECT_EQ(16u, sps->log2_max_pic_order_cnt_lsb);
+
+  GenerateFakeSps(320u, 180u, 1, 0, 13, &buffer);
+  EXPECT_FALSE(SpsParser::ParseSps(buffer.data(), buffer.size()));
 }
 
 }  // namespace webrtc

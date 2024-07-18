@@ -8,20 +8,20 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_TEST_CHANNEL_H_
-#define WEBRTC_MODULES_AUDIO_CODING_TEST_CHANNEL_H_
+#ifndef MODULES_AUDIO_CODING_TEST_CHANNEL_H_
+#define MODULES_AUDIO_CODING_TEST_CHANNEL_H_
 
 #include <stdio.h>
 
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/modules/audio_coding/include/audio_coding_module.h"
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/typedefs.h"
+#include "modules/audio_coding/acm2/acm_receiver.h"
+#include "modules/audio_coding/include/audio_coding_module.h"
+#include "modules/include/module_common_types.h"
+#include "rtc_base/synchronization/mutex.h"
 
 namespace webrtc {
 
-#define MAX_NUM_PAYLOADS   50
-#define MAX_NUM_FRAMESIZES  6
+#define MAX_NUM_PAYLOADS 50
+#define MAX_NUM_FRAMESIZES 6
 
 // TODO(turajs): Write constructor for this structure.
 struct ACMTestFrameSizeStats {
@@ -45,32 +45,21 @@ struct ACMTestPayloadStats {
 
 class Channel : public AudioPacketizationCallback {
  public:
-
   Channel(int16_t chID = -1);
   ~Channel() override;
 
-  int32_t SendData(FrameType frameType,
+  int32_t SendData(AudioFrameType frameType,
                    uint8_t payloadType,
                    uint32_t timeStamp,
                    const uint8_t* payloadData,
                    size_t payloadSize,
-                   const RTPFragmentationHeader* fragmentation) override;
+                   int64_t absolute_capture_timestamp_ms) override;
 
-  void RegisterReceiverACM(AudioCodingModule *acm);
+  void RegisterReceiverACM(acm2::AcmReceiver* acm_receiver);
 
   void ResetStats();
 
-  int16_t Stats(CodecInst& codecInst, ACMTestPayloadStats& payloadStats);
-
-  void Stats(uint32_t* numPackets);
-
-  void Stats(uint8_t* payloadType, uint32_t* payloadLenByte);
-
-  void PrintStats(CodecInst& codecInst);
-
-  void SetIsStereo(bool isStereo) {
-    _isStereo = isStereo;
-  }
+  void SetIsStereo(bool isStereo) { _isStereo = isStereo; }
 
   uint32_t LastInTimestamp();
 
@@ -93,20 +82,20 @@ class Channel : public AudioPacketizationCallback {
   }
 
  private:
-  void CalcStatistics(WebRtcRTPHeader& rtpInfo, size_t payloadSize);
+  void CalcStatistics(const RTPHeader& rtp_header, size_t payloadSize);
 
-  AudioCodingModule* _receiverACM;
+  acm2::AcmReceiver* _receiverACM;
   uint16_t _seqNo;
   // 60msec * 32 sample(max)/msec * 2 description (maybe) * 2 bytes/sample
   uint8_t _payloadData[60 * 32 * 2 * 2];
 
-  rtc::CriticalSection _channelCritSect;
+  Mutex _channelCritSect;
   FILE* _bitStreamFile;
   bool _saveBitStream;
   int16_t _lastPayloadType;
   ACMTestPayloadStats _payloadStats[MAX_NUM_PAYLOADS];
   bool _isStereo;
-  WebRtcRTPHeader _rtpInfo;
+  RTPHeader _rtp_header;
   bool _leftChannel;
   uint32_t _lastInTimestamp;
   bool _useLastFrameSize;
@@ -126,4 +115,4 @@ class Channel : public AudioPacketizationCallback {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_TEST_CHANNEL_H_
+#endif  // MODULES_AUDIO_CODING_TEST_CHANNEL_H_

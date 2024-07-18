@@ -37,21 +37,21 @@
 
 namespace WebCore {
 
-inline MutationObserverInterestGroup::MutationObserverInterestGroup(HashMap<MutationObserver*, MutationRecordDeliveryOptions>&& observers, MutationRecordDeliveryOptions oldValueFlag)
+inline MutationObserverInterestGroup::MutationObserverInterestGroup(HashMap<Ref<MutationObserver>, MutationRecordDeliveryOptions>&& observers, MutationRecordDeliveryOptions oldValueFlag)
     : m_observers(WTFMove(observers))
     , m_oldValueFlag(oldValueFlag)
 {
     ASSERT(!m_observers.isEmpty());
 }
 
-std::unique_ptr<MutationObserverInterestGroup> MutationObserverInterestGroup::createIfNeeded(Node& target, MutationObserver::MutationType type, MutationRecordDeliveryOptions oldValueFlag, const QualifiedName* attributeName)
+std::unique_ptr<MutationObserverInterestGroup> MutationObserverInterestGroup::createIfNeeded(Node& target, MutationObserverOptionType type, MutationRecordDeliveryOptions oldValueFlag, const QualifiedName* attributeName)
 {
-    ASSERT((type == MutationObserver::Attributes && attributeName) || !attributeName);
+    ASSERT((type == MutationObserverOptionType::Attributes && attributeName) || !attributeName);
     auto observers = target.registeredMutationObservers(type, attributeName);
     if (observers.isEmpty())
         return nullptr;
 
-    return std::make_unique<MutationObserverInterestGroup>(WTFMove(observers), oldValueFlag);
+    return makeUnique<MutationObserverInterestGroup>(WTFMove(observers), oldValueFlag);
 }
 
 bool MutationObserverInterestGroup::isOldValueRequested() const
@@ -67,9 +67,9 @@ void MutationObserverInterestGroup::enqueueMutationRecord(Ref<MutationRecord>&& 
 {
     RefPtr<MutationRecord> mutationWithNullOldValue;
     for (auto& observerOptionsPair : m_observers) {
-        MutationObserver* observer = observerOptionsPair.key;
+        auto& observer = observerOptionsPair.key.get();
         if (hasOldValue(observerOptionsPair.value)) {
-            observer->enqueueMutationRecord(mutation.copyRef());
+            observer.enqueueMutationRecord(mutation.copyRef());
             continue;
         }
         if (!mutationWithNullOldValue) {
@@ -78,7 +78,7 @@ void MutationObserverInterestGroup::enqueueMutationRecord(Ref<MutationRecord>&& 
             else
                 mutationWithNullOldValue = MutationRecord::createWithNullOldValue(mutation).ptr();
         }
-        observer->enqueueMutationRecord(*mutationWithNullOldValue);
+        observer.enqueueMutationRecord(*mutationWithNullOldValue);
     }
 }
 

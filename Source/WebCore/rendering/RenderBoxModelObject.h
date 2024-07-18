@@ -25,6 +25,7 @@
 
 #include "FontBaseline.h"
 #include "LayoutRect.h"
+#include "RectEdges.h"
 #include "RenderLayerModelObject.h"
 
 namespace WebCore {
@@ -32,7 +33,6 @@ namespace WebCore {
 // Modes for some of the line-related functions.
 enum LinePositionMode { PositionOnContainingLine, PositionOfInteriorLineBoxes };
 enum LineDirectionMode { HorizontalLine, VerticalLine };
-typedef unsigned BorderEdgeFlags;
 
 enum BackgroundBleedAvoidance {
     BackgroundBleedNone,
@@ -54,15 +54,23 @@ enum ContentChangeType {
     CanvasChanged,
     CanvasPixelsChanged,
     VideoChanged,
-    FullScreenChanged
+    FullScreenChanged,
+    ModelChanged
 };
 
 class BorderEdge;
 class ImageBuffer;
-class InlineFlowBox;
-class KeyframeList;
 class RenderTextFragment;
 class StickyPositionViewportConstraints;
+class TransformationMatrix;
+
+namespace InlineIterator {
+class InlineBoxIterator;
+};
+
+enum class BoxSideFlag : uint8_t;
+using BoxSideSet = OptionSet<BoxSideFlag>;
+using BorderEdges = RectEdges<BorderEdge>;
 
 class BackgroundImageGeometry {
 public:
@@ -104,6 +112,7 @@ private:
 // at http://www.w3.org/TR/CSS21/box.html
 
 class RenderBoxModelObject : public RenderLayerModelObject {
+    WTF_MAKE_ISO_ALLOCATED(RenderBoxModelObject);
 public:
     virtual ~RenderBoxModelObject();
     
@@ -111,6 +120,7 @@ public:
     LayoutSize relativePositionLogicalOffset() const { return style().isHorizontalWritingMode() ? relativePositionOffset() : relativePositionOffset().transposedSize(); }
 
     FloatRect constrainingRectForStickyPosition() const;
+    std::pair<const RenderBox&, const RenderLayer*> enclosingClippingBoxForStickyPosition() const;
     void computeStickyPositionConstraints(StickyPositionViewportConstraints&, const FloatRect& constrainingRect) const;
     LayoutSize stickyPositionOffset() const;
     LayoutSize stickyPositionLogicalOffset() const { return style().isHorizontalWritingMode() ? stickyPositionOffset() : stickyPositionOffset().transposedSize(); }
@@ -126,7 +136,7 @@ public:
 
     void updateFromStyle() override;
 
-    bool requiresLayer() const override { return isDocumentElementRenderer() || isPositioned() || createsGroup() || hasClipPath() || hasTransformRelatedProperty() || hasHiddenBackface() || hasReflection(); }
+    bool requiresLayer() const override { return isDocumentElementRenderer() || isPositioned() || createsGroup() || hasTransformRelatedProperty() || hasHiddenBackface() || hasReflection(); }
 
     // This will work on inlines to return the bounding box of all of the lines' border boxes.
     virtual LayoutRect borderBoundingBox() const = 0;
@@ -152,20 +162,25 @@ public:
     virtual LayoutUnit paddingStart() const { return computedCSSPaddingStart(); }
     virtual LayoutUnit paddingEnd() const { return computedCSSPaddingEnd(); }
 
-    virtual LayoutUnit borderTop() const { return style().borderTopWidth(); }
-    virtual LayoutUnit borderBottom() const { return style().borderBottomWidth(); }
-    virtual LayoutUnit borderLeft() const { return style().borderLeftWidth(); }
-    virtual LayoutUnit borderRight() const { return style().borderRightWidth(); }
+    virtual LayoutUnit borderTop() const { return LayoutUnit(style().borderTopWidth()); }
+    virtual LayoutUnit borderBottom() const { return LayoutUnit(style().borderBottomWidth()); }
+    virtual LayoutUnit borderLeft() const { return LayoutUnit(style().borderLeftWidth()); }
+    virtual LayoutUnit borderRight() const { return LayoutUnit(style().borderRightWidth()); }
     virtual LayoutUnit horizontalBorderExtent() const { return borderLeft() + borderRight(); }
     virtual LayoutUnit verticalBorderExtent() const { return borderTop() + borderBottom(); }
-    virtual LayoutUnit borderBefore() const { return style().borderBeforeWidth(); }
-    virtual LayoutUnit borderAfter() const { return style().borderAfterWidth(); }
-    virtual LayoutUnit borderStart() const { return style().borderStartWidth(); }
-    virtual LayoutUnit borderEnd() const { return style().borderEndWidth(); }
+    virtual LayoutUnit borderBefore() const { return LayoutUnit(style().borderBeforeWidth()); }
+    virtual LayoutUnit borderAfter() const { return LayoutUnit(style().borderAfterWidth()); }
+    virtual LayoutUnit borderStart() const { return LayoutUnit(style().borderStartWidth()); }
+    virtual LayoutUnit borderEnd() const { return LayoutUnit(style().borderEndWidth()); }
 
     LayoutUnit borderAndPaddingStart() const { return borderStart() + paddingStart(); }
     LayoutUnit borderAndPaddingBefore() const { return borderBefore() + paddingBefore(); }
     LayoutUnit borderAndPaddingAfter() const { return borderAfter() + paddingAfter(); }
+
+    LayoutUnit marginAndBorderAndPaddingStart() const { return marginStart() + borderStart() + paddingStart(); }
+    LayoutUnit marginAndBorderAndPaddingEnd() const { return marginEnd() + borderEnd() + paddingEnd(); }
+    LayoutUnit marginAndBorderAndPaddingBefore() const { return marginBefore() + borderBefore() + paddingBefore(); }
+    LayoutUnit marginAndBorderAndPaddingAfter() const { return marginAfter() + borderAfter() + paddingAfter(); }
 
     LayoutUnit verticalBorderAndPaddingExtent() const { return borderTop() + borderBottom() + paddingTop() + paddingBottom(); }
     LayoutUnit horizontalBorderAndPaddingExtent() const { return borderLeft() + borderRight() + paddingLeft() + paddingRight(); }
@@ -201,43 +216,46 @@ public:
 
     virtual LayoutUnit containingBlockLogicalWidthForContent() const;
 
-    virtual void childBecameNonInline(RenderElement&) { }
-
     void paintBorder(const PaintInfo&, const LayoutRect&, const RenderStyle&, BackgroundBleedAvoidance = BackgroundBleedNone, bool includeLogicalLeftEdge = true, bool includeLogicalRightEdge = true);
-    bool paintNinePieceImage(GraphicsContext&, const LayoutRect&, const RenderStyle&, const NinePieceImage&, CompositeOperator = CompositeSourceOver);
+    bool paintNinePieceImage(GraphicsContext&, const LayoutRect&, const RenderStyle&, const NinePieceImage&, CompositeOperator = CompositeOperator::SourceOver);
     void paintBoxShadow(const PaintInfo&, const LayoutRect&, const RenderStyle&, ShadowStyle, bool includeLogicalLeftEdge = true, bool includeLogicalRightEdge = true);
-    void paintFillLayerExtended(const PaintInfo&, const Color&, const FillLayer&, const LayoutRect&, BackgroundBleedAvoidance, InlineFlowBox* = nullptr, const LayoutSize& = LayoutSize(), CompositeOperator = CompositeSourceOver, RenderElement* backgroundObject = nullptr, BaseBackgroundColorUsage = BaseBackgroundColorUse);
+    void paintFillLayerExtended(const PaintInfo&, const Color&, const FillLayer&, const LayoutRect&, BackgroundBleedAvoidance, const InlineIterator::InlineBoxIterator&, const LayoutRect& backgroundImageStrip = { }, CompositeOperator = CompositeOperator::SourceOver, RenderElement* backgroundObject = nullptr, BaseBackgroundColorUsage = BaseBackgroundColorUse);
 
-    virtual bool boxShadowShouldBeAppliedToBackground(const LayoutPoint& absolutePaintPostion, BackgroundBleedAvoidance, InlineFlowBox* = nullptr) const;
+    virtual bool boxShadowShouldBeAppliedToBackground(const LayoutPoint& absolutePaintPostion, BackgroundBleedAvoidance, const InlineIterator::InlineBoxIterator&) const;
 
     // Overridden by subclasses to determine line height and baseline position.
     virtual LayoutUnit lineHeight(bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const = 0;
-    virtual int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const = 0;
+    virtual LayoutUnit baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const = 0;
 
-    void mapAbsoluteToLocalPoint(MapCoordinatesFlags, TransformState&) const override;
+    void mapAbsoluteToLocalPoint(OptionSet<MapCoordinatesMode>, TransformState&) const override;
 
-    void setSelectionState(SelectionState) override;
+    void setSelectionState(HighlightState) override;
 
-    bool canHaveBoxInfoInRegion() const { return !isFloating() && !isReplaced() && !isInline() && !isTableCell() && isRenderBlock() && !isRenderSVGBlock(); }
+    bool canHaveBoxInfoInFragment() const { return !isFloating() && !isReplacedOrInlineBlock() && !isInline() && !isTableCell() && isRenderBlock() && !isRenderSVGBlock(); }
 
     void getGeometryForBackgroundImage(const RenderLayerModelObject* paintContainer, const LayoutPoint& paintOffset, FloatRect& destRect, FloatSize& phase, FloatSize& tileSize) const;
     void contentChanged(ContentChangeType);
     bool hasAcceleratedCompositing() const;
 
-    bool startTransition(double, CSSPropertyID, const RenderStyle* fromStyle, const RenderStyle* toStyle);
-    void transitionPaused(double timeOffset, CSSPropertyID);
-    void transitionFinished(CSSPropertyID);
-
-    bool startAnimation(double timeOffset, const Animation*, const KeyframeList& keyframes);
-    void animationPaused(double timeOffset, const String& name);
-    void animationFinished(const String& name);
-
-    void suspendAnimations(double time = 0);
-
     RenderBoxModelObject* continuation() const;
+    WEBCORE_EXPORT RenderInline* inlineContinuation() const;
+
+    static void forRendererAndContinuations(RenderBoxModelObject&, const std::function<void(RenderBoxModelObject&)>&);
+
+    void insertIntoContinuationChainAfter(RenderBoxModelObject&);
+    void removeFromContinuationChain();
 
     virtual LayoutRect paintRectToClipOutFromBorder(const LayoutRect&) { return LayoutRect(); };
-    
+
+    bool hasRunningAcceleratedAnimations() const;
+
+    virtual std::optional<LayoutUnit> overridingContainingBlockContentWidth() const { ASSERT_NOT_REACHED(); return -1_lu; }
+    virtual std::optional<LayoutUnit> overridingContainingBlockContentHeight() const { ASSERT_NOT_REACHED(); return -1_lu; }
+    virtual bool hasOverridingContainingBlockContentWidth() const { return false; }
+    virtual bool hasOverridingContainingBlockContentHeight() const { return false; }
+
+    void applyTransform(TransformationMatrix&, const RenderStyle&, const FloatRect& boundingBox, OptionSet<RenderStyle::TransformOperationOption> = RenderStyle::allTransformOperations) const override;
+
 protected:
     RenderBoxModelObject(Element&, RenderStyle&&, BaseTypeFlags);
     RenderBoxModelObject(Document&, RenderStyle&&, BaseTypeFlags);
@@ -251,14 +269,10 @@ protected:
         const LayoutRect& paintRect, RenderElement* = nullptr) const;
     bool borderObscuresBackgroundEdge(const FloatSize& contextScale) const;
     bool borderObscuresBackground() const;
-    RoundedRect backgroundRoundedRectAdjustedForBleedAvoidance(const GraphicsContext&, const LayoutRect&, BackgroundBleedAvoidance, InlineFlowBox*, const LayoutSize&, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const;
+    RoundedRect backgroundRoundedRectAdjustedForBleedAvoidance(const GraphicsContext&, const LayoutRect&, BackgroundBleedAvoidance, const InlineIterator::InlineBoxIterator&, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const;
     LayoutRect borderInnerRectAdjustedForBleedAvoidance(const GraphicsContext&, const LayoutRect&, BackgroundBleedAvoidance) const;
 
     InterpolationQuality chooseInterpolationQuality(GraphicsContext&, Image&, const void*, const LayoutSize&);
-
-    void setContinuation(RenderBoxModelObject*);
-
-    LayoutRect localCaretRectForEmptyElement(LayoutUnit width, LayoutUnit textIndentOffset);
 
     static bool shouldAntialiasLines(GraphicsContext&);
 
@@ -269,47 +283,44 @@ protected:
     DecodingMode decodingModeForImageDraw(const Image&, const PaintInfo&) const;
 
 public:
-    // For RenderBlocks and RenderInlines with m_style->styleType() == FIRST_LETTER, this tracks their remaining text fragments
+    // For RenderBlocks and RenderInlines with m_style->styleType() == PseudoId::FirstLetter, this tracks their remaining text fragments
     RenderTextFragment* firstLetterRemainingText() const;
-    void setFirstLetterRemainingText(RenderTextFragment*);
-
-    // These functions are only used internally to manipulate the render tree structure via remove/insert/appendChildNode.
-    // Since they are typically called only to move objects around within anonymous blocks, the default for fullRemoveInsert is false rather than true.
-    void moveChildTo(RenderBoxModelObject* toBoxModelObject, RenderObject* child, RenderObject* beforeChild, bool fullRemoveInsert = false);
-    void moveChildTo(RenderBoxModelObject* toBoxModelObject, RenderObject* child, bool fullRemoveInsert = false)
-    {
-        moveChildTo(toBoxModelObject, child, nullptr, fullRemoveInsert);
-    }
-    void moveAllChildrenTo(RenderBoxModelObject* toBoxModelObject, bool fullRemoveInsert = false)
-    {
-        moveAllChildrenTo(toBoxModelObject, nullptr, fullRemoveInsert);
-    }
-    void moveAllChildrenTo(RenderBoxModelObject* toBoxModelObject, RenderObject* beforeChild, bool fullRemoveInsert = false)
-    {
-        moveChildrenTo(toBoxModelObject, firstChild(), nullptr, beforeChild, fullRemoveInsert);
-    }
-    // Move all of the kids from |startChild| up to but excluding |endChild|. 0 can be passed as the |endChild| to denote
-    // that all the kids from |startChild| onwards should be moved.
-    void moveChildrenTo(RenderBoxModelObject* toBoxModelObject, RenderObject* startChild, RenderObject* endChild, bool fullRemoveInsert = false)
-    {
-        moveChildrenTo(toBoxModelObject, startChild, endChild, nullptr, fullRemoveInsert);
-    }
-    void moveChildrenTo(RenderBoxModelObject* toBoxModelObject, RenderObject* startChild, RenderObject* endChild, RenderObject* beforeChild, bool fullRemoveInsert = false);
+    void setFirstLetterRemainingText(RenderTextFragment&);
+    void clearFirstLetterRemainingText();
 
     enum ScaleByEffectiveZoomOrNot { ScaleByEffectiveZoom, DoNotScaleByEffectiveZoom };
     LayoutSize calculateImageIntrinsicDimensions(StyleImage*, const LayoutSize& scaledPositioningAreaSize, ScaleByEffectiveZoomOrNot) const;
 
     RenderBlock* containingBlockForAutoHeightDetection(Length logicalHeight) const;
 
+    struct ContinuationChainNode {
+        WeakPtr<RenderBoxModelObject> renderer;
+        ContinuationChainNode* previous { nullptr };
+        ContinuationChainNode* next { nullptr };
+
+        ContinuationChainNode(RenderBoxModelObject&);
+        ~ContinuationChainNode();
+
+        void insertAfter(ContinuationChainNode&);
+
+        WTF_MAKE_FAST_ALLOCATED;
+    };
+
+    ContinuationChainNode* continuationChainNode() const;
+
+protected:
+    WEBCORE_EXPORT LayoutUnit computedCSSPadding(const Length&) const;
+    virtual void absoluteQuadsIgnoringContinuation(const FloatRect&, Vector<FloatQuad>&, bool* /*wasFixed*/) const { ASSERT_NOT_REACHED(); }
+    void collectAbsoluteQuadsForContinuation(Vector<FloatQuad>& quads, bool* wasFixed) const;
+
 private:
-    LayoutUnit computedCSSPadding(const Length&) const;
+    ContinuationChainNode& ensureContinuationChainNode();
     
     virtual LayoutRect frameRectForStickyPositioning() const = 0;
 
     LayoutSize calculateFillTileSize(const FillLayer&, const LayoutSize& scaledPositioningAreaSize) const;
 
-    RoundedRect getBackgroundRoundedRect(const LayoutRect&, InlineFlowBox*, LayoutUnit inlineBoxWidth, LayoutUnit inlineBoxHeight,
-        bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const;
+    RoundedRect getBackgroundRoundedRect(const LayoutRect&, const InlineIterator::InlineBoxIterator&, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const;
     
     bool fixedBackgroundPaintsInLocalCoordinates() const;
 
@@ -317,17 +328,17 @@ private:
                                BoxSide, bool firstEdgeMatches, bool secondEdgeMatches);
 
     void paintOneBorderSide(GraphicsContext&, const RenderStyle&, const RoundedRect& outerBorder, const RoundedRect& innerBorder,
-        const LayoutRect& sideRect, BoxSide, BoxSide adjacentSide1, BoxSide adjacentSide2, const BorderEdge[],
+        const LayoutRect& sideRect, BoxSide, BoxSide adjacentSide1, BoxSide adjacentSide2, const BorderEdges&,
         const Path*, BackgroundBleedAvoidance, bool includeLogicalLeftEdge, bool includeLogicalRightEdge, bool antialias, const Color* overrideColor = nullptr);
     void paintTranslucentBorderSides(GraphicsContext&, const RenderStyle&, const RoundedRect& outerBorder, const RoundedRect& innerBorder, const IntPoint& innerBorderAdjustment,
-        const BorderEdge[], BorderEdgeFlags, BackgroundBleedAvoidance, bool includeLogicalLeftEdge, bool includeLogicalRightEdge, bool antialias = false);
+        const BorderEdges&, BoxSideSet, BackgroundBleedAvoidance, bool includeLogicalLeftEdge, bool includeLogicalRightEdge, bool antialias = false);
     void paintBorderSides(GraphicsContext&, const RenderStyle&, const RoundedRect& outerBorder, const RoundedRect& innerBorder,
-        const IntPoint& innerBorderAdjustment, const BorderEdge[], BorderEdgeFlags, BackgroundBleedAvoidance,
+        const IntPoint& innerBorderAdjustment, const BorderEdges&, BoxSideSet, BackgroundBleedAvoidance,
         bool includeLogicalLeftEdge, bool includeLogicalRightEdge, bool antialias = false, const Color* overrideColor = nullptr);
-    void drawBoxSideFromPath(GraphicsContext&, const LayoutRect&, const Path&, const BorderEdge[],
+    void drawBoxSideFromPath(GraphicsContext&, const LayoutRect&, const Path&, const BorderEdges&,
         float thickness, float drawThickness, BoxSide, const RenderStyle&,
-        Color, EBorderStyle, BackgroundBleedAvoidance, bool includeLogicalLeftEdge, bool includeLogicalRightEdge);
-    void paintMaskForTextFillBox(ImageBuffer*, const IntRect&, InlineFlowBox*, const LayoutRect&);
+        Color, BorderStyle, BackgroundBleedAvoidance, bool includeLogicalLeftEdge, bool includeLogicalRightEdge);
+    void paintMaskForTextFillBox(ImageBuffer*, const FloatRect&, const InlineIterator::InlineBoxIterator&, const LayoutRect&);
 };
 
 } // namespace WebCore

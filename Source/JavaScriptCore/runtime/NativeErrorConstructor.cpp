@@ -22,74 +22,150 @@
 #include "NativeErrorConstructor.h"
 
 #include "ErrorInstance.h"
-#include "Interpreter.h"
-#include "JSFunction.h"
-#include "JSString.h"
-#include "NativeErrorPrototype.h"
 #include "JSCInlines.h"
+#include "NativeErrorPrototype.h"
 
 namespace JSC {
 
-STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(NativeErrorConstructor);
+STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(NativeErrorConstructorBase);
 
-const ClassInfo NativeErrorConstructor::s_info = { "Function", &InternalFunction::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(NativeErrorConstructor) };
+const ClassInfo NativeErrorConstructorBase::s_info = { "Function"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(NativeErrorConstructorBase) };
 
-NativeErrorConstructor::NativeErrorConstructor(VM& vm, Structure* structure)
-    : InternalFunction(vm, structure)
+static JSC_DECLARE_HOST_FUNCTION(callEvalError);
+static JSC_DECLARE_HOST_FUNCTION(constructEvalError);
+static JSC_DECLARE_HOST_FUNCTION(callRangeError);
+static JSC_DECLARE_HOST_FUNCTION(constructRangeError);
+static JSC_DECLARE_HOST_FUNCTION(callReferenceError);
+static JSC_DECLARE_HOST_FUNCTION(constructReferenceError);
+static JSC_DECLARE_HOST_FUNCTION(callSyntaxError);
+static JSC_DECLARE_HOST_FUNCTION(constructSyntaxError);
+static JSC_DECLARE_HOST_FUNCTION(callTypeError);
+static JSC_DECLARE_HOST_FUNCTION(constructTypeError);
+static JSC_DECLARE_HOST_FUNCTION(callURIError);
+static JSC_DECLARE_HOST_FUNCTION(constructURIError);
+
+template<ErrorType errorType>
+inline EncodedJSValue NativeErrorConstructor<errorType>::constructImpl(JSGlobalObject* globalObject, CallFrame* callFrame)
 {
-}
-
-void NativeErrorConstructor::finishCreation(VM& vm, JSGlobalObject* globalObject, Structure* prototypeStructure, const String& name)
-{
-    Base::finishCreation(vm, name);
-    ASSERT(inherits(vm, info()));
-    
-    NativeErrorPrototype* prototype = NativeErrorPrototype::create(vm, prototypeStructure, name, this);
-    
-    putDirect(vm, vm.propertyNames->length, jsNumber(1), PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly);
-    putDirect(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
-    m_errorStructure.set(vm, this, ErrorInstance::createStructure(vm, globalObject, prototype));
-    ASSERT(m_errorStructure);
-    ASSERT(m_errorStructure->isObject());
-}
-
-void NativeErrorConstructor::visitChildren(JSCell* cell, SlotVisitor& visitor)
-{
-    NativeErrorConstructor* thisObject = jsCast<NativeErrorConstructor*>(cell);
-    ASSERT_GC_OBJECT_INHERITS(thisObject, info());
-    Base::visitChildren(thisObject, visitor);
-    visitor.append(thisObject->m_errorStructure);
-}
-
-EncodedJSValue JSC_HOST_CALL Interpreter::constructWithNativeErrorConstructor(ExecState* exec)
-{
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    JSValue message = exec->argument(0);
-    Structure* errorStructure = InternalFunction::createSubclassStructure(exec, exec->newTarget(), jsCast<NativeErrorConstructor*>(exec->jsCallee())->errorStructure());
-    RETURN_IF_EXCEPTION(scope, encodedJSValue());
-    ASSERT(errorStructure);
-    scope.release();
-    return JSValue::encode(ErrorInstance::create(exec, errorStructure, message, nullptr, TypeNothing, false));
+    JSValue message = callFrame->argument(0);
+    JSValue options = callFrame->argument(1);
+
+    JSObject* newTarget = asObject(callFrame->newTarget());
+    Structure* errorStructure = JSC_GET_DERIVED_STRUCTURE(vm, errorStructureWithErrorType<errorType>, newTarget, callFrame->jsCallee());
+    RETURN_IF_EXCEPTION(scope, { });
+    RELEASE_AND_RETURN(scope, JSValue::encode(ErrorInstance::create(globalObject, errorStructure, message, options, nullptr, TypeNothing, errorType, false)));
 }
 
-ConstructType NativeErrorConstructor::getConstructData(JSCell*, ConstructData& constructData)
+template<ErrorType errorType>
+inline EncodedJSValue NativeErrorConstructor<errorType>::callImpl(JSGlobalObject* globalObject, CallFrame* callFrame)
 {
-    constructData.native.function = Interpreter::constructWithNativeErrorConstructor;
-    return ConstructType::Host;
+    JSValue message = callFrame->argument(0);
+    JSValue options = callFrame->argument(1);
+    Structure* errorStructure = globalObject->errorStructure(errorType);
+    return JSValue::encode(ErrorInstance::create(globalObject, errorStructure, message, options, nullptr, TypeNothing, errorType, false));
 }
+
+JSC_DEFINE_HOST_FUNCTION(callEvalError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::EvalError>::callImpl(globalObject, callFrame);
+}
+JSC_DEFINE_HOST_FUNCTION(constructEvalError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::EvalError>::constructImpl(globalObject, callFrame);
+}
+
+JSC_DEFINE_HOST_FUNCTION(callRangeError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::RangeError>::callImpl(globalObject, callFrame);
+}
+JSC_DEFINE_HOST_FUNCTION(constructRangeError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::RangeError>::constructImpl(globalObject, callFrame);
+}
+
+JSC_DEFINE_HOST_FUNCTION(callReferenceError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::ReferenceError>::callImpl(globalObject, callFrame);
+}
+JSC_DEFINE_HOST_FUNCTION(constructReferenceError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::ReferenceError>::constructImpl(globalObject, callFrame);
+}
+
+JSC_DEFINE_HOST_FUNCTION(callSyntaxError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::SyntaxError>::callImpl(globalObject, callFrame);
+}
+JSC_DEFINE_HOST_FUNCTION(constructSyntaxError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::SyntaxError>::constructImpl(globalObject, callFrame);
+}
+
+JSC_DEFINE_HOST_FUNCTION(callTypeError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::TypeError>::callImpl(globalObject, callFrame);
+}
+JSC_DEFINE_HOST_FUNCTION(constructTypeError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::TypeError>::constructImpl(globalObject, callFrame);
+}
+
+JSC_DEFINE_HOST_FUNCTION(callURIError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::URIError>::callImpl(globalObject, callFrame);
+}
+JSC_DEFINE_HOST_FUNCTION(constructURIError, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return NativeErrorConstructor<ErrorType::URIError>::constructImpl(globalObject, callFrame);
+}
+
+static constexpr auto callFunction(ErrorType errorType) -> decltype(&callEvalError)
+{
+    switch (errorType) {
+    case ErrorType::EvalError: return callEvalError;
+    case ErrorType::RangeError: return callRangeError;
+    case ErrorType::ReferenceError: return callReferenceError;
+    case ErrorType::SyntaxError: return callSyntaxError;
+    case ErrorType::TypeError: return callTypeError;
+    case ErrorType::URIError: return callURIError;
+    default: return nullptr;
+    }
+}
+
+static constexpr auto constructFunction(ErrorType errorType) -> decltype(&constructEvalError)
+{
+    switch (errorType) {
+    case ErrorType::EvalError: return constructEvalError;
+    case ErrorType::RangeError: return constructRangeError;
+    case ErrorType::ReferenceError: return constructReferenceError;
+    case ErrorType::SyntaxError: return constructSyntaxError;
+    case ErrorType::TypeError: return constructTypeError;
+    case ErrorType::URIError: return constructURIError;
+    default: return nullptr;
+    }
+}
+
+template<ErrorType errorType>
+NativeErrorConstructor<errorType>::NativeErrorConstructor(VM& vm, Structure* structure)
+    : NativeErrorConstructorBase(vm, structure, callFunction(errorType), constructFunction(errorType))
+{
+}
+
+void NativeErrorConstructorBase::finishCreation(VM& vm, NativeErrorPrototype* prototype, ErrorType errorType)
+{
+    Base::finishCreation(vm, 1, errorTypeName(errorType), PropertyAdditionMode::WithoutStructureTransition);
+    ASSERT(inherits(info()));
     
-EncodedJSValue JSC_HOST_CALL Interpreter::callNativeErrorConstructor(ExecState* exec)
-{
-    JSValue message = exec->argument(0);
-    Structure* errorStructure = static_cast<NativeErrorConstructor*>(exec->jsCallee())->errorStructure();
-    return JSValue::encode(ErrorInstance::create(exec, errorStructure, message, nullptr, TypeNothing, false));
+    putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
 }
 
-CallType NativeErrorConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = Interpreter::callNativeErrorConstructor;
-    return CallType::Host;
-}
+template class NativeErrorConstructor<ErrorType::EvalError>;
+template class NativeErrorConstructor<ErrorType::RangeError>;
+template class NativeErrorConstructor<ErrorType::ReferenceError>;
+template class NativeErrorConstructor<ErrorType::SyntaxError>;
+template class NativeErrorConstructor<ErrorType::TypeError>;
+template class NativeErrorConstructor<ErrorType::URIError>;
 
 } // namespace JSC

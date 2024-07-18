@@ -50,7 +50,8 @@ if ($flavour && $flavour ne "void") {
     open OUT,"| \"$^X\" $xlate $flavour $output";
     *STDOUT=*OUT;
 } else {
-    open STDOUT,">$output";
+    open OUT,">$output";
+    *STDOUT=*OUT;
 }
 
 if ($output =~ /512/) {
@@ -178,26 +179,27 @@ $code.=<<___;
 .text
 
 .extern	OPENSSL_armcap_P
+.hidden	OPENSSL_armcap_P
 .globl	$func
 .type	$func,%function
 .align	6
 $func:
 ___
 $code.=<<___	if ($SZ==4);
+	AARCH64_VALID_CALL_TARGET
 #ifndef	__KERNEL__
-# ifdef	__ILP32__
-	ldrsw	x16,.LOPENSSL_armcap_P
-# else
-	ldr	x16,.LOPENSSL_armcap_P
-# endif
-	adr	x17,.LOPENSSL_armcap_P
-	add	x16,x16,x17
-	ldr	w16,[x16]
+#if __has_feature(hwaddress_sanitizer) && __clang_major__ >= 10
+	adrp	x16,:pg_hi21_nc:OPENSSL_armcap_P
+#else
+	adrp	x16,:pg_hi21:OPENSSL_armcap_P
+#endif
+	ldr	w16,[x16,:lo12:OPENSSL_armcap_P]
 	tst	w16,#ARMV8_SHA256
 	b.ne	.Lv8_entry
 #endif
 ___
 $code.=<<___;
+	AARCH64_SIGN_LINK_REGISTER
 	stp	x29,x30,[sp,#-128]!
 	add	x29,sp,#0
 
@@ -213,7 +215,8 @@ $code.=<<___;
 	ldp	$E,$F,[$ctx,#4*$SZ]
 	add	$num,$inp,$num,lsl#`log(16*$SZ)/log(2)`	// end of input
 	ldp	$G,$H,[$ctx,#6*$SZ]
-	adr	$Ktbl,.LK$BITS
+	adrp	$Ktbl,:pg_hi21:.LK$BITS
+	add	$Ktbl,$Ktbl,:lo12:.LK$BITS
 	stp	$ctx,$num,[x29,#96]
 
 .Loop:
@@ -259,9 +262,11 @@ $code.=<<___;
 	ldp	x25,x26,[x29,#64]
 	ldp	x27,x28,[x29,#80]
 	ldp	x29,x30,[sp],#128
+	AARCH64_VALIDATE_LINK_REGISTER
 	ret
 .size	$func,.-$func
 
+.section .rodata
 .align	6
 .type	.LK$BITS,%object
 .LK$BITS:
@@ -330,15 +335,6 @@ $code.=<<___ if ($SZ==4);
 ___
 $code.=<<___;
 .size	.LK$BITS,.-.LK$BITS
-#ifndef	__KERNEL__
-.align	3
-.LOPENSSL_armcap_P:
-# ifdef	__ILP32__
-	.long	OPENSSL_armcap_P-.
-# else
-	.quad	OPENSSL_armcap_P-.
-# endif
-#endif
 .asciz	"SHA$BITS block transform for ARMv8, CRYPTOGAMS by <appro\@openssl.org>"
 .align	2
 ___
@@ -352,16 +348,19 @@ my ($W0,$W1)=("v16.4s","v17.4s");
 my ($ABCD_SAVE,$EFGH_SAVE)=("v18.16b","v19.16b");
 
 $code.=<<___;
+.text
 #ifndef	__KERNEL__
 .type	sha256_block_armv8,%function
 .align	6
 sha256_block_armv8:
 .Lv8_entry:
+	// Armv8.3-A PAuth: even though x30 is pushed to stack it is not popped later.
 	stp		x29,x30,[sp,#-16]!
 	add		x29,sp,#0
 
 	ld1.32		{$ABCD,$EFGH},[$ctx]
-	adr		$Ktbl,.LK256
+	adrp		$Ktbl,:pg_hi21:.LK256
+	add		$Ktbl,$Ktbl,:lo12:.LK256
 
 .Loop_hw:
 	ld1		{@MSG[0]-@MSG[3]},[$inp],#64
@@ -425,12 +424,6 @@ $code.=<<___;
 ___
 }
 
-$code.=<<___;
-#ifndef	__KERNEL__
-.comm	OPENSSL_armcap_P,4,4
-#endif
-___
-
 {   my  %opcode = (
 	"sha256h"	=> 0x5e004000,	"sha256h2"	=> 0x5e005000,
 	"sha256su0"	=> 0x5e282800,	"sha256su1"	=> 0x5e006000	);
@@ -466,4 +459,4 @@ foreach(split("\n",$code)) {
 	print $_,"\n";
 }
 
-close STDOUT;
+close STDOUT or die "error closing STDOUT";

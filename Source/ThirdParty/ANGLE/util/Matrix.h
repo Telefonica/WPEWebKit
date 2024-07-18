@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2014 The ANGLE Project Authors. All rights reserved.
+// Copyright 2014 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -10,11 +10,10 @@
 #ifndef UTIL_MATRIX_H
 #define UTIL_MATRIX_H
 
-#include <export.h>
+#include "common/vector_utils.h"
+#include "util/util_export.h"
 
-#include "Vector.h"
-
-struct ANGLE_EXPORT Matrix4
+struct ANGLE_UTIL_EXPORT Matrix4
 {
     float data[16];
 
@@ -37,9 +36,9 @@ struct ANGLE_EXPORT Matrix4
             float m33);
 
     static Matrix4 identity();
-    static Matrix4 rotate(float angle, const Vector3 &p);
-    static Matrix4 translate(const Vector3 &t);
-    static Matrix4 scale(const Vector3 &s);
+    static Matrix4 rotate(float angle, const angle::Vector3 &p);
+    static Matrix4 translate(const angle::Vector3 &t);
+    static Matrix4 scale(const angle::Vector3 &s);
     static Matrix4 frustum(float l, float r, float b, float t, float n, float f);
     static Matrix4 perspective(float fov, float aspectRatio, float n, float f);
     static Matrix4 ortho(float l, float r, float b, float t, float n, float f);
@@ -47,17 +46,17 @@ struct ANGLE_EXPORT Matrix4
 
     static Matrix4 invert(const Matrix4 &mat);
     static Matrix4 transpose(const Matrix4 &mat);
-    static Vector3 transform(const Matrix4 &mat, const Vector3 &pt);
-    static Vector3 transform(const Matrix4 &mat, const Vector4 &pt);
+    static angle::Vector3 transform(const Matrix4 &mat, const angle::Vector3 &pt);
+    static angle::Vector3 transform(const Matrix4 &mat, const angle::Vector4 &pt);
 };
 
-ANGLE_EXPORT Matrix4 operator*(const Matrix4 &a, const Matrix4 &b);
-ANGLE_EXPORT Matrix4 &operator*=(Matrix4 &a, const Matrix4 &b);
-ANGLE_EXPORT Matrix4 operator*(const Matrix4 &a, float b);
-ANGLE_EXPORT Matrix4 &operator*=(Matrix4 &a, float b);
-ANGLE_EXPORT Vector4 operator*(const Matrix4 &a, const Vector4 &b);
+ANGLE_UTIL_EXPORT Matrix4 operator*(const Matrix4 &a, const Matrix4 &b);
+ANGLE_UTIL_EXPORT Matrix4 &operator*=(Matrix4 &a, const Matrix4 &b);
+ANGLE_UTIL_EXPORT Matrix4 operator*(const Matrix4 &a, float b);
+ANGLE_UTIL_EXPORT Matrix4 &operator*=(Matrix4 &a, float b);
+ANGLE_UTIL_EXPORT angle::Vector4 operator*(const Matrix4 &a, const angle::Vector4 &b);
 
-ANGLE_EXPORT bool operator==(const Matrix4 &a, const Matrix4 &b);
-ANGLE_EXPORT bool operator!=(const Matrix4 &a, const Matrix4 &b);
+ANGLE_UTIL_EXPORT bool operator==(const Matrix4 &a, const Matrix4 &b);
+ANGLE_UTIL_EXPORT bool operator!=(const Matrix4 &a, const Matrix4 &b);
 
 #endif  // UTIL_MATRIX_H

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2012 Apple Inc.  All rights reserved.
+ * Copyright (C) 2007-2021 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,30 +27,32 @@
 
 #import "WebDatabaseManagerPrivate.h"
 #import "WebSecurityOriginInternal.h"
-#import <wtf/MainThread.h>
-#import <wtf/RetainPtr.h>
 #import <WebCore/DatabaseTracker.h>
 #import <WebCore/SecurityOrigin.h>
+#import <wtf/MainThread.h>
+#import <wtf/RetainPtr.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import <WebCore/WebCoreThread.h>
 #endif
 
 using namespace WebCore;
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 static const CFStringRef WebDatabaseOriginWasAddedNotification = CFSTR("com.apple.MobileSafariSettings.WebDatabaseOriginWasAddedNotification");
 static const CFStringRef WebDatabaseWasDeletedNotification = CFSTR("com.apple.MobileSafariSettings.WebDatabaseWasDeletedNotification");
 static const CFStringRef WebDatabaseOriginWasDeletedNotification = CFSTR("com.apple.MobileSafariSettings.WebDatabaseOriginWasDeletedNotification");
 #endif
 
-WebDatabaseManagerClient* WebDatabaseManagerClient::sharedWebDatabaseManagerClient()
+namespace WebKit {
+
+WebDatabaseManagerClient& WebDatabaseManagerClient::sharedWebDatabaseManagerClient()
 {
-    static WebDatabaseManagerClient* sharedClient = new WebDatabaseManagerClient();
+    static NeverDestroyed<WebDatabaseManagerClient> sharedClient;
     return sharedClient;
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 static void onNewDatabaseOriginAdded(CFNotificationCenterRef, void* observer, CFStringRef, const void*, CFDictionaryRef)
 {
     ASSERT(observer);
@@ -78,7 +80,7 @@ static void onDatabaseOriginDeleted(CFNotificationCenterRef, void* observer, CFS
 
 WebDatabaseManagerClient::WebDatabaseManagerClient()
 {
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     CFNotificationCenterRef center = CFNotificationCenterGetDarwinNotifyCenter(); 
     CFNotificationCenterAddObserver(center, this, onNewDatabaseOriginAdded, WebDatabaseOriginWasAddedNotification, 0, CFNotificationSuspensionBehaviorDeliverImmediately);
     CFNotificationCenterAddObserver(center, this, onDatabaseDeleted, WebDatabaseWasDeletedNotification, 0, CFNotificationSuspensionBehaviorDeliverImmediately);
@@ -88,16 +90,17 @@ WebDatabaseManagerClient::WebDatabaseManagerClient()
 
 WebDatabaseManagerClient::~WebDatabaseManagerClient()
 {
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     CFNotificationCenterRemoveObserver(CFNotificationCenterGetDarwinNotifyCenter(), this, 0, 0);
 #endif
 }
 
 class DidModifyOriginData {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     static void dispatchToMainThread(WebDatabaseManagerClient& client, const SecurityOriginData& origin)
     {
-        auto context = std::make_unique<DidModifyOriginData>(client, origin);
+        auto context = makeUnique<DidModifyOriginData>(client, origin);
         callOnMainThread([context = WTFMove(context)] {
             context->client.dispatchDidModifyOrigin(context->origin);
         });
@@ -138,7 +141,7 @@ void WebDatabaseManagerClient::dispatchDidModifyDatabase(const SecurityOriginDat
     [[NSNotificationCenter defaultCenter] postNotificationName:WebDatabaseDidModifyDatabaseNotification object:webSecurityOrigin.get() userInfo:userInfo.get()];
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 void WebDatabaseManagerClient::dispatchDidAddNewOrigin()
 {    
@@ -213,4 +216,6 @@ void WebDatabaseManagerClient::databaseOriginsDidChange()
     CFNotificationCenterPostNotification(CFNotificationCenterGetLocalCenter(), WebDatabaseOriginsDidChangeNotification, 0, 0, true);
 }
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)
+
+} // namespace WebKit

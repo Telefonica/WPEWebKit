@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,22 +28,26 @@
 
 #if ENABLE(B3_JIT)
 
+#include "AirAllocateRegistersAndStackAndGenerateCode.h"
 #include "AirCCallSpecial.h"
 #include "AirCFG.h"
 #include "AllowMacroScratchRegisterUsageIf.h"
 #include "B3BasicBlockUtils.h"
 #include "B3Procedure.h"
-#include "B3StackSlot.h"
+#include "CCallHelpers.h"
 #include <wtf/ListDump.h>
+#include <wtf/MathExtras.h>
 
 namespace JSC { namespace B3 { namespace Air {
+
+const char* const tierName = "Air ";
 
 static void defaultPrologueGenerator(CCallHelpers& jit, Code& code)
 {
     jit.emitFunctionPrologue();
     if (code.frameSize()) {
         AllowMacroScratchRegisterUsageIf allowScratch(jit, isARM64());
-        jit.addPtr(CCallHelpers::TrustedImm32(-code.frameSize()), MacroAssembler::stackPointerRegister);
+        jit.addPtr(MacroAssembler::TrustedImm32(-code.frameSize()), MacroAssembler::framePointerRegister,  MacroAssembler::stackPointerRegister);
     }
     
     jit.emitSave(code.calleeSaveRegisterAtOffsetList());
@@ -52,13 +56,18 @@ static void defaultPrologueGenerator(CCallHelpers& jit, Code& code)
 Code::Code(Procedure& proc)
     : m_proc(proc)
     , m_cfg(new CFG(*this))
+    , m_preserveB3Origins(Options::dumpAirGraphAtEachPhase() || Options::dumpFTLDisassembly())
     , m_lastPhaseName("initial")
     , m_defaultPrologueGenerator(createSharedTask<PrologueGeneratorFunction>(&defaultPrologueGenerator))
 {
     // Come up with initial orderings of registers. The user may replace this with something else.
+    std::optional<WeakRandom> weakRandom;
+    if (Options::airRandomizeRegs())
+        weakRandom.emplace();
     forEachBank(
-        [&] (Bank bank) {
-            Vector<Reg> result;
+        [&](Bank bank) {
+            Vector<Reg> volatileRegs;
+            Vector<Reg> calleeSaveRegs;
             RegisterSet all = bank == GP ? RegisterSet::allGPRs() : RegisterSet::allFPRs();
             all.exclude(RegisterSet::stackRegisters());
             all.exclude(RegisterSet::reservedHardwareRegisters());
@@ -66,18 +75,23 @@ Code::Code(Procedure& proc)
             all.forEach(
                 [&] (Reg reg) {
                     if (!calleeSave.get(reg))
-                        result.append(reg);
+                        volatileRegs.append(reg);
                 });
             all.forEach(
                 [&] (Reg reg) {
                     if (calleeSave.get(reg))
-                        result.append(reg);
+                        calleeSaveRegs.append(reg);
                 });
+            if (Options::airRandomizeRegs()) {
+                WeakRandom random(Options::airRandomizeRegsSeed() ? Options::airRandomizeRegsSeed() : weakRandom->getUint32());
+                shuffleVector(volatileRegs, [&] (unsigned limit) { return random.getUint32(limit); });
+                shuffleVector(calleeSaveRegs, [&] (unsigned limit) { return random.getUint32(limit); });
+            }
+            Vector<Reg> result;
+            result.appendVector(volatileRegs);
+            result.appendVector(calleeSaveRegs);
             setRegsInPriorityOrder(bank, result);
         });
-
-    if (auto reg = pinnedExtendedOffsetAddrRegister())
-        pinRegister(*reg);
 
     m_pinnedRegs.set(MacroAssembler::framePointerRegister);
 }
@@ -86,10 +100,25 @@ Code::~Code()
 {
 }
 
+void Code::emitDefaultPrologue(CCallHelpers& jit)
+{
+    defaultPrologueGenerator(jit, *this);
+}
+
+void Code::emitEpilogue(CCallHelpers& jit)
+{
+    if (frameSize()) {
+        jit.emitRestore(calleeSaveRegisterAtOffsetList());
+        jit.emitFunctionEpilogue();
+    } else
+        jit.emitFunctionEpilogueWithEmptyFrame();
+    jit.ret();
+}
+
 void Code::setRegsInPriorityOrder(Bank bank, const Vector<Reg>& regs)
 {
     regsInPriorityOrderImpl(bank) = regs;
-    m_mutableRegs = RegisterSet();
+    m_mutableRegs = { };
     forEachBank(
         [&] (Bank bank) {
             for (Reg reg : regsInPriorityOrder(bank))
@@ -134,9 +163,9 @@ BasicBlock* Code::addBlock(double frequency)
     return result;
 }
 
-StackSlot* Code::addStackSlot(unsigned byteSize, StackSlotKind kind, B3::StackSlot* b3Slot)
+StackSlot* Code::addStackSlot(uint64_t byteSize, StackSlotKind kind)
 {
-    StackSlot* result = m_stackSlots.addNew(byteSize, kind, b3Slot);
+    StackSlot* result = m_stackSlots.addNew(byteSize, kind);
     if (m_stackIsAllocated) {
         // FIXME: This is unnecessarily awful. Fortunately, it doesn't run often.
         unsigned extent = WTF::roundUpToMultipleOf(result->alignment(), frameSize() + byteSize);
@@ -144,11 +173,6 @@ StackSlot* Code::addStackSlot(unsigned byteSize, StackSlotKind kind, B3::StackSl
         setFrameSize(WTF::roundUpToMultipleOf(stackAlignmentBytes(), extent));
     }
     return result;
-}
-
-StackSlot* Code::addStackSlot(B3::StackSlot* b3Slot)
-{
-    return addStackSlot(b3Slot->byteSize(), StackSlotKind::Locked, b3Slot);
 }
 
 Special* Code::addSpecial(std::unique_ptr<Special> special)
@@ -161,7 +185,7 @@ CCallSpecial* Code::cCallSpecial()
 {
     if (!m_cCallSpecial) {
         m_cCallSpecial = static_cast<CCallSpecial*>(
-            addSpecial(std::make_unique<CCallSpecial>()));
+            addSpecial(makeUnique<CCallSpecial>()));
     }
 
     return m_cCallSpecial;
@@ -202,14 +226,8 @@ void Code::setCalleeSaveRegisterAtOffsetList(RegisterAtOffsetList&& registerAtOf
 RegisterAtOffsetList Code::calleeSaveRegisterAtOffsetList() const
 {
     RegisterAtOffsetList result = m_uncorrectedCalleeSaveRegisterAtOffsetList;
-    if (StackSlot* slot = m_calleeSaveStackSlot) {
-        ptrdiff_t offset = slot->byteSize() + slot->offsetFromFP();
-        for (size_t i = result.size(); i--;) {
-            result.at(i) = RegisterAtOffset(
-                result.at(i).reg(),
-                result.at(i).offset() + offset);
-        }
-    }
+    if (StackSlot* slot = m_calleeSaveStackSlot)
+        result.adjustOffsets(slot->byteSize() + slot->offsetFromFP());
     return result;
 }
 
@@ -232,26 +250,26 @@ void Code::resetReachability()
 void Code::dump(PrintStream& out) const
 {
     if (!m_entrypoints.isEmpty())
-        out.print("Entrypoints: ", listDump(m_entrypoints), "\n");
+        out.print(tierName, "Entrypoints: ", listDump(m_entrypoints), "\n");
     for (BasicBlock* block : *this)
         out.print(deepDump(block));
     if (stackSlots().size()) {
-        out.print("Stack slots:\n");
+        out.print(tierName, "Stack slots:\n");
         for (StackSlot* slot : stackSlots())
-            out.print("    ", pointerDump(slot), ": ", deepDump(slot), "\n");
+            out.print(tierName, "    ", pointerDump(slot), ": ", deepDump(slot), "\n");
     }
     if (specials().size()) {
-        out.print("Specials:\n");
+        out.print(tierName, "Specials:\n");
         for (Special* special : specials())
-            out.print("    ", deepDump(special), "\n");
+            out.print(tierName, "    ", deepDump(special), "\n");
     }
     if (m_frameSize || m_stackIsAllocated)
-        out.print("Frame size: ", m_frameSize, m_stackIsAllocated ? " (Allocated)" : "", "\n");
+        out.print(tierName, "Frame size: ", m_frameSize, m_stackIsAllocated ? " (Allocated)" : "", "\n");
     if (m_callArgAreaSize)
-        out.print("Call arg area size: ", m_callArgAreaSize, "\n");
+        out.print(tierName, "Call arg area size: ", m_callArgAreaSize, "\n");
     RegisterAtOffsetList calleeSaveRegisters = this->calleeSaveRegisterAtOffsetList();
-    if (calleeSaveRegisters.size())
-        out.print("Callee saves: ", calleeSaveRegisters, "\n");
+    if (calleeSaveRegisters.registerCount())
+        out.print(tierName, "Callee saves: ", calleeSaveRegisters, "\n");
 }
 
 unsigned Code::findFirstBlockIndex(unsigned index) const
@@ -307,12 +325,9 @@ unsigned Code::jsHash() const
     return result;
 }
 
-void Code::setNumEntrypoints(unsigned numEntrypoints)
+void Code::setNumEntrypoints(unsigned numEntryPoints)
 {
-    m_prologueGenerators.clear();
-    m_prologueGenerators.reserveCapacity(numEntrypoints);
-    for (unsigned i = 0; i < numEntrypoints; ++i)
-        m_prologueGenerators.uncheckedAppend(m_defaultPrologueGenerator.copyRef());
+    m_prologueGenerators = { numEntryPoints, m_defaultPrologueGenerator.copyRef() };
 }
 
 } } } // namespace JSC::B3::Air

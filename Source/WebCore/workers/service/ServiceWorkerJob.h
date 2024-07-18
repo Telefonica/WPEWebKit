@@ -27,8 +27,14 @@
 
 #if ENABLE(SERVICE_WORKER)
 
+#include "ResourceLoaderIdentifier.h"
+#include "ResourceResponse.h"
 #include "ServiceWorkerJobClient.h"
 #include "ServiceWorkerJobData.h"
+#include "ServiceWorkerTypes.h"
+#include "WorkerScriptLoader.h"
+#include "WorkerScriptLoaderClient.h"
+#include <wtf/CompletionHandler.h>
 #include <wtf/RefPtr.h>
 #include <wtf/RunLoop.h>
 #include <wtf/ThreadSafeRefCounted.h>
@@ -38,37 +44,52 @@ namespace WebCore {
 
 class DeferredPromise;
 class Exception;
+class ScriptExecutionContext;
 enum class ServiceWorkerJobType;
 struct ServiceWorkerRegistrationData;
 
-class ServiceWorkerJob : public ThreadSafeRefCounted<ServiceWorkerJob> {
+class ServiceWorkerJob : public WorkerScriptLoaderClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    static Ref<ServiceWorkerJob> create(ServiceWorkerJobClient& client, Ref<DeferredPromise>&& promise, ServiceWorkerJobData&& jobData)
-    {
-        return adoptRef(*new ServiceWorkerJob(client, WTFMove(promise), WTFMove(jobData)));
-    }
-
+    ServiceWorkerJob(ServiceWorkerJobClient&, RefPtr<DeferredPromise>&&, ServiceWorkerJobData&&);
     WEBCORE_EXPORT ~ServiceWorkerJob();
 
     void failedWithException(const Exception&);
-    void resolvedWithRegistration(const ServiceWorkerRegistrationData&);
+    void resolvedWithRegistration(ServiceWorkerRegistrationData&&, ShouldNotifyWhenResolved);
+    void resolvedWithUnregistrationResult(bool);
+    void startScriptFetch(FetchOptions::Cache);
 
-    ServiceWorkerJobData data() const { return m_jobData; }
-    DeferredPromise& promise() { return m_promise.get(); }
+    using Identifier = ServiceWorkerJobIdentifier;
+    Identifier identifier() const { return m_jobData.identifier().jobIdentifier; }
+
+    const ServiceWorkerJobData& data() const { return m_jobData; }
+    bool hasPromise() const { return !!m_promise; }
+    RefPtr<DeferredPromise> takePromise();
+
+    void fetchScriptWithContext(ScriptExecutionContext&, FetchOptions::Cache);
+
+    const ServiceWorkerOrClientIdentifier& contextIdentifier() { return m_contextIdentifier; }
+
+    bool cancelPendingLoad();
+
+    WEBCORE_EXPORT static ResourceError validateServiceWorkerResponse(const ServiceWorkerJobData&, const ResourceResponse&);
 
 private:
-    ServiceWorkerJob(ServiceWorkerJobClient&, Ref<DeferredPromise>&&, ServiceWorkerJobData&&);
+    // WorkerScriptLoaderClient
+    void didReceiveResponse(ResourceLoaderIdentifier, const ResourceResponse&) final;
+    void notifyFinished() final;
 
-    Ref<ServiceWorkerJobClient> m_client;
+    ServiceWorkerJobClient& m_client;
     ServiceWorkerJobData m_jobData;
-    Ref<DeferredPromise> m_promise;
+    RefPtr<DeferredPromise> m_promise;
 
     bool m_completed { false };
 
-    Ref<RunLoop> m_runLoop { RunLoop::current() };
+    ServiceWorkerOrClientIdentifier m_contextIdentifier;
+    RefPtr<WorkerScriptLoader> m_scriptLoader;
 
-#if !ASSERT_DISABLED
-    ThreadIdentifier m_creationThread { currentThread() };
+#if ASSERT_ENABLED
+    Ref<Thread> m_creationThread { Thread::current() };
 #endif
 };
 

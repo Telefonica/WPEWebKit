@@ -27,40 +27,76 @@ WI.GroupNavigationItem = class GroupNavigationItem extends WI.NavigationItem
 {
     constructor(navigationItems)
     {
-        console.assert(Array.isArray(navigationItems));
+        console.assert(!navigationItems || Array.isArray(navigationItems));
 
         super();
 
-        this._navigationItems = navigationItems;
+        this._needsUpdate = false;
 
-        for (let item of this._navigationItems) {
-            console.assert(item instanceof WI.NavigationItem);
-            this.element.appendChild(item.element);
-        }
+        this.navigationItems = navigationItems || [];
     }
 
     // Public
 
-    get navigationItems() { return this._navigationItems; }
+    get navigationItems()
+    {
+        return this._navigationItems;
+    }
+
+    set navigationItems(items)
+    {
+        this._navigationItems = items;
+
+        // Wait until a layout to update the DOM.
+        this._needsUpdate = true;
+    }
+
+    get hidden()
+    {
+        return super.hidden || this._navigationItems.every((item) => item.hidden);
+    }
+
+    set hidden(flag)
+    {
+        super.hidden = flag;
+    }
+
+    get width()
+    {
+        this._updateItems();
+
+        return super.width;
+    }
 
     get minimumWidth()
     {
+        this._updateItems();
+
         return this._navigationItems.reduce((total, item) => total + item.minimumWidth, 0);
     }
 
     // Protected
 
-    updateLayout(expandOnly)
+    get additionalClassNames()
     {
-        super.updateLayout(expandOnly);
+        return ["group"];
+    }
+
+    update(options = {})
+    {
+        super.update(options);
+
+        this._updateItems();
 
         for (let item of this._navigationItems)
-            item.updateLayout(expandOnly);
+            item.update(options);
     }
 
     didAttach(navigationBar)
     {
         super.didAttach(navigationBar);
+
+        this._updateItems();
 
         for (let item of this._navigationItems)
             item.didAttach(navigationBar);
@@ -73,4 +109,21 @@ WI.GroupNavigationItem = class GroupNavigationItem extends WI.NavigationItem
 
         super.didDetach();
     }
-}
+
+    // Private
+
+    _updateItems()
+    {
+        if (!this._needsUpdate)
+            return;
+
+        this._needsUpdate = false;
+
+        this.element.removeChildren();
+
+        for (let item of this._navigationItems) {
+            console.assert(item instanceof WI.NavigationItem);
+            this.element.appendChild(item.element);
+        }
+    }
+};

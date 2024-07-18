@@ -23,15 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebPDFViewPlaceholder.h"
 
 #import "WebFrameInternal.h"
 #import "WebPDFViewIOS.h"
 #import <JavaScriptCore/JSContextRef.h>
-#import <JavaScriptCore/JSStringRef.h>
-#import <JavaScriptCore/JSStringRefCF.h>
+#import <JavaScriptCore/OpaqueJSString.h>
 #import <WebCore/DataTransfer.h>
 #import <WebCore/EventHandler.h>
 #import <WebCore/EventNames.h>
@@ -54,10 +53,6 @@
 
 using namespace WebCore;
 
-@interface WebPDFView (Secrets)
-+ (Class)_representationClassForWebFrame:(WebFrame *)webFrame;
-@end
-
 #pragma mark Constants
 
 static const float PAGE_WIDTH_INSET = 4.0f * 2.0f;
@@ -76,7 +71,7 @@ static const float PAGE_HEIGHT_INSET = 4.0f * 2.0f;
     return [NSValue valueWithBytes:&rect objCType:@encode(CGRect)];
 }
 
-- (CGRect)CGRectValue
+- (CGRect)_web_CGRectValue
 {
     CGRect result;
     [self getValue:&result];
@@ -107,9 +102,9 @@ static const float PAGE_HEIGHT_INSET = 4.0f * 2.0f;
     NSArray *_pageRects;
     NSArray *_pageYOrigins;
     CGPDFDocumentRef _document;
-    WebDataSource *_dataSource; // weak to prevent cycles.
+    __weak WebDataSource *_dataSource; // Weak to prevent cycles.
     
-    NSObject<WebPDFViewPlaceholderDelegate> *_delegate;
+    __weak NSObject<WebPDFViewPlaceholderDelegate> *_delegate;
     
     BOOL _didFinishLoad;
     
@@ -279,13 +274,11 @@ static const float PAGE_HEIGHT_INSET = 4.0f * 2.0f;
     [self dataSourceUpdated:dataSource];
 
     _didFinishLoad = YES;
-    CGDataProviderRef provider = CGDataProviderCreateWithCFData((CFDataRef)[dataSource data]);
+    auto provider = adoptCF(CGDataProviderCreateWithCFData((CFDataRef)[dataSource data]));
     if (!provider)
         return;
 
-    _document = CGPDFDocumentCreateWithProvider(provider);
-
-    CGDataProviderRelease(provider);
+    _document = CGPDFDocumentCreateWithProvider(provider.get());
 
     [self _doPostLoadOrUnlockTasks];
 }
@@ -309,18 +302,11 @@ static const float PAGE_HEIGHT_INSET = 4.0f * 2.0f;
 
     NSArray *scripts = allScriptsInPDFDocument(pdfDocument);
 
-    NSUInteger scriptCount = [scripts count];
-    if (scriptCount) {
-
+    if ([scripts count]) {
         JSGlobalContextRef ctx = JSGlobalContextCreate(0);
         JSObjectRef jsPDFDoc = makeJSPDFDoc(ctx, _dataSource);
-
-        for (NSUInteger i = 0; i < scriptCount; ++i) {
-            JSStringRef script = JSStringCreateWithCFString((CFStringRef)[scripts objectAtIndex:i]);
-            JSEvaluateScript(ctx, script, jsPDFDoc, 0, 0, 0);
-            JSStringRelease(script);
-        }
-
+        for (NSString *script in scripts)
+            JSEvaluateScript(ctx, OpaqueJSString::tryCreate(script).get(), jsPDFDoc, nullptr, 0, nullptr);
         JSGlobalContextRelease(ctx);
     }
 }
@@ -340,19 +326,17 @@ static const float PAGE_HEIGHT_INSET = 4.0f * 2.0f;
     if (!_document || !CGPDFDocumentIsUnlocked(_document))
         return;
 
-    NSString *title = nil;
+    RetainPtr<CFStringRef> title;
 
     CGPDFDictionaryRef info = CGPDFDocumentGetInfo(_document);
     CGPDFStringRef value;
     if (CGPDFDictionaryGetString(info, "Title", &value))
-        title = (NSString *)CGPDFStringCopyTextString(value);
+        title = adoptCF(CGPDFStringCopyTextString(value));
 
-    if ([title length]) {
-        [self setTitle:title];
-        [[self _frame] _dispatchDidReceiveTitle:title];
+    if (title && CFStringGetLength(title.get())) {
+        [self setTitle:(NSString *)title.get()];
+        [[self _frame] _dispatchDidReceiveTitle:(NSString *)title.get()];
     }
-
-    [title release];
 }
 
 - (CGRect)_getPDFPageBounds:(CGPDFPageRef)page
@@ -470,7 +454,7 @@ static const float PAGE_HEIGHT_INSET = 4.0f * 2.0f;
     if ((!pageNumber) || (pageNumber > [_pageRects count]))
         return CGRectNull;
 
-    return [[_pageRects objectAtIndex:pageNumber - 1] CGRectValue];
+    return [[_pageRects objectAtIndex:pageNumber - 1] _web_CGRectValue];
 }
 
 - (void)simulateClickOnLinkToURL:(NSURL *)URL
@@ -478,19 +462,16 @@ static const float PAGE_HEIGHT_INSET = 4.0f * 2.0f;
     if (!URL)
         return;
 
-    // Construct an event to simulate a click.
-    RefPtr<Event> event = MouseEvent::create(eventNames().clickEvent, true, true, MonotonicTime::now(), 0, 1, 0, 0, 0, 0,
-#if ENABLE(POINTER_LOCK)
-        0, 0,
-#endif
-        false, false, false, false, 0, 0, nullptr, 0, 0, nullptr, true);
+    auto event = MouseEvent::create(eventNames().clickEvent, Event::CanBubble::Yes, Event::IsCancelable::Yes, Event::IsComposed::Yes,
+        MonotonicTime::now(), nullptr, 1, { }, { }, { }, { }, 0, 0, nullptr, 0, 0, MouseEvent::IsSimulated::Yes);
 
     // Call to the frame loader because this is where our security checks are made.
     Frame* frame = core([_dataSource webFrame]);
-    FrameLoadRequest frameLoadRequest { *frame->document(), frame->document()->securityOrigin(), { URL }, { }, LockHistory::No, LockBackForwardList::No, MaybeSendReferrer, AllowNavigationToInvalidURL::Yes, NewFrameOpenerPolicy::Allow, ShouldOpenExternalURLsPolicy::ShouldNotAllow,  InitiatedByMainFrame::Unknown };
-    frame->loader().loadFrameRequest(WTFMove(frameLoadRequest), event.get(), nullptr);
+    FrameLoadRequest frameLoadRequest { *frame->document(), frame->document()->securityOrigin(), { URL }, { }, InitiatedByMainFrame::Unknown };
+frameLoadRequest.setReferrerPolicy(ReferrerPolicy::NoReferrer);
+    frame->loader().loadFrameRequest(WTFMove(frameLoadRequest), event.ptr(), nullptr);
 }
 
 @end
 
-#endif /* PLATFORM(IOS) */
+#endif /* PLATFORM(IOS_FAMILY) */

@@ -26,7 +26,10 @@
 #include "config.h"
 #include "WebEventConversion.h"
 
-#include "WebEvent.h"
+#include "WebKeyboardEvent.h"
+#include "WebMouseEvent.h"
+#include "WebTouchEvent.h"
+#include "WebWheelEvent.h"
 
 #if ENABLE(MAC_GESTURE_EVENTS)
 #include "WebGestureEvent.h"
@@ -69,15 +72,15 @@ public:
         }
 
         if (webEvent.shiftKey())
-            m_modifiers |= Modifier::ShiftKey;
+            m_modifiers.add(Modifier::ShiftKey);
         if (webEvent.controlKey())
-            m_modifiers |= Modifier::CtrlKey;
+            m_modifiers.add(Modifier::ControlKey);
         if (webEvent.altKey())
-            m_modifiers |= Modifier::AltKey;
+            m_modifiers.add(Modifier::AltKey);
         if (webEvent.metaKey())
-            m_modifiers |= Modifier::MetaKey;
+            m_modifiers.add(Modifier::MetaKey);
         if (webEvent.capsLockKey())
-            m_modifiers |= Modifier::CapsLockKey;
+            m_modifiers.add(Modifier::CapsLockKey);
 
         m_timestamp = webEvent.timestamp();
 
@@ -102,24 +105,27 @@ public:
         m_buttons = webEvent.buttons();
 
         m_position = webEvent.position();
-#if ENABLE(POINTER_LOCK)
         m_movementDelta = WebCore::IntPoint(webEvent.deltaX(), webEvent.deltaY());
-#endif
         m_globalPosition = webEvent.globalPosition();
         m_clickCount = webEvent.clickCount();
 #if PLATFORM(MAC)
         m_eventNumber = webEvent.eventNumber();
         m_menuTypeForEvent = webEvent.menuTypeForEvent();
+#elif PLATFORM(GTK)
+        m_isTouchEvent = webEvent.isTouchEvent();
 #endif
         m_modifierFlags = 0;
         if (webEvent.shiftKey())
-            m_modifierFlags |= WebEvent::ShiftKey;
+            m_modifierFlags |= static_cast<unsigned>(WebEvent::Modifier::ShiftKey);
         if (webEvent.controlKey())
-            m_modifierFlags |= WebEvent::ControlKey;
+            m_modifierFlags |= static_cast<unsigned>(WebEvent::Modifier::ControlKey);
         if (webEvent.altKey())
-            m_modifierFlags |= WebEvent::AltKey;
+            m_modifierFlags |= static_cast<unsigned>(WebEvent::Modifier::AltKey);
         if (webEvent.metaKey())
-            m_modifierFlags |= WebEvent::MetaKey;
+            m_modifierFlags |= static_cast<unsigned>(WebEvent::Modifier::MetaKey);
+
+        m_pointerId = webEvent.pointerId();
+        m_pointerType = webEvent.pointerType();
     }
 };
 
@@ -136,15 +142,15 @@ public:
         m_type = PlatformEvent::Wheel;
 
         if (webEvent.shiftKey())
-            m_modifiers |= Modifier::ShiftKey;
+            m_modifiers.add(Modifier::ShiftKey);
         if (webEvent.controlKey())
-            m_modifiers |= Modifier::CtrlKey;
+            m_modifiers.add(Modifier::ControlKey);
         if (webEvent.altKey())
-            m_modifiers |= Modifier::AltKey;
+            m_modifiers.add(Modifier::AltKey);
         if (webEvent.metaKey())
-            m_modifiers |= Modifier::MetaKey;
+            m_modifiers.add(Modifier::MetaKey);
         if (webEvent.capsLockKey())
-            m_modifiers |= Modifier::CapsLockKey;
+            m_modifiers.add(Modifier::CapsLockKey);
 
         m_timestamp = webEvent.timestamp();
 
@@ -157,12 +163,16 @@ public:
         m_wheelTicksY = webEvent.wheelTicks().height();
         m_granularity = (webEvent.granularity() == WebWheelEvent::ScrollByPageWheelEvent) ? WebCore::ScrollByPageWheelEvent : WebCore::ScrollByPixelWheelEvent;
         m_directionInvertedFromDevice = webEvent.directionInvertedFromDevice();
-#if PLATFORM(COCOA) || PLATFORM(GTK)
+#if ENABLE(KINETIC_SCROLLING)
         m_phase = static_cast<WebCore::PlatformWheelEventPhase>(webEvent.phase());
         m_momentumPhase = static_cast<WebCore::PlatformWheelEventPhase>(webEvent.momentumPhase());
 #endif
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) || PLATFORM(GTK) || USE(LIBWPE)
         m_hasPreciseScrollingDeltas = webEvent.hasPreciseScrollingDeltas();
+#endif
+#if PLATFORM(COCOA)
+        m_ioHIDEventTimestamp = webEvent.ioHIDEventTimestamp();
+        m_rawPlatformDelta = webEvent.rawPlatformDelta();
         m_scrollCount = webEvent.scrollCount();
         m_unacceleratedScrollingDeltaX = webEvent.unacceleratedScrollingDelta().width();
         m_unacceleratedScrollingDeltaY = webEvent.unacceleratedScrollingDelta().height();
@@ -198,31 +208,36 @@ public:
         }
 
         if (webEvent.shiftKey())
-            m_modifiers |= Modifier::ShiftKey;
+            m_modifiers.add(Modifier::ShiftKey);
         if (webEvent.controlKey())
-            m_modifiers |= Modifier::CtrlKey;
+            m_modifiers.add(Modifier::ControlKey);
         if (webEvent.altKey())
-            m_modifiers |= Modifier::AltKey;
+            m_modifiers.add(Modifier::AltKey);
         if (webEvent.metaKey())
-            m_modifiers |= Modifier::MetaKey;
+            m_modifiers.add(Modifier::MetaKey);
         if (webEvent.capsLockKey())
-            m_modifiers |= Modifier::CapsLockKey;
+            m_modifiers.add(Modifier::CapsLockKey);
 
         m_timestamp = webEvent.timestamp();
 
         // PlatformKeyboardEvent
         m_text = webEvent.text();
         m_unmodifiedText = webEvent.unmodifiedText();
-#if ENABLE(KEYBOARD_KEY_ATTRIBUTE)
         m_key = webEvent.key();
-#endif
-#if ENABLE(KEYBOARD_CODE_ATTRIBUTE)
         m_code = webEvent.code();
-#endif
         m_keyIdentifier = webEvent.keyIdentifier();
         m_windowsVirtualKeyCode = webEvent.windowsVirtualKeyCode();
-#if USE(APPKIT) || PLATFORM(GTK)
+#if USE(APPKIT) || PLATFORM(IOS_FAMILY) || PLATFORM(GTK) || USE(LIBWPE)
         m_handledByInputMethod = webEvent.handledByInputMethod();
+#endif
+#if PLATFORM(GTK) || USE(LIBWPE)
+        m_preeditUnderlines = webEvent.preeditUnderlines();
+        if (auto preeditSelectionRange = webEvent.preeditSelectionRange()) {
+            m_preeditSelectionRangeStart = preeditSelectionRange->location;
+            m_preeditSelectionRangeLength = preeditSelectionRange->length;
+        }
+#endif
+#if USE(APPKIT) || PLATFORM(GTK)
         m_commands = webEvent.commands();
 #endif
         m_autoRepeat = webEvent.isAutoRepeat();
@@ -238,7 +253,7 @@ WebCore::PlatformKeyboardEvent platform(const WebKeyboardEvent& webEvent)
 
 #if ENABLE(TOUCH_EVENTS)
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 static WebCore::PlatformTouchPoint::TouchPhaseType touchEventType(const WebPlatformTouchPoint& webTouchPoint)
 {
@@ -314,7 +329,7 @@ public:
         m_rotationAngle = webTouchPoint.rotationAngle();
     }
 };
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)
 
 class WebKit2PlatformTouchEvent : public WebCore::PlatformTouchEvent {
 public:
@@ -339,19 +354,19 @@ public:
         }
 
         if (webEvent.shiftKey())
-            m_modifiers |= Modifier::ShiftKey;
+            m_modifiers.add(Modifier::ShiftKey);
         if (webEvent.controlKey())
-            m_modifiers |= Modifier::CtrlKey;
+            m_modifiers.add(Modifier::ControlKey);
         if (webEvent.altKey())
-            m_modifiers |= Modifier::AltKey;
+            m_modifiers.add(Modifier::AltKey);
         if (webEvent.metaKey())
-            m_modifiers |= Modifier::MetaKey;
+            m_modifiers.add(Modifier::MetaKey);
         if (webEvent.capsLockKey())
-            m_modifiers |= Modifier::CapsLockKey;
+            m_modifiers.add(Modifier::CapsLockKey);
 
         m_timestamp = webEvent.timestamp();
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
         unsigned touchCount = webEvent.touchPoints().size();
         m_touchPoints.reserveInitialCapacity(touchCount);
         for (unsigned i = 0; i < touchCount; ++i)
@@ -368,7 +383,7 @@ public:
         // PlatformTouchEvent
         for (size_t i = 0; i < webEvent.touchPoints().size(); ++i)
             m_touchPoints.append(WebKit2PlatformTouchPoint(webEvent.touchPoints().at(i)));
-#endif //PLATFORM(IOS)
+#endif //PLATFORM(IOS_FAMILY)
     }
 };
 
@@ -398,15 +413,15 @@ public:
         }
 
         if (webEvent.shiftKey())
-            m_modifiers |= Modifier::ShiftKey;
+            m_modifiers.add(Modifier::ShiftKey);
         if (webEvent.controlKey())
-            m_modifiers |= Modifier::CtrlKey;
+            m_modifiers.add(Modifier::ControlKey);
         if (webEvent.altKey())
-            m_modifiers |= Modifier::AltKey;
+            m_modifiers.add(Modifier::AltKey);
         if (webEvent.metaKey())
-            m_modifiers |= Modifier::MetaKey;
+            m_modifiers.add(Modifier::MetaKey);
         if (webEvent.capsLockKey())
-            m_modifiers |= Modifier::CapsLockKey;
+            m_modifiers.add(Modifier::CapsLockKey);
 
         m_timestamp = webEvent.timestamp();
 

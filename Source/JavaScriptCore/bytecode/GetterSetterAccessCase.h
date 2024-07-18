@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,57 +27,56 @@
 
 #if ENABLE(JIT)
 
+#include "MacroAssemblerCodeRef.h"
 #include "ProxyableAccessCase.h"
 
 namespace JSC {
 
-class GetterSetterAccessCase : public ProxyableAccessCase {
+class GetterSetterAccessCase final : public ProxyableAccessCase {
 public:
     typedef ProxyableAccessCase Base;
     friend class AccessCase;
 
     // This can return null if it hasn't been generated yet. That's
     // actually somewhat likely because of how we do buffering of new cases.
-    CallLinkInfo* callLinkInfo() const { return m_callLinkInfo.get(); }
+    // CallLinkInfo's ownership is held both by generated code via GCAwareJITStubRoutine and PolymorphicAccess.
+    // The ownership relation is PolymorphicAccess -> GCAwareJITStubRoutine -> CallLinkInfo.
+    // PolymorphicAccess can be destroyed while GCAwareJITStubRoutine is alive if we are destroying PolymorphicAccess
+    // while we are executing GCAwareJITStubRoutine. It is not possible that GetterSetterAccessCase is alive while
+    // GCAwareJITStubRoutine is destroyed.
+    OptimizingCallLinkInfo* callLinkInfo() const { return m_callLinkInfo; }
     JSObject* customSlotBase() const { return m_customSlotBase.get(); }
     std::optional<DOMAttributeAnnotation> domAttribute() const { return m_domAttribute; }
 
-    JSObject* alternateBase() const override;
+    bool hasAlternateBase() const final;
+    JSObject* alternateBase() const final;
 
     void emitDOMJITGetter(AccessGenerationState&, const DOMJIT::GetterSetter*, GPRReg baseForGetGPR);
 
-    static std::unique_ptr<AccessCase> create(
-        VM&, JSCell* owner, AccessType, PropertyOffset, Structure*,
-        const ObjectPropertyConditionSet& = ObjectPropertyConditionSet(),
-        bool viaProxy = false,
-        WatchpointSet* additionalSet = nullptr,
-        PropertySlot::GetValueFunc = nullptr,
-        JSObject* customSlotBase = nullptr,
-        std::optional<DOMAttributeAnnotation> = std::nullopt);
+    static Ref<AccessCase> create(
+        VM&, JSCell* owner, AccessType, CacheableIdentifier, PropertyOffset, Structure*,
+        const ObjectPropertyConditionSet&, bool viaProxy, WatchpointSet* additionalSet, FunctionPtr<CustomAccessorPtrTag> customGetter,
+        JSObject* customSlotBase, std::optional<DOMAttributeAnnotation>, RefPtr<PolyProtoAccessChain>&&);
 
-    static std::unique_ptr<AccessCase> create(VM&, JSCell* owner, AccessType, Structure*, PropertyOffset,
-        const ObjectPropertyConditionSet&, PutPropertySlot::PutValueFunc = nullptr,
-        JSObject* customSlotBase = nullptr);
+    static Ref<AccessCase> create(VM&, JSCell* owner, AccessType, Structure*, CacheableIdentifier, PropertyOffset,
+        const ObjectPropertyConditionSet&, RefPtr<PolyProtoAccessChain>&&, bool viaProxy = false,
+        FunctionPtr<CustomAccessorPtrTag> customSetter = nullptr, JSObject* customSlotBase = nullptr);
 
-    void dumpImpl(PrintStream&, CommaPrinter&) const override;
-    std::unique_ptr<AccessCase> clone() const override;
+    void dumpImpl(PrintStream&, CommaPrinter&, Indenter&) const final;
+    Ref<AccessCase> clone() const final;
 
-    ~GetterSetterAccessCase();
+    ~GetterSetterAccessCase() final;
 
-    void* customAccessor() const { return m_customAccessor.opaque; }
+    FunctionPtr<CustomAccessorPtrTag> customAccessor() const { return m_customAccessor; }
 
 private:
-    GetterSetterAccessCase(VM&, JSCell*, AccessType, PropertyOffset, Structure*, const ObjectPropertyConditionSet&, bool viaProxy, WatchpointSet* additionalSet, JSObject* customSlotBase);
+    GetterSetterAccessCase(VM&, JSCell*, AccessType, CacheableIdentifier, PropertyOffset, Structure*, const ObjectPropertyConditionSet&, bool viaProxy, WatchpointSet* additionalSet, JSObject* customSlotBase, RefPtr<PolyProtoAccessChain>&&);
 
     GetterSetterAccessCase(const GetterSetterAccessCase&);
 
     WriteBarrier<JSObject> m_customSlotBase;
-    std::unique_ptr<CallLinkInfo> m_callLinkInfo;
-    union {
-        PutPropertySlot::PutValueFunc setter;
-        PropertySlot::GetValueFunc getter;
-        void* opaque;
-    } m_customAccessor;
+    OptimizingCallLinkInfo* m_callLinkInfo { nullptr };
+    FunctionPtr<CustomAccessorPtrTag> m_customAccessor;
     std::optional<DOMAttributeAnnotation> m_domAttribute;
 };
 

@@ -37,49 +37,50 @@
 #if PLATFORM(COCOA)
 #include "RemoteLayerTreeDrawingArea.h"
 #include "TiledCoreAnimationDrawingArea.h"
-#elif PLATFORM(WPE)
-#include "AcceleratedDrawingArea.h"
-#else
-#include "DrawingAreaImpl.h"
+#elif USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
+#include "DrawingAreaCoordinatedGraphics.h"
+#endif
+#if USE(GRAPHICS_LAYER_WC)
+#include "DrawingAreaWC.h"
 #endif
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 std::unique_ptr<DrawingArea> DrawingArea::create(WebPage& webPage, const WebPageCreationParameters& parameters)
 {
     switch (parameters.drawingAreaType) {
 #if PLATFORM(COCOA)
-#if !PLATFORM(IOS)
-    case DrawingAreaTypeTiledCoreAnimation:
-        return std::make_unique<TiledCoreAnimationDrawingArea>(webPage, parameters);
+#if !PLATFORM(IOS_FAMILY)
+    case DrawingAreaType::TiledCoreAnimation:
+        return makeUnique<TiledCoreAnimationDrawingArea>(webPage, parameters);
 #endif
-    case DrawingAreaTypeRemoteLayerTree:
-        return std::make_unique<RemoteLayerTreeDrawingArea>(webPage, parameters);
-#else
-    case DrawingAreaTypeImpl:
-#if PLATFORM(WPE)
-        return std::make_unique<AcceleratedDrawingArea>(webPage, parameters);
-#else
-        return std::make_unique<DrawingAreaImpl>(webPage, parameters);
+    case DrawingAreaType::RemoteLayerTree:
+        return makeUnique<RemoteLayerTreeDrawingArea>(webPage, parameters);
+#elif USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
+    case DrawingAreaType::CoordinatedGraphics:
+        return makeUnique<DrawingAreaCoordinatedGraphics>(webPage, parameters);
 #endif
+#if USE(GRAPHICS_LAYER_WC)
+    case DrawingAreaType::WC:
+        return makeUnique<DrawingAreaWC>(webPage, parameters);
 #endif
     }
 
     return nullptr;
 }
 
-DrawingArea::DrawingArea(DrawingAreaType type, WebPage& webPage)
+DrawingArea::DrawingArea(DrawingAreaType type, DrawingAreaIdentifier identifier, WebPage& webPage)
     : m_type(type)
+    , m_identifier(identifier)
     , m_webPage(webPage)
 {
-    WebProcess::singleton().addMessageReceiver(Messages::DrawingArea::messageReceiverName(), m_webPage.pageID(), *this);
+    WebProcess::singleton().addMessageReceiver(Messages::DrawingArea::messageReceiverName(), m_identifier, *this);
 }
 
 DrawingArea::~DrawingArea()
 {
-    WebProcess::singleton().removeMessageReceiver(Messages::DrawingArea::messageReceiverName(), m_webPage.pageID());
+    removeMessageReceiverIfNeeded();
 }
 
 void DrawingArea::dispatchAfterEnsuringUpdatedScrollPosition(WTF::Function<void ()>&& function)
@@ -88,11 +89,45 @@ void DrawingArea::dispatchAfterEnsuringUpdatedScrollPosition(WTF::Function<void 
     function();
 }
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-RefPtr<WebCore::DisplayRefreshMonitor> DrawingArea::createDisplayRefreshMonitor(PlatformDisplayID)
+void DrawingArea::tryMarkLayersVolatile(CompletionHandler<void(bool)>&& completionFunction)
+{
+    completionFunction(true);
+}
+
+void DrawingArea::removeMessageReceiverIfNeeded()
+{
+    if (m_hasRemovedMessageReceiver)
+        return;
+    m_hasRemovedMessageReceiver = true;
+    WebProcess::singleton().removeMessageReceiver(Messages::DrawingArea::messageReceiverName(), m_identifier);
+}
+
+RefPtr<WebCore::DisplayRefreshMonitor> DrawingArea::createDisplayRefreshMonitor(WebCore::PlatformDisplayID)
 {
     return nullptr;
 }
+
+bool DrawingArea::supportsGPUProcessRendering(DrawingAreaType type)
+{
+    switch (type) {
+#if PLATFORM(COCOA)
+#if !PLATFORM(IOS_FAMILY)
+    case DrawingAreaType::TiledCoreAnimation:
+        return false;
 #endif
+    case DrawingAreaType::RemoteLayerTree:
+        return true;
+#elif USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
+    case DrawingAreaType::CoordinatedGraphics:
+        return false;
+#endif
+#if USE(GRAPHICS_LAYER_WC)
+    case DrawingAreaType::WC:
+        return true;
+#endif
+    default:
+        return false;
+    }
+}
 
 } // namespace WebKit

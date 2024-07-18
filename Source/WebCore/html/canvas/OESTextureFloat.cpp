@@ -26,23 +26,38 @@
 #include "config.h"
 
 #if ENABLE(WEBGL)
-
 #include "OESTextureFloat.h"
 
+#include <wtf/IsoMallocInlines.h>
+
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(OESTextureFloat);
 
 OESTextureFloat::OESTextureFloat(WebGLRenderingContextBase& context)
     : WebGLExtension(context)
 {
+    context.graphicsContextGL()->ensureExtensionEnabled("GL_OES_texture_float"_s);
+
+    // Spec requires WEBGL_color_buffer_float to be turned on implicitly here.
+    // Enable it both in the backend and in WebKit.
+    context.getExtension("WEBGL_color_buffer_float"_s);
+
+    // https://github.com/KhronosGroup/WebGL/pull/2830
+    // Spec requires EXT_float_blend to be turned on implicitly here.
+    // It will be implicitly enabled by the WEBGL_color_buffer_float above.
 }
 
-OESTextureFloat::~OESTextureFloat()
-{
-}
+OESTextureFloat::~OESTextureFloat() = default;
 
 WebGLExtension::ExtensionName OESTextureFloat::getName() const
 {
     return OESTextureFloatName;
+}
+
+bool OESTextureFloat::supported(GraphicsContextGL& context)
+{
+    return context.supportsExtension("GL_OES_texture_float"_s);
 }
 
 } // namespace WebCore

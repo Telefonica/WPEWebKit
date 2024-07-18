@@ -7,90 +7,206 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#ifndef WEBRTC_TEST_FRAME_GENERATOR_H_
-#define WEBRTC_TEST_FRAME_GENERATOR_H_
+#ifndef TEST_FRAME_GENERATOR_H_
+#define TEST_FRAME_GENERATOR_H_
 
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "webrtc/api/video/video_frame.h"
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/media/base/videosourceinterface.h"
-#include "webrtc/typedefs.h"
+#include "api/scoped_refptr.h"
+#include "api/test/frame_generator_interface.h"
+#include "api/video/i420_buffer.h"
+#include "api/video/nv12_buffer.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video/video_source_interface.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/random.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
-class Clock;
 namespace test {
 
-// FrameForwarder can be used as an implementation
-// of rtc::VideoSourceInterface<VideoFrame> where the caller controls when
-// a frame should be forwarded to its sink.
-// Currently this implementation only support one sink.
-class FrameForwarder : public rtc::VideoSourceInterface<VideoFrame> {
+// SquareGenerator is a FrameGenerator that draws a given amount of randomly
+// sized and colored squares. Between each new generated frame, the squares
+// are moved slightly towards the lower right corner.
+class SquareGenerator : public FrameGeneratorInterface {
  public:
-  FrameForwarder();
-  virtual ~FrameForwarder();
-  // Forwards |video_frame| to the registered |sink_|.
-  virtual void IncomingCapturedFrame(const VideoFrame& video_frame);
-  rtc::VideoSinkWants sink_wants() const;
-  bool has_sinks() const;
+  SquareGenerator(int width, int height, OutputType type, int num_squares);
 
- protected:
-  void AddOrUpdateSink(rtc::VideoSinkInterface<VideoFrame>* sink,
-                       const rtc::VideoSinkWants& wants) override;
-  void RemoveSink(rtc::VideoSinkInterface<VideoFrame>* sink) override;
+  void ChangeResolution(size_t width, size_t height) override;
+  VideoFrameData NextFrame() override;
+  Resolution GetResolution() const override;
 
-  rtc::CriticalSection crit_;
-  rtc::VideoSinkInterface<VideoFrame>* sink_ GUARDED_BY(crit_);
-  rtc::VideoSinkWants sink_wants_ GUARDED_BY(crit_);
+  absl::optional<int> fps() const override { return absl::nullopt; }
+
+ private:
+  rtc::scoped_refptr<I420Buffer> CreateI420Buffer(int width, int height);
+
+  class Square {
+   public:
+    Square(int width, int height, int seed);
+
+    void Draw(const rtc::scoped_refptr<VideoFrameBuffer>& frame_buffer);
+
+   private:
+    Random random_generator_;
+    int x_;
+    int y_;
+    const int length_;
+    const uint8_t yuv_y_;
+    const uint8_t yuv_u_;
+    const uint8_t yuv_v_;
+    const uint8_t yuv_a_;
+  };
+
+  mutable Mutex mutex_;
+  const OutputType type_;
+  int width_ RTC_GUARDED_BY(&mutex_);
+  int height_ RTC_GUARDED_BY(&mutex_);
+  std::vector<std::unique_ptr<Square>> squares_ RTC_GUARDED_BY(&mutex_);
 };
 
-class FrameGenerator {
+class YuvFileGenerator : public FrameGeneratorInterface {
  public:
-  virtual ~FrameGenerator() = default;
+  YuvFileGenerator(std::vector<FILE*> files,
+                   size_t width,
+                   size_t height,
+                   int frame_repeat_count);
 
-  // Returns video frame that remains valid until next call.
-  virtual VideoFrame* NextFrame() = 0;
+  ~YuvFileGenerator();
 
-  // Change the capture resolution.
-  virtual void ChangeResolution(size_t width, size_t height) {
-    RTC_NOTREACHED();
+  VideoFrameData NextFrame() override;
+  void ChangeResolution(size_t width, size_t height) override {
+    RTC_LOG(LS_WARNING) << "YuvFileGenerator::ChangeResolution not implemented";
   }
+  Resolution GetResolution() const override;
 
-  // Creates a frame generator that produces frames with small squares that
-  // move randomly towards the lower right corner.
-  static std::unique_ptr<FrameGenerator> CreateSquareGenerator(int width,
-                                                               int height);
+  absl::optional<int> fps() const override { return absl::nullopt; }
 
-  // Creates a frame generator that repeatedly plays a set of yuv files.
-  // The frame_repeat_count determines how many times each frame is shown,
-  // with 1 = show each frame once, etc.
-  static std::unique_ptr<FrameGenerator> CreateFromYuvFile(
-      std::vector<std::string> files,
-      size_t width,
-      size_t height,
-      int frame_repeat_count);
+ private:
+  // Returns true if the new frame was loaded.
+  // False only in case of a single file with a single frame in it.
+  bool ReadNextFrame();
 
-  // Creates a frame generator which takes a set of yuv files (wrapping a
-  // frame generator created by CreateFromYuvFile() above), but outputs frames
-  // that have been cropped to specified resolution: source_width/source_height
-  // is the size of the source images, target_width/target_height is the size of
-  // the cropped output. For each source image read, the cropped viewport will
-  // be scrolled top to bottom/left to right for scroll_tim_ms milliseconds.
-  // After that the image will stay in place for pause_time_ms milliseconds,
-  // and then this will be repeated with the next file from the input set.
-  static std::unique_ptr<FrameGenerator> CreateScrollingInputFromYuvFiles(
-      Clock* clock,
-      std::vector<std::string> filenames,
-      size_t source_width,
-      size_t source_height,
-      size_t target_width,
-      size_t target_height,
-      int64_t scroll_time_ms,
-      int64_t pause_time_ms);
+  size_t file_index_;
+  size_t frame_index_;
+  const std::vector<FILE*> files_;
+  const size_t width_;
+  const size_t height_;
+  const size_t frame_size_;
+  const std::unique_ptr<uint8_t[]> frame_buffer_;
+  const int frame_display_count_;
+  int current_display_count_;
+  rtc::scoped_refptr<I420Buffer> last_read_buffer_;
 };
+
+class NV12FileGenerator : public FrameGeneratorInterface {
+ public:
+  NV12FileGenerator(std::vector<FILE*> files,
+                    size_t width,
+                    size_t height,
+                    int frame_repeat_count);
+
+  ~NV12FileGenerator();
+
+  VideoFrameData NextFrame() override;
+  void ChangeResolution(size_t width, size_t height) override {
+    RTC_LOG(LS_WARNING)
+        << "NV12FileGenerator::ChangeResolution not implemented";
+  }
+  Resolution GetResolution() const override;
+
+  absl::optional<int> fps() const override { return absl::nullopt; }
+
+ private:
+  // Returns true if the new frame was loaded.
+  // False only in case of a single file with a single frame in it.
+  bool ReadNextFrame();
+
+  size_t file_index_;
+  size_t frame_index_;
+  const std::vector<FILE*> files_;
+  const size_t width_;
+  const size_t height_;
+  const size_t frame_size_;
+  const std::unique_ptr<uint8_t[]> frame_buffer_;
+  const int frame_display_count_;
+  int current_display_count_;
+  rtc::scoped_refptr<NV12Buffer> last_read_buffer_;
+};
+
+// SlideGenerator works similarly to YuvFileGenerator but it fills the frames
+// with randomly sized and colored squares instead of reading their content
+// from files.
+class SlideGenerator : public FrameGeneratorInterface {
+ public:
+  SlideGenerator(int width, int height, int frame_repeat_count);
+
+  VideoFrameData NextFrame() override;
+  void ChangeResolution(size_t width, size_t height) override {
+    RTC_LOG(LS_WARNING) << "SlideGenerator::ChangeResolution not implemented";
+  }
+  Resolution GetResolution() const override;
+
+  absl::optional<int> fps() const override { return absl::nullopt; }
+
+ private:
+  // Generates some randomly sized and colored squares scattered
+  // over the frame.
+  void GenerateNewFrame();
+
+  const int width_;
+  const int height_;
+  const int frame_display_count_;
+  int current_display_count_;
+  Random random_generator_;
+  rtc::scoped_refptr<I420Buffer> buffer_;
+};
+
+class ScrollingImageFrameGenerator : public FrameGeneratorInterface {
+ public:
+  ScrollingImageFrameGenerator(Clock* clock,
+                               const std::vector<FILE*>& files,
+                               size_t source_width,
+                               size_t source_height,
+                               size_t target_width,
+                               size_t target_height,
+                               int64_t scroll_time_ms,
+                               int64_t pause_time_ms);
+  ~ScrollingImageFrameGenerator() override = default;
+
+  VideoFrameData NextFrame() override;
+  void ChangeResolution(size_t width, size_t height) override {
+    RTC_LOG(LS_WARNING)
+        << "ScrollingImageFrameGenerator::ChangeResolution not implemented";
+  }
+  Resolution GetResolution() const override;
+
+  absl::optional<int> fps() const override { return absl::nullopt; }
+
+ private:
+  void UpdateSourceFrame(size_t frame_num);
+  void CropSourceToScrolledImage(double scroll_factor);
+
+  Clock* const clock_;
+  const int64_t start_time_;
+  const int64_t scroll_time_;
+  const int64_t pause_time_;
+  const size_t num_frames_;
+  const int target_width_;
+  const int target_height_;
+
+  size_t current_frame_num_;
+  bool prev_frame_not_scrolled_;
+  VideoFrameData current_source_frame_;
+  VideoFrameData current_frame_;
+  YuvFileGenerator file_generator_;
+};
+
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_FRAME_GENERATOR_H_
+#endif  // TEST_FRAME_GENERATOR_H_

@@ -23,11 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef DisplayRefreshMonitorManager_h
-#define DisplayRefreshMonitorManager_h
+#pragma once
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-
+#include "AnimationFrameRate.h"
 #include "DisplayRefreshMonitor.h"
 #include "PlatformScreen.h"
 #include <wtf/NeverDestroyed.h>
@@ -36,31 +34,48 @@
 
 namespace WebCore {
 
+struct DisplayUpdate;
+
 class DisplayRefreshMonitorManager {
     friend class NeverDestroyed<DisplayRefreshMonitorManager>;
+    friend class DisplayRefreshMonitor;
 public:
-    static DisplayRefreshMonitorManager& sharedManager();
-    
-    void registerClient(DisplayRefreshMonitorClient&);
+    WEBCORE_EXPORT static DisplayRefreshMonitorManager& sharedManager();
+
     void unregisterClient(DisplayRefreshMonitorClient&);
 
     bool scheduleAnimation(DisplayRefreshMonitorClient&);
     void windowScreenDidChange(PlatformDisplayID, DisplayRefreshMonitorClient&);
+    
+    std::optional<FramesPerSecond> nominalFramesPerSecondForDisplay(PlatformDisplayID, DisplayRefreshMonitorFactory*);
+
+    void clientPreferredFramesPerSecondChanged(DisplayRefreshMonitorClient&);
+
+    WEBCORE_EXPORT void displayWasUpdated(PlatformDisplayID, const DisplayUpdate&);
 
 private:
-    friend class DisplayRefreshMonitor;
-    void displayDidRefresh(DisplayRefreshMonitor&);
-    
-    DisplayRefreshMonitorManager() { }
+    DisplayRefreshMonitorManager() = default;
     virtual ~DisplayRefreshMonitorManager();
 
-    DisplayRefreshMonitor* createMonitorForClient(DisplayRefreshMonitorClient&);
+    void displayDidRefresh(DisplayRefreshMonitor&);
 
-    Vector<RefPtr<DisplayRefreshMonitor>> m_monitors;
+    size_t findMonitorForDisplayID(PlatformDisplayID) const;
+    DisplayRefreshMonitor* monitorForDisplayID(PlatformDisplayID) const;
+    DisplayRefreshMonitor* monitorForClient(DisplayRefreshMonitorClient&);
+
+    DisplayRefreshMonitor* ensureMonitorForDisplayID(PlatformDisplayID, DisplayRefreshMonitorFactory*);
+
+    struct DisplayRefreshMonitorWrapper {
+        ~DisplayRefreshMonitorWrapper()
+        {
+            if (monitor)
+                monitor->stop();
+        }
+
+        RefPtr<DisplayRefreshMonitor> monitor;
+    };
+
+    Vector<DisplayRefreshMonitorWrapper> m_monitors;
 };
 
 }
-
-#endif // USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-
-#endif

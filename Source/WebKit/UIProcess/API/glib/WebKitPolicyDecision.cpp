@@ -20,18 +20,21 @@
 #include "config.h"
 #include "WebKitPolicyDecision.h"
 
+#include "APIWebsitePolicies.h"
 #include "WebFramePolicyListenerProxy.h"
 #include "WebKitPolicyDecisionPrivate.h"
-#include "WebsitePolicies.h"
+#include "WebKitWebsitePolicies.h"
+#include "WebKitWebsitePoliciesPrivate.h"
+#include "WebsitePoliciesData.h"
 #include <wtf/glib/WTFGType.h>
 
 using namespace WebKit;
 
 /**
- * SECTION: WebKitPolicyDecision
- * @Short_description: A pending policy decision
- * @Title: WebKitPolicyDecision
+ * WebKitPolicyDecision:
  * @See_also: #WebKitWebView
+ *
+ * A pending policy decision.
  *
  * Often WebKit allows the client to decide the policy for certain
  * operations. For instance, a client may want to open a link in a new
@@ -46,7 +49,6 @@ using namespace WebKit;
 
 struct _WebKitPolicyDecisionPrivate {
     RefPtr<WebFramePolicyListenerProxy> listener;
-    bool madePolicyDecision;
 };
 
 WEBKIT_DEFINE_ABSTRACT_TYPE(WebKitPolicyDecision, webkit_policy_decision, G_TYPE_OBJECT)
@@ -57,9 +59,9 @@ static void webkitPolicyDecisionDispose(GObject* object)
     G_OBJECT_CLASS(webkit_policy_decision_parent_class)->dispose(object);
 }
 
-void webkitPolicyDecisionSetListener(WebKitPolicyDecision* decision, WebFramePolicyListenerProxy* listener)
+void webkitPolicyDecisionSetListener(WebKitPolicyDecision* decision, Ref<WebFramePolicyListenerProxy>&& listener)
 {
-     decision->priv->listener = listener;
+    decision->priv->listener = WTFMove(listener);
 }
 
 static void webkit_policy_decision_class_init(WebKitPolicyDecisionClass* decisionClass)
@@ -78,16 +80,48 @@ void webkit_policy_decision_use(WebKitPolicyDecision* decision)
 {
     g_return_if_fail(WEBKIT_IS_POLICY_DECISION(decision));
 
-    if (decision->priv->madePolicyDecision)
+    if (!decision->priv->listener)
         return;
 
-    decision->priv->listener->use({ });
-    decision->priv->madePolicyDecision = true;
+    auto listener = std::exchange(decision->priv->listener, nullptr);
+    listener->use();
+}
+
+/**
+ * webkit_policy_decision_use_with_policies:
+ * @decision: a #WebKitPolicyDecision
+ * @policies: a #WebKitWebsitePolicies
+ *
+ * Accept the navigation action and continue with provided @policies.
+ *
+ * Accept the navigation action which triggered this decision, and
+ * continue with @policies affecting all subsequent loads of resources
+ * in the origin associated with the accepted navigation action.
+ *
+ * For example, a navigation decision to a video sharing website may
+ * be accepted under the priviso no movies are allowed to autoplay. The
+ * autoplay policy in this case would be set in the @policies.
+ *
+ * Since: 2.30
+ */
+void webkit_policy_decision_use_with_policies(WebKitPolicyDecision* decision, WebKitWebsitePolicies* policies)
+{
+    g_return_if_fail(WEBKIT_IS_POLICY_DECISION(decision));
+    g_return_if_fail(WEBKIT_IS_WEBSITE_POLICIES(policies));
+
+    if (!decision->priv->listener)
+        return;
+
+    auto listener = std::exchange(decision->priv->listener, nullptr);
+
+    listener->use(webkitWebsitePoliciesGetWebsitePolicies(policies));
 }
 
 /**
  * webkit_policy_decision_ignore:
  * @decision: a #WebKitPolicyDecision
+ *
+ * #WebKitResponsePolicyDecision, this would cancel the request.
  *
  * Ignore the action which triggered this decision. For instance, for a
  * #WebKitResponsePolicyDecision, this would cancel the request.
@@ -96,11 +130,11 @@ void webkit_policy_decision_ignore(WebKitPolicyDecision* decision)
 {
     g_return_if_fail(WEBKIT_IS_POLICY_DECISION(decision));
 
-    if (decision->priv->madePolicyDecision)
+    if (!decision->priv->listener)
         return;
 
-    decision->priv->listener->ignore();
-    decision->priv->madePolicyDecision = true;
+    auto listener = std::exchange(decision->priv->listener, nullptr);
+    listener->ignore();
 }
 
 /**
@@ -113,9 +147,9 @@ void webkit_policy_decision_download(WebKitPolicyDecision* decision)
 {
     g_return_if_fail(WEBKIT_IS_POLICY_DECISION(decision));
 
-    if (decision->priv->madePolicyDecision)
+    if (!decision->priv->listener)
         return;
 
-    decision->priv->listener->download();
-    decision->priv->madePolicyDecision = true;
+    auto listener = std::exchange(decision->priv->listener, nullptr);
+    listener->download();
 }

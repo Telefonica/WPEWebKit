@@ -8,10 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_VECTOR_MATH_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_VECTOR_MATH_H_
+#ifndef MODULES_AUDIO_PROCESSING_AEC3_VECTOR_MATH_H_
+#define MODULES_AUDIO_PROCESSING_AEC3_VECTOR_MATH_H_
 
-#include "webrtc/typedefs.h"
+// Defines WEBRTC_ARCH_X86_FAMILY, used below.
+#include "rtc_base/system/arch.h"
+
 #if defined(WEBRTC_HAS_NEON)
 #include <arm_neon.h>
 #endif
@@ -19,13 +21,14 @@
 #include <emmintrin.h>
 #endif
 #include <math.h>
+
 #include <algorithm>
 #include <array>
 #include <functional>
 
-#include "webrtc/base/array_view.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/audio_processing/aec3/aec3_common.h"
+#include "api/array_view.h"
+#include "modules/audio_processing/aec3/aec3_common.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 namespace aec3 {
@@ -37,6 +40,7 @@ class VectorMath {
       : optimization_(optimization) {}
 
   // Elementwise square root.
+  void SqrtAVX2(rtc::ArrayView<float> x);
   void Sqrt(rtc::ArrayView<float> x) {
     switch (optimization_) {
 #if defined(WEBRTC_ARCH_X86_FAMILY)
@@ -55,6 +59,9 @@ class VectorMath {
           x[j] = sqrtf(x[j]);
         }
       } break;
+      case Aec3Optimization::kAvx2:
+        SqrtAVX2(x);
+        break;
 #endif
 #if defined(WEBRTC_HAS_NEON)
       case Aec3Optimization::kNeon: {
@@ -107,6 +114,9 @@ class VectorMath {
   }
 
   // Elementwise vector multiplication z = x * y.
+  void MultiplyAVX2(rtc::ArrayView<const float> x,
+                    rtc::ArrayView<const float> y,
+                    rtc::ArrayView<float> z);
   void Multiply(rtc::ArrayView<const float> x,
                 rtc::ArrayView<const float> y,
                 rtc::ArrayView<float> z) {
@@ -130,6 +140,9 @@ class VectorMath {
           z[j] = x[j] * y[j];
         }
       } break;
+      case Aec3Optimization::kAvx2:
+        MultiplyAVX2(x, y, z);
+        break;
 #endif
 #if defined(WEBRTC_HAS_NEON)
       case Aec3Optimization::kNeon: {
@@ -156,6 +169,7 @@ class VectorMath {
   }
 
   // Elementwise vector accumulation z += x.
+  void AccumulateAVX2(rtc::ArrayView<const float> x, rtc::ArrayView<float> z);
   void Accumulate(rtc::ArrayView<const float> x, rtc::ArrayView<float> z) {
     RTC_DCHECK_EQ(z.size(), x.size());
     switch (optimization_) {
@@ -176,6 +190,9 @@ class VectorMath {
           z[j] += x[j];
         }
       } break;
+      case Aec3Optimization::kAvx2:
+        AccumulateAVX2(x, z);
+        break;
 #endif
 #if defined(WEBRTC_HAS_NEON)
       case Aec3Optimization::kNeon: {
@@ -209,4 +226,4 @@ class VectorMath {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_VECTOR_MATH_H_
+#endif  // MODULES_AUDIO_PROCESSING_AEC3_VECTOR_MATH_H_

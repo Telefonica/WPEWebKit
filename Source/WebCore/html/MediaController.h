@@ -27,18 +27,27 @@
 
 #if ENABLE(VIDEO)
 
+#include "ContextDestructionObserver.h"
 #include "Event.h"
 #include "EventTarget.h"
 #include "MediaControllerInterface.h"
 #include "Timer.h"
 #include <wtf/Vector.h>
 
+namespace PAL {
+class Clock;
+}
+
 namespace WebCore {
 
-class Clock;
 class HTMLMediaElement;
 
-class MediaController final : public RefCounted<MediaController>, public MediaControllerInterface, public EventTargetWithInlineData {
+class MediaController final
+    : public RefCounted<MediaController>
+    , public MediaControllerInterface
+    , public ContextDestructionObserver
+    , public EventTargetWithInlineData {
+    WTF_MAKE_ISO_ALLOCATED(MediaController);
 public:
     static Ref<MediaController> create(ScriptExecutionContext&);
     virtual ~MediaController();
@@ -68,7 +77,7 @@ public:
     bool muted() const final { return m_muted; }
     void setMuted(bool) final;
 
-    const AtomicString& playbackState() const;
+    const AtomString& playbackState() const;
 
     using RefCounted::ref;
     using RefCounted::deref;
@@ -81,7 +90,7 @@ private:
     void updatePlaybackState();
     void updateMediaElements();
     void bringElementUpToSpeed(HTMLMediaElement&);
-    void scheduleEvent(const AtomicString& eventName);
+    void scheduleEvent(const AtomString& eventName);
     void asyncEventTimerFired();
     void clearPositionTimerFired();
     bool hasEnded() const;
@@ -91,7 +100,7 @@ private:
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
     EventTargetInterface eventTargetInterface() const final { return MediaControllerEventTargetInterfaceType; }
-    ScriptExecutionContext* scriptExecutionContext() const final { return &m_scriptExecutionContext; };
+    ScriptExecutionContext* scriptExecutionContext() const final { return ContextDestructionObserver::scriptExecutionContext(); };
 
     void addMediaElement(HTMLMediaElement&);
     void removeMediaElement(HTMLMediaElement&);
@@ -142,8 +151,7 @@ private:
     mutable Timer m_clearPositionTimer;
     String m_mediaGroup;
     bool m_closedCaptionsVisible;
-    std::unique_ptr<Clock> m_clock;
-    ScriptExecutionContext& m_scriptExecutionContext;
+    std::unique_ptr<PAL::Clock> m_clock;
     Timer m_timeupdateTimer;
     MonotonicTime m_previousTimeupdateTime;
     bool m_resetCurrentTimeInNextPlay { false };

@@ -8,80 +8,116 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_VIDEO_CODING_UTILITY_QUALITY_SCALER_H_
-#define WEBRTC_MODULES_VIDEO_CODING_UTILITY_QUALITY_SCALER_H_
+#ifndef MODULES_VIDEO_CODING_UTILITY_QUALITY_SCALER_H_
+#define MODULES_VIDEO_CODING_UTILITY_QUALITY_SCALER_H_
 
-#include <utility>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "webrtc/common_types.h"
-#include "webrtc/api/video_codecs/video_encoder.h"
-#include "webrtc/base/optional.h"
-#include "webrtc/base/sequenced_task_checker.h"
-#include "webrtc/modules/video_coding/utility/moving_average.h"
+#include <memory>
+
+#include "absl/types/optional.h"
+#include "api/field_trials_view.h"
+#include "api/scoped_refptr.h"
+#include "api/sequence_checker.h"
+#include "api/video_codecs/video_encoder.h"
+#include "rtc_base/experiments/quality_scaling_experiment.h"
+#include "rtc_base/numerics/moving_average.h"
+#include "rtc_base/ref_count.h"
+#include "rtc_base/system/no_unique_address.h"
 
 namespace webrtc {
 
-// An interface for signaling requests to limit or increase the resolution or
-// framerate of the captured video stream.
-class AdaptationObserverInterface {
- public:
-  // Indicates if the adaptation is due to overuse of the CPU resources, or if
-  // the quality of the encoded frames have dropped too low.
-  enum AdaptReason : size_t { kQuality = 0, kCpu = 1 };
-  static const size_t kScaleReasonSize = 2;
-  // Called to signal that we can handle larger or more frequent frames.
-  virtual void AdaptUp(AdaptReason reason) = 0;
-  // Called to signal that the source should reduce the resolution or framerate.
-  virtual void AdaptDown(AdaptReason reason) = 0;
-
- protected:
-  virtual ~AdaptationObserverInterface() {}
-};
+class QualityScalerQpUsageHandlerCallbackInterface;
+class QualityScalerQpUsageHandlerInterface;
 
 // QualityScaler runs asynchronously and monitors QP values of encoded frames.
-// It holds a reference to a ScalingObserverInterface implementation to signal
-// an intent to scale up or down.
+// It holds a reference to a QualityScalerQpUsageHandlerInterface implementation
+// to signal an overuse or underuse of QP (which indicate a desire to scale the
+// video stream down or up).
 class QualityScaler {
  public:
-  // Construct a QualityScaler with a given |observer|.
+  // Construct a QualityScaler with given `thresholds` and `handler`.
   // This starts the quality scaler periodically checking what the average QP
   // has been recently.
-  QualityScaler(AdaptationObserverInterface* observer,
-                VideoCodecType codec_type);
-  // If specific thresholds are desired these can be supplied as |thresholds|.
-  QualityScaler(AdaptationObserverInterface* observer,
-                VideoEncoder::QpThresholds thresholds);
-  virtual ~QualityScaler();
-  // Should be called each time the encoder drops a frame
-  void ReportDroppedFrame();
-  // Inform the QualityScaler of the last seen QP.
-  void ReportQP(int qp);
-
-  // The following members declared protected for testing purposes
- protected:
-  QualityScaler(AdaptationObserverInterface* observer,
+  QualityScaler(QualityScalerQpUsageHandlerInterface* handler,
                 VideoEncoder::QpThresholds thresholds,
-                int64_t sampling_period);
+                const FieldTrialsView& field_trials);
+  virtual ~QualityScaler();
+  // Should be called each time a frame is dropped at encoding.
+  void ReportDroppedFrameByMediaOpt();
+  void ReportDroppedFrameByEncoder();
+  // Inform the QualityScaler of the last seen QP.
+  void ReportQp(int qp, int64_t time_sent_us);
+
+  void SetQpThresholds(VideoEncoder::QpThresholds thresholds);
+  bool QpFastFilterLow() const;
+
+  // The following members declared protected for testing purposes.
+ protected:
+  QualityScaler(QualityScalerQpUsageHandlerInterface* handler,
+                VideoEncoder::QpThresholds thresholds,
+                const FieldTrialsView& field_trials,
+                int64_t sampling_period_ms);
 
  private:
-  class CheckQPTask;
-  void CheckQP();
+  class QpSmoother;
+  class CheckQpTask;
+  class CheckQpTaskHandlerCallback;
+
+  enum class CheckQpResult {
+    kInsufficientSamples,
+    kNormalQp,
+    kHighQp,
+    kLowQp,
+  };
+
+  // Starts checking for QP in a delayed task. When the resulting CheckQpTask
+  // completes, it will invoke this method again, ensuring that we always
+  // periodically check for QP. See CheckQpTask for more details. We never run
+  // more than one CheckQpTask at a time.
+  void StartNextCheckQpTask();
+
+  CheckQpResult CheckQp() const;
   void ClearSamples();
-  void ReportQPLow();
-  void ReportQPHigh();
-  int64_t GetSamplingPeriodMs() const;
 
-  CheckQPTask* check_qp_task_ GUARDED_BY(&task_checker_);
-  AdaptationObserverInterface* const observer_ GUARDED_BY(&task_checker_);
-  rtc::SequencedTaskChecker task_checker_;
+  std::unique_ptr<CheckQpTask> pending_qp_task_ RTC_GUARDED_BY(&task_checker_);
+  QualityScalerQpUsageHandlerInterface* const handler_
+      RTC_GUARDED_BY(&task_checker_);
+  RTC_NO_UNIQUE_ADDRESS SequenceChecker task_checker_;
 
+  VideoEncoder::QpThresholds thresholds_ RTC_GUARDED_BY(&task_checker_);
   const int64_t sampling_period_ms_;
-  bool fast_rampup_ GUARDED_BY(&task_checker_);
-  MovingAverage average_qp_ GUARDED_BY(&task_checker_);
-  MovingAverage framedrop_percent_ GUARDED_BY(&task_checker_);
+  bool fast_rampup_ RTC_GUARDED_BY(&task_checker_);
+  rtc::MovingAverage average_qp_ RTC_GUARDED_BY(&task_checker_);
+  rtc::MovingAverage framedrop_percent_media_opt_
+      RTC_GUARDED_BY(&task_checker_);
+  rtc::MovingAverage framedrop_percent_all_ RTC_GUARDED_BY(&task_checker_);
 
-  VideoEncoder::QpThresholds thresholds_ GUARDED_BY(&task_checker_);
+  // Used by QualityScalingExperiment.
+  const bool experiment_enabled_;
+  QualityScalingExperiment::Config config_ RTC_GUARDED_BY(&task_checker_);
+  std::unique_ptr<QpSmoother> qp_smoother_high_ RTC_GUARDED_BY(&task_checker_);
+  std::unique_ptr<QpSmoother> qp_smoother_low_ RTC_GUARDED_BY(&task_checker_);
+
+  const size_t min_frames_needed_;
+  const double initial_scale_factor_;
+  const absl::optional<double> scale_factor_;
 };
+
+// Reacts to QP being too high or too low. For best quality, when QP is high it
+// is desired to decrease the resolution or frame rate of the stream and when QP
+// is low it is desired to increase the resolution or frame rate of the stream.
+// Whether to reconfigure the stream is ultimately up to the handler, which is
+// able to respond asynchronously.
+class QualityScalerQpUsageHandlerInterface {
+ public:
+  virtual ~QualityScalerQpUsageHandlerInterface();
+
+  virtual void OnReportQpUsageHigh() = 0;
+  virtual void OnReportQpUsageLow() = 0;
+};
+
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_VIDEO_CODING_UTILITY_QUALITY_SCALER_H_
+#endif  // MODULES_VIDEO_CODING_UTILITY_QUALITY_SCALER_H_

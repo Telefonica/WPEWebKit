@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2018 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Google Inc. All rights reserved.
  * Copyright (C) 2012 Samsung Electronics. All rights reserved.
  *
@@ -25,6 +25,7 @@
 
 #include "CachedImage.h"
 #include "DOMFormData.h"
+#include "ElementInlines.h"
 #include "HTMLFormElement.h"
 #include "HTMLImageLoader.h"
 #include "HTMLInputElement.h"
@@ -40,11 +41,11 @@ namespace WebCore {
 using namespace HTMLNames;
 
 ImageInputType::ImageInputType(HTMLInputElement& element)
-    : BaseButtonInputType(element)
+    : BaseButtonInputType(Type::Image, element)
 {
 }
 
-const AtomicString& ImageInputType::formControlType() const
+const AtomString& ImageInputType::formControlType() const
 {
     return InputTypeNames::image();
 }
@@ -54,39 +55,35 @@ bool ImageInputType::isFormDataAppendable() const
     return true;
 }
 
-bool ImageInputType::appendFormData(DOMFormData& formData, bool) const
+bool ImageInputType::appendFormData(DOMFormData& formData) const
 {
-    if (!element().isActivatedSubmit())
+    ASSERT(element());
+    if (!element()->isActivatedSubmit())
         return false;
 
-    auto& name = element().name();
+    auto& name = element()->name();
     if (name.isEmpty()) {
-        formData.append(ASCIILiteral("x"), String::number(m_clickLocation.x()));
-        formData.append(ASCIILiteral("y"), String::number(m_clickLocation.y()));
+        formData.append("x"_s, String::number(m_clickLocation.x()));
+        formData.append("y"_s, String::number(m_clickLocation.y()));
         return true;
     }
 
     formData.append(makeString(name, ".x"), String::number(m_clickLocation.x()));
     formData.append(makeString(name, ".y"), String::number(m_clickLocation.y()));
 
-    auto value = element().value();
-    if (!value.isEmpty())
-        formData.append(name, value);
-
     return true;
-}
-
-bool ImageInputType::supportsValidation() const
-{
-    return false;
 }
 
 void ImageInputType::handleDOMActivateEvent(Event& event)
 {
-    Ref<HTMLInputElement> element(this->element());
-    if (element->isDisabledFormControl() || !element->form())
+    ASSERT(element());
+    Ref<HTMLInputElement> protectedElement(*element());
+    if (protectedElement->isDisabledFormControl() || !protectedElement->form())
         return;
-    element->setActivatedSubmit(true);
+
+    Ref<HTMLFormElement> protectedForm(*protectedElement->form());
+
+    protectedElement->setActivatedSubmit(true);
 
     m_clickLocation = IntPoint();
     if (event.underlyingEvent()) {
@@ -98,42 +95,49 @@ void ImageInputType::handleDOMActivateEvent(Event& event)
         }
     }
 
-    element->form()->prepareForSubmission(event); // Event handlers can run.
-    element->setActivatedSubmit(false);
+    // Update layout before processing form actions in case the style changes
+    // the Form or button relationships.
+    protectedElement->document().updateLayoutIgnorePendingStylesheets();
+
+    if (auto currentForm = protectedElement->form())
+        currentForm->submitIfPossible(&event, element()); // Event handlers can run.
+
+    protectedElement->setActivatedSubmit(false);
     event.setDefaultHandled();
 }
 
 RenderPtr<RenderElement> ImageInputType::createInputRenderer(RenderStyle&& style)
 {
-    return createRenderer<RenderImage>(element(), WTFMove(style));
+    ASSERT(element());
+    return createRenderer<RenderImage>(*element(), WTFMove(style));
 }
 
-void ImageInputType::altAttributeChanged()
+void ImageInputType::attributeChanged(const QualifiedName& name)
 {
-    if (!is<RenderImage>(element().renderer()))
-        return;
-
-    auto* renderer = downcast<RenderImage>(element().renderer());
-    if (!renderer)
-        return;
-    renderer->updateAltText();
-}
-
-void ImageInputType::srcAttributeChanged()
-{
-    if (!element().renderer())
-        return;
-    element().ensureImageLoader().updateFromElementIgnoringPreviousError();
+    if (name == altAttr) {
+        if (auto* element = this->element()) {
+            auto* renderer = element->renderer();
+            if (is<RenderImage>(renderer))
+                downcast<RenderImage>(*renderer).updateAltText();
+        }
+    } else if (name == srcAttr) {
+        if (auto* element = this->element()) {
+            if (element->renderer())
+                element->ensureImageLoader().updateFromElementIgnoringPreviousError();
+        }
+    }
+    BaseButtonInputType::attributeChanged(name);
 }
 
 void ImageInputType::attach()
 {
     BaseButtonInputType::attach();
 
-    HTMLImageLoader& imageLoader = element().ensureImageLoader();
+    ASSERT(element());
+    HTMLImageLoader& imageLoader = element()->ensureImageLoader();
     imageLoader.updateFromElement();
 
-    auto* renderer = downcast<RenderImage>(element().renderer());
+    auto* renderer = downcast<RenderImage>(element()->renderer());
     if (!renderer)
         return;
 
@@ -159,16 +163,6 @@ bool ImageInputType::canBeSuccessfulSubmitButton()
     return true;
 }
 
-bool ImageInputType::isImageButton() const
-{
-    return true;
-}
-
-bool ImageInputType::isEnumeratable()
-{
-    return false;
-}
-
 bool ImageInputType::shouldRespectHeightAndWidthAttributes()
 {
     return true;
@@ -176,7 +170,8 @@ bool ImageInputType::shouldRespectHeightAndWidthAttributes()
 
 unsigned ImageInputType::height() const
 {
-    Ref<HTMLInputElement> element(this->element());
+    ASSERT(element());
+    Ref<HTMLInputElement> element(*this->element());
 
     element->document().updateLayout();
 
@@ -197,7 +192,8 @@ unsigned ImageInputType::height() const
 
 unsigned ImageInputType::width() const
 {
-    Ref<HTMLInputElement> element(this->element());
+    ASSERT(element());
+    Ref<HTMLInputElement> element(*this->element());
 
     element->document().updateLayout();
 
@@ -214,6 +210,11 @@ unsigned ImageInputType::width() const
         return imageLoader->image()->imageSizeForRenderer(element->renderer(), 1).width().toUnsigned();
 
     return 0;
+}
+
+String ImageInputType::resultForDialogSubmit() const
+{
+    return makeString(m_clickLocation.x(), ',', m_clickLocation.y());
 }
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,7 +29,6 @@
 #include "CodeBlock.h"
 #include "FunctionCodeBlock.h"
 #include "JSCInlines.h"
-#include "LLIntData.h"
 
 namespace JSC {
 
@@ -38,12 +37,11 @@ FunctionExecutable* getExecutableForFunction(JSValue theFunctionValue)
     if (!theFunctionValue.isCell())
         return nullptr;
 
-    VM& vm = *theFunctionValue.asCell()->vm();
-    JSFunction* theFunction = jsDynamicCast<JSFunction*>(vm, theFunctionValue);
+    JSFunction* theFunction = jsDynamicCast<JSFunction*>(theFunctionValue);
     if (!theFunction)
         return nullptr;
     
-    FunctionExecutable* executable = jsDynamicCast<FunctionExecutable*>(vm, 
+    FunctionExecutable* executable = jsDynamicCast<FunctionExecutable*>(
         theFunction->executable());
     return executable;
 }
@@ -52,7 +50,7 @@ CodeBlock* getSomeBaselineCodeBlockForFunction(JSValue theFunctionValue)
 {
     FunctionExecutable* executable = getExecutableForFunction(theFunctionValue);
     if (!executable)
-        return 0;
+        return nullptr;
     
     CodeBlock* baselineCodeBlock = executable->baselineCodeBlockFor(CodeForCall);
     
@@ -66,7 +64,7 @@ JSValue numberOfDFGCompiles(JSValue theFunctionValue)
 {
     bool pretendToHaveManyCompiles = false;
 #if ENABLE(DFG_JIT)
-    if (!Options::useJIT() || !Options::useDFGJIT())
+    if (!Options::useJIT() || !Options::useBaselineJIT() || !Options::useDFGJIT())
         pretendToHaveManyCompiles = true;
 #else
     pretendToHaveManyCompiles = true;
@@ -102,65 +100,61 @@ JSValue optimizeNextInvocation(JSValue theFunctionValue)
 #if ENABLE(JIT)
     if (CodeBlock* baselineCodeBlock = getSomeBaselineCodeBlockForFunction(theFunctionValue))
         baselineCodeBlock->optimizeNextInvocation();
-#else
-    UNUSED_PARAM(theFunctionValue);
 #endif
+    UNUSED_PARAM(theFunctionValue);
+    return jsUndefined();
+}
+
+JSValue failNextNewCodeBlock(JSGlobalObject* globalObject)
+{
+    globalObject->vm().setFailNextNewCodeBlock();
 
     return jsUndefined();
 }
 
-JSValue failNextNewCodeBlock(ExecState* exec)
+JSValue numberOfDFGCompiles(JSGlobalObject*, CallFrame* callFrame)
 {
-    exec->vm().setFailNextNewCodeBlock();
-
-    return jsUndefined();
+    if (callFrame->argumentCount() < 1)
+        return jsUndefined();
+    return numberOfDFGCompiles(callFrame->uncheckedArgument(0));
 }
 
-JSValue numberOfDFGCompiles(ExecState* exec)
+JSValue setNeverInline(JSGlobalObject*, CallFrame* callFrame)
 {
-    if (exec->argumentCount() < 1)
+    if (callFrame->argumentCount() < 1)
         return jsUndefined();
-    return numberOfDFGCompiles(exec->uncheckedArgument(0));
+    return setNeverInline(callFrame->uncheckedArgument(0));
 }
 
-JSValue setNeverInline(ExecState* exec)
+JSValue setNeverOptimize(JSGlobalObject*, CallFrame* callFrame)
 {
-    if (exec->argumentCount() < 1)
+    if (callFrame->argumentCount() < 1)
         return jsUndefined();
-    return setNeverInline(exec->uncheckedArgument(0));
+    return setNeverOptimize(callFrame->uncheckedArgument(0));
 }
 
-JSValue setNeverOptimize(ExecState* exec)
+JSValue setCannotUseOSRExitFuzzing(JSGlobalObject*, CallFrame* callFrame)
 {
-    if (exec->argumentCount() < 1)
-        return jsUndefined();
-    return setNeverOptimize(exec->uncheckedArgument(0));
-}
-
-JSValue setCannotUseOSRExitFuzzing(ExecState* exec)
-{
-    if (exec->argumentCount() < 1)
+    if (callFrame->argumentCount() < 1)
         return jsUndefined();
 
-    JSValue theFunctionValue = exec->uncheckedArgument(0);
+    JSValue theFunctionValue = callFrame->uncheckedArgument(0);
     if (FunctionExecutable* executable = getExecutableForFunction(theFunctionValue))
         executable->setCanUseOSRExitFuzzing(false);
 
     return jsUndefined();
 }
 
-JSValue optimizeNextInvocation(ExecState* exec)
+JSValue optimizeNextInvocation(JSGlobalObject*, CallFrame* callFrame)
 {
-    if (exec->argumentCount() < 1)
+    if (callFrame->argumentCount() < 1)
         return jsUndefined();
-    return optimizeNextInvocation(exec->uncheckedArgument(0));
+    return optimizeNextInvocation(callFrame->uncheckedArgument(0));
 }
 
 // This is a hook called at the bitter end of some of our tests.
 void finalizeStatsAtEndOfTesting()
 {
-    if (Options::reportLLIntStats())
-        LLInt::Data::finalizeStats();
 }
 
 } // namespace JSC

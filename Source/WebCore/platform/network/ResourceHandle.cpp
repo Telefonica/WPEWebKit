@@ -31,21 +31,26 @@
 #include "NetworkingContext.h"
 #include "NotImplemented.h"
 #include "ResourceHandleClient.h"
+#include "SecurityOrigin.h"
 #include "Timer.h"
+#include "TimingAllowOrigin.h"
 #include <algorithm>
+#include <wtf/CompletionHandler.h>
 #include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
-#include <wtf/text/AtomicStringHash.h>
+#include <wtf/text/AtomStringHash.h>
 #include <wtf/text/CString.h>
 
 namespace WebCore {
 
 static bool shouldForceContentSniffing;
 
-typedef HashMap<AtomicString, ResourceHandle::BuiltinConstructor> BuiltinResourceHandleConstructorMap;
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(ResourceHandleInternal);
+
+typedef HashMap<AtomString, ResourceHandle::BuiltinConstructor> BuiltinResourceHandleConstructorMap;
 static BuiltinResourceHandleConstructorMap& builtinResourceHandleConstructorMap()
 {
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     ASSERT(WebThreadIsLockedOrDisabled());
 #else
     ASSERT(isMainThread());
@@ -54,12 +59,12 @@ static BuiltinResourceHandleConstructorMap& builtinResourceHandleConstructorMap(
     return map;
 }
 
-void ResourceHandle::registerBuiltinConstructor(const AtomicString& protocol, ResourceHandle::BuiltinConstructor constructor)
+void ResourceHandle::registerBuiltinConstructor(const AtomString& protocol, ResourceHandle::BuiltinConstructor constructor)
 {
     builtinResourceHandleConstructorMap().add(protocol, constructor);
 }
 
-typedef HashMap<AtomicString, ResourceHandle::BuiltinSynchronousLoader> BuiltinResourceHandleSynchronousLoaderMap;
+typedef HashMap<AtomString, ResourceHandle::BuiltinSynchronousLoader> BuiltinResourceHandleSynchronousLoaderMap;
 static BuiltinResourceHandleSynchronousLoaderMap& builtinResourceHandleSynchronousLoaderMap()
 {
     ASSERT(isMainThread());
@@ -67,13 +72,13 @@ static BuiltinResourceHandleSynchronousLoaderMap& builtinResourceHandleSynchrono
     return map;
 }
 
-void ResourceHandle::registerBuiltinSynchronousLoader(const AtomicString& protocol, ResourceHandle::BuiltinSynchronousLoader loader)
+void ResourceHandle::registerBuiltinSynchronousLoader(const AtomString& protocol, ResourceHandle::BuiltinSynchronousLoader loader)
 {
     builtinResourceHandleSynchronousLoaderMap().add(protocol, loader);
 }
 
-ResourceHandle::ResourceHandle(NetworkingContext* context, const ResourceRequest& request, ResourceHandleClient* client, bool defersLoading, bool shouldContentSniff)
-    : d(std::make_unique<ResourceHandleInternal>(this, context, request, client, defersLoading, shouldContentSniff && shouldContentSniffURL(request.url())))
+ResourceHandle::ResourceHandle(NetworkingContext* context, const ResourceRequest& request, ResourceHandleClient* client, bool defersLoading, bool shouldContentSniff, ContentEncodingSniffingPolicy contentEncodingSniffingPolicy, RefPtr<SecurityOrigin>&& sourceOrigin, bool isMainFrameNavigation)
+    : d(makeUnique<ResourceHandleInternal>(this, context, request, client, defersLoading, shouldContentSniff && shouldContentSniffURL(request.url()), contentEncodingSniffingPolicy, WTFMove(sourceOrigin), isMainFrameNavigation))
 {
     if (!request.url().isValid()) {
         scheduleFailure(InvalidURLFailure);
@@ -86,18 +91,20 @@ ResourceHandle::ResourceHandle(NetworkingContext* context, const ResourceRequest
     }
 }
 
-RefPtr<ResourceHandle> ResourceHandle::create(NetworkingContext* context, const ResourceRequest& request, ResourceHandleClient* client, bool defersLoading, bool shouldContentSniff)
+RefPtr<ResourceHandle> ResourceHandle::create(NetworkingContext* context, const ResourceRequest& request, ResourceHandleClient* client, bool defersLoading, bool shouldContentSniff, ContentEncodingSniffingPolicy contentEncodingSniffingPolicy, RefPtr<SecurityOrigin>&& sourceOrigin, bool isMainFrameNavigation)
 {
-    if (auto constructor = builtinResourceHandleConstructorMap().get(request.url().protocol().toStringWithoutCopying()))
-        return constructor(request, client);
+    if (auto protocol = request.url().protocol().toExistingAtomString(); !protocol.isNull()) {
+        if (auto constructor = builtinResourceHandleConstructorMap().get(protocol))
+            return constructor(request, client);
+    }
 
-    auto newHandle = adoptRef(*new ResourceHandle(context, request, client, defersLoading, shouldContentSniff));
+    auto newHandle = adoptRef(*new ResourceHandle(context, request, client, defersLoading, shouldContentSniff, contentEncodingSniffingPolicy, WTFMove(sourceOrigin), isMainFrameNavigation));
 
     if (newHandle->d->m_scheduledFailureType != NoFailure)
-        return WTFMove(newHandle);
+        return newHandle;
 
     if (newHandle->start())
-        return WTFMove(newHandle);
+        return newHandle;
 
     return nullptr;
 }
@@ -130,14 +137,16 @@ void ResourceHandle::failureTimerFired()
     ASSERT_NOT_REACHED();
 }
 
-void ResourceHandle::loadResourceSynchronously(NetworkingContext* context, const ResourceRequest& request, StoredCredentialsPolicy storedCredentialsPolicy, ResourceError& error, ResourceResponse& response, Vector<char>& data)
+void ResourceHandle::loadResourceSynchronously(NetworkingContext* context, const ResourceRequest& request, StoredCredentialsPolicy storedCredentialsPolicy, SecurityOrigin* sourceOrigin, ResourceError& error, ResourceResponse& response, Vector<uint8_t>& data)
 {
-    if (auto constructor = builtinResourceHandleSynchronousLoaderMap().get(request.url().protocol().toStringWithoutCopying())) {
-        constructor(context, request, storedCredentialsPolicy, error, response, data);
-        return;
+    if (auto protocol = request.url().protocol().toExistingAtomString(); !protocol.isNull()) {
+        if (auto constructor = builtinResourceHandleSynchronousLoaderMap().get(protocol)) {
+            constructor(context, request, storedCredentialsPolicy, error, response, data);
+            return;
+        }
     }
 
-    platformLoadResourceSynchronously(context, request, storedCredentialsPolicy, error, response, data);
+    platformLoadResourceSynchronously(context, request, storedCredentialsPolicy, sourceOrigin, error, response, data);
 }
 
 ResourceHandleClient* ResourceHandle::client() const
@@ -150,47 +159,23 @@ void ResourceHandle::clearClient()
     d->m_client = nullptr;
 }
 
-void ResourceHandle::didReceiveResponse(ResourceResponse&& response)
+void ResourceHandle::didReceiveResponse(ResourceResponse&& response, CompletionHandler<void()>&& completionHandler)
 {
     if (response.isHTTP09()) {
         auto url = response.url();
         std::optional<uint16_t> port = url.port();
-        if (port && !isDefaultPortForProtocol(port.value(), url.protocol())) {
+        if (port && !WTF::isDefaultPortForProtocol(port.value(), url.protocol())) {
             cancel();
             String message = "Cancelled load from '" + url.stringCenterEllipsizedToLength() + "' because it is using HTTP/0.9.";
             d->m_client->didFail(this, { String(), 0, url, message });
+            completionHandler();
             return;
         }
     }
-    if (d->m_usesAsyncCallbacks)
-        d->m_client->didReceiveResponseAsync(this, WTFMove(response));
-    else {
-        d->m_client->didReceiveResponse(this, WTFMove(response));
-        platformContinueSynchronousDidReceiveResponse();
-    }
+    client()->didReceiveResponseAsync(this, WTFMove(response), WTFMove(completionHandler));
 }
 
-#if !PLATFORM(COCOA) && !USE(CFURLCONNECTION) && !USE(SOUP)
-// ResourceHandle never uses async client calls on these platforms yet.
-void ResourceHandle::continueWillSendRequest(ResourceRequest&&)
-{
-    notImplemented();
-}
-
-void ResourceHandle::continueDidReceiveResponse()
-{
-    notImplemented();
-}
-
-#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
-void ResourceHandle::continueCanAuthenticateAgainstProtectionSpace(bool)
-{
-    notImplemented();
-}
-#endif
-#endif
-
-#if !USE(SOUP)
+#if !USE(SOUP) && !USE(CURL)
 void ResourceHandle::platformContinueSynchronousDidReceiveResponse()
 {
     // Do nothing.
@@ -224,10 +209,70 @@ void ResourceHandle::clearAuthentication()
 #endif
     d->m_currentWebChallenge.nullify();
 }
-  
+
+bool ResourceHandle::failsTAOCheck() const
+{
+    return d->m_failsTAOCheck;
+}
+
+void ResourceHandle::checkTAO(const ResourceResponse& response)
+{
+    if (d->m_failsTAOCheck)
+        return;
+
+    RefPtr<SecurityOrigin> origin;
+    if (d->m_isMainFrameNavigation)
+        origin = SecurityOrigin::create(firstRequest().url());
+    else
+        origin = d->m_sourceOrigin;
+
+    if (origin)
+        d->m_failsTAOCheck = !passesTimingAllowOriginCheck(response, *origin);
+}
+
+bool ResourceHandle::hasCrossOriginRedirect() const
+{
+    return d->m_hasCrossOriginRedirect;
+}
+
+void ResourceHandle::markAsHavingCrossOriginRedirect()
+{
+    d->m_hasCrossOriginRedirect = true;
+}
+
+void ResourceHandle::incrementRedirectCount()
+{
+    d->m_redirectCount++;
+}
+
+uint16_t ResourceHandle::redirectCount() const
+{
+    return d->m_redirectCount;
+}
+
+MonotonicTime ResourceHandle::startTimeBeforeRedirects() const
+{
+    return d->m_startTime;
+}
+
+NetworkLoadMetrics* ResourceHandle::networkLoadMetrics()
+{
+    return d->m_networkLoadMetrics.get();
+}
+
+void ResourceHandle::setNetworkLoadMetrics(Box<NetworkLoadMetrics>&& metrics)
+{
+    d->m_networkLoadMetrics = WTFMove(metrics);
+}
+
 bool ResourceHandle::shouldContentSniff() const
 {
     return d->m_shouldContentSniff;
+}
+
+ContentEncodingSniffingPolicy ResourceHandle::contentEncodingSniffingPolicy() const
+{
+    return d->m_contentEncodingSniffingPolicy;
 }
 
 bool ResourceHandle::shouldContentSniffURL(const URL& url)
@@ -237,7 +282,7 @@ bool ResourceHandle::shouldContentSniffURL(const URL& url)
         return true;
 #endif
     // We shouldn't content sniff file URLs as their MIME type should be established via their extension.
-    return !url.protocolIs("file");
+    return !url.protocolIs("file"_s);
 }
 
 void ResourceHandle::forceContentSniffing()
@@ -262,11 +307,6 @@ void ResourceHandle::setDefersLoading(bool defers)
     }
 
     platformSetDefersLoading(defers);
-}
-
-bool ResourceHandle::usesAsyncCallbacks() const
-{
-    return d->m_usesAsyncCallbacks;
 }
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,33 +28,29 @@
 
 #if ENABLE(B3_JIT)
 
-#include "B3BasicBlockInlines.h"
 #include "B3BlockWorklist.h"
 #include "B3Dominators.h"
 #include "B3HeapRange.h"
 #include "B3InsertionSetInlines.h"
 #include "B3MemoryValue.h"
+#include "B3MemoryValueInlines.h"
 #include "B3PhaseScope.h"
 #include "B3ProcedureInlines.h"
 #include "B3PureCSE.h"
-#include "B3SlotBaseValue.h"
-#include "B3StackSlot.h"
-#include "B3ValueKey.h"
 #include "B3ValueInlines.h"
-#include "B3Variable.h"
 #include "B3VariableValue.h"
-#include "DFGGraph.h"
 #include <wtf/CommaPrinter.h>
 #include <wtf/HashMap.h>
 #include <wtf/ListDump.h>
 #include <wtf/RangeSet.h>
+#include <wtf/Scope.h>
 
 namespace JSC { namespace B3 {
 
 namespace {
 
 namespace B3EliminateCommonSubexpressionsInternal {
-static const bool verbose = false;
+static constexpr bool verbose = false;
 }
 
 // FIXME: We could treat Patchpoints with a non-empty set of reads as a "memory value" and somehow
@@ -106,8 +102,14 @@ public:
     template<typename Functor>
     MemoryValue* find(Value* ptr, const Functor& functor)
     {
+        if (B3EliminateCommonSubexpressionsInternal::verbose)
+            dataLog("        Looking for ", pointerDump(ptr), " in ", *this, "\n");
         if (Matches* matches = find(ptr)) {
+            if (B3EliminateCommonSubexpressionsInternal::verbose)
+                dataLog("        Matches: ", pointerListDump(*matches), "\n");
             for (Value* candidateValue : *matches) {
+                if (B3EliminateCommonSubexpressionsInternal::verbose)
+                    dataLog("        Having candidate: ", pointerDump(candidateValue), "\n");
                 if (MemoryValue* candidateMemory = candidateValue->as<MemoryValue>()) {
                     if (functor(candidateMemory))
                         return candidateMemory;
@@ -144,10 +146,14 @@ struct ImpureBlockData {
 
     RangeSet<HeapRange> reads; // This only gets used for forward store elimination.
     RangeSet<HeapRange> writes; // This gets used for both load and store elimination.
-    bool fence;
+    bool fence { false };
+    bool writesPinned { false };
 
     MemoryValueMap storesAtHead;
     MemoryValueMap memoryValuesAtTail;
+
+    // This Maps x->y in "y = WasmAddress(@x)"
+    HashMap<Value*, Value*> m_candidateWasmAddressesAtTail;
 };
 
 class CSE {
@@ -188,6 +194,14 @@ public:
 
                 if (memory)
                     data.memoryValuesAtTail.add(memory);
+
+                if (WasmAddressValue* wasmAddress = value->as<WasmAddressValue>())
+                    data.m_candidateWasmAddressesAtTail.add(wasmAddress->child(0), wasmAddress);
+
+                if (effects.writesPinned) {
+                    data.writesPinned = true;
+                    data.m_candidateWasmAddressesAtTail.clear();
+                }
             }
 
             if (B3EliminateCommonSubexpressionsInternal::verbose)
@@ -236,16 +250,30 @@ private:
         m_value->performSubstitution();
 
         if (m_pureCSE.process(m_value, m_dominators)) {
+            ASSERT(!m_value->effects().readsPinned || !m_data.writesPinned);
             ASSERT(!m_value->effects().writes);
+            ASSERT(!m_value->effects().writesPinned);
             m_changed = true;
             return;
+        }
+
+        if (WasmAddressValue* wasmAddress = m_value->as<WasmAddressValue>()) {
+            processWasmAddressValue(wasmAddress);
+            return;
+        }
+
+        Effects effects = m_value->effects();
+
+        if (effects.writesPinned) {
+            m_data.writesPinned = true;
+            m_data.m_candidateWasmAddressesAtTail.clear();
         }
 
         MemoryValue* memory = m_value->as<MemoryValue>();
         if (memory && processMemoryBeforeClobber(memory))
             return;
 
-        if (HeapRange writes = m_value->effects().writes)
+        if (HeapRange writes = effects.writes)
             clobber(m_data, writes);
         
         if (memory)
@@ -405,14 +433,25 @@ private:
             handleMemoryValue(
                 ptr, range,
                 [&] (MemoryValue* candidate) -> bool {
+                    if (B3EliminateCommonSubexpressionsInternal::verbose)
+                        dataLog("        Consdering ", pointerDump(candidate), "\n");
                     if (candidate->offset() != offset)
                         return false;
-
+                    
+                    if (B3EliminateCommonSubexpressionsInternal::verbose)
+                        dataLog("            offset ok.\n");
+                    
                     if (candidate->opcode() == Load && candidate->type() == type)
                         return true;
 
+                    if (B3EliminateCommonSubexpressionsInternal::verbose)
+                        dataLog("            not a load with ok type.\n");
+                    
                     if (candidate->opcode() == Store && candidate->child(0)->type() == type)
                         return true;
+
+                    if (B3EliminateCommonSubexpressionsInternal::verbose)
+                        dataLog("            not a store with ok type.\n");
 
                     return false;
                 });
@@ -440,11 +479,13 @@ private:
         }
             
         case Store: {
+            auto clobberWidth = memory->accessWidth();
             handleStoreAfterClobber(
                 ptr, range,
                 [&] (MemoryValue* candidate) -> bool {
                     return candidate->opcode() == Store
-                        && candidate->offset() == offset;
+                        && candidate->offset() == offset
+                        && candidate->accessWidth() >= clobberWidth;
                 });
             break;
         }
@@ -617,8 +658,10 @@ private:
     template<typename Filter>
     MemoryMatches findMemoryValue(Value* ptr, HeapRange range, const Filter& filter)
     {
-        if (B3EliminateCommonSubexpressionsInternal::verbose)
+        if (B3EliminateCommonSubexpressionsInternal::verbose) {
             dataLog(*m_value, ": looking backward for ", *ptr, "...\n");
+            dataLog("    Full value: ", deepDump(m_value), "\n");
+        }
         
         if (m_value->as<MemoryValue>()->hasFence()) {
             if (B3EliminateCommonSubexpressionsInternal::verbose)
@@ -650,6 +693,8 @@ private:
             ImpureBlockData& data = m_impureBlockData[block];
 
             MemoryValue* match = data.memoryValuesAtTail.find(ptr, filter);
+            if (B3EliminateCommonSubexpressionsInternal::verbose)
+                dataLog("    Consdering match: ", pointerDump(match), "\n");
             if (match && match != m_value) {
                 if (B3EliminateCommonSubexpressionsInternal::verbose)
                     dataLog("    Found match: ", *match, "\n");
@@ -677,6 +722,63 @@ private:
         if (B3EliminateCommonSubexpressionsInternal::verbose)
             dataLog("    Got matches: ", pointerListDump(matches), "\n");
         return matches;
+    }
+
+    void processWasmAddressValue(WasmAddressValue* wasmAddress)
+    {
+        Value* ptr = wasmAddress->child(0);
+
+        if (Value* replacement = m_data.m_candidateWasmAddressesAtTail.get(ptr)) {
+            if (B3EliminateCommonSubexpressionsInternal::verbose)
+                dataLog("    Replacing WasmAddress: ", *wasmAddress, " with ", *replacement, "\n");
+            wasmAddress->replaceWithIdentity(replacement);
+            m_changed = true;
+            return;
+        }
+
+        auto addPtrOnScopeExit = makeScopeExit([&] {
+            m_data.m_candidateWasmAddressesAtTail.add(ptr, wasmAddress);
+        });
+
+        if (m_data.writesPinned) {
+            // Someone before us in this block wrote to pinned. So we have no
+            // hope of finding a match if the above search failed.
+            return;
+        }
+
+        Value* candidateReplacement = nullptr;
+        BasicBlock* dominator = nullptr;
+        m_dominators.forAllStrictDominatorsOf(m_block, [&] (BasicBlock* block) {
+            if (candidateReplacement)
+                return;
+
+            if (Value* replacement = m_impureBlockData[block].m_candidateWasmAddressesAtTail.get(ptr)) {
+                candidateReplacement = replacement;
+                dominator = block;
+            }
+        });
+
+        if (!candidateReplacement)
+            return;
+
+        BlockWorklist worklist;
+        worklist.pushAll(m_block->predecessors());
+        while (BasicBlock* block = worklist.pop()) {
+            if (block == dominator)
+                continue;
+            if (m_impureBlockData[block].writesPinned) {
+                candidateReplacement = nullptr;
+                break;
+            }
+            worklist.pushAll(block->predecessors());
+        }
+
+        if (candidateReplacement) {
+            if (B3EliminateCommonSubexpressionsInternal::verbose)
+                dataLog("    Replacing WasmAddress: ", *wasmAddress, " with ", *candidateReplacement, "\n");
+            wasmAddress->replaceWithIdentity(candidateReplacement);
+            m_changed = true;
+        }
     }
 
     Procedure& m_proc;

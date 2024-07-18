@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2018 Apple Inc. All rights reserved.
  * Copyright (C) 2009, 2010, 2011 Google Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -25,6 +25,7 @@
 #pragma once
 
 #include "HTMLFormControlElementWithState.h"
+#include "PointerEventTypeNames.h"
 
 namespace WebCore {
 
@@ -33,11 +34,15 @@ class RenderTextControl;
 class TextControlInnerTextElement;
 class VisiblePosition;
 
-enum class AutoFillButtonType : uint8_t { None, Credentials, Contacts };
+struct SimpleRange;
+
+enum class AutoFillButtonType : uint8_t { None, Credentials, Contacts, StrongPassword, CreditCard, Loading };
 enum TextFieldSelectionDirection { SelectionHasNoDirection, SelectionHasForwardDirection, SelectionHasBackwardDirection };
 enum TextFieldEventBehavior { DispatchNoEvent, DispatchChangeEvent, DispatchInputAndChangeEvent };
+enum TextControlSetValueSelection { SetSelectionToEnd, Clamp, DoNotSet };
 
 class HTMLTextFormControlElement : public HTMLFormControlElementWithState {
+    WTF_MAKE_ISO_ALLOCATED(HTMLTextFormControlElement);
 public:
     // Common flag for HTMLInputElement::tooLong() / tooShort() and HTMLTextAreaElement::tooLong() / tooShort().
     enum NeedsToCheckDirtyFlag {CheckDirtyFlag, IgnoreDirtyFlag};
@@ -52,71 +57,74 @@ public:
     int minLength() const { return m_minLength; }
     ExceptionOr<void> setMinLength(int);
 
-    InsertionNotificationRequest insertedInto(ContainerNode&) override;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) override;
 
     // The derived class should return true if placeholder processing is needed.
     bool isPlaceholderVisible() const { return m_isPlaceholderVisible; }
     virtual bool supportsPlaceholder() const = 0;
-    String strippedPlaceholder() const;
     virtual HTMLElement* placeholderElement() const = 0;
     void updatePlaceholderVisibility();
 
+    WEBCORE_EXPORT void setCanShowPlaceholder(bool);
+    bool canShowPlaceholder() const { return m_canShowPlaceholder; }
+
     int indexForVisiblePosition(const VisiblePosition&) const;
     WEBCORE_EXPORT VisiblePosition visiblePositionForIndex(int index) const;
-    WEBCORE_EXPORT int selectionStart() const;
-    WEBCORE_EXPORT int selectionEnd() const;
-    WEBCORE_EXPORT const AtomicString& selectionDirection() const;
-    WEBCORE_EXPORT void setSelectionStart(int);
-    WEBCORE_EXPORT void setSelectionEnd(int);
+    WEBCORE_EXPORT unsigned selectionStart() const;
+    WEBCORE_EXPORT unsigned selectionEnd() const;
+    WEBCORE_EXPORT const AtomString& selectionDirection() const;
+    WEBCORE_EXPORT void setSelectionStart(unsigned);
+    WEBCORE_EXPORT void setSelectionEnd(unsigned);
     WEBCORE_EXPORT void setSelectionDirection(const String&);
-    WEBCORE_EXPORT void select(const AXTextStateChangeIntent& = AXTextStateChangeIntent());
-    WEBCORE_EXPORT virtual ExceptionOr<void> setRangeText(const String& replacement);
-    WEBCORE_EXPORT virtual ExceptionOr<void> setRangeText(const String& replacement, unsigned start, unsigned end, const String& selectionMode);
-    void setSelectionRange(int start, int end, const String& direction, const AXTextStateChangeIntent& = AXTextStateChangeIntent());
-    WEBCORE_EXPORT void setSelectionRange(int start, int end, TextFieldSelectionDirection = SelectionHasNoDirection, const AXTextStateChangeIntent& = AXTextStateChangeIntent());
-    RefPtr<Range> selection() const;
+    WEBCORE_EXPORT void select(SelectionRevealMode = SelectionRevealMode::DoNotReveal, const AXTextStateChangeIntent& = AXTextStateChangeIntent());
+    WEBCORE_EXPORT ExceptionOr<void> setRangeText(StringView replacement);
+    WEBCORE_EXPORT virtual ExceptionOr<void> setRangeText(StringView replacement, unsigned start, unsigned end, const String& selectionMode);
+    void setSelectionRange(unsigned start, unsigned end, const String& direction, const AXTextStateChangeIntent& = AXTextStateChangeIntent());
+    WEBCORE_EXPORT bool setSelectionRange(unsigned start, unsigned end, TextFieldSelectionDirection = SelectionHasNoDirection, SelectionRevealMode = SelectionRevealMode::DoNotReveal, const AXTextStateChangeIntent& = AXTextStateChangeIntent());
+
+    std::optional<SimpleRange> selection() const;
     String selectedText() const;
 
     void dispatchFormControlChangeEvent() final;
+    void scheduleSelectEvent();
 
     virtual String value() const = 0;
 
-    virtual TextControlInnerTextElement* innerTextElement() const = 0;
-    virtual RenderStyle createInnerTextStyle(const RenderStyle&) const = 0;
+    virtual ExceptionOr<void> setValue(const String&, TextFieldEventBehavior = DispatchNoEvent, TextControlSetValueSelection = TextControlSetValueSelection::SetSelectionToEnd) = 0;
+    virtual RefPtr<TextControlInnerTextElement> innerTextElement() const = 0;
+    virtual RefPtr<TextControlInnerTextElement> innerTextElementCreatingShadowSubtreeIfNeeded() = 0;
+    virtual RenderStyle createInnerTextStyle(const RenderStyle&) = 0;
 
     void selectionChanged(bool shouldFireSelectEvent);
     WEBCORE_EXPORT bool lastChangeWasUserEdit() const;
-    void setInnerTextValue(const String&);
+    void setInnerTextValue(String&&);
     String innerTextValue() const;
 
     String directionForFormData() const;
 
     void setTextAsOfLastFormControlChangeEvent(const String& text) { m_textAsOfLastFormControlChangeEvent = text; }
-#if PLATFORM(IOS)
-    WEBCORE_EXPORT void hidePlaceholder();
-    WEBCORE_EXPORT void showPlaceholderIfNecessary();
-#endif
+
+    WEBCORE_EXPORT virtual bool isInnerTextElementEditable() const;
 
 protected:
     HTMLTextFormControlElement(const QualifiedName&, Document&, HTMLFormElement*);
     bool isPlaceholderEmpty() const;
     virtual void updatePlaceholderText() = 0;
 
-    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    void parseAttribute(const QualifiedName&, const AtomString&) override;
 
     void disabledStateChanged() override;
-    void readOnlyAttributeChanged() override;
+    void readOnlyStateChanged() override;
+
     void updateInnerTextElementEditability();
 
-    void cacheSelection(int start, int end, TextFieldSelectionDirection direction)
-    {
-        m_cachedSelectionStart = start;
-        m_cachedSelectionEnd = end;
-        m_cachedSelectionDirection = direction;
-    }
+    bool cacheSelection(unsigned start, unsigned end, TextFieldSelectionDirection);
 
-    void restoreCachedSelection(const AXTextStateChangeIntent& = AXTextStateChangeIntent());
-    bool hasCachedSelection() const { return m_cachedSelectionStart >= 0; }
+    void restoreCachedSelection(SelectionRevealMode, const AXTextStateChangeIntent& = AXTextStateChangeIntent());
+    bool hasCachedSelection() const { return m_hasCachedSelection; }
+
+    unsigned computeSelectionStart() const;
+    unsigned computeSelectionEnd() const;
 
     virtual void subtreeHasChanged() = 0;
 
@@ -132,13 +140,15 @@ protected:
 private:
     TextFieldSelectionDirection cachedSelectionDirection() const { return static_cast<TextFieldSelectionDirection>(m_cachedSelectionDirection); }
 
-    int computeSelectionStart() const;
-    int computeSelectionEnd() const;
+    bool isTextFormControlElement() const final { return true; }
+
     TextFieldSelectionDirection computeSelectionDirection() const;
 
-    void dispatchFocusEvent(RefPtr<Element>&& oldFocusedElement, FocusDirection) final;
+    void dispatchFocusEvent(RefPtr<Element>&& oldFocusedElement, const FocusOptions&) final;
     void dispatchBlurEvent(RefPtr<Element>&& newFocusedElement) final;
     bool childShouldCreateRenderer(const Node&) const override;
+    
+    void setHovered(bool, Style::InvalidationScope, HitTestRequest) final;
 
     unsigned indexForPosition(const Position&) const;
 
@@ -154,21 +164,27 @@ private:
     unsigned m_cachedSelectionDirection : 2;
     unsigned m_lastChangeWasUserEdit : 1;
     unsigned m_isPlaceholderVisible : 1;
+    unsigned m_canShowPlaceholder : 1;
+    
+    String m_pointerType { mousePointerEventType() };
 
     String m_textAsOfLastFormControlChangeEvent;
 
-    int m_cachedSelectionStart;
-    int m_cachedSelectionEnd;
+    unsigned m_cachedSelectionStart;
+    unsigned m_cachedSelectionEnd;
 
     int m_maxLength { -1 };
     int m_minLength { -1 };
+
+    bool m_hasCachedSelection { false };
 };
 
-HTMLTextFormControlElement* enclosingTextFormControl(const Position&);
+WEBCORE_EXPORT HTMLTextFormControlElement* enclosingTextFormControl(const Position&);
 
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::HTMLTextFormControlElement)
-    static bool isType(const WebCore::Element& element) { return element.isTextFormControl(); }
+    static bool isType(const WebCore::Element& element) { return element.isTextFormControlElement(); }
     static bool isType(const WebCore::Node& node) { return is<WebCore::Element>(node) && isType(downcast<WebCore::Element>(node)); }
+    static bool isType(const WebCore::EventTarget& target) { return is<WebCore::Node>(target) && isType(downcast<WebCore::Node>(target)); }
 SPECIALIZE_TYPE_TRAITS_END()

@@ -31,7 +31,7 @@ WI.NetworkTimelineView = class NetworkTimelineView extends WI.TimelineView
 
         console.assert(timeline.type === WI.TimelineRecord.Type.Network);
 
-        let columns = {name: {}, domain: {}, type: {}, method: {}, scheme: {}, statusCode: {}, cached: {}, protocol: {}, priority: {}, remoteAddress: {}, connectionIdentifier: {}, size: {}, transferSize: {}, requestSent: {}, latency: {}, duration: {}, graph: {}};
+        let columns = {name: {}, domain: {}, type: {}, method: {}, scheme: {}, statusCode: {}, cached: {}, protocol: {}, priority: {}, remoteAddress: {}, connectionIdentifier: {}, size: {}, transferSize: {}, requestSent: {}, latency: {}, duration: {}, initiator: {}, graph: {}};
 
         columns.name.title = WI.UIString("Name");
         columns.name.icon = true;
@@ -102,6 +102,10 @@ WI.NetworkTimelineView = class NetworkTimelineView extends WI.TimelineView
         columns.duration.width = "9%";
         columns.duration.aligned = "right";
 
+        columns.initiator.title = WI.UIString("Initiator");
+        columns.initiator.width = "9%";
+        columns.initiator.hidden = true;
+
         for (let column in columns)
             columns[column].sortable = true;
 
@@ -114,7 +118,7 @@ WI.NetworkTimelineView = class NetworkTimelineView extends WI.TimelineView
         columns.graph.sortable = false;
 
         // COMPATIBILITY(iOS 10.3): Network load metrics were not previously available.
-        if (!NetworkAgent.hasEventParameter("loadingFinished", "metrics")) {
+        if (!InspectorBackend.hasEvent("Network.loadingFinished", "metrics")) {
             delete columns.protocol;
             delete columns.priority;
             delete columns.remoteAddress;
@@ -136,6 +140,9 @@ WI.NetworkTimelineView = class NetworkTimelineView extends WI.TimelineView
 
         this._pendingRecords = [];
         this._resourceDataGridNodeMap = new Map;
+
+        for (let record of timeline.records)
+            this._processRecord(record);
     }
 
     // Public
@@ -154,24 +161,9 @@ WI.NetworkTimelineView = class NetworkTimelineView extends WI.TimelineView
         return [pathComponent];
     }
 
-    shown()
-    {
-        super.shown();
-
-        this._dataGrid.shown();
-    }
-
-    hidden()
-    {
-        this._dataGrid.hidden();
-
-        super.hidden();
-    }
-
     closed()
     {
-        console.assert(this.representedObject instanceof WI.Timeline);
-        this.representedObject.removeEventListener(null, null, this);
+        this.representedObject.removeEventListener(WI.Timeline.Event.RecordAdded, this._networkTimelineRecordAdded, this);
 
         this._dataGrid.closed();
     }
@@ -192,8 +184,8 @@ WI.NetworkTimelineView = class NetworkTimelineView extends WI.TimelineView
     {
         if (sortColumnIdentifier === "priority")
             return WI.Resource.comparePriority(node1.data.priority, node2.data.priority) * sortDirection;
-        
-        if (sortColumnIdentifier == "name") {
+
+        if (sortColumnIdentifier === "name") {
             let displayName1 = node1.displayName();
             let displayName2 = node2.displayName();
 
@@ -254,12 +246,14 @@ WI.NetworkTimelineView = class NetworkTimelineView extends WI.TimelineView
             if (dataGridNode)
                 continue;
 
-            const includesGraph = false;
-            const shouldShowPopover = true;
-            dataGridNode = new WI.ResourceTimelineDataGridNode(resourceTimelineRecord, includesGraph, this, shouldShowPopover);
+            dataGridNode = new WI.ResourceTimelineDataGridNode(resourceTimelineRecord, {
+                graphDataSource: this,
+                shouldShowPopover: true,
+            });
+
             this._resourceDataGridNodeMap.set(resourceTimelineRecord.resource, dataGridNode);
 
-            this._dataGrid.addRowInSortOrder(null, dataGridNode);
+            this._dataGrid.addRowInSortOrder(dataGridNode);
         }
 
         this._pendingRecords = [];
@@ -267,11 +261,18 @@ WI.NetworkTimelineView = class NetworkTimelineView extends WI.TimelineView
 
     _networkTimelineRecordAdded(event)
     {
-        var resourceTimelineRecord = event.data.record;
+        let resourceTimelineRecord = event.data.record;
         console.assert(resourceTimelineRecord instanceof WI.ResourceTimelineRecord);
 
-        this._pendingRecords.push(resourceTimelineRecord);
+        this._processRecord(resourceTimelineRecord);
 
         this.needsLayout();
     }
+
+    _processRecord(resourceTimelineRecord)
+    {
+        this._pendingRecords.push(resourceTimelineRecord);
+    }
 };
+
+WI.NetworkTimelineView.ReferencePage = WI.ReferencePage.TimelinesTab.NetworkRequestsTimeline;

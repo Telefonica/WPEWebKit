@@ -28,8 +28,12 @@ WI.TestAppController = class TestAppController extends WI.AppControllerBase
     constructor()
     {
         super();
+
+        this._debuggableType = WI.DebuggableType.fromString(InspectorFrontendHost.debuggableInfo.debuggableType);
+        console.assert(this._debuggableType);
     }
 
-    get hasExtraDomains() { return false; }
-    get debuggableType() { return WI.DebuggableType.Web; }
+    // Public
+
+    get debuggableType() { return this._debuggableType; }
 };

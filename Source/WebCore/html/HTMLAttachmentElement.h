@@ -28,41 +28,88 @@
 #if ENABLE(ATTACHMENT_ELEMENT)
 
 #include "HTMLElement.h"
+#include "Image.h"
 
 namespace WebCore {
 
 class File;
+class HTMLImageElement;
 class RenderAttachment;
+class ShareableBitmap;
+class FragmentedSharedBuffer;
 
 class HTMLAttachmentElement final : public HTMLElement {
+    WTF_MAKE_ISO_ALLOCATED(HTMLAttachmentElement);
 public:
     static Ref<HTMLAttachmentElement> create(const QualifiedName&, Document&);
+    WEBCORE_EXPORT static const String& getAttachmentIdentifier(HTMLImageElement&);
+    static URL archiveResourceURL(const String&);
 
+    WEBCORE_EXPORT URL blobURL() const;
     WEBCORE_EXPORT File* file() const;
-    void setFile(File*);
+
+    enum class UpdateDisplayAttributes { No, Yes };
+    void setFile(RefPtr<File>&&, UpdateDisplayAttributes = UpdateDisplayAttributes::No);
+
+    const String& uniqueIdentifier() const { return m_uniqueIdentifier; }
+    void setUniqueIdentifier(const String& uniqueIdentifier) { m_uniqueIdentifier = uniqueIdentifier; }
+
+    void copyNonAttributePropertiesFromElement(const Element&) final;
+
+    WEBCORE_EXPORT void updateAttributes(std::optional<uint64_t>&& newFileSize, const AtomString& newContentType, const AtomString& newFilename);
+    WEBCORE_EXPORT void updateEnclosingImageWithData(const String& contentType, Ref<FragmentedSharedBuffer>&& data);
+    WEBCORE_EXPORT void updateThumbnail(const RefPtr<Image>& thumbnail);
+    WEBCORE_EXPORT void updateIcon(const RefPtr<Image>& icon, const WebCore::FloatSize&);
+
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) final;
+    void removedFromAncestor(RemovalType, ContainerNode&) final;
+
+    const String& ensureUniqueIdentifier();
+    RefPtr<HTMLImageElement> enclosingImageElement() const;
 
     WEBCORE_EXPORT String attachmentTitle() const;
-    String attachmentType() const;
-
+    String attachmentTitleForDisplay() const;
+    WEBCORE_EXPORT String attachmentType() const;
+    String attachmentPath() const;
+    RefPtr<Image> thumbnail() const { return m_thumbnail; }
+    RefPtr<Image> icon() const { return m_icon; }
+    void requestIconWithSize(const FloatSize&) const;
+    FloatSize iconSize() const { return m_iconSize; }
     RenderAttachment* renderer() const;
+
+#if ENABLE(SERVICE_CONTROLS)
+    bool isImageMenuEnabled() const { return m_isImageMenuEnabled; }
+    void setImageMenuEnabled(bool value) { m_isImageMenuEnabled = value; }
+#endif
 
 private:
     HTMLAttachmentElement(const QualifiedName&, Document&);
     virtual ~HTMLAttachmentElement();
 
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) final;
-
     bool shouldSelectOnMouseDown() final {
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
         return false;
 #else
         return true;
 #endif
     }
     bool canContainRangeEndPoint() const final { return false; }
-    void parseAttribute(const QualifiedName&, const AtomicString&) final;
-    
+    void parseAttribute(const QualifiedName&, const AtomString&) final;
+
+#if ENABLE(SERVICE_CONTROLS)
+    bool childShouldCreateRenderer(const Node&) const final;
+#endif
+
     RefPtr<File> m_file;
+    String m_uniqueIdentifier;
+    RefPtr<Image> m_thumbnail;
+    RefPtr<Image> m_icon;
+    FloatSize m_iconSize;
+
+#if ENABLE(SERVICE_CONTROLS)
+    bool m_isImageMenuEnabled { false };
+#endif
 };
 
 } // namespace WebCore

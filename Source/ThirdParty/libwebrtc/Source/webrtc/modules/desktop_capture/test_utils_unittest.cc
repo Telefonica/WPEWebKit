@@ -8,11 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/desktop_capture/test_utils.h"
+#include "modules/desktop_capture/test_utils.h"
 
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/desktop_capture/rgba_color.h"
-#include "webrtc/test/gtest.h"
+#include <stdint.h>
+
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/rgba_color.h"
+#include "rtc_base/checks.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
@@ -21,8 +24,8 @@ namespace {
 void PaintDesktopFrame(DesktopFrame* frame,
                        DesktopVector pos,
                        RgbaColor color) {
-  RTC_DCHECK(frame);
-  RTC_DCHECK(DesktopRect::MakeSize(frame->size()).Contains(pos));
+  ASSERT_TRUE(frame);
+  ASSERT_TRUE(DesktopRect::MakeSize(frame->size()).Contains(pos));
   *reinterpret_cast<uint32_t*>(frame->GetFrameDataAtPos(pos)) =
       color.ToUInt32();
 }

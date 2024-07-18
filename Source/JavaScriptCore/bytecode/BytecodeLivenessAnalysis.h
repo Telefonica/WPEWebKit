@@ -28,6 +28,7 @@
 #include "BytecodeBasicBlock.h"
 #include "BytecodeGraph.h"
 #include "CodeBlock.h"
+#include <wtf/Bitmap.h>
 #include <wtf/FastBitVector.h>
 
 namespace JSC {
@@ -35,19 +36,44 @@ namespace JSC {
 class BytecodeKills;
 class FullBytecodeLiveness;
 
+// We model our bytecode effects like the following and insert the liveness calculation points.
+//
+// <- BeforeUse
+//     Use
+// <- AfterUse
+//     Use by exception handlers
+//     Def
+enum class LivenessCalculationPoint : uint8_t {
+    BeforeUse,
+    AfterUse,
+};
+
 class BytecodeLivenessPropagation {
-protected:
-    template<typename Graph, typename UseFunctor, typename DefFunctor> void stepOverInstruction(Graph&, unsigned bytecodeOffset, const UseFunctor&, const DefFunctor&);
+public:
+    template<typename CodeBlockType, typename UseFunctor>
+    static void stepOverBytecodeIndexUse(CodeBlockType*, const JSInstructionStream&, BytecodeGraph&, BytecodeIndex, const UseFunctor&);
+    template<typename CodeBlockType, typename UseFunctor>
+    static void stepOverBytecodeIndexUseInExceptionHandler(CodeBlockType*, const JSInstructionStream&, BytecodeGraph&, BytecodeIndex, const UseFunctor&);
+    template<typename CodeBlockType, typename DefFunctor>
+    static void stepOverBytecodeIndexDef(CodeBlockType*, const JSInstructionStream&, BytecodeGraph&, BytecodeIndex, const DefFunctor&);
 
-    template<typename Graph> void stepOverInstruction(Graph&, unsigned bytecodeOffset, FastBitVector& out);
+    template<typename CodeBlockType, typename UseFunctor, typename DefFunctor>
+    static void stepOverBytecodeIndex(CodeBlockType*, const JSInstructionStream&, BytecodeGraph&, BytecodeIndex, const UseFunctor&, const DefFunctor&);
 
-    template<typename Graph> bool computeLocalLivenessForBytecodeOffset(Graph&, BytecodeBasicBlock*, unsigned targetOffset, FastBitVector& result);
+    template<typename CodeBlockType>
+    static void stepOverInstruction(CodeBlockType*, const JSInstructionStream&, BytecodeGraph&, BytecodeIndex, FastBitVector& out);
 
-    template<typename Graph> bool computeLocalLivenessForBlock(Graph&, BytecodeBasicBlock*);
+    template<typename CodeBlockType, typename Instructions>
+    static bool computeLocalLivenessForInstruction(CodeBlockType*, const Instructions&, BytecodeGraph&, JSBytecodeBasicBlock&, BytecodeIndex, FastBitVector& result);
 
-    template<typename Graph> FastBitVector getLivenessInfoAtBytecodeOffset(Graph&, unsigned bytecodeOffset);
+    template<typename CodeBlockType, typename Instructions>
+    static bool computeLocalLivenessForBlock(CodeBlockType*, const Instructions&, BytecodeGraph&, JSBytecodeBasicBlock&);
 
-    template<typename Graph> void runLivenessFixpoint(Graph&);
+    template<typename CodeBlockType, typename Instructions>
+    static FastBitVector getLivenessInfoAtInstruction(CodeBlockType*, const Instructions&, BytecodeGraph&, BytecodeIndex);
+
+    template<typename CodeBlockType, typename Instructions>
+    static void runLivenessFixpoint(CodeBlockType*, const Instructions&, BytecodeGraph&);
 };
 
 class BytecodeLivenessAnalysis : private BytecodeLivenessPropagation {
@@ -57,20 +83,19 @@ public:
     friend class BytecodeLivenessPropagation;
     BytecodeLivenessAnalysis(CodeBlock*);
     
-    bool operandIsLiveAtBytecodeOffset(int operand, unsigned bytecodeOffset);
-    FastBitVector getLivenessInfoAtBytecodeOffset(unsigned bytecodeOffset);
+    FastBitVector getLivenessInfoAtInstruction(CodeBlock* codeBlock, BytecodeIndex bytecodeIndex) { return BytecodeLivenessPropagation::getLivenessInfoAtInstruction(codeBlock, codeBlock->instructions(), m_graph, bytecodeIndex); }
     
-    void computeFullLiveness(FullBytecodeLiveness& result);
-    void computeKills(BytecodeKills& result);
+    std::unique_ptr<FullBytecodeLiveness> computeFullLiveness(CodeBlock*);
+
+    BytecodeGraph& graph() { return m_graph; }
 
 private:
-    void compute();
-    void dumpResults();
+    void dumpResults(CodeBlock*);
 
-    void getLivenessInfoAtBytecodeOffset(unsigned bytecodeOffset, FastBitVector&);
-
-    BytecodeGraph<CodeBlock> m_graph;
+    BytecodeGraph m_graph;
 };
+
+Bitmap<maxNumCheckpointTmps> tmpLivenessForCheckpoint(const CodeBlock&, BytecodeIndex);
 
 inline bool operandIsAlwaysLive(int operand);
 inline bool operandThatIsNotAlwaysLiveIsLive(const FastBitVector& out, int operand);

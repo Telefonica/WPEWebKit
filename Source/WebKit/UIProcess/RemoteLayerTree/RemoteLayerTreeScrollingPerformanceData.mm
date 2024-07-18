@@ -30,11 +30,10 @@
 #import "RemoteLayerTreeHost.h"
 #import <QuartzCore/CALayer.h>
 #import <WebCore/TileController.h>
-
-using namespace WebCore;
+#import <wtf/cocoa/VectorCocoa.h>
 
 namespace WebKit {
-
+using namespace WebCore;
 
 RemoteLayerTreeScrollingPerformanceData::RemoteLayerTreeScrollingPerformanceData(RemoteLayerTreeDrawingAreaProxy& drawingArea)
     : m_drawingArea(drawingArea)
@@ -74,16 +73,13 @@ void RemoteLayerTreeScrollingPerformanceData::appendBlankPixelCount(BlankPixelCo
 
 NSArray *RemoteLayerTreeScrollingPerformanceData::data()
 {
-    NSMutableArray* dataArray = [NSMutableArray arrayWithCapacity:m_blankPixelCounts.size()];
-    
-    for (auto pixelData : m_blankPixelCounts) {
-        [dataArray addObject:@[
+    return createNSArray(m_blankPixelCounts, [] (auto& pixelData) {
+        return @[
             @(pixelData.startTime),
             (pixelData.eventType == BlankPixelCount::Filled) ? @"filled" : @"exposed",
             @(pixelData.blankPixelCount)
-        ]];
-    }
-    return dataArray;
+        ];
+    }).autorelease();
 }
 
 static CALayer *findTileGridContainerLayer(CALayer *layer)
@@ -102,7 +98,7 @@ static CALayer *findTileGridContainerLayer(CALayer *layer)
 
 unsigned RemoteLayerTreeScrollingPerformanceData::blankPixelCount(const FloatRect& visibleRect) const
 {
-    CALayer *rootLayer = asLayer(m_drawingArea.remoteLayerTreeHost().rootLayer());
+    CALayer *rootLayer = m_drawingArea.remoteLayerTreeHost().rootLayer();
 
     CALayer *tileGridContainer = findTileGridContainerLayer(rootLayer);
     if (!tileGridContainer) {

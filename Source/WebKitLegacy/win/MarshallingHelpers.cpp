@@ -28,19 +28,23 @@
 
 #include <WebCore/BString.h>
 #include <WebCore/IntRect.h>
-#include <WebCore/URL.h>
 #include <wtf/DateMath.h>
 #include <wtf/MathExtras.h>
+#include <wtf/URL.h>
 #include <wtf/text/WTFString.h>
 
 using namespace WebCore;
 
+#if USE(CF)
+
 CFArrayCallBacks MarshallingHelpers::kIUnknownArrayCallBacks = {0, IUnknownRetainCallback, IUnknownReleaseCallback, 0, 0};
 CFDictionaryValueCallBacks MarshallingHelpers::kIUnknownDictionaryValueCallBacks = {0, IUnknownRetainCallback, IUnknownReleaseCallback, 0, 0};
 
+#endif
+
 URL MarshallingHelpers::BSTRToKURL(BSTR urlStr)
 {
-    return URL(URL(), String(urlStr, SysStringLen(urlStr)));
+    return URL { String(urlStr, SysStringLen(urlStr)) };
 }
 
 BSTR MarshallingHelpers::URLToBSTR(const URL& url)
@@ -48,39 +52,34 @@ BSTR MarshallingHelpers::URLToBSTR(const URL& url)
     return BString(url.string()).release();
 }
 
-CFURLRef MarshallingHelpers::PathStringToFileCFURLRef(const String& string)
+#if USE(CF)
+RetainPtr<CFURLRef> MarshallingHelpers::PathStringToFileCFURLRef(const String& string)
 {
-    return CFURLCreateWithFileSystemPath(0, string.createCFString().get(), kCFURLWindowsPathStyle, false);
+    return adoptCF(CFURLCreateWithFileSystemPath(0, string.createCFString().get(), kCFURLWindowsPathStyle, false));
 }
 
 String MarshallingHelpers::FileCFURLRefToPathString(CFURLRef fileURL)
 {
-    CFStringRef string = CFURLCopyFileSystemPath(fileURL, kCFURLWindowsPathStyle);
-    String result(string);
-    CFRelease(string);
-    return result;
+    return adoptCF(CFURLCopyFileSystemPath(fileURL, kCFURLWindowsPathStyle)).get();
 }
 
-CFURLRef MarshallingHelpers::BSTRToCFURLRef(BSTR urlStr)
+RetainPtr<CFURLRef> MarshallingHelpers::BSTRToCFURLRef(BSTR urlStr)
 {
-    CFStringRef urlCFString = BSTRToCFStringRef(urlStr);
+    auto urlCFString = BSTRToCFStringRef(urlStr);
     if (!urlCFString)
-        return 0;
+        return nullptr;
 
-    CFURLRef urlRef = CFURLCreateWithString(0, urlCFString, 0);
-    CFRelease(urlCFString);
-
-    return urlRef;
+    return adoptCF(CFURLCreateWithString(nullptr, urlCFString.get(), nullptr));
 }
 
-CFStringRef MarshallingHelpers::BSTRToCFStringRef(BSTR str)
+RetainPtr<CFStringRef> MarshallingHelpers::BSTRToCFStringRef(BSTR str)
 {
-    return CFStringCreateWithCharacters(0, (const UniChar*)(str ? str : TEXT("")), SysStringLen(str));
+    return adoptCF(CFStringCreateWithCharacters(0, (const UniChar*)(str ? str : TEXT("")), SysStringLen(str)));
 }
 
-CFStringRef MarshallingHelpers::LPCOLESTRToCFStringRef(LPCOLESTR str)
+RetainPtr<CFStringRef> MarshallingHelpers::LPCOLESTRToCFStringRef(LPCOLESTR str)
 {
-    return CFStringCreateWithCharacters(0, (const UniChar*)(str ? str : TEXT("")), (CFIndex)(str ? wcslen(str) : 0));
+    return adoptCF(CFStringCreateWithCharacters(0, (const UniChar*)(str ? str : TEXT("")), (CFIndex)(str ? wcslen(str) : 0)));
 }
 
 BSTR MarshallingHelpers::CFStringRefToBSTR(CFStringRef str)
@@ -95,11 +94,13 @@ int MarshallingHelpers::CFNumberRefToInt(CFNumberRef num)
     return number;
 }
 
-CFNumberRef MarshallingHelpers::intToCFNumberRef(int num)
+RetainPtr<CFNumberRef> MarshallingHelpers::intToCFNumberRef(int num)
 {
-    return CFNumberCreate(0, kCFNumberSInt32Type, &num);
+    return adoptCF(CFNumberCreate(0, kCFNumberSInt32Type, &num));
 }
+#endif
 
+#if USE(CF)
 CFAbsoluteTime MarshallingHelpers::windowsEpochAbsoluteTime()
 {
     static CFAbsoluteTime windowsEpochAbsoluteTime = 0;
@@ -109,8 +110,34 @@ CFAbsoluteTime MarshallingHelpers::windowsEpochAbsoluteTime()
     }
     return windowsEpochAbsoluteTime;
 }
+#else
+double MarshallingHelpers::windowsEpochAbsoluteTime()
+{
+    static double windowsEpochAbsoluteTime = 0;
+    if (!windowsEpochAbsoluteTime) {
+        SYSTEMTIME windowsEpochDate = { };
+        windowsEpochDate.wYear = 1899;
+        windowsEpochDate.wMonth = 12;
+        windowsEpochDate.wDay = 30;
 
+        FILETIME absoluteFileTime;
+        SystemTimeToFileTime(&windowsEpochDate, &absoluteFileTime);
+
+        ULARGE_INTEGER timeValue;
+        timeValue.LowPart = absoluteFileTime.dwLowDateTime;
+        timeValue.HighPart = absoluteFileTime.dwHighDateTime;
+
+        windowsEpochAbsoluteTime = timeValue.QuadPart;
+    }
+    return windowsEpochAbsoluteTime;
+}
+#endif
+
+#if USE(CF)
 CFAbsoluteTime MarshallingHelpers::DATEToCFAbsoluteTime(DATE date)
+#else
+double MarshallingHelpers::DATEToAbsoluteTime(DATE date)
+#endif
 {
     // <http://msdn2.microsoft.com/en-us/library/ms221627.aspx>
     // DATE: This is the same numbering system used by most spreadsheet programs,
@@ -129,11 +156,16 @@ CFAbsoluteTime MarshallingHelpers::DATEToCFAbsoluteTime(DATE date)
     return round((date + windowsEpochAbsoluteTime()) * secondsPerDay);
 }
 
+#if USE(CF)
 DATE MarshallingHelpers::CFAbsoluteTimeToDATE(CFAbsoluteTime absoluteTime)
+#else
+DATE MarshallingHelpers::absoluteTimeToDATE(double absoluteTime)
+#endif
 {
     return (round(absoluteTime)/secondsPerDay - windowsEpochAbsoluteTime());
 }
 
+#if USE(CF)
 // utility method to store a 1-dim string vector into a newly created SAFEARRAY
 SAFEARRAY* MarshallingHelpers::stringArrayToSafeArray(CFArrayRef inArray)
 {
@@ -163,6 +195,7 @@ SAFEARRAY* MarshallingHelpers::intArrayToSafeArray(CFArrayRef inArray)
     }
     return sa;
 }
+#endif
 
 SAFEARRAY* MarshallingHelpers::intRectToSafeArray(const WebCore::IntRect& rect)
 {
@@ -189,6 +222,8 @@ SAFEARRAY* MarshallingHelpers::intRectToSafeArray(const WebCore::IntRect& rect)
     return sa;
 }
 
+#if USE(CF)
+
 // utility method to store a 1-dim IUnknown* vector into a newly created SAFEARRAY
 SAFEARRAY* MarshallingHelpers::iunknownArrayToSafeArray(CFArrayRef inArray)
 {
@@ -203,51 +238,45 @@ SAFEARRAY* MarshallingHelpers::iunknownArrayToSafeArray(CFArrayRef inArray)
     return sa;
 }
 
-CFArrayRef MarshallingHelpers::safeArrayToStringArray(SAFEARRAY* inArray)
+RetainPtr<CFArrayRef> MarshallingHelpers::safeArrayToStringArray(SAFEARRAY* inArray)
 {
     long lBound=0, uBound=-1;
     HRESULT hr = ::SafeArrayGetLBound(inArray, 1, &lBound);
     if (SUCCEEDED(hr))
         hr = ::SafeArrayGetUBound(inArray, 1, &uBound);
     long len = (SUCCEEDED(hr)) ? (uBound-lBound+1) : 0;
-    CFStringRef* items = 0;
+    Vector<CFStringRef> items;
     if (len > 0) {
-        items = new CFStringRef[len];
+        items.resize(len);
         for (; lBound <= uBound; lBound++) {
             BString str;
             hr = ::SafeArrayGetElement(inArray, &lBound, &str);
-            items[lBound] = BSTRToCFStringRef(str);
+            items[lBound] = BSTRToCFStringRef(str).leakRef();
         }
     }
-    CFArrayRef result = CFArrayCreate(0, (const void**)items, len, &kCFTypeArrayCallBacks);
-    if (items)
-        delete[] items;
-    return result;
+    return adoptCF(CFArrayCreate(0, (const void**)items.data(), len, &kCFTypeArrayCallBacks));
 }
 
-CFArrayRef MarshallingHelpers::safeArrayToIntArray(SAFEARRAY* inArray)
+RetainPtr<CFArrayRef> MarshallingHelpers::safeArrayToIntArray(SAFEARRAY* inArray)
 {
     long lBound=0, uBound=-1;
     HRESULT hr = ::SafeArrayGetLBound(inArray, 1, &lBound);
     if (SUCCEEDED(hr))
         hr = ::SafeArrayGetUBound(inArray, 1, &uBound);
     long len = (SUCCEEDED(hr)) ? (uBound-lBound+1) : 0;
-    CFNumberRef* items = 0;
+    Vector<CFNumberRef> items;
     if (len > 0) {
-        items = new CFNumberRef[len];
+        items.resize(len);
         for (; lBound <= uBound; lBound++) {
             int num = 0;
             hr = ::SafeArrayGetElement(inArray, &lBound, &num);
-            items[lBound] = SUCCEEDED(hr) ? intToCFNumberRef(num) : kCFNumberNaN;
+            items[lBound] = SUCCEEDED(hr) ? intToCFNumberRef(num).leakRef() : kCFNumberNaN;
         }
     }
-    CFArrayRef result = CFArrayCreate(0, (const void**) items, len, &kCFTypeArrayCallBacks);
-    if (items)
-        delete[] items;
-    return result;
+    return adoptCF(CFArrayCreate(0, (const void**)items.data(), len, &kCFTypeArrayCallBacks));
 }
 
-CFArrayRef MarshallingHelpers::safeArrayToIUnknownArray(SAFEARRAY* inArray)
+RetainPtr<CFArrayRef> MarshallingHelpers::safeArrayToIUnknownArray(SAFEARRAY* inArray)
 {
     long lBound=0, uBound=-1;
     HRESULT hr = ::SafeArrayGetLBound(inArray, 1, &lBound);
@@ -256,7 +285,7 @@ CFArrayRef MarshallingHelpers::safeArrayToIUnknownArray(SAFEARRAY* inArray)
     long len = (SUCCEEDED(hr)) ? (uBound-lBound+1) : 0;
     void* items = nullptr;
     hr = ::SafeArrayAccessData(inArray, &items);
-    CFArrayRef result = SUCCEEDED(hr) ? CFArrayCreate(0, (const void**) items, len, &kIUnknownArrayCallBacks) : nullptr;
+    auto result = SUCCEEDED(hr) ? adoptCF(CFArrayCreate(0, (const void**) items, len, &kIUnknownArrayCallBacks)) : nullptr;
     hr = ::SafeArrayUnaccessData(inArray);
     return result;
 }
@@ -271,3 +300,5 @@ void MarshallingHelpers::IUnknownReleaseCallback(CFAllocatorRef /*allocator*/, c
 {
     ((IUnknown*) value)->Release();
 }
+
+#endif

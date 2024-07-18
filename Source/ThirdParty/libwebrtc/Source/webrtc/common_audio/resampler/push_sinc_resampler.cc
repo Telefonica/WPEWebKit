@@ -8,12 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/common_audio/resampler/push_sinc_resampler.h"
+#include "common_audio/resampler/push_sinc_resampler.h"
 
 #include <cstring>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/common_audio/include/audio_util.h"
+#include "common_audio/include/audio_util.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -28,8 +28,7 @@ PushSincResampler::PushSincResampler(size_t source_frames,
       first_pass_(true),
       source_available_(0) {}
 
-PushSincResampler::~PushSincResampler() {
-}
+PushSincResampler::~PushSincResampler() {}
 
 size_t PushSincResampler::Resample(const int16_t* source,
                                    size_t source_length,
@@ -64,12 +63,12 @@ size_t PushSincResampler::Resample(const float* source,
   // request through Run().
   //
   // If this wasn't done, SincResampler would call Run() twice on the first
-  // pass, and we'd have to introduce an entire |source_frames| of delay, rather
+  // pass, and we'd have to introduce an entire `source_frames` of delay, rather
   // than the minimum half kernel.
   //
   // It works out that ChunkSize() is exactly the amount of output we need to
   // request in order to prime the buffer with a single Run() request for
-  // |source_frames|.
+  // `source_frames`.
   if (first_pass_)
     resampler_->Resample(resampler_->ChunkSize(), destination);
 

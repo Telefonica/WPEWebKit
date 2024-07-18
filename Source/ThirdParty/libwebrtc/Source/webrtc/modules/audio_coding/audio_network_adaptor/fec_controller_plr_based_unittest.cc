@@ -8,17 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "modules/audio_coding/audio_network_adaptor/fec_controller_plr_based.h"
+
 #include <utility>
 
-#include "webrtc/common_audio/mocks/mock_smoothing_filter.h"
-#include "webrtc/modules/audio_coding/audio_network_adaptor/fec_controller_plr_based.h"
-#include "webrtc/test/gtest.h"
+#include "common_audio/mocks/mock_smoothing_filter.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
+using ::testing::_;
 using ::testing::NiceMock;
 using ::testing::Return;
-using ::testing::_;
 
 namespace {
 
@@ -78,8 +79,8 @@ FecControllerPlrBasedTestStates CreateFecControllerPlrBased(
 }
 
 void UpdateNetworkMetrics(FecControllerPlrBasedTestStates* states,
-                          const rtc::Optional<int>& uplink_bandwidth_bps,
-                          const rtc::Optional<float>& uplink_packet_loss) {
+                          const absl::optional<int>& uplink_bandwidth_bps,
+                          const absl::optional<float>& uplink_packet_loss) {
   // UpdateNetworkMetrics can accept multiple network metric updates at once.
   // However, currently, the most used case is to update one metric at a time.
   // To reflect this fact, we separate the calls.
@@ -95,27 +96,20 @@ void UpdateNetworkMetrics(FecControllerPlrBasedTestStates* states,
     states->controller->UpdateNetworkMetrics(network_metrics);
     // This is called during CheckDecision().
     EXPECT_CALL(*states->packet_loss_smoother, GetAverage())
-        .WillOnce(Return(rtc::Optional<float>(*uplink_packet_loss)));
+        .WillOnce(Return(*uplink_packet_loss));
   }
 }
 
-void UpdateNetworkMetrics(FecControllerPlrBasedTestStates* states,
-                          int uplink_bandwidth_bps,
-                          float uplink_packet_loss) {
-  UpdateNetworkMetrics(states, rtc::Optional<int>(uplink_bandwidth_bps),
-                       rtc::Optional<float>(uplink_packet_loss));
-}
-
-// Checks that the FEC decision and |uplink_packet_loss_fraction| given by
-// |states->controller->MakeDecision| matches |expected_enable_fec| and
-// |expected_uplink_packet_loss_fraction|, respectively.
+// Checks that the FEC decision and `uplink_packet_loss_fraction` given by
+// `states->controller->MakeDecision` matches `expected_enable_fec` and
+// `expected_uplink_packet_loss_fraction`, respectively.
 void CheckDecision(FecControllerPlrBasedTestStates* states,
                    bool expected_enable_fec,
                    float expected_uplink_packet_loss_fraction) {
   AudioEncoderRuntimeConfig config;
   states->controller->MakeDecision(&config);
-  EXPECT_EQ(rtc::Optional<bool>(expected_enable_fec), config.enable_fec);
-  EXPECT_EQ(rtc::Optional<float>(expected_uplink_packet_loss_fraction),
+  EXPECT_EQ(expected_enable_fec, config.enable_fec);
+  EXPECT_EQ(expected_uplink_packet_loss_fraction,
             config.uplink_packet_loss_fraction);
 }
 
@@ -138,8 +132,7 @@ TEST(FecControllerPlrBasedTest, OutputInitValueWhenUplinkBandwidthUnknown) {
           kEnablingPacketLossAtLowBw - kEpsilon, kEnablingPacketLossAtLowBw,
           kEnablingPacketLossAtLowBw + kEpsilon}) {
       auto states = CreateFecControllerPlrBased(initial_fec_enabled);
-      UpdateNetworkMetrics(&states, rtc::Optional<int>(),
-                           rtc::Optional<float>(packet_loss));
+      UpdateNetworkMetrics(&states, absl::nullopt, packet_loss);
       CheckDecision(&states, initial_fec_enabled, packet_loss);
     }
   }
@@ -154,8 +147,7 @@ TEST(FecControllerPlrBasedTest,
                           kDisablingBandwidthLow + 1, kEnablingBandwidthLow - 1,
                           kEnablingBandwidthLow, kEnablingBandwidthLow + 1}) {
       auto states = CreateFecControllerPlrBased(initial_fec_enabled);
-      UpdateNetworkMetrics(&states, rtc::Optional<int>(bandwidth),
-                           rtc::Optional<float>());
+      UpdateNetworkMetrics(&states, bandwidth, absl::nullopt);
       CheckDecision(&states, initial_fec_enabled, 0.0);
     }
   }
@@ -178,12 +170,10 @@ TEST(FecControllerPlrBasedTest, UpdateMultipleNetworkMetricsAtOnce) {
   // audio_network_adaptor_impl.cc.
   auto states = CreateFecControllerPlrBased(false);
   Controller::NetworkMetrics network_metrics;
-  network_metrics.uplink_bandwidth_bps =
-      rtc::Optional<int>(kEnablingBandwidthHigh);
-  network_metrics.uplink_packet_loss_fraction =
-      rtc::Optional<float>(kEnablingPacketLossAtHighBw);
+  network_metrics.uplink_bandwidth_bps = kEnablingBandwidthHigh;
+  network_metrics.uplink_packet_loss_fraction = kEnablingPacketLossAtHighBw;
   EXPECT_CALL(*states.packet_loss_smoother, GetAverage())
-      .WillOnce(Return(rtc::Optional<float>(kEnablingPacketLossAtHighBw)));
+      .WillOnce(Return(kEnablingPacketLossAtHighBw));
   states.controller->UpdateNetworkMetrics(network_metrics);
   CheckDecision(&states, true, kEnablingPacketLossAtHighBw);
 }
@@ -231,7 +221,7 @@ TEST(FecControllerPlrBasedTest, MaintainFecOffForLowBandwidth) {
 
 TEST(FecControllerPlrBasedTest, MaintainFecOffForVeryLowBandwidth) {
   auto states = CreateFecControllerPlrBased(false);
-  // Below |kEnablingBandwidthLow|, no packet loss fraction can cause FEC to
+  // Below `kEnablingBandwidthLow`, no packet loss fraction can cause FEC to
   // turn on.
   UpdateNetworkMetrics(&states, kEnablingBandwidthLow - 1, 1.0);
   CheckDecision(&states, false, 1.0);
@@ -282,7 +272,7 @@ TEST(FecControllerPlrBasedTest, DisableFecForLowBandwidth) {
 
 TEST(FecControllerPlrBasedTest, DisableFecForVeryLowBandwidth) {
   auto states = CreateFecControllerPlrBased(true);
-  // Below |kEnablingBandwidthLow|, any packet loss fraction can cause FEC to
+  // Below `kEnablingBandwidthLow`, any packet loss fraction can cause FEC to
   // turn off.
   UpdateNetworkMetrics(&states, kDisablingBandwidthLow - 1, 1.0);
   CheckDecision(&states, false, 1.0);
@@ -433,7 +423,7 @@ TEST(FecControllerPlrBasedTest, SingleThresholdCurveForEnablingAndDisabling) {
 
   // Test that FEC is turned on whenever we're on the curve or above it,
   // independent of the starting FEC state.
-  for (std::vector<NetworkState> states_list : {on, above}) {
+  for (const std::vector<NetworkState>& states_list : {on, above}) {
     for (NetworkState net_state : states_list) {
       for (bool initial_fec_enabled : {false, true}) {
         auto states =

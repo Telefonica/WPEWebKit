@@ -26,7 +26,7 @@
 #include "config.h"
 #include "WebCoreThreadRun.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #include "WebCoreThreadInternal.h"
 #include <mutex>
@@ -45,14 +45,14 @@ public:
 
     void waitForCompletion()
     {
-        std::unique_lock<Lock> lock(m_stateMutex);
+        Locker lock { m_stateMutex };
 
-        m_completionConditionVariable.wait(lock, [this] { return m_completed; });
+        m_completionConditionVariable.wait(m_stateMutex, [this] { return m_completed; });
     }
 
     void setCompleted()
     {
-        std::lock_guard<Lock> lock(m_stateMutex);
+        Locker locker { m_stateMutex };
 
         ASSERT(!m_completed);
         m_completed = true;
@@ -67,41 +67,41 @@ private:
 
 class WebThreadBlock {
 public:
-    WebThreadBlock(void (^task)(), WebThreadBlockState* state)
-        : m_task(Block_copy(task))
+    WebThreadBlock(void (^block)(void), WebThreadBlockState* state)
+        : m_block(Block_copy(block))
         , m_state(state)
     {
     }
 
     WebThreadBlock(const WebThreadBlock& other)
-        : m_task(Block_copy(other.m_task))
+        : m_block(Block_copy(other.m_block))
         , m_state(other.m_state)
     {
     }
 
     WebThreadBlock& operator=(const WebThreadBlock& other)
     {
-        void (^oldTask)() = m_task;
-        m_task = Block_copy(other.m_task);
-        Block_release(oldTask);
+        void (^oldBlock)() = m_block;
+        m_block = Block_copy(other.m_block);
+        Block_release(oldBlock);
         m_state = other.m_state;
         return *this;
     }
 
     ~WebThreadBlock()
     {
-        Block_release(m_task);
+        Block_release(m_block);
     }
 
     void operator()() const
     {
-        m_task();
+        m_block();
         if (m_state)
             m_state->setCompleted();
     }
 
 private:
-    void (^m_task)();
+    void (^m_block)(void);
     WebThreadBlockState* m_state;
 };
 
@@ -109,22 +109,27 @@ private:
 
 extern "C" {
 
-typedef WTF::Vector<WebThreadBlock> WebThreadRunQueue;
+typedef Vector<WebThreadBlock> WebThreadRunQueue;
 
-static StaticLock runQueueMutex;
-static CFRunLoopSourceRef runSource;
+static Lock runQueueMutex;
 static WebThreadRunQueue* runQueue;
+
+static RetainPtr<CFRunLoopSourceRef>& runSource()
+{
+    static NeverDestroyed<RetainPtr<CFRunLoopSourceRef>> runSource;
+    return runSource;
+}
 
 static void HandleRunSource(void *info)
 {
     UNUSED_PARAM(info);
     ASSERT(WebThreadIsCurrent());
-    ASSERT(runSource);
+    ASSERT(runSource());
     ASSERT(runQueue);
 
     WebThreadRunQueue queueCopy;
     {
-        std::lock_guard<StaticLock> lock(runQueueMutex);
+        Locker locker { runQueueMutex };
         queueCopy = *runQueue;
         runQueue->clear();
     }
@@ -133,14 +138,14 @@ static void HandleRunSource(void *info)
         block();
 }
 
-static void _WebThreadRun(void (^task)(), bool synchronous)
+static void _WebThreadRun(void (^block)(void), bool synchronous)
 {
     if (WebThreadIsCurrent() || !WebThreadIsEnabled()) {
-        task();
+        block();
         return;
     }
 
-    ASSERT(runSource);
+    ASSERT(runSource());
     ASSERT(runQueue);
 
     WebThreadBlockState* state = 0;
@@ -148,11 +153,11 @@ static void _WebThreadRun(void (^task)(), bool synchronous)
         state = new WebThreadBlockState;
 
     {
-        std::lock_guard<StaticLock> lock(runQueueMutex);
-        runQueue->append(WebThreadBlock(task, state));
+        Locker locker { runQueueMutex };
+        runQueue->append(WebThreadBlock(block, state));
     }
 
-    CFRunLoopSourceSignal(runSource);
+    CFRunLoopSourceSignal(runSource().get());
     CFRunLoopWakeUp(WebThreadRunLoop());
 
     if (synchronous) {
@@ -161,26 +166,26 @@ static void _WebThreadRun(void (^task)(), bool synchronous)
     }
 }
 
-void WebThreadRun(void (^task)())
+void WebThreadRun(void (^block)(void))
 {
-    _WebThreadRun(task, false);
+    _WebThreadRun(block, false);
 }
 
 void WebThreadInitRunQueue()
 {
     ASSERT(!runQueue);
-    ASSERT(!runSource);
+    ASSERT(!runSource());
 
     static dispatch_once_t pred;
     dispatch_once(&pred, ^{
         runQueue = new WebThreadRunQueue;
 
-        CFRunLoopSourceContext runSourceContext = {0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, HandleRunSource};
-        runSource = CFRunLoopSourceCreate(NULL, -1, &runSourceContext);
-        CFRunLoopAddSource(WebThreadRunLoop(), runSource, kCFRunLoopDefaultMode);
+        CFRunLoopSourceContext runSourceContext = { 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, HandleRunSource };
+        runSource() = adoptCF(CFRunLoopSourceCreate(nullptr, -1, &runSourceContext));
+        CFRunLoopAddSource(WebThreadRunLoop(), runSource().get(), kCFRunLoopDefaultMode);
     });
 }
 
 }
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

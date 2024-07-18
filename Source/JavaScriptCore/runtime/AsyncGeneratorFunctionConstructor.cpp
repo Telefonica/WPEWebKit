@@ -34,44 +34,32 @@ namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(AsyncGeneratorFunctionConstructor);
 
-const ClassInfo AsyncGeneratorFunctionConstructor::s_info = { "AsyncGeneratorFunction", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(AsyncGeneratorFunctionConstructor) };
+const ClassInfo AsyncGeneratorFunctionConstructor::s_info = { "AsyncGeneratorFunction"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(AsyncGeneratorFunctionConstructor) };
+
+static JSC_DECLARE_HOST_FUNCTION(callAsyncGeneratorFunctionConstructor);
+static JSC_DECLARE_HOST_FUNCTION(constructAsyncGeneratorFunctionConstructor);
+
+JSC_DEFINE_HOST_FUNCTION(callAsyncGeneratorFunctionConstructor, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    ArgList args(callFrame);
+    return JSValue::encode(constructFunction(globalObject, callFrame, args, FunctionConstructionMode::AsyncGenerator));
+}
+
+JSC_DEFINE_HOST_FUNCTION(constructAsyncGeneratorFunctionConstructor, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    ArgList args(callFrame);
+    return JSValue::encode(constructFunction(globalObject, callFrame, args, FunctionConstructionMode::AsyncGenerator, callFrame->newTarget()));
+}
 
 AsyncGeneratorFunctionConstructor::AsyncGeneratorFunctionConstructor(VM& vm, Structure* structure)
-    : InternalFunction(vm, structure)
+    : InternalFunction(vm, structure, callAsyncGeneratorFunctionConstructor, constructAsyncGeneratorFunctionConstructor)
 {
 }
 
 void AsyncGeneratorFunctionConstructor::finishCreation(VM& vm, AsyncGeneratorFunctionPrototype* prototype)
 {
-    Base::finishCreation(vm, "AsyncGeneratorFunction");
+    Base::finishCreation(vm, 1, "AsyncGeneratorFunction"_s, PropertyAdditionMode::WithoutStructureTransition);
     putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
-
-    // Number of arguments for constructor
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
-}
-
-static EncodedJSValue JSC_HOST_CALL callAsyncGeneratorFunctionConstructor(ExecState* exec)
-{
-    ArgList args(exec);
-    return JSValue::encode(constructFunction(exec, asInternalFunction(exec->jsCallee())->globalObject(), args, FunctionConstructionMode::AsyncGenerator));
-}
-
-static EncodedJSValue JSC_HOST_CALL constructAsyncGeneratorFunctionConstructor(ExecState* exec)
-{
-    ArgList args(exec);
-    return JSValue::encode(constructFunction(exec, asInternalFunction(exec->jsCallee())->globalObject(), args, FunctionConstructionMode::AsyncGenerator));
-}
-
-CallType AsyncGeneratorFunctionConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = callAsyncGeneratorFunctionConstructor;
-    return CallType::Host;
-}
-
-ConstructType AsyncGeneratorFunctionConstructor::getConstructData(JSCell*, ConstructData& constructData)
-{
-    constructData.native.function = constructAsyncGeneratorFunctionConstructor;
-    return ConstructType::Host;
 }
 
 } // namespace JSC

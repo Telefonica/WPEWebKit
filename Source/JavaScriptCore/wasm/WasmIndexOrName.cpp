@@ -28,26 +28,36 @@
 
 namespace JSC { namespace Wasm {
 
-IndexOrName::IndexOrName(Index index, const Name* name)
+IndexOrName::IndexOrName(Index index, std::pair<const Name*, RefPtr<NameSection>>&& name)
 {
-    static_assert(sizeof(m_index) == sizeof(m_name), "bit-tagging depends on sizes being equal");
-    static_assert(sizeof(m_index) == sizeof(*this), "bit-tagging depends on object being the size of the union's types");
-
-    if ((index & allTags) || (bitwise_cast<Index>(name) & allTags))
-        *this = IndexOrName();
-    else if (name)
-        m_name = name;
+#if USE(JSVALUE64)
+    static_assert(sizeof(m_indexName.index) == sizeof(m_indexName.name), "bit-tagging depends on sizes being equal");
+    ASSERT(!(index & allTags));
+    ASSERT(!(bitwise_cast<Index>(name.first) & allTags));
+    if (name.first)
+        m_indexName.name = name.first;
     else
-        m_index = indexTag | index;
+        m_indexName.index = indexTag | index;
+#elif USE(JSVALUE32_64)
+    if (name.first) {
+        m_indexName.name = name.first;
+        m_kind = Kind::Name;
+    } else {
+        m_indexName.index = index;
+        m_kind = Kind::Index;
+    }
+#endif
+    m_nameSection = WTFMove(name.second);
 }
 
 String makeString(const IndexOrName& ion)
 {
     if (ion.isEmpty())
-        return String();
+        return "wasm-stub"_s;
+    const String moduleName = ion.nameSection()->moduleName.size() ? String(ion.nameSection()->moduleName.data(), ion.nameSection()->moduleName.size()) : String(ion.nameSection()->moduleHash.data(), ion.nameSection()->moduleHash.size());
     if (ion.isIndex())
-        return String::number(ion.m_index & ~IndexOrName::indexTag);
-    return String(ion.m_name->data(), ion.m_name->size());
-};
+        return makeString(moduleName, ".wasm-function[", String::number(ion.index()), ']');
+    return makeString(moduleName, ".wasm-function[", String(ion.name()->data(), ion.name()->size()), ']');
+}
 
 } } // namespace JSC::Wasm

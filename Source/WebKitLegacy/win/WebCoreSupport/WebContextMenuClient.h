@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,19 +23,24 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#pragma once
+
 #include <WebCore/ContextMenu.h>
 #include <WebCore/ContextMenuClient.h>
 #include <wtf/Forward.h>
 
+#if ENABLE(CONTEXT_MENUS)
+
 class WebView;
 
 class WebContextMenuClient : public WebCore::ContextMenuClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebContextMenuClient(WebView*);
 
     virtual void contextMenuDestroyed();
 
-    virtual void downloadURL(const WebCore::URL&);
+    virtual void downloadURL(const URL&);
     virtual void searchWithGoogle(const WebCore::Frame*);
     virtual void lookUpInDictionary(WebCore::Frame*);
     virtual void speak(const WTF::String&);
@@ -45,3 +50,6 @@ public:
 private:
     WebView* m_webView;
 };
+
+#endif
+

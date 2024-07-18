@@ -29,15 +29,13 @@ WI.RecordingTraceDetailsSidebarPanel = class RecordingTraceDetailsSidebarPanel e
     {
         super("recording-trace", WI.UIString("Trace"));
 
+        const selectable = false;
+        this._backtraceTreeOutline = new WI.TreeOutline(selectable);
+        this._backtraceTreeOutline.disclosureButtons = false;
+        this._backtraceTreeController = new WI.StackTraceTreeController(this._backtraceTreeOutline);
+
         this._recording = null;
         this._action = null;
-    }
-
-    // Static
-
-    static disallowInstanceForClass()
-    {
-        return true;
     }
 
     // Public
@@ -48,8 +46,9 @@ WI.RecordingTraceDetailsSidebarPanel = class RecordingTraceDetailsSidebarPanel e
             objects = [objects];
 
         this.recording = objects.find((object) => object instanceof WI.Recording);
+        this.action = objects.find((object) => object instanceof WI.RecordingAction);
 
-        return !!this._recording;
+        return this._recording && this._action;
     }
 
     set recording(recording)
@@ -63,8 +62,9 @@ WI.RecordingTraceDetailsSidebarPanel = class RecordingTraceDetailsSidebarPanel e
         this.contentView.element.removeChildren();
     }
 
-    updateAction(action, context, options = {})
+    set action(action)
     {
+        console.assert(!action || action instanceof WI.RecordingAction);
         if (!this._recording || action === this._action)
             return;
 
@@ -72,19 +72,22 @@ WI.RecordingTraceDetailsSidebarPanel = class RecordingTraceDetailsSidebarPanel e
 
         this.contentView.element.removeChildren();
 
-        let trace = this._action.trace;
-        if (!trace.length) {
-            let noTraceDataElement = this.contentView.element.appendChild(document.createElement("div"));
-            noTraceDataElement.classList.add("no-trace-data");
+        if (!this._action)
+            return;
 
-            let noTraceDataMessageElement = noTraceDataElement.appendChild(document.createElement("div"));
-            noTraceDataMessageElement.classList.add("message");
-            noTraceDataMessageElement.textContent = WI.UIString("Call Stack Unavailable");
+        let stackTrace = this._action.stackTrace;
+        this._backtraceTreeController.stackTrace = stackTrace;
+
+        if (!stackTrace?.callFrames.length) {
+            let noStackTraceContainerElement = this.contentView.element.appendChild(document.createElement("div"));
+            noStackTraceContainerElement.classList.add("no-stack-trace");
+
+            let noStackTraceMessageElement = noStackTraceContainerElement.appendChild(document.createElement("div"));
+            noStackTraceMessageElement.classList.add("message");
+            noStackTraceMessageElement.textContent = WI.UIString("Call Stack Unavailable");
             return;
         }
 
-        const showFunctionName = true;
-        for (let callFrame of trace)
-            this.contentView.element.appendChild(new WI.CallFrameView(callFrame, showFunctionName));
+        this.contentView.element.appendChild(this._backtraceTreeOutline.element);
     }
 };

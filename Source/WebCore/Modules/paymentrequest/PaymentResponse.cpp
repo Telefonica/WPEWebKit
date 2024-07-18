@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,13 +28,142 @@
 
 #if ENABLE(PAYMENT_REQUEST)
 
+#include "Document.h"
+#include "JSDOMPromiseDeferred.h"
+#include "NotImplemented.h"
+#include "PaymentComplete.h"
+#include "PaymentCompleteDetails.h"
+#include "PaymentRequest.h"
+#include <JavaScriptCore/JSONObject.h>
+#include <JavaScriptCore/ThrowScope.h>
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/RunLoop.h>
 
 namespace WebCore {
 
-void PaymentResponse::complete(std::optional<PaymentComplete>&&, DOMPromiseDeferred<void>&& promise)
+WTF_MAKE_ISO_ALLOCATED_IMPL(PaymentResponse);
+
+PaymentResponse::PaymentResponse(ScriptExecutionContext* context, PaymentRequest& request)
+    : ActiveDOMObject { context }
+    , m_request { request }
 {
-    promise.reject(Exception { NotSupportedError, ASCIILiteral("Not implemented") });
+}
+
+void PaymentResponse::finishConstruction()
+{
+    ASSERT(!hasPendingActivity());
+    m_pendingActivity = makePendingActivity(*this);
+    suspendIfNeeded();
+}
+
+PaymentResponse::~PaymentResponse()
+{
+    ASSERT(!hasPendingActivity());
+    ASSERT(!hasRetryPromise());
+}
+
+void PaymentResponse::setDetailsFunction(DetailsFunction&& detailsFunction)
+{
+    m_detailsFunction = WTFMove(detailsFunction);
+    m_cachedDetails.clear();
+}
+
+void PaymentResponse::complete(Document& document, std::optional<PaymentComplete>&& result, std::optional<PaymentCompleteDetails>&& details, DOMPromiseDeferred<void>&& promise)
+{
+    if (m_state == State::Stopped || !m_request) {
+        promise.reject(Exception { AbortError });
+        return;
+    }
+
+    if (m_state == State::Completed || m_retryPromise) {
+        promise.reject(Exception { InvalidStateError });
+        return;
+    }
+
+    String serializedData;
+    if (details) {
+        if (auto data = details->data) {
+            auto throwScope = DECLARE_THROW_SCOPE(document.globalObject()->vm());
+
+            serializedData = JSONStringify(document.globalObject(), data.get(), 0);
+            if (throwScope.exception()) {
+                promise.reject(Exception { ExistingExceptionError });
+                return;
+            }
+        }
+    }
+
+    auto exception = m_request->complete(document, WTFMove(result), WTFMove(serializedData));
+    if (!exception.hasException()) {
+        ASSERT(hasPendingActivity());
+        ASSERT(m_state == State::Created);
+        m_pendingActivity = nullptr;
+        m_state = State::Completed;
+    }
+    promise.settle(WTFMove(exception));
+}
+
+void PaymentResponse::retry(PaymentValidationErrors&& errors, DOMPromiseDeferred<void>&& promise)
+{
+    if (m_state == State::Stopped || !m_request) {
+        promise.reject(Exception { AbortError });
+        return;
+    }
+
+    if (m_state == State::Completed || m_retryPromise) {
+        promise.reject(Exception { InvalidStateError });
+        return;
+    }
+
+    ASSERT(hasPendingActivity());
+    ASSERT(m_state == State::Created);
+
+    auto exception = m_request->retry(WTFMove(errors));
+    if (exception.hasException()) {
+        promise.reject(exception.releaseException());
+        return;
+    }
+
+    m_retryPromise = makeUnique<DOMPromiseDeferred<void>>(WTFMove(promise));
+}
+
+void PaymentResponse::abortWithException(Exception&& exception)
+{
+    settleRetryPromise(WTFMove(exception));
+    m_pendingActivity = nullptr;
+    m_state = State::Completed;
+}
+
+void PaymentResponse::settleRetryPromise(ExceptionOr<void>&& result)
+{
+    if (!m_retryPromise)
+        return;
+
+    ASSERT(hasPendingActivity());
+    ASSERT(m_state == State::Created);
+    m_retryPromise->settle(WTFMove(result));
+    m_retryPromise = nullptr;
+}
+
+void PaymentResponse::stop()
+{
+    settleRetryPromise(Exception { AbortError });
+    m_pendingActivity = nullptr;
+    m_state = State::Stopped;
+}
+
+void PaymentResponse::suspend(ReasonForSuspension reason)
+{
+    if (reason != ReasonForSuspension::BackForwardCache)
+        return;
+
+    if (m_state != State::Created) {
+        ASSERT(!hasPendingActivity());
+        ASSERT(!m_retryPromise);
+        return;
+    }
+
+    stop();
 }
 
 } // namespace WebCore

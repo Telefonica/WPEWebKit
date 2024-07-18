@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_VAD_GMM_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_VAD_GMM_H_
+#ifndef MODULES_AUDIO_PROCESSING_VAD_GMM_H_
+#define MODULES_AUDIO_PROCESSING_VAD_GMM_H_
 
 namespace webrtc {
 
@@ -20,13 +20,13 @@ namespace webrtc {
 // Where a 'mixture' is a Gaussian density.
 
 struct GmmParameters {
-  // weight[n] = log(w[n]) - |dimension|/2 * log(2*pi) - 1/2 * log(det(cov[n]));
+  // weight[n] = log(w[n]) - `dimension`/2 * log(2*pi) - 1/2 * log(det(cov[n]));
   // where cov[n] is the covariance matrix of mixture n;
   const double* weight;
-  // pointer to the first element of a |num_mixtures|x|dimension| matrix
+  // pointer to the first element of a `num_mixtures`x`dimension` matrix
   // where kth row is the mean of the kth mixture.
   const double* mean;
-  // pointer to the first element of a |num_mixtures|x|dimension|x|dimension|
+  // pointer to the first element of a `num_mixtures`x`dimension`x`dimension`
   // 3D-matrix, where the kth 2D-matrix is the inverse of the covariance
   // matrix of the kth mixture.
   const double* covar_inverse;
@@ -36,10 +36,10 @@ struct GmmParameters {
   int num_mixtures;
 };
 
-// Evaluate the given GMM, according to |gmm_parameters|, at the given point
-// |x|. If the dimensionality of the given GMM is larger that the maximum
+// Evaluate the given GMM, according to `gmm_parameters`, at the given point
+// `x`. If the dimensionality of the given GMM is larger that the maximum
 // acceptable dimension by the following function -1 is returned.
 double EvaluateGmm(const double* x, const GmmParameters& gmm_parameters);
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_VAD_GMM_H_
+#endif  // MODULES_AUDIO_PROCESSING_VAD_GMM_H_

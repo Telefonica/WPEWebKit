@@ -1,4 +1,4 @@
-#!/usr/bin/ruby
+#!/usr/bin/env ruby
 
 require 'fileutils'
 require 'tmpdir'
@@ -28,8 +28,7 @@ class Task
     puts "#{display_input} -> #{display_output}"
 
     Dir.mktmpdir do |tmpdir|
-      dependency = @dependency_json_path ? "'#{@dependency_json_path}'" : ""
-      cmd = "#{$code_generator_path} --force --outputDir '#{tmpdir}' --framework JavaScriptCore '#{@input_json_path}' #{dependency}"
+      cmd = "#{$code_generator_path} --force --outputDir '#{tmpdir}' --framework WebInspectorUI '#{@input_json_path}'"
       %x{ #{cmd} }
       if $?.exitstatus != 0
         puts "ERROR: Error Code (#{$?.exitstatus}) Evaluating: #{cmd}"
@@ -37,7 +36,7 @@ class Task
       end
 
       generated_path = File.join tmpdir, output_filename
-      if !File.exists?(generated_path)
+      if !File.exist?(generated_path)
         puts "ERROR: Generated file does not exist at expected path."
         exit 1
       end
@@ -55,7 +54,7 @@ def all_tasks
   Dir.glob(File.join($versions_directory_path, "*.json")).each do |version_path|
     match = File.basename(version_path).match(/^Inspector\-(.*?)\-([^-]+?)\.json$/)
     if match
-      output_path = File.join $web_inspector_protocol_legacy_path, match[2]
+      output_path = File.join $web_inspector_protocol_legacy_path, match[1], match[2]
       tasks << Task.new(version_path, output_path)
     else
       puts "ERROR: Version file (#{version_path}) did not match the template Inspector-<ANYTHING>-<VERSION>.js"

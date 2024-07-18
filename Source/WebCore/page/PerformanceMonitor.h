@@ -28,19 +28,19 @@
 #include "ActivityState.h"
 #include "Timer.h"
 #include <wtf/CPUTime.h>
-#include <wtf/Optional.h>
 
 namespace WebCore {
 
 class Page;
 
 class PerformanceMonitor {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit PerformanceMonitor(Page&);
 
     void didStartProvisionalLoad();
     void didFinishLoad();
-    void activityStateChanged(ActivityState::Flags oldState, ActivityState::Flags newState);
+    void activityStateChanged(OptionSet<ActivityState::Flag> oldState, OptionSet<ActivityState::Flag> newState);
 
 private:
     void measurePostLoadCPUUsage();

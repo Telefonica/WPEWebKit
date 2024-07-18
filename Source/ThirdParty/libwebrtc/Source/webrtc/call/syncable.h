@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-// Syncable is used by RtpStreamsSynchronizer in VideoReceiveStream, and
-// implemented by AudioReceiveStream.
+// Syncable is used by RtpStreamsSynchronizer in VideoReceiveStreamInterface,
+// and implemented by AudioReceiveStreamInterface.
 
-#ifndef WEBRTC_CALL_SYNCABLE_H_
-#define WEBRTC_CALL_SYNCABLE_H_
+#ifndef CALL_SYNCABLE_H_
+#define CALL_SYNCABLE_H_
 
 #include <stdint.h>
 
-#include "webrtc/base/optional.h"
+#include "absl/types/optional.h"
 
 namespace webrtc {
 
@@ -33,11 +33,14 @@ class Syncable {
 
   virtual ~Syncable();
 
-  virtual int id() const = 0;
-  virtual rtc::Optional<Info> GetInfo() const = 0;
-  virtual uint32_t GetPlayoutTimestamp() const = 0;
-  virtual void SetMinimumPlayoutDelay(int delay_ms) = 0;
+  virtual uint32_t id() const = 0;
+  virtual absl::optional<Info> GetInfo() const = 0;
+  virtual bool GetPlayoutRtpTimestamp(uint32_t* rtp_timestamp,
+                                      int64_t* time_ms) const = 0;
+  virtual bool SetMinimumPlayoutDelay(int delay_ms) = 0;
+  virtual void SetEstimatedPlayoutNtpTimestampMs(int64_t ntp_timestamp_ms,
+                                                 int64_t time_ms) = 0;
 };
 }  // namespace webrtc
 
-#endif  // WEBRTC_CALL_SYNCABLE_H_
+#endif  // CALL_SYNCABLE_H_

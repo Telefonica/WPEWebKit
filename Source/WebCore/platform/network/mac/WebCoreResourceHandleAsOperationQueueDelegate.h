@@ -23,39 +23,39 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
-#if !USE(CFURLCONNECTION)
-
-#include "WebCoreResourceHandleAsDelegate.h"
-#include <dispatch/dispatch.h>
-#include <wtf/RetainPtr.h>
+#import <dispatch/dispatch.h>
+#import <wtf/Box.h>
+#import <wtf/Function.h>
+#import <wtf/Lock.h>
+#import <wtf/MessageQueue.h>
+#import <wtf/RefPtr.h>
+#import <wtf/RetainPtr.h>
+#import <wtf/SchedulePair.h>
+#import <wtf/threads/BinarySemaphore.h>
 
 namespace WebCore {
+class NetworkLoadMetrics;
 class ResourceHandle;
+class SynchronousLoaderMessageQueue;
 }
 
-@interface WebCoreResourceHandleAsOperationQueueDelegate : NSObject <NSURLConnectionDelegate, WebCoreResourceLoaderDelegate> {
-    WebCore::ResourceHandle* m_handle;
+@interface WebCoreResourceHandleAsOperationQueueDelegate : NSObject <NSURLConnectionDelegate> {
+    Lock m_lock;
+    WebCore::ResourceHandle* m_handle WTF_GUARDED_BY_LOCK(m_lock);
 
     // Synchronous delegates on operation queue wait until main thread sends an asynchronous response.
-    dispatch_semaphore_t m_semaphore;
+    BinarySemaphore m_semaphore;
+    RefPtr<WebCore::SynchronousLoaderMessageQueue> m_messageQueue;
     RetainPtr<NSURLRequest> m_requestResult;
     RetainPtr<NSCachedURLResponse> m_cachedResponseResult;
+    std::optional<SchedulePairHashSet> m_scheduledPairs;
     BOOL m_boolResult;
 }
 
-- (id)initWithHandle:(WebCore::ResourceHandle*)handle;
-- (void)continueWillSendRequest:(NSURLRequest *)newRequest;
-- (void)continueDidReceiveResponse;
-#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
-- (void)continueCanAuthenticateAgainstProtectionSpace:(BOOL)canAuthenticate;
-#endif
-- (void)continueWillCacheResponse:(NSCachedURLResponse *)response;
+- (void)detachHandle;
+- (id)initWithHandle:(WebCore::ResourceHandle*)handle messageQueue:(RefPtr<WebCore::SynchronousLoaderMessageQueue>&&)messageQueue;
 @end
 
 @interface WebCoreResourceHandleWithCredentialStorageAsOperationQueueDelegate : WebCoreResourceHandleAsOperationQueueDelegate
 
 @end
-
-#endif // !USE(CFURLCONNECTION)

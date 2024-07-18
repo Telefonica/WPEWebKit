@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,26 +24,28 @@
  */
 
 #include "config.h"
-#include "RAMSize.h"
+#include <wtf/RAMSize.h>
+#include <wtf/text/StringToIntegerConversion.h>
+#include <wtf/text/WTFString.h>
 
-#include "StdLibExtras.h"
 #include <mutex>
 
 #if OS(WINDOWS)
 #include <windows.h>
-#elif defined(USE_SYSTEM_MALLOC) && USE_SYSTEM_MALLOC
-#if OS(UNIX)
+#elif USE(SYSTEM_MALLOC)
+#if OS(LINUX) || OS(FREEBSD)
 #include <sys/sysinfo.h>
-#endif // OS(UNIX)
+#elif OS(UNIX)
+#include <unistd.h>
+#endif // OS(LINUX) || OS(FREEBSD) || OS(UNIX)
 #else
-#include <wtf/text/WTFString.h>
 #include <bmalloc/bmalloc.h>
 #endif
 
 namespace WTF {
 
 #if OS(WINDOWS)
-static const size_t ramSizeGuess = 512 * MB;
+static constexpr size_t ramSizeGuess = 512 * MB;
 #endif
 
 static size_t customRAMSize()
@@ -51,27 +53,30 @@ static size_t customRAMSize()
     // Syntax: Case insensitive, unit multipliers (M=Mb, K=Kb, <empty>=bytes).
     // Example: WPE_RAM_SIZE='500M'
 
-    String s(getenv("WPE_RAM_SIZE"));
+    size_t customSize = 0;
+
+    String s = String::fromLatin1(getenv("WPE_RAM_SIZE"));
     if (!s.isEmpty()) {
         String value = s.stripWhiteSpace().convertToLowercaseWithoutLocale();
         size_t units = 1;
         if (value.endsWith('k'))
-            units = 1024;
+            units = KB;
         else if (value.endsWith('m'))
-            units = 1024 * 1024;
+            units = MB;
         if (units != 1)
-            value = value.substring(0, value.length()-1);
-        bool ok = false;
-        size_t size = size_t(value.toUInt64(&ok));
-        if (ok)
-            return size * units;
+            value = value.substring(0, value.length() - 1);
+        customSize = parseInteger<uint64_t>(value).value_or(0) * units;
     }
 
-    return 0;
+    return customSize;
 }
 
 static size_t computeRAMSize()
 {
+    size_t custom = customRAMSize();
+    if (custom)
+        return custom;
+
 #if OS(WINDOWS)
     MEMORYSTATUSEX status;
     status.dwLength = sizeof(status);
@@ -79,19 +84,19 @@ static size_t computeRAMSize()
     if (!result)
         return ramSizeGuess;
     return status.ullTotalPhys;
-#elif defined(USE_SYSTEM_MALLOC) && USE_SYSTEM_MALLOC
-#if OS(UNIX)
+#elif USE(SYSTEM_MALLOC)
+#if OS(LINUX) || OS(FREEBSD)
     struct sysinfo si;
     sysinfo(&si);
     return si.totalram * si.mem_unit;
+#elif OS(UNIX)
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long pageSize = sysconf(_SC_PAGE_SIZE);
+    return pages * pageSize;
 #else
 #error "Missing a platform specific way of determining the available RAM"
-#endif // OS(UNIX)
+#endif // OS(LINUX) || OS(FREEBSD) || OS(UNIX)
 #else
-    size_t custom = customRAMSize();
-    if (custom)
-        return custom;
-
     return bmalloc::api::availableMemory();
 #endif
 }

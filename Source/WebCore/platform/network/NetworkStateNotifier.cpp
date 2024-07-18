@@ -28,12 +28,26 @@
 
 #include <wtf/NeverDestroyed.h>
 
+#if USE(WEB_THREAD)
+#include "WebCoreThread.h"
+#endif
+
 namespace WebCore {
 
 static const Seconds updateStateSoonInterval { 2_s };
 
+static bool shouldSuppressThreadSafetyCheck()
+{
+#if USE(WEB_THREAD)
+    return WebThreadIsEnabled();
+#else
+    return false;
+#endif
+}
+
 NetworkStateNotifier& NetworkStateNotifier::singleton()
 {
+    RELEASE_ASSERT(shouldSuppressThreadSafetyCheck() || isMainThread());
     static NeverDestroyed<NetworkStateNotifier> networkStateNotifier;
     return networkStateNotifier;
 }
@@ -52,7 +66,7 @@ bool NetworkStateNotifier::onLine()
     return m_isOnLine.value_or(true);
 }
 
-void NetworkStateNotifier::addListener(WTF::Function<void(bool)>&& listener)
+void NetworkStateNotifier::addListener(Function<void(bool)>&& listener)
 {
     ASSERT(listener);
     if (m_listeners.isEmpty())
@@ -74,19 +88,5 @@ void NetworkStateNotifier::updateStateSoon()
 {
     m_updateStateTimer.startOneShot(updateStateSoonInterval);
 }
-
-#if !PLATFORM(IOS) && !PLATFORM(MAC) && !PLATFORM(WIN)
-
-// Empty stubs for platforms where monitoring of network state is not yet implemented.
-
-void NetworkStateNotifier::updateStateWithoutNotifying()
-{
-}
-
-void NetworkStateNotifier::startObserving()
-{
-}
-
-#endif
 
 } // namespace WebCore

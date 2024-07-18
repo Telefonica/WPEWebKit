@@ -43,6 +43,7 @@ WI.CodeMirrorTokenTrackingController = class CodeMirrorTokenTrackingController e
         this._tracking = false;
         this._previousTokenInfo = null;
         this._hoveredMarker = null;
+        this._ignoreNextMouseMove = false;
 
         const hidePopover = this._hidePopover.bind(this);
 
@@ -198,12 +199,14 @@ WI.CodeMirrorTokenTrackingController = class CodeMirrorTokenTrackingController e
             return;
 
         this._tracking = true;
+        this._ignoreNextMouseMove = false;
 
         var wrapper = this._codeMirror.getWrapperElement();
         wrapper.addEventListener("mousemove", this, true);
         wrapper.addEventListener("mouseout", this, false);
         wrapper.addEventListener("mousedown", this, false);
         wrapper.addEventListener("mouseup", this, false);
+        wrapper.addEventListener("mousewheel", this, false);
         window.addEventListener("blur", this, true);
     }
 
@@ -220,6 +223,7 @@ WI.CodeMirrorTokenTrackingController = class CodeMirrorTokenTrackingController e
         wrapper.removeEventListener("mouseout", this, false);
         wrapper.removeEventListener("mousedown", this, false);
         wrapper.removeEventListener("mouseup", this, false);
+        wrapper.removeEventListener("mousewheel", this, false);
         window.removeEventListener("blur", this, true);
         window.removeEventListener("mousemove", this, true);
 
@@ -251,6 +255,9 @@ WI.CodeMirrorTokenTrackingController = class CodeMirrorTokenTrackingController e
             break;
         case "mouseup":
             this._mouseButtonWasReleasedOverEditor(event);
+            break;
+        case "mousewheel":
+            this._ignoreNextMouseMove = true;
             break;
         case "blur":
             this._windowLostFocus(event);
@@ -318,6 +325,11 @@ WI.CodeMirrorTokenTrackingController = class CodeMirrorTokenTrackingController e
 
     _mouseMovedOverEditor(event)
     {
+        if (this._ignoreNextMouseMove) {
+            this._ignoreNextMouseMove = false;
+            return;
+        }
+
         this._updateHoveredTokenInfo({left: event.pageX, top: event.pageY});
     }
 
@@ -566,10 +578,16 @@ WI.CodeMirrorTokenTrackingController = class CodeMirrorTokenTrackingController e
             if (!isDot && !isExpression)
                 break;
 
-            // Disallow operators. We want the hovered expression to be just a single operand.
-            // Also, some operators can modify values, such as pre-increment and assignment operators.
-            if (isExpression && token.type.includes("operator"))
-                break;
+            if (isExpression) {
+                // Disallow operators. We want the hovered expression to be just a single operand.
+                // Also, some operators can modify values, such as pre-increment and assignment operators.
+                if (token.type.includes("operator"))
+                    break;
+
+                // Don't break out of a template string quasi group.
+                if (token.type.includes("string-2"))
+                    break;
+            }
 
             expression = token.string + expression;
             expressionStartPosition.ch = token.start;

@@ -8,9 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_device/include/audio_device_data_observer.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/base/refcountedobject.h"
+#include "modules/audio_device/include/audio_device_data_observer.h"
+
+#include "api/make_ref_counted.h"
+#include "modules/audio_device/include/audio_device_defines.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -20,15 +22,22 @@ namespace {
 // callback and redirects the PCM data to AudioDeviceDataObserver callback.
 class ADMWrapper : public AudioDeviceModule, public AudioTransport {
  public:
-  ADMWrapper(const int32_t id,
-             const AudioLayer audio_layer,
-             AudioDeviceDataObserver* observer)
-      : impl_(AudioDeviceModule::Create(id, audio_layer)), observer_(observer) {
-    // Register self as the audio transport callback for underlying ADM impl.
-    auto res = impl_->RegisterAudioCallback(this);
-    is_valid_ = (impl_.get() != nullptr) && (res == 0);
+  ADMWrapper(rtc::scoped_refptr<AudioDeviceModule> impl,
+             AudioDeviceDataObserver* legacy_observer,
+             std::unique_ptr<AudioDeviceDataObserver> observer)
+      : impl_(impl),
+        legacy_observer_(legacy_observer),
+        observer_(std::move(observer)) {
+    is_valid_ = impl_.get() != nullptr;
   }
-  virtual ~ADMWrapper() {
+  ADMWrapper(AudioLayer audio_layer,
+             TaskQueueFactory* task_queue_factory,
+             AudioDeviceDataObserver* legacy_observer,
+             std::unique_ptr<AudioDeviceDataObserver> observer)
+      : ADMWrapper(AudioDeviceModule::Create(audio_layer, task_queue_factory),
+                   legacy_observer,
+                   std::move(observer)) {}
+  ~ADMWrapper() override {
     audio_transport_ = nullptr;
     observer_ = nullptr;
   }
@@ -36,23 +45,35 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
   // Make sure we have a valid ADM before returning it to user.
   bool IsValid() { return is_valid_; }
 
-  // RefCountedModule methods overrides.
-  int64_t TimeUntilNextProcess() override {
-    return impl_->TimeUntilNextProcess();
+  int32_t RecordedDataIsAvailable(const void* audioSamples,
+                                  size_t nSamples,
+                                  size_t nBytesPerSample,
+                                  size_t nChannels,
+                                  uint32_t samples_per_sec,
+                                  uint32_t total_delay_ms,
+                                  int32_t clockDrift,
+                                  uint32_t currentMicLevel,
+                                  bool keyPressed,
+                                  uint32_t& newMicLevel) override {
+    return RecordedDataIsAvailable(
+        audioSamples, nSamples, nBytesPerSample, nChannels, samples_per_sec,
+        total_delay_ms, clockDrift, currentMicLevel, keyPressed, newMicLevel,
+        /*capture_timestamp_ns=*/absl::nullopt);
   }
-  void Process() override { return impl_->Process(); }
 
   // AudioTransport methods overrides.
-  int32_t RecordedDataIsAvailable(const void* audioSamples,
-                                  const size_t nSamples,
-                                  const size_t nBytesPerSample,
-                                  const size_t nChannels,
-                                  const uint32_t samples_per_sec,
-                                  const uint32_t total_delay_ms,
-                                  const int32_t clockDrift,
-                                  const uint32_t currentMicLevel,
-                                  const bool keyPressed,
-                                  uint32_t& newMicLevel) override {
+  int32_t RecordedDataIsAvailable(
+      const void* audioSamples,
+      size_t nSamples,
+      size_t nBytesPerSample,
+      size_t nChannels,
+      uint32_t samples_per_sec,
+      uint32_t total_delay_ms,
+      int32_t clockDrift,
+      uint32_t currentMicLevel,
+      bool keyPressed,
+      uint32_t& newMicLevel,
+      absl::optional<int64_t> capture_timestamp_ns) override {
     int32_t res = 0;
     // Capture PCM data of locally captured audio.
     if (observer_) {
@@ -64,7 +85,8 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
     if (audio_transport_) {
       res = audio_transport_->RecordedDataIsAvailable(
           audioSamples, nSamples, nBytesPerSample, nChannels, samples_per_sec,
-          total_delay_ms, clockDrift, currentMicLevel, keyPressed, newMicLevel);
+          total_delay_ms, clockDrift, currentMicLevel, keyPressed, newMicLevel,
+          capture_timestamp_ns);
     }
 
     return res;
@@ -79,6 +101,11 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
                            int64_t* elapsed_time_ms,
                            int64_t* ntp_time_ms) override {
     int32_t res = 0;
+    // Set out parameters to safe values to be sure not to return corrupted
+    // data.
+    nSamplesOut = 0;
+    *elapsed_time_ms = -1;
+    *ntp_time_ms = -1;
     // Request data from audio transport.
     if (audio_transport_) {
       res = audio_transport_->NeedMorePlayData(
@@ -95,15 +122,6 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
     return res;
   }
 
-  void PushCaptureData(int voe_channel,
-                       const void* audio_data,
-                       int bits_per_sample,
-                       int sample_rate,
-                       size_t number_of_channels,
-                       size_t number_of_frames) override {
-    RTC_NOTREACHED();
-  }
-
   void PullRenderData(int bits_per_sample,
                       int sample_rate,
                       size_t number_of_channels,
@@ -111,7 +129,7 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
                       void* audio_data,
                       int64_t* elapsed_time_ms,
                       int64_t* ntp_time_ms) override {
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
   }
 
   // Override AudioDeviceModule's RegisterAudioCallback method to remember the
@@ -126,11 +144,15 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
   int32_t ActiveAudioLayer(AudioLayer* audio_layer) const override {
     return impl_->ActiveAudioLayer(audio_layer);
   }
-  ErrorCode LastError() const override { return impl_->LastError(); }
-  int32_t RegisterEventObserver(AudioDeviceObserver* event_callback) override {
-    return impl_->RegisterEventObserver(event_callback);
+  int32_t Init() override {
+    int res = impl_->Init();
+    if (res != 0) {
+      return res;
+    }
+    // Register self as the audio transport callback for underlying ADM impl.
+    impl_->RegisterAudioCallback(this);
+    return res;
   }
-  int32_t Init() override { return impl_->Init(); }
   int32_t Terminate() override { return impl_->Terminate(); }
   bool Initialized() const override { return impl_->Initialized(); }
   int16_t PlayoutDevices() override { return impl_->PlayoutDevices(); }
@@ -177,16 +199,6 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
   int32_t StartRecording() override { return impl_->StartRecording(); }
   int32_t StopRecording() override { return impl_->StopRecording(); }
   bool Recording() const override { return impl_->Recording(); }
-  int32_t SetAGC(bool enable) override { return impl_->SetAGC(enable); }
-  bool AGC() const override { return impl_->AGC(); }
-  int32_t SetWaveOutVolume(uint16_t volume_left,
-                           uint16_t volume_right) override {
-    return impl_->SetWaveOutVolume(volume_left, volume_right);
-  }
-  int32_t WaveOutVolume(uint16_t* volume_left,
-                        uint16_t* volume_right) const override {
-    return impl_->WaveOutVolume(volume_left, volume_right);
-  }
   int32_t InitSpeaker() override { return impl_->InitSpeaker(); }
   bool SpeakerIsInitialized() const override {
     return impl_->SpeakerIsInitialized();
@@ -210,9 +222,6 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
   int32_t MinSpeakerVolume(uint32_t* min_volume) const override {
     return impl_->MinSpeakerVolume(min_volume);
   }
-  int32_t SpeakerVolumeStepSize(uint16_t* step_size) const override {
-    return impl_->SpeakerVolumeStepSize(step_size);
-  }
   int32_t MicrophoneVolumeIsAvailable(bool* available) override {
     return impl_->MicrophoneVolumeIsAvailable(available);
   }
@@ -227,9 +236,6 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
   }
   int32_t MinMicrophoneVolume(uint32_t* min_volume) const override {
     return impl_->MinMicrophoneVolume(min_volume);
-  }
-  int32_t MicrophoneVolumeStepSize(uint16_t* step_size) const override {
-    return impl_->MicrophoneVolumeStepSize(step_size);
   }
   int32_t SpeakerMuteIsAvailable(bool* available) override {
     return impl_->SpeakerMuteIsAvailable(available);
@@ -249,15 +255,6 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
   int32_t MicrophoneMute(bool* enabled) const override {
     return impl_->MicrophoneMute(enabled);
   }
-  int32_t MicrophoneBoostIsAvailable(bool* available) override {
-    return impl_->MicrophoneBoostIsAvailable(available);
-  }
-  int32_t SetMicrophoneBoost(bool enable) override {
-    return impl_->SetMicrophoneBoost(enable);
-  }
-  int32_t MicrophoneBoost(bool* enabled) const override {
-    return impl_->MicrophoneBoost(enabled);
-  }
   int32_t StereoPlayoutIsAvailable(bool* available) const override {
     return impl_->StereoPlayoutIsAvailable(available);
   }
@@ -276,59 +273,8 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
   int32_t StereoRecording(bool* enabled) const override {
     return impl_->StereoRecording(enabled);
   }
-  int32_t SetRecordingChannel(const ChannelType channel) override {
-    return impl_->SetRecordingChannel(channel);
-  }
-  int32_t RecordingChannel(ChannelType* channel) const override {
-    return impl_->RecordingChannel(channel);
-  }
-  int32_t SetPlayoutBuffer(const BufferType type, uint16_t size_ms) override {
-    return impl_->SetPlayoutBuffer(type, size_ms);
-  }
-  int32_t PlayoutBuffer(BufferType* type, uint16_t* size_ms) const override {
-    return impl_->PlayoutBuffer(type, size_ms);
-  }
   int32_t PlayoutDelay(uint16_t* delay_ms) const override {
     return impl_->PlayoutDelay(delay_ms);
-  }
-  int32_t RecordingDelay(uint16_t* delay_ms) const override {
-    return impl_->RecordingDelay(delay_ms);
-  }
-  int32_t CPULoad(uint16_t* load) const override {
-    return impl_->CPULoad(load);
-  }
-  int32_t StartRawOutputFileRecording(
-      const char pcm_file_name_utf8[kAdmMaxFileNameSize]) override {
-    return impl_->StartRawOutputFileRecording(pcm_file_name_utf8);
-  }
-  int32_t StopRawOutputFileRecording() override {
-    return impl_->StopRawOutputFileRecording();
-  }
-  int32_t StartRawInputFileRecording(
-      const char pcm_file_name_utf8[kAdmMaxFileNameSize]) override {
-    return impl_->StartRawInputFileRecording(pcm_file_name_utf8);
-  }
-  int32_t StopRawInputFileRecording() override {
-    return impl_->StopRawInputFileRecording();
-  }
-  int32_t SetRecordingSampleRate(const uint32_t samples_per_sec) override {
-    return impl_->SetRecordingSampleRate(samples_per_sec);
-  }
-  int32_t RecordingSampleRate(uint32_t* samples_per_sec) const override {
-    return impl_->RecordingSampleRate(samples_per_sec);
-  }
-  int32_t SetPlayoutSampleRate(const uint32_t samples_per_sec) override {
-    return impl_->SetPlayoutSampleRate(samples_per_sec);
-  }
-  int32_t PlayoutSampleRate(uint32_t* samples_per_sec) const override {
-    return impl_->PlayoutSampleRate(samples_per_sec);
-  }
-  int32_t ResetAudioDevice() override { return impl_->ResetAudioDevice(); }
-  int32_t SetLoudspeakerStatus(bool enable) override {
-    return impl_->SetLoudspeakerStatus(enable);
-  }
-  int32_t GetLoudspeakerStatus(bool* enabled) const override {
-    return impl_->GetLoudspeakerStatus(enabled);
   }
   bool BuiltInAECIsAvailable() const override {
     return impl_->BuiltInAECIsAvailable();
@@ -348,6 +294,9 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
   int32_t EnableBuiltInNS(bool enable) override {
     return impl_->EnableBuiltInNS(enable);
   }
+  int32_t GetPlayoutUnderrunCount() const override {
+    return impl_->GetPlayoutUnderrunCount();
+  }
 // Only supported on iOS.
 #if defined(WEBRTC_IOS)
   int GetPlayoutAudioParameters(AudioParameters* params) const override {
@@ -360,7 +309,8 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
 
  protected:
   rtc::scoped_refptr<AudioDeviceModule> impl_;
-  AudioDeviceDataObserver* observer_ = nullptr;
+  AudioDeviceDataObserver* legacy_observer_ = nullptr;
+  std::unique_ptr<AudioDeviceDataObserver> observer_;
   AudioTransport* audio_transport_ = nullptr;
   bool is_valid_ = false;
 };
@@ -368,11 +318,10 @@ class ADMWrapper : public AudioDeviceModule, public AudioTransport {
 }  // namespace
 
 rtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceWithDataObserver(
-    const int32_t id,
-    const AudioDeviceModule::AudioLayer audio_layer,
-    AudioDeviceDataObserver* observer) {
-  rtc::scoped_refptr<ADMWrapper> audio_device(
-      new rtc::RefCountedObject<ADMWrapper>(id, audio_layer, observer));
+    rtc::scoped_refptr<AudioDeviceModule> impl,
+    std::unique_ptr<AudioDeviceDataObserver> observer) {
+  auto audio_device = rtc::make_ref_counted<ADMWrapper>(impl, observer.get(),
+                                                        std::move(observer));
 
   if (!audio_device->IsValid()) {
     return nullptr;
@@ -381,4 +330,44 @@ rtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceWithDataObserver(
   return audio_device;
 }
 
+rtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceWithDataObserver(
+    rtc::scoped_refptr<AudioDeviceModule> impl,
+    AudioDeviceDataObserver* legacy_observer) {
+  auto audio_device =
+      rtc::make_ref_counted<ADMWrapper>(impl, legacy_observer, nullptr);
+
+  if (!audio_device->IsValid()) {
+    return nullptr;
+  }
+
+  return audio_device;
+}
+
+rtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceWithDataObserver(
+    AudioDeviceModule::AudioLayer audio_layer,
+    TaskQueueFactory* task_queue_factory,
+    std::unique_ptr<AudioDeviceDataObserver> observer) {
+  auto audio_device = rtc::make_ref_counted<ADMWrapper>(
+      audio_layer, task_queue_factory, observer.get(), std::move(observer));
+
+  if (!audio_device->IsValid()) {
+    return nullptr;
+  }
+
+  return audio_device;
+}
+
+rtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceWithDataObserver(
+    AudioDeviceModule::AudioLayer audio_layer,
+    TaskQueueFactory* task_queue_factory,
+    AudioDeviceDataObserver* legacy_observer) {
+  auto audio_device = rtc::make_ref_counted<ADMWrapper>(
+      audio_layer, task_queue_factory, legacy_observer, nullptr);
+
+  if (!audio_device->IsValid()) {
+    return nullptr;
+  }
+
+  return audio_device;
+}
 }  // namespace webrtc

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2014 Igalia S.L.
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -27,9 +27,8 @@
 #include <WebCore/UserMediaController.h>
 #include <WebCore/UserMediaRequest.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 WebUserMediaClient::WebUserMediaClient(WebPage& page)
     : m_page(page)
@@ -51,14 +50,19 @@ void WebUserMediaClient::cancelUserMediaAccessRequest(UserMediaRequest& request)
     m_page.userMediaPermissionRequestManager().cancelUserMediaRequest(request);
 }
 
-void WebUserMediaClient::enumerateMediaDevices(MediaDevicesEnumerationRequest& request)
+void WebUserMediaClient::enumerateMediaDevices(Document& document, CompletionHandler<void(const Vector<CaptureDevice>&, const String&)>&& completionHandler)
 {
-    m_page.userMediaPermissionRequestManager().enumerateMediaDevices(request);
+    m_page.userMediaPermissionRequestManager().enumerateMediaDevices(document, WTFMove(completionHandler));
 }
 
-void WebUserMediaClient::cancelMediaDevicesEnumerationRequest(MediaDevicesEnumerationRequest& request)
+WebUserMediaClient::DeviceChangeObserverToken WebUserMediaClient::addDeviceChangeObserver(WTF::Function<void()>&& observer)
 {
-    m_page.userMediaPermissionRequestManager().cancelMediaDevicesEnumeration(request);
+    return m_page.userMediaPermissionRequestManager().addDeviceChangeObserver(WTFMove(observer));
+}
+
+void WebUserMediaClient::removeDeviceChangeObserver(DeviceChangeObserverToken token)
+{
+    m_page.userMediaPermissionRequestManager().removeDeviceChangeObserver(token);
 }
 
 } // namespace WebKit;

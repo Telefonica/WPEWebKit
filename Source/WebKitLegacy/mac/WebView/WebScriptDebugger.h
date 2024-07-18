@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,18 +29,15 @@
 #ifndef WebScriptDebugger_h
 #define WebScriptDebugger_h
 
-#include <heap/Strong.h>
-#include <debugger/Debugger.h>
+#include <JavaScriptCore/Debugger.h>
+#include <JavaScriptCore/Strong.h>
 
+#include <wtf/Forward.h>
 #include <wtf/RetainPtr.h>
 
-namespace WTF {
-class String;
-}
-
 namespace JSC {
+    class CallFrame;
     class DebuggerCallFrame;
-    class ExecState;
     class JSGlobalObject;
     class JSObject;
     class ArgList;
@@ -55,7 +52,7 @@ public:
     JSC::JSGlobalObject* globalObject() const { return m_globalObject.get(); }
 
 private:
-    void sourceParsed(JSC::ExecState*, JSC::SourceProvider*, int errorLine, const WTF::String& errorMsg) override;
+    void sourceParsed(JSC::JSGlobalObject*, JSC::SourceProvider*, int errorLine, const WTF::String& errorMsg) override;
     void handlePause(JSC::JSGlobalObject*, JSC::Debugger::ReasonForPause) override;
 
     bool m_callingDelegate;

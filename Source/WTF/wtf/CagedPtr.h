@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,35 +26,102 @@
 #pragma once
 
 #include <wtf/Gigacage.h>
+#include <wtf/MathExtras.h>
+#include <wtf/PtrTag.h>
+#include <wtf/RawPtrTraits.h>
+
+#include <climits>
+
+#if OS(DARWIN)
+#include <mach/vm_param.h>
+#endif
 
 namespace WTF {
 
-template<Gigacage::Kind passedKind, typename T>
+constexpr bool tagCagedPtr = true;
+
+template<Gigacage::Kind passedKind, typename T, bool shouldTag = false, typename PtrTraits = RawPtrTraits<T>>
 class CagedPtr {
 public:
     static constexpr Gigacage::Kind kind = passedKind;
-    
-    CagedPtr(T* ptr = nullptr)
-        : m_ptr(ptr)
-    {
-    }
-    
-    T* get() const
+    static constexpr unsigned numberOfPointerBits = sizeof(T*) * CHAR_BIT;
+    static constexpr unsigned maxNumberOfAllowedPACBits = numberOfPointerBits - OS_CONSTANT(EFFECTIVE_ADDRESS_WIDTH);
+    static constexpr uintptr_t nonPACBitsMask = (1ull << (numberOfPointerBits - maxNumberOfAllowedPACBits)) - 1;
+
+    CagedPtr() : CagedPtr(nullptr) { }
+    CagedPtr(std::nullptr_t)
+        : m_ptr(shouldTag ? tagArrayPtr<T>(nullptr, 0) : nullptr)
+    { }
+
+    CagedPtr(T* ptr, size_t size)
+        : m_ptr(shouldTag ? tagArrayPtr(ptr, size) : ptr)
+    { }
+
+    T* get(size_t size) const
     {
         ASSERT(m_ptr);
-        return Gigacage::caged(kind, m_ptr);
+        T* ptr = PtrTraits::unwrap(m_ptr);
+        T* cagedPtr = Gigacage::caged(kind, ptr);
+        T* untaggedPtr = shouldTag ? untagArrayPtr(mergePointers(ptr, cagedPtr), size) : cagedPtr;
+        return untaggedPtr;
     }
-    
-    T* getMayBeNull() const
+
+    T* getMayBeNull(size_t size) const
     {
-        if (!m_ptr)
+        T* ptr = PtrTraits::unwrap(m_ptr);
+        if (!removeArrayPtrTag(ptr))
             return nullptr;
-        return get();
+        T* cagedPtr = Gigacage::caged(kind, ptr);
+        T* untaggedPtr = shouldTag ? untagArrayPtr(mergePointers(ptr, cagedPtr), size) : cagedPtr;
+        return untaggedPtr;
     }
-    
+
+    T* getUnsafe() const
+    {
+        T* ptr = PtrTraits::unwrap(m_ptr);
+        ptr = shouldTag ? removeArrayPtrTag(ptr) : ptr;
+        return Gigacage::cagedMayBeNull(kind, ptr);
+    }
+
+    // We need the template here so that the type of U is deduced at usage time rather than class time. U should always be T.
+    template<typename U = T>
+    typename std::enable_if<!std::is_same<void, U>::value, T>::type&
+    /* T& */ at(size_t index, size_t size) const { return get(size)[index]; }
+
+    void recage(size_t oldSize, size_t newSize)
+    {
+        auto ptr = get(oldSize);
+        ASSERT(ptr == getUnsafe());
+        *this = CagedPtr(ptr, newSize);
+    }
+
+    CagedPtr(CagedPtr& other)
+        : m_ptr(other.m_ptr)
+    {
+    }
+
+    CagedPtr& operator=(const CagedPtr& ptr)
+    {
+        m_ptr = ptr.m_ptr;
+        return *this;
+    }
+
+    CagedPtr(CagedPtr&& other)
+        : m_ptr(PtrTraits::exchange(other.m_ptr, nullptr))
+    {
+    }
+
+    CagedPtr& operator=(CagedPtr&& ptr)
+    {
+        m_ptr = PtrTraits::exchange(ptr.m_ptr, nullptr);
+        return *this;
+    }
+
     bool operator==(const CagedPtr& other) const
     {
-        return getMayBeNull() == other.getMayBeNull();
+        bool result = m_ptr == other.m_ptr;
+        ASSERT(result == (getUnsafe() == other.getUnsafe()));
+        return result;
     }
     
     bool operator!=(const CagedPtr& other) const
@@ -64,62 +131,30 @@ public:
     
     explicit operator bool() const
     {
-        return *this != CagedPtr();
+        return getUnsafe() != nullptr;
     }
-    
-    T& operator*() const { return *get(); }
-    T* operator->() const { return get(); }
 
-    template<typename IndexType>
-    T& operator[](IndexType index) const { return get()[index]; }
-    
-protected:
-    T* m_ptr;
-};
-
-template<Gigacage::Kind passedKind>
-class CagedPtr<passedKind, void> {
-public:
-    static constexpr Gigacage::Kind kind = passedKind;
-    
-    CagedPtr(void* ptr = nullptr)
-        : m_ptr(ptr)
+    T* rawBits() const
     {
-    }
-    
-    void* get() const
-    {
-        ASSERT(m_ptr);
-        return Gigacage::caged(kind, m_ptr);
-    }
-    
-    void* getMayBeNull() const
-    {
-        if (!m_ptr)
-            return nullptr;
-        return get();
-    }
-    
-    bool operator==(const CagedPtr& other) const
-    {
-        return getMayBeNull() == other.getMayBeNull();
-    }
-    
-    bool operator!=(const CagedPtr& other) const
-    {
-        return !(*this == other);
-    }
-    
-    explicit operator bool() const
-    {
-        return *this != CagedPtr();
+        return bitwise_cast<T*>(m_ptr);
     }
     
 protected:
-    void* m_ptr;
+    static inline T* mergePointers(T* sourcePtr, T* cagedPtr)
+    {
+#if CPU(ARM64E)
+        return reinterpret_cast<T*>((reinterpret_cast<uintptr_t>(sourcePtr) & ~nonPACBitsMask) | (reinterpret_cast<uintptr_t>(cagedPtr) & nonPACBitsMask));
+#else
+        UNUSED_PARAM(sourcePtr);
+        return cagedPtr;
+#endif
+    }
+
+    typename PtrTraits::StorageType m_ptr;
 };
 
 } // namespace WTF
 
 using WTF::CagedPtr;
+using WTF::tagCagedPtr;
 

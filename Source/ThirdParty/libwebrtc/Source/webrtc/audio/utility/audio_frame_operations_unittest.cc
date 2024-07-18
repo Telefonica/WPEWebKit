@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/audio/utility/audio_frame_operations.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/test/gtest.h"
+#include "audio/utility/audio_frame_operations.h"
+
+#include "rtc_base/checks.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 namespace {
@@ -26,6 +26,8 @@ class AudioFrameOperationsTest : public ::testing::Test {
 
   AudioFrame frame_;
 };
+
+class AudioFrameOperationsDeathTest : public AudioFrameOperationsTest {};
 
 void SetFrameData(int16_t ch1,
                   int16_t ch2,
@@ -51,27 +53,29 @@ void SetFrameData(int16_t left, int16_t right, AudioFrame* frame) {
 
 void SetFrameData(int16_t data, AudioFrame* frame) {
   int16_t* frame_data = frame->mutable_data();
-  for (size_t i = 0;
-       i < frame->samples_per_channel_ * frame->num_channels_; i++) {
+  for (size_t i = 0; i < frame->samples_per_channel_ * frame->num_channels_;
+       i++) {
     frame_data[i] = data;
   }
 }
 
 void VerifyFramesAreEqual(const AudioFrame& frame1, const AudioFrame& frame2) {
   EXPECT_EQ(frame1.num_channels_, frame2.num_channels_);
-  EXPECT_EQ(frame1.samples_per_channel_,
-            frame2.samples_per_channel_);
+  EXPECT_EQ(frame1.samples_per_channel_, frame2.samples_per_channel_);
   const int16_t* frame1_data = frame1.data();
   const int16_t* frame2_data = frame2.data();
   for (size_t i = 0; i < frame1.samples_per_channel_ * frame1.num_channels_;
-      i++) {
+       i++) {
     EXPECT_EQ(frame1_data[i], frame2_data[i]);
   }
   EXPECT_EQ(frame1.muted(), frame2.muted());
 }
 
-void InitFrame(AudioFrame* frame, size_t channels, size_t samples_per_channel,
-               int16_t left_data, int16_t right_data) {
+void InitFrame(AudioFrame* frame,
+               size_t channels,
+               size_t samples_per_channel,
+               int16_t left_data,
+               int16_t right_data) {
   RTC_DCHECK(frame);
   RTC_DCHECK_GE(2, channels);
   RTC_DCHECK_GE(AudioFrame::kMaxDataSizeSamples,
@@ -91,7 +95,9 @@ int16_t GetChannelData(const AudioFrame& frame, size_t channel, size_t index) {
   return frame.data()[index * frame.num_channels_ + channel];
 }
 
-void VerifyFrameDataBounds(const AudioFrame& frame, size_t channel, int16_t max,
+void VerifyFrameDataBounds(const AudioFrame& frame,
+                           size_t channel,
+                           int16_t max,
                            int16_t min) {
   for (size_t i = 0; i < frame.samples_per_channel_; ++i) {
     int16_t s = GetChannelData(frame, channel, i);
@@ -100,19 +106,21 @@ void VerifyFrameDataBounds(const AudioFrame& frame, size_t channel, int16_t max,
   }
 }
 
-TEST_F(AudioFrameOperationsTest, MonoToStereoFailsWithBadParameters) {
-  EXPECT_EQ(-1, AudioFrameOperations::MonoToStereo(&frame_));
-
+#if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
+TEST_F(AudioFrameOperationsDeathTest, MonoToStereoFailsWithBadParameters) {
+  EXPECT_DEATH(AudioFrameOperations::UpmixChannels(2, &frame_), "");
   frame_.samples_per_channel_ = AudioFrame::kMaxDataSizeSamples;
   frame_.num_channels_ = 1;
-  EXPECT_EQ(-1, AudioFrameOperations::MonoToStereo(&frame_));
+  EXPECT_DEATH(AudioFrameOperations::UpmixChannels(2, &frame_), "");
 }
+#endif
 
 TEST_F(AudioFrameOperationsTest, MonoToStereoSucceeds) {
   frame_.num_channels_ = 1;
   SetFrameData(1, &frame_);
 
-  EXPECT_EQ(0, AudioFrameOperations::MonoToStereo(&frame_));
+  AudioFrameOperations::UpmixChannels(2, &frame_);
+  EXPECT_EQ(2u, frame_.num_channels_);
 
   AudioFrame stereo_frame;
   stereo_frame.samples_per_channel_ = 320;
@@ -124,36 +132,22 @@ TEST_F(AudioFrameOperationsTest, MonoToStereoSucceeds) {
 TEST_F(AudioFrameOperationsTest, MonoToStereoMuted) {
   frame_.num_channels_ = 1;
   ASSERT_TRUE(frame_.muted());
-  EXPECT_EQ(0, AudioFrameOperations::MonoToStereo(&frame_));
+  AudioFrameOperations::UpmixChannels(2, &frame_);
+  EXPECT_EQ(2u, frame_.num_channels_);
   EXPECT_TRUE(frame_.muted());
 }
 
-TEST_F(AudioFrameOperationsTest, MonoToStereoBufferSucceeds) {
-  AudioFrame target_frame;
+#if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
+TEST_F(AudioFrameOperationsDeathTest, StereoToMonoFailsWithBadParameters) {
   frame_.num_channels_ = 1;
-  SetFrameData(4, &frame_);
-
-  target_frame.num_channels_ = 2;
-  target_frame.samples_per_channel_ = frame_.samples_per_channel_;
-
-  AudioFrameOperations::MonoToStereo(frame_.data(), frame_.samples_per_channel_,
-                                     target_frame.mutable_data());
-
-  AudioFrame stereo_frame;
-  stereo_frame.samples_per_channel_ = 320;
-  stereo_frame.num_channels_ = 2;
-  SetFrameData(4, 4, &stereo_frame);
-  VerifyFramesAreEqual(stereo_frame, target_frame);
+  EXPECT_DEATH(AudioFrameOperations::DownmixChannels(1, &frame_), "");
 }
-
-TEST_F(AudioFrameOperationsTest, StereoToMonoFailsWithBadParameters) {
-  frame_.num_channels_ = 1;
-  EXPECT_EQ(-1, AudioFrameOperations::StereoToMono(&frame_));
-}
+#endif
 
 TEST_F(AudioFrameOperationsTest, StereoToMonoSucceeds) {
   SetFrameData(4, 2, &frame_);
-  EXPECT_EQ(0, AudioFrameOperations::StereoToMono(&frame_));
+  AudioFrameOperations::DownmixChannels(1, &frame_);
+  EXPECT_EQ(1u, frame_.num_channels_);
 
   AudioFrame mono_frame;
   mono_frame.samples_per_channel_ = 320;
@@ -164,7 +158,8 @@ TEST_F(AudioFrameOperationsTest, StereoToMonoSucceeds) {
 
 TEST_F(AudioFrameOperationsTest, StereoToMonoMuted) {
   ASSERT_TRUE(frame_.muted());
-  EXPECT_EQ(0, AudioFrameOperations::StereoToMono(&frame_));
+  AudioFrameOperations::DownmixChannels(1, &frame_);
+  EXPECT_EQ(1u, frame_.num_channels_);
   EXPECT_TRUE(frame_.muted());
 }
 
@@ -175,8 +170,9 @@ TEST_F(AudioFrameOperationsTest, StereoToMonoBufferSucceeds) {
   target_frame.num_channels_ = 1;
   target_frame.samples_per_channel_ = frame_.samples_per_channel_;
 
-  AudioFrameOperations::StereoToMono(frame_.data(), frame_.samples_per_channel_,
-                                     target_frame.mutable_data());
+  AudioFrameOperations::DownmixChannels(frame_.data(), 2,
+                                        frame_.samples_per_channel_, 1,
+                                        target_frame.mutable_data());
 
   AudioFrame mono_frame;
   mono_frame.samples_per_channel_ = 320;
@@ -187,8 +183,8 @@ TEST_F(AudioFrameOperationsTest, StereoToMonoBufferSucceeds) {
 
 TEST_F(AudioFrameOperationsTest, StereoToMonoDoesNotWrapAround) {
   SetFrameData(-32768, -32768, &frame_);
-  EXPECT_EQ(0, AudioFrameOperations::StereoToMono(&frame_));
-
+  AudioFrameOperations::DownmixChannels(1, &frame_);
+  EXPECT_EQ(1u, frame_.num_channels_);
   AudioFrame mono_frame;
   mono_frame.samples_per_channel_ = 320;
   mono_frame.num_channels_ = 1;
@@ -196,18 +192,12 @@ TEST_F(AudioFrameOperationsTest, StereoToMonoDoesNotWrapAround) {
   VerifyFramesAreEqual(mono_frame, frame_);
 }
 
-TEST_F(AudioFrameOperationsTest, QuadToMonoFailsWithBadParameters) {
-  frame_.num_channels_ = 1;
-  EXPECT_EQ(-1, AudioFrameOperations::QuadToMono(&frame_));
-  frame_.num_channels_ = 2;
-  EXPECT_EQ(-1, AudioFrameOperations::QuadToMono(&frame_));
-}
-
 TEST_F(AudioFrameOperationsTest, QuadToMonoSucceeds) {
   frame_.num_channels_ = 4;
   SetFrameData(4, 2, 6, 8, &frame_);
 
-  EXPECT_EQ(0, AudioFrameOperations::QuadToMono(&frame_));
+  AudioFrameOperations::DownmixChannels(1, &frame_);
+  EXPECT_EQ(1u, frame_.num_channels_);
 
   AudioFrame mono_frame;
   mono_frame.samples_per_channel_ = 320;
@@ -219,7 +209,8 @@ TEST_F(AudioFrameOperationsTest, QuadToMonoSucceeds) {
 TEST_F(AudioFrameOperationsTest, QuadToMonoMuted) {
   frame_.num_channels_ = 4;
   ASSERT_TRUE(frame_.muted());
-  EXPECT_EQ(0, AudioFrameOperations::QuadToMono(&frame_));
+  AudioFrameOperations::DownmixChannels(1, &frame_);
+  EXPECT_EQ(1u, frame_.num_channels_);
   EXPECT_TRUE(frame_.muted());
 }
 
@@ -231,8 +222,9 @@ TEST_F(AudioFrameOperationsTest, QuadToMonoBufferSucceeds) {
   target_frame.num_channels_ = 1;
   target_frame.samples_per_channel_ = frame_.samples_per_channel_;
 
-  AudioFrameOperations::QuadToMono(frame_.data(), frame_.samples_per_channel_,
-                                   target_frame.mutable_data());
+  AudioFrameOperations::DownmixChannels(frame_.data(), 4,
+                                        frame_.samples_per_channel_, 1,
+                                        target_frame.mutable_data());
   AudioFrame mono_frame;
   mono_frame.samples_per_channel_ = 320;
   mono_frame.num_channels_ = 1;
@@ -243,7 +235,8 @@ TEST_F(AudioFrameOperationsTest, QuadToMonoBufferSucceeds) {
 TEST_F(AudioFrameOperationsTest, QuadToMonoDoesNotWrapAround) {
   frame_.num_channels_ = 4;
   SetFrameData(-32768, -32768, -32768, -32768, &frame_);
-  EXPECT_EQ(0, AudioFrameOperations::QuadToMono(&frame_));
+  AudioFrameOperations::DownmixChannels(1, &frame_);
+  EXPECT_EQ(1u, frame_.num_channels_);
 
   AudioFrame mono_frame;
   mono_frame.samples_per_channel_ = 320;

@@ -26,54 +26,53 @@
 #include "config.h"
 #include "WebPageProxy.h"
 
+#include "EditorState.h"
+#include "InputMethodState.h"
 #include "PageClientImpl.h"
-#include "WebsiteDataStore.h"
-#include <WebCore/NotImplemented.h>
-#include <WebCore/UserAgent.h>
+
+#if ENABLE(ACCESSIBILITY)
+#include <atk/atk.h>
+#endif
 
 namespace WebKit {
 
 void WebPageProxy::platformInitialize()
 {
-    notImplemented();
-}
-
-JSGlobalContextRef WebPageProxy::javascriptGlobalContext()
-{
-    return m_pageClient.javascriptGlobalContext();
 }
 
 struct wpe_view_backend* WebPageProxy::viewBackend()
 {
-    return static_cast<PageClientImpl&>(m_pageClient).viewBackend();
+    return static_cast<PageClientImpl&>(pageClient()).viewBackend();
 }
 
-String WebPageProxy::standardUserAgent(const String& applicationNameForUserAgent)
+void WebPageProxy::bindAccessibilityTree(const String& plugID)
 {
-    return "Mozilla/5.0 (Linux; x86_64 GNU/Linux) AppleWebKit/601.1 (KHTML, like Gecko) Version/8.0 Safari/601.1 WPE";
-
-    // FIXME: determine whether the WPE-branded UA string can be pushed into WebCore::standardUserAgent().
-    // return WebCore::standardUserAgent(applicationNameForUserAgent);
+#if ENABLE(ACCESSIBILITY)
+    auto* accessible = static_cast<PageClientImpl&>(pageClient()).accessible();
+    atk_socket_embed(ATK_SOCKET(accessible), const_cast<char*>(plugID.utf8().data()));
+    atk_object_notify_state_change(accessible, ATK_STATE_TRANSIENT, FALSE);
+#endif
 }
 
-void WebPageProxy::saveRecentSearches(const String&, const Vector<WebCore::RecentSearch>&)
+void WebPageProxy::didUpdateEditorState(const EditorState&, const EditorState& newEditorState)
 {
-    notImplemented();
+    if (!newEditorState.shouldIgnoreSelectionChanges)
+        pageClient().selectionDidChange();
 }
 
-void WebPageProxy::loadRecentSearches(const String&, Vector<WebCore::RecentSearch>&)
+void WebPageProxy::sendMessageToWebViewWithReply(UserMessage&& message, CompletionHandler<void(UserMessage&&)>&& completionHandler)
 {
-    notImplemented();
+    static_cast<PageClientImpl&>(pageClient()).sendMessageToWebView(WTFMove(message), WTFMove(completionHandler));
 }
 
-void WebsiteDataStore::platformRemoveRecentSearches(std::chrono::system_clock::time_point)
+void WebPageProxy::sendMessageToWebView(UserMessage&& message)
 {
-    notImplemented();
+    sendMessageToWebViewWithReply(WTFMove(message), [](UserMessage&&) { });
 }
 
-void WebPageProxy::editorStateChanged(const EditorState&)
+void WebPageProxy::setInputMethodState(std::optional<InputMethodState>&& state)
 {
-    notImplemented();
+    static_cast<PageClientImpl&>(pageClient()).setInputMethodState(WTFMove(state));
 }
 
 } // namespace WebKit

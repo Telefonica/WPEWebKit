@@ -44,26 +44,34 @@ class JSGlobalObjectDebuggable final : public Inspector::RemoteInspectionTarget 
     WTF_MAKE_NONCOPYABLE(JSGlobalObjectDebuggable);
 public:
     JSGlobalObjectDebuggable(JSGlobalObject&);
-    ~JSGlobalObjectDebuggable() { }
+    ~JSGlobalObjectDebuggable() final { }
 
-    Inspector::RemoteControllableTarget::Type type() const override { return Inspector::RemoteControllableTarget::Type::JavaScript; }
+    Inspector::RemoteControllableTarget::Type type() const final { return m_type; }
+    void setIsITML() { m_type = Inspector::RemoteControllableTarget::Type::ITML; }
 
-    String name() const override;
-    bool hasLocalDebugger() const override { return false; }
+    String name() const final;
+    bool hasLocalDebugger() const final { return false; }
 
-    void connect(Inspector::FrontendChannel*, bool isAutomaticConnection = false, bool immediatelyPause = false) override;
-    void disconnect(Inspector::FrontendChannel*) override;
-    void dispatchMessageFromRemote(const String& message) override;
+    void connect(Inspector::FrontendChannel&, bool isAutomaticConnection = false, bool immediatelyPause = false) final;
+    void disconnect(Inspector::FrontendChannel&) final;
+    void dispatchMessageFromRemote(String&& message) final;
 
-    bool automaticInspectionAllowed() const override { return true; }
-    void pauseWaitingForAutomaticInspection() override;
+    bool automaticInspectionAllowed() const final { return true; }
+    void pauseWaitingForAutomaticInspection() final;
 
 private:
     JSGlobalObject& m_globalObject;
+    Inspector::RemoteControllableTarget::Type m_type { Inspector::RemoteControllableTarget::Type::JavaScript };
 };
 
 } // namespace JSC
 
-SPECIALIZE_TYPE_TRAITS_CONTROLLABLE_TARGET(JSC::JSGlobalObjectDebuggable, JavaScript);
+SPECIALIZE_TYPE_TRAITS_BEGIN(JSC::JSGlobalObjectDebuggable)
+    static bool isType(const Inspector::RemoteControllableTarget& target)
+    {
+        return target.type() == Inspector::RemoteControllableTarget::Type::JavaScript
+            || target.type() == Inspector::RemoteControllableTarget::Type::ITML;
+    }
+SPECIALIZE_TYPE_TRAITS_END()
 
 #endif // ENABLE(REMOTE_INSPECTOR)

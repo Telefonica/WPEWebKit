@@ -37,29 +37,29 @@ Attachment::Attachment()
 }
 
 #if OS(DARWIN) && !USE(UNIX_DOMAIN_SOCKETS)
-Attachment::Attachment(mach_port_name_t port, mach_msg_type_name_t disposition)
-    : m_type(MachPortType)
-    , m_port(port)
-    , m_disposition(disposition)
+Attachment::Attachment(MachSendRight&& right)
+    : MachSendRight(WTFMove(right))
+    , m_type(MachPortType)
 {
 }
 
-void Attachment::release()
+Attachment::Attachment(const MachSendRight& right)
+    : MachSendRight(right)
+    , m_type(MachPortType)
 {
-    m_type = Uninitialized;
 }
 #endif
 
+#if !OS(WINDOWS)
 void Attachment::encode(Encoder& encoder) const
 {
     encoder.addAttachment(WTFMove(*const_cast<Attachment*>(this)));
 }
 
-bool Attachment::decode(Decoder& decoder, Attachment& attachment)
+std::optional<Attachment> Attachment::decode(Decoder& decoder)
 {
-    if (!decoder.removeAttachment(attachment))
-        return false;
-    return true;
+    return decoder.takeLastAttachment();
 }
+#endif
 
 } // namespace IPC

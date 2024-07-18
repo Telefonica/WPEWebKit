@@ -30,10 +30,8 @@
 
 #include "DFGBasicBlockInlines.h"
 #include "DFGGraph.h"
-#include "DFGInsertionSet.h"
 #include "DFGPhase.h"
-#include "DFGValidate.h"
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
 
 namespace JSC { namespace DFG {
 
@@ -51,9 +49,6 @@ public:
     
     bool run()
     {
-        // FIXME: We should make this work in SSA. https://bugs.webkit.org/show_bug.cgi?id=148260
-        DFG_ASSERT(m_graph, nullptr, m_graph.m_form != SSA);
-        
         const bool extremeLogging = false;
 
         bool outerChanged = false;
@@ -106,7 +101,10 @@ public:
                             if (extremeLogging)
                                 m_graph.dump();
                             m_graph.dethread();
-                            mergeBlocks(block, targetBlock, oneBlock(jettisonedBlock));
+                            if (targetBlock == jettisonedBlock)
+                                mergeBlocks(block, targetBlock, noBlocks());
+                            else
+                                mergeBlocks(block, targetBlock, oneBlock(jettisonedBlock));
                         } else {
                             if (extremeLogging)
                                 m_graph.dump();
@@ -116,7 +114,8 @@ public:
                             ASSERT(terminal->isTerminal());
                             NodeOrigin boundaryNodeOrigin = terminal->origin;
 
-                            jettisonBlock(block, jettisonedBlock, boundaryNodeOrigin);
+                            if (targetBlock != jettisonedBlock)
+                                jettisonBlock(block, jettisonedBlock, boundaryNodeOrigin);
 
                             block->replaceTerminal(
                                 m_graph, SpecNone, Jump, boundaryNodeOrigin,
@@ -134,7 +133,7 @@ public:
                         innerChanged = outerChanged = true;
                         break;
                     }
-                    
+
                     // Branch to same destination -> jump.
                     // FIXME: this will currently not be hit because of the lack of jump-only
                     // block simplification.
@@ -166,23 +165,23 @@ public:
                     Node* terminal = block->terminal();
                     if (terminal->child1()->hasConstant()) {
                         FrozenValue* value = terminal->child1()->constant();
-                        TriState found = FalseTriState;
-                        BasicBlock* targetBlock = 0;
-                        for (unsigned i = data->cases.size(); found == FalseTriState && i--;) {
+                        TriState found = TriState::False;
+                        BasicBlock* targetBlock = nullptr;
+                        for (unsigned i = data->cases.size(); found == TriState::False && i--;) {
                             found = data->cases[i].value.strictEqual(value);
-                            if (found == TrueTriState)
+                            if (found == TriState::True)
                                 targetBlock = data->cases[i].target.block;
                         }
                         
-                        if (found == MixedTriState)
+                        if (found == TriState::Indeterminate)
                             break;
-                        if (found == FalseTriState)
+                        if (found == TriState::False)
                             targetBlock = data->fallThrough.block;
                         ASSERT(targetBlock);
                         
                         Vector<BasicBlock*, 1> jettisonedBlocks;
                         for (BasicBlock* successor : terminal->successors()) {
-                            if (successor != targetBlock)
+                            if (successor != targetBlock && !jettisonedBlocks.contains(successor))
                                 jettisonedBlocks.append(successor);
                         }
                         
@@ -276,7 +275,7 @@ private:
         }
     }
     
-    void keepOperandAlive(BasicBlock* block, BasicBlock* jettisonedBlock, NodeOrigin nodeOrigin, VirtualRegister operand)
+    void keepOperandAlive(BasicBlock* block, BasicBlock* jettisonedBlock, NodeOrigin nodeOrigin, Operand operand)
     {
         Node* livenessNode = jettisonedBlock->variablesAtHead.operand(operand);
         if (!livenessNode)
@@ -298,11 +297,9 @@ private:
     
     void jettisonBlock(BasicBlock* block, BasicBlock* jettisonedBlock, NodeOrigin boundaryNodeOrigin)
     {
-        for (size_t i = 0; i < jettisonedBlock->variablesAtHead.numberOfArguments(); ++i)
-            keepOperandAlive(block, jettisonedBlock, boundaryNodeOrigin, virtualRegisterForArgument(i));
-        for (size_t i = 0; i < jettisonedBlock->variablesAtHead.numberOfLocals(); ++i)
-            keepOperandAlive(block, jettisonedBlock, boundaryNodeOrigin, virtualRegisterForLocal(i));
-        
+        for (size_t i = 0; i < jettisonedBlock->variablesAtHead.size(); ++i)
+            keepOperandAlive(block, jettisonedBlock, boundaryNodeOrigin, jettisonedBlock->variablesAtHead.operandForIndex(i));
+
         fixJettisonedPredecessors(block, jettisonedBlock);
     }
     
@@ -339,7 +336,7 @@ private:
         Node* terminal = firstBlock->terminal();
         ASSERT(terminal->isTerminal());
         NodeOrigin boundaryNodeOrigin = terminal->origin;
-        terminal->remove();
+        terminal->remove(m_graph);
         ASSERT(terminal->refCount() == 1);
         
         for (unsigned i = jettisonedBlocks.size(); i--;) {
@@ -348,11 +345,8 @@ private:
             // Time to insert ghosties for things that need to be kept alive in case we OSR
             // exit prior to hitting the firstBlock's terminal, and end up going down a
             // different path than secondBlock.
-            
-            for (size_t i = 0; i < jettisonedBlock->variablesAtHead.numberOfArguments(); ++i)
-                keepOperandAlive(firstBlock, jettisonedBlock, boundaryNodeOrigin, virtualRegisterForArgument(i));
-            for (size_t i = 0; i < jettisonedBlock->variablesAtHead.numberOfLocals(); ++i)
-                keepOperandAlive(firstBlock, jettisonedBlock, boundaryNodeOrigin, virtualRegisterForLocal(i));
+            for (size_t i = 0; i < jettisonedBlock->variablesAtHead.size(); ++i)
+                keepOperandAlive(firstBlock, jettisonedBlock, boundaryNodeOrigin, jettisonedBlock->variablesAtHead.operandForIndex(i));
         }
         
         for (size_t i = 0; i < secondBlock->phis.size(); ++i)

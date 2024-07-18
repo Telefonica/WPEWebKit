@@ -27,8 +27,9 @@
 #define WKTextFinderClient_h
 
 #import <WebKit/WKFoundation.h>
+#import <wtf/NakedRef.h>
 
-#if PLATFORM(MAC) && WK_API_ENABLED
+#if PLATFORM(MAC)
 
 OBJC_CLASS NSView;
 
@@ -38,7 +39,7 @@ class WebPageProxy;
 
 @interface WKTextFinderClient : NSObject
 
-- (instancetype)initWithPage:(WebKit::WebPageProxy&)page view:(NSView *)view;
+- (instancetype)initWithPage:(NakedRef<WebKit::WebPageProxy>)page view:(NSView *)view usePlatformFindUI:(BOOL)usePlatformFindUI;
 - (void)willDestroyView:(NSView *)view;
 
 @end

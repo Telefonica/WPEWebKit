@@ -28,7 +28,6 @@
 #pragma once
 
 #include <WebCore/FrameNetworkingContext.h>
-#include <pal/SessionID.h>
 
 namespace WebKit {
 
@@ -43,15 +42,15 @@ public:
         return adoptRef(*new WebFrameNetworkingContext(frame));
     }
 
-    static void ensurePrivateBrowsingSession(PAL::SessionID);
-    static void ensureWebsiteDataStoreSession(WebsiteDataStoreParameters&&);
+    static void ensurePrivateBrowsingSession(WebsiteDataStoreParameters&&);
+    static void ensureWebsiteDataStoreSession(const WebsiteDataStoreParameters&);
 
     WebFrameLoaderClient* webFrameLoaderClient() const;
 
 private:
     WebFrameNetworkingContext(WebFrame*);
 
-    WebCore::NetworkStorageSession& storageSession() const override;
+    WebCore::NetworkStorageSession* storageSession() const override { return nullptr; }
 };
 
 }

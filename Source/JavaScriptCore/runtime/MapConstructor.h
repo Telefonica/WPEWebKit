@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,13 +32,13 @@ namespace JSC {
 class MapPrototype;
 class GetterSetter;
 
-class MapConstructor : public InternalFunction {
+class MapConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
 
     static MapConstructor* create(VM& vm, Structure* structure, MapPrototype* mapPrototype, GetterSetter* speciesSymbol)
     {
-        MapConstructor* constructor = new (NotNull, allocateCell<MapConstructor>(vm.heap)) MapConstructor(vm, structure);
+        MapConstructor* constructor = new (NotNull, allocateCell<MapConstructor>(vm)) MapConstructor(vm, structure);
         constructor->finishCreation(vm, mapPrototype, speciesSymbol);
         return constructor;
     }
@@ -47,22 +47,19 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
 private:
-    MapConstructor(VM& vm, Structure* structure)
-        : Base(vm, structure)
-    {
-    }
-    void finishCreation(VM&, MapPrototype*, GetterSetter* speciesSymbol);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
-};
+    MapConstructor(VM&, Structure*);
 
-EncodedJSValue JSC_HOST_CALL mapPrivateFuncMapBucketHead(ExecState*);
-EncodedJSValue JSC_HOST_CALL mapPrivateFuncMapBucketNext(ExecState*);
-EncodedJSValue JSC_HOST_CALL mapPrivateFuncMapBucketKey(ExecState*);
-EncodedJSValue JSC_HOST_CALL mapPrivateFuncMapBucketValue(ExecState*);
+    void finishCreation(VM&, MapPrototype*, GetterSetter* speciesSymbol);
+};
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(MapConstructor, InternalFunction);
+
+JSC_DECLARE_HOST_FUNCTION(mapPrivateFuncMapBucketHead);
+JSC_DECLARE_HOST_FUNCTION(mapPrivateFuncMapBucketNext);
+JSC_DECLARE_HOST_FUNCTION(mapPrivateFuncMapBucketKey);
+JSC_DECLARE_HOST_FUNCTION(mapPrivateFuncMapBucketValue);
 
 } // namespace JSC

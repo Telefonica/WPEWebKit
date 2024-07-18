@@ -35,42 +35,46 @@ namespace JSC { namespace DFG {
 
 void FrequentExitSite::dump(PrintStream& out) const
 {
-    out.print("bc#", m_bytecodeOffset, ": ", m_kind, "/", m_jitType);
+    out.print(m_bytecodeIndex, ": ", m_kind, "/", m_jitType, "/", m_inlineKind);
 }
 
 ExitProfile::ExitProfile() { }
 ExitProfile::~ExitProfile() { }
 
-bool ExitProfile::add(const ConcurrentJSLocker&, CodeBlock* owner, const FrequentExitSite& site)
+bool ExitProfile::add(CodeBlock* owner, const FrequentExitSite& site)
 {
-    ASSERT(site.jitType() != ExitFromAnything);
+    RELEASE_ASSERT(site.jitType() != ExitFromAnything);
+    RELEASE_ASSERT(site.inlineKind() != ExitFromAnyInlineKind);
+
+    ConcurrentJSLocker locker(owner->unlinkedCodeBlock()->m_lock);
 
     CODEBLOCK_LOG_EVENT(owner, "frequentExit", (site));
     
-    if (Options::verboseExitProfile())
-        dataLog(pointerDump(owner), ": Adding exit site: ", site, "\n");
+    dataLogLnIf(Options::verboseExitProfile(), pointerDump(owner), ": Adding exit site: ", site);
+
+    ExitProfile& profile = owner->unlinkedCodeBlock()->exitProfile();
     
     // If we've never seen any frequent exits then create the list and put this site
     // into it.
-    if (!m_frequentExitSites) {
-        m_frequentExitSites = std::make_unique<Vector<FrequentExitSite>>();
-        m_frequentExitSites->append(site);
+    if (!profile.m_frequentExitSites) {
+        profile.m_frequentExitSites = makeUnique<Vector<FrequentExitSite>>();
+        profile.m_frequentExitSites->append(site);
         return true;
     }
     
     // Don't add it if it's already there. This is O(n), but that's OK, because we
     // know that the total number of places where code exits tends to not be large,
     // and this code is only used when recompilation is triggered.
-    for (unsigned i = 0; i < m_frequentExitSites->size(); ++i) {
-        if (m_frequentExitSites->at(i) == site)
+    for (unsigned i = 0; i < profile.m_frequentExitSites->size(); ++i) {
+        if (profile.m_frequentExitSites->at(i) == site)
             return false;
     }
     
-    m_frequentExitSites->append(site);
+    profile.m_frequentExitSites->append(site);
     return true;
 }
 
-Vector<FrequentExitSite> ExitProfile::exitSitesFor(unsigned bytecodeIndex)
+Vector<FrequentExitSite> ExitProfile::exitSitesFor(BytecodeIndex bytecodeIndex)
 {
     Vector<FrequentExitSite> result;
     
@@ -78,7 +82,7 @@ Vector<FrequentExitSite> ExitProfile::exitSitesFor(unsigned bytecodeIndex)
         return result;
     
     for (unsigned i = 0; i < m_frequentExitSites->size(); ++i) {
-        if (m_frequentExitSites->at(i).bytecodeOffset() == bytecodeIndex)
+        if (m_frequentExitSites->at(i).bytecodeIndex() == bytecodeIndex)
             result.append(m_frequentExitSites->at(i));
     }
     
@@ -100,8 +104,10 @@ bool ExitProfile::hasExitSite(const ConcurrentJSLocker&, const FrequentExitSite&
 QueryableExitProfile::QueryableExitProfile() { }
 QueryableExitProfile::~QueryableExitProfile() { }
 
-void QueryableExitProfile::initialize(const ConcurrentJSLocker&, const ExitProfile& profile)
+void QueryableExitProfile::initialize(UnlinkedCodeBlock* unlinkedCodeBlock)
 {
+    ConcurrentJSLocker locker(unlinkedCodeBlock->m_lock);
+    const ExitProfile& profile = unlinkedCodeBlock->exitProfile();
     if (!profile.m_frequentExitSites)
         return;
     

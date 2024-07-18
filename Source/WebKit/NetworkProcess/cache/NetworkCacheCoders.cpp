@@ -26,8 +26,6 @@
 #include "config.h"
 #include "NetworkCacheCoders.h"
 
-#if ENABLE(NETWORK_CACHE)
-
 namespace WTF {
 namespace Persistence {
 
@@ -42,24 +40,27 @@ void Coder<WebCore::HTTPHeaderMap>::encode(Encoder& encoder, const WebCore::HTTP
     }
 }
 
-bool Coder<WebCore::HTTPHeaderMap>::decode(Decoder& decoder, WebCore::HTTPHeaderMap& headers)
+std::optional<WebCore::HTTPHeaderMap> Coder<WebCore::HTTPHeaderMap>::decode(Decoder& decoder)
 {
-    uint64_t headersSize;
-    if (!decoder.decode(headersSize))
-        return false;
-    for (uint64_t i = 0; i < headersSize; ++i) {
-        String name;
-        if (!decoder.decode(name))
-            return false;
-        String value;
-        if (!decoder.decode(value))
-            return false;
-        headers.add(name, value);
+    std::optional<uint64_t> headersSize;
+    decoder >> headersSize;
+    if (!headersSize)
+        return std::nullopt;
+
+    WebCore::HTTPHeaderMap headers;
+    for (uint64_t i = 0; i < *headersSize; ++i) {
+        std::optional<String> name;
+        decoder >> name;
+        if (!name)
+            return std::nullopt;
+        std::optional<String> value;
+        decoder >> value;
+        if (!value)
+            return std::nullopt;
+        headers.append(WTFMove(*name), WTFMove(*value));
     }
-    return true;
+    return headers;
 }
 
 }
 }
-
-#endif

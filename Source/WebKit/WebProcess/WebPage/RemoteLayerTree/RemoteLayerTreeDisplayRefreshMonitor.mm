@@ -26,17 +26,19 @@
 #import "config.h"
 #import "RemoteLayerTreeDisplayRefreshMonitor.h"
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-
-#import <wtf/CurrentTime.h>
-
-using namespace WebCore;
+#import "Logging.h"
+#include <wtf/text/TextStream.h>
 
 namespace WebKit {
+using namespace WebCore;
+
+constexpr FramesPerSecond DefaultPreferredFramesPerSecond = 60;
 
 RemoteLayerTreeDisplayRefreshMonitor::RemoteLayerTreeDisplayRefreshMonitor(PlatformDisplayID displayID, RemoteLayerTreeDrawingArea& drawingArea)
     : DisplayRefreshMonitor(displayID)
-    , m_drawingArea(drawingArea.createWeakPtr())
+    , m_drawingArea(drawingArea)
+    , m_preferredFramesPerSecond(DefaultPreferredFramesPerSecond)
+    , m_currentUpdate({ 0, m_preferredFramesPerSecond })
 {
 }
 
@@ -46,30 +48,60 @@ RemoteLayerTreeDisplayRefreshMonitor::~RemoteLayerTreeDisplayRefreshMonitor()
         m_drawingArea->willDestroyDisplayRefreshMonitor(this);
 }
 
+void RemoteLayerTreeDisplayRefreshMonitor::adjustPreferredFramesPerSecond(FramesPerSecond preferredFramesPerSecond)
+{
+    if (preferredFramesPerSecond == m_preferredFramesPerSecond)
+        return;
+
+    LOG_WITH_STREAM(DisplayLink, stream << "RemoteLayerTreeDisplayRefreshMonitor::adjustMaxPreferredFramesPerSecond to " << preferredFramesPerSecond);
+
+    m_preferredFramesPerSecond = preferredFramesPerSecond;
+    m_currentUpdate = { 0, m_preferredFramesPerSecond };
+
+    if (m_drawingArea)
+        m_drawingArea->setPreferredFramesPerSecond(preferredFramesPerSecond);
+}
+
 bool RemoteLayerTreeDisplayRefreshMonitor::requestRefreshCallback()
 {
-    if (!m_drawingArea || !isActive())
+    if (!m_drawingArea)
         return false;
 
-    if (!isScheduled())
-        static_cast<DrawingArea&>(*m_drawingArea.get()).scheduleCompositingLayerFlush();
+    Locker locker { lock() };
 
-    setIsActive(true);
+    if (isScheduled())
+        return true;
+
+    LOG_WITH_STREAM(DisplayLink, stream << "RemoteLayerTreeDisplayRefreshMonitor::requestRefreshCallback - triggering update");
+    static_cast<DrawingArea&>(*m_drawingArea.get()).triggerRenderingUpdate();
+
     setIsScheduled(true);
     return true;
 }
 
 void RemoteLayerTreeDisplayRefreshMonitor::didUpdateLayers()
 {
-    setIsScheduled(false);
+    {
+        Locker locker { lock() };
+        setIsScheduled(false);
 
-    if (!isPreviousFrameDone())
-        return;
+        if (!isPreviousFrameDone())
+            return;
 
-    setIsPreviousFrameDone(false);
-    handleDisplayRefreshedNotificationOnMainThread(this);
+        setIsPreviousFrameDone(false);
+    }
+    displayDidRefresh(m_currentUpdate);
+    m_currentUpdate = m_currentUpdate.nextUpdate();
 }
 
+void RemoteLayerTreeDisplayRefreshMonitor::updateDrawingArea(RemoteLayerTreeDrawingArea& drawingArea)
+{
+    m_drawingArea = drawingArea;
 }
 
-#endif // USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
+std::optional<FramesPerSecond> RemoteLayerTreeDisplayRefreshMonitor::displayNominalFramesPerSecond()
+{
+    return m_preferredFramesPerSecond;
+}
+
+} // namespace WebKit

@@ -26,18 +26,21 @@
 #include "config.h"
 #include "NetworkCacheFileSystem.h"
 
-#if ENABLE(NETWORK_CACHE)
-
 #include "Logging.h"
-#include <WebCore/FileSystem.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <sys/time.h>
 #include <wtf/Assertions.h>
+#include <wtf/FileSystem.h>
 #include <wtf/Function.h>
 #include <wtf/text/CString.h>
 
-#if PLATFORM(IOS) && !PLATFORM(IOS_SIMULATOR)
+#if !OS(WINDOWS)
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#else
+#include <windows.h>
+#endif
+
+#if PLATFORM(IOS_FAMILY) && !PLATFORM(IOS_FAMILY_SIMULATOR)
 #include <sys/attr.h>
 #include <unistd.h>
 #endif
@@ -50,85 +53,38 @@
 namespace WebKit {
 namespace NetworkCache {
 
-static DirectoryEntryType directoryEntryType(uint8_t dtype)
-{
-    switch (dtype) {
-    case DT_DIR:
-        return DirectoryEntryType::Directory;
-    case DT_REG:
-        return DirectoryEntryType::File;
-    default:
-        ASSERT_NOT_REACHED();
-        return DirectoryEntryType::File;
-    }
-}
-
 void traverseDirectory(const String& path, const Function<void (const String&, DirectoryEntryType)>& function)
 {
-    DIR* dir = opendir(WebCore::fileSystemRepresentation(path).data());
-    if (!dir)
-        return;
-    dirent* dp;
-    while ((dp = readdir(dir))) {
-        auto d_type = dp->d_type;
-        if (d_type == DT_UNKNOWN)
-        {
-            struct stat stat;
-            auto filePath = WebCore::pathByAppendingComponent(path, dp->d_name);
-            ::stat(WebCore::fileSystemRepresentation(filePath).data(), &stat);
-            if (S_ISDIR(stat.st_mode))
-                d_type = DT_DIR;
-            else if (S_ISREG(stat.st_mode))
-                d_type = DT_REG;
-        }
-        if (d_type != DT_DIR && d_type != DT_REG)
-            continue;
-        const char* name = dp->d_name;
-        if (!strcmp(name, ".") || !strcmp(name, ".."))
-            continue;
-        auto nameString = String::fromUTF8(name);
-        if (nameString.isNull())
-            continue;
-        function(nameString, directoryEntryType(d_type));
+    auto entries = FileSystem::listDirectory(path);
+    for (auto& entry : entries) {
+        auto entryPath = FileSystem::pathByAppendingComponent(path, entry);
+        auto type = FileSystem::fileType(entryPath) == FileSystem::FileType::Directory ? DirectoryEntryType::Directory : DirectoryEntryType::File;
+        function(entry, type);
     }
-    closedir(dir);
-}
-
-void deleteDirectoryRecursively(const String& path)
-{
-    traverseDirectory(path, [&path](const String& name, DirectoryEntryType type) {
-        String entryPath = WebCore::pathByAppendingComponent(path, name);
-        switch (type) {
-        case DirectoryEntryType::File:
-            WebCore::deleteFile(entryPath);
-            break;
-        case DirectoryEntryType::Directory:
-            deleteDirectoryRecursively(entryPath);
-            break;
-        // This doesn't follow symlinks.
-        }
-    });
-    WebCore::deleteEmptyDirectory(path);
 }
 
 FileTimes fileTimes(const String& path)
 {
 #if HAVE(STAT_BIRTHTIME)
     struct stat fileInfo;
-    if (stat(WebCore::fileSystemRepresentation(path).data(), &fileInfo))
+    if (stat(FileSystem::fileSystemRepresentation(path).data(), &fileInfo))
         return { };
-    return { std::chrono::system_clock::from_time_t(fileInfo.st_birthtime), std::chrono::system_clock::from_time_t(fileInfo.st_mtime) };
+    return { WallTime::fromRawSeconds(fileInfo.st_birthtime), WallTime::fromRawSeconds(fileInfo.st_mtime) };
 #elif USE(SOUP)
     // There's no st_birthtime in some operating systems like Linux, so we use xattrs to set/get the creation time.
-    GRefPtr<GFile> file = adoptGRef(g_file_new_for_path(WebCore::fileSystemRepresentation(path).data()));
+    GRefPtr<GFile> file = adoptGRef(g_file_new_for_path(FileSystem::fileSystemRepresentation(path).data()));
     GRefPtr<GFileInfo> fileInfo = adoptGRef(g_file_query_info(file.get(), "xattr::birthtime,time::modified", G_FILE_QUERY_INFO_NONE, nullptr, nullptr));
     if (!fileInfo)
         return { };
     const char* birthtimeString = g_file_info_get_attribute_string(fileInfo.get(), "xattr::birthtime");
     if (!birthtimeString)
         return { };
-    return { std::chrono::system_clock::from_time_t(g_ascii_strtoull(birthtimeString, nullptr, 10)),
-        std::chrono::system_clock::from_time_t(g_file_info_get_attribute_uint64(fileInfo.get(), "time::modified")) };
+    return { WallTime::fromRawSeconds(g_ascii_strtoull(birthtimeString, nullptr, 10)),
+        WallTime::fromRawSeconds(g_file_info_get_attribute_uint64(fileInfo.get(), "time::modified")) };
+#elif OS(WINDOWS)
+    auto createTime = FileSystem::fileCreationTime(path);
+    auto modifyTime = FileSystem::fileModificationTime(path);
+    return { valueOrDefault(createTime), valueOrDefault(modifyTime) };
 #endif
 }
 
@@ -137,45 +93,11 @@ void updateFileModificationTimeIfNeeded(const String& path)
     auto times = fileTimes(path);
     if (times.creation != times.modification) {
         // Don't update more than once per hour.
-        if (std::chrono::system_clock::now() - times.modification < std::chrono::hours(1))
+        if (WallTime::now() - times.modification < 1_h)
             return;
     }
-    // This really updates both the access time and the modification time.
-    utimes(WebCore::fileSystemRepresentation(path).data(), nullptr);
-}
-
-bool canUseSharedMemoryForPath(const String& path)
-{
-#if PLATFORM(IOS) && !PLATFORM(IOS_SIMULATOR)
-    struct {
-        uint32_t length;
-        uint32_t protectionClass;
-    } attrBuffer;
-
-    attrlist attrList = { };
-    attrList.bitmapcount = ATTR_BIT_MAP_COUNT;
-    attrList.commonattr = ATTR_CMN_DATA_PROTECT_FLAGS;
-    int32_t error = getattrlist(WebCore::fileSystemRepresentation(path).data(), &attrList, &attrBuffer, sizeof(attrBuffer), FSOPT_NOFOLLOW);
-    if (error) {
-        RELEASE_LOG_ERROR(Network, "Unable to get cache directory protection class, disabling use of shared mapped memory");
-        return false;
-    }
-
-    // For stricter protection classes shared maps could disappear when device is locked.
-    const uint32_t fileProtectionCompleteUntilFirstUserAuthentication = 3;
-    bool isSafe = attrBuffer.protectionClass >= fileProtectionCompleteUntilFirstUserAuthentication;
-
-    if (!isSafe)
-        RELEASE_LOG(Network, "Disallowing use of shared mapped memory due to container protection class %u", attrBuffer.protectionClass);
-
-    return isSafe;
-#else
-    UNUSED_PARAM(path);
-    return true;
-#endif
+    FileSystem::updateFileModificationTime(path);
 }
 
 }
 }
-
-#endif // ENABLE(NETWORK_CACHE)

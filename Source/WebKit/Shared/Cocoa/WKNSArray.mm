@@ -26,7 +26,7 @@
 #import "config.h"
 #import "WKNSArray.h"
 
-#if WK_API_ENABLED
+#import <WebCore/WebCoreObjCExtras.h>
 
 @implementation WKNSArray {
     API::ObjectStorage<API::Array> _array;
@@ -34,6 +34,9 @@
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKNSArray.class, self))
+        return;
+
     _array->~Array();
 
     [super dealloc];
@@ -67,5 +70,3 @@
 }
 
 @end
-
-#endif // WK_API_ENABLED

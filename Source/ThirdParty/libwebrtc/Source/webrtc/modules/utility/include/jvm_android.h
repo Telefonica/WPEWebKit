@@ -8,31 +8,33 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_UTILITY_INCLUDE_JVM_ANDROID_H_
-#define WEBRTC_MODULES_UTILITY_INCLUDE_JVM_ANDROID_H_
+#ifndef MODULES_UTILITY_INCLUDE_JVM_ANDROID_H_
+#define MODULES_UTILITY_INCLUDE_JVM_ANDROID_H_
 
 #include <jni.h>
 
 #include <memory>
 #include <string>
 
-#include "webrtc/base/thread_checker.h"
-#include "webrtc/modules/utility/include/helpers_android.h"
+#include "api/sequence_checker.h"
+#include "modules/utility/include/helpers_android.h"
 
 namespace webrtc {
 
+// RAII JavaVM AttachCurrentThread/DetachCurrentThread object.
+//
 // The JNI interface pointer (JNIEnv) is valid only in the current thread.
 // Should another thread need to access the Java VM, it must first call
 // AttachCurrentThread() to attach itself to the VM and obtain a JNI interface
 // pointer. The native thread remains attached to the VM until it calls
 // DetachCurrentThread() to detach.
-class AttachCurrentThreadIfNeeded {
+class JvmThreadConnector {
  public:
-  AttachCurrentThreadIfNeeded();
-  ~AttachCurrentThreadIfNeeded();
+  JvmThreadConnector();
+  ~JvmThreadConnector();
 
  private:
-  rtc::ThreadChecker thread_checker_;
+  SequenceChecker thread_checker_;
   bool attached_;
 };
 
@@ -78,8 +80,9 @@ class NativeRegistration : public JavaClass {
   NativeRegistration(JNIEnv* jni, jclass clazz);
   ~NativeRegistration();
 
-  std::unique_ptr<GlobalRef> NewObject(
-      const char* name, const char* signature, ...);
+  std::unique_ptr<GlobalRef> NewObject(const char* name,
+                                       const char* signature,
+                                       ...);
 
  private:
   JNIEnv* const jni_;
@@ -94,19 +97,21 @@ class JNIEnvironment {
   explicit JNIEnvironment(JNIEnv* jni);
   ~JNIEnvironment();
 
-  // Registers native methods with the Java class specified by |name|.
+  // Registers native methods with the Java class specified by `name`.
   // Note that the class name must be one of the names in the static
-  // |loaded_classes| array defined in jvm_android.cc.
+  // `loaded_classes` array defined in jvm_android.cc.
   // This method must be called on the construction thread.
   std::unique_ptr<NativeRegistration> RegisterNatives(
-      const char* name, const JNINativeMethod *methods, int num_methods);
+      const char* name,
+      const JNINativeMethod* methods,
+      int num_methods);
 
   // Converts from Java string to std::string.
   // This method must be called on the construction thread.
   std::string JavaToStdString(const jstring& j_string);
 
  private:
-  rtc::ThreadChecker thread_checker_;
+  SequenceChecker thread_checker_;
   JNIEnv* const jni_;
 };
 
@@ -133,7 +138,7 @@ class JNIEnvironment {
 //     obj = reg->NewObject("<init>", ,);
 //   }
 //
-//   // Each User method can now use |reg| and |obj| and call Java functions
+//   // Each User method can now use `reg` and `obj` and call Java functions
 //   // in WebRtcTest.java, e.g. boolean init() {}.
 //   bool User::Foo() {
 //     jmethodID id = reg->GetMethodId("init", "()Z");
@@ -163,9 +168,9 @@ class JVM {
   // called successfully. Use the AttachCurrentThreadIfNeeded class if needed.
   std::unique_ptr<JNIEnvironment> environment();
 
-  // Returns a JavaClass object given class |name|.
+  // Returns a JavaClass object given class `name`.
   // Note that the class name must be one of the names in the static
-  // |loaded_classes| array defined in jvm_android.cc.
+  // `loaded_classes` array defined in jvm_android.cc.
   // This method must be called on the construction thread.
   JavaClass GetClass(const char* name);
 
@@ -179,10 +184,10 @@ class JVM {
  private:
   JNIEnv* jni() const { return GetEnv(jvm_); }
 
-  rtc::ThreadChecker thread_checker_;
+  SequenceChecker thread_checker_;
   JavaVM* const jvm_;
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_UTILITY_INCLUDE_JVM_ANDROID_H_
+#endif  // MODULES_UTILITY_INCLUDE_JVM_ANDROID_H_

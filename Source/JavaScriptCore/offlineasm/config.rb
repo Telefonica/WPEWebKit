@@ -1,4 +1,4 @@
-# Copyright (C) 2012, 2016 Apple Inc. All rights reserved.
+# Copyright (C) 2012-2022 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -21,14 +21,26 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 # THE POSSIBILITY OF SUCH DAMAGE.
 
-$preferredCommentStartColumn = 60
+buildProductsDirectory = ENV['BUILT_PRODUCTS_DIR'];
+headersFolderPath = ENV['WK_LIBRARY_HEADERS_FOLDER_PATH'];
+if buildProductsDirectory and File.exist?(buildProductsDirectory)
+    $: << "#{buildProductsDirectory}#{headersFolderPath}/WebKitAdditions/Scripts"
+end
+sdkRootDirectory = ENV['SDKROOT'];
+if sdkRootDirectory and File.exist?(sdkRootDirectory)
+    $: << "#{sdkRootDirectory}#{headersFolderPath}/WebKitAdditions/Scripts"
+end
+
+
+$preferredCommentStartColumn = 40
+$preferredDebugAnnotationColumns = 18
 
 
 # Turns on dumping of the count of labels.
 # For example,  the output will look like this:
 #
 #    ...
-#    OFFLINE_ASM_LOCAL_LABEL(_offlineasm_4_functionArityCheck__continue)  // Local Label 24 .
+#    OFFLINE_ASM_LOCAL_LABEL(jsc_llint_4_functionArityCheck__continue)  // Local Label 24 .
 #    ...
 #    OFFLINE_ASM_GLOBAL_LABEL(llint_op_enter)  // Global Label 8 .
 #    ...
@@ -79,6 +91,10 @@ def shouldEnableDebugAnnotations()
                 end
             end
         end
+    elsif ENV["CMAKE_CXX_COMPILER_ID"] == 'GNU' and
+         ENV["GCC_OFFLINEASM_SOURCE_MAP"] == 'ON'
+      # All GCC versions that can build JSC support debug annotations
+      return true
     end
 
     false

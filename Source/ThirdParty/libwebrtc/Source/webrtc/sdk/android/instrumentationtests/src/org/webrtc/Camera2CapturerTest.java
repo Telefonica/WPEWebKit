@@ -10,31 +10,24 @@
 
 package org.webrtc;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.os.Handler;
 import android.os.Looper;
-import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.LargeTest;
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
-import java.io.IOException;
+import androidx.annotation.Nullable;
+import androidx.test.InstrumentationRegistry;
+import androidx.test.filters.LargeTest;
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 import java.util.concurrent.CountDownLatch;
-import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-@TargetApi(21)
-@RunWith(BaseJUnit4ClassRunner.class)
 public class Camera2CapturerTest {
   static final String TAG = "Camera2CapturerTest";
 
@@ -46,7 +39,7 @@ public class Camera2CapturerTest {
     final LooperThread looperThread;
     final CountDownLatch openDoneSignal;
     final Object cameraDeviceLock;
-    CameraDevice cameraDevice; // Guarded by cameraDeviceLock
+    @Nullable CameraDevice cameraDevice; // Guarded by cameraDeviceLock
     boolean openSucceeded; // Guarded by cameraDeviceLock
 
     private class LooperThread extends Thread {
@@ -241,14 +234,14 @@ public class Camera2CapturerTest {
 
   @Test
   @MediumTest
-  public void testCameraEvents() throws InterruptedException {
-    fixtures.cameraEventsInvoked();
+  public void testSwitchVideoCapturerToSpecificCameraName() throws InterruptedException {
+    fixtures.switchCamera(true /* specifyCameraName */);
   }
 
   @Test
   @MediumTest
-  public void testUpdateMediaRecorder() throws InterruptedException, IOException {
-    fixtures.updateMediaRecorder(true /* useSurfaceCapture */);
+  public void testCameraEvents() throws InterruptedException {
+    fixtures.cameraEventsInvoked();
   }
 
   // Test what happens when attempting to call e.g. switchCamera() after camera has been stopped.
@@ -305,6 +298,14 @@ public class Camera2CapturerTest {
   @MediumTest
   public void testScaleCameraOutput() throws InterruptedException {
     fixtures.scaleCameraOutput();
+  }
+
+  // This test that frames forwarded to a renderer is cropped to a new orientation if
+  // adaptOutputFormat is called in such a way. This test both Java and C++ parts of of the stack.
+  @Test
+  @MediumTest
+  public void testCropCameraOutput() throws InterruptedException {
+    fixtures.cropCameraOutput();
   }
 
   // This test that an error is reported if the camera is already opened

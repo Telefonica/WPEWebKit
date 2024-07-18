@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,11 +25,13 @@
 
 #pragma once
 
-#if PLATFORM(IOS) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
+#if PLATFORM(IOS_FAMILY) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
 
+#include "PlatformMediaSession.h"
 #include <wtf/Forward.h>
 #include <wtf/Ref.h>
 #include <wtf/Vector.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
@@ -37,7 +39,7 @@ class TimeRanges;
 class PlaybackSessionModelClient;
 struct MediaSelectionOption;
 
-class PlaybackSessionModel {
+class PlaybackSessionModel : public CanMakeWeakPtr<PlaybackSessionModel> {
 public:
     virtual ~PlaybackSessionModel() { };
     virtual void addClient(PlaybackSessionModelClient&) = 0;
@@ -48,26 +50,38 @@ public:
     virtual void togglePlayState() = 0;
     virtual void beginScrubbing() = 0;
     virtual void endScrubbing() = 0;
-    virtual void seekToTime(double time) = 0;
+    virtual void seekToTime(double time, double toleranceBefore = 0, double toleranceAfter = 0) = 0;
     virtual void fastSeek(double time) = 0;
     virtual void beginScanningForward() = 0;
     virtual void beginScanningBackward() = 0;
     virtual void endScanning() = 0;
+    virtual void setDefaultPlaybackRate(double) = 0;
+    virtual void setPlaybackRate(double) = 0;
     virtual void selectAudioMediaOption(uint64_t index) = 0;
     virtual void selectLegibleMediaOption(uint64_t index) = 0;
     virtual void togglePictureInPicture() = 0;
     virtual void toggleMuted() = 0;
     virtual void setMuted(bool) = 0;
+    virtual void setVolume(double) = 0;
+    virtual void setPlayingOnSecondScreen(bool) = 0;
+    virtual void sendRemoteCommand(PlatformMediaSession::RemoteControlCommandType, const PlatformMediaSession::RemoteCommandArgument&) { };
 
-    enum ExternalPlaybackTargetType { TargetTypeNone, TargetTypeAirPlay, TargetTypeTVOut };
+    enum class ExternalPlaybackTargetType { TargetTypeNone, TargetTypeAirPlay, TargetTypeTVOut };
 
     virtual double playbackStartedTime() const = 0;
     virtual double duration() const = 0;
     virtual double currentTime() const = 0;
     virtual double bufferedTime() const = 0;
+
+    enum class PlaybackState {
+        Playing = 1 << 0,
+        Stalled = 1 << 1,
+    };
     virtual bool isPlaying() const = 0;
+    virtual bool isStalled() const = 0;
     virtual bool isScrubbing() const = 0;
-    virtual float playbackRate() const = 0;
+    virtual double defaultPlaybackRate() const = 0;
+    virtual double playbackRate() const = 0;
     virtual Ref<TimeRanges> seekableRanges() const = 0;
     virtual double seekableTimeRangesLastModifiedTime() const = 0;
     virtual double liveUpdateInterval() const = 0;
@@ -81,6 +95,9 @@ public:
     virtual String externalPlaybackLocalizedDeviceName() const = 0;
     virtual bool wirelessVideoPlaybackDisabled() const = 0;
     virtual bool isMuted() const = 0;
+    virtual double volume() const = 0;
+    virtual bool isPictureInPictureSupported() const = 0;
+    virtual bool isPictureInPictureActive() const = 0;
 };
 
 class PlaybackSessionModelClient {
@@ -90,7 +107,7 @@ public:
     virtual void currentTimeChanged(double /* currentTime */, double /* anchorTime */) { }
     virtual void bufferedTimeChanged(double) { }
     virtual void playbackStartedTimeChanged(double /* playbackStartedTime */) { }
-    virtual void rateChanged(bool /* isPlaying */, float /* playbackRate */) { }
+    virtual void rateChanged(OptionSet<PlaybackSessionModel::PlaybackState>, double /* playbackRate */, double /* defaultPlaybackRate */) { }
     virtual void seekableRangesChanged(const TimeRanges&, double /* lastModified */, double /* liveInterval */) { }
     virtual void canPlayFastReverseChanged(bool) { }
     virtual void audioMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& /* options */, uint64_t /* selectedIndex */) { }
@@ -100,8 +117,34 @@ public:
     virtual void externalPlaybackChanged(bool /* enabled */, PlaybackSessionModel::ExternalPlaybackTargetType, const String& /* localizedDeviceName */) { }
     virtual void wirelessVideoPlaybackDisabledChanged(bool) { }
     virtual void mutedChanged(bool) { }
+    virtual void volumeChanged(double) { }
+    virtual void isPictureInPictureSupportedChanged(bool) { }
+    virtual void pictureInPictureActiveChanged(bool) { }
+    virtual void ensureControlsManager() { }
+    virtual void modelDestroyed() { }
 };
 
-}
+} // namespace WebCore
 
-#endif // PLATFORM(IOS) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
+namespace WTF {
+
+template<> struct EnumTraits<WebCore::PlaybackSessionModel::ExternalPlaybackTargetType> {
+    using values = EnumValues<
+        WebCore::PlaybackSessionModel::ExternalPlaybackTargetType,
+        WebCore::PlaybackSessionModel::ExternalPlaybackTargetType::TargetTypeNone,
+        WebCore::PlaybackSessionModel::ExternalPlaybackTargetType::TargetTypeAirPlay,
+        WebCore::PlaybackSessionModel::ExternalPlaybackTargetType::TargetTypeTVOut
+    >;
+};
+
+template<> struct EnumTraits<WebCore::PlaybackSessionModel::PlaybackState> {
+    using values = EnumValues<
+        WebCore::PlaybackSessionModel::PlaybackState,
+        WebCore::PlaybackSessionModel::PlaybackState::Playing,
+        WebCore::PlaybackSessionModel::PlaybackState::Stalled
+    >;
+};
+
+} // namespace WTF
+
+#endif // PLATFORM(IOS_FAMILY) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))

@@ -8,13 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/rtp_rtcp/source/ulpfec_header_reader_writer.h"
+#include "modules/rtp_rtcp/source/ulpfec_header_reader_writer.h"
 
-#include <utility>
+#include <string.h>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/rtp_rtcp/source/byte_io.h"
-#include "webrtc/modules/rtp_rtcp/source/forward_error_correction_internal.h"
+#include "api/scoped_refptr.h"
+#include "modules/rtp_rtcp/source/byte_io.h"
+#include "modules/rtp_rtcp/source/forward_error_correction_internal.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -22,6 +23,11 @@ namespace {
 
 // Maximum number of media packets that can be protected in one batch.
 constexpr size_t kMaxMediaPackets = 48;
+
+// Maximum number of media packets tracked by FEC decoder.
+// Maintain a sufficiently larger tracking window than `kMaxMediaPackets`
+// to account for packet reordering in pacer/ network.
+constexpr size_t kMaxTrackedMediaPackets = 4 * kMaxMediaPackets;
 
 // Maximum number of FEC packets stored inside ForwardErrorCorrection.
 constexpr size_t kMaxFecPackets = kMaxMediaPackets;
@@ -50,30 +56,33 @@ size_t UlpfecHeaderSize(size_t packet_mask_size) {
 }  // namespace
 
 UlpfecHeaderReader::UlpfecHeaderReader()
-    : FecHeaderReader(kMaxMediaPackets, kMaxFecPackets) {}
+    : FecHeaderReader(kMaxTrackedMediaPackets, kMaxFecPackets) {}
 
 UlpfecHeaderReader::~UlpfecHeaderReader() = default;
 
 bool UlpfecHeaderReader::ReadFecHeader(
     ForwardErrorCorrection::ReceivedFecPacket* fec_packet) const {
-  bool l_bit = (fec_packet->pkt->data[0] & 0x40) != 0u;
+  uint8_t* data = fec_packet->pkt->data.MutableData();
+  if (fec_packet->pkt->data.size() < kPacketMaskOffset) {
+    return false;  // Truncated packet.
+  }
+  bool l_bit = (data[0] & 0x40) != 0u;
   size_t packet_mask_size =
       l_bit ? kUlpfecPacketMaskSizeLBitSet : kUlpfecPacketMaskSizeLBitClear;
   fec_packet->fec_header_size = UlpfecHeaderSize(packet_mask_size);
-  uint16_t seq_num_base =
-      ByteReader<uint16_t>::ReadBigEndian(&fec_packet->pkt->data[2]);
-  fec_packet->protected_ssrc = fec_packet->ssrc;  // Due to RED.
-  fec_packet->seq_num_base = seq_num_base;
-  fec_packet->packet_mask_offset = kPacketMaskOffset;
-  fec_packet->packet_mask_size = packet_mask_size;
+  uint16_t seq_num_base = ByteReader<uint16_t>::ReadBigEndian(&data[2]);
+  fec_packet->protected_streams = {{.ssrc = fec_packet->ssrc,  // Due to RED.
+                                    .seq_num_base = seq_num_base,
+                                    .packet_mask_offset = kPacketMaskOffset,
+                                    .packet_mask_size = packet_mask_size}};
   fec_packet->protection_length =
-      ByteReader<uint16_t>::ReadBigEndian(&fec_packet->pkt->data[10]);
+      ByteReader<uint16_t>::ReadBigEndian(&data[10]);
 
   // Store length recovery field in temporary location in header.
   // This makes the header "compatible" with the corresponding
   // FlexFEC location of the length recovery field, thus simplifying
   // the XORing operations.
-  memcpy(&fec_packet->pkt->data[2], &fec_packet->pkt->data[8], 2);
+  memcpy(&data[2], &data[8], 2);
 
   return true;
 }
@@ -99,33 +108,36 @@ size_t UlpfecHeaderWriter::FecHeaderSize(size_t packet_mask_size) const {
 }
 
 void UlpfecHeaderWriter::FinalizeFecHeader(
-    uint32_t /* media_ssrc */,
-    uint16_t seq_num_base,
-    const uint8_t* packet_mask,
-    size_t packet_mask_size,
-    ForwardErrorCorrection::Packet* fec_packet) const {
+    rtc::ArrayView<const ProtectedStream> protected_streams,
+    ForwardErrorCorrection::Packet& fec_packet) const {
+  RTC_CHECK_EQ(protected_streams.size(), 1);
+  uint16_t seq_num_base = protected_streams[0].seq_num_base;
+  const uint8_t* packet_mask = protected_streams[0].packet_mask.data();
+  size_t packet_mask_size = protected_streams[0].packet_mask.size();
+
+  uint8_t* data = fec_packet.data.MutableData();
   // Set E bit to zero.
-  fec_packet->data[0] &= 0x7f;
+  data[0] &= 0x7f;
   // Set L bit based on packet mask size. (Note that the packet mask
   // can only take on two discrete values.)
   bool l_bit = (packet_mask_size == kUlpfecPacketMaskSizeLBitSet);
   if (l_bit) {
-    fec_packet->data[0] |= 0x40;  // Set the L bit.
+    data[0] |= 0x40;  // Set the L bit.
   } else {
     RTC_DCHECK_EQ(packet_mask_size, kUlpfecPacketMaskSizeLBitClear);
-    fec_packet->data[0] &= 0xbf;  // Clear the L bit.
+    data[0] &= 0xbf;  // Clear the L bit.
   }
   // Copy length recovery field from temporary location.
-  memcpy(&fec_packet->data[8], &fec_packet->data[2], 2);
+  memcpy(&data[8], &data[2], 2);
   // Write sequence number base.
-  ByteWriter<uint16_t>::WriteBigEndian(&fec_packet->data[2], seq_num_base);
+  ByteWriter<uint16_t>::WriteBigEndian(&data[2], seq_num_base);
   // Protection length is set to entire packet. (This is not
   // required in general.)
   const size_t fec_header_size = FecHeaderSize(packet_mask_size);
-  ByteWriter<uint16_t>::WriteBigEndian(&fec_packet->data[10],
-                                       fec_packet->length - fec_header_size);
+  ByteWriter<uint16_t>::WriteBigEndian(
+      &data[10], fec_packet.data.size() - fec_header_size);
   // Copy the packet mask.
-  memcpy(&fec_packet->data[12], packet_mask, packet_mask_size);
+  memcpy(&data[12], packet_mask, packet_mask_size);
 }
 
 }  // namespace webrtc

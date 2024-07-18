@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef ParallelVectorIterator_h
-#define ParallelVectorIterator_h
+#pragma once
 
 #include <wtf/FastMalloc.h>
 #include <wtf/Lock.h>
@@ -50,7 +49,7 @@ public:
             size_t begin;
             size_t end;
             {
-                LockHolder locker(m_lock);
+                Locker locker { m_lock };
                 begin = m_next;
                 if (begin == m_vector.size())
                     return;
@@ -68,15 +67,12 @@ public:
         }
     }
 private:
-    VectorType& m_vector;
     Lock m_lock;
-    size_t m_shardSize;
-    size_t m_next { 0 };
+    VectorType& m_vector WTF_GUARDED_BY_LOCK(m_lock);
+    size_t m_shardSize WTF_GUARDED_BY_LOCK(m_lock);
+    size_t m_next WTF_GUARDED_BY_LOCK(m_lock) { 0 };
 };
 
 } // namespace WTF
 
 using WTF::ParallelVectorIterator;
-
-#endif // ParallelVectorIterator_h
-

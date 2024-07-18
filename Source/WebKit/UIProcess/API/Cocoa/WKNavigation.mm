@@ -25,10 +25,10 @@
 
 #import "config.h"
 #import "WKNavigationInternal.h"
+#import "WKWebpagePreferencesInternal.h"
 
 #import "APINavigation.h"
-
-#if WK_API_ENABLED
+#import <WebCore/WebCoreObjCExtras.h>
 
 @implementation WKNavigation {
     API::ObjectStorage<API::Navigation> _navigation;
@@ -36,6 +36,9 @@
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKNavigation.class, self))
+        return;
+
     _navigation->~Navigation();
 
     [super dealloc];
@@ -43,8 +46,22 @@
 
 - (NSURLRequest *)_request
 {
-    return _navigation->request().nsURLRequest(WebCore::DoNotUpdateHTTPBody);
+    return _navigation->originalRequest().nsURLRequest(WebCore::HTTPBodyUpdatePolicy::DoNotUpdateHTTPBody);
 }
+
+- (BOOL)_isUserInitiated
+{
+    return _navigation->wasUserInitiated();
+}
+
+#if PLATFORM(IOS_FAMILY)
+
+- (WKContentMode)effectiveContentMode
+{
+    return WebKit::contentMode(_navigation->effectiveContentMode());
+}
+
+#endif // PLATFORM(IOS_FAMILY)
 
 #pragma mark WKObject protocol implementation
 
@@ -54,5 +71,3 @@
 }
 
 @end
-
-#endif

@@ -27,7 +27,12 @@
 
 @interface CALayer (WebCoreCALayerExtras)
 
-- (void)web_disableAllActions;
 + (CALayer *)_web_renderLayerWithContextID:(uint32_t)contextID;
+
+- (void)web_disableAllActions;
+- (void)_web_setLayerBoundsOrigin:(CGPoint)origin;
+- (void)_web_setLayerTopLeftPosition:(CGPoint)position;
+- (BOOL)_web_maskContainsPoint:(CGPoint)point;
+- (BOOL)_web_maskMayIntersectRect:(CGRect)rect;
 
 @end

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,34 +26,27 @@
 #include "config.h"
 #include "OriginLock.h"
 
-#include "FileSystem.h"
-
 namespace WebCore {
 
-String OriginLock::lockFileNameForPath(String originPath)
+static String lockFileNameForPath(const String& originPath)
 {
-    return pathByAppendingComponent(originPath, String(".lock"));
+    return FileSystem::pathByAppendingComponent(originPath, ".lock"_s);
 }
 
-OriginLock::OriginLock(String originPath)
+OriginLock::OriginLock(const String& originPath)
     : m_lockFileName(lockFileNameForPath(originPath).isolatedCopy())
-#if USE(FILE_LOCK)
-    , m_lockHandle(invalidPlatformFileHandle)
-#endif
 {
 }
 
-OriginLock::~OriginLock()
-{
-}
+OriginLock::~OriginLock() = default;
 
-void OriginLock::lock()
+void OriginLock::lock() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
 {
     m_mutex.lock();
 
 #if USE(FILE_LOCK)
-    m_lockHandle = openAndLockFile(m_lockFileName, OpenForWrite);
-    if (m_lockHandle == invalidPlatformFileHandle) {
+    m_lockHandle = FileSystem::openAndLockFile(m_lockFileName, FileSystem::FileOpenMode::Write);
+    if (m_lockHandle == FileSystem::invalidPlatformFileHandle) {
         // The only way we can get here is if the directory containing the lock
         // has been deleted or we were given a path to a non-existant directory.
         // In that case, there's nothing we can do but cleanup and return.
@@ -63,29 +56,29 @@ void OriginLock::lock()
 #endif
 }
 
-void OriginLock::unlock()
+void OriginLock::unlock() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
 {
 #if USE(FILE_LOCK)
     // If the file descriptor was uninitialized, then that means the directory
     // containing the lock has been deleted before we opened the lock file, or
     // we were given a path to a non-existant directory. Which, in turn, means
     // that there's nothing to unlock.
-    if (m_lockHandle == invalidPlatformFileHandle) 
+    if (m_lockHandle == FileSystem::invalidPlatformFileHandle)
         return;
 
-    unlockAndCloseFile(m_lockHandle);
-    m_lockHandle = invalidPlatformFileHandle;
+    FileSystem::unlockAndCloseFile(m_lockHandle);
+    m_lockHandle = FileSystem::invalidPlatformFileHandle;
 #endif
 
     m_mutex.unlock();
 }
 
-void OriginLock::deleteLockFile(String originPath)
+void OriginLock::deleteLockFile(const String& originPath)
 {
-    UNUSED_PARAM(originPath);
 #if USE(FILE_LOCK)
-    String lockFileName = OriginLock::lockFileNameForPath(originPath);
-    deleteFile(lockFileName);
+    FileSystem::deleteFile(lockFileNameForPath(originPath));
+#else
+    UNUSED_PARAM(originPath);
 #endif
 }
 

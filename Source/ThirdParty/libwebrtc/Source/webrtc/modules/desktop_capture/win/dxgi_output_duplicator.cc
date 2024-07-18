@@ -8,21 +8,24 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/desktop_capture/win/dxgi_output_duplicator.h"
+#include "modules/desktop_capture/win/dxgi_output_duplicator.h"
 
+#include <dxgi.h>
+#include <dxgiformat.h>
 #include <string.h>
-
 #include <unknwn.h>
-#include <DXGI.h>
-#include <DXGIFormat.h>
-#include <Windows.h>
+#include <windows.h>
 
 #include <algorithm>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/modules/desktop_capture/win/dxgi_texture_mapping.h"
-#include "webrtc/modules/desktop_capture/win/dxgi_texture_staging.h"
+#include "modules/desktop_capture/win/desktop_capture_utils.h"
+#include "modules/desktop_capture/win/dxgi_texture_mapping.h"
+#include "modules/desktop_capture/win/dxgi_texture_staging.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/string_utils.h"
+#include "rtc_base/win32.h"
+#include "system_wrappers/include/metrics.h"
 
 namespace webrtc {
 
@@ -53,7 +56,7 @@ Rotation DxgiRotationToRotation(DXGI_MODE_ROTATION rotation) {
       return Rotation::CLOCK_WISE_270;
   }
 
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return Rotation::CLOCK_WISE_0;
 }
 
@@ -64,10 +67,12 @@ DxgiOutputDuplicator::DxgiOutputDuplicator(const D3dDevice& device,
                                            const DXGI_OUTPUT_DESC& desc)
     : device_(device),
       output_(output),
+      device_name_(rtc::ToUtf8(desc.DeviceName)),
       desktop_rect_(RECTToDesktopRect(desc.DesktopCoordinates)) {
   RTC_DCHECK(output_);
   RTC_DCHECK(!desktop_rect_.is_empty());
-  RTC_DCHECK(desktop_rect_.width() > 0 && desktop_rect_.height() > 0);
+  RTC_DCHECK_GT(desktop_rect_.width(), 0);
+  RTC_DCHECK_GT(desktop_rect_.height(), 0);
 }
 
 DxgiOutputDuplicator::DxgiOutputDuplicator(DxgiOutputDuplicator&& other) =
@@ -100,28 +105,28 @@ bool DxgiOutputDuplicator::DuplicateOutput() {
       output_->DuplicateOutput(static_cast<IUnknown*>(device_.d3d_device()),
                                duplication_.GetAddressOf());
   if (error.Error() != S_OK || !duplication_) {
-    LOG(LS_WARNING) << "Failed to duplicate output from IDXGIOutput1, error "
-                    << error.ErrorMessage() << ", with code " << error.Error();
+    RTC_LOG(LS_WARNING) << "Failed to duplicate output from IDXGIOutput1: "
+                        << desktop_capture::utils::ComErrorToString(error);
     return false;
   }
 
   memset(&desc_, 0, sizeof(desc_));
   duplication_->GetDesc(&desc_);
   if (desc_.ModeDesc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
-    LOG(LS_ERROR) << "IDXGIDuplicateOutput does not use RGBA (8 bit) "
-                     "format, which is required by downstream components, "
-                     "format is "
-                  << desc_.ModeDesc.Format;
+    RTC_LOG(LS_ERROR) << "IDXGIDuplicateOutput does not use RGBA (8 bit) "
+                      << "format, which is required by downstream components, "
+                      << "format is " << desc_.ModeDesc.Format;
     return false;
   }
 
   if (static_cast<int>(desc_.ModeDesc.Width) != desktop_rect_.width() ||
       static_cast<int>(desc_.ModeDesc.Height) != desktop_rect_.height()) {
-    LOG(LS_ERROR) << "IDXGIDuplicateOutput does not return a same size as its "
-                     "IDXGIOutput1, size returned by IDXGIDuplicateOutput is "
-                  << desc_.ModeDesc.Width << " x " << desc_.ModeDesc.Height
-                  << ", size returned by IDXGIOutput1 is "
-                  << desktop_rect_.width() << " x " << desktop_rect_.height();
+    RTC_LOG(LS_ERROR)
+        << "IDXGIDuplicateOutput does not return a same size as its "
+        << "IDXGIOutput1, size returned by IDXGIDuplicateOutput is "
+        << desc_.ModeDesc.Width << " x " << desc_.ModeDesc.Height
+        << ", size returned by IDXGIOutput1 is " << desktop_rect_.width()
+        << " x " << desktop_rect_.height();
     return false;
   }
 
@@ -135,12 +140,39 @@ bool DxgiOutputDuplicator::ReleaseFrame() {
   RTC_DCHECK(duplication_);
   _com_error error = duplication_->ReleaseFrame();
   if (error.Error() != S_OK) {
-    LOG(LS_ERROR) << "Failed to release frame from IDXGIOutputDuplication, "
-                     "error"
-                  << error.ErrorMessage() << ", code " << error.Error();
+    RTC_LOG(LS_ERROR) << "Failed to release frame from IDXGIOutputDuplication: "
+                      << desktop_capture::utils::ComErrorToString(error);
     return false;
   }
   return true;
+}
+
+bool DxgiOutputDuplicator::ContainsMouseCursor(
+    const DXGI_OUTDUPL_FRAME_INFO& frame_info) {
+  // The DXGI_OUTDUPL_POINTER_POSITION structure that describes the most recent
+  // mouse position is only valid if the LastMouseUpdateTime member is a non-
+  // zero value.
+  if (frame_info.LastMouseUpdateTime.QuadPart == 0)
+    return false;
+
+  // Ignore cases when the mouse shape has changed and not the position.
+  const bool new_pointer_shape = (frame_info.PointerShapeBufferSize != 0);
+  if (new_pointer_shape)
+    return false;
+
+  // The mouse cursor has moved and we can now query if the mouse pointer is
+  // drawn onto the desktop image or not to decide if we must draw the mouse
+  // pointer shape onto the desktop image (always done by default currently).
+  // Either the mouse pointer is already drawn onto the desktop image that
+  // IDXGIOutputDuplication::AcquireNextFrame provides or the mouse pointer is
+  // separate from the desktop image. If the mouse pointer is drawn onto the
+  // desktop image, the pointer position data that is reported by
+  // AcquireNextFrame indicates that a separate pointer isn’t visible, hence
+  // `frame_info.PointerPosition.Visible` is false.
+  const bool cursor_embedded_in_frame = !frame_info.PointerPosition.Visible;
+  RTC_HISTOGRAM_BOOLEAN("WebRTC.DesktopCapture.Win.DirectXCursorEmbedded",
+                        cursor_embedded_in_frame);
+  return cursor_embedded_in_frame;
 }
 
 bool DxgiOutputDuplicator::Duplicate(Context* context,
@@ -161,19 +193,19 @@ bool DxgiOutputDuplicator::Duplicate(Context* context,
   _com_error error = duplication_->AcquireNextFrame(
       kAcquireTimeoutMs, &frame_info, resource.GetAddressOf());
   if (error.Error() != S_OK && error.Error() != DXGI_ERROR_WAIT_TIMEOUT) {
-    LOG(LS_ERROR) << "Failed to capture frame, error " << error.ErrorMessage()
-                  << ", code " << error.Error();
+    RTC_LOG(LS_ERROR) << "Failed to capture frame: "
+                      << desktop_capture::utils::ComErrorToString(error);
     return false;
   }
 
+  const bool cursor_embedded_in_frame = ContainsMouseCursor(frame_info);
+
   // We need to merge updated region with the one from context, but only spread
   // updated region from current frame. So keeps a copy of updated region from
-  // context here. The |updated_region| always starts from (0, 0).
+  // context here. The `updated_region` always starts from (0, 0).
   DesktopRegion updated_region;
   updated_region.Swap(&context->updated_region);
-  if (error.Error() == S_OK &&
-      frame_info.AccumulatedFrames > 0 &&
-      resource) {
+  if (error.Error() == S_OK && frame_info.AccumulatedFrames > 0 && resource) {
     DetectUpdatedRegion(frame_info, &context->updated_region);
     SpreadContextChange(context);
     if (!texture_->CopyFrom(frame_info, resource.Get())) {
@@ -187,16 +219,16 @@ bool DxgiOutputDuplicator::Duplicate(Context* context,
     if (rotation_ != Rotation::CLOCK_WISE_0) {
       for (DesktopRegion::Iterator it(updated_region); !it.IsAtEnd();
            it.Advance()) {
-        // The |updated_region| returned by Windows is rotated, but the |source|
+        // The `updated_region` returned by Windows is rotated, but the `source`
         // frame is not. So we need to rotate it reversely.
-        const DesktopRect source_rect = RotateRect(
-            it.rect(), desktop_size(), ReverseRotation(rotation_));
+        const DesktopRect source_rect =
+            RotateRect(it.rect(), desktop_size(), ReverseRotation(rotation_));
         RotateDesktopFrame(source, source_rect, rotation_, offset, target);
       }
     } else {
       for (DesktopRegion::Iterator it(updated_region); !it.IsAtEnd();
            it.Advance()) {
-        // The DesktopRect in |target|, starts from offset.
+        // The DesktopRect in `target`, starts from offset.
         DesktopRect dest_rect = it.rect();
         dest_rect.Translate(offset);
         target->CopyPixelsFrom(source, it.rect().top_left(), dest_rect);
@@ -206,6 +238,7 @@ bool DxgiOutputDuplicator::Duplicate(Context* context,
     last_frame_offset_ = offset;
     updated_region.Translate(offset.x(), offset.y());
     target->mutable_updated_region()->AddRegion(updated_region);
+    target->set_may_contain_cursor(cursor_embedded_in_frame);
     num_frames_captured_++;
     return texture_->Release() && ReleaseFrame();
   }
@@ -215,9 +248,9 @@ bool DxgiOutputDuplicator::Duplicate(Context* context,
     // export last frame to the target.
     for (DesktopRegion::Iterator it(updated_region); !it.IsAtEnd();
          it.Advance()) {
-      // The DesktopRect in |source|, starts from last_frame_offset_.
+      // The DesktopRect in `source`, starts from last_frame_offset_.
       DesktopRect source_rect = it.rect();
-      // The DesktopRect in |target|, starts from offset.
+      // The DesktopRect in `target`, starts from offset.
       DesktopRect target_rect = source_rect;
       source_rect.Translate(last_frame_offset_);
       target_rect.Translate(offset);
@@ -225,6 +258,7 @@ bool DxgiOutputDuplicator::Duplicate(Context* context,
     }
     updated_region.Translate(offset.x(), offset.y());
     target->mutable_updated_region()->AddRegion(updated_region);
+    target->set_may_contain_cursor(cursor_embedded_in_frame);
   } else {
     // If we were at the very first frame, and capturing failed, the
     // context->updated_region should be kept unchanged for next attempt.
@@ -265,14 +299,14 @@ bool DxgiOutputDuplicator::DoDetectUpdatedRegion(
   updated_region->Clear();
   if (frame_info.TotalMetadataBufferSize == 0) {
     // This should not happen, since frame_info.AccumulatedFrames > 0.
-    LOG(LS_ERROR) << "frame_info.AccumulatedFrames > 0, "
-                     "but TotalMetadataBufferSize == 0";
+    RTC_LOG(LS_ERROR) << "frame_info.AccumulatedFrames > 0, "
+                      << "but TotalMetadataBufferSize == 0";
     return false;
   }
 
-  if (metadata_.capacity() < frame_info.TotalMetadataBufferSize) {
+  if (metadata_.size() < frame_info.TotalMetadataBufferSize) {
     metadata_.clear();  // Avoid data copy
-    metadata_.reserve(frame_info.TotalMetadataBufferSize);
+    metadata_.resize(frame_info.TotalMetadataBufferSize);
   }
 
   UINT buff_size = 0;
@@ -280,10 +314,10 @@ bool DxgiOutputDuplicator::DoDetectUpdatedRegion(
       reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT*>(metadata_.data());
   size_t move_rects_count = 0;
   _com_error error = duplication_->GetFrameMoveRects(
-      static_cast<UINT>(metadata_.capacity()), move_rects, &buff_size);
+      static_cast<UINT>(metadata_.size()), move_rects, &buff_size);
   if (error.Error() != S_OK) {
-    LOG(LS_ERROR) << "Failed to get move rectangles, error "
-                  << error.ErrorMessage() << ", code " << error.Error();
+    RTC_LOG(LS_ERROR) << "Failed to get move rectangles: "
+                      << desktop_capture::utils::ComErrorToString(error);
     return false;
   }
   move_rects_count = buff_size / sizeof(DXGI_OUTDUPL_MOVE_RECT);
@@ -291,11 +325,10 @@ bool DxgiOutputDuplicator::DoDetectUpdatedRegion(
   RECT* dirty_rects = reinterpret_cast<RECT*>(metadata_.data() + buff_size);
   size_t dirty_rects_count = 0;
   error = duplication_->GetFrameDirtyRects(
-      static_cast<UINT>(metadata_.capacity()) - buff_size, dirty_rects,
-      &buff_size);
+      static_cast<UINT>(metadata_.size()) - buff_size, dirty_rects, &buff_size);
   if (error.Error() != S_OK) {
-    LOG(LS_ERROR) << "Failed to get dirty rectangles, error "
-                  << error.ErrorMessage() << ", code " << error.Error();
+    RTC_LOG(LS_ERROR) << "Failed to get dirty rectangles: "
+                      << desktop_capture::utils::ComErrorToString(error);
     return false;
   }
   dirty_rects_count = buff_size / sizeof(RECT);
@@ -324,11 +357,11 @@ bool DxgiOutputDuplicator::DoDetectUpdatedRegion(
                                            move_rects->DestinationRect.bottom),
                      unrotated_size_, rotation_));
     } else {
-      LOG(LS_INFO) << "Unmoved move_rect detected, ["
-                   << move_rects->DestinationRect.left << ", "
-                   << move_rects->DestinationRect.top << "] - ["
-                   << move_rects->DestinationRect.right << ", "
-                   << move_rects->DestinationRect.bottom << "].";
+      RTC_LOG(LS_INFO) << "Unmoved move_rect detected, ["
+                       << move_rects->DestinationRect.left << ", "
+                       << move_rects->DestinationRect.top << "] - ["
+                       << move_rects->DestinationRect.right << ", "
+                       << move_rects->DestinationRect.bottom << "].";
     }
     move_rects++;
     move_rects_count--;
@@ -383,7 +416,8 @@ int64_t DxgiOutputDuplicator::num_frames_captured() const {
 
 void DxgiOutputDuplicator::TranslateRect(const DesktopVector& position) {
   desktop_rect_.Translate(position);
-  RTC_DCHECK(desktop_rect_.left() >= 0 && desktop_rect_.top() >= 0);
+  RTC_DCHECK_GE(desktop_rect_.left(), 0);
+  RTC_DCHECK_GE(desktop_rect_.top(), 0);
 }
 
 }  // namespace webrtc

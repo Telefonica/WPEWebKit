@@ -8,13 +8,32 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/codecs/opus/opus_interface.h"
-#include "webrtc/modules/audio_coding/codecs/opus/opus_inst.h"
-#include "webrtc/modules/audio_coding/neteq/tools/neteq_quality_test.h"
+#include "absl/flags/flag.h"
+#include "modules/audio_coding/codecs/opus/opus_inst.h"
+#include "modules/audio_coding/codecs/opus/opus_interface.h"
+#include "modules/audio_coding/neteq/tools/neteq_quality_test.h"
 
-using google::RegisterFlagValidator;
-using google::ParseCommandLineFlags;
-using testing::InitGoogleTest;
+ABSL_FLAG(int, bit_rate_kbps, 32, "Target bit rate (kbps).");
+
+ABSL_FLAG(int,
+          complexity,
+          10,
+          "Complexity: 0 ~ 10 -- defined as in Opus"
+          "specification.");
+
+ABSL_FLAG(int, maxplaybackrate, 48000, "Maximum playback rate (Hz).");
+
+ABSL_FLAG(int, application, 0, "Application mode: 0 -- VOIP, 1 -- Audio.");
+
+ABSL_FLAG(int, reported_loss_rate, 10, "Reported percentile of packet loss.");
+
+ABSL_FLAG(bool, fec, false, "Enable FEC for encoding (-nofec to disable).");
+
+ABSL_FLAG(bool, dtx, false, "Enable DTX for encoding (-nodtx to disable).");
+
+ABSL_FLAG(int, sub_packets, 1, "Number of sub packets to repacketize.");
+
+using ::testing::InitGoogleTest;
 
 namespace webrtc {
 namespace test {
@@ -22,88 +41,18 @@ namespace {
 
 static const int kOpusBlockDurationMs = 20;
 static const int kOpusSamplingKhz = 48;
-
-// Define switch for bit rate.
-static bool ValidateBitRate(const char* flagname, int32_t value) {
-  if (value >= 6 && value <= 510)
-    return true;
-  printf("Invalid bit rate, should be between 6 and 510 kbps.");
-  return false;
-}
-
-DEFINE_int32(bit_rate_kbps, 32, "Target bit rate (kbps).");
-
-static const bool bit_rate_dummy =
-    RegisterFlagValidator(&FLAGS_bit_rate_kbps, &ValidateBitRate);
-
-// Define switch for complexity.
-static bool ValidateComplexity(const char* flagname, int32_t value) {
-  if (value >= -1 && value <= 10)
-    return true;
-  printf("Invalid complexity setting, should be between 0 and 10.");
-  return false;
-}
-
-DEFINE_int32(complexity, 10, "Complexity: 0 ~ 10 -- defined as in Opus"
-    "specification.");
-
-static const bool complexity_dummy =
-    RegisterFlagValidator(&FLAGS_complexity, &ValidateComplexity);
-
-// Define switch for maxplaybackrate
-DEFINE_int32(maxplaybackrate, 48000, "Maximum playback rate (Hz).");
-
-// Define switch for application mode.
-static bool ValidateApplication(const char* flagname, int32_t value) {
-  if (value != 0 && value != 1) {
-    printf("Invalid application mode, should be 0 or 1.");
-    return false;
-  }
-  return true;
-}
-
-DEFINE_int32(application, 0, "Application mode: 0 -- VOIP, 1 -- Audio.");
-
-static const bool application_dummy =
-    RegisterFlagValidator(&FLAGS_application, &ValidateApplication);
-
-// Define switch for reported packet loss rate.
-static bool ValidatePacketLossRate(const char* flagname, int32_t value) {
-  if (value >= 0 && value <= 100)
-    return true;
-  printf("Invalid packet loss percentile, should be between 0 and 100.");
-  return false;
-}
-
-DEFINE_int32(reported_loss_rate, 10, "Reported percentile of packet loss.");
-
-static const bool reported_loss_rate_dummy =
-    RegisterFlagValidator(&FLAGS_reported_loss_rate, &ValidatePacketLossRate);
-
-DEFINE_bool(fec, false, "Enable FEC for encoding (-nofec to disable).");
-
-DEFINE_bool(dtx, false, "Enable DTX for encoding (-nodtx to disable).");
-
-// Define switch for number of sub packets to repacketize.
-static bool ValidateSubPackets(const char* flagname, int32_t value) {
-  if (value >= 1 && value <= 3)
-    return true;
-  printf("Invalid number of sub packets, should be between 1 and 3.");
-  return false;
-}
-DEFINE_int32(sub_packets, 1, "Number of sub packets to repacketize.");
-static const bool sub_packets_dummy =
-    RegisterFlagValidator(&FLAGS_sub_packets, &ValidateSubPackets);
-
-}  // namepsace
+}  // namespace
 
 class NetEqOpusQualityTest : public NetEqQualityTest {
  protected:
   NetEqOpusQualityTest();
   void SetUp() override;
   void TearDown() override;
-  int EncodeBlock(int16_t* in_data, size_t block_size_samples,
-                  rtc::Buffer* payload, size_t max_bytes) override;
+  int EncodeBlock(int16_t* in_data,
+                  size_t block_size_samples,
+                  rtc::Buffer* payload,
+                  size_t max_bytes) override;
+
  private:
   WebRtcOpusEncInst* opus_encoder_;
   OpusRepacketizer* repacketizer_;
@@ -119,31 +68,53 @@ class NetEqOpusQualityTest : public NetEqQualityTest {
 };
 
 NetEqOpusQualityTest::NetEqOpusQualityTest()
-    : NetEqQualityTest(kOpusBlockDurationMs * FLAGS_sub_packets,
+    : NetEqQualityTest(kOpusBlockDurationMs * absl::GetFlag(FLAGS_sub_packets),
                        kOpusSamplingKhz,
                        kOpusSamplingKhz,
-                       NetEqDecoder::kDecoderOpus),
+                       SdpAudioFormat("opus", 48000, 2)),
       opus_encoder_(NULL),
       repacketizer_(NULL),
       sub_block_size_samples_(
           static_cast<size_t>(kOpusBlockDurationMs * kOpusSamplingKhz)),
-      bit_rate_kbps_(FLAGS_bit_rate_kbps),
-      fec_(FLAGS_fec),
-      dtx_(FLAGS_dtx),
-      complexity_(FLAGS_complexity),
-      maxplaybackrate_(FLAGS_maxplaybackrate),
-      target_loss_rate_(FLAGS_reported_loss_rate),
-      sub_packets_(FLAGS_sub_packets) {
+      bit_rate_kbps_(absl::GetFlag(FLAGS_bit_rate_kbps)),
+      fec_(absl::GetFlag(FLAGS_fec)),
+      dtx_(absl::GetFlag(FLAGS_dtx)),
+      complexity_(absl::GetFlag(FLAGS_complexity)),
+      maxplaybackrate_(absl::GetFlag(FLAGS_maxplaybackrate)),
+      target_loss_rate_(absl::GetFlag(FLAGS_reported_loss_rate)),
+      sub_packets_(absl::GetFlag(FLAGS_sub_packets)) {
+  // Flag validation
+  RTC_CHECK(absl::GetFlag(FLAGS_bit_rate_kbps) >= 6 &&
+            absl::GetFlag(FLAGS_bit_rate_kbps) <= 510)
+      << "Invalid bit rate, should be between 6 and 510 kbps.";
+
+  RTC_CHECK(absl::GetFlag(FLAGS_complexity) >= -1 &&
+            absl::GetFlag(FLAGS_complexity) <= 10)
+      << "Invalid complexity setting, should be between 0 and 10.";
+
+  RTC_CHECK(absl::GetFlag(FLAGS_application) == 0 ||
+            absl::GetFlag(FLAGS_application) == 1)
+      << "Invalid application mode, should be 0 or 1.";
+
+  RTC_CHECK(absl::GetFlag(FLAGS_reported_loss_rate) >= 0 &&
+            absl::GetFlag(FLAGS_reported_loss_rate) <= 100)
+      << "Invalid packet loss percentile, should be between 0 and 100.";
+
+  RTC_CHECK(absl::GetFlag(FLAGS_sub_packets) >= 1 &&
+            absl::GetFlag(FLAGS_sub_packets) <= 3)
+      << "Invalid number of sub packets, should be between 1 and 3.";
+
   // Redefine decoder type if input is stereo.
   if (channels_ > 1) {
-    decoder_type_ = NetEqDecoder::kDecoderOpus_2ch;
+    audio_format_ =
+        SdpAudioFormat("opus", 48000, 2, CodecParameterMap{{"stereo", "1"}});
   }
-  application_ = FLAGS_application;
+  application_ = absl::GetFlag(FLAGS_application);
 }
 
 void NetEqOpusQualityTest::SetUp() {
   // Create encoder memory.
-  WebRtcOpus_EncoderCreate(&opus_encoder_, channels_, application_);
+  WebRtcOpus_EncoderCreate(&opus_encoder_, channels_, application_, 48000);
   ASSERT_TRUE(opus_encoder_);
 
   // Create repacketizer.
@@ -160,8 +131,7 @@ void NetEqOpusQualityTest::SetUp() {
   }
   EXPECT_EQ(0, WebRtcOpus_SetComplexity(opus_encoder_, complexity_));
   EXPECT_EQ(0, WebRtcOpus_SetMaxPlaybackRate(opus_encoder_, maxplaybackrate_));
-  EXPECT_EQ(0, WebRtcOpus_SetPacketLossRate(opus_encoder_,
-                                            target_loss_rate_));
+  EXPECT_EQ(0, WebRtcOpus_SetPacketLossRate(opus_encoder_, target_loss_rate_));
   NetEqQualityTest::SetUp();
 }
 
@@ -174,26 +144,25 @@ void NetEqOpusQualityTest::TearDown() {
 
 int NetEqOpusQualityTest::EncodeBlock(int16_t* in_data,
                                       size_t block_size_samples,
-                                      rtc::Buffer* payload, size_t max_bytes) {
+                                      rtc::Buffer* payload,
+                                      size_t max_bytes) {
   EXPECT_EQ(block_size_samples, sub_block_size_samples_ * sub_packets_);
   int16_t* pointer = in_data;
   int value;
   opus_repacketizer_init(repacketizer_);
   for (int idx = 0; idx < sub_packets_; idx++) {
-    payload->AppendData(max_bytes, [&] (rtc::ArrayView<uint8_t> payload) {
-        value = WebRtcOpus_Encode(opus_encoder_,
-                                  pointer, sub_block_size_samples_,
-                                  max_bytes, payload.data());
+    payload->AppendData(max_bytes, [&](rtc::ArrayView<uint8_t> payload) {
+      value = WebRtcOpus_Encode(opus_encoder_, pointer, sub_block_size_samples_,
+                                max_bytes, payload.data());
 
-        Log() << "Encoded a frame with Opus mode "
-              << (value == 0 ? 0 : payload[0] >> 3)
-              << std::endl;
+      Log() << "Encoded a frame with Opus mode "
+            << (value == 0 ? 0 : payload[0] >> 3) << std::endl;
 
-        return (value >= 0) ? static_cast<size_t>(value) : 0;
-      });
+      return (value >= 0) ? static_cast<size_t>(value) : 0;
+    });
 
-    if (OPUS_OK != opus_repacketizer_cat(repacketizer_,
-                                         payload->data(), value)) {
+    if (OPUS_OK !=
+        opus_repacketizer_cat(repacketizer_, payload->data(), value)) {
       opus_repacketizer_init(repacketizer_);
       // If the repacketization fails, we discard this frame.
       return 0;

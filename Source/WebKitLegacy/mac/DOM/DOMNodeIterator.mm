@@ -30,7 +30,7 @@
 #import "DOMNodeInternal.h"
 #import "DOMNodeIteratorInternal.h"
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/NativeNodeFilter.h>
 #import <WebCore/Node.h>
 #import <WebCore/NodeIterator.h>
@@ -127,10 +127,12 @@ DOMNodeIterator *kit(WebCore::NodeIterator* value)
     if (!value)
         return nil;
     if (DOMNodeIterator *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMNodeIterator *wrapper = [[DOMNodeIterator alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    auto wrapper = adoptNS([[DOMNodeIterator alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
+
+#undef IMPL

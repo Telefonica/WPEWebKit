@@ -26,22 +26,30 @@ namespace WebCore {
 class RenderTable;
 
 class RenderTableCaption final : public RenderBlockFlow {
+    WTF_MAKE_ISO_ALLOCATED(RenderTableCaption);
 public:
     RenderTableCaption(Element&, RenderStyle&&);
     virtual ~RenderTableCaption();
 
     Element& element() const { return downcast<Element>(nodeForNonAnonymous()); }
 
-    LayoutUnit containingBlockLogicalWidthForContent() const override { return containingBlock()->logicalWidth(); }
+    LayoutUnit containingBlockLogicalWidthForContent() const override;
     
 private:
     bool isTableCaption() const override { return true; }
 
-    void insertedIntoTree() override;
-    void willBeRemovedFromTree() override;
+    void insertedIntoTree(IsInternalMove) override;
+    void willBeRemovedFromTree(IsInternalMove) override;
 
     RenderTable* table() const;
 };
+
+inline LayoutUnit RenderTableCaption::containingBlockLogicalWidthForContent() const
+{
+    if (auto* containingBlock = this->containingBlock())
+        return containingBlock->logicalWidth();
+    return { };
+}
 
 } // namespace WebCore
 

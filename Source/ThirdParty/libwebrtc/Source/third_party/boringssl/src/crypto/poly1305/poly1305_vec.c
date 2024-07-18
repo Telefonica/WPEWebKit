@@ -12,24 +12,36 @@
  * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 
-/* This implementation of poly1305 is by Andrew Moon
- * (https://github.com/floodyberry/poly1305-donna) and released as public
- * domain. It implements SIMD vectorization based on the algorithm described in
- * http://cr.yp.to/papers.html#neoncrypto. Unrolled to 2 powers, i.e. 64 byte
- * block size */
+// This implementation of poly1305 is by Andrew Moon
+// (https://github.com/floodyberry/poly1305-donna) and released as public
+// domain. It implements SIMD vectorization based on the algorithm described in
+// http://cr.yp.to/papers.html#neoncrypto. Unrolled to 2 powers, i.e. 64 byte
+// block size
 
 #include <openssl/poly1305.h>
 
 #include "../internal.h"
 
 
-#if !defined(OPENSSL_WINDOWS) && defined(OPENSSL_X86_64)
+#if defined(BORINGSSL_HAS_UINT128) && defined(OPENSSL_X86_64)
 
 #include <emmintrin.h>
 
-#define U8TO64_LE(m) (*(const uint64_t *)(m))
-#define U8TO32_LE(m) (*(const uint32_t *)(m))
-#define U64TO8_LE(m, v) (*(uint64_t *)(m)) = v
+static uint32_t load_u32_le(const uint8_t in[4]) {
+  uint32_t ret;
+  OPENSSL_memcpy(&ret, in, 4);
+  return ret;
+}
+
+static uint64_t load_u64_le(const uint8_t in[8]) {
+  uint64_t ret;
+  OPENSSL_memcpy(&ret, in, 8);
+  return ret;
+}
+
+static void store_u64_le(uint8_t out[8], uint64_t v) {
+  OPENSSL_memcpy(out, &v, 8);
+}
 
 typedef __m128i xmmi;
 
@@ -69,71 +81,24 @@ typedef struct poly1305_state_internal_t {
   poly1305_power P[2]; /* 288 bytes, top 32 bit halves unused = 144
                           bytes of free storage */
   union {
-    xmmi H[5]; /*  80 bytes  */
+    xmmi H[5];  //  80 bytes
     uint64_t HH[10];
   };
-  /* uint64_t r0,r1,r2;       [24 bytes] */
-  /* uint64_t pad0,pad1;      [16 bytes] */
-  uint64_t started;        /*   8 bytes  */
-  uint64_t leftover;       /*   8 bytes  */
-  uint8_t buffer[64];      /*  64 bytes  */
+  // uint64_t r0,r1,r2;       [24 bytes]
+  // uint64_t pad0,pad1;      [16 bytes]
+  uint64_t started;        //   8 bytes
+  uint64_t leftover;       //   8 bytes
+  uint8_t buffer[64];      //  64 bytes
 } poly1305_state_internal; /* 448 bytes total + 63 bytes for
                               alignment = 511 bytes raw */
+
+OPENSSL_STATIC_ASSERT(
+    sizeof(struct poly1305_state_internal_t) + 63 <= sizeof(poly1305_state),
+    "poly1305_state isn't large enough to hold aligned poly1305_state_internal_t");
 
 static inline poly1305_state_internal *poly1305_aligned_state(
     poly1305_state *state) {
   return (poly1305_state_internal *)(((uint64_t)state + 63) & ~63);
-}
-
-/* copy 0-63 bytes */
-static inline void
-poly1305_block_copy(uint8_t *dst, const uint8_t *src, size_t bytes) {
-  size_t offset = src - dst;
-  if (bytes & 32) {
-    _mm_storeu_si128((xmmi *)(dst + 0),
-                     _mm_loadu_si128((const xmmi *)(dst + offset + 0)));
-    _mm_storeu_si128((xmmi *)(dst + 16),
-                     _mm_loadu_si128((const xmmi *)(dst + offset + 16)));
-    dst += 32;
-  }
-  if (bytes & 16) {
-    _mm_storeu_si128((xmmi *)dst, _mm_loadu_si128((const xmmi *)(dst + offset)));
-    dst += 16;
-  }
-  if (bytes & 8) {
-    *(uint64_t *)dst = *(const uint64_t *)(dst + offset);
-    dst += 8;
-  }
-  if (bytes & 4) {
-    *(uint32_t *)dst = *(const uint32_t *)(dst + offset);
-    dst += 4;
-  }
-  if (bytes & 2) {
-    *(uint16_t *)dst = *(uint16_t *)(dst + offset);
-    dst += 2;
-  }
-  if (bytes & 1) {
-    *(uint8_t *)dst = *(uint8_t *)(dst + offset);
-  }
-}
-
-/* zero 0-15 bytes */
-static inline void poly1305_block_zero(uint8_t *dst, size_t bytes) {
-  if (bytes & 8) {
-    *(uint64_t *)dst = 0;
-    dst += 8;
-  }
-  if (bytes & 4) {
-    *(uint32_t *)dst = 0;
-    dst += 4;
-  }
-  if (bytes & 2) {
-    *(uint16_t *)dst = 0;
-    dst += 2;
-  }
-  if (bytes & 1) {
-    *(uint8_t *)dst = 0;
-  }
 }
 
 static inline size_t poly1305_min(size_t a, size_t b) {
@@ -146,9 +111,9 @@ void CRYPTO_poly1305_init(poly1305_state *state, const uint8_t key[32]) {
   uint64_t r0, r1, r2;
   uint64_t t0, t1;
 
-  /* clamp key */
-  t0 = U8TO64_LE(key + 0);
-  t1 = U8TO64_LE(key + 8);
+  // clamp key
+  t0 = load_u64_le(key + 0);
+  t1 = load_u64_le(key + 8);
   r0 = t0 & 0xffc0fffffff;
   t0 >>= 44;
   t0 |= t1 << 20;
@@ -156,7 +121,7 @@ void CRYPTO_poly1305_init(poly1305_state *state, const uint8_t key[32]) {
   t1 >>= 24;
   r2 = t1 & 0x00ffffffc0f;
 
-  /* store r in un-used space of st->P[1] */
+  // store r in un-used space of st->P[1]
   p = &st->P[1];
   p->R20.d[1] = (uint32_t)(r0);
   p->R20.d[3] = (uint32_t)(r0 >> 32);
@@ -165,13 +130,13 @@ void CRYPTO_poly1305_init(poly1305_state *state, const uint8_t key[32]) {
   p->R22.d[1] = (uint32_t)(r2);
   p->R22.d[3] = (uint32_t)(r2 >> 32);
 
-  /* store pad */
-  p->R23.d[1] = U8TO32_LE(key + 16);
-  p->R23.d[3] = U8TO32_LE(key + 20);
-  p->R24.d[1] = U8TO32_LE(key + 24);
-  p->R24.d[3] = U8TO32_LE(key + 28);
+  // store pad
+  p->R23.d[1] = load_u32_le(key + 16);
+  p->R23.d[3] = load_u32_le(key + 20);
+  p->R24.d[1] = load_u32_le(key + 24);
+  p->R24.d[3] = load_u32_le(key + 28);
 
-  /* H = 0 */
+  // H = 0
   st->H[0] = _mm_setzero_si128();
   st->H[1] = _mm_setzero_si128();
   st->H[2] = _mm_setzero_si128();
@@ -196,7 +161,7 @@ static void poly1305_first_block(poly1305_state_internal *st,
   uint64_t c;
   uint64_t i;
 
-  /* pull out stored info */
+  // pull out stored info
   p = &st->P[1];
 
   r0 = ((uint64_t)p->R20.d[3] << 32) | (uint64_t)p->R20.d[1];
@@ -205,7 +170,7 @@ static void poly1305_first_block(poly1305_state_internal *st,
   pad0 = ((uint64_t)p->R23.d[3] << 32) | (uint64_t)p->R23.d[1];
   pad1 = ((uint64_t)p->R24.d[3] << 32) | (uint64_t)p->R24.d[1];
 
-  /* compute powers r^2,r^4 */
+  // compute powers r^2,r^4
   r20 = r0;
   r21 = r1;
   r22 = r2;
@@ -249,7 +214,7 @@ static void poly1305_first_block(poly1305_state_internal *st,
     p--;
   }
 
-  /* put saved info back */
+  // put saved info back
   p = &st->P[1];
   p->R20.d[1] = (uint32_t)(r0);
   p->R20.d[3] = (uint32_t)(r0 >> 32);
@@ -262,7 +227,7 @@ static void poly1305_first_block(poly1305_state_internal *st,
   p->R24.d[1] = (uint32_t)(pad1);
   p->R24.d[3] = (uint32_t)(pad1 >> 32);
 
-  /* H = [Mx,My] */
+  // H = [Mx,My]
   T5 = _mm_unpacklo_epi64(_mm_loadl_epi64((const xmmi *)(m + 0)),
                           _mm_loadl_epi64((const xmmi *)(m + 16)));
   T6 = _mm_unpacklo_epi64(_mm_loadl_epi64((const xmmi *)(m + 8)),
@@ -294,7 +259,7 @@ static void poly1305_blocks(poly1305_state_internal *st, const uint8_t *m,
   H4 = st->H[4];
 
   while (bytes >= 64) {
-    /* H *= [r^4,r^4] */
+    // H *= [r^4,r^4]
     p = &st->P[0];
     T0 = _mm_mul_epu32(H0, p->R20.v);
     T1 = _mm_mul_epu32(H0, p->R21.v);
@@ -342,7 +307,7 @@ static void poly1305_blocks(poly1305_state_internal *st, const uint8_t *m,
     T5 = _mm_mul_epu32(H4, p->R20.v);
     T4 = _mm_add_epi64(T4, T5);
 
-    /* H += [Mx,My]*[r^2,r^2] */
+    // H += [Mx,My]*[r^2,r^2]
     T5 = _mm_unpacklo_epi64(_mm_loadl_epi64((const xmmi *)(m + 0)),
                             _mm_loadl_epi64((const xmmi *)(m + 16)));
     T6 = _mm_unpacklo_epi64(_mm_loadl_epi64((const xmmi *)(m + 8)),
@@ -406,7 +371,7 @@ static void poly1305_blocks(poly1305_state_internal *st, const uint8_t *m,
     T5 = _mm_mul_epu32(M4, p->R20.v);
     T4 = _mm_add_epi64(T4, T5);
 
-    /* H += [Mx,My] */
+    // H += [Mx,My]
     T5 = _mm_unpacklo_epi64(_mm_loadl_epi64((const xmmi *)(m + 32)),
                             _mm_loadl_epi64((const xmmi *)(m + 48)));
     T6 = _mm_unpacklo_epi64(_mm_loadl_epi64((const xmmi *)(m + 40)),
@@ -424,7 +389,7 @@ static void poly1305_blocks(poly1305_state_internal *st, const uint8_t *m,
     T3 = _mm_add_epi64(T3, M3);
     T4 = _mm_add_epi64(T4, M4);
 
-    /* reduce */
+    // reduce
     C1 = _mm_srli_epi64(T0, 26);
     C2 = _mm_srli_epi64(T3, 26);
     T0 = _mm_and_si128(T0, MMASK);
@@ -447,7 +412,7 @@ static void poly1305_blocks(poly1305_state_internal *st, const uint8_t *m,
     T3 = _mm_and_si128(T3, MMASK);
     T4 = _mm_add_epi64(T4, C1);
 
-    /* H = (H*[r^4,r^4] + [Mx,My]*[r^2,r^2] + [Mx,My]) */
+    // H = (H*[r^4,r^4] + [Mx,My]*[r^2,r^2] + [Mx,My])
     H0 = T0;
     H1 = T1;
     H2 = T2;
@@ -488,11 +453,11 @@ static size_t poly1305_combine(poly1305_state_internal *st, const uint8_t *m,
   H3 = st->H[3];
   H4 = st->H[4];
 
-  /* p = [r^2,r^2] */
+  // p = [r^2,r^2]
   p = &st->P[1];
 
   if (bytes >= 32) {
-    /* H *= [r^2,r^2] */
+    // H *= [r^2,r^2]
     T0 = _mm_mul_epu32(H0, p->R20.v);
     T1 = _mm_mul_epu32(H0, p->R21.v);
     T2 = _mm_mul_epu32(H0, p->R22.v);
@@ -539,7 +504,7 @@ static size_t poly1305_combine(poly1305_state_internal *st, const uint8_t *m,
     T5 = _mm_mul_epu32(H4, p->R20.v);
     T4 = _mm_add_epi64(T4, T5);
 
-    /* H += [Mx,My] */
+    // H += [Mx,My]
     T5 = _mm_unpacklo_epi64(_mm_loadl_epi64((const xmmi *)(m + 0)),
                             _mm_loadl_epi64((const xmmi *)(m + 16)));
     T6 = _mm_unpacklo_epi64(_mm_loadl_epi64((const xmmi *)(m + 8)),
@@ -557,7 +522,7 @@ static size_t poly1305_combine(poly1305_state_internal *st, const uint8_t *m,
     T3 = _mm_add_epi64(T3, M3);
     T4 = _mm_add_epi64(T4, M4);
 
-    /* reduce */
+    // reduce
     C1 = _mm_srli_epi64(T0, 26);
     C2 = _mm_srli_epi64(T3, 26);
     T0 = _mm_and_si128(T0, MMASK);
@@ -580,7 +545,7 @@ static size_t poly1305_combine(poly1305_state_internal *st, const uint8_t *m,
     T3 = _mm_and_si128(T3, MMASK);
     T4 = _mm_add_epi64(T4, C1);
 
-    /* H = (H*[r^2,r^2] + [Mx,My]) */
+    // H = (H*[r^2,r^2] + [Mx,My])
     H0 = T0;
     H1 = T1;
     H2 = T2;
@@ -590,7 +555,7 @@ static size_t poly1305_combine(poly1305_state_internal *st, const uint8_t *m,
     consumed = 32;
   }
 
-  /* finalize, H *= [r^2,r] */
+  // finalize, H *= [r^2,r]
   r0 = ((uint64_t)p->R20.d[3] << 32) | (uint64_t)p->R20.d[1];
   r1 = ((uint64_t)p->R21.d[3] << 32) | (uint64_t)p->R21.d[1];
   r2 = ((uint64_t)p->R22.d[3] << 32) | (uint64_t)p->R22.d[1];
@@ -605,7 +570,7 @@ static size_t poly1305_combine(poly1305_state_internal *st, const uint8_t *m,
   p->S23.d[2] = p->R23.d[2] * 5;
   p->S24.d[2] = p->R24.d[2] * 5;
 
-  /* H *= [r^2,r] */
+  // H *= [r^2,r]
   T0 = _mm_mul_epu32(H0, p->R20.v);
   T1 = _mm_mul_epu32(H0, p->R21.v);
   T2 = _mm_mul_epu32(H0, p->R22.v);
@@ -674,7 +639,7 @@ static size_t poly1305_combine(poly1305_state_internal *st, const uint8_t *m,
   T3 = _mm_and_si128(T3, MMASK);
   T4 = _mm_add_epi64(T4, C1);
 
-  /* H = H[0]+H[1] */
+  // H = H[0]+H[1]
   H0 = _mm_add_epi64(T0, _mm_srli_si128(T0, 8));
   H1 = _mm_add_epi64(T1, _mm_srli_si128(T1, 8));
   H2 = _mm_add_epi64(T2, _mm_srli_si128(T2, 8));
@@ -713,7 +678,12 @@ void CRYPTO_poly1305_update(poly1305_state *state, const uint8_t *m,
   poly1305_state_internal *st = poly1305_aligned_state(state);
   size_t want;
 
-  /* need at least 32 initial bytes to start the accelerated branch */
+  // Work around a C language bug. See https://crbug.com/1019588.
+  if (bytes == 0) {
+    return;
+  }
+
+  // need at least 32 initial bytes to start the accelerated branch
   if (!st->started) {
     if ((st->leftover == 0) && (bytes > 32)) {
       poly1305_first_block(st, m);
@@ -721,7 +691,7 @@ void CRYPTO_poly1305_update(poly1305_state *state, const uint8_t *m,
       bytes -= 32;
     } else {
       want = poly1305_min(32 - st->leftover, bytes);
-      poly1305_block_copy(st->buffer + st->leftover, m, want);
+      OPENSSL_memcpy(st->buffer + st->leftover, m, want);
       bytes -= want;
       m += want;
       st->leftover += want;
@@ -734,10 +704,10 @@ void CRYPTO_poly1305_update(poly1305_state *state, const uint8_t *m,
     st->started = 1;
   }
 
-  /* handle leftover */
+  // handle leftover
   if (st->leftover) {
     want = poly1305_min(64 - st->leftover, bytes);
-    poly1305_block_copy(st->buffer + st->leftover, m, want);
+    OPENSSL_memcpy(st->buffer + st->leftover, m, want);
     bytes -= want;
     m += want;
     st->leftover += want;
@@ -748,7 +718,7 @@ void CRYPTO_poly1305_update(poly1305_state *state, const uint8_t *m,
     st->leftover = 0;
   }
 
-  /* process 64 byte blocks */
+  // process 64 byte blocks
   if (bytes >= 64) {
     want = (bytes & ~63);
     poly1305_blocks(st, m, want);
@@ -757,7 +727,7 @@ void CRYPTO_poly1305_update(poly1305_state *state, const uint8_t *m,
   }
 
   if (bytes) {
-    poly1305_block_copy(st->buffer + st->leftover, m, bytes);
+    OPENSSL_memcpy(st->buffer + st->leftover, m, bytes);
     st->leftover += bytes;
   }
 }
@@ -779,7 +749,7 @@ void CRYPTO_poly1305_finish(poly1305_state *state, uint8_t mac[16]) {
     m += consumed;
   }
 
-  /* st->HH will either be 0 or have the combined result */
+  // st->HH will either be 0 or have the combined result
   h0 = st->HH[0];
   h1 = st->HH[1];
   h2 = st->HH[2];
@@ -796,8 +766,8 @@ void CRYPTO_poly1305_finish(poly1305_state *state, uint8_t mac[16]) {
   }
 
 poly1305_donna_atleast16bytes:
-  t0 = U8TO64_LE(m + 0);
-  t1 = U8TO64_LE(m + 8);
+  t0 = load_u64_le(m + 0);
+  t1 = load_u64_le(m + 8);
   h0 += t0 & 0xfffffffffff;
   t0 = shr128_pair(t1, t0, 44);
   h1 += t0 & 0xfffffffffff;
@@ -826,18 +796,18 @@ poly1305_donna_mul:
     goto poly1305_donna_atleast16bytes;
   }
 
-/* final bytes */
+// final bytes
 poly1305_donna_atmost15bytes:
   if (!leftover) {
     goto poly1305_donna_finish;
   }
 
   m[leftover++] = 1;
-  poly1305_block_zero(m + leftover, 16 - leftover);
+  OPENSSL_memset(m + leftover, 0, 16 - leftover);
   leftover = 16;
 
-  t0 = U8TO64_LE(m + 0);
-  t1 = U8TO64_LE(m + 8);
+  t0 = load_u64_le(m + 0);
+  t1 = load_u64_le(m + 8);
   h0 += t0 & 0xfffffffffff;
   t0 = shr128_pair(t1, t0, 44);
   h1 += t0 & 0xfffffffffff;
@@ -870,7 +840,7 @@ poly1305_donna_finish:
   h1 = (h1 & nc) | (g1 & c);
   h2 = (h2 & nc) | (g2 & c);
 
-  /* pad */
+  // pad
   t0 = ((uint64_t)p->R23.d[3] << 32) | (uint64_t)p->R23.d[1];
   t1 = ((uint64_t)p->R24.d[3] << 32) | (uint64_t)p->R24.d[1];
   h0 += (t0 & 0xfffffffffff);
@@ -883,8 +853,8 @@ poly1305_donna_finish:
   t1 = (t1 >> 24);
   h2 += (t1)+c;
 
-  U64TO8_LE(mac + 0, ((h0) | (h1 << 44)));
-  U64TO8_LE(mac + 8, ((h1 >> 20) | (h2 << 24)));
+  store_u64_le(mac + 0, ((h0) | (h1 << 44)));
+  store_u64_le(mac + 8, ((h1 >> 20) | (h2 << 24)));
 }
 
-#endif  /* !OPENSSL_WINDOWS && OPENSSL_X86_64 */
+#endif  // BORINGSSL_HAS_UINT128 && OPENSSL_X86_64

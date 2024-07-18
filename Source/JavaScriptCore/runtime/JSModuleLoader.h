@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2015-2022 Apple Inc. All Rights Reserved.
  * Copyright (C) 2016 Yusuke Suzuki <utatane.tea@gmail.com>.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,13 +32,20 @@ namespace JSC {
 
 class JSInternalPromise;
 class JSModuleNamespaceObject;
+class JSModuleRecord;
 class SourceCode;
 
-class JSModuleLoader : public JSNonFinalObject {
-private:
-    JSModuleLoader(VM&, Structure*);
+class JSModuleLoader final : public JSNonFinalObject {
 public:
-    typedef JSNonFinalObject Base;
+    using Base = JSNonFinalObject;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
+
+    template<typename CellType, SubspaceAccess>
+    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    {
+        STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSModuleLoader, Base);
+        return &vm.plainObjectSpace();
+    }
 
     enum Status {
         Fetch = 1,
@@ -48,10 +55,10 @@ public:
         Ready,
     };
 
-    static JSModuleLoader* create(ExecState* exec, VM& vm, JSGlobalObject* globalObject, Structure* structure)
+    static JSModuleLoader* create(JSGlobalObject* globalObject, VM& vm, Structure* structure)
     {
-        JSModuleLoader* object = new (NotNull, allocateCell<JSModuleLoader>(vm.heap)) JSModuleLoader(vm, structure);
-        object->finishCreation(exec, vm, globalObject);
+        JSModuleLoader* object = new (NotNull, allocateCell<JSModuleLoader>(vm)) JSModuleLoader(vm, structure);
+        object->finishCreation(globalObject, vm);
         return object;
     }
 
@@ -63,26 +70,30 @@ public:
     }
 
     // APIs to control the module loader.
-    JSValue provide(ExecState*, JSValue key, Status, const SourceCode&);
-    JSInternalPromise* loadAndEvaluateModule(ExecState*, JSValue moduleName, JSValue referrer, JSValue scriptFetcher);
-    JSInternalPromise* loadModule(ExecState*, JSValue moduleName, JSValue referrer, JSValue scriptFetcher);
-    JSValue linkAndEvaluateModule(ExecState*, JSValue moduleKey, JSValue scriptFetcher);
-    JSInternalPromise* requestImportModule(ExecState*, const Identifier&, JSValue scriptFetcher);
+    JSValue provideFetch(JSGlobalObject*, JSValue key, const SourceCode&);
+    JSInternalPromise* loadAndEvaluateModule(JSGlobalObject*, JSValue moduleName, JSValue parameters, JSValue scriptFetcher);
+    JSInternalPromise* loadModule(JSGlobalObject*, JSValue moduleName, JSValue parameters, JSValue scriptFetcher);
+    JSValue linkAndEvaluateModule(JSGlobalObject*, JSValue moduleKey, JSValue scriptFetcher);
+    JSInternalPromise* requestImportModule(JSGlobalObject*, const Identifier&, JSValue parameters, JSValue scriptFetcher);
 
     // Platform dependent hooked APIs.
-    JSInternalPromise* importModule(ExecState*, JSString* moduleName, const SourceOrigin& referrer);
-    JSInternalPromise* resolve(ExecState*, JSValue name, JSValue referrer, JSValue scriptFetcher);
-    JSInternalPromise* fetch(ExecState*, JSValue key, JSValue scriptFetcher);
-    JSInternalPromise* instantiate(ExecState*, JSValue key, JSValue source, JSValue scriptFetcher);
+    JSInternalPromise* importModule(JSGlobalObject*, JSString* moduleName, JSValue parameters, const SourceOrigin& referrer);
+    JSInternalPromise* resolve(JSGlobalObject*, JSValue name, JSValue referrer, JSValue scriptFetcher);
+    Identifier resolveSync(JSGlobalObject*, JSValue name, JSValue referrer, JSValue scriptFetcher);
+    JSInternalPromise* fetch(JSGlobalObject*, JSValue key, JSValue parameters, JSValue scriptFetcher);
+    JSObject* createImportMetaProperties(JSGlobalObject*, JSValue key, JSModuleRecord*, JSValue scriptFetcher);
 
     // Additional platform dependent hooked APIs.
-    JSValue evaluate(ExecState*, JSValue key, JSValue moduleRecord, JSValue scriptFetcher);
+    JSValue evaluate(JSGlobalObject*, JSValue key, JSValue moduleRecord, JSValue scriptFetcher, JSValue sentValue, JSValue resumeMode);
+    JSValue evaluateNonVirtual(JSGlobalObject*, JSValue key, JSValue moduleRecord, JSValue scriptFetcher, JSValue sentValue, JSValue resumeMode);
 
     // Utility functions.
-    JSModuleNamespaceObject* getModuleNamespaceObject(ExecState*, JSValue moduleRecord);
+    JSModuleNamespaceObject* getModuleNamespaceObject(JSGlobalObject*, JSValue moduleRecord);
+    JSArray* dependencyKeysIfEvaluated(JSGlobalObject*, JSValue key);
 
-protected:
-    void finishCreation(ExecState*, VM&, JSGlobalObject*);
+private:
+    JSModuleLoader(VM&, Structure*);
+    void finishCreation(JSGlobalObject*, VM&);
 };
 
 } // namespace JSC

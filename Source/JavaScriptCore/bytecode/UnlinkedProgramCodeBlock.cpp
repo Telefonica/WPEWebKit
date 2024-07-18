@@ -26,12 +26,11 @@
 #include "config.h"
 #include "UnlinkedProgramCodeBlock.h"
 
-#include "HeapInlines.h"
 #include "JSCellInlines.h"
 
 namespace JSC {
 
-const ClassInfo UnlinkedProgramCodeBlock::s_info = { "UnlinkedProgramCodeBlock", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(UnlinkedProgramCodeBlock) };
+const ClassInfo UnlinkedProgramCodeBlock::s_info = { "UnlinkedProgramCodeBlock"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(UnlinkedProgramCodeBlock) };
 
 void UnlinkedProgramCodeBlock::destroy(JSCell* cell)
 {

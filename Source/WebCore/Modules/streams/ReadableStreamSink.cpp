@@ -32,8 +32,6 @@
 #include "ReadableStream.h"
 #include "SharedBuffer.h"
 
-#if ENABLE(STREAMS_API)
-
 namespace WebCore {
 
 ReadableStreamToSharedBufferSink::ReadableStreamToSharedBufferSink(Callback&& callback)
@@ -48,25 +46,31 @@ void ReadableStreamToSharedBufferSink::pipeFrom(ReadableStream& stream)
 
 void ReadableStreamToSharedBufferSink::enqueue(const BufferSource& buffer)
 {
-    if (!m_data) {
-        m_data = SharedBuffer::create(buffer.data(), buffer.length());
+    if (!buffer.length())
         return;
+
+    if (m_callback) {
+        Span chunk { buffer.data(), buffer.length() };
+        m_callback(&chunk);
     }
-    m_data->append(reinterpret_cast<const char*>(buffer.data()), buffer.length());
 }
 
 void ReadableStreamToSharedBufferSink::close()
 {
-    if (auto callback = WTFMove(m_callback))
-        callback(WTFMove(m_data));
+    if (!m_callback)
+        return;
+
+    auto callback = std::exchange(m_callback, { });
+    callback(nullptr);
 }
 
 void ReadableStreamToSharedBufferSink::error(String&& message)
 {
-    if (auto callback = WTFMove(m_callback))
-        callback(Exception { TypeError, WTFMove(message) });
+    if (!m_callback)
+        return;
+
+    auto callback = std::exchange(m_callback, { });
+    callback(Exception { TypeError, WTFMove(message) });
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(STREAMS_API)

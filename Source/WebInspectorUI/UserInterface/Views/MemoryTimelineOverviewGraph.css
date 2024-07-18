@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,61 +35,46 @@ body .timeline-overview > .graphs-container > .timeline-overview-graph.memory {
 .timeline-overview-graph.memory > .legend {
     position: absolute;
     top: 0;
+    inset-inline-end: 0
+    z-index: var(--timeline-record-z-index);
     padding: 2px;
     font-size: 8px;
     color: hsl(0, 0%, 50%);
-    background-color: white;
+    background-color: var(--timeline-odd-background-color);
     pointer-events: none;
-}
-
-body[dir=ltr] .timeline-overview-graph.memory > .legend {
-    right: 0;
-}
-
-body[dir=rtl] .timeline-overview-graph.memory > .legend {
-    left: 0;
 }
 
 .timeline-overview-graph.memory .memory-pressure-event {
     position: absolute;
     top: 0;
     bottom: 0;
-
-    --memory-timeline-overview-graph-pressure-event-border-start: 1px solid black;
+    border-inline-start: 1px solid black;
 }
 
-body[dir=ltr] .timeline-overview-graph.memory .memory-pressure-event {
-    border-left: var(--memory-timeline-overview-graph-pressure-event-border-start);
+.timeline-overview-graph.memory:nth-child(even) > .legend {
+    background-color: var(--timeline-even-background-color);
 }
 
-body[dir=rtl] .timeline-overview-graph.memory .memory-pressure-event {
-    border-right: var(--memory-timeline-overview-graph-pressure-event-border-start);
-}
-
-.timeline-overview-graph:nth-child(even) > .legend {
-    background-color: hsl(0, 0%, 96%);
-}
-
-body[dir=rtl] .timeline-overview-graph.memory > .stacked-line-chart {
+body[dir=rtl] .timeline-overview-graph.memory > .stacked-area-chart {
     transform: scaleX(-1);
 }
 
-.timeline-overview-graph.memory > .stacked-line-chart > svg > path.javascript {
+.timeline-overview-graph.memory > .stacked-area-chart > svg > path.javascript {
     stroke: var(--memory-javascript-stroke-color);
     fill: var(--memory-javascript-fill-color);
 }
 
-.timeline-overview-graph.memory > .stacked-line-chart > svg > path.images {
+.timeline-overview-graph.memory > .stacked-area-chart > svg > path.images {
     stroke: var(--memory-images-stroke-color);
     fill: var(--memory-images-fill-color);
 }
 
-.timeline-overview-graph.memory > .stacked-line-chart > svg > path.layers {
+.timeline-overview-graph.memory > .stacked-area-chart > svg > path.layers {
     stroke: var(--memory-layers-stroke-color);
     fill: var(--memory-layers-fill-color);
 }
 
-.timeline-overview-graph.memory > .stacked-line-chart > svg > path.page {
+.timeline-overview-graph.memory > .stacked-area-chart > svg > path.page {
     stroke: var(--memory-page-stroke-color);
     fill: var(--memory-page-fill-color);
 }

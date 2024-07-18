@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,10 +28,11 @@
 #if PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE)
 
 #include "HTMLMediaElementEnums.h"
-#include "PlaybackSessionInterface.h"
 #include "PlaybackSessionModel.h"
 #include <wtf/RefCounted.h>
 #include <wtf/RetainPtr.h>
+#include <wtf/WeakObjCPtr.h>
+#include <wtf/WeakPtr.h>
 #include <wtf/text/WTFString.h>
 
 OBJC_CLASS WebPlaybackControlsManager;
@@ -41,46 +42,46 @@ class IntRect;
 class PlaybackSessionModel;
 
 class WEBCORE_EXPORT PlaybackSessionInterfaceMac final
-    : public PlaybackSessionInterface
-    , public PlaybackSessionModelClient
+    : public PlaybackSessionModelClient
     , public RefCounted<PlaybackSessionInterfaceMac> {
 public:
     static Ref<PlaybackSessionInterfaceMac> create(PlaybackSessionModel&);
     virtual ~PlaybackSessionInterfaceMac();
-    PlaybackSessionModel* playbackSessionModel() const { return m_playbackSessionModel; }
-
-    // PlaybackSessionInterface
-    WEBCORE_EXPORT void resetMediaState() final { }
+    PlaybackSessionModel* playbackSessionModel() const;
 
     // PlaybackSessionModelClient
-    WEBCORE_EXPORT void durationChanged(double) final;
-    WEBCORE_EXPORT void currentTimeChanged(double /*currentTime*/, double /*anchorTime*/) final;
-    WEBCORE_EXPORT void rateChanged(bool /*isPlaying*/, float /*playbackRate*/) final;
-    WEBCORE_EXPORT void seekableRangesChanged(const TimeRanges&, double /*lastModifiedTime*/, double /*liveUpdateInterval*/) final;
-    WEBCORE_EXPORT void audioMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& /*options*/, uint64_t /*selectedIndex*/) final;
-    WEBCORE_EXPORT void legibleMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& /*options*/, uint64_t /*selectedIndex*/) final;
-    WEBCORE_EXPORT void audioMediaSelectionIndexChanged(uint64_t) final;
-    WEBCORE_EXPORT void legibleMediaSelectionIndexChanged(uint64_t) final;
-    WEBCORE_EXPORT void externalPlaybackChanged(bool /* enabled */, PlaybackSessionModel::ExternalPlaybackTargetType, const String& /* localizedDeviceName */) final;
+    void durationChanged(double) final;
+    void currentTimeChanged(double /*currentTime*/, double /*anchorTime*/) final;
+    void rateChanged(OptionSet<PlaybackSessionModel::PlaybackState>, double /* playbackRate */, double /* defaultPlaybackRate */) final;
+    void seekableRangesChanged(const TimeRanges&, double /*lastModifiedTime*/, double /*liveUpdateInterval*/) final;
+    void audioMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& /*options*/, uint64_t /*selectedIndex*/) final;
+    void legibleMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& /*options*/, uint64_t /*selectedIndex*/) final;
+    void audioMediaSelectionIndexChanged(uint64_t) final;
+    void legibleMediaSelectionIndexChanged(uint64_t) final;
+    void externalPlaybackChanged(bool /* enabled */, PlaybackSessionModel::ExternalPlaybackTargetType, const String& /* localizedDeviceName */) final;
+    void isPictureInPictureSupportedChanged(bool) final;
+    void ensureControlsManager() final;
 
-    WEBCORE_EXPORT void invalidate();
-    WEBCORE_EXPORT void ensureControlsManager();
 #if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
-    WEBCORE_EXPORT void setPlayBackControlsManager(WebPlaybackControlsManager *);
-    WEBCORE_EXPORT WebPlaybackControlsManager *playBackControlsManager();
+    void setPlayBackControlsManager(WebPlaybackControlsManager *);
+    WebPlaybackControlsManager *playBackControlsManager();
+
+    void updatePlaybackControlsManagerCanTogglePictureInPicture();
 #endif
-    WEBCORE_EXPORT void beginScrubbing();
-    WEBCORE_EXPORT void endScrubbing();
+    void willBeginScrubbing();
+    void beginScrubbing();
+    void endScrubbing();
+
+    void invalidate();
 
 private:
     PlaybackSessionInterfaceMac(PlaybackSessionModel&);
-    PlaybackSessionModel* m_playbackSessionModel { nullptr };
+    WeakPtr<PlaybackSessionModel> m_playbackSessionModel;
 #if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
-    WebPlaybackControlsManager *m_playbackControlsManager  { nullptr };
+    WeakObjCPtr<WebPlaybackControlsManager> m_playbackControlsManager;
 
     void updatePlaybackControlsManagerTiming(double currentTime, double anchorTime, double playbackRate, bool isPlaying);
 #endif
-
 };
 
 }

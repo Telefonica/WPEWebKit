@@ -2,6 +2,7 @@
  * Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005 Rob Buis <buis@kde.org>
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
+ * Copyright (C) 2021-2022 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,66 +20,80 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef FEGaussianBlur_h
-#define FEGaussianBlur_h
+#pragma once
 
 #include "FEConvolveMatrix.h"
-#include "Filter.h"
 #include "FilterEffect.h"
 
 namespace WebCore {
 
 class FEGaussianBlur : public FilterEffect {
 public:
-    static Ref<FEGaussianBlur> create(Filter&, float, float, EdgeModeType);
+    WEBCORE_EXPORT static Ref<FEGaussianBlur> create(float x, float y, EdgeModeType);
 
-    float stdDeviationX() const;
-    void setStdDeviationX(float);
+    float stdDeviationX() const { return m_stdX; }
+    bool setStdDeviationX(float);
 
-    float stdDeviationY() const;
-    void setStdDeviationY(float);
+    float stdDeviationY() const { return m_stdY; }
+    bool setStdDeviationY(float);
 
-    EdgeModeType edgeMode() const;
-    void setEdgeMode(EdgeModeType);
+    EdgeModeType edgeMode() const { return m_edgeMode; }
+    bool setEdgeMode(EdgeModeType);
 
-    void platformApplySoftware() override;
-    void dump() override;
+    static IntSize calculateKernelSize(const Filter&, FloatSize stdDeviation);
+    static IntSize calculateUnscaledKernelSize(FloatSize stdDeviation);
+    static IntSize calculateOutsetSize(FloatSize stdDeviation);
 
-    void determineAbsolutePaintRect() override;
-    static IntSize calculateKernelSize(const Filter&, const FloatPoint& stdDeviation);
-    static IntSize calculateUnscaledKernelSize(const FloatPoint& stdDeviation);
+    static IntOutsets calculateOutsets(const FloatSize& stdDeviation);
 
-    WTF::TextStream& externalRepresentation(WTF::TextStream&, int indention) const override;
+    template<class Encoder> void encode(Encoder&) const;
+    template<class Decoder> static std::optional<Ref<FEGaussianBlur>> decode(Decoder&);
 
 private:
-    static const int s_minimalRectDimension = 100 * 100; // Empirical data limit for parallel jobs
+    FEGaussianBlur(float x, float y, EdgeModeType);
 
-    template<typename Type>
-    friend class ParallelJobs;
+    FloatRect calculateImageRect(const Filter&, const FilterImageVector& inputs, const FloatRect& primitiveSubregion) const override;
 
-    struct PlatformApplyParameters {
-        FEGaussianBlur* filter;
-        RefPtr<Uint8ClampedArray> srcPixelArray;
-        RefPtr<Uint8ClampedArray> dstPixelArray;
-        int width;
-        int height;
-        unsigned kernelSizeX;
-        unsigned kernelSizeY;
-    };
+    bool resultIsAlphaImage(const FilterImageVector& inputs) const override;
 
-    static void platformApplyWorker(PlatformApplyParameters*);
+    std::unique_ptr<FilterEffectApplier> createSoftwareApplier() const override;
 
-    FEGaussianBlur(Filter&, float, float, EdgeModeType);
-
-    inline void platformApply(Uint8ClampedArray* srcPixelArray, Uint8ClampedArray* tmpPixelArray, unsigned kernelSizeX, unsigned kernelSizeY, IntSize& paintSize);
-
-    inline void platformApplyGeneric(Uint8ClampedArray* srcPixelArray, Uint8ClampedArray* tmpPixelArray, unsigned kernelSizeX, unsigned kernelSizeY, IntSize& paintSize);
+    WTF::TextStream& externalRepresentation(WTF::TextStream&, FilterRepresentation) const override;
 
     float m_stdX;
     float m_stdY;
     EdgeModeType m_edgeMode;
 };
 
+template<class Encoder>
+void FEGaussianBlur::encode(Encoder& encoder) const
+{
+    encoder << m_stdX;
+    encoder << m_stdY;
+    encoder << m_edgeMode;
+}
+
+template<class Decoder>
+std::optional<Ref<FEGaussianBlur>> FEGaussianBlur::decode(Decoder& decoder)
+{
+    std::optional<float> stdX;
+    decoder >> stdX;
+    if (!stdX)
+        return std::nullopt;
+
+    std::optional<float> stdY;
+    decoder >> stdY;
+    if (!stdY)
+        return std::nullopt;
+
+    std::optional<EdgeModeType> edgeMode;
+    decoder >> edgeMode;
+    if (!edgeMode)
+        return std::nullopt;
+
+    return FEGaussianBlur::create(*stdX, *stdY, *edgeMode);
+}
+
 } // namespace WebCore
 
-#endif // FEGaussianBlur_h
+SPECIALIZE_TYPE_TRAITS_FILTER_EFFECT(FEGaussianBlur)

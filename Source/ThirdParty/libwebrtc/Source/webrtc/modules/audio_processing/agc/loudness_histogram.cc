@@ -8,13 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/agc/loudness_histogram.h"
+#include "modules/audio_processing/agc/loudness_histogram.h"
+
+#include <string.h>
 
 #include <cmath>
-#include <cstring>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/include/module_common_types.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -114,7 +114,7 @@ void LoudnessHistogram::RemoveOldestEntryAndUpdate() {
 
 void LoudnessHistogram::RemoveTransient() {
   // Don't expect to be here if high-activity region is longer than
-  // |kTransientWidthThreshold| or there has not been any transient.
+  // `kTransientWidthThreshold` or there has not been any transient.
   RTC_DCHECK_LE(len_high_activity_, kTransientWidthThreshold);
   int index =
       (buffer_index_ > 0) ? (buffer_index_ - 1) : len_circular_buffer_ - 1;

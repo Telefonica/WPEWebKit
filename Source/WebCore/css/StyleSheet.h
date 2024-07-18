@@ -24,13 +24,16 @@
 #include <wtf/Forward.h>
 #include <wtf/RefCounted.h>
 
+namespace WTF {
+class TextStream;
+}
+
 namespace WebCore {
 
 class CSSImportRule;
 class MediaList;
 class Node;
 class StyleSheet;
-class URL;
 
 class StyleSheet : public RefCounted<StyleSheet> {
 public:
@@ -51,6 +54,10 @@ public:
     virtual bool isLoading() const = 0;
     virtual bool isCSSStyleSheet() const { return false; }
     virtual bool isXSLStyleSheet() const { return false; }
+
+    virtual String debugDescription() const = 0;
 };
+
+TextStream& operator<<(TextStream&, const StyleSheet&);
 
 } // namespace WebCore

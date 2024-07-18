@@ -25,24 +25,31 @@
 
 #pragma once
 
+#include "ContextDestructionObserver.h"
+#include "ExceptionOr.h"
 #include <wtf/Forward.h>
 #include <wtf/RefCounted.h>
 #include <wtf/UniqueRef.h>
 #include <wtf/Vector.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
+class GPU;
 class ScriptExecutionContext;
 class ServiceWorkerContainer;
+class StorageManager;
+class WebCoreOpaqueRoot;
+class WebLockManager;
 
-class NavigatorBase : public RefCounted<NavigatorBase> {
+class NavigatorBase : public RefCounted<NavigatorBase>, public ContextDestructionObserver, public CanMakeWeakPtr<NavigatorBase> {
 public:
     virtual ~NavigatorBase();
 
     static String appName();
     String appVersion() const;
-    virtual String userAgent() const = 0;
-    static String platform();
+    virtual const String& userAgent() const = 0;
+    virtual String platform() const;
 
     static String appCodeName();
     static String product();
@@ -50,21 +57,33 @@ public:
     static String vendor();
     static String vendorSub();
 
-    static bool onLine();
+    virtual bool onLine() const = 0;
 
     static String language();
     static Vector<String> languages();
 
+    StorageManager& storage();
+    WebLockManager& locks();
+
+    static int hardwareConcurrency();
+
 protected:
-    explicit NavigatorBase(ScriptExecutionContext&);
+    explicit NavigatorBase(ScriptExecutionContext*);
+
+private:
+    RefPtr<StorageManager> m_storageManager;
+    RefPtr<WebLockManager> m_webLockManager;
 
 #if ENABLE(SERVICE_WORKER)
 public:
-    ServiceWorkerContainer* serviceWorker();
+    ServiceWorkerContainer& serviceWorker();
+    ExceptionOr<ServiceWorkerContainer&> serviceWorker(ScriptExecutionContext&);
 
 private:
-    UniqueRef<ServiceWorkerContainer> m_serviceWorkerContainer;
+    std::unique_ptr<ServiceWorkerContainer> m_serviceWorkerContainer;
 #endif
 };
+
+WebCoreOpaqueRoot root(NavigatorBase*);
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,158 +33,42 @@
 #import "Heap.h"
 #import "JSContextInternal.h"
 #import "JSValueInternal.h"
-#import "Weak.h"
+#import "JSWeakValue.h"
 #import "WeakHandleOwner.h"
 #import "ObjcRuntimeExtras.h"
 #import "JSCInlines.h"
 #import <wtf/NeverDestroyed.h>
-#import <wtf/spi/cocoa/NSMapTableSPI.h>
+#import <wtf/RetainPtr.h>
 
-class JSManagedValueHandleOwner : public JSC::WeakHandleOwner {
+class JSManagedValueHandleOwner final : public JSC::WeakHandleOwner {
 public:
-    void finalize(JSC::Handle<JSC::Unknown>, void* context) override;
-    bool isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, JSC::SlotVisitor&) override;
+    void finalize(JSC::Handle<JSC::Unknown>, void* context) final;
+    bool isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, JSC::AbstractSlotVisitor&, const char**) final;
 };
 
-static JSManagedValueHandleOwner* managedValueHandleOwner()
+static JSManagedValueHandleOwner& managedValueHandleOwner()
 {
     static NeverDestroyed<JSManagedValueHandleOwner> jsManagedValueHandleOwner;
-    return &jsManagedValueHandleOwner.get();
+    return jsManagedValueHandleOwner;
 }
-
-class WeakValueRef {
-public:
-    WeakValueRef()
-        : m_tag(NotSet)
-    {
-    }
-
-    ~WeakValueRef()
-    {
-        clear();
-    }
-
-    void clear()
-    {
-        switch (m_tag) {
-        case NotSet:
-            return;
-        case Primitive:
-            u.m_primitive = JSC::JSValue();
-            return;
-        case Object:
-            u.m_object.clear();
-            return;
-        case String:
-            u.m_string.clear();
-            return;
-        }
-        RELEASE_ASSERT_NOT_REACHED();
-    }
-
-    bool isClear() const
-    {
-        switch (m_tag) {
-        case NotSet:
-            return true;
-        case Primitive:
-            return !u.m_primitive;
-        case Object:
-            return !u.m_object;
-        case String:
-            return !u.m_string;
-        }
-        RELEASE_ASSERT_NOT_REACHED();
-    }
-
-    bool isSet() const { return m_tag != NotSet; }
-    bool isPrimitive() const { return m_tag == Primitive; }
-    bool isObject() const { return m_tag == Object; }
-    bool isString() const { return m_tag == String; }
-
-    void setPrimitive(JSC::JSValue primitive)
-    {
-        ASSERT(!isSet());
-        ASSERT(!u.m_primitive);
-        ASSERT(primitive.isPrimitive());
-        m_tag = Primitive;
-        u.m_primitive = primitive;
-    }
-
-    void setObject(JSC::JSObject* object, void* context)
-    {
-        ASSERT(!isSet());
-        ASSERT(!u.m_object);
-        m_tag = Object;
-        JSC::Weak<JSC::JSObject> weak(object, managedValueHandleOwner(), context);
-        u.m_object.swap(weak);
-    }
-
-    void setString(JSC::JSString* string, void* context)
-    {
-        ASSERT(!isSet());
-        ASSERT(!u.m_object);
-        m_tag = String;
-        JSC::Weak<JSC::JSString> weak(string, managedValueHandleOwner(), context);
-        u.m_string.swap(weak);
-    }
-
-    JSC::JSObject* object()
-    {
-        ASSERT(isObject());
-        return u.m_object.get();
-    }
-
-    JSC::JSValue primitive()
-    {
-        ASSERT(isPrimitive());
-        return u.m_primitive;
-    }
-
-    JSC::JSString* string()
-    {
-        ASSERT(isString());
-        return u.m_string.get();
-    }
-
-private:
-    enum WeakTypeTag { NotSet, Primitive, Object, String };
-    WeakTypeTag m_tag;
-    union WeakValueUnion {
-    public:
-        WeakValueUnion ()
-            : m_primitive(JSC::JSValue())
-        {
-        }
-
-        ~WeakValueUnion()
-        {
-            ASSERT(!m_primitive);
-        }
-
-        JSC::JSValue m_primitive;
-        JSC::Weak<JSC::JSObject> m_object;
-        JSC::Weak<JSC::JSString> m_string;
-    } u;
-};
 
 @implementation JSManagedValue {
     JSC::Weak<JSC::JSGlobalObject> m_globalObject;
     RefPtr<JSC::JSLock> m_lock;
-    WeakValueRef m_weakValue;
-    NSMapTable *m_owners;
+    JSC::JSWeakValue m_weakValue;
+    RetainPtr<NSMapTable> m_owners;
 }
 
 + (JSManagedValue *)managedValueWithValue:(JSValue *)value
 {
-    return [[[self alloc] initWithValue:value] autorelease];
+    return adoptNS([[self alloc] initWithValue:value]).autorelease();
 }
 
 + (JSManagedValue *)managedValueWithValue:(JSValue *)value andOwner:(id)owner
 {
-    JSManagedValue *managedValue = [[self alloc] initWithValue:value];
-    [value.context.virtualMachine addManagedReference:managedValue withOwner:owner];
-    return [managedValue autorelease];
+    auto managedValue = adoptNS([[self alloc] initWithValue:value]);
+    [value.context.virtualMachine addManagedReference:managedValue.get() withOwner:owner];
+    return managedValue.autorelease();
 }
 
 - (instancetype)init
@@ -201,22 +85,22 @@ private:
     if (!value)
         return self;
 
-    JSC::ExecState* exec = toJS([value.context JSGlobalContextRef]);
-    JSC::JSGlobalObject* globalObject = exec->lexicalGlobalObject();
-    JSC::Weak<JSC::JSGlobalObject> weak(globalObject, managedValueHandleOwner(), self);
+    JSC::JSGlobalObject* globalObject = toJS([value.context JSGlobalContextRef]);
+    auto& owner = managedValueHandleOwner();
+    JSC::Weak<JSC::JSGlobalObject> weak(globalObject, &owner, (__bridge void*)self);
     m_globalObject.swap(weak);
 
-    m_lock = &exec->vm().apiLock();
+    m_lock = &globalObject->vm().apiLock();
 
     NSPointerFunctionsOptions weakIDOptions = NSPointerFunctionsWeakMemory | NSPointerFunctionsObjectPersonality;
     NSPointerFunctionsOptions integerOptions = NSPointerFunctionsOpaqueMemory | NSPointerFunctionsIntegerPersonality;
-    m_owners = [[NSMapTable alloc] initWithKeyOptions:weakIDOptions valueOptions:integerOptions capacity:1];
+    m_owners = adoptNS([[NSMapTable alloc] initWithKeyOptions:weakIDOptions valueOptions:integerOptions capacity:1]);
 
-    JSC::JSValue jsValue = toJS(exec, [value JSValueRef]);
+    JSC::JSValue jsValue = toJS(globalObject, [value JSValueRef]);
     if (jsValue.isObject())
-        m_weakValue.setObject(JSC::jsCast<JSC::JSObject*>(jsValue.asCell()), self);
+        m_weakValue.setObject(JSC::jsCast<JSC::JSObject*>(jsValue.asCell()), owner, (__bridge void*)self);
     else if (jsValue.isString())
-        m_weakValue.setString(JSC::jsCast<JSC::JSString*>(jsValue.asCell()), self);
+        m_weakValue.setString(JSC::jsCast<JSC::JSString*>(jsValue.asCell()), owner, (__bridge void*)self);
     else
         m_weakValue.setPrimitive(jsValue);
     return self;
@@ -226,39 +110,37 @@ private:
 {
     JSVirtualMachine *virtualMachine = [[[self value] context] virtualMachine];
     if (virtualMachine) {
-        NSMapTable *copy = [m_owners copy];
+        auto copy = adoptNS([m_owners copy]);
         for (id owner in [copy keyEnumerator]) {
-            size_t count = reinterpret_cast<size_t>(NSMapGet(m_owners, owner));
+            size_t count = reinterpret_cast<size_t>(NSMapGet(m_owners.get(), (__bridge void*)owner));
             while (count--)
                 [virtualMachine removeManagedReference:self withOwner:owner];
         }
-        [copy release];
     }
 
     [self disconnectValue];
-    [m_owners release];
     [super dealloc];
 }
 
 - (void)didAddOwner:(id)owner
 {
-    size_t count = reinterpret_cast<size_t>(NSMapGet(m_owners, owner));
-    NSMapInsert(m_owners, owner, reinterpret_cast<void*>(count + 1));
+    size_t count = reinterpret_cast<size_t>(NSMapGet(m_owners.get(), (__bridge void*)owner));
+    NSMapInsert(m_owners.get(), (__bridge void*)owner, reinterpret_cast<void*>(count + 1));
 }
 
 - (void)didRemoveOwner:(id)owner
 {
-    size_t count = reinterpret_cast<size_t>(NSMapGet(m_owners, owner));
+    size_t count = reinterpret_cast<size_t>(NSMapGet(m_owners.get(), (__bridge void*)owner));
 
     if (!count)
         return;
 
     if (count == 1) {
-        NSMapRemove(m_owners, owner);
+        NSMapRemove(m_owners.get(), (__bridge void*)owner);
         return;
     }
 
-    NSMapInsert(m_owners, owner, reinterpret_cast<void*>(count - 1));
+    NSMapInsert(m_owners.get(), (__bridge void*)owner, reinterpret_cast<void*>(count - 1));
 }
 
 - (JSValue *)value
@@ -273,8 +155,8 @@ private:
         return nil;
     if (m_weakValue.isClear())
         return nil;
-    JSC::ExecState* exec = m_globalObject->globalExec();
-    JSContext *context = [JSContext contextWithJSGlobalContextRef:toGlobalRef(exec)];
+    JSC::JSGlobalObject* globalObject = m_globalObject.get();
+    JSContext *context = [JSContext contextWithJSGlobalContextRef:toGlobalRef(globalObject)];
     JSC::JSValue value;
     if (m_weakValue.isPrimitive())
         value = m_weakValue.primitive();
@@ -282,7 +164,7 @@ private:
         value = m_weakValue.string();
     else
         value = m_weakValue.object();
-    return [JSValue valueWithJSValueRef:toRef(exec, value) inContext:context];
+    return [JSValue valueWithJSValueRef:toRef(globalObject, value) inContext:context];
 }
 
 - (void)disconnectValue
@@ -297,15 +179,17 @@ private:
 - (void)disconnectValue;
 @end
 
-bool JSManagedValueHandleOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, JSC::SlotVisitor& visitor)
+bool JSManagedValueHandleOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, JSC::AbstractSlotVisitor& visitor, const char** reason)
 {
-    JSManagedValue *managedValue = static_cast<JSManagedValue *>(context);
-    return visitor.containsOpaqueRoot(managedValue);
+    if (UNLIKELY(reason))
+        *reason = "JSManagedValue is opaque root";
+    JSManagedValue *managedValue = (__bridge JSManagedValue *)context;
+    return visitor.containsOpaqueRoot((__bridge void*)managedValue);
 }
 
 void JSManagedValueHandleOwner::finalize(JSC::Handle<JSC::Unknown>, void* context)
 {
-    JSManagedValue *managedValue = static_cast<JSManagedValue *>(context);
+    JSManagedValue *managedValue = (__bridge JSManagedValue *)context;
     [managedValue disconnectValue];
 }
 

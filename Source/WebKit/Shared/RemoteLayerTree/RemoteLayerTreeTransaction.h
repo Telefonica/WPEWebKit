@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,21 +25,28 @@
 
 #pragma once
 
+#include "DrawingAreaInfo.h"
 #include "EditorState.h"
 #include "GenericCallback.h"
 #include "PlatformCAAnimationRemote.h"
 #include "RemoteLayerBackingStore.h"
+#include "TransactionID.h"
 #include <WebCore/Color.h>
 #include <WebCore/FilterOperations.h>
 #include <WebCore/FloatPoint3D.h>
 #include <WebCore/FloatSize.h>
-#include <WebCore/LayoutMilestones.h>
+#include <WebCore/LayoutMilestone.h>
+#include <WebCore/Model.h>
 #include <WebCore/PlatformCALayer.h>
 #include <WebCore/TransformationMatrix.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
+
+#if PLATFORM(IOS_FAMILY)
+#include "DynamicViewportSizeUpdate.h"
+#endif
 
 namespace IPC {
 class Decoder;
@@ -48,53 +55,59 @@ class Encoder;
 
 namespace WebKit {
 
-class PlatformCALayerRemote;
-
 class RemoteLayerTreeTransaction {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    enum LayerChanges {
-        NoChange                        = 0,
-        NameChanged                     = 1LLU << 1,
-        ChildrenChanged                 = 1LLU << 2,
-        PositionChanged                 = 1LLU << 3,
-        BoundsChanged                   = 1LLU << 4,
-        BackgroundColorChanged          = 1LLU << 5,
-        AnchorPointChanged              = 1LLU << 6,
-        BorderWidthChanged              = 1LLU << 7,
-        BorderColorChanged              = 1LLU << 8,
-        OpacityChanged                  = 1LLU << 9,
-        TransformChanged                = 1LLU << 10,
-        SublayerTransformChanged        = 1LLU << 11,
-        HiddenChanged                   = 1LLU << 12,
-        GeometryFlippedChanged          = 1LLU << 13,
-        DoubleSidedChanged              = 1LLU << 14,
-        MasksToBoundsChanged            = 1LLU << 15,
-        OpaqueChanged                   = 1LLU << 16,
-        ContentsHiddenChanged           = 1LLU << 17,
-        MaskLayerChanged                = 1LLU << 18,
-        ClonedContentsChanged           = 1LLU << 19,
-        ContentsRectChanged             = 1LLU << 20,
-        ContentsScaleChanged            = 1LLU << 21,
-        CornerRadiusChanged             = 1LLU << 22,
-        ShapeRoundedRectChanged         = 1LLU << 23,
-        ShapePathChanged                = 1LLU << 24,
-        MinificationFilterChanged       = 1LLU << 25,
-        MagnificationFilterChanged      = 1LLU << 26,
-        BlendModeChanged                = 1LLU << 27,
-        WindRuleChanged                 = 1LLU << 28,
-        SpeedChanged                    = 1LLU << 29,
-        TimeOffsetChanged               = 1LLU << 30,
-        BackingStoreChanged             = 1LLU << 31,
-        BackingStoreAttachmentChanged   = 1LLU << 32,
-        FiltersChanged                  = 1LLU << 33,
-        AnimationsChanged               = 1LLU << 34,
-        EdgeAntialiasingMaskChanged     = 1LLU << 35,
-        CustomAppearanceChanged         = 1LLU << 36,
-        UserInteractionEnabledChanged   = 1LLU << 37,
+    enum LayerChange {
+        NameChanged                         = 1LLU << 1,
+        ChildrenChanged                     = 1LLU << 2,
+        PositionChanged                     = 1LLU << 3,
+        BoundsChanged                       = 1LLU << 4,
+        BackgroundColorChanged              = 1LLU << 5,
+        AnchorPointChanged                  = 1LLU << 6,
+        BorderWidthChanged                  = 1LLU << 7,
+        BorderColorChanged                  = 1LLU << 8,
+        OpacityChanged                      = 1LLU << 9,
+        TransformChanged                    = 1LLU << 10,
+        SublayerTransformChanged            = 1LLU << 11,
+        HiddenChanged                       = 1LLU << 12,
+        GeometryFlippedChanged              = 1LLU << 13,
+        DoubleSidedChanged                  = 1LLU << 14,
+        MasksToBoundsChanged                = 1LLU << 15,
+        OpaqueChanged                       = 1LLU << 16,
+        ContentsHiddenChanged               = 1LLU << 17,
+        MaskLayerChanged                    = 1LLU << 18,
+        ClonedContentsChanged               = 1LLU << 19,
+        ContentsRectChanged                 = 1LLU << 20,
+        ContentsScaleChanged                = 1LLU << 21,
+        CornerRadiusChanged                 = 1LLU << 22,
+        ShapeRoundedRectChanged             = 1LLU << 23,
+        ShapePathChanged                    = 1LLU << 24,
+        MinificationFilterChanged           = 1LLU << 25,
+        MagnificationFilterChanged          = 1LLU << 26,
+        BlendModeChanged                    = 1LLU << 27,
+        WindRuleChanged                     = 1LLU << 28,
+        SpeedChanged                        = 1LLU << 29,
+        TimeOffsetChanged                   = 1LLU << 30,
+        BackingStoreChanged                 = 1LLU << 31,
+        BackingStoreAttachmentChanged       = 1LLU << 32,
+        FiltersChanged                      = 1LLU << 33,
+        AnimationsChanged                   = 1LLU << 34,
+        EdgeAntialiasingMaskChanged         = 1LLU << 35,
+        CustomAppearanceChanged             = 1LLU << 36,
+        UserInteractionEnabledChanged       = 1LLU << 37,
+        EventRegionChanged                  = 1LLU << 38,
+#if HAVE(CORE_ANIMATION_SEPARATED_LAYERS)
+        SeparatedChanged                    = 1LLU << 39,
+#if HAVE(CORE_ANIMATION_SEPARATED_PORTALS)
+        SeparatedPortalChanged              = 1LLU << 40,
+        DescendentOfSeparatedPortalChanged  = 1LLU << 41,
+#endif
+#endif
     };
-    typedef uint64_t LayerChange;
 
     struct LayerCreationProperties {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
         LayerCreationProperties();
 
         void encode(IPC::Encoder&) const;
@@ -105,28 +118,33 @@ public:
 
         uint32_t hostingContextID;
         float hostingDeviceScaleFactor;
+        
+#if ENABLE(MODEL_ELEMENT)
+        RefPtr<WebCore::Model> model;
+#endif
     };
 
     struct LayerProperties {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
         LayerProperties();
         LayerProperties(const LayerProperties& other);
 
         void encode(IPC::Encoder&) const;
-        static bool decode(IPC::Decoder&, LayerProperties&);
+        static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, LayerProperties&);
 
-        void notePropertiesChanged(LayerChange changeFlags)
+        void notePropertiesChanged(OptionSet<LayerChange> changeFlags)
         {
-            changedProperties |= changeFlags;
-            everChangedProperties |= changeFlags;
+            changedProperties.add(changeFlags);
+            everChangedProperties.add(changeFlags);
         }
 
         void resetChangedProperties()
         {
-            changedProperties = RemoteLayerTreeTransaction::NoChange;
+            changedProperties = { };
         }
 
-        LayerChange changedProperties;
-        LayerChange everChangedProperties;
+        OptionSet<LayerChange> changedProperties;
+        OptionSet<LayerChange> everChangedProperties;
 
         String name;
         std::unique_ptr<WebCore::TransformationMatrix> transform;
@@ -169,13 +187,23 @@ public:
         bool opaque;
         bool contentsHidden;
         bool userInteractionEnabled;
+        WebCore::EventRegion eventRegion;
+#if HAVE(CORE_ANIMATION_SEPARATED_LAYERS)
+        bool isSeparated;
+#if HAVE(CORE_ANIMATION_SEPARATED_PORTALS)
+        bool isSeparatedPortal;
+        bool isDescendentOfSeparatedPortal;
+#endif
+#endif
     };
 
     explicit RemoteLayerTreeTransaction();
     ~RemoteLayerTreeTransaction();
+    RemoteLayerTreeTransaction(RemoteLayerTreeTransaction&&);
+    RemoteLayerTreeTransaction& operator=(RemoteLayerTreeTransaction&&);
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, RemoteLayerTreeTransaction&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, RemoteLayerTreeTransaction&);
 
     WebCore::GraphicsLayer::PlatformLayerID rootLayerID() const { return m_rootLayerID; }
     void setRootLayerID(WebCore::GraphicsLayer::PlatformLayerID);
@@ -185,7 +213,7 @@ public:
     void setLayerIDsWithNewlyUnreachableBackingStore(Vector<WebCore::GraphicsLayer::PlatformLayerID>);
 
 #if !defined(NDEBUG) || !LOG_DISABLED
-    WTF::CString description() const;
+    String description() const;
     void dump() const;
 #endif
 
@@ -195,7 +223,7 @@ public:
     Vector<WebCore::GraphicsLayer::PlatformLayerID> destroyedLayers() const { return m_destroyedLayerIDs; }
     Vector<WebCore::GraphicsLayer::PlatformLayerID> layerIDsWithNewlyUnreachableBackingStore() const { return m_layerIDsWithNewlyUnreachableBackingStore; }
 
-    Vector<RefPtr<PlatformCALayerRemote>>& changedLayers() { return m_changedLayers; }
+    HashSet<RefPtr<PlatformCALayerRemote>>& changedLayers() { return m_changedLayers; }
 
     const LayerPropertiesMap& changedLayerProperties() const { return m_changedLayerProperties; }
     LayerPropertiesMap& changedLayerProperties() { return m_changedLayerProperties; }
@@ -214,14 +242,18 @@ public:
     
     WebCore::LayoutPoint maxStableLayoutViewportOrigin() const { return m_maxStableLayoutViewportOrigin; }
     void setMaxStableLayoutViewportOrigin(const WebCore::LayoutPoint& point) { m_maxStableLayoutViewportOrigin = point; };
-    
+
+    WebCore::Color themeColor() const { return m_themeColor; }
+    void setThemeColor(WebCore::Color color) { m_themeColor = color; }
+
     WebCore::Color pageExtendedBackgroundColor() const { return m_pageExtendedBackgroundColor; }
     void setPageExtendedBackgroundColor(WebCore::Color color) { m_pageExtendedBackgroundColor = color; }
 
-#if PLATFORM(MAC)
+    WebCore::Color sampledPageTopColor() const { return m_sampledPageTopColor; }
+    void setSampledPageTopColor(WebCore::Color color) { m_sampledPageTopColor = color; }
+
     WebCore::IntPoint scrollPosition() const { return m_scrollPosition; }
     void setScrollPosition(WebCore::IntPoint p) { m_scrollPosition = p; }
-#endif
 
     double pageScaleFactor() const { return m_pageScaleFactor; }
     void setPageScaleFactor(double pageScaleFactor) { m_pageScaleFactor = pageScaleFactor; }
@@ -259,23 +291,31 @@ public:
     bool avoidsUnsafeArea() const { return m_avoidsUnsafeArea; }
     void setAvoidsUnsafeArea(bool avoidsUnsafeArea) { m_avoidsUnsafeArea = avoidsUnsafeArea; }
 
-    uint64_t transactionID() const { return m_transactionID; }
-    void setTransactionID(uint64_t transactionID) { m_transactionID = transactionID; }
+    TransactionID transactionID() const { return m_transactionID; }
+    void setTransactionID(TransactionID transactionID) { m_transactionID = transactionID; }
+
+    ActivityStateChangeID activityStateChangeID() const { return m_activityStateChangeID; }
+    void setActivityStateChangeID(ActivityStateChangeID activityStateChangeID) { m_activityStateChangeID = activityStateChangeID; }
 
     typedef CallbackID TransactionCallbackID;
     const Vector<TransactionCallbackID>& callbackIDs() const { return m_callbackIDs; }
     void setCallbackIDs(Vector<TransactionCallbackID>&& callbackIDs) { m_callbackIDs = WTFMove(callbackIDs); }
 
-    WebCore::LayoutMilestones newlyReachedLayoutMilestones() const { return m_newlyReachedLayoutMilestones; }
-    void setNewlyReachedLayoutMilestones(WebCore::LayoutMilestones milestones) { m_newlyReachedLayoutMilestones = milestones; }
+    OptionSet<WebCore::LayoutMilestone> newlyReachedPaintingMilestones() const { return m_newlyReachedPaintingMilestones; }
+    void setNewlyReachedPaintingMilestones(OptionSet<WebCore::LayoutMilestone> milestones) { m_newlyReachedPaintingMilestones = milestones; }
 
     bool hasEditorState() const { return !!m_editorState; }
     const EditorState& editorState() const { return m_editorState.value(); }
     void setEditorState(const EditorState& editorState) { m_editorState = editorState; }
-    
+
+#if PLATFORM(IOS_FAMILY)
+    std::optional<DynamicViewportSizeUpdateID> dynamicViewportSizeUpdateID() const { return m_dynamicViewportSizeUpdateID; }
+    void setDynamicViewportSizeUpdateID(DynamicViewportSizeUpdateID resizeID) { m_dynamicViewportSizeUpdateID = resizeID; }
+#endif
+
 private:
     WebCore::GraphicsLayer::PlatformLayerID m_rootLayerID;
-    Vector<RefPtr<PlatformCALayerRemote>> m_changedLayers; // Only used in the Web process.
+    HashSet<RefPtr<PlatformCALayerRemote>> m_changedLayers; // Only used in the Web process.
     LayerPropertiesMap m_changedLayerProperties; // Only used in the UI process.
 
     Vector<LayerCreationProperties> m_createdLayers;
@@ -290,18 +330,19 @@ private:
     WebCore::LayoutSize m_baseLayoutViewportSize;
     WebCore::LayoutPoint m_minStableLayoutViewportOrigin;
     WebCore::LayoutPoint m_maxStableLayoutViewportOrigin;
-#if PLATFORM(MAC)
     WebCore::IntPoint m_scrollPosition;
-#endif
+    WebCore::Color m_themeColor;
     WebCore::Color m_pageExtendedBackgroundColor;
+    WebCore::Color m_sampledPageTopColor;
     double m_pageScaleFactor { 1 };
     double m_minimumScaleFactor { 1 };
     double m_maximumScaleFactor { 1 };
     double m_initialScaleFactor { 1 };
     double m_viewportMetaTagWidth { -1 };
     uint64_t m_renderTreeSize { 0 };
-    uint64_t m_transactionID { 0 };
-    WebCore::LayoutMilestones m_newlyReachedLayoutMilestones { 0 };
+    TransactionID m_transactionID;
+    ActivityStateChangeID m_activityStateChangeID { ActivityStateChangeAsynchronous };
+    OptionSet<WebCore::LayoutMilestone> m_newlyReachedPaintingMilestones;
     bool m_scaleWasSetByUIProcess { false };
     bool m_allowsUserScaling { false };
     bool m_avoidsUnsafeArea { true };
@@ -309,7 +350,65 @@ private:
     bool m_viewportMetaTagCameFromImageDocument { false };
     bool m_isInStableState { false };
 
-    std::optional<EditorState> m_editorState { std::nullopt };
+    std::optional<EditorState> m_editorState;
+#if PLATFORM(IOS_FAMILY)
+    std::optional<DynamicViewportSizeUpdateID> m_dynamicViewportSizeUpdateID;
+#endif
 };
 
 } // namespace WebKit
+
+namespace WTF {
+
+template<> struct EnumTraits<WebKit::RemoteLayerTreeTransaction::LayerChange> {
+    using values = EnumValues<
+        WebKit::RemoteLayerTreeTransaction::LayerChange,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::NameChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ChildrenChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::PositionChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BoundsChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BackgroundColorChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::AnchorPointChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BorderWidthChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BorderColorChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::OpacityChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::TransformChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::SublayerTransformChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::HiddenChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::GeometryFlippedChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::DoubleSidedChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::MasksToBoundsChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::OpaqueChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ContentsHiddenChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::MaskLayerChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ClonedContentsChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ContentsRectChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ContentsScaleChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::CornerRadiusChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ShapeRoundedRectChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::ShapePathChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::MinificationFilterChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::MagnificationFilterChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BlendModeChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::WindRuleChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::SpeedChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::TimeOffsetChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BackingStoreChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::BackingStoreAttachmentChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::FiltersChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::AnimationsChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::EdgeAntialiasingMaskChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::CustomAppearanceChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::UserInteractionEnabledChanged,
+        WebKit::RemoteLayerTreeTransaction::LayerChange::EventRegionChanged
+#if HAVE(CORE_ANIMATION_SEPARATED_LAYERS)
+        , WebKit::RemoteLayerTreeTransaction::LayerChange::SeparatedChanged
+#if HAVE(CORE_ANIMATION_SEPARATED_PORTALS)
+        , WebKit::RemoteLayerTreeTransaction::LayerChange::SeparatedPortalChanged
+        , WebKit::RemoteLayerTreeTransaction::LayerChange::DescendentOfSeparatedPortalChanged
+#endif
+#endif
+    >;
+};
+
+} // namespace WTF

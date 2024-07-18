@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2005 Oliver Hunt <ojh16@student.canterbury.ac.nz>
+ * Copyright (C) 2022 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -38,10 +39,7 @@ Ref<SVGFESpotLightElement> SVGFESpotLightElement::create(const QualifiedName& ta
 
 Ref<LightSource> SVGFESpotLightElement::lightSource() const
 {
-    FloatPoint3D pos(x(), y(), z());
-    FloatPoint3D direction(pointsAtX(), pointsAtY(), pointsAtZ());
-
-    return SpotLightSource::create(pos, direction, specularExponent(), limitingConeAngle());
+    return SpotLightSource::create({ x(), y(), z() }, { pointsAtX(), pointsAtY(), pointsAtZ() }, specularExponent(), limitingConeAngle());
 }
 
-}
+} // namespace WebCore

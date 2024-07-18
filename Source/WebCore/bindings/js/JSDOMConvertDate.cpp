@@ -22,28 +22,32 @@
 #include "config.h"
 #include "JSDOMConvertDate.h"
 
-#include <heap/HeapInlines.h>
-#include <runtime/DateInstance.h>
-#include <runtime/JSCJSValueInlines.h>
-#include <runtime/JSGlobalObject.h>
-
-using namespace JSC;
+#include <JavaScriptCore/DateInstance.h>
+#include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/JSCJSValueInlines.h>
+#include <JavaScriptCore/JSGlobalObject.h>
 
 namespace WebCore {
+using namespace JSC;
 
-// FIXME: This should get passed a global object rather than getting it out of the ExecState.
-JSValue jsDate(ExecState& state, double value)
+JSValue jsDate(JSGlobalObject& lexicalGlobalObject, WallTime value)
 {
-    return DateInstance::create(state.vm(), state.lexicalGlobalObject()->dateStructure(), value);
+    return DateInstance::create(lexicalGlobalObject.vm(), lexicalGlobalObject.dateStructure(), value.secondsSinceEpoch().milliseconds());
 }
 
-double valueToDate(ExecState& state, JSValue value)
+WallTime valueToDate(JSC::JSGlobalObject& lexicalGlobalObject, JSValue value)
 {
-    if (value.isNumber())
-        return value.asNumber();
-    if (!value.inherits(state.vm(), DateInstance::info()))
-        return std::numeric_limits<double>::quiet_NaN();
-    return static_cast<DateInstance*>(value.toObject(&state))->internalNumber();
+    double milliseconds = std::numeric_limits<double>::quiet_NaN();
+
+    auto& vm = lexicalGlobalObject.vm();
+    if (value.inherits<DateInstance>())
+        milliseconds = jsCast<DateInstance*>(value)->internalNumber();
+    else if (value.isNumber())
+        milliseconds = value.asNumber();
+    else if (value.isString())
+        milliseconds = vm.dateCache.parseDate(&lexicalGlobalObject, vm, value.getString(&lexicalGlobalObject));
+
+    return WallTime::fromRawSeconds(Seconds::fromMilliseconds(milliseconds).value());
 }
 
 } // namespace WebCore

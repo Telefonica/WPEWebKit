@@ -126,11 +126,9 @@ static const NSString* JSTEvaluatorThreadContextKey = @"JSTEvaluatorThreadContex
 {
     self = [self init];
     if (self) {
-        __block NSError* scriptError = nil;
         dispatch_semaphore_t dsema = dispatch_semaphore_create(0);
         [self evaluateScript:script
-            completion:^(NSError* error) {
-                scriptError = error;
+            completion:^(NSError*) {
                 dispatch_semaphore_signal(dsema);
             }];
         dispatch_semaphore_wait(dsema, DISPATCH_TIME_FOREVER);
@@ -306,12 +304,12 @@ static void __JSTRunLoopSourceCancelCallBack(void* info, CFRunLoopRef rl, CFStri
                 NSError* error = nil;
                 if (task.evaluateBlock) {
                     [self _setupEvaluatorThreadContextIfNeeded];
-                    task.evaluateBlock(_jsContext);
-                    if (_jsContext.exception) {
-                        NSLog(@"Did fail on JSContext: %@", _jsContext.name);
-                        NSDictionary* userInfo = @{ NSLocalizedDescriptionKey : [_jsContext.exception[@"message"] toString] };
+                    task.evaluateBlock(self->_jsContext);
+                    if (self->_jsContext.exception) {
+                        NSLog(@"Did fail on JSContext: %@", self->_jsContext.name);
+                        NSDictionary* userInfo = @{ NSLocalizedDescriptionKey : [self->_jsContext.exception[@"message"] toString] };
                         error = [NSError errorWithDomain:@"JSTEvaluator" code:1 userInfo:userInfo];
-                        _jsContext.exception = nil;
+                        self->_jsContext.exception = nil;
                     }
                 }
                 [self _callCompletionHandler:task.completionHandler ifNeededWithError:error];
@@ -324,8 +322,8 @@ static void __JSTRunLoopSourceCancelCallBack(void* info, CFRunLoopRef rl, CFStri
         }
 
         dispatch_barrier_sync(_jsSourcePerformQueue, ^{
-            if ([_jsContext[@"counter"] toInt32] == scriptToEvaluate)
-                dispatch_semaphore_signal(_allScriptsDone);
+            if ([self->_jsContext[@"counter"] toInt32] == scriptToEvaluate)
+                dispatch_semaphore_signal(self->_allScriptsDone);
         });
     }
 }

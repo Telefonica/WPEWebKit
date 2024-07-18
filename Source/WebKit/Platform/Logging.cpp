@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  * Copyright (C) 2011 Samsung Electronics
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,33 +26,10 @@
 
 #include "config.h"
 #include "Logging.h"
-#include "LogInitialization.h"
-
-#include <wtf/text/CString.h>
 
 #if !LOG_DISABLED || !RELEASE_LOG_DISABLED
 
 #define DEFINE_WEBKIT2_LOG_CHANNEL(name) DEFINE_LOG_CHANNEL(name, LOG_CHANNEL_WEBKIT_SUBSYSTEM)
 WEBKIT2_LOG_CHANNELS(DEFINE_WEBKIT2_LOG_CHANNEL)
-
-static WTFLogChannel* logChannels[] = {
-    WEBKIT2_LOG_CHANNELS(LOG_CHANNEL_ADDRESS)
-};
-
-namespace WebKit {
-
-static const size_t logChannelCount = WTF_ARRAY_LENGTH(logChannels);
-
-void initializeLogChannelsIfNecessary()
-{
-    static bool haveInitializedLoggingChannels = false;
-    if (haveInitializedLoggingChannels)
-        return;
-    haveInitializedLoggingChannels = true;
-    
-    WTFInitializeLogChannelStatesFromString(logChannels, logChannelCount, logLevelString().utf8().data());
-}
-
-} // namespace WebKit
 
 #endif // !LOG_DISABLED || !RELEASE_LOG_DISABLED

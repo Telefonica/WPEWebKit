@@ -1,37 +1,25 @@
+include(GLib.cmake)
+include(inspector/remote/GLib.cmake)
+
 list(APPEND JavaScriptCore_LIBRARIES
     ${GLIB_LIBRARIES}
+    ${GLIB_GMODULE_LIBRARIES}
 )
-list(APPEND JavaScriptCore_INCLUDE_DIRECTORIES
+
+list(APPEND JavaScriptCore_SYSTEM_INCLUDE_DIRECTORIES
     ${GLIB_INCLUDE_DIRS}
-    ${WTF_DIR}
 )
 
-list(APPEND JavaScriptCore_SOURCES
-    API/JSRemoteInspector.cpp
-
-    inspector/remote/RemoteAutomationTarget.cpp
-    inspector/remote/RemoteControllableTarget.cpp
-    inspector/remote/RemoteInspectionTarget.cpp
-    inspector/remote/RemoteInspector.cpp
-
-    inspector/remote/glib/RemoteConnectionToTargetGlib.cpp
-    inspector/remote/glib/RemoteInspectorGlib.cpp
-    inspector/remote/glib/RemoteInspectorServer.cpp
-    inspector/remote/glib/RemoteInspectorUtils.cpp
+list(APPEND JavaScriptCore_PRIVATE_DEFINITIONS
+    JSC_COMPILATION
+    PKGLIBDIR="${CMAKE_INSTALL_FULL_LIBDIR}/wpe-webkit-${WPE_API_VERSION}"
 )
 
-set(WPE_INSTALLED_JAVASCRIPTCORE_HEADERS
-    API/JSBase.h
-    API/JSContextRef.h
-    API/JSObjectRef.h
-    API/JSStringRef.h
-    API/JSTypedArray.h
-    API/JSValueRef.h
-    API/JavaScript.h
-    API/WebKitAvailability.h
+install(FILES ${JavaScriptCore_PUBLIC_FRAMEWORK_HEADERS}
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/wpe-webkit-${WPE_API_VERSION}/JavaScriptCore"
 )
 
-install(FILES ${WPE_INSTALLED_JAVASCRIPTCORE_HEADERS}
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/wpe-${WPE_API_VERSION}/WPE/JavaScriptCore"
+install(FILES ${JavaScriptCore_INSTALLED_HEADERS}
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/wpe-webkit-${WPE_API_VERSION}/jsc"
     COMPONENT "Development"
 )

@@ -56,7 +56,6 @@
 
 #include <openssl/pem.h>
 
-#include <openssl/buf.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/mem.h>
@@ -176,6 +175,7 @@ EVP_PKEY *d2i_PKCS8PrivateKey_bio(BIO *bp, EVP_PKEY **x, pem_password_cb *cb,
     }
     p8inf = PKCS8_decrypt(p8, psbuf, klen);
     X509_SIG_free(p8);
+    OPENSSL_cleanse(psbuf, klen);
     if (!p8inf)
         return NULL;
     ret = EVP_PKCS82PKEY(p8inf);

@@ -42,8 +42,8 @@ public:
     virtual ~JPEG2000ImageDecoder() = default;
 
     // ScalableImageDecoder
-    String filenameExtension() const override { return m_format == Format::JP2 ? "jp2" : "j2k"; }
-    ImageFrame* frameBufferAtIndex(size_t index) override;
+    String filenameExtension() const override { return m_format == Format::JP2 ? "jp2"_s : "j2k"_s; }
+    ScalableImageDecoderFrame* frameBufferAtIndex(size_t index) override;
 
 private:
     JPEG2000ImageDecoder(Format, AlphaOption, GammaAndColorProfileOption);

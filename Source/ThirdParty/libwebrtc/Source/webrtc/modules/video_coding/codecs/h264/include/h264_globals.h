@@ -11,8 +11,14 @@
 // This file contains codec dependent definitions that are needed in
 // order to compile the WebRTC codebase, even if this codec is not used.
 
-#ifndef WEBRTC_MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_GLOBALS_H_
-#define WEBRTC_MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_GLOBALS_H_
+#ifndef MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_GLOBALS_H_
+#define MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_GLOBALS_H_
+
+#include <algorithm>
+#include <string>
+
+#include "modules/video_coding/codecs/interface/common_constants.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -40,17 +46,15 @@ enum class H264PacketizationMode {
 // This function is declared inline because it is not clear which
 // .cc file it should belong to.
 // TODO(hta): Refactor. https://bugs.webrtc.org/6842
-inline std::ostream& operator<<(std::ostream& stream,
-                                H264PacketizationMode mode) {
-  switch (mode) {
-    case H264PacketizationMode::NonInterleaved:
-      stream << "NonInterleaved";
-      break;
-    case H264PacketizationMode::SingleNalUnit:
-      stream << "SingleNalUnit";
-      break;
+// TODO(jonasolsson): Use absl::string_view instead when that's available.
+inline std::string ToString(H264PacketizationMode mode) {
+  if (mode == H264PacketizationMode::NonInterleaved) {
+    return "NonInterleaved";
+  } else if (mode == H264PacketizationMode::SingleNalUnit) {
+    return "SingleNalUnit";
   }
-  return stream;
+  RTC_DCHECK_NOTREACHED();
+  return "";
 }
 
 struct NaluInfo {
@@ -58,9 +62,14 @@ struct NaluInfo {
   int sps_id;
   int pps_id;
 
-  // Offset and size are only valid for non-FuA packets.
-  size_t offset;
-  size_t size;
+  friend bool operator==(const NaluInfo& lhs, const NaluInfo& rhs) {
+    return lhs.type == rhs.type && lhs.sps_id == rhs.sps_id &&
+           lhs.pps_id == rhs.pps_id;
+  }
+
+  friend bool operator!=(const NaluInfo& lhs, const NaluInfo& rhs) {
+    return !(lhs == rhs);
+  }
 };
 
 const size_t kMaxNalusPerPacket = 10;
@@ -79,8 +88,22 @@ struct RTPVideoHeaderH264 {
   // The packetization mode of this transport. Packetization mode
   // determines which packetization types are allowed when packetizing.
   H264PacketizationMode packetization_mode;
+
+  friend bool operator==(const RTPVideoHeaderH264& lhs,
+                         const RTPVideoHeaderH264& rhs) {
+    return lhs.nalu_type == rhs.nalu_type &&
+           lhs.packetization_type == rhs.packetization_type &&
+           std::equal(lhs.nalus, lhs.nalus + lhs.nalus_length, rhs.nalus,
+                      rhs.nalus + rhs.nalus_length) &&
+           lhs.packetization_mode == rhs.packetization_mode;
+  }
+
+  friend bool operator!=(const RTPVideoHeaderH264& lhs,
+                         const RTPVideoHeaderH264& rhs) {
+    return !(lhs == rhs);
+  }
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_GLOBALS_H_
+#endif  // MODULES_VIDEO_CODING_CODECS_H264_INCLUDE_H264_GLOBALS_H_

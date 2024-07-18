@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,14 +28,16 @@
 #include "CommonIdentifiers.h"
 #include "Identifier.h"
 #include <array>
+#include <type_traits>
 #include <wtf/SegmentedVector.h>
 
 namespace JSC {
 
     class ParserArenaDeletable;
 
+    DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(IdentifierArena);
     class IdentifierArena {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(IdentifierArena);
     public:
         IdentifierArena()
         {
@@ -43,11 +45,14 @@ namespace JSC {
         }
 
         template <typename T>
-        ALWAYS_INLINE const Identifier& makeIdentifier(VM*, const T* characters, size_t length);
-        ALWAYS_INLINE const Identifier& makeEmptyIdentifier(VM*);
-        ALWAYS_INLINE const Identifier& makeIdentifierLCharFromUChar(VM*, const UChar* characters, size_t length);
+        ALWAYS_INLINE const Identifier& makeIdentifier(VM&, const T* characters, size_t length);
+        ALWAYS_INLINE const Identifier& makeEmptyIdentifier(VM&);
+        ALWAYS_INLINE const Identifier& makeIdentifierLCharFromUChar(VM&, const UChar* characters, size_t length);
+        ALWAYS_INLINE const Identifier& makeIdentifier(VM&, SymbolImpl*);
 
-        const Identifier& makeNumericIdentifier(VM*, double number);
+        const Identifier* makeBigIntDecimalIdentifier(VM&, const Identifier&, uint8_t radix);
+        const Identifier& makeNumericIdentifier(VM&, double number);
+        const Identifier& makePrivateIdentifier(VM&, ASCIILiteral, unsigned);
 
     public:
         static const int MaximumCachableCharacter = 128;
@@ -56,9 +61,9 @@ namespace JSC {
         {
             m_identifiers.clear();
             for (int i = 0; i < MaximumCachableCharacter; i++)
-                m_shortIdentifiers[i] = 0;
+                m_shortIdentifiers[i] = nullptr;
             for (int i = 0; i < MaximumCachableCharacter; i++)
-                m_recentIdentifiers[i] = 0;
+                m_recentIdentifiers[i] = nullptr;
         }
 
     private:
@@ -68,10 +73,10 @@ namespace JSC {
     };
 
     template <typename T>
-    ALWAYS_INLINE const Identifier& IdentifierArena::makeIdentifier(VM* vm, const T* characters, size_t length)
+    ALWAYS_INLINE const Identifier& IdentifierArena::makeIdentifier(VM& vm, const T* characters, size_t length)
     {
         if (!length)
-            return vm->propertyNames->emptyIdentifier;
+            return vm.propertyNames->emptyIdentifier;
         if (characters[0] >= MaximumCachableCharacter) {
             m_identifiers.append(Identifier::fromString(vm, characters, length));
             return m_identifiers.last();
@@ -91,15 +96,22 @@ namespace JSC {
         return m_identifiers.last();
     }
 
-    ALWAYS_INLINE const Identifier& IdentifierArena::makeEmptyIdentifier(VM* vm)
+    ALWAYS_INLINE const Identifier& IdentifierArena::makeIdentifier(VM&, SymbolImpl* symbol)
     {
-        return vm->propertyNames->emptyIdentifier;
+        ASSERT(symbol);
+        m_identifiers.append(Identifier::fromUid(*symbol));
+        return m_identifiers.last();
     }
 
-    ALWAYS_INLINE const Identifier& IdentifierArena::makeIdentifierLCharFromUChar(VM* vm, const UChar* characters, size_t length)
+    ALWAYS_INLINE const Identifier& IdentifierArena::makeEmptyIdentifier(VM& vm)
+    {
+        return vm.propertyNames->emptyIdentifier;
+    }
+
+    ALWAYS_INLINE const Identifier& IdentifierArena::makeIdentifierLCharFromUChar(VM& vm, const UChar* characters, size_t length)
     {
         if (!length)
-            return vm->propertyNames->emptyIdentifier;
+            return vm.propertyNames->emptyIdentifier;
         if (characters[0] >= MaximumCachableCharacter) {
             m_identifiers.append(Identifier::createLCharFromUChar(vm, characters, length));
             return m_identifiers.last();
@@ -119,11 +131,15 @@ namespace JSC {
         return m_identifiers.last();
     }
     
-    inline const Identifier& IdentifierArena::makeNumericIdentifier(VM* vm, double number)
+    inline const Identifier& IdentifierArena::makeNumericIdentifier(VM& vm, double number)
     {
-        m_identifiers.append(Identifier::fromString(vm, String::numberToStringECMAScript(number)));
+        // FIXME: Why doesn't this use the Identifier::from overload that takes a double?
+        // Seems we are missing out on multiple optimizations by not using it.
+        m_identifiers.append(Identifier::fromString(vm, String::number(number)));
         return m_identifiers.last();
     }
+
+    DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(ParserArena);
 
     class ParserArena {
         WTF_MAKE_NONCOPYABLE(ParserArena);
@@ -153,17 +169,23 @@ namespace JSC {
             return block;
         }
 
+        template<typename T, typename = std::enable_if_t<std::is_base_of<ParserArenaDeletable, T>::value>>
         void* allocateDeletable(size_t size)
         {
-            ParserArenaDeletable* deletable = static_cast<ParserArenaDeletable*>(allocateFreeable(size));
+            // T may extend ParserArenaDeletable via multiple inheritance, but not as T's first
+            // base class. m_deletableObjects is expecting pointers to objects of the shape of
+            // ParserArenaDeletable. We ensure this by allocating T, and casting it to
+            // ParserArenaDeletable to get the correct pointer to append to m_deletableObjects.
+            T* instance = static_cast<T*>(allocateFreeable(size));
+            ParserArenaDeletable* deletable = static_cast<ParserArenaDeletable*>(instance);
             m_deletableObjects.append(deletable);
-            return deletable;
+            return instance;
         }
 
         IdentifierArena& identifierArena()
         {
             if (UNLIKELY (!m_identifierArena))
-                m_identifierArena = std::make_unique<IdentifierArena>();
+                m_identifierArena = makeUnique<IdentifierArena>();
             return *m_identifierArena;
         }
 

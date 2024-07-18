@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBConnectionToClient.h"
 #include "IDBRequestData.h"
 #include <wtf/HashSet.h>
@@ -63,7 +61,7 @@ public:
 private:
     ServerOpenDBRequest(IDBConnectionToClient&, const IDBRequestData&);
 
-    IDBConnectionToClient& m_connection;
+    Ref<IDBConnectionToClient> m_connection;
     IDBRequestData m_requestData;
 
     bool m_notifiedBlocked { false };
@@ -74,5 +72,3 @@ private:
 
 } // namespace IDBServer
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

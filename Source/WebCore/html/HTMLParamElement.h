@@ -27,11 +27,12 @@
 namespace WebCore {
 
 class HTMLParamElement final : public HTMLElement {
+    WTF_MAKE_ISO_ALLOCATED(HTMLParamElement);
 public:
     static Ref<HTMLParamElement> create(const QualifiedName&, Document&);
 
-    String name() const;
-    String value() const;
+    AtomString name() const;
+    AtomString value() const;
 
     static bool isURLParameter(const String&);
 

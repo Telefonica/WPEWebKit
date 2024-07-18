@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,12 +25,17 @@
 
 #pragma once
 
+#include <WebCore/LengthBox.h>
+#include <wtf/EnumTraits.h>
+
 #if USE(APPKIT)
 OBJC_CLASS NSPrintInfo;
 #elif PLATFORM(GTK)
-typedef struct _GtkPrintSettings GtkPrintSettings;
-typedef struct _GtkPageSetup GtkPageSetup;
 #include <wtf/glib/GRefPtr.h>
+
+typedef struct _GtkPageSetup GtkPageSetup;
+typedef struct _GtkPrintJob GtkPrintJob;
+typedef struct _GtkPrintSettings GtkPrintSettings;
 #else
 // FIXME: This should use the windows equivalent.
 class NSPrintInfo;
@@ -51,26 +56,44 @@ struct PrintInfo {
         PrintModeSync
     };
 
-    explicit PrintInfo(GtkPrintSettings*, GtkPageSetup*, PrintMode = PrintModeAsync);
+#if HAVE(GTK_UNIX_PRINTING)
+    explicit PrintInfo(GtkPrintJob*, PrintMode = PrintModeAsync);
+#endif
 #else
     explicit PrintInfo(NSPrintInfo *);
 #endif
 
+    // These values are in 'point' unit (and not CSS pixel).
     float pageSetupScaleFactor { 0 };
     float availablePaperWidth { 0 };
     float availablePaperHeight { 0 };
-#if PLATFORM(IOS)
+    WebCore::FloatBoxExtent margin;
+#if PLATFORM(IOS_FAMILY)
     bool snapshotFirstPage { false };
 #endif
 
 #if PLATFORM(GTK)
     GRefPtr<GtkPrintSettings> printSettings;
     GRefPtr<GtkPageSetup> pageSetup;
-    PrintMode printMode;
+    PrintMode printMode { PrintModeAsync };
 #endif
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, PrintInfo&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, PrintInfo&);
 };
 
-}
+} // namespace WebKit
+
+#if PLATFORM(GTK)
+namespace WTF {
+
+template<> struct EnumTraits<WebKit::PrintInfo::PrintMode> {
+    using values = EnumValues<
+        WebKit::PrintInfo::PrintMode,
+        WebKit::PrintInfo::PrintMode::PrintModeAsync,
+        WebKit::PrintInfo::PrintMode::PrintModeSync
+    >;
+};
+
+} // namespace WTF
+#endif // PLATFORM(GTK)

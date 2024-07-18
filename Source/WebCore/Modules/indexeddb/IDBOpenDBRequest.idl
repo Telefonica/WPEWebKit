@@ -24,11 +24,13 @@
  */
 
 [
-    Conditional=INDEXED_DATABASE,
     JSGenerateToJSObject,
     JSGenerateToNativeObject,
+    EnabledBySetting=DatabasesEnabled,
     SkipVTableValidation,
+    Exposed=(Window,Worker)
 ] interface IDBOpenDBRequest : IDBRequest {
+    // Event handlers:
     attribute EventHandler onblocked;
     attribute EventHandler onupgradeneeded;
 };

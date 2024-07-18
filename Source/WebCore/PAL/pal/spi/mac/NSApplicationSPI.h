@@ -29,6 +29,17 @@
 
 - (void)speakString:(NSString *)string;
 - (void)_setCurrentEvent:(NSEvent *)event;
++ (void)_accessibilityInitialize;
++ (void)_preventDockConnections;
+
+- (void)accessibilitySetEnhancedUserInterfaceAttribute:(id)value;
+- (id)accessibilityEnhancedUserInterfaceAttribute;
+
+- (void)_updateCanQuitQuietlyAndSafely;
+
+// Conditionally define this only for !USE_APPLE_INTERNAL_SDK when <rdar://problem/63864711> is fixed.
+@property (copy, setter=_setAccentColor:) NSColor *_accentColor;
+@property (readonly, copy) NSColor *_effectiveAccentColor;
 
 @end
 

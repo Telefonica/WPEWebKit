@@ -8,13 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_COMMON_VIDEO_H264_H264_COMMON_H_
-#define WEBRTC_COMMON_VIDEO_H264_H264_COMMON_H_
+#ifndef COMMON_VIDEO_H264_H264_COMMON_H_
+#define COMMON_VIDEO_H264_H264_COMMON_H_
 
-#include <memory>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <vector>
 
-#include "webrtc/base/buffer.h"
+#include "rtc_base/buffer.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
@@ -40,6 +43,7 @@ enum NaluType : uint8_t {
   kEndOfSequence = 10,
   kEndOfStream = 11,
   kFiller = 12,
+  kPrefix = 14,
   kStapA = 24,
   kFuA = 28
 };
@@ -56,11 +60,11 @@ struct NaluIndex {
 };
 
 // Returns a vector of the NALU indices in the given buffer.
-std::vector<NaluIndex> FindNaluIndices(const uint8_t* buffer,
-                                       size_t buffer_size);
+RTC_EXPORT std::vector<NaluIndex> FindNaluIndices(const uint8_t* buffer,
+                                                  size_t buffer_size);
 
 // Get the NAL type from the header byte immediately following start sequence.
-NaluType ParseNaluType(uint8_t data);
+RTC_EXPORT NaluType ParseNaluType(uint8_t data);
 
 // Methods for parsing and writing RBSP. See section 7.4.1 of the H264 spec.
 //
@@ -85,4 +89,4 @@ void WriteRbsp(const uint8_t* bytes, size_t length, rtc::Buffer* destination);
 }  // namespace H264
 }  // namespace webrtc
 
-#endif  // WEBRTC_COMMON_VIDEO_H264_H264_COMMON_H_
+#endif  // COMMON_VIDEO_H264_H264_COMMON_H_

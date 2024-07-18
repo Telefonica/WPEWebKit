@@ -32,6 +32,7 @@
 
 #if TARGET_OS_IPHONE
 #import <CoreGraphics/CGColor.h>
+#import <WebKitLegacy/WAKView.h>
 #endif
 
 #if !defined(ENABLE_DASHBOARD_SUPPORT)
@@ -75,7 +76,6 @@
 #endif
 @protocol WebDeviceOrientationProvider;
 @protocol WebFormDelegate;
-@protocol WebUserMediaClient;
 
 #if !TARGET_OS_IPHONE
 extern NSString *_WebCanGoBackKey;
@@ -106,25 +106,19 @@ extern NSString *WebElementIsInScrollBarKey;
 // One of the subviews of the WebView entered compositing mode.
 extern NSString *_WebViewDidStartAcceleratedCompositingNotification;
 
-#if ENABLE_REMOTE_INSPECTOR
-// FIXME: Legacy, remove this, switch to something from JavaScriptCore Inspector::RemoteInspectorServer.
-// Notification when the number of inspector sessions becomes non-zero or returns to 0.
-// Check the current state via -[WebView _hasRemoteInspectorSession].
-extern NSString *_WebViewRemoteInspectorHasSessionChangedNotification;
-#endif
-
 #if TARGET_OS_IPHONE
 extern NSString *WebQuickLookFileNameKey;
 extern NSString *WebQuickLookUTIKey;
 #endif
 
-#if TARGET_OS_IPHONE && __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+#if TARGET_OS_IOS
 @protocol UIDropSession;
 #endif
 
 extern NSString * const WebViewWillCloseNotification;
 
 #if ENABLE_DASHBOARD_SUPPORT
+// FIXME: Remove this once it is verified no one is dependent on it.
 typedef enum {
     WebDashboardBehaviorAlwaysSendMouseEventsToAllWindows,
     WebDashboardBehaviorAlwaysSendActiveNullEventsToPlugIns,
@@ -160,11 +154,6 @@ typedef enum {
     WebPaginationModeRightToLeft,
     WebPaginationModeTopToBottom,
     WebPaginationModeBottomToTop,
-#if TARGET_OS_IPHONE
-    // FIXME: Remove these once UIKit has switched to the above.
-    WebPaginationModeHorizontal = WebPaginationModeLeftToRight,
-    WebPaginationModeVertical = WebPaginationModeTopToBottom,
-#endif
 } WebPaginationMode;
 
 enum {
@@ -311,6 +300,13 @@ typedef enum {
 - (void)setMediaVolume:(float)volume;
 - (float)mediaVolume;
 
+- (void)suspendAllMediaPlayback;
+- (void)resumeAllMediaPlayback;
+
+#if !TARGET_OS_IPHONE
+@property (nonatomic, setter=_setAllowsLinkPreview:) BOOL _allowsLinkPreview;
+#endif
+
 // Add visited links
 - (void)addVisitedLinks:(NSArray *)visitedLinks;
 #if TARGET_OS_IPHONE
@@ -322,6 +318,12 @@ typedef enum {
 
 + (void)_setIconLoadingEnabled:(BOOL)enabled;
 + (BOOL)_isIconLoadingEnabled;
+
+@property (nonatomic, assign, setter=_setUseDarkAppearance:) BOOL _useDarkAppearance;
+@property (nonatomic, assign, setter=_setUseElevatedUserInterfaceLevel:) BOOL _useElevatedUserInterfaceLevel;
+
+- (void)_setUseDarkAppearance:(BOOL)useDarkAppearance useInactiveAppearance:(BOOL)useInactiveAppearance;
+- (void)_setUseDarkAppearance:(BOOL)useDarkAppearance useElevatedUserInterfaceLevel:(BOOL)useElevatedUserInterfaceLevel;
 
 - (WebInspector *)inspector;
 
@@ -466,13 +468,11 @@ Could be worth adding to the API.
 - (void)_setResourceLoadSchedulerSuspended:(BOOL)suspend;
 + (void)_setTileCacheLayerPoolCapacity:(unsigned)capacity;
 
-+ (void)_setAllowCookies:(BOOL)allow;
-+ (BOOL)_allowCookies;
 + (void)_releaseMemoryNow;
 
 - (void)_replaceCurrentHistoryItem:(WebHistoryItem *)item;
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+#if TARGET_OS_IOS
 - (BOOL)_requestStartDataInteraction:(CGPoint)clientPosition globalPosition:(CGPoint)globalPosition;
 - (WebUITextIndicatorData *)_getDataInteractionData;
 @property (nonatomic, readonly, strong, getter=_dataOperationTextIndicator) WebUITextIndicatorData *dataOperationTextIndicator;
@@ -485,7 +485,7 @@ Could be worth adding to the API.
 - (void)_exitedDataInteraction:(id <UIDropSession>)session client:(CGPoint)clientPosition global:(CGPoint)globalPosition operation:(uint64_t)operation;
 - (void)_performDataInteraction:(id <UIDropSession>)session client:(CGPoint)clientPosition global:(CGPoint)globalPosition operation:(uint64_t)operation;
 - (BOOL)_tryToPerformDataInteraction:(id <UIDropSession>)session client:(CGPoint)clientPosition global:(CGPoint)globalPosition operation:(uint64_t)operation;
-- (void)_endedDataInteraction:(CGPoint)clientPosition global:(CGPoint)clientPosition;
+- (void)_endedDataInteraction:(CGPoint)clientPosition global:(CGPoint)globalPosition;
 
 @property (nonatomic, readonly, getter=_dataInteractionCaretRect) CGRect dataInteractionCaretRect;
 #endif
@@ -552,6 +552,7 @@ Could be worth adding to the API.
 #endif
 
 #if ENABLE_DASHBOARD_SUPPORT
+// FIXME: Remove these once we have verified no one is calling them
 - (void)_addScrollerDashboardRegions:(NSMutableDictionary *)regions;
 - (NSDictionary *)_dashboardRegions;
 
@@ -683,7 +684,11 @@ Could be worth adding to the API.
     If layer is NULL, removes any existing layer. Returns YES if the set or
     remove was successful.
  */
+#if TARGET_OS_IPHONE
+- (BOOL)_setMediaLayer:(CALayer*)layer forPluginView:(WAKView*)pluginView;
+#else
 - (BOOL)_setMediaLayer:(CALayer*)layer forPluginView:(NSView*)pluginView;
+#endif
 
 /*!
  @method _wantsTelephoneNumberParsing
@@ -723,8 +728,6 @@ Could be worth adding to the API.
 
 - (BOOL)usesPageCache;
 - (void)setUsesPageCache:(BOOL)usesPageCache;
-
-- (WebHistoryItem *)_globalHistoryItem;
 
 /*!
     @method textIteratorForRect:
@@ -787,22 +790,19 @@ Could be worth adding to the API.
 - (NSPasteboard *)_insertionPasteboard;
 #endif
 
-// Whitelists access from an origin (sourceOrigin) to a set of one or more origins described by the parameters:
+// Allow lists access from an origin (sourceOrigin) to a set of one or more origins described by the parameters:
 // - destinationProtocol: The protocol to grant access to.
 // - destinationHost: The host to grant access to.
-// - allowDestinationSubdomains: If host is a domain, setting this to YES will whitelist host and all its subdomains, recursively.
-+ (void)_addOriginAccessWhitelistEntryWithSourceOrigin:(NSString *)sourceOrigin destinationProtocol:(NSString *)destinationProtocol destinationHost:(NSString *)destinationHost allowDestinationSubdomains:(BOOL)allowDestinationSubdomains;
-+ (void)_removeOriginAccessWhitelistEntryWithSourceOrigin:(NSString *)sourceOrigin destinationProtocol:(NSString *)destinationProtocol destinationHost:(NSString *)destinationHost allowDestinationSubdomains:(BOOL)allowDestinationSubdomains;
+// - allowDestinationSubdomains: If host is a domain, setting this to YES will allow host and all its subdomains, recursively.
++ (void)_addOriginAccessAllowListEntryWithSourceOrigin:(NSString *)sourceOrigin destinationProtocol:(NSString *)destinationProtocol destinationHost:(NSString *)destinationHost allowDestinationSubdomains:(BOOL)allowDestinationSubdomains;
++ (void)_removeOriginAccessAllowListEntryWithSourceOrigin:(NSString *)sourceOrigin destinationProtocol:(NSString *)destinationProtocol destinationHost:(NSString *)destinationHost allowDestinationSubdomains:(BOOL)allowDestinationSubdomains;
 
-// Removes all white list entries created with _addOriginAccessWhitelistEntryWithSourceOrigin.
-+ (void)_resetOriginAccessWhitelists;
+// Removes all allow list entries created with _addOriginAccessAllowListEntryWithSourceOrigin.
++ (void)_resetOriginAccessAllowLists;
 
-// FIXME: The following two methods are deprecated in favor of the overloads below that take the WebUserContentInjectedFrames argument. https://bugs.webkit.org/show_bug.cgi?id=41800.
-+ (void)_addUserScriptToGroup:(NSString *)groupName world:(WebScriptWorld *)world source:(NSString *)source url:(NSURL *)url whitelist:(NSArray *)whitelist blacklist:(NSArray *)blacklist injectionTime:(WebUserScriptInjectionTime)injectionTime;
-+ (void)_addUserStyleSheetToGroup:(NSString *)groupName world:(WebScriptWorld *)world source:(NSString *)source url:(NSURL *)url whitelist:(NSArray *)whitelist blacklist:(NSArray *)blacklist;
++ (void)_addUserScriptToGroup:(NSString *)groupName world:(WebScriptWorld *)world source:(NSString *)source url:(NSURL *)url includeMatchPatternStrings:(NSArray *)includeMatchPatternStrings excludeMatchPatternStrings:(NSArray *)excludeMatchPatternStrings injectionTime:(WebUserScriptInjectionTime)injectionTime injectedFrames:(WebUserContentInjectedFrames)injectedFrames;
++ (void)_addUserStyleSheetToGroup:(NSString *)groupName world:(WebScriptWorld *)world source:(NSString *)source url:(NSURL *)url includeMatchPatternStrings:(NSArray *)includeMatchPatternStrings excludeMatchPatternStrings:(NSArray *)excludeMatchPatternStrings injectedFrames:(WebUserContentInjectedFrames)injectedFrames;
 
-+ (void)_addUserScriptToGroup:(NSString *)groupName world:(WebScriptWorld *)world source:(NSString *)source url:(NSURL *)url whitelist:(NSArray *)whitelist blacklist:(NSArray *)blacklist injectionTime:(WebUserScriptInjectionTime)injectionTime injectedFrames:(WebUserContentInjectedFrames)injectedFrames;
-+ (void)_addUserStyleSheetToGroup:(NSString *)groupName world:(WebScriptWorld *)world source:(NSString *)source url:(NSURL *)url whitelist:(NSArray *)whitelist blacklist:(NSArray *)blacklist injectedFrames:(WebUserContentInjectedFrames)injectedFrames;
 + (void)_removeUserScriptFromGroup:(NSString *)groupName world:(WebScriptWorld *)world url:(NSURL *)url;
 + (void)_removeUserStyleSheetFromGroup:(NSString *)groupName world:(WebScriptWorld *)world url:(NSURL *)url;
 + (void)_removeUserScriptsFromGroup:(NSString *)groupName world:(WebScriptWorld *)world;
@@ -811,28 +811,7 @@ Could be worth adding to the API.
 
 // SPI for DumpRenderTree
 + (void)_setLoadResourcesSerially:(BOOL)serialize;
-
-/*!
-    @method cssAnimationsSuspended
-    @abstract Returns whether or not CSS Animations are suspended.
-    @result YES if CSS Animations are suspended.
-*/
-- (BOOL)cssAnimationsSuspended;
-
-/*!
-    @method setCSSAnimationsSuspended
-    @param suspended YES to suspend animations, NO to resume animations.
-    @discussion Suspends or resumes all running animations and transitions in the page.
-*/
-- (void)setCSSAnimationsSuspended:(BOOL)suspended;
-
-/*
-    SPI to revert back to buggy behavior that would allow new transitions
-    and animations to run even when the view is suspended (e.g. loading a
-    new document).
-*/
-- (BOOL)allowsNewCSSAnimationsWhileSuspended;
-- (void)setAllowsNewCSSAnimationsWhileSuspended:(BOOL)allowed;
+- (void)_forceRepaintForTesting;
 
 + (void)_setDomainRelaxationForbidden:(BOOL)forbidden forURLScheme:(NSString *)scheme;
 + (void)_registerURLSchemeAsSecure:(NSString *)scheme;
@@ -856,6 +835,11 @@ Could be worth adding to the API.
 
 - (WebPageVisibilityState)_visibilityState;
 - (void)_setVisibilityState:(WebPageVisibilityState)visibilityState isInitialState:(BOOL)isInitialState;
+
+#if !TARGET_OS_IPHONE
+- (BOOL)windowOcclusionDetectionEnabled;
+- (void)setWindowOcclusionDetectionEnabled:(BOOL)flag;
+#endif
 
 // Whether the column-break-{before,after} properties are respected instead of the
 // page-break-{before,after} properties.
@@ -916,7 +900,11 @@ Could be worth adding to the API.
 
 - (void)_setFontFallbackPrefersPictographs:(BOOL)flag;
 
+#if TARGET_OS_IPHONE
+- (void)showCandidates:(NSArray *)candidates forString:(NSString *)string inRect:(NSRect)rectOfTypedString forSelectedRange:(NSRange)range view:(WAKView *)view completionHandler:(void (^)(NSTextCheckingResult *acceptedCandidate))completionBlock;
+#else
 - (void)showCandidates:(NSArray *)candidates forString:(NSString *)string inRect:(NSRect)rectOfTypedString forSelectedRange:(NSRange)range view:(NSView *)view completionHandler:(void (^)(NSTextCheckingResult *acceptedCandidate))completionBlock;
+#endif
 - (void)forceRequestCandidatesForTesting;
 - (BOOL)shouldRequestCandidates;
 
@@ -928,6 +916,8 @@ typedef struct WebEdgeInsets {
 } WebEdgeInsets;
 
 @property (nonatomic, assign, setter=_setUnobscuredSafeAreaInsets:) WebEdgeInsets _unobscuredSafeAreaInsets;
+
+@property (nonatomic, assign, setter=_setUseSystemAppearance:) BOOL _useSystemAppearance;
 
 @end
 
@@ -956,11 +946,9 @@ typedef struct WebEdgeInsets {
 
 @interface WebView (WebViewGrammarChecking)
 
-// FIXME: These two methods should be merged into WebViewEditing when we're not in API freeze
 - (BOOL)isGrammarCheckingEnabled;
 - (void)setGrammarCheckingEnabled:(BOOL)flag;
 
-// FIXME: This method should be merged into WebIBActions when we're not in API freeze
 - (void)toggleGrammarChecking:(id)sender;
 
 @end
@@ -1009,11 +997,6 @@ typedef struct WebEdgeInsets {
 
 #endif
 
-@interface WebView (WebViewUserMedia)
-- (void)_setUserMediaClient:(id<WebUserMediaClient>)userMediaClient;
-- (id<WebUserMediaClient>)_userMediaClient;
-@end
-
 @protocol WebGeolocationProvider <NSObject>
 - (void)registerWebView:(WebView *)webView;
 - (void)unregisterWebView:(WebView *)webView;
@@ -1060,13 +1043,15 @@ typedef struct WebEdgeInsets {
 - (void)_notificationsDidClose:(NSArray *)notificationIDs;
 
 - (uint64_t)_notificationIDForTesting:(JSValueRef)jsNotification;
+- (void)_clearNotificationPermissionState;
 @end
 
 @interface WebView (WebViewFontSelection)
-+ (void)_setFontWhitelist:(NSArray *)whitelist;
++ (void)_setFontAllowList:(NSArray *)allowList;
 @end
 
 #if TARGET_OS_IPHONE
+
 @interface WebView (WebViewIOSPDF)
 + (Class)_getPDFRepresentationClass;
 + (void)_setPDFRepresentationClass:(Class)pdfRepresentationClass;
@@ -1074,6 +1059,15 @@ typedef struct WebEdgeInsets {
 + (Class)_getPDFViewClass;
 + (void)_setPDFViewClass:(Class)pdfViewClass;
 @end
+
+@interface WebView (WebViewIOSAdditions)
+- (NSArray<DOMElement *> *)_editableElementsInRect:(CGRect)rect;
+- (void)revealCurrentSelection;
+
+// View must be a UIView.
+- (void)_installVisualIdentificationOverlayForViewIfNeeded:(id)view kind:(NSString *)kind;
+@end
+
 #endif
 
 @interface NSObject (WebViewFrameLoadDelegatePrivate)
@@ -1090,6 +1084,10 @@ typedef struct WebEdgeInsets {
 - (void)webView:(WebView *)sender didFirstVisuallyNonEmptyLayoutInFrame:(WebFrame *)frame;
 
 - (void)webView:(WebView *)sender didLayout:(WebLayoutMilestones)milestones;
+
+#if TARGET_OS_IPHONE
+- (void)webThreadWebView:(WebView *)sender didLayout:(WebLayoutMilestones)milestones;
+#endif
 
 // For implementing the WebInspector's test harness
 - (void)webView:(WebView *)webView didClearInspectorWindowObject:(WebScriptObject *)windowObject forFrame:(WebFrame *)frame;

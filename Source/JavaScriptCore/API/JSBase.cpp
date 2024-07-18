@@ -25,21 +25,17 @@
 
 #include "config.h"
 #include "JSBase.h"
+#include "JSBaseInternal.h"
 #include "JSBasePrivate.h"
 
 #include "APICast.h"
-#include "CallFrame.h"
 #include "Completion.h"
-#include "Exception.h"
 #include "GCActivityCallback.h"
-#include "InitializeThreading.h"
-#include "JSGlobalObject.h"
-#include "JSLock.h"
-#include "JSObject.h"
-#include "OpaqueJSString.h"
 #include "JSCInlines.h"
+#include "JSLock.h"
+#include "ObjectConstructor.h"
+#include "OpaqueJSString.h"
 #include "SourceCode.h"
-#include <wtf/text/StringHash.h>
 
 #if ENABLE(REMOTE_INSPECTOR)
 #include "JSGlobalObjectInspectorController.h"
@@ -47,72 +43,78 @@
 
 using namespace JSC;
 
-JSValueRef JSEvaluateScript(JSContextRef ctx, JSStringRef script, JSObjectRef thisObject, JSStringRef sourceURL, int startingLineNumber, JSValueRef* exception)
+JSValueRef JSEvaluateScriptInternal(const JSLockHolder&, JSContextRef ctx, JSObjectRef thisObject, const SourceCode& source, JSValueRef* exception)
 {
-    if (!ctx) {
-        ASSERT_NOT_REACHED();
-        return 0;
-    }
-    ExecState* exec = toJS(ctx);
-    JSLockHolder locker(exec);
-
     JSObject* jsThisObject = toJS(thisObject);
 
-    startingLineNumber = std::max(1, startingLineNumber);
-
     // evaluate sets "this" to the global object if it is NULL
-    JSGlobalObject* globalObject = exec->vmEntryGlobalObject();
-    auto sourceURLString = sourceURL ? sourceURL->string() : String();
-    SourceCode source = makeSource(script->string(), SourceOrigin { sourceURLString }, sourceURLString, TextPosition(OrdinalNumber::fromOneBasedInt(startingLineNumber), OrdinalNumber()));
-
+    JSGlobalObject* globalObject = toJS(ctx);
     NakedPtr<Exception> evaluationException;
-    JSValue returnValue = profiledEvaluate(globalObject->globalExec(), ProfilingReason::API, source, jsThisObject, evaluationException);
+    JSValue returnValue = profiledEvaluate(globalObject, ProfilingReason::API, source, jsThisObject, evaluationException);
 
     if (evaluationException) {
         if (exception)
-            *exception = toRef(exec, evaluationException->value());
+            *exception = toRef(globalObject, evaluationException->value());
 #if ENABLE(REMOTE_INSPECTOR)
         // FIXME: If we have a debugger attached we could learn about ParseError exceptions through
         // ScriptDebugServer::sourceParsed and this path could produce a duplicate warning. The
         // Debugger path is currently ignored by inspector.
         // NOTE: If we don't have a debugger, this SourceCode will be forever lost to the inspector.
         // We could stash it in the inspector in case an inspector is ever opened.
-        globalObject->inspectorController().reportAPIException(exec, evaluationException);
+        globalObject->inspectorController().reportAPIException(globalObject, evaluationException);
 #endif
-        return 0;
+        return nullptr;
     }
 
     if (returnValue)
-        return toRef(exec, returnValue);
+        return toRef(globalObject, returnValue);
 
     // happens, for example, when the only statement is an empty (';') statement
-    return toRef(exec, jsUndefined());
+    return toRef(globalObject, jsUndefined());
 }
 
-bool JSCheckScriptSyntax(JSContextRef ctx, JSStringRef script, JSStringRef sourceURL, int startingLineNumber, JSValueRef* exception)
+JSValueRef JSEvaluateScript(JSContextRef ctx, JSStringRef script, JSObjectRef thisObject, JSStringRef sourceURLString, int startingLineNumber, JSValueRef* exception)
+{
+    if (!ctx) {
+        ASSERT_NOT_REACHED();
+        return nullptr;
+    }
+    JSGlobalObject* globalObject = toJS(ctx);
+    VM& vm = globalObject->vm();
+    JSLockHolder locker(vm);
+
+    startingLineNumber = std::max(1, startingLineNumber);
+
+    auto sourceURL = sourceURLString ? URL({ }, sourceURLString->string()) : URL();
+    SourceCode source = makeSource(script->string(), SourceOrigin { sourceURL }, sourceURL.string(), TextPosition(OrdinalNumber::fromOneBasedInt(startingLineNumber), OrdinalNumber()));
+
+    return JSEvaluateScriptInternal(locker, ctx, thisObject, source, exception);
+}
+
+bool JSCheckScriptSyntax(JSContextRef ctx, JSStringRef script, JSStringRef sourceURLString, int startingLineNumber, JSValueRef* exception)
 {
     if (!ctx) {
         ASSERT_NOT_REACHED();
         return false;
     }
-    ExecState* exec = toJS(ctx);
-    VM& vm = exec->vm();
+    JSGlobalObject* globalObject = toJS(ctx);
+    VM& vm = globalObject->vm();
     JSLockHolder locker(vm);
 
     startingLineNumber = std::max(1, startingLineNumber);
 
-    auto sourceURLString = sourceURL ? sourceURL->string() : String();
-    SourceCode source = makeSource(script->string(), SourceOrigin { sourceURLString }, sourceURLString, TextPosition(OrdinalNumber::fromOneBasedInt(startingLineNumber), OrdinalNumber()));
+    auto sourceURL = sourceURLString ? URL({ }, sourceURLString->string()) : URL();
+    SourceCode source = makeSource(script->string(), SourceOrigin { sourceURL }, sourceURL.string(), TextPosition(OrdinalNumber::fromOneBasedInt(startingLineNumber), OrdinalNumber()));
     
     JSValue syntaxException;
-    bool isValidSyntax = checkSyntax(exec->vmEntryGlobalObject()->globalExec(), source, &syntaxException);
+    bool isValidSyntax = checkSyntax(globalObject, source, &syntaxException);
 
     if (!isValidSyntax) {
         if (exception)
-            *exception = toRef(exec, syntaxException);
+            *exception = toRef(globalObject, syntaxException);
 #if ENABLE(REMOTE_INSPECTOR)
         Exception* exception = Exception::create(vm, syntaxException);
-        exec->vmEntryGlobalObject()->inspectorController().reportAPIException(exec, exception);
+        globalObject->inspectorController().reportAPIException(globalObject, exception);
 #endif
         return false;
     }
@@ -130,8 +132,8 @@ void JSGarbageCollect(JSContextRef ctx)
     if (!ctx)
         return;
 
-    ExecState* exec = toJS(ctx);
-    VM& vm = exec->vm();
+    JSGlobalObject* globalObject = toJS(ctx);
+    VM& vm = globalObject->vm();
     JSLockHolder locker(vm);
 
     vm.heap.reportAbandonedObjectGraph();
@@ -143,8 +145,8 @@ void JSReportExtraMemoryCost(JSContextRef ctx, size_t size)
         ASSERT_NOT_REACHED();
         return;
     }
-    ExecState* exec = toJS(ctx);
-    VM& vm = exec->vm();
+    JSGlobalObject* globalObject = toJS(ctx);
+    VM& vm = globalObject->vm();
     JSLockHolder locker(vm);
 
     vm.heap.deprecatedReportExtraMemory(size);
@@ -158,8 +160,8 @@ void JSSynchronousGarbageCollectForDebugging(JSContextRef ctx)
     if (!ctx)
         return;
 
-    ExecState* exec = toJS(ctx);
-    VM& vm = exec->vm();
+    JSGlobalObject* globalObject = toJS(ctx);
+    VM& vm = globalObject->vm();
     JSLockHolder locker(vm);
     vm.heap.collectNow(Sync, CollectionScope::Full);
 }
@@ -169,8 +171,8 @@ void JSSynchronousEdenCollectForDebugging(JSContextRef ctx)
     if (!ctx)
         return;
 
-    ExecState* exec = toJS(ctx);
-    VM& vm = exec->vm();
+    JSGlobalObject* globalObject = toJS(ctx);
+    VM& vm = globalObject->vm();
     JSLockHolder locker(vm);
     vm.heap.collectSync(CollectionScope::Eden);
 }
@@ -180,19 +182,42 @@ void JSDisableGCTimer(void)
     GCActivityCallback::s_shouldCreateGCTimer = false;
 }
 
-#if PLATFORM(IOS) && TARGET_OS_IOS
-// FIXME: Expose symbols to tell dyld where to find JavaScriptCore on older versions of
-// iOS (< 7.0). We should remove these symbols once we no longer need to support such
-// versions of iOS. See <rdar://problem/13696872> for more details.
-JS_EXPORT extern const char iosInstallName43 __asm("$ld$install_name$os4.3$/System/Library/PrivateFrameworks/JavaScriptCore.framework/JavaScriptCore");
-JS_EXPORT extern const char iosInstallName50 __asm("$ld$install_name$os5.0$/System/Library/PrivateFrameworks/JavaScriptCore.framework/JavaScriptCore");
-JS_EXPORT extern const char iosInstallName51 __asm("$ld$install_name$os5.1$/System/Library/PrivateFrameworks/JavaScriptCore.framework/JavaScriptCore");
-JS_EXPORT extern const char iosInstallName60 __asm("$ld$install_name$os6.0$/System/Library/PrivateFrameworks/JavaScriptCore.framework/JavaScriptCore");
-JS_EXPORT extern const char iosInstallName61 __asm("$ld$install_name$os6.1$/System/Library/PrivateFrameworks/JavaScriptCore.framework/JavaScriptCore");
-
-const char iosInstallName43 = 0;
-const char iosInstallName50 = 0;
-const char iosInstallName51 = 0;
-const char iosInstallName60 = 0;
-const char iosInstallName61 = 0;
+#if !OS(DARWIN) && !OS(WINDOWS)
+bool JSConfigureSignalForGC(int signal)
+{
+    if (g_wtfConfig.isThreadSuspendResumeSignalConfigured)
+        return false;
+    g_wtfConfig.sigThreadSuspendResume = signal;
+    g_wtfConfig.isUserSpecifiedThreadSuspendResumeSignalConfigured = true;
+    return true;
+}
 #endif
+
+JSObjectRef JSGetMemoryUsageStatistics(JSContextRef ctx)
+{
+    if (!ctx) {
+        ASSERT_NOT_REACHED();
+        return nullptr;
+    }
+
+    JSGlobalObject* globalObject = toJS(ctx);
+    VM& vm = globalObject->vm();
+    JSLockHolder locker(vm);
+
+    auto typeCounts = vm.heap.objectTypeCounts();
+    JSObject* objectTypeCounts = constructEmptyObject(globalObject);
+    for (auto& it : *typeCounts)
+        objectTypeCounts->putDirect(vm, Identifier::fromLatin1(vm, it.key), jsNumber(it.value));
+
+    JSObject* object = constructEmptyObject(globalObject);
+    object->putDirect(vm, Identifier::fromString(vm, "heapSize"_s), jsNumber(vm.heap.size()));
+    object->putDirect(vm, Identifier::fromString(vm, "heapCapacity"_s), jsNumber(vm.heap.capacity()));
+    object->putDirect(vm, Identifier::fromString(vm, "extraMemorySize"_s), jsNumber(vm.heap.extraMemorySize()));
+    object->putDirect(vm, Identifier::fromString(vm, "objectCount"_s), jsNumber(vm.heap.objectCount()));
+    object->putDirect(vm, Identifier::fromString(vm, "protectedObjectCount"_s), jsNumber(vm.heap.protectedObjectCount()));
+    object->putDirect(vm, Identifier::fromString(vm, "globalObjectCount"_s), jsNumber(vm.heap.globalObjectCount()));
+    object->putDirect(vm, Identifier::fromString(vm, "protectedGlobalObjectCount"_s), jsNumber(vm.heap.protectedGlobalObjectCount()));
+    object->putDirect(vm, Identifier::fromString(vm, "objectTypeCounts"_s), objectTypeCounts);
+
+    return toRef(object);
+}

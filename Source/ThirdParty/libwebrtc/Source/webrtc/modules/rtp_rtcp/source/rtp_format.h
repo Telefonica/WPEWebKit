@@ -8,67 +8,54 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_RTP_RTCP_SOURCE_RTP_FORMAT_H_
-#define WEBRTC_MODULES_RTP_RTCP_SOURCE_RTP_FORMAT_H_
+#ifndef MODULES_RTP_RTCP_SOURCE_RTP_FORMAT_H_
+#define MODULES_RTP_RTCP_SOURCE_RTP_FORMAT_H_
 
-#include <string>
+#include <stdint.h>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include <memory>
+#include <vector>
+
+#include "absl/types/optional.h"
+#include "api/array_view.h"
+#include "modules/rtp_rtcp/source/rtp_video_header.h"
 
 namespace webrtc {
+
 class RtpPacketToSend;
 
 class RtpPacketizer {
  public:
-  static RtpPacketizer* Create(RtpVideoCodecTypes type,
-                               size_t max_payload_len,
-                               size_t last_packet_reduction_len,
-                               const RTPVideoTypeHeader* rtp_type_header,
-                               FrameType frame_type);
+  struct PayloadSizeLimits {
+    int max_payload_len = 1200;
+    int first_packet_reduction_len = 0;
+    int last_packet_reduction_len = 0;
+    // Reduction len for packet that is first & last at the same time.
+    int single_packet_reduction_len = 0;
+  };
 
-  virtual ~RtpPacketizer() {}
+  // If type is not set, returns a raw packetizer.
+  static std::unique_ptr<RtpPacketizer> Create(
+      absl::optional<VideoCodecType> type,
+      rtc::ArrayView<const uint8_t> payload,
+      PayloadSizeLimits limits,
+      // Codec-specific details.
+      const RTPVideoHeader& rtp_video_header);
 
-  // Returns total number of packets which would be produced by the packetizer.
-  virtual size_t SetPayloadData(
-      const uint8_t* payload_data,
-      size_t payload_size,
-      const RTPFragmentationHeader* fragmentation) = 0;
+  virtual ~RtpPacketizer() = default;
+
+  // Returns number of remaining packets to produce by the packetizer.
+  virtual size_t NumPackets() const = 0;
 
   // Get the next payload with payload header.
-  // Write payload and set marker bit of the |packet|.
+  // Write payload and set marker bit of the `packet`.
   // Returns true on success, false otherwise.
   virtual bool NextPacket(RtpPacketToSend* packet) = 0;
 
-  virtual ProtectionType GetProtectionType() = 0;
-
-  virtual StorageType GetStorageType(uint32_t retransmission_settings) = 0;
-
-  virtual std::string ToString() = 0;
-};
-
-// TODO(sprang): Update the depacketizer to return a std::unqie_ptr with a copy
-// of the parsed payload, rather than just a pointer into the incoming buffer.
-// This way we can move some parsing out from the jitter buffer into here, and
-// the jitter buffer can just store that pointer rather than doing a copy there.
-class RtpDepacketizer {
- public:
-  struct ParsedPayload {
-    const uint8_t* payload;
-    size_t payload_length;
-    FrameType frame_type;
-    RTPTypeHeader type;
-  };
-
-  static RtpDepacketizer* Create(RtpVideoCodecTypes type);
-
-  virtual ~RtpDepacketizer() {}
-
-  // Parses the RTP payload, parsed result will be saved in |parsed_payload|.
-  virtual bool Parse(ParsedPayload* parsed_payload,
-                     const uint8_t* payload_data,
-                     size_t payload_data_length) = 0;
+  // Split payload_len into sum of integers with respect to `limits`.
+  // Returns empty vector on failure.
+  static std::vector<int> SplitAboutEqually(int payload_len,
+                                            const PayloadSizeLimits& limits);
 };
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_RTP_RTCP_SOURCE_RTP_FORMAT_H_
+#endif  // MODULES_RTP_RTCP_SOURCE_RTP_FORMAT_H_

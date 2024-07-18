@@ -31,19 +31,22 @@
 #import <WebCore/ApplicationCacheStorage.h>
 #import <WebCore/SecurityOrigin.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import <WebCore/RuntimeApplicationChecks.h>
 #import <WebCore/SQLiteDatabaseTracker.h>
 #import <WebCore/WebSQLiteDatabaseTrackerClient.h>
 #endif
 
-using namespace WebCore;
-
 @implementation WebApplicationCache
 
-#if PLATFORM(IOS)
-static NSString *overrideBundleIdentifier;
+#if PLATFORM(IOS_FAMILY)
+static RetainPtr<NSString>& overrideBundleIdentifier()
+{
+    static NeverDestroyed<RetainPtr<NSString>> overrideBundleIdentifier;
+    return overrideBundleIdentifier;
+}
 
 // FIXME: This will be removed when WebKitInitializeApplicationCachePathIfNecessary()
 // is moved from WebView.mm to WebKitInitializeApplicationCacheIfNecessary() in this file.
@@ -54,10 +57,10 @@ static NSString *overrideBundleIdentifier;
     if (initialized)
         return;
 
-    SQLiteDatabaseTracker::setClient(&WebSQLiteDatabaseTrackerClient::sharedWebSQLiteDatabaseTrackerClient());
+    WebCore::SQLiteDatabaseTracker::setClient(&WebCore::WebSQLiteDatabaseTrackerClient::sharedWebSQLiteDatabaseTrackerClient());
 
-    ASSERT(!overrideBundleIdentifier);
-    overrideBundleIdentifier = [bundleIdentifier copy];
+    ASSERT(!overrideBundleIdentifier());
+    overrideBundleIdentifier() = adoptNS([bundleIdentifier copy]);
 
     initialized = YES;
 }
@@ -65,10 +68,10 @@ static NSString *overrideBundleIdentifier;
 
 static NSString *applicationCacheBundleIdentifier()
 {
-#if PLATFORM(IOS)
-    if (overrideBundleIdentifier)
-        return overrideBundleIdentifier;
-    if (WebCore::IOSApplication::isMobileSafari() || WebCore::IOSApplication::isWebApp())
+#if PLATFORM(IOS_FAMILY)
+    if (overrideBundleIdentifier())
+        return overrideBundleIdentifier().get();
+    if (WebCore::IOSApplication::isMobileSafari())
         return @"com.apple.WebAppCache";
 #endif
 
@@ -108,7 +111,7 @@ static NSString *applicationCachePath()
 
 + (long long)diskUsageForOrigin:(WebSecurityOrigin *)origin
 {
-    return webApplicationCacheStorage().diskUsageForOrigin(*[origin _core]);
+    return webApplicationCacheStorage().diskUsageForOrigin([origin _core]->data());
 }
 
 + (void)deleteAllApplicationCaches
@@ -118,30 +121,21 @@ static NSString *applicationCachePath()
 
 + (void)deleteCacheForOrigin:(WebSecurityOrigin *)origin
 {
-    webApplicationCacheStorage().deleteCacheForOrigin(*[origin _core]);
+    webApplicationCacheStorage().deleteCacheForOrigin([origin _core]->data());
 }
 
 + (NSArray *)originsWithCache
 {
-    HashSet<RefPtr<SecurityOrigin>> coreOrigins;
-    webApplicationCacheStorage().getOriginsWithCache(coreOrigins);
-    
-    NSMutableArray *webOrigins = [[[NSMutableArray alloc] initWithCapacity:coreOrigins.size()] autorelease];
-    
-    HashSet<RefPtr<SecurityOrigin>>::const_iterator end = coreOrigins.end();
-    for (HashSet<RefPtr<SecurityOrigin>>::const_iterator it = coreOrigins.begin(); it != end; ++it) {
-        RetainPtr<WebSecurityOrigin> webOrigin = adoptNS([[WebSecurityOrigin alloc] _initWithWebCoreSecurityOrigin:(*it).get()]);
-        [webOrigins addObject:webOrigin.get()];
-    }
-    
-    return webOrigins;
+    return createNSArray(webApplicationCacheStorage().originsWithCache(), [] (auto& origin) {
+        return adoptNS([[WebSecurityOrigin alloc] _initWithWebCoreSecurityOrigin:origin.securityOrigin().ptr()]);
+    }).autorelease();
 }
 
 @end
 
 WebCore::ApplicationCacheStorage& webApplicationCacheStorage()
 {
-    static ApplicationCacheStorage& storage = ApplicationCacheStorage::create(applicationCachePath(), "ApplicationCache").leakRef();
+    static WebCore::ApplicationCacheStorage& storage = WebCore::ApplicationCacheStorage::create(applicationCachePath(), "ApplicationCache"_s).leakRef();
 
     return storage;
 }

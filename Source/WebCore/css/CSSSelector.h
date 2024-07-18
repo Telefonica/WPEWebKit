@@ -34,6 +34,7 @@ namespace WebCore {
     };
 
     // this class represents a selector for a StyleRule
+    DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(CSSSelectorRareData);
     class CSSSelector {
         WTF_MAKE_FAST_ALLOCATED;
     public:
@@ -56,7 +57,7 @@ namespace WebCore {
         static const unsigned classMask = 0xff00;
         static const unsigned elementMask = 0xff;
 
-        unsigned staticSpecificity(bool& ok) const;
+        unsigned computeSpecificity() const;
         unsigned specificityForPage() const;
         unsigned simpleSelectorSpecificity() const;
         static unsigned addSpecificities(unsigned, unsigned);
@@ -85,7 +86,9 @@ namespace WebCore {
             Child,
             DirectAdjacent,
             IndirectAdjacent,
-            ShadowDescendant
+            ShadowDescendant,
+            ShadowPartDescendant,
+            ShadowSlotted
         };
 
         enum PseudoClassType {
@@ -107,9 +110,13 @@ namespace WebCore {
             PseudoClassAnyLink,
             PseudoClassAnyLinkDeprecated,
             PseudoClassAutofill,
+            PseudoClassAutofillAndObscured,
+            PseudoClassAutofillStrongPassword,
+            PseudoClassAutofillStrongPasswordViewable,
             PseudoClassHover,
             PseudoClassDrag,
             PseudoClassFocus,
+            PseudoClassFocusVisible,
             PseudoClassFocusWithin,
             PseudoClassActive,
             PseudoClassChecked,
@@ -117,7 +124,9 @@ namespace WebCore {
             PseudoClassFullPageMedia,
             PseudoClassDefault,
             PseudoClassDisabled,
-            PseudoClassMatches,
+            PseudoClassIs,
+            PseudoClassMatches, // obsolete synonym for PseudoClassIs
+            PseudoClassWhere,
             PseudoClassOptional,
             PseudoClassPlaceholderShown,
             PseudoClassRequired,
@@ -131,10 +140,12 @@ namespace WebCore {
             PseudoClassNot,
             PseudoClassRoot,
             PseudoClassScope,
+            PseudoClassRelativeScope, // Like :scope but for internal use with relative selectors like :has(> foo).
             PseudoClassWindowInactive,
             PseudoClassCornerPresent,
             PseudoClassDecrement,
             PseudoClassIncrement,
+            PseudoClassHas,
             PseudoClassHorizontal,
             PseudoClassVertical,
             PseudoClassStart,
@@ -147,31 +158,46 @@ namespace WebCore {
             PseudoClassFullScreenDocument,
             PseudoClassFullScreenAncestor,
             PseudoClassAnimatingFullScreenTransition,
+            PseudoClassFullScreenControlsHidden,
+#endif
+#if ENABLE(PICTURE_IN_PICTURE_API)
+            PseudoClassPictureInPicture,
 #endif
             PseudoClassInRange,
             PseudoClassOutOfRange,
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
             PseudoClassFuture,
             PseudoClassPast,
+            PseudoClassPlaying,
+            PseudoClassPaused,
+            PseudoClassSeeking,
+            PseudoClassBuffering,
+            PseudoClassStalled,
+            PseudoClassMuted,
+            PseudoClassVolumeLocked,
 #endif
-#if ENABLE(CSS_SELECTORS_LEVEL4)
             PseudoClassDir,
-            PseudoClassRole,
-#endif
             PseudoClassHost,
             PseudoClassDefined,
+#if ENABLE(ATTACHMENT_ELEMENT)
+            PseudoClassHasAttachment,
+#endif
+            PseudoClassModal,
         };
 
         enum PseudoElementType {
             PseudoElementUnknown = 0,
             PseudoElementAfter,
+            PseudoElementBackdrop,
             PseudoElementBefore,
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
             PseudoElementCue,
 #endif
             PseudoElementFirstLetter,
             PseudoElementFirstLine,
+            PseudoElementHighlight,
             PseudoElementMarker,
+            PseudoElementPart,
             PseudoElementResizer,
             PseudoElementScrollbar,
             PseudoElementScrollbarButton,
@@ -181,7 +207,6 @@ namespace WebCore {
             PseudoElementScrollbarTrackPiece,
             PseudoElementSelection,
             PseudoElementSlotted,
-            PseudoElementUserAgentCustom,
             PseudoElementWebKitCustom,
 
             // WebKitCustom that appeared in an old prefixed form
@@ -219,37 +244,34 @@ namespace WebCore {
             CaseInsensitive,
         };
 
-        static PseudoElementType parsePseudoElementType(const String&);
+        static PseudoElementType parsePseudoElementType(StringView);
         static PseudoId pseudoId(PseudoElementType);
 
         // Selectors are kept in an array by CSSSelectorList. The next component of the selector is
         // the next item in the array.
-        const CSSSelector* tagHistory() const { return m_isLastInTagHistory ? 0 : const_cast<CSSSelector*>(this + 1); }
+        const CSSSelector* tagHistory() const { return m_isLastInTagHistory ? nullptr : this + 1; }
+        const CSSSelector* firstInCompound() const;
 
         const QualifiedName& tagQName() const;
-        const AtomicString& tagLowercaseLocalName() const;
+        const AtomString& tagLowercaseLocalName() const;
 
-        const AtomicString& value() const;
-        const AtomicString& serializingValue() const;
+        const AtomString& value() const;
+        const AtomString& serializingValue() const;
         const QualifiedName& attribute() const;
-        const AtomicString& attributeCanonicalLocalName() const;
-        const AtomicString& argument() const { return m_hasRareData ? m_data.m_rareData->m_argument : nullAtom(); }
+        const AtomString& attributeCanonicalLocalName() const;
+        const AtomString& argument() const { return m_hasRareData ? m_data.m_rareData->m_argument : nullAtom(); }
         bool attributeValueMatchingIsCaseInsensitive() const;
-        const Vector<AtomicString>* langArgumentList() const { return m_hasRareData ? m_data.m_rareData->m_langArgumentList.get() : nullptr; }
+        const Vector<AtomString>* argumentList() const { return m_hasRareData ? m_data.m_rareData->m_argumentList.get() : nullptr; }
         const CSSSelectorList* selectorList() const { return m_hasRareData ? m_data.m_rareData->m_selectorList.get() : nullptr; }
 
-        void setValue(const AtomicString&, bool matchLowerCase = false);
+        void setValue(const AtomString&, bool matchLowerCase = false);
         
-        // FIXME-NEWPARSER: These two methods can go away once the old parser is gone.
-        void setAttribute(const QualifiedName&, bool);
-        void setAttributeValueMatchingIsCaseInsensitive(bool);
         void setAttribute(const QualifiedName&, bool convertToLowercase, AttributeMatchType);
         void setNth(int a, int b);
-        void setArgument(const AtomicString&);
-        void setLangArgumentList(std::unique_ptr<Vector<AtomicString>>);
+        void setArgument(const AtomString&);
+        void setArgumentList(std::unique_ptr<Vector<AtomString>>);
         void setSelectorList(std::unique_ptr<CSSSelectorList>);
 
-        bool parseNth() const;
         bool matchNth(int count) const;
         int nthA() const;
         int nthB() const;
@@ -314,7 +336,9 @@ namespace WebCore {
 
         bool isLastInSelectorList() const { return m_isLastInSelectorList; }
         void setLastInSelectorList() { m_isLastInSelectorList = true; }
+        bool isFirstInTagHistory() const { return m_isFirstInTagHistory; }
         bool isLastInTagHistory() const { return m_isLastInTagHistory; }
+        void setNotFirstInTagHistory() { m_isFirstInTagHistory = false; }
         void setNotLastInTagHistory() { m_isLastInTagHistory = false; }
 
         bool isForPage() const { return m_isForPage; }
@@ -324,8 +348,8 @@ namespace WebCore {
         unsigned m_relation              : 4; // enum RelationType.
         mutable unsigned m_match         : 4; // enum Match.
         mutable unsigned m_pseudoType    : 8; // PseudoType.
-        mutable unsigned m_parsedNth     : 1; // Used for :nth-*.
         unsigned m_isLastInSelectorList  : 1;
+        unsigned m_isFirstInTagHistory   : 1;
         unsigned m_isLastInTagHistory    : 1;
         unsigned m_hasRareData           : 1;
         unsigned m_hasNameWithCase       : 1;
@@ -342,33 +366,33 @@ namespace WebCore {
         CSSSelector& operator=(const CSSSelector&);
 
         struct RareData : public RefCounted<RareData> {
-            static Ref<RareData> create(AtomicString&& value) { return adoptRef(*new RareData(WTFMove(value))); }
+            WTF_MAKE_STRUCT_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(CSSSelectorRareData);
+            static Ref<RareData> create(AtomString&& value) { return adoptRef(*new RareData(WTFMove(value))); }
             ~RareData();
 
-            bool parseNth();
             bool matchNth(int count);
 
             // For quirks mode, class and id are case-insensitive. In the case where uppercase
             // letters are used in quirks mode, |m_matchingValue| holds the lowercase class/id
             // and |m_serializingValue| holds the original string.
-            AtomicString m_matchingValue;
-            AtomicString m_serializingValue;
+            AtomString m_matchingValue;
+            AtomString m_serializingValue;
             
             int m_a; // Used for :nth-*
             int m_b; // Used for :nth-*
             QualifiedName m_attribute; // used for attribute selector
-            AtomicString m_attributeCanonicalLocalName;
-            AtomicString m_argument; // Used for :contains and :nth-*
-            std::unique_ptr<Vector<AtomicString>> m_langArgumentList; // Used for :lang arguments.
-            std::unique_ptr<CSSSelectorList> m_selectorList; // Used for :matches() and :not().
+            AtomString m_attributeCanonicalLocalName;
+            AtomString m_argument; // Used for :contains and :nth-*
+            std::unique_ptr<Vector<AtomString>> m_argumentList; // Used for :lang and ::part arguments.
+            std::unique_ptr<CSSSelectorList> m_selectorList; // Used for :is(), :matches(), and :not().
         
         private:
-            RareData(AtomicString&& value);
+            RareData(AtomString&& value);
         };
         void createRareData();
 
         struct NameWithCase : public RefCounted<NameWithCase> {
-            NameWithCase(const QualifiedName& originalName, const AtomicString& lowercaseName)
+            NameWithCase(const QualifiedName& originalName, const AtomString& lowercaseName)
                 : m_originalName(originalName)
                 , m_lowercaseLocalName(lowercaseName)
             {
@@ -376,12 +400,12 @@ namespace WebCore {
             }
 
             const QualifiedName m_originalName;
-            const AtomicString m_lowercaseLocalName;
+            const AtomString m_lowercaseLocalName;
         };
 
         union DataUnion {
             DataUnion() : m_value(0) { }
-            AtomicStringImpl* m_value;
+            AtomStringImpl* m_value;
             QualifiedName::QualifiedNameImpl* m_tagQName;
             RareData* m_rareData;
             NameWithCase* m_nameWithCase;
@@ -395,7 +419,7 @@ inline const QualifiedName& CSSSelector::attribute() const
     return m_data.m_rareData->m_attribute;
 }
 
-inline const AtomicString& CSSSelector::attributeCanonicalLocalName() const
+inline const AtomString& CSSSelector::attributeCanonicalLocalName() const
 {
     ASSERT(isAttributeSelector());
     ASSERT(m_hasRareData);
@@ -415,8 +439,7 @@ inline bool CSSSelector::isUnknownPseudoElement() const
 inline bool CSSSelector::isCustomPseudoElement() const
 {
     return match() == PseudoElement
-        && (pseudoElementType() == PseudoElementUserAgentCustom
-            || pseudoElementType() == PseudoElementWebKitCustom
+        && (pseudoElementType() == PseudoElementWebKitCustom
             || pseudoElementType() == PseudoElementWebKitCustomLegacyPrefixed);
 }
 
@@ -440,6 +463,26 @@ static inline bool pseudoClassIsRelativeToSiblings(CSSSelector::PseudoClassType 
         || type == CSSSelector::PseudoClassNthLastOfType;
 }
 
+static inline bool isTreeStructuralPseudoClass(CSSSelector::PseudoClassType type)
+{
+    return pseudoClassIsRelativeToSiblings(type) || type == CSSSelector::PseudoClassRoot;
+}
+
+inline bool isLogicalCombinationPseudoClass(CSSSelector::PseudoClassType pseudoClassType)
+{
+    switch (pseudoClassType) {
+    case CSSSelector::PseudoClassIs:
+    case CSSSelector::PseudoClassWhere:
+    case CSSSelector::PseudoClassNot:
+    case CSSSelector::PseudoClassAny:
+    case CSSSelector::PseudoClassMatches:
+    case CSSSelector::PseudoClassHas:
+        return true;
+    default:
+        return false;
+    }
+}
+
 inline bool CSSSelector::isSiblingSelector() const
 {
     return relation() == DirectAdjacent
@@ -458,10 +501,10 @@ inline bool CSSSelector::isAttributeSelector() const
         || match() == CSSSelector::End;
 }
 
-inline void CSSSelector::setValue(const AtomicString& value, bool matchLowerCase)
+inline void CSSSelector::setValue(const AtomString& value, bool matchLowerCase)
 {
     ASSERT(match() != Tag);
-    AtomicString matchingValue = matchLowerCase ? value.convertToASCIILowercase() : value;
+    AtomString matchingValue = matchLowerCase ? value.convertToASCIILowercase() : value;
     if (!m_hasRareData && matchingValue != value)
         createRareData();
     
@@ -482,8 +525,8 @@ inline CSSSelector::CSSSelector()
     : m_relation(DescendantSpace)
     , m_match(Unknown)
     , m_pseudoType(0)
-    , m_parsedNth(false)
     , m_isLastInSelectorList(false)
+    , m_isFirstInTagHistory(true)
     , m_isLastInTagHistory(true)
     , m_hasRareData(false)
     , m_hasNameWithCase(false)
@@ -500,8 +543,8 @@ inline CSSSelector::CSSSelector(const CSSSelector& o)
     : m_relation(o.m_relation)
     , m_match(o.m_match)
     , m_pseudoType(o.m_pseudoType)
-    , m_parsedNth(o.m_parsedNth)
     , m_isLastInSelectorList(o.m_isLastInSelectorList)
+    , m_isFirstInTagHistory(o.m_isFirstInTagHistory)
     , m_isLastInTagHistory(o.m_isLastInTagHistory)
     , m_hasRareData(o.m_hasRareData)
     , m_hasNameWithCase(o.m_hasNameWithCase)
@@ -518,7 +561,7 @@ inline CSSSelector::CSSSelector(const CSSSelector& o)
     } else if (o.m_hasNameWithCase) {
         m_data.m_nameWithCase = o.m_data.m_nameWithCase;
         m_data.m_nameWithCase->ref();
-    } if (o.match() == Tag) {
+    } else if (o.match() == Tag) {
         m_data.m_tagQName = o.m_data.m_tagQName;
         m_data.m_tagQName->ref();
     } else if (o.m_data.m_value) {
@@ -559,37 +602,31 @@ inline const QualifiedName& CSSSelector::tagQName() const
     return *reinterpret_cast<const QualifiedName*>(&m_data.m_tagQName);
 }
 
-inline const AtomicString& CSSSelector::tagLowercaseLocalName() const
+inline const AtomString& CSSSelector::tagLowercaseLocalName() const
 {
     if (m_hasNameWithCase)
         return m_data.m_nameWithCase->m_lowercaseLocalName;
     return m_data.m_tagQName->m_localName;
 }
 
-inline const AtomicString& CSSSelector::value() const
+inline const AtomString& CSSSelector::value() const
 {
     ASSERT(match() != Tag);
     if (m_hasRareData)
         return m_data.m_rareData->m_matchingValue;
 
-    // AtomicString is really just an AtomicStringImpl* so the cast below is safe.
-    return *reinterpret_cast<const AtomicString*>(&m_data.m_value);
+    // AtomString is really just an AtomStringImpl* so the cast below is safe.
+    return *reinterpret_cast<const AtomString*>(&m_data.m_value);
 }
 
-inline const AtomicString& CSSSelector::serializingValue() const
+inline const AtomString& CSSSelector::serializingValue() const
 {
     ASSERT(match() != Tag);
     if (m_hasRareData)
         return m_data.m_rareData->m_serializingValue;
     
-    // AtomicString is really just an AtomicStringImpl* so the cast below is safe.
-    return *reinterpret_cast<const AtomicString*>(&m_data.m_value);
-}
-
-inline void CSSSelector::setAttributeValueMatchingIsCaseInsensitive(bool isCaseInsensitive)
-{
-    ASSERT(isAttributeSelector() && match() != CSSSelector::Set);
-    m_caseInsensitiveAttributeValueMatching = isCaseInsensitive;
+    // AtomString is really just an AtomStringImpl* so the cast below is safe.
+    return *reinterpret_cast<const AtomString*>(&m_data.m_value);
 }
     
 inline bool CSSSelector::attributeValueMatchingIsCaseInsensitive() const

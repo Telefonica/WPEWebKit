@@ -32,6 +32,7 @@
 #include "config.h"
 #include "ResetInputType.h"
 
+#include "Document.h"
 #include "Event.h"
 #include "HTMLFormElement.h"
 #include "HTMLInputElement.h"
@@ -40,32 +41,23 @@
 
 namespace WebCore {
 
-const AtomicString& ResetInputType::formControlType() const
+const AtomString& ResetInputType::formControlType() const
 {
     return InputTypeNames::reset();
 }
 
-bool ResetInputType::supportsValidation() const
-{
-    return false;
-}
-
 void ResetInputType::handleDOMActivateEvent(Event& event)
 {
-    if (element().isDisabledFormControl() || !element().form())
+    ASSERT(element());
+    if (element()->isDisabledFormControl() || !element()->form())
         return;
-    element().form()->reset();
+    element()->form()->reset();
     event.setDefaultHandled();
 }
 
 String ResetInputType::defaultValue() const
 {
     return resetButtonDefaultLabel();
-}
-
-bool ResetInputType::isTextButton() const
-{
-    return true;
 }
 
 } // namespace WebCore

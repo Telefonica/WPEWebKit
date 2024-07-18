@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,12 +23,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef LargeMap_h
-#define LargeMap_h
+#pragma once
 
 #include "LargeRange.h"
 #include "Vector.h"
 #include <algorithm>
+
+#if !BUSE(LIBPAS)
 
 namespace bmalloc {
 
@@ -40,6 +41,10 @@ public:
     void add(const LargeRange&);
     LargeRange remove(size_t alignment, size_t);
     Vector<LargeRange>& ranges() { return m_free; }
+    void markAllAsEligibile();
+
+    size_t size() { return m_free.size(); }
+    LargeRange& at(size_t i) { return m_free[i]; }
 
 private:
     Vector<LargeRange> m_free;
@@ -47,4 +52,4 @@ private:
 
 } // namespace bmalloc
 
-#endif // LargeMap_h
+#endif

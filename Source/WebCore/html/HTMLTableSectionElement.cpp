@@ -26,15 +26,17 @@
 #include "HTMLTableSectionElement.h"
 
 #include "GenericCachedHTMLCollection.h"
-#include "HTMLCollection.h"
 #include "HTMLNames.h"
 #include "HTMLTableRowElement.h"
 #include "HTMLTableElement.h"
 #include "NodeList.h"
 #include "NodeRareData.h"
 #include "Text.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLTableSectionElement);
 
 using namespace HTMLNames;
 
@@ -48,9 +50,9 @@ Ref<HTMLTableSectionElement> HTMLTableSectionElement::create(const QualifiedName
     return adoptRef(*new HTMLTableSectionElement(tagName, document));
 }
 
-const StyleProperties* HTMLTableSectionElement::additionalPresentationAttributeStyle() const
+const StyleProperties* HTMLTableSectionElement::additionalPresentationalHintStyle() const
 {
-    auto* table = findParentTable();
+    auto table = findParentTable();
     if (!table)
         return nullptr;
     return table->additionalGroupStyle(true);
@@ -92,7 +94,7 @@ ExceptionOr<void> HTMLTableSectionElement::deleteRow(int index)
 int HTMLTableSectionElement::numRows() const
 {
     auto rows = childrenOfType<HTMLTableRowElement>(*this);
-    return std::distance(rows.begin(), rows.end());
+    return std::distance(rows.begin(), { });
 }
 
 Ref<HTMLCollection> HTMLTableSectionElement::rows()

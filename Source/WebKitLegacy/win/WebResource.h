@@ -28,20 +28,16 @@
 
 #include "WebKit.h"
 #include <WebCore/COMPtr.h>
-#include <WebCore/URL.h>
 #include <WebCore/ResourceResponse.h>
 #include <WebCore/SharedBuffer.h>
 #include <wtf/RefPtr.h>
+#include <wtf/URL.h>
 #include <wtf/text/WTFString.h>
 
-class WebResource : public IWebResource {
+class WebResource final : public IWebResource {
 public:
     static WebResource* createInstance(RefPtr<WebCore::SharedBuffer>&&, const WebCore::ResourceResponse&);
-protected:
-    WebResource(IStream* data, const WebCore::URL& url, const WTF::String& mimeType, const WTF::String& textEncodingName, const WTF::String& frameName);
-    ~WebResource();
 
-public:
     // IUnknown
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppvObject);
     virtual ULONG STDMETHODCALLTYPE AddRef();
@@ -56,9 +52,12 @@ public:
     virtual HRESULT STDMETHODCALLTYPE frameName(__deref_opt_out BSTR* name);
 
 private:
+    WebResource(IStream* data, const WTF::URL&, const WTF::String& mimeType, const WTF::String& textEncodingName, const WTF::String& frameName);
+    ~WebResource();
+
     ULONG m_refCount { 0 };
     COMPtr<IStream> m_data;
-    WebCore::URL m_url;
+    WTF::URL m_url;
     WTF::String m_mimeType;
     WTF::String m_textEncodingName;
     WTF::String m_frameName;

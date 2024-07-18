@@ -29,9 +29,13 @@
 
 #include "HTMLAudioElement.h"
 
+#include "CommonAtomStrings.h"
 #include "HTMLNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLAudioElement);
 
 using namespace HTMLNames;
 
@@ -48,10 +52,10 @@ Ref<HTMLAudioElement> HTMLAudioElement::create(const QualifiedName& tagName, Doc
     return element;
 }
 
-Ref<HTMLAudioElement> HTMLAudioElement::createForJSConstructor(Document& document, const AtomicString& src)
+Ref<HTMLAudioElement> HTMLAudioElement::createForLegacyFactoryFunction(Document& document, const AtomString& src)
 {
     auto element = create(audioTag, document, false);
-    element->setAttributeWithoutSynchronization(preloadAttr, "auto");
+    element->setAttributeWithoutSynchronization(preloadAttr, autoAtom());
     element->setAttributeWithoutSynchronization(srcAttr, src);
     return element;
 }

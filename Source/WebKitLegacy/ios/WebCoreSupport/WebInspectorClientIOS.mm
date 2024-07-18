@@ -28,12 +28,14 @@
 
 #import "WebInspectorClient.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebFrameInternal.h"
 #import "WebInspector.h"
 #import "WebNodeHighlighter.h"
 #import "WebViewInternal.h"
+#import <WebCore/CertificateInfo.h>
+#import <WebCore/FloatRect.h>
 #import <WebCore/InspectorController.h>
 #import <WebCore/NotImplemented.h>
 #import <WebCore/Page.h>
@@ -102,10 +104,9 @@ void WebInspectorClient::showPaintRect(const FloatRect&)
 
 void WebInspectorClient::didSetSearchingForNode(bool enabled)
 {
-    WebInspector *inspector = [m_inspectedWebView inspector];
     NSString *notificationName = enabled ? WebInspectorDidStartSearchingForNode : WebInspectorDidStopSearchingForNode;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [[NSNotificationCenter defaultCenter] postNotificationName:notificationName object:inspector];
+    RunLoop::main().dispatch([notificationName = retainPtr(notificationName), inspector = retainPtr([m_inspectedWebView inspector])] {
+        [[NSNotificationCenter defaultCenter] postNotificationName:notificationName.get() object:inspector.get()];
     });
 }
 
@@ -121,17 +122,22 @@ WebInspectorFrontendClient::WebInspectorFrontendClient(WebView* inspectedWebView
 
 void WebInspectorFrontendClient::attachAvailabilityChanged(bool) { }
 void WebInspectorFrontendClient::frontendLoaded() { }
-String WebInspectorFrontendClient::localizedStringsURL() { return String(); }
+String WebInspectorFrontendClient::localizedStringsURL() const { return String(); }
 void WebInspectorFrontendClient::bringToFront() { }
 void WebInspectorFrontendClient::closeWindow() { }
+void WebInspectorFrontendClient::reopen() { }
+void WebInspectorFrontendClient::resetState() { }
+void WebInspectorFrontendClient::setForcedAppearance(InspectorFrontendClient::Appearance) { }
+bool WebInspectorFrontendClient::supportsDockSide(DockSide) { return false; }
 void WebInspectorFrontendClient::attachWindow(DockSide) { }
 void WebInspectorFrontendClient::detachWindow() { }
 void WebInspectorFrontendClient::setAttachedWindowHeight(unsigned) { }
 void WebInspectorFrontendClient::setAttachedWindowWidth(unsigned) { }
+void WebInspectorFrontendClient::setSheetRect(const FloatRect&) { }
 void WebInspectorFrontendClient::startWindowDrag() { }
 void WebInspectorFrontendClient::inspectedURLChanged(const String&) { }
+void WebInspectorFrontendClient::showCertificate(const CertificateInfo&) { }
 void WebInspectorFrontendClient::updateWindowTitle() const { }
-void WebInspectorFrontendClient::save(const String&, const String&, bool, bool) { }
-void WebInspectorFrontendClient::append(const String&, const String&) { }
+void WebInspectorFrontendClient::save(Vector<InspectorFrontendClient::SaveData>&&, bool /* forceSaveAs */) { }
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

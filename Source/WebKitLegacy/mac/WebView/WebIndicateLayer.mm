@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS) && ENABLE(REMOTE_INSPECTOR)
+#if PLATFORM(IOS_FAMILY) && ENABLE(REMOTE_INSPECTOR)
 
 #import "WebIndicateLayer.h"
 
@@ -50,8 +50,8 @@ using namespace WebCore;
     self.contentsScale = [[_webView window] screenScale];
 
     // Blue highlight color.
-    static NeverDestroyed<Color> highlightColor(111.0f / 255.0f, 168.0f / 255.0f, 220.0f / 255.0f, 0.66f);
-    self.backgroundColor = cachedCGColor(highlightColor);
+    constexpr auto highlightColor = SRGBA<uint8_t> { 111, 168, 220, 168 };
+    self.backgroundColor = cachedCGColor(highlightColor).get();
 
     return self;
 }

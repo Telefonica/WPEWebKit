@@ -28,10 +28,6 @@
 
 #if ENABLE(MEDIA_STREAM)
 
-#include <wtf/HashMap.h>
-#include <wtf/text/AtomicString.h>
-#include <wtf/text/AtomicStringHash.h>
-
 namespace WebCore {
 
 bool RealtimeMediaSourceSupportedConstraints::supportsConstraint(MediaConstraintType constraint) const
@@ -61,6 +57,10 @@ bool RealtimeMediaSourceSupportedConstraints::supportsConstraint(MediaConstraint
         return supportsDeviceId();
     case MediaConstraintType::GroupId:
         return supportsGroupId();
+    case MediaConstraintType::DisplaySurface:
+        return supportsDisplaySurface();
+    case MediaConstraintType::LogicalSurface:
+        return supportsLogicalSurface();
     }
 
     ASSERT_NOT_REACHED();

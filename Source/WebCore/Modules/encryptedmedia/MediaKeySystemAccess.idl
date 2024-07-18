@@ -27,11 +27,13 @@
  */
 
 [
+    ActiveDOMObject,
     Conditional=ENCRYPTED_MEDIA,
-    EnabledAtRuntime=EncryptedMediaAPI,
-    ImplementationLacksVTable,
+    EnabledBySetting=EncryptedMediaAPIEnabled,
+    DisabledByQuirk=hasBrokenEncryptedMediaAPISupport,
+    Exposed=Window
 ] interface MediaKeySystemAccess {
     readonly attribute DOMString keySystem;
     MediaKeySystemConfiguration getConfiguration();
-    Promise<MediaKeys> createMediaKeys();
+    [CallWith=CurrentDocument] Promise<MediaKeys> createMediaKeys();
 };

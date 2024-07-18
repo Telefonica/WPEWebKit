@@ -23,60 +23,68 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef PendingDownload_h
-#define PendingDownload_h
+#pragma once
 
-#if USE(NETWORK_SESSION)
-
+#include "DataReference.h"
+#include "DownloadID.h"
 #include "MessageSender.h"
 #include "NetworkLoadClient.h"
+#include "SandboxExtension.h"
+
+namespace IPC {
+class Connection;
+}
 
 namespace WebCore {
+class BlobRegistryImpl;
 class ResourceResponse;
 }
 
 namespace WebKit {
 
-class DownloadID;
+class Download;
 class NetworkLoad;
 class NetworkLoadParameters;
 class NetworkSession;
-    
+
 class PendingDownload : public NetworkLoadClient, public IPC::MessageSender {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    PendingDownload(NetworkLoadParameters&&, DownloadID, NetworkSession&, const String& suggestedName);
-    PendingDownload(std::unique_ptr<NetworkLoad>&&, DownloadID, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&);
+    PendingDownload(IPC::Connection*, NetworkLoadParameters&&, DownloadID, NetworkSession&, WebCore::BlobRegistryImpl*, const String& suggestedName);
+    PendingDownload(IPC::Connection*, std::unique_ptr<NetworkLoad>&&, ResponseCompletionHandler&&, DownloadID, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&);
 
     void continueWillSendRequest(WebCore::ResourceRequest&&);
-#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
-    void continueCanAuthenticateAgainstProtectionSpace(bool canAuthenticate);
+    void cancel(CompletionHandler<void(const IPC::DataReference&)>&&);
+
+#if PLATFORM(COCOA)
+    void publishProgress(const URL&, SandboxExtension::Handle&&);
+    void didBecomeDownload(const std::unique_ptr<Download>&);
 #endif
-    void cancel();
 
 private:    
     // NetworkLoadClient.
     void didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent) override { }
-#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
-    void canAuthenticateAgainstProtectionSpaceAsync(const WebCore::ProtectionSpace&) override;
-#endif
     bool isSynchronous() const override { return false; }
+    bool isAllowedToAskUserForCredentials() const final { return m_isAllowedToAskUserForCredentials; }
     void willSendRedirectedRequest(WebCore::ResourceRequest&&, WebCore::ResourceRequest&& redirectRequest, WebCore::ResourceResponse&& redirectResponse) override;
-    ShouldContinueDidReceiveResponse didReceiveResponse(WebCore::ResourceResponse&&) override { return ShouldContinueDidReceiveResponse::No; };
-    void didReceiveBuffer(Ref<WebCore::SharedBuffer>&&, int reportedEncodedDataLength) override { };
+    void didReceiveResponse(WebCore::ResourceResponse&&, PrivateRelayed, ResponseCompletionHandler&&) override;
+    void didReceiveBuffer(const WebCore::FragmentedSharedBuffer&, int reportedEncodedDataLength) override { };
     void didFinishLoading(const WebCore::NetworkLoadMetrics&) override { };
     void didFailLoading(const WebCore::ResourceError&) override;
 
     // MessageSender.
-    IPC::Connection* messageSenderConnection() override;
-    uint64_t messageSenderDestinationID() override;
+    IPC::Connection* messageSenderConnection() const override;
+    uint64_t messageSenderDestinationID() const override;
 
 private:
     std::unique_ptr<NetworkLoad> m_networkLoad;
+    RefPtr<IPC::Connection> m_parentProcessConnection;
+    bool m_isAllowedToAskUserForCredentials;
+
+#if PLATFORM(COCOA)
+    URL m_progressURL;
+    SandboxExtension::Handle m_progressSandboxExtension;
+#endif
 };
 
 }
-
-#endif
-
-#endif

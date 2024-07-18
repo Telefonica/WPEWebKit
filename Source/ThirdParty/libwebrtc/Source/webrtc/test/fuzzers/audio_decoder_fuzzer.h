@@ -8,12 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_TEST_FUZZERS_AUDIO_DECODER_FUZZER_H_
-#define WEBRTC_TEST_FUZZERS_AUDIO_DECODER_FUZZER_H_
+#ifndef TEST_FUZZERS_AUDIO_DECODER_FUZZER_H_
+#define TEST_FUZZERS_AUDIO_DECODER_FUZZER_H_
 
 #include <stddef.h>
-
-#include "webrtc/typedefs.h"
+#include <stdint.h>
 
 namespace webrtc {
 
@@ -32,9 +31,6 @@ void FuzzAudioDecoder(DecoderFunctionType decode_type,
                       size_t max_decoded_bytes,
                       int16_t* decoded);
 
-void FuzzAudioDecoderIncomingPacket(const uint8_t* data,
-                                    size_t size,
-                                    AudioDecoder* decoder);
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_FUZZERS_AUDIO_DECODER_FUZZER_H_
+#endif  // TEST_FUZZERS_AUDIO_DECODER_FUZZER_H_

@@ -8,28 +8,32 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/test/wav_based_simulator.h"
+#include "modules/audio_processing/test/wav_based_simulator.h"
 
 #include <stdio.h>
+
 #include <iostream>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/audio_processing/test/test_utils.h"
-#include "webrtc/test/testsupport/trace_to_stderr.h"
+#include "absl/strings/string_view.h"
+#include "modules/audio_processing/logging/apm_data_dumper.h"
+#include "modules/audio_processing/test/test_utils.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/system/file_wrapper.h"
 
 namespace webrtc {
 namespace test {
 
 std::vector<WavBasedSimulator::SimulationEventType>
-WavBasedSimulator::GetCustomEventChain(const std::string& filename) {
+WavBasedSimulator::GetCustomEventChain(absl::string_view filename) {
   std::vector<WavBasedSimulator::SimulationEventType> call_chain;
-  FILE* stream = OpenFile(filename.c_str(), "r");
+  FileWrapper file_wrapper = FileWrapper::OpenReadOnly(filename);
 
-  RTC_CHECK(stream) << "Could not open the custom call order file, reverting "
-                       "to using the default call order";
+  RTC_CHECK(file_wrapper.is_open())
+      << "Could not open the custom call order file, reverting "
+         "to using the default call order";
 
   char c;
-  size_t num_read = fread(&c, sizeof(char), 1, stream);
+  size_t num_read = file_wrapper.Read(&c, sizeof(char));
   while (num_read > 0) {
     switch (c) {
       case 'r':
@@ -41,21 +45,29 @@ WavBasedSimulator::GetCustomEventChain(const std::string& filename) {
       case '\n':
         break;
       default:
-        FATAL() << "Incorrect custom call order file, reverting to using the "
-                   "default call order";
-        fclose(stream);
-        return WavBasedSimulator::GetDefaultEventChain();
+        RTC_FATAL() << "Incorrect custom call order file";
     }
 
-    num_read = fread(&c, sizeof(char), 1, stream);
+    num_read = file_wrapper.Read(&c, sizeof(char));
   }
 
-  fclose(stream);
   return call_chain;
 }
 
-WavBasedSimulator::WavBasedSimulator(const SimulationSettings& settings)
-      : AudioProcessingSimulator(settings) {}
+WavBasedSimulator::WavBasedSimulator(
+    const SimulationSettings& settings,
+    rtc::scoped_refptr<AudioProcessing> audio_processing,
+    std::unique_ptr<AudioProcessingBuilder> ap_builder)
+    : AudioProcessingSimulator(settings,
+                               std::move(audio_processing),
+                               std::move(ap_builder)) {
+  if (settings_.call_order_input_filename) {
+    call_chain_ = WavBasedSimulator::GetCustomEventChain(
+        *settings_.call_order_input_filename);
+  } else {
+    call_chain_ = WavBasedSimulator::GetDefaultEventChain();
+  }
+}
 
 WavBasedSimulator::~WavBasedSimulator() = default;
 
@@ -69,54 +81,39 @@ WavBasedSimulator::GetDefaultEventChain() {
 
 void WavBasedSimulator::PrepareProcessStreamCall() {
   if (settings_.fixed_interface) {
-    CopyToAudioFrame(*in_buf_, &fwd_frame_);
+    fwd_frame_.CopyFrom(*in_buf_);
   }
-  ap_->set_stream_key_pressed(settings_.use_ts && (*settings_.use_ts));
+  ap_->set_stream_key_pressed(settings_.override_key_pressed.value_or(false));
 
-  RTC_CHECK_EQ(AudioProcessing::kNoError,
-               ap_->set_stream_delay_ms(
-                   settings_.stream_delay ? *settings_.stream_delay : 0));
-
-  ap_->echo_cancellation()->set_stream_drift_samples(
-      settings_.stream_drift_samples ? *settings_.stream_drift_samples : 0);
-
-  RTC_CHECK_EQ(AudioProcessing::kNoError,
-               ap_->gain_control()->set_stream_analog_level(
-                   last_specified_microphone_level_));
+  if (!settings_.use_stream_delay || *settings_.use_stream_delay) {
+    RTC_CHECK_EQ(AudioProcessing::kNoError,
+                 ap_->set_stream_delay_ms(
+                     settings_.stream_delay ? *settings_.stream_delay : 0));
+  }
 }
 
 void WavBasedSimulator::PrepareReverseProcessStreamCall() {
   if (settings_.fixed_interface) {
-    CopyToAudioFrame(*reverse_in_buf_, &rev_frame_);
+    rev_frame_.CopyFrom(*reverse_in_buf_);
   }
 }
 
 void WavBasedSimulator::Process() {
-  std::unique_ptr<test::TraceToStderr> trace_to_stderr;
-  if (settings_.use_verbose_logging) {
-    trace_to_stderr.reset(new test::TraceToStderr(true));
-  }
-
-  if (settings_.custom_call_order_filename) {
-    call_chain_ = WavBasedSimulator::GetCustomEventChain(
-        *settings_.custom_call_order_filename);
-  } else {
-    call_chain_ = WavBasedSimulator::GetDefaultEventChain();
-  }
-  CreateAudioProcessor();
+  ConfigureAudioProcessor();
 
   Initialize();
 
   bool samples_left_to_process = true;
   int call_chain_index = 0;
-  int num_forward_chunks_processed = 0;
-  const int kOneBykChunksPerSecond =
-      1.f / AudioProcessingSimulator::kChunksPerSecond;
+  int capture_frames_since_init = 0;
+  constexpr int kInitIndex = 1;
   while (samples_left_to_process) {
     switch (call_chain_[call_chain_index]) {
       case SimulationEventType::kProcessStream:
+        SelectivelyToggleDataDumping(kInitIndex, capture_frames_since_init);
+
         samples_left_to_process = HandleProcessStreamCall();
-        ++num_forward_chunks_processed;
+        ++capture_frames_since_init;
         break;
       case SimulationEventType::kProcessReverseStream:
         if (settings_.reverse_input_filename) {
@@ -124,18 +121,21 @@ void WavBasedSimulator::Process() {
         }
         break;
       default:
-        RTC_CHECK(false);
+        RTC_CHECK_NOTREACHED();
     }
 
     call_chain_index = (call_chain_index + 1) % call_chain_.size();
-
-    if (trace_to_stderr) {
-      trace_to_stderr->SetTimeSeconds(num_forward_chunks_processed *
-                                      kOneBykChunksPerSecond);
-    }
   }
 
-  DestroyAudioProcessor();
+  DetachAecDump();
+}
+
+void WavBasedSimulator::Analyze() {
+  std::cout << "Inits:" << std::endl;
+  std::cout << "1: -->" << std::endl;
+  std::cout << " Time:" << std::endl;
+  std::cout << "  Capture: 0 s (0 frames) " << std::endl;
+  std::cout << "  Render: 0 s (0 frames)" << std::endl;
 }
 
 bool WavBasedSimulator::HandleProcessStreamCall() {
@@ -143,10 +143,6 @@ bool WavBasedSimulator::HandleProcessStreamCall() {
   if (samples_left_to_process) {
     PrepareProcessStreamCall();
     ProcessStream(settings_.fixed_interface);
-    // Call stream analog level to ensure that any side-effects are triggered.
-    (void)ap_->gain_control()->stream_analog_level();
-    last_specified_microphone_level_ =
-        ap_->gain_control()->stream_analog_level();
   }
   return samples_left_to_process;
 }

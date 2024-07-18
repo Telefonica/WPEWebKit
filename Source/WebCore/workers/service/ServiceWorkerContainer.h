@@ -28,14 +28,19 @@
 #if ENABLE(SERVICE_WORKER)
 
 #include "ActiveDOMObject.h"
-#include "DOMPromiseProxy.h"
+#include "AddEventListenerOptions.h"
 #include "EventTarget.h"
+#include "IDLTypes.h"
+#include "JSDOMPromiseDeferred.h"
+#include "PushPermissionState.h"
+#include "PushSubscription.h"
 #include "SWClientConnection.h"
 #include "SWServer.h"
 #include "ServiceWorkerJobClient.h"
 #include "ServiceWorkerRegistration.h"
 #include "ServiceWorkerRegistrationOptions.h"
-#include <pal/SessionID.h>
+#include "WorkerType.h"
+#include <wtf/Forward.h>
 #include <wtf/Threading.h>
 
 namespace WebCore {
@@ -44,56 +49,124 @@ class DeferredPromise;
 class NavigatorBase;
 class ServiceWorker;
 
-enum class ServiceWorkerUpdateViaCache;
-enum class WorkerType;
+enum class ServiceWorkerUpdateViaCache : uint8_t;
+enum class WorkerType : bool;
+
+template<typename IDLType> class DOMPromiseProxy;
 
 class ServiceWorkerContainer final : public EventTargetWithInlineData, public ActiveDOMObject, public ServiceWorkerJobClient {
+    WTF_MAKE_NONCOPYABLE(ServiceWorkerContainer);
+    WTF_MAKE_ISO_ALLOCATED(ServiceWorkerContainer);
 public:
-    ServiceWorkerContainer(ScriptExecutionContext&, NavigatorBase&);
-    ~ServiceWorkerContainer();
+    static UniqueRef<ServiceWorkerContainer> create(ScriptExecutionContext*, NavigatorBase&);
 
-    typedef WebCore::RegistrationOptions RegistrationOptions;
+    ~ServiceWorkerContainer();
 
     ServiceWorker* controller() const;
 
     using ReadyPromise = DOMPromiseProxy<IDLInterface<ServiceWorkerRegistration>>;
-    ReadyPromise& ready() { return m_readyPromise; }
+    ReadyPromise& ready();
 
+    using RegistrationOptions = ServiceWorkerRegistrationOptions;
     void addRegistration(const String& scriptURL, const RegistrationOptions&, Ref<DeferredPromise>&&);
-    void getRegistration(const String& url, Ref<DeferredPromise>&&);
+    void unregisterRegistration(ServiceWorkerRegistrationIdentifier, DOMPromiseDeferred<IDLBoolean>&&);
+    void updateRegistration(const URL& scopeURL, const URL& scriptURL, WorkerType, RefPtr<DeferredPromise>&&);
+
+    void getRegistration(const String& clientURL, Ref<DeferredPromise>&&);
+    void updateRegistrationState(ServiceWorkerRegistrationIdentifier, ServiceWorkerRegistrationState, const std::optional<ServiceWorkerData>&);
+    void updateWorkerState(ServiceWorkerIdentifier, ServiceWorkerState);
+    void queueTaskToFireUpdateFoundEvent(ServiceWorkerRegistrationIdentifier);
+    void queueTaskToDispatchControllerChangeEvent();
+
+    void postMessage(MessageWithMessagePorts&&, ServiceWorkerData&& sourceData, String&& sourceOrigin);
+
     void getRegistrations(Ref<DeferredPromise>&&);
+
+    ServiceWorkerRegistration* registration(ServiceWorkerRegistrationIdentifier identifier) const { return m_registrations.get(identifier); }
+
+    void addRegistration(ServiceWorkerRegistration&);
+    void removeRegistration(ServiceWorkerRegistration&);
+
+    void subscribeToPushService(ServiceWorkerRegistration&, const Vector<uint8_t>& applicationServerKey, DOMPromiseDeferred<IDLInterface<PushSubscription>>&&);
+    void unsubscribeFromPushService(ServiceWorkerRegistrationIdentifier, PushSubscriptionIdentifier, DOMPromiseDeferred<IDLBoolean>&&);
+    void getPushSubscription(ServiceWorkerRegistration&, DOMPromiseDeferred<IDLNullable<IDLInterface<PushSubscription>>>&&);
+    void getPushPermissionState(ServiceWorkerRegistrationIdentifier, DOMPromiseDeferred<IDLEnumeration<PushPermissionState>>&&);
+#if ENABLE(NOTIFICATIONS)
+    void getNotifications(const URL&, const String&, DOMPromiseDeferred<IDLSequence<IDLInterface<Notification>>>&&);
+#endif
+
+    ServiceWorkerJob* job(ServiceWorkerJobIdentifier);
 
     void startMessages();
 
-    void ref() final { refEventTarget(); }
-    void deref() final { derefEventTarget(); }
+    bool isStopped() const { return m_isStopped; };
+
+    NavigatorBase* navigator() { return &m_navigator; }
+
+    using VoidPromise = DOMPromiseDeferred<void>;
+    using NavigationPreloadStatePromise = DOMPromiseDeferred<IDLDictionary<NavigationPreloadState>>;
+    void enableNavigationPreload(ServiceWorkerRegistrationIdentifier, VoidPromise&&);
+    void disableNavigationPreload(ServiceWorkerRegistrationIdentifier, VoidPromise&&);
+    void setNavigationPreloadHeaderValue(ServiceWorkerRegistrationIdentifier, String&&, VoidPromise&&);
+    void getNavigationPreloadState(ServiceWorkerRegistrationIdentifier, NavigationPreloadStatePromise&&);
 
 private:
-    void scheduleJob(Ref<ServiceWorkerJob>&&);
+    ServiceWorkerContainer(ScriptExecutionContext*, NavigatorBase&);
+
+    bool addEventListener(const AtomString& eventType, Ref<EventListener>&&, const AddEventListenerOptions& = { }) final;
+
+    void scheduleJob(std::unique_ptr<ServiceWorkerJob>&&);
 
     void jobFailedWithException(ServiceWorkerJob&, const Exception&) final;
-    void jobResolvedWithRegistration(ServiceWorkerJob&, const ServiceWorkerRegistrationData&) final;
-    void jobDidFinish(ServiceWorkerJob&);
+    void jobResolvedWithRegistration(ServiceWorkerJob&, ServiceWorkerRegistrationData&&, ShouldNotifyWhenResolved) final;
+    void jobResolvedWithUnregistrationResult(ServiceWorkerJob&, bool unregistrationResult) final;
+    void startScriptFetchForJob(ServiceWorkerJob&, FetchOptions::Cache) final;
+    void jobFinishedLoadingScript(ServiceWorkerJob&, WorkerFetchResult&&) final;
+    void jobFailedLoadingScript(ServiceWorkerJob&, const ResourceError&, Exception&&) final;
 
-    uint64_t connectionIdentifier() final;
+    void notifyFailedFetchingScript(ServiceWorkerJob&, const ResourceError&);
+    void destroyJob(ServiceWorkerJob&);
+    void willSettleRegistrationPromise(bool success);
 
+    ServiceWorkerOrClientIdentifier contextIdentifier() final;
+    ScriptExecutionContext* context() final { return scriptExecutionContext(); }
+
+    SWClientConnection& ensureSWClientConnection();
+
+    // ActiveDOMObject.
     const char* activeDOMObjectName() const final;
-    bool canSuspendForDocumentSuspension() const final;
+    
     ScriptExecutionContext* scriptExecutionContext() const final { return ActiveDOMObject::scriptExecutionContext(); }
     EventTargetInterface eventTargetInterface() const final { return ServiceWorkerContainerEventTargetInterfaceType; }
     void refEventTarget() final;
     void derefEventTarget() final;
+    void stop() final;
 
-    ReadyPromise m_readyPromise;
+    void notifyRegistrationIsSettled(const ServiceWorkerRegistrationKey&);
+
+    std::unique_ptr<ReadyPromise> m_readyPromise;
 
     NavigatorBase& m_navigator;
 
     RefPtr<SWClientConnection> m_swConnection;
-    HashMap<uint64_t, RefPtr<ServiceWorkerJob>> m_jobMap;
 
-#ifndef NDEBUG
-    ThreadIdentifier m_creationThread { currentThread() };
+    struct OngoingJob {
+        std::unique_ptr<ServiceWorkerJob> job;
+        RefPtr<PendingActivity<ServiceWorkerContainer>> pendingActivity;
+    };
+    HashMap<ServiceWorkerJobIdentifier, OngoingJob> m_jobMap;
+
+    bool m_isStopped { false };
+    HashMap<ServiceWorkerRegistrationIdentifier, ServiceWorkerRegistration*> m_registrations;
+
+#if ASSERT_ENABLED
+    Ref<Thread> m_creationThread { Thread::current() };
 #endif
+
+    uint64_t m_lastOngoingSettledRegistrationIdentifier { 0 };
+    HashMap<uint64_t, ServiceWorkerRegistrationKey> m_ongoingSettledRegistrations;
+    bool m_shouldDeferMessageEvents { false };
+    Vector<Ref<Event>> m_deferredMessageEvents;
 };
 
 } // namespace WebCore

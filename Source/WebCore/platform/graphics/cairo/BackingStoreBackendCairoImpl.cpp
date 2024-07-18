@@ -35,36 +35,33 @@ static RefPtr<cairo_surface_t> createCairoImageSurfaceWithFastMalloc(const IntSi
     auto* surfaceData = fastZeroedMalloc(size.height() * stride);
     RefPtr<cairo_surface_t> surface = adoptRef(cairo_image_surface_create_for_data(static_cast<unsigned char*>(surfaceData), CAIRO_FORMAT_ARGB32, size.width(), size.height(), stride));
     cairo_surface_set_user_data(surface.get(), &s_surfaceDataKey, surfaceData, [](void* data) { fastFree(data); });
-    cairoSurfaceSetDeviceScale(surface.get(), deviceScaleFactor, deviceScaleFactor);
+    cairo_surface_set_device_scale(surface.get(), deviceScaleFactor, deviceScaleFactor);
     return surface;
 }
 
 BackingStoreBackendCairoImpl::BackingStoreBackendCairoImpl(const IntSize& size, float deviceScaleFactor)
     : BackingStoreBackendCairo(size)
-    , m_scrolledHysteresis([this](HysteresisState state) { if (state == HysteresisState::Stopped) m_scrollSurface = nullptr; }, scrollHysteresisDuration)
+    , m_scrolledHysteresis([this](PAL::HysteresisState state) { if (state == PAL::HysteresisState::Stopped) m_scrollSurface = nullptr; }, scrollHysteresisDuration)
 {
     IntSize scaledSize = m_size;
     scaledSize.scale(deviceScaleFactor);
     m_surface = createCairoImageSurfaceWithFastMalloc(scaledSize, deviceScaleFactor);
 }
 
-BackingStoreBackendCairoImpl::~BackingStoreBackendCairoImpl()
-{
-}
+BackingStoreBackendCairoImpl::~BackingStoreBackendCairoImpl() = default;
 
 void BackingStoreBackendCairoImpl::scroll(const IntRect& scrollRect, const IntSize& scrollOffset)
 {
     IntRect targetRect = scrollRect;
     targetRect.move(scrollOffset);
-    targetRect.shiftMaxXEdgeTo(targetRect.maxX() - scrollOffset.width());
-    targetRect.shiftMaxYEdgeTo(targetRect.maxY() - scrollOffset.height());
+    targetRect.intersect(scrollRect);
     if (targetRect.isEmpty())
         return;
 
     if (!m_scrollSurface) {
         IntSize size(cairo_image_surface_get_width(m_surface.get()), cairo_image_surface_get_height(m_surface.get()));
         double xScale, yScale;
-        cairoSurfaceGetDeviceScale(m_surface.get(), xScale, yScale);
+        cairo_surface_get_device_scale(m_surface.get(), &xScale, &yScale);
         ASSERT(xScale == yScale);
         m_scrollSurface = createCairoImageSurfaceWithFastMalloc(size, xScale);
     }

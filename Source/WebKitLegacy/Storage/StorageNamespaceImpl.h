@@ -28,6 +28,7 @@
 #include <WebCore/SecurityOriginData.h>
 #include <WebCore/StorageArea.h>
 #include <WebCore/StorageNamespace.h>
+#include <pal/SessionID.h>
 #include <wtf/HashMap.h>
 #include <wtf/RefPtr.h>
 #include <wtf/text/WTFString.h>
@@ -36,11 +37,10 @@ namespace WebKit {
 
 class StorageAreaImpl;
 
-class StorageNamespaceImpl : public WebCore::StorageNamespace {
+class StorageNamespaceImpl final : public WebCore::StorageNamespace {
 public:
-    static Ref<StorageNamespaceImpl> createSessionStorageNamespace(unsigned quota);
-    static Ref<StorageNamespaceImpl> createEphemeralLocalStorageNamespace(unsigned quota);
-    static Ref<StorageNamespaceImpl> getOrCreateLocalStorageNamespace(const String& databasePath, unsigned quota);
+    static Ref<StorageNamespaceImpl> createSessionStorageNamespace(unsigned quota, PAL::SessionID);
+    static Ref<StorageNamespaceImpl> getOrCreateLocalStorageNamespace(const String& databasePath, unsigned quota, PAL::SessionID);
     virtual ~StorageNamespaceImpl();
 
     void close();
@@ -54,11 +54,14 @@ public:
     void sync();
     void closeIdleLocalStorageDatabases();
 
-private:
-    StorageNamespaceImpl(WebCore::StorageType, const String& path, unsigned quota);
+    PAL::SessionID sessionID() const final { return m_sessionID; }
+    void setSessionIDForTesting(PAL::SessionID) final;
 
-    RefPtr<WebCore::StorageArea> storageArea(const WebCore::SecurityOriginData&) override;
-    RefPtr<StorageNamespace> copy(WebCore::Page* newPage) override;
+private:
+    StorageNamespaceImpl(WebCore::StorageType, const String& path, unsigned quota, PAL::SessionID);
+
+    Ref<WebCore::StorageArea> storageArea(const WebCore::SecurityOrigin&) final;
+    Ref<StorageNamespace> copy(WebCore::Page& newPage) final;
 
     typedef HashMap<WebCore::SecurityOriginData, RefPtr<StorageAreaImpl>> StorageAreaMap;
     StorageAreaMap m_storageAreaMap;
@@ -73,6 +76,8 @@ private:
     unsigned m_quota;
 
     bool m_isShutdown;
+
+    PAL::SessionID m_sessionID;
 };
 
 } // namespace WebCore

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2012 Google Inc. All rights reserved.
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,6 +35,7 @@
 
 #include "RealtimeMediaSourceSupportedConstraints.h"
 #include <cstdlib>
+#include <wtf/EnumTraits.h>
 #include <wtf/Function.h>
 #include <wtf/Vector.h>
 
@@ -42,7 +43,7 @@ namespace WebCore {
     
 class MediaConstraint {
 public:
-    enum class DataType { None, Integer, Double, Boolean, String };
+    enum class DataType : uint8_t { None, Integer, Double, Boolean, String };
 
     bool isInt() const { return m_dataType == DataType::Integer; }
     bool isDouble() const { return m_dataType == DataType::Double; }
@@ -55,24 +56,26 @@ public:
 
     template <class Encoder> void encode(Encoder& encoder) const
     {
-        encoder.encodeEnum(m_constraintType);
+        encoder << m_constraintType;
         encoder << m_name;
-        encoder.encodeEnum(m_dataType);
+        encoder << m_dataType;
     }
 
-    template <class Decoder> static bool decode(Decoder& decoder, MediaConstraint& constraint)
+    template <class Decoder> static WARN_UNUSED_RETURN bool decode(Decoder& decoder, MediaConstraint& constraint)
     {
-        if (!decoder.decodeEnum(constraint.m_constraintType))
+        if (!decoder.decode(constraint.m_constraintType))
             return false;
 
         if (!decoder.decode(constraint.m_name))
             return false;
 
-        if (!decoder.decodeEnum(constraint.m_dataType))
+        if (!decoder.decode(constraint.m_dataType))
             return false;
 
         return true;
     }
+
+    void log() const;
 
 protected:
     MediaConstraint(const String& name, MediaConstraintType constraintType, DataType dataType)
@@ -193,6 +196,19 @@ public:
         return static_cast<double>(std::abs(ideal - m_ideal.value())) / std::max(std::abs(ideal), std::abs(m_ideal.value()));
     }
 
+    double fitnessDistance(const Vector<ValueType>& discreteCapabilityValues) const
+    {
+        double minDistance = std::numeric_limits<double>::infinity();
+
+        for (auto& value : discreteCapabilityValues) {
+            auto distance = fitnessDistance(value, value);
+            if (distance < minDistance)
+                minDistance = distance;
+        }
+
+        return minDistance;
+    }
+
     bool validForRange(ValueType rangeMin, ValueType rangeMax) const
     {
         if (isEmpty())
@@ -221,7 +237,7 @@ public:
         return true;
     }
 
-    ValueType find(const WTF::Function<bool(ValueType)>& function) const
+    ValueType find(const Function<bool(ValueType)>& function) const
     {
         if (m_min && function(m_min.value()))
             return m_min.value();
@@ -240,9 +256,9 @@ public:
 
     ValueType valueForCapabilityRange(ValueType current, ValueType capabilityMin, ValueType capabilityMax) const
     {
-        ValueType value;
-        ValueType min = capabilityMin;
-        ValueType max = capabilityMax;
+        ValueType value { 0 };
+        ValueType min { capabilityMin };
+        ValueType max { capabilityMax };
 
         if (m_exact) {
             ASSERT(validForRange(capabilityMin, capabilityMax));
@@ -254,6 +270,8 @@ public:
             ASSERT(validForRange(value, capabilityMax));
             if (value > min)
                 min = value;
+            if (value < min)
+                value = min;
 
             // If there is no ideal, don't change if minimum is smaller than current.
             if (!m_ideal && value < current)
@@ -265,10 +283,52 @@ public:
             ASSERT(validForRange(capabilityMin, value));
             if (value < max)
                 max = value;
+            if (value > max)
+                value = max;
         }
 
         if (m_ideal)
             value = std::max(min, std::min(max, m_ideal.value()));
+
+        return value;
+    }
+
+    std::optional<ValueType> valueForDiscreteCapabilityValues(ValueType current, const Vector<ValueType>& discreteCapabilityValues) const
+    {
+        std::optional<ValueType> value;
+        std::optional<ValueType> min;
+        std::optional<ValueType> max;
+
+        if (m_exact) {
+            ASSERT(discreteCapabilityValues.contains(m_exact.value()));
+            return m_exact.value();
+        }
+
+        if (m_min) {
+            auto index = discreteCapabilityValues.findIf([&](ValueType value) { return m_min.value() >= value; });
+            if (index != notFound) {
+                min = value = discreteCapabilityValues[index];
+
+                // If there is no ideal, don't change if minimum is smaller than current.
+                if (!m_ideal && *value < current)
+                    value = current;
+            }
+        }
+
+        if (m_max && m_max.value() >= discreteCapabilityValues[0]) {
+            for (auto& discreteValue : discreteCapabilityValues) {
+                if (m_max.value() <= discreteValue)
+                    max = value = discreteValue;
+            }
+        }
+
+        if (m_ideal && discreteCapabilityValues.contains(m_ideal.value())) {
+            value = m_ideal.value();
+            if (max)
+                value = std::min(max.value(), *value);
+            if (min)
+                value = std::max(min.value(), *value);
+        }
 
         return value;
     }
@@ -286,7 +346,7 @@ public:
         encoder << m_ideal;
     }
 
-    template <class Decoder> static bool decode(Decoder& decoder, NumericConstraint& constraint)
+    template <class Decoder> static WARN_UNUSED_RETURN bool decode(Decoder& decoder, NumericConstraint& constraint)
     {
         if (!MediaConstraint::decode(decoder, constraint))
             return false;
@@ -357,6 +417,8 @@ public:
         ASSERT(other.isInt());
         NumericConstraint::innerMerge(downcast<const IntConstraint>(other));
     }
+
+    void logAsInt() const;
 };
 
 class DoubleConstraint final : public NumericConstraint<double> {
@@ -373,6 +435,8 @@ public:
         ASSERT(other.isDouble());
         NumericConstraint::innerMerge(downcast<DoubleConstraint>(other));
     }
+
+    void logAsDouble() const;
 };
 
 class BooleanConstraint final : public MediaConstraint {
@@ -456,7 +520,7 @@ public:
         encoder << m_ideal;
     }
 
-    template <class Decoder> static bool decode(Decoder& decoder, BooleanConstraint& constraint)
+    template <class Decoder> static WARN_UNUSED_RETURN bool decode(Decoder& decoder, BooleanConstraint& constraint)
     {
         if (!MediaConstraint::decode(decoder, constraint))
             return false;
@@ -468,6 +532,8 @@ public:
 
         return true;
     }
+
+    void logAsBoolean() const;
 
 private:
     std::optional<bool> m_exact;
@@ -507,7 +573,7 @@ public:
 
     bool getExact(Vector<String>& exact) const
     {
-        if (!m_exact.isEmpty())
+        if (m_exact.isEmpty())
             return false;
 
         exact = m_exact;
@@ -516,7 +582,7 @@ public:
 
     bool getIdeal(Vector<String>& ideal) const
     {
-        if (!m_ideal.isEmpty())
+        if (m_ideal.isEmpty())
             return false;
 
         ideal = m_ideal;
@@ -526,7 +592,7 @@ public:
     double fitnessDistance(const String&) const;
     double fitnessDistance(const Vector<String>&) const;
 
-    const String& find(const WTF::Function<bool(const String&)>&) const;
+    const String& find(const Function<bool(const String&)>&) const;
 
     bool isEmpty() const { return m_exact.isEmpty() && m_ideal.isEmpty(); }
     bool isMandatory() const { return !m_exact.isEmpty(); }
@@ -540,7 +606,7 @@ public:
         encoder << m_ideal;
     }
 
-    template <class Decoder> static bool decode(Decoder& decoder, StringConstraint& constraint)
+    template <class Decoder> static WARN_UNUSED_RETURN bool decode(Decoder& decoder, StringConstraint& constraint)
     {
         if (!MediaConstraint::decode(decoder, constraint))
             return false;
@@ -551,6 +617,16 @@ public:
             return false;
 
         return true;
+    }
+
+    void removeEmptyStringConstraint()
+    {
+        m_exact.removeAllMatching([](auto& constraint) {
+            return constraint.isEmpty();
+        });
+        m_ideal.removeAllMatching([](auto& constraint) {
+            return constraint.isEmpty();
+        });
     }
 
 private:
@@ -573,8 +649,8 @@ private:
 
 class MediaTrackConstraintSetMap {
 public:
-    WEBCORE_EXPORT void forEach(WTF::Function<void(const MediaConstraint&)>&&) const;
-    void filter(const WTF::Function<bool(const MediaConstraint&)>&) const;
+    WEBCORE_EXPORT void forEach(Function<void(const MediaConstraint&)>&&) const;
+    void filter(const Function<bool(const MediaConstraint&)>&) const;
     bool isEmpty() const;
     WEBCORE_EXPORT size_t size() const;
 
@@ -593,6 +669,8 @@ public:
     std::optional<DoubleConstraint> volume() const { return m_volume; }
 
     std::optional<BooleanConstraint> echoCancellation() const { return m_echoCancellation; }
+    std::optional<BooleanConstraint> displaySurface() const { return m_displaySurface; }
+    std::optional<BooleanConstraint> logicalSurface() const { return m_logicalSurface; }
 
     std::optional<StringConstraint> facingMode() const { return m_facingMode; }
     std::optional<StringConstraint> deviceId() const { return m_deviceId; }
@@ -610,6 +688,8 @@ public:
         encoder << m_volume;
 
         encoder << m_echoCancellation;
+        encoder << m_displaySurface;
+        encoder << m_logicalSurface;
 
         encoder << m_facingMode;
         encoder << m_deviceId;
@@ -637,6 +717,10 @@ public:
 
         if (!decoder.decode(map.m_echoCancellation))
             return std::nullopt;
+        if (!decoder.decode(map.m_displaySurface))
+            return std::nullopt;
+        if (!decoder.decode(map.m_logicalSurface))
+            return std::nullopt;
 
         if (!decoder.decode(map.m_facingMode))
             return std::nullopt;
@@ -645,7 +729,7 @@ public:
         if (!decoder.decode(map.m_groupId))
             return std::nullopt;
 
-        return WTFMove(map);
+        return map;
     }
 
 private:
@@ -659,6 +743,8 @@ private:
     std::optional<DoubleConstraint> m_volume;
 
     std::optional<BooleanConstraint> m_echoCancellation;
+    std::optional<BooleanConstraint> m_displaySurface;
+    std::optional<BooleanConstraint> m_logicalSurface;
 
     std::optional<StringConstraint> m_facingMode;
     std::optional<StringConstraint> m_deviceId;
@@ -808,11 +894,10 @@ private:
 
 struct MediaConstraints {
     void setDefaultVideoConstraints();
-    bool isConstraintSet(const WTF::Function<bool(const MediaTrackConstraintSetMap&)>&);
+    bool isConstraintSet(const Function<bool(const MediaTrackConstraintSetMap&)>&);
 
     MediaTrackConstraintSetMap mandatoryConstraints;
     Vector<MediaTrackConstraintSetMap> advancedConstraints;
-    String deviceIDHashSalt;
     bool isValid { false };
 };
     
@@ -827,5 +912,20 @@ SPECIALIZE_TYPE_TRAITS_MEDIACONSTRAINT(IntConstraint, isInt())
 SPECIALIZE_TYPE_TRAITS_MEDIACONSTRAINT(DoubleConstraint, isDouble())
 SPECIALIZE_TYPE_TRAITS_MEDIACONSTRAINT(StringConstraint, isString())
 SPECIALIZE_TYPE_TRAITS_MEDIACONSTRAINT(BooleanConstraint, isBoolean())
+
+namespace WTF {
+
+template<> struct EnumTraits<WebCore::MediaConstraint::DataType> {
+    using values = EnumValues<
+        WebCore::MediaConstraint::DataType,
+        WebCore::MediaConstraint::DataType::None,
+        WebCore::MediaConstraint::DataType::Integer,
+        WebCore::MediaConstraint::DataType::Double,
+        WebCore::MediaConstraint::DataType::Boolean,
+        WebCore::MediaConstraint::DataType::String
+    >;
+};
+
+} // namespace WTF
 
 #endif // ENABLE(MEDIA_STREAM)

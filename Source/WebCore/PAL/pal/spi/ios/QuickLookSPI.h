@@ -24,6 +24,7 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <QuickLook/QuickLook.h>
 
 #if USE(APPLE_INTERNAL_SDK)
 
@@ -38,6 +39,7 @@
 - (NSURLRequest *)safeRequestForRequest:(NSURLRequest *)request;
 - (id)initWithConnection:(NSURLConnection *)connection delegate:(id)delegate response:(NSURLResponse *)response options:(NSDictionary *)options;
 - (id)initWithData:(NSData *)data name:(NSString *)name uti:(NSString *)uti options:(NSDictionary *)options;
+- (void)appendData:(NSData *)data;
 - (void)appendDataArray:(NSArray *)dataArray;
 - (void)finishConverting;
 - (void)finishedAppendingData;
@@ -47,20 +49,39 @@
 @property (readonly, nonatomic) NSURLResponse *previewResponse;
 @end
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+@class QLItem;
+
+@protocol QLPreviewItemDataProvider <NSObject>
+- (NSData *)provideDataForItem:(QLItem *)item;
+@end
+
+@interface QLItem : NSObject<QLPreviewItem>
+- (instancetype)initWithDataProvider:(id<QLPreviewItemDataProvider>)data contentType:(NSString *)contentType previewTitle:(NSString *)previewTitle;
+- (instancetype)initWithPreviewItemProvider:(NSItemProvider *)itemProvider contentType:(NSString *)contentType previewTitle:(NSString *)previewTitle fileSize:(NSNumber *)fileSize;
+- (void)setPreviewItemProviderProgress:(NSNumber*)progress;
+- (void)setUseLoadingTimeout:(BOOL) timeout;
+@property (nonatomic, copy) NSDictionary *previewOptions;
+@end
+
 #define kQLReturnPasswordProtected 1 << 2
-#else
-#define kQLReturnMask 0xaf00
-#define kQLReturnPasswordProtected (kQLReturnMask | 20)
-#endif
+
+typedef NS_OPTIONS(NSUInteger, QLPreviewControllerFirstTimeAppearanceActions) {
+    QLPreviewControllerFirstTimeAppearanceActionNone = 0,
+    QLPreviewControllerFirstTimeAppearanceActionPlayAudio = 1 << 0,
+    QLPreviewControllerFirstTimeAppearanceActionPlayVideo = 1 << 1,
+    QLPreviewControllerFirstTimeAppearanceActionEnableEditMode = 1 << 2,
+    QLPreviewControllerFirstTimeAppearanceActionEnableVisualSearchDataDetection = 1 << 3,
+    QLPreviewControllerFirstTimeAppearanceActionEnableVisualSearchMode = 1 << 4,
+    QLPreviewControllerFirstTimeAppearanceActionAll = NSUIntegerMax,
+};
+
+@interface QLPreviewController ()
+@property (nonatomic, assign) QLPreviewControllerFirstTimeAppearanceActions appearanceActions;
+@end
 
 #endif
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
 static_assert(kQLReturnPasswordProtected == 4, "kQLReturnPasswordProtected should equal 4.");
-#else
-static_assert(kQLReturnPasswordProtected == 44820, "kQLReturnPasswordProtected should equal 44820.");
-#endif
 
 WTF_EXTERN_C_BEGIN
 

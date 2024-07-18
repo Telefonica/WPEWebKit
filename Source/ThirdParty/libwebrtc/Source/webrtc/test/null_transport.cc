@@ -7,18 +7,17 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#include "webrtc/test/null_transport.h"
+#include "test/null_transport.h"
 
 namespace webrtc {
 namespace test {
 
-bool NullTransport::SendRtp(const uint8_t* packet,
-                            size_t length,
+bool NullTransport::SendRtp(rtc::ArrayView<const uint8_t> packet,
                             const PacketOptions& options) {
   return true;
 }
 
-bool NullTransport::SendRtcp(const uint8_t* packet, size_t length) {
+bool NullTransport::SendRtcp(rtc::ArrayView<const uint8_t> packet) {
   return true;
 }
 

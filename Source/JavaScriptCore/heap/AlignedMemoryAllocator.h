@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,8 +26,13 @@
 #pragma once
 
 #include <wtf/PrintStream.h>
+#include <wtf/SinglyLinkedListWithTail.h>
 
 namespace JSC {
+
+class BlockDirectory;
+class Heap;
+class Subspace;
 
 class AlignedMemoryAllocator {
     WTF_MAKE_NONCOPYABLE(AlignedMemoryAllocator);
@@ -40,6 +45,21 @@ public:
     virtual void freeAlignedMemory(void*) = 0;
     
     virtual void dump(PrintStream&) const = 0;
+
+    void registerDirectory(Heap&, BlockDirectory*);
+    BlockDirectory* firstDirectory() const { return m_directories.first(); }
+
+    void registerSubspace(Subspace*);
+
+    // Some of derived memory allocators do not have these features because they do not use them.
+    // For example, IsoAlignedMemoryAllocator does not have "realloc" feature since it never extends / shrinks the allocated memory region.
+    virtual void* tryAllocateMemory(size_t) = 0;
+    virtual void freeMemory(void*) = 0;
+    virtual void* tryReallocateMemory(void*, size_t) = 0;
+
+private:
+    SinglyLinkedListWithTail<BlockDirectory> m_directories;
+    SinglyLinkedListWithTail<Subspace> m_subspaces;
 };
 
 } // namespace WTF

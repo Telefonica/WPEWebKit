@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015 Yusuke Suzuki <utatane.tea@gmail.com>.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,13 +38,13 @@ class GeneratorFunctionPrototype;
 
 // %GeneratorFunction% intrinsic.
 // https://tc39.github.io/ecma262/#sec-generatorfunction-constructor
-class GeneratorFunctionConstructor : public InternalFunction {
+class GeneratorFunctionConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
 
     static GeneratorFunctionConstructor* create(VM& vm, Structure* structure, GeneratorFunctionPrototype* generatorFunctionPrototype)
     {
-        GeneratorFunctionConstructor* constructor = new (NotNull, allocateCell<GeneratorFunctionConstructor>(vm.heap)) GeneratorFunctionConstructor(vm, structure);
+        GeneratorFunctionConstructor* constructor = new (NotNull, allocateCell<GeneratorFunctionConstructor>(vm)) GeneratorFunctionConstructor(vm, structure);
         constructor->finishCreation(vm, generatorFunctionPrototype);
         return constructor;
     }
@@ -52,14 +53,13 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
 private:
     GeneratorFunctionConstructor(VM&, Structure*);
     void finishCreation(VM&, GeneratorFunctionPrototype*);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(GeneratorFunctionConstructor, InternalFunction);
 
 } // namespace JSC

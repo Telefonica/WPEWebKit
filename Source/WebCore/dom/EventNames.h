@@ -21,24 +21,25 @@
 
 #pragma once
 
+#include "Document.h"
+#include "Quirks.h"
 #include "ThreadGlobalData.h"
 #include <array>
 #include <functional>
-#include <wtf/text/AtomicString.h>
+#include <wtf/text/AtomString.h>
 
 namespace WebCore {
 
-#if !defined(ADDITIONAL_DOM_EVENT_NAMES_FOR_EACH)
-#define ADDITIONAL_DOM_EVENT_NAMES_FOR_EACH(macro)
+#if ENABLE(APPLE_PAY_COUPON_CODE)
+#define DOM_EVENT_NAME_APPLE_PAY_COUPON_CODE_CHANGED(macro) macro(couponcodechanged)
+#else
+#define DOM_EVENT_NAME_APPLE_PAY_COUPON_CODE_CHANGED(macro)
 #endif
 
 #define DOM_EVENT_NAMES_FOR_EACH(macro) \
-    ADDITIONAL_DOM_EVENT_NAMES_FOR_EACH(macro) \
     macro(DOMActivate) \
     macro(DOMCharacterDataModified) \
     macro(DOMContentLoaded) \
-    macro(DOMFocusIn) \
-    macro(DOMFocusOut) \
     macro(DOMNodeInserted) \
     macro(DOMNodeInsertedIntoDocument) \
     macro(DOMNodeRemoved) \
@@ -50,6 +51,8 @@ namespace WebCore {
     macro(addsourcebuffer) \
     macro(addstream) \
     macro(addtrack) \
+    macro(afterprint) \
+    macro(animationcancel) \
     macro(animationend) \
     macro(animationiteration) \
     macro(animationstart) \
@@ -63,6 +66,7 @@ namespace WebCore {
     macro(beforeinput) \
     macro(beforeload) \
     macro(beforepaste) \
+    macro(beforeprint) \
     macro(beforeunload) \
     macro(beginEvent) \
     macro(blocked) \
@@ -79,6 +83,7 @@ namespace WebCore {
     macro(checking) \
     macro(click) \
     macro(close) \
+    macro(closing) \
     macro(complete) \
     macro(compositionend) \
     macro(compositionstart) \
@@ -88,15 +93,19 @@ namespace WebCore {
     macro(connecting) \
     macro(contextmenu) \
     macro(controllerchange) \
+    macro(coordinatorstatechange) \
     macro(copy) \
+    DOM_EVENT_NAME_APPLE_PAY_COUPON_CODE_CHANGED(macro) \
     macro(cuechange) \
     macro(cut) \
+    macro(dataavailable) \
     macro(datachannel) \
     macro(dblclick) \
     macro(devicechange) \
     macro(devicemotion) \
     macro(deviceorientation) \
     macro(dischargingtimechange) \
+    macro(disconnect) \
     macro(downloading) \
     macro(drag) \
     macro(dragend) \
@@ -112,14 +121,18 @@ namespace WebCore {
     macro(endEvent) \
     macro(ended) \
     macro(enter) \
+    macro(enterpictureinpicture) \
     macro(error) \
     macro(exit) \
     macro(fetch) \
+    macro(finish) \
     macro(focus) \
     macro(focusin) \
     macro(focusout) \
+    macro(formdata) \
     macro(gamepadconnected) \
     macro(gamepaddisconnected) \
+    macro(gatheringstatechange) \
     macro(gesturechange) \
     macro(gestureend) \
     macro(gesturescrollend) \
@@ -128,12 +141,15 @@ namespace WebCore {
     macro(gesturestart) \
     macro(gesturetap) \
     macro(gesturetapdown) \
+    macro(gotpointercapture) \
     macro(hashchange) \
     macro(icecandidate) \
+    macro(icecandidateerror) \
     macro(iceconnectionstatechange) \
     macro(icegatheringstatechange) \
     macro(inactive) \
     macro(input) \
+    macro(inputsourceschange) \
     macro(install) \
     macro(invalid) \
     macro(keydown) \
@@ -141,6 +157,7 @@ namespace WebCore {
     macro(keystatuseschange) \
     macro(keyup) \
     macro(languagechange) \
+    macro(leavepictureinpicture) \
     macro(levelchange) \
     macro(load) \
     macro(loadeddata) \
@@ -150,7 +167,9 @@ namespace WebCore {
     macro(loadingdone) \
     macro(loadingerror) \
     macro(loadstart) \
+    macro(lostpointercapture) \
     macro(mark) \
+    macro(merchantvalidation) \
     macro(message) \
     macro(messageerror) \
     macro(mousedown) \
@@ -165,30 +184,45 @@ namespace WebCore {
     macro(negotiationneeded) \
     macro(nexttrack) \
     macro(nomatch) \
+    macro(notificationclick) \
+    macro(notificationclose) \
     macro(noupdate) \
     macro(obsolete) \
     macro(offline) \
     macro(online) \
     macro(open) \
     macro(orientationchange) \
-    macro(overconstrained) \
     macro(overflowchanged) \
     macro(pagehide) \
     macro(pageshow) \
     macro(paste) \
     macro(pause) \
+    macro(payerdetailchange) \
     macro(paymentauthorized) \
+    macro(paymentmethodchange) \
     macro(paymentmethodselected) \
     macro(play) \
     macro(playing) \
     macro(pointerlockchange) \
     macro(pointerlockerror) \
+    macro(pointercancel) \
+    macro(pointerdown) \
+    macro(pointerenter) \
+    macro(pointerleave) \
+    macro(pointermove) \
+    macro(pointerout) \
+    macro(pointerover) \
+    macro(pointerup) \
     macro(popstate) \
     macro(previoustrack) \
+    macro(processorerror) \
     macro(progress) \
+    macro(push) \
+    macro(pushsubscriptionchange) \
     macro(ratechange) \
     macro(readystatechange) \
     macro(rejectionhandled) \
+    macro(remove) \
     macro(removesourcebuffer) \
     macro(removestream) \
     macro(removetrack) \
@@ -197,12 +231,15 @@ namespace WebCore {
     macro(resourcetimingbufferfull) \
     macro(result) \
     macro(resume) \
+    macro(rtctransform) \
     macro(scroll) \
     macro(search) \
     macro(securitypolicyviolation) \
     macro(seeked) \
     macro(seeking) \
     macro(select) \
+    macro(selectedcandidatepairchange) \
+    macro(selectend) \
     macro(selectionchange) \
     macro(selectstart) \
     macro(shippingaddresschange) \
@@ -219,10 +256,14 @@ namespace WebCore {
     macro(sourceopen) \
     macro(speechend) \
     macro(speechstart) \
+    macro(squeeze) \
+    macro(squeezestart) \
+    macro(squeezeend) \
     macro(stalled) \
     macro(start) \
     macro(started) \
     macro(statechange) \
+    macro(stop) \
     macro(storage) \
     macro(submit) \
     macro(success) \
@@ -238,7 +279,11 @@ namespace WebCore {
     macro(touchmove) \
     macro(touchstart) \
     macro(track) \
+    macro(transitioncancel) \
     macro(transitionend) \
+    macro(transitionrun) \
+    macro(transitionstart) \
+    macro(uncapturederror) \
     macro(unhandledrejection) \
     macro(unload) \
     macro(unmute) \
@@ -251,14 +296,8 @@ namespace WebCore {
     macro(validatemerchant) \
     macro(versionchange) \
     macro(visibilitychange) \
+    macro(voiceschanged) \
     macro(volumechange) \
-    macro(vrdisplayactivate) \
-    macro(vrdisplayblur) \
-    macro(vrdisplayconnect) \
-    macro(vrdisplaydeactivate) \
-    macro(vrdisplaydisconnect) \
-    macro(vrdisplayfocus) \
-    macro(vrdisplaypresentchange) \
     macro(waiting) \
     macro(waitingforkey) \
     macro(webglcontextchanged) \
@@ -269,7 +308,6 @@ namespace WebCore {
     macro(webkitAnimationIteration) \
     macro(webkitAnimationStart) \
     macro(webkitBeforeTextInserted) \
-    macro(webkitEditableContentChanged) \
     macro(webkitTransitionEnd) \
     macro(webkitbeginfullscreen) \
     macro(webkitcurrentplaybacktargetiswirelesschanged) \
@@ -287,16 +325,10 @@ namespace WebCore {
     macro(webkitnetworkinfochange) \
     macro(webkitplaybacktargetavailabilitychanged) \
     macro(webkitpresentationmodechanged) \
-    macro(webkitregionoversetchange) \
     macro(webkitremovesourcebuffer) \
     macro(webkitsourceclose) \
     macro(webkitsourceended) \
     macro(webkitsourceopen) \
-    macro(webkitspeechchange) \
-    macro(webkitwillrevealbottom) \
-    macro(webkitwillrevealleft) \
-    macro(webkitwillrevealright) \
-    macro(webkitwillrevealtop) \
     macro(wheel) \
     macro(write) \
     macro(writeend) \
@@ -308,17 +340,17 @@ struct EventNames {
     WTF_MAKE_NONCOPYABLE(EventNames); WTF_MAKE_FAST_ALLOCATED;
 
 public:
-#define DOM_EVENT_NAMES_DECLARE(name) const AtomicString name##Event;
+#define DOM_EVENT_NAMES_DECLARE(name) const AtomString name##Event;
     DOM_EVENT_NAMES_FOR_EACH(DOM_EVENT_NAMES_DECLARE)
 #undef DOM_EVENT_NAMES_DECLARE
 
-    // FIXME: The friend declaration to std::make_unique below does not work in windows port.
+    // FIXME: The friend declaration to makeUnique below does not work in windows port.
     //
     // template<class T, class... Args>
-    // friend typename std::_Unique_if<T>::_Single_object std::make_unique(Args&&...);
+    // friend typename std::_Unique_if<T>::_Single_object makeUnique(Args&&...);
     //
     // This create function should be deleted later and is only for keeping EventNames as private.
-    // std::make_unique should be used instead.
+    // makeUnique should be used instead.
     //
     template<class... Args>
     static std::unique_ptr<EventNames> create(Args&&... args)
@@ -328,16 +360,17 @@ public:
 
     // FIXME: Inelegant to call these both event names and event types.
     // We should choose one term and stick to it.
-    bool isWheelEventType(const AtomicString& eventType) const;
-    bool isGestureEventType(const AtomicString& eventType) const;
-    bool isTouchEventType(const AtomicString& eventType) const;
-    bool isTouchScrollBlockingEventType(const AtomicString& eventType) const;
+    bool isWheelEventType(const AtomString& eventType) const;
+    bool isGestureEventType(const AtomString& eventType) const;
+    bool isTouchRelatedEventType(const AtomString& eventType, const EventTarget&) const;
+    bool isTouchScrollBlockingEventType(const AtomString& eventType) const;
 #if ENABLE(GAMEPAD)
-    bool isGamepadEventType(const AtomicString& eventType) const;
+    bool isGamepadEventType(const AtomString& eventType) const;
 #endif
 
-    std::array<std::reference_wrapper<const AtomicString>, 5> touchEventNames() const;
-    std::array<std::reference_wrapper<const AtomicString>, 3> gestureEventNames() const;
+    std::array<std::reference_wrapper<const AtomString>, 13> touchRelatedEventNames() const;
+    std::array<std::reference_wrapper<const AtomString>, 16> extendedTouchRelatedEventNames() const;
+    std::array<std::reference_wrapper<const AtomString>, 3> gestureEventNames() const;
 
 private:
     EventNames(); // Private to prevent accidental call to EventNames() instead of eventNames().
@@ -353,45 +386,65 @@ inline const EventNames& eventNames()
     return threadGlobalData().eventNames();
 }
 
-inline bool EventNames::isGestureEventType(const AtomicString& eventType) const
+inline bool EventNames::isGestureEventType(const AtomString& eventType) const
 {
     return eventType == gesturestartEvent || eventType == gesturechangeEvent || eventType == gestureendEvent;
 }
 
-inline bool EventNames::isTouchScrollBlockingEventType(const AtomicString& eventType) const
+inline bool EventNames::isTouchScrollBlockingEventType(const AtomString& eventType) const
 {
     return eventType == touchstartEvent
         || eventType == touchmoveEvent;
 }
 
-inline bool EventNames::isTouchEventType(const AtomicString& eventType) const
+inline bool EventNames::isTouchRelatedEventType(const AtomString& eventType, const EventTarget& target) const
 {
+#if ENABLE(TOUCH_EVENTS)
+    if (is<Node>(target) && downcast<Node>(target).document().quirks().shouldDispatchSimulatedMouseEvents(&target)) {
+        if (eventType == mousedownEvent || eventType == mousemoveEvent || eventType == mouseupEvent)
+            return true;
+    }
+#endif
+    UNUSED_PARAM(target);
     return eventType == touchstartEvent
         || eventType == touchmoveEvent
         || eventType == touchendEvent
         || eventType == touchcancelEvent
-        || eventType == touchforcechangeEvent;
+        || eventType == touchforcechangeEvent
+        || eventType == pointeroverEvent
+        || eventType == pointerenterEvent
+        || eventType == pointerdownEvent
+        || eventType == pointermoveEvent
+        || eventType == pointerupEvent
+        || eventType == pointeroutEvent
+        || eventType == pointerleaveEvent
+        || eventType == pointercancelEvent;
 }
 
-inline bool EventNames::isWheelEventType(const AtomicString& eventType) const
+inline bool EventNames::isWheelEventType(const AtomString& eventType) const
 {
     return eventType == wheelEvent
         || eventType == mousewheelEvent;
 }
 
-inline std::array<std::reference_wrapper<const AtomicString>, 5> EventNames::touchEventNames() const
+inline std::array<std::reference_wrapper<const AtomString>, 13> EventNames::touchRelatedEventNames() const
 {
-    return { { touchstartEvent, touchmoveEvent, touchendEvent, touchcancelEvent, touchforcechangeEvent } };
+    return { { touchstartEvent, touchmoveEvent, touchendEvent, touchcancelEvent, touchforcechangeEvent, pointeroverEvent, pointerenterEvent, pointerdownEvent, pointermoveEvent, pointerupEvent, pointeroutEvent, pointerleaveEvent, pointercancelEvent } };
 }
 
-inline std::array<std::reference_wrapper<const AtomicString>, 3> EventNames::gestureEventNames() const
+inline std::array<std::reference_wrapper<const AtomString>, 16> EventNames::extendedTouchRelatedEventNames() const
+{
+    return { { touchstartEvent, touchmoveEvent, touchendEvent, touchcancelEvent, touchforcechangeEvent, pointeroverEvent, pointerenterEvent, pointerdownEvent, pointermoveEvent, pointerupEvent, pointeroutEvent, pointerleaveEvent, pointercancelEvent, mousedownEvent, mousemoveEvent, mouseupEvent } };
+}
+    
+inline std::array<std::reference_wrapper<const AtomString>, 3> EventNames::gestureEventNames() const
 {
     return { { gesturestartEvent, gesturechangeEvent, gestureendEvent } };
 }
 
 #if ENABLE(GAMEPAD)
 
-inline bool EventNames::isGamepadEventType(const AtomicString& eventType) const
+inline bool EventNames::isGamepadEventType(const AtomString& eventType) const
 {
     return eventType == gamepadconnectedEvent
         || eventType == gamepaddisconnectedEvent;

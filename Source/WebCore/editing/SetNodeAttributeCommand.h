@@ -32,25 +32,25 @@ namespace WebCore {
 
 class SetNodeAttributeCommand : public SimpleEditCommand {
 public:
-    static Ref<SetNodeAttributeCommand> create(Ref<Element>&& element, const QualifiedName& attribute, const AtomicString& value)
+    static Ref<SetNodeAttributeCommand> create(Ref<Element>&& element, const QualifiedName& attribute, const AtomString& value)
     {
         return adoptRef(*new SetNodeAttributeCommand(WTFMove(element), attribute, value));
     }
 
 private:
-    SetNodeAttributeCommand(Ref<Element>&&, const QualifiedName& attribute, const AtomicString& value);
+    SetNodeAttributeCommand(Ref<Element>&&, const QualifiedName& attribute, const AtomString& value);
 
     void doApply() override;
     void doUnapply() override;
 
 #ifndef NDEBUG
-    void getNodesInCommand(HashSet<Node*>&) override;
+    void getNodesInCommand(HashSet<Ref<Node>>&) override;
 #endif
 
     Ref<Element> m_element;
     QualifiedName m_attribute;
-    AtomicString m_value;
-    AtomicString m_oldValue;
+    AtomString m_value;
+    AtomString m_oldValue;
 };
 
 } // namespace WebCore

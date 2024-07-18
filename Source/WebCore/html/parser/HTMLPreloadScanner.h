@@ -65,9 +65,9 @@ private:
 
     static TagId tagIdFor(const HTMLToken::DataVector&);
 
-    static String initiatorFor(TagId);
+    static ASCIILiteral initiatorFor(TagId);
 
-    void updatePredictedBaseURL(const HTMLToken&);
+    void updatePredictedBaseURL(const HTMLToken&, bool shouldRestrictBaseURLSchemes);
 
     CSSPreloadScanner m_cssScanner;
     const URL m_documentURL;

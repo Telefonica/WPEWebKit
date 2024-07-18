@@ -29,13 +29,11 @@
 
 #include "ArgumentCoders.h"
 
-using namespace WebCore;
-
 namespace WebKit {
 
 WebPopupItem::WebPopupItem()
-    : m_type(Item)
-    , m_textDirection(LTR)
+    : m_type(Type::Item)
+    , m_textDirection(WebCore::TextDirection::LTR)
     , m_hasTextDirectionOverride(false)
     , m_isEnabled(true)
     , m_isSelected(false)
@@ -44,7 +42,7 @@ WebPopupItem::WebPopupItem()
 
 WebPopupItem::WebPopupItem(Type type)
     : m_type(type)
-    , m_textDirection(LTR)
+    , m_textDirection(WebCore::TextDirection::LTR)
     , m_hasTextDirectionOverride(false)
     , m_isEnabled(true)
     , m_isLabel(false)
@@ -52,7 +50,7 @@ WebPopupItem::WebPopupItem(Type type)
 {
 }
 
-WebPopupItem::WebPopupItem(Type type, const String& text, TextDirection textDirection, bool hasTextDirectionOverride, const String& toolTip, const String& accessibilityText, bool isEnabled, bool isLabel, bool isSelected)
+WebPopupItem::WebPopupItem(Type type, const String& text, WebCore::TextDirection textDirection, bool hasTextDirectionOverride, const String& toolTip, const String& accessibilityText, bool isEnabled, bool isLabel, bool isSelected)
     : m_type(type)
     , m_text(text)
     , m_textDirection(textDirection)
@@ -67,9 +65,9 @@ WebPopupItem::WebPopupItem(Type type, const String& text, TextDirection textDire
 
 void WebPopupItem::encode(IPC::Encoder& encoder) const
 {
-    encoder.encodeEnum(m_type);
+    encoder << m_type;
     encoder << m_text;
-    encoder.encodeEnum(m_textDirection);
+    encoder << m_textDirection;
     encoder << m_hasTextDirectionOverride;
     encoder << m_toolTip;
     encoder << m_accessibilityText;
@@ -81,15 +79,15 @@ void WebPopupItem::encode(IPC::Encoder& encoder) const
 std::optional<WebPopupItem> WebPopupItem::decode(IPC::Decoder& decoder)
 {
     Type type;
-    if (!decoder.decodeEnum(type))
+    if (!decoder.decode(type))
         return std::nullopt;
 
     String text;
     if (!decoder.decode(text))
         return std::nullopt;
     
-    TextDirection textDirection;
-    if (!decoder.decodeEnum(textDirection))
+    WebCore::TextDirection textDirection;
+    if (!decoder.decode(textDirection))
         return std::nullopt;
 
     bool hasTextDirectionOverride;

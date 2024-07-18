@@ -32,6 +32,7 @@
 namespace WebCore {
 
 class MathMLFractionElement final : public MathMLPresentationElement {
+    WTF_MAKE_ISO_ALLOCATED(MathMLFractionElement);
 public:
     static Ref<MathMLFractionElement> create(const QualifiedName& tagName, Document&);
     const Length& lineThickness();
@@ -46,7 +47,7 @@ public:
 private:
     MathMLFractionElement(const QualifiedName& tagName, Document&);
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) final;
-    void parseAttribute(const QualifiedName&, const AtomicString&) final;
+    void parseAttribute(const QualifiedName&, const AtomString&) final;
 
     FractionAlignment cachedFractionAlignment(const QualifiedName&, std::optional<FractionAlignment>&);
 

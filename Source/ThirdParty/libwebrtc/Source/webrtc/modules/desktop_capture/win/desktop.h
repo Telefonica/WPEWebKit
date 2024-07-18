@@ -8,25 +8,29 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_DESKTOP_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_DESKTOP_H_
+#ifndef MODULES_DESKTOP_CAPTURE_WIN_DESKTOP_H_
+#define MODULES_DESKTOP_CAPTURE_WIN_DESKTOP_H_
 
 #include <windows.h>
+
 #include <string>
 
-#include "webrtc/base/constructormagic.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
-class Desktop {
+class RTC_EXPORT Desktop {
  public:
   ~Desktop();
+
+  Desktop(const Desktop&) = delete;
+  Desktop& operator=(const Desktop&) = delete;
 
   // Returns the name of the desktop represented by the object. Return false if
   // quering the name failed for any reason.
   bool GetName(std::wstring* desktop_name_out) const;
 
-  // Returns true if |other| has the same name as this desktop. Returns false
+  // Returns true if `other` has the same name as this desktop. Returns false
   // in any other case including failing Win32 APIs and uninitialized desktop
   // handles.
   bool IsSame(const Desktop& other) const;
@@ -52,12 +56,10 @@ class Desktop {
   // The desktop handle.
   HDESK desktop_;
 
-  // True if |desktop_| must be closed on teardown.
+  // True if `desktop_` must be closed on teardown.
   bool own_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(Desktop);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_DESKTOP_H_
+#endif  // MODULES_DESKTOP_CAPTURE_WIN_DESKTOP_H_

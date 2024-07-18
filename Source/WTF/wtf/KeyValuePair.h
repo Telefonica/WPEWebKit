@@ -31,10 +31,18 @@ namespace WTF {
 
 template<typename KeyTypeArg, typename ValueTypeArg>
 struct KeyValuePair {
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+
     using KeyType = KeyTypeArg;
     using ValueType = ValueTypeArg;
 
     KeyValuePair()
+    {
+    }
+
+    KeyValuePair(KeyTypeArg&& key, ValueTypeArg&& value)
+        : key(WTFMove(key))
+        , value(WTFMove(value))
     {
     }
 
@@ -60,6 +68,11 @@ template<typename K, typename V>
 inline KeyValuePair<typename std::decay<K>::type, typename std::decay<V>::type> makeKeyValuePair(K&& key, V&& value)
 {
     return KeyValuePair<typename std::decay<K>::type, typename std::decay<V>::type> { std::forward<K>(key), std::forward<V>(value) };
+}
+
+template<typename KeyType, typename ValueType> constexpr bool operator==(const KeyValuePair<KeyType, ValueType>& a, const KeyValuePair<KeyType, ValueType>& b)
+{
+    return a.key == b.key && a.value == b.value;
 }
 
 }

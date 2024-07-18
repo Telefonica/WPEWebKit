@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2005 Oliver Hunt <ojh16@student.canterbury.ac.nz>
+ * Copyright (C) 2022 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,9 +20,9 @@
 
 #include "config.h"
 #include "SVGFEPointLightElement.h"
-#include "SVGNames.h"
 
 #include "PointLightSource.h"
+#include "SVGNames.h"
 
 namespace WebCore {
 
@@ -38,7 +39,7 @@ Ref<SVGFEPointLightElement> SVGFEPointLightElement::create(const QualifiedName& 
 
 Ref<LightSource> SVGFEPointLightElement::lightSource() const
 {
-    return PointLightSource::create(FloatPoint3D(x(), y(), z()));
+    return PointLightSource::create({ x(), y(), z() });
 }
 
-}
+} // namespace WebCore

@@ -23,13 +23,11 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import "WKDOMNode.h"
-#import "WKDOMRange.h"
 #import <WebCore/Node.h>
 #import <WebCore/Range.h>
+#import <WebKit/WKDOMNode.h>
+#import <WebKit/WKDOMRange.h>
 #import <wtf/HashMap.h>
-
-#if WK_API_ENABLED
 
 namespace WebCore {
 class Element;
@@ -89,8 +87,8 @@ private:
 
 // -- Caches --
 
-DOMCache<WebCore::Node*, WKDOMNode *>& WKDOMNodeCache();
-DOMCache<WebCore::Range*, WKDOMRange *>& WKDOMRangeCache();
+DOMCache<WebCore::Node*, __unsafe_unretained WKDOMNode *>& WKDOMNodeCache();
+DOMCache<WebCore::Range*, __unsafe_unretained WKDOMRange *>& WKDOMRangeCache();
 
 // -- Node and classes derived from Node. --
 
@@ -111,10 +109,4 @@ WKDOMText *toWKDOMText(WebCore::Text*);
 WebCore::Range* toWebCoreRange(WKDOMRange *);
 WKDOMRange *toWKDOMRange(WebCore::Range*);
 
-// -- Helpers --
-
-NSArray *toNSArray(const Vector<WebCore::IntRect>&);
-
 } // namespace WebKit
-
-#endif // WK_API_ENABLED

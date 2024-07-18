@@ -25,6 +25,7 @@
 
 #include "BPlatform.h"
 #include "Environment.h"
+#include "ProcessCheck.h"
 #include <cstdlib>
 #include <cstring>
 #if BOS(DARWIN)
@@ -33,9 +34,32 @@
 #include <dlfcn.h>
 #endif
 
+#if BOS(UNIX)
+#include "valgrind.h"
+#endif
+
+#if BPLATFORM(IOS_FAMILY) && !BPLATFORM(MACCATALYST) && !BPLATFORM(IOS_FAMILY_SIMULATOR)
+#define BUSE_CHECK_NANO_MALLOC 1
+#else
+#define BUSE_CHECK_NANO_MALLOC 0
+#endif
+
+#if BUSE(CHECK_NANO_MALLOC)
+extern "C" {
+#if __has_include(<malloc_private.h>)
+#include <malloc_private.h>
+#endif
+int malloc_engaged_nano(void);
+}
+#endif
+
+#if BUSE(LIBPAS)
+#include "pas_status_reporter.h"
+#endif
+
 namespace bmalloc {
 
-static bool isMallocEnvironmentVariableSet()
+static bool isMallocEnvironmentVariableImplyingSystemMallocSet()
 {
     const char* list[] = {
         "Malloc",
@@ -43,9 +67,7 @@ static bool isMallocEnvironmentVariableSet()
         "MallocGuardEdges",
         "MallocDoNotProtectPrelude",
         "MallocDoNotProtectPostlude",
-        "MallocStackLogging",
         "MallocStackLoggingNoCompact",
-        "MallocStackLoggingDirectory",
         "MallocScribble",
         "MallocCheckHeapStart",
         "MallocCheckHeapEach",
@@ -61,6 +83,12 @@ static bool isMallocEnvironmentVariableSet()
         if (getenv(list[i]))
             return true;
     }
+
+    // Use system malloc anytime MallocStackLogging is enabled, except when the "vm" or "vmlite" logging modes are enabled.
+    // Those modes only intercept syscalls rather than mallocs, so they don't necessarily imply the use of system malloc.
+    const char* mallocStackLogging = getenv("MallocStackLogging");
+    if (mallocStackLogging && strncmp(mallocStackLogging, "vm", 2))
+        return true;
 
     return false;
 }
@@ -107,19 +135,58 @@ static bool isSanitizerEnabled()
 #endif
 }
 
-Environment::Environment(std::lock_guard<StaticMutex>&)
+static bool isRunningOnValgrind()
+{
+#if BOS(UNIX)
+    if (RUNNING_ON_VALGRIND)
+        return true;
+#endif
+    return false;
+}
+
+#if BUSE(CHECK_NANO_MALLOC)
+static bool isNanoMallocEnabled()
+{
+    int result = !!malloc_engaged_nano();
+    return result;
+}
+#endif
+
+DEFINE_STATIC_PER_PROCESS_STORAGE(Environment);
+
+Environment::Environment(const LockHolder&)
     : m_isDebugHeapEnabled(computeIsDebugHeapEnabled())
 {
+#if BUSE(LIBPAS)
+    const char* statusReporter = getenv("WebKitPasStatusReporter");
+    if (statusReporter) {
+        unsigned enabled;
+        if (sscanf(statusReporter, "%u", &enabled) == 1)
+            pas_status_reporter_enabled = enabled;
+    }
+#endif
 }
 
 bool Environment::computeIsDebugHeapEnabled()
 {
-    if (isMallocEnvironmentVariableSet())
+    if (isMallocEnvironmentVariableImplyingSystemMallocSet())
         return true;
     if (isLibgmallocEnabled())
         return true;
     if (isSanitizerEnabled())
         return true;
+    if (isRunningOnValgrind())
+        return true;
+
+#if BUSE(CHECK_NANO_MALLOC)
+    if (!isNanoMallocEnabled() && !shouldProcessUnconditionallyUseBmalloc())
+        return true;
+#endif
+
+#if BENABLE_MALLOC_HEAP_BREAKDOWN
+    return true;
+#endif
+
     return false;
 }
 

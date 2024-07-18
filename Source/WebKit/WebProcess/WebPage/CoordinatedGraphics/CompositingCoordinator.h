@@ -24,36 +24,39 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef CompositingCoordinator_h
-#define CompositingCoordinator_h
+#pragma once
 
 #if USE(COORDINATED_GRAPHICS)
 
+#include "WebPage.h"
 #include <WebCore/CoordinatedGraphicsLayer.h>
 #include <WebCore/CoordinatedGraphicsState.h>
-#include <WebCore/CoordinatedImageBacking.h>
 #include <WebCore/FloatPoint.h>
 #include <WebCore/GraphicsLayerClient.h>
 #include <WebCore/GraphicsLayerFactory.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/NicosiaBuffer.h>
+#include <WebCore/NicosiaPlatformLayer.h>
+#include <WebCore/NicosiaSceneIntegration.h>
 
 namespace Nicosia {
+class ImageBackingStore;
 class PaintingEngine;
+class SceneIntegration;
 }
 
 namespace WebCore {
 class GraphicsContext;
 class GraphicsLayer;
-class Page;
+class Image;
 }
 
 namespace WebKit {
 
 class CompositingCoordinator final : public WebCore::GraphicsLayerClient
     , public WebCore::CoordinatedGraphicsLayerClient
-    , public WebCore::CoordinatedImageBacking::Client
-    , public WebCore::GraphicsLayerFactory {
+    , public WebCore::GraphicsLayerFactory
+    , public Nicosia::SceneIntegration::Client {
     WTF_MAKE_NONCOPYABLE(CompositingCoordinator);
 public:
     class Client {
@@ -61,9 +64,10 @@ public:
         virtual void didFlushRootLayer(const WebCore::FloatRect& visibleContentRect) = 0;
         virtual void notifyFlushRequired() = 0;
         virtual void commitSceneState(const WebCore::CoordinatedGraphicsState&) = 0;
+        virtual void updateScene() = 0;
     };
 
-    CompositingCoordinator(WebCore::Page*, CompositingCoordinator::Client&);
+    CompositingCoordinator(WebPage&, CompositingCoordinator::Client&);
     virtual ~CompositingCoordinator();
 
     void invalidate();
@@ -73,18 +77,15 @@ public:
     void sizeDidChange(const WebCore::IntSize&);
     void deviceOrPageScaleFactorChanged();
 
-    void setVisibleContentsRect(const WebCore::FloatRect&, const WebCore::FloatPoint&);
+    void setVisibleContentsRect(const WebCore::FloatRect&);
     void renderNextFrame();
-    void commitScrollOffset(uint32_t layerID, const WebCore::IntSize& offset);
 
-    void createRootLayer(const WebCore::IntSize&);
     WebCore::GraphicsLayer* rootLayer() const { return m_rootLayer.get(); }
     WebCore::GraphicsLayer* rootCompositingLayer() const { return m_rootCompositingLayer; }
-    WebCore::CoordinatedGraphicsLayer* mainContentsLayer();
 
     void forceFrameSync() { m_shouldSyncFrame = true; }
 
-    bool flushPendingLayerChanges();
+    bool flushPendingLayerChanges(OptionSet<WebCore::FinalizeRenderingUpdateFlags>);
     WebCore::CoordinatedGraphicsState& state() { return m_state; }
 
     void syncDisplayState();
@@ -97,51 +98,53 @@ private:
     float deviceScaleFactor() const override;
     float pageScaleFactor() const override;
 
-    // CoordinatedImageBacking::Client
-    void createImageBacking(WebCore::CoordinatedImageBackingID) override;
-    void updateImageBacking(WebCore::CoordinatedImageBackingID, RefPtr<Nicosia::Buffer>&&) override;
-    void clearImageBackingContents(WebCore::CoordinatedImageBackingID) override;
-    void removeImageBacking(WebCore::CoordinatedImageBackingID) override;
-
     // CoordinatedGraphicsLayerClient
     bool isFlushingLayerChanges() const override { return m_isFlushingLayerChanges; }
     WebCore::FloatRect visibleContentsRect() const override;
-    Ref<WebCore::CoordinatedImageBacking> createImageBackingIfNeeded(WebCore::Image&) override;
     void detachLayer(WebCore::CoordinatedGraphicsLayer*) override;
+    void attachLayer(WebCore::CoordinatedGraphicsLayer*) override;
     Nicosia::PaintingEngine& paintingEngine() override;
-    void syncLayerState(WebCore::CoordinatedLayerID, WebCore::CoordinatedGraphicsLayerState&) override;
+    RefPtr<Nicosia::ImageBackingStore> imageBackingStore(uint64_t, Function<RefPtr<Nicosia::Buffer>()>) override;
+    void syncLayerState() override;
+    bool nonCompositedWebGLEnabled() const override { return m_nonCompositedWebGLEnabled; }
 
     // GraphicsLayerFactory
-    std::unique_ptr<WebCore::GraphicsLayer> createGraphicsLayer(WebCore::GraphicsLayer::Type, WebCore::GraphicsLayerClient&) override;
+    Ref<WebCore::GraphicsLayer> createGraphicsLayer(WebCore::GraphicsLayer::Type, WebCore::GraphicsLayerClient&) override;
+
+    // Nicosia::SceneIntegration::Client
+    void requestUpdate() override;
 
     void initializeRootCompositingLayerIfNeeded();
-    void flushPendingImageBackingChanges();
-    void clearPendingStateChanges();
 
     void purgeBackingStores();
 
     double timestamp() const;
 
-    WebCore::Page* m_page;
+    WebPage& m_page;
     CompositingCoordinator::Client& m_client;
 
-    std::unique_ptr<WebCore::GraphicsLayer> m_rootLayer;
+    RefPtr<WebCore::GraphicsLayer> m_rootLayer;
     WebCore::GraphicsLayer* m_rootCompositingLayer { nullptr };
     WebCore::GraphicsLayer* m_overlayCompositingLayer { nullptr };
 
+    struct {
+        RefPtr<Nicosia::Scene> scene;
+        RefPtr<Nicosia::SceneIntegration> sceneIntegration;
+        Nicosia::Scene::State state;
+    } m_nicosia;
     WebCore::CoordinatedGraphicsState m_state;
 
-    HashMap<WebCore::CoordinatedLayerID, WebCore::CoordinatedGraphicsLayer*> m_registeredLayers;
-    HashMap<WebCore::CoordinatedImageBackingID, RefPtr<WebCore::CoordinatedImageBacking>> m_imageBackings;
+    HashMap<Nicosia::PlatformLayer::LayerID, WebCore::CoordinatedGraphicsLayer*> m_registeredLayers;
 
     std::unique_ptr<Nicosia::PaintingEngine> m_paintingEngine;
+    HashMap<uint64_t, Ref<Nicosia::ImageBackingStore>> m_imageBackingStores;
 
     // We don't send the messages related to releasing resources to renderer during purging, because renderer already had removed all resources.
-    bool m_isDestructing { false };
     bool m_isPurging { false };
     bool m_isFlushingLayerChanges { false };
     bool m_shouldSyncFrame { false };
     bool m_didInitializeRootCompositingLayer { false };
+    bool m_nonCompositedWebGLEnabled { false };
 
     WebCore::FloatRect m_visibleContentsRect;
 
@@ -151,5 +154,3 @@ private:
 }
 
 #endif // namespace WebKit
-
-#endif // CompositingCoordinator_h

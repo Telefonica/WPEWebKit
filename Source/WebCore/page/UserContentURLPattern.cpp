@@ -26,72 +26,72 @@
 #include "config.h"
 #include "UserContentURLPattern.h"
 
-#include "URL.h"
 #include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/URL.h>
 
 namespace WebCore {
 
-bool UserContentURLPattern::matchesPatterns(const URL& url, const Vector<String>& whitelist, const Vector<String>& blacklist)
+bool UserContentURLPattern::matchesPatterns(const URL& url, const Vector<String>& allowlist, const Vector<String>& blocklist)
 {
-    // In order for a URL to be a match it has to be present in the whitelist and not present in the blacklist.
-    // If there is no whitelist at all, then all URLs are assumed to be in the whitelist.
-    bool matchesWhitelist = whitelist.isEmpty();
-    if (!matchesWhitelist) {
-        for (auto& entry : whitelist) {
+    // In order for a URL to be a match it has to be present in the allowlist and not present in the blocklist.
+    // If there is no allowlist at all, then all URLs are assumed to be in the allowlist.
+    bool matchesAllowlist = allowlist.isEmpty();
+    if (!matchesAllowlist) {
+        for (auto& entry : allowlist) {
             UserContentURLPattern contentPattern(entry);
             if (contentPattern.matches(url)) {
-                matchesWhitelist = true;
+                matchesAllowlist = true;
                 break;
             }
         }
     }
 
-    bool matchesBlacklist = false;
-    if (!blacklist.isEmpty()) {
-        for (auto& entry : blacklist) {
+    bool matchesBlocklist = false;
+    if (!blocklist.isEmpty()) {
+        for (auto& entry : blocklist) {
             UserContentURLPattern contentPattern(entry);
             if (contentPattern.matches(url)) {
-                matchesBlacklist = true;
+                matchesBlocklist = true;
                 break;
             }
         }
     }
 
-    return matchesWhitelist && !matchesBlacklist;
+    return matchesAllowlist && !matchesBlocklist;
 }
 
-bool UserContentURLPattern::parse(const String& pattern)
+bool UserContentURLPattern::parse(StringView pattern)
 {
-    static NeverDestroyed<const String> schemeSeparator(MAKE_STATIC_STRING_IMPL("://"));
+    static constexpr ASCIILiteral schemeSeparator = "://"_s;
 
     size_t schemeEndPos = pattern.find(schemeSeparator);
     if (schemeEndPos == notFound)
         return false;
 
-    m_scheme = pattern.left(schemeEndPos);
+    m_scheme = pattern.left(schemeEndPos).toString();
 
-    unsigned hostStartPos = schemeEndPos + schemeSeparator.get().length();
+    unsigned hostStartPos = schemeEndPos + schemeSeparator.length();
     if (hostStartPos >= pattern.length())
         return false;
 
     int pathStartPos = 0;
 
-    if (equalLettersIgnoringASCIICase(m_scheme, "file"))
+    if (equalLettersIgnoringASCIICase(m_scheme, "file"_s))
         pathStartPos = hostStartPos;
     else {
         size_t hostEndPos = pattern.find('/', hostStartPos);
         if (hostEndPos == notFound)
             return false;
 
-        m_host = pattern.substring(hostStartPos, hostEndPos - hostStartPos);
+        m_host = pattern.substring(hostStartPos, hostEndPos - hostStartPos).toString();
         m_matchSubdomains = false;
 
-        if (m_host == "*") {
+        if (m_host == "*"_s) {
             // The pattern can be just '*', which means match all domains.
             m_host = emptyString();
             m_matchSubdomains = true;
-        } else if (m_host.startsWith("*.")) {
+        } else if (m_host.startsWith("*."_s)) {
             // The first component can be '*', which means to match all subdomains.
             m_host = m_host.substring(2); // Length of "*."
             m_matchSubdomains = true;
@@ -104,7 +104,7 @@ bool UserContentURLPattern::parse(const String& pattern)
         pathStartPos = hostEndPos;
     }
 
-    m_path = pattern.right(pattern.length() - pathStartPos);
+    m_path = pattern.right(pattern.length() - pathStartPos).toString();
 
     return true;
 }
@@ -114,10 +114,10 @@ bool UserContentURLPattern::matches(const URL& test) const
     if (m_invalid)
         return false;
 
-    if (!equalIgnoringASCIICase(test.protocol(), m_scheme))
+    if (m_scheme != "*"_s && !equalIgnoringASCIICase(test.protocol(), m_scheme))
         return false;
 
-    if (!equalLettersIgnoringASCIICase(m_scheme, "file") && !matchesHost(test))
+    if (!equalLettersIgnoringASCIICase(m_scheme, "file"_s) && !matchesHost(test))
         return false;
 
     return matchesPath(test);
@@ -125,7 +125,7 @@ bool UserContentURLPattern::matches(const URL& test) const
 
 bool UserContentURLPattern::matchesHost(const URL& test) const
 {
-    const String& host = test.host();
+    auto host = test.host();
     if (equalIgnoringASCIICase(host, m_host))
         return true;
 
@@ -138,7 +138,7 @@ bool UserContentURLPattern::matchesHost(const URL& test) const
         return true;
 
     // Check if the domain is a subdomain of our host.
-    if (!host.endsWith(m_host, false))
+    if (!host.endsWithIgnoringASCIICase(m_host))
         return false;
 
     ASSERT(host.length() > m_host.length());
@@ -147,22 +147,19 @@ bool UserContentURLPattern::matchesHost(const URL& test) const
     return host[host.length() - m_host.length() - 1] == '.';
 }
 
-struct MatchTester
-{
-    const String m_pattern;
-    unsigned m_patternIndex;
-    
-    const String m_test;
-    unsigned m_testIndex;
-    
-    MatchTester(const String& pattern, const String& test)
-    : m_pattern(pattern)
-    , m_patternIndex(0)
-    , m_test(test)
-    , m_testIndex(0)
+struct MatchTester {
+    StringView m_pattern;
+    unsigned m_patternIndex { 0 };
+
+    StringView m_test;
+    unsigned m_testIndex { 0 };
+
+    MatchTester(StringView pattern, StringView test)
+        : m_pattern(pattern)
+        , m_test(test)
     {
     }
-    
+
     bool testStringFinished() const { return m_testIndex >= m_test.length(); }
     bool patternStringFinished() const { return m_patternIndex >= m_pattern.length(); }
 
@@ -174,7 +171,7 @@ struct MatchTester
             m_patternIndex++;
         }
     }
-    
+
     void eatSameChars()
     {
         while (!patternStringFinished() && !testStringFinished()) {
@@ -226,8 +223,7 @@ struct MatchTester
 
 bool UserContentURLPattern::matchesPath(const URL& test) const
 {
-    MatchTester match(m_path, test.path());
-    return match.test();
+    return MatchTester(m_path, test.path()).test();
 }
 
 } // namespace WebCore

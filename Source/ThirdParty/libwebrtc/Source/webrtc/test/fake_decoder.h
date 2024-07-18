@@ -8,29 +8,33 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_TEST_FAKE_DECODER_H_
-#define WEBRTC_TEST_FAKE_DECODER_H_
+#ifndef TEST_FAKE_DECODER_H_
+#define TEST_FAKE_DECODER_H_
 
-#include <vector>
+#include <stdint.h>
 
-#include "webrtc/modules/video_coding/include/video_codec_interface.h"
-#include "webrtc/system_wrappers/include/clock.h"
+#include <memory>
+
+#include "api/task_queue/task_queue_base.h"
+#include "api/task_queue/task_queue_factory.h"
+#include "api/video/encoded_image.h"
+#include "api/video_codecs/video_decoder.h"
+#include "modules/video_coding/include/video_codec_interface.h"
 
 namespace webrtc {
 namespace test {
 
 class FakeDecoder : public VideoDecoder {
  public:
+  enum { kDefaultWidth = 320, kDefaultHeight = 180 };
+
   FakeDecoder();
+  explicit FakeDecoder(TaskQueueFactory* task_queue_factory);
   virtual ~FakeDecoder() {}
 
-  int32_t InitDecode(const VideoCodec* config,
-                     int32_t number_of_cores) override;
+  bool Configure(const Settings& settings) override;
 
   int32_t Decode(const EncodedImage& input,
-                 bool missing_frames,
-                 const RTPFragmentationHeader* fragmentation,
-                 const CodecSpecificInfo* codec_specific_info,
                  int64_t render_time_ms) override;
 
   int32_t RegisterDecodeCompleteCallback(
@@ -38,13 +42,20 @@ class FakeDecoder : public VideoDecoder {
 
   int32_t Release() override;
 
+  DecoderInfo GetDecoderInfo() const override;
   const char* ImplementationName() const override;
 
   static const char* kImplementationName;
 
+  void SetDelayedDecoding(int decode_delay_ms);
+
  private:
-  VideoCodec config_;
   DecodedImageCallback* callback_;
+  int width_;
+  int height_;
+  std::unique_ptr<TaskQueueBase, TaskQueueDeleter> task_queue_;
+  TaskQueueFactory* task_queue_factory_;
+  int decode_delay_ms_;
 };
 
 class FakeH264Decoder : public FakeDecoder {
@@ -52,25 +63,10 @@ class FakeH264Decoder : public FakeDecoder {
   virtual ~FakeH264Decoder() {}
 
   int32_t Decode(const EncodedImage& input,
-                 bool missing_frames,
-                 const RTPFragmentationHeader* fragmentation,
-                 const CodecSpecificInfo* codec_specific_info,
                  int64_t render_time_ms) override;
 };
 
-class FakeNullDecoder : public FakeDecoder {
- public:
-  virtual ~FakeNullDecoder() {}
-
-  int32_t Decode(const EncodedImage& input,
-                 bool missing_frames,
-                 const RTPFragmentationHeader* fragmentation,
-                 const CodecSpecificInfo* codec_specific_info,
-                 int64_t render_time_ms) override {
-    return 0;
-  }
-};
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_FAKE_DECODER_H_
+#endif  // TEST_FAKE_DECODER_H_

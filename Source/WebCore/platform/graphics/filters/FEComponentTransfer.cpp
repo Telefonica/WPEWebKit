@@ -4,6 +4,7 @@
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
  * Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
  * Copyright (C) Research In Motion Limited 2010. All rights reserved.
+ * Copyright (C) 2021-2022 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,173 +25,54 @@
 #include "config.h"
 #include "FEComponentTransfer.h"
 
+#include "FEComponentTransferSoftwareApplier.h"
 #include "Filter.h"
-#include "GraphicsContext.h"
 #include <wtf/text/TextStream.h>
 
-#include <runtime/Uint8ClampedArray.h>
-#include <wtf/MathExtras.h>
-#include <wtf/StdLibExtras.h>
+#if USE(CORE_IMAGE)
+#include "FEComponentTransferCoreImageApplier.h"
+#endif
 
 namespace WebCore {
 
-typedef void (*TransferType)(unsigned char*, const ComponentTransferFunction&);
+Ref<FEComponentTransfer> FEComponentTransfer::create(const ComponentTransferFunction& redFunction, const ComponentTransferFunction& greenFunction, const ComponentTransferFunction& blueFunction, const ComponentTransferFunction& alphaFunction)
+{
+    return adoptRef(*new FEComponentTransfer(redFunction, greenFunction, blueFunction, alphaFunction));
+}
 
-FEComponentTransfer::FEComponentTransfer(Filter& filter, const ComponentTransferFunction& redFunc, const ComponentTransferFunction& greenFunc,
-                                         const ComponentTransferFunction& blueFunc, const ComponentTransferFunction& alphaFunc)
-    : FilterEffect(filter)
-    , m_redFunc(redFunc)
-    , m_greenFunc(greenFunc)
-    , m_blueFunc(blueFunc)
-    , m_alphaFunc(alphaFunc)
+FEComponentTransfer::FEComponentTransfer(const ComponentTransferFunction& redFunction, const ComponentTransferFunction& greenFunction, const ComponentTransferFunction& blueFunction, const ComponentTransferFunction& alphaFunction)
+    : FilterEffect(FilterEffect::Type::FEComponentTransfer)
+    , m_redFunction(redFunction)
+    , m_greenFunction(greenFunction)
+    , m_blueFunction(blueFunction)
+    , m_alphaFunction(alphaFunction)
 {
 }
 
-Ref<FEComponentTransfer> FEComponentTransfer::create(Filter& filter, const ComponentTransferFunction& redFunc,
-    const ComponentTransferFunction& greenFunc, const ComponentTransferFunction& blueFunc, const ComponentTransferFunction& alphaFunc)
+bool FEComponentTransfer::supportsAcceleratedRendering() const
 {
-    return adoptRef(*new FEComponentTransfer(filter, redFunc, greenFunc, blueFunc, alphaFunc));
+#if USE(CORE_IMAGE)
+    return FEComponentTransferCoreImageApplier::supportsCoreImageRendering(*this);
+#else
+    return false;
+#endif
 }
 
-ComponentTransferFunction FEComponentTransfer::redFunction() const
+std::unique_ptr<FilterEffectApplier> FEComponentTransfer::createAcceleratedApplier() const
 {
-    return m_redFunc;
+#if USE(CORE_IMAGE)
+    return FilterEffectApplier::create<FEComponentTransferCoreImageApplier>(*this);
+#else
+    return nullptr;
+#endif
 }
 
-void FEComponentTransfer::setRedFunction(const ComponentTransferFunction& func)
+std::unique_ptr<FilterEffectApplier> FEComponentTransfer::createSoftwareApplier() const
 {
-    m_redFunc = func;
+    return FilterEffectApplier::create<FEComponentTransferSoftwareApplier>(*this);
 }
 
-ComponentTransferFunction FEComponentTransfer::greenFunction() const
-{
-    return m_greenFunc;
-}
-
-void FEComponentTransfer::setGreenFunction(const ComponentTransferFunction& func)
-{
-    m_greenFunc = func;
-}
-
-ComponentTransferFunction FEComponentTransfer::blueFunction() const
-{
-    return m_blueFunc;
-}
-
-void FEComponentTransfer::setBlueFunction(const ComponentTransferFunction& func)
-{
-    m_blueFunc = func;
-}
-
-ComponentTransferFunction FEComponentTransfer::alphaFunction() const
-{
-    return m_alphaFunc;
-}
-
-void FEComponentTransfer::setAlphaFunction(const ComponentTransferFunction& func)
-{
-    m_alphaFunc = func;
-}
-
-static void identity(unsigned char*, const ComponentTransferFunction&)
-{
-}
-
-static void table(unsigned char* values, const ComponentTransferFunction& transferFunction)
-{
-    const Vector<float>& tableValues = transferFunction.tableValues;
-    unsigned n = tableValues.size();
-    if (n < 1)
-        return;            
-    for (unsigned i = 0; i < 256; ++i) {
-        double c = i / 255.0;                
-        unsigned k = static_cast<unsigned>(c * (n - 1));
-        double v1 = tableValues[k];
-        double v2 = tableValues[std::min((k + 1), (n - 1))];
-        double val = 255.0 * (v1 + (c * (n - 1) - k) * (v2 - v1));
-        val = std::max(0.0, std::min(255.0, val));
-        values[i] = static_cast<unsigned char>(val);
-    }
-}
-
-static void discrete(unsigned char* values, const ComponentTransferFunction& transferFunction)
-{
-    const Vector<float>& tableValues = transferFunction.tableValues;
-    unsigned n = tableValues.size();
-    if (n < 1)
-        return;
-    for (unsigned i = 0; i < 256; ++i) {
-        unsigned k = static_cast<unsigned>((i * n) / 255.0);
-        k = std::min(k, n - 1);
-        double val = 255 * tableValues[k];
-        val = std::max(0.0, std::min(255.0, val));
-        values[i] = static_cast<unsigned char>(val);
-    }
-}
-
-static void linear(unsigned char* values, const ComponentTransferFunction& transferFunction)
-{
-    for (unsigned i = 0; i < 256; ++i) {
-        double val = transferFunction.slope * i + 255 * transferFunction.intercept;
-        val = std::max(0.0, std::min(255.0, val));
-        values[i] = static_cast<unsigned char>(val);
-    }
-}
-
-static void gamma(unsigned char* values, const ComponentTransferFunction& transferFunction)
-{
-    for (unsigned i = 0; i < 256; ++i) {
-        double exponent = transferFunction.exponent; // RCVT doesn't like passing a double and a float to pow, so promote this to double
-        double val = 255.0 * (transferFunction.amplitude * pow((i / 255.0), exponent) + transferFunction.offset);
-        val = std::max(0.0, std::min(255.0, val));
-        values[i] = static_cast<unsigned char>(val);
-    }
-}
-
-void FEComponentTransfer::platformApplySoftware()
-{
-    FilterEffect* in = inputEffect(0);
-
-    Uint8ClampedArray* pixelArray = createUnmultipliedImageResult();
-    if (!pixelArray)
-        return;
-
-    unsigned char rValues[256], gValues[256], bValues[256], aValues[256];
-    getValues(rValues, gValues, bValues, aValues);
-    unsigned char* tables[] = { rValues, gValues, bValues, aValues };
-
-    IntRect drawingRect = requestedRegionOfInputImageData(in->absolutePaintRect());
-    in->copyUnmultipliedImage(pixelArray, drawingRect);
-
-    unsigned pixelArrayLength = pixelArray->length();
-    unsigned char* data = pixelArray->data();
-    for (unsigned pixelOffset = 0; pixelOffset < pixelArrayLength; pixelOffset += 4) {
-        for (unsigned channel = 0; channel < 4; ++channel) {
-            unsigned char c = data[pixelOffset + channel];
-            data[pixelOffset + channel] = tables[channel][c];
-        }
-    }
-}
-
-void FEComponentTransfer::getValues(unsigned char rValues[256], unsigned char gValues[256], unsigned char bValues[256], unsigned char aValues[256])
-{
-    for (unsigned i = 0; i < 256; ++i)
-        rValues[i] = gValues[i] = bValues[i] = aValues[i] = i;
-    unsigned char* tables[] = { rValues, gValues, bValues, aValues };
-    ComponentTransferFunction transferFunction[] = {m_redFunc, m_greenFunc, m_blueFunc, m_alphaFunc};
-    TransferType callEffect[] = {identity, identity, table, discrete, linear, gamma};
-
-    for (unsigned channel = 0; channel < 4; channel++) {
-        ASSERT_WITH_SECURITY_IMPLICATION(static_cast<size_t>(transferFunction[channel].type) < WTF_ARRAY_LENGTH(callEffect));
-        (*callEffect[transferFunction[channel].type])(tables[channel], transferFunction[channel]);
-    }
-}
-
-void FEComponentTransfer::dump()
-{
-}
-
-static TextStream& operator<<(TextStream& ts, const ComponentTransferType& type)
+static TextStream& operator<<(TextStream& ts, ComponentTransferType type)
 {
     switch (type) {
     case FECOMPONENTTRANSFER_TYPE_UNKNOWN:
@@ -217,30 +99,45 @@ static TextStream& operator<<(TextStream& ts, const ComponentTransferType& type)
 
 static TextStream& operator<<(TextStream& ts, const ComponentTransferFunction& function)
 {
-    ts << "type=\"" << function.type 
-       << "\" slope=\"" << function.slope
-       << "\" intercept=\"" << function.intercept
-       << "\" amplitude=\"" << function.amplitude
-       << "\" exponent=\"" << function.exponent
-       << "\" offset=\"" << function.offset << "\"";
+    ts << "type=\"" << function.type;
+
+    switch (function.type) {
+    case FECOMPONENTTRANSFER_TYPE_UNKNOWN:
+        break;
+    case FECOMPONENTTRANSFER_TYPE_IDENTITY:
+        break;
+    case FECOMPONENTTRANSFER_TYPE_TABLE:
+        ts << " " << function.tableValues;
+        break;
+    case FECOMPONENTTRANSFER_TYPE_DISCRETE:
+        ts << " " << function.tableValues;
+        break;
+    case FECOMPONENTTRANSFER_TYPE_LINEAR:
+        ts << "\" slope=\"" << function.slope << "\" intercept=\"" << function.intercept << "\"";
+        break;
+    case FECOMPONENTTRANSFER_TYPE_GAMMA:
+        ts << "\" amplitude=\"" << function.amplitude << "\" exponent=\"" << function.exponent << "\" offset=\"" << function.offset << "\"";
+        break;
+    }
+
     return ts;
 }
 
-TextStream& FEComponentTransfer::externalRepresentation(TextStream& ts, int indent) const
+TextStream& FEComponentTransfer::externalRepresentation(TextStream& ts, FilterRepresentation representation) const
 {
-    writeIndent(ts, indent);
-    ts << "[feComponentTransfer";
-    FilterEffect::externalRepresentation(ts);
-    ts << " \n";
-    writeIndent(ts, indent + 2);
-    ts << "{red: " << m_redFunc << "}\n";
-    writeIndent(ts, indent + 2);
-    ts << "{green: " << m_greenFunc << "}\n";
-    writeIndent(ts, indent + 2);
-    ts << "{blue: " << m_blueFunc << "}\n";    
-    writeIndent(ts, indent + 2);
-    ts << "{alpha: " << m_alphaFunc << "}]\n";
-    inputEffect(0)->externalRepresentation(ts, indent + 1);
+    ts << indent << "[feComponentTransfer";
+    FilterEffect::externalRepresentation(ts, representation);
+    ts << "\n";
+
+    {
+        TextStream::IndentScope indentScope(ts, 2);
+        ts << indent << "{red: " << m_redFunction << "}\n";
+        ts << indent << "{green: " << m_greenFunction << "}\n";
+        ts << indent << "{blue: " << m_blueFunction << "}\n";
+        ts << indent << "{alpha: " << m_alphaFunction << "}";
+    }
+
+    ts << "]\n";
     return ts;
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,22 +25,24 @@
 
 #pragma once
 
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
 
-#include <pal/Logger.h>
-#include <pal/LoggerHelper.h>
-#include <wtf/text/AtomicString.h>
+#include "ContextDestructionObserver.h"
+#include "WebCoreOpaqueRoot.h"
+#include <wtf/LoggerHelper.h>
+#include <wtf/WeakPtr.h>
+#include <wtf/text/AtomString.h>
 
 namespace WebCore {
 
-class Element;
-class HTMLMediaElement;
 class SourceBuffer;
+class TrackListBase;
 
 class TrackBase
     : public RefCounted<TrackBase>
+    , public ContextDestructionObserver
 #if !RELEASE_LOG_DISABLED
-    , private PAL::LoggerHelper
+    , private LoggerHelper
 #endif
 {
 public:
@@ -49,21 +51,10 @@ public:
     enum Type { BaseTrack, TextTrack, AudioTrack, VideoTrack };
     Type type() const { return m_type; }
 
-    virtual void setMediaElement(HTMLMediaElement*);
-    HTMLMediaElement* mediaElement() { return m_mediaElement; }
-    virtual Element* element();
-
-    virtual AtomicString id() const { return m_id; }
-    virtual void setId(const AtomicString& id) { m_id = id; }
-
-    AtomicString label() const { return m_label; }
-    void setLabel(const AtomicString& label) { m_label = label; }
-
-    AtomicString validBCP47Language() const;
-    AtomicString language() const { return m_language; }
-    virtual void setLanguage(const AtomicString&);
-
-    virtual void clearClient() = 0;
+    virtual AtomString id() const { return m_id; }
+    AtomString label() const { return m_label; }
+    AtomString validBCP47Language() const { return m_validBCP47Language; }
+    AtomString language() const { return m_language; }
 
     virtual int uniqueId() const { return m_uniqueId; }
 
@@ -72,18 +63,26 @@ public:
     void setSourceBuffer(SourceBuffer* buffer) { m_sourceBuffer = buffer; }
 #endif
 
+    void setTrackList(TrackListBase&);
+    void clearTrackList();
+    TrackListBase* trackList() const;
+    WebCoreOpaqueRoot opaqueRoot();
+
     virtual bool enabled() const = 0;
 
 #if !RELEASE_LOG_DISABLED
-    const PAL::Logger& logger() const final { ASSERT(m_logger); return *m_logger.get(); }
+    virtual void setLogger(const Logger&, const void*);
+    const Logger& logger() const final { ASSERT(m_logger); return *m_logger.get(); }
     const void* logIdentifier() const final { return m_logIdentifier; }
     WTFLogChannel& logChannel() const final;
 #endif
 
 protected:
-    TrackBase(Type, const AtomicString& id, const AtomicString& label, const AtomicString& language);
+    TrackBase(ScriptExecutionContext*, Type, const AtomString& id, const AtomString& label, const AtomString& language);
 
-    HTMLMediaElement* m_mediaElement { nullptr };
+    virtual void setId(const AtomString& id) { m_id = id; }
+    virtual void setLabel(const AtomString& label) { m_label = label; }
+    virtual void setLanguage(const AtomString&);
 
 #if ENABLE(MEDIA_SOURCE)
     SourceBuffer* m_sourceBuffer { nullptr };
@@ -92,31 +91,37 @@ protected:
 private:
     Type m_type;
     int m_uniqueId;
-    AtomicString m_id;
-    AtomicString m_label;
-    AtomicString m_language;
-    AtomicString m_validBCP47Language;
+    AtomString m_id;
+    AtomString m_label;
+    AtomString m_language;
+    AtomString m_validBCP47Language;
 #if !RELEASE_LOG_DISABLED
-    RefPtr<const PAL::Logger> m_logger;
-    const void* m_logIdentifier;
+    RefPtr<const Logger> m_logger;
+    const void* m_logIdentifier { nullptr };
 #endif
+    WeakPtr<TrackListBase> m_trackList;
 };
 
 class MediaTrackBase : public TrackBase {
 public:
-    const AtomicString& kind() const { return m_kind; }
-    virtual void setKind(const AtomicString&);
+    const AtomString& kind() const { return m_kind; }
+    virtual void setKind(const AtomString&);
 
 protected:
-    MediaTrackBase(Type, const AtomicString& id, const AtomicString& label, const AtomicString& language);
+    MediaTrackBase(ScriptExecutionContext*, Type, const AtomString& id, const AtomString& label, const AtomString& language);
 
-    void setKindInternal(const AtomicString&);
+    void setKindInternal(const AtomString&);
 
 private:
-    virtual bool isValidKind(const AtomicString&) const = 0;
+    virtual bool isValidKind(const AtomString&) const = 0;
 
-    AtomicString m_kind;
+    AtomString m_kind;
 };
+
+inline WebCoreOpaqueRoot root(TrackBase* track)
+{
+    return track->opaqueRoot();
+}
 
 } // namespace WebCore
 

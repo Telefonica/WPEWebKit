@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,19 +23,19 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef Deallocator_h
-#define Deallocator_h
+#pragma once
 
 #include "BExport.h"
 #include "FixedVector.h"
 #include "SmallPage.h"
 #include <mutex>
 
+#if !BUSE(LIBPAS)
+
 namespace bmalloc {
 
-class DebugHeap;
 class Heap;
-class StaticMutex;
+class Mutex;
 
 // Per-cache object deallocator.
 
@@ -47,9 +47,9 @@ public:
     void deallocate(void*);
     void scavenge();
     
-    void processObjectLog(std::lock_guard<StaticMutex>&);
+    void processObjectLog(UniqueLockHolder&);
     
-    LineCache& lineCache(std::lock_guard<StaticMutex>&) { return m_lineCache; }
+    LineCache& lineCache(UniqueLockHolder&) { return m_lineCache; }
 
 private:
     bool deallocateFastCase(void*);
@@ -58,7 +58,6 @@ private:
     Heap& m_heap;
     FixedVector<void*, deallocatorLogCapacity> m_objectLog;
     LineCache m_lineCache; // The Heap removes items from this cache.
-    DebugHeap* m_debugHeap;
 };
 
 inline bool Deallocator::deallocateFastCase(void* object)
@@ -82,4 +81,4 @@ inline void Deallocator::deallocate(void* object)
 
 } // namespace bmalloc
 
-#endif // Deallocator_h
+#endif

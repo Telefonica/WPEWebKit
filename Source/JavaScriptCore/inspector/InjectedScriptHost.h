@@ -26,7 +26,7 @@
 #pragma once
 
 #include "JSCJSValueInlines.h"
-#include "inspector/PerGlobalObjectWrapperWorld.h"
+#include "PerGlobalObjectWrapperWorld.h"
 #include <wtf/RefCounted.h>
 
 namespace Inspector {
@@ -36,14 +36,19 @@ public:
     static Ref<InjectedScriptHost> create() { return adoptRef(*new InjectedScriptHost); }
     virtual ~InjectedScriptHost();
 
-    virtual JSC::JSValue subtype(JSC::ExecState*, JSC::JSValue) { return JSC::jsUndefined(); }
+    virtual JSC::JSValue subtype(JSC::JSGlobalObject*, JSC::JSValue) { return JSC::jsUndefined(); }
+    virtual JSC::JSValue getInternalProperties(JSC::VM&, JSC::JSGlobalObject*, JSC::JSValue) { return { }; }
     virtual bool isHTMLAllCollection(JSC::VM&, JSC::JSValue) { return false; }
 
-    JSC::JSValue wrapper(JSC::ExecState*, JSC::JSGlobalObject*);
+    JSC::JSValue wrapper(JSC::JSGlobalObject*);
     void clearAllWrappers();
+
+    void setSavedResultAlias(const std::optional<String>& alias) { m_savedResultAlias = alias; }
+    const std::optional<String>& savedResultAlias() const { return m_savedResultAlias; }
 
 private:
     PerGlobalObjectWrapperWorld m_wrappers;
+    std::optional<String> m_savedResultAlias;
 };
 
 } // namespace Inspector

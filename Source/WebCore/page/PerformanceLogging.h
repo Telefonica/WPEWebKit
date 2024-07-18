@@ -30,15 +30,15 @@
 
 namespace WebCore {
 
-class MainFrame;
+class Page;
 
-enum class ShouldIncludeExpensiveComputations { No, Yes };
+enum class ShouldIncludeExpensiveComputations : bool { No, Yes };
 
 class PerformanceLogging {
     WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(PerformanceLogging);
 public:
-    explicit PerformanceLogging(MainFrame&);
+    explicit PerformanceLogging(Page&);
 
     enum PointOfInterest {
         MainFrameLoadStarted,
@@ -54,7 +54,7 @@ public:
 private:
     static void getPlatformMemoryUsageStatistics(HashMap<const char*, size_t>&);
 
-    MainFrame& m_mainFrame;
+    Page& m_page;
 };
 
 }

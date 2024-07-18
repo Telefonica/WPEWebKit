@@ -10,13 +10,13 @@
 
 // Gaussian probability calculations internally used in vad_core.c.
 
-#ifndef WEBRTC_COMMON_AUDIO_VAD_VAD_GMM_H_
-#define WEBRTC_COMMON_AUDIO_VAD_VAD_GMM_H_
+#ifndef COMMON_AUDIO_VAD_VAD_GMM_H_
+#define COMMON_AUDIO_VAD_VAD_GMM_H_
 
-#include "webrtc/typedefs.h"
+#include <stdint.h>
 
-// Calculates the probability for |input|, given that |input| comes from a
-// normal distribution with mean and standard deviation (|mean|, |std|).
+// Calculates the probability for `input`, given that `input` comes from a
+// normal distribution with mean and standard deviation (`mean`, `std`).
 //
 // Inputs:
 //      - input         : input sample in Q4.
@@ -26,14 +26,14 @@
 // Output:
 //
 //      - delta         : input used when updating the model, Q11.
-//                        |delta| = (|input| - |mean|) / |std|^2.
+//                        `delta` = (`input` - `mean`) / `std`^2.
 //
 // Return:
-//   (probability for |input|) =
-//    1 / |std| * exp(-(|input| - |mean|)^2 / (2 * |std|^2));
+//   (probability for `input`) =
+//    1 / `std` * exp(-(`input` - `mean`)^2 / (2 * `std`^2));
 int32_t WebRtcVad_GaussianProbability(int16_t input,
                                       int16_t mean,
                                       int16_t std,
                                       int16_t* delta);
 
-#endif  // WEBRTC_COMMON_AUDIO_VAD_VAD_GMM_H_
+#endif  // COMMON_AUDIO_VAD_VAD_GMM_H_

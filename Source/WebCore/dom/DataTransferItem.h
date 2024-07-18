@@ -36,7 +36,7 @@
 #include <wtf/Forward.h>
 #include <wtf/RefCounted.h>
 #include <wtf/WeakPtr.h>
-#include <wtf/text/AtomicString.h>
+#include <wtf/text/AtomString.h>
 
 namespace WebCore {
 
@@ -54,12 +54,13 @@ public:
 
     ~DataTransferItem();
 
+    RefPtr<File> file() { return m_file; }
     void clearListAndPutIntoDisabledMode();
 
     bool isFile() const { return m_file; }
     String kind() const;
     String type() const;
-    void getAsString(ScriptExecutionContext&, RefPtr<StringCallback>&&) const;
+    void getAsString(Document&, RefPtr<StringCallback>&&) const;
     RefPtr<File> getAsFile() const;
     RefPtr<FileSystemEntry> getAsEntry(ScriptExecutionContext&) const;
 

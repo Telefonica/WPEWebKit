@@ -26,8 +26,6 @@
 #include "config.h"
 #include "SampleMap.h"
 
-#if ENABLE(MEDIA_SOURCE)
-
 #include "MediaSample.h"
 
 namespace WebCore {
@@ -68,7 +66,7 @@ class SampleIsRandomAccess {
 public:
     bool operator()(DecodeOrderSampleMap::MapType::value_type& value)
     {
-        return value.second->flags() == MediaSample::IsSync;
+        return value.second->isSync();
     }
 };
 
@@ -190,6 +188,11 @@ DecodeOrderSampleMap::iterator DecodeOrderSampleMap::findSampleWithDecodeKey(con
     return m_samples.find(key);
 }
 
+DecodeOrderSampleMap::iterator DecodeOrderSampleMap::findSampleAfterDecodeKey(const KeyType& key)
+{
+    return m_samples.upper_bound(key);
+}
+
 PresentationOrderSampleMap::reverse_iterator PresentationOrderSampleMap::reverseFindSampleContainingPresentationTime(const MediaTime& time)
 {
     auto range = std::equal_range(rbegin(), rend(), time, SampleIsGreaterThanMediaTimeComparator<MapType>());
@@ -309,6 +312,18 @@ DecodeOrderSampleMap::reverse_iterator_range DecodeOrderSampleMap::findDependent
     return reverse_iterator_range(currentDecodeIter, nextSyncSample);
 }
 
+DecodeOrderSampleMap::iterator_range DecodeOrderSampleMap::findSamplesBetweenDecodeKeys(const KeyType& beginKey, const KeyType& endKey)
+{
+    if (beginKey > endKey)
+        return { end(), end() };
+
+    // beginKey is inclusive, so use lower_bound to include samples wich start exactly at beginKey.
+    // endKey is not inclusive, so use lower_bound to exclude samples which start exactly at endKey.
+    auto lower_bound = m_samples.lower_bound(beginKey);
+    auto upper_bound = m_samples.lower_bound(endKey);
+    if (lower_bound == upper_bound)
+        return { end(), end() };
+    return { lower_bound, upper_bound };
 }
 
-#endif
+}

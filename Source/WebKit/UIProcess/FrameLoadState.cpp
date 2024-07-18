@@ -32,7 +32,19 @@ FrameLoadState::~FrameLoadState()
 {
 }
 
-void FrameLoadState::didStartProvisionalLoad(const WebCore::URL& url)
+void FrameLoadState::addObserver(Observer& observer)
+{
+    auto result = m_observers.add(observer);
+    ASSERT_UNUSED(result, result.isNewEntry);
+}
+
+void FrameLoadState::removeObserver(Observer& observer)
+{
+    auto result = m_observers.remove(observer);
+    ASSERT_UNUSED(result, result);
+}
+
+void FrameLoadState::didStartProvisionalLoad(const URL& url)
 {
     ASSERT(m_provisionalURL.isEmpty());
 
@@ -40,7 +52,13 @@ void FrameLoadState::didStartProvisionalLoad(const WebCore::URL& url)
     m_provisionalURL = url;
 }
 
-void FrameLoadState::didReceiveServerRedirectForProvisionalLoad(const WebCore::URL& url)
+void FrameLoadState::didExplicitOpen(const URL& url)
+{
+    m_url = url;
+    m_provisionalURL = { };
+}
+
+void FrameLoadState::didReceiveServerRedirectForProvisionalLoad(const URL& url)
 {
     ASSERT(m_state == State::Provisional);
 
@@ -71,6 +89,9 @@ void FrameLoadState::didFinishLoad()
     ASSERT(m_provisionalURL.isEmpty());
 
     m_state = State::Finished;
+
+    for (auto& observer : copyToVectorOf<std::reference_wrapper<Observer>>(m_observers))
+        observer.get().didFinishLoad();
 }
 
 void FrameLoadState::didFailLoad()
@@ -81,12 +102,12 @@ void FrameLoadState::didFailLoad()
     m_state = State::Finished;
 }
 
-void FrameLoadState::didSameDocumentNotification(const WebCore::URL& url)
+void FrameLoadState::didSameDocumentNotification(const URL& url)
 {
     m_url = url;
 }
 
-void FrameLoadState::setUnreachableURL(const WebCore::URL& unreachableURL)
+void FrameLoadState::setUnreachableURL(const URL& unreachableURL)
 {
     m_lastUnreachableURL = m_unreachableURL;
     m_unreachableURL = unreachableURL;

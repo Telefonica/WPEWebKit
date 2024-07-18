@@ -25,34 +25,28 @@
 
 WI.WorkerTarget = class WorkerTarget extends WI.Target
 {
-    constructor(workerId, name, connection)
+    constructor(parentTarget, workerId, url, displayName, connection, options = {})
     {
-        super(workerId, name, WI.Target.Type.Worker, connection);
+        super(parentTarget, workerId, url, WI.TargetType.Worker, connection, options);
 
-        WI.frameResourceManager.adoptOrphanedResourcesForTarget(this);
+        this._displayName = displayName;
 
-        if (this.RuntimeAgent) {
-            this._executionContext = new WI.ExecutionContext(this, WI.RuntimeManager.TopLevelContextExecutionIdentifier, this.displayName, false, null);
-            this.RuntimeAgent.enable();
-            if (WI.showJavaScriptTypeInformationSetting && WI.showJavaScriptTypeInformationSetting.value)
-                this.RuntimeAgent.enableTypeProfiler();
-            if (WI.enableControlFlowProfilerSetting && WI.enableControlFlowProfilerSetting.value)
-                this.RuntimeAgent.enableControlFlowProfiler();
-        }
-
-        if (this.DebuggerAgent)
-            WI.debuggerManager.initializeTarget(this);
-
-        if (this.ConsoleAgent)
-            this.ConsoleAgent.enable();
-
-        if (this.HeapAgent)
-            this.HeapAgent.enable();
+        this._executionContext = new WI.ExecutionContext(this, WI.RuntimeManager.TopLevelContextExecutionIdentifier, WI.ExecutionContext.Type.Normal, this.displayName);
     }
 
     // Protected (Target)
 
+    get customName()
+    {
+        return this._displayName;
+    }
+
     get displayName()
+    {
+        return this._displayName || this.displayURL;
+    }
+
+    get displayURL()
     {
         return WI.displayNameForURL(this._name);
     }

@@ -33,6 +33,7 @@
 #include "SubmitInputType.h"
 
 #include "DOMFormData.h"
+#include "Document.h"
 #include "Event.h"
 #include "HTMLFormElement.h"
 #include "HTMLInputElement.h"
@@ -41,16 +42,17 @@
 
 namespace WebCore {
 
-const AtomicString& SubmitInputType::formControlType() const
+const AtomString& SubmitInputType::formControlType() const
 {
     return InputTypeNames::submit();
 }
 
-bool SubmitInputType::appendFormData(DOMFormData& formData, bool) const
+bool SubmitInputType::appendFormData(DOMFormData& formData) const
 {
-    if (!element().isActivatedSubmit())
+    ASSERT(element());
+    if (!element()->isActivatedSubmit())
         return false;
-    formData.append(element().name(), element().valueWithDefault());
+    formData.append(element()->name(), element()->valueWithDefault());
     return true;
 }
 
@@ -61,12 +63,19 @@ bool SubmitInputType::supportsRequired() const
 
 void SubmitInputType::handleDOMActivateEvent(Event& event)
 {
-    Ref<HTMLInputElement> element(this->element());
-    if (element->isDisabledFormControl() || !element->form())
+    ASSERT(element());
+    Ref<HTMLInputElement> protectedElement(*element());
+    if (protectedElement->isDisabledFormControl() || !protectedElement->form())
         return;
-    element->setActivatedSubmit(true);
-    element->form()->prepareForSubmission(event); // Event handlers can run.
-    element->setActivatedSubmit(false);
+
+    Ref<HTMLFormElement> protectedForm(*protectedElement->form());
+
+    // Update layout before processing form actions in case the style changes
+    // the Form or button relationships.
+    protectedElement->document().updateLayoutIgnorePendingStylesheets();
+
+    if (RefPtr currentForm = protectedElement->form())
+        currentForm->submitIfPossible(&event, element()); // Event handlers can run.
     event.setDefaultHandled();
 }
 
@@ -78,16 +87,6 @@ bool SubmitInputType::canBeSuccessfulSubmitButton()
 String SubmitInputType::defaultValue() const
 {
     return submitButtonDefaultLabel();
-}
-
-bool SubmitInputType::isSubmitButton() const
-{
-    return true;
-}
-
-bool SubmitInputType::isTextButton() const
-{
-    return true;
 }
 
 } // namespace WebCore

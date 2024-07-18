@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,28 +26,26 @@
 #include "config.h"
 #include "InspectorScriptProfilerAgent.h"
 
-#include "DeferGC.h"
+#include "Debugger.h"
+#include "DeferGCInlines.h"
 #include "HeapInlines.h"
 #include "InspectorEnvironment.h"
 #include "SamplingProfiler.h"
-#include "ScriptDebugServer.h"
 #include <wtf/Stopwatch.h>
-
-using namespace JSC;
 
 namespace Inspector {
 
+using namespace JSC;
+
 InspectorScriptProfilerAgent::InspectorScriptProfilerAgent(AgentContext& context)
-    : InspectorAgentBase(ASCIILiteral("ScriptProfiler"))
-    , m_frontendDispatcher(std::make_unique<ScriptProfilerFrontendDispatcher>(context.frontendRouter))
+    : InspectorAgentBase("ScriptProfiler"_s)
+    , m_frontendDispatcher(makeUnique<ScriptProfilerFrontendDispatcher>(context.frontendRouter))
     , m_backendDispatcher(ScriptProfilerBackendDispatcher::create(context.backendDispatcher, this))
     , m_environment(context.environment)
 {
 }
 
-InspectorScriptProfilerAgent::~InspectorScriptProfilerAgent()
-{
-}
+InspectorScriptProfilerAgent::~InspectorScriptProfilerAgent() = default;
 
 void InspectorScriptProfilerAgent::didCreateFrontendAndBackend(FrontendRouter*, BackendDispatcher*)
 {
@@ -59,51 +57,57 @@ void InspectorScriptProfilerAgent::willDestroyFrontendAndBackend(DisconnectReaso
     if (m_tracking) {
         m_tracking = false;
         m_activeEvaluateScript = false;
-        m_environment.scriptDebugServer().setProfilingClient(nullptr);
+        m_environment.debugger().setProfilingClient(nullptr);
 
         // Stop sampling without processing the samples.
         stopSamplingWhenDisconnecting();
     }
 }
 
-void InspectorScriptProfilerAgent::startTracking(ErrorString&, const bool* const includeSamples)
+Protocol::ErrorStringOr<void> InspectorScriptProfilerAgent::startTracking(std::optional<bool>&& includeSamples)
 {
     if (m_tracking)
-        return;
+        return { };
 
     m_tracking = true;
 
+    auto& stopwatch = m_environment.executionStopwatch();
+
 #if ENABLE(SAMPLING_PROFILER)
     if (includeSamples && *includeSamples) {
-        VM& vm = m_environment.scriptDebugServer().vm();
-        SamplingProfiler& samplingProfiler = vm.ensureSamplingProfiler(m_environment.executionStopwatch());
+        VM& vm = m_environment.debugger().vm();
+        SamplingProfiler& samplingProfiler = vm.ensureSamplingProfiler(stopwatch);
 
-        LockHolder locker(samplingProfiler.getLock());
-        samplingProfiler.setStopWatch(locker, m_environment.executionStopwatch());
-        samplingProfiler.noticeCurrentThreadAsJSCExecutionThread(locker);
-        samplingProfiler.start(locker);
+        Locker locker { samplingProfiler.getLock() };
+        samplingProfiler.setStopWatch(stopwatch);
+        samplingProfiler.noticeCurrentThreadAsJSCExecutionThreadWithLock();
+        samplingProfiler.startWithLock();
         m_enabledSamplingProfiler = true;
     }
 #else
     UNUSED_PARAM(includeSamples);
 #endif // ENABLE(SAMPLING_PROFILER)
 
-    m_environment.scriptDebugServer().setProfilingClient(this);
+    m_environment.debugger().setProfilingClient(this);
 
-    m_frontendDispatcher->trackingStart(m_environment.executionStopwatch()->elapsedTime());
+    m_frontendDispatcher->trackingStart(stopwatch.elapsedTime().seconds());
+
+    return { };
 }
 
-void InspectorScriptProfilerAgent::stopTracking(ErrorString&)
+Protocol::ErrorStringOr<void> InspectorScriptProfilerAgent::stopTracking()
 {
     if (!m_tracking)
-        return;
+        return { };
 
     m_tracking = false;
     m_activeEvaluateScript = false;
 
-    m_environment.scriptDebugServer().setProfilingClient(nullptr);
+    m_environment.debugger().setProfilingClient(nullptr);
 
     trackingComplete();
+
+    return { };
 }
 
 bool InspectorScriptProfilerAgent::isAlreadyProfiling() const
@@ -111,52 +115,52 @@ bool InspectorScriptProfilerAgent::isAlreadyProfiling() const
     return m_activeEvaluateScript;
 }
 
-double InspectorScriptProfilerAgent::willEvaluateScript()
+Seconds InspectorScriptProfilerAgent::willEvaluateScript()
 {
     m_activeEvaluateScript = true;
 
 #if ENABLE(SAMPLING_PROFILER)
     if (m_enabledSamplingProfiler) {
-        SamplingProfiler* samplingProfiler = m_environment.scriptDebugServer().vm().samplingProfiler();
+        SamplingProfiler* samplingProfiler = m_environment.debugger().vm().samplingProfiler();
         RELEASE_ASSERT(samplingProfiler);
         samplingProfiler->noticeCurrentThreadAsJSCExecutionThread();
     }
 #endif
 
-    return m_environment.executionStopwatch()->elapsedTime();
+    return m_environment.executionStopwatch().elapsedTime();
 }
 
-void InspectorScriptProfilerAgent::didEvaluateScript(double startTime, ProfilingReason reason)
+void InspectorScriptProfilerAgent::didEvaluateScript(Seconds startTime, ProfilingReason reason)
 {
     m_activeEvaluateScript = false;
 
-    double endTime = m_environment.executionStopwatch()->elapsedTime();
+    Seconds endTime = m_environment.executionStopwatch().elapsedTime();
 
     addEvent(startTime, endTime, reason);
 }
 
-static Inspector::Protocol::ScriptProfiler::EventType toProtocol(ProfilingReason reason)
+static Protocol::ScriptProfiler::EventType toProtocol(ProfilingReason reason)
 {
     switch (reason) {
     case ProfilingReason::API:
-        return Inspector::Protocol::ScriptProfiler::EventType::API;
+        return Protocol::ScriptProfiler::EventType::API;
     case ProfilingReason::Microtask:
-        return Inspector::Protocol::ScriptProfiler::EventType::Microtask;
+        return Protocol::ScriptProfiler::EventType::Microtask;
     case ProfilingReason::Other:
-        return Inspector::Protocol::ScriptProfiler::EventType::Other;
+        return Protocol::ScriptProfiler::EventType::Other;
     }
 
     ASSERT_NOT_REACHED();
-    return Inspector::Protocol::ScriptProfiler::EventType::Other;
+    return Protocol::ScriptProfiler::EventType::Other;
 }
 
-void InspectorScriptProfilerAgent::addEvent(double startTime, double endTime, ProfilingReason reason)
+void InspectorScriptProfilerAgent::addEvent(Seconds startTime, Seconds endTime, ProfilingReason reason)
 {
     ASSERT(endTime >= startTime);
 
-    auto event = Inspector::Protocol::ScriptProfiler::Event::create()
-        .setStartTime(startTime)
-        .setEndTime(endTime)
+    auto event = Protocol::ScriptProfiler::Event::create()
+        .setStartTime(startTime.seconds())
+        .setEndTime(endTime.seconds())
         .setType(toProtocol(reason))
         .release();
 
@@ -189,7 +193,7 @@ static Ref<Protocol::ScriptProfiler::Samples> buildSamples(VM& vm, Vector<Sampli
             frames->addItem(WTFMove(frameObject));
         }
         Ref<Protocol::ScriptProfiler::StackTrace> inspectorStackTrace = Protocol::ScriptProfiler::StackTrace::create()
-            .setTimestamp(stackTrace.timestamp)
+            .setTimestamp(stackTrace.timestamp.seconds())
             .setStackFrames(WTFMove(frames))
             .release();
         stackTraces->addItem(WTFMove(inspectorStackTrace));
@@ -203,28 +207,30 @@ static Ref<Protocol::ScriptProfiler::Samples> buildSamples(VM& vm, Vector<Sampli
 
 void InspectorScriptProfilerAgent::trackingComplete()
 {
+    auto timestamp = m_environment.executionStopwatch().elapsedTime().seconds();
+
 #if ENABLE(SAMPLING_PROFILER)
     if (m_enabledSamplingProfiler) {
-        VM& vm = m_environment.scriptDebugServer().vm();
+        VM& vm = m_environment.debugger().vm();
         JSLockHolder lock(vm);
-        DeferGC deferGC(vm.heap);
+        DeferGC deferGC(vm); // This is required because we will have raw pointers into the heap after we releaseStackTraces().
         SamplingProfiler* samplingProfiler = vm.samplingProfiler();
         RELEASE_ASSERT(samplingProfiler);
 
-        LockHolder locker(samplingProfiler->getLock());
-        samplingProfiler->pause(locker);
-        Vector<SamplingProfiler::StackTrace> stackTraces = samplingProfiler->releaseStackTraces(locker);
+        Locker locker { samplingProfiler->getLock() };
+        samplingProfiler->pause();
+        Vector<SamplingProfiler::StackTrace> stackTraces = samplingProfiler->releaseStackTraces();
         locker.unlockEarly();
 
         Ref<Protocol::ScriptProfiler::Samples> samples = buildSamples(vm, WTFMove(stackTraces));
 
         m_enabledSamplingProfiler = false;
 
-        m_frontendDispatcher->trackingComplete(WTFMove(samples));
+        m_frontendDispatcher->trackingComplete(timestamp, WTFMove(samples));
     } else
-        m_frontendDispatcher->trackingComplete(nullptr);
+        m_frontendDispatcher->trackingComplete(timestamp, nullptr);
 #else
-    m_frontendDispatcher->trackingComplete(nullptr);
+    m_frontendDispatcher->trackingComplete(timestamp, nullptr);
 #endif // ENABLE(SAMPLING_PROFILER)
 }
 
@@ -234,26 +240,16 @@ void InspectorScriptProfilerAgent::stopSamplingWhenDisconnecting()
     if (!m_enabledSamplingProfiler)
         return;
 
-    VM& vm = m_environment.scriptDebugServer().vm();
+    VM& vm = m_environment.debugger().vm();
     JSLockHolder lock(vm);
     SamplingProfiler* samplingProfiler = vm.samplingProfiler();
     RELEASE_ASSERT(samplingProfiler);
-    LockHolder locker(samplingProfiler->getLock());
-    samplingProfiler->pause(locker);
-    samplingProfiler->clearData(locker);
+    Locker locker { samplingProfiler->getLock() };
+    samplingProfiler->pause();
+    samplingProfiler->clearData();
 
     m_enabledSamplingProfiler = false;
 #endif
-}
-
-void InspectorScriptProfilerAgent::programmaticCaptureStarted()
-{
-    m_frontendDispatcher->programmaticCaptureStarted();
-}
-
-void InspectorScriptProfilerAgent::programmaticCaptureStopped()
-{
-    m_frontendDispatcher->programmaticCaptureStopped();
 }
 
 } // namespace Inspector

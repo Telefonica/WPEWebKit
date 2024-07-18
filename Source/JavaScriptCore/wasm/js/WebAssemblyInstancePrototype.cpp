@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,52 +28,53 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "FunctionPrototype.h"
+#include "AuxiliaryBarrierInlines.h"
 #include "JSCInlines.h"
 #include "JSModuleNamespaceObject.h"
 #include "JSWebAssemblyInstance.h"
+#include "WebAssemblyModuleRecord.h"
 
 namespace JSC {
-static EncodedJSValue JSC_HOST_CALL webAssemblyInstanceProtoFuncExports(ExecState*);
+static JSC_DECLARE_CUSTOM_GETTER(webAssemblyInstanceProtoGetterExports);
 }
 
 #include "WebAssemblyInstancePrototype.lut.h"
 
 namespace JSC {
 
-const ClassInfo WebAssemblyInstancePrototype::s_info = { "WebAssembly.Instance", &Base::s_info, &prototypeTableWebAssemblyInstance, nullptr, CREATE_METHOD_TABLE(WebAssemblyInstancePrototype) };
+const ClassInfo WebAssemblyInstancePrototype::s_info = { "WebAssembly.Instance"_s, &Base::s_info, &prototypeTableWebAssemblyInstance, nullptr, CREATE_METHOD_TABLE(WebAssemblyInstancePrototype) };
 
 /* Source for WebAssemblyInstancePrototype.lut.h
  @begin prototypeTableWebAssemblyInstance
- exports webAssemblyInstanceProtoFuncExports DontEnum|Accessor 0
+  exports webAssemblyInstanceProtoGetterExports ReadOnly|CustomAccessor
  @end
  */
 
-static ALWAYS_INLINE JSWebAssemblyInstance* getInstance(ExecState* exec, VM& vm, JSValue v)
+static ALWAYS_INLINE JSWebAssemblyInstance* getInstance(JSGlobalObject* globalObject, VM& vm, JSValue v)
 {
     auto throwScope = DECLARE_THROW_SCOPE(vm);
-    JSWebAssemblyInstance* result = jsDynamicCast<JSWebAssemblyInstance*>(vm, v);
+    JSWebAssemblyInstance* result = jsDynamicCast<JSWebAssemblyInstance*>(v);
     if (!result) {
-        throwException(exec, throwScope, 
-            createTypeError(exec, ASCIILiteral("expected |this| value to be an instance of WebAssembly.Instance")));
+        throwException(globalObject, throwScope, 
+            createTypeError(globalObject, "expected |this| value to be an instance of WebAssembly.Instance"_s));
         return nullptr;
     }
     return result;
 }
 
-static EncodedJSValue JSC_HOST_CALL webAssemblyInstanceProtoFuncExports(ExecState* exec)
+JSC_DEFINE_CUSTOM_GETTER(webAssemblyInstanceProtoGetterExports, (JSGlobalObject* globalObject, EncodedJSValue thisValue, PropertyName))
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     auto throwScope = DECLARE_THROW_SCOPE(vm);
 
-    JSWebAssemblyInstance* instance = getInstance(exec, vm, exec->thisValue()); 
+    JSWebAssemblyInstance* instance = getInstance(globalObject, vm, JSValue::decode(thisValue));
     RETURN_IF_EXCEPTION(throwScope, { });
-    return JSValue::encode(instance->moduleNamespaceObject());
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(instance->moduleRecord()->exportsObject()));
 }
 
 WebAssemblyInstancePrototype* WebAssemblyInstancePrototype::create(VM& vm, JSGlobalObject*, Structure* structure)
 {
-    auto* object = new (NotNull, allocateCell<WebAssemblyInstancePrototype>(vm.heap)) WebAssemblyInstancePrototype(vm, structure);
+    auto* object = new (NotNull, allocateCell<WebAssemblyInstancePrototype>(vm)) WebAssemblyInstancePrototype(vm, structure);
     object->finishCreation(vm);
     return object;
 }
@@ -86,6 +87,8 @@ Structure* WebAssemblyInstancePrototype::createStructure(VM& vm, JSGlobalObject*
 void WebAssemblyInstancePrototype::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
+    ASSERT(inherits(info()));
+    JSC_TO_STRING_TAG_WITHOUT_TRANSITION();
 }
 
 WebAssemblyInstancePrototype::WebAssemblyInstancePrototype(VM& vm, Structure* structure)

@@ -30,16 +30,15 @@
 namespace JSC {
 
 class UnlinkedCodeBlock;
-struct UnlinkedInstruction;
 
 // Return a sorted list of bytecode index that are the destination of a jump.
-void computePreciseJumpTargets(CodeBlock*, Vector<unsigned, 32>& out);
-void computePreciseJumpTargets(CodeBlock*, Instruction* instructionsBegin, unsigned instructionCount, Vector<unsigned, 32>& out);
-void computePreciseJumpTargets(UnlinkedCodeBlock*, UnlinkedInstruction* instructionsBegin, unsigned instructionCount, Vector<unsigned, 32>& out);
+void computePreciseJumpTargets(CodeBlock*, Vector<JSInstructionStream::Offset, 32>& out);
+void computePreciseJumpTargets(CodeBlock*, const JSInstructionStream& instructions, Vector<JSInstructionStream::Offset, 32>& out);
+void computePreciseJumpTargets(UnlinkedCodeBlockGenerator*, const JSInstructionStream&, Vector<JSInstructionStream::Offset, 32>& out);
 
-void recomputePreciseJumpTargets(UnlinkedCodeBlock*, UnlinkedInstruction* instructionsBegin, unsigned instructionCount, Vector<unsigned>& out);
+void recomputePreciseJumpTargets(UnlinkedCodeBlockGenerator*, const JSInstructionStream&, Vector<JSInstructionStream::Offset>& out);
 
-void findJumpTargetsForBytecodeOffset(CodeBlock*, Instruction* instructionsBegin, unsigned bytecodeOffset, Vector<unsigned, 1>& out);
-void findJumpTargetsForBytecodeOffset(UnlinkedCodeBlock*, UnlinkedInstruction* instructionsBegin, unsigned bytecodeOffset, Vector<unsigned, 1>& out);
+void findJumpTargetsForInstruction(CodeBlock*, const JSInstructionStream::Ref&, Vector<JSInstructionStream::Offset, 1>& out);
+void findJumpTargetsForInstruction(UnlinkedCodeBlockGenerator*, const JSInstructionStream::Ref&, Vector<JSInstructionStream::Offset, 1>& out);
 
 } // namespace JSC

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,13 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "HangDetectionDisabler.h"
+#import "config.h"
+#import "HangDetectionDisabler.h"
 
 #if PLATFORM(MAC)
 
-#include <pal/spi/cg/CoreGraphicsSPI.h>
-#include <wtf/RetainPtr.h>
+#import <pal/spi/cg/CoreGraphicsSPI.h>
+#import <wtf/ProcessPrivilege.h>
+#import <wtf/RetainPtr.h>
 
 namespace WebKit {
 
@@ -46,7 +47,16 @@ static bool clientsMayIgnoreEvents()
 
 static void setClientsMayIgnoreEvents(bool clientsMayIgnoreEvents)
 {
-    if (CGSSetConnectionProperty(CGSMainConnectionID(), CGSMainConnectionID(), clientsMayIgnoreEventsKey, clientsMayIgnoreEvents ? kCFBooleanTrue : kCFBooleanFalse) != kCGErrorSuccess)
+    auto cgsId = CGSMainConnectionID();
+
+    // In macOS 10.14 and later, the WebContent process does not have access to the WindowServer.
+    // In this case, there will be no valid WindowServer main connection.
+    if (!cgsId)
+        return;
+    // FIXME: <https://webkit.org/b/184484> We should assert here if this is being called from
+    // the WebContent process.
+
+    if (CGSSetConnectionProperty(cgsId, cgsId, clientsMayIgnoreEventsKey, clientsMayIgnoreEvents ? kCFBooleanTrue : kCFBooleanFalse) != kCGErrorSuccess)
         ASSERT_NOT_REACHED();
 }
 

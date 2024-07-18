@@ -26,14 +26,14 @@
 #pragma once
 
 #include <functional>
-#include <wtf/Forward.h>
 #include <wtf/Function.h>
-#include <wtf/HashSet.h>
 #include <wtf/RefCounted.h>
+#include <wtf/WeakHashSet.h>
+#include <wtf/WeakPtr.h>
 
 #if ENABLE(CONTENT_EXTENSIONS)
-#include "ContentExtensionActions.h"
 #include "ContentExtensionsBackend.h"
+#include "ContentRuleListResults.h"
 #endif
 
 namespace WebCore {
@@ -41,24 +41,12 @@ namespace WebCore {
 class DOMWrapperWorld;
 class DocumentLoader;
 class Page;
-class ResourceRequest;
-class URL;
+class UserContentProvider;
 class UserMessageHandlerDescriptor;
 class UserScript;
 class UserStyleSheet;
 
-enum class ResourceType : uint16_t;
-
-struct ResourceLoadInfo;
-
-namespace ContentExtensions {
-class ContentExtensionsBackend;
-struct Action;
-}
-
-class UserContentProvider;
-
-class UserContentProviderInvalidationClient {
+class UserContentProviderInvalidationClient : public CanMakeWeakPtr<UserContentProviderInvalidationClient> {
 public:
     virtual ~UserContentProviderInvalidationClient()
     {
@@ -88,11 +76,7 @@ public:
     void removePage(Page&);
 
 #if ENABLE(CONTENT_EXTENSIONS)
-    // FIXME: These don't really belong here. They should probably bundled up in the ContentExtensionsBackend
-    // which should always exist.
-    ContentExtensions::BlockedStatus processContentExtensionRulesForLoad(const URL&, ResourceType, DocumentLoader& initiatingDocumentLoader);
-    std::pair<Vector<ContentExtensions::Action>, Vector<String>> actionsForResourceLoad(const ResourceLoadInfo&, DocumentLoader& initiatingDocumentLoader);
-    WEBCORE_EXPORT void forEachContentExtension(const WTF::Function<void(const String&, ContentExtensions::ContentExtension&)>&, DocumentLoader& initiatingDocumentLoader);
+    ContentRuleListResults processContentRuleListsForLoad(Page&, const URL&, OptionSet<ContentExtensions::ResourceType>, DocumentLoader& initiatingDocumentLoader, const URL& redirectFrom = { });
 #endif
 
 protected:
@@ -100,8 +84,8 @@ protected:
     WEBCORE_EXPORT void invalidateInjectedStyleSheetCacheInAllFramesInAllPages();
 
 private:
-    HashSet<Page*> m_pages;
-    HashSet<UserContentProviderInvalidationClient*> m_userMessageHandlerInvalidationClients;
+    WeakHashSet<Page> m_pages;
+    WeakHashSet<UserContentProviderInvalidationClient> m_userMessageHandlerInvalidationClients;
 };
 
 } // namespace WebCore

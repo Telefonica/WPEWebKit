@@ -26,10 +26,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 
 #import <WebKitLegacy/WebNSEventExtras.h>
-#import <wtf/mac/AppKitCompatibilityDeclarations.h>
 
 @implementation NSEvent (WebExtras)
 
@@ -84,4 +83,4 @@
 
 @end
 
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)

@@ -29,7 +29,7 @@
 
 #include "ContentSecurityPolicy.h"
 #include "ContentSecurityPolicyDirectiveList.h"
-#include "URL.h"
+#include <wtf/URL.h>
 
 namespace WebCore {
 
@@ -52,9 +52,19 @@ bool ContentSecurityPolicySourceListDirective::allows(const String& nonce) const
     return m_sourceList.matches(nonce);
 }
 
-bool ContentSecurityPolicySourceListDirective::allows(const ContentSecurityPolicyHash& hash) const
+bool ContentSecurityPolicySourceListDirective::containsAllHashes(const Vector<ContentSecurityPolicyHash>& hashes) const
 {
-    return m_sourceList.matches(hash);
+    return m_sourceList.matchesAll(hashes);
+}
+
+bool ContentSecurityPolicySourceListDirective::allows(const Vector<ContentSecurityPolicyHash>& hashes) const
+{
+    return m_sourceList.matches(hashes);
+}
+
+bool ContentSecurityPolicySourceListDirective::allowUnsafeHashes(const Vector<ContentSecurityPolicyHash>& hashes) const
+{
+    return m_sourceList.allowUnsafeHashes() && allows(hashes);
 }
 
 } // namespace WebCore

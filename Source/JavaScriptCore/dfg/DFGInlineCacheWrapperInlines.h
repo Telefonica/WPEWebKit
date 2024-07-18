@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,10 +33,14 @@
 namespace JSC { namespace DFG {
 
 template<typename GeneratorType>
-void InlineCacheWrapper<GeneratorType>::finalize(LinkBuffer& linkBuffer)
+void InlineCacheWrapper<GeneratorType>::finalize(LinkBuffer& fastPath, LinkBuffer& slowPath)
 {
     m_generator.reportSlowPathCall(m_slowPath->label(), m_slowPath->call());
-    m_generator.finalize(linkBuffer);
+    if (m_generator.m_unlinkedStubInfo) {
+        m_generator.m_unlinkedStubInfo->doneLocation = fastPath.locationOf<JSInternalPtrTag>(m_generator.m_done);
+        m_generator.m_unlinkedStubInfo->slowPathStartLocation = fastPath.locationOf<JITStubRoutinePtrTag>(m_generator.m_slowPathBegin);
+    } else
+        m_generator.finalize(fastPath, slowPath);
 }
 
 } } // namespace JSC::DFG

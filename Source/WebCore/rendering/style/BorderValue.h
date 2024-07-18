@@ -33,14 +33,14 @@ class BorderValue {
 friend class RenderStyle;
 public:
     BorderValue()
-        : m_style(BNONE)
-        , m_isAuto(AUTO_OFF)
+        : m_style(static_cast<unsigned>(BorderStyle::None))
+        , m_isAuto(static_cast<unsigned>(OutlineIsAuto::Off))
     {
     }
 
-    bool nonZero(bool checkStyle = true) const
+    bool nonZero() const
     {
-        return width() && (!checkStyle || m_style != BNONE);
+        return width() && style() != BorderStyle::None;
     }
 
     bool isTransparent() const
@@ -48,9 +48,9 @@ public:
         return m_color.isValid() && !m_color.isVisible();
     }
 
-    bool isVisible(bool checkStyle = true) const
+    bool isVisible() const
     {
-        return nonZero(checkStyle) && !isTransparent() && (!checkStyle || m_style != BHIDDEN);
+        return nonZero() && !isTransparent() && style() != BorderStyle::Hidden;
     }
 
     bool operator==(const BorderValue& o) const
@@ -71,13 +71,14 @@ public:
     const Color& color() const { return m_color; }
 
     float width() const { return m_width; }
-    EBorderStyle style() const { return static_cast<EBorderStyle>(m_style); }
+    BorderStyle style() const { return static_cast<BorderStyle>(m_style); }
 
 protected:
-    float m_width { 3 };
     Color m_color;
 
-    unsigned m_style : 4; // EBorderStyle
+    float m_width { 3 };
+
+    unsigned m_style : 4; // BorderStyle
 
     // This is only used by OutlineValue but moved here to keep the bits packed.
     unsigned m_isAuto : 1; // OutlineIsAuto

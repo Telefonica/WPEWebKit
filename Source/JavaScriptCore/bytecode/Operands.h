@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011, 2012, 2013, 2015, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 #include "CallFrame.h"
 #include "VirtualRegister.h"
 
+#include <wtf/FixedVector.h>
 #include <wtf/PrintStream.h>
 #include <wtf/Vector.h>
 
@@ -35,228 +36,355 @@ namespace JSC {
 
 template<typename T> struct OperandValueTraits;
 
-enum OperandKind { ArgumentOperand, LocalOperand };
+constexpr unsigned maxNumCheckpointTmps = 4;
+
+// A OperandKind::Tmp is one that exists for exiting to a checkpoint but does not exist between bytecodes.
+enum class OperandKind : uint32_t { Argument, Local, Tmp }; // Keep bit-width in sync with Operand::operandKindBits' definition.
+static constexpr OperandKind lastOperandKind = OperandKind::Tmp;
+
+class Operand {
+public:
+    static constexpr unsigned kindBits = WTF::getMSBSetConstexpr(static_cast<std::underlying_type_t<OperandKind>>(lastOperandKind)) + 1;
+    static constexpr unsigned maxBits = 32 + kindBits;
+    static_assert(maxBits == 34);
+
+    Operand() = default;
+    Operand(const Operand&) = default;
+
+    Operand(VirtualRegister operand)
+        : Operand(operand.isLocal() ? OperandKind::Local : OperandKind::Argument, operand.offset())
+    { }
+
+    Operand(OperandKind kind, int operand)
+#if CPU(LITTLE_ENDIAN)
+        : m_operand(operand)
+        , m_kind(kind)
+#else
+        : m_kind(kind)
+        , m_operand(operand)
+#endif
+    { 
+        ASSERT(kind == OperandKind::Tmp || VirtualRegister(operand).isLocal() == (kind == OperandKind::Local));
+    }
+    static Operand tmp(uint32_t index) { return Operand(OperandKind::Tmp, index); }
+
+    Operand& operator=(const Operand&) = default;
+
+    OperandKind kind() const { return m_kind; }
+    int value() const { return m_operand; }
+    VirtualRegister virtualRegister() const
+    {
+        ASSERT(m_kind != OperandKind::Tmp);
+        return VirtualRegister(m_operand);
+    }
+    uint64_t asBits() const
+    {
+        uint64_t bits = bitwise_cast<uint64_t>(*this);
+        ASSERT(bits < (1ULL << maxBits));
+        return bits;
+    }
+    static Operand fromBits(uint64_t value);
+
+    bool isTmp() const { return kind() == OperandKind::Tmp; }
+    bool isArgument() const { return kind() == OperandKind::Argument; }
+    bool isLocal() const { return kind() == OperandKind::Local && virtualRegister().isLocal(); }
+    bool isHeader() const { return kind() != OperandKind::Tmp && virtualRegister().isHeader(); }
+    bool isConstant() const { return kind() != OperandKind::Tmp && virtualRegister().isConstant(); }
+
+    int toArgument() const { ASSERT(isArgument()); return virtualRegister().toArgument(); }
+    int toLocal() const { ASSERT(isLocal()); return virtualRegister().toLocal(); }
+
+    inline bool isValid() const;
+
+    inline bool operator==(const Operand&) const;
+
+    void dump(PrintStream&) const;
+
+private:
+#if CPU(LITTLE_ENDIAN)
+    int m_operand { VirtualRegister::invalidVirtualRegister };
+    OperandKind m_kind { OperandKind::Argument };
+#else
+    OperandKind m_kind { OperandKind::Argument };
+    int m_operand { VirtualRegister::invalidVirtualRegister };
+#endif
+};
+
+ALWAYS_INLINE bool Operand::operator==(const Operand& other) const
+{
+    if (kind() != other.kind())
+        return false;
+    if (isTmp())
+        return value() == other.value();
+    return virtualRegister() == other.virtualRegister();
+}
+
+inline bool Operand::isValid() const
+{
+    if (isTmp())
+        return value() >= 0;
+    return virtualRegister().isValid();
+}
+
+inline Operand Operand::fromBits(uint64_t value)
+{
+    Operand result = bitwise_cast<Operand>(value);
+    ASSERT(result.isValid());
+    return result;
+}
+
+static_assert(sizeof(Operand) == sizeof(uint64_t), "Operand::asBits() relies on this.");
 
 enum OperandsLikeTag { OperandsLike };
 
-template<typename T>
+template<typename T, typename StorageArg = std::conditional_t<std::is_same_v<T, bool>, FastBitVector, Vector<T, 0, UnsafeVectorOverflow>>>
 class Operands {
 public:
-    Operands() { }
-    
-    explicit Operands(size_t numArguments, size_t numLocals)
+    template<typename, typename> friend class Operands;
+
+    using Storage = StorageArg;
+    using RefType = std::conditional_t<std::is_same_v<T, bool>, FastBitReference, T&>;
+    using ConstRefType = std::conditional_t<std::is_same_v<T, bool>, bool, const T&>;
+
+    Operands() = default;
+
+    explicit Operands(size_t numArguments, size_t numLocals, size_t numTmps)
+        : m_values(numArguments + numLocals + numTmps)
+        , m_numArguments(numArguments)
+        , m_numLocals(numLocals)
     {
-        if (WTF::VectorTraits<T>::needsInitialization) {
-            m_arguments.resize(numArguments);
-            m_locals.resize(numLocals);
-        } else {
-            m_arguments.fill(T(), numArguments);
-            m_locals.fill(T(), numLocals);
-        }
+        if (!WTF::VectorTraits<T>::needsInitialization)
+            m_values.fill(T());
     }
 
-    explicit Operands(size_t numArguments, size_t numLocals, const T& initialValue)
+    explicit Operands(size_t numArguments, size_t numLocals, size_t numTmps, const T& initialValue)
+        : m_values(numArguments + numLocals + numTmps)
+        , m_numArguments(numArguments)
+        , m_numLocals(numLocals)
     {
-        m_arguments.fill(initialValue, numArguments);
-        m_locals.fill(initialValue, numLocals);
+        m_values.fill(initialValue);
     }
     
+    template<typename U, typename V>
+    explicit Operands(OperandsLikeTag, const Operands<U, V>& other, const T& initialValue = T())
+        : m_values(other.size())
+        , m_numArguments(other.numberOfArguments())
+        , m_numLocals(other.numberOfLocals())
+    {
+        m_values.fill(initialValue);
+    }
+
     template<typename U>
-    explicit Operands(OperandsLikeTag, const Operands<U>& other)
+    explicit Operands(const Operands<T, U>& other)
+        : m_values(other.m_values)
+        , m_numArguments(other.m_numArguments)
+        , m_numLocals(other.m_numLocals)
     {
-        m_arguments.fill(T(), other.numberOfArguments());
-        m_locals.fill(T(), other.numberOfLocals());
+    }
+
+    size_t numberOfArguments() const { return m_numArguments; }
+    size_t numberOfLocals() const { return m_numLocals; }
+    size_t numberOfTmps() const { return m_values.size() - numberOfArguments() - numberOfLocals(); }
+
+    size_t tmpIndex(size_t idx) const
+    {
+        ASSERT(idx < numberOfTmps());
+        return idx + numberOfArguments() + numberOfLocals();
+    }
+    size_t argumentIndex(size_t idx) const
+    {
+        ASSERT(idx < numberOfArguments());
+        return idx;
     }
     
-    size_t numberOfArguments() const { return m_arguments.size(); }
-    size_t numberOfLocals() const { return m_locals.size(); }
+    size_t localIndex(size_t idx) const
+    {
+        ASSERT(idx < numberOfLocals());
+        return numberOfArguments() + idx;
+    }
+
+    RefType tmp(size_t idx) { return m_values[tmpIndex(idx)]; }
+    ConstRefType tmp(size_t idx) const { return m_values[tmpIndex(idx)]; }
     
-    T& argument(size_t idx) { return m_arguments[idx]; }
-    const T& argument(size_t idx) const { return m_arguments[idx]; }
+    RefType argument(size_t idx) { return m_values[argumentIndex(idx)]; }
+    ConstRefType argument(size_t idx) const { return m_values[argumentIndex(idx)]; }
     
-    T& local(size_t idx) { return m_locals[idx]; }
-    const T& local(size_t idx) const { return m_locals[idx]; }
+    RefType local(size_t idx) { return m_values[localIndex(idx)]; }
+    ConstRefType local(size_t idx) const { return m_values[localIndex(idx)]; }
     
     template<OperandKind operandKind>
     size_t sizeFor() const
     {
-        if (operandKind == ArgumentOperand)
+        switch (operandKind) {
+        case OperandKind::Tmp:
+            return numberOfTmps();
+        case OperandKind::Argument:
             return numberOfArguments();
-        return numberOfLocals();
+        case OperandKind::Local:
+            return numberOfLocals();
+        }
+        RELEASE_ASSERT_NOT_REACHED();
+        return 0;
     }
     template<OperandKind operandKind>
-    T& atFor(size_t idx)
+    RefType atFor(size_t idx)
     {
-        if (operandKind == ArgumentOperand)
+        switch (operandKind) {
+        case OperandKind::Tmp:
+            return tmp(idx);
+        case OperandKind::Argument:
             return argument(idx);
-        return local(idx);
+        case OperandKind::Local:
+            return local(idx);
+        }
+        RELEASE_ASSERT_NOT_REACHED();
+        return tmp(0);
     }
     template<OperandKind operandKind>
-    const T& atFor(size_t idx) const
+    ConstRefType atFor(size_t idx) const
     {
-        if (operandKind == ArgumentOperand)
+        switch (operandKind) {
+        case OperandKind::Tmp:
+            return tmp(idx);
+        case OperandKind::Argument:
             return argument(idx);
-        return local(idx);
+        case OperandKind::Local:
+            return local(idx);
+        }
+        RELEASE_ASSERT_NOT_REACHED();
+        return tmp(0);
     }
-    
-    void ensureLocals(size_t size)
+
+    void ensureLocals(size_t size, const T& ensuredValue = T())
     {
-        size_t oldSize = m_locals.size();
-        if (size <= oldSize)
+        if (size <= numberOfLocals())
             return;
 
-        m_locals.grow(size);
-        if (!WTF::VectorTraits<T>::needsInitialization) {
-            for (size_t i = oldSize; i < m_locals.size(); ++i)
-                m_locals[i] = T();
+        size_t newSize = numberOfArguments() + numberOfTmps() + size;
+        size_t oldNumLocals = numberOfLocals();
+        size_t oldNumTmps = numberOfTmps();
+        m_values.grow(newSize);
+        for (size_t i = 0; i < oldNumTmps; ++i)
+            m_values[newSize - 1 - i] = m_values[tmpIndex(oldNumTmps - 1 - i)];
+
+        m_numLocals = size;
+        if (ensuredValue != T() || !WTF::VectorTraits<T>::needsInitialization) {
+            for (size_t i = 0; i < size - oldNumLocals; ++i)
+                m_values[localIndex(oldNumLocals + i)] = ensuredValue;
         }
     }
 
-    void ensureLocals(size_t size, const T& ensuredValue)
+    void ensureTmps(size_t size, const T& ensuredValue = T())
     {
-        size_t oldSize = m_locals.size();
-        if (size <= oldSize)
+        if (size <= numberOfTmps())
             return;
 
-        m_locals.grow(size);
-        for (size_t i = oldSize; i < m_locals.size(); ++i)
-            m_locals[i] = ensuredValue;
+        size_t oldSize = m_values.size();
+        size_t newSize = numberOfArguments() + numberOfLocals() + size;
+        m_values.grow(newSize);
+
+        if (ensuredValue != T() || !WTF::VectorTraits<T>::needsInitialization) {
+            for (size_t i = oldSize; i < newSize; ++i)
+                m_values[i] = ensuredValue;
+        }
     }
     
     void setLocal(size_t idx, const T& value)
     {
         ensureLocals(idx + 1);
-        
-        m_locals[idx] = value;
+        local(idx) = value;
     }
     
     T getLocal(size_t idx)
     {
-        if (idx >= m_locals.size())
-            return T();
-        return m_locals[idx];
+        return idx >= numberOfLocals() ? T() : local(idx);
     }
     
     void setArgumentFirstTime(size_t idx, const T& value)
     {
-        ASSERT(m_arguments[idx] == T());
+        ASSERT(m_values[idx] == T());
         argument(idx) = value;
     }
     
     void setLocalFirstTime(size_t idx, const T& value)
     {
-        ASSERT(idx >= m_locals.size() || m_locals[idx] == T());
+        ASSERT(idx >= numberOfLocals() || local(idx) == T());
         setLocal(idx, value);
     }
-    
-    T& operand(int operand)
-    {
-        if (operandIsArgument(operand)) {
-            int argument = VirtualRegister(operand).toArgument();
-            return m_arguments[argument];
-        }
 
-        return m_locals[VirtualRegister(operand).toLocal()];
+    RefType getForOperandIndex(size_t index) { return m_values[index]; }
+    ConstRefType getForOperandIndex(size_t index) const { return const_cast<Operands*>(this)->getForOperandIndex(index); }
+
+    size_t operandIndex(VirtualRegister operand) const
+    {
+        if (operand.isArgument())
+            return argumentIndex(operand.toArgument());
+        return localIndex(operand.toLocal());
+    }
+    
+    size_t operandIndex(Operand op) const
+    {
+        if (!op.isTmp())
+            return operandIndex(op.virtualRegister());
+        return tmpIndex(op.value());
+    }
+    
+    RefType operand(VirtualRegister operand)
+    {
+        if (operand.isArgument())
+            return argument(operand.toArgument());
+        return local(operand.toLocal());
     }
 
-    T& operand(VirtualRegister virtualRegister)
+    RefType operand(Operand op)
     {
-        return operand(virtualRegister.offset());
+        if (!op.isTmp())
+            return operand(op.virtualRegister());
+        return tmp(op.value());
     }
 
-    const T& operand(int operand) const { return const_cast<const T&>(const_cast<Operands*>(this)->operand(operand)); }
-    const T& operand(VirtualRegister operand) const { return const_cast<const T&>(const_cast<Operands*>(this)->operand(operand)); }
+    ConstRefType operand(VirtualRegister operand) const { return const_cast<Operands*>(this)->operand(operand); }
+    ConstRefType operand(Operand operand) const { return const_cast<Operands*>(this)->operand(operand); }
     
-    bool hasOperand(int operand) const
+    bool hasOperand(VirtualRegister operand) const
     {
-        if (operandIsArgument(operand))
+        if (operand.isArgument())
             return true;
-        return static_cast<size_t>(VirtualRegister(operand).toLocal()) < numberOfLocals();
+        return static_cast<size_t>(operand.toLocal()) < numberOfLocals();
     }
-    bool hasOperand(VirtualRegister reg) const
+    bool hasOperand(Operand op) const
     {
-        return hasOperand(reg.offset());
-    }
-    
-    void setOperand(int operand, const T& value)
-    {
-        if (operandIsArgument(operand)) {
-            int argument = VirtualRegister(operand).toArgument();
-            m_arguments[argument] = value;
-            return;
+        if (op.isTmp()) {
+            ASSERT(op.value() >= 0);
+            return static_cast<size_t>(op.value()) < numberOfTmps();
         }
-        
-        setLocal(VirtualRegister(operand).toLocal(), value);
+        return hasOperand(op.virtualRegister());
     }
     
-    void setOperand(VirtualRegister virtualRegister, const T& value)
+    void setOperand(Operand operand, const T& value)
     {
-        setOperand(virtualRegister.offset(), value);
+        this->operand(operand) = value;
     }
 
-    size_t size() const { return numberOfArguments() + numberOfLocals(); }
-    const T& at(size_t index) const
-    {
-        if (index < numberOfArguments())
-            return m_arguments[index];
-        return m_locals[index - numberOfArguments()];
-    }
-    T& at(size_t index)
-    {
-        if (index < numberOfArguments())
-            return m_arguments[index];
-        return m_locals[index - numberOfArguments()];
-    }
-    const T& operator[](size_t index) const { return at(index); }
-    T& operator[](size_t index) { return at(index); }
+    size_t size() const { return m_values.size(); }
+    ConstRefType at(size_t index) const { return m_values[index]; }
+    RefType at(size_t index) { return m_values[index]; }
+    ConstRefType operator[](size_t index) const { return at(index); }
+    RefType operator[](size_t index) { return at(index); }
 
-    bool isArgument(size_t index) const { return index < numberOfArguments(); }
-    bool isVariable(size_t index) const { return !isArgument(index); }
-    int argumentForIndex(size_t index) const
-    {
-        return index;
-    }
-    int variableForIndex(size_t index) const
-    {
-        return index - m_arguments.size();
-    }
-    int operandForIndex(size_t index) const
+    Operand operandForIndex(size_t index) const
     {
         if (index < numberOfArguments())
-            return virtualRegisterForArgument(index).offset();
-        return virtualRegisterForLocal(index - numberOfArguments()).offset();
+            return virtualRegisterForArgumentIncludingThis(index);
+        else if (index < numberOfLocals() + numberOfArguments())
+            return virtualRegisterForLocal(index - numberOfArguments());
+        return Operand::tmp(index - (numberOfLocals() + numberOfArguments()));
     }
-    VirtualRegister virtualRegisterForIndex(size_t index) const
-    {
-        return VirtualRegister(operandForIndex(index));
-    }
-    size_t indexForOperand(int operand) const
-    {
-        if (operandIsArgument(operand))
-            return static_cast<size_t>(VirtualRegister(operand).toArgument());
-        return static_cast<size_t>(VirtualRegister(operand).toLocal()) + numberOfArguments();
-    }
-    size_t indexForOperand(VirtualRegister reg) const
-    {
-        return indexForOperand(reg.offset());
-    }
-    
-    void setOperandFirstTime(int operand, const T& value)
-    {
-        if (operandIsArgument(operand)) {
-            setArgumentFirstTime(VirtualRegister(operand).toArgument(), value);
-            return;
-        }
-        
-        setLocalFirstTime(VirtualRegister(operand).toLocal(), value);
-    }
-    
+
     void fill(T value)
     {
-        for (size_t i = 0; i < m_arguments.size(); ++i)
-            m_arguments[i] = value;
-        for (size_t i = 0; i < m_locals.size(); ++i)
-            m_locals[i] = value;
+        for (size_t i = 0; i < m_values.size(); ++i)
+            m_values[i] = value;
     }
     
     void clear()
@@ -268,16 +396,27 @@ public:
     {
         ASSERT(numberOfArguments() == other.numberOfArguments());
         ASSERT(numberOfLocals() == other.numberOfLocals());
+        ASSERT(numberOfTmps() == other.numberOfTmps());
         
-        return m_arguments == other.m_arguments && m_locals == other.m_locals;
+        return m_values == other.m_values;
+    }
+
+    bool operator!=(const Operands& other) const
+    {
+        return !(*this == other);
     }
     
     void dumpInContext(PrintStream& out, DumpContext* context) const;
     void dump(PrintStream& out) const;
     
 private:
-    Vector<T, 8> m_arguments;
-    Vector<T, 16> m_locals;
+    // The first m_numArguments of m_values are arguments, the next m_numLocals are locals, and the rest are tmps.
+    Storage m_values;
+    unsigned m_numArguments { 0 };
+    unsigned m_numLocals { 0 };
 };
+
+template<typename T>
+using FixedOperands = Operands<T, std::conditional_t<std::is_same_v<T, bool>, FastBitVector, FixedVector<T>>>;
 
 } // namespace JSC

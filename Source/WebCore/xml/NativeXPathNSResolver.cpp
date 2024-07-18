@@ -26,29 +26,28 @@
 #include "config.h"
 #include "NativeXPathNSResolver.h"
 
+#include "CommonAtomStrings.h"
 #include "Node.h"
 #include "XMLNames.h"
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-NativeXPathNSResolver::NativeXPathNSResolver(RefPtr<Node>&& node)
+NativeXPathNSResolver::NativeXPathNSResolver(Ref<Node>&& node)
     : m_node(WTFMove(node))
 {
 }
 
-NativeXPathNSResolver::~NativeXPathNSResolver()
-{
-}
+NativeXPathNSResolver::~NativeXPathNSResolver() = default;
 
-String NativeXPathNSResolver::lookupNamespaceURI(const String& prefix)
+AtomString NativeXPathNSResolver::lookupNamespaceURI(const AtomString& prefix)
 {
     // This is not done by Node::lookupNamespaceURI as per the DOM3 Core spec,
     // but the XPath spec says that we should do it for XPathNSResolver.
-    if (prefix == "xml")
-        return XMLNames::xmlNamespaceURI;
+    if (prefix == xmlAtom())
+        return XMLNames::xmlNamespaceURI.get();
     
-    return m_node ? m_node->lookupNamespaceURI(prefix).string() : String();
+    return m_node->lookupNamespaceURI(prefix);
 }
 
 } // namespace WebCore

@@ -29,10 +29,10 @@
 using namespace WebKit;
 
 /**
- * SECTION: WebKitWebsiteData
- * @Short_description: Website data
- * @Title: WebKitWebsiteData
+ * WebKitWebsiteData: (ref-func webkit_website_data_ref) (unref-func webkit_website_data_unref)
  * @See_also: #WebKitWebsiteDataManager
+ *
+ * Data stored locally by a web site.
  *
  * WebKitWebsiteData represents data stored in the client by a particular website.
  * A website is normally a set of URLs grouped by domain name. You can get the website name,
@@ -65,7 +65,7 @@ G_DEFINE_BOXED_TYPE(WebKitWebsiteData, webkit_website_data, webkit_website_data_
 
 static bool recordContainsSupportedDataTypes(const WebsiteDataRecord& record)
 {
-    static const OptionSet<WebsiteDataType> typesSupported = {
+    return record.types.containsAny({
         WebsiteDataType::MemoryCache,
         WebsiteDataType::DiskCache,
         WebsiteDataType::OfflineWebApplicationCache,
@@ -73,12 +73,15 @@ static bool recordContainsSupportedDataTypes(const WebsiteDataRecord& record)
         WebsiteDataType::LocalStorage,
         WebsiteDataType::WebSQLDatabases,
         WebsiteDataType::IndexedDBDatabases,
-#if ENABLE(NETSCAPE_PLUGIN_API)
-        WebsiteDataType::PlugInData,
+        WebsiteDataType::HSTSCache,
+        WebsiteDataType::Cookies,
+        WebsiteDataType::DeviceIdHashSalt,
+        WebsiteDataType::ResourceLoadStatistics,
+#if ENABLE(SERVICE_WORKER)
+        WebsiteDataType::ServiceWorkerRegistrations,
 #endif
-        WebsiteDataType::Cookies
-    };
-    return record.types.contains(typesSupported);
+        WebsiteDataType::DOMCache
+    });
 }
 
 static WebKitWebsiteDataTypes toWebKitWebsiteDataTypes(OptionSet<WebsiteDataType> types)
@@ -98,12 +101,20 @@ static WebKitWebsiteDataTypes toWebKitWebsiteDataTypes(OptionSet<WebsiteDataType
         returnValue |= WEBKIT_WEBSITE_DATA_WEBSQL_DATABASES;
     if (types.contains(WebsiteDataType::IndexedDBDatabases))
         returnValue |= WEBKIT_WEBSITE_DATA_INDEXEDDB_DATABASES;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    if (types.contains(WebsiteDataType::PlugInData))
-        returnValue |= WEBKIT_WEBSITE_DATA_PLUGIN_DATA;
-#endif
+    if (types.contains(WebsiteDataType::HSTSCache))
+        returnValue |= WEBKIT_WEBSITE_DATA_HSTS_CACHE;
     if (types.contains(WebsiteDataType::Cookies))
         returnValue |= WEBKIT_WEBSITE_DATA_COOKIES;
+    if (types.contains(WebsiteDataType::DeviceIdHashSalt))
+        returnValue |= WEBKIT_WEBSITE_DATA_DEVICE_ID_HASH_SALT;
+    if (types.contains(WebsiteDataType::ResourceLoadStatistics))
+        returnValue |= WEBKIT_WEBSITE_DATA_ITP;
+#if ENABLE(SERVICE_WORKER)
+    if (types.contains(WebsiteDataType::ServiceWorkerRegistrations))
+        returnValue |= WEBKIT_WEBSITE_DATA_SERVICE_WORKER_REGISTRATIONS;
+#endif
+    if (types.contains(WebsiteDataType::DOMCache))
+        returnValue |= WEBKIT_WEBSITE_DATA_DOM_CACHE;
     return static_cast<WebKitWebsiteDataTypes>(returnValue);
 }
 
@@ -128,6 +139,7 @@ const WebKit::WebsiteDataRecord& webkitWebsiteDataGetRecord(WebKitWebsiteData* w
  * @website_data: a #WebKitWebsiteData
  *
  * Atomically increments the reference count of @website_data by one.
+ *
  * This function is MT-safe and may be called from any thread.
  *
  * Returns: The passed #WebKitWebsiteData
@@ -147,6 +159,7 @@ WebKitWebsiteData* webkit_website_data_ref(WebKitWebsiteData* websiteData)
  * @website_data: A #WebKitWebsiteData
  *
  * Atomically decrements the reference count of @website_data by one.
+ *
  * If the reference count drops to 0, all memory allocated by
  * #WebKitWebsiteData is released. This function is MT-safe and may be
  * called from any thread.
@@ -167,7 +180,9 @@ void webkit_website_data_unref(WebKitWebsiteData* websiteData)
  * webkit_website_data_get_name:
  * @website_data: a #WebKitWebsiteData
  *
- * Gets the name of #WebKitWebsiteData. This is the website name, normally represented by
+ * Gets the name of #WebKitWebsiteData.
+ *
+ * This is the website name, normally represented by
  * a domain or host name. All local documents are grouped in the same #WebKitWebsiteData using
  * the name "Local files".
  *
@@ -180,7 +195,7 @@ const char* webkit_website_data_get_name(WebKitWebsiteData* websiteData)
     g_return_val_if_fail(websiteData, nullptr);
 
     if (websiteData->displayName.isNull()) {
-        if (websiteData->record.displayName == "Local documents on your computer")
+        if (websiteData->record.displayName == "Local documents on your computer"_s)
             websiteData->displayName = _("Local files");
         else
             websiteData->displayName = websiteData->record.displayName.utf8();
@@ -192,7 +207,9 @@ const char* webkit_website_data_get_name(WebKitWebsiteData* websiteData)
  * webkit_website_data_get_types:
  * @website_data: a #WebKitWebsiteData
  *
- * Gets the types of data stored in the client for a #WebKitWebsiteData. These are the
+ * Gets the types of data stored in the client for a #WebKitWebsiteData.
+ *
+ * These are the
  * types actually present, not the types queried with webkit_website_data_manager_fetch().
  *
  * Returns: a bitmask of #WebKitWebsiteDataTypes in @website_data
@@ -212,6 +229,7 @@ WebKitWebsiteDataTypes webkit_website_data_get_types(WebKitWebsiteData* websiteD
  * @types: a bitmask  of #WebKitWebsiteDataTypes
  *
  * Gets the size of the data of types @types in a #WebKitWebsiteData.
+ *
  * Note that currently the data size is only known for %WEBKIT_WEBSITE_DATA_DISK_CACHE data type
  * so for all other types 0 will be returned.
  *

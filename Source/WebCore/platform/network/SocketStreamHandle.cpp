@@ -31,6 +31,7 @@
 #include "config.h"
 #include "SocketStreamHandle.h"
 
+#include "CookieRequestHeaderFieldProxy.h"
 #include "SocketStreamHandleClient.h"
 #include <wtf/Function.h>
 
@@ -41,6 +42,7 @@ SocketStreamHandle::SocketStreamHandle(const URL& url, SocketStreamHandleClient&
     , m_client(client)
     , m_state(Connecting)
 {
+    ASSERT(isMainThread());
 }
 
 SocketStreamHandle::SocketStreamState SocketStreamHandle::state() const
@@ -48,11 +50,18 @@ SocketStreamHandle::SocketStreamState SocketStreamHandle::state() const
     return m_state;
 }
 
-void SocketStreamHandle::sendData(const char* data, size_t length, Function<void(bool)> completionHandler)
+void SocketStreamHandle::sendData(const uint8_t* data, size_t length, Function<void(bool)> completionHandler)
 {
     if (m_state == Connecting || m_state == Closing)
         return completionHandler(false);
     platformSend(data, length, WTFMove(completionHandler));
+}
+
+void SocketStreamHandle::sendHandshake(CString&& handshake, std::optional<CookieRequestHeaderFieldProxy>&& headerFieldProxy, Function<void(bool, bool)> completionHandler)
+{
+    if (m_state == Connecting || m_state == Closing)
+        return completionHandler(false, false);
+    platformSendHandshake(handshake.dataAsUInt8Ptr(), handshake.length(), WTFMove(headerFieldProxy), WTFMove(completionHandler));
 }
 
 void SocketStreamHandle::close()
@@ -67,7 +76,7 @@ void SocketStreamHandle::close()
 
 void SocketStreamHandle::disconnect()
 {
-    auto protect = makeRef(static_cast<SocketStreamHandle&>(*this)); // platformClose calls the client, which may make the handle get deallocated immediately.
+    Ref protect = static_cast<SocketStreamHandle&>(*this); // platformClose calls the client, which may make the handle get deallocated immediately.
 
     platformClose();
     m_state = Closed;

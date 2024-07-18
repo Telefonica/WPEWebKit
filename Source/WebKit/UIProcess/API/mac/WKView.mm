@@ -31,26 +31,29 @@
 #import "APIHitTestResult.h"
 #import "APIIconLoadingClient.h"
 #import "APIPageConfiguration.h"
+#import "AppKitSPI.h"
 #import "WKBrowsingContextGroupPrivate.h"
-#import "WKDragDestinationAction.h"
 #import "WKNSData.h"
 #import "WKProcessGroupPrivate.h"
+#import "WKWebViewMac.h"
 #import "WebBackForwardListItem.h"
 #import "WebKit2Initialize.h"
 #import "WebPageGroup.h"
-#import "WebPreferencesKeys.h"
+#import "WebPageProxy.h"
+#import "WebPreferences.h"
 #import "WebProcessPool.h"
 #import "WebViewImpl.h"
 #import "_WKLinkIconParametersInternal.h"
+#import <WebCore/WebCoreObjCExtras.h>
+#import <WebCore/WebViewVisualIdentificationOverlay.h>
+#import <WebKit/WKDragDestinationAction.h>
 #import <pal/spi/cocoa/AVKitSPI.h>
 #import <wtf/BlockPtr.h>
-
-using namespace WebKit;
-using namespace WebCore;
+#import <wtf/NakedRef.h>
 
 @interface WKViewData : NSObject {
 @public
-    std::unique_ptr<WebViewImpl> _impl;
+    std::unique_ptr<WebKit::WebViewImpl> _impl;
 }
 
 @end
@@ -66,9 +69,21 @@ using namespace WebCore;
 @end
 #endif
 
-@implementation WKView
+#if HAVE(NSSCROLLVIEW_SEPARATOR_TRACKING_ADAPTER)
+@interface WKView () <NSScrollViewSeparatorTrackingAdapter>
+@end
+#endif
 
-#if WK_API_ENABLED
+#if ENABLE(DRAG_SUPPORT)
+
+@interface WKView () <NSFilePromiseProviderDelegate, NSDraggingSource>
+@end
+
+#endif
+
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
+@implementation WKView
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 - (id)initWithFrame:(NSRect)frame processGroup:(WKProcessGroup *)processGroup browsingContextGroup:(WKBrowsingContextGroup *)browsingContextGroup
 {
@@ -80,10 +95,11 @@ using namespace WebCore;
     return [self initWithFrame:frame contextRef:processGroup._contextRef pageGroupRef:browsingContextGroup._pageGroupRef relatedToPage:relatedView ? relatedView.pageRef : nil];
 }
 
-#endif // WK_API_ENABLED
-
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKView.class, self))
+        return;
+
     _data->_impl->page().setIconLoadingClient(nullptr);
     _data->_impl = nullptr;
 
@@ -93,12 +109,10 @@ using namespace WebCore;
     [super dealloc];
 }
 
-#if WK_API_ENABLED
 - (WKBrowsingContextController *)browsingContextController
 {
     return _data->_impl->browsingContextController();
 }
-#endif // WK_API_ENABLED
 
 - (void)setDrawsBackground:(BOOL)drawsBackground
 {
@@ -108,6 +122,16 @@ using namespace WebCore;
 - (BOOL)drawsBackground
 {
     return _data->_impl->drawsBackground();
+}
+
+- (NSColor *)_backgroundColor
+{
+    return _data->_impl->backgroundColor();
+}
+
+- (void)_setBackgroundColor:(NSColor *)backgroundColor
+{
+    _data->_impl->setBackgroundColor(backgroundColor);
 }
 
 - (void)setDrawsTransparentBackground:(BOOL)drawsTransparentBackground
@@ -166,7 +190,9 @@ using namespace WebCore;
     _data->_impl->setFrameSize(NSSizeToCGSize(size));
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)renewGState
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     _data->_impl->renewGState();
     [super renewGState];
@@ -179,6 +205,7 @@ WEBCORE_COMMAND(alignJustified)
 WEBCORE_COMMAND(alignLeft)
 WEBCORE_COMMAND(alignRight)
 WEBCORE_COMMAND(copy)
+WEBCORE_COMMAND(copyFont)
 WEBCORE_COMMAND(cut)
 WEBCORE_COMMAND(delete)
 WEBCORE_COMMAND(deleteBackward)
@@ -252,6 +279,7 @@ WEBCORE_COMMAND(pageUp)
 WEBCORE_COMMAND(pageUpAndModifySelection)
 WEBCORE_COMMAND(paste)
 WEBCORE_COMMAND(pasteAsPlainText)
+WEBCORE_COMMAND(pasteFont)
 WEBCORE_COMMAND(scrollPageDown)
 WEBCORE_COMMAND(scrollPageUp)
 WEBCORE_COMMAND(scrollLineDown)
@@ -297,9 +325,11 @@ WEBCORE_COMMAND(yankAndSelect)
     return _data->_impl->readSelectionFromPasteboard(pasteboard);
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)changeFont:(id)sender
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
-    _data->_impl->changeFontFromFontPanel();
+    _data->_impl->changeFontFromFontManager();
 }
 
 /*
@@ -311,11 +341,9 @@ individual methods here with Mac-specific code.
 Editing-related methods still unimplemented that are implemented in WebKit1:
 
 - (void)complete:(id)sender;
-- (void)copyFont:(id)sender;
 - (void)makeBaseWritingDirectionLeftToRight:(id)sender;
 - (void)makeBaseWritingDirectionNatural:(id)sender;
 - (void)makeBaseWritingDirectionRightToLeft:(id)sender;
-- (void)pasteFont:(id)sender;
 - (void)scrollLineDown:(id)sender;
 - (void)scrollLineUp:(id)sender;
 - (void)showGuessPanel:(id)sender;
@@ -488,11 +516,6 @@ Some other editing-related methods still unimplemented:
     _data->_impl->swipeWithEvent(event);
 }
 
-- (void)mouseMoved:(NSEvent *)event
-{
-    _data->_impl->mouseMoved(event);
-}
-
 - (void)mouseDown:(NSEvent *)event
 {
     _data->_impl->mouseDown(event);
@@ -506,16 +529,6 @@ Some other editing-related methods still unimplemented:
 - (void)mouseDragged:(NSEvent *)event
 {
     _data->_impl->mouseDragged(event);
-}
-
-- (void)mouseEntered:(NSEvent *)event
-{
-    _data->_impl->mouseEntered(event);
-}
-
-- (void)mouseExited:(NSEvent *)event
-{
-    _data->_impl->mouseExited(event);
 }
 
 - (void)otherMouseDown:(NSEvent *)event
@@ -679,7 +692,9 @@ Some other editing-related methods still unimplemented:
 }
 
 #if ENABLE(DRAG_SUPPORT)
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)draggedImage:(NSImage *)image endedAt:(NSPoint)endPoint operation:(NSDragOperation)operation
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     _data->_impl->draggedImage(image, NSPointToCGPoint(endPoint), operation);
 }
@@ -742,7 +757,7 @@ Some other editing-related methods still unimplemented:
 
 - (BOOL)mouseDownCanMoveWindow
 {
-    return WebViewImpl::mouseDownCanMoveWindow();
+    return WebKit::WebViewImpl::mouseDownCanMoveWindow();
 }
 
 - (void)viewDidHide
@@ -770,7 +785,9 @@ Some other editing-related methods still unimplemented:
     return _data->_impl->accessibilityFocusedUIElement();
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (BOOL)accessibilityIsIgnored
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     return _data->_impl->accessibilityIsIgnored();
 }
@@ -780,9 +797,26 @@ Some other editing-related methods still unimplemented:
     return _data->_impl->accessibilityHitTest(NSPointToCGPoint(point));
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (id)accessibilityAttributeValue:(NSString *)attribute
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     return _data->_impl->accessibilityAttributeValue(attribute);
+}
+
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
+- (id)accessibilityAttributeValue:(NSString *)attribute forParameter:(id)parameter
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
+{
+    return _data->_impl->accessibilityAttributeValue(attribute, parameter);
+}
+
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
+- (NSArray<NSString *> *)accessibilityParameterizedAttributeNames
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
+{
+    NSArray<NSString *> *names = [super accessibilityParameterizedAttributeNames];
+    return [names arrayByAddingObject:@"AXConvertRelativeFrame"];
 }
 
 - (NSView *)hitTest:(NSPoint)point
@@ -835,30 +869,39 @@ Some other editing-related methods still unimplemented:
     _data->_impl->removeTrackingRects(tags, count);
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (NSString *)view:(NSView *)view stringForToolTip:(NSToolTipTag)tag point:(NSPoint)point userData:(void *)data
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     return _data->_impl->stringForToolTip(tag);
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)pasteboardChangedOwner:(NSPasteboard *)pasteboard
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     _data->_impl->pasteboardChangedOwner(pasteboard);
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)pasteboard:(NSPasteboard *)pasteboard provideDataForType:(NSString *)type
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     _data->_impl->provideDataForPasteboard(pasteboard, type);
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (NSArray *)namesOfPromisedFilesDroppedAtDestination:(NSURL *)dropDestination
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     return _data->_impl->namesOfPromisedFilesDroppedAtDestination(dropDestination);
 }
 
 - (void)maybeInstallIconLoadingClient
 {
-#if WK_API_ENABLED
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     class IconLoadingClient : public API::IconLoadingClient {
+        WTF_MAKE_FAST_ALLOCATED;
     public:
         explicit IconLoadingClient(WKView *wkView)
             : m_wkView(wkView)
@@ -867,22 +910,21 @@ Some other editing-related methods still unimplemented:
 
         static SEL delegateSelector()
         {
-            return sel_registerName("_shouldLoadIconWithParameters:completionHandler:");
+            return @selector(_shouldLoadIconWithParameters:completionHandler:);
         }
 
     private:
         typedef void (^IconLoadCompletionHandler)(NSData*);
 
-        void getLoadDecisionForIcon(const WebCore::LinkIcon& linkIcon, WTF::Function<void (WTF::Function<void (API::Data*, WebKit::CallbackBase::Error)>&&)>&& completionHandler) override {
+        void getLoadDecisionForIcon(const WebCore::LinkIcon& linkIcon, CompletionHandler<void(CompletionHandler<void(API::Data*)>&&)>&& completionHandler) override
+        {
             RetainPtr<_WKLinkIconParameters> parameters = adoptNS([[_WKLinkIconParameters alloc] _initWithLinkIcon:linkIcon]);
 
-            [m_wkView performSelector:delegateSelector() withObject:parameters.get() withObject:BlockPtr<void (IconLoadCompletionHandler)>::fromCallable([completionHandler = WTFMove(completionHandler)](IconLoadCompletionHandler loadCompletionHandler) {
+            [m_wkView _shouldLoadIconWithParameters:parameters.get() completionHandler:makeBlockPtr([completionHandler = WTFMove(completionHandler)](IconLoadCompletionHandler loadCompletionHandler) mutable {
+                ASSERT(RunLoop::isMain());
                 if (loadCompletionHandler) {
-                    completionHandler([loadCompletionHandler = BlockPtr<void (NSData *)>(loadCompletionHandler)](API::Data* data, WebKit::CallbackBase::Error error) {
-                        if (error != CallbackBase::Error::None || !data)
-                            loadCompletionHandler(nil);
-                        else
-                            loadCompletionHandler(wrapper(*data));
+                    completionHandler([loadCompletionHandler = makeBlockPtr(loadCompletionHandler)](API::Data* data) {
+                        loadCompletionHandler(wrapper(data));
                     });
                 } else
                     completionHandler(nullptr);
@@ -891,29 +933,29 @@ Some other editing-related methods still unimplemented:
 
         WKView *m_wkView;
     };
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
     if ([self respondsToSelector:IconLoadingClient::delegateSelector()])
-        _data->_impl->page().setIconLoadingClient(std::make_unique<IconLoadingClient>(self));
-#endif // WK_API_ENABLED
+        _data->_impl->page().setIconLoadingClient(makeUnique<IconLoadingClient>(self));
 }
 
-- (instancetype)initWithFrame:(NSRect)frame processPool:(WebProcessPool&)processPool configuration:(Ref<API::PageConfiguration>&&)configuration
+- (instancetype)initWithFrame:(NSRect)frame processPool:(NakedRef<WebKit::WebProcessPool>)processPool configuration:(Ref<API::PageConfiguration>&&)configuration
 {
     self = [super initWithFrame:frame];
     if (!self)
         return nil;
 
-    InitializeWebKit2();
+    WebKit::InitializeWebKit2();
 
     _data = [[WKViewData alloc] init];
-    _data->_impl = std::make_unique<WebViewImpl>(self, nullptr, processPool, WTFMove(configuration));
+    _data->_impl = makeUnique<WebKit::WebViewImpl>(self, nullptr, processPool.get(), WTFMove(configuration));
 
     [self maybeInstallIconLoadingClient];
+    [WebViewVisualIdentificationOverlay installForWebViewIfNeeded:self kind:@"WKView" deprecated:YES];
 
     return self;
 }
 
-#if WK_API_ENABLED
 - (void)_setThumbnailView:(_WKThumbnailView *)thumbnailView
 {
     _data->_impl->setThumbnailView(thumbnailView);
@@ -925,7 +967,6 @@ Some other editing-related methods still unimplemented:
         return nil;
     return _data->_impl->thumbnailView();
 }
-#endif // WK_API_ENABLED
 
 - (NSTextInputContext *)_web_superInputContext
 {
@@ -959,10 +1000,9 @@ Some other editing-related methods still unimplemented:
 
 - (id)_web_superAccessibilityAttributeValue:(NSString *)attribute
 {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     return [super accessibilityAttributeValue:attribute];
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
 }
 
 - (void)_web_superDoCommandBySelector:(SEL)selector
@@ -987,7 +1027,7 @@ Some other editing-related methods still unimplemented:
 
 - (id)_web_immediateActionAnimationControllerForHitTestResultInternal:(API::HitTestResult*)hitTestResult withType:(uint32_t)type userData:(API::Object*)userData
 {
-    return [self _immediateActionAnimationControllerForHitTestResult:toAPI(hitTestResult) withType:type userData:toAPI(userData)];
+    return [self _immediateActionAnimationControllerForHitTestResult:WebKit::toAPI(hitTestResult) withType:type userData:WebKit::toAPI(userData)];
 }
 
 - (void)_web_prepareForImmediateActionAnimation
@@ -1010,7 +1050,12 @@ Some other editing-related methods still unimplemented:
     [self _didChangeContentSize:newSize];
 }
 
-#if ENABLE(DRAG_SUPPORT) && WK_API_ENABLED
+#if ENABLE(DRAG_SUPPORT)
+
+- (void)_web_didPerformDragOperation:(BOOL)handled
+{
+    UNUSED_PARAM(handled);
+}
 
 - (WKDragDestinationAction)_web_dragDestinationActionForDraggingInfo:(id <NSDraggingInfo>)draggingInfo
 {
@@ -1072,9 +1117,54 @@ Some other editing-related methods still unimplemented:
 
 #endif // HAVE(TOUCH_BAR)
 
+#if HAVE(NSSCROLLVIEW_SEPARATOR_TRACKING_ADAPTER)
+
+- (NSRect)scrollViewFrame
+{
+    if (!_data->_impl)
+        return NSZeroRect;
+    return _data->_impl->scrollViewFrame();
+}
+
+- (BOOL)hasScrolledContentsUnderTitlebar
+{
+    if (!_data->_impl)
+        return NO;
+    return _data->_impl->hasScrolledContentsUnderTitlebar();
+}
+
+#endif // HAVE(NSSCROLLVIEW_SEPARATOR_TRACKING_ADAPTER)
+
+#if ENABLE(DRAG_SUPPORT)
+
+- (NSString *)filePromiseProvider:(NSFilePromiseProvider *)filePromiseProvider fileNameForType:(NSString *)fileType
+{
+    return _data->_impl->fileNameForFilePromiseProvider(filePromiseProvider, fileType);
+}
+
+- (void)filePromiseProvider:(NSFilePromiseProvider *)filePromiseProvider writePromiseToURL:(NSURL *)url completionHandler:(void (^)(NSError *error))completionHandler
+{
+    _data->_impl->writeToURLForFilePromiseProvider(filePromiseProvider, url, completionHandler);
+}
+
+- (NSDragOperation)draggingSession:(NSDraggingSession *)session sourceOperationMaskForDraggingContext:(NSDraggingContext)context
+{
+    return _data->_impl->dragSourceOperationMask(session, context);
+}
+
+- (void)draggingSession:(NSDraggingSession *)session endedAtPoint:(NSPoint)screenPoint operation:(NSDragOperation)operation
+{
+    _data->_impl->draggingSessionEnded(session, screenPoint, operation);
+}
+
+#endif // ENABLE(DRAG_SUPPORT)
+
 @end
 
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 @implementation WKView (Private)
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 - (void)saveBackForwardSnapshotForCurrentItem
 {
@@ -1083,7 +1173,7 @@ Some other editing-related methods still unimplemented:
 
 - (void)saveBackForwardSnapshotForItem:(WKBackForwardListItemRef)item
 {
-    _data->_impl->saveBackForwardSnapshotForItem(*toImpl(item));
+    _data->_impl->saveBackForwardSnapshotForItem(*WebKit::toImpl(item));
 }
 
 - (id)initWithFrame:(NSRect)frame contextRef:(WKContextRef)contextRef pageGroupRef:(WKPageGroupRef)pageGroupRef
@@ -1107,19 +1197,20 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 - (id)initWithFrame:(NSRect)frame contextRef:(WKContextRef)contextRef pageGroupRef:(WKPageGroupRef)pageGroupRef relatedToPage:(WKPageRef)relatedPage
 {
     auto configuration = API::PageConfiguration::create();
-    configuration->setProcessPool(toImpl(contextRef));
-    configuration->setPageGroup(toImpl(pageGroupRef));
-    configuration->setRelatedPage(toImpl(relatedPage));
+    configuration->setProcessPool(WebKit::toImpl(contextRef));
+    configuration->setPageGroup(WebKit::toImpl(pageGroupRef));
+    configuration->setRelatedPage(WebKit::toImpl(relatedPage));
 #if PLATFORM(MAC)
-    configuration->preferenceValues().set(WebKit::WebPreferencesKey::systemLayoutDirectionKey(), WebKit::WebPreferencesStore::Value(static_cast<uint32_t>(toUserInterfaceLayoutDirection(self.userInterfaceLayoutDirection))));
+    configuration->setPreferences(&configuration->pageGroup()->preferences());
+    configuration->preferences()->setSystemLayoutDirection(static_cast<uint32_t>(toUserInterfaceLayoutDirection(self.userInterfaceLayoutDirection)));
 #endif
 
-    return [self initWithFrame:frame processPool:*toImpl(contextRef) configuration:WTFMove(configuration)];
+    return [self initWithFrame:frame processPool:*WebKit::toImpl(contextRef) configuration:WTFMove(configuration)];
 }
 
 - (id)initWithFrame:(NSRect)frame configurationRef:(WKPageConfigurationRef)configurationRef
 {
-    Ref<API::PageConfiguration> configuration = toImpl(configurationRef)->copy();
+    Ref<API::PageConfiguration> configuration = WebKit::toImpl(configurationRef)->copy();
     auto& processPool = *configuration->processPool();
 
     return [self initWithFrame:frame processPool:processPool configuration:WTFMove(configuration)];
@@ -1127,7 +1218,7 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 
 - (BOOL)wantsUpdateLayer
 {
-    return WebViewImpl::wantsUpdateLayer();
+    return WebKit::WebViewImpl::wantsUpdateLayer();
 }
 
 - (void)updateLayer
@@ -1137,17 +1228,17 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 
 - (WKPageRef)pageRef
 {
-    return toAPI(&_data->_impl->page());
+    return WebKit::toAPI(&_data->_impl->page());
 }
 
 - (BOOL)canChangeFrameLayout:(WKFrameRef)frameRef
 {
-    return _data->_impl->canChangeFrameLayout(*toImpl(frameRef));
+    return _data->_impl->canChangeFrameLayout(*WebKit::toImpl(frameRef));
 }
 
 - (NSPrintOperation *)printOperationWithPrintInfo:(NSPrintInfo *)printInfo forFrame:(WKFrameRef)frameRef
 {
-    return _data->_impl->printOperationWithPrintInfo(printInfo, *toImpl(frameRef));
+    return _data->_impl->printOperationWithPrintInfo(printInfo, *WebKit::toImpl(frameRef));
 }
 
 - (void)setFrame:(NSRect)rect andScrollBy:(NSSize)offset
@@ -1172,7 +1263,7 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 
 + (void)hideWordDefinitionWindow
 {
-    WebViewImpl::hideWordDefinitionWindow();
+    WebKit::WebViewImpl::hideWordDefinitionWindow();
 }
 
 - (NSSize)minimumSizeForAutoLayout
@@ -1183,6 +1274,16 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 - (void)setMinimumSizeForAutoLayout:(NSSize)minimumSizeForAutoLayout
 {
     _data->_impl->setMinimumSizeForAutoLayout(NSSizeToCGSize(minimumSizeForAutoLayout));
+}
+
+- (NSSize)sizeToContentAutoSizeMaximumSize
+{
+    return NSSizeFromCGSize(_data->_impl->sizeToContentAutoSizeMaximumSize());
+}
+
+- (void)setSizeToContentAutoSizeMaximumSize:(NSSize)sizeToContentAutoSizeMaximumSize
+{
+    _data->_impl->setSizeToContentAutoSizeMaximumSize(NSSizeToCGSize(sizeToContentAutoSizeMaximumSize));
 }
 
 - (BOOL)shouldExpandToViewHeightForAutoLayout
@@ -1207,7 +1308,7 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 
 - (NSColor *)underlayColor
 {
-    return _data->_impl->underlayColor();
+    return _data->_impl->underlayColor().autorelease();
 }
 
 - (void)setUnderlayColor:(NSColor *)underlayColor
@@ -1215,7 +1316,6 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
     _data->_impl->setUnderlayColor(underlayColor);
 }
 
-#if WK_API_ENABLED
 - (NSView *)_inspectorAttachmentView
 {
     return _data->_impl->inspectorAttachmentView();
@@ -1224,17 +1324,6 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 - (void)_setInspectorAttachmentView:(NSView *)newView
 {
     _data->_impl->setInspectorAttachmentView(newView);
-}
-#endif
-
-- (BOOL)_requiresUserActionForEditingControlsManager
-{
-    return _data->_impl->requiresUserActionForEditingControlsManager();
-}
-
-- (void)_setRequiresUserActionForEditingControlsManager:(BOOL)requiresUserAction
-{
-    _data->_impl->setRequiresUserActionForEditingControlsManager(requiresUserAction);
 }
 
 - (NSView *)fullScreenPlaceholderView
@@ -1245,7 +1334,7 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 // FIXME: This returns an autoreleased object. Should it really be prefixed 'create'?
 - (NSWindow *)createFullScreenWindow
 {
-    return _data->_impl->createFullScreenWindow();
+    return _data->_impl->fullScreenWindow();
 }
 
 - (void)beginDeferringViewInWindowChanges
@@ -1369,6 +1458,9 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
 
 - (void)_setViewScale:(CGFloat)viewScale
 {
+    if (viewScale <= 0 || isnan(viewScale) || isinf(viewScale))
+        [NSException raise:NSInvalidArgumentException format:@"View scale should be a positive number"];
+
     _data->_impl->setViewScale(viewScale);
 }
 
@@ -1392,40 +1484,6 @@ static WebCore::UserInterfaceLayoutDirection toUserInterfaceLayoutDirection(NSUs
     return _data->_impl->totalHeightOfBanners();
 }
 
-static std::optional<WebCore::ScrollbarOverlayStyle> toCoreScrollbarStyle(_WKOverlayScrollbarStyle scrollbarStyle)
-{
-    switch (scrollbarStyle) {
-    case _WKOverlayScrollbarStyleDark:
-        return WebCore::ScrollbarOverlayStyleDark;
-    case _WKOverlayScrollbarStyleLight:
-        return WebCore::ScrollbarOverlayStyleLight;
-    case _WKOverlayScrollbarStyleDefault:
-        return WebCore::ScrollbarOverlayStyleDefault;
-    case _WKOverlayScrollbarStyleAutomatic:
-    default:
-        break;
-    }
-
-    return std::nullopt;
-}
-
-static _WKOverlayScrollbarStyle toAPIScrollbarStyle(std::optional<WebCore::ScrollbarOverlayStyle> coreScrollbarStyle)
-{
-    if (!coreScrollbarStyle)
-        return _WKOverlayScrollbarStyleAutomatic;
-
-    switch (coreScrollbarStyle.value()) {
-    case WebCore::ScrollbarOverlayStyleDark:
-        return _WKOverlayScrollbarStyleDark;
-    case WebCore::ScrollbarOverlayStyleLight:
-        return _WKOverlayScrollbarStyleLight;
-    case WebCore::ScrollbarOverlayStyleDefault:
-        return _WKOverlayScrollbarStyleDefault;
-    default:
-        return _WKOverlayScrollbarStyleAutomatic;
-    }
-}
-
 - (void)_setOverlayScrollbarStyle:(_WKOverlayScrollbarStyle)scrollbarStyle
 {
     _data->_impl->setOverlayScrollbarStyle(toCoreScrollbarStyle(scrollbarStyle));
@@ -1438,7 +1496,7 @@ static _WKOverlayScrollbarStyle toAPIScrollbarStyle(std::optional<WebCore::Scrol
 
 - (NSColor *)_pageExtendedBackgroundColor
 {
-    return _data->_impl->pageExtendedBackgroundColor();
+    return _data->_impl->pageExtendedBackgroundColor().autorelease();
 }
 
 - (BOOL)isUsingUISideCompositing
@@ -1471,6 +1529,11 @@ static _WKOverlayScrollbarStyle toAPIScrollbarStyle(std::optional<WebCore::Scrol
 - (void)_gestureEventWasNotHandledByWebCore:(NSEvent *)event
 {
     _data->_impl->gestureEventWasNotHandledByWebCoreFromViewOnly(event);
+}
+
+- (void)_simulateMouseMove:(NSEvent *)event
+{
+    _data->_impl->mouseMoved(event);
 }
 
 - (void)smartMagnifyWithEvent:(NSEvent *)event
@@ -1605,6 +1668,47 @@ static _WKOverlayScrollbarStyle toAPIScrollbarStyle(std::optional<WebCore::Scrol
     });
 }
 
+- (void)_setShouldSuppressFirstResponderChanges:(BOOL)shouldSuppress
+{
+    _data->_impl->setShouldSuppressFirstResponderChanges(shouldSuppress);
+}
+
+- (void)viewDidChangeEffectiveAppearance
+{
+    // This can be called during [super initWithCoder:] and [super initWithFrame:].
+    // That is before _data or _impl is ready to be used, so check. <rdar://problem/39611236>
+    if (!_data || !_data->_impl)
+        return;
+
+    _data->_impl->effectiveAppearanceDidChange();
+}
+
+- (void)_setUseSystemAppearance:(BOOL)useSystemAppearance
+{
+    _data->_impl->setUseSystemAppearance(useSystemAppearance);
+}
+
+- (BOOL)_useSystemAppearance
+{
+    return _data->_impl->useSystemAppearance();
+}
+
+- (BOOL)acceptsPreviewPanelControl:(QLPreviewPanel *)panel
+{
+    return _data->_impl->acceptsPreviewPanelControl(panel);
+}
+
+- (void)beginPreviewPanelControl:(QLPreviewPanel *)panel
+{
+    _data->_impl->beginPreviewPanelControl(panel);
+}
+
+- (void)endPreviewPanelControl:(QLPreviewPanel *)panel
+{
+    _data->_impl->endPreviewPanelControl(panel);
+}
+
 @end
+ALLOW_DEPRECATED_DECLARATIONS_END
 
 #endif // PLATFORM(MAC)

@@ -23,22 +23,16 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef List_h
-#define List_h
+#pragma once
+
+#include "BPlatform.h"
+
+#if !BUSE(LIBPAS)
 
 namespace bmalloc {
 
 template<typename T>
 struct ListNode {
-#if !BCOMPILER_SUPPORTS(NSDMI_FOR_AGGREGATES)
-    ListNode() = default;
-    ListNode(ListNode<T>* prev, ListNode<T>* next)
-        : prev { prev }
-        , next { next }
-    {
-    }
-#endif
-
     ListNode<T>* prev { nullptr };
     ListNode<T>* next { nullptr };
 };
@@ -48,18 +42,10 @@ class List {
     static_assert(std::is_trivially_destructible<T>::value, "List must have a trivial destructor.");
 
     struct iterator {
-#if !BCOMPILER_SUPPORTS(NSDMI_FOR_AGGREGATES)
-        iterator() = default;
-        iterator(ListNode<T>* node)
-            : m_node(node)
-        {
-        }
-#endif
-
         T* operator*() { return static_cast<T*>(m_node); }
         T* operator->() { return static_cast<T*>(m_node); }
 
-        bool operator!=(const iterator& other) { return m_node != other.m_node; }
+        bool operator!=(const iterator& other) const { return m_node != other.m_node; }
 
         iterator& operator++()
         {
@@ -137,4 +123,4 @@ private:
 
 } // namespace bmalloc
 
-#endif // List_h
+#endif

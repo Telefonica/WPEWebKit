@@ -8,18 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_VAD_PITCH_BASED_VAD_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_VAD_PITCH_BASED_VAD_H_
+#ifndef MODULES_AUDIO_PROCESSING_VAD_PITCH_BASED_VAD_H_
+#define MODULES_AUDIO_PROCESSING_VAD_PITCH_BASED_VAD_H_
 
 #include <memory>
 
-#include "webrtc/modules/audio_processing/vad/common.h"
-#include "webrtc/modules/audio_processing/vad/gmm.h"
-#include "webrtc/typedefs.h"
+#include "modules/audio_processing/vad/common.h"
+#include "modules/audio_processing/vad/gmm.h"
 
 namespace webrtc {
 
-class AudioFrame;
 class VadCircularBuffer;
 
 // Computes the probability of the input audio frame to be active given
@@ -36,7 +34,7 @@ class PitchBasedVad {
   //   p_combined: an array which contains the combined activity probabilities
   //               computed prior to the call of this function. The method,
   //               then, computes the voicing probabilities and combine them
-  //               with the given values. The result are returned in |p|.
+  //               with the given values. The result are returned in `p`.
   int VoicingProbability(const AudioFeatures& features, double* p_combined);
 
  private:
@@ -55,4 +53,5 @@ class PitchBasedVad {
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_VAD_PITCH_BASED_VAD_H_
+
+#endif  // MODULES_AUDIO_PROCESSING_VAD_PITCH_BASED_VAD_H_

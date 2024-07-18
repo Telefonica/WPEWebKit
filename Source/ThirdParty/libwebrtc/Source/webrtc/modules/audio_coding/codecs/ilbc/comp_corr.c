@@ -16,7 +16,9 @@
 
 ******************************************************************/
 
-#include "defines.h"
+#include "modules/audio_coding/codecs/ilbc/comp_corr.h"
+
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  *  Compute cross correlation and pitch gain for pitch prediction

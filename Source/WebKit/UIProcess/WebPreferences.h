@@ -26,15 +26,16 @@
 #pragma once
 
 #include "APIExperimentalFeature.h"
+#include "APIInternalDebugFeature.h"
 #include "APIObject.h"
-#include "FontSmoothingLevel.h"
 #include "WebPreferencesDefinitions.h"
 #include "WebPreferencesStore.h"
-#include <wtf/HashSet.h>
 #include <wtf/RefPtr.h>
+#include <wtf/WeakHashSet.h>
 
 #define DECLARE_PREFERENCE_GETTER_AND_SETTERS(KeyUpper, KeyLower, TypeName, Type, DefaultValue, HumanReadableName, HumanReadableDescription) \
     void set##KeyUpper(const Type& value); \
+    void delete##KeyUpper(); \
     Type KeyLower() const;
 
 namespace WebKit {
@@ -58,27 +59,59 @@ public:
 
     const WebPreferencesStore& store() const { return m_store; }
 
+    // Implemented in generated file WebPreferencesGetterSetters.cpp.
     FOR_EACH_WEBKIT_PREFERENCE(DECLARE_PREFERENCE_GETTER_AND_SETTERS)
     FOR_EACH_WEBKIT_DEBUG_PREFERENCE(DECLARE_PREFERENCE_GETTER_AND_SETTERS)
+    FOR_EACH_WEBKIT_INTERNAL_DEBUG_FEATURE_PREFERENCE(DECLARE_PREFERENCE_GETTER_AND_SETTERS)
     FOR_EACH_WEBKIT_EXPERIMENTAL_FEATURE_PREFERENCE(DECLARE_PREFERENCE_GETTER_AND_SETTERS)
 
     static const Vector<RefPtr<API::Object>>& experimentalFeatures();
-    bool isEnabledForFeature(const API::ExperimentalFeature&) const;
-    void setEnabledForFeature(bool, const API::ExperimentalFeature&);
+    bool isFeatureEnabled(const API::ExperimentalFeature&) const;
+    void setFeatureEnabled(const API::ExperimentalFeature&, bool);
+    void setExperimentalFeatureEnabledForKey(const String&, bool);
     void enableAllExperimentalFeatures();
 
+    static const Vector<RefPtr<API::Object>>& internalDebugFeatures();
+    bool isFeatureEnabled(const API::InternalDebugFeature&) const;
+    void setFeatureEnabled(const API::InternalDebugFeature&, bool);
+    void setInternalDebugFeatureEnabledForKey(const String&, bool);
+    void resetAllInternalDebugFeatures();
+
     // Exposed for WebKitTestRunner use only.
+    void setBoolValueForKey(const String&, bool value);
+    void setDoubleValueForKey(const String&, double value);
+    void setUInt32ValueForKey(const String&, uint32_t value);
+    void setStringValueForKey(const String&, const String& value);
     void forceUpdate() { update(); }
 
-    static bool anyPagesAreUsingPrivateBrowsing();
+    void startBatchingUpdates();
+    void endBatchingUpdates();
 
 private:
     void platformInitializeStore();
 
     void update();
 
+    class UpdateBatch {
+    public:
+        explicit UpdateBatch(WebPreferences& preferences)
+            : m_preferences(preferences)
+        {
+            m_preferences.startBatchingUpdates();
+        }
+        
+        ~UpdateBatch()
+        {
+            m_preferences.endBatchingUpdates();
+        }
+        
+    private:
+        WebPreferences& m_preferences;
+    };
+
     void updateStringValueForKey(const String& key, const String& value);
     void updateBoolValueForKey(const String& key, bool value);
+    void updateBoolValueForInternalDebugFeatureKey(const String& key, bool value);
     void updateBoolValueForExperimentalFeatureKey(const String& key, bool value);
     void updateUInt32ValueForKey(const String& key, uint32_t value);
     void updateDoubleValueForKey(const String& key, double value);
@@ -89,7 +122,8 @@ private:
     void platformUpdateDoubleValueForKey(const String& key, double value);
     void platformUpdateFloatValueForKey(const String& key, float value);
 
-    void updatePrivateBrowsingValue(bool value);
+    void deleteKey(const String& key);
+    void platformDeleteKey(const String& key);
 
     void registerDefaultBoolValueForKey(const String&, bool);
     void registerDefaultUInt32ValueForKey(const String&, uint32_t);
@@ -104,7 +138,9 @@ private:
     const String m_globalDebugKeyPrefix;
     WebPreferencesStore m_store;
 
-    HashSet<WebPageProxy*> m_pages;
+    WeakHashSet<WebPageProxy> m_pages;
+    unsigned m_updateBatchCount { 0 };
+    bool m_needUpdateAfterBatch { false };
 };
 
 } // namespace WebKit

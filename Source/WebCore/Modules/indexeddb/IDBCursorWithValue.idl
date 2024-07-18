@@ -24,10 +24,10 @@
  */
 
 [
-    Conditional=INDEXED_DATABASE,
-    ActiveDOMObject,
+    EnabledBySetting=DatabasesEnabled,
     SkipVTableValidation,
     JSCustomMarkFunction,
+    Exposed=(Window,Worker)
 ] interface IDBCursorWithValue : IDBCursor {
-    readonly attribute any value;
+    [CustomGetter] readonly attribute any value;
 };

@@ -39,12 +39,12 @@ class Object;
 namespace InjectedBundle {
 
 class Client {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~Client() = default;
 
     virtual void didCreatePage(WebKit::InjectedBundle&, WebKit::WebPage&) { }
     virtual void willDestroyPage(WebKit::InjectedBundle&, WebKit::WebPage&) { }
-    virtual void didInitializePageGroup(WebKit::InjectedBundle&, WebKit::WebPageGroupProxy&) { }
     virtual void didReceiveMessage(WebKit::InjectedBundle&, const WTF::String&, API::Object*) { }
     virtual void didReceiveMessageToPage(WebKit::InjectedBundle&, WebKit::WebPage&, const WTF::String&, API::Object*) { }
 };

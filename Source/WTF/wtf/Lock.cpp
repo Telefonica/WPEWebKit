@@ -24,30 +24,73 @@
  */
 
 #include "config.h"
-#include "Lock.h"
+#include <wtf/Lock.h>
 
 #include <wtf/LockAlgorithmInlines.h>
+#include <wtf/StackShotProfiler.h>
+
+#if OS(WINDOWS)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace WTF {
 
-void LockBase::lockSlow()
+static constexpr bool profileLockContention = false;
+
+void Lock::lockSlow()
 {
+    if (profileLockContention)
+        STACK_SHOT_PROFILE(4, 2, 5);
+
+    // Heap allocations are forbidden on certain threads (e.g. audio rendering thread) for performance reasons so we need to
+    // explicitly allow the following allocation(s). In some rare cases, the lockSlow() algorithm may cause allocations.
+    DisableMallocRestrictionsForCurrentThreadScope disableMallocRestrictions;
+
     DefaultLockAlgorithm::lockSlow(m_byte);
 }
 
-void LockBase::unlockSlow()
+void Lock::unlockSlow()
 {
+    // Heap allocations are forbidden on certain threads (e.g. audio rendering thread) for performance reasons so we need to
+    // explicitly allow the following allocation(s). In some rare cases, the unlockSlow() algorithm may cause allocations.
+    DisableMallocRestrictionsForCurrentThreadScope disableMallocRestrictions;
+
     DefaultLockAlgorithm::unlockSlow(m_byte, DefaultLockAlgorithm::Unfair);
 }
 
-void LockBase::unlockFairlySlow()
+void Lock::unlockFairlySlow()
 {
+    // Heap allocations are forbidden on certain threads (e.g. audio rendering thread) for performance reasons so we need to
+    // explicitly allow the following allocation(s). In some rare cases, the unlockSlow() algorithm may cause allocations.
+    DisableMallocRestrictionsForCurrentThreadScope disableMallocRestrictions;
+
     DefaultLockAlgorithm::unlockSlow(m_byte, DefaultLockAlgorithm::Fair);
 }
 
-void LockBase::safepointSlow()
+void Lock::safepointSlow()
 {
     DefaultLockAlgorithm::safepointSlow(m_byte);
+}
+
+bool Lock::tryLockWithTimeout(Seconds timeout)
+{
+    // This function may be called from a signal handler (e.g. via visit()). Hence,
+    // it should only use APIs that are safe to call from signal handlers. This is
+    // why we use unistd.h's sleep() instead of its alternatives.
+
+    // We'll be doing sleep(1) between tries below. Hence, sleepPerRetry is 1.
+    unsigned maxRetries = (timeout < Seconds::infinity()) ? timeout.value() : std::numeric_limits<unsigned>::max();
+    unsigned tryCount = 0;
+    while (!tryLock() && tryCount++ <= maxRetries) {
+#if OS(WINDOWS)
+        Sleep(1000);
+#else
+        ::sleep(1);
+#endif
+    }
+    return isHeld();
 }
 
 } // namespace WTF

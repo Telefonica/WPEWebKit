@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2018 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,22 +23,25 @@
 #include "Comment.h"
 
 #include "Document.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-inline Comment::Comment(Document& document, const String& text)
-    : CharacterData(document, text, CreateOther)
+WTF_MAKE_ISO_ALLOCATED_IMPL(Comment);
+
+inline Comment::Comment(Document& document, String&& text)
+    : CharacterData(document, WTFMove(text))
 {
 }
 
-Ref<Comment> Comment::create(Document& document, const String& text)
+Ref<Comment> Comment::create(Document& document, String&& text)
 {
-    return adoptRef(*new Comment(document, text));
+    return adoptRef(*new Comment(document, WTFMove(text)));
 }
 
 String Comment::nodeName() const
 {
-    return ASCIILiteral("#comment");
+    return "#comment"_s;
 }
 
 Node::NodeType Comment::nodeType() const
@@ -48,7 +51,7 @@ Node::NodeType Comment::nodeType() const
 
 Ref<Node> Comment::cloneNodeInternal(Document& targetDocument, CloningOperation)
 {
-    return create(targetDocument, data());
+    return create(targetDocument, String { data() });
 }
 
 bool Comment::childTypeAllowed(NodeType) const

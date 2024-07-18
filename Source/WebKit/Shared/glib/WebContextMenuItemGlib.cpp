@@ -29,100 +29,12 @@
 #include "APIObject.h"
 #include <gio/gio.h>
 
-#if PLATFORM(GTK)
+#if PLATFORM(GTK) && !USE(GTK4)
 #include <gtk/gtk.h>
 #endif
 
-using namespace WebCore;
-
 namespace WebKit {
-
-#if PLATFORM(GTK)
-static const char* gtkStockIDFromContextMenuAction(ContextMenuAction action)
-{
-    switch (action) {
-    case ContextMenuItemTagCopyLinkToClipboard:
-    case ContextMenuItemTagCopyImageToClipboard:
-    case ContextMenuItemTagCopyMediaLinkToClipboard:
-    case ContextMenuItemTagCopy:
-        return GTK_STOCK_COPY;
-    case ContextMenuItemTagOpenLinkInNewWindow:
-    case ContextMenuItemTagOpenImageInNewWindow:
-    case ContextMenuItemTagOpenFrameInNewWindow:
-    case ContextMenuItemTagOpenMediaInNewWindow:
-        return GTK_STOCK_OPEN;
-    case ContextMenuItemTagDownloadLinkToDisk:
-    case ContextMenuItemTagDownloadImageToDisk:
-        return GTK_STOCK_SAVE;
-    case ContextMenuItemTagGoBack:
-        return GTK_STOCK_GO_BACK;
-    case ContextMenuItemTagGoForward:
-        return GTK_STOCK_GO_FORWARD;
-    case ContextMenuItemTagStop:
-        return GTK_STOCK_STOP;
-    case ContextMenuItemTagReload:
-        return GTK_STOCK_REFRESH;
-    case ContextMenuItemTagCut:
-        return GTK_STOCK_CUT;
-    case ContextMenuItemTagPaste:
-        return GTK_STOCK_PASTE;
-    case ContextMenuItemTagDelete:
-        return GTK_STOCK_DELETE;
-    case ContextMenuItemTagSelectAll:
-        return GTK_STOCK_SELECT_ALL;
-    case ContextMenuItemTagSpellingGuess:
-        return nullptr;
-    case ContextMenuItemTagIgnoreSpelling:
-        return GTK_STOCK_NO;
-    case ContextMenuItemTagLearnSpelling:
-        return GTK_STOCK_OK;
-    case ContextMenuItemTagOther:
-        return GTK_STOCK_MISSING_IMAGE;
-    case ContextMenuItemTagSearchInSpotlight:
-        return GTK_STOCK_FIND;
-    case ContextMenuItemTagSearchWeb:
-        return GTK_STOCK_FIND;
-    case ContextMenuItemTagOpenWithDefaultApplication:
-        return GTK_STOCK_OPEN;
-    case ContextMenuItemPDFZoomIn:
-        return GTK_STOCK_ZOOM_IN;
-    case ContextMenuItemPDFZoomOut:
-        return GTK_STOCK_ZOOM_OUT;
-    case ContextMenuItemPDFAutoSize:
-        return GTK_STOCK_ZOOM_FIT;
-    case ContextMenuItemPDFNextPage:
-        return GTK_STOCK_GO_FORWARD;
-    case ContextMenuItemPDFPreviousPage:
-        return GTK_STOCK_GO_BACK;
-    // New tags, not part of API
-    case ContextMenuItemTagOpenLink:
-        return GTK_STOCK_OPEN;
-    case ContextMenuItemTagCheckSpelling:
-        return GTK_STOCK_SPELL_CHECK;
-    case ContextMenuItemTagFontMenu:
-        return GTK_STOCK_SELECT_FONT;
-    case ContextMenuItemTagShowFonts:
-        return GTK_STOCK_SELECT_FONT;
-    case ContextMenuItemTagBold:
-        return GTK_STOCK_BOLD;
-    case ContextMenuItemTagItalic:
-        return GTK_STOCK_ITALIC;
-    case ContextMenuItemTagUnderline:
-        return GTK_STOCK_UNDERLINE;
-    case ContextMenuItemTagShowColors:
-        return GTK_STOCK_SELECT_COLOR;
-    case ContextMenuItemTagToggleMediaControls:
-    case ContextMenuItemTagToggleMediaLoop:
-    case ContextMenuItemTagCopyImageUrlToClipboard:
-        // No icon for this.
-        return nullptr;
-    case ContextMenuItemTagEnterVideoFullscreen:
-        return GTK_STOCK_FULLSCREEN;
-    default:
-        return nullptr;
-    }
-}
-#endif // PLATFORM(GTK)
+using namespace WebCore;
 
 WebContextMenuItemGlib::WebContextMenuItemGlib(ContextMenuItemType type, ContextMenuAction action, const String& title, bool enabled, bool checked)
     : WebContextMenuItemData(type, action, title, enabled, checked)
@@ -142,7 +54,7 @@ WebContextMenuItemGlib::WebContextMenuItemGlib(const WebContextMenuItemGlib& dat
 {
     m_gAction = data.gAction();
     m_submenuItems = WTFMove(submenu);
-#if PLATFORM(GTK)
+#if PLATFORM(GTK) && !USE(GTK4)
     m_gtkAction = data.gtkAction();
 #endif
 }
@@ -165,7 +77,8 @@ WebContextMenuItemGlib::WebContextMenuItemGlib(GAction* action, const String& ti
     createActionIfNeeded();
 }
 
-#if PLATFORM(GTK)
+#if PLATFORM(GTK) && !USE(GTK4)
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
 WebContextMenuItemGlib::WebContextMenuItemGlib(GtkAction* action)
     : WebContextMenuItemData(GTK_IS_TOGGLE_ACTION(action) ? CheckableActionType : ActionType, ContextMenuItemBaseApplicationTag, String::fromUTF8(gtk_action_get_label(action)), gtk_action_get_sensitive(action), GTK_IS_TOGGLE_ACTION(action) ? gtk_toggle_action_get_active(GTK_TOGGLE_ACTION(action)) : false)
 {
@@ -173,6 +86,7 @@ WebContextMenuItemGlib::WebContextMenuItemGlib(GtkAction* action)
     createActionIfNeeded();
     g_object_set_data_full(G_OBJECT(m_gAction.get()), "webkit-gtk-action", g_object_ref(m_gtkAction), g_object_unref);
 }
+ALLOW_DEPRECATED_DECLARATIONS_END
 #endif
 
 WebContextMenuItemGlib::~WebContextMenuItemGlib()
@@ -181,9 +95,11 @@ WebContextMenuItemGlib::~WebContextMenuItemGlib()
 
 GUniquePtr<char> WebContextMenuItemGlib::buildActionName() const
 {
-#if PLATFORM(GTK)
+#if PLATFORM(GTK) && !USE(GTK4)
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     if (m_gtkAction)
         return GUniquePtr<char>(g_strdup(gtk_action_get_name(m_gtkAction)));
+ALLOW_DEPRECATED_DECLARATIONS_END
 #endif
 
     static uint64_t actionID = 0;
@@ -204,19 +120,21 @@ void WebContextMenuItemGlib::createActionIfNeeded()
         g_simple_action_set_enabled(G_SIMPLE_ACTION(m_gAction.get()), enabled());
     }
 
-#if PLATFORM(GTK)
+#if PLATFORM(GTK) && !USE(GTK4)
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     // Create the GtkAction for backwards compatibility only.
     if (!m_gtkAction) {
         if (type() == CheckableActionType) {
-            m_gtkAction = GTK_ACTION(gtk_toggle_action_new(g_action_get_name(m_gAction.get()), title().utf8().data(), nullptr, gtkStockIDFromContextMenuAction(action())));
+            m_gtkAction = GTK_ACTION(gtk_toggle_action_new(g_action_get_name(m_gAction.get()), title().utf8().data(), nullptr, nullptr));
             gtk_toggle_action_set_active(GTK_TOGGLE_ACTION(m_gtkAction), checked());
         } else
-            m_gtkAction = gtk_action_new(g_action_get_name(m_gAction.get()), title().utf8().data(), 0, gtkStockIDFromContextMenuAction(action()));
+            m_gtkAction = gtk_action_new(g_action_get_name(m_gAction.get()), title().utf8().data(), 0, nullptr);
         gtk_action_set_sensitive(m_gtkAction, enabled());
         g_object_set_data_full(G_OBJECT(m_gAction.get()), "webkit-gtk-action", m_gtkAction, g_object_unref);
     }
 
     g_signal_connect_object(m_gAction.get(), "activate", G_CALLBACK(gtk_action_activate), m_gtkAction, G_CONNECT_SWAPPED);
+ALLOW_DEPRECATED_DECLARATIONS_END
 #endif
 }
 

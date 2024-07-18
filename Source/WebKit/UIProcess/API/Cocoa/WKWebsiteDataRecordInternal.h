@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,25 +25,22 @@
 
 #import "WKWebsiteDataRecordPrivate.h"
 
-#if WK_API_ENABLED
-
 #import "APIWebsiteDataRecord.h"
 #import "WKObject.h"
 #import <wtf/OptionSet.h>
-#import <wtf/Optional.h>
 
 namespace WebKit {
 
-inline WKWebsiteDataRecord *wrapper(API::WebsiteDataRecord& websiteDataRecord)
-{
-    ASSERT([websiteDataRecord.wrapper() isKindOfClass:[WKWebsiteDataRecord class]]);
-    return (WKWebsiteDataRecord *)websiteDataRecord.wrapper();
-}
+template<> struct WrapperTraits<API::WebsiteDataRecord> {
+    using WrapperClass = WKWebsiteDataRecord;
+};
 
 static inline std::optional<WebsiteDataType> toWebsiteDataType(NSString *websiteDataType)
 {
     if ([websiteDataType isEqualToString:WKWebsiteDataTypeCookies])
         return WebsiteDataType::Cookies;
+    if ([websiteDataType isEqualToString:WKWebsiteDataTypeFetchCache])
+        return WebsiteDataType::DOMCache;
     if ([websiteDataType isEqualToString:WKWebsiteDataTypeDiskCache])
         return WebsiteDataType::DiskCache;
     if ([websiteDataType isEqualToString:WKWebsiteDataTypeMemoryCache])
@@ -58,20 +55,30 @@ static inline std::optional<WebsiteDataType> toWebsiteDataType(NSString *website
         return WebsiteDataType::WebSQLDatabases;
     if ([websiteDataType isEqualToString:WKWebsiteDataTypeIndexedDBDatabases])
         return WebsiteDataType::IndexedDBDatabases;
+#if ENABLE(SERVICE_WORKER)
+    if ([websiteDataType isEqualToString:WKWebsiteDataTypeServiceWorkerRegistrations])
+        return WebsiteDataType::ServiceWorkerRegistrations;
+#endif
+    if ([websiteDataType isEqualToString:WKWebsiteDataTypeFileSystem])
+        return WebsiteDataType::FileSystem;
     if ([websiteDataType isEqualToString:_WKWebsiteDataTypeHSTSCache])
         return WebsiteDataType::HSTSCache;
     if ([websiteDataType isEqualToString:_WKWebsiteDataTypeMediaKeys])
         return WebsiteDataType::MediaKeys;
     if ([websiteDataType isEqualToString:_WKWebsiteDataTypeSearchFieldRecentSearches])
         return WebsiteDataType::SearchFieldRecentSearches;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    if ([websiteDataType isEqualToString:_WKWebsiteDataTypePlugInData])
-        return WebsiteDataType::PlugInData;
-#endif
     if ([websiteDataType isEqualToString:_WKWebsiteDataTypeResourceLoadStatistics])
         return WebsiteDataType::ResourceLoadStatistics;
     if ([websiteDataType isEqualToString:_WKWebsiteDataTypeCredentials])
         return WebsiteDataType::Credentials;
+    if ([websiteDataType isEqualToString:_WKWebsiteDataTypeAdClickAttributions])
+        return WebsiteDataType::PrivateClickMeasurements;
+    if ([websiteDataType isEqualToString:_WKWebsiteDataTypePrivateClickMeasurements])
+        return WebsiteDataType::PrivateClickMeasurements;
+#if HAVE(CFNETWORK_ALTERNATIVE_SERVICE)
+    if ([websiteDataType isEqualToString:_WKWebsiteDataTypeAlternativeServices])
+        return WebsiteDataType::AlternativeServices;
+#endif
     return std::nullopt;
 }
 
@@ -81,7 +88,7 @@ static inline OptionSet<WebKit::WebsiteDataType> toWebsiteDataTypes(NSSet *websi
 
     for (NSString *websiteDataType in websiteDataTypes) {
         if (auto dataType = toWebsiteDataType(websiteDataType))
-            result |= *dataType;
+            result.add(*dataType);
     }
 
     return result;
@@ -95,6 +102,8 @@ static inline RetainPtr<NSSet> toWKWebsiteDataTypes(OptionSet<WebKit::WebsiteDat
         [wkWebsiteDataTypes addObject:WKWebsiteDataTypeCookies];
     if (websiteDataTypes.contains(WebsiteDataType::DiskCache))
         [wkWebsiteDataTypes addObject:WKWebsiteDataTypeDiskCache];
+    if (websiteDataTypes.contains(WebsiteDataType::DOMCache))
+        [wkWebsiteDataTypes addObject:WKWebsiteDataTypeFetchCache];
     if (websiteDataTypes.contains(WebsiteDataType::MemoryCache))
         [wkWebsiteDataTypes addObject:WKWebsiteDataTypeMemoryCache];
     if (websiteDataTypes.contains(WebsiteDataType::OfflineWebApplicationCache))
@@ -107,20 +116,28 @@ static inline RetainPtr<NSSet> toWKWebsiteDataTypes(OptionSet<WebKit::WebsiteDat
         [wkWebsiteDataTypes addObject:WKWebsiteDataTypeWebSQLDatabases];
     if (websiteDataTypes.contains(WebsiteDataType::IndexedDBDatabases))
         [wkWebsiteDataTypes addObject:WKWebsiteDataTypeIndexedDBDatabases];
+#if ENABLE(SERVICE_WORKER)
+    if (websiteDataTypes.contains(WebsiteDataType::ServiceWorkerRegistrations))
+        [wkWebsiteDataTypes addObject:WKWebsiteDataTypeServiceWorkerRegistrations];
+#endif
+    if (websiteDataTypes.contains(WebsiteDataType::FileSystem))
+        [wkWebsiteDataTypes addObject:WKWebsiteDataTypeFileSystem];
     if (websiteDataTypes.contains(WebsiteDataType::HSTSCache))
         [wkWebsiteDataTypes addObject:_WKWebsiteDataTypeHSTSCache];
     if (websiteDataTypes.contains(WebsiteDataType::MediaKeys))
         [wkWebsiteDataTypes addObject:_WKWebsiteDataTypeMediaKeys];
     if (websiteDataTypes.contains(WebsiteDataType::SearchFieldRecentSearches))
         [wkWebsiteDataTypes addObject:_WKWebsiteDataTypeSearchFieldRecentSearches];
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    if (websiteDataTypes.contains(WebsiteDataType::PlugInData))
-        [wkWebsiteDataTypes addObject:_WKWebsiteDataTypePlugInData];
-#endif
     if (websiteDataTypes.contains(WebsiteDataType::ResourceLoadStatistics))
         [wkWebsiteDataTypes addObject:_WKWebsiteDataTypeResourceLoadStatistics];
     if (websiteDataTypes.contains(WebsiteDataType::Credentials))
         [wkWebsiteDataTypes addObject:_WKWebsiteDataTypeCredentials];
+    if (websiteDataTypes.contains(WebsiteDataType::PrivateClickMeasurements))
+        [wkWebsiteDataTypes addObject:_WKWebsiteDataTypePrivateClickMeasurements];
+#if HAVE(CFNETWORK_ALTERNATIVE_SERVICE)
+    if (websiteDataTypes.contains(WebsiteDataType::AlternativeServices))
+        [wkWebsiteDataTypes addObject:_WKWebsiteDataTypeAlternativeServices];
+#endif
 
     return wkWebsiteDataTypes;
 }
@@ -132,5 +149,3 @@ static inline RetainPtr<NSSet> toWKWebsiteDataTypes(OptionSet<WebKit::WebsiteDat
     API::ObjectStorage<API::WebsiteDataRecord> _websiteDataRecord;
 }
 @end
-
-#endif

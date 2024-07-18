@@ -23,10 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef NativeWebMouseEvent_h
-#define NativeWebMouseEvent_h
+#pragma once
 
-#include "WebEvent.h"
+#include "WebMouseEvent.h"
+#include <WebCore/PointerID.h>
 
 #if USE(APPKIT)
 #include <wtf/RetainPtr.h>
@@ -35,12 +35,26 @@ OBJC_CLASS NSView;
 
 #if PLATFORM(GTK)
 #include <WebCore/GUniquePtrGtk.h>
+#if USE(GTK4)
+typedef struct _GdkEvent GdkEvent;
+#else
 typedef union _GdkEvent GdkEvent;
 #endif
+#endif
 
-#if PLATFORM(WPE)
+#if PLATFORM(IOS_FAMILY)
+#include <wtf/RetainPtr.h>
+OBJC_CLASS WebEvent;
+#endif
+
+#if USE(LIBWPE)
 struct wpe_input_pointer_event;
 #endif
+
+#if PLATFORM(WIN)
+#include <windows.h>
+#endif
+
 
 namespace WebKit {
 
@@ -50,18 +64,29 @@ public:
     NativeWebMouseEvent(NSEvent *, NSEvent *lastPressureEvent, NSView *);
 #elif PLATFORM(GTK)
     NativeWebMouseEvent(const NativeWebMouseEvent&);
-    NativeWebMouseEvent(GdkEvent*, int);
-#elif PLATFORM(WPE)
+    NativeWebMouseEvent(GdkEvent*, int, std::optional<WebCore::FloatSize>);
+    NativeWebMouseEvent(GdkEvent*, const WebCore::IntPoint&, int, std::optional<WebCore::FloatSize>);
+    NativeWebMouseEvent(Type, Button, unsigned short buttons, const WebCore::IntPoint& position, const WebCore::IntPoint& globalPosition, int clickCount, OptionSet<Modifier> modifiers, std::optional<WebCore::FloatSize>, WebCore::PointerID, const String& pointerType, WebCore::PlatformMouseEvent::IsTouch isTouchEvent);
+    explicit NativeWebMouseEvent(const WebCore::IntPoint&);
+#elif PLATFORM(IOS_FAMILY)
+    NativeWebMouseEvent(::WebEvent *);
+    NativeWebMouseEvent(Type, Button, unsigned short buttons, const WebCore::IntPoint& position, const WebCore::IntPoint& globalPosition, float deltaX, float deltaY, float deltaZ, int clickCount, OptionSet<Modifier>, WallTime timestamp, double force, GestureWasCancelled, const String& pointerType);
+    NativeWebMouseEvent(const NativeWebMouseEvent&, const WebCore::IntPoint& position, const WebCore::IntPoint& globalPosition, float deltaX, float deltaY, float deltaZ);
+#elif USE(LIBWPE)
     NativeWebMouseEvent(struct wpe_input_pointer_event*, float deviceScaleFactor);
+#elif PLATFORM(WIN)
+    NativeWebMouseEvent(HWND, UINT message, WPARAM, LPARAM, bool);
 #endif
 
 #if USE(APPKIT)
     NSEvent* nativeEvent() const { return m_nativeEvent.get(); }
 #elif PLATFORM(GTK)
     const GdkEvent* nativeEvent() const { return m_nativeEvent.get(); }
-#elif PLATFORM(IOS)
-    const void* nativeEvent() const { return 0; }
-#elif PLATFORM(WPE)
+#elif PLATFORM(IOS_FAMILY)
+    ::WebEvent* nativeEvent() const { return m_nativeEvent.get(); }
+#elif PLATFORM(WIN)
+    const MSG* nativeEvent() const { return &m_nativeEvent; }
+#else
     const void* nativeEvent() const { return nullptr; }
 #endif
 
@@ -70,9 +95,11 @@ private:
     RetainPtr<NSEvent> m_nativeEvent;
 #elif PLATFORM(GTK)
     GUniquePtr<GdkEvent> m_nativeEvent;
+#elif PLATFORM(IOS_FAMILY)
+    RetainPtr<::WebEvent> m_nativeEvent;
+#elif PLATFORM(WIN)
+    MSG m_nativeEvent;
 #endif
 };
 
 } // namespace WebKit
-
-#endif // NativeWebMouseEvent_h

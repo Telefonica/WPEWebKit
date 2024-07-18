@@ -25,12 +25,11 @@
 
 #import "WebPDFDocumentExtras.h"
 
-#import "WebTypesInternal.h"
 #import <wtf/Vector.h>
 #import <wtf/RetainPtr.h>
 
-#if !PLATFORM(IOS)
-#import <PDFKit/PDFDocument.h>
+#if !PLATFORM(IOS_FAMILY)
+#import <Quartz/Quartz.h>
 #endif
 
 static void appendValuesInPDFNameSubtreeToVector(CGPDFDictionaryRef subtree, Vector<CGPDFObjectRef>& values)
@@ -99,8 +98,8 @@ NSArray *allScriptsInPDFDocument(CGPDFDocumentRef pdfDocument)
         if (!CGPDFDictionaryGetName(javaScriptAction, "S", &actionType) || strcmp(actionType, "JavaScript"))
             continue;
 
-        const UInt8* bytes = 0;
-        CFIndex length;
+        const UInt8* bytes = nullptr;
+        CFIndex length = 0;
         CGPDFStreamRef stream;
         CGPDFStringRef string;
         RetainPtr<CFDataRef> data;
@@ -115,22 +114,21 @@ NSArray *allScriptsInPDFDocument(CGPDFDocumentRef pdfDocument)
             bytes = CGPDFStringGetBytePtr(string);
             length = CGPDFStringGetLength(string);
         }
-        if (!bytes)
+        if (!bytes || !length)
             continue;
 
         NSStringEncoding encoding = (length > 1 && bytes[0] == 0xFE && bytes[1] == 0xFF) ? NSUnicodeStringEncoding : NSUTF8StringEncoding;
-        NSString *script = [[NSString alloc] initWithBytes:bytes length:length encoding:encoding];
+        auto script = adoptNS([[NSString alloc] initWithBytes:bytes length:length encoding:encoding]);
         if (!script)
             continue;
 
-        [scripts addObject:script];
-        [script release];
+        [scripts addObject:script.get()];
     }
 
     return scripts;
 }
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 NSArray *allScriptsInPDFDocument(PDFDocument *document)
 {
     return allScriptsInPDFDocument([document documentRef]);

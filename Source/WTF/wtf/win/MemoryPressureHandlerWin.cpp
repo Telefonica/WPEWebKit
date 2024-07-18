@@ -24,7 +24,7 @@
  */
 
 #include "config.h"
-#include "MemoryPressureHandler.h"
+#include <wtf/MemoryPressureHandler.h>
 
 #include <psapi.h>
 #include <wtf/NeverDestroyed.h>
@@ -38,12 +38,12 @@ void MemoryPressureHandler::platformInitialize()
 
 void MemoryPressureHandler::windowsMeasurementTimerFired()
 {
-    setUnderMemoryPressure(false);
+    setMemoryPressureStatus(MemoryPressureStatus::Normal);
 
     BOOL memoryLow;
 
     if (QueryMemoryResourceNotification(m_lowMemoryHandle.get(), &memoryLow) && memoryLow) {
-        setUnderMemoryPressure(true);
+        setMemoryPressureStatus(MemoryPressureStatus::SystemCritical);
         releaseMemory(Critical::Yes);
         return;
     }
@@ -60,7 +60,7 @@ void MemoryPressureHandler::windowsMeasurementTimerFired()
     const int maxMemoryUsageBytes = 0.9 * 1024 * 1024 * 1024;
 
     if (counters.PrivateUsage > maxMemoryUsageBytes) {
-        setUnderMemoryPressure(true);
+        setMemoryPressureStatus(MemoryPressureStatus::ProcessLimitCritical);
         releaseMemory(Critical::Yes);
     }
 #endif
@@ -73,7 +73,7 @@ void MemoryPressureHandler::platformReleaseMemory(Critical)
 void MemoryPressureHandler::install()
 {
     m_installed = true;
-    m_windowsMeasurementTimer.startRepeating(60.0);
+    m_windowsMeasurementTimer.startRepeating(60_s);
 }
 
 void MemoryPressureHandler::uninstall()
@@ -85,7 +85,7 @@ void MemoryPressureHandler::uninstall()
     m_installed = false;
 }
 
-void MemoryPressureHandler::holdOff(unsigned seconds)
+void MemoryPressureHandler::holdOff(Seconds seconds)
 {
 }
 

@@ -28,10 +28,12 @@
 
 #if PLATFORM(MAC)
 
+#import "APINavigation.h"
 #import "DrawingAreaProxy.h"
 #import "FrameLoadState.h"
 #import "Logging.h"
 #import "NativeWebWheelEvent.h"
+#import "ProvisionalPageProxy.h"
 #import "ViewGestureControllerMessages.h"
 #import "ViewGestureGeometryCollectorMessages.h"
 #import "ViewSnapshotStore.h"
@@ -43,14 +45,10 @@
 #import "WebProcessProxy.h"
 #import <Cocoa/Cocoa.h>
 #import <WebCore/IOSurface.h>
+#import <WebCore/NotImplemented.h>
 #import <WebCore/WebActionDisablingCALayerDelegate.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
 #import <pal/spi/mac/NSEventSPI.h>
-
-using namespace WebCore;
-
-static const double minMagnification = 1;
-static const double maxMagnification = 3;
 
 static const double minElasticMagnification = 0.75;
 static const double maxElasticMagnification = 4;
@@ -65,11 +63,6 @@ static const double swipeOverlayShadowOpacity = 0.06;
 static const double swipeOverlayDimmingOpacity = 0.12;
 static const CGFloat swipeOverlayShadowWidth = 81;
 
-static const CGFloat minimumHorizontalSwipeDistance = 15;
-static const float minimumScrollEventRatioForSwipe = 0.5;
-
-static const float swipeSnapshotRemovalRenderTreeSizeTargetFraction = 0.5;
-
 @interface WKSwipeCancellationTracker : NSObject {
 @private
     BOOL _isCancelled;
@@ -80,10 +73,11 @@ static const float swipeSnapshotRemovalRenderTreeSizeTargetFraction = 0.5;
 @end
 
 @implementation WKSwipeCancellationTracker
-@synthesize isCancelled=_isCancelled;
+@synthesize isCancelled = _isCancelled;
 @end
 
 namespace WebKit {
+using namespace WebCore;
 
 void ViewGestureController::platformTeardown()
 {
@@ -94,7 +88,7 @@ void ViewGestureController::platformTeardown()
         removeSwipeSnapshot();
 }
 
-static double resistanceForDelta(double deltaScale, double currentScale)
+double ViewGestureController::resistanceForDelta(double deltaScale, double currentScale)
 {
     // Zoom out with slight acceleration, until we reach minimum scale.
     if (deltaScale < 0 && currentScale > minMagnification)
@@ -113,23 +107,6 @@ static double resistanceForDelta(double deltaScale, double currentScale)
     return resistance;
 }
 
-FloatPoint ViewGestureController::scaledMagnificationOrigin(FloatPoint origin, double scale)
-{
-    FloatPoint scaledMagnificationOrigin(origin);
-    scaledMagnificationOrigin.moveBy(m_visibleContentRect.location());
-    float magnificationOriginScale = 1 - (scale / m_webPageProxy.pageScaleFactor());
-    scaledMagnificationOrigin.scale(magnificationOriginScale);
-    return scaledMagnificationOrigin;
-}
-
-void ViewGestureController::didCollectGeometryForMagnificationGesture(FloatRect visibleContentRect, bool frameHandlesMagnificationGesture)
-{
-    willBeginGesture(ViewGestureType::Magnification);
-    m_visibleContentRect = visibleContentRect;
-    m_visibleContentRectIsValid = true;
-    m_frameHandlesMagnificationGesture = frameHandlesMagnificationGesture;
-}
-
 void ViewGestureController::gestureEventWasNotHandledByWebCore(NSEvent *event, FloatPoint origin)
 {
     if (event.type == NSEventTypeMagnify)
@@ -138,6 +115,8 @@ void ViewGestureController::gestureEventWasNotHandledByWebCore(NSEvent *event, F
 
 void ViewGestureController::handleMagnificationGestureEvent(NSEvent *event, FloatPoint origin)
 {
+    origin.setY(origin.y() - m_webPageProxy.topContentInset());
+
     ASSERT(m_activeGestureType == ViewGestureType::None || m_activeGestureType == ViewGestureType::Magnification);
 
     if (m_activeGestureType == ViewGestureType::None) {
@@ -145,9 +124,7 @@ void ViewGestureController::handleMagnificationGestureEvent(NSEvent *event, Floa
             return;
 
         // FIXME: We drop the first frame of the gesture on the floor, because we don't have the visible content bounds yet.
-        m_magnification = m_webPageProxy.pageScaleFactor();
-        m_webPageProxy.process().send(Messages::ViewGestureGeometryCollector::CollectGeometryForMagnificationGesture(), m_webPageProxy.pageID());
-        m_lastMagnificationGestureWasSmartMagnification = false;
+        prepareMagnificationGesture(origin);
 
         return;
     }
@@ -166,31 +143,10 @@ void ViewGestureController::handleMagnificationGestureEvent(NSEvent *event, Floa
 
     m_magnificationOrigin = origin;
 
-    if (m_frameHandlesMagnificationGesture)
-        m_webPageProxy.scalePage(m_magnification, roundedIntPoint(origin));
-    else
-        m_webPageProxy.drawingArea()->adjustTransientZoom(m_magnification, scaledMagnificationOrigin(origin, m_magnification));
+    applyMagnification();
 
     if (event.phase == NSEventPhaseEnded || event.phase == NSEventPhaseCancelled)
         endMagnificationGesture();
-}
-
-void ViewGestureController::endMagnificationGesture()
-{
-    if (m_activeGestureType != ViewGestureType::Magnification)
-        return;
-
-    double newMagnification = std::min(std::max(m_magnification, minMagnification), maxMagnification);
-
-    if (m_frameHandlesMagnificationGesture)
-        m_webPageProxy.scalePage(newMagnification, roundedIntPoint(m_magnificationOrigin));
-    else {
-        if (auto drawingArea = m_webPageProxy.drawingArea())
-            drawingArea->commitTransientZoom(newMagnification, scaledMagnificationOrigin(m_magnificationOrigin, newMagnification));
-    }
-
-    didEndGesture();
-    m_visibleContentRectIsValid = false;
 }
 
 void ViewGestureController::handleSmartMagnificationGesture(FloatPoint origin)
@@ -198,7 +154,7 @@ void ViewGestureController::handleSmartMagnificationGesture(FloatPoint origin)
     if (m_activeGestureType != ViewGestureType::None)
         return;
 
-    m_webPageProxy.process().send(Messages::ViewGestureGeometryCollector::CollectGeometryForSmartMagnificationGesture(origin), m_webPageProxy.pageID());
+    m_webPageProxy.send(Messages::ViewGestureGeometryCollector::CollectGeometryForSmartMagnificationGesture(origin));
 }
 
 static float maximumRectangleComponentDelta(FloatRect a, FloatRect b)
@@ -206,7 +162,7 @@ static float maximumRectangleComponentDelta(FloatRect a, FloatRect b)
     return std::max(std::abs(a.x() - b.x()), std::max(std::abs(a.y() - b.y()), std::max(std::abs(a.width() - b.width()), std::abs(a.height() - b.height()))));
 }
 
-void ViewGestureController::didCollectGeometryForSmartMagnificationGesture(FloatPoint origin, FloatRect renderRect, FloatRect visibleContentRect, bool isReplacedElement, double viewportMinimumScale, double viewportMaximumScale)
+void ViewGestureController::didCollectGeometryForSmartMagnificationGesture(FloatPoint origin, FloatRect renderRect, FloatRect visibleContentRect, bool fitEntireRect, double viewportMinimumScale, double viewportMaximumScale)
 {
     double currentScaleFactor = m_webPageProxy.pageScaleFactor();
 
@@ -234,7 +190,7 @@ void ViewGestureController::didCollectGeometryForSmartMagnificationGesture(Float
 
     // For replaced elements like images, we want to fit the whole element
     // in the view, so scale it down enough to make both dimensions fit if possible.
-    if (isReplacedElement)
+    if (fitEntireRect)
         targetMagnification = std::min(targetMagnification, static_cast<double>(visibleContentRect.height() / viewportConstrainedUnscaledTargetRect.height()));
 
     targetMagnification = std::min(std::max(targetMagnification, minMagnification), maxMagnification);
@@ -254,6 +210,9 @@ void ViewGestureController::didCollectGeometryForSmartMagnificationGesture(Float
     FloatPoint targetOrigin(visibleContentRect.center());
     targetOrigin.moveBy(-targetRect.center());
 
+    m_initialMagnification = m_webPageProxy.pageScaleFactor();
+    m_initialMagnificationOrigin = FloatPoint();
+
     m_webPageProxy.drawingArea()->adjustTransientZoom(m_webPageProxy.pageScaleFactor(), scaledMagnificationOrigin(FloatPoint(), m_webPageProxy.pageScaleFactor()));
     m_webPageProxy.drawingArea()->commitTransientZoom(targetMagnification, targetOrigin);
 
@@ -263,46 +222,24 @@ void ViewGestureController::didCollectGeometryForSmartMagnificationGesture(Float
     m_lastMagnificationGestureWasSmartMagnification = true;
 }
 
-static bool scrollEventCanInfluenceSwipe(NSEvent *event)
+bool ViewGestureController::PendingSwipeTracker::scrollEventCanStartSwipe(NSEvent *event)
+{
+    return event.phase == NSEventPhaseBegan;
+}
+
+bool ViewGestureController::PendingSwipeTracker::scrollEventCanEndSwipe(NSEvent *event)
+{
+    return event.phase == NSEventPhaseEnded;
+}
+
+bool ViewGestureController::PendingSwipeTracker::scrollEventCanInfluenceSwipe(NSEvent *event)
 {
     return event.hasPreciseScrollingDeltas && [NSEvent isSwipeTrackingFromScrollEventsEnabled];
 }
 
-static bool deltaShouldCancelSwipe(float x, float y)
+FloatSize ViewGestureController::PendingSwipeTracker::scrollEventGetScrollingDeltas(NSEvent *event)
 {
-    return std::abs(y) >= std::abs(x) * minimumScrollEventRatioForSwipe;
-}
-
-ViewGestureController::PendingSwipeTracker::PendingSwipeTracker(WebPageProxy& webPageProxy, ViewGestureController& viewGestureController)
-    : m_viewGestureController(viewGestureController)
-    , m_webPageProxy(webPageProxy)
-{
-}
-
-bool ViewGestureController::PendingSwipeTracker::scrollEventCanBecomeSwipe(NSEvent *event, ViewGestureController::SwipeDirection& potentialSwipeDirection)
-{
-    if (event.phase != NSEventPhaseBegan)
-        return false;
-
-    if (!scrollEventCanInfluenceSwipe(event))
-        return false;
-
-    if (deltaShouldCancelSwipe(event.scrollingDeltaX, event.scrollingDeltaY))
-        return false;
-
-    bool isPinnedToLeft = m_shouldIgnorePinnedState || m_webPageProxy.isPinnedToLeftSide();
-    bool isPinnedToRight = m_shouldIgnorePinnedState || m_webPageProxy.isPinnedToRightSide();
-
-    bool tryingToSwipeBack = event.scrollingDeltaX > 0 && isPinnedToLeft;
-    bool tryingToSwipeForward = event.scrollingDeltaX < 0 && isPinnedToRight;
-    if (m_webPageProxy.userInterfaceLayoutDirection() != WebCore::UserInterfaceLayoutDirection::LTR)
-        std::swap(tryingToSwipeBack, tryingToSwipeForward);
-    
-    if (!tryingToSwipeBack && !tryingToSwipeForward)
-        return false;
-
-    potentialSwipeDirection = tryingToSwipeBack ? SwipeDirection::Back : SwipeDirection::Forward;
-    return m_viewGestureController.canSwipeInDirection(potentialSwipeDirection);
+    return FloatSize(event.scrollingDeltaX, event.scrollingDeltaY);
 }
 
 bool ViewGestureController::handleScrollWheelEvent(NSEvent *event)
@@ -312,93 +249,12 @@ bool ViewGestureController::handleScrollWheelEvent(NSEvent *event)
     return m_pendingSwipeTracker.handleEvent(event);
 }
 
-bool ViewGestureController::PendingSwipeTracker::handleEvent(NSEvent *event)
+void ViewGestureController::trackSwipeGesture(PlatformScrollEvent event, SwipeDirection direction, RefPtr<WebBackForwardListItem> targetItem)
 {
-    if (event.phase == NSEventPhaseEnded) {
-        reset("gesture ended");
-        return false;
-    }
-
-    if (m_state == State::None) {
-        if (!scrollEventCanBecomeSwipe(event, m_direction))
-            return false;
-
-        if (!m_shouldIgnorePinnedState && m_webPageProxy.willHandleHorizontalScrollEvents()) {
-            m_state = State::WaitingForWebCore;
-            LOG(ViewGestures, "Swipe Start Hysteresis - waiting for WebCore to handle event");
-        }
-    }
-
-    if (m_state == State::WaitingForWebCore)
-        return false;
-
-    return tryToStartSwipe(event);
-}
-
-void ViewGestureController::PendingSwipeTracker::eventWasNotHandledByWebCore(NSEvent *event)
-{
-    if (m_state != State::WaitingForWebCore)
-        return;
-
-    LOG(ViewGestures, "Swipe Start Hysteresis - WebCore didn't handle event");
-    m_state = State::None;
-    m_cumulativeDelta = FloatSize();
-    tryToStartSwipe(event);
-}
-
-bool ViewGestureController::PendingSwipeTracker::tryToStartSwipe(NSEvent *event)
-{
-    ASSERT(m_state != State::WaitingForWebCore);
-
-    if (m_state == State::None) {
-        SwipeDirection direction;
-        if (!scrollEventCanBecomeSwipe(event, direction))
-            return false;
-    }
-
-    if (!scrollEventCanInfluenceSwipe(event))
-        return false;
-
-    m_cumulativeDelta += FloatSize(event.scrollingDeltaX, event.scrollingDeltaY);
-    LOG(ViewGestures, "Swipe Start Hysteresis - consumed event, cumulative delta (%0.2f, %0.2f)", m_cumulativeDelta.width(), m_cumulativeDelta.height());
-
-    if (deltaShouldCancelSwipe(m_cumulativeDelta.width(), m_cumulativeDelta.height())) {
-        reset("cumulative delta became too vertical");
-        return false;
-    }
-
-    if (std::abs(m_cumulativeDelta.width()) >= minimumHorizontalSwipeDistance)
-        m_viewGestureController.trackSwipeGesture(event, m_direction);
-    else
-        m_state = State::InsufficientMagnitude;
-
-    return true;
-}
-
-void ViewGestureController::PendingSwipeTracker::reset(const char* resetReasonForLogging)
-{
-    if (m_state != State::None)
-        LOG(ViewGestures, "Swipe Start Hysteresis - reset; %s", resetReasonForLogging);
-
-    m_state = State::None;
-    m_cumulativeDelta = FloatSize();
-}
-
-void ViewGestureController::trackSwipeGesture(NSEvent *event, SwipeDirection direction)
-{
-    ASSERT(m_activeGestureType == ViewGestureType::None);
-
-    m_pendingSwipeTracker.reset("starting to track swipe");
-
-    m_webPageProxy.recordAutomaticNavigationSnapshot();
-
     BOOL swipingLeft = isPhysicallySwipingLeft(direction);
     CGFloat maxProgress = swipingLeft ? 1 : 0;
     CGFloat minProgress = !swipingLeft ? -1 : 0;
-    RefPtr<WebBackForwardListItem> targetItem = (direction == SwipeDirection::Back) ? m_webPageProxy.backForwardList().backItem() : m_webPageProxy.backForwardList().forwardItem();
-    if (!targetItem)
-        return;
-    
+
     __block bool swipeCancelled = false;
 
     ASSERT(!m_swipeCancellationTracker);
@@ -421,11 +277,6 @@ void ViewGestureController::trackSwipeGesture(NSEvent *event, SwipeDirection dir
         if (isComplete)
             this->endSwipeGesture(targetItem.get(), swipeCancelled);
     }];
-}
-
-void ViewGestureController::willEndSwipeGesture(WebBackForwardListItem& targetItem, bool cancelled)
-{
-    m_webPageProxy.navigationGestureWillEnd(!cancelled, targetItem);
 }
 
 FloatRect ViewGestureController::windowRelativeBoundsForCustomSwipeViews() const
@@ -484,20 +335,6 @@ CALayer *ViewGestureController::determineLayerAdjacentToSnapshotForParent(SwipeD
     while (snapshotLayerParent != layerAdjacentToSnapshot.superlayer)
         layerAdjacentToSnapshot = layerAdjacentToSnapshot.superlayer;
     return layerAdjacentToSnapshot;
-}
-
-bool ViewGestureController::shouldUseSnapshotForSize(ViewSnapshot& snapshot, FloatSize swipeLayerSize, float topContentInset)
-{
-    float deviceScaleFactor = m_webPageProxy.deviceScaleFactor();
-    if (snapshot.deviceScaleFactor() != deviceScaleFactor)
-        return false;
-
-    FloatSize unobscuredSwipeLayerSizeInDeviceCoordinates = swipeLayerSize - FloatSize(0, topContentInset);
-    unobscuredSwipeLayerSizeInDeviceCoordinates.scale(deviceScaleFactor);
-    if (snapshot.size() != unobscuredSwipeLayerSizeInDeviceCoordinates)
-        return false;
-
-    return true;
 }
 
 static bool layerGeometryFlippedToRoot(CALayer *layer)
@@ -591,6 +428,9 @@ void ViewGestureController::beginSwipeGesture(WebBackForwardListItem* targetItem
     if (m_webPageProxy.preferences().viewGestureDebuggingEnabled())
         applyDebuggingPropertiesToSwipeViews();
 
+    m_didCallEndSwipeGesture = false;
+    m_removeSnapshotImmediatelyWhenGestureEnds = false;
+
     CALayer *layerAdjacentToSnapshot = determineLayerAdjacentToSnapshotForParent(direction, snapshotLayerParent);
     BOOL swipingLeft = isPhysicallySwipingLeft(direction);
     if (swipingLeft)
@@ -614,22 +454,22 @@ void ViewGestureController::beginSwipeGesture(WebBackForwardListItem* targetItem
         m_swipeShadowLayer = adoptNS([[CAGradientLayer alloc] init]);
         [m_swipeShadowLayer setName:@"Gesture Swipe Shadow Layer"];
         [m_swipeShadowLayer setColors:@[
-            (id)adoptCF(CGColorCreateGenericGray(0, 1.)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.99)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.98)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.95)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.92)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.82)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.71)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.46)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.35)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.25)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.17)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.11)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.07)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.04)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.01)).get(),
-            (id)adoptCF(CGColorCreateGenericGray(0, 0.)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 1.)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.99)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.98)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.95)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.92)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.82)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.71)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.46)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.35)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.25)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.17)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.11)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.07)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.04)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.01)).get(),
+            (__bridge id)adoptCF(CGColorCreateGenericGray(0, 0.)).get(),
         ]];
         [m_swipeShadowLayer setLocations:@[
             @0,
@@ -666,21 +506,14 @@ void ViewGestureController::beginSwipeGesture(WebBackForwardListItem* targetItem
     }
 }
 
-bool ViewGestureController::isPhysicallySwipingLeft(SwipeDirection direction) const
-{
-    bool isLTR = m_webPageProxy.userInterfaceLayoutDirection() == WebCore::UserInterfaceLayoutDirection::LTR;
-    bool isSwipingForward = direction == SwipeDirection::Forward;
-    return isLTR != isSwipingForward;
-}
-
 void ViewGestureController::handleSwipeGesture(WebBackForwardListItem* targetItem, double progress, SwipeDirection direction)
 {
     ASSERT(m_activeGestureType == ViewGestureType::Swipe);
 
-    bool swipingLeft = isPhysicallySwipingLeft(direction);
-
     if (!m_webPageProxy.drawingArea())
         return;
+
+    bool swipingLeft = isPhysicallySwipingLeft(direction);
 
     double width;
     if (!m_customSwipeViews.isEmpty())
@@ -721,60 +554,6 @@ void ViewGestureController::didMoveSwipeSnapshotLayer()
     m_didMoveSwipeSnapshotCallback(m_webPageProxy.boundsOfLayerInLayerBackedWindowCoordinates(m_swipeLayer.get()));
 }
 
-void ViewGestureController::endSwipeGesture(WebBackForwardListItem* targetItem, bool cancelled)
-{
-    ASSERT(m_activeGestureType == ViewGestureType::Swipe);
-
-    m_swipeCancellationTracker = nullptr;
-
-    if (cancelled) {
-        removeSwipeSnapshot();
-        m_webPageProxy.navigationGestureDidEnd(false, *targetItem);
-        return;
-    }
-
-    uint64_t renderTreeSize = 0;
-    if (ViewSnapshot* snapshot = targetItem->snapshot())
-        renderTreeSize = snapshot->renderTreeSize();
-
-    m_webPageProxy.process().send(Messages::ViewGestureGeometryCollector::SetRenderTreeSizeNotificationThreshold(renderTreeSize * swipeSnapshotRemovalRenderTreeSizeTargetFraction), m_webPageProxy.pageID());
-
-    m_webPageProxy.navigationGestureDidEnd(true, *targetItem);
-    m_webPageProxy.goToBackForwardItem(targetItem);
-
-    SnapshotRemovalTracker::Events desiredEvents = SnapshotRemovalTracker::VisuallyNonEmptyLayout
-        | SnapshotRemovalTracker::MainFrameLoad
-        | SnapshotRemovalTracker::SubresourceLoads
-        | SnapshotRemovalTracker::ScrollPositionRestoration;
-    if (renderTreeSize)
-        desiredEvents |= SnapshotRemovalTracker::RenderTreeSizeThreshold;
-    m_snapshotRemovalTracker.start(desiredEvents, [this] { this->forceRepaintIfNeeded(); });
-
-    // FIXME: Like on iOS, we should ensure that even if one of the timeouts fires,
-    // we never show the old page content, instead showing the snapshot background color.
-
-    if (ViewSnapshot* snapshot = targetItem->snapshot())
-        m_backgroundColorForCurrentSnapshot = snapshot->backgroundColor();
-}
-
-void ViewGestureController::forceRepaintIfNeeded()
-{
-    if (m_activeGestureType != ViewGestureType::Swipe)
-        return;
-
-    if (m_hasOutstandingRepaintRequest)
-        return;
-
-    m_hasOutstandingRepaintRequest = true;
-
-    uint64_t pageID = m_webPageProxy.pageID();
-    GestureID gestureID = m_currentGestureID;
-    m_webPageProxy.forceRepaint(VoidCallback::create([pageID, gestureID] (CallbackBase::Error error) {
-        if (auto gestureController = controllerForGesture(pageID, gestureID))
-            gestureController->removeSwipeSnapshot();
-    }));
-}
-
 void ViewGestureController::removeSwipeSnapshot()
 {
     m_snapshotRemovalTracker.reset();
@@ -784,9 +563,23 @@ void ViewGestureController::removeSwipeSnapshot()
     if (m_activeGestureType != ViewGestureType::Swipe)
         return;
 
+    if (!m_didCallEndSwipeGesture) {
+        m_removeSnapshotImmediatelyWhenGestureEnds = true;
+        return;
+    }
+
+    resetState();
+}
+
+void ViewGestureController::resetState()
+{
     if (m_currentSwipeSnapshot)
         m_currentSwipeSnapshot->setVolatile(true);
     m_currentSwipeSnapshot = nullptr;
+
+    if (m_swipeCancellationTracker)
+        [m_swipeCancellationTracker setIsCancelled:YES];
+    m_swipeCancellationTracker = nil;
 
     for (const auto& layer : m_currentSwipeLiveLayers)
         [layer setTransform:CATransform3DIdentity];
@@ -809,15 +602,27 @@ void ViewGestureController::removeSwipeSnapshot()
 
     m_backgroundColorForCurrentSnapshot = Color();
 
+    m_pendingNavigation = nullptr;
+
     didEndGesture();
 }
 
-double ViewGestureController::magnification() const
+void ViewGestureController::reset()
 {
-    if (m_activeGestureType == ViewGestureType::Magnification)
-        return m_magnification;
+    removeSwipeSnapshot();
+    resetState();
+}
 
-    return m_webPageProxy.pageScaleFactor();
+bool ViewGestureController::beginSimulatedSwipeInDirectionForTesting(SwipeDirection)
+{
+    notImplemented();
+    return false;
+}
+
+bool ViewGestureController::completeSimulatedSwipeInDirectionForTesting(SwipeDirection)
+{
+    notImplemented();
+    return false;
 }
 
 } // namespace WebKit

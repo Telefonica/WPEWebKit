@@ -26,27 +26,27 @@
 #import "config.h"
 #import "WKHTTPCookieStoreInternal.h"
 
-#if WK_API_ENABLED
-
-#import "HTTPCookieAcceptPolicy.h"
-#import "WeakObjCPtr.h"
 #import <WebCore/Cookie.h>
-#import <WebCore/URL.h>
+#import <WebCore/HTTPCookieAcceptPolicy.h>
+#import <WebCore/HTTPCookieAcceptPolicyCocoa.h>
+#import <WebCore/WebCoreObjCExtras.h>
 #import <pal/spi/cf/CFNetworkSPI.h>
+#import <wtf/BlockPtr.h>
 #import <wtf/HashMap.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/URL.h>
+#import <wtf/WeakObjCPtr.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
 static NSArray<NSHTTPCookie *> *coreCookiesToNSCookies(const Vector<WebCore::Cookie>& coreCookies)
 {
-    NSMutableArray<NSHTTPCookie *> *nsCookies = [NSMutableArray arrayWithCapacity:coreCookies.size()];
-
-    for (auto& cookie : coreCookies)
-        [nsCookies addObject:(NSHTTPCookie *)cookie];
-
-    return nsCookies;
+    return createNSArray(coreCookies, [] (auto& cookie) -> NSHTTPCookie * {
+        return cookie;
+    }).autorelease();
 }
 
 class WKHTTPCookieStoreObserver : public API::HTTPCookieStore::Observer {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit WKHTTPCookieStoreObserver(id<WKHTTPCookieStoreObserver> observer)
         : m_observer(observer)
@@ -56,18 +56,21 @@ public:
 private:
     void cookiesDidChange(API::HTTPCookieStore& cookieStore) final
     {
-        [m_observer.get() cookiesDidChangeInCookieStore:WebKit::wrapper(cookieStore)];
+        [m_observer cookiesDidChangeInCookieStore:wrapper(cookieStore)];
     }
 
-    WebKit::WeakObjCPtr<id<WKHTTPCookieStoreObserver>> m_observer;
+    WeakObjCPtr<id<WKHTTPCookieStoreObserver>> m_observer;
 };
 
 @implementation WKHTTPCookieStore {
-    HashMap<id<WKHTTPCookieStoreObserver>, std::unique_ptr<WKHTTPCookieStoreObserver>> _observers;
+    HashMap<CFTypeRef, std::unique_ptr<WKHTTPCookieStoreObserver>> _observers;
 }
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKHTTPCookieStore.class, self))
+        return;
+
     for (auto& observer : _observers.values())
         _cookieStore->unregisterObserver(*observer);
 
@@ -84,9 +87,9 @@ private:
     });
 }
 
-- (void)setCookie:(NSHTTPCookie *)cookie completionHandler:(void (^)())completionHandler
+- (void)setCookie:(NSHTTPCookie *)cookie completionHandler:(void (^)(void))completionHandler
 {
-    _cookieStore->setCookie(cookie, [handler = adoptNS([completionHandler copy])]() {
+    _cookieStore->setCookies({ cookie }, [handler = adoptNS([completionHandler copy])]() {
         auto rawHandler = (void (^)())handler.get();
         if (rawHandler)
             rawHandler();
@@ -94,7 +97,7 @@ private:
 
 }
 
-- (void)deleteCookie:(NSHTTPCookie *)cookie completionHandler:(void (^)())completionHandler
+- (void)deleteCookie:(NSHTTPCookie *)cookie completionHandler:(void (^)(void))completionHandler
 {
     _cookieStore->deleteCookie(cookie, [handler = adoptNS([completionHandler copy])]() {
         auto rawHandler = (void (^)())handler.get();
@@ -105,17 +108,17 @@ private:
 
 - (void)addObserver:(id<WKHTTPCookieStoreObserver>)observer
 {
-    auto result = _observers.add(observer, nullptr);
+    auto result = _observers.add((__bridge CFTypeRef)observer, nullptr);
     if (!result.isNewEntry)
         return;
 
-    result.iterator->value = std::make_unique<WKHTTPCookieStoreObserver>(observer);
+    result.iterator->value = makeUnique<WKHTTPCookieStoreObserver>(observer);
     _cookieStore->registerObserver(*result.iterator->value);
 }
 
 - (void)removeObserver:(id<WKHTTPCookieStoreObserver>)observer
 {
-    auto result = _observers.take(observer);
+    auto result = _observers.take((__bridge CFTypeRef)observer);
     if (!result)
         return;
 
@@ -131,4 +134,27 @@ private:
 
 @end
 
-#endif
+@implementation WKHTTPCookieStore (WKPrivate)
+
+- (void)_getCookiesForURL:(NSURL *)url completionHandler:(void (^)(NSArray<NSHTTPCookie *> *))completionHandler
+{
+    _cookieStore->cookiesForURL(url, [handler = makeBlockPtr(completionHandler)] (const Vector<WebCore::Cookie>& cookies) {
+        handler.get()(coreCookiesToNSCookies(cookies));
+    });
+}
+
+- (void)_setCookieAcceptPolicy:(NSHTTPCookieAcceptPolicy)policy completionHandler:(void (^)())completionHandler
+{
+    _cookieStore->setHTTPCookieAcceptPolicy(WebCore::toHTTPCookieAcceptPolicy(policy), [completionHandler = makeBlockPtr(completionHandler)] {
+        completionHandler.get()();
+    });
+}
+
+- (void)_flushCookiesToDiskWithCompletionHandler:(void(^)(void))completionHandler
+{
+    _cookieStore->flushCookies([completionHandler = makeBlockPtr(completionHandler)]() {
+        completionHandler();
+    });
+}
+
+@end

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,24 +23,34 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "SerializedCryptoKeyWrap.h"
+#import "config.h"
+#import "SerializedCryptoKeyWrap.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
-#include "CommonCryptoUtilities.h"
-#include "LocalizedStrings.h"
-#include <CommonCrypto/CommonSymmetricKeywrap.h>
-#include <crt_externs.h>
-#include <wtf/text/Base64.h>
-#include <wtf/text/CString.h>
-#include <wtf/CryptographicUtilities.h>
-#include <wtf/RetainPtr.h>
+#import "CommonCryptoUtilities.h"
+#import "LocalizedStrings.h"
+#import <CommonCrypto/CommonSymmetricKeywrap.h>
+#import <crt_externs.h>
+#import <wtf/CryptographicUtilities.h>
+#import <wtf/ProcessPrivilege.h>
+#import <wtf/RetainPtr.h>
+#import <wtf/cocoa/VectorCocoa.h>
+#import <wtf/spi/cocoa/SecuritySPI.h>
+#import <wtf/text/Base64.h>
+#import <wtf/text/CString.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #define USE_KEYCHAIN_ACCESS_CONTROL_LISTS 0
 #else
 #define USE_KEYCHAIN_ACCESS_CONTROL_LISTS 1
+#endif
+
+#if USE(KEYCHAIN_ACCESS_CONTROL_LISTS)
+#import <wtf/cf/TypeCastsCF.h>
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+WTF_DECLARE_CF_TYPE_TRAIT(SecACL);
+ALLOW_DEPRECATED_DECLARATIONS_END
 #endif
 
 namespace WebCore {
@@ -54,16 +64,9 @@ const NSString* tagKey = @"tag";
 
 const size_t masterKeySizeInBytes = 16;
 
-inline Vector<uint8_t> vectorFromNSData(NSData* data)
-{
-    Vector<uint8_t> result;
-    result.append((const uint8_t*)[data bytes], [data length]);
-    return result;
-}
-
 static NSString* masterKeyAccountNameForCurrentApplication()
 {
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
 #else
     NSString *bundleIdentifier = [[NSRunningApplication currentApplication] bundleIdentifier];
@@ -73,13 +76,15 @@ static NSString* masterKeyAccountNameForCurrentApplication()
     return [NSString stringWithFormat:@"com.apple.WebKit.WebCrypto.master+%@", bundleIdentifier];
 }
 
-static bool createAndStoreMasterKey(Vector<uint8_t>& masterKeyData)
+static std::optional<Vector<uint8_t>> createAndStoreMasterKey()
 {
-    masterKeyData.resize(masterKeySizeInBytes);
-    int rc = CCRandomCopyBytes(kCCRandomDefault, masterKeyData.data(), masterKeyData.size());
+    RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessCredentials));
+
+    Vector<uint8_t> masterKeyData(masterKeySizeInBytes);
+    auto rc = CCRandomGenerateBytes(masterKeyData.data(), masterKeyData.size());
     RELEASE_ASSERT(rc == kCCSuccess);
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     NSBundle *mainBundle = [NSBundle mainBundle];
     NSString *applicationName = [mainBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"];
     if (!applicationName)
@@ -95,40 +100,47 @@ static bool createAndStoreMasterKey(Vector<uint8_t>& masterKeyData)
 
 #if USE(KEYCHAIN_ACCESS_CONTROL_LISTS)
     SecAccessRef accessRef;
-    status = SecAccessCreate((CFStringRef)localizedItemName, nullptr, &accessRef);
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+    status = SecAccessCreate((__bridge CFStringRef)localizedItemName, nullptr, &accessRef);
+ALLOW_DEPRECATED_DECLARATIONS_END
     if (status) {
         WTFLogAlways("Cannot create a security access object for storing WebCrypto master key, error %d", (int)status);
-        return false;
+        return std::nullopt;
     }
     RetainPtr<SecAccessRef> access = adoptCF(accessRef);
 
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     RetainPtr<CFArrayRef> acls = adoptCF(SecAccessCopyMatchingACLList(accessRef, kSecACLAuthorizationExportClear));
-    SecACLRef acl = (SecACLRef)CFArrayGetValueAtIndex(acls.get(), 0);
+ALLOW_DEPRECATED_DECLARATIONS_END
+    SecACLRef acl = checked_cf_cast<SecACLRef>(CFArrayGetValueAtIndex(acls.get(), 0));
 
     SecTrustedApplicationRef trustedAppRef;
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     status = SecTrustedApplicationCreateFromPath(0, &trustedAppRef);
+ALLOW_DEPRECATED_DECLARATIONS_END
     if (status) {
         WTFLogAlways("Cannot create a trusted application object for storing WebCrypto master key, error %d", (int)status);
-        return false;
+        return std::nullopt;
     }
     RetainPtr<SecTrustedApplicationRef> trustedApp = adoptCF(trustedAppRef);
 
-    status = SecACLSetContents(acl, (CFArrayRef)@[ (id)trustedApp.get() ], (CFStringRef)localizedItemName, kSecKeychainPromptRequirePassphase);
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+    status = SecACLSetContents(acl, (__bridge CFArrayRef)@[ (__bridge id)trustedApp.get() ], (__bridge CFStringRef)localizedItemName, kSecKeychainPromptRequirePassphase);
+ALLOW_DEPRECATED_DECLARATIONS_END
     if (status) {
         WTFLogAlways("Cannot set ACL for WebCrypto master key, error %d", (int)status);
-        return false;
+        return std::nullopt;
     }
 #endif
 
-    Vector<char> base64EncodedMasterKeyData;
-    base64Encode(masterKeyData, base64EncodedMasterKeyData);
+    auto base64EncodedMasterKeyData = base64EncodeToVector(masterKeyData);
 
     // Cannot use kSecClassKey because of <rdar://problem/16068207>.
     NSDictionary *attributes = @{
         (id)kSecClass : (id)kSecClassGenericPassword,
         (id)kSecAttrSynchronizable : @NO,
 #if USE(KEYCHAIN_ACCESS_CONTROL_LISTS)
-        (id)kSecAttrAccess : (id)access.get(),
+        (id)kSecAttrAccess : (__bridge id)access.get(),
 #endif
         (id)kSecAttrComment : webCryptoMasterKeyKeychainComment(),
         (id)kSecAttrLabel : localizedItemName,
@@ -139,13 +151,16 @@ static bool createAndStoreMasterKey(Vector<uint8_t>& masterKeyData)
     status = SecItemAdd((CFDictionaryRef)attributes, nullptr);
     if (status) {
         WTFLogAlways("Cannot store WebCrypto master key, error %d", (int)status);
-        return false;
+        return std::nullopt;
     }
-    return true;
+
+    return masterKeyData;
 }
 
-static bool findMasterKey(Vector<uint8_t>& masterKeyData)
+static std::optional<Vector<uint8_t>> findMasterKey()
 {
+    RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessCredentials));
+
     NSDictionary *query = @{
         (id)kSecClass : (id)kSecClassGenericPassword,
         (id)kSecAttrAccount : masterKeyAccountNameForCurrentApplication(),
@@ -157,24 +172,31 @@ static bool findMasterKey(Vector<uint8_t>& masterKeyData)
     if (status) {
         if (status != errSecItemNotFound && status != errSecUserCanceled)
             WTFLogAlways("Could not find WebCrypto master key in Keychain, error %d", (int)status);
-        return false;
+        return std::nullopt;
     }
     RetainPtr<CFDataRef> keyData = adoptCF(keyDataRef);
-
-    Vector<uint8_t> base64EncodedMasterKeyData = vectorFromNSData((NSData *)keyData.get());
-    return base64Decode((const char*)base64EncodedMasterKeyData.data(), base64EncodedMasterKeyData.size(), masterKeyData);
+    return base64Decode(CFDataGetBytePtr(keyData.get()), CFDataGetLength(keyData.get()));
 }
 
-bool getDefaultWebCryptoMasterKey(Vector<uint8_t>& masterKey)
+std::optional<Vector<uint8_t>> defaultWebCryptoMasterKey()
 {
-    if (!findMasterKey(masterKey) && !createAndStoreMasterKey(masterKey))
-        return false;
-    RELEASE_ASSERT(masterKey.size() == masterKeySizeInBytes);
-    return true;
+    if (auto masterKey = findMasterKey()) {
+        RELEASE_ASSERT(masterKey->size() == masterKeySizeInBytes);
+        return masterKey;
+    }
+
+    if (auto masterKey = createAndStoreMasterKey()) {
+        RELEASE_ASSERT(masterKey->size() == masterKeySizeInBytes);
+        return masterKey;
+    }
+
+    return std::nullopt;
 }
 
 bool deleteDefaultWebCryptoMasterKey()
 {
+    RELEASE_ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessCredentials));
+
     NSDictionary *query = @{
         (id)kSecClass : (id)kSecClassGenericPassword,
         (id)kSecAttrAccount : masterKeyAccountNameForCurrentApplication(),
@@ -192,7 +214,7 @@ bool deleteDefaultWebCryptoMasterKey()
 bool wrapSerializedCryptoKey(const Vector<uint8_t>& masterKey, const Vector<uint8_t>& key, Vector<uint8_t>& result)
 {
     Vector<uint8_t> kek(16);
-    int rc = CCRandomCopyBytes(kCCRandomDefault, kek.data(), kek.size());
+    auto rc = CCRandomGenerateBytes(kek.data(), kek.size());
     RELEASE_ASSERT(rc == kCCSuccess);
 
     Vector<uint8_t> wrappedKEK(CCSymmetricWrappedSize(kCCWRAPAES, kek.size()));
@@ -205,18 +227,18 @@ bool wrapSerializedCryptoKey(const Vector<uint8_t>& masterKey, const Vector<uint
     wrappedKEK.shrink(wrappedKEKSize);
 
     Vector<uint8_t> encryptedKey(key.size());
-    size_t tagLength = 16;
-    uint8_t tag[tagLength];
+    constexpr size_t maxTagLength = 16;
+    size_t tagLength = maxTagLength;
+    uint8_t tag[maxTagLength];
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     status = CCCryptorGCM(kCCEncrypt, kCCAlgorithmAES128, kek.data(), kek.size(),
         nullptr, 0, // iv
         nullptr, 0, // auth data
         key.data(), key.size(),
         encryptedKey.data(),
         tag, &tagLength);
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
     if (status != kCCSuccess)
         return false;
@@ -273,19 +295,19 @@ bool unwrapSerializedCryptoKey(const Vector<uint8_t>& masterKey, const Vector<ui
         return false;
     kek.shrink(kekSize);
 
-    size_t tagLength = 16;
-    uint8_t actualTag[tagLength];
+    constexpr size_t maxTagLength = 16;
+    size_t tagLength = maxTagLength;
+    uint8_t actualTag[maxTagLength];
 
     key.resize(encryptedKey.size());
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     status = CCCryptorGCM(kCCDecrypt, kCCAlgorithmAES128, kek.data(), kek.size(),
         nullptr, 0, // iv
         nullptr, 0, // auth data
         encryptedKey.data(), encryptedKey.size(),
         key.data(),
         actualTag, &tagLength);
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
     if (status != kCCSuccess)
         return false;
@@ -299,4 +321,4 @@ bool unwrapSerializedCryptoKey(const Vector<uint8_t>& masterKey, const Vector<ui
 
 }
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

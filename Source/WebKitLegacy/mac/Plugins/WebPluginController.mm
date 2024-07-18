@@ -26,7 +26,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #import "WebPluginController.h"
 
 #import "DOMNodeInternal.h"
@@ -48,6 +47,7 @@
 #import "WebUIDelegate.h"
 #import "WebViewInternal.h"
 #import <Foundation/NSURLRequest.h>
+#import <JavaScriptCore/JSLock.h>
 #import <WebCore/CommonVM.h>
 #import <WebCore/DocumentLoader.h>
 #import <WebCore/Frame.h>
@@ -57,12 +57,12 @@
 #import <WebCore/HTMLNames.h>
 #import <WebCore/ResourceRequest.h>
 #import <WebCore/ScriptController.h>
+#import <WebCore/UserGestureIndicator.h>
 #import <WebCore/WebCoreURLResponse.h>
 #import <objc/runtime.h>
-#import <runtime/JSLock.h>
 #import <wtf/text/WTFString.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import "DOMElementInternal.h"
 #import "WebUIKitDelegate.h"
 #import <WebCore/AudioSession.h>
@@ -73,14 +73,11 @@
 #import <wtf/SoftLinking.h>
 #endif
 
-using namespace WebCore;
-using namespace HTMLNames;
-
 @interface NSView (PluginSecrets)
 - (void)setContainingWindow:(NSWindow *)w;
 @end
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 // For compatibility only.
 @interface NSObject (OldPluginAPI)
 + (NSView *)pluginViewWithArguments:(NSDictionary *)arguments;
@@ -94,15 +91,19 @@ using namespace HTMLNames;
 - (void)pluginDestroy;
 @end
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 static bool isKindOfClass(id, NSString* className);
 static void installFlip4MacPlugInWorkaroundIfNecessary();
 #endif
 
 
-static NSMutableSet *pluginViews = nil;
+static RetainPtr<NSMutableSet>& pluginViews()
+{
+    static NeverDestroyed<RetainPtr<NSMutableSet>> pluginViews;
+    return pluginViews;
+}
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 static void initializeAudioSession()
 {
     static bool wasAudioSessionInitialized;
@@ -113,7 +114,7 @@ static void initializeAudioSession()
     if (!WebCore::IOSApplication::isMobileSafari())
         return;
 
-    AudioSession::sharedSession().setCategory(AudioSession::MediaPlayback);
+    WebCore::AudioSession::sharedSession().setCategory(WebCore::AudioSession::CategoryType::MediaPlayback, WebCore::RouteSharingPolicy::Default);
 }
 #endif
 
@@ -121,7 +122,7 @@ static void initializeAudioSession()
 
 - (NSView *)plugInViewWithArguments:(NSDictionary *)arguments fromPluginPackage:(WebPluginPackage *)pluginPackage
 {
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     initializeAudioSession();
 #endif
 
@@ -129,19 +130,19 @@ static void initializeAudioSession()
 
     NSView *view = nil;
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     {
         WebView *webView = [_documentView _webView];
-        JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+        JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
         view = [[webView _UIKitDelegateForwarder] webView:webView plugInViewWithArguments:arguments fromPlugInPackage:pluginPackage];
     }
 #else
     Class viewFactory = [pluginPackage viewFactory];
     if ([viewFactory respondsToSelector:@selector(plugInViewWithArguments:)]) {
-        JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+        JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
         view = [viewFactory plugInViewWithArguments:arguments];
     } else if ([viewFactory respondsToSelector:@selector(pluginViewWithArguments:)]) {
-        JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+        JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
         view = [viewFactory pluginViewWithArguments:arguments];
     }
 #endif
@@ -150,29 +151,30 @@ static void initializeAudioSession()
         return nil;
     }
     
-    if (pluginViews == nil) {
-        pluginViews = [[NSMutableSet alloc] init];
-    }
-    [pluginViews addObject:view];
+    auto& views = pluginViews();
+    if (!views)
+        views = adoptNS([[NSMutableSet alloc] init]);
+    [views addObject:view];
 
     return view;
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 + (void)addPlugInView:(NSView *)view
 {
-    if (pluginViews == nil)
-        pluginViews = [[NSMutableSet alloc] init];
+    auto& views = pluginViews();
+    if (!views)
+        views = adoptNS([[NSMutableSet alloc] init]);
 
     ASSERT(view);
     if (view)
-        [pluginViews addObject:view];
+        [views addObject:view];
 }
 #endif
 
 + (BOOL)isPlugInView:(NSView *)view
 {
-    return [pluginViews containsObject:view];
+    return [pluginViews() containsObject:view];
 }
 
 - (id)initWithDocumentView:(NSView *)view
@@ -198,7 +200,7 @@ static void initializeAudioSession()
     [super dealloc];
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (BOOL)plugInsAreRunning
 {
     NSUInteger pluginViewCount = [_views count];
@@ -207,13 +209,13 @@ static void initializeAudioSession()
 
 - (CALayer *)superlayerForPluginView:(NSView *)view
 {
-    Frame* coreFrame = core([self webFrame]);
-    FrameView* coreView = coreFrame ? coreFrame->view() : nullptr;
+    auto* coreFrame = core([self webFrame]);
+    auto* coreView = coreFrame ? coreFrame->view() : nullptr;
     if (!coreView)
         return nil;
 
     // Get a GraphicsLayer;
-    GraphicsLayer* layerForWidget = coreView->graphicsLayerForPlatformWidget(view);
+    WebCore::GraphicsLayer* layerForWidget = coreView->graphicsLayerForPlatformWidget(view);
     if (!layerForWidget)
         return nil;
     
@@ -224,19 +226,19 @@ static void initializeAudioSession()
 - (void)stopOnePlugin:(NSView *)view
 {
     if ([view respondsToSelector:@selector(webPlugInStop)]) {
-        JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+        JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
         [view webPlugInStop];
     } else if ([view respondsToSelector:@selector(pluginStop)]) {
-        JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+        JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
         [view pluginStop];
     }
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (void)stopOnePluginForPageCache:(NSView *)view
 {
     if ([view respondsToSelector:@selector(webPlugInStopForPageCache)]) {
-        JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+        JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
         [view webPlugInStopForPageCache];
     } else
         [self stopOnePlugin:view];
@@ -246,10 +248,10 @@ static void initializeAudioSession()
 - (void)destroyOnePlugin:(NSView *)view
 {
     if ([view respondsToSelector:@selector(webPlugInDestroy)]) {
-        JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+        JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
         [view webPlugInDestroy];
     } else if ([view respondsToSelector:@selector(pluginDestroy)]) {
-        JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+        JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
         [view pluginDestroy];
     }
 }
@@ -266,10 +268,10 @@ static void initializeAudioSession()
     for (int i = 0; i < count; i++) {
         id aView = [_views objectAtIndex:i];
         if ([aView respondsToSelector:@selector(webPlugInStart)]) {
-            JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+            JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
             [aView webPlugInStart];
         } else if ([aView respondsToSelector:@selector(pluginStart)]) {
-            JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+            JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
             [aView pluginStart];
         }
     }
@@ -292,7 +294,7 @@ static void initializeAudioSession()
     _started = NO;
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (void)stopPluginsForPageCache
 {
     if (!_started)
@@ -319,7 +321,7 @@ static void initializeAudioSession()
     for (NSUInteger i = 0; i < viewsCount; ++i)
         [[webView _UIKitDelegateForwarder] webView:webView willAddPlugInView:[_views objectAtIndex:i]];
 }
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)
 
 - (void)addPlugin:(NSView *)view
 {
@@ -330,11 +332,11 @@ static void initializeAudioSession()
     
     if (![_views containsObject:view]) {
         [_views addObject:view];
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
         [[_documentView _webView] addPluginInstanceView:view];
 #endif
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
         BOOL oldDefersCallbacks = [[self webView] defersCallbacks];
         if (!oldDefersCallbacks)
             [[self webView] setDefersCallbacks:YES];
@@ -345,14 +347,14 @@ static void initializeAudioSession()
 
         LOG(Plugins, "initializing plug-in %@", view);
         if ([view respondsToSelector:@selector(webPlugInInitialize)]) {
-            JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+            JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
             [view webPlugInInitialize];
         } else if ([view respondsToSelector:@selector(pluginInitialize)]) {
-            JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+            JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
             [view pluginInitialize];
         }
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
         if (!oldDefersCallbacks)
             [[self webView] setDefersCallbacks:NO];
 #endif
@@ -360,15 +362,15 @@ static void initializeAudioSession()
         if (_started) {
             LOG(Plugins, "starting plug-in %@", view);
             if ([view respondsToSelector:@selector(webPlugInStart)]) {
-                JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+                JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
                 [view webPlugInStart];
             } else if ([view respondsToSelector:@selector(pluginStart)]) {
-                JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+                JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
                 [view pluginStart];
             }
             
             if ([view respondsToSelector:@selector(setContainingWindow:)]) {
-                JSC::JSLock::DropAllLocks dropAllLocks(commonVM());
+                JSC::JSLock::DropAllLocks dropAllLocks(WebCore::commonVM());
                 [view setContainingWindow:[_documentView window]];
             }
         }
@@ -381,14 +383,9 @@ static void initializeAudioSession()
         if (_started)
             [self stopOnePlugin:view];
         [self destroyOnePlugin:view];
-
-#if ENABLE(NETSCAPE_PLUGIN_API)
-        if (Frame* frame = core([self webFrame]))
-            frame->script().cleanupScriptObjectsForPlugin(self);
-#endif
         
-        [pluginViews removeObject:view];
-#if !PLATFORM(IOS)
+        [pluginViews() removeObject:view];
+#if !PLATFORM(IOS_FAMILY)
         [[_documentView _webView] removePluginInstanceView:view];
 #endif
         [_views removeObject:view];
@@ -409,7 +406,7 @@ static void cancelOutstandingCheck(const void *item, void *context)
 - (void)_cancelOutstandingChecks
 {
     if (_checksInProgress) {
-        CFSetApplyFunction((CFSetRef)_checksInProgress, cancelOutstandingCheck, NULL);
+        CFSetApplyFunction((__bridge CFSetRef)_checksInProgress, cancelOutstandingCheck, NULL);
         [_checksInProgress release];
         _checksInProgress = nil;
     }
@@ -429,19 +426,14 @@ static void cancelOutstandingCheck(const void *item, void *context)
     for (int i = 0; i < viewsCount; i++) {
         id aView = [_views objectAtIndex:i];
         [self destroyOnePlugin:aView];
-        
-#if ENABLE(NETSCAPE_PLUGIN_API)
-        if (Frame* frame = core([self webFrame]))
-            frame->script().cleanupScriptObjectsForPlugin(self);
-#endif
-        
-        [pluginViews removeObject:aView];
-#if !PLATFORM(IOS)
+
+        [pluginViews() removeObject:aView];
+#if !PLATFORM(IOS_FAMILY)
         [[_documentView _webView] removePluginInstanceView:aView];
 #endif
     }
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     [_views makeObjectsPerformSelector:@selector(removeFromSuperviewWithoutNeedingDisplay)];
 #else
     [_views makeObjectsPerformSelector:@selector(removeFromSuperview)];
@@ -452,10 +444,10 @@ static void cancelOutstandingCheck(const void *item, void *context)
     _documentView = nil;
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (BOOL)processingUserGesture
 {
-    return ScriptController::processingUserGesture();
+    return WebCore::UserGestureIndicator::processingUserGesture();
 }
 #endif
 
@@ -498,14 +490,14 @@ static void cancelOutstandingCheck(const void *item, void *context)
             LOG_ERROR("could not load URL %@", [request URL]);
             return;
         }
-        FrameLoadRequest frameLoadRequest { *core(frame), request, ShouldOpenExternalURLsPolicy::ShouldNotAllow };
+        WebCore::FrameLoadRequest frameLoadRequest { *core(frame), request };
         frameLoadRequest.setFrameName(target);
         frameLoadRequest.setShouldCheckNewWindowPolicy(true);
         core(frame)->loader().load(WTFMove(frameLoadRequest));
     }
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (void)webPlugInContainerWillShowFullScreenForView:(id)plugInView
 {
     WebView *webView = [_dataSource _webView];
@@ -534,13 +526,13 @@ static void cancelOutstandingCheck(const void *item, void *context)
     [self webPlugInContainerShowStatus:message];
 }
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 - (NSColor *)webPlugInContainerSelectionColor
 {
     bool primary = true;
-    if (Frame* frame = core([self webFrame]))
+    if (auto* frame = core([self webFrame]))
         primary = frame->selection().isFocusedAndActive();
-    return primary ? [NSColor selectedTextBackgroundColor] : [NSColor secondarySelectedControlColor];
+    return primary ? [NSColor selectedTextBackgroundColor] : [NSColor unemphasizedSelectedContentBackgroundColor];
 }
 
 // For compatibility only.
@@ -574,13 +566,12 @@ static void cancelOutstandingCheck(const void *item, void *context)
     else {
         // Cancel the load since this plug-in does its own loading.
         // FIXME: See <rdar://problem/4258008> for a problem with this.
-        NSError *error = [[NSError alloc] _initWithPluginErrorCode:WebKitErrorPlugInWillHandleLoad
+        auto error = adoptNS([[NSError alloc] _initWithPluginErrorCode:WebKitErrorPlugInWillHandleLoad
                                                         contentURL:[response URL]
                                                      pluginPageURL:nil
                                                         pluginName:nil // FIXME: Get this from somewhere
-                                                          MIMEType:[response MIMEType]];
-        [_dataSource _documentLoader]->cancelMainResourceLoad(error);
-        [error release];
+                                                          MIMEType:[response MIMEType]]);
+        [_dataSource _documentLoader]->cancelMainResourceLoad(error.get());
     }        
 }
 
@@ -604,7 +595,7 @@ static void cancelOutstandingCheck(const void *item, void *context)
 
 @end
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 static bool isKindOfClass(id object, NSString *className)
 {
     Class cls = NSClassFromString(className);
@@ -653,21 +644,19 @@ static alertDidEndIMP original_TSUpdateCheck_alertDidEnd_returnCode_contextInfo_
 
 static void WebKit_TSUpdateCheck_alertDidEnd_returnCode_contextInfo_(id object, SEL selector, NSAlert *alert, NSInteger returnCode, void* contextInfo)
 {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     [[(TSUpdateCheck *)object delegate] autorelease];
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
     original_TSUpdateCheck_alertDidEnd_returnCode_contextInfo_(object, selector, alert, returnCode, contextInfo);
 }
 
 static void WebKit_NSAlert_beginSheetModalForWindow_modalDelegate_didEndSelector_contextInfo_(id object, SEL selector, NSWindow *window, id modalDelegate, SEL didEndSelector, void* contextInfo)
 {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     if (isKindOfClass(modalDelegate, @"TSUpdateCheck"))
         [[(TSUpdateCheck *)modalDelegate delegate] retain];
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
     original_NSAlert_beginSheetModalForWindow_modalDelegate_didEndSelector_contextInfo_(object, selector, window, modalDelegate, didEndSelector, contextInfo);
 }
@@ -680,7 +669,9 @@ static void installFlip4MacPlugInWorkaroundIfNecessary()
         if (!TSUpdateCheck)
             return;
 
+IGNORE_WARNINGS_BEGIN("undeclared-selector")
         Method methodToPatch = class_getInstanceMethod(TSUpdateCheck, @selector(alertDidEnd:returnCode:contextInfo:));
+IGNORE_WARNINGS_END
         if (!methodToPatch)
             return;
 
@@ -694,4 +685,4 @@ static void installFlip4MacPlugInWorkaroundIfNecessary()
         hasInstalledFlip4MacPlugInWorkaround = true;
     }
 }
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)

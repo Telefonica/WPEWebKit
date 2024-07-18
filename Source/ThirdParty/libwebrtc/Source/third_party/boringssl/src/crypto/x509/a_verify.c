@@ -61,7 +61,6 @@
 #include <sys/types.h>
 
 #include <openssl/bn.h>
-#include <openssl/buf.h>
 #include <openssl/digest.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -109,10 +108,7 @@ int ASN1_item_verify(const ASN1_ITEM *it, X509_ALGOR *a,
     ret = 1;
 
 err:
-    if (buf_in != NULL) {
-        OPENSSL_cleanse(buf_in, inl);
-        OPENSSL_free(buf_in);
-    }
+    OPENSSL_free(buf_in);
     EVP_MD_CTX_cleanup(&ctx);
     return ret;
 }

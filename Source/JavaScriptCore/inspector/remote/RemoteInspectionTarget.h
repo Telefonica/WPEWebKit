@@ -42,12 +42,12 @@ public:
     void setRemoteDebuggingAllowed(bool);
 
 #if USE(CF)
-    CFRunLoopRef targetRunLoop() override { return m_runLoop.get(); }
+    CFRunLoopRef targetRunLoop() const final { return m_runLoop.get(); }
     void setTargetRunLoop(CFRunLoopRef runLoop) { m_runLoop = runLoop; }
 #endif
 
-    virtual String name() const { return String(); } // JavaScript and Web
-    virtual String url() const { return String(); } // Web
+    virtual String name() const { return String(); } // ITML JavaScript Page ServiceWorker WebPage
+    virtual String url() const { return String(); } // Page ServiceWorker WebPage
     virtual bool hasLocalDebugger() const = 0;
 
     virtual void setIndicating(bool) { } // Default is to do nothing.
@@ -57,9 +57,10 @@ public:
     virtual void unpauseForInitializedInspector();
 
     // RemoteControllableTarget overrides.
-    bool remoteControlAllowed() const override;
+    bool remoteControlAllowed() const final;
+
 private:
-    bool m_allowed {false};
+    bool m_allowed { false };
 #if USE(CF)
     RetainPtr<CFRunLoopRef> m_runLoop;
 #endif
@@ -67,11 +68,10 @@ private:
 
 } // namespace Inspector
 
-SPECIALIZE_TYPE_TRAITS_BEGIN(Inspector::RemoteInspectionTarget) \
-    static bool isType(const Inspector::RemoteControllableTarget& target) \
-    { \
-        return target.type() == Inspector::RemoteControllableTarget::Type::JavaScript \
-            || target.type() == Inspector::RemoteControllableTarget::Type::Web; \
+SPECIALIZE_TYPE_TRAITS_BEGIN(Inspector::RemoteInspectionTarget)
+    static bool isType(const Inspector::RemoteControllableTarget& target)
+    {
+        return target.type() != Inspector::RemoteControllableTarget::Type::Automation;
     }
 SPECIALIZE_TYPE_TRAITS_END()
 

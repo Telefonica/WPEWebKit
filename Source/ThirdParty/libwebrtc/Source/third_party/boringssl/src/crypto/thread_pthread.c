@@ -24,8 +24,12 @@
 #include <openssl/type_check.h>
 
 
-OPENSSL_COMPILE_ASSERT(sizeof(CRYPTO_MUTEX) >= sizeof(pthread_rwlock_t),
-                       CRYPTO_MUTEX_too_small);
+OPENSSL_STATIC_ASSERT(sizeof(CRYPTO_MUTEX) >= sizeof(pthread_rwlock_t),
+                      "CRYPTO_MUTEX is too small");
+#if defined(__GNUC__) || defined(__clang__)
+OPENSSL_STATIC_ASSERT(alignof(CRYPTO_MUTEX) >= alignof(pthread_rwlock_t),
+                      "CRYPTO_MUTEX has insufficient alignment");
+#endif
 
 void CRYPTO_MUTEX_init(CRYPTO_MUTEX *lock) {
   if (pthread_rwlock_init((pthread_rwlock_t *) lock, NULL) != 0) {
@@ -94,6 +98,8 @@ void CRYPTO_once(CRYPTO_once_t *once, void (*init)(void)) {
 static pthread_mutex_t g_destructors_lock = PTHREAD_MUTEX_INITIALIZER;
 static thread_local_destructor_t g_destructors[NUM_OPENSSL_THREAD_LOCALS];
 
+// thread_local_destructor is called when a thread exits. It releases thread
+// local data for that thread only.
 static void thread_local_destructor(void *arg) {
   if (arg == NULL) {
     return;
@@ -119,16 +125,16 @@ static void thread_local_destructor(void *arg) {
 
 static pthread_once_t g_thread_local_init_once = PTHREAD_ONCE_INIT;
 static pthread_key_t g_thread_local_key;
-static int g_thread_local_failed = 0;
+static int g_thread_local_key_created = 0;
 
 static void thread_local_init(void) {
-  g_thread_local_failed =
-      pthread_key_create(&g_thread_local_key, thread_local_destructor) != 0;
+  g_thread_local_key_created =
+      pthread_key_create(&g_thread_local_key, thread_local_destructor) == 0;
 }
 
 void *CRYPTO_get_thread_local(thread_local_data_t index) {
   CRYPTO_once(&g_thread_local_init_once, thread_local_init);
-  if (g_thread_local_failed) {
+  if (!g_thread_local_key_created) {
     return NULL;
   }
 
@@ -142,7 +148,7 @@ void *CRYPTO_get_thread_local(thread_local_data_t index) {
 int CRYPTO_set_thread_local(thread_local_data_t index, void *value,
                             thread_local_destructor_t destructor) {
   CRYPTO_once(&g_thread_local_init_once, thread_local_init);
-  if (g_thread_local_failed) {
+  if (!g_thread_local_key_created) {
     destructor(value);
     return 0;
   }
@@ -173,4 +179,4 @@ int CRYPTO_set_thread_local(thread_local_data_t index, void *value,
   return 1;
 }
 
-#endif  /* OPENSSL_PTHREADS */
+#endif  // OPENSSL_PTHREADS

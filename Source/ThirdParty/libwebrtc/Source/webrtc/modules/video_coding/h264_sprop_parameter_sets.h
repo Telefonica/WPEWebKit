@@ -8,19 +8,22 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_VIDEO_CODING_H264_SPROP_PARAMETER_SETS_H_
-#define WEBRTC_MODULES_VIDEO_CODING_H264_SPROP_PARAMETER_SETS_H_
+#ifndef MODULES_VIDEO_CODING_H264_SPROP_PARAMETER_SETS_H_
+#define MODULES_VIDEO_CODING_H264_SPROP_PARAMETER_SETS_H_
 
+#include <cstdint>
 #include <string>
 #include <vector>
-
-#include "webrtc/base/constructormagic.h"
 
 namespace webrtc {
 
 class H264SpropParameterSets {
  public:
   H264SpropParameterSets() {}
+
+  H264SpropParameterSets(const H264SpropParameterSets&) = delete;
+  H264SpropParameterSets& operator=(const H264SpropParameterSets&) = delete;
+
   bool DecodeSprop(const std::string& sprop);
   const std::vector<uint8_t>& sps_nalu() { return sps_; }
   const std::vector<uint8_t>& pps_nalu() { return pps_; }
@@ -28,9 +31,8 @@ class H264SpropParameterSets {
  private:
   std::vector<uint8_t> sps_;
   std::vector<uint8_t> pps_;
-  RTC_DISALLOW_COPY_AND_ASSIGN(H264SpropParameterSets);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_VIDEO_CODING_H264_SPROP_PARAMETER_SETS_H_
+#endif  // MODULES_VIDEO_CODING_H264_SPROP_PARAMETER_SETS_H_

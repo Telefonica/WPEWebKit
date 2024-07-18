@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003-2019 Apple Inc. All rights reserved.
  *  Copyright (C) 2007 Eric Seidel <eric@webkit.org>
  *
  *  This library is free software; you can redistribute it and/or
@@ -19,12 +19,10 @@
  */
 
 #include "config.h"
-#include "StackBounds.h"
+#include <wtf/StackBounds.h>
 
 #if OS(DARWIN)
 
-#include <mach/task.h>
-#include <mach/thread_act.h>
 #include <pthread.h>
 
 #elif OS(WINDOWS)
@@ -36,6 +34,12 @@
 #include <pthread.h>
 #if HAVE(PTHREAD_NP_H)
 #include <pthread_np.h>
+#endif
+
+#if OS(LINUX)
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #endif
 
 #endif
@@ -61,6 +65,8 @@ StackBounds StackBounds::currentThreadStackBoundsInternal()
         rlimit limit;
         getrlimit(RLIMIT_STACK, &limit);
         rlim_t size = limit.rlim_cur;
+        if (size == RLIM_INFINITY)
+            size = 8 * MB;
         void* bound = static_cast<char*>(origin) - size;
         return StackBounds { origin, bound };
     }
@@ -76,11 +82,7 @@ StackBounds StackBounds::newThreadStackBounds(PlatformThreadHandle thread)
     stack_t stack;
     pthread_stackseg_np(thread, &stack);
     void* origin = stack.ss_sp;
-#if CPU(HPPA)
-    void* bound = static_cast<char*>(origin) + stack.ss_size;
-#else
     void* bound = static_cast<char*>(origin) - stack.ss_size;
-#endif
     return StackBounds { origin, bound };
 }
 
@@ -105,6 +107,7 @@ StackBounds StackBounds::newThreadStackBounds(PlatformThreadHandle thread)
     ASSERT(bound);
     pthread_attr_destroy(&sattr);
     void* origin = static_cast<char*>(bound) + stackSize;
+    // pthread_attr_getstack's bound is the lowest accessible pointer of the stack.
     return StackBounds { origin, bound };
 }
 
@@ -112,14 +115,34 @@ StackBounds StackBounds::newThreadStackBounds(PlatformThreadHandle thread)
 
 StackBounds StackBounds::currentThreadStackBoundsInternal()
 {
-    return newThreadStackBounds(pthread_self());
+    auto ret = newThreadStackBounds(pthread_self());
+#if OS(LINUX)
+    // on glibc, pthread_attr_getstack will generally return the limit size (minus a guard page)
+    // for the main thread; this is however not necessarily always true on every libc - for example
+    // on musl, it will return the currently reserved size - since the stack bounds are expected to
+    // be constant (and they are for every thread except main, which is allowed to grow), check
+    // resource limits and use that as the boundary instead (and prevent stack overflows in JSC)
+    if (getpid() == static_cast<pid_t>(syscall(SYS_gettid))) {
+        void* origin = ret.origin();
+        rlimit limit;
+        getrlimit(RLIMIT_STACK, &limit);
+        rlim_t size = limit.rlim_cur;
+        if (size == RLIM_INFINITY)
+            size = 8 * MB;
+        // account for a guard page
+        size -= static_cast<rlim_t>(sysconf(_SC_PAGESIZE));
+        void* bound = static_cast<char*>(origin) - size;
+        return StackBounds { origin, bound };
+    }
+#endif
+    return ret;
 }
 
 #elif OS(WINDOWS)
 
 StackBounds StackBounds::currentThreadStackBoundsInternal()
 {
-    MEMORY_BASIC_INFORMATION stackOrigin = { 0 };
+    MEMORY_BASIC_INFORMATION stackOrigin { };
     VirtualQuery(&stackOrigin, &stackOrigin, sizeof(stackOrigin));
     // stackOrigin.AllocationBase points to the reserved stack memory base address.
 

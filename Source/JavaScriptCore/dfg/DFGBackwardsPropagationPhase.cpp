@@ -28,29 +28,56 @@
 
 #if ENABLE(DFG_JIT)
 
-#include "DFGBasicBlockInlines.h"
+#include "DFGBlockMapInlines.h"
 #include "DFGGraph.h"
 #include "DFGPhase.h"
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
+#include <wtf/MathExtras.h>
 
 namespace JSC { namespace DFG {
 
-class BackwardsPropagationPhase : public Phase {
+// This phase is run at the end of BytecodeParsing, so the graph isn't in a fully formed state.
+// For example, we can't access the predecessor list of any basic blocks yet.
+
+class BackwardsPropagationPhase {
 public:
     BackwardsPropagationPhase(Graph& graph)
-        : Phase(graph, "backwards propagation")
+        : m_graph(graph)
+        , m_flagsAtHead(graph)
     {
     }
-    
+
     bool run()
     {
-        m_changed = true;
-        while (m_changed) {
-            m_changed = false;
+        for (BasicBlock* block : m_graph.blocksInNaturalOrder()) {
+            m_flagsAtHead[block] = Operands<NodeFlags>(OperandsLike, m_graph.block(0)->variablesAtHead);
+            m_flagsAtHead[block].fill(0);
+        }
+
+        bool changed;
+        do {
+            changed = false;
+
             for (BlockIndex blockIndex = m_graph.numBlocks(); blockIndex--;) {
                 BasicBlock* block = m_graph.block(blockIndex);
                 if (!block)
                     continue;
+
+                {
+                    unsigned numSuccessors = block->numSuccessors();
+                    if (!numSuccessors) {
+                        m_currentFlags = Operands<NodeFlags>(OperandsLike, m_graph.block(0)->variablesAtHead);
+                        m_currentFlags.fill(0);
+                    } else {
+                        m_currentFlags = m_flagsAtHead[block->successor(0)];
+                        for (unsigned i = 1; i < numSuccessors; ++i) {
+                            BasicBlock* successor = block->successor(i);
+                            for (size_t i = 0; i < m_currentFlags.size(); ++i)
+                                m_currentFlags[i] |= m_flagsAtHead[successor][i];
+                        }
+                    }
+                }
+
             
                 // Prevent a tower of overflowing additions from creating a value that is out of the
                 // safe 2^48 range.
@@ -58,8 +85,13 @@ public:
             
                 for (unsigned indexInBlock = block->size(); indexInBlock--;)
                     propagate(block->at(indexInBlock));
+
+                if (m_flagsAtHead[block] != m_currentFlags) {
+                    m_flagsAtHead[block] = m_currentFlags;
+                    changed = true;
+                }
             }
-        }
+        } while (changed);
         
         return true;
     }
@@ -110,7 +142,8 @@ private:
             return isWithinPowerOfTwoForConstant<power>(node);
         }
             
-        case BitAnd: {
+        case ValueBitAnd:
+        case ArithBitAnd: {
             if (power > 31)
                 return true;
             
@@ -118,13 +151,17 @@ private:
                 || isWithinPowerOfTwoNonRecursive<power>(node->child2().node());
         }
             
-        case BitOr:
-        case BitXor:
-        case BitLShift: {
+        case ArithBitOr:
+        case ArithBitXor:
+        case ValueBitOr:
+        case ValueBitXor:
+        case ValueBitLShift:
+        case ArithBitLShift: {
             return power > 31;
         }
             
-        case BitRShift:
+        case ArithBitRShift:
+        case ValueBitRShift:
         case BitURShift: {
             if (power > 31)
                 return true;
@@ -147,6 +184,11 @@ private:
     bool isWithinPowerOfTwo(Edge edge)
     {
         return isWithinPowerOfTwo<power>(edge.node());
+    }
+
+    static bool mergeFlags(NodeFlags& flagsRef, NodeFlags newFlags)
+    {
+        return checkAndSet(flagsRef, flagsRef | newFlags);
     }
 
     bool mergeDefaultFlags(Node* node)
@@ -173,6 +215,10 @@ private:
         return changed;
     }
     
+    static constexpr NodeFlags VariableIsUsed = 1 << (1 + WTF::getMSBSetConstexpr(NodeBytecodeBackPropMask));
+    static_assert(!(VariableIsUsed & NodeBytecodeBackPropMask));
+    static_assert(VariableIsUsed > NodeBytecodeBackPropMask, "Verify the above doesn't overflow");
+    
     void propagate(Node* node)
     {
         NodeFlags flags = node->flags() & NodeBytecodeBackPropMask;
@@ -180,37 +226,68 @@ private:
         switch (node->op()) {
         case GetLocal: {
             VariableAccessData* variableAccessData = node->variableAccessData();
-            flags &= ~NodeBytecodeUsesAsInt; // We don't care about cross-block uses-as-int.
-            m_changed |= variableAccessData->mergeFlags(flags);
+            flags |= m_currentFlags.operand(variableAccessData->operand());
+            flags |= VariableIsUsed;
+            m_currentFlags.operand(variableAccessData->operand()) = flags;
             break;
         }
             
         case SetLocal: {
             VariableAccessData* variableAccessData = node->variableAccessData();
-            if (!variableAccessData->isLoadedFrom())
+
+            Operand operand = variableAccessData->operand();
+            NodeFlags flags = m_currentFlags.operand(operand);
+            if (!(flags & VariableIsUsed))
                 break;
-            flags = variableAccessData->flags();
-            RELEASE_ASSERT(!(flags & ~NodeBytecodeBackPropMask));
-            flags |= NodeBytecodeUsesAsNumber; // Account for the fact that control flow may cause overflows that our modeling can't handle.
-            node->child1()->mergeFlags(flags);
+
+            flags &= NodeBytecodeBackPropMask;
+            flags &= ~NodeBytecodeUsesAsInt; // We don't care about cross-block uses-as-int.
+
+            variableAccessData->mergeFlags(flags);
+            // We union with NodeBytecodeUsesAsNumber to account for the fact that control flow may cause overflows that our modeling can't handle.
+            // For example, a loop where we always add a constant value.
+            node->child1()->mergeFlags(flags | NodeBytecodeUsesAsNumber); 
+
+            m_currentFlags.operand(operand) = 0;
             break;
         }
             
         case Flush: {
             VariableAccessData* variableAccessData = node->variableAccessData();
-            m_changed |= variableAccessData->mergeFlags(NodeBytecodeUsesAsValue);
+            mergeFlags(m_currentFlags.operand(variableAccessData->operand()), NodeBytecodeUsesAsValue | VariableIsUsed);
+            break;
+        }
+
+        case PhantomLocal: {
+            VariableAccessData* variableAccessData = node->variableAccessData();
+            mergeFlags(m_currentFlags.operand(variableAccessData->operand()), VariableIsUsed);
             break;
         }
             
         case MovHint:
         case Check:
+        case CheckVarargs:
             break;
             
-        case BitAnd:
-        case BitOr:
-        case BitXor:
-        case BitRShift:
-        case BitLShift:
+        case ValueBitNot:
+        case ArithBitNot: {
+            flags |= NodeBytecodeUsesAsInt;
+            flags &= ~(NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero | NodeBytecodeUsesAsOther);
+            flags &= ~NodeBytecodeUsesAsArrayIndex;
+            node->child1()->mergeFlags(flags);
+            break;
+        }
+
+        case ArithBitAnd:
+        case ArithBitOr:
+        case ArithBitXor:
+        case ValueBitAnd:
+        case ValueBitOr:
+        case ValueBitXor:
+        case ValueBitLShift:
+        case ArithBitLShift:
+        case ArithBitRShift:
+        case ValueBitRShift:
         case BitURShift:
         case ArithIMul: {
             flags |= NodeBytecodeUsesAsInt;
@@ -221,11 +298,38 @@ private:
             break;
         }
             
-        case StringCharCodeAt: {
+        case StringCharAt:
+        case StringCharCodeAt:
+        case StringCodePointAt: {
             node->child1()->mergeFlags(NodeBytecodeUsesAsValue);
             node->child2()->mergeFlags(NodeBytecodeUsesAsValue | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
             break;
         }
+
+        case StringSlice: {
+            node->child1()->mergeFlags(NodeBytecodeUsesAsValue);
+            node->child2()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+            if (node->child3())
+                node->child3()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+            break;
+        }
+
+        case ArraySlice: {
+            m_graph.varArgChild(node, 0)->mergeFlags(NodeBytecodeUsesAsValue);
+
+            if (node->numChildren() == 2)
+                m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsValue);
+            else if (node->numChildren() == 3) {
+                m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+                m_graph.varArgChild(node, 2)->mergeFlags(NodeBytecodeUsesAsValue);
+            } else if (node->numChildren() == 4) {
+                m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+                m_graph.varArgChild(node, 2)->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+                m_graph.varArgChild(node, 3)->mergeFlags(NodeBytecodeUsesAsValue);
+            }
+            break;
+        }
+
             
         case UInt32ToNumber: {
             node->child1()->mergeFlags(flags);
@@ -235,7 +339,7 @@ private:
         case ValueAdd: {
             if (isNotNegZero(node->child1().node()) || isNotNegZero(node->child2().node()))
                 flags &= ~NodeBytecodeNeedsNegZero;
-            if (node->child1()->hasNumberResult() || node->child2()->hasNumberResult())
+            if (node->child1()->hasNumericResult() || node->child2()->hasNumericResult() || node->child1()->hasNumberResult() || node->child2()->hasNumberResult())
                 flags &= ~NodeBytecodeUsesAsOther;
             if (!isWithinPowerOfTwo<32>(node->child1()) && !isWithinPowerOfTwo<32>(node->child2()))
                 flags |= NodeBytecodeUsesAsNumber;
@@ -288,7 +392,21 @@ private:
             node->child1()->mergeFlags(flags);
             break;
         }
-            
+
+        case Inc:
+        case Dec: {
+            flags &= ~NodeBytecodeNeedsNegZero;
+            flags &= ~NodeBytecodeUsesAsOther;
+            if (!isWithinPowerOfTwo<32>(node->child1()))
+                flags |= NodeBytecodeUsesAsNumber;
+            if (!m_allowNestedOverflowingAdditions)
+                flags |= NodeBytecodeUsesAsNumber;
+
+            node->child1()->mergeFlags(flags);
+            break;
+        }
+
+        case ValueMul:
         case ArithMul: {
             // As soon as a multiply happens, we can easily end up in the part
             // of the double domain where the point at which you do truncation
@@ -311,6 +429,7 @@ private:
             break;
         }
             
+        case ValueDiv:
         case ArithDiv: {
             flags |= NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero;
             flags &= ~NodeBytecodeUsesAsOther;
@@ -320,6 +439,7 @@ private:
             break;
         }
             
+        case ValueMod:
         case ArithMod: {
             flags |= NodeBytecodeUsesAsNumber;
             flags &= ~NodeBytecodeUsesAsOther;
@@ -328,10 +448,11 @@ private:
             node->child2()->mergeFlags(flags & ~NodeBytecodeNeedsNegZero);
             break;
         }
-            
+
+        case EnumeratorGetByVal:
         case GetByVal: {
-            node->child1()->mergeFlags(NodeBytecodeUsesAsValue);
-            node->child2()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+            m_graph.varArgChild(node, 0)->mergeFlags(NodeBytecodeUsesAsValue);
+            m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
             break;
         }
             
@@ -344,12 +465,6 @@ private:
             break;
         }
             
-        case StringCharAt: {
-            node->child1()->mergeFlags(NodeBytecodeUsesAsValue);
-            node->child2()->mergeFlags(NodeBytecodeUsesAsValue | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
-            break;
-        }
-            
         case ToString:
         case CallStringConstructor: {
             node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther);
@@ -357,8 +472,23 @@ private:
         }
             
         case ToPrimitive:
-        case ToNumber: {
+        case ToNumber:
+        case ToNumeric:
+        case CallNumberConstructor: {
             node->child1()->mergeFlags(flags);
+            break;
+        }
+
+        case CompareLess:
+        case CompareLessEq:
+        case CompareGreater:
+        case CompareGreaterEq:
+        case CompareBelow:
+        case CompareBelowEq:
+        case CompareEq:
+        case CompareStrictEq: {
+            node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther);
+            node->child2()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther);
             break;
         }
 
@@ -419,13 +549,16 @@ private:
         }
     }
     
+    Graph& m_graph;
     bool m_allowNestedOverflowingAdditions;
-    bool m_changed;
+
+    BlockMap<Operands<NodeFlags>> m_flagsAtHead;
+    Operands<NodeFlags> m_currentFlags;
 };
 
-bool performBackwardsPropagation(Graph& graph)
+void performBackwardsPropagation(Graph& graph)
 {
-    return runPhase<BackwardsPropagationPhase>(graph);
+    BackwardsPropagationPhase(graph).run();
 }
 
 } } // namespace JSC::DFG

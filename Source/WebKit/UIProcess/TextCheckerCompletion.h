@@ -25,25 +25,29 @@
 
 #pragma once
 
-#include "WebPageProxy.h"
+#include "IdentifierTypes.h"
 #include <WebCore/TextChecking.h>
 #include <wtf/Forward.h>
 
 namespace WebKit {
 
+using SpellDocumentTag = int64_t;
+
+class WebPageProxy;
+
 class TextCheckerCompletion : public RefCounted<TextCheckerCompletion> {
 public:
-    static Ref<TextCheckerCompletion> create(uint64_t requestID, const WebCore::TextCheckingRequestData&, WebPageProxy*);
+    static Ref<TextCheckerCompletion> create(TextCheckerRequestID, const WebCore::TextCheckingRequestData&, WebPageProxy*);
 
     const WebCore::TextCheckingRequestData& textCheckingRequestData() const;
-    int64_t spellDocumentTag();
+    SpellDocumentTag spellDocumentTag();
     void didFinishCheckingText(const Vector<WebCore::TextCheckingResult>&) const;
     void didCancelCheckingText() const;
 
 private:
-    TextCheckerCompletion(uint64_t requestID, const WebCore::TextCheckingRequestData&, WebPageProxy*);
+    TextCheckerCompletion(TextCheckerRequestID, const WebCore::TextCheckingRequestData&, WebPageProxy*);
 
-    const uint64_t m_requestID;
+    const TextCheckerRequestID m_requestID;
     const WebCore::TextCheckingRequestData m_requestData;
     WebPageProxy* m_page;
 };

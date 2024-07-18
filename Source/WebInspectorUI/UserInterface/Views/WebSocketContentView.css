@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,27 +39,15 @@
     overflow-wrap: break-word;
 }
 
-body[dir=ltr] .web-socket.content-view > .data-grid .data-column > div {
-    padding-left: 18px;
-}
-
-body[dir=rtl] .web-socket.content-view > .data-grid .data-column > div {
-    padding-right: 18px;
+.web-socket.content-view > .data-grid .data-column > div {
+    padding-inline-start: 18px;
 }
 
 .web-socket.content-view .icon {
     position: absolute;
     margin-top: -1px;
-}
-
-body[dir=ltr] .web-socket.content-view .icon {
-    left: 4px;
-    margin-right: 2px;
-}
-
-body[dir=rtl] .web-socket.content-view .icon {
-    right: 4px;
-    margin-left: 2px;
+    margin-inline-end: 2px;
+    inset-inline-start: 4px;
 }
 
 .web-socket.content-view .data-grid.variable-height-rows table.data tr:nth-child(odd) {
@@ -78,4 +66,20 @@ body[dir=rtl] .web-socket.content-view .icon {
 .web-socket.content-view .data-grid.variable-height-rows table.data tr.non-text-frame {
     background-color: hsl(50, 100%, 90%);
     color: hsl(3, 96%, 27%);
+}
+
+@media (prefers-color-scheme: dark) {
+    .web-socket.content-view .data-grid table.data tr.revealed {
+        border-bottom-color: hsla(0, 0%, var(--foreground-lightness), 0.1);
+    }
+
+    .web-socket.content-view .data-grid.variable-height-rows table.data tr.outgoing {
+        background-color: var(--green-highlight-background-color);
+        color: var(--green-highlight-text-color);
+    }
+
+    .web-socket.content-view .data-grid.variable-height-rows table.data tr.non-text-frame {
+        background-color: var(--yellow-highlight-background-color);
+        color: var(--yellow-highlight-text-color);
+    }
 }

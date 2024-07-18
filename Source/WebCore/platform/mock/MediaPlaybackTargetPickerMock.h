@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,7 +26,7 @@
 #ifndef MediaPlaybackTargetPickerMock_h
 #define MediaPlaybackTargetPickerMock_h
 
-#if ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS)
+#if ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS_FAMILY)
 
 #include "MediaPlaybackTargetContext.h"
 #include "MediaPlaybackTargetPicker.h"
@@ -34,34 +34,33 @@
 
 namespace WebCore {
 
-class MediaPlaybackTargetPickerMock final : public MediaPlaybackTargetPicker {
+class MediaPlaybackTargetPickerMock final : public MediaPlaybackTargetPicker, public CanMakeWeakPtr<MediaPlaybackTargetPickerMock> {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(MediaPlaybackTargetPickerMock);
 public:
     explicit MediaPlaybackTargetPickerMock(MediaPlaybackTargetPicker::Client&);
 
     virtual ~MediaPlaybackTargetPickerMock();
 
-    void showPlaybackTargetPicker(const FloatRect&, bool checkActiveRoute) override;
+    void showPlaybackTargetPicker(PlatformView*, const FloatRect&, bool checkActiveRoute, bool useDarkAppearance) override;
     void startingMonitoringPlaybackTargets() override;
     void stopMonitoringPlaybackTargets() override;
     void invalidatePlaybackTargets() override;
 
-    void setState(const String&, MediaPlaybackTargetContext::State);
+    void setState(const String&, MediaPlaybackTargetContext::MockState);
+    void dismissPopup();
 
 private:
     bool externalOutputDeviceAvailable() override;
     Ref<MediaPlaybackTarget> playbackTarget() override;
 
-    void timerFired();
-
     String m_deviceName;
-    RunLoop::Timer<MediaPlaybackTargetPickerMock> m_timer;
-    MediaPlaybackTargetContext::State m_state { MediaPlaybackTargetContext::Unknown };
+    MediaPlaybackTargetContext::MockState m_state { MediaPlaybackTargetContext::MockState::Unknown };
     bool m_showingMenu { false };
 };
 
 } // namespace WebCore
 
-#endif // ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS)
+#endif // ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS_FAMILY)
 
 #endif // WebContextMenuProxyMac_h

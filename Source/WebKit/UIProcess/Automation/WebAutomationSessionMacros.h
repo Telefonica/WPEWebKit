@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,14 +42,24 @@
 #define AUTOMATION_COMMAND_ERROR_WITH_MESSAGE(errorString) AutomationCommandError(VALIDATED_ERROR_MESSAGE(errorString))
 
 // Convenience macros for filling in the error string of synchronous commands in bailout branches.
-#define FAIL_WITH_PREDEFINED_ERROR(errorName) \
+#define SYNC_FAIL_WITH_PREDEFINED_ERROR(errorName) \
 do { \
-    errorString = STRING_FOR_PREDEFINED_ERROR_NAME(errorName); \
+    return makeUnexpected(STRING_FOR_PREDEFINED_ERROR_NAME(errorName)); \
+} while (false)
+
+#define SYNC_FAIL_WITH_PREDEFINED_ERROR_AND_DETAILS(errorName, detailsString) \
+do { \
+    return makeUnexpected(STRING_FOR_PREDEFINED_ERROR_NAME_AND_DETAILS(errorName, detailsString)); \
+} while (false)
+
+#define ASYNC_FAIL_WITH_PREDEFINED_ERROR(errorName) \
+do { \
+    callback->sendFailure(STRING_FOR_PREDEFINED_ERROR_NAME(errorName)); \
     return; \
 } while (false)
 
-#define FAIL_WITH_PREDEFINED_ERROR_AND_DETAILS(errorName, detailsString) \
+#define ASYNC_FAIL_WITH_PREDEFINED_ERROR_AND_DETAILS(errorName, detailsString) \
 do { \
-    errorString = STRING_FOR_PREDEFINED_ERROR_NAME_AND_DETAILS(errorName, detailsString); \
+    callback->sendFailure(STRING_FOR_PREDEFINED_ERROR_NAME_AND_DETAILS(errorName, detailsString)); \
     return; \
 } while (false)

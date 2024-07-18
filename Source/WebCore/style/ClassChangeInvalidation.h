@@ -26,12 +26,11 @@
 #pragma once
 
 #include "Element.h"
+#include "StyleInvalidator.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
-class DocumentRuleSets;
-class RuleSet;
 class SpaceSplitString;
 
 namespace Style {
@@ -42,13 +41,15 @@ public:
     ~ClassChangeInvalidation();
 
 private:
-    void invalidateStyle(const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses);
-    void invalidateDescendantStyle();
+    void computeInvalidation(const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses);
+    void invalidateBeforeChange();
+    void invalidateAfterChange();
 
     const bool m_isEnabled;
     Element& m_element;
 
-    Vector<const RuleSet*, 4> m_descendantInvalidationRuleSets;
+    Invalidator::MatchElementRuleSets m_beforeChangeRuleSets;
+    Invalidator::MatchElementRuleSets m_afterChangeRuleSets;
 };
 
 inline ClassChangeInvalidation::ClassChangeInvalidation(Element& element, const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses)
@@ -58,15 +59,15 @@ inline ClassChangeInvalidation::ClassChangeInvalidation(Element& element, const 
 {
     if (!m_isEnabled)
         return;
-    invalidateStyle(oldClasses, newClasses);
-    invalidateDescendantStyle();
+    computeInvalidation(oldClasses, newClasses);
+    invalidateBeforeChange();
 }
 
 inline ClassChangeInvalidation::~ClassChangeInvalidation()
 {
     if (!m_isEnabled)
         return;
-    invalidateDescendantStyle();
+    invalidateAfterChange();
 }
 
 }

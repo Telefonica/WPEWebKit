@@ -10,20 +10,39 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#if defined(WEBRTC_POSIX)
+#include <sys/select.h>
+#endif
+#include <time.h>
 
+#include <string>
 #include <vector>
 
-#include "webrtc/examples/peerconnection/server/data_socket.h"
-#include "webrtc/examples/peerconnection/server/peer_channel.h"
-#include "webrtc/examples/peerconnection/server/utils.h"
-#include "webrtc/tools/simple_command_line_parser.h"
+#include "absl/flags/flag.h"
+#include "absl/flags/parse.h"
+#include "absl/flags/usage.h"
+#include "examples/peerconnection/server/data_socket.h"
+#include "examples/peerconnection/server/peer_channel.h"
+#include "rtc_base/checks.h"
+#include "system_wrappers/include/field_trial.h"
+#include "test/field_trial.h"
+
+ABSL_FLAG(
+    std::string,
+    force_fieldtrials,
+    "",
+    "Field trials control experimental features. This flag specifies the field "
+    "trials in effect. E.g. running with "
+    "--force_fieldtrials=WebRTC-FooFeature/Enabled/ "
+    "will assign the group Enabled to field trial WebRTC-FooFeature. Multiple "
+    "trials are separated by \"/\"");
+ABSL_FLAG(int, port, 8888, "default: 8888");
 
 static const size_t kMaxConnections = (FD_SETSIZE - 2);
 
 void HandleBrowserRequest(DataSocket* ds, bool* quit) {
-  assert(ds && ds->valid());
-  assert(quit);
+  RTC_DCHECK(ds && ds->valid());
+  RTC_DCHECK(quit);
 
   const std::string& path = ds->request_path();
 
@@ -46,22 +65,17 @@ void HandleBrowserRequest(DataSocket* ds, bool* quit) {
   }
 }
 
-int main(int argc, char** argv) {
-  std::string program_name = argv[0];
-  std::string usage = "Example usage: " + program_name + " --port=8888";
-  webrtc::test::CommandLineParser parser;
-  parser.Init(argc, argv);
-  parser.SetUsageMessage(usage);
-  parser.SetFlag("port", "8888");
-  parser.SetFlag("help", "false");
-  parser.ProcessFlags();
+int main(int argc, char* argv[]) {
+  absl::SetProgramUsageMessage(
+      "Example usage: ./peerconnection_server --port=8888\n");
+  absl::ParseCommandLine(argc, argv);
 
-  if (parser.GetFlag("help") == "true") {
-    parser.PrintUsageMessage();
-    return 0;
-  }
+  // InitFieldTrialsFromString stores the char*, so the char array must outlive
+  // the application.
+  const std::string force_field_trials = absl::GetFlag(FLAGS_force_fieldtrials);
+  webrtc::field_trial::InitFieldTrialsFromString(force_field_trials.c_str());
 
-  int port = strtol((parser.GetFlag("port")).c_str(), NULL, 10);
+  int port = absl::GetFlag(FLAGS_port);
 
   // Abort if the user specifies a port that is outside the allowed
   // range [1, 65535].
@@ -94,7 +108,7 @@ int main(int argc, char** argv) {
     for (SocketArray::iterator i = sockets.begin(); i != sockets.end(); ++i)
       FD_SET((*i)->socket(), &socket_set);
 
-    struct timeval timeout = { 10, 0 };
+    struct timeval timeout = {10, 0};
     if (select(FD_SETSIZE, &socket_set, NULL, NULL, &timeout) == SOCKET_ERROR) {
       printf("select failed\n");
       break;
@@ -111,8 +125,7 @@ int main(int argc, char** argv) {
               if (s->PathEquals("/sign_in")) {
                 clients.AddMember(s);
               } else {
-                printf("No member found for: %s\n",
-                    s->request_path().c_str());
+                printf("No member found for: %s\n", s->request_path().c_str());
                 s->Send("500 Error", true, "text/plain", "",
                         "Peer most likely gone.");
               }
@@ -127,7 +140,7 @@ int main(int argc, char** argv) {
                 s->Send("200 OK", true, "text/plain", "", "");
               } else {
                 printf("Couldn't find target for request: %s\n",
-                    s->request_path().c_str());
+                       s->request_path().c_str());
                 s->Send("500 Error", true, "text/plain", "",
                         "Peer most likely gone.");
               }
@@ -149,7 +162,7 @@ int main(int argc, char** argv) {
       if (socket_done) {
         printf("Disconnecting socket\n");
         clients.OnClosing(s);
-        assert(s->valid());  // Close must not have been called yet.
+        RTC_DCHECK(s->valid());  // Close must not have been called yet.
         FD_CLR(s->socket(), &socket_set);
         delete (*i);
         i = sockets.erase(i);

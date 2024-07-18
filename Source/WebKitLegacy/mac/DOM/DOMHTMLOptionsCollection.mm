@@ -32,14 +32,14 @@
 #import <WebCore/HTMLOptGroupElement.h>
 #import <WebCore/HTMLOptionElement.h>
 #import <WebCore/HTMLOptionsCollection.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/Node.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/WebScriptObjectPrivate.h>
+#import <variant>
 #import <wtf/GetPtr.h>
-#import <wtf/Variant.h>
+#import <wtf/URL.h>
 
 #define IMPL reinterpret_cast<WebCore::HTMLOptionsCollection*>(_internal)
 
@@ -113,10 +113,12 @@ DOMHTMLOptionsCollection *kit(WebCore::HTMLOptionsCollection* value)
     if (!value)
         return nil;
     if (DOMHTMLOptionsCollection *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMHTMLOptionsCollection *wrapper = [[DOMHTMLOptionsCollection alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    auto wrapper = adoptNS([[DOMHTMLOptionsCollection alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
+
+#undef IMPL

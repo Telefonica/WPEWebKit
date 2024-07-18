@@ -31,7 +31,7 @@
 #import "DOMStyleSheetInternal.h"
 #import "DOMStyleSheetListInternal.h"
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/StyleSheet.h>
 #import <WebCore/StyleSheetList.h>
 #import <WebCore/ThreadCheck.h>
@@ -73,10 +73,12 @@ DOMStyleSheetList *kit(WebCore::StyleSheetList* value)
     if (!value)
         return nil;
     if (DOMStyleSheetList *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMStyleSheetList *wrapper = [[DOMStyleSheetList alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    auto wrapper = adoptNS([[DOMStyleSheetList alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
+
+#undef IMPL

@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if USE(VIDEOTOOLBOX)
-
 #include <CoreMedia/CMTime.h>
 #include <functional>
 #include <wtf/Lock.h>
@@ -35,8 +33,10 @@
 #include <wtf/Ref.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/ThreadSafeRefCounted.h>
+#include <wtf/WorkQueue.h>
 
 typedef CFTypeRef CMBufferRef;
+typedef const struct __CFArray * CFArrayRef;
 typedef struct opaqueCMBufferQueue *CMBufferQueueRef;
 typedef struct opaqueCMSampleBuffer *CMSampleBufferRef;
 typedef struct OpaqueCMTimebase* CMTimebaseRef;
@@ -44,12 +44,11 @@ typedef signed long CMItemCount;
 typedef struct __CVBuffer *CVPixelBufferRef;
 typedef struct __CVBuffer *CVImageBufferRef;
 typedef UInt32 VTDecodeInfoFlags;
-typedef UInt32 VTDecodeInfoFlags;
 typedef struct OpaqueVTDecompressionSession*  VTDecompressionSessionRef;
 
 namespace WebCore {
 
-class WebCoreDecompressionSession : public ThreadSafeRefCounted<WebCoreDecompressionSession> {
+class WEBCORE_EXPORT WebCoreDecompressionSession : public ThreadSafeRefCounted<WebCoreDecompressionSession> {
 public:
     static Ref<WebCoreDecompressionSession> createOpenGL() { return adoptRef(*new WebCoreDecompressionSession(OpenGL)); }
     static Ref<WebCoreDecompressionSession> createRGB() { return adoptRef(*new WebCoreDecompressionSession(RGB)); }
@@ -72,10 +71,13 @@ public:
     RetainPtr<CVPixelBufferRef> imageForTime(const MediaTime&, ImageForTimeFlags = ExactTime);
     void flush();
 
-    unsigned long totalVideoFrames() { return m_totalVideoFrames; }
-    unsigned long droppedVideoFrames() { return m_droppedVideoFrames; }
-    unsigned long corruptedVideoFrames() { return m_corruptedVideoFrames; }
-    MediaTime totalFrameDelay() { return m_totalFrameDelay; }
+    unsigned totalVideoFrames() const { return m_totalVideoFrames; }
+    unsigned droppedVideoFrames() const { return m_droppedVideoFrames; }
+    unsigned corruptedVideoFrames() const { return m_corruptedVideoFrames; }
+    MediaTime totalFrameDelay() const { return m_totalFrameDelay; }
+
+    bool hardwareDecoderEnabled() const { return m_hardwareDecoderEnabled; }
+    void setHardwareDecoderEnabled(bool enabled) { m_hardwareDecoderEnabled = enabled; }
 
 private:
     enum Mode {
@@ -100,6 +102,11 @@ private:
     static CFComparisonResult compareBuffers(CMBufferRef buf1, CMBufferRef buf2, void* refcon);
     void maybeBecomeReadyForMoreMediaData();
 
+    void resetQosTier();
+    void increaseQosTier();
+    void decreaseQosTier();
+    void updateQosWithDecodeTimeStatistics(double ratio);
+
     static const CMItemCount kMaximumCapacity = 120;
     static const CMItemCount kHighWaterMark = 60;
     static const CMItemCount kLowWaterMark = 15;
@@ -109,21 +116,23 @@ private:
     RetainPtr<CMBufferQueueRef> m_producerQueue;
     RetainPtr<CMBufferQueueRef> m_consumerQueue;
     RetainPtr<CMTimebaseRef> m_timebase;
-    OSObjectPtr<dispatch_queue_t> m_decompressionQueue;
-    OSObjectPtr<dispatch_queue_t> m_enqueingQueue;
-    OSObjectPtr<dispatch_semaphore_t> m_hasAvailableImageSemaphore;
+    Ref<WorkQueue> m_decompressionQueue;
+    Ref<WorkQueue> m_enqueingQueue;
     OSObjectPtr<dispatch_source_t> m_timerSource;
     std::function<void()> m_notificationCallback;
     std::function<void()> m_hasAvailableFrameCallback;
+    RetainPtr<CFArrayRef> m_qosTiers;
+    int m_currentQosTier { 0 };
+    unsigned m_framesSinceLastQosCheck { 0 };
+    double m_decodeRatioMovingAverage { 0 };
 
     bool m_invalidated { false };
+    bool m_hardwareDecoderEnabled { true };
     int m_framesBeingDecoded { 0 };
-    unsigned long m_totalVideoFrames { 0 };
-    unsigned long m_droppedVideoFrames { 0 };
-    unsigned long m_corruptedVideoFrames { 0 };
+    unsigned m_totalVideoFrames { 0 };
+    unsigned m_droppedVideoFrames { 0 };
+    unsigned m_corruptedVideoFrames { 0 };
     MediaTime m_totalFrameDelay;
 };
 
 }
-
-#endif

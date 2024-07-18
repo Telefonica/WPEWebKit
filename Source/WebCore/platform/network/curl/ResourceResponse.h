@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2006 Apple Inc.  All rights reserved.
- * Copyright (C) 2017 Sony Interactive Entertainment Inc.
+ * Copyright (C) 2018 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,29 +32,33 @@ typedef struct _CFURLResponse* CFURLResponseRef;
 
 namespace WebCore {
 
-class ResourceResponse : public ResourceResponseBase {
+class CurlResponse;
+
+class WEBCORE_EXPORT ResourceResponse : public ResourceResponseBase {
 public:
     ResourceResponse()
-        : m_responseFired(false)
+        : ResourceResponseBase()
     {
     }
 
     ResourceResponse(const URL& url, const String& mimeType, long long expectedLength, const String& textEncodingName)
-        : ResourceResponseBase(url, mimeType, expectedLength, textEncodingName),
-          m_responseFired(false)
+        : ResourceResponseBase(url, mimeType, expectedLength, textEncodingName)
     {
     }
 
-    void setResponseFired(bool fired) { m_responseFired = fired; }
-    bool responseFired() { return m_responseFired; }
+    ResourceResponse(const CurlResponse&);
 
     void appendHTTPHeaderField(const String&);
 
-    void setDeprecatedNetworkLoadMetrics(const NetworkLoadMetrics& networkLoadMetrics) { m_networkLoadMetrics = networkLoadMetrics; }
+    void setCertificateInfo(CertificateInfo&&);
 
-    bool isRedirection() const;
+    bool shouldRedirect();
+    bool isMovedPermanently() const;
+    bool isFound() const;
+    bool isSeeOther() const;
     bool isNotModified() const;
     bool isUnauthorized() const;
+    bool isProxyAuthenticationRequired() const;
 
     // Needed for compatibility.
     CFURLResponseRef cfURLResponse() const { return 0; }
@@ -65,9 +69,7 @@ private:
     static bool isAppendableHeader(const String &key);
     String platformSuggestedFilename() const;
 
-    void setStatusLine(const String&);
-
-    bool m_responseFired;
+    void setStatusLine(StringView);
 };
 
 } // namespace WebCore

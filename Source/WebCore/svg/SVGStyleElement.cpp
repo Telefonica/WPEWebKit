@@ -24,16 +24,21 @@
 #include "SVGStyleElement.h"
 
 #include "CSSStyleSheet.h"
+#include "CommonAtomStrings.h"
 #include "Document.h"
+#include "SVGElementInlines.h"
 #include "SVGNames.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGStyleElement);
+
 inline SVGStyleElement::SVGStyleElement(const QualifiedName& tagName, Document& document, bool createdByParser)
     : SVGElement(tagName, document)
     , m_styleSheetOwner(document, createdByParser)
-    , m_svgLoadEventTimer(*this, &SVGElement::svgLoadEventTimerFired)
+    , m_loadEventTimer(*this, &SVGElement::loadEventTimerFired)
 {
     ASSERT(hasTagName(SVGNames::styleTag));
 }
@@ -55,30 +60,29 @@ bool SVGStyleElement::disabled() const
 
 void SVGStyleElement::setDisabled(bool setDisabled)
 {
-    if (CSSStyleSheet* styleSheet = sheet())
+    if (RefPtr styleSheet = sheet())
         styleSheet->setDisabled(setDisabled);
 }
 
-const AtomicString& SVGStyleElement::type() const
+const AtomString& SVGStyleElement::type() const
 {
-    static NeverDestroyed<const AtomicString> defaultValue("text/css", AtomicString::ConstructFromLiteral);
-    const AtomicString& n = getAttribute(SVGNames::typeAttr);
-    return n.isNull() ? defaultValue.get() : n;
+    auto& typeValue = getAttribute(SVGNames::typeAttr);
+    return typeValue.isNull() ? cssContentTypeAtom() : typeValue;
 }
 
-void SVGStyleElement::setType(const AtomicString& type)
+void SVGStyleElement::setType(const AtomString& type)
 {
     setAttribute(SVGNames::typeAttr, type);
 }
 
-const AtomicString& SVGStyleElement::media() const
+const AtomString& SVGStyleElement::media() const
 {
-    static NeverDestroyed<const AtomicString> defaultValue("all", AtomicString::ConstructFromLiteral);
-    const AtomicString& n = attributeWithoutSynchronization(SVGNames::mediaAttr);
+    static MainThreadNeverDestroyed<const AtomString> defaultValue("all"_s);
+    const AtomString& n = attributeWithoutSynchronization(SVGNames::mediaAttr);
     return n.isNull() ? defaultValue.get() : n;
 }
 
-void SVGStyleElement::setMedia(const AtomicString& media)
+void SVGStyleElement::setMedia(const AtomString& media)
 {
     setAttributeWithoutSynchronization(SVGNames::mediaAttr, media);
 }
@@ -88,10 +92,10 @@ String SVGStyleElement::title() const
     return attributeWithoutSynchronization(SVGNames::titleAttr);
 }
 
-void SVGStyleElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void SVGStyleElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == SVGNames::titleAttr) {
-        if (sheet())
+        if (sheet() && !isInShadowTree())
             sheet()->setTitle(value);
         return;
     }
@@ -113,19 +117,18 @@ void SVGStyleElement::finishParsingChildren()
     SVGElement::finishParsingChildren();
 }
 
-Node::InsertionNotificationRequest SVGStyleElement::insertedInto(ContainerNode& rootParent)
+Node::InsertedIntoAncestorResult SVGStyleElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    bool wasInDocument = isConnected();
-    auto result = SVGElement::insertedInto(rootParent);
-    if (rootParent.isConnected() && !wasInDocument)
+    auto result = SVGElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    if (insertionType.connectedToDocument)
         m_styleSheetOwner.insertedIntoDocument(*this);
     return result;
 }
 
-void SVGStyleElement::removedFrom(ContainerNode& rootParent)
+void SVGStyleElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
 {
-    SVGElement::removedFrom(rootParent);
-    if (rootParent.isConnected() && !isConnected())
+    SVGElement::removedFromAncestor(removalType, oldParentOfRemovedTree);
+    if (removalType.disconnectedFromDocument)
         m_styleSheetOwner.removedFromDocument(*this);
 }
 

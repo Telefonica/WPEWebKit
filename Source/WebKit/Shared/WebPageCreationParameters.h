@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2011, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,27 +27,34 @@
 
 #include "DrawingAreaInfo.h"
 #include "LayerTreeContext.h"
+#include "SandboxExtension.h"
 #include "SessionState.h"
-#include "WebCompiledContentRuleListData.h"
+#include "UserContentControllerParameters.h"
 #include "WebCoreArgumentCoders.h"
 #include "WebPageGroupData.h"
+#include "WebPageProxyIdentifier.h"
 #include "WebPreferencesStore.h"
-#include "WebUserContentControllerDataTypes.h"
+#include "WebURLSchemeHandlerIdentifier.h"
 #include <WebCore/ActivityState.h>
 #include <WebCore/Color.h>
+#include <WebCore/ContentSecurityPolicy.h>
+#include <WebCore/DestinationColorSpace.h>
 #include <WebCore/FloatSize.h>
+#include <WebCore/HighlightVisibility.h>
 #include <WebCore/IntSize.h>
-#include <WebCore/LayoutMilestones.h>
+#include <WebCore/LayoutMilestone.h>
 #include <WebCore/MediaProducer.h>
+#include <WebCore/PageIdentifier.h>
 #include <WebCore/Pagination.h>
 #include <WebCore/ScrollTypes.h>
+#include <WebCore/ShouldRelaxThirdPartyCookieBlocking.h>
 #include <WebCore/UserInterfaceLayoutDirection.h>
-#include <pal/SessionID.h>
-#include <wtf/HashMap.h>
+#include <WebCore/ViewportArguments.h>
+#include <wtf/RobinHoodHashSet.h>
 #include <wtf/text/WTFString.h>
 
-#if PLATFORM(MAC)
-#include "ColorSpaceData.h"
+#if ENABLE(APPLICATION_MANIFEST)
+#include <WebCore/ApplicationManifest.h>
 #endif
 
 namespace IPC {
@@ -63,19 +70,29 @@ struct WebPageCreationParameters {
 
     WebCore::IntSize viewSize;
 
-    WebCore::ActivityState::Flags activityState;
+    OptionSet<WebCore::ActivityState::Flag> activityState;
     
     WebPreferencesStore store;
     DrawingAreaType drawingAreaType;
+    DrawingAreaIdentifier drawingAreaIdentifier;
+    WebPageProxyIdentifier webPageProxyIdentifier;
     WebPageGroupData pageGroupData;
 
-    bool drawsBackground;
     bool isEditable;
 
     WebCore::Color underlayColor;
 
     bool useFixedLayout;
     WebCore::IntSize fixedLayoutSize;
+
+    WebCore::FloatSize defaultUnobscuredSize;
+    WebCore::FloatSize minimumUnobscuredSize;
+    WebCore::FloatSize maximumUnobscuredSize;
+
+    std::optional<WebCore::FloatRect> viewExposedRect;
+
+    bool alwaysShowsHorizontalScroller;
+    bool alwaysShowsVerticalScroller;
 
     bool suppressScrollbarAnimations;
 
@@ -87,28 +104,31 @@ struct WebPageCreationParameters {
     
     String userAgent;
 
+    bool itemStatesWereRestoredByAPIRequest { false };
     Vector<BackForwardListItemState> itemStates;
-    PAL::SessionID sessionID;
-    uint64_t highestUsedBackForwardItemID;
 
-    uint64_t userContentControllerID;
     uint64_t visitedLinkTableID;
-    uint64_t websiteDataStoreID;
     bool canRunBeforeUnloadConfirmPanel;
     bool canRunModal;
 
     float deviceScaleFactor;
     float viewScaleFactor;
 
+    double textZoomFactor { 1 };
+    double pageZoomFactor { 1 };
+
     float topContentInset;
     
     float mediaVolume;
-    WebCore::MediaProducer::MutedStateFlags muted;
+    WebCore::MediaProducerMutedStateFlags muted;
+    bool openedByDOM { false };
     bool mayStartMediaWhenInWindow;
+    bool mediaPlaybackIsSuspended { false };
 
-    WebCore::IntSize minimumLayoutSize;
+    WebCore::IntSize minimumSizeForAutoLayout;
+    WebCore::IntSize sizeToContentAutoSizeMaximumSize;
     bool autoSizingShouldExpandToViewHeight;
-    std::optional<WebCore::IntSize> viewportSizeForCSSViewportUnits;
+    std::optional<WebCore::FloatSize> viewportSizeForCSSViewportUnits;
     
     WebCore::ScrollPinningBehavior scrollPinningBehavior;
 
@@ -120,54 +140,139 @@ struct WebPageCreationParameters {
 
     LayerHostingMode layerHostingMode;
 
+    bool hasResourceLoadClient { false };
+
     Vector<String> mimeTypesWithCustomContentProviders;
 
     bool controlledByAutomation;
+    bool isProcessSwap { false };
 
-#if ENABLE(REMOTE_INSPECTOR)
-    bool allowsRemoteInspection;
-    String remoteInspectionNameOverride;
-#endif
+    bool useDarkAppearance { false };
+    bool useElevatedUserInterfaceLevel { false };
 
 #if PLATFORM(MAC)
-    ColorSpaceData colorSpace;
+    std::optional<WebCore::DestinationColorSpace> colorSpace;
+    bool useSystemAppearance;
 #endif
-#if PLATFORM(IOS)
+#if ENABLE(META_VIEWPORT)
+    bool ignoresViewportScaleLimits;
+    WebCore::FloatSize viewportConfigurationViewLayoutSize;
+    double viewportConfigurationLayoutSizeScaleFactor;
+    double viewportConfigurationMinimumEffectiveDeviceWidth;
+    WebCore::FloatSize viewportConfigurationViewSize;
+    std::optional<WebCore::ViewportArguments> overrideViewportArguments;
+#endif
+#if PLATFORM(IOS_FAMILY)
     WebCore::FloatSize screenSize;
     WebCore::FloatSize availableScreenSize;
+    WebCore::FloatSize overrideScreenSize;
     float textAutosizingWidth;
-    bool ignoresViewportScaleLimits;
-    bool allowsBlockSelection;
+    int32_t deviceOrientation { 0 };
+    bool keyboardIsAttached { false };
+    bool canShowWhileLocked { false };
+    bool isCapturingScreen { false };
 #endif
 #if PLATFORM(COCOA)
     bool smartInsertDeleteEnabled;
+    Vector<String> additionalSupportedImageTypes;
+    Vector<SandboxExtension::Handle> gpuIOKitExtensionHandles;
+    Vector<SandboxExtension::Handle> gpuMachExtensionHandles;
 #endif
-    bool appleMailPaginationQuirkEnabled;
+#if HAVE(STATIC_FONT_REGISTRY)
+    std::optional<SandboxExtension::Handle> fontMachExtensionHandle;
+#endif
+#if HAVE(APP_ACCENT_COLORS)
+    WebCore::Color accentColor;
+#endif
+#if USE(WPE_RENDERER)
+    IPC::Attachment hostFileDescriptor;
+#endif
+#if PLATFORM(WIN)
+    uint64_t nativeWindowHandle;
+#endif
+#if USE(GRAPHICS_LAYER_WC)
+    bool usesOffscreenRendering { false };
+#endif
     bool shouldScaleViewToFitDocument;
 
     WebCore::UserInterfaceLayoutDirection userInterfaceLayoutDirection;
-    WebCore::LayoutMilestones observedLayoutMilestones;
+    OptionSet<WebCore::LayoutMilestone> observedLayoutMilestones;
 
     String overrideContentSecurityPolicy;
     std::optional<double> cpuLimit;
 
-    HashMap<String, uint64_t> urlSchemeHandlers;
+    HashMap<String, WebURLSchemeHandlerIdentifier> urlSchemeHandlers;
+    Vector<String> urlSchemesWithLegacyCustomProtocolHandlers;
+
+#if ENABLE(APPLICATION_MANIFEST)
+    std::optional<WebCore::ApplicationManifest> applicationManifest;
+#endif
+
+    bool needsFontAttributes { false };
 
     // WebRTC members.
     bool iceCandidateFilteringEnabled { true };
     bool enumeratingAllNetworkInterfacesEnabled { false };
 
-    // UserContentController members
-    Vector<std::pair<uint64_t, String>> userContentWorlds;
-    Vector<WebUserScriptData> userScripts;
-    Vector<WebUserStyleSheetData> userStyleSheets;
-    Vector<WebScriptMessageHandlerData> messageHandlers;
-#if ENABLE(CONTENT_EXTENSIONS)
-    Vector<std::pair<String, WebCompiledContentRuleListData>> contentRuleLists;
+    UserContentControllerParameters userContentControllerParameters;
+
+    std::optional<WebCore::Color> backgroundColor;
+
+    std::optional<WebCore::PageIdentifier> oldPageID;
+
+    String overriddenMediaType;
+    Vector<String> corsDisablingPatterns;
+    HashSet<String> maskedURLSchemes;
+    bool userScriptsShouldWaitUntilNotification { true };
+    bool loadsSubresources { true };
+    std::optional<MemoryCompactLookupOnlyRobinHoodHashSet<String>> allowedNetworkHosts;
+
+    bool crossOriginAccessControlCheckEnabled { true };
+    String processDisplayName;
+
+    bool shouldCaptureAudioInUIProcess { false };
+    bool shouldCaptureAudioInGPUProcess { false };
+    bool shouldCaptureVideoInUIProcess { false };
+    bool shouldCaptureVideoInGPUProcess { false };
+    bool shouldCaptureDisplayInUIProcess { false };
+    bool shouldCaptureDisplayInGPUProcess { false };
+    bool shouldRenderCanvasInGPUProcess { false };
+    bool shouldRenderDOMInGPUProcess { false };
+    bool shouldPlayMediaInGPUProcess { false };
+#if ENABLE(WEBGL)
+    bool shouldRenderWebGLInGPUProcess { false };
+#endif
+    bool shouldEnableVP8Decoder { false };
+    bool shouldEnableVP9Decoder { false };
+    bool shouldEnableVP9SWDecoder { false };
+#if ENABLE(APP_BOUND_DOMAINS)
+    bool limitsNavigationsToAppBoundDomains { false };
+#endif
+    bool lastNavigationWasAppInitiated { true };
+    bool canUseCredentialStorage { true };
+
+    WebCore::ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking { WebCore::ShouldRelaxThirdPartyCookieBlocking::No };
+    
+    bool httpsUpgradeEnabled { true };
+
+#if PLATFORM(IOS)
+    bool allowsDeprecatedSynchronousXMLHttpRequestDuringUnload { false };
+#endif
+    
+#if ENABLE(APP_HIGHLIGHTS)
+    WebCore::HighlightVisibility appHighlightsVisible { WebCore::HighlightVisibility::Hidden };
 #endif
 
-    // LocalStorageQuota setting
+#if HAVE(TOUCH_BAR)
+    bool requiresUserActionForEditingControlsManager { false };
+#endif
+
+    bool hasResizableWindows { false };
+
+    WebCore::ContentSecurityPolicyModeForExtension contentSecurityPolicyModeForExtension { WebCore::ContentSecurityPolicyModeForExtension::None };
+
     uint32_t localStorageQuota;
+
 };
 
 } // namespace WebKit

@@ -12,24 +12,31 @@
 # OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 # CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 
-licenses(["notice"])
-
-exports_files(["LICENSE"])
-
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load(
     ":BUILD.generated.bzl",
     "crypto_headers",
     "crypto_internal_headers",
     "crypto_sources",
+    "crypto_sources_linux_aarch64",
+    "crypto_sources_linux_ppc64le",
     "crypto_sources_linux_x86_64",
     "crypto_sources_mac_x86_64",
     "fips_fragments",
     "ssl_headers",
     "ssl_internal_headers",
-    "ssl_c_sources",
-    "ssl_cc_sources",
-    "tool_sources",
+    "ssl_sources",
     "tool_headers",
+    "tool_sources",
+)
+
+licenses(["notice"])
+
+exports_files(["LICENSE"])
+
+config_setting(
+    name = "linux_aarch64",
+    values = {"cpu": "aarch64"},
 )
 
 config_setting(
@@ -38,11 +45,46 @@ config_setting(
 )
 
 config_setting(
+    name = "linux_ppc64le",
+    values = {"cpu": "ppc"},
+)
+
+config_setting(
     name = "mac_x86_64",
     values = {"cpu": "darwin"},
 )
 
-boringssl_copts = [
+config_setting(
+    name = "windows_x86_64",
+    values = {"cpu": "x64_windows"},
+)
+
+config_setting(
+    name = "android_legacy",
+    values = {"crosstool_top": "//external:android/crosstool"},
+)
+
+config_setting(
+    name = "android_stlport",
+    values = {"crosstool_top": "@androidndk//:toolchain-stlport"},
+)
+
+config_setting(
+    name = "android_libcpp",
+    values = {"crosstool_top": "@androidndk//:toolchain-libcpp"},
+)
+
+config_setting(
+    name = "android_gnu_libstdcpp",
+    values = {"crosstool_top": "@androidndk//:toolchain-gnu-libstdcpp"},
+)
+
+config_setting(
+    name = "android_default",
+    values = {"crosstool_top": "@androidndk//:default_crosstool"},
+)
+
+posix_copts = [
     # Assembler option --noexecstack adds .note.GNU-stack to each object to
     # ensure that binaries can be built with non-executable stack.
     "-Wa,--noexecstack",
@@ -64,31 +106,57 @@ boringssl_copts = [
     # operations for reference counting rather than locks. However, it's
     # known not to work on some Android builds.
     # "-DOPENSSL_C11_ATOMIC",
-] + select({
-    ":linux_x86_64": [],
-    ":mac_x86_64": [],
+]
+
+boringssl_copts = select({
+    ":linux_aarch64": posix_copts,
+    ":linux_ppc64le": posix_copts,
+    ":linux_x86_64": posix_copts,
+    ":mac_x86_64": posix_copts,
+    ":windows_x86_64": [
+        "-DWIN32_LEAN_AND_MEAN",
+        "-DOPENSSL_NO_ASM",
+    ],
     "//conditions:default": ["-DOPENSSL_NO_ASM"],
 })
 
 crypto_sources_asm = select({
+    ":linux_aarch64": crypto_sources_linux_aarch64,
+    ":linux_ppc64le": crypto_sources_linux_ppc64le,
     ":linux_x86_64": crypto_sources_linux_x86_64,
     ":mac_x86_64": crypto_sources_mac_x86_64,
     "//conditions:default": [],
 })
 
 # For C targets only (not C++), compile with C11 support.
-boringssl_copts_c11 = boringssl_copts + [
+posix_copts_c11 = [
     "-std=c11",
     "-Wmissing-prototypes",
     "-Wold-style-definition",
     "-Wstrict-prototypes",
 ]
 
-# For C targets only (not C++), compile with C11 support.
-boringssl_copts_cxx = boringssl_copts + [
+boringssl_copts_c11 = boringssl_copts + select({
+    ":linux_aarch64": posix_copts_c11,
+    ":linux_ppc64le": posix_copts_c11,
+    ":linux_x86_64": posix_copts_c11,
+    ":mac_x86_64": posix_copts_c11,
+    "//conditions:default": [],
+})
+
+# For C++ targets only (not C), compile with C++11 support.
+posix_copts_cxx = [
     "-std=c++11",
     "-Wmissing-declarations",
 ]
+
+boringssl_copts_cxx = boringssl_copts + select({
+    ":linux_aarch64": posix_copts_cxx,
+    ":linux_ppc64le": posix_copts_cxx,
+    ":linux_x86_64": posix_copts_cxx,
+    ":mac_x86_64": posix_copts_cxx,
+    "//conditions:default": [],
+})
 
 cc_library(
     name = "crypto",
@@ -97,7 +165,15 @@ cc_library(
     copts = boringssl_copts_c11,
     includes = ["src/include"],
     linkopts = select({
+        # Android supports pthreads, but does not provide a libpthread
+        # to link against.
+        ":android_legacy": [],
+        ":android_stlport": [],
+        ":android_libcpp": [],
+        ":android_gnu_libstdcpp": [],
+        ":android_default": [],
         ":mac_x86_64": [],
+        ":windows_x86_64": ["-defaultlib:advapi32.lib"],
         "//conditions:default": ["-lpthread"],
     }),
     visibility = ["//visibility:public"],
@@ -105,21 +181,14 @@ cc_library(
 
 cc_library(
     name = "ssl",
-    srcs = ssl_c_sources + ssl_internal_headers,
+    srcs = ssl_sources + ssl_internal_headers,
     hdrs = ssl_headers,
-    copts = boringssl_copts_c11,
+    copts = boringssl_copts_cxx,
     includes = ["src/include"],
     visibility = ["//visibility:public"],
-    deps = [":crypto", ":ssl_cc"],
-)
-
-cc_library(
-    name = "ssl_cc",
-    srcs = ssl_cc_sources + ssl_internal_headers,
-    hdrs = ssl_headers,
-    copts = boringssl_copts,
-    includes = ["src/include"],
-    deps = [":crypto"],
+    deps = [
+        ":crypto",
+    ],
 )
 
 cc_binary(

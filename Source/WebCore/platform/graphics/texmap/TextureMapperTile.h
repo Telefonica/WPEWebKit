@@ -30,14 +30,15 @@ namespace WebCore {
 class GraphicsLayer;
 
 class TextureMapperTile {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     inline RefPtr<BitmapTexture> texture() const { return m_texture; }
     inline FloatRect rect() const { return m_rect; }
     inline void setTexture(BitmapTexture* texture) { m_texture = texture; }
     inline void setRect(const FloatRect& rect) { m_rect = rect; }
 
-    void updateContents(TextureMapper&, Image*, const IntRect&, BitmapTexture::UpdateContentsFlag UpdateCanModifyOriginalImageData);
-    void updateContents(TextureMapper&, GraphicsLayer*, const IntRect&, BitmapTexture::UpdateContentsFlag UpdateCanModifyOriginalImageData, float scale = 1);
+    void updateContents(TextureMapper&, Image*, const IntRect&);
+    void updateContents(TextureMapper&, GraphicsLayer*, const IntRect&, float scale = 1);
     WEBCORE_EXPORT virtual void paint(TextureMapper&, const TransformationMatrix&, float, const unsigned exposedEdges);
     virtual ~TextureMapperTile() = default;
 

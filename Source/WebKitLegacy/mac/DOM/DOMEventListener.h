@@ -24,10 +24,11 @@
  */
 
 #import <WebKitLegacy/WebKitAvailability.h>
+#import <objc/NSObject.h>
 
 @class DOMEvent;
 
-WEBKIT_CLASS_AVAILABLE_MAC(10_4)
+WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @protocol DOMEventListener <NSObject>
 - (void)handleEvent:(DOMEvent *)event;
 @end

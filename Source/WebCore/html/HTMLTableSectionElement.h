@@ -31,6 +31,7 @@
 namespace WebCore {
 
 class HTMLTableSectionElement final : public HTMLTablePartElement {
+    WTF_MAKE_ISO_ALLOCATED(HTMLTableSectionElement);
 public:
     static Ref<HTMLTableSectionElement> create(const QualifiedName&, Document&);
 
@@ -44,7 +45,7 @@ public:
 private:
     HTMLTableSectionElement(const QualifiedName& tagName, Document&);
 
-    const StyleProperties* additionalPresentationAttributeStyle() const final;
+    const StyleProperties* additionalPresentationalHintStyle() const final;
 };
 
 } // namespace WebCore

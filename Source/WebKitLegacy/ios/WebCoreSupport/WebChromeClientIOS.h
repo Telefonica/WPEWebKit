@@ -23,11 +23,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebChromeClient.h"
 
 class WebChromeClientIOS final : public WebChromeClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebChromeClientIOS(WebView* webView)
         : WebChromeClient(webView)
@@ -47,6 +48,15 @@ private:
     bool runJavaScriptPrompt(WebCore::Frame&, const WTF::String& message, const WTF::String& defaultValue, WTF::String& result) final;
 
     void runOpenPanel(WebCore::Frame&, WebCore::FileChooser&) final;
+    void showShareSheet(WebCore::ShareDataWithParsedURL&, CompletionHandler<void(bool)>&&) final;
+
+    bool hoverSupportedByPrimaryPointingDevice() const final { return false; }
+    bool hoverSupportedByAnyAvailablePointingDevice() const final { return false; }
+    std::optional<WebCore::PointerCharacteristics> pointerCharacteristicsOfPrimaryPointingDevice() const final { return WebCore::PointerCharacteristics::Coarse; }
+    OptionSet<WebCore::PointerCharacteristics> pointerCharacteristicsOfAllAvailablePointingDevices() const final { return WebCore::PointerCharacteristics::Coarse; }
+
+    void setCursor(const WebCore::Cursor&) final { }
+    void setCursorHiddenUntilMouseMoves(bool) final { }
 
 #if ENABLE(TOUCH_EVENTS)
     void didPreventDefaultForEvent() final;
@@ -54,10 +64,11 @@ private:
 
     void didReceiveMobileDocType(bool) final;
     void setNeedsScrollNotifications(WebCore::Frame&, bool) final;
-    void observedContentChange(WebCore::Frame&) final;
-    void clearContentChangeObservers(WebCore::Frame&) final;
+    void didFinishContentChangeObserving(WebCore::Frame&, WKContentChange) final;
     WebCore::FloatSize screenSize() const final;
     WebCore::FloatSize availableScreenSize() const final;
+    WebCore::FloatSize overrideScreenSize() const final;
+    void dispatchDisabledAdaptationsDidChange(const OptionSet<WebCore::DisabledAdaptations>&) const final;
     void dispatchViewportPropertiesDidChange(const WebCore::ViewportArguments&) const final;
     void notifyRevealedSelectionByScrollingFrame(WebCore::Frame&) final;
     bool isStopping() final;
@@ -68,14 +79,14 @@ private:
     void suppressFormNotifications() final;
     void restoreFormNotifications() final;
 
-    void elementDidFocus(WebCore::Element&) final;
+    void elementDidFocus(WebCore::Element&, const WebCore::FocusOptions&) final;
     void elementDidBlur(WebCore::Element&) final;
 
     void attachRootGraphicsLayer(WebCore::Frame&, WebCore::GraphicsLayer*) final;
 
     void didFlushCompositingLayers() final;
 
-    void updateViewportConstrainedLayers(HashMap<PlatformLayer*, std::unique_ptr<WebCore::ViewportConstraints>>&, HashMap<PlatformLayer*, PlatformLayer*>&) final;
+    void updateViewportConstrainedLayers(HashMap<PlatformLayer*, std::unique_ptr<WebCore::ViewportConstraints>>&, const HashMap<PlatformLayer*, PlatformLayer*>&) final;
 
     bool fetchCustomFixedPositionLayoutRect(WebCore::IntRect&) final;
     void addOrUpdateScrollingLayer(WebCore::Node*, PlatformLayer*, PlatformLayer*, const WebCore::IntSize&, bool allowHorizontalScrollbar, bool allowVerticalScrollbar) final;
@@ -88,8 +99,10 @@ private:
 
     void webAppOrientationsUpdated() final;
     void focusedElementChanged(WebCore::Element*) final;
-    void showPlaybackTargetPicker(bool hasVideo) final;
+    void showPlaybackTargetPicker(bool hasVideo, WebCore::RouteSharingPolicy, const String&) final;
     RefPtr<WebCore::Icon> createIconForFiles(const Vector<String>& filenames) final;
+
+    bool showDataDetectorsUIForElement(const WebCore::Element&, const WebCore::Event&) final { return false; }
 
 #if ENABLE(ORIENTATION_EVENTS)
     int deviceOrientation() const final;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,14 +26,14 @@
 #include "config.h"
 #include "ProbeContext.h"
 
-#if ENABLE(MASM_PROBE)
+#if ENABLE(ASSEMBLER)
 
 namespace JSC {
 namespace Probe {
 
 static void flushDirtyStackPages(State*);
 
-void executeProbe(State* state)
+void executeJSCJITProbe(State* state)
 {
     Context context(state);
 #if CPU(ARM64)
@@ -59,8 +59,9 @@ void executeProbe(State* state)
 #endif
 
     if (context.hasWritesToFlush()) {
-        context.stack().setNewStackPointer(state->cpu.sp());
-        state->cpu.sp() = std::min(context.stack().lowWatermark(), state->cpu.sp());
+        context.stack().setSavedStackPointer(state->cpu.sp());
+        void* lowWatermark = context.stack().lowWatermarkFromVisitingDirtyPages();
+        state->cpu.sp() = std::min(lowWatermark, state->cpu.sp());
 
         state->initializeStackFunction = flushDirtyStackPages;
         state->initializeStackArg = context.releaseStack();
@@ -71,7 +72,7 @@ static void flushDirtyStackPages(State* state)
 {
     std::unique_ptr<Stack> stack(reinterpret_cast<Probe::Stack*>(state->initializeStackArg));
     stack->flushWrites();
-    state->cpu.sp() = stack->newStackPointer();
+    state->cpu.sp() = stack->savedStackPointer();
 }
 
 // Not for general use. This should only be for writing tests.
@@ -84,4 +85,4 @@ void* probeStateForContext(Context& context)
 } // namespace Probe
 } // namespace JSC
 
-#endif // ENABLE(MASM_PROBE)
+#endif // ENABLE(ASSEMBLER)

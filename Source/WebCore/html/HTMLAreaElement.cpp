@@ -23,6 +23,7 @@
 #include "HTMLAreaElement.h"
 
 #include "AffineTransform.h"
+#include "ElementInlines.h"
 #include "Frame.h"
 #include "HTMLImageElement.h"
 #include "HTMLMapElement.h"
@@ -31,8 +32,11 @@
 #include "Path.h"
 #include "RenderImage.h"
 #include "RenderView.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLAreaElement);
 
 using namespace HTMLNames;
 
@@ -49,14 +53,14 @@ Ref<HTMLAreaElement> HTMLAreaElement::create(const QualifiedName& tagName, Docum
     return adoptRef(*new HTMLAreaElement(tagName, document));
 }
 
-void HTMLAreaElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLAreaElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == shapeAttr) {
-        if (equalLettersIgnoringASCIICase(value, "default"))
+        if (equalLettersIgnoringASCIICase(value, "default"_s))
             m_shape = Default;
-        else if (equalLettersIgnoringASCIICase(value, "circle") || equalLettersIgnoringASCIICase(value, "circ"))
+        else if (equalLettersIgnoringASCIICase(value, "circle"_s) || equalLettersIgnoringASCIICase(value, "circ"_s))
             m_shape = Circle;
-        else if (equalLettersIgnoringASCIICase(value, "poly") || equalLettersIgnoringASCIICase(value, "polygon"))
+        else if (equalLettersIgnoringASCIICase(value, "poly"_s) || equalLettersIgnoringASCIICase(value, "polygon"_s))
             m_shape = Poly;
         else {
             // The missing value default is the rectangle state.
@@ -66,7 +70,7 @@ void HTMLAreaElement::parseAttribute(const QualifiedName& name, const AtomicStri
     } else if (name == coordsAttr) {
         m_coords = parseHTMLListOfOfFloatingPointNumberValues(value.string());
         invalidateCachedRegion();
-    } else if (name == altAttr || name == accesskeyAttr) {
+    } else if (name == altAttr) {
         // Do nothing.
     } else
         HTMLAnchorElement::parseAttribute(name, value);
@@ -80,7 +84,7 @@ void HTMLAreaElement::invalidateCachedRegion()
 bool HTMLAreaElement::mapMouseEvent(LayoutPoint location, const LayoutSize& size, HitTestResult& result)
 {
     if (m_lastSize != size) {
-        m_region = std::make_unique<Path>(getRegion(size));
+        m_region = makeUnique<Path>(getRegion(size));
         m_lastSize = size;
     }
 
@@ -187,14 +191,14 @@ Path HTMLAreaElement::getRegion(const LayoutSize& size) const
 
 HTMLImageElement* HTMLAreaElement::imageElement() const
 {
-    Node* mapElement = parentNode();
+    RefPtr<Node> mapElement = parentNode();
     if (!is<HTMLMapElement>(mapElement))
         return nullptr;
     
     return downcast<HTMLMapElement>(*mapElement).imageElement();
 }
 
-bool HTMLAreaElement::isKeyboardFocusable(KeyboardEvent&) const
+bool HTMLAreaElement::isKeyboardFocusable(KeyboardEvent*) const
 {
     return isFocusable();
 }
@@ -206,21 +210,21 @@ bool HTMLAreaElement::isMouseFocusable() const
 
 bool HTMLAreaElement::isFocusable() const
 {
-    HTMLImageElement* image = imageElement();
-    if (!image || !image->renderer() || image->renderer()->style().visibility() != VISIBLE)
+    RefPtr<HTMLImageElement> image = imageElement();
+    if (!image || !image->isFocusableWithoutResolvingFullStyle())
         return false;
 
-    return supportsFocus() && Element::tabIndex() >= 0;
+    return supportsFocus() && tabIndexSetExplicitly().value_or(0) >= 0;
 }
     
-void HTMLAreaElement::setFocus(bool shouldBeFocused)
+void HTMLAreaElement::setFocus(bool shouldBeFocused, FocusVisibility visibility)
 {
     if (focused() == shouldBeFocused)
         return;
 
-    HTMLAnchorElement::setFocus(shouldBeFocused);
+    HTMLAnchorElement::setFocus(shouldBeFocused, visibility);
 
-    HTMLImageElement* imageElement = this->imageElement();
+    RefPtr<HTMLImageElement> imageElement = this->imageElement();
     if (!imageElement)
         return;
 
@@ -230,17 +234,12 @@ void HTMLAreaElement::setFocus(bool shouldBeFocused)
 
     downcast<RenderImage>(*renderer).areaElementFocusChanged(this);
 }
-    
-void HTMLAreaElement::updateFocusAppearance(SelectionRestorationMode restorationMode, SelectionRevealMode revealMode)
+
+RefPtr<Element> HTMLAreaElement::focusAppearanceUpdateTarget()
 {
     if (!isFocusable())
-        return;
-
-    HTMLImageElement* imageElement = this->imageElement();
-    if (!imageElement)
-        return;
-
-    imageElement->updateFocusAppearance(restorationMode, revealMode);
+        return nullptr;
+    return imageElement();
 }
     
 bool HTMLAreaElement::supportsFocus() const
@@ -251,7 +250,7 @@ bool HTMLAreaElement::supportsFocus() const
     return isLink();
 }
 
-String HTMLAreaElement::target() const
+AtomString HTMLAreaElement::target() const
 {
     return attributeWithoutSynchronization(targetAttr);
 }

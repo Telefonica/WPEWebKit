@@ -34,7 +34,6 @@
 #include "AccessibilityTableCell.h"
 #include "AccessibilityTableColumn.h"
 #include "AccessibilityTableHeaderContainer.h"
-#include "AccessibilityTableRow.h"
 #include "RenderObject.h"
 #include "RenderTableSection.h"
 
@@ -45,44 +44,41 @@ AccessibilityARIAGrid::AccessibilityARIAGrid(RenderObject* renderer)
 {
 }
 
-AccessibilityARIAGrid::~AccessibilityARIAGrid()
-{
-}
+AccessibilityARIAGrid::~AccessibilityARIAGrid() = default;
 
 Ref<AccessibilityARIAGrid> AccessibilityARIAGrid::create(RenderObject* renderer)
 {
     return adoptRef(*new AccessibilityARIAGrid(renderer));
 }
 
-bool AccessibilityARIAGrid::addTableCellChild(AccessibilityObject* child, HashSet<AccessibilityObject*>& appendedRows, unsigned& columnCount)
+bool AccessibilityARIAGrid::addTableCellChild(AXCoreObject* child, HashSet<AccessibilityObject*>& appendedRows, unsigned& columnCount)
 {
-    if (!child || (!is<AccessibilityTableRow>(*child) && !is<AccessibilityARIAGridRow>(*child)))
+    if (!child || (!is<AccessibilityTableRow>(*child) && !child->isARIATreeGridRow()))
         return false;
-        
+
     auto& row = downcast<AccessibilityTableRow>(*child);
     if (appendedRows.contains(&row))
         return false;
-        
+
     // store the maximum number of columns
     unsigned rowCellCount = row.children().size();
     if (rowCellCount > columnCount)
         columnCount = rowCellCount;
-    
+
     row.setRowIndex((int)m_rows.size());
     m_rows.append(&row);
-
-    // Try adding the row if it's not ignoring accessibility,
-    // otherwise add its children (the cells) as the grid's children.
-    if (!row.accessibilityIsIgnored())
-        m_children.append(&row);
-    else
-        m_children.appendVector(row.children());
-
+    addChild(&row);
     appendedRows.add(&row);
     return true;
 }
 
-void AccessibilityARIAGrid::addRowDescendant(AccessibilityObject* rowChild, HashSet<AccessibilityObject*>& appendedRows, unsigned& columnCount)
+bool AccessibilityARIAGrid::isMultiSelectable() const
+{
+    const AtomString& ariaMultiSelectable = getAttribute(HTMLNames::aria_multiselectableAttr);
+    return !equalLettersIgnoringASCIICase(ariaMultiSelectable, "false"_s);
+}
+
+void AccessibilityARIAGrid::addRowDescendant(AXCoreObject* rowChild, HashSet<AccessibilityObject*>& appendedRows, unsigned& columnCount)
 {
     if (!rowChild)
         return;
@@ -98,14 +94,14 @@ void AccessibilityARIAGrid::addRowDescendant(AccessibilityObject* rowChild, Hash
 
 void AccessibilityARIAGrid::addChildren()
 {
-    ASSERT(!m_haveChildren); 
+    ASSERT(!m_childrenInitialized); 
     
-    if (!isExposableThroughAccessibility()) {
+    if (!isExposable()) {
         AccessibilityRenderObject::addChildren();
         return;
     }
     
-    m_haveChildren = true;
+    m_childrenInitialized = true;
     if (!m_renderer)
         return;
     
@@ -135,17 +131,14 @@ void AccessibilityARIAGrid::addChildren()
     
     // make the columns based on the number of columns in the first body
     for (unsigned i = 0; i < columnCount; ++i) {
-        auto& column = downcast<AccessibilityTableColumn>(*axCache->getOrCreate(ColumnRole));
-        column.setColumnIndex(static_cast<int>(i));
+        auto& column = downcast<AccessibilityTableColumn>(*axCache->create(AccessibilityRole::Column));
+        column.setColumnIndex(i);
         column.setParent(this);
         m_columns.append(&column);
-        if (!column.accessibilityIsIgnored())
-            m_children.append(&column);
+        addChild(&column, DescendIfIgnored::No);
     }
-    
-    AccessibilityObject* headerContainerObject = headerContainer();
-    if (headerContainerObject && !headerContainerObject->accessibilityIsIgnored())
-        m_children.append(headerContainerObject);
+
+    addChild(headerContainer(), DescendIfIgnored::No);
 }
     
 } // namespace WebCore

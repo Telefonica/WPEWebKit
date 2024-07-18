@@ -8,72 +8,68 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_VIDEO_CAPTURE_DS_H_
-#define WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_VIDEO_CAPTURE_DS_H_
+#ifndef MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_VIDEO_CAPTURE_DS_H_
+#define MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_VIDEO_CAPTURE_DS_H_
 
-#include "webrtc/modules/video_capture/video_capture_impl.h"
-#include "webrtc/modules/video_capture/windows/device_info_ds.h"
+#include "api/scoped_refptr.h"
+#include "modules/video_capture/video_capture_impl.h"
+#include "modules/video_capture/windows/device_info_ds.h"
 
 #define CAPTURE_FILTER_NAME L"VideoCaptureFilter"
 #define SINK_FILTER_NAME L"SinkFilter"
 
-namespace webrtc
-{
-namespace videocapturemodule
-{
+namespace webrtc {
+namespace videocapturemodule {
 // Forward declaraion
 class CaptureSinkFilter;
 
-class VideoCaptureDS: public VideoCaptureImpl
-{
-public:
-    VideoCaptureDS();
+class VideoCaptureDS : public VideoCaptureImpl {
+ public:
+  VideoCaptureDS();
 
-    virtual int32_t Init(const char* deviceUniqueIdUTF8);
+  virtual int32_t Init(const char* deviceUniqueIdUTF8);
 
-    /*************************************************************************
-     *
-     *   Start/Stop
-     *
-     *************************************************************************/
-    virtual int32_t
-        StartCapture(const VideoCaptureCapability& capability);
-    virtual int32_t StopCapture();
+  /*************************************************************************
+   *
+   *   Start/Stop
+   *
+   *************************************************************************/
+  int32_t StartCapture(const VideoCaptureCapability& capability) override;
+  int32_t StopCapture() override;
 
-    /**************************************************************************
-     *
-     *   Properties of the set device
-     *
-     **************************************************************************/
+  /**************************************************************************
+   *
+   *   Properties of the set device
+   *
+   **************************************************************************/
 
-    virtual bool CaptureStarted();
-    virtual int32_t CaptureSettings(VideoCaptureCapability& settings);
+  bool CaptureStarted() override;
+  int32_t CaptureSettings(VideoCaptureCapability& settings) override;
 
-protected:
-    virtual ~VideoCaptureDS();
+ protected:
+  ~VideoCaptureDS() override;
 
-    // Help functions
+  // Help functions
 
-    int32_t
-        SetCameraOutput(const VideoCaptureCapability& requestedCapability);
-    int32_t DisconnectGraph();
-    HRESULT VideoCaptureDS::ConnectDVCamera();
+  int32_t SetCameraOutput(const VideoCaptureCapability& requestedCapability);
+  int32_t DisconnectGraph();
+  HRESULT ConnectDVCamera();
 
-    DeviceInfoDS _dsInfo;
+  DeviceInfoDS _dsInfo RTC_GUARDED_BY(api_checker_);
 
-    IBaseFilter* _captureFilter;
-    IGraphBuilder* _graphBuilder;
-    IMediaControl* _mediaControl;
-    CaptureSinkFilter* _sinkFilter;
-    IPin* _inputSendPin;
-    IPin* _outputCapturePin;
+  IBaseFilter* _captureFilter RTC_GUARDED_BY(api_checker_);
+  IGraphBuilder* _graphBuilder RTC_GUARDED_BY(api_checker_);
+  IMediaControl* _mediaControl RTC_GUARDED_BY(api_checker_);
+  rtc::scoped_refptr<CaptureSinkFilter> sink_filter_
+      RTC_GUARDED_BY(api_checker_);
+  IPin* _inputSendPin RTC_GUARDED_BY(api_checker_);
+  IPin* _outputCapturePin RTC_GUARDED_BY(api_checker_);
 
-    // Microsoft DV interface (external DV cameras)
-    IBaseFilter* _dvFilter;
-    IPin* _inputDvPin;
-    IPin* _outputDvPin;
-
+  // Microsoft DV interface (external DV cameras)
+  IBaseFilter* _dvFilter RTC_GUARDED_BY(api_checker_);
+  IPin* _inputDvPin RTC_GUARDED_BY(api_checker_);
+  IPin* _outputDvPin RTC_GUARDED_BY(api_checker_);
 };
 }  // namespace videocapturemodule
 }  // namespace webrtc
-#endif // WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_VIDEO_CAPTURE_DS_H_
+#endif  // MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_VIDEO_CAPTURE_DS_H_

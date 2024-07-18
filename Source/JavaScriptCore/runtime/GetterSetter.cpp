@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2002 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2004, 2007-2009, 2014, 2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2004-2021 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -23,89 +23,60 @@
 #include "config.h"
 #include "GetterSetter.h"
 
-#include "Error.h"
 #include "Exception.h"
-#include "JSObject.h"
-#include "JSCInlines.h"
+#include "JSObjectInlines.h"
 #include <wtf/Assertions.h>
 
 namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(GetterSetter);
 
-const ClassInfo GetterSetter::s_info = { "GetterSetter", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(GetterSetter) };
+const ClassInfo GetterSetter::s_info = { "GetterSetter"_s, nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(GetterSetter) };
 
-void GetterSetter::visitChildren(JSCell* cell, SlotVisitor& visitor)
+template<typename Visitor>
+void GetterSetter::visitChildrenImpl(JSCell* cell, Visitor& visitor)
 {
     GetterSetter* thisObject = jsCast<GetterSetter*>(cell);
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
-    JSCell::visitChildren(thisObject, visitor);
+    Base::visitChildren(thisObject, visitor);
 
     visitor.append(thisObject->m_getter);
     visitor.append(thisObject->m_setter);
 }
 
-GetterSetter* GetterSetter::withGetter(VM& vm, JSGlobalObject* globalObject, JSObject* newGetter)
-{
-    if (isGetterNull()) {
-        setGetter(vm, globalObject, newGetter);
-        return this;
-    }
-    
-    GetterSetter* result = GetterSetter::create(vm, globalObject);
-    result->setGetter(vm, globalObject, newGetter);
-    result->setSetter(vm, globalObject, setter());
-    return result;
-}
+DEFINE_VISIT_CHILDREN(GetterSetter);
 
-GetterSetter* GetterSetter::withSetter(VM& vm, JSGlobalObject* globalObject, JSObject* newSetter)
+JSValue GetterSetter::callGetter(JSGlobalObject* globalObject, JSValue thisValue)
 {
-    if (isSetterNull()) {
-        setSetter(vm, globalObject, newSetter);
-        return this;
-    }
-    
-    GetterSetter* result = GetterSetter::create(vm, globalObject);
-    result->setGetter(vm, globalObject, getter());
-    result->setSetter(vm, globalObject, newSetter);
-    return result;
-}
-
-JSValue callGetter(ExecState* exec, JSValue base, JSValue getterSetter)
-{
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
     // FIXME: Some callers may invoke get() without checking for an exception first.
     // We work around that by checking here.
     RETURN_IF_EXCEPTION(scope, scope.exception()->value());
 
-    JSObject* getter = jsCast<GetterSetter*>(getterSetter)->getter();
+    JSObject* getter = this->getter();
 
-    CallData callData;
-    CallType callType = getter->methodTable(vm)->getCallData(getter, callData);
-    scope.release();
-    return call(exec, getter, callType, callData, base, ArgList());
+    auto callData = JSC::getCallData(getter);
+    RELEASE_AND_RETURN(scope, call(globalObject, getter, callData, thisValue, ArgList()));
 }
 
-bool callSetter(ExecState* exec, JSValue base, JSValue getterSetter, JSValue value, ECMAMode ecmaMode)
+bool GetterSetter::callSetter(JSGlobalObject* globalObject, JSValue thisValue, JSValue value, bool shouldThrow)
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    GetterSetter* getterSetterObj = jsCast<GetterSetter*>(getterSetter);
+    JSObject* setter = this->setter();
 
-    if (getterSetterObj->isSetterNull())
-        return typeError(exec, scope, ecmaMode == StrictMode, ASCIILiteral(ReadonlyPropertyWriteError));
-
-    JSObject* setter = getterSetterObj->setter();
+    if (setter->type() == NullSetterFunctionType)
+        return typeError(globalObject, scope, shouldThrow, ReadonlyPropertyWriteError);
 
     MarkedArgumentBuffer args;
     args.append(value);
+    ASSERT(!args.hasOverflowed());
 
-    CallData callData;
-    CallType callType = setter->methodTable(vm)->getCallData(setter, callData);
+    auto callData = JSC::getCallData(setter);
     scope.release();
-    call(exec, setter, callType, callData, base, args);
+    call(globalObject, setter, callData, thisValue, args);
     return true;
 }
 

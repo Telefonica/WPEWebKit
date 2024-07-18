@@ -25,8 +25,10 @@
 
 #pragma once
 
+#include "NetworkSessionCreationParameters.h"
 #include "SandboxExtension.h"
 #include <WebCore/Cookie.h>
+#include <WebCore/StorageQuotaManager.h>
 #include <pal/SessionID.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
@@ -41,17 +43,22 @@ namespace WebKit {
 struct WebsiteDataStoreParameters {
     WebsiteDataStoreParameters() = default;
     WebsiteDataStoreParameters(WebsiteDataStoreParameters&&) = default;
+    WebsiteDataStoreParameters& operator=(WebsiteDataStoreParameters&&) = default;
     ~WebsiteDataStoreParameters();
-    
-    void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, WebsiteDataStoreParameters&);
 
-    PAL::SessionID sessionID;
+    void encode(IPC::Encoder&) const;
+    static std::optional<WebsiteDataStoreParameters> decode(IPC::Decoder&);
+
     Vector<uint8_t> uiProcessCookieStorageIdentifier;
     SandboxExtension::Handle cookieStoragePathExtensionHandle;
-    Vector<WebCore::Cookie> pendingCookies;
-    String cacheStorageDirectory;
-    SandboxExtension::Handle cacheStorageDirectoryExtensionHandle;
+    NetworkSessionCreationParameters networkSessionParameters;
+
+#if PLATFORM(IOS_FAMILY)
+    std::optional<SandboxExtension::Handle> cookieStorageDirectoryExtensionHandle;
+    std::optional<SandboxExtension::Handle> containerCachesDirectoryExtensionHandle;
+    std::optional<SandboxExtension::Handle> parentBundleDirectoryExtensionHandle;
+    std::optional<SandboxExtension::Handle> tempDirectoryExtensionHandle;
+#endif
 };
 
 } // namespace WebKit

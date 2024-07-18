@@ -45,12 +45,12 @@ public:
     enum GIFQuery { GIFFullQuery, GIFSizeQuery, GIFFrameCountQuery };
 
     // ScalableImageDecoder
-    String filenameExtension() const final { return ASCIILiteral("gif"); }
-    void setData(SharedBuffer& data, bool allDataReceived) final;
+    String filenameExtension() const final { return "gif"_s; }
+    void setData(const FragmentedSharedBuffer& data, bool allDataReceived) final;
     bool setSize(const IntSize&) final;
     size_t frameCount() const final;
     RepetitionCount repetitionCount() const final;
-    ImageFrame* frameBufferAtIndex(size_t index) final;
+    ScalableImageDecoderFrame* frameBufferAtIndex(size_t index) final;
     // CAUTION: setFailed() deletes |m_reader|. Be careful to avoid
     // accessing deleted memory, especially when calling this from inside
     // GIFImageReader!
@@ -59,12 +59,13 @@ public:
 
     // Callbacks from the GIF reader.
     bool haveDecodedRow(unsigned frameIndex, const Vector<unsigned char>& rowBuffer, size_t width, size_t rowNumber, unsigned repeatCount, bool writeTransparentPixels);
-    bool frameComplete(unsigned frameIndex, unsigned frameDuration, ImageFrame::DisposalMethod);
+    bool frameComplete(unsigned frameIndex, unsigned frameDuration, ScalableImageDecoderFrame::DisposalMethod);
     void gifComplete();
 
 private:
     GIFImageDecoder(AlphaOption, GammaAndColorProfileOption);
     void tryDecodeSize(bool allDataReceived) final { decode(0, GIFSizeQuery, allDataReceived); }
+    size_t findFirstRequiredFrameToDecode(size_t);
 
     // If the query is GIFFullQuery, decodes the image up to (but not
     // including) |haltAtFrame|. Otherwise, decodes as much as is needed to
@@ -76,12 +77,10 @@ private:
     // the previous frame's disposal method. Returns true on success. On
     // failure, this will mark the image as failed.
     bool initFrameBuffer(unsigned frameIndex);
-    size_t findFirstRequiredFrameToDecode(size_t);
 
     bool m_currentBufferSawAlpha;
     mutable RepetitionCount m_repetitionCount { RepetitionCountOnce };
     std::unique_ptr<GIFImageReader> m_reader;
-    Lock m_decodeLock;
 };
 
 } // namespace WebCore

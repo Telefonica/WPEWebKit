@@ -28,7 +28,14 @@
 
 #if ENABLE(WEBASSEMBLY)
 
+#include "WasmNameSection.h"
+
 namespace JSC { namespace Wasm {
+
+ModuleInformation::ModuleInformation()
+    : nameSection(NameSection::create())
+{
+}
 
 ModuleInformation::~ModuleInformation() { }
 

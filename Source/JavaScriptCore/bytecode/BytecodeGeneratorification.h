@@ -26,12 +26,19 @@
 
 #pragma once
 
-#include "UnlinkedCodeBlock.h"
-
 namespace JSC {
 
+class BytecodeGenerator;
+class SymbolTable;
+class UnlinkedCodeBlockGenerator;
 class SymbolTable;
 
-void performGeneratorification(UnlinkedCodeBlock*, UnlinkedCodeBlock::UnpackedInstructions&, SymbolTable* generatorFrameSymbolTable, int generatorFrameSymbolTableIndex);
+struct JSOpcodeTraits;
+template<typename> struct BaseInstruction;
+template<typename> class InstructionStreamWriter;
+using JSInstruction = BaseInstruction<JSOpcodeTraits>;
+using JSInstructionStreamWriter = InstructionStreamWriter<JSInstruction>;
+
+void performGeneratorification(BytecodeGenerator&, UnlinkedCodeBlockGenerator*, JSInstructionStreamWriter&, SymbolTable* generatorFrameSymbolTable, int generatorFrameSymbolTableIndex);
 
 } // namespace JSC

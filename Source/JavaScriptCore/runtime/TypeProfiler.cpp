@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2014-2019 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,14 +26,13 @@
 #include "config.h"
 #include "TypeProfiler.h"
 
-#include "InspectorProtocolObjects.h"
 #include "TypeLocation.h"
 #include <wtf/text/StringBuilder.h>
 
 namespace JSC {
 
 namespace TypeProfilerInternal {
-static const bool verbose = false;
+static constexpr bool verbose = false;
 }
 
 TypeProfiler::TypeProfiler()
@@ -54,9 +53,9 @@ void TypeProfiler::logTypesForTypeLocation(TypeLocation* location, VM& vm)
 
     dataLog("\t\t", location->m_globalVariableID == TypeProfilerReturnStatement ? "[Return Statement]" : "[Normal Statement]", "\n");
 
-    dataLog("\t\t#Local#\n\t\t", location->m_instructionTypeSet->dumpTypes().replace("\n", "\n\t\t"), "\n");
+    dataLog("\t\t#Local#\n\t\t", makeStringByReplacingAll(location->m_instructionTypeSet->dumpTypes(), '\n', "\n\t\t"_s), "\n");
     if (location->m_globalTypeSet)
-        dataLog("\t\t#Global#\n\t\t", location->m_globalTypeSet->dumpTypes().replace("\n", "\n\t\t"), "\n");
+        dataLog("\t\t#Global#\n\t\t", makeStringByReplacingAll(location->m_globalTypeSet->dumpTypes(), '\n', "\n\t\t"_s), "\n");
 }
 
 void TypeProfiler::insertNewLocation(TypeLocation* location)
@@ -73,7 +72,7 @@ void TypeProfiler::insertNewLocation(TypeLocation* location)
     bucket.append(location);
 }
 
-String TypeProfiler::typeInformationForExpressionAtOffset(TypeProfilerSearchDescriptor descriptor, unsigned offset, intptr_t sourceID, VM& vm)
+String TypeProfiler::typeInformationForExpressionAtOffset(TypeProfilerSearchDescriptor descriptor, unsigned offset, SourceID sourceID, VM& vm)
 {
     // This returns a JSON string representing an Object with the following properties:
     //     globalTypeSet: 'JSON<TypeSet> | null'
@@ -86,29 +85,24 @@ String TypeProfiler::typeInformationForExpressionAtOffset(TypeProfilerSearchDesc
 
     json.append('{');
 
-    json.appendLiteral("\"globalTypeSet\":");
+    json.append("\"globalTypeSet\":");
     if (location->m_globalTypeSet && location->m_globalVariableID != TypeProfilerNoGlobalIDExists)
         json.append(location->m_globalTypeSet->toJSONString());
     else
-        json.appendLiteral("null");
+        json.append("null");
     json.append(',');
 
-    json.appendLiteral("\"instructionTypeSet\":");
-    json.append(location->m_instructionTypeSet->toJSONString());
-    json.append(',');
+    json.append("\"instructionTypeSet\":", location->m_instructionTypeSet->toJSONString(), ',');
 
-    json.appendLiteral("\"isOverflown\":");
-    if (location->m_instructionTypeSet->isOverflown() || (location->m_globalTypeSet && location->m_globalTypeSet->isOverflown()))
-        json.appendLiteral("true");
-    else
-        json.appendLiteral("false");
+    bool isOverflown = location->m_instructionTypeSet->isOverflown() || (location->m_globalTypeSet && location->m_globalTypeSet->isOverflown());
+    json.append("\"isOverflown\":", isOverflown ? "true" : "false");
 
     json.append('}');
-    
+
     return json.toString();
 }
 
-TypeLocation* TypeProfiler::findLocation(unsigned divot, intptr_t sourceID, TypeProfilerSearchDescriptor descriptor, VM& vm)
+TypeLocation* TypeProfiler::findLocation(unsigned divot, SourceID sourceID, TypeProfilerSearchDescriptor descriptor, VM& vm)
 {
     QueryKey queryKey(sourceID, divot, descriptor);
     auto iter = m_queryCache.find(queryKey);
@@ -148,13 +142,13 @@ TypeLocation* TypeProfiler::nextTypeLocation()
     return m_typeLocationInfo.add(); 
 }
 
-void TypeProfiler::invalidateTypeSetCache()
+void TypeProfiler::invalidateTypeSetCache(VM& vm)
 {
     for (Bag<TypeLocation>::iterator iter = m_typeLocationInfo.begin(); !!iter; ++iter) {
         TypeLocation* location = *iter;
-        location->m_instructionTypeSet->invalidateCache();
+        location->m_instructionTypeSet->invalidateCache(vm);
         if (location->m_globalTypeSet)
-            location->m_globalTypeSet->invalidateCache();
+            location->m_globalTypeSet->invalidateCache(vm);
     }
 }
 

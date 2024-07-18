@@ -27,7 +27,6 @@
 #include "WebKitDOMHTMLPrivate.h"
 
 #include <WebCore/HTMLAnchorElement.h>
-#include <WebCore/HTMLAppletElement.h>
 #include <WebCore/HTMLAreaElement.h>
 #include <WebCore/HTMLAudioElement.h>
 #include <WebCore/HTMLBRElement.h>
@@ -52,7 +51,6 @@
 #include <WebCore/HTMLIFrameElement.h>
 #include <WebCore/HTMLImageElement.h>
 #include <WebCore/HTMLInputElement.h>
-#include <WebCore/HTMLKeygenElement.h>
 #include <WebCore/HTMLLIElement.h>
 #include <WebCore/HTMLLabelElement.h>
 #include <WebCore/HTMLLegendElement.h>
@@ -85,7 +83,6 @@
 #include <WebCore/HTMLUListElement.h>
 #include <WebCore/HTMLVideoElement.h>
 #include "WebKitDOMHTMLAnchorElementPrivate.h"
-#include "WebKitDOMHTMLAppletElementPrivate.h"
 #include "WebKitDOMHTMLAreaElementPrivate.h"
 #include "WebKitDOMHTMLBRElementPrivate.h"
 #include "WebKitDOMHTMLBaseElementPrivate.h"
@@ -139,6 +136,8 @@
 #include "WebKitDOMHTMLTitleElementPrivate.h"
 #include "WebKitDOMHTMLUListElementPrivate.h"
 
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
+
 namespace WebKit {
 
 using namespace WebCore;
@@ -148,7 +147,6 @@ using namespace WebCore::HTMLNames;
 
 #define FOR_EACH_HTML_TAG(macro) \
     macro(a, Anchor) \
-    macro(applet, Applet) \
     macro(area, Area) \
     macro(base, Base) \
     macro(blockquote, Quote) \
@@ -229,7 +227,7 @@ WebKitDOMHTMLElement* wrap(HTMLElement* element)
 {
     static HashMap<const QualifiedName::QualifiedNameImpl*, HTMLElementWrapFunction> map;
     if (map.isEmpty()) {
-#define ADD_HTML_WRAPPER(TagName, ElementName) map.set(TagName##Tag.impl(), TagName##Wrapper);
+#define ADD_HTML_WRAPPER(TagName, ElementName) map.set(TagName##Tag->impl(), TagName##Wrapper);
         FOR_EACH_HTML_TAG(ADD_HTML_WRAPPER)
 #undef ADD_HTML_WRAPPER
     }
@@ -241,3 +239,4 @@ WebKitDOMHTMLElement* wrap(HTMLElement* element)
 }
 
 }
+G_GNUC_END_IGNORE_DEPRECATIONS;

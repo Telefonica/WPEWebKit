@@ -26,7 +26,7 @@
 #include "config.h"
 #include "CryptoAlgorithmECDH.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 #include "CryptoAlgorithmEcKeyParams.h"
 #include "CryptoAlgorithmEcdhKeyDeriveParams.h"
@@ -66,16 +66,9 @@ void CryptoAlgorithmECDH::generateKey(const CryptoAlgorithmParameters& parameter
     callback(WTFMove(pair));
 }
 
-void CryptoAlgorithmECDH::deriveBits(std::unique_ptr<CryptoAlgorithmParameters>&& parameters, Ref<CryptoKey>&& baseKey, size_t length, VectorCallback&& callback, ExceptionCallback&& exceptionCallback, ScriptExecutionContext& context, WorkQueue& workQueue)
+void CryptoAlgorithmECDH::deriveBits(const CryptoAlgorithmParameters& parameters, Ref<CryptoKey>&& baseKey, size_t length, VectorCallback&& callback, ExceptionCallback&& exceptionCallback, ScriptExecutionContext& context, WorkQueue& workQueue)
 {
-    // We only accept length that is a multiple of 8.
-    if (length % 8) {
-        exceptionCallback(OperationError);
-        return;
-    }
-
-    ASSERT(parameters);
-    auto& ecParameters = downcast<CryptoAlgorithmEcdhKeyDeriveParams>(*parameters);
+    auto& ecParameters = downcast<CryptoAlgorithmEcdhKeyDeriveParams>(parameters);
 
     if (baseKey->type() != CryptoKey::Type::Private) {
         exceptionCallback(InvalidAccessError);
@@ -106,37 +99,34 @@ void CryptoAlgorithmECDH::deriveBits(std::unique_ptr<CryptoAlgorithmParameters>&
             callback(WTFMove(*derivedKey));
             return;
         }
-        if (length / 8 > (*derivedKey).size()) {
+        auto lengthInBytes = std::ceil(length / 8.);
+        if (lengthInBytes > (*derivedKey).size()) {
             exceptionCallback(OperationError);
             return;
         }
-        (*derivedKey).shrink(length / 8);
+        (*derivedKey).shrink(lengthInBytes);
         callback(WTFMove(*derivedKey));
     };
 
     // This is a special case that can't use dispatchOperation() because it bundles
     // the result validation and callback dispatch into unifiedCallback.
-    context.ref();
     workQueue.dispatch(
-        [baseKey = WTFMove(baseKey), publicKey = ecParameters.publicKey.releaseNonNull(), length, unifiedCallback = WTFMove(unifiedCallback), &context]() mutable {
-            auto derivedKey = platformDeriveBits(downcast<CryptoKeyEC>(baseKey.get()), downcast<CryptoKeyEC>(publicKey.get()));
-            context.postTask(
-                [derivedKey = WTFMove(derivedKey), length, unifiedCallback = WTFMove(unifiedCallback)](ScriptExecutionContext& context) mutable {
-                    unifiedCallback(WTFMove(derivedKey), length);
-                    context.deref();
-                });
+        [baseKey = WTFMove(baseKey), publicKey = ecParameters.publicKey, length, unifiedCallback = WTFMove(unifiedCallback), contextIdentifier = context.identifier()]() mutable {
+            auto derivedKey = platformDeriveBits(downcast<CryptoKeyEC>(baseKey.get()), downcast<CryptoKeyEC>(*publicKey));
+            ScriptExecutionContext::postTaskTo(contextIdentifier, [derivedKey = WTFMove(derivedKey), length, unifiedCallback = WTFMove(unifiedCallback)](auto&) mutable {
+                unifiedCallback(WTFMove(derivedKey), length);
+            });
         });
 }
 
-void CryptoAlgorithmECDH::importKey(CryptoKeyFormat format, KeyData&& data, const std::unique_ptr<CryptoAlgorithmParameters>&& parameters, bool extractable, CryptoKeyUsageBitmap usages, KeyCallback&& callback, ExceptionCallback&& exceptionCallback)
+void CryptoAlgorithmECDH::importKey(CryptoKeyFormat format, KeyData&& data, const CryptoAlgorithmParameters& parameters, bool extractable, CryptoKeyUsageBitmap usages, KeyCallback&& callback, ExceptionCallback&& exceptionCallback)
 {
-    ASSERT(parameters);
-    const auto& ecParameters = downcast<CryptoAlgorithmEcKeyParams>(*parameters);
+    const auto& ecParameters = downcast<CryptoAlgorithmEcKeyParams>(parameters);
 
     RefPtr<CryptoKeyEC> result;
     switch (format) {
     case CryptoKeyFormat::Jwk: {
-        JsonWebKey key = WTFMove(WTF::get<JsonWebKey>(data));
+        JsonWebKey key = WTFMove(std::get<JsonWebKey>(data));
 
         bool isUsagesAllowed = false;
         if (!key.d.isNull()) {
@@ -150,7 +140,7 @@ void CryptoAlgorithmECDH::importKey(CryptoKeyFormat format, KeyData&& data, cons
             return;
         }
 
-        if (usages && !key.use.isNull() && key.use != "enc") {
+        if (usages && !key.use.isNull() && key.use != "enc"_s) {
             exceptionCallback(DataError);
             return;
         }
@@ -163,21 +153,21 @@ void CryptoAlgorithmECDH::importKey(CryptoKeyFormat format, KeyData&& data, cons
             exceptionCallback(SyntaxError);
             return;
         }
-        result = CryptoKeyEC::importRaw(ecParameters.identifier, ecParameters.namedCurve, WTFMove(WTF::get<Vector<uint8_t>>(data)), extractable, usages);
+        result = CryptoKeyEC::importRaw(ecParameters.identifier, ecParameters.namedCurve, WTFMove(std::get<Vector<uint8_t>>(data)), extractable, usages);
         break;
     case CryptoKeyFormat::Spki:
         if (usages) {
             exceptionCallback(SyntaxError);
             return;
         }
-        result = CryptoKeyEC::importSpki(ecParameters.identifier, ecParameters.namedCurve, WTFMove(WTF::get<Vector<uint8_t>>(data)), extractable, usages);
+        result = CryptoKeyEC::importSpki(ecParameters.identifier, ecParameters.namedCurve, WTFMove(std::get<Vector<uint8_t>>(data)), extractable, usages);
         break;
     case CryptoKeyFormat::Pkcs8:
         if (usages && (usages ^ CryptoKeyUsageDeriveKey) && (usages ^ CryptoKeyUsageDeriveBits) && (usages ^ (CryptoKeyUsageDeriveKey | CryptoKeyUsageDeriveBits))) {
             exceptionCallback(SyntaxError);
             return;
         }
-        result = CryptoKeyEC::importPkcs8(ecParameters.identifier, ecParameters.namedCurve, WTFMove(WTF::get<Vector<uint8_t>>(data)), extractable, usages);
+        result = CryptoKeyEC::importPkcs8(ecParameters.identifier, ecParameters.namedCurve, WTFMove(std::get<Vector<uint8_t>>(data)), extractable, usages);
         break;
     }
     if (!result) {
@@ -242,4 +232,4 @@ void CryptoAlgorithmECDH::exportKey(CryptoKeyFormat format, Ref<CryptoKey>&& key
 
 } // namespace WebCore
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

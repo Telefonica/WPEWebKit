@@ -23,18 +23,15 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "WKBundlePageBannerMac.h"
+#import "config.h"
+#import "WKBundlePageBannerMac.h"
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 
-#include "APIClient.h"
-#include "PageBanner.h"
-#include "WKAPICast.h"
-#include "WKBundleAPICast.h"
-
-using namespace WebCore;
-using namespace WebKit;
+#import "APIClient.h"
+#import "PageBanner.h"
+#import "WKAPICast.h"
+#import "WKBundleAPICast.h"
 
 namespace API {
 template<> struct ClientTraits<WKBundlePageBannerClientBase> {
@@ -42,7 +39,11 @@ template<> struct ClientTraits<WKBundlePageBannerClientBase> {
 };
 }
 
+namespace WebKit {
+using namespace WebCore;
+
 class PageBannerClientImpl : API::Client<WKBundlePageBannerClientBase>, public PageBanner::Client {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit PageBannerClientImpl(WKBundlePageBannerClientBase* client)
     {
@@ -96,18 +97,20 @@ private:
     }
 };
 
+}
+
 WKBundlePageBannerRef WKBundlePageBannerCreateBannerWithCALayer(CALayer *layer, int height, WKBundlePageBannerClientBase* wkClient)
 {
     if (wkClient && wkClient->version)
         return 0;
 
-    auto clientImpl = std::make_unique<PageBannerClientImpl>(wkClient);
-    return toAPI(&PageBanner::create(layer, height, clientImpl.release()).leakRef());
+    auto clientImpl = makeUnique<WebKit::PageBannerClientImpl>(wkClient);
+    return toAPI(&WebKit::PageBanner::create(layer, height, clientImpl.release()).leakRef());
 }
 
-CALayer * WKBundlePageBannerGetLayer(WKBundlePageBannerRef pageBanner)
+CALayer *WKBundlePageBannerGetLayer(WKBundlePageBannerRef pageBanner)
 {
-    return toImpl(pageBanner)->layer();
+    return WebKit::toImpl(pageBanner)->layer();
 }
 
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)

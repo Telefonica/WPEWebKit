@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,7 +34,7 @@ namespace JSC {
 
 class CodeBlockWithJITType {
 public:
-    CodeBlockWithJITType(CodeBlock* codeBlock, JITCode::JITType jitType)
+    CodeBlockWithJITType(CodeBlock* codeBlock, JITType jitType)
         : m_codeBlock(codeBlock)
         , m_jitType(jitType)
     {
@@ -45,8 +45,8 @@ public:
         m_codeBlock->dumpAssumingJITType(out, m_jitType);
     }
 private:
-    CodeBlock* m_codeBlock;
-    JITCode::JITType m_jitType;
+    CodeBlock* const m_codeBlock;
+    JITType const m_jitType;
 };
 
 } // namespace JSC

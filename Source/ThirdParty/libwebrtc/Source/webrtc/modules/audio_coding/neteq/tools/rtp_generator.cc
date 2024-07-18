@@ -8,9 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <assert.h>
-
-#include "webrtc/modules/audio_coding/neteq/tools/rtp_generator.h"
+#include "modules/audio_coding/neteq/tools/rtp_generator.h"
 
 namespace webrtc {
 namespace test {
@@ -18,7 +16,7 @@ namespace test {
 uint32_t RtpGenerator::GetRtpHeader(uint8_t payload_type,
                                     size_t payload_length_samples,
                                     RTPHeader* rtp_header) {
-  assert(rtp_header);
+  RTC_DCHECK(rtp_header);
   if (!rtp_header) {
     return 0;
   }
@@ -31,9 +29,9 @@ uint32_t RtpGenerator::GetRtpHeader(uint8_t payload_type,
   rtp_header->numCSRCs = 0;
 
   uint32_t this_send_time = next_send_time_ms_;
-  assert(samples_per_ms_ > 0);
-  next_send_time_ms_ += ((1.0 + drift_factor_) * payload_length_samples) /
-      samples_per_ms_;
+  RTC_DCHECK_GT(samples_per_ms_, 0);
+  next_send_time_ms_ +=
+      ((1.0 + drift_factor_) * payload_length_samples) / samples_per_ms_;
   return this_send_time;
 }
 
@@ -46,12 +44,12 @@ void RtpGenerator::set_drift_factor(double factor) {
 uint32_t TimestampJumpRtpGenerator::GetRtpHeader(uint8_t payload_type,
                                                  size_t payload_length_samples,
                                                  RTPHeader* rtp_header) {
-  uint32_t ret = RtpGenerator::GetRtpHeader(
-      payload_type, payload_length_samples, rtp_header);
+  uint32_t ret = RtpGenerator::GetRtpHeader(payload_type,
+                                            payload_length_samples, rtp_header);
   if (timestamp_ - static_cast<uint32_t>(payload_length_samples) <=
           jump_from_timestamp_ &&
       timestamp_ > jump_from_timestamp_) {
-    // We just moved across the |jump_from_timestamp_| timestamp. Do the jump.
+    // We just moved across the `jump_from_timestamp_` timestamp. Do the jump.
     timestamp_ = jump_to_timestamp_;
   }
   return ret;

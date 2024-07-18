@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,22 +38,29 @@
 #include "B3OriginDump.h"
 #include "B3ProcedureInlines.h"
 #include "B3SlotBaseValue.h"
-#include "B3StackSlot.h"
-#include "B3UpsilonValue.h"
 #include "B3ValueInlines.h"
 #include "B3ValueKeyInlines.h"
-#include "B3VariableValue.h"
 #include "B3WasmBoundsCheckValue.h"
 #include <wtf/CommaPrinter.h>
 #include <wtf/ListDump.h>
 #include <wtf/StringPrintStream.h>
+#include <wtf/Vector.h>
 
 namespace JSC { namespace B3 {
 
-const char* const Value::dumpPrefix = "@";
+const char* const Value::dumpPrefix = "b@";
+void DeepValueDump::dump(PrintStream& out) const
+{
+    if (m_value)
+        m_value->deepDump(m_proc, out);
+    else
+        out.print("<null>");
+}
 
 Value::~Value()
 {
+    if (m_numChildren == VarArgs)
+        bitwise_cast<Vector<Value*, 3> *>(childrenAlloc())->Vector<Value*, 3>::~Vector();
 }
 
 void Value::replaceWithIdentity(Value* value)
@@ -62,26 +69,13 @@ void Value::replaceWithIdentity(Value* value)
     // a plain Identity Value. We first collect all of the information we need, then we destruct the
     // previous value in place, and then we construct the Identity Value in place.
 
-    ASSERT(m_type == value->m_type);
+    RELEASE_ASSERT(m_type == value->m_type);
+    ASSERT(value != this);
 
-    if (m_type == Void) {
+    if (m_type == Void)
         replaceWithNopIgnoringType();
-        return;
-    }
-
-    unsigned index = m_index;
-    Type type = m_type;
-    Origin origin = m_origin;
-    BasicBlock* owner = this->owner;
-
-    RELEASE_ASSERT(type == value->type());
-
-    this->~Value();
-
-    new (this) Value(Identity, type, origin, value);
-
-    this->owner = owner;
-    this->m_index = index;
+    else
+        replaceWith(Identity, m_type, this->owner, value);
 }
 
 void Value::replaceWithBottom(InsertionSet& insertionSet, size_t index)
@@ -97,16 +91,7 @@ void Value::replaceWithNop()
 
 void Value::replaceWithNopIgnoringType()
 {
-    unsigned index = m_index;
-    Origin origin = m_origin;
-    BasicBlock* owner = this->owner;
-
-    this->~Value();
-
-    new (this) Value(Nop, Void, origin);
-
-    this->owner = owner;
-    this->m_index = index;
+    replaceWith(Nop, Void, this->owner);
 }
 
 void Value::replaceWithPhi()
@@ -115,51 +100,21 @@ void Value::replaceWithPhi()
         replaceWithNop();
         return;
     }
-    
-    unsigned index = m_index;
-    Origin origin = m_origin;
-    BasicBlock* owner = this->owner;
-    Type type = m_type;
 
-    this->~Value();
-
-    new (this) Value(Phi, type, origin);
-
-    this->owner = owner;
-    this->m_index = index;
+    replaceWith(Phi, m_type, this->owner);
 }
 
 void Value::replaceWithJump(BasicBlock* owner, FrequentedBlock target)
 {
     RELEASE_ASSERT(owner->last() == this);
-    
-    unsigned index = m_index;
-    Origin origin = m_origin;
-    
-    this->~Value();
-    
-    new (this) Value(Jump, Void, origin);
-    
-    this->owner = owner;
-    this->m_index = index;
-    
+    replaceWith(Jump, Void, this->owner);
     owner->setSuccessors(target);
 }
 
 void Value::replaceWithOops(BasicBlock* owner)
 {
     RELEASE_ASSERT(owner->last() == this);
-    
-    unsigned index = m_index;
-    Origin origin = m_origin;
-    
-    this->~Value();
-    
-    new (this) Value(Oops, Void, origin);
-    
-    this->owner = owner;
-    this->m_index = index;
-    
+    replaceWith(Oops, Void, this->owner);
     owner->clearSuccessors();
 }
 
@@ -171,6 +126,30 @@ void Value::replaceWithJump(FrequentedBlock target)
 void Value::replaceWithOops()
 {
     replaceWithOops(owner);
+}
+
+void Value::replaceWith(Kind kind, Type type, BasicBlock* owner)
+{
+    unsigned index = m_index;
+
+    this->~Value();
+
+    new (this) Value(kind, type, m_origin);
+
+    this->m_index = index;
+    this->owner = owner;
+}
+
+void Value::replaceWith(Kind kind, Type type, BasicBlock* owner, Value* value)
+{
+    unsigned index = m_index;
+
+    this->~Value();
+
+    new (this) Value(kind, type, m_origin, value);
+
+    this->m_index = index;
+    this->owner = owner;
 }
 
 void Value::dump(PrintStream& out) const
@@ -202,11 +181,6 @@ void Value::dump(PrintStream& out) const
 
     if (isConstant)
         out.print(")");
-}
-
-Value* Value::cloneImpl() const
-{
-    return new Value(*this);
 }
 
 void Value::dumpChildren(CommaPrinter& comma, PrintStream& out) const
@@ -315,6 +289,16 @@ Value* Value::uModConstant(Procedure&, const Value*) const
     return nullptr;
 }
 
+Value* Value::fMinConstant(Procedure&, const Value*) const
+{
+    return nullptr;
+}
+
+Value* Value::fMaxConstant(Procedure&, const Value*) const
+{
+    return nullptr;
+}
+
 Value* Value::bitAndConstant(Procedure&, const Value*) const
 {
     return nullptr;
@@ -402,73 +386,73 @@ Value* Value::sqrtConstant(Procedure&) const
 
 TriState Value::equalConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 TriState Value::notEqualConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 TriState Value::lessThanConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 TriState Value::greaterThanConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 TriState Value::lessEqualConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 TriState Value::greaterEqualConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 TriState Value::aboveConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 TriState Value::belowConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 TriState Value::aboveEqualConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 TriState Value::belowEqualConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 TriState Value::equalOrUnorderedConstant(const Value*) const
 {
-    return MixedTriState;
+    return TriState::Indeterminate;
 }
 
 Value* Value::invertedCompare(Procedure& proc) const
 {
-    if (!numChildren())
+    if (numChildren() != 2)
         return nullptr;
     if (std::optional<Opcode> invertedOpcode = B3::invertedCompare(opcode(), child(0)->type())) {
         ASSERT(!kind().hasExtraBits());
-        return proc.add<Value>(*invertedOpcode, type(), origin(), children());
+        return proc.add<Value>(*invertedOpcode, type(), origin(), child(0), child(1));
     }
     return nullptr;
 }
 
 bool Value::isRounded() const
 {
-    ASSERT(isFloat(type()));
+    ASSERT(type().isFloat());
     switch (opcode()) {
     case Floor:
     case Ceil:
@@ -495,12 +479,19 @@ bool Value::returnsBool() const
 {
     if (type() != Int32)
         return false;
+
     switch (opcode()) {
     case Const32:
         return asInt32() == 0 || asInt32() == 1;
     case BitAnd:
-        return child(1)->isInt32(1)
-            || (child(0)->returnsBool() && child(1)->hasInt() && child(1)->asInt() & 1);
+        return child(0)->returnsBool() || child(1)->returnsBool();
+    case BitOr:
+    case BitXor:
+        return child(0)->returnsBool() && child(1)->returnsBool();
+    case Select:
+        return child(1)->returnsBool() && child(2)->returnsBool();
+    case Identity:
+        return child(0)->returnsBool();
     case Equal:
     case NotEqual:
     case LessThan:
@@ -536,13 +527,13 @@ TriState Value::asTriState() const
     case ConstFloat:
         return triState(asFloat() != 0.);
     default:
-        return MixedTriState;
+        return TriState::Indeterminate;
     }
 }
 
 Effects Value::effects() const
 {
-    Effects result;
+    Effects result = Effects::none();
     switch (opcode()) {
     case Nop:
     case Identity:
@@ -551,6 +542,7 @@ Effects Value::effects() const
     case Const64:
     case ConstDouble:
     case ConstFloat:
+    case BottomTuple:
     case SlotBase:
     case ArgumentReg:
     case FramePointer:
@@ -594,6 +586,9 @@ Effects Value::effects() const
     case EqualOrUnordered:
     case Select:
     case Depend:
+    case Extract:
+    case FMin:
+    case FMax:
         break;
     case Div:
     case UDiv:
@@ -674,6 +669,7 @@ Effects Value::effects() const
             break;
         }
         result.exitsSideways = true;
+        result.reads = HeapRange::top();
         break;
     case Upsilon:
     case Set:
@@ -734,6 +730,8 @@ ValueKey Value::key() const
     case UDiv:
     case Mod:
     case UMod:
+    case FMax:
+    case FMin:
     case BitAnd:
     case BitOr:
     case BitXor:
@@ -765,6 +763,8 @@ ValueKey Value::key() const
         return ValueKey(ConstDouble, type(), asDouble());
     case ConstFloat:
         return ValueKey(ConstFloat, type(), asFloat());
+    case BottomTuple:
+        return ValueKey(BottomTuple, type());
     case ArgumentReg:
         return ValueKey(
             ArgumentReg, type(),
@@ -778,13 +778,21 @@ ValueKey Value::key() const
     }
 }
 
+Value* Value::foldIdentity() const
+{
+    Value* current = const_cast<Value*>(this);
+    while (current->opcode() == Identity)
+        current = current->child(0);
+    return current;
+}
+
 bool Value::performSubstitution()
 {
     bool result = false;
     for (Value*& child : children()) {
-        while (child->opcode() == Identity) {
+        if (child->opcode() == Identity) {
             result = true;
-            child = child->child(0);
+            child = child->foldIdentity();
         }
     }
     return result;
@@ -822,6 +830,8 @@ Type Value::typeFor(Kind kind, Value* firstChild, Value* secondChild)
     case UDiv:
     case Mod:
     case UMod:
+    case FMax:
+    case FMin:
     case Neg:
     case BitAnd:
     case BitOr:
@@ -869,7 +879,7 @@ Type Value::typeFor(Kind kind, Value* firstChild, Value* secondChild)
     case IToF:
         return Float;
     case BitwiseCast:
-        switch (firstChild->type()) {
+        switch (firstChild->type().kind()) {
         case Int64:
             return Double;
         case Double:
@@ -879,6 +889,7 @@ Type Value::typeFor(Kind kind, Value* firstChild, Value* secondChild)
         case Float:
             return Int32;
         case Void:
+        case Tuple:
             ASSERT_NOT_REACHED();
         }
         return Void;

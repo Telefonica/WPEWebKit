@@ -23,11 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef APIInjectedBundlePageUIClient_h
-#define APIInjectedBundlePageUIClient_h
+#pragma once
 
 #include "WebEvent.h"
-#include <runtime/ConsoleTypes.h>
+#include <JavaScriptCore/ConsoleTypes.h>
 
 namespace WebCore {
 class HitTestResult;
@@ -47,19 +46,18 @@ class SecurityOrigin;
 namespace InjectedBundle {
 
 class PageUIClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~PageUIClient() { }
 
     virtual void willAddMessageToConsole(WebKit::WebPage*, JSC::MessageSource, JSC::MessageLevel, const WTF::String& message, unsigned lineNumber, unsigned columnNumber, const WTF::String& sourceID) { UNUSED_PARAM(message); UNUSED_PARAM(lineNumber); UNUSED_PARAM(columnNumber); UNUSED_PARAM(sourceID); }
+    virtual void willAddMessageWithArgumentsToConsole(WebKit::WebPage*, JSC::MessageSource, JSC::MessageLevel, const WTF::String& message, Span<const WTF::String> messageArguments, unsigned lineNumber, unsigned columnNumber, const WTF::String& sourceID) { UNUSED_PARAM(message); UNUSED_PARAM(messageArguments); UNUSED_PARAM(lineNumber); UNUSED_PARAM(columnNumber); UNUSED_PARAM(sourceID); }
     virtual void willSetStatusbarText(WebKit::WebPage*, const WTF::String&) { }
     virtual void willRunJavaScriptAlert(WebKit::WebPage*, const WTF::String&, WebKit::WebFrame*) { }
     virtual void willRunJavaScriptConfirm(WebKit::WebPage*, const WTF::String&, WebKit::WebFrame*) { }
     virtual void willRunJavaScriptPrompt(WebKit::WebPage*, const WTF::String&, const WTF::String&, WebKit::WebFrame*) { }
-    virtual void mouseDidMoveOverElement(WebKit::WebPage*, const WebCore::HitTestResult&, WebKit::WebEvent::Modifiers, RefPtr<API::Object>& userData) { UNUSED_PARAM(userData); }
+    virtual void mouseDidMoveOverElement(WebKit::WebPage*, const WebCore::HitTestResult&, OptionSet<WebKit::WebEvent::Modifier>, RefPtr<API::Object>& userData) { UNUSED_PARAM(userData); }
     virtual void pageDidScroll(WebKit::WebPage*) { }
-
-    virtual WTF::String shouldGenerateFileForUpload(WebKit::WebPage*, const WTF::String& originalFilePath) { UNUSED_PARAM(originalFilePath); return WTF::String(); }
-    virtual WTF::String generateFileForUpload(WebKit::WebPage*, const WTF::String& originalFilePath) { UNUSED_PARAM(originalFilePath); return emptyString(); }
 
     enum class UIElementVisibility {
         Unknown,
@@ -89,10 +87,10 @@ public:
     virtual WTF::String plugInExtraScript() const { return emptyString(); }
 
     virtual void didClickAutoFillButton(WebKit::WebPage&, WebKit::InjectedBundleNodeHandle&, RefPtr<API::Object>&) { }
+
+    virtual void didResignInputElementStrongPasswordAppearance(WebKit::WebPage&, WebKit::InjectedBundleNodeHandle&, RefPtr<API::Object>&) { };
 };
 
 } // namespace InjectedBundle
 
 } // namespace API
-
-#endif // APIInjectedBundlePageUIClient_h

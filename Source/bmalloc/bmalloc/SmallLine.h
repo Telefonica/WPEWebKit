@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,21 +23,22 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef SmallLine_h
-#define SmallLine_h
+#pragma once
 
 #include "BAssert.h"
 #include "Mutex.h"
 #include "ObjectType.h"
 #include <mutex>
 
+#if !BUSE(LIBPAS)
+
 namespace bmalloc {
 
 class SmallLine {
 public:
-    void ref(std::lock_guard<StaticMutex>&, unsigned char = 1);
-    bool deref(std::lock_guard<StaticMutex>&);
-    unsigned refCount(std::lock_guard<StaticMutex>&) { return m_refCount; }
+    void ref(UniqueLockHolder&, unsigned char = 1);
+    bool deref(UniqueLockHolder&);
+    unsigned refCount(UniqueLockHolder&) { return m_refCount; }
     
     char* begin();
     char* end();
@@ -51,13 +52,13 @@ static_assert(
 
 };
 
-inline void SmallLine::ref(std::lock_guard<StaticMutex>&, unsigned char refCount)
+inline void SmallLine::ref(UniqueLockHolder&, unsigned char refCount)
 {
     BASSERT(!m_refCount);
     m_refCount = refCount;
 }
 
-inline bool SmallLine::deref(std::lock_guard<StaticMutex>&)
+inline bool SmallLine::deref(UniqueLockHolder&)
 {
     BASSERT(m_refCount);
     --m_refCount;
@@ -66,4 +67,4 @@ inline bool SmallLine::deref(std::lock_guard<StaticMutex>&)
 
 } // namespace bmalloc
 
-#endif // SmallLine_h
+#endif

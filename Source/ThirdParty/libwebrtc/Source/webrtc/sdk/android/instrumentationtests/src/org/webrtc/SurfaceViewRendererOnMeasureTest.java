@@ -15,22 +15,19 @@ import static org.junit.Assert.fail;
 
 import android.annotation.SuppressLint;
 import android.graphics.Point;
-import android.support.test.InstrumentationRegistry;
-import android.support.test.annotation.UiThreadTest;
-import android.support.test.filters.MediumTest;
-import android.support.test.rule.UiThreadTestRule;
 import android.view.View.MeasureSpec;
+import androidx.test.InstrumentationRegistry;
+import androidx.test.annotation.UiThreadTest;
+import androidx.test.filters.MediumTest;
+import androidx.test.rule.UiThreadTestRule;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
-import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-@RunWith(BaseJUnit4ClassRunner.class)
 public class SurfaceViewRendererOnMeasureTest {
-  @Rule public UiThreadTestRule uiThreadTestRule = new UiThreadTestRule();
+  @Rule public final UiThreadTestRule uiThreadRule = new UiThreadTestRule();
 
   /**
    * List with all possible scaling types.
@@ -48,14 +45,17 @@ public class SurfaceViewRendererOnMeasureTest {
   /**
    * Returns a dummy YUV frame.
    */
-  static VideoRenderer.I420Frame createFrame(int width, int height, int rotationDegree) {
+  static VideoFrame createFrame(int width, int height, int rotationDegree) {
     final int[] yuvStrides = new int[] {width, (width + 1) / 2, (width + 1) / 2};
     final int[] yuvHeights = new int[] {height, (height + 1) / 2, (height + 1) / 2};
     final ByteBuffer[] yuvPlanes = new ByteBuffer[3];
     for (int i = 0; i < 3; ++i) {
       yuvPlanes[i] = ByteBuffer.allocateDirect(yuvStrides[i] * yuvHeights[i]);
     }
-    return new VideoRenderer.I420Frame(width, height, rotationDegree, yuvStrides, yuvPlanes, 0);
+    final VideoFrame.I420Buffer buffer =
+        JavaI420Buffer.wrap(width, height, yuvPlanes[0], yuvStrides[0], yuvPlanes[1], yuvStrides[1],
+            yuvPlanes[2], yuvStrides[2], null /* releaseCallback */);
+    return new VideoFrame(buffer, rotationDegree, 0 /* timestamp */);
   }
 
   /**
@@ -134,6 +134,8 @@ public class SurfaceViewRendererOnMeasureTest {
       private int frameHeight;
       private int rotation;
 
+      // TODO(bugs.webrtc.org/8491): Remove NoSynchronizedMethodCheck suppression.
+      @SuppressWarnings("NoSynchronizedMethodCheck")
       public synchronized void waitForFrameSize(int frameWidth, int frameHeight, int rotation)
           throws InterruptedException {
         while (this.frameWidth != frameWidth || this.frameHeight != frameHeight
@@ -142,8 +144,12 @@ public class SurfaceViewRendererOnMeasureTest {
         }
       }
 
+      @Override
       public void onFirstFrameRendered() {}
 
+      @Override
+      // TODO(bugs.webrtc.org/8491): Remove NoSynchronizedMethodCheck suppression.
+      @SuppressWarnings("NoSynchronizedMethodCheck")
       public synchronized void onFrameResolutionChanged(
           int frameWidth, int frameHeight, int rotation) {
         this.frameWidth = frameWidth;
@@ -161,13 +167,13 @@ public class SurfaceViewRendererOnMeasureTest {
       final int rotatedHeight = 720;
       final int unrotatedWidth = (rotationDegree % 180 == 0 ? rotatedWidth : rotatedHeight);
       final int unrotatedHeight = (rotationDegree % 180 == 0 ? rotatedHeight : rotatedWidth);
-      final VideoRenderer.I420Frame frame =
-          createFrame(unrotatedWidth, unrotatedHeight, rotationDegree);
-      assertEquals(rotatedWidth, frame.rotatedWidth());
-      assertEquals(rotatedHeight, frame.rotatedHeight());
+      final VideoFrame frame = createFrame(unrotatedWidth, unrotatedHeight, rotationDegree);
+      assertEquals(rotatedWidth, frame.getRotatedWidth());
+      assertEquals(rotatedHeight, frame.getRotatedHeight());
       final String frameDimensions =
           unrotatedWidth + "x" + unrotatedHeight + " with rotation " + rotationDegree;
-      surfaceViewRenderer.renderFrame(frame);
+      surfaceViewRenderer.onFrame(frame);
+      frame.release();
       rendererEvents.waitForFrameSize(unrotatedWidth, unrotatedHeight, rotationDegree);
 
       // Test forcing to zero size.

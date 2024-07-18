@@ -23,23 +23,20 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import "WKWebViewConfigurationPrivate.h"
-
-#if WK_API_ENABLED
+#import "APIPageConfiguration.h"
+#import <WebKit/WKWebViewConfigurationPrivate.h>
+#import <wtf/Ref.h>
 
 @class WKWebView;
 @class WKWebViewContentProviderRegistry;
 
 @interface WKWebViewConfiguration ()
 
-@property (nonatomic, readonly) NSMutableDictionary<NSString *, id <WKURLSchemeHandler>> *_urlSchemeHandlers;
-
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 @property (nonatomic, setter=_setContentProviderRegistry:) WKWebViewContentProviderRegistry *_contentProviderRegistry;
 #endif
+@property (nonatomic, readonly) NSString *_applicationNameForDesktopUserAgent;
 
-- (void)_validate;
+- (Ref<API::PageConfiguration>)copyPageConfiguration;
 
 @end
-
-#endif

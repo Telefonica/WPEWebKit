@@ -22,10 +22,9 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 #include "config.h"
 #include "IDBSerialization.h"
-
-#if ENABLE(INDEXED_DATABASE)
 
 #include "IDBKeyData.h"
 #include "IDBKeyPath.h"
@@ -46,17 +45,17 @@ RefPtr<SharedBuffer> serializeIDBKeyPath(const std::optional<IDBKeyPath>& keyPat
 
     if (keyPath) {
         auto visitor = WTF::makeVisitor([&](const String& string) {
-            encoder->encodeEnum("type", KeyPathType::String);
-            encoder->encodeString("string", string);
+            encoder->encodeEnum("type"_s, KeyPathType::String);
+            encoder->encodeString("string"_s, string);
         }, [&](const Vector<String>& vector) {
-            encoder->encodeEnum("type", KeyPathType::Array);
-            encoder->encodeObjects("array", vector.begin(), vector.end(), [](WebCore::KeyedEncoder& encoder, const String& string) {
-                encoder.encodeString("string", string);
+            encoder->encodeEnum("type"_s, KeyPathType::Array);
+            encoder->encodeObjects("array"_s, vector.begin(), vector.end(), [](WebCore::KeyedEncoder& encoder, const String& string) {
+                encoder.encodeString("string"_s, string);
             });
         });
-        WTF::visit(visitor, keyPath.value());
+        std::visit(visitor, keyPath.value());
     } else
-        encoder->encodeEnum("type", KeyPathType::Null);
+        encoder->encodeEnum("type"_s, KeyPathType::Null);
 
     return encoder->finishEncoding();
 }
@@ -69,7 +68,7 @@ bool deserializeIDBKeyPath(const uint8_t* data, size_t size, std::optional<IDBKe
     auto decoder = KeyedDecoder::decoder(data, size);
 
     KeyPathType type;
-    bool succeeded = decoder->decodeEnum("type", type, [](KeyPathType value) {
+    bool succeeded = decoder->decodeEnum("type"_s, type, [](KeyPathType value) {
         return value == KeyPathType::Null || value == KeyPathType::String || value == KeyPathType::Array;
     });
     if (!succeeded)
@@ -80,15 +79,15 @@ bool deserializeIDBKeyPath(const uint8_t* data, size_t size, std::optional<IDBKe
         break;
     case KeyPathType::String: {
         String string;
-        if (!decoder->decodeString("string", string))
+        if (!decoder->decodeString("string"_s, string))
             return false;
         result = IDBKeyPath(WTFMove(string));
         break;
     }
     case KeyPathType::Array: {
         Vector<String> vector;
-        succeeded = decoder->decodeObjects("array", vector, [](KeyedDecoder& decoder, String& result) {
-            return decoder.decodeString("string", result);
+        succeeded = decoder->decodeObjects("array"_s, vector, [](KeyedDecoder& decoder, String& result) {
+            return decoder.decodeString("string"_s, result);
         });
         if (!succeeded)
             return false;
@@ -114,6 +113,9 @@ static bool isLegacySerializedIDBKeyData(const uint8_t* data, size_t size)
     GRefPtr<GBytes> bytes = adoptGRef(g_bytes_new(data, size));
     GRefPtr<GVariant> variant = g_variant_new_from_bytes(G_VARIANT_TYPE("a{sv}"), bytes.get(), FALSE);
     return g_variant_is_normal_form(variant.get());
+#else
+    UNUSED_PARAM(data);
+    UNUSED_PARAM(size);
 #endif
     return false;
 }
@@ -185,7 +187,7 @@ static SIDBKeyType serializedTypeForKeyType(IndexedDB::KeyType type)
 }
 
 #if CPU(BIG_ENDIAN) || CPU(MIDDLE_ENDIAN) || CPU(NEEDS_ALIGNED_ACCESS)
-template <typename T> static void writeLittleEndian(Vector<char>& buffer, T value)
+template <typename T> static void writeLittleEndian(Vector<uint8_t>& buffer, T value)
 {
     for (unsigned i = 0; i < sizeof(T); i++) {
         buffer.append(value & 0xFF);
@@ -204,7 +206,7 @@ template <typename T> static bool readLittleEndian(const uint8_t*& ptr, const ui
     return true;
 }
 #else
-template <typename T> static void writeLittleEndian(Vector<char>& buffer, T value)
+template <typename T> static void writeLittleEndian(Vector<uint8_t>& buffer, T value)
 {
     buffer.append(reinterpret_cast<uint8_t*>(&value), sizeof(value));
 }
@@ -221,7 +223,7 @@ template <typename T> static bool readLittleEndian(const uint8_t*& ptr, const ui
 }
 #endif
 
-static void writeDouble(Vector<char>& data, double d)
+static void writeDouble(Vector<uint8_t>& data, double d)
 {
     writeLittleEndian(data, *reinterpret_cast<uint64_t*>(&d));
 }
@@ -231,10 +233,10 @@ static bool readDouble(const uint8_t*& data, const uint8_t* end, double& d)
     return readLittleEndian(data, end, *reinterpret_cast<uint64_t*>(&d));
 }
 
-static void encodeKey(Vector<char>& data, const IDBKeyData& key)
+static void encodeKey(Vector<uint8_t>& data, const IDBKeyData& key)
 {
     SIDBKeyType type = serializedTypeForKeyType(key.type());
-    data.append(static_cast<char>(type));
+    data.append(static_cast<uint8_t>(type));
 
     switch (type) {
     case SIDBKeyType::Number:
@@ -282,14 +284,14 @@ static void encodeKey(Vector<char>& data, const IDBKeyData& key)
 
 RefPtr<SharedBuffer> serializeIDBKeyData(const IDBKeyData& key)
 {
-    Vector<char> data;
+    Vector<uint8_t> data;
     data.append(SIDBKeyVersion);
 
     encodeKey(data, key);
     return SharedBuffer::create(WTFMove(data));
 }
 
-static bool decodeKey(const uint8_t*& data, const uint8_t* end, IDBKeyData& result)
+static WARN_UNUSED_RETURN bool decodeKey(const uint8_t*& data, const uint8_t* end, IDBKeyData& result)
 {
     if (!data || data >= end)
         return false;
@@ -326,7 +328,7 @@ static bool decodeKey(const uint8_t*& data, const uint8_t* end, IDBKeyData& resu
         if (static_cast<uint64_t>(end - data) < length * 2)
             return false;
 
-        StringVector<UChar> buffer;
+        Vector<UChar> buffer;
         buffer.reserveInitialCapacity(length);
         for (size_t i = 0; i < length; i++) {
             uint16_t ch;
@@ -416,5 +418,3 @@ bool deserializeIDBKeyData(const uint8_t* data, size_t size, IDBKeyData& result)
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

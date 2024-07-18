@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2016 Canon Inc.
+ * Copyright (C) 2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted, provided that the following conditions
@@ -29,17 +30,20 @@
 #pragma once
 
 #include "ActiveDOMObject.h"
+#include "ExceptionOr.h"
 #include "FetchBody.h"
 #include "FetchBodySource.h"
 #include "FetchHeaders.h"
 #include "FetchLoader.h"
 #include "FetchLoaderClient.h"
+#include "ResourceError.h"
+#include "SharedBuffer.h"
 
 namespace WebCore {
 
-class FetchBodyOwner : public RefCounted<FetchBodyOwner>, public ActiveDOMObject {
+class FetchBodyOwner : public RefCounted<FetchBodyOwner>, public ActiveDOMObject, public CanMakeWeakPtr<FetchBodyOwner> {
 public:
-    FetchBodyOwner(ScriptExecutionContext&, std::optional<FetchBody>&&, Ref<FetchHeaders>&&);
+    ~FetchBodyOwner();
 
     bool bodyUsed() const { return isDisturbed(); }
     void arrayBuffer(Ref<DeferredPromise>&&);
@@ -55,27 +59,35 @@ public:
 
     bool isActive() const { return !!m_blobLoader; }
 
-    RefPtr<ReadableStream> readableStream(JSC::ExecState&);
+    ExceptionOr<RefPtr<ReadableStream>> readableStream(JSC::JSGlobalObject&);
     bool hasReadableStreamBody() const { return m_body && m_body->hasReadableStream(); }
+    bool isReadableStreamBody() const { return m_body && m_body->isReadableStream(); }
 
-#if ENABLE(STREAMS_API)
     virtual void consumeBodyAsStream();
     virtual void feedStream() { }
     virtual void cancel() { }
-#endif
+
+    bool hasLoadingError() const;
+    ResourceError loadingError() const;
+    std::optional<Exception> loadingException() const;
+
+    const String& contentType() const { return m_contentType; }
 
 protected:
+    FetchBodyOwner(ScriptExecutionContext*, std::optional<FetchBody>&&, Ref<FetchHeaders>&&);
+
     const FetchBody& body() const { return *m_body; }
     FetchBody& body() { return *m_body; }
     bool isBodyNull() const { return !m_body; }
     bool isBodyNullOrOpaque() const { return !m_body || m_isBodyOpaque; }
     void cloneBody(FetchBodyOwner&);
 
-    void extractBody(ScriptExecutionContext&, FetchBody::Init&&);
+    ExceptionOr<void> extractBody(FetchBody::Init&&);
     void updateContentType();
     void consumeOnceLoadingFinished(FetchBodyConsumer::Type, Ref<DeferredPromise>&&);
 
     void setBody(FetchBody&& body) { m_body = WTFMove(body); }
+    ExceptionOr<void> createReadableStream(JSC::JSGlobalObject&);
 
     // ActiveDOMObject API
     void stop() override;
@@ -85,21 +97,27 @@ protected:
     void setBodyAsOpaque() { m_isBodyOpaque = true; }
     bool isBodyOpaque() const { return m_isBodyOpaque; }
 
+    void setLoadingError(Exception&&);
+    void setLoadingError(ResourceError&&);
+
 private:
     // Blob loading routines
-    void blobChunk(const char*, size_t);
+    void blobChunk(const SharedBuffer&);
     void blobLoadingSucceeded();
     void blobLoadingFailed();
     void finishBlobLoading();
+
+    // ActiveDOMObject API
+    bool virtualHasPendingActivity() const final;
 
     struct BlobLoader final : FetchLoaderClient {
         BlobLoader(FetchBodyOwner&);
 
         // FetchLoaderClient API
         void didReceiveResponse(const ResourceResponse&) final;
-        void didReceiveData(const char* data, size_t size) final { owner.blobChunk(data, size); }
+        void didReceiveData(const SharedBuffer& buffer) final { owner.blobChunk(buffer); }
         void didFail(const ResourceError&) final;
-        void didSucceed() final { owner.blobLoadingSucceeded(); }
+        void didSucceed(const NetworkLoadMetrics&) final { owner.blobLoadingSucceeded(); }
 
         FetchBodyOwner& owner;
         std::unique_ptr<FetchLoader> loader;
@@ -109,14 +127,14 @@ protected:
     std::optional<FetchBody> m_body;
     String m_contentType;
     bool m_isDisturbed { false };
-#if ENABLE(STREAMS_API)
     RefPtr<FetchBodySource> m_readableStreamSource;
-#endif
     Ref<FetchHeaders> m_headers;
 
 private:
     std::optional<BlobLoader> m_blobLoader;
     bool m_isBodyOpaque { false };
+
+    std::variant<std::nullptr_t, Exception, ResourceError> m_loadingError;
 };
 
 } // namespace WebCore

@@ -27,7 +27,6 @@
 #define APIAutomationClient_h
 
 #include <wtf/Forward.h>
-#include <wtf/text/WTFString.h>
 
 namespace WebKit {
 class WebProcessPool;
@@ -36,13 +35,12 @@ class WebProcessPool;
 namespace API {
 
 class AutomationClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~AutomationClient() { }
 
     virtual bool allowsRemoteAutomation(WebKit::WebProcessPool*) { return false; }
     virtual void didRequestAutomationSession(WebKit::WebProcessPool*, const WTF::String&) { }
-    virtual WTF::String browserName(WebKit::WebProcessPool*) const { return { }; }
-    virtual WTF::String browserVersion(WebKit::WebProcessPool*) const { return { }; }
 };
 
 } // namespace API

@@ -29,9 +29,13 @@
 #include "AutomationBackendDispatchers.h"
 #include "AutomationFrontendDispatchers.h"
 #include "Connection.h"
+#include "MessageReceiver.h"
+#include "MessageSender.h"
 #include "ShareableBitmap.h"
 #include "SimulatedInputDispatcher.h"
 #include "WebEvent.h"
+#include "WebPageProxyIdentifier.h"
+#include <WebCore/FrameIdentifier.h>
 #include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
 #include <wtf/RunLoop.h>
@@ -71,6 +75,7 @@ class OpenPanelParameters;
 
 namespace WebKit {
 
+class ViewSnapshot;
 class WebAutomationSessionClient;
 class WebFrameProxy;
 class WebOpenPanelResultListenerProxy;
@@ -99,7 +104,9 @@ class WebAutomationSession final : public API::ObjectImpl<API::Object::Type::Aut
     , public Inspector::RemoteAutomationTarget
 #endif
     , public Inspector::AutomationBackendDispatcherHandler
+#if ENABLE(WEBDRIVER_ACTIONS_API)
     , public SimulatedInputDispatcher::Client
+#endif
 {
 public:
     WebAutomationSession();
@@ -118,6 +125,7 @@ public:
     void inspectorFrontendLoaded(const WebPageProxy&);
     void keyboardEventsFlushedForPage(const WebPageProxy&);
     void mouseEventsFlushedForPage(const WebPageProxy&);
+    void wheelEventsFlushedForPage(const WebPageProxy&);
     void willClosePage(const WebPageProxy&);
     void handleRunOpenPanel(const WebPageProxy&, const WebFrameProxy&, const API::OpenPanelParameters&, WebOpenPanelResultListenerProxy&);
     void willShowJavaScriptDialog(WebPageProxy&);
@@ -128,73 +136,98 @@ public:
 
 #if ENABLE(REMOTE_INSPECTOR)
     // Inspector::RemoteAutomationTarget API
-    String name() const override { return m_sessionIdentifier; }
-    void dispatchMessageFromRemote(const String& message) override;
-    void connect(Inspector::FrontendChannel*, bool isAutomaticConnection = false, bool immediatelyPause = false) override;
-    void disconnect(Inspector::FrontendChannel*) override;
+    String name() const { return m_sessionIdentifier; }
+    void dispatchMessageFromRemote(String&& message);
+    void connect(Inspector::FrontendChannel&, bool isAutomaticConnection = false, bool immediatelyPause = false);
+    void disconnect(Inspector::FrontendChannel&);
 #endif
     void terminate();
 
+#if ENABLE(WEBDRIVER_ACTIONS_API)
+
     // SimulatedInputDispatcher::Client API
-    void simulateMouseInteraction(WebPageProxy&, MouseInteraction, WebMouseEvent::Button, const WebCore::IntPoint& locationInView, AutomationCompletionHandler&&) final;
-    void simulateKeyboardInteraction(WebPageProxy&, KeyboardInteraction, WTF::Variant<VirtualKey, CharKey>&&, AutomationCompletionHandler&&) final;
-    void viewportInViewCenterPointOfElement(WebPageProxy&, uint64_t frameID, const String& nodeHandle, Function<void (std::optional<WebCore::IntPoint>, std::optional<AutomationCommandError>)>&&) final;
+#if ENABLE(WEBDRIVER_MOUSE_INTERACTIONS)
+    void simulateMouseInteraction(WebPageProxy&, MouseInteraction, MouseButton, const WebCore::IntPoint& locationInView, const String& pointerType, AutomationCompletionHandler&&);
+#endif
+#if ENABLE(WEBDRIVER_TOUCH_INTERACTIONS)
+    void simulateTouchInteraction(WebPageProxy&, TouchInteraction, const WebCore::IntPoint& locationInView, std::optional<Seconds> duration, AutomationCompletionHandler&&);
+#endif
+#if ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
+    void simulateKeyboardInteraction(WebPageProxy&, KeyboardInteraction, std::variant<VirtualKey, CharKey>&&, AutomationCompletionHandler&&);
+#endif
+#if ENABLE(WEBDRIVER_WHEEL_INTERACTIONS)
+    void simulateWheelInteraction(WebPageProxy&, const WebCore::IntPoint& locationInView, const WebCore::IntSize& delta, AutomationCompletionHandler&&);
+#endif
+    void viewportInViewCenterPointOfElement(WebPageProxy&, std::optional<WebCore::FrameIdentifier>, const Inspector::Protocol::Automation::NodeHandle&, Function<void(std::optional<WebCore::IntPoint>, std::optional<AutomationCommandError>)>&&);
+
+#endif // ENABLE(WEBDRIVER_ACTIONS_API)
 
     // Inspector::AutomationBackendDispatcherHandler API
     // NOTE: the set of declarations included in this interface depend on the "platform" property in Automation.json
     // and the --platform argument passed to the protocol bindings generator.
 
     // Platform: Generic
-    void getBrowsingContexts(Inspector::ErrorString&, Ref<GetBrowsingContextsCallback>&&) final;
-    void getBrowsingContext(Inspector::ErrorString&, const String&, Ref<GetBrowsingContextCallback>&&) final;
-    void closeBrowsingContext(Inspector::ErrorString&, const String&) override;
-    void switchToBrowsingContext(Inspector::ErrorString&, const String& browsingContextHandle, const String* optionalFrameHandle, Ref<SwitchToBrowsingContextCallback>&&) override;
-    void createBrowsingContext(Inspector::ErrorString&, const bool* preferNewTab, Ref<CreateBrowsingContextCallback>&&) override;
-    void setWindowFrameOfBrowsingContext(Inspector::ErrorString&, const String& handle, const JSON::Object* origin, const JSON::Object* size, Ref<SetWindowFrameOfBrowsingContextCallback>&&) final;
-    void maximizeWindowOfBrowsingContext(Inspector::ErrorString&, const String& handle, Ref<MaximizeWindowOfBrowsingContextCallback>&&) final;
-    void hideWindowOfBrowsingContext(Inspector::ErrorString&, const String& handle, Ref<HideWindowOfBrowsingContextCallback>&&) final;
-    void navigateBrowsingContext(Inspector::ErrorString&, const String& handle, const String& url, const String* optionalPageLoadStrategyString, const int* optionalPageLoadTimeout, Ref<NavigateBrowsingContextCallback>&&) override;
-    void goBackInBrowsingContext(Inspector::ErrorString&, const String&, const String* optionalPageLoadStrategyString, const int* optionalPageLoadTimeout, Ref<GoBackInBrowsingContextCallback>&&) override;
-    void goForwardInBrowsingContext(Inspector::ErrorString&, const String&, const String* optionalPageLoadStrategyString, const int* optionalPageLoadTimeout, Ref<GoForwardInBrowsingContextCallback>&&) override;
-    void reloadBrowsingContext(Inspector::ErrorString&, const String&, const String* optionalPageLoadStrategyString, const int* optionalPageLoadTimeout, Ref<ReloadBrowsingContextCallback>&&) override;
-    void waitForNavigationToComplete(Inspector::ErrorString&, const String& browsingContextHandle, const String* optionalFrameHandle, const String* optionalPageLoadStrategyString, const int* optionalPageLoadTimeout, Ref<WaitForNavigationToCompleteCallback>&&) override;
-    void evaluateJavaScriptFunction(Inspector::ErrorString&, const String& browsingContextHandle, const String* optionalFrameHandle, const String& function, const JSON::Array& arguments, const bool* optionalExpectsImplicitCallbackArgument, const int* optionalCallbackTimeout, Ref<Inspector::AutomationBackendDispatcherHandler::EvaluateJavaScriptFunctionCallback>&&) override;
-    void performMouseInteraction(Inspector::ErrorString&, const String& handle, const JSON::Object& requestedPosition, const String& mouseButton, const String& mouseInteraction, const JSON::Array& keyModifiers, Ref<PerformMouseInteractionCallback>&&) final;
-    void performKeyboardInteractions(Inspector::ErrorString&, const String& handle, const JSON::Array& interactions, Ref<PerformKeyboardInteractionsCallback>&&) override;
-    void performInteractionSequence(Inspector::ErrorString&, const String& handle, const String* optionalFrameHandle, const JSON::Array& sources, const JSON::Array& steps, Ref<PerformInteractionSequenceCallback>&&) override;
-    void cancelInteractionSequence(Inspector::ErrorString&, const String& handle, const String* optionalFrameHandle, Ref<CancelInteractionSequenceCallback>&&) override;
-    void takeScreenshot(Inspector::ErrorString&, const String& handle, const String* optionalFrameHandle, const String* optionalNodeHandle, const bool* optionalScrollIntoViewIfNeeded, const bool* optionalClipToViewport, Ref<TakeScreenshotCallback>&&) override;
-    void resolveChildFrameHandle(Inspector::ErrorString&, const String& browsingContextHandle, const String* optionalFrameHandle, const int* optionalOrdinal, const String* optionalName, const String* optionalNodeHandle, Ref<ResolveChildFrameHandleCallback>&&) override;
-    void resolveParentFrameHandle(Inspector::ErrorString&, const String& browsingContextHandle, const String& frameHandle, Ref<ResolveParentFrameHandleCallback>&&) override;
-    void computeElementLayout(Inspector::ErrorString&, const String& browsingContextHandle, const String& frameHandle, const String& nodeHandle, const bool* optionalScrollIntoViewIfNeeded, const String& coordinateSystem, Ref<Inspector::AutomationBackendDispatcherHandler::ComputeElementLayoutCallback>&&) override;
-    void selectOptionElement(Inspector::ErrorString&, const String& browsingContextHandle, const String& frameHandle, const String& nodeHandle, Ref<Inspector::AutomationBackendDispatcherHandler::SelectOptionElementCallback>&&) override;
-    void isShowingJavaScriptDialog(Inspector::ErrorString&, const String& browsingContextHandle, bool* result) override;
-    void dismissCurrentJavaScriptDialog(Inspector::ErrorString&, const String& browsingContextHandle) override;
-    void acceptCurrentJavaScriptDialog(Inspector::ErrorString&, const String& browsingContextHandle) override;
-    void messageOfCurrentJavaScriptDialog(Inspector::ErrorString&, const String& browsingContextHandle, String* text) override;
-    void setUserInputForCurrentJavaScriptPrompt(Inspector::ErrorString&, const String& browsingContextHandle, const String& text) override;
-    void setFilesToSelectForFileUpload(Inspector::ErrorString&, const String& browsingContextHandle, const JSON::Array& filenames) override;
-    void getAllCookies(Inspector::ErrorString&, const String& browsingContextHandle, Ref<GetAllCookiesCallback>&&) override;
-    void deleteSingleCookie(Inspector::ErrorString&, const String& browsingContextHandle, const String& cookieName, Ref<DeleteSingleCookieCallback>&&) override;
-    void addSingleCookie(Inspector::ErrorString&, const String& browsingContextHandle, const JSON::Object& cookie, Ref<AddSingleCookieCallback>&&) override;
-    void deleteAllCookies(Inspector::ErrorString&, const String& browsingContextHandle) override;
-    void getSessionPermissions(Inspector::ErrorString&, RefPtr<JSON::ArrayOf<Inspector::Protocol::Automation::SessionPermissionData>>& out_permissions) override;
-    void setSessionPermissions(Inspector::ErrorString&, const JSON::Array& in_permissions) override;
+    void getBrowsingContexts(Ref<GetBrowsingContextsCallback>&&);
+    void getBrowsingContext(const Inspector::Protocol::Automation::BrowsingContextHandle&, Ref<GetBrowsingContextCallback>&&);
+    void createBrowsingContext(std::optional<Inspector::Protocol::Automation::BrowsingContextPresentation>&&, Ref<CreateBrowsingContextCallback>&&);
+    Inspector::Protocol::ErrorStringOr<void> closeBrowsingContext(const Inspector::Protocol::Automation::BrowsingContextHandle&);
+    void switchToBrowsingContext(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, Ref<SwitchToBrowsingContextCallback>&&);
+    void setWindowFrameOfBrowsingContext(const Inspector::Protocol::Automation::BrowsingContextHandle&, RefPtr<JSON::Object>&& origin, RefPtr<JSON::Object>&& size, Ref<SetWindowFrameOfBrowsingContextCallback>&&);
+    void maximizeWindowOfBrowsingContext(const Inspector::Protocol::Automation::BrowsingContextHandle&, Ref<MaximizeWindowOfBrowsingContextCallback>&&);
+    void hideWindowOfBrowsingContext(const Inspector::Protocol::Automation::BrowsingContextHandle&, Ref<HideWindowOfBrowsingContextCallback>&&);
+    void navigateBrowsingContext(const Inspector::Protocol::Automation::BrowsingContextHandle&, const String& url, std::optional<Inspector::Protocol::Automation::PageLoadStrategy>&&, std::optional<double>&& pageLoadTimeout, Ref<NavigateBrowsingContextCallback>&&);
+    void goBackInBrowsingContext(const String&, std::optional<Inspector::Protocol::Automation::PageLoadStrategy>&&, std::optional<double>&& pageLoadTimeout, Ref<GoBackInBrowsingContextCallback>&&);
+    void goForwardInBrowsingContext(const String&, std::optional<Inspector::Protocol::Automation::PageLoadStrategy>&&, std::optional<double>&& pageLoadTimeout, Ref<GoForwardInBrowsingContextCallback>&&);
+    void reloadBrowsingContext(const String&, std::optional<Inspector::Protocol::Automation::PageLoadStrategy>&&, std::optional<double>&& pageLoadTimeout, Ref<ReloadBrowsingContextCallback>&&);
+    void waitForNavigationToComplete(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, std::optional<Inspector::Protocol::Automation::PageLoadStrategy>&&, std::optional<double>&& pageLoadTimeout, Ref<WaitForNavigationToCompleteCallback>&&);
+    void evaluateJavaScriptFunction(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, const String& function, Ref<JSON::Array>&& arguments, std::optional<bool>&& expectsImplicitCallbackArgument, std::optional<double>&& callbackTimeout, Ref<EvaluateJavaScriptFunctionCallback>&&);
+    void performMouseInteraction(const Inspector::Protocol::Automation::BrowsingContextHandle&, Ref<JSON::Object>&& requestedPosition, Inspector::Protocol::Automation::MouseButton, Inspector::Protocol::Automation::MouseInteraction, Ref<JSON::Array>&& keyModifiers, Ref<PerformMouseInteractionCallback>&&);
+    void performKeyboardInteractions(const Inspector::Protocol::Automation::BrowsingContextHandle&, Ref<JSON::Array>&& interactions, Ref<PerformKeyboardInteractionsCallback>&&);
+    void performInteractionSequence(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, Ref<JSON::Array>&& sources, Ref<JSON::Array>&& steps, Ref<PerformInteractionSequenceCallback>&&);
+    void cancelInteractionSequence(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, Ref<CancelInteractionSequenceCallback>&&);
+    void takeScreenshot(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, const Inspector::Protocol::Automation::NodeHandle&, std::optional<bool>&& scrollIntoViewIfNeeded, std::optional<bool>&& clipToViewport, Ref<TakeScreenshotCallback>&&);
+    void resolveChildFrameHandle(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, std::optional<int>&& ordinal, const String& name, const Inspector::Protocol::Automation::NodeHandle&, Ref<ResolveChildFrameHandleCallback>&&);
+    void resolveParentFrameHandle(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, Ref<ResolveParentFrameHandleCallback>&&);
+    void computeElementLayout(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, const Inspector::Protocol::Automation::NodeHandle&, std::optional<bool>&& scrollIntoViewIfNeeded, Inspector::Protocol::Automation::CoordinateSystem, Ref<ComputeElementLayoutCallback>&&);
+    void selectOptionElement(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, const Inspector::Protocol::Automation::NodeHandle&, Ref<SelectOptionElementCallback>&&);
+    Inspector::Protocol::ErrorStringOr<bool> isShowingJavaScriptDialog(const Inspector::Protocol::Automation::BrowsingContextHandle&);
+    Inspector::Protocol::ErrorStringOr<void> dismissCurrentJavaScriptDialog(const Inspector::Protocol::Automation::BrowsingContextHandle&);
+    Inspector::Protocol::ErrorStringOr<void> acceptCurrentJavaScriptDialog(const Inspector::Protocol::Automation::BrowsingContextHandle&);
+    Inspector::Protocol::ErrorStringOr<String> messageOfCurrentJavaScriptDialog(const Inspector::Protocol::Automation::BrowsingContextHandle&);
+    Inspector::Protocol::ErrorStringOr<void> setUserInputForCurrentJavaScriptPrompt(const Inspector::Protocol::Automation::BrowsingContextHandle&, const String& text);
+    Inspector::Protocol::ErrorStringOr<void> setFilesToSelectForFileUpload(const Inspector::Protocol::Automation::BrowsingContextHandle&, Ref<JSON::Array>&& filenames, RefPtr<JSON::Array>&& fileContents);
+    void setFilesForInputFileUpload(const Inspector::Protocol::Automation::BrowsingContextHandle&, const Inspector::Protocol::Automation::FrameHandle&, const Inspector::Protocol::Automation::NodeHandle&, Ref<JSON::Array>&& filenames, Ref<SetFilesForInputFileUploadCallback>&&);
+    void getAllCookies(const Inspector::Protocol::Automation::BrowsingContextHandle&, Ref<GetAllCookiesCallback>&&);
+    void deleteSingleCookie(const Inspector::Protocol::Automation::BrowsingContextHandle&, const String& cookieName, Ref<DeleteSingleCookieCallback>&&);
+    void addSingleCookie(const Inspector::Protocol::Automation::BrowsingContextHandle&, Ref<JSON::Object>&& cookie, Ref<AddSingleCookieCallback>&&);
+    Inspector::Protocol::ErrorStringOr<void> deleteAllCookies(const Inspector::Protocol::Automation::BrowsingContextHandle&);
+    Inspector::Protocol::ErrorStringOr<Ref<JSON::ArrayOf<Inspector::Protocol::Automation::SessionPermissionData>>> getSessionPermissions();
+    Inspector::Protocol::ErrorStringOr<void> setSessionPermissions(Ref<JSON::Array>&&);
 
-    // Platform: macOS
+    Inspector::Protocol::ErrorStringOr<String /* authenticatorId */> addVirtualAuthenticator(const String& browsingContextHandle, Ref<JSON::Object>&& authenticator);
+    Inspector::Protocol::ErrorStringOr<void> removeVirtualAuthenticator(const String& browsingContextHandle, const String& authenticatorId);
+    Inspector::Protocol::ErrorStringOr<void> addVirtualAuthenticatorCredential(const String& browsingContextHandle, const String& authenticatorId, Ref<JSON::Object>&& credential);
+    Inspector::Protocol::ErrorStringOr<Ref<JSON::ArrayOf<Inspector::Protocol::Automation::VirtualAuthenticatorCredential>> /* credentials */> getVirtualAuthenticatorCredentials(const String& browsingContextHandle, const String& authenticatorId);
+    Inspector::Protocol::ErrorStringOr<void> removeVirtualAuthenticatorCredential(const String& browsingContextHandle, const String& authenticatorId, const String& credentialId);
+    Inspector::Protocol::ErrorStringOr<void> removeAllVirtualAuthenticatorCredentials(const String& browsingContextHandle, const String& authenticatorId);
+    Inspector::Protocol::ErrorStringOr<void> setVirtualAuthenticatorUserVerified(const String& browsingContextHandle, const String& authenticatorId, bool isUserVerified);
+
 #if PLATFORM(MAC)
-    void inspectBrowsingContext(Inspector::ErrorString&, const String&, const bool* optionalEnableAutoCapturing, Ref<InspectBrowsingContextCallback>&&) override;
+    void inspectBrowsingContext(const Inspector::Protocol::Automation::BrowsingContextHandle&, std::optional<bool>&& enableAutoCapturing, Ref<InspectBrowsingContextCallback>&&);
 #endif
 
     // Event Simulation Support.
     bool isSimulatingUserInteraction() const;
+#if ENABLE(WEBDRIVER_ACTIONS_API)
     SimulatedInputDispatcher& inputDispatcherForPage(WebPageProxy&);
-    SimulatedInputSource* inputSourceForType(SimulatedInputSourceType) const;
+#endif
 
 #if PLATFORM(MAC)
     bool wasEventSynthesizedForAutomation(NSEvent *);
     void markEventAsSynthesizedForAutomation(NSEvent *);
 #endif
+
+    void didDestroyFrame(WebCore::FrameIdentifier);
 
 private:
     WebPageProxy* webPageProxyForHandle(const String&);
@@ -202,14 +235,14 @@ private:
     Ref<Inspector::Protocol::Automation::BrowsingContext> buildBrowsingContextForPage(WebPageProxy&, WebCore::FloatRect windowFrame);
     void getNextContext(Ref<WebAutomationSession>&&, Vector<Ref<WebPageProxy>>&&, Ref<JSON::ArrayOf<Inspector::Protocol::Automation::BrowsingContext>>, Ref<WebAutomationSession::GetBrowsingContextsCallback>&&);
 
-    std::optional<uint64_t> webFrameIDForHandle(const String&);
-    String handleForWebFrameID(uint64_t frameID);
+    std::optional<WebCore::FrameIdentifier> webFrameIDForHandle(const String&, bool& frameNotFound);
+    String handleForWebFrameID(std::optional<WebCore::FrameIdentifier>);
     String handleForWebFrameProxy(const WebFrameProxy&);
 
     void waitForNavigationToCompleteOnPage(WebPageProxy&, Inspector::Protocol::Automation::PageLoadStrategy, Seconds, Ref<Inspector::BackendDispatcher::CallbackBase>&&);
     void waitForNavigationToCompleteOnFrame(WebFrameProxy&, Inspector::Protocol::Automation::PageLoadStrategy, Seconds, Ref<Inspector::BackendDispatcher::CallbackBase>&&);
-    void respondToPendingPageNavigationCallbacksWithTimeout(HashMap<uint64_t, RefPtr<Inspector::BackendDispatcher::CallbackBase>>&);
-    void respondToPendingFrameNavigationCallbacksWithTimeout(HashMap<uint64_t, RefPtr<Inspector::BackendDispatcher::CallbackBase>>&);
+    void respondToPendingPageNavigationCallbacksWithTimeout(HashMap<WebPageProxyIdentifier, RefPtr<Inspector::BackendDispatcher::CallbackBase>>&);
+    void respondToPendingFrameNavigationCallbacksWithTimeout(HashMap<WebCore::FrameIdentifier, RefPtr<Inspector::BackendDispatcher::CallbackBase>>&);
     void loadTimerFired();
 
     void exitFullscreenWindowForPage(WebPageProxy&, WTF::CompletionHandler<void()>&&);
@@ -217,27 +250,41 @@ private:
     void maximizeWindowForPage(WebPageProxy&, WTF::CompletionHandler<void()>&&);
     void hideWindowForPage(WebPageProxy&, WTF::CompletionHandler<void()>&&);
 
-    // Implemented in generated WebAutomationSessionMessageReceiver.cpp.
-    void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
+    // IPC::MessageReceiver (Implemented by generated code in WebAutomationSessionMessageReceiver.cpp).
+    void didReceiveMessage(IPC::Connection&, IPC::Decoder&);
 
     // Called by WebAutomationSession messages.
     void didEvaluateJavaScriptFunction(uint64_t callbackID, const String& result, const String& errorType);
-    void didResolveChildFrame(uint64_t callbackID, uint64_t frameID, const String& errorType);
-    void didResolveParentFrame(uint64_t callbackID, uint64_t frameID, const String& errorType);
-    void didComputeElementLayout(uint64_t callbackID, WebCore::IntRect, std::optional<WebCore::IntPoint>, bool isObscured, const String& errorType);
-    void didSelectOptionElement(uint64_t callbackID, const String& errorType);
     void didTakeScreenshot(uint64_t callbackID, const ShareableBitmap::Handle&, const String& errorType);
-    void didGetCookiesForFrame(uint64_t callbackID, Vector<WebCore::Cookie>, const String& errorType);
-    void didDeleteCookie(uint64_t callbackID, const String& errorType);
 
     // Platform-dependent implementations.
-    void platformSimulateMouseInteraction(WebPageProxy&, MouseInteraction, WebMouseEvent::Button, const WebCore::IntPoint& locationInView, WebEvent::Modifiers keyModifiers);
+#if ENABLE(WEBDRIVER_MOUSE_INTERACTIONS)
+    void updateClickCount(MouseButton, const WebCore::IntPoint&, Seconds maxTime, int maxDistance);
+    void resetClickCount();
+    void platformSimulateMouseInteraction(WebPageProxy&, MouseInteraction, MouseButton, const WebCore::IntPoint& locationInViewport, OptionSet<WebEvent::Modifier>, const String& pointerType);
+    static OptionSet<WebEvent::Modifier> platformWebModifiersFromRaw(unsigned modifiers);
+#endif
+#if ENABLE(WEBDRIVER_TOUCH_INTERACTIONS)
+    // Simulates a single touch point being pressed, moved, and released.
+    void platformSimulateTouchInteraction(WebPageProxy&, TouchInteraction, const WebCore::IntPoint& locationInViewport, std::optional<Seconds> duration, AutomationCompletionHandler&&);
+#endif
+#if ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
     // Simulates a single virtual or char key being pressed/released, such as 'a', Control, F-keys, Numpad keys, etc. as allowed by the protocol.
-    void platformSimulateKeyboardInteraction(WebPageProxy&, KeyboardInteraction, WTF::Variant<VirtualKey, CharKey>&&);
+    void platformSimulateKeyboardInteraction(WebPageProxy&, KeyboardInteraction, std::variant<VirtualKey, CharKey>&&);
     // Simulates key presses to produce the codepoints in a string. One or more code points are delivered atomically at grapheme cluster boundaries.
     void platformSimulateKeySequence(WebPageProxy&, const String&);
-    // Get base64 encoded PNG data from a bitmap.
-    std::optional<String> platformGetBase64EncodedPNGData(const ShareableBitmap::Handle&);
+#endif // ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
+#if ENABLE(WEBDRIVER_WHEEL_INTERACTIONS)
+    void platformSimulateWheelInteraction(WebPageProxy&, const WebCore::IntPoint& locationInViewport, const WebCore::IntSize& delta);
+#endif // ENABLE(WEBDRIVER_WHEEL_INTERACTIONS)
+
+    // Get base64-encoded PNG data from a bitmap.
+    static std::optional<String> platformGetBase64EncodedPNGData(const ShareableBitmap::Handle&);
+    static std::optional<String> platformGetBase64EncodedPNGData(const ViewSnapshot&);
+
+    // Save base64-encoded file contents to a local file path and return the path.
+    // This reuses the basename of the remote file path so that the filename exposed to DOM API remains the same.
+    std::optional<String> platformGenerateLocalFilePathForRemoteFile(const String& remoteFilePath, const String& base64EncodedFileContents);
 
 #if PLATFORM(COCOA)
     // The type parameter of the NSArray argument is platform-dependent.
@@ -250,54 +297,38 @@ private:
     WebProcessPool* m_processPool { nullptr };
 
     std::unique_ptr<API::AutomationSessionClient> m_client;
-    String m_sessionIdentifier { ASCIILiteral("Untitled Session") };
+    String m_sessionIdentifier { "Untitled Session"_s };
     Ref<Inspector::FrontendRouter> m_frontendRouter;
     Ref<Inspector::BackendDispatcher> m_backendDispatcher;
     Ref<Inspector::AutomationBackendDispatcher> m_domainDispatcher;
     std::unique_ptr<Inspector::AutomationFrontendDispatcher> m_domainNotifier;
 
-    HashMap<uint64_t, String> m_webPageHandleMap;
-    HashMap<String, uint64_t> m_handleWebPageMap;
+    HashMap<WebPageProxyIdentifier, String> m_webPageHandleMap;
+    HashMap<String, WebPageProxyIdentifier> m_handleWebPageMap;
 
-    HashMap<uint64_t, String> m_webFrameHandleMap;
-    HashMap<String, uint64_t> m_handleWebFrameMap;
+    HashMap<WebCore::FrameIdentifier, String> m_webFrameHandleMap;
+    HashMap<String, WebCore::FrameIdentifier> m_handleWebFrameMap;
 
-    HashMap<uint64_t, RefPtr<Inspector::BackendDispatcher::CallbackBase>> m_pendingNormalNavigationInBrowsingContextCallbacksPerPage;
-    HashMap<uint64_t, RefPtr<Inspector::BackendDispatcher::CallbackBase>> m_pendingEagerNavigationInBrowsingContextCallbacksPerPage;
-    HashMap<uint64_t, RefPtr<Inspector::BackendDispatcher::CallbackBase>> m_pendingNormalNavigationInBrowsingContextCallbacksPerFrame;
-    HashMap<uint64_t, RefPtr<Inspector::BackendDispatcher::CallbackBase>> m_pendingEagerNavigationInBrowsingContextCallbacksPerFrame;
-    HashMap<uint64_t, RefPtr<Inspector::BackendDispatcher::CallbackBase>> m_pendingInspectorCallbacksPerPage;
-    HashMap<uint64_t, Function<void(std::optional<AutomationCommandError>)>> m_pendingKeyboardEventsFlushedCallbacksPerPage;
-    HashMap<uint64_t, Function<void(std::optional<AutomationCommandError>)>> m_pendingMouseEventsFlushedCallbacksPerPage;
+    HashMap<WebPageProxyIdentifier, RefPtr<Inspector::BackendDispatcher::CallbackBase>> m_pendingNormalNavigationInBrowsingContextCallbacksPerPage;
+    HashMap<WebPageProxyIdentifier, RefPtr<Inspector::BackendDispatcher::CallbackBase>> m_pendingEagerNavigationInBrowsingContextCallbacksPerPage;
+    HashMap<WebCore::FrameIdentifier, RefPtr<Inspector::BackendDispatcher::CallbackBase>> m_pendingNormalNavigationInBrowsingContextCallbacksPerFrame;
+    HashMap<WebCore::FrameIdentifier, RefPtr<Inspector::BackendDispatcher::CallbackBase>> m_pendingEagerNavigationInBrowsingContextCallbacksPerFrame;
+    HashMap<WebPageProxyIdentifier, RefPtr<Inspector::BackendDispatcher::CallbackBase>> m_pendingInspectorCallbacksPerPage;
+#if ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
+    HashMap<WebPageProxyIdentifier, Function<void(std::optional<AutomationCommandError>)>> m_pendingKeyboardEventsFlushedCallbacksPerPage;
+#endif
+#if ENABLE(WEBDRIVER_MOUSE_INTERACTIONS)
+    HashMap<WebPageProxyIdentifier, Function<void(std::optional<AutomationCommandError>)>> m_pendingMouseEventsFlushedCallbacksPerPage;
+#endif
+#if ENABLE(WEBDRIVER_WHEEL_INTERACTIONS)
+    HashMap<WebPageProxyIdentifier, Function<void(std::optional<AutomationCommandError>)>> m_pendingWheelEventsFlushedCallbacksPerPage;
+#endif
 
     uint64_t m_nextEvaluateJavaScriptCallbackID { 1 };
     HashMap<uint64_t, RefPtr<Inspector::AutomationBackendDispatcherHandler::EvaluateJavaScriptFunctionCallback>> m_evaluateJavaScriptFunctionCallbacks;
 
-    uint64_t m_nextResolveFrameCallbackID { 1 };
-    HashMap<uint64_t, RefPtr<Inspector::AutomationBackendDispatcherHandler::ResolveChildFrameHandleCallback>> m_resolveChildFrameHandleCallbacks;
-
-    uint64_t m_nextResolveParentFrameCallbackID { 1 };
-    HashMap<uint64_t, RefPtr<Inspector::AutomationBackendDispatcherHandler::ResolveParentFrameHandleCallback>> m_resolveParentFrameHandleCallbacks;
-
-    // Start at 2 and use only even numbers to not conflict with m_nextViewportInViewCenterPointOfElementCallbackID.
-    uint64_t m_nextComputeElementLayoutCallbackID { 2 };
-    HashMap<uint64_t, RefPtr<Inspector::AutomationBackendDispatcherHandler::ComputeElementLayoutCallback>> m_computeElementLayoutCallbacks;
-
-    // Start at 3 and use only odd numbers to not conflict with m_nextComputeElementLayoutCallbackID.
-    uint64_t m_nextViewportInViewCenterPointOfElementCallbackID { 3 };
-    HashMap<uint64_t, Function<void(std::optional<WebCore::IntPoint>, std::optional<AutomationCommandError>)>> m_viewportInViewCenterPointOfElementCallbacks;
-
     uint64_t m_nextScreenshotCallbackID { 1 };
     HashMap<uint64_t, RefPtr<Inspector::AutomationBackendDispatcherHandler::TakeScreenshotCallback>> m_screenshotCallbacks;
-
-    uint64_t m_nextGetCookiesCallbackID { 1 };
-    HashMap<uint64_t, RefPtr<Inspector::AutomationBackendDispatcherHandler::GetAllCookiesCallback>> m_getCookieCallbacks;
-
-    uint64_t m_nextDeleteCookieCallbackID { 1 };
-    HashMap<uint64_t, RefPtr<Inspector::AutomationBackendDispatcherHandler::DeleteSingleCookieCallback>> m_deleteCookieCallbacks;
-
-    uint64_t m_nextSelectOptionElementCallbackID { 1 };
-    HashMap<uint64_t, RefPtr<Inspector::AutomationBackendDispatcherHandler::SelectOptionElementCallback>> m_selectOptionElementCallbacks;
 
     enum class WindowTransitionedToState {
         Fullscreen,
@@ -310,14 +341,26 @@ private:
 
     bool m_permissionForGetUserMedia { true };
 
+#if ENABLE(WEBDRIVER_ACTIONS_API)
+    // SimulatedInputDispatcher APIs take a set of input sources. We also intern these
+    // so that previous input source state is used as initial state for later commands.
+    HashMap<String, Ref<SimulatedInputSource>> m_inputSources;
+    HashMap<WebPageProxyIdentifier, Ref<SimulatedInputDispatcher>> m_inputDispatchersByPage;
+#endif
+#if ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
     // Keep track of currently active modifiers across multiple keystrokes.
     // Most platforms do not track current modifiers from synthesized events.
     unsigned m_currentModifiers { 0 };
-
-    // SimulatedInputDispatcher APIs take a set of input sources. We also intern these
-    // so that previous input source state is used as initial state for later commands.
-    HashSet<Ref<SimulatedInputSource>> m_inputSources;
-    HashMap<uint64_t, Ref<SimulatedInputDispatcher>> m_inputDispatchersByPage;
+#endif
+#if ENABLE(WEBDRIVER_TOUCH_INTERACTIONS)
+    bool m_simulatingTouchInteraction { false };
+#endif
+#if ENABLE(WEBDRIVER_MOUSE_INTERACTIONS)
+    MonotonicTime m_lastClickTime;
+    MouseButton m_lastClickButton { MouseButton::None };
+    WebCore::IntPoint m_lastClickPosition;
+    unsigned m_clickCount { 1 };
+#endif
 
 #if ENABLE(REMOTE_INSPECTOR)
     Inspector::FrontendChannel* m_remoteChannel { nullptr };

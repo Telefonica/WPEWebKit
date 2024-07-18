@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,9 +26,6 @@
 
 #include <unicode/uchar.h>
 #include <wtf/Expected.h>
-#include <wtf/Forward.h>
-#include <wtf/Optional.h>
-#include <wtf/Vector.h>
 #include <wtf/text/StringView.h>
 
 namespace WebCore {
@@ -57,10 +54,10 @@ String serializeForNumberType(double);
 // Convert the specified string to a decimal/double. If the conversion fails, the return value is fallback value or NaN if not specified.
 // Leading or trailing illegal characters cause failure, as does passing an empty string.
 // The double* parameter may be 0 to check if the string can be parsed without getting the result.
-Decimal parseToDecimalForNumberType(const String&);
-Decimal parseToDecimalForNumberType(const String&, const Decimal& fallbackValue);
-double parseToDoubleForNumberType(const String&);
-double parseToDoubleForNumberType(const String&, double fallbackValue);
+Decimal parseToDecimalForNumberType(StringView);
+Decimal parseToDecimalForNumberType(StringView, const Decimal& fallbackValue);
+double parseToDoubleForNumberType(StringView);
+double parseToDoubleForNumberType(StringView, double fallbackValue);
 
 // http://www.whatwg.org/specs/web-apps/current-work/#rules-for-parsing-integers
 enum class HTMLIntegerParsingError { NegativeOverflow, PositiveOverflow, Other };
@@ -80,14 +77,23 @@ std::optional<double> parseValidHTMLFloatingPointNumber(StringView);
 Vector<double> parseHTMLListOfOfFloatingPointNumberValues(StringView);
 
 // https://html.spec.whatwg.org/multipage/semantics.html#attr-meta-http-equiv-refresh
-bool parseMetaHTTPEquivRefresh(const StringView&, double& delay, String& url);
+bool parseMetaHTTPEquivRefresh(StringView, double& delay, String& url);
 
 // https://html.spec.whatwg.org/multipage/infrastructure.html#cors-settings-attribute
-String parseCORSSettingsAttribute(const AtomicString&);
+String parseCORSSettingsAttribute(const AtomString&);
 
 bool threadSafeMatch(const QualifiedName&, const QualifiedName&);
 
-AtomicString parseHTMLHashNameReference(StringView);
+AtomString parseHTMLHashNameReference(StringView);
+
+// https://html.spec.whatwg.org/#rules-for-parsing-dimension-values
+struct HTMLDimension {
+    enum class Type : bool { Percentage, Pixel };
+    double number;
+    Type type;
+};
+std::optional<HTMLDimension> parseHTMLDimension(StringView);
+std::optional<HTMLDimension> parseHTMLMultiLength(StringView);
 
 // Inline implementations of some of the functions declared above.
 
@@ -158,7 +164,7 @@ inline unsigned limitToOnlyHTMLNonNegative(unsigned value, unsigned defaultValue
 inline unsigned limitToOnlyHTMLNonNegative(StringView stringValue, unsigned defaultValue = 0)
 {
     ASSERT(defaultValue <= maxHTMLNonNegativeInteger);
-    unsigned value = parseHTMLNonNegativeInteger(stringValue).valueOr(defaultValue);
+    unsigned value = parseHTMLNonNegativeInteger(stringValue).value_or(defaultValue);
     ASSERT(value <= maxHTMLNonNegativeInteger);
     return value;
 }

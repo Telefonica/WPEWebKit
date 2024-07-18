@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
+ *  Copyright (C) 2007-2021 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -27,14 +27,14 @@ namespace JSC {
 class StringPrototype;
 class GetterSetter;
 
-class StringConstructor : public InternalFunction {
+class StringConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
-    static const unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
 
     static StringConstructor* create(VM& vm, Structure* structure, StringPrototype* stringPrototype, GetterSetter*)
     {
-        StringConstructor* constructor = new (NotNull, allocateCell<StringConstructor>(vm.heap)) StringConstructor(vm, structure);
+        StringConstructor* constructor = new (NotNull, allocateCell<StringConstructor>(vm)) StringConstructor(vm, structure);
         constructor->finishCreation(vm, stringPrototype);
         return constructor;
     }
@@ -43,17 +43,16 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
 private:
     StringConstructor(VM&, Structure*);
     void finishCreation(VM&, StringPrototype*);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(StringConstructor, InternalFunction);
 
-JSCell* JSC_HOST_CALL stringFromCharCode(ExecState*, int32_t);
-JSCell* stringConstructor(ExecState*, JSValue);
+JSString* stringFromCharCode(JSGlobalObject*, int32_t);
+JSString* stringConstructor(JSGlobalObject*, JSValue);
 
 } // namespace JSC

@@ -37,11 +37,6 @@
 
 class WebResourceLoadScheduler;
 
-namespace WebCore {
-struct FetchOptions;
-class SecurityOrigin;
-}
-
 WebResourceLoadScheduler& webResourceLoadScheduler();
 
 class WebResourceLoadScheduler final : public WebCore::LoaderStrategy {
@@ -49,36 +44,42 @@ class WebResourceLoadScheduler final : public WebCore::LoaderStrategy {
 public:
     WebResourceLoadScheduler();
 
-    RefPtr<WebCore::SubresourceLoader> loadResource(WebCore::Frame&, WebCore::CachedResource&, const WebCore::ResourceRequest&, const WebCore::ResourceLoaderOptions&) final;
-    void loadResourceSynchronously(WebCore::NetworkingContext*, unsigned long, const WebCore::ResourceRequest&, WebCore::StoredCredentialsPolicy, WebCore::ClientCredentialPolicy, WebCore::ResourceError&, WebCore::ResourceResponse&, Vector<char>&) final;
+    void loadResource(WebCore::Frame&, WebCore::CachedResource&, WebCore::ResourceRequest&&, const WebCore::ResourceLoaderOptions&, CompletionHandler<void(RefPtr<WebCore::SubresourceLoader>&&)>&&) final;
+    void loadResourceSynchronously(WebCore::FrameLoader&, WebCore::ResourceLoaderIdentifier, const WebCore::ResourceRequest&, WebCore::ClientCredentialPolicy, const WebCore::FetchOptions&, const WebCore::HTTPHeaderMap&, WebCore::ResourceError&, WebCore::ResourceResponse&, Vector<uint8_t>&) final;
+    void pageLoadCompleted(WebCore::Page&) final;
+    void browsingContextRemoved(WebCore::Frame&) final;
+
     void remove(WebCore::ResourceLoader*) final;
-    void setDefersLoading(WebCore::ResourceLoader*, bool) final;
-    void crossOriginRedirectReceived(WebCore::ResourceLoader*, const WebCore::URL& redirectURL) final;
+    void setDefersLoading(WebCore::ResourceLoader&, bool) final;
+    void crossOriginRedirectReceived(WebCore::ResourceLoader*, const URL& redirectURL) final;
     
     void servePendingRequests(WebCore::ResourceLoadPriority minimumPriority = WebCore::ResourceLoadPriority::VeryLow) final;
     void suspendPendingRequests() final;
     void resumePendingRequests() final;
 
-    void startPingLoad(WebCore::Frame&, WebCore::ResourceRequest&, const WebCore::HTTPHeaderMap&, const WebCore::FetchOptions&, PingLoadCompletionHandler&&) final;
+    void startPingLoad(WebCore::Frame&, WebCore::ResourceRequest&, const WebCore::HTTPHeaderMap&, const WebCore::FetchOptions&, WebCore::ContentSecurityPolicyImposition, PingLoadCompletionHandler&&) final;
 
-    void storeDerivedDataToCache(const SHA1::Digest&, const String&, const String&, WebCore::SharedBuffer&) final { }
+    void preconnectTo(WebCore::FrameLoader&, const URL&, WebCore::StoredCredentialsPolicy, ShouldPreconnectAsFirstParty, PreconnectCompletionHandler&&) final;
 
     void setCaptureExtraNetworkLoadMetricsEnabled(bool) final { }
 
     bool isSerialLoadingEnabled() const { return m_isSerialLoadingEnabled; }
     void setSerialLoadingEnabled(bool b) { m_isSerialLoadingEnabled = b; }
 
-    RefPtr<WebCore::NetscapePlugInStreamLoader> schedulePluginStreamLoad(WebCore::Frame&, WebCore::NetscapePlugInStreamLoaderClient&, const WebCore::ResourceRequest&);
+    void schedulePluginStreamLoad(WebCore::Frame&, WebCore::NetscapePlugInStreamLoaderClient&, WebCore::ResourceRequest&&, CompletionHandler<void(RefPtr<WebCore::NetscapePlugInStreamLoader>&&)>&&);
 
-protected:
-    virtual ~WebResourceLoadScheduler();
+    bool isOnLine() const final;
+    void addOnlineStateChangeListener(WTF::Function<void(bool)>&&) final;
 
 private:
+    virtual ~WebResourceLoadScheduler();
+
     void scheduleLoad(WebCore::ResourceLoader*);
     void scheduleServePendingRequests();
     void requestTimerFired();
 
     bool isSuspendingPendingRequests() const { return !!m_suspendPendingRequestsCount; }
+    void isResourceLoadFinished(WebCore::CachedResource&, CompletionHandler<void(bool)>&&) final;
 
     class HostInformation {
         WTF_MAKE_NONCOPYABLE(HostInformation); WTF_MAKE_FAST_ALLOCATED;
@@ -111,7 +112,7 @@ private:
         FindOnly
     };
     
-    HostInformation* hostForURL(const WebCore::URL&, CreateHostPolicy = FindOnly);
+    HostInformation* hostForURL(const URL&, CreateHostPolicy = FindOnly);
     void servePendingRequests(HostInformation*, WebCore::ResourceLoadPriority);
 
     typedef HashMap<String, HostInformation*, StringHash> HostMap;

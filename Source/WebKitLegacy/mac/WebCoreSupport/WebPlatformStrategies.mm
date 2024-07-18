@@ -28,15 +28,17 @@
 #import "WebFrameNetworkingContext.h"
 #import "WebPluginPackage.h"
 #import "WebResourceLoadScheduler.h"
+#import <WebCore/AudioDestination.h>
 #import <WebCore/BlobRegistryImpl.h>
+#import <WebCore/CDMFactory.h>
 #import <WebCore/Color.h>
-#import <WebCore/MainFrame.h>
+#import <WebCore/Frame.h>
+#import <WebCore/MediaStrategy.h>
 #import <WebCore/NetworkStorageSession.h>
-#import <WebCore/PlatformCookieJar.h>
+#import <WebCore/PasteboardItemInfo.h>
 #import <WebCore/PlatformPasteboard.h>
 #import <WebCore/SharedBuffer.h>
 #import <WebCore/SubframeLoader.h>
-#import <WebKitSystemInterface.h>
 
 using namespace WebCore;
 
@@ -53,11 +55,6 @@ WebPlatformStrategies::WebPlatformStrategies()
 {
 }
 
-CookiesStrategy* WebPlatformStrategies::createCookiesStrategy()
-{
-    return this;
-}
-
 LoaderStrategy* WebPlatformStrategies::createLoaderStrategy()
 {
     return new WebResourceLoadScheduler;
@@ -68,170 +65,199 @@ PasteboardStrategy* WebPlatformStrategies::createPasteboardStrategy()
     return this;
 }
 
+class WebMediaStrategy final : public MediaStrategy {
+private:
+#if ENABLE(WEB_AUDIO)
+    Ref<AudioDestination> createAudioDestination(AudioIOCallback& callback, const String& inputDeviceId,
+        unsigned numberOfInputChannels, unsigned numberOfOutputChannels, float sampleRate) override
+    {
+        return AudioDestination::create(callback, inputDeviceId, numberOfInputChannels, numberOfOutputChannels, sampleRate);
+    }
+#endif
+};
+
+MediaStrategy* WebPlatformStrategies::createMediaStrategy()
+{
+    return new WebMediaStrategy;
+}
+
+class WebBlobRegistry final : public BlobRegistry {
+private:
+    void registerFileBlobURL(const URL& url, Ref<BlobDataFileReference>&& reference, const String&, const String& contentType) final { m_blobRegistry.registerFileBlobURL(url, WTFMove(reference), contentType); }
+    void registerBlobURL(const URL& url, Vector<BlobPart>&& parts, const String& contentType) final { m_blobRegistry.registerBlobURL(url, WTFMove(parts), contentType); }
+    void registerBlobURL(const URL& url, const URL& srcURL, const PolicyContainer& policyContainer) final { m_blobRegistry.registerBlobURL(url, srcURL, policyContainer); }
+    void registerBlobURLOptionallyFileBacked(const URL& url, const URL& srcURL, RefPtr<BlobDataFileReference>&& reference, const String& contentType) final { m_blobRegistry.registerBlobURLOptionallyFileBacked(url, srcURL, WTFMove(reference), contentType, { }); }
+    void registerBlobURLForSlice(const URL& url, const URL& srcURL, long long start, long long end, const String& contentType) final { m_blobRegistry.registerBlobURLForSlice(url, srcURL, start, end, contentType); }
+    void unregisterBlobURL(const URL& url) final { m_blobRegistry.unregisterBlobURL(url); }
+    unsigned long long blobSize(const URL& url) final { return m_blobRegistry.blobSize(url); }
+    void writeBlobsToTemporaryFilesForIndexedDB(const Vector<String>& blobURLs, CompletionHandler<void(Vector<String>&& filePaths)>&& completionHandler) final { m_blobRegistry.writeBlobsToTemporaryFilesForIndexedDB(blobURLs, WTFMove(completionHandler)); }
+    void registerBlobURLHandle(const URL& url) final { m_blobRegistry.registerBlobURLHandle(url); }
+    void unregisterBlobURLHandle(const URL& url) final { m_blobRegistry.unregisterBlobURLHandle(url); }
+
+    BlobRegistryImpl* blobRegistryImpl() final { return &m_blobRegistry; }
+
+    BlobRegistryImpl m_blobRegistry;
+};
+
 BlobRegistry* WebPlatformStrategies::createBlobRegistry()
 {
-    return new WebCore::BlobRegistryImpl;
+    return new WebBlobRegistry;
 }
 
-std::pair<String, bool> WebPlatformStrategies::cookiesForDOM(const NetworkStorageSession& session, const URL& firstParty, const URL& url, IncludeSecureCookies includeSecureCookies)
-{
-    return WebCore::cookiesForDOM(session, firstParty, url, includeSecureCookies);
-}
-
-void WebPlatformStrategies::setCookiesFromDOM(const NetworkStorageSession& session, const URL& firstParty, const URL& url, const String& cookieString)
-{
-    WebCore::setCookiesFromDOM(session, firstParty, url, cookieString);
-}
-
-bool WebPlatformStrategies::cookiesEnabled(const NetworkStorageSession& session, const URL& firstParty, const URL& url)
-{
-    return WebCore::cookiesEnabled(session, firstParty, url);
-}
-
-std::pair<String, bool> WebPlatformStrategies::cookieRequestHeaderFieldValue(const NetworkStorageSession& session, const URL& firstParty, const URL& url, IncludeSecureCookies includeSecureCookies)
-{
-    return WebCore::cookieRequestHeaderFieldValue(session, firstParty, url, includeSecureCookies);
-}
-
-std::pair<String, bool> WebPlatformStrategies::cookieRequestHeaderFieldValue(PAL::SessionID sessionID, const URL& firstParty, const URL& url, IncludeSecureCookies includeSecureCookies)
-{
-    auto& session = sessionID.isEphemeral() ? WebFrameNetworkingContext::ensurePrivateBrowsingSession() : NetworkStorageSession::defaultStorageSession();
-    return WebCore::cookieRequestHeaderFieldValue(session, firstParty, url, includeSecureCookies);
-}
-
-bool WebPlatformStrategies::getRawCookies(const NetworkStorageSession& session, const URL& firstParty, const URL& url, Vector<Cookie>& rawCookies)
-{
-    return WebCore::getRawCookies(session, firstParty, url, rawCookies);
-}
-
-void WebPlatformStrategies::deleteCookie(const NetworkStorageSession& session, const URL& url, const String& cookieName)
-{
-    WebCore::deleteCookie(session, url, cookieName);
-}
-
-void WebPlatformStrategies::getTypes(Vector<String>& types, const String& pasteboardName)
+void WebPlatformStrategies::getTypes(Vector<String>& types, const String& pasteboardName, const PasteboardContext*)
 {
     PlatformPasteboard(pasteboardName).getTypes(types);
 }
 
-RefPtr<SharedBuffer> WebPlatformStrategies::bufferForType(const String& pasteboardType, const String& pasteboardName)
+RefPtr<SharedBuffer> WebPlatformStrategies::bufferForType(const String& pasteboardType, const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).bufferForType(pasteboardType);
 }
 
-void WebPlatformStrategies::getPathnamesForType(Vector<String>& pathnames, const String& pasteboardType, const String& pasteboardName)
+void WebPlatformStrategies::getPathnamesForType(Vector<String>& pathnames, const String& pasteboardType, const String& pasteboardName, const PasteboardContext*)
 {
     PlatformPasteboard(pasteboardName).getPathnamesForType(pathnames, pasteboardType);
 }
 
-String WebPlatformStrategies::stringForType(const String& pasteboardType, const String& pasteboardName)
+Vector<String> WebPlatformStrategies::allStringsForType(const String& pasteboardType, const String& pasteboardName, const PasteboardContext*)
+{
+    return PlatformPasteboard(pasteboardName).allStringsForType(pasteboardType);
+}
+
+String WebPlatformStrategies::stringForType(const String& pasteboardType, const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).stringForType(pasteboardType);
 }
 
-long WebPlatformStrategies::changeCount(const String &pasteboardName)
+int64_t WebPlatformStrategies::changeCount(const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).changeCount();
 }
 
-String WebPlatformStrategies::uniqueName()
-{
-    return PlatformPasteboard::uniqueName();
-}
-
-Color WebPlatformStrategies::color(const String& pasteboardName)
+Color WebPlatformStrategies::color(const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).color();    
 }
 
-URL WebPlatformStrategies::url(const String& pasteboardName)
+URL WebPlatformStrategies::url(const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).url();
 }
 
-long WebPlatformStrategies::addTypes(const Vector<String>& pasteboardTypes, const String& pasteboardName)
+int64_t WebPlatformStrategies::addTypes(const Vector<String>& pasteboardTypes, const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).addTypes(pasteboardTypes);
 }
 
-long WebPlatformStrategies::setTypes(const Vector<String>& pasteboardTypes, const String& pasteboardName)
+int64_t WebPlatformStrategies::setTypes(const Vector<String>& pasteboardTypes, const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).setTypes(pasteboardTypes);
 }
 
-long WebPlatformStrategies::setBufferForType(SharedBuffer* buffer, const String& pasteboardType, const String& pasteboardName)
+int64_t WebPlatformStrategies::setBufferForType(SharedBuffer* buffer, const String& pasteboardType, const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).setBufferForType(buffer, pasteboardType);
 }
 
-long WebPlatformStrategies::setPathnamesForType(const Vector<String>& pathnames, const String& pasteboardType, const String& pasteboardName)
+int64_t WebPlatformStrategies::setURL(const PasteboardURL& pasteboardURL, const String& pasteboardName, const PasteboardContext*)
 {
-    return PlatformPasteboard(pasteboardName).setPathnamesForType(pathnames, pasteboardType);
+    return PlatformPasteboard(pasteboardName).setURL(pasteboardURL);
 }
 
-long WebPlatformStrategies::setStringForType(const String& string, const String& pasteboardType, const String& pasteboardName)
+int64_t WebPlatformStrategies::setColor(const Color& color, const String& pasteboardName, const PasteboardContext*)
+{
+    return PlatformPasteboard(pasteboardName).setColor(color);
+}
+
+int64_t WebPlatformStrategies::setStringForType(const String& string, const String& pasteboardType, const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).setStringForType(string, pasteboardType);
 }
 
-int WebPlatformStrategies::getNumberOfFiles(const String& pasteboardName)
+int WebPlatformStrategies::getNumberOfFiles(const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).numberOfFiles();
 }
 
-#if PLATFORM(IOS)
-void WebPlatformStrategies::getTypesByFidelityForItemAtIndex(Vector<String>& types, uint64_t index, const String& pasteboardName)
+Vector<String> WebPlatformStrategies::typesSafeForDOMToReadAndWrite(const String& pasteboardName, const String& origin, const PasteboardContext*)
 {
-    PlatformPasteboard(pasteboardName).getTypesByFidelityForItemAtIndex(types, index);
+    return PlatformPasteboard(pasteboardName).typesSafeForDOMToReadAndWrite(origin);
 }
 
-void WebPlatformStrategies::writeToPasteboard(const PasteboardURL& url, const String& pasteboardName)
+int64_t WebPlatformStrategies::writeCustomData(const Vector<WebCore::PasteboardCustomData>& data, const String& pasteboardName, const PasteboardContext*)
 {
-    PlatformPasteboard(pasteboardName).write(url);
+    return PlatformPasteboard(pasteboardName).write(data);
 }
 
-void WebPlatformStrategies::writeToPasteboard(const WebCore::PasteboardWebContent& content, const String& pasteboardName)
+bool WebPlatformStrategies::containsStringSafeForDOMToReadForType(const String& pasteboardName, const String& type, const PasteboardContext*)
 {
-    PlatformPasteboard(pasteboardName).write(content);
+    return PlatformPasteboard(pasteboardName).containsStringSafeForDOMToReadForType(type);
 }
 
-void WebPlatformStrategies::writeToPasteboard(const WebCore::PasteboardImage& image, const String& pasteboardName)
+std::optional<WebCore::PasteboardItemInfo> WebPlatformStrategies::informationForItemAtIndex(size_t index, const String& pasteboardName, int64_t changeCount, const PasteboardContext*)
 {
-    PlatformPasteboard(pasteboardName).write(image);
+    return PlatformPasteboard(pasteboardName).informationForItemAtIndex(index, changeCount);
 }
 
-void WebPlatformStrategies::writeToPasteboard(const String& pasteboardType, const String& text, const String& pasteboardName)
+std::optional<Vector<WebCore::PasteboardItemInfo>> WebPlatformStrategies::allPasteboardItemInfo(const String& pasteboardName, int64_t changeCount, const PasteboardContext*)
 {
-    PlatformPasteboard(pasteboardName).write(pasteboardType, text);
+    return PlatformPasteboard(pasteboardName).allPasteboardItemInfo(changeCount);
 }
 
-int WebPlatformStrategies::getPasteboardItemsCount(const String& pasteboardName)
+int WebPlatformStrategies::getPasteboardItemsCount(const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).count();
 }
 
-void WebPlatformStrategies::updateSupportedTypeIdentifiers(const Vector<String>& identifiers, const String& pasteboardName)
-{
-    PlatformPasteboard(pasteboardName).updateSupportedTypeIdentifiers(identifiers);
-}
-
-RefPtr<WebCore::SharedBuffer> WebPlatformStrategies::readBufferFromPasteboard(int index, const String& type, const String& pasteboardName)
+RefPtr<WebCore::SharedBuffer> WebPlatformStrategies::readBufferFromPasteboard(std::optional<size_t> index, const String& type, const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).readBuffer(index, type);
 }
 
-WebCore::URL WebPlatformStrategies::readURLFromPasteboard(int index, const String& type, const String& pasteboardName, String& title)
+URL WebPlatformStrategies::readURLFromPasteboard(size_t index, const String& pasteboardName, String& title, const PasteboardContext*)
 {
-    return PlatformPasteboard(pasteboardName).readURL(index, type, title);
+    return PlatformPasteboard(pasteboardName).readURL(index, title);
 }
 
-String WebPlatformStrategies::readStringFromPasteboard(int index, const String& type, const String& pasteboardName)
+String WebPlatformStrategies::readStringFromPasteboard(size_t index, const String& type, const String& pasteboardName, const PasteboardContext*)
 {
     return PlatformPasteboard(pasteboardName).readString(index, type);
 }
 
-void WebPlatformStrategies::getFilenamesForDataInteraction(Vector<String>& filenames, const String& pasteboardName)
+bool WebPlatformStrategies::containsURLStringSuitableForLoading(const String& pasteboardName, const PasteboardContext*)
 {
-    filenames = PlatformPasteboard(pasteboardName).filenamesForDataInteraction();
+    return PlatformPasteboard(pasteboardName).containsURLStringSuitableForLoading();
 }
-#endif // PLATFORM(IOS)
+
+String WebPlatformStrategies::urlStringSuitableForLoading(const String& pasteboardName, String& title, const PasteboardContext*)
+{
+    return PlatformPasteboard(pasteboardName).urlStringSuitableForLoading(title);
+}
+
+#if PLATFORM(IOS_FAMILY)
+
+void WebPlatformStrategies::writeToPasteboard(const PasteboardURL& url, const String& pasteboardName, const PasteboardContext*)
+{
+    PlatformPasteboard(pasteboardName).write(url);
+}
+
+void WebPlatformStrategies::writeToPasteboard(const WebCore::PasteboardWebContent& content, const String& pasteboardName, const PasteboardContext*)
+{
+    PlatformPasteboard(pasteboardName).write(content);
+}
+
+void WebPlatformStrategies::writeToPasteboard(const WebCore::PasteboardImage& image, const String& pasteboardName, const PasteboardContext*)
+{
+    PlatformPasteboard(pasteboardName).write(image);
+}
+
+void WebPlatformStrategies::writeToPasteboard(const String& pasteboardType, const String& text, const String& pasteboardName, const PasteboardContext*)
+{
+    PlatformPasteboard(pasteboardName).write(pasteboardType, text);
+}
+
+void WebPlatformStrategies::updateSupportedTypeIdentifiers(const Vector<String>& identifiers, const String& pasteboardName, const PasteboardContext*)
+{
+    PlatformPasteboard(pasteboardName).updateSupportedTypeIdentifiers(identifiers);
+}
+#endif // PLATFORM(IOS_FAMILY)

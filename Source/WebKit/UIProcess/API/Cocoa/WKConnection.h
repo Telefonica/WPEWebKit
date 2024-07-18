@@ -25,8 +25,6 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <Foundation/Foundation.h>
 
 @class WKConnection;
@@ -38,13 +36,11 @@
 
 @end
 
-WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
+WK_CLASS_DEPRECATED_WITH_REPLACEMENT("_WKRemoteObjectRegistry", macos(10.10, 10.14.4), ios(8.0, 12.2))
 @interface WKConnection : NSObject
 
 - (void)sendMessageWithName:(NSString *)messageName body:(id)messageBody;
 
-@property (assign) id <WKConnectionDelegate> delegate;
+@property (nonatomic, weak) id <WKConnectionDelegate> delegate;
 
 @end
-
-#endif // WK_API_ENABLED

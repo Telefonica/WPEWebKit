@@ -25,19 +25,18 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class WKContentWorld;
 @class WKFrameInfo;
 @class WKWebView;
 
 /*! A WKScriptMessage object contains information about a message sent from
  a webpage.
  */
-WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
+WK_CLASS_AVAILABLE(macos(10.10), ios(8.0))
 @interface WKScriptMessage : NSObject
 
 /*! @abstract The body of the message.
@@ -56,8 +55,9 @@ WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
  */
 @property (nonatomic, readonly, copy) NSString *name;
 
+/*! @abstract The content world from which the message was sent. */
+@property (nonatomic, readonly) WKContentWorld *world WK_API_AVAILABLE(macos(11.0), ios(14.0));
+
 @end
 
 NS_ASSUME_NONNULL_END
-
-#endif

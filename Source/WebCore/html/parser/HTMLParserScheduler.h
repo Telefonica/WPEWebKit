@@ -27,10 +27,9 @@
 
 #include "NestingLevelIncrementer.h"
 #include "Timer.h"
-#include <wtf/CurrentTime.h>
 #include <wtf/RefPtr.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #include "WebCoreThread.h"
 #endif
 
@@ -38,6 +37,7 @@ namespace WebCore {
 
 class Document;
 class HTMLDocumentParser;
+class ScriptElement;
 
 class ActiveParserSession {
 public:
@@ -53,9 +53,10 @@ public:
     PumpSession(unsigned& nestingLevel, Document*);
     ~PumpSession();
 
-    unsigned processedTokens;
-    double startTime;
-    bool didSeeScript;
+    unsigned processedTokens { 0 };
+    unsigned processedTokensOnLastCheck { 0 };
+    MonotonicTime startTime { MonotonicTime::now() };
+    bool didSeeScript { false };
 };
 
 class HTMLParserScheduler {
@@ -66,23 +67,41 @@ public:
 
     bool shouldYieldBeforeToken(PumpSession& session)
     {
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
         if (WebThreadShouldYield())
             return true;
 #endif
-        if (UNLIKELY(session.processedTokens > numberOfTokensBeforeCheckingForYield || session.didSeeScript))
+        if (UNLIKELY(m_documentHasActiveParserYieldTokens))
+            return true;
+
+        if (UNLIKELY(session.processedTokens > session.processedTokensOnLastCheck + numberOfTokensBeforeCheckingForYield || session.didSeeScript))
             return checkForYield(session);
 
         ++session.processedTokens;
         return false;
     }
-    bool shouldYieldBeforeExecutingScript(PumpSession&);
+    bool shouldYieldBeforeExecutingScript(const ScriptElement*, PumpSession&);
 
     void scheduleForResume();
-    bool isScheduledForResume() const { return m_isSuspendedWithActiveTimer || m_continueNextChunkTimer.isActive(); }
+    bool isScheduledForResume() const { return m_isSuspendedWithActiveTimer || m_continueNextChunkTimer.isActive() || m_documentHasActiveParserYieldTokens; }
 
     void suspend();
     void resume();
+
+    void didBeginYieldingParser()
+    {
+        ASSERT(!m_documentHasActiveParserYieldTokens);
+        m_documentHasActiveParserYieldTokens = true;
+    }
+
+    void didEndYieldingParser()
+    {
+        ASSERT(m_documentHasActiveParserYieldTokens);
+        m_documentHasActiveParserYieldTokens = false;
+
+        if (!isScheduledForResume())
+            scheduleForResume();
+    }
 
 private:
     static const unsigned numberOfTokensBeforeCheckingForYield = 4096; // Performance optimization
@@ -91,28 +110,22 @@ private:
 
     bool checkForYield(PumpSession& session)
     {
-        session.processedTokens = 1;
+        session.processedTokensOnLastCheck = session.processedTokens;
         session.didSeeScript = false;
 
-        // monotonicallyIncreasingTime() can be expensive. By delaying, we avoided calling
-        // monotonicallyIncreasingTime() when constructing non-yielding PumpSessions.
-        if (!session.startTime) {
-            session.startTime = monotonicallyIncreasingTime();
-            return false;
-        }
-
-        double elapsedTime = monotonicallyIncreasingTime() - session.startTime;
+        Seconds elapsedTime = MonotonicTime::now() - session.startTime;
         return elapsedTime > m_parserTimeLimit;
     }
 
     HTMLDocumentParser& m_parser;
 
-    double m_parserTimeLimit;
+    Seconds m_parserTimeLimit;
     Timer m_continueNextChunkTimer;
     bool m_isSuspendedWithActiveTimer;
-#if !ASSERT_DISABLED
+#if ASSERT_ENABLED
     bool m_suspended;
 #endif
+    bool m_documentHasActiveParserYieldTokens { false };
 };
 
 } // namespace WebCore

@@ -1,13 +1,14 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
+use warnings;
 use File::Path qw(make_path);
 use File::Spec;
 use File::Basename;
 use Cwd 'abs_path';
 use Win32;
 
-# Copyright (C) 2007, 2009, 2014 Apple Inc.  All rights reserved.
+# Copyright (C) 2007-2021 Apple Inc.  All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -121,7 +122,7 @@ sub packTwoValues($$)
     my $first = shift;
     my $second = shift;
 
-    die "First version component ($first) is too large. Must be between 0 and 99" if ($first > 99);
+    die "First version component ($first) is too large. Must be between 0 and 999" if ($first > 999);
     die "Second version component ($second) is too large. Must be between 0 and 999" if ($second > 999);
 
     return $first * 1000 + $second;

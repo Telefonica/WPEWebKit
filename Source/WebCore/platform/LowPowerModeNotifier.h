@@ -27,30 +27,40 @@
 
 #include <wtf/Function.h>
 
-#if PLATFORM(IOS)
-
+#if HAVE(APPLE_LOW_POWER_MODE_SUPPORT)
 #include <wtf/RetainPtr.h>
 OBJC_CLASS WebLowPowerModeObserver;
+#endif
 
+#if USE(GLIB)
+#include <wtf/glib/GRefPtr.h>
+typedef struct _GPowerProfileMonitor GPowerProfileMonitor;
 #endif
 
 namespace WebCore {
 
 class LowPowerModeNotifier {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    using LowPowerModeChangeCallback = WTF::Function<void(bool isLowPowerModeEnabled)>;
+    using LowPowerModeChangeCallback = Function<void(bool isLowPowerModeEnabled)>;
     WEBCORE_EXPORT explicit LowPowerModeNotifier(LowPowerModeChangeCallback&&);
     WEBCORE_EXPORT ~LowPowerModeNotifier();
 
     WEBCORE_EXPORT bool isLowPowerModeEnabled() const;
 
 private:
-#if PLATFORM(IOS)
+#if HAVE(APPLE_LOW_POWER_MODE_SUPPORT)
     void notifyLowPowerModeChanged(bool);
     friend void notifyLowPowerModeChanged(LowPowerModeNotifier&, bool);
 
     RetainPtr<WebLowPowerModeObserver> m_observer;
     LowPowerModeChangeCallback m_callback;
+#elif USE(GLIB)
+#if GLIB_CHECK_VERSION(2, 69, 1)
+    LowPowerModeChangeCallback m_callback;
+    GRefPtr<GPowerProfileMonitor> m_powerProfileMonitor;
+#endif
+    bool m_lowPowerModeEnabled { false };
 #endif
 };
 

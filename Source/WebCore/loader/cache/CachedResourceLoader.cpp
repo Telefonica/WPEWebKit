@@ -2,7 +2,7 @@
     Copyright (C) 1998 Lars Knoll (knoll@mpi-hd.mpg.de)
     Copyright (C) 2001 Dirk Mueller (mueller@kde.org)
     Copyright (C) 2002 Waldo Bastian (bastian@kde.org)
-    Copyright (C) 2004-2016 Apple Inc. All rights reserved.
+    Copyright (C) 2004-2017 Apple Inc. All rights reserved.
     Copyright (C) 2009 Torch Mobile Inc. http://www.torchmobile.com/
 
     This library is free software; you can redistribute it and/or
@@ -27,6 +27,7 @@
 #include "config.h"
 #include "CachedResourceLoader.h"
 
+#include "CachePolicy.h"
 #include "CachedCSSStyleSheet.h"
 #include "CachedFont.h"
 #include "CachedImage.h"
@@ -35,37 +36,47 @@
 #include "CachedSVGDocument.h"
 #include "CachedSVGFont.h"
 #include "CachedScript.h"
+#include "CachedTextTrack.h"
 #include "CachedXSLStyleSheet.h"
 #include "Chrome.h"
 #include "ChromeClient.h"
 #include "ContentExtensionError.h"
 #include "ContentExtensionRule.h"
+#include "ContentRuleListResults.h"
 #include "ContentSecurityPolicy.h"
+#include "CrossOriginAccessControl.h"
+#include "CustomHeaderFields.h"
 #include "DOMWindow.h"
+#include "DateComponents.h"
 #include "DiagnosticLoggingClient.h"
 #include "DiagnosticLoggingKeys.h"
-#include "Document.h"
+#include "DocumentInlines.h"
 #include "DocumentLoader.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "FrameLoaderClient.h"
 #include "HTMLElement.h"
 #include "HTMLFrameOwnerElement.h"
+#include "HTTPHeaderField.h"
+#include "InspectorInstrumentation.h"
 #include "LoaderStrategy.h"
 #include "LocalizedStrings.h"
 #include "Logging.h"
-#include "MainFrame.h"
 #include "MemoryCache.h"
+#include "MixedContentChecker.h"
 #include "Page.h"
 #include "PingLoader.h"
 #include "PlatformStrategies.h"
 #include "RenderElement.h"
 #include "ResourceLoadInfo.h"
 #include "ResourceTiming.h"
-#include "RuntimeEnabledFeatures.h"
+#include "RuntimeApplicationChecks.h"
+#include "SVGElementTypeHelpers.h"
+#include "SVGImage.h"
 #include "ScriptController.h"
 #include "SecurityOrigin.h"
 #include "SecurityPolicy.h"
+#include "ServiceWorker.h"
 #include "Settings.h"
 #include "StyleSheetContents.h"
 #include "SubresourceLoader.h"
@@ -75,11 +86,19 @@
 #include <wtf/text/CString.h>
 #include <wtf/text/WTFString.h>
 
-#if ENABLE(VIDEO_TRACK)
-#include "CachedTextTrack.h"
+#if ENABLE(APPLICATION_MANIFEST)
+#include "CachedApplicationManifest.h"
 #endif
 
-#define RELEASE_LOG_IF_ALLOWED(fmt, ...) RELEASE_LOG_IF(isAlwaysOnLoggingAllowed(), Network, "%p - CachedResourceLoader::" fmt, this, ##__VA_ARGS__)
+#if PLATFORM(IOS_FAMILY)
+#include "Device.h"
+#endif
+
+#undef CACHEDRESOURCELOADER_RELEASE_LOG
+#define PAGE_ID(frame) (valueOrDefault(frame.pageID()).toUInt64())
+#define FRAME_ID(frame) (valueOrDefault(frame.frameID()).toUInt64())
+#define CACHEDRESOURCELOADER_RELEASE_LOG(fmt, ...) RELEASE_LOG(Network, "%p - CachedResourceLoader::" fmt, this, ##__VA_ARGS__)
+#define CACHEDRESOURCELOADER_RELEASE_LOG_WITH_FRAME(fmt, frame, ...) RELEASE_LOG(Network, "%p - [pageID=%" PRIu64 ", frameID=%" PRIu64 "] CachedResourceLoader::" fmt, this, PAGE_ID(frame), FRAME_ID(frame), ##__VA_ARGS__)
 
 namespace WebCore {
 
@@ -94,42 +113,84 @@ static inline ResourceErrorOr<CachedResourceHandle<T>> castCachedResourceTo(Reso
     return makeUnexpected(cachedResource.error());
 }
 
-static CachedResource* createResource(CachedResource::Type type, CachedResourceRequest&& request, PAL::SessionID sessionID)
+static CachedResourceHandle<CachedResource> createResource(CachedResource::Type type, CachedResourceRequest&& request, PAL::SessionID sessionID, const CookieJar* cookieJar, const Settings& settings)
 {
     switch (type) {
-    case CachedResource::ImageResource:
-        return new CachedImage(WTFMove(request), sessionID);
-    case CachedResource::CSSStyleSheet:
-        return new CachedCSSStyleSheet(WTFMove(request), sessionID);
-    case CachedResource::Script:
-        return new CachedScript(WTFMove(request), sessionID);
-    case CachedResource::SVGDocumentResource:
-        return new CachedSVGDocument(WTFMove(request), sessionID);
-#if ENABLE(SVG_FONTS)
-    case CachedResource::SVGFontResource:
-        return new CachedSVGFont(WTFMove(request), sessionID);
+    case CachedResource::Type::ImageResource:
+        return new CachedImage(WTFMove(request), sessionID, cookieJar);
+    case CachedResource::Type::CSSStyleSheet:
+        return new CachedCSSStyleSheet(WTFMove(request), sessionID, cookieJar);
+    case CachedResource::Type::Script:
+        return new CachedScript(WTFMove(request), sessionID, cookieJar);
+    case CachedResource::Type::SVGDocumentResource:
+        return new CachedSVGDocument(WTFMove(request), sessionID, cookieJar, settings);
+    case CachedResource::Type::SVGFontResource:
+        return new CachedSVGFont(WTFMove(request), sessionID, cookieJar, settings);
+    case CachedResource::Type::FontResource:
+        return new CachedFont(WTFMove(request), sessionID, cookieJar);
+    case CachedResource::Type::Beacon:
+    case CachedResource::Type::Ping:
+    case CachedResource::Type::MediaResource:
+#if ENABLE(MODEL_ELEMENT)
+    case CachedResource::Type::ModelResource:
 #endif
-    case CachedResource::FontResource:
-        return new CachedFont(WTFMove(request), sessionID);
-    case CachedResource::Beacon:
-    case CachedResource::MediaResource:
-    case CachedResource::RawResource:
-    case CachedResource::Icon:
-    case CachedResource::MainResource:
-        return new CachedRawResource(WTFMove(request), type, sessionID);
+    case CachedResource::Type::RawResource:
+    case CachedResource::Type::Icon:
+    case CachedResource::Type::MainResource:
+        return new CachedRawResource(WTFMove(request), type, sessionID, cookieJar);
 #if ENABLE(XSLT)
-    case CachedResource::XSLStyleSheet:
-        return new CachedXSLStyleSheet(WTFMove(request), sessionID);
+    case CachedResource::Type::XSLStyleSheet:
+        return new CachedXSLStyleSheet(WTFMove(request), sessionID, cookieJar);
 #endif
-#if ENABLE(LINK_PREFETCH)
-    case CachedResource::LinkPrefetch:
-        return new CachedResource(WTFMove(request), CachedResource::LinkPrefetch, sessionID);
-    case CachedResource::LinkSubresource:
-        return new CachedResource(WTFMove(request), CachedResource::LinkSubresource, sessionID);
+    case CachedResource::Type::LinkPrefetch:
+        return new CachedResource(WTFMove(request), CachedResource::Type::LinkPrefetch, sessionID, cookieJar);
+    case CachedResource::Type::TextTrackResource:
+        return new CachedTextTrack(WTFMove(request), sessionID, cookieJar);
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::Type::ApplicationManifest:
+        return new CachedApplicationManifest(WTFMove(request), sessionID, cookieJar);
 #endif
-#if ENABLE(VIDEO_TRACK)
-    case CachedResource::TextTrackResource:
-        return new CachedTextTrack(WTFMove(request), sessionID);
+    }
+    ASSERT_NOT_REACHED();
+    return nullptr;
+}
+
+static CachedResourceHandle<CachedResource> createResource(CachedResourceRequest&& request, CachedResource& resource)
+{
+    switch (resource.type()) {
+    case CachedResource::Type::ImageResource:
+        return new CachedImage(WTFMove(request), resource.sessionID(), resource.cookieJar());
+    case CachedResource::Type::CSSStyleSheet:
+        return new CachedCSSStyleSheet(WTFMove(request), resource.sessionID(), resource.cookieJar());
+    case CachedResource::Type::Script:
+        return new CachedScript(WTFMove(request), resource.sessionID(), resource.cookieJar());
+    case CachedResource::Type::SVGDocumentResource:
+        return new CachedSVGDocument(WTFMove(request), downcast<CachedSVGDocument>(resource));
+    case CachedResource::Type::SVGFontResource:
+        return new CachedSVGFont(WTFMove(request), downcast<CachedSVGFont>(resource));
+    case CachedResource::Type::FontResource:
+        return new CachedFont(WTFMove(request), resource.sessionID(), resource.cookieJar());
+    case CachedResource::Type::Beacon:
+    case CachedResource::Type::Ping:
+    case CachedResource::Type::MediaResource:
+    case CachedResource::Type::RawResource:
+    case CachedResource::Type::Icon:
+    case CachedResource::Type::MainResource:
+#if ENABLE(MODEL_ELEMENT)
+    case CachedResource::Type::ModelResource:
+#endif
+        return new CachedRawResource(WTFMove(request), resource.type(), resource.sessionID(), resource.cookieJar());
+#if ENABLE(XSLT)
+    case CachedResource::Type::XSLStyleSheet:
+        return new CachedXSLStyleSheet(WTFMove(request), resource.sessionID(), resource.cookieJar());
+#endif
+    case CachedResource::Type::LinkPrefetch:
+        return new CachedResource(WTFMove(request), CachedResource::Type::LinkPrefetch, resource.sessionID(), resource.cookieJar());
+    case CachedResource::Type::TextTrackResource:
+        return new CachedTextTrack(WTFMove(request), resource.sessionID(), resource.cookieJar());
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::Type::ApplicationManifest:
+        return new CachedApplicationManifest(WTFMove(request), resource.sessionID(), resource.cookieJar());
 #endif
     }
     ASSERT_NOT_REACHED();
@@ -137,14 +198,9 @@ static CachedResource* createResource(CachedResource::Type type, CachedResourceR
 }
 
 CachedResourceLoader::CachedResourceLoader(DocumentLoader* documentLoader)
-    : m_document(nullptr)
-    , m_documentLoader(documentLoader)
-    , m_requestCount(0)
+    : m_documentLoader(documentLoader)
     , m_unusedPreloadsTimer(*this, &CachedResourceLoader::warnUnusedPreloads)
     , m_garbageCollectDocumentResourcesTimer(*this, &CachedResourceLoader::garbageCollectDocumentResources)
-    , m_autoLoadImages(true)
-    , m_imagesEnabled(true)
-    , m_allowStaleResources(false)
 {
 }
 
@@ -154,8 +210,6 @@ CachedResourceLoader::~CachedResourceLoader()
     m_document = nullptr;
 
     clearPreloads(ClearPreloadsMode::ClearAllPreloads);
-    for (auto& resource : m_documentResources.values())
-        resource->setOwningCachedResourceLoader(nullptr);
 
     // Make sure no requests still point to this CachedResourceLoader
     ASSERT(m_requestCount == 0);
@@ -171,7 +225,7 @@ CachedResource* CachedResourceLoader::cachedResource(const String& resourceURL) 
 CachedResource* CachedResourceLoader::cachedResource(const URL& url) const
 {
     ASSERT(!MemoryCache::shouldRemoveFragmentIdentifier(url));
-    return m_documentResources.get(url).get();
+    return m_documentResources.get(url.string()).get();
 }
 
 Frame* CachedResourceLoader::frame() const
@@ -179,64 +233,53 @@ Frame* CachedResourceLoader::frame() const
     return m_documentLoader ? m_documentLoader->frame() : nullptr;
 }
 
-PAL::SessionID CachedResourceLoader::sessionID() const
-{
-    PAL::SessionID sessionID = PAL::SessionID::defaultSessionID();
-
-    if (Frame* f = frame())
-        sessionID = f->page()->sessionID();
-
-    return sessionID;
-}
-
-ResourceErrorOr<CachedResourceHandle<CachedImage>> CachedResourceLoader::requestImage(CachedResourceRequest&& request)
+ResourceErrorOr<CachedResourceHandle<CachedImage>> CachedResourceLoader::requestImage(CachedResourceRequest&& request, ImageLoading imageLoading)
 {
     if (Frame* frame = this->frame()) {
         if (frame->loader().pageDismissalEventBeingDispatched() != FrameLoader::PageDismissalType::None) {
             if (Document* document = frame->document())
                 request.upgradeInsecureRequestIfNeeded(*document);
             URL requestURL = request.resourceRequest().url();
-            if (requestURL.isValid() && canRequest(CachedResource::ImageResource, requestURL, request, ForPreload::No))
+            if (requestURL.isValid() && canRequest(CachedResource::Type::ImageResource, requestURL, request.options(), ForPreload::No))
                 PingLoader::loadImage(*frame, requestURL);
             return CachedResourceHandle<CachedImage> { };
         }
     }
 
-    auto defer = clientDefersImage(request.resourceRequest().url()) ? DeferOption::DeferredByClient : DeferOption::NoDefer;
-    return castCachedResourceTo<CachedImage>(requestResource(CachedResource::ImageResource, WTFMove(request), ForPreload::No, defer));
+    if (imageLoading == ImageLoading::Immediate)
+        imageLoading = clientDefersImage(request.resourceRequest().url());
+    return castCachedResourceTo<CachedImage>(requestResource(CachedResource::Type::ImageResource, WTFMove(request), ForPreload::No, imageLoading));
 }
 
 ResourceErrorOr<CachedResourceHandle<CachedFont>> CachedResourceLoader::requestFont(CachedResourceRequest&& request, bool isSVG)
 {
-#if ENABLE(SVG_FONTS)
     if (isSVG)
-        return castCachedResourceTo<CachedFont>(requestResource(CachedResource::SVGFontResource, WTFMove(request)));
-#else
-    UNUSED_PARAM(isSVG);
-#endif
-    return castCachedResourceTo<CachedFont>(requestResource(CachedResource::FontResource, WTFMove(request)));
+        return castCachedResourceTo<CachedFont>(requestResource(CachedResource::Type::SVGFontResource, WTFMove(request)));
+    return castCachedResourceTo<CachedFont>(requestResource(CachedResource::Type::FontResource, WTFMove(request)));
 }
 
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
 ResourceErrorOr<CachedResourceHandle<CachedTextTrack>> CachedResourceLoader::requestTextTrack(CachedResourceRequest&& request)
 {
-    return castCachedResourceTo<CachedTextTrack>(requestResource(CachedResource::TextTrackResource, WTFMove(request)));
+    return castCachedResourceTo<CachedTextTrack>(requestResource(CachedResource::Type::TextTrackResource, WTFMove(request)));
 }
 #endif
 
 ResourceErrorOr<CachedResourceHandle<CachedCSSStyleSheet>> CachedResourceLoader::requestCSSStyleSheet(CachedResourceRequest&& request)
 {
-    return castCachedResourceTo<CachedCSSStyleSheet>(requestResource(CachedResource::CSSStyleSheet, WTFMove(request)));
+    return castCachedResourceTo<CachedCSSStyleSheet>(requestResource(CachedResource::Type::CSSStyleSheet, WTFMove(request)));
 }
 
-CachedResourceHandle<CachedCSSStyleSheet> CachedResourceLoader::requestUserCSSStyleSheet(CachedResourceRequest&& request)
+CachedResourceHandle<CachedCSSStyleSheet> CachedResourceLoader::requestUserCSSStyleSheet(Page& page, CachedResourceRequest&& request)
 {
+    request.setDestinationIfNotSet(FetchOptions::Destination::Style);
+
     ASSERT(document());
     request.setDomainForCachePartition(*document());
 
     auto& memoryCache = MemoryCache::singleton();
     if (request.allowsCaching()) {
-        if (CachedResource* existing = memoryCache.resourceForRequest(request.resourceRequest(), sessionID())) {
+        if (CachedResource* existing = memoryCache.resourceForRequest(request.resourceRequest(), page.sessionID())) {
             if (is<CachedCSSStyleSheet>(*existing))
                 return downcast<CachedCSSStyleSheet>(existing);
             memoryCache.remove(*existing);
@@ -245,11 +288,10 @@ CachedResourceHandle<CachedCSSStyleSheet> CachedResourceLoader::requestUserCSSSt
 
     request.removeFragmentIdentifierIfNeeded();
 
-    CachedResourceHandle<CachedCSSStyleSheet> userSheet = new CachedCSSStyleSheet(WTFMove(request), sessionID());
+    CachedResourceHandle<CachedCSSStyleSheet> userSheet = new CachedCSSStyleSheet(WTFMove(request), page.sessionID(), &page.cookieJar());
 
     if (userSheet->allowsCaching())
         memoryCache.add(*userSheet);
-    // FIXME: loadResource calls setOwningCachedResourceLoader() if the resource couldn't be added to cache. Does this function need to call it, too?
 
     userSheet->load(*this);
     return userSheet;
@@ -257,54 +299,87 @@ CachedResourceHandle<CachedCSSStyleSheet> CachedResourceLoader::requestUserCSSSt
 
 ResourceErrorOr<CachedResourceHandle<CachedScript>> CachedResourceLoader::requestScript(CachedResourceRequest&& request)
 {
-    return castCachedResourceTo<CachedScript>(requestResource(CachedResource::Script, WTFMove(request)));
+    return castCachedResourceTo<CachedScript>(requestResource(CachedResource::Type::Script, WTFMove(request)));
 }
 
 #if ENABLE(XSLT)
 ResourceErrorOr<CachedResourceHandle<CachedXSLStyleSheet>> CachedResourceLoader::requestXSLStyleSheet(CachedResourceRequest&& request)
 {
-    return castCachedResourceTo<CachedXSLStyleSheet>(requestResource(CachedResource::XSLStyleSheet, WTFMove(request)));
+    return castCachedResourceTo<CachedXSLStyleSheet>(requestResource(CachedResource::Type::XSLStyleSheet, WTFMove(request)));
 }
 #endif
 
 ResourceErrorOr<CachedResourceHandle<CachedSVGDocument>> CachedResourceLoader::requestSVGDocument(CachedResourceRequest&& request)
 {
-    return castCachedResourceTo<CachedSVGDocument>(requestResource(CachedResource::SVGDocumentResource, WTFMove(request)));
+    return castCachedResourceTo<CachedSVGDocument>(requestResource(CachedResource::Type::SVGDocumentResource, WTFMove(request)));
 }
 
-#if ENABLE(LINK_PREFETCH)
 ResourceErrorOr<CachedResourceHandle<CachedResource>> CachedResourceLoader::requestLinkResource(CachedResource::Type type, CachedResourceRequest&& request)
 {
     ASSERT(frame());
-    ASSERT(type == CachedResource::LinkPrefetch || type == CachedResource::LinkSubresource);
+    ASSERT(type == CachedResource::Type::LinkPrefetch);
     return requestResource(type, WTFMove(request));
 }
-#endif
 
 ResourceErrorOr<CachedResourceHandle<CachedRawResource>> CachedResourceLoader::requestMedia(CachedResourceRequest&& request)
 {
-    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::MediaResource, WTFMove(request)));
+    auto resourceType = CachedResource::Type::MediaResource;
+    switch (request.options().destination) {
+    case FetchOptions::Destination::Audio:
+    case FetchOptions::Destination::Video:
+        break;
+    case FetchOptions::Destination::Model:
+#if ENABLE(MODEL_ELEMENT)
+        resourceType = CachedResource::Type::ModelResource;
+        break;
+#endif
+    default:
+        ASSERT_NOT_REACHED();
+    }
+
+    return castCachedResourceTo<CachedRawResource>(requestResource(resourceType, WTFMove(request)));
 }
 
 ResourceErrorOr<CachedResourceHandle<CachedRawResource>> CachedResourceLoader::requestIcon(CachedResourceRequest&& request)
 {
-    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::Icon, WTFMove(request)));
+    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::Type::Icon, WTFMove(request)));
 }
 
 ResourceErrorOr<CachedResourceHandle<CachedRawResource>> CachedResourceLoader::requestRawResource(CachedResourceRequest&& request)
 {
-    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::RawResource, WTFMove(request)));
+    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::Type::RawResource, WTFMove(request)));
 }
 
 ResourceErrorOr<CachedResourceHandle<CachedRawResource>> CachedResourceLoader::requestBeaconResource(CachedResourceRequest&& request)
 {
-    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::Beacon, WTFMove(request)));
+    ASSERT(request.options().destination == FetchOptions::Destination::EmptyString);
+    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::Type::Beacon, WTFMove(request)));
+}
+
+ResourceErrorOr<CachedResourceHandle<CachedRawResource>> CachedResourceLoader::requestPingResource(CachedResourceRequest&& request)
+{
+    ASSERT(request.options().destination == FetchOptions::Destination::EmptyString || request.options().destination == FetchOptions::Destination::Report);
+    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::Type::Ping, WTFMove(request)));
 }
 
 ResourceErrorOr<CachedResourceHandle<CachedRawResource>> CachedResourceLoader::requestMainResource(CachedResourceRequest&& request)
 {
-    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::MainResource, WTFMove(request)));
+    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::Type::MainResource, WTFMove(request)));
 }
+
+#if ENABLE(APPLICATION_MANIFEST)
+ResourceErrorOr<CachedResourceHandle<CachedApplicationManifest>> CachedResourceLoader::requestApplicationManifest(CachedResourceRequest&& request)
+{
+    return castCachedResourceTo<CachedApplicationManifest>(requestResource(CachedResource::Type::ApplicationManifest, WTFMove(request)));
+}
+#endif // ENABLE(APPLICATION_MANIFEST)
+
+#if ENABLE(MODEL_ELEMENT)
+ResourceErrorOr<CachedResourceHandle<CachedRawResource>> CachedResourceLoader::requestModelResource(CachedResourceRequest&& request)
+{
+    return castCachedResourceTo<CachedRawResource>(requestResource(CachedResource::Type::ModelResource, WTFMove(request)));
+}
+#endif
 
 static MixedContentChecker::ContentType contentTypeFromResourceType(CachedResource::Type type)
 {
@@ -312,38 +387,41 @@ static MixedContentChecker::ContentType contentTypeFromResourceType(CachedResour
     // https://w3c.github.io/webappsec-mixed-content/#category-optionally-blockable
     // Editor's Draft, 11 February 2016
     // 3.1. Optionally-blockable Content
-    case CachedResource::ImageResource:
-    case CachedResource::MediaResource:
-            return MixedContentChecker::ContentType::ActiveCanWarn;
-
-    case CachedResource::CSSStyleSheet:
-    case CachedResource::Script:
-    case CachedResource::FontResource:
-        return MixedContentChecker::ContentType::Active;
-
-#if ENABLE(SVG_FONTS)
-    case CachedResource::SVGFontResource:
-        return MixedContentChecker::ContentType::Active;
+    case CachedResource::Type::ImageResource:
+    case CachedResource::Type::MediaResource:
+#if ENABLE(MODEL_ELEMENT)
+    case CachedResource::Type::ModelResource:
 #endif
+        return MixedContentChecker::ContentType::ActiveCanWarn;
 
-    case CachedResource::Beacon:
-    case CachedResource::RawResource:
-    case CachedResource::Icon:
-    case CachedResource::SVGDocumentResource:
+    case CachedResource::Type::CSSStyleSheet:
+    case CachedResource::Type::Script:
+    case CachedResource::Type::FontResource:
+        return MixedContentChecker::ContentType::Active;
+
+    case CachedResource::Type::SVGFontResource:
+        return MixedContentChecker::ContentType::Active;
+
+    case CachedResource::Type::Beacon:
+    case CachedResource::Type::Ping:
+    case CachedResource::Type::RawResource:
+    case CachedResource::Type::Icon:
+    case CachedResource::Type::SVGDocumentResource:
         return MixedContentChecker::ContentType::Active;
 #if ENABLE(XSLT)
-    case CachedResource::XSLStyleSheet:
+    case CachedResource::Type::XSLStyleSheet:
         return MixedContentChecker::ContentType::Active;
 #endif
 
-#if ENABLE(LINK_PREFETCH)
-    case CachedResource::LinkPrefetch:
-    case CachedResource::LinkSubresource:
+    case CachedResource::Type::LinkPrefetch:
+        return MixedContentChecker::ContentType::Active;
+
+#if ENABLE(VIDEO)
+    case CachedResource::Type::TextTrackResource:
         return MixedContentChecker::ContentType::Active;
 #endif
-
-#if ENABLE(VIDEO_TRACK)
-    case CachedResource::TextTrackResource:
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::Type::ApplicationManifest:
         return MixedContentChecker::ContentType::Active;
 #endif
     default:
@@ -358,56 +436,58 @@ bool CachedResourceLoader::checkInsecureContent(CachedResource::Type type, const
         return false;
 
     switch (type) {
-    case CachedResource::Script:
+    case CachedResource::Type::Script:
 #if ENABLE(XSLT)
-    case CachedResource::XSLStyleSheet:
+    case CachedResource::Type::XSLStyleSheet:
 #endif
-    case CachedResource::SVGDocumentResource:
-    case CachedResource::CSSStyleSheet:
+    case CachedResource::Type::SVGDocumentResource:
+    case CachedResource::Type::CSSStyleSheet:
         // These resource can inject script into the current document (Script,
         // XSL) or exfiltrate the content of the current document (CSS).
         if (Frame* frame = this->frame()) {
-            if (!frame->loader().mixedContentChecker().canRunInsecureContent(m_document->securityOrigin(), url))
+            if (!MixedContentChecker::canRunInsecureContent(*frame, m_document->securityOrigin(), url))
                 return false;
             Frame& top = frame->tree().top();
-            if (&top != frame && !top.loader().mixedContentChecker().canRunInsecureContent(top.document()->securityOrigin(), url))
+            if (&top != frame && !MixedContentChecker::canRunInsecureContent(top, top.document()->securityOrigin(), url))
                 return false;
         }
         break;
-#if ENABLE(VIDEO_TRACK)
-    case CachedResource::TextTrackResource:
+#if ENABLE(VIDEO)
+    case CachedResource::Type::TextTrackResource:
 #endif
-    case CachedResource::MediaResource:
-    case CachedResource::RawResource:
-    case CachedResource::Icon:
-    case CachedResource::ImageResource:
-#if ENABLE(SVG_FONTS)
-    case CachedResource::SVGFontResource:
+#if ENABLE(MODEL_ELEMENT)
+    case CachedResource::Type::ModelResource:
 #endif
-    case CachedResource::FontResource: {
+    case CachedResource::Type::MediaResource:
+    case CachedResource::Type::RawResource:
+    case CachedResource::Type::Icon:
+    case CachedResource::Type::ImageResource:
+    case CachedResource::Type::SVGFontResource:
+    case CachedResource::Type::FontResource: {
         // These resources can corrupt only the frame's pixels.
         if (Frame* frame = this->frame()) {
-            if (!frame->loader().mixedContentChecker().canDisplayInsecureContent(m_document->securityOrigin(), contentTypeFromResourceType(type), url, MixedContentChecker::AlwaysDisplayInNonStrictMode::Yes))
+            if (!MixedContentChecker::canDisplayInsecureContent(*frame, m_document->securityOrigin(), contentTypeFromResourceType(type), url, MixedContentChecker::AlwaysDisplayInNonStrictMode::Yes))
                 return false;
             Frame& topFrame = frame->tree().top();
-            if (!topFrame.loader().mixedContentChecker().canDisplayInsecureContent(topFrame.document()->securityOrigin(), contentTypeFromResourceType(type), url))
+            if (!MixedContentChecker::canDisplayInsecureContent(topFrame, topFrame.document()->securityOrigin(), contentTypeFromResourceType(type), url))
                 return false;
         }
         break;
     }
-    case CachedResource::MainResource:
-    case CachedResource::Beacon:
-#if ENABLE(LINK_PREFETCH)
-    case CachedResource::LinkPrefetch:
-    case CachedResource::LinkSubresource:
+    case CachedResource::Type::MainResource:
+    case CachedResource::Type::Beacon:
+    case CachedResource::Type::Ping:
+    case CachedResource::Type::LinkPrefetch:
         // Prefetch cannot affect the current document.
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::Type::ApplicationManifest:
 #endif
         break;
     }
     return true;
 }
 
-bool CachedResourceLoader::allowedByContentSecurityPolicy(CachedResource::Type type, const URL& url, const ResourceLoaderOptions& options, ContentSecurityPolicy::RedirectResponseReceived redirectResponseReceived) const
+bool CachedResourceLoader::allowedByContentSecurityPolicy(CachedResource::Type type, const URL& url, const ResourceLoaderOptions& options, ContentSecurityPolicy::RedirectResponseReceived redirectResponseReceived, const URL& preRedirectURL) const
 {
     if (options.contentSecurityPolicyImposition == ContentSecurityPolicyImposition::SkipPolicyCheck)
         return true;
@@ -415,41 +495,54 @@ bool CachedResourceLoader::allowedByContentSecurityPolicy(CachedResource::Type t
     ASSERT(m_document);
     ASSERT(m_document->contentSecurityPolicy());
 
+    // All content loaded through embed or object elements goes through object-src: https://www.w3.org/TR/CSP3/#directive-object-src.
+    if (options.loadedFromPluginElement == LoadedFromPluginElement::Yes
+        && !m_document->contentSecurityPolicy()->allowObjectFromSource(url, redirectResponseReceived, preRedirectURL))
+        return false;
+
     switch (type) {
 #if ENABLE(XSLT)
-    case CachedResource::XSLStyleSheet:
+    case CachedResource::Type::XSLStyleSheet:
 #endif
-    case CachedResource::Script:
-        if (!m_document->contentSecurityPolicy()->allowScriptFromSource(url, redirectResponseReceived))
+    case CachedResource::Type::Script:
+        if (!m_document->contentSecurityPolicy()->allowScriptFromSource(url, redirectResponseReceived, preRedirectURL, options.integrity, options.nonce))
             return false;
         break;
-    case CachedResource::CSSStyleSheet:
-        if (!m_document->contentSecurityPolicy()->allowStyleFromSource(url, redirectResponseReceived))
+    case CachedResource::Type::CSSStyleSheet:
+        if (!m_document->contentSecurityPolicy()->allowStyleFromSource(url, redirectResponseReceived, preRedirectURL, options.nonce))
             return false;
         break;
-    case CachedResource::SVGDocumentResource:
-    case CachedResource::Icon:
-    case CachedResource::ImageResource:
-        if (!m_document->contentSecurityPolicy()->allowImageFromSource(url, redirectResponseReceived))
+    case CachedResource::Type::SVGDocumentResource:
+    case CachedResource::Type::Icon:
+    case CachedResource::Type::ImageResource:
+        if (!m_document->contentSecurityPolicy()->allowImageFromSource(url, redirectResponseReceived, preRedirectURL))
             return false;
         break;
-#if ENABLE(SVG_FONTS)
-    case CachedResource::SVGFontResource:
+    case CachedResource::Type::SVGFontResource:
+    case CachedResource::Type::FontResource:
+        if (!m_document->contentSecurityPolicy()->allowFontFromSource(url, redirectResponseReceived, preRedirectURL))
+            return false;
+        break;
+    case CachedResource::Type::MediaResource:
+#if ENABLE(VIDEO)
+    case CachedResource::Type::TextTrackResource:
 #endif
-    case CachedResource::FontResource:
-        if (!m_document->contentSecurityPolicy()->allowFontFromSource(url, redirectResponseReceived))
+        if (!m_document->contentSecurityPolicy()->allowMediaFromSource(url, redirectResponseReceived, preRedirectURL))
             return false;
         break;
-    case CachedResource::MediaResource:
-#if ENABLE(VIDEO_TRACK)
-    case CachedResource::TextTrackResource:
+    case CachedResource::Type::Beacon:
+    case CachedResource::Type::Ping:
+    case CachedResource::Type::RawResource:
+#if ENABLE(MODEL_ELEMENT)
+    case CachedResource::Type::ModelResource:
 #endif
-        if (!m_document->contentSecurityPolicy()->allowMediaFromSource(url, redirectResponseReceived))
-            return false;
-        break;
-    case CachedResource::Beacon:
-    case CachedResource::RawResource:
         return true;
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::Type::ApplicationManifest:
+        if (!m_document->contentSecurityPolicy()->allowManifestFromSource(url, redirectResponseReceived, preRedirectURL))
+            return false;
+        break;
+#endif
     default:
         ASSERT_NOT_REACHED();
     }
@@ -463,10 +556,9 @@ static inline bool isSameOriginDataURL(const URL& url, const ResourceLoaderOptio
     return url.protocolIsData() && options.sameOriginDataURLFlag == SameOriginDataURLFlag::Set;
 }
 
-bool CachedResourceLoader::canRequest(CachedResource::Type type, const URL& url, const CachedResourceRequest& request, ForPreload forPreload)
+// Security checks defined in https://fetch.spec.whatwg.org/#main-fetch step 2 and 4.
+bool CachedResourceLoader::canRequest(CachedResource::Type type, const URL& url, const ResourceLoaderOptions& options, ForPreload forPreload)
 {
-    auto& options = request.options();
-
     if (document() && !document()->securityOrigin().canDisplay(url)) {
         if (forPreload == ForPreload::No)
             FrameLoader::reportLocalLoadFailed(frame(), url.stringCenterEllipsizedToLength());
@@ -479,11 +571,17 @@ bool CachedResourceLoader::canRequest(CachedResource::Type type, const URL& url,
         return false;
     }
 
+    if (options.mode == FetchOptions::Mode::NoCors && !m_document->securityOrigin().canRequest(url) && options.redirect != FetchOptions::Redirect::Follow && type != CachedResource::Type::Ping) {
+        ASSERT(type != CachedResource::Type::MainResource);
+        frame()->document()->addConsoleMessage(MessageSource::Security, MessageLevel::Error, "No-Cors mode requires follow redirect mode"_s);
+        return false;
+    }
+
     if (!allowedByContentSecurityPolicy(type, url, options, ContentSecurityPolicy::RedirectResponseReceived::No))
         return false;
 
     // SVG Images have unique security rules that prevent all subresource requests except for data urls.
-    if (type != CachedResource::MainResource && frame() && frame()->page()) {
+    if (type != CachedResource::Type::MainResource && frame() && frame()->page()) {
         if (frame()->page()->chrome().client().isSVGImageChromeClient() && !url.protocolIsData())
             return false;
     }
@@ -499,11 +597,12 @@ bool CachedResourceLoader::canRequest(CachedResource::Type type, const URL& url,
 }
 
 // FIXME: Should we find a way to know whether the redirection is for a preload request like we do for CachedResourceLoader::canRequest?
-bool CachedResourceLoader::canRequestAfterRedirection(CachedResource::Type type, const URL& url, const ResourceLoaderOptions& options) const
+bool CachedResourceLoader::canRequestAfterRedirection(CachedResource::Type type, const URL& url, const ResourceLoaderOptions& options, const URL& preRedirectURL) const
 {
     if (document() && !document()->securityOrigin().canDisplay(url)) {
         FrameLoader::reportLocalLoadFailed(frame(), url.stringCenterEllipsizedToLength());
-        LOG(ResourceLoading, "CachedResourceLoader::requestResource URL was not allowed by SecurityOrigin::canDisplay");
+        LOG(ResourceLoading, "CachedResourceLoader::canRequestAfterRedirection URL was not allowed by SecurityOrigin::canDisplay");
+        CACHEDRESOURCELOADER_RELEASE_LOG("canRequestAfterRedirection: URL was not allowed by SecurityOrigin::canDisplay");
         return false;
     }
 
@@ -511,22 +610,27 @@ bool CachedResourceLoader::canRequestAfterRedirection(CachedResource::Type type,
     // But we currently allow at least data URLs to be loaded.
 
     if (options.mode == FetchOptions::Mode::SameOrigin && !m_document->securityOrigin().canRequest(url)) {
+        CACHEDRESOURCELOADER_RELEASE_LOG("canRequestAfterRedirection: URL was not allowed by SecurityOrigin::canRequest");
         printAccessDeniedMessage(url);
         return false;
     }
 
-    if (!allowedByContentSecurityPolicy(type, url, options, ContentSecurityPolicy::RedirectResponseReceived::Yes))
+    if (!allowedByContentSecurityPolicy(type, url, options, ContentSecurityPolicy::RedirectResponseReceived::Yes, preRedirectURL)) {
+        CACHEDRESOURCELOADER_RELEASE_LOG("canRequestAfterRedirection: URL was not allowed by content policy");
         return false;
+    }
 
     // Last of all, check for insecure content. We do this last so that when folks block insecure content with a CSP policy, they don't get a warning.
     // They'll still get a warning in the console about CSP blocking the load.
-    if (!checkInsecureContent(type, url))
+    if (!checkInsecureContent(type, url)) {
+        CACHEDRESOURCELOADER_RELEASE_LOG("canRequestAfterRedirection: URL was not allowed because content is insecure");
         return false;
+    }
 
     return true;
 }
 
-bool CachedResourceLoader::updateRequestAfterRedirection(CachedResource::Type type, ResourceRequest& request, const ResourceLoaderOptions& options)
+bool CachedResourceLoader::updateRequestAfterRedirection(CachedResource::Type type, ResourceRequest& request, const ResourceLoaderOptions& options, const URL& preRedirectURL)
 {
     ASSERT(m_documentLoader);
     if (auto* document = m_documentLoader->cachedResourceLoader().document())
@@ -534,7 +638,7 @@ bool CachedResourceLoader::updateRequestAfterRedirection(CachedResource::Type ty
 
     // FIXME: We might want to align the checks done here with the ones done in CachedResourceLoader::requestResource, content extensions blocking in particular.
 
-    return canRequestAfterRedirection(type, request.url(), options);
+    return canRequestAfterRedirection(type, request.url(), options, preRedirectURL);
 }
 
 bool CachedResourceLoader::canRequestInContentDispositionAttachmentSandbox(CachedResource::Type type, const URL& url) const
@@ -543,14 +647,14 @@ bool CachedResourceLoader::canRequestInContentDispositionAttachmentSandbox(Cache
 
     // FIXME: Do we want to expand this to all resource types that the mixed content checker would consider active content?
     switch (type) {
-    case CachedResource::MainResource:
+    case CachedResource::Type::MainResource:
         if (auto ownerElement = frame() ? frame()->ownerElement() : nullptr) {
             document = &ownerElement->document();
             break;
         }
         return true;
-    case CachedResource::CSSStyleSheet:
-        document = m_document;
+    case CachedResource::Type::CSSStyleSheet:
+        document = m_document.get();
         break;
     default:
         return true;
@@ -571,6 +675,8 @@ bool CachedResourceLoader::shouldContinueAfterNotifyingLoadedFromMemoryCache(con
 
     ResourceRequest newRequest = ResourceRequest(resource.url());
     newRequest.setInitiatorIdentifier(request.resourceRequest().initiatorIdentifier());
+    if (auto inspectorInitiatorNodeIdentifier = request.resourceRequest().inspectorInitiatorNodeIdentifier())
+        newRequest.setInspectorInitiatorNodeIdentifier(*inspectorInitiatorNodeIdentifier);
     if (request.resourceRequest().hiddenFromInspector())
         newRequest.setHiddenFromInspector(true);
     frame()->loader().loadedResourceFromMemoryCache(resource, newRequest, error);
@@ -586,34 +692,28 @@ bool CachedResourceLoader::shouldUpdateCachedResourceWithCurrentRequest(const Ca
     if (resource.type() == CachedResource::Type::FontResource)
         return false;
 
-#if ENABLE(SVG_FONTS)
     if (resource.type() == CachedResource::Type::SVGFontResource)
         return false;
-#endif
 
 #if ENABLE(XSLT)
     // Load is same-origin, we do not check for CORS.
-    if (resource.type() == CachedResource::XSLStyleSheet)
+    if (resource.type() == CachedResource::Type::XSLStyleSheet)
         return false;
 #endif
 
     // FIXME: We should enable resource reuse for these resource types
     switch (resource.type()) {
-    case CachedResource::SVGDocumentResource:
+    case CachedResource::Type::SVGDocumentResource:
         return false;
-    case CachedResource::MainResource:
+    case CachedResource::Type::MainResource:
         return false;
-#if ENABLE(LINK_PREFETCH)
-    case CachedResource::LinkPrefetch:
+    case CachedResource::Type::LinkPrefetch:
         return false;
-    case CachedResource::LinkSubresource:
-        return false;
-#endif
     default:
         break;
     }
 
-    if (resource.options().mode != request.options().mode || !originsMatch(request.origin(), resource.origin()))
+    if (resource.options().mode != request.options().mode || !serializedOriginsMatch(request.origin(), resource.origin()))
         return true;
 
     if (resource.options().redirect != request.options().redirect && resource.hasRedirections())
@@ -643,20 +743,20 @@ static inline bool isResourceSuitableForDirectReuse(const CachedResource& resour
     if (resource.type() == CachedResource::Type::RawResource || resource.type() == CachedResource::Type::MediaResource)
         return false;
 
-    if (resource.type() == CachedResource::Beacon)
+    if (resource.type() == CachedResource::Type::Beacon || resource.type() == CachedResource::Type::Ping)
         return false;
 
     return true;
 }
 
-CachedResourceHandle<CachedResource> CachedResourceLoader::updateCachedResourceWithCurrentRequest(const CachedResource& resource, CachedResourceRequest&& request)
+CachedResourceHandle<CachedResource> CachedResourceLoader::updateCachedResourceWithCurrentRequest(const CachedResource& resource, CachedResourceRequest&& request, PAL::SessionID sessionID, const CookieJar& cookieJar, const Settings& settings)
 {
     if (!isResourceSuitableForDirectReuse(resource, request)) {
         request.setCachingPolicy(CachingPolicy::DisallowCaching);
-        return loadResource(resource.type(), WTFMove(request));
+        return loadResource(resource.type(), sessionID, WTFMove(request), cookieJar, settings);
     }
 
-    auto resourceHandle = createResource(resource.type(), WTFMove(request), sessionID());
+    auto resourceHandle = createResource(resource.type(), WTFMove(request), sessionID, &cookieJar, settings);
     resourceHandle->loadFrom(resource);
     return resourceHandle;
 }
@@ -670,10 +770,16 @@ static inline void logMemoryCacheResourceRequest(Frame* frame, const String& key
 
 void CachedResourceLoader::prepareFetch(CachedResource::Type type, CachedResourceRequest& request)
 {
-    // Implementing step 1 to 7 of https://fetch.spec.whatwg.org/#fetching
-
-    if (!request.origin() && document())
-        request.setOrigin(document()->securityOrigin());
+    // Implementing step 1.1 to 1.6 of https://fetch.spec.whatwg.org/#concept-fetch.
+    if (auto* document = this->document()) {
+        if (!request.origin())
+            request.setOrigin(document->securityOrigin());
+#if ENABLE(SERVICE_WORKER)
+        request.setClientIdentifierIfNeeded(document->identifier());
+        if (auto* activeServiceWorker = document->activeServiceWorker())
+            request.setSelectedServiceWorkerRegistrationIdentifierIfNeeded(activeServiceWorker->registrationIdentifier());
+#endif
+    }
 
     request.setAcceptHeaderIfNone(type);
 
@@ -681,64 +787,157 @@ void CachedResourceLoader::prepareFetch(CachedResource::Type type, CachedResourc
     // FIXME: Decide whether to support client hints
 }
 
-void CachedResourceLoader::updateHTTPRequestHeaders(CachedResource::Type type, CachedResourceRequest& request)
+void CachedResourceLoader::updateHTTPRequestHeaders(FrameLoader& frameLoader, CachedResource::Type type, CachedResourceRequest& request)
 {
-    // Implementing steps 7 to 12 of https://fetch.spec.whatwg.org/#http-network-or-cache-fetch
+    // Implementing steps 11 to 19 of https://fetch.spec.whatwg.org/#http-network-or-cache-fetch as of 22 Feb 2022.
 
     // FIXME: We should reconcile handling of MainResource with other resources.
-    if (type != CachedResource::Type::MainResource) {
-        // In some cases we may try to load resources in frameless documents. Such loads always fail.
-        // FIXME: We shouldn't need to do the check on frame.
-        if (auto* frame = this->frame())
-            request.updateReferrerOriginAndUserAgentHeaders(frame->loader(), document() ? document()->referrerPolicy() : ReferrerPolicy::NoReferrerWhenDowngrade);
-    }
+    if (type != CachedResource::Type::MainResource)
+        request.updateReferrerAndOriginHeaders(frameLoader);
+    if (frameLoader.frame().settings().fetchMetadataEnabled())
+        request.updateFetchMetadataHeaders();
+    request.updateUserAgentHeader(frameLoader);
 
     request.updateAccordingCacheMode();
+    request.updateAcceptEncodingHeader();
 }
 
-ResourceErrorOr<CachedResourceHandle<CachedResource>> CachedResourceLoader::requestResource(CachedResource::Type type, CachedResourceRequest&& request, ForPreload forPreload, DeferOption defer)
+static FetchOptions::Destination destinationForType(CachedResource::Type type, Frame& frame)
 {
-    std::optional<HTTPHeaderMap> originalRequestHeaders;
-    if (CachedResource::shouldUsePingLoad(type))
-        originalRequestHeaders = request.resourceRequest().httpHeaderFields();
+    switch (type) {
+    case CachedResource::Type::MainResource:
+        return frame.isMainFrame() ? FetchOptions::Destination::Document : FetchOptions::Destination::Iframe;
+    case CachedResource::Type::SVGDocumentResource:
+        return FetchOptions::Destination::Document;
+    case CachedResource::Type::ImageResource:
+    case CachedResource::Type::Icon:
+        return FetchOptions::Destination::Image;
+    case CachedResource::Type::CSSStyleSheet:
+        return FetchOptions::Destination::Style;
+    case CachedResource::Type::Script:
+        return FetchOptions::Destination::Script;
+    case CachedResource::Type::FontResource:
+    case CachedResource::Type::SVGFontResource:
+        return FetchOptions::Destination::Font;
+#if ENABLE(XSLT)
+    case CachedResource::Type::XSLStyleSheet:
+        return FetchOptions::Destination::Xslt;
+#endif
+#if ENABLE(VIDEO)
+    case CachedResource::Type::TextTrackResource:
+        return FetchOptions::Destination::Track;
+#endif
+#if ENABLE(APPLICATION_MANIFEST)
+    case CachedResource::Type::ApplicationManifest:
+        return FetchOptions::Destination::Manifest;
+#endif
+    case CachedResource::Type::Beacon:
+    case CachedResource::Type::Ping:
+    case CachedResource::Type::LinkPrefetch:
+    case CachedResource::Type::RawResource:
+    case CachedResource::Type::MediaResource:
+#if ENABLE(MODEL_ELEMENT)
+    case CachedResource::Type::ModelResource:
+#endif
+        // The caller is responsible for setting the appropriate destination.
+        return FetchOptions::Destination::EmptyString;
+    }
+    ASSERT_NOT_REACHED();
+    return FetchOptions::Destination::EmptyString;
+}
 
-    if (Document* document = this->document())
-        request.upgradeInsecureRequestIfNeeded(*document);
+static inline bool isSVGImageCachedResource(const CachedResource* resource)
+{
+    if (!resource || !is<CachedImage>(*resource))
+        return false;
+    return downcast<CachedImage>(*resource).hasSVGImage();
+}
 
+static inline SVGImage* cachedResourceSVGImage(CachedResource* resource)
+{
+    if (!isSVGImageCachedResource(resource))
+        return nullptr;
+    return downcast<SVGImage>(downcast<CachedImage>(*resource).image());
+}
+
+ResourceErrorOr<CachedResourceHandle<CachedResource>> CachedResourceLoader::requestResource(CachedResource::Type type, CachedResourceRequest&& request, ForPreload forPreload, ImageLoading imageLoading)
+{
     URL url = request.resourceRequest().url();
+    if (!frame() || !frame()->page()) {
+        CACHEDRESOURCELOADER_RELEASE_LOG("requestResource: failed because no frame or page");
+        return makeUnexpected(ResourceError { errorDomainWebKitInternal, 0, url, "Invalid loader state"_s });
+    }
 
-    LOG(ResourceLoading, "CachedResourceLoader::requestResource '%s', charset '%s', priority=%d, forPreload=%u", url.stringCenterEllipsizedToLength().latin1().data(), request.charset().latin1().data(), request.priority() ? static_cast<int>(request.priority().value()) : -1, forPreload == ForPreload::Yes);
-
+    auto& frame = *this->frame();
     if (!url.isValid()) {
-        RELEASE_LOG_IF_ALLOWED("requestResource: URL is invalid (frame = %p)", frame());
-        return makeUnexpected(ResourceError { errorDomainWebKitInternal, 0, url, ASCIILiteral("URL is invalid") });
+        CACHEDRESOURCELOADER_RELEASE_LOG_WITH_FRAME("requestResource: URL is invalid", frame);
+        return makeUnexpected(ResourceError { errorDomainWebKitInternal, 0, url, "URL is invalid"_s });
+    }
+
+    LOG(ResourceLoading, "CachedResourceLoader::requestResource '%.255s', charset '%s', priority=%d, forPreload=%u", url.stringCenterEllipsizedToLength().latin1().data(), request.charset().latin1().data(), request.priority() ? static_cast<int>(request.priority().value()) : -1, forPreload == ForPreload::Yes);
+
+    request.setDestinationIfNotSet(destinationForType(type, frame));
+
+    // Entry point to https://fetch.spec.whatwg.org/#main-fetch.
+    std::unique_ptr<ResourceRequest> originalRequest;
+    if (CachedResource::shouldUsePingLoad(type) || request.options().destination == FetchOptions::Destination::EmptyString) {
+        originalRequest = makeUnique<ResourceRequest>(request.resourceRequest());
+        originalRequest->clearHTTPReferrer();
+        originalRequest->clearHTTPOrigin();
     }
 
     prepareFetch(type, request);
 
-    // We are passing url as well as request, as request url may contain a fragment identifier.
-    if (!canRequest(type, url, request, forPreload)) {
-        RELEASE_LOG_IF_ALLOWED("requestResource: Not allowed to request resource (frame = %p)", frame());
-        return makeUnexpected(ResourceError { errorDomainWebKitInternal, 0, url, ASCIILiteral("Not allowed to request resource"), ResourceError::Type::AccessControl });
+    if (request.options().destination == FetchOptions::Destination::Document || request.options().destination == FetchOptions::Destination::Iframe) {
+        // FIXME: Identify HSTS cases and avoid adding the header. <https://bugs.webkit.org/show_bug.cgi?id=157885>
+        if (!url.protocolIs("https"_s))
+            request.resourceRequest().setHTTPHeaderField(HTTPHeaderName::UpgradeInsecureRequests, "1"_s);
     }
 
+    if (Document* document = this->document()) {
+        request.upgradeInsecureRequestIfNeeded(*document);
+        url = request.resourceRequest().url();
+    }
+
+    // We are passing url as well as request, as request url may contain a fragment identifier.
+    if (!canRequest(type, url, request.options(), forPreload)) {
+        CACHEDRESOURCELOADER_RELEASE_LOG_WITH_FRAME("requestResource: Not allowed to request resource", frame);
+        return makeUnexpected(ResourceError { errorDomainWebKitInternal, 0, url, "Not allowed to request resource"_s, ResourceError::Type::AccessControl });
+    }
+
+    if (!portAllowed(url)) {
+        if (forPreload == ForPreload::No)
+            FrameLoader::reportBlockedLoadFailed(frame, url);
+        CACHEDRESOURCELOADER_RELEASE_LOG_WITH_FRAME("CachedResourceLoader::requestResource URL has a blocked port", frame);
+        return makeUnexpected(frame.loader().blockedError(request.resourceRequest()));
+    }
+
+    request.updateReferrerPolicy(document() ? document()->referrerPolicy() : ReferrerPolicy::Default);
+
+    if (InspectorInstrumentation::willIntercept(&frame, request.resourceRequest()))
+        request.setCachingPolicy(CachingPolicy::DisallowCaching);
+
+    auto& page = *frame.page();
+
 #if ENABLE(CONTENT_EXTENSIONS)
-    if (frame() && frame()->mainFrame().page() && m_documentLoader) {
+    if (m_documentLoader) {
         const auto& resourceRequest = request.resourceRequest();
-        auto blockedStatus = frame()->mainFrame().page()->userContentProvider().processContentExtensionRulesForLoad(resourceRequest.url(), toResourceType(type), *m_documentLoader);
-        request.applyBlockedStatus(blockedStatus);
-        if (blockedStatus.blockedLoad) {
-            RELEASE_LOG_IF_ALLOWED("requestResource: Resource blocked by content blocker (frame = %p)", frame());
+        auto results = page.userContentProvider().processContentRuleListsForLoad(page, resourceRequest.url(), ContentExtensions::toResourceType(type, request.resourceRequest().requester()), *m_documentLoader);
+        bool blockedLoad = results.summary.blockedLoad;
+        bool madeHTTPS = results.summary.madeHTTPS;
+        request.applyResults(WTFMove(results), &page);
+        if (blockedLoad) {
+            CACHEDRESOURCELOADER_RELEASE_LOG_WITH_FRAME("requestResource: Resource blocked by content blocker", frame);
             if (type == CachedResource::Type::MainResource) {
-                CachedResourceHandle<CachedResource> resource = createResource(type, WTFMove(request), sessionID());
+                auto resource = createResource(type, WTFMove(request), page.sessionID(), &page.cookieJar(), page.settings());
                 ASSERT(resource);
                 resource->error(CachedResource::Status::LoadError);
                 resource->setResourceError(ResourceError(ContentExtensions::WebKitContentBlockerDomain, 0, resourceRequest.url(), WEB_UI_STRING("The URL was blocked by a content blocker", "WebKitErrorBlockedByContentBlocker description")));
-                return WTFMove(resource);
+                return resource;
             }
-            return makeUnexpected(ResourceError { errorDomainWebKitInternal, 0, url, ASCIILiteral("Resource blocked by content blocker"), ResourceError::Type::AccessControl });
+            return makeUnexpected(ResourceError { errorDomainWebKitInternal, 0, url, "Resource blocked by content blocker"_s, ResourceError::Type::AccessControl });
         }
-        if (blockedStatus.madeHTTPS
+        if (madeHTTPS
             && type == CachedResource::Type::MainResource
             && m_documentLoader->isLoadingMainResource()) {
             // This is to make sure the correct 'new' URL shows in the location bar.
@@ -749,21 +948,36 @@ ResourceErrorOr<CachedResourceHandle<CachedResource>> CachedResourceLoader::requ
     }
 #endif
 
-    LoadTiming loadTiming;
-    loadTiming.markStartTimeAndFetchStart();
+    if (m_documentLoader && !m_documentLoader->customHeaderFields().isEmpty()) {
+        bool sameOriginRequest = false;
+        auto requestedOrigin = SecurityOrigin::create(url);
+        if (type == CachedResource::Type::MainResource) {
+            if (frame.isMainFrame())
+                sameOriginRequest = true;
+            else if (auto* topDocument = frame.mainFrame().document())
+                sameOriginRequest = topDocument->securityOrigin().isSameSchemeHostPort(requestedOrigin.get());
+        } else if (document()) {
+            sameOriginRequest = document()->topOrigin().isSameSchemeHostPort(requestedOrigin.get())
+                && document()->securityOrigin().isSameSchemeHostPort(requestedOrigin.get());
+        }
+        for (auto& fields : m_documentLoader->customHeaderFields()) {
+            if (sameOriginRequest || fields.thirdPartyDomainsMatch(url)) {
+                for (auto& field : fields.fields)
+                    request.resourceRequest().setHTTPHeaderField(field.name(), field.value());
+            }
+        }
+    }
+
+    ResourceLoadTiming loadTiming;
+    loadTiming.markStartTime();
     InitiatorContext initiatorContext = request.options().initiatorContext;
 
     if (request.resourceRequest().url().protocolIsInHTTPFamily())
-        updateHTTPRequestHeaders(type, request);
+        updateHTTPRequestHeaders(frame.loader(), type, request);
 
     auto& memoryCache = MemoryCache::singleton();
-    if (request.allowsCaching() && memoryCache.disabled()) {
-        DocumentResourceMap::iterator it = m_documentResources.find(url.string());
-        if (it != m_documentResources.end()) {
-            it->value->setOwningCachedResourceLoader(nullptr);
-            m_documentResources.remove(it);
-        }
-    }
+    if (request.allowsCaching() && memoryCache.disabled())
+        m_documentResources.remove(url.string());
 
     // See if we can use an existing resource from the cache.
     CachedResourceHandle<CachedResource> resource;
@@ -771,51 +985,80 @@ ResourceErrorOr<CachedResourceHandle<CachedResource>> CachedResourceLoader::requ
         request.setDomainForCachePartition(*document());
 
     if (request.allowsCaching())
-        resource = memoryCache.resourceForRequest(request.resourceRequest(), sessionID());
+        resource = memoryCache.resourceForRequest(request.resourceRequest(), page.sessionID());
 
     if (resource && request.isLinkPreload() && !resource->isLinkPreload())
         resource->setLinkPreload();
 
-    logMemoryCacheResourceRequest(frame(), DiagnosticLoggingKeys::memoryCacheUsageKey(), resource ? DiagnosticLoggingKeys::inMemoryCacheKey() : DiagnosticLoggingKeys::notInMemoryCacheKey());
+    logMemoryCacheResourceRequest(&frame, DiagnosticLoggingKeys::memoryCacheUsageKey(), resource ? DiagnosticLoggingKeys::inMemoryCacheKey() : DiagnosticLoggingKeys::notInMemoryCacheKey());
 
-    RevalidationPolicy policy = determineRevalidationPolicy(type, request, resource.get(), forPreload, defer);
+    auto& cookieJar = page.cookieJar();
+
+    RevalidationPolicy policy = determineRevalidationPolicy(type, request, resource.get(), forPreload, imageLoading);
     switch (policy) {
     case Reload:
         memoryCache.remove(*resource);
         FALLTHROUGH;
     case Load:
-        if (resource)
-            logMemoryCacheResourceRequest(frame(), DiagnosticLoggingKeys::memoryCacheEntryDecisionKey(), DiagnosticLoggingKeys::unusedKey());
-        resource = loadResource(type, WTFMove(request));
+        if (resource) {
+            logMemoryCacheResourceRequest(&frame, DiagnosticLoggingKeys::memoryCacheEntryDecisionKey(), DiagnosticLoggingKeys::unusedKey());
+            memoryCache.remove(*resource);
+        }
+        resource = loadResource(type, page.sessionID(), WTFMove(request), cookieJar, page.settings());
         break;
     case Revalidate:
         if (resource)
-            logMemoryCacheResourceRequest(frame(), DiagnosticLoggingKeys::memoryCacheEntryDecisionKey(), DiagnosticLoggingKeys::revalidatingKey());
+            logMemoryCacheResourceRequest(&frame, DiagnosticLoggingKeys::memoryCacheEntryDecisionKey(), DiagnosticLoggingKeys::revalidatingKey());
         resource = revalidateResource(WTFMove(request), *resource);
         break;
     case Use:
         ASSERT(resource);
+        if (request.options().mode == FetchOptions::Mode::Navigate && !frame.isMainFrame()) {
+            if (auto* parentDocument = frame.tree().parent() ? frame.tree().parent()->document() : nullptr) {
+                auto coep = parentDocument->crossOriginEmbedderPolicy().value;
+                if (auto error = validateCrossOriginResourcePolicy(coep, parentDocument->securityOrigin(), request.resourceRequest().url(), resource->response(), ForNavigation::Yes))
+                    return makeUnexpected(WTFMove(*error));
+            }
+        }
+        // Per the Fetch specification, the "cross-origin resource policy check" should only occur in the HTTP Fetch case (https://fetch.spec.whatwg.org/#concept-http-fetch).
+        // However, per https://fetch.spec.whatwg.org/#main-fetch, if the request URL's protocol is "data:", then we should perform a scheme fetch which would end up
+        // returning a response WITHOUT performing an HTTP fetch (and thus no CORP check).
+        if (request.options().mode == FetchOptions::Mode::NoCors && !url.protocolIsData()) {
+            auto coep = document() ? document()->crossOriginEmbedderPolicy().value : CrossOriginEmbedderPolicyValue::UnsafeNone;
+            if (auto error = validateCrossOriginResourcePolicy(coep, *request.origin(), request.resourceRequest().url(), resource->response(), ForNavigation::No))
+                return makeUnexpected(WTFMove(*error));
+        }
+        if (request.options().mode == FetchOptions::Mode::NoCors) {
+            if (auto error = validateRangeRequestedFlag(request.resourceRequest(), resource->response()))
+                return makeUnexpected(WTFMove(*error));
+        }
         if (shouldUpdateCachedResourceWithCurrentRequest(*resource, request)) {
-            resource = updateCachedResourceWithCurrentRequest(*resource, WTFMove(request));
+            resource = updateCachedResourceWithCurrentRequest(*resource, WTFMove(request), page.sessionID(), cookieJar, page.settings());
             if (resource->status() != CachedResource::Status::Cached)
                 policy = Load;
         } else {
             ResourceError error;
             if (!shouldContinueAfterNotifyingLoadedFromMemoryCache(request, *resource, error))
                 return makeUnexpected(WTFMove(error));
-            logMemoryCacheResourceRequest(frame(), DiagnosticLoggingKeys::memoryCacheEntryDecisionKey(), DiagnosticLoggingKeys::usedKey());
-            loadTiming.setResponseEnd(MonotonicTime::now());
+            logMemoryCacheResourceRequest(&frame, DiagnosticLoggingKeys::memoryCacheEntryDecisionKey(), DiagnosticLoggingKeys::usedKey());
+            loadTiming.markEndTime();
 
             memoryCache.resourceAccessed(*resource);
 
-            if (RuntimeEnabledFeatures::sharedFeatures().resourceTimingEnabled() && document() && !resource->isLoading()) {
-                auto resourceTiming = ResourceTiming::fromCache(url, request.initiatorName(), loadTiming, resource->response(), *request.origin());
+            if (document() && !resource->isLoading()) {
+                Box<NetworkLoadMetrics> metrics;
+                auto* documentLoader = document()->loader();
+                // Use the actual network load metrics if this is the first time loading this resource and it was loaded
+                // for this document because it may have been speculatively preloaded.
+                if (auto metricsFromResource = resource->takeNetworkLoadMetrics(); metricsFromResource && documentLoader && metricsFromResource->redirectStart >= documentLoader->timing().timeOrigin())
+                    metrics = WTFMove(metricsFromResource);
+                auto resourceTiming = ResourceTiming::fromMemoryCache(url, request.initiatorName(), loadTiming, resource->response(), metrics ? *metrics : NetworkLoadMetrics::emptyMetrics(), *request.origin());
                 if (initiatorContext == InitiatorContext::Worker) {
                     ASSERT(is<CachedRawResource>(resource.get()));
                     downcast<CachedRawResource>(resource.get())->finishedTimingForWorkerLoad(WTFMove(resourceTiming));
                 } else {
                     ASSERT(initiatorContext == InitiatorContext::Document);
-                    m_resourceTimingInfo.storeResourceTimingInitiatorInformation(resource, request.initiatorName(), frame());
+                    m_resourceTimingInfo.storeResourceTimingInitiatorInformation(resource, request.initiatorName(), &frame);
                     m_resourceTimingInfo.addResourceTiming(*resource.get(), *document(), WTFMove(resourceTiming));
                 }
             }
@@ -826,14 +1069,15 @@ ResourceErrorOr<CachedResourceHandle<CachedResource>> CachedResourceLoader::requ
         break;
     }
     ASSERT(resource);
-    resource->setOriginalRequestHeaders(WTFMove(originalRequestHeaders));
+    resource->setOriginalRequest(WTFMove(originalRequest));
 
-    if (forPreload == ForPreload::No && resource->loader() && resource->ignoreForRequestCount()) {
+    if (auto* subresourceLoader = resource->loader(); forPreload == ForPreload::No && subresourceLoader && resource->ignoreForRequestCount()) {
+        subresourceLoader->clearRequestCountTracker();
         resource->setIgnoreForRequestCount(false);
-        incrementRequestCount(*resource);
+        subresourceLoader->resetRequestCountTracker(*this, *resource);
     }
 
-    if ((policy != Use || resource->stillNeedsLoad()) && defer == DeferOption::NoDefer) {
+    if ((policy != Use || resource->stillNeedsLoad()) && imageLoading == ImageLoading::Immediate) {
         resource->load(*this);
 
         // We don't support immediate loads, but we do support immediate failure.
@@ -853,8 +1097,11 @@ ResourceErrorOr<CachedResourceHandle<CachedResource>> CachedResourceLoader::requ
         m_validatedURLs.add(resource->resourceRequest().url());
 
     ASSERT(resource->url() == url.string());
-    m_documentResources.set(resource->url(), resource);
-    return WTFMove(resource);
+    m_documentResources.set(resource->url().string(), resource);
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+    frame.loader().client().didLoadFromRegistrableDomain(RegistrableDomain(resource->resourceRequest().url()));
+#endif
+    return resource;
 }
 
 void CachedResourceLoader::documentDidFinishLoadEvent()
@@ -879,10 +1126,9 @@ CachedResourceHandle<CachedResource> CachedResourceLoader::revalidateResource(Ca
     ASSERT(!memoryCache.disabled());
     ASSERT(resource.canUseCacheValidator());
     ASSERT(!resource.resourceToRevalidate());
-    ASSERT(resource.sessionID() == sessionID());
     ASSERT(resource.allowsCaching());
 
-    CachedResourceHandle<CachedResource> newResource = createResource(resource.type(), WTFMove(request), resource.sessionID());
+    auto newResource = createResource(WTFMove(request), resource);
 
     LOG(ResourceLoading, "Resource %p created to revalidate %p", newResource.get(), &resource);
     newResource->setResourceToRevalidate(&resource);
@@ -890,27 +1136,25 @@ CachedResourceHandle<CachedResource> CachedResourceLoader::revalidateResource(Ca
     memoryCache.remove(resource);
     memoryCache.add(*newResource);
 
-    if (RuntimeEnabledFeatures::sharedFeatures().resourceTimingEnabled())
-        m_resourceTimingInfo.storeResourceTimingInitiatorInformation(newResource, newResource->initiatorName(), frame());
+    m_resourceTimingInfo.storeResourceTimingInitiatorInformation(newResource, newResource->initiatorName(), frame());
 
     return newResource;
 }
 
-CachedResourceHandle<CachedResource> CachedResourceLoader::loadResource(CachedResource::Type type, CachedResourceRequest&& request)
+CachedResourceHandle<CachedResource> CachedResourceLoader::loadResource(CachedResource::Type type, PAL::SessionID sessionID, CachedResourceRequest&& request, const CookieJar& cookieJar, const Settings& settings)
 {
     auto& memoryCache = MemoryCache::singleton();
-    ASSERT(!request.allowsCaching() || !memoryCache.resourceForRequest(request.resourceRequest(), sessionID())
-        || request.resourceRequest().cachePolicy() == DoNotUseAnyCache || request.resourceRequest().cachePolicy() == ReloadIgnoringCacheData || request.resourceRequest().cachePolicy() == RefreshAnyCacheData);
+    ASSERT(!request.allowsCaching() || !memoryCache.resourceForRequest(request.resourceRequest(), sessionID)
+        || request.resourceRequest().cachePolicy() == ResourceRequestCachePolicy::DoNotUseAnyCache || request.resourceRequest().cachePolicy() == ResourceRequestCachePolicy::ReloadIgnoringCacheData || request.resourceRequest().cachePolicy() == ResourceRequestCachePolicy::RefreshAnyCacheData);
 
     LOG(ResourceLoading, "Loading CachedResource for '%s'.", request.resourceRequest().url().stringCenterEllipsizedToLength().latin1().data());
 
-    CachedResourceHandle<CachedResource> resource = createResource(type, WTFMove(request), sessionID());
+    auto resource = createResource(type, WTFMove(request), sessionID, &cookieJar, settings);
 
-    if (resource->allowsCaching() && !memoryCache.add(*resource))
-        resource->setOwningCachedResourceLoader(this);
+    if (resource->allowsCaching())
+        memoryCache.add(*resource);
 
-    if (RuntimeEnabledFeatures::sharedFeatures().resourceTimingEnabled())
-        m_resourceTimingInfo.storeResourceTimingInitiatorInformation(resource, resource->initiatorName(), frame());
+    m_resourceTimingInfo.storeResourceTimingInitiatorInformation(resource, resource->initiatorName(), frame());
 
     return resource;
 }
@@ -943,18 +1187,46 @@ static void logResourceRevalidationDecision(CachedResource::RevalidationDecision
     }
 }
 
-CachedResourceLoader::RevalidationPolicy CachedResourceLoader::determineRevalidationPolicy(CachedResource::Type type, CachedResourceRequest& cachedResourceRequest, CachedResource* existingResource, ForPreload forPreload, DeferOption defer) const
+#if ENABLE(SERVICE_WORKER)
+static inline bool mustReloadFromServiceWorkerOptions(Document* document, const ResourceLoaderOptions& options, const ResourceLoaderOptions& cachedOptions)
+{
+    // When Loading a worker script and there is an active service worker, it is important to bypass the memory cache for the fetching of the script. If we
+    // don't then the worker won't be controlled by the service worker and the loads from the worker won't be intercepted by the service worker.
+    if ((cachedOptions.destination == FetchOptions::Destination::Worker || cachedOptions.destination == FetchOptions::Destination::Sharedworker)
+        && options.serviceWorkersMode != ServiceWorkersMode::None && document && document->activeServiceWorker()) {
+        return true;
+    }
+
+    // FIXME: We should validate/specify this behavior.
+    if (options.serviceWorkerRegistrationIdentifier != cachedOptions.serviceWorkerRegistrationIdentifier)
+        return true;
+
+    if (options.serviceWorkersMode == cachedOptions.serviceWorkersMode)
+        return false;
+
+    return cachedOptions.mode == FetchOptions::Mode::Navigate || cachedOptions.destination == FetchOptions::Destination::Worker || cachedOptions.destination == FetchOptions::Destination::Sharedworker;
+}
+#endif
+
+CachedResourceLoader::RevalidationPolicy CachedResourceLoader::determineRevalidationPolicy(CachedResource::Type type, CachedResourceRequest& cachedResourceRequest, CachedResource* existingResource, ForPreload forPreload, ImageLoading imageLoading) const
 {
     auto& request = cachedResourceRequest.resourceRequest();
 
     if (!existingResource)
         return Load;
 
-    if (request.cachePolicy() == DoNotUseAnyCache || request.cachePolicy() == ReloadIgnoringCacheData)
+    if (request.cachePolicy() == ResourceRequestCachePolicy::DoNotUseAnyCache || request.cachePolicy() == ResourceRequestCachePolicy::ReloadIgnoringCacheData)
         return Load;
 
-    if (request.cachePolicy() == RefreshAnyCacheData)
+    if (request.cachePolicy() == ResourceRequestCachePolicy::RefreshAnyCacheData)
         return Reload;
+
+#if ENABLE(SERVICE_WORKER)
+    if (mustReloadFromServiceWorkerOptions(document(), cachedResourceRequest.options(), existingResource->options())) {
+        LOG(ResourceLoading, "CachedResourceLoader::determineRevalidationPolicy reloading because selected service worker may differ");
+        return Reload;
+    }
+#endif
 
     // We already have a preload going for this URL.
     if (forPreload == ForPreload::Yes && existingResource->isPreloaded())
@@ -991,7 +1263,7 @@ CachedResourceLoader::RevalidationPolicy CachedResourceLoader::determineRevalida
     ASSERT(!request.isConditional());
 
     // Do not load from cache if images are not enabled. The load for this image will be blocked in CachedImage::load.
-    if (defer == DeferOption::DeferredByClient)
+    if (imageLoading == ImageLoading::DeferredUntilVisible)
         return Reload;
 
     // Don't reload resources while pasting or if cache mode allows stale resources.
@@ -1009,21 +1281,24 @@ CachedResourceLoader::RevalidationPolicy CachedResourceLoader::determineRevalida
         return Use;
     ASSERT(!existingResource->validationInProgress());
 
+    if (is<CachedImage>(*existingResource) && downcast<CachedImage>(*existingResource).canSkipRevalidation(*this, cachedResourceRequest))
+        return Use;
+
     auto cachePolicy = this->cachePolicy(type, request.url());
 
     // Validate the redirect chain.
-    bool cachePolicyIsHistoryBuffer = cachePolicy == CachePolicyHistoryBuffer;
+    bool cachePolicyIsHistoryBuffer = cachePolicy == CachePolicy::HistoryBuffer;
     if (!existingResource->redirectChainAllowsReuse(cachePolicyIsHistoryBuffer ? ReuseExpiredRedirection : DoNotReuseExpiredRedirection)) {
         LOG(ResourceLoading, "CachedResourceLoader::determineRevalidationPolicy reloading due to not cached or expired redirections.");
         logMemoryCacheResourceRequest(frame(), DiagnosticLoggingKeys::inMemoryCacheKey(), DiagnosticLoggingKeys::unusedReasonRedirectChainKey());
         return Reload;
     }
 
-    // CachePolicyHistoryBuffer uses the cache except if this is a main resource with "cache-control: no-store".
+    // CachePolicy::HistoryBuffer uses the cache except if this is a main resource with "cache-control: no-store".
     if (cachePolicyIsHistoryBuffer) {
         // FIXME: Ignoring "cache-control: no-cache" for sub-resources on history navigation but not the main
         // resource is inconsistent. We should probably harmonize this.
-        if (!existingResource->response().cacheControlContainsNoStore() || type != CachedResource::MainResource)
+        if (!existingResource->response().cacheControlContainsNoStore() || type != CachedResource::Type::MainResource)
             return Use;
     }
 
@@ -1040,7 +1315,7 @@ CachedResourceLoader::RevalidationPolicy CachedResourceLoader::determineRevalida
     // This helps with the case where the server sends back
     // "Access-Control-Allow-Origin: *" all the time, but some of the
     // client's requests are made without CORS and some with.
-    if (existingResource->resourceRequest().allowCookies() != request.allowCookies()) {
+    if (existingResource->resourceRequest().allowCookies() != request.allowCookies() || existingResource->options().credentials != cachedResourceRequest.options().credentials) {
         LOG(ResourceLoading, "CachedResourceLoader::determineRevalidationPolicy reloading due to difference in credentials settings.");
         logMemoryCacheResourceRequest(frame(), DiagnosticLoggingKeys::inMemoryCacheKey(), DiagnosticLoggingKeys::unusedReasonCredentialSettingsKey());
         return Reload;
@@ -1050,8 +1325,8 @@ CachedResourceLoader::RevalidationPolicy CachedResourceLoader::determineRevalida
     if (document() && !document()->loadEventFinished() && m_validatedURLs.contains(existingResource->url()))
         return Use;
 
-    // CachePolicyReload always reloads
-    if (cachePolicy == CachePolicyReload) {
+    // CachePolicy::Reload always reloads
+    if (cachePolicy == CachePolicy::Reload) {
         LOG(ResourceLoading, "CachedResourceLoader::determineRevalidationPolicy reloading due to CachePolicyReload.");
         logMemoryCacheResourceRequest(frame(), DiagnosticLoggingKeys::inMemoryCacheKey(), DiagnosticLoggingKeys::unusedReasonReloadKey());
         return Reload;
@@ -1081,8 +1356,14 @@ CachedResourceLoader::RevalidationPolicy CachedResourceLoader::determineRevalida
     // Check if the cache headers requires us to revalidate (cache expiration for example).
     if (revalidationDecision != CachedResource::RevalidationDecision::No) {
         // See if the resource has usable ETag or Last-modified headers.
-        if (existingResource->canUseCacheValidator())
+        if (existingResource->canUseCacheValidator()) {
+#if ENABLE(SERVICE_WORKER)
+            // Revalidating will mean exposing headers to the service worker, let's reload given the service worker already handled it.
+            if (cachedResourceRequest.options().serviceWorkerRegistrationIdentifier)
+                return Reload;
+#endif
             return Revalidate;
+        }
         
         // No, must reload.
         LOG(ResourceLoading, "CachedResourceLoader::determineRevalidationPolicy reloading due to missing cache validators.");
@@ -1103,9 +1384,9 @@ void CachedResourceLoader::printAccessDeniedMessage(const URL& url) const
 
     String message;
     if (!m_document || m_document->url().isNull())
-        message = "Unsafe attempt to load URL " + url.stringCenterEllipsizedToLength() + '.';
+        message = makeString("Unsafe attempt to load URL ", url.stringCenterEllipsizedToLength(), '.');
     else
-        message = "Unsafe attempt to load URL " + url.stringCenterEllipsizedToLength() + " from frame with URL " + m_document->url().stringCenterEllipsizedToLength() + ". Domains, protocols and ports must match.\n";
+        message = makeString("Unsafe attempt to load URL ", url.stringCenterEllipsizedToLength(), " from origin ", m_document->securityOrigin().toString(), ". Domains, protocols and ports must match.\n");
 
     frame()->document()->addConsoleMessage(MessageSource::Security, MessageLevel::Error, message);
 }
@@ -1136,9 +1417,9 @@ void CachedResourceLoader::setImagesEnabled(bool enable)
     reloadImagesIfNotDeferred();
 }
 
-bool CachedResourceLoader::clientDefersImage(const URL&) const
+ImageLoading CachedResourceLoader::clientDefersImage(const URL&) const
 {
-    return !m_imagesEnabled;
+    return m_imagesEnabled ? ImageLoading::Immediate : ImageLoading::DeferredUntilVisible;
 }
 
 bool CachedResourceLoader::shouldPerformImageLoad(const URL& url) const
@@ -1148,13 +1429,13 @@ bool CachedResourceLoader::shouldPerformImageLoad(const URL& url) const
 
 bool CachedResourceLoader::shouldDeferImageLoad(const URL& url) const
 {
-    return clientDefersImage(url) || !shouldPerformImageLoad(url);
+    return clientDefersImage(url) == ImageLoading::DeferredUntilVisible || !shouldPerformImageLoad(url);
 }
 
 void CachedResourceLoader::reloadImagesIfNotDeferred()
 {
     for (auto& resource : m_documentResources.values()) {
-        if (is<CachedImage>(*resource) && resource->stillNeedsLoad() && !clientDefersImage(resource->url()))
+        if (is<CachedImage>(*resource) && resource->stillNeedsLoad() && clientDefersImage(resource->url()) == ImageLoading::Immediate)
             downcast<CachedImage>(*resource).load(*this);
     }
 }
@@ -1163,47 +1444,39 @@ CachePolicy CachedResourceLoader::cachePolicy(CachedResource::Type type, const U
 {
     Frame* frame = this->frame();
     if (!frame)
-        return CachePolicyVerify;
+        return CachePolicy::Verify;
 
-    if (type != CachedResource::MainResource)
+    if (type != CachedResource::Type::MainResource)
         return frame->loader().subresourceCachePolicy(url);
 
     if (Page* page = frame->page()) {
-        if (page->isResourceCachingDisabled())
-            return CachePolicyReload;
+        if (page->isResourceCachingDisabledByWebInspector())
+            return CachePolicy::Reload;
     }
 
     switch (frame->loader().loadType()) {
     case FrameLoadType::ReloadFromOrigin:
     case FrameLoadType::Reload:
-        return CachePolicyReload;
+        return CachePolicy::Reload;
     case FrameLoadType::Back:
     case FrameLoadType::Forward:
     case FrameLoadType::IndexedBackForward:
         // Do not revalidate cached main resource on back/forward navigation.
-        return CachePolicyHistoryBuffer;
+        return CachePolicy::HistoryBuffer;
     default:
-        return CachePolicyVerify;
+        return CachePolicy::Verify;
     }
 }
 
-void CachedResourceLoader::removeCachedResource(CachedResource& resource)
-{
-#ifndef NDEBUG
-    DocumentResourceMap::iterator it = m_documentResources.find(resource.url());
-    if (it != m_documentResources.end())
-        ASSERT(it->value.get() == &resource);
-#endif
-    m_documentResources.remove(resource.url());
-}
-
-void CachedResourceLoader::loadDone(bool shouldPerformPostLoadActions)
+void CachedResourceLoader::loadDone(LoadCompletionType type, bool shouldPerformPostLoadActions)
 {
     RefPtr<DocumentLoader> protectDocumentLoader(m_documentLoader);
-    RefPtr<Document> protectDocument(m_document);
+    RefPtr<Document> protectDocument(m_document.get());
+
+    ASSERT(shouldPerformPostLoadActions || type == LoadCompletionType::Cancel);
 
     if (frame())
-        frame()->loader().loadDone();
+        frame()->loader().loadDone(type);
 
     if (shouldPerformPostLoadActions)
         performPostLoadActions();
@@ -1220,13 +1493,18 @@ void CachedResourceLoader::loadDone(bool shouldPerformPostLoadActions)
 // remove it from the map.
 void CachedResourceLoader::garbageCollectDocumentResources()
 {
+    LOG(ResourceLoading, "CachedResourceLoader %p garbageCollectDocumentResources", this);
+
     typedef Vector<String, 10> StringVector;
     StringVector resourcesToDelete;
 
-    for (auto& resource : m_documentResources) {
-        if (resource.value->hasOneHandle()) {
-            resourcesToDelete.append(resource.key);
-            resource.value->setOwningCachedResourceLoader(nullptr);
+    for (auto& resourceEntry : m_documentResources) {
+        auto& resource = *resourceEntry.value;
+        LOG(ResourceLoading, "  cached resource %p - hasOneHandle %d", &resource, resource.hasOneHandle());
+
+        if (resource.hasOneHandle() && !resource.loader() && !resource.isPreloaded()) {
+            resourcesToDelete.append(resourceEntry.key);
+            m_resourceTimingInfo.removeResourceTiming(resource);
         }
     }
 
@@ -1256,21 +1534,43 @@ void CachedResourceLoader::decrementRequestCount(const CachedResource& resource)
     ASSERT(m_requestCount > -1);
 }
 
+void CachedResourceLoader::notifyFinished(const CachedResource& resource)
+{
+    if (isSVGImageCachedResource(&resource))
+        m_cachedSVGImagesURLs.add(resource.url());
+}
+
+Vector<Ref<SVGImage>> CachedResourceLoader::allCachedSVGImages() const
+{
+    Vector<Ref<SVGImage>> allCachedSVGImages;
+
+    for (auto& cachedSVGImageURL : m_cachedSVGImagesURLs) {
+        auto* resource = cachedResource(cachedSVGImageURL);
+        if (auto* image = cachedResourceSVGImage(resource))
+            allCachedSVGImages.append(*image);
+    }
+        
+    return allCachedSVGImages;
+}
+
 ResourceErrorOr<CachedResourceHandle<CachedResource>> CachedResourceLoader::preload(CachedResource::Type type, CachedResourceRequest&& request)
 {
-    if (request.charset().isEmpty() && (type == CachedResource::Script || type == CachedResource::CSSStyleSheet))
+    if (InspectorInstrumentation::willIntercept(frame(), request.resourceRequest()))
+        return makeUnexpected(ResourceError { errorDomainWebKitInternal, 0, request.resourceRequest().url(), "Inspector intercept"_s });
+
+    if (request.charset().isEmpty() && (type == CachedResource::Type::Script || type == CachedResource::Type::CSSStyleSheet))
         request.setCharset(m_document->charset());
 
     auto resource = requestResource(type, WTFMove(request), ForPreload::Yes);
     if (resource && (!m_preloads || !m_preloads->contains(resource.value().get()))) {
         auto resourceValue = resource.value();
         // Fonts need special treatment since just creating the resource doesn't trigger a load.
-        if (type == CachedResource::FontResource)
+        if (type == CachedResource::Type::FontResource)
             downcast<CachedFont>(resourceValue.get())->beginLoadIfNeeded(*this);
         resourceValue->increasePreloadCount();
 
         if (!m_preloads)
-            m_preloads = std::make_unique<ListHashSet<CachedResource*>>();
+            m_preloads = makeUnique<ListHashSet<CachedResource*>>();
         m_preloads->add(resourceValue.get());
     }
     return resource;
@@ -1281,7 +1581,7 @@ void CachedResourceLoader::warnUnusedPreloads()
     if (!m_preloads)
         return;
     for (const auto& resource : *m_preloads) {
-        if (resource && resource->isLinkPreload() && resource->preloadResult() == CachedResource::PreloadNotReferenced && document()) {
+        if (resource && resource->isLinkPreload() && resource->preloadResult() == CachedResource::PreloadResult::PreloadNotReferenced && document()) {
             document()->addConsoleMessage(MessageSource::Other, MessageLevel::Warning,
                 "The resource " + resource->url().string() +
                 " was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it wasn't preloaded for nothing.");
@@ -1312,27 +1612,64 @@ void CachedResourceLoader::clearPreloads(ClearPreloadsMode mode)
         ASSERT(resource);
         if (mode == ClearPreloadsMode::ClearSpeculativePreloads && resource->isLinkPreload()) {
             if (!remainingLinkPreloads)
-                remainingLinkPreloads = std::make_unique<ListHashSet<CachedResource*>>();
+                remainingLinkPreloads = makeUnique<ListHashSet<CachedResource*>>();
             remainingLinkPreloads->add(resource);
             continue;
         }
         resource->decreasePreloadCount();
         bool deleted = resource->deleteIfPossible();
-        if (!deleted && resource->preloadResult() == CachedResource::PreloadNotReferenced)
+        if (!deleted && resource->preloadResult() == CachedResource::PreloadResult::PreloadNotReferenced)
             MemoryCache::singleton().remove(*resource);
     }
     m_preloads = WTFMove(remainingLinkPreloads);
 }
 
+Vector<CachedResource*> CachedResourceLoader::visibleResourcesToPrioritize()
+{
+    if (!document())
+        return { };
+
+    Vector<CachedResource*> toPrioritize;
+
+    for (auto& resource : m_documentResources.values()) {
+        if (!is<CachedImage>(resource.get()))
+            continue;
+        auto& cachedImage = downcast<CachedImage>(*resource);
+        if (!cachedImage.isLoading())
+            continue;
+        if (!cachedImage.url().protocolIsInHTTPFamily())
+            continue;
+        if (!cachedImage.loader())
+            continue;
+        if (!cachedImage.isVisibleInViewport(*document()))
+            continue;
+        toPrioritize.append(&cachedImage);
+    }
+
+    return toPrioritize;
+}
+
 const ResourceLoaderOptions& CachedResourceLoader::defaultCachedResourceOptions()
 {
-    static NeverDestroyed<ResourceLoaderOptions> options(SendCallbacks, SniffContent, BufferData, StoredCredentialsPolicy::Use, ClientCredentialPolicy::MayAskClientForCredentials, FetchOptions::Credentials::Include, DoSecurityCheck, FetchOptions::Mode::NoCors, DoNotIncludeCertificateInfo, ContentSecurityPolicyImposition::DoPolicyCheck, DefersLoadingPolicy::AllowDefersLoading, CachingPolicy::AllowCaching);
+    static NeverDestroyed<ResourceLoaderOptions> options(
+        SendCallbackPolicy::SendCallbacks,
+        ContentSniffingPolicy::SniffContent,
+        DataBufferingPolicy::BufferData,
+        StoredCredentialsPolicy::Use,
+        ClientCredentialPolicy::MayAskClientForCredentials,
+        FetchOptions::Credentials::Include,
+        SecurityCheckPolicy::DoSecurityCheck,
+        FetchOptions::Mode::NoCors,
+        CertificateInfoPolicy::DoNotIncludeCertificateInfo,
+        ContentSecurityPolicyImposition::DoPolicyCheck,
+        DefersLoadingPolicy::AllowDefersLoading,
+        CachingPolicy::AllowCaching);
     return options;
 }
 
-bool CachedResourceLoader::isAlwaysOnLoggingAllowed() const
-{
-    return m_documentLoader ? m_documentLoader->isAlwaysOnLoggingAllowed() : true;
 }
 
-}
+#undef PAGE_ID
+#undef FRAME_ID
+#undef CACHEDRESOURCELOADER_RELEASE_LOG
+#undef CACHEDRESOURCELOADER_RELEASE_LOG_WITH_FRAME

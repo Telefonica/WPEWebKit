@@ -8,99 +8,114 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AUDIO_PROCESSING_IMPL_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_AUDIO_PROCESSING_IMPL_H_
+#ifndef MODULES_AUDIO_PROCESSING_AUDIO_PROCESSING_IMPL_H_
+#define MODULES_AUDIO_PROCESSING_AUDIO_PROCESSING_IMPL_H_
 
+#include <stdio.h>
+
+#include <atomic>
 #include <list>
 #include <memory>
+#include <string>
 #include <vector>
 
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/function_view.h"
-#include "webrtc/base/gtest_prod_util.h"
-#include "webrtc/base/ignore_wundef.h"
-#include "webrtc/base/protobuf_utils.h"
-#include "webrtc/base/swap_queue.h"
-#include "webrtc/base/thread_annotations.h"
-#include "webrtc/modules/audio_processing/audio_buffer.h"
-#include "webrtc/modules/audio_processing/include/aec_dump.h"
-#include "webrtc/modules/audio_processing/include/audio_processing.h"
-#include "webrtc/modules/audio_processing/render_queue_item_verifier.h"
-#include "webrtc/modules/audio_processing/rms_level.h"
-#include "webrtc/system_wrappers/include/file_wrapper.h"
-
-#ifdef WEBRTC_AUDIOPROC_DEBUG_DUMP
-// *.pb.h files are generated at build-time by the protobuf compiler.
-RTC_PUSH_IGNORING_WUNDEF()
-#ifdef WEBRTC_ANDROID_PLATFORM_BUILD
-#include "external/webrtc/webrtc/modules/audio_processing/debug.pb.h"
-#else
-#include "webrtc/modules/audio_processing/debug.pb.h"
-#endif
-RTC_POP_IGNORING_WUNDEF()
-#endif  // WEBRTC_AUDIOPROC_DEBUG_DUMP
+#include "absl/base/nullability.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/optional.h"
+#include "api/array_view.h"
+#include "api/function_view.h"
+#include "api/task_queue/task_queue_base.h"
+#include "modules/audio_processing/aec3/echo_canceller3.h"
+#include "modules/audio_processing/agc/agc_manager_direct.h"
+#include "modules/audio_processing/agc/gain_control.h"
+#include "modules/audio_processing/agc2/input_volume_stats_reporter.h"
+#include "modules/audio_processing/audio_buffer.h"
+#include "modules/audio_processing/capture_levels_adjuster/capture_levels_adjuster.h"
+#include "modules/audio_processing/echo_control_mobile_impl.h"
+#include "modules/audio_processing/gain_control_impl.h"
+#include "modules/audio_processing/gain_controller2.h"
+#include "modules/audio_processing/high_pass_filter.h"
+#include "modules/audio_processing/include/aec_dump.h"
+#include "modules/audio_processing/include/audio_frame_proxies.h"
+#include "modules/audio_processing/include/audio_processing.h"
+#include "modules/audio_processing/include/audio_processing_statistics.h"
+#include "modules/audio_processing/ns/noise_suppressor.h"
+#include "modules/audio_processing/optionally_built_submodule_creators.h"
+#include "modules/audio_processing/render_queue_item_verifier.h"
+#include "modules/audio_processing/rms_level.h"
+#include "modules/audio_processing/transient/transient_suppressor.h"
+#include "rtc_base/gtest_prod_util.h"
+#include "rtc_base/swap_queue.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
+class ApmDataDumper;
 class AudioConverter;
-class NonlinearBeamformer;
+
+constexpr int RuntimeSettingQueueSize() {
+  return 100;
+}
 
 class AudioProcessingImpl : public AudioProcessing {
  public:
   // Methods forcing APM to run in a single-threaded manner.
   // Acquires both the render and capture locks.
-  explicit AudioProcessingImpl(const webrtc::Config& config);
-  // AudioProcessingImpl takes ownership of beamformer.
-  AudioProcessingImpl(const webrtc::Config& config,
-                      NonlinearBeamformer* beamformer);
+  AudioProcessingImpl();
+  AudioProcessingImpl(const AudioProcessing::Config& config,
+                      std::unique_ptr<CustomProcessing> capture_post_processor,
+                      std::unique_ptr<CustomProcessing> render_pre_processor,
+                      std::unique_ptr<EchoControlFactory> echo_control_factory,
+                      rtc::scoped_refptr<EchoDetector> echo_detector,
+                      std::unique_ptr<CustomAudioAnalyzer> capture_analyzer);
   ~AudioProcessingImpl() override;
   int Initialize() override;
-  int Initialize(int capture_input_sample_rate_hz,
-                 int capture_output_sample_rate_hz,
-                 int render_sample_rate_hz,
-                 ChannelLayout capture_input_layout,
-                 ChannelLayout capture_output_layout,
-                 ChannelLayout render_input_layout) override;
   int Initialize(const ProcessingConfig& processing_config) override;
   void ApplyConfig(const AudioProcessing::Config& config) override;
-  void SetExtraOptions(const webrtc::Config& config) override;
-  void UpdateHistogramsOnCallEnd() override;
+  bool CreateAndAttachAecDump(
+      absl::string_view file_name,
+      int64_t max_log_size_bytes,
+      absl::Nonnull<TaskQueueBase*> worker_queue) override;
+  bool CreateAndAttachAecDump(
+      FILE* handle,
+      int64_t max_log_size_bytes,
+      absl::Nonnull<TaskQueueBase*> worker_queue) override;
+  // TODO(webrtc:5298) Deprecated variant.
   void AttachAecDump(std::unique_ptr<AecDump> aec_dump) override;
   void DetachAecDump() override;
-  int StartDebugRecording(const char filename[kMaxFilenameSize],
-                          int64_t max_log_size_bytes) override;
-  int StartDebugRecording(FILE* handle, int64_t max_log_size_bytes) override;
-  int StartDebugRecording(FILE* handle) override;
-  int StartDebugRecordingForPlatformFile(rtc::PlatformFile handle) override;
-  int StopDebugRecording() override;
+  void SetRuntimeSetting(RuntimeSetting setting) override;
+  bool PostRuntimeSetting(RuntimeSetting setting) override;
 
   // Capture-side exclusive methods possibly running APM in a
   // multi-threaded manner. Acquire the capture lock.
-  int ProcessStream(AudioFrame* frame) override;
-  int ProcessStream(const float* const* src,
-                    size_t samples_per_channel,
-                    int input_sample_rate_hz,
-                    ChannelLayout input_layout,
-                    int output_sample_rate_hz,
-                    ChannelLayout output_layout,
-                    float* const* dest) override;
+  int ProcessStream(const int16_t* const src,
+                    const StreamConfig& input_config,
+                    const StreamConfig& output_config,
+                    int16_t* const dest) override;
   int ProcessStream(const float* const* src,
                     const StreamConfig& input_config,
                     const StreamConfig& output_config,
                     float* const* dest) override;
+  bool GetLinearAecOutput(
+      rtc::ArrayView<std::array<float, 160>> linear_output) const override;
   void set_output_will_be_muted(bool muted) override;
+  void HandleCaptureOutputUsedSetting(bool capture_output_used)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
   int set_stream_delay_ms(int delay) override;
-  void set_delay_offset_ms(int offset) override;
-  int delay_offset_ms() const override;
   void set_stream_key_pressed(bool key_pressed) override;
+  void set_stream_analog_level(int level) override;
+  int recommended_stream_analog_level() const
+      RTC_LOCKS_EXCLUDED(mutex_capture_) override;
 
   // Render-side exclusive methods possibly running APM in a
   // multi-threaded manner. Acquire the render lock.
-  int ProcessReverseStream(AudioFrame* frame) override;
+  int ProcessReverseStream(const int16_t* const src,
+                           const StreamConfig& input_config,
+                           const StreamConfig& output_config,
+                           int16_t* const dest) override;
   int AnalyzeReverseStream(const float* const* data,
-                           size_t samples_per_channel,
-                           int sample_rate_hz,
-                           ChannelLayout layout) override;
+                           const StreamConfig& reverse_config) override;
   int ProcessReverseStream(const float* const* src,
                            const StreamConfig& input_config,
                            const StreamConfig& output_config,
@@ -116,33 +131,25 @@ class AudioProcessingImpl : public AudioProcessing {
   size_t num_output_channels() const override;
   size_t num_reverse_channels() const override;
   int stream_delay_ms() const override;
-  bool was_stream_delay_set() const override
-      EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
 
-  AudioProcessingStatistics GetStatistics() const override;
+  AudioProcessingStats GetStatistics(bool has_remote_tracks) override {
+    return GetStatistics();
+  }
+  AudioProcessingStats GetStatistics() override {
+    return stats_reporter_.GetStatistics();
+  }
 
-  // Methods returning pointers to APM submodules.
-  // No locks are aquired in those, as those locks
-  // would offer no protection (the submodules are
-  // created only once in a single-treaded manner
-  // during APM creation).
-  EchoCancellation* echo_cancellation() const override;
-  EchoControlMobile* echo_control_mobile() const override;
-  GainControl* gain_control() const override;
-  // TODO(peah): Deprecate this API call.
-  HighPassFilter* high_pass_filter() const override;
-  LevelEstimator* level_estimator() const override;
-  NoiseSuppression* noise_suppression() const override;
-  VoiceDetection* voice_detection() const override;
-
-  // TODO(peah): Remove MutateConfig once the new API allows that.
-  void MutateConfig(rtc::FunctionView<void(AudioProcessing::Config*)> mutator);
   AudioProcessing::Config GetConfig() const override;
 
  protected:
   // Overridden in a mock.
-  virtual int InitializeLocked()
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_, crit_capture_);
+  virtual void InitializeLocked()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_, mutex_capture_);
+  void AssertLockedForTest()
+      RTC_ASSERT_EXCLUSIVE_LOCK(mutex_render_, mutex_capture_) {
+    mutex_render_.AssertHeld();
+    mutex_capture_.AssertHeld();
+  }
 
  private:
   // TODO(peah): These friend classes should be removed as soon as the new
@@ -150,189 +157,259 @@ class AudioProcessingImpl : public AudioProcessing {
   FRIEND_TEST_ALL_PREFIXES(ApmConfiguration, DefaultBehavior);
   FRIEND_TEST_ALL_PREFIXES(ApmConfiguration, ValidConfigBehavior);
   FRIEND_TEST_ALL_PREFIXES(ApmConfiguration, InValidConfigBehavior);
-  struct ApmPublicSubmodules;
-  struct ApmPrivateSubmodules;
+  FRIEND_TEST_ALL_PREFIXES(ApmWithSubmodulesExcludedTest,
+                           ToggleTransientSuppressor);
+  FRIEND_TEST_ALL_PREFIXES(ApmWithSubmodulesExcludedTest,
+                           ReinitializeTransientSuppressor);
+  FRIEND_TEST_ALL_PREFIXES(ApmWithSubmodulesExcludedTest,
+                           BitexactWithDisabledModules);
+  FRIEND_TEST_ALL_PREFIXES(
+      AudioProcessingImplGainController2FieldTrialParametrizedTest,
+      ConfigAdjustedWhenExperimentEnabled);
 
-  // Submodule interface implementations.
-  std::unique_ptr<HighPassFilter> high_pass_filter_impl_;
+  void set_stream_analog_level_locked(int level)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+  void UpdateRecommendedInputVolumeLocked()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
-  class ApmSubmoduleStates {
+  void OverrideSubmoduleCreationForTesting(
+      const ApmSubmoduleCreationOverrides& overrides);
+
+  // Class providing thread-safe message pipe functionality for
+  // `runtime_settings_`.
+  class RuntimeSettingEnqueuer {
    public:
-    ApmSubmoduleStates();
-    // Updates the submodule state and returns true if it has changed.
-    bool Update(bool low_cut_filter_enabled,
-                bool echo_canceller_enabled,
-                bool mobile_echo_controller_enabled,
-                bool residual_echo_detector_enabled,
-                bool noise_suppressor_enabled,
-                bool intelligibility_enhancer_enabled,
-                bool beamformer_enabled,
-                bool adaptive_gain_controller_enabled,
-                bool gain_controller2_enabled,
-                bool level_controller_enabled,
-                bool echo_canceller3_enabled,
-                bool voice_activity_detector_enabled,
-                bool level_estimator_enabled,
-                bool transient_suppressor_enabled);
-    bool CaptureMultiBandSubModulesActive() const;
-    bool CaptureMultiBandProcessingActive() const;
-    bool CaptureFullBandProcessingActive() const;
-    bool RenderMultiBandSubModulesActive() const;
-    bool RenderMultiBandProcessingActive() const;
+    explicit RuntimeSettingEnqueuer(
+        SwapQueue<RuntimeSetting>* runtime_settings);
+    ~RuntimeSettingEnqueuer();
+
+    // Enqueue setting and return whether the setting was successfully enqueued.
+    bool Enqueue(RuntimeSetting setting);
 
    private:
-    bool low_cut_filter_enabled_ = false;
-    bool echo_canceller_enabled_ = false;
+    SwapQueue<RuntimeSetting>& runtime_settings_;
+  };
+
+  const std::unique_ptr<ApmDataDumper> data_dumper_;
+  static std::atomic<int> instance_count_;
+  const bool use_setup_specific_default_aec3_config_;
+
+  // Parameters for the "GainController2" experiment which determines whether
+  // the following APM sub-modules are created and, if so, their configurations:
+  // AGC2 (`gain_controller2`), AGC1 (`gain_control`, `agc_manager`) and TS
+  // (`transient_suppressor`).
+  // TODO(bugs.webrtc.org/7494): Remove when the "WebRTC-Audio-GainController2"
+  // field trial is removed.
+  struct GainController2ExperimentParams {
+    struct Agc2Config {
+      InputVolumeController::Config input_volume_controller;
+      AudioProcessing::Config::GainController2::AdaptiveDigital
+          adaptive_digital_controller;
+    };
+    // When `agc2_config` is specified, all gain control switches to AGC2 and
+    // the configuration is overridden.
+    absl::optional<Agc2Config> agc2_config;
+    // When true, the transient suppressor submodule is never created regardless
+    // of the APM configuration.
+    bool disallow_transient_suppressor_usage;
+  };
+  // Specified when the "WebRTC-Audio-GainController2" field trial is specified.
+  // TODO(bugs.webrtc.org/7494): Remove when the "WebRTC-Audio-GainController2"
+  // field trial is removed.
+  const absl::optional<GainController2ExperimentParams>
+      gain_controller2_experiment_params_;
+
+  // Parses the "WebRTC-Audio-GainController2" field trial. If disabled, returns
+  // an unspecified value.
+  static absl::optional<GainController2ExperimentParams>
+  GetGainController2ExperimentParams();
+
+  // When `experiment_params` is specified, returns an APM configuration
+  // modified according to the experiment parameters. Otherwise returns
+  // `config`.
+  static AudioProcessing::Config AdjustConfig(
+      const AudioProcessing::Config& config,
+      const absl::optional<GainController2ExperimentParams>& experiment_params);
+  // Returns true if the APM VAD sub-module should be used.
+  static bool UseApmVadSubModule(
+      const AudioProcessing::Config& config,
+      const absl::optional<GainController2ExperimentParams>& experiment_params);
+
+  TransientSuppressor::VadMode transient_suppressor_vad_mode_;
+
+  SwapQueue<RuntimeSetting> capture_runtime_settings_;
+  SwapQueue<RuntimeSetting> render_runtime_settings_;
+
+  RuntimeSettingEnqueuer capture_runtime_settings_enqueuer_;
+  RuntimeSettingEnqueuer render_runtime_settings_enqueuer_;
+
+  // EchoControl factory.
+  const std::unique_ptr<EchoControlFactory> echo_control_factory_;
+
+  class SubmoduleStates {
+   public:
+    SubmoduleStates(bool capture_post_processor_enabled,
+                    bool render_pre_processor_enabled,
+                    bool capture_analyzer_enabled);
+    // Updates the submodule state and returns true if it has changed.
+    bool Update(bool high_pass_filter_enabled,
+                bool mobile_echo_controller_enabled,
+                bool noise_suppressor_enabled,
+                bool adaptive_gain_controller_enabled,
+                bool gain_controller2_enabled,
+                bool voice_activity_detector_enabled,
+                bool gain_adjustment_enabled,
+                bool echo_controller_enabled,
+                bool transient_suppressor_enabled);
+    bool CaptureMultiBandSubModulesActive() const;
+    bool CaptureMultiBandProcessingPresent() const;
+    bool CaptureMultiBandProcessingActive(bool ec_processing_active) const;
+    bool CaptureFullBandProcessingActive() const;
+    bool CaptureAnalyzerActive() const;
+    bool RenderMultiBandSubModulesActive() const;
+    bool RenderFullBandProcessingActive() const;
+    bool RenderMultiBandProcessingActive() const;
+    bool HighPassFilteringRequired() const;
+
+   private:
+    const bool capture_post_processor_enabled_ = false;
+    const bool render_pre_processor_enabled_ = false;
+    const bool capture_analyzer_enabled_ = false;
+    bool high_pass_filter_enabled_ = false;
     bool mobile_echo_controller_enabled_ = false;
-    bool residual_echo_detector_enabled_ = false;
     bool noise_suppressor_enabled_ = false;
-    bool intelligibility_enhancer_enabled_ = false;
-    bool beamformer_enabled_ = false;
     bool adaptive_gain_controller_enabled_ = false;
-    bool gain_controller2_enabled_ = false;
-    bool level_controller_enabled_ = false;
-    bool echo_canceller3_enabled_ = false;
-    bool level_estimator_enabled_ = false;
     bool voice_activity_detector_enabled_ = false;
+    bool gain_controller2_enabled_ = false;
+    bool gain_adjustment_enabled_ = false;
+    bool echo_controller_enabled_ = false;
     bool transient_suppressor_enabled_ = false;
     bool first_update_ = true;
   };
 
-#ifdef WEBRTC_AUDIOPROC_DEBUG_DUMP
-  // State for the debug dump.
-  struct ApmDebugDumpThreadState {
-    ApmDebugDumpThreadState();
-    ~ApmDebugDumpThreadState();
-    std::unique_ptr<audioproc::Event> event_msg;  // Protobuf message.
-    ProtoString event_str;  // Memory for protobuf serialization.
-
-    // Serialized string of last saved APM configuration.
-    ProtoString last_serialized_config;
-  };
-
-  struct ApmDebugDumpState {
-    ApmDebugDumpState();
-    ~ApmDebugDumpState();
-    // Number of bytes that can still be written to the log before the maximum
-    // size is reached. A value of <= 0 indicates that no limit is used.
-    int64_t num_bytes_left_for_log_ = -1;
-    std::unique_ptr<FileWrapper> debug_file;
-    ApmDebugDumpThreadState render;
-    ApmDebugDumpThreadState capture;
-  };
-#endif
-
-  // Method for modifying the formats struct that are called from both
-  // the render and capture threads. The check for whether modifications
-  // are needed is done while holding the render lock only, thereby avoiding
-  // that the capture thread blocks the render thread.
-  // The struct is modified in a single-threaded manner by holding both the
-  // render and capture locks.
-  int MaybeInitialize(const ProcessingConfig& config, bool force_initialization)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_);
-
-  int MaybeInitializeRender(const ProcessingConfig& processing_config)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_);
-
-  int MaybeInitializeCapture(const ProcessingConfig& processing_config,
-                             bool force_initialization)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_);
+  // Methods for modifying the formats struct that is used by both
+  // the render and capture threads. The check for whether modifications are
+  // needed is done while holding a single lock only, thereby avoiding that the
+  // capture thread blocks the render thread.
+  // Called by render: Holds the render lock when reading the format struct and
+  // acquires both locks if reinitialization is required.
+  void MaybeInitializeRender(const StreamConfig& input_config,
+                             const StreamConfig& output_config)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_);
+  // Called by capture: Acquires and releases the capture lock to read the
+  // format struct and acquires both locks if reinitialization is needed.
+  void MaybeInitializeCapture(const StreamConfig& input_config,
+                              const StreamConfig& output_config);
 
   // Method for updating the state keeping track of the active submodules.
   // Returns a bool indicating whether the state has changed.
-  bool UpdateActiveSubmoduleStates() EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
+  bool UpdateActiveSubmoduleStates()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
-  // Methods requiring APM running in a single-threaded manner.
-  // Are called with both the render and capture locks already
-  // acquired.
-  void InitializeTransient()
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_, crit_capture_);
-  void InitializeBeamformer()
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_, crit_capture_);
-  void InitializeIntelligibility()
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_, crit_capture_);
-  int InitializeLocked(const ProcessingConfig& config)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_, crit_capture_);
-  void InitializeLevelController() EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
+  // Methods requiring APM running in a single-threaded manner, requiring both
+  // the render and capture lock to be acquired.
+  void InitializeLocked(const ProcessingConfig& config)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_, mutex_capture_);
   void InitializeResidualEchoDetector()
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_, crit_capture_);
-  void InitializeLowCutFilter() EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
-  void InitializeEchoCanceller3() EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
-  void InitializeGainController2();
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_, mutex_capture_);
+  void InitializeEchoController()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_, mutex_capture_);
 
-  void EmptyQueuedRenderAudio();
+  // Initializations of capture-only sub-modules, requiring the capture lock
+  // already acquired.
+  void InitializeHighPassFilter(bool forced_reset)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+  void InitializeGainController1() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+  void InitializeTransientSuppressor()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+  // Initializes the `GainController2` sub-module. If the sub-module is enabled,
+  // recreates it.
+  void InitializeGainController2() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+  // Initializes the `VoiceActivityDetectorWrapper` sub-module. If the
+  // sub-module is enabled, recreates it. Call `InitializeGainController2()`
+  // first.
+  // TODO(bugs.webrtc.org/13663): Remove if TS is removed otherwise remove call
+  // order requirement - i.e., decouple from `InitializeGainController2()`.
+  void InitializeVoiceActivityDetector()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+  void InitializeNoiseSuppressor() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+  void InitializeCaptureLevelsAdjuster()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+  void InitializePostProcessor() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+  void InitializeAnalyzer() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+
+  // Initializations of render-only submodules, requiring the render lock
+  // already acquired.
+  void InitializePreProcessor() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_);
+
+  // Sample rate used for the fullband processing.
+  int proc_fullband_sample_rate_hz() const
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+
+  // Empties and handles the respective RuntimeSetting queues.
+  void HandleCaptureRuntimeSettings()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+  void HandleRenderRuntimeSettings()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_);
+
+  void EmptyQueuedRenderAudio() RTC_LOCKS_EXCLUDED(mutex_capture_);
+  void EmptyQueuedRenderAudioLocked()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
   void AllocateRenderQueue()
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_, crit_capture_);
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_, mutex_capture_);
   void QueueBandedRenderAudio(AudioBuffer* audio)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_);
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_);
   void QueueNonbandedRenderAudio(AudioBuffer* audio)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_);
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_);
 
   // Capture-side exclusive methods possibly running APM in a multi-threaded
   // manner that are called with the render lock already acquired.
-  int ProcessCaptureStreamLocked() EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
-  void MaybeUpdateHistograms() EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
+  int ProcessCaptureStreamLocked() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
   // Render-side exclusive methods possibly running APM in a multi-threaded
   // manner that are called with the render lock already acquired.
-  // TODO(ekm): Remove once all clients updated to new interface.
   int AnalyzeReverseStreamLocked(const float* const* src,
                                  const StreamConfig& input_config,
                                  const StreamConfig& output_config)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_render_);
-  int ProcessRenderStreamLocked() EXCLUSIVE_LOCKS_REQUIRED(crit_render_);
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_);
+  int ProcessRenderStreamLocked() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_render_);
 
   // Collects configuration settings from public and private
   // submodules to be saved as an audioproc::Config message on the
-  // AecDump if it is attached.  If not |forced|, only writes the current
-  // config if it is different from the last saved one; if |forced|,
+  // AecDump if it is attached.  If not `forced`, only writes the current
+  // config if it is different from the last saved one; if `forced`,
   // writes the config regardless of the last saved.
   void WriteAecDumpConfigMessage(bool forced)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
   // Notifies attached AecDump of current configuration and capture data.
   void RecordUnprocessedCaptureStream(const float* const* capture_stream)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
-  void RecordUnprocessedCaptureStream(const AudioFrame& capture_frame)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
+  void RecordUnprocessedCaptureStream(const int16_t* const data,
+                                      const StreamConfig& config)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
   // Notifies attached AecDump of current configuration and
   // processed capture data and issues a capture stream recording
   // request.
   void RecordProcessedCaptureStream(
       const float* const* processed_capture_stream)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
-  void RecordProcessedCaptureStream(const AudioFrame& processed_capture_frame)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
+  void RecordProcessedCaptureStream(const int16_t* const data,
+                                    const StreamConfig& config)
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
   // Notifies attached AecDump about current state (delay, drift, etc).
-  void RecordAudioProcessingState() EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
+  void RecordAudioProcessingState()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
-// Debug dump methods that are internal and called without locks.
-// TODO(peah): Make thread safe.
-#ifdef WEBRTC_AUDIOPROC_DEBUG_DUMP
-  // TODO(andrew): make this more graceful. Ideally we would split this stuff
-  // out into a separate class with an "enabled" and "disabled" implementation.
-  static int WriteMessageToDebugFile(FileWrapper* debug_file,
-                                     int64_t* filesize_limit_bytes,
-                                     rtc::CriticalSection* crit_debug,
-                                     ApmDebugDumpThreadState* debug_state);
-  int WriteInitMessage() EXCLUSIVE_LOCKS_REQUIRED(crit_render_, crit_capture_);
-
-  // Writes Config message. If not |forced|, only writes the current config if
-  // it is different from the last saved one; if |forced|, writes the config
-  // regardless of the last saved.
-  int WriteConfigMessage(bool forced) EXCLUSIVE_LOCKS_REQUIRED(crit_capture_)
-      EXCLUSIVE_LOCKS_REQUIRED(crit_capture_);
-
-  // Critical section.
-  rtc::CriticalSection crit_debug_;
-
-  // Debug dump state.
-  ApmDebugDumpState debug_dump_;
-#endif
+  // Ensures that overruns in the capture runtime settings queue is properly
+  // handled by the code, providing safe-fallbacks to mitigate the implications
+  // of any settings being missed.
+  void HandleOverrunInCaptureRuntimeSettingsQueue()
+      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
 
   // AecDump instance used for optionally logging APM config, input
   // and output to file in the AEC-dump format defined in debug.proto.
@@ -340,21 +417,48 @@ class AudioProcessingImpl : public AudioProcessing {
 
   // Hold the last config written with AecDump for avoiding writing
   // the same config twice.
-  InternalAPMConfig apm_config_for_aec_dump_ GUARDED_BY(crit_capture_);
+  InternalAPMConfig apm_config_for_aec_dump_ RTC_GUARDED_BY(mutex_capture_);
 
   // Critical sections.
-  rtc::CriticalSection crit_render_ ACQUIRED_BEFORE(crit_capture_);
-  rtc::CriticalSection crit_capture_;
+  mutable Mutex mutex_render_ RTC_ACQUIRED_BEFORE(mutex_capture_);
+  mutable Mutex mutex_capture_;
 
   // Struct containing the Config specifying the behavior of APM.
   AudioProcessing::Config config_;
 
-  // Class containing information about what submodules are active.
-  ApmSubmoduleStates submodule_states_;
+  // Overrides for testing the exclusion of some submodules from the build.
+  ApmSubmoduleCreationOverrides submodule_creation_overrides_
+      RTC_GUARDED_BY(mutex_capture_);
 
-  // Structs containing the pointers to the submodules.
-  std::unique_ptr<ApmPublicSubmodules> public_submodules_;
-  std::unique_ptr<ApmPrivateSubmodules> private_submodules_;
+  // Class containing information about what submodules are active.
+  SubmoduleStates submodule_states_;
+
+  // Struct containing the pointers to the submodules.
+  struct Submodules {
+    Submodules(std::unique_ptr<CustomProcessing> capture_post_processor,
+               std::unique_ptr<CustomProcessing> render_pre_processor,
+               rtc::scoped_refptr<EchoDetector> echo_detector,
+               std::unique_ptr<CustomAudioAnalyzer> capture_analyzer)
+        : echo_detector(std::move(echo_detector)),
+          capture_post_processor(std::move(capture_post_processor)),
+          render_pre_processor(std::move(render_pre_processor)),
+          capture_analyzer(std::move(capture_analyzer)) {}
+    // Accessed internally from capture or during initialization.
+    const rtc::scoped_refptr<EchoDetector> echo_detector;
+    const std::unique_ptr<CustomProcessing> capture_post_processor;
+    const std::unique_ptr<CustomProcessing> render_pre_processor;
+    const std::unique_ptr<CustomAudioAnalyzer> capture_analyzer;
+    std::unique_ptr<AgcManagerDirect> agc_manager;
+    std::unique_ptr<GainControlImpl> gain_control;
+    std::unique_ptr<GainController2> gain_controller2;
+    std::unique_ptr<VoiceActivityDetectorWrapper> voice_activity_detector;
+    std::unique_ptr<HighPassFilter> high_pass_filter;
+    std::unique_ptr<EchoControl> echo_controller;
+    std::unique_ptr<EchoControlMobileImpl> echo_control_mobile;
+    std::unique_ptr<NoiseSuppressor> noise_suppressor;
+    std::unique_ptr<TransientSuppressor> transient_suppressor;
+    std::unique_ptr<CaptureLevelsAdjuster> capture_levels_adjuster;
+  } submodules_;
 
   // State that is written to while holding both the render and capture locks
   // but can be read without any lock being held.
@@ -364,10 +468,10 @@ class AudioProcessingImpl : public AudioProcessing {
   struct ApmFormatState {
     ApmFormatState()
         :  // Format of processing streams at input/output call sites.
-          api_format({{{kSampleRate16kHz, 1, false},
-                       {kSampleRate16kHz, 1, false},
-                       {kSampleRate16kHz, 1, false},
-                       {kSampleRate16kHz, 1, false}}}),
+          api_format({{{kSampleRate16kHz, 1},
+                       {kSampleRate16kHz, 1},
+                       {kSampleRate16kHz, 1},
+                       {kSampleRate16kHz, 1}}}),
           render_processing_format(kSampleRate16kHz, 1) {}
     ProcessingConfig api_format;
     StreamConfig render_processing_format;
@@ -375,63 +479,66 @@ class AudioProcessingImpl : public AudioProcessing {
 
   // APM constants.
   const struct ApmConstants {
-    ApmConstants(int agc_startup_min_volume,
-                 int agc_clipped_level_min,
-                 bool use_experimental_agc)
-        :  // Format of processing streams at input/output call sites.
-          agc_startup_min_volume(agc_startup_min_volume),
-          agc_clipped_level_min(agc_clipped_level_min),
-          use_experimental_agc(use_experimental_agc) {}
-    int agc_startup_min_volume;
-    int agc_clipped_level_min;
-    bool use_experimental_agc;
+    ApmConstants(bool multi_channel_render_support,
+                 bool multi_channel_capture_support,
+                 bool enforce_split_band_hpf,
+                 bool minimize_processing_for_unused_output,
+                 bool transient_suppressor_forced_off)
+        : multi_channel_render_support(multi_channel_render_support),
+          multi_channel_capture_support(multi_channel_capture_support),
+          enforce_split_band_hpf(enforce_split_band_hpf),
+          minimize_processing_for_unused_output(
+              minimize_processing_for_unused_output),
+          transient_suppressor_forced_off(transient_suppressor_forced_off) {}
+    bool multi_channel_render_support;
+    bool multi_channel_capture_support;
+    bool enforce_split_band_hpf;
+    bool minimize_processing_for_unused_output;
+    bool transient_suppressor_forced_off;
   } constants_;
 
   struct ApmCaptureState {
-    ApmCaptureState(bool transient_suppressor_enabled,
-                    const std::vector<Point>& array_geometry,
-                    SphericalPointf target_direction);
+    ApmCaptureState();
     ~ApmCaptureState();
-    int aec_system_delay_jumps;
-    int delay_offset_ms;
     bool was_stream_delay_set;
-    int last_stream_delay_ms;
-    int last_aec_system_delay_ms;
-    int stream_delay_jumps;
-    bool output_will_be_muted;
+    bool capture_output_used;
+    bool capture_output_used_last_frame;
     bool key_pressed;
-    bool transient_suppressor_enabled;
-    std::vector<Point> array_geometry;
-    SphericalPointf target_direction;
     std::unique_ptr<AudioBuffer> capture_audio;
+    std::unique_ptr<AudioBuffer> capture_fullband_audio;
+    std::unique_ptr<AudioBuffer> linear_aec_output;
     // Only the rate and samples fields of capture_processing_format_ are used
     // because the capture processing number of channels is mutable and is
     // tracked by the capture_audio_.
     StreamConfig capture_processing_format;
     int split_rate;
-    int previous_agc_level;
     bool echo_path_gain_change;
-  } capture_ GUARDED_BY(crit_capture_);
+    float prev_pre_adjustment_gain;
+    int playout_volume;
+    int prev_playout_volume;
+    AudioProcessingStats stats;
+    // Input volume applied on the audio input device when the audio is
+    // acquired. Unspecified when unknown.
+    absl::optional<int> applied_input_volume;
+    bool applied_input_volume_changed;
+    // Recommended input volume to apply on the audio input device the next time
+    // that audio is acquired. Unspecified when no input volume can be
+    // recommended.
+    absl::optional<int> recommended_input_volume;
+  } capture_ RTC_GUARDED_BY(mutex_capture_);
 
   struct ApmCaptureNonLockedState {
-    ApmCaptureNonLockedState(bool beamformer_enabled,
-                             bool intelligibility_enabled)
+    ApmCaptureNonLockedState()
         : capture_processing_format(kSampleRate16kHz),
           split_rate(kSampleRate16kHz),
-          stream_delay_ms(0),
-          beamformer_enabled(beamformer_enabled),
-          intelligibility_enabled(intelligibility_enabled) {}
+          stream_delay_ms(0) {}
     // Only the rate and samples fields of capture_processing_format_ are used
     // because the forward processing number of channels is mutable and is
     // tracked by the capture_audio_.
     StreamConfig capture_processing_format;
     int split_rate;
     int stream_delay_ms;
-    bool beamformer_enabled;
-    bool intelligibility_enabled;
-    bool level_controller_enabled = false;
-    bool echo_canceller3_enabled = false;
-    bool gain_controller2_enabled = false;
+    bool echo_controller_enabled = false;
   } capture_nonlocked_;
 
   struct ApmRenderState {
@@ -439,35 +546,51 @@ class AudioProcessingImpl : public AudioProcessing {
     ~ApmRenderState();
     std::unique_ptr<AudioConverter> render_converter;
     std::unique_ptr<AudioBuffer> render_audio;
-  } render_ GUARDED_BY(crit_render_);
+  } render_ RTC_GUARDED_BY(mutex_render_);
 
-  size_t aec_render_queue_element_max_size_ GUARDED_BY(crit_render_)
-      GUARDED_BY(crit_capture_) = 0;
-  std::vector<float> aec_render_queue_buffer_ GUARDED_BY(crit_render_);
-  std::vector<float> aec_capture_queue_buffer_ GUARDED_BY(crit_capture_);
+  // Class for statistics reporting. The class is thread-safe and no lock is
+  // needed when accessing it.
+  class ApmStatsReporter {
+   public:
+    ApmStatsReporter();
+    ~ApmStatsReporter();
 
-  size_t aecm_render_queue_element_max_size_ GUARDED_BY(crit_render_)
-      GUARDED_BY(crit_capture_) = 0;
-  std::vector<int16_t> aecm_render_queue_buffer_ GUARDED_BY(crit_render_);
-  std::vector<int16_t> aecm_capture_queue_buffer_ GUARDED_BY(crit_capture_);
+    // Returns the most recently reported statistics.
+    AudioProcessingStats GetStatistics();
 
-  size_t agc_render_queue_element_max_size_ GUARDED_BY(crit_render_)
-      GUARDED_BY(crit_capture_) = 0;
-  std::vector<int16_t> agc_render_queue_buffer_ GUARDED_BY(crit_render_);
-  std::vector<int16_t> agc_capture_queue_buffer_ GUARDED_BY(crit_capture_);
+    // Update the cached statistics.
+    void UpdateStatistics(const AudioProcessingStats& new_stats);
 
-  size_t red_render_queue_element_max_size_ GUARDED_BY(crit_render_)
-      GUARDED_BY(crit_capture_) = 0;
-  std::vector<float> red_render_queue_buffer_ GUARDED_BY(crit_render_);
-  std::vector<float> red_capture_queue_buffer_ GUARDED_BY(crit_capture_);
+   private:
+    Mutex mutex_stats_;
+    AudioProcessingStats cached_stats_ RTC_GUARDED_BY(mutex_stats_);
+    SwapQueue<AudioProcessingStats> stats_message_queue_;
+  } stats_reporter_;
 
-  RmsLevel capture_input_rms_ GUARDED_BY(crit_capture_);
-  RmsLevel capture_output_rms_ GUARDED_BY(crit_capture_);
-  int capture_rms_interval_counter_ GUARDED_BY(crit_capture_) = 0;
+  std::vector<int16_t> aecm_render_queue_buffer_ RTC_GUARDED_BY(mutex_render_);
+  std::vector<int16_t> aecm_capture_queue_buffer_
+      RTC_GUARDED_BY(mutex_capture_);
+
+  size_t agc_render_queue_element_max_size_ RTC_GUARDED_BY(mutex_render_)
+      RTC_GUARDED_BY(mutex_capture_) = 0;
+  std::vector<int16_t> agc_render_queue_buffer_ RTC_GUARDED_BY(mutex_render_);
+  std::vector<int16_t> agc_capture_queue_buffer_ RTC_GUARDED_BY(mutex_capture_);
+
+  size_t red_render_queue_element_max_size_ RTC_GUARDED_BY(mutex_render_)
+      RTC_GUARDED_BY(mutex_capture_) = 0;
+  std::vector<float> red_render_queue_buffer_ RTC_GUARDED_BY(mutex_render_);
+  std::vector<float> red_capture_queue_buffer_ RTC_GUARDED_BY(mutex_capture_);
+
+  RmsLevel capture_input_rms_ RTC_GUARDED_BY(mutex_capture_);
+  RmsLevel capture_output_rms_ RTC_GUARDED_BY(mutex_capture_);
+  int capture_rms_interval_counter_ RTC_GUARDED_BY(mutex_capture_) = 0;
+
+  InputVolumeStatsReporter applied_input_volume_stats_reporter_
+      RTC_GUARDED_BY(mutex_capture_);
+  InputVolumeStatsReporter recommended_input_volume_stats_reporter_
+      RTC_GUARDED_BY(mutex_capture_);
 
   // Lock protection not needed.
-  std::unique_ptr<SwapQueue<std::vector<float>, RenderQueueItemVerifier<float>>>
-      aec_render_signal_queue_;
   std::unique_ptr<
       SwapQueue<std::vector<int16_t>, RenderQueueItemVerifier<int16_t>>>
       aecm_render_signal_queue_;
@@ -480,4 +603,4 @@ class AudioProcessingImpl : public AudioProcessing {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AUDIO_PROCESSING_IMPL_H_
+#endif  // MODULES_AUDIO_PROCESSING_AUDIO_PROCESSING_IMPL_H_

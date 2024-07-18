@@ -32,16 +32,20 @@ class CSSValue;
 class FillLayer;
 class LengthBox;
 class NinePieceImage;
+class Quad;
 class RenderStyle;
 class StyleImage;
-class StyleResolver;
+
+namespace Style {
+class BuilderState;
+}
 
 class CSSToStyleMap {
     WTF_MAKE_NONCOPYABLE(CSSToStyleMap);
     WTF_MAKE_FAST_ALLOCATED;
 
 public:
-    CSSToStyleMap(StyleResolver*);
+    CSSToStyleMap(Style::BuilderState&);
 
     void mapFillAttachment(CSSPropertyID, FillLayer&, const CSSValue&);
     void mapFillClip(CSSPropertyID, FillLayer&, const CSSValue&);
@@ -54,7 +58,7 @@ public:
     void mapFillSize(CSSPropertyID, FillLayer&, const CSSValue&);
     void mapFillXPosition(CSSPropertyID, FillLayer&, const CSSValue&);
     void mapFillYPosition(CSSPropertyID, FillLayer&, const CSSValue&);
-    void mapFillMaskSourceType(CSSPropertyID, FillLayer&, const CSSValue&);
+    void mapFillMaskMode(CSSPropertyID, FillLayer&, const CSSValue&);
 
     void mapAnimationDelay(Animation&, const CSSValue&);
     void mapAnimationDirection(Animation&, const CSSValue&);
@@ -65,29 +69,22 @@ public:
     void mapAnimationPlayState(Animation&, const CSSValue&);
     void mapAnimationProperty(Animation&, const CSSValue&);
     void mapAnimationTimingFunction(Animation&, const CSSValue&);
-#if ENABLE(CSS_ANIMATIONS_LEVEL_2)
-    void mapAnimationTrigger(Animation&, const CSSValue&);
-#endif
+    void mapAnimationCompositeOperation(Animation&, const CSSValue&);
 
-    void mapNinePieceImage(CSSPropertyID, CSSValue*, NinePieceImage&);
+    void mapNinePieceImage(CSSValue*, NinePieceImage&);
     void mapNinePieceImageSlice(CSSValue&, NinePieceImage&);
+    void mapNinePieceImageWidth(CSSValue&, NinePieceImage&);
     LengthBox mapNinePieceImageQuad(CSSValue&);
     void mapNinePieceImageRepeat(CSSValue&, NinePieceImage&);
 
 private:
-    // FIXME: These accessors should be replaced by a ResolveState object
-    // similar to how PaintInfo/LayoutState cache values needed for
-    // the current paint/layout.
     RenderStyle* style() const;
-    const RenderStyle* rootElementStyle() const;
     bool useSVGZoomRules() const;
-
-    // FIXME: This should be part of some sort of StyleImageCache object which
-    // is held by the StyleResolver, and likely provided to this object
-    // during the resolve.
     RefPtr<StyleImage> styleImage(CSSValue&);
+    LengthBox mapNinePieceImageQuad(Quad*);
 
-    StyleResolver* m_resolver;
+    // FIXME: This type can merge into BuilderState.
+    Style::BuilderState& m_builderState;
 };
 
 } // namespace WebCore

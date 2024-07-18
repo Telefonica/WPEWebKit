@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef BackingStore_h
-#define BackingStore_h
+#pragma once
 
 #include <WebCore/IntRect.h>
 #include <wtf/Noncopyable.h>
@@ -40,6 +39,7 @@ class UpdateInfo;
 class WebPageProxy;
 
 class BackingStore {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(BackingStore);
 
 public:
@@ -73,5 +73,3 @@ private:
 };
 
 } // namespace WebKit
-
-#endif // BackingStore_h

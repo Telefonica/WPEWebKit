@@ -8,29 +8,36 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_OPUS_OPUS_INST_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_OPUS_OPUS_INST_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_OPUS_OPUS_INST_H_
+#define MODULES_AUDIO_CODING_CODECS_OPUS_OPUS_INST_H_
 
 #include <stddef.h>
 
-#include "webrtc/base/ignore_wundef.h"
+#include "rtc_base/ignore_wundef.h"
 
 RTC_PUSH_IGNORING_WUNDEF()
-#include "opus.h"
+#include "third_party/opus/src/include/opus.h"
+#include "third_party/opus/src/include/opus_multistream.h"
 RTC_POP_IGNORING_WUNDEF()
 
 struct WebRtcOpusEncInst {
   OpusEncoder* encoder;
+  OpusMSEncoder* multistream_encoder;
   size_t channels;
   int in_dtx_mode;
+  bool avoid_noise_pumping_during_dtx;
+  int sample_rate_hz;
+  float smooth_energy_non_active_frames;
 };
 
 struct WebRtcOpusDecInst {
   OpusDecoder* decoder;
+  OpusMSDecoder* multistream_decoder;
   int prev_decoded_samples;
+  bool plc_use_prev_decoded_samples;
   size_t channels;
   int in_dtx_mode;
+  int sample_rate_hz;
 };
 
-
-#endif  // WEBRTC_MODULES_AUDIO_CODING_CODECS_OPUS_OPUS_INST_H_
+#endif  // MODULES_AUDIO_CODING_CODECS_OPUS_OPUS_INST_H_

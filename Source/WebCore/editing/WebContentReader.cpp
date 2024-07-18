@@ -26,6 +26,7 @@
 #include "config.h"
 #include "WebContentReader.h"
 
+#include "Document.h"
 #include "DocumentFragment.h"
 
 namespace WebCore {
@@ -37,6 +38,30 @@ void WebContentReader::addFragment(Ref<DocumentFragment>&& newFragment)
     else
         fragment->appendChild(newFragment.get());
 }
+
+bool FrameWebContentReader::shouldSanitize() const
+{
+    ASSERT(frame.document());
+    return frame.document()->originIdentifierForPasteboard() != contentOrigin;
+}
+
+MSOListQuirks FrameWebContentReader::msoListQuirksForMarkup() const
+{
+    return contentOrigin.isNull() ? MSOListQuirks::CheckIfNeeded : MSOListQuirks::Disabled;
+}
+
+#if PLATFORM(COCOA) || PLATFORM(GTK)
+bool WebContentReader::readFilePaths(const Vector<String>& paths)
+{
+    if (paths.isEmpty() || !frame.document())
+        return false;
+
+    for (auto& path : paths)
+        readFilePath(path);
+
+    return true;
+}
+#endif
 
 }
 

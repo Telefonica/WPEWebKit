@@ -30,9 +30,8 @@
 #include "WebPage.h"
 #include "WebPageProxyMessages.h"
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 WebAlternativeTextClient::WebAlternativeTextClient(WebPage* webPage)
 : m_page(webPage)
@@ -44,11 +43,6 @@ WebAlternativeTextClient::~WebAlternativeTextClient()
 #if USE(AUTOCORRECTION_PANEL)
     m_page->send(Messages::WebPageProxy::DismissCorrectionPanel(ReasonForDismissingAlternativeTextIgnored));
 #endif
-}
-
-void WebAlternativeTextClient::pageDestroyed()
-{
-    delete this;
 }
 
 #if USE(AUTOCORRECTION_PANEL)
@@ -75,22 +69,21 @@ void WebAlternativeTextClient::recordAutocorrectionResponse(AutocorrectionRespon
 }
 #endif
 
-#if USE(DICTATION_ALTERNATIVES)
-void WebAlternativeTextClient::removeDictationAlternatives(uint64_t dictationContext)
+void WebAlternativeTextClient::removeDictationAlternatives(WebCore::DictationContext dictationContext)
 {
     m_page->send(Messages::WebPageProxy::RemoveDictationAlternatives(dictationContext));
 }
 
-void WebAlternativeTextClient::showDictationAlternativeUI(const WebCore::FloatRect& boundingBoxOfDictatedText, uint64_t dictationContext)
+void WebAlternativeTextClient::showDictationAlternativeUI(const WebCore::FloatRect& boundingBoxOfDictatedText, WebCore::DictationContext dictationContext)
 {
     m_page->send(Messages::WebPageProxy::ShowDictationAlternativeUI(boundingBoxOfDictatedText, dictationContext));
 }
 
-Vector<String> WebAlternativeTextClient::dictationAlternatives(uint64_t dictationContext)
+Vector<String> WebAlternativeTextClient::dictationAlternatives(WebCore::DictationContext dictationContext)
 {
     Vector<String> result;
     m_page->sendSync(Messages::WebPageProxy::DictationAlternatives(dictationContext), Messages::WebPageProxy::DictationAlternatives::Reply(result));
     return result;
 }
-#endif
+
 }

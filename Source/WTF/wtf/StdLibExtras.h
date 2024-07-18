@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2022 Apple Inc. All Rights Reserved.
  * Copyright (C) 2013 Patrick Gansterer <paroga@paroga.com>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,23 +24,17 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WTF_StdLibExtras_h
-#define WTF_StdLibExtras_h
+#pragma once
 
 #include <cstring>
 #include <memory>
 #include <type_traits>
+#include <variant>
 #include <wtf/Assertions.h>
 #include <wtf/CheckedArithmetic.h>
 #include <wtf/Compiler.h>
-
-// This was used to declare and define a static local variable (static T;) so that
-//  it was leaked so that its destructors were not called at exit.
-// Newly written code should use static NeverDestroyed<T> instead.
-#ifndef DEPRECATED_DEFINE_STATIC_LOCAL
-#define DEPRECATED_DEFINE_STATIC_LOCAL(type, name, arguments) \
-    static type& name = *new type arguments
-#endif
+#include <wtf/GetPtr.h>
+#include <wtf/TypeCasts.h>
 
 // Use this macro to declare and define a debug-only global variable that may have a
 // non-trivial constructor and destructor. When building with clang, this will suppress
@@ -89,7 +83,7 @@
  * - https://bugs.webkit.org/show_bug.cgi?id=38045
  * - http://gcc.gnu.org/bugzilla/show_bug.cgi?id=43976
  */
-#if (CPU(ARM) || CPU(MIPS)) && COMPILER(GCC_OR_CLANG)
+#if (CPU(ARM) || CPU(MIPS) || CPU(RISCV64)) && COMPILER(GCC_COMPATIBLE)
 template<typename Type>
 inline bool isPointerTypeAlignmentOkay(Type* ptr)
 {
@@ -122,9 +116,9 @@ namespace WTF {
 
 enum CheckMoveParameterTag { CheckMoveParameter };
 
-static const size_t KB = 1024;
-static const size_t MB = 1024 * 1024;
-static const size_t GB = 1024 * 1024 * 1024;
+static constexpr size_t KB = 1024;
+static constexpr size_t MB = 1024 * 1024;
+static constexpr size_t GB = 1024 * 1024 * 1024;
 
 inline bool isPointerAligned(void* p)
 {
@@ -136,9 +130,6 @@ inline bool is8ByteAligned(void* p)
     return !((uintptr_t)(p) & (sizeof(double) - 1));
 }
 
-/*
- * C++'s idea of a reinterpret_cast lacks sufficient cojones.
- */
 template<typename ToType, typename FromType>
 inline ToType bitwise_cast(FromType from)
 {
@@ -149,7 +140,7 @@ inline ToType bitwise_cast(FromType from)
     static_assert(__is_trivially_copyable(FromType), "bitwise_cast of non-trivially-copyable type!");
 #endif
     typename std::remove_const<ToType>::type to { };
-    std::memcpy(&to, &from, sizeof(to));
+    std::memcpy(static_cast<void*>(&to), static_cast<void*>(&from), sizeof(to));
     return to;
 }
 
@@ -176,37 +167,37 @@ inline size_t bitCount(uint64_t bits)
 // Macro that returns a compile time constant with the length of an array, but gives an error if passed a non-array.
 template<typename T, size_t Size> char (&ArrayLengthHelperFunction(T (&)[Size]))[Size];
 // GCC needs some help to deduce a 0 length array.
-#if COMPILER(GCC_OR_CLANG)
+#if COMPILER(GCC_COMPATIBLE)
 template<typename T> char (&ArrayLengthHelperFunction(T (&)[0]))[0];
 #endif
 #define WTF_ARRAY_LENGTH(array) sizeof(::WTF::ArrayLengthHelperFunction(array))
 
-ALWAYS_INLINE constexpr size_t roundUpToMultipleOfImpl0(size_t remainderMask, size_t x)
+inline constexpr bool isPowerOfTwo(size_t size) { return !(size & (size - 1)); }
+
+template<typename T, typename U>
+ALWAYS_INLINE constexpr T roundUpToMultipleOfImpl(U divisor, T x)
 {
+    T remainderMask = static_cast<T>(divisor) - 1;
     return (x + remainderMask) & ~remainderMask;
 }
 
-ALWAYS_INLINE constexpr size_t roundUpToMultipleOfImpl(size_t divisor, size_t x)
-{
-    return roundUpToMultipleOfImpl0(divisor - 1, x);
-}
-
 // Efficient implementation that takes advantage of powers of two.
-inline size_t roundUpToMultipleOf(size_t divisor, size_t x)
+template<typename T, typename U>
+inline constexpr T roundUpToMultipleOf(U divisor, T x)
 {
-    ASSERT(divisor && !(divisor & (divisor - 1)));
+    ASSERT_UNDER_CONSTEXPR_CONTEXT(divisor && isPowerOfTwo(divisor));
+    return roundUpToMultipleOfImpl<T, U>(divisor, x);
+}
+
+template<size_t divisor> constexpr size_t roundUpToMultipleOf(size_t x)
+{
+    static_assert(divisor && isPowerOfTwo(divisor));
     return roundUpToMultipleOfImpl(divisor, x);
 }
 
-template<size_t divisor> inline constexpr size_t roundUpToMultipleOf(size_t x)
+template<size_t divisor, typename T> inline constexpr T* roundUpToMultipleOf(T* x)
 {
-    static_assert(divisor && !(divisor & (divisor - 1)), "divisor must be a power of two!");
-    return roundUpToMultipleOfImpl(divisor, x);
-}
-
-template<size_t divisor, typename T> inline T* roundUpToMultipleOf(T* x)
-{
-    static_assert(sizeof(T*) == sizeof(size_t), "");
+    static_assert(sizeof(T*) == sizeof(size_t));
     return reinterpret_cast<T*>(roundUpToMultipleOf<divisor>(reinterpret_cast<size_t>(x)));
 }
 
@@ -222,7 +213,7 @@ inline ArrayElementType* binarySearchImpl(ArrayType& array, size_t size, KeyType
     size_t offset = 0;
     while (size > 1) {
         size_t pos = (size - 1) >> 1;
-        KeyType val = extractKey(&array[offset + pos]);
+        auto val = extractKey(&array[offset + pos]);
         
         if (val == key)
             return &array[offset + pos];
@@ -330,20 +321,42 @@ bool checkAndSet(T& left, U right)
 }
 
 template<typename T>
-bool findBitInWord(T word, size_t& index, size_t endIndex, bool value)
+inline unsigned ctz(T value); // Clients will also need to #include MathExtras.h
+
+template<typename T>
+bool findBitInWord(T word, size_t& startOrResultIndex, size_t endIndex, bool value)
 {
     static_assert(std::is_unsigned<T>::value, "Type used in findBitInWord must be unsigned");
-    
+
+    constexpr size_t bitsInWord = sizeof(word) * 8;
+    ASSERT_UNUSED(bitsInWord, startOrResultIndex <= bitsInWord && endIndex <= bitsInWord);
+
+    size_t index = startOrResultIndex;
     word >>= index;
-    
+
+#if COMPILER(GCC_COMPATIBLE) && (CPU(X86_64) || CPU(ARM64))
+    // We should only use ctz() when we know that ctz() is implementated using
+    // a fast hardware instruction. Otherwise, this will actually result in
+    // worse performance.
+
+    word ^= (static_cast<T>(value) - 1);
+    index += ctz(word);
+    if (index < endIndex) {
+        startOrResultIndex = index;
+        return true;
+    }
+#else
     while (index < endIndex) {
-        if ((word & 1) == static_cast<T>(value))
+        if ((word & 1) == static_cast<T>(value)) {
+            startOrResultIndex = index;
             return true;
+        }
         index++;
         word >>= 1;
     }
-    
-    index = endIndex;
+#endif
+
+    startOrResultIndex = endIndex;
     return false;
 }
 
@@ -377,6 +390,36 @@ Visitor<F...> makeVisitor(F... f)
     return Visitor<F...>(f...);
 }
 
+template<class V, class... F>
+auto switchOn(V&& v, F&&... f) -> decltype(std::visit(makeVisitor(std::forward<F>(f)...), std::forward<V>(v)))
+{
+    return std::visit(makeVisitor(std::forward<F>(f)...), std::forward<V>(v));
+}
+
+namespace Detail {
+
+template<std::size_t, class, class> struct AlternativeIndexHelper;
+
+template<std::size_t index, class T, class U>
+struct AlternativeIndexHelper<index, T, std::variant<U>> {
+    static constexpr std::size_t count = std::is_same_v<T, U>;
+    static constexpr std::size_t value = index;
+};
+
+template<std::size_t index, class T, class U, class... Types> struct AlternativeIndexHelper<index, T, std::variant<U, Types...>> {
+    static constexpr std::size_t count = std::is_same_v<T, U> + AlternativeIndexHelper<index + 1, T, std::variant<Types...>>::count;
+    static constexpr std::size_t value = std::is_same_v<T, U> ? index : AlternativeIndexHelper<index + 1, T, std::variant<Types...>>::value;
+};
+
+} // namespace Detail
+
+template<class T, class U> struct alternativeIndex {
+    static_assert(Detail::AlternativeIndexHelper<0, T, U>::count == 1, "There needs to be exactly one of the given type in the variant");
+    static constexpr std::size_t value = Detail::AlternativeIndexHelper<0, T, U>::value;
+};
+
+template <class T, class U> inline constexpr std::size_t alternativeIndexV = alternativeIndex<T, U>::value;
+
 namespace Detail
 {
     template <typename, template <typename...> class>
@@ -408,6 +451,11 @@ namespace Detail
 
 template <template <typename...> class Base, typename Derived>
 struct IsBaseOfTemplate : public std::integral_constant<bool, Detail::IsBaseOfTemplateImpl<Base, Derived>::value> {};
+
+// Based on 'Detecting in C++ whether a type is defined, part 3: SFINAE and incomplete types'
+// <https://devblogs.microsoft.com/oldnewthing/20190710-00/?p=102678>
+template<typename, typename = void> inline constexpr bool IsTypeComplete = false;
+template<typename T> inline constexpr bool IsTypeComplete<T, std::void_t<decltype(sizeof(T))>> = true;
 
 template <class T>
 struct RemoveCVAndReference  {
@@ -453,6 +501,15 @@ IteratorTypeDst mergeDeduplicatedSorted(IteratorTypeLeft leftBegin, IteratorType
     return dstIter;
 }
 
+// libstdc++5 does not have constexpr std::tie. Since we cannot redefine std::tie with constexpr, we define WTF::tie instead.
+// This workaround can be removed after 2019-04 and all users of WTF::tie can be converted to std::tie
+// For more info see: https://bugs.webkit.org/show_bug.cgi?id=180692 and https://gcc.gnu.org/bugzilla/show_bug.cgi?id=65978
+template <class ...Args>
+constexpr std::tuple<Args&...> tie(Args&... values)
+{
+    return std::tuple<Args&...>(values...);
+}
+
 } // namespace WTF
 
 // This version of placement new omits a 0 check.
@@ -463,47 +520,7 @@ inline void* operator new(size_t, NotNullTag, void* location)
     return location;
 }
 
-// This adds various C++14 features for versions of the STL that may not yet have them.
 namespace std {
-#if COMPILER(CLANG) && __cplusplus < 201400L
-template<class T> struct _Unique_if {
-    typedef unique_ptr<T> _Single_object;
-};
-
-template<class T> struct _Unique_if<T[]> {
-    typedef unique_ptr<T[]> _Unknown_bound;
-};
-
-template<class T, size_t N> struct _Unique_if<T[N]> {
-    typedef void _Known_bound;
-};
-
-template<class T, class... Args> inline typename _Unique_if<T>::_Single_object
-make_unique(Args&&... args)
-{
-    return unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
-
-template<class T> inline typename _Unique_if<T>::_Unknown_bound
-make_unique(size_t n)
-{
-    typedef typename remove_extent<T>::type U;
-    return unique_ptr<T>(new U[n]());
-}
-
-template<class T, class... Args> typename _Unique_if<T>::_Known_bound
-make_unique(Args&&...) = delete;
-
-// std::exchange
-template<class T, class U = T>
-T exchange(T& t, U&& newValue)
-{
-    T oldValue = std::move(t);
-    t = std::forward<U>(newValue);
-
-    return oldValue;
-}
-#endif
 
 template<WTF::CheckMoveParameterTag, typename T>
 ALWAYS_INLINE constexpr typename remove_reference<T>::type&& move(T&& value)
@@ -516,36 +533,115 @@ ALWAYS_INLINE constexpr typename remove_reference<T>::type&& move(T&& value)
     return move(forward<T>(value));
 }
 
-#if __cplusplus < 201703L && (!defined(_MSC_FULL_VER) || _MSC_FULL_VER < 190023918)
-template<class...> struct wtf_conjunction_impl;
-template<> struct wtf_conjunction_impl<> : true_type { };
-template<class B0> struct wtf_conjunction_impl<B0> : B0 { };
-template<class B0, class B1> struct wtf_conjunction_impl<B0, B1> : conditional<B0::value, B1, B0>::type { };
-template<class B0, class B1, class B2, class... Bn> struct wtf_conjunction_impl<B0, B1, B2, Bn...> : conditional<B0::value, wtf_conjunction_impl<B1, B2, Bn...>, B0>::type { };
-template<class... _Args> struct conjunction : wtf_conjunction_impl<_Args...> { };
-#endif
-
 } // namespace std
+
+namespace WTF {
+
+template<class T, class... Args>
+ALWAYS_INLINE decltype(auto) makeUnique(Args&&... args)
+{
+    static_assert(std::is_same<typename T::webkitFastMalloced, int>::value, "T is FastMalloced");
+    return std::make_unique<T>(std::forward<Args>(args)...);
+}
+
+template<class T, class... Args>
+ALWAYS_INLINE decltype(auto) makeUniqueWithoutFastMallocCheck(Args&&... args)
+{
+    return std::make_unique<T>(std::forward<Args>(args)...);
+}
+
+template <typename ResultType, size_t... Is, typename ...Args>
+constexpr auto constructFixedSizeArrayWithArgumentsImpl(std::index_sequence<Is...>, Args&&... args) -> std::array<ResultType, sizeof...(Is)>
+{
+    return { ((void)Is, ResultType { std::forward<Args>(args)... })... };
+}
+
+// Construct an std::array with N elements of ResultType, passing Args to each of the N constructors.
+template<typename ResultType, size_t N, typename ...Args>
+constexpr auto constructFixedSizeArrayWithArguments(Args&&... args) -> decltype(auto)
+{
+    auto tuple = std::make_index_sequence<N>();
+    return constructFixedSizeArrayWithArgumentsImpl<ResultType>(tuple, std::forward<Args>(args)...);
+}
+
+// FIXME: Use std::is_sorted instead of this and remove it, once we require C++20.
+template<typename Iterator, typename Predicate> constexpr bool isSortedConstExpr(Iterator first, Iterator last, Predicate predicate)
+{
+    if (first == last)
+        return true;
+    auto current = first;
+    auto previous = current;
+    while (++current != last) {
+        if (!predicate(*previous, *current))
+            return false;
+        previous = current;
+    }
+    return true;
+}
+
+// FIXME: Use std::is_sorted instead of this and remove it, once we require C++20.
+template<typename Iterator> constexpr bool isSortedConstExpr(Iterator first, Iterator last)
+{
+    return isSortedConstExpr(first, last, [] (auto& a, auto& b) { return a < b; });
+}
+
+// FIXME: Use std::all_of instead of this and remove it, once we require C++20.
+template<typename Iterator, typename Predicate> constexpr bool allOfConstExpr(Iterator first, Iterator last, Predicate predicate)
+{
+    for (; first != last; ++first) {
+        if (!predicate(*first))
+            return false;
+    }
+    return true;
+}
+
+template<typename OptionalType, class Callback> typename OptionalType::value_type valueOrCompute(OptionalType optional, Callback callback) 
+{
+    return optional ? *optional : callback();
+}
+
+template<typename OptionalType> auto valueOrDefault(OptionalType&& optionalValue)
+{
+    return optionalValue ? *std::forward<OptionalType>(optionalValue) : std::remove_reference_t<decltype(*optionalValue)> { };
+}
+
+} // namespace WTF
 
 #define WTFMove(value) std::move<WTF::CheckMoveParameter>(value)
 
+// FIXME: Needed for GCC<=9.3. Remove it after Ubuntu 20.04 end of support (May 2023).
+#if defined(__GLIBCXX__) && !defined(HAVE_STD_REMOVE_CVREF) && !COMPILER(CLANG)
+namespace std {
+template <typename T>
+struct remove_cvref {
+    using type = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
+};
+
+template <typename T>
+using remove_cvref_t = typename remove_cvref<T>::type;
+}
+#endif
+
+using WTF::GB;
 using WTF::KB;
 using WTF::MB;
-using WTF::GB;
 using WTF::approximateBinarySearch;
 using WTF::binarySearch;
 using WTF::bitwise_cast;
 using WTF::callStatelessLambda;
 using WTF::checkAndSet;
+using WTF::constructFixedSizeArrayWithArguments;
 using WTF::findBitInWord;
 using WTF::insertIntoBoundedVector;
+using WTF::is8ByteAligned;
 using WTF::isCompilationThread;
 using WTF::isPointerAligned;
 using WTF::isStatelessLambda;
-using WTF::is8ByteAligned;
+using WTF::makeUnique;
+using WTF::makeUniqueWithoutFastMallocCheck;
 using WTF::mergeDeduplicatedSorted;
 using WTF::roundUpToMultipleOf;
 using WTF::safeCast;
 using WTF::tryBinarySearch;
-
-#endif // WTF_StdLibExtras_h
+using WTF::valueOrCompute;
+using WTF::valueOrDefault;

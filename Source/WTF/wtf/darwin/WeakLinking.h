@@ -25,25 +25,4 @@
 
 #pragma once
 
-#include <type_traits>
-
-namespace WTF {
-
-template<typename T, typename = std::enable_if_t<std::is_function<T>::value>>
-inline bool isNullFunctionPointer(T* functionPointer)
-{
-    void* result;
-    // The C compiler may take advantage of the fact that by definition, function pointers cannot be
-    // null. When weak-linking a library, function pointers can be null. We use non-C code to
-    // prevent the C compiler from using the definition to optimize out the null check.
-    asm(
-        "mov %1, %0"
-        : "=r" (result)
-        : "r" (functionPointer)
-    );
-    return !result;
-}
-
-}
-
-using WTF::isNullFunctionPointer;
+#define WTF_WEAK_LINK_FORCE_IMPORT(sym) extern __attribute__((weak_import)) __typeof__(sym) sym

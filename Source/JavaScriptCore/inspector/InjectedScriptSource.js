@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2014-2015 Apple Inc.  All rights reserved.
+ * Copyright (C) 2007-2022 Apple Inc. All rights reserved.
  * Copyright (C) 2013 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,23 +27,51 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-//# sourceURL=__InjectedScript_InjectedScriptSource.js
+@linkTimeConstant
+function createObjectWithoutPrototype(/* key1, value1, key2, value2, ... */)
+{
+    if (arguments.length % 2 !== 0)
+        @throwRangeError("`createObjectWithoutPrototype` requires that each key argument be followed by a value, resulting in an even number of arguments.");
 
-(function (InjectedScriptHost, inspectedGlobalObject, injectedScriptId) {
+    let object = @Object.@create(null)
+    for (let i = 0; i < arguments.length; i += 2)
+        object[arguments[i]] = arguments[i + 1];
 
-// FIXME: <https://webkit.org/b/152294> Web Inspector: Parse InjectedScriptSource as a built-in to get guaranteed non-user-overriden built-ins
+    return object;
+}
 
-var Object = {}.constructor;
+@linkTimeConstant
+function createArrayWithoutPrototype(/* value1, value2, ... */)
+{
+    let array = new @Array(arguments.length);
+    array.__proto__ = null;
+    
+    for (let i = 0; i < arguments.length; ++i)
+        @arrayPush(array, arguments[i]);
+    
+    return array;
+}
+
+@linkTimeConstant
+@visibility=PrivateRecursive
+function createInspectorInjectedScript(InjectedScriptHost, inspectedGlobalObject, injectedScriptId)
+{
+
+function PrototypelessObjectBase() {}
+PrototypelessObjectBase.prototype = null;
 
 function toString(obj)
 {
-    return String(obj);
+    return @String(obj);
 }
 
 function toStringDescription(obj)
 {
     if (obj === 0 && 1 / obj < 0)
         return "-0";
+
+    if (isBigInt(obj))
+        return toString(obj) + "n";
 
     return toString(obj);
 }
@@ -55,9 +83,14 @@ function isUInt32(obj)
     return "" + (obj >>> 0) === obj;
 }
 
-function isSymbol(obj)
+function isSymbol(value)
 {
-    return typeof obj === "symbol";
+    return typeof value === "symbol";
+}
+
+function isBigInt(value)
+{
+    return typeof value === "bigint";
 }
 
 function isEmptyObject(object)
@@ -85,35 +118,93 @@ function isPrimitiveValue(value)
         return false;
     }
 }
+    
+function createIterableWithoutPrototypeFromArguments(argumentsObject) {
+    let iteratorFunction = argumentsObject.@@iterator;
+    return @wrappedIterator(iteratorFunction.@call(argumentsObject));
+}
+
+function max(a, b) {
+    return a > b ? a : b;
+}
 
 // -------
 
-let InjectedScript = class InjectedScript
+let InjectedScript = class InjectedScript extends PrototypelessObjectBase
 {
     constructor()
     {
+        super();
+
         this._lastBoundObjectId = 1;
-        this._idToWrappedObject = {};
-        this._idToObjectGroupName = {};
-        this._objectGroups = {};
-        this._modules = {};
+        this._idToWrappedObject = @createObjectWithoutPrototype();
+        this._idToObjectGroupName = @createObjectWithoutPrototype();
+        this._objectGroups = @createObjectWithoutPrototype();
+        this._modules = @createObjectWithoutPrototype();
         this._nextSavedResultIndex = 1;
-        this._savedResults = [];
+        this._savedResults = @createArrayWithoutPrototype();
     }
 
     // InjectedScript C++ API
 
-    evaluate(expression, objectGroup, injectCommandLineAPI, returnByValue, generatePreview, saveResult)
+    execute(functionString, objectGroup, includeCommandLineAPI, returnByValue, generatePreview, saveResult, args)
     {
-        return this._evaluateAndWrap(InjectedScriptHost.evaluateWithScopeExtension, InjectedScriptHost, expression, objectGroup, false, injectCommandLineAPI, returnByValue, generatePreview, saveResult);
+        return this._wrapAndSaveCall(objectGroup, returnByValue, generatePreview, saveResult, () => {
+            const isEvalOnCallFrame = false;
+            return this._evaluateOn(InjectedScriptHost.evaluateWithScopeExtension, InjectedScriptHost, functionString, isEvalOnCallFrame, includeCommandLineAPI).@apply(@undefined, args);
+        });
     }
 
-    evaluateOnCallFrame(topCallFrame, callFrameId, expression, objectGroup, injectCommandLineAPI, returnByValue, generatePreview, saveResult)
+    evaluate(expression, objectGroup, includeCommandLineAPI, returnByValue, generatePreview, saveResult)
+    {
+        const isEvalOnCallFrame = false;
+        return this._evaluateAndWrap(InjectedScriptHost.evaluateWithScopeExtension, InjectedScriptHost, expression, objectGroup, isEvalOnCallFrame, includeCommandLineAPI, returnByValue, generatePreview, saveResult);
+    }
+
+    awaitPromise(promiseObjectId, returnByValue, generatePreview, saveResult, callback)
+    {
+        let parsedPromiseObjectId = this._parseObjectId(promiseObjectId);
+        let promiseObject = this._objectForId(parsedPromiseObjectId);
+        let promiseObjectGroupName = this._idToObjectGroupName[parsedPromiseObjectId.id];
+
+        if (!isDefined(promiseObject)) {
+            callback("Could not find object with given id");
+            return;
+        }
+
+        if (!(promiseObject instanceof @Promise)) {
+            callback("Object with given id is not a Promise");
+            return;
+        }
+
+        let resolve = (value) => {
+            let returnObject = @createObjectWithoutPrototype(
+                "wasThrown", false,
+                "result", RemoteObject.create(value, promiseObjectGroupName, returnByValue, generatePreview),
+            );
+
+            if (saveResult) {
+                this._savedResultIndex = 0;
+                this._saveResult(returnObject.result);
+                if (this._savedResultIndex)
+                    returnObject.savedResultIndex = this._savedResultIndex;
+            }
+
+            callback(returnObject);
+        };
+        let reject = (reason) => {
+            callback(this._createThrownValue(reason, promiseObjectGroupName));
+        };
+        promiseObject.@then(resolve, reject);
+    }
+
+    evaluateOnCallFrame(topCallFrame, callFrameId, expression, objectGroup, includeCommandLineAPI, returnByValue, generatePreview, saveResult)
     {
         let callFrame = this._callFrameForId(topCallFrame, callFrameId);
         if (!callFrame)
             return "Could not find call frame with given id";
-        return this._evaluateAndWrap(callFrame.evaluateWithScopeExtension, callFrame, expression, objectGroup, true, injectCommandLineAPI, returnByValue, generatePreview, saveResult);
+        const isEvalOnCallFrame = true;
+        return this._evaluateAndWrap(callFrame.evaluateWithScopeExtension, callFrame, expression, objectGroup, isEvalOnCallFrame, includeCommandLineAPI, returnByValue, generatePreview, saveResult);
     }
 
     callFunctionOn(objectId, expression, args, returnByValue, generatePreview)
@@ -125,14 +216,14 @@ let InjectedScript = class InjectedScript
         if (!isDefined(object))
             return "Could not find object with given id";
 
-        let resolvedArgs = [];
+        let resolvedArgs = @createArrayWithoutPrototype();
         if (args) {
             let callArgs = InjectedScriptHost.evaluate(args);
             for (let i = 0; i < callArgs.length; ++i) {
                 try {
                     resolvedArgs[i] = this._resolveCallArgument(callArgs[i]);
                 } catch (e) {
-                    return String(e);
+                    return @String(e);
                 }
             }
         }
@@ -142,10 +233,10 @@ let InjectedScript = class InjectedScript
             if (typeof func !== "function")
                 return "Given expression does not evaluate to a function";
 
-            return {
-                wasThrown: false,
-                result: RemoteObject.create(func.apply(object, resolvedArgs), objectGroupName, returnByValue, generatePreview)
-            };
+            return @createObjectWithoutPrototype(
+                "wasThrown", false,
+                "result", RemoteObject.create(func.@apply(object, resolvedArgs), objectGroupName, returnByValue, generatePreview),
+            );
         } catch (e) {
             return this._createThrownValue(e, objectGroupName);
         }
@@ -175,18 +266,25 @@ let InjectedScript = class InjectedScript
         return RemoteObject.createObjectPreviewForValue(object, true);
     }
 
-    getProperties(objectId, ownProperties, generatePreview)
+    getProperties(objectId, ownProperties, fetchStart, fetchCount, generatePreview)
     {
-        let nativeGettersAsValues = false;
         let collectionMode = ownProperties ? InjectedScript.CollectionMode.OwnProperties : InjectedScript.CollectionMode.AllProperties;
-        return this._getProperties(objectId, collectionMode, generatePreview, nativeGettersAsValues);
+        return this._getProperties(objectId, collectionMode, @createObjectWithoutPrototype(
+            "fetchStart", fetchStart,
+            "fetchCount", fetchCount,
+            "generatePreview", generatePreview,
+        ));
     }
 
-    getDisplayableProperties(objectId, generatePreview)
+    getDisplayableProperties(objectId, fetchStart, fetchCount, generatePreview)
     {
-        let nativeGettersAsValues = true;
         let collectionMode = InjectedScript.CollectionMode.OwnProperties | InjectedScript.CollectionMode.NativeGetterProperties;
-        return this._getProperties(objectId, collectionMode, generatePreview, nativeGettersAsValues);
+        return this._getProperties(objectId, collectionMode, @createObjectWithoutPrototype(
+            "fetchStart", fetchStart,
+            "fetchCount", fetchCount,
+            "generatePreview", generatePreview,
+            "nativeGettersAsValues", true,
+        ));
     }
 
     getInternalProperties(objectId, generatePreview)
@@ -203,7 +301,7 @@ let InjectedScript = class InjectedScript
 
         let descriptors = this._internalPropertyDescriptors(object);
         if (!descriptors)
-            return [];
+            return @createArrayWithoutPrototype();
 
         for (let i = 0; i < descriptors.length; ++i) {
             let descriptor = descriptors[i];
@@ -214,7 +312,7 @@ let InjectedScript = class InjectedScript
         return descriptors;
     }
 
-    getCollectionEntries(objectId, objectGroupName, startIndex, numberToFetch)
+    getCollectionEntries(objectId, objectGroupName, fetchStart, fetchCount)
     {
         let parsedObjectId = this._parseObjectId(objectId);
         let object = this._objectForId(parsedObjectId);
@@ -226,13 +324,14 @@ let InjectedScript = class InjectedScript
         if (typeof object !== "object")
             return;
 
-        let entries = this._entries(object, InjectedScriptHost.subtype(object), startIndex, numberToFetch);
-        return entries.map(function(entry) {
+        let entries = this._entries(object, InjectedScriptHost.subtype(object), fetchStart, fetchCount);
+        for (let i = 0; i < entries.length; ++i) {
+            let entry = entries[i];
             entry.value = RemoteObject.create(entry.value, objectGroupName, false, true);
             if ("key" in entry)
                 entry.key = RemoteObject.create(entry.key, objectGroupName, false, true);
-            return entry;
-        });
+        }
+        return entries;
     }
 
     saveResult(callArgumentJSON)
@@ -243,7 +342,7 @@ let InjectedScript = class InjectedScript
             let callArgument = InjectedScriptHost.evaluate("(" + callArgumentJSON + ")");
             let value = this._resolveCallArgument(callArgument);
             this._saveResult(value);
-        } catch (e) {}
+        } catch { }
 
         return this._savedResultIndex;
     }
@@ -253,10 +352,10 @@ let InjectedScript = class InjectedScript
         if (!callFrame)
             return false;
 
-        let result = [];
+        let result = @createArrayWithoutPrototype();
         let depth = 0;
         do {
-            result.push(new InjectedScript.CallFrameProxy(depth++, callFrame));
+            @arrayPush(result, new InjectedScript.CallFrameProxy(depth++, callFrame));
             callFrame = callFrame.caller;
         } while (callFrame);
         return result;
@@ -270,6 +369,15 @@ let InjectedScript = class InjectedScript
         return RemoteObject.create(object, groupName, false, generatePreview);
     }
 
+    wrapJSONString(jsonString, groupName, generatePreview)
+    {
+        try {
+            return this.wrapObject(@jsonParse(jsonString), groupName, true, generatePreview);
+        } catch {
+            return null;
+        }
+    }
+
     wrapTable(canAccessInspectedGlobalObject, table, columns)
     {
         if (!canAccessInspectedGlobalObject)
@@ -281,12 +389,12 @@ let InjectedScript = class InjectedScript
 
         let columnNames = null;
         if (typeof columns === "string")
-            columns = [columns];
+            columns = @createArrayWithoutPrototype(columns);
 
         if (InjectedScriptHost.subtype(columns) === "array") {
-            columnNames = [];
+            columnNames = @createArrayWithoutPrototype();
             for (let i = 0; i < columns.length; ++i)
-                columnNames.push(toString(columns[i]));
+                @arrayPush(columnNames, toString(columns[i]));
         }
 
         return RemoteObject.create(table, "console", false, true, columnNames);
@@ -295,6 +403,16 @@ let InjectedScript = class InjectedScript
     previewValue(value)
     {
         return RemoteObject.createObjectPreviewForValue(value, true);
+    }
+
+    setEventValue(value)
+    {
+        this._eventValue = value;
+    }
+
+    clearEventValue()
+    {
+        delete this._eventValue;
     }
 
     setExceptionValue(value)
@@ -313,12 +431,6 @@ let InjectedScript = class InjectedScript
         return this._objectForId(parsedObjectId);
     }
 
-    inspectObject(object)
-    {
-        if (this._commandLineAPIImpl)
-            this._commandLineAPIImpl.inspect(object);
-    }
-
     releaseObject(objectId)
     {
         let parsedObjectId = this._parseObjectId(objectId);
@@ -330,7 +442,7 @@ let InjectedScript = class InjectedScript
         if (objectGroupName === "console") {
             delete this._lastResult;
             this._nextSavedResultIndex = 1;
-            this._savedResults = [];
+            this._savedResults = @createArrayWithoutPrototype();
         }
 
         let group = this._objectGroups[objectGroupName];
@@ -343,27 +455,38 @@ let InjectedScript = class InjectedScript
         delete this._objectGroups[objectGroupName];
     }
 
+    createCommandLineAPIObject(callFrame)
+    {
+        return new CommandLineAPI(callFrame || null);
+    }
+
+    // CommandLineAPI
+
+    inspectObject(object)
+    {
+        if (this._inspectObject)
+            this._inspectObject(object);
+    }
+
     // InjectedScriptModule C++ API
 
-    module(name)
+    hasInjectedModule(name)
     {
         return this._modules[name];
     }
 
-    injectModule(name, source, host)
+    injectModule(name, moduleFunction, host)
     {
-        delete this._modules[name];
+        this._modules[name] = false;
 
-        let moduleFunction = InjectedScriptHost.evaluate("(" + source + ")");
-        if (typeof moduleFunction !== "function") {
-            if (inspectedGlobalObject.console)
-                inspectedGlobalObject.console.error("Web Inspector error: A function was expected for module %s evaluation", name);
-            return null;
-        }
+        if (typeof moduleFunction !== "function")
+            throw "Error: Web Inspector: a function was expected for injectModule";
+        moduleFunction(InjectedScriptHost, inspectedGlobalObject, injectedScriptId, this, @createObjectWithoutPrototype(
+            "RemoteObject", RemoteObject,
+            "CommandLineAPI", CommandLineAPI,
+        ), host);
 
-        let module = moduleFunction.call(inspectedGlobalObject, InjectedScriptHost, inspectedGlobalObject, injectedScriptId, this, RemoteObject, host);
-        this._modules[name] = module;
-        return module;
+        this._modules[name] = true;
     }
 
     // InjectedScriptModule JavaScript API
@@ -395,10 +518,10 @@ let InjectedScript = class InjectedScript
         if (objectGroupName) {
             let group = this._objectGroups[objectGroupName];
             if (!group) {
-                group = [];
+                group = @createArrayWithoutPrototype();
                 this._objectGroups[objectGroupName] = group;
             }
-            group.push(id);
+            @arrayPush(group, id);
             this._idToObjectGroupName[id] = objectGroupName;
         }
 
@@ -413,12 +536,11 @@ let InjectedScript = class InjectedScript
 
     _fallbackWrapper(object)
     {
-        let result = {};
-        result.type = typeof object;
+        let result = @createObjectWithoutPrototype("type", typeof object);
         if (isPrimitiveValue(object))
             result.value = object;
         else
-            result.description = toString(object);
+            result.description = toStringDescription(object);
         return result;
     }
 
@@ -440,7 +562,7 @@ let InjectedScript = class InjectedScript
             return resolvedArg;
         }
 
-        return undefined;
+        return @undefined;
     }
 
     _createThrownValue(value, objectGroup)
@@ -448,22 +570,39 @@ let InjectedScript = class InjectedScript
         let remoteObject = RemoteObject.create(value, objectGroup);
         try {
             remoteObject.description = toStringDescription(value);
-        } catch (e) {}
-        return {
-            wasThrown: true,
-            result: remoteObject
-        };
+        } catch { }
+        return @createObjectWithoutPrototype(
+            "wasThrown", true,
+            "result", remoteObject,
+        );
     }
 
-    _evaluateAndWrap(evalFunction, object, expression, objectGroup, isEvalOnCallFrame, injectCommandLineAPI, returnByValue, generatePreview, saveResult)
+    _evaluateAndWrap(evalFunction, object, expression, objectGroup, isEvalOnCallFrame, includeCommandLineAPI, returnByValue, generatePreview, saveResult)
+    {
+        return this._wrapAndSaveCall(objectGroup, returnByValue, generatePreview, saveResult, () => {
+            return this._evaluateOn(evalFunction, object, expression, isEvalOnCallFrame, includeCommandLineAPI);
+        });
+    }
+
+    _wrapAndSaveCall(objectGroup, returnByValue, generatePreview, saveResult, func)
+    {
+        return this._wrapCall(objectGroup, returnByValue, generatePreview, saveResult, () => {
+            let result = func();
+            if (saveResult)
+                this._saveResult(result);
+            return result;
+        });
+    }
+
+    _wrapCall(objectGroup, returnByValue, generatePreview, saveResult, func)
     {
         try {
             this._savedResultIndex = 0;
 
-            let returnObject = {
-                wasThrown: false,
-                result: RemoteObject.create(this._evaluateOn(evalFunction, object, objectGroup, expression, isEvalOnCallFrame, injectCommandLineAPI, saveResult), objectGroup, returnByValue, generatePreview)
-            };
+            let returnObject = @createObjectWithoutPrototype(
+                "wasThrown", false,
+                "result", RemoteObject.create(func(), objectGroup, returnByValue, generatePreview),
+            );
 
             if (saveResult && this._savedResultIndex)
                 returnObject.savedResultIndex = this._savedResultIndex;
@@ -474,20 +613,12 @@ let InjectedScript = class InjectedScript
         }
     }
 
-    _evaluateOn(evalFunction, object, objectGroup, expression, isEvalOnCallFrame, injectCommandLineAPI, saveResult)
+    _evaluateOn(evalFunction, object, expression, isEvalOnCallFrame, includeCommandLineAPI)
     {
         let commandLineAPI = null;
-        if (injectCommandLineAPI) {
-            if (this.CommandLineAPI)
-                commandLineAPI = new this.CommandLineAPI(this._commandLineAPIImpl, isEvalOnCallFrame ? object : null);
-            else
-                commandLineAPI = new BasicCommandLineAPI(isEvalOnCallFrame ? object : null);
-        }
-
-        let result = evalFunction.call(object, expression, commandLineAPI);
-        if (saveResult)
-            this._saveResult(result);
-        return result;
+        if (includeCommandLineAPI)
+            commandLineAPI = this.createCommandLineAPIObject(isEvalOnCallFrame ? object : null);
+        return evalFunction.@call(object, expression, commandLineAPI);
     }
 
     _callFrameForId(topCallFrame, callFrameId)
@@ -500,7 +631,7 @@ let InjectedScript = class InjectedScript
         return callFrame;
     }
 
-    _getProperties(objectId, collectionMode, generatePreview, nativeGettersAsValues)
+    _getProperties(objectId, collectionMode, {fetchStart, fetchCount, generatePreview, nativeGettersAsValues})
     {
         let parsedObjectId = this._parseObjectId(objectId);
         let object = this._objectForId(parsedObjectId);
@@ -512,24 +643,42 @@ let InjectedScript = class InjectedScript
         if (isSymbol(object))
             return false;
 
-        let descriptors = this._propertyDescriptors(object, collectionMode, nativeGettersAsValues);
+        let start = fetchStart || 0;
+        if (start < 0)
+            start = 0;
 
-        for (let i = 0; i < descriptors.length; ++i) {
-            let descriptor = descriptors[i];
+        let count = fetchCount || 0;
+        if (count < 0)
+            count = 0;
+
+        // Always include __proto__ at the end, but only for the first fetch.
+        let includeProto = !start;
+
+        let descriptors = @createArrayWithoutPrototype();
+        this._forEachPropertyDescriptor(object, collectionMode, (descriptor) => {
+            if (start > 0) {
+                --start;
+                return InjectedScript.PropertyFetchAction.Continue;
+            }
+
             if ("get" in descriptor)
                 descriptor.get = RemoteObject.create(descriptor.get, objectGroupName);
             if ("set" in descriptor)
                 descriptor.set = RemoteObject.create(descriptor.set, objectGroupName);
             if ("value" in descriptor)
                 descriptor.value = RemoteObject.create(descriptor.value, objectGroupName, false, generatePreview);
-            if (!("configurable" in descriptor))
-                descriptor.configurable = false;
-            if (!("enumerable" in descriptor))
-                descriptor.enumerable = false;
             if ("symbol" in descriptor)
                 descriptor.symbol = RemoteObject.create(descriptor.symbol, objectGroupName);
-        }
+            @arrayPush(descriptors, descriptor);
 
+            if (includeProto && count && descriptors.length >= count && descriptor.name !== "__proto__")
+                return InjectedScript.PropertyFetchAction.Stop;
+
+            return (count && descriptors.length >= count) ? InjectedScript.PropertyFetchAction.Stop : InjectedScript.PropertyFetchAction.Continue;
+        }, @createObjectWithoutPrototype(
+            "nativeGettersAsValues", nativeGettersAsValues,
+            "includeProto", includeProto,
+        ));
         return descriptors;
     }
 
@@ -539,33 +688,45 @@ let InjectedScript = class InjectedScript
         if (!internalProperties)
             return null;
 
-        let descriptors = [];
+        let descriptors = @createArrayWithoutPrototype();
         for (let i = 0; i < internalProperties.length; i++) {
             let property = internalProperties[i];
-            let descriptor = {name: property.name, value: property.value};
-            if (completeDescriptor) {
-                descriptor.writable = false;
-                descriptor.configurable = false;
-                descriptor.enumerable = false;
+            let descriptor = @createObjectWithoutPrototype(
+                "name", property.name,
+                "value", property.value,
+            );
+            if (completeDescriptor)
                 descriptor.isOwn = true;
-            }
-            descriptors.push(descriptor);
+            @arrayPush(descriptors, descriptor);
         }
         return descriptors;
     }
 
-    _propertyDescriptors(object, collectionMode, nativeGettersAsValues)
+    _forEachPropertyDescriptor(object, collectionMode, callback, {nativeGettersAsValues, includeProto})
     {
         if (InjectedScriptHost.subtype(object) === "proxy")
-            return [];
+            return;
 
-        let descriptors = [];
-        let nameProcessed = new Set;
+        let nameProcessed = new @Set;
+
+        // Handled below when `includeProto`.
+        nameProcessed.@add("__proto__");
 
         function createFakeValueDescriptor(name, symbol, descriptor, isOwnProperty, possibleNativeBindingGetter)
         {
             try {
-                let fakeDescriptor = {name, value: object[name], writable: descriptor.writable || false, configurable: descriptor.configurable || false, enumerable: descriptor.enumerable || false};
+                let fakeDescriptor = @createObjectWithoutPrototype(
+                    "name", name,
+                    "value", object[name],
+                );
+                if (descriptor) {
+                    if (descriptor.writable)
+                        fakeDescriptor.writable = true;
+                    if (descriptor.configurable)
+                        fakeDescriptor.configurable = true;
+                    if (descriptor.enumerable)
+                        fakeDescriptor.enumerable = true;
+                }
                 if (possibleNativeBindingGetter)
                     fakeDescriptor.nativeGetter = true;
                 if (isOwnProperty)
@@ -573,11 +734,15 @@ let InjectedScript = class InjectedScript
                 if (symbol)
                     fakeDescriptor.symbol = symbol;
                 // Silence any possible unhandledrejection exceptions created from accessing a native accessor with a wrong this object.
-                if (fakeDescriptor.value instanceof Promise)
-                    fakeDescriptor.value.catch(function(){});
+                if (fakeDescriptor.value instanceof @Promise && InjectedScriptHost.isPromiseRejectedWithNativeGetterTypeError(fakeDescriptor.value))
+                    fakeDescriptor.value.@catch(function(){});
                 return fakeDescriptor;
             } catch (e) {
-                let errorDescriptor = {name, value: e, wasThrown: true};
+                let errorDescriptor = @createObjectWithoutPrototype(
+                    "name", name,
+                    "value", e,
+                    "wasThrown", true,
+                );
                 if (isOwnProperty)
                     errorDescriptor.isOwn = true;
                 if (symbol)
@@ -589,174 +754,185 @@ let InjectedScript = class InjectedScript
         function processDescriptor(descriptor, isOwnProperty, possibleNativeBindingGetter)
         {
             // All properties.
-            if (collectionMode & InjectedScript.CollectionMode.AllProperties) {
-                descriptors.push(descriptor);
-                return;
-            }
+            if (collectionMode & InjectedScript.CollectionMode.AllProperties)
+                return callback(descriptor);
 
             // Own properties.
-            if (collectionMode & InjectedScript.CollectionMode.OwnProperties && isOwnProperty) {
-                descriptors.push(descriptor);
-                return;
-            }
+            if (collectionMode & InjectedScript.CollectionMode.OwnProperties && isOwnProperty)
+                return callback(descriptor);
 
             // Native Getter properties.
             if (collectionMode & InjectedScript.CollectionMode.NativeGetterProperties) {
-                if (possibleNativeBindingGetter) {
-                    descriptors.push(descriptor);
-                    return;
-                }
+                if (possibleNativeBindingGetter)
+                    return callback(descriptor);
             }
         }
 
-        function processProperties(o, properties, isOwnProperty)
+        function processProperty(o, propertyName, isOwnProperty)
         {
-            for (let i = 0; i < properties.length; ++i) {
-                let property = properties[i];
-                if (nameProcessed.has(property) || property === "__proto__")
-                    continue;
+            if (nameProcessed.@has(propertyName))
+                return InjectedScript.PropertyFetchAction.Continue;
 
-                nameProcessed.add(property);
+            nameProcessed.@add(propertyName);
 
-                let name = toString(property);
-                let symbol = isSymbol(property) ? property : null;
+            let name = toString(propertyName);
+            let symbol = isSymbol(propertyName) ? propertyName : null;
 
-                let descriptor = Object.getOwnPropertyDescriptor(o, property);
-                if (!descriptor) {
-                    // FIXME: Bad descriptor. Can we get here?
-                    // Fall back to very restrictive settings.
-                    let fakeDescriptor = createFakeValueDescriptor(name, symbol, {writable: false, configurable: false, enumerable: false}, isOwnProperty);
-                    processDescriptor(fakeDescriptor, isOwnProperty);
-                    continue;
-                }
-
-                if (nativeGettersAsValues) {
-                    if (String(descriptor.get).endsWith("[native code]\n}") || (!descriptor.get && descriptor.hasOwnProperty("get") && !descriptor.set && descriptor.hasOwnProperty("set"))) {
-                        // Developers may create such a descriptor, so we should be resilient:
-                        // let x = {}; Object.defineProperty(x, "p", {get:undefined}); Object.getOwnPropertyDescriptor(x, "p")
-                        let fakeDescriptor = createFakeValueDescriptor(name, symbol, descriptor, isOwnProperty, true);
-                        processDescriptor(fakeDescriptor, isOwnProperty, true);
-                        continue;
-                    }
-                }
-
-                descriptor.name = name;
-                if (isOwnProperty)
-                    descriptor.isOwn = true;
-                if (symbol)
-                    descriptor.symbol = symbol;
-                processDescriptor(descriptor, isOwnProperty);
+            let descriptor = @Object.@getOwnPropertyDescriptor(o, propertyName);
+            if (!descriptor) {
+                // FIXME: Bad descriptor. Can we get here?
+                // Fall back to very restrictive settings.
+                let fakeDescriptor = createFakeValueDescriptor(name, symbol, descriptor, isOwnProperty);
+                return processDescriptor(fakeDescriptor, isOwnProperty);
             }
+
+            if (nativeGettersAsValues) {
+                if (@String(descriptor.get).@endsWith("[native code]\n}") || (!descriptor.get && @Object.@hasOwn(descriptor, "get") && !descriptor.set && @Object.@hasOwn(descriptor, "set"))) {
+                    // Developers may create such a descriptor, so we should be resilient:
+                    // let x = {}; Object.defineProperty(x, "p", {get:undefined}); Object.getOwnPropertyDescriptor(x, "p")
+                    let fakeDescriptor = createFakeValueDescriptor(name, symbol, descriptor, isOwnProperty, true);
+                    return processDescriptor(fakeDescriptor, isOwnProperty, true);
+                }
+            }
+
+            descriptor.name = name;
+            if (isOwnProperty)
+                descriptor.isOwn = true;
+            if (symbol)
+                descriptor.symbol = symbol;
+            return processDescriptor(descriptor, isOwnProperty);
         }
 
-        function arrayIndexPropertyNames(o, length)
-        {
-            let array = [];
-            for (let i = 0; i < length; ++i) {
-                if (i in o)
-                    array.push("" + i);
-            }
-            return array;
-        }
-
-        // FIXME: <https://webkit.org/b/143589> Web Inspector: Better handling for large collections in Object Trees
-        // For array types with a large length we attempt to skip getOwnPropertyNames and instead just sublist of indexes.
         let isArrayLike = false;
         try {
-            isArrayLike = RemoteObject.subtype(object) === "array" && isFinite(object.length) && object.length > 0;
-        } catch(e) {}
+            isArrayLike = RemoteObject.subtype(object) === "array" && @isFinite(object.length) && object.length > 0;
+        } catch { }
 
-        for (let o = object; isDefined(o); o = Object.getPrototypeOf(o)) {
+        for (let o = object; isDefined(o); o = @Object.@getPrototypeOf(o)) {
             let isOwnProperty = o === object;
+            let shouldBreak = false;
 
-            if (isArrayLike && isOwnProperty)
-                processProperties(o, arrayIndexPropertyNames(o, Math.min(object.length, 100)), isOwnProperty);
-            else {
-                processProperties(o, Object.getOwnPropertyNames(o), isOwnProperty);
-                if (Object.getOwnPropertySymbols)
-                    processProperties(o, Object.getOwnPropertySymbols(o), isOwnProperty);
+            // FIXME: <https://webkit.org/b/201861> Web Inspector: show autocomplete entries for non-index properties on arrays
+            if (isArrayLike && isOwnProperty) {
+                for (let i = 0; i < o.length; ++i) {
+                    if (!(i in o))
+                        continue;
+
+                    let result = processProperty(o, toString(i), isOwnProperty);
+                    shouldBreak = result === InjectedScript.PropertyFetchAction.Stop;
+                    if (shouldBreak)
+                        break;
+                }
+            } else {
+                let propertyNames = @Object.@getOwnPropertyNames(o);
+                for (let i = 0; i < propertyNames.length; ++i) {
+                    let result = processProperty(o, propertyNames[i], isOwnProperty);
+                    shouldBreak = result === InjectedScript.PropertyFetchAction.Stop;
+                    if (shouldBreak)
+                        break;
+                }
             }
+
+            if (shouldBreak)
+                break;
+
+            let propertySymbols = @Object.@getOwnPropertySymbols(o);
+            for (let i = 0; i < propertySymbols.length; ++i) {
+                let result = processProperty(o, propertySymbols[i], isOwnProperty);
+                shouldBreak = result === InjectedScript.PropertyFetchAction.Stop;
+                if (shouldBreak)
+                    break;
+            }
+
+            if (shouldBreak)
+                break;
 
             if (collectionMode === InjectedScript.CollectionMode.OwnProperties)
                 break;
         }
 
-        // Always include __proto__ at the end.
-        try {
-            if (object.__proto__)
-                descriptors.push({name: "__proto__", value: object.__proto__, writable: true, configurable: true, enumerable: false, isOwn: true});
-        } catch (e) {}
-
-        return descriptors;
+        if (includeProto) {
+            try {
+                if (object.__proto__)
+                    callback(@createObjectWithoutPrototype(
+                        "name", "__proto__",
+                        "value", object.__proto__,
+                        "writable", true,
+                        "configurable", true,
+                        "isOwn", true,
+                    ));
+            } catch { }
+        }
     }
 
-    _getSetEntries(object, skip, numberToFetch)
+    _getSetEntries(object, fetchStart, fetchCount)
     {
-        let entries = [];
+        let entries = @createArrayWithoutPrototype();
 
-        // FIXME: This is observable if the page overrides Set.prototype[Symbol.iterator].
-        for (let value of object) {
-            if (skip > 0) {
-                skip--;
+        for (let value of @builtinSetIterable(object)) {
+            if (fetchStart > 0) {
+                fetchStart--;
                 continue;
             }
 
-            entries.push({value});
+            @arrayPush(entries, @createObjectWithoutPrototype("value", value));
 
-            if (numberToFetch && entries.length === numberToFetch)
+            if (fetchCount && entries.length === fetchCount)
                 break;
         }
 
         return entries;
     }
 
-    _getMapEntries(object, skip, numberToFetch)
+    _getMapEntries(object, fetchStart, fetchCount)
     {
-        let entries = [];
+        let entries = @createArrayWithoutPrototype();
 
-        // FIXME: This is observable if the page overrides Map.prototype[Symbol.iterator].
-        for (let [key, value] of object) {
-            if (skip > 0) {
-                skip--;
+        for (let [key, value] of @builtinMapIterable(object)) {
+            if (fetchStart > 0) {
+                fetchStart--;
                 continue;
             }
 
-            entries.push({key, value});
+            @arrayPush(entries, @createObjectWithoutPrototype(
+                "key", key,
+                "value", value,
+            ));
 
-            if (numberToFetch && entries.length === numberToFetch)
+            if (fetchCount && entries.length === fetchCount)
                 break;
         }
 
         return entries;
     }
 
-    _getWeakMapEntries(object, numberToFetch)
+    _getWeakMapEntries(object, fetchCount)
     {
-        return InjectedScriptHost.weakMapEntries(object, numberToFetch);
+        return InjectedScriptHost.weakMapEntries(object, fetchCount);
     }
 
-    _getWeakSetEntries(object, numberToFetch)
+    _getWeakSetEntries(object, fetchCount)
     {
-        return InjectedScriptHost.weakSetEntries(object, numberToFetch);
+        return InjectedScriptHost.weakSetEntries(object, fetchCount);
     }
 
-    _getIteratorEntries(object, numberToFetch)
+    _getIteratorEntries(object, fetchCount)
     {
-        return InjectedScriptHost.iteratorEntries(object, numberToFetch);
+        return InjectedScriptHost.iteratorEntries(object, fetchCount);
     }
 
-    _entries(object, subtype, startIndex, numberToFetch)
+    _entries(object, subtype, fetchStart, fetchCount)
     {
         if (subtype === "set")
-            return this._getSetEntries(object, startIndex, numberToFetch);
+            return this._getSetEntries(object, fetchStart, fetchCount);
         if (subtype === "map")
-            return this._getMapEntries(object, startIndex, numberToFetch);
+            return this._getMapEntries(object, fetchStart, fetchCount);
         if (subtype === "weakmap")
-            return this._getWeakMapEntries(object, numberToFetch);
+            return this._getWeakMapEntries(object, fetchCount);
         if (subtype === "weakset")
-            return this._getWeakSetEntries(object, numberToFetch);
+            return this._getWeakSetEntries(object, fetchCount);
         if (subtype === "iterator")
-            return this._getIteratorEntries(object, numberToFetch);
+            return this._getIteratorEntries(object, fetchCount);
 
         throw "unexpected type";
     }
@@ -765,10 +941,10 @@ let InjectedScript = class InjectedScript
     {
         this._lastResult = result;
 
-        if (result === undefined || result === null)
+        if (result === @undefined || result === null)
             return;
 
-        let existingIndex = this._savedResults.indexOf(result);
+        let existingIndex = @Array.prototype.@indexOf.@call(this._savedResults, result);
         if (existingIndex !== -1) {
             this._savedResultIndex = existingIndex;
             return;
@@ -781,35 +957,38 @@ let InjectedScript = class InjectedScript
         if (this._nextSavedResultIndex >= 100)
             this._nextSavedResultIndex = 1;
     }
-
-    _savedResult(index)
-    {
-        return this._savedResults[index];
-    }
-}
-
-InjectedScript.CollectionMode = {
-    OwnProperties: 1 << 0,          // own properties.
-    NativeGetterProperties: 1 << 1, // native getter properties in the prototype chain.
-    AllProperties: 1 << 2,          // all properties in the prototype chain.
 };
+
+InjectedScript.CollectionMode = @createObjectWithoutPrototype(
+    "OwnProperties", 1 << 0,          // own properties.
+    "NativeGetterProperties", 1 << 1, // native getter properties in the prototype chain.
+    "AllProperties", 1 << 2,          // all properties in the prototype chain.
+);
+
+InjectedScript.PropertyFetchAction = @createObjectWithoutPrototype(
+    "Continue", @createPrivateSymbol("continue"),
+    "Stop", @createPrivateSymbol("stop"),
+);
 
 var injectedScript = new InjectedScript;
 
 // -------
 
-let RemoteObject = class RemoteObject
+let RemoteObject = class RemoteObject extends PrototypelessObjectBase
 {
     constructor(object, objectGroupName, forceValueType, generatePreview, columnNames)
     {
+        super();
+
         this.type = typeof object;
 
         if (this.type === "undefined" && InjectedScriptHost.isHTMLAllCollection(object))
             this.type = "object";
 
-        if (isPrimitiveValue(object) || object === null || forceValueType) {
+        if (isPrimitiveValue(object) || isBigInt(object) || object === null || forceValueType) {
             // We don't send undefined values over JSON.
-            if (this.type !== "undefined")
+            // BigInt values are not JSON serializable.
+            if (this.type !== "undefined" && this.type !== "bigint")
                 this.value = object;
 
             // Null object is object with 'null' subtype.
@@ -817,8 +996,9 @@ let RemoteObject = class RemoteObject
                 this.subtype = "null";
 
             // Provide user-friendly number values.
-            if (this.type === "number")
+            if (this.type === "number" || this.type === "bigint")
                 this.description = toStringDescription(object);
+
             return;
         }
 
@@ -849,7 +1029,7 @@ let RemoteObject = class RemoteObject
                 this.preview = this._generatePreview(InjectedScriptHost.proxyTargetValue(object));
                 this.preview.lossless = false;
             } else
-                this.preview = this._generatePreview(object, undefined, columnNames);
+                this.preview = this._generatePreview(object, @undefined, columnNames);
         }
     }
 
@@ -864,7 +1044,7 @@ let RemoteObject = class RemoteObject
             try {
                 description = RemoteObject.describe(e);
             } catch (ex) {
-                alert(ex.message);
+                inspectedGlobalObject.console.error(ex.message);
                 description = "<failed to convert exception to string>";
             }
             return new RemoteObject(description);
@@ -873,7 +1053,7 @@ let RemoteObject = class RemoteObject
 
     static createObjectPreviewForValue(value, generatePreview, columnNames)
     {
-        let remoteObject = new RemoteObject(value, undefined, false, generatePreview, columnNames);
+        let remoteObject = new RemoteObject(value, @undefined, false, generatePreview, columnNames);
         if (remoteObject.objectId)
             injectedScript.releaseObject(remoteObject.objectId);
         if (remoteObject.classPrototype && remoteObject.classPrototype.objectId)
@@ -886,7 +1066,7 @@ let RemoteObject = class RemoteObject
         if (value === null)
             return "null";
 
-        if (isPrimitiveValue(value) || isSymbol(value))
+        if (isPrimitiveValue(value) || isBigInt(value) || isSymbol(value))
             return null;
 
         if (InjectedScriptHost.isHTMLAllCollection(value))
@@ -898,9 +1078,9 @@ let RemoteObject = class RemoteObject
 
         // FireBug's array detection.
         try {
-            if (typeof value.splice === "function" && isFinite(value.length))
+            if (typeof value.splice === "function" && @isFinite(value.length))
                 return "array";
-        } catch (e) {}
+        } catch { }
 
         return null;
     }
@@ -908,6 +1088,9 @@ let RemoteObject = class RemoteObject
     static describe(value)
     {
         if (isPrimitiveValue(value))
+            return null;
+
+        if (isBigInt(value))
             return null;
 
         if (isSymbol(value))
@@ -934,8 +1117,8 @@ let RemoteObject = class RemoteObject
         if (subtype === "array")
             return className;
 
-        if (subtype === "iterator" && Symbol.toStringTag in value)
-            return value[Symbol.toStringTag];
+        if (subtype === "iterator" && @@toStringTag in value)
+            return value.@@toStringTag;
 
         // NodeList in JSC is a function, check for array prior to this.
         if (typeof value === "function")
@@ -953,6 +1136,7 @@ let RemoteObject = class RemoteObject
 
     static nodePreview(node)
     {
+        // FIXME: <webkit.org/b/239774> Injected script should use WebCore built-ins.
         let isXMLDocument = node.ownerDocument && !!node.ownerDocument.xmlVersion;
         let nodeName = isXMLDocument ? node.nodeName : node.nodeName.toLowerCase();
 
@@ -984,17 +1168,17 @@ let RemoteObject = class RemoteObject
 
     _initialPreview()
     {
-        let preview = {
-            type: this.type,
-            description: this.description || toString(this.value),
-            lossless: true,
-        };
+        let preview = @createObjectWithoutPrototype(
+            "type", this.type,
+            "description", this.description || toString(this.value),
+            "lossless", true,
+        );
 
         if (this.subtype) {
             preview.subtype = this.subtype;
             if (this.subtype !== "null") {
                 preview.overflow = false;
-                preview.properties = [];
+                preview.properties = @createArrayWithoutPrototype();
             }
         }
 
@@ -1010,7 +1194,7 @@ let RemoteObject = class RemoteObject
 
         if (this.subtype === "map" || this.subtype === "set" || this.subtype === "weakmap" || this.subtype === "weakset" || this.subtype === "iterator") {
             if (this.size) {
-                preview.entries = [];
+                preview.entries = @createArrayWithoutPrototype();
                 preview.lossless = false;
                 preview.overflow = true;
             }
@@ -1025,181 +1209,190 @@ let RemoteObject = class RemoteObject
         let isTableRowsRequest = secondLevelKeys === null || secondLevelKeys;
         let firstLevelKeysCount = firstLevelKeys ? firstLevelKeys.length : 0;
 
-        let propertiesThreshold = {
-            properties: isTableRowsRequest ? 1000 : Math.max(5, firstLevelKeysCount),
-            indexes: isTableRowsRequest ? 1000 : Math.max(10, firstLevelKeysCount)
-        };
+        let propertiesThreshold = @createObjectWithoutPrototype(
+            "properties", isTableRowsRequest ? 1000 : max(5, firstLevelKeysCount),
+            "indexes", isTableRowsRequest ? 1000 : max(10, firstLevelKeysCount),
+        );
 
         try {
             // Maps, Sets, and Iterators have entries.
             if (this.subtype === "map" || this.subtype === "set" || this.subtype === "weakmap" || this.subtype === "weakset" || this.subtype === "iterator")
                 this._appendEntryPreviews(object, preview);
 
-            preview.properties = [];
+            preview.properties = @createArrayWithoutPrototype();
 
             // Internal Properties.
             let internalPropertyDescriptors = injectedScript._internalPropertyDescriptors(object, true);
             if (internalPropertyDescriptors) {
-                this._appendPropertyPreviews(object, preview, internalPropertyDescriptors, true, propertiesThreshold, firstLevelKeys, secondLevelKeys);
-                if (propertiesThreshold.indexes < 0 || propertiesThreshold.properties < 0)
-                    return preview;
+                for (let i = 0; i < internalPropertyDescriptors.length; ++i) {
+                    let result = this._appendPropertyPreview(object, preview, internalPropertyDescriptors[i], propertiesThreshold, firstLevelKeys, secondLevelKeys, @createObjectWithoutPrototype("internal", true));
+                    if (result === InjectedScript.PropertyFetchAction.Stop)
+                        return preview;
+                }
             }
 
             if (preview.entries)
                 return preview;
 
             // Properties.
-            let nativeGettersAsValues = true;
-            let descriptors = injectedScript._propertyDescriptors(object, InjectedScript.CollectionMode.AllProperties, nativeGettersAsValues);
-            this._appendPropertyPreviews(object, preview, descriptors, false, propertiesThreshold, firstLevelKeys, secondLevelKeys);
-            if (propertiesThreshold.indexes < 0 || propertiesThreshold.properties < 0)
-                return preview;
-        } catch (e) {
+            injectedScript._forEachPropertyDescriptor(object, InjectedScript.CollectionMode.AllProperties, (descriptor) => {
+                return this._appendPropertyPreview(object, preview, descriptor, propertiesThreshold, firstLevelKeys, secondLevelKeys);
+            }, @createObjectWithoutPrototype(
+                "nativeGettersAsValues", true,
+                "includeProto", true,
+            ));
+        } catch {
             preview.lossless = false;
         }
 
         return preview;
     }
 
-    _appendPropertyPreviews(object, preview, descriptors, internal, propertiesThreshold, firstLevelKeys, secondLevelKeys)
+    _appendPropertyPreview(object, preview, descriptor, propertiesThreshold, firstLevelKeys, secondLevelKeys, {internal} = @createObjectWithoutPrototype())
     {
-        for (let i = 0; i < descriptors.length; ++i) {
-            let descriptor = descriptors[i];
-
-            // Seen enough.
-            if (propertiesThreshold.indexes < 0 || propertiesThreshold.properties < 0)
-                break;
-
-            // Error in descriptor.
-            if (descriptor.wasThrown) {
-                preview.lossless = false;
-                continue;
-            }
-
-            // Do not show "__proto__" in preview.
-            let name = descriptor.name;
-            if (name === "__proto__") {
-                // Non basic __proto__ objects may have interesting, non-enumerable, methods to show.
-                if (descriptor.value && descriptor.value.constructor
-                    && descriptor.value.constructor !== Object
-                    && descriptor.value.constructor !== Array
-                    && descriptor.value.constructor !== RegExp)
-                    preview.lossless = false;
-                continue;
-            }
-
-            // For arrays, only allow indexes.
-            if (this.subtype === "array" && !isUInt32(name))
-                continue;
-
-            // Do not show non-enumerable non-own properties.
-            // Special case to allow array indexes that may be on the prototype.
-            // Special case to allow native getters on non-RegExp objects.
-            if (!descriptor.enumerable && !descriptor.isOwn && !(this.subtype === "array" || (this.subtype !== "regexp" && descriptor.nativeGetter)))
-                continue;
-
-            // If we have a filter, only show properties in the filter.
-            // FIXME: Currently these filters do nothing on the backend.
-            if (firstLevelKeys && !firstLevelKeys.includes(name))
-                continue;
-
-            // Getter/setter.
-            if (!("value" in descriptor)) {
-                preview.lossless = false;
-                this._appendPropertyPreview(preview, internal, {name, type: "accessor"}, propertiesThreshold);
-                continue;
-            }
-
-            // Null value.
-            let value = descriptor.value;
-            if (value === null) {
-                this._appendPropertyPreview(preview, internal, {name, type: "object", subtype: "null", value: "null"}, propertiesThreshold);
-                continue;
-            }
-
-            // Ignore non-enumerable functions.
-            let type = typeof value;
-            if (!descriptor.enumerable && type === "function")
-                continue;
-
-            // Fix type of document.all.
-            if (InjectedScriptHost.isHTMLAllCollection(value))
-                type = "object";
-
-            // Primitive.
-            const maxLength = 100;
-            if (isPrimitiveValue(value)) {
-                if (type === "string" && value.length > maxLength) {
-                    value = this._abbreviateString(value, maxLength, true);
-                    preview.lossless = false;
-                }
-                this._appendPropertyPreview(preview, internal, {name, type, value: toStringDescription(value)}, propertiesThreshold);
-                continue;
-            }
-
-            // Symbol.
-            if (isSymbol(value)) {
-                let symbolString = toString(value);
-                if (symbolString.length > maxLength) {
-                    symbolString = this._abbreviateString(symbolString, maxLength, true);
-                    preview.lossless = false;
-                }
-                this._appendPropertyPreview(preview, internal, {name, type, value: symbolString}, propertiesThreshold);
-                continue;
-            }
-
-            // Object.
-            let property = {name, type};
-            let subtype = RemoteObject.subtype(value);
-            if (subtype)
-                property.subtype = subtype;
-
-            // Second level.
-            if ((secondLevelKeys === null || secondLevelKeys) || this._isPreviewableObject(value, object)) {
-                // FIXME: If we want secondLevelKeys filter to continue we would need some refactoring.
-                let subPreview = RemoteObject.createObjectPreviewForValue(value, value !== object, secondLevelKeys);
-                property.valuePreview = subPreview;
-                if (!subPreview.lossless)
-                    preview.lossless = false;
-                if (subPreview.overflow)
-                    preview.overflow = true;
-            } else {
-                let description = "";
-                if (type !== "function" || subtype === "class") {
-                    let fullDescription;
-                    if (subtype === "class")
-                        fullDescription = "class " + value.name;
-                    else if (subtype === "node")
-                        fullDescription = RemoteObject.nodePreview(value);
-                    else
-                        fullDescription = RemoteObject.describe(value);
-                    description = this._abbreviateString(fullDescription, maxLength, subtype === "regexp");
-                }
-                property.value = description;
-                preview.lossless = false;
-            }
-
-            this._appendPropertyPreview(preview, internal, property, propertiesThreshold);
-        }
-    }
-
-    _appendPropertyPreview(preview, internal, property, propertiesThreshold)
-    {
-        if (toString(property.name >>> 0) === property.name)
-            propertiesThreshold.indexes--;
-        else
-            propertiesThreshold.properties--;
-
-        if (propertiesThreshold.indexes < 0 || propertiesThreshold.properties < 0) {
-            preview.overflow = true;
+        // Error in descriptor.
+        if (descriptor.wasThrown) {
             preview.lossless = false;
-            return;
+            return InjectedScript.PropertyFetchAction.Continue;
         }
 
-        if (internal)
-            property.internal = true;
+        // Do not show "__proto__" in preview.
+        let name = descriptor.name;
+        if (name === "__proto__") {
+            // Non basic __proto__ objects may have interesting, non-enumerable, methods to show.
+            if (descriptor.value && descriptor.value.constructor
+                && descriptor.value.constructor !== @Object
+                && descriptor.value.constructor !== @Array
+                && descriptor.value.constructor !== @RegExp)
+                preview.lossless = false;
+            return InjectedScript.PropertyFetchAction.Continue;
+        }
 
-        preview.properties.push(property);
+        // For arrays, only allow indexes.
+        if (this.subtype === "array" && !isUInt32(name))
+            return InjectedScript.PropertyFetchAction.Continue;
+
+        // Do not show non-enumerable non-own properties.
+        // Special case to allow array indexes that may be on the prototype.
+        // Special case to allow native getters on non-RegExp objects.
+        if (!descriptor.enumerable && !descriptor.isOwn && !(this.subtype === "array" || (this.subtype !== "regexp" && descriptor.nativeGetter)))
+            return InjectedScript.PropertyFetchAction.Continue;
+
+        // If we have a filter, only show properties in the filter.
+        // FIXME: Currently these filters do nothing on the backend.
+        if (firstLevelKeys && !@Array.prototype.@includes.@call(firstLevelKeys, name))
+            return InjectedScript.PropertyFetchAction.Continue;
+
+        function appendPreview(property) {
+            if (toString(property.name >>> 0) === property.name)
+                propertiesThreshold.indexes--;
+            else
+                propertiesThreshold.properties--;
+
+            if (propertiesThreshold.indexes < 0 || propertiesThreshold.properties < 0) {
+                preview.overflow = true;
+                preview.lossless = false;
+                return InjectedScript.PropertyFetchAction.Stop;
+            }
+
+            if (internal)
+                property.internal = true;
+
+            @arrayPush(preview.properties, property);
+            return InjectedScript.PropertyFetchAction.Continue;
+        }
+
+        // Getter/setter.
+        if (!("value" in descriptor)) {
+            preview.lossless = false;
+            return appendPreview(@createObjectWithoutPrototype(
+                "name", name,
+                "type", "accessor",
+            ));
+        }
+
+        // Null value.
+        let value = descriptor.value;
+        if (value === null)
+            return appendPreview(@createObjectWithoutPrototype(
+                "name", name,
+                "type", "object",
+                "subtype", "null",
+                "value", "null",
+            ));
+
+        // Ignore non-enumerable functions.
+        let type = typeof value;
+        if (!descriptor.enumerable && type === "function")
+            return InjectedScript.PropertyFetchAction.Continue;
+
+        // Fix type of document.all.
+        if (InjectedScriptHost.isHTMLAllCollection(value))
+            type = "object";
+
+        // Primitive.
+        const maxLength = 100;
+        if (isPrimitiveValue(value) || isBigInt(value)) {
+            if (type === "string" && value.length > maxLength) {
+                value = this._abbreviateString(value, maxLength, true);
+                preview.lossless = false;
+            }
+            return appendPreview(@createObjectWithoutPrototype(
+                "name", name,
+                "type", type,
+                "value", toStringDescription(value),
+            ));
+        }
+
+        // Symbol.
+        if (isSymbol(value)) {
+            let symbolString = toString(value);
+            if (symbolString.length > maxLength) {
+                symbolString = this._abbreviateString(symbolString, maxLength, true);
+                preview.lossless = false;
+            }
+            return appendPreview(@createObjectWithoutPrototype(
+                "name", name,
+                "type", type,
+                "value", symbolString,
+            ));
+        }
+
+        // Object.
+        let property = @createObjectWithoutPrototype(
+            "name", name,
+            "type", type,
+        );
+        let subtype = RemoteObject.subtype(value);
+        if (subtype)
+            property.subtype = subtype;
+
+        // Second level.
+        if ((secondLevelKeys === null || secondLevelKeys) || this._isPreviewableObject(value, object)) {
+            // FIXME: If we want secondLevelKeys filter to continue we would need some refactoring.
+            let subPreview = RemoteObject.createObjectPreviewForValue(value, value !== object, secondLevelKeys);
+            property.valuePreview = subPreview;
+            if (!subPreview.lossless)
+                preview.lossless = false;
+            if (subPreview.overflow)
+                preview.overflow = true;
+        } else {
+            let description = "";
+            if (type !== "function" || subtype === "class") {
+                let fullDescription;
+                if (subtype === "class")
+                    fullDescription = "class " + value.name;
+                else if (subtype === "node")
+                    fullDescription = RemoteObject.nodePreview(value);
+                else
+                    fullDescription = RemoteObject.describe(value);
+                description = this._abbreviateString(fullDescription, maxLength, subtype === "regexp");
+            }
+            property.value = description;
+            preview.lossless = false;
+        }
+
+        return appendPreview(property);
     }
 
     _appendEntryPreviews(object, preview)
@@ -1210,7 +1403,7 @@ let RemoteObject = class RemoteObject
             return;
 
         if (entries.length > 5) {
-            entries.pop();
+            @Array.prototype.@pop.@call(entries);
             preview.overflow = true;
             preview.lossless = false;
         }
@@ -1220,7 +1413,7 @@ let RemoteObject = class RemoteObject
                 preview.lossless = false;
         }
 
-        preview.entries = entries.map(function(entry) {
+        preview.entries = @Array.prototype.@map.@call(entries, function(entry) {
             entry.value = RemoteObject.createObjectPreviewForValue(entry.value, entry.value !== object);
             updateMainPreview(entry.value);
             if ("key" in entry) {
@@ -1233,8 +1426,8 @@ let RemoteObject = class RemoteObject
 
     _isPreviewableObject(value, object)
     {
-        let set = new Set;
-        set.add(object);
+        let set = new @Set;
+        set.@add(object);
 
         return this._isPreviewableObjectInternal(value, set, 1);
     }
@@ -1246,7 +1439,7 @@ let RemoteObject = class RemoteObject
             return false;
 
         // Primitive.
-        if (isPrimitiveValue(object) || isSymbol(object))
+        if (isPrimitiveValue(object) || isBigInt(object) || isSymbol(object))
             return true;
 
         // Null.
@@ -1254,11 +1447,11 @@ let RemoteObject = class RemoteObject
             return true;
 
         // Cyclic objects.
-        if (knownObjects.has(object))
+        if (knownObjects.@has(object))
             return false;
 
         ++depth;
-        knownObjects.add(object);
+        knownObjects.@add(object);
 
         // Arrays are simple if they have 5 or less simple objects.
         let subtype = RemoteObject.subtype(object);
@@ -1277,12 +1470,15 @@ let RemoteObject = class RemoteObject
         if (object.__proto__ && object.__proto__.__proto__)
             return false;
 
-        // Objects are simple if they have 3 or less simple properties.
-        let ownPropertyNames = Object.getOwnPropertyNames(object);
+        // Objects are simple if they have 3 or less simple value properties.
+        let ownPropertyNames = @Object.@getOwnPropertyNames(object);
         if (ownPropertyNames.length > 3)
             return false;
         for (let i = 0; i < ownPropertyNames.length; ++i) {
             let propertyName = ownPropertyNames[i];
+            let descriptor = @Object.@getOwnPropertyDescriptor(object, propertyName);
+            if (descriptor && !("value" in descriptor))
+                return false;
             if (!this._isPreviewableObjectInternal(object[propertyName], knownObjects, depth))
                 return false;
         }
@@ -1298,112 +1494,155 @@ let RemoteObject = class RemoteObject
         if (middle) {
             let leftHalf = maxLength >> 1;
             let rightHalf = maxLength - leftHalf - 1;
-            return string.substr(0, leftHalf) + "\u2026" + string.substr(string.length - rightHalf, rightHalf);
+            return string.@substr(0, leftHalf) + "\u2026" + string.@substr(string.length - rightHalf, rightHalf);
         }
 
-        return string.substr(0, maxLength) + "\u2026";
+        return string.@substr(0, maxLength) + "\u2026";
     }
-}
+};
 
 // -------
 
-InjectedScript.CallFrameProxy = function(ordinal, callFrame)
+InjectedScript.CallFrameProxy = class CallFrameProxy extends PrototypelessObjectBase
 {
-    this.callFrameId = `{"ordinal":${ordinal},"injectedScriptId":${injectedScriptId}}`;
-    this.functionName = callFrame.functionName;
-    this.location = {scriptId: String(callFrame.sourceID), lineNumber: callFrame.line, columnNumber: callFrame.column};
-    this.scopeChain = this._wrapScopeChain(callFrame);
-    this.this = RemoteObject.create(callFrame.thisObject, "backtrace");
-    this.isTailDeleted = callFrame.isTailDeleted;
-}
+    constructor(ordinal, callFrame)
+    {
+        super();
 
-InjectedScript.CallFrameProxy.prototype = {
+        this.callFrameId = `{"ordinal":${ordinal},"injectedScriptId":${injectedScriptId}}`;
+        this.functionName = callFrame.functionName;
+
+        this.location = @createObjectWithoutPrototype(
+            "scriptId", @String(callFrame.sourceID),
+            "lineNumber", callFrame.line,
+            "columnNumber", callFrame.column,
+        );
+
+        this.scopeChain = this._wrapScopeChain(callFrame);
+        this.this = RemoteObject.create(callFrame.thisObject, "backtrace");
+        this.isTailDeleted = callFrame.isTailDeleted;
+    }
+
     _wrapScopeChain(callFrame)
     {
         let scopeChain = callFrame.scopeChain;
         let scopeDescriptions = callFrame.scopeDescriptions();
 
-        let scopeChainProxy = [];
+        let scopeChainProxy = @createArrayWithoutPrototype();
         for (let i = 0; i < scopeChain.length; i++)
             scopeChainProxy[i] = InjectedScript.CallFrameProxy._createScopeJson(scopeChain[i], scopeDescriptions[i], "backtrace");
         return scopeChainProxy;
     }
-}
 
-InjectedScript.CallFrameProxy._scopeTypeNames = {
-    0: "global", // GLOBAL_SCOPE
-    1: "with", // WITH_SCOPE
-    2: "closure", // CLOSURE_SCOPE
-    3: "catch", // CATCH_SCOPE
-    4: "functionName", // FUNCTION_NAME_SCOPE
-    5: "globalLexicalEnvironment", // GLOBAL_LEXICAL_ENVIRONMENT_SCOPE
-    6: "nestedLexical", // NESTED_LEXICAL_SCOPE
+    static _createScopeJson(object, {name, type, location}, groupId)
+    {
+        let scope = @createObjectWithoutPrototype(
+            "object", RemoteObject.create(object, groupId),
+            "type", InjectedScript.CallFrameProxy._scopeTypeNames[type],
+        );
+
+        if (name)
+            scope.name = name;
+
+        if (location)
+            scope.location = location;
+
+        if (isEmptyObject(object))
+            scope.empty = true;
+
+        return scope;
+    }
 };
 
-InjectedScript.CallFrameProxy._createScopeJson = function(object, {name, type, location}, groupId)
-{
-    let scope = {
-        object: RemoteObject.create(object, groupId),
-        type: InjectedScript.CallFrameProxy._scopeTypeNames[type],
-    };
-
-    if (name)
-        scope.name = name;
-
-    if (location)
-        scope.location = location;
-
-    if (isEmptyObject(object))
-        scope.empty = true;
-
-    return scope;
-}
+InjectedScript.CallFrameProxy._scopeTypeNames = @createObjectWithoutPrototype(
+    0, "global", // GLOBAL_SCOPE
+    1, "with", // WITH_SCOPE
+    2, "closure", // CLOSURE_SCOPE
+    3, "catch", // CATCH_SCOPE
+    4, "functionName", // FUNCTION_NAME_SCOPE
+    5, "globalLexicalEnvironment", // GLOBAL_LEXICAL_ENVIRONMENT
+    6, "nestedLexical", // NESTED_LEXICAL_SCOPE
+);
 
 // -------
 
-function bind(func, thisObject, ...outerArgs)
+function CommandLineAPI(callFrame)
 {
-    return function(...innerArgs) {
-        return func.apply(thisObject, outerArgs.concat(innerArgs));
-    };
-}
+    let savedResultAlias = InjectedScriptHost.savedResultAlias;
 
-function BasicCommandLineAPI(callFrame)
-{
-    this.$_ = injectedScript._lastResult;
-    this.$exception = injectedScript._exceptionValue;
+    let defineGetter = (key, value, wrap) => {
+        if (wrap) {
+            let originalValue = value;
+            value = function() { return originalValue; };
+        }
+
+        @Object.@defineProperty(this, "$" + key, @createObjectWithoutPrototype("get", value));
+        if (savedResultAlias && savedResultAlias !== "$")
+            @Object.@defineProperty(this, savedResultAlias + key, @createObjectWithoutPrototype("get", value));
+    };
+
+    if ("_lastResult" in injectedScript)
+        defineGetter("_", injectedScript._lastResult, true);
+
+    if ("_exceptionValue" in injectedScript)
+        defineGetter("exception", injectedScript._exceptionValue, true);
+
+    if ("_eventValue" in injectedScript)
+        defineGetter("event", injectedScript._eventValue, true);
 
     // $1-$99
-    for (let i = 1; i <= injectedScript._savedResults.length; ++i)
-        this.__defineGetter__("$" + i, bind(injectedScript._savedResult, injectedScript, i));
+    for (let i = 1; i < injectedScript._savedResults.length; ++i)
+        defineGetter(i, injectedScript._savedResults[i], true);
 
-    // Command Line API methods.
-    for (let i = 0; i < BasicCommandLineAPI.methods.length; ++i) {
-        let method = BasicCommandLineAPI.methods[i];
-        this[method.name] = method;
-    }
+    for (let name in CommandLineAPI.getters)
+        defineGetter(name, CommandLineAPI.getters[name]);
+
+    for (let name in CommandLineAPI.methods)
+        this[name] = CommandLineAPI.methods[name];
 }
 
-BasicCommandLineAPI.methods = [
-    function dir() { return inspectedGlobalObject.console.dir(...arguments); },
-    function clear() { return inspectedGlobalObject.console.clear(...arguments); },
-    function table() { return inspectedGlobalObject.console.table(...arguments); },
-    function profile() { return inspectedGlobalObject.console.profile(...arguments); },
-    function profileEnd() { return inspectedGlobalObject.console.profileEnd(...arguments); },
+CommandLineAPI.getters = @createObjectWithoutPrototype();
 
-    function keys(object) { return Object.keys(object); },
-    function values(object) {
-        let result = [];
-        for (let key in object)
-            result.push(object[key]);
-        return result;
-    },
-];
+CommandLineAPI.methods = @createObjectWithoutPrototype();
 
-for (let i = 0; i < BasicCommandLineAPI.methods.length; ++i) {
-    let method = BasicCommandLineAPI.methods[i];
-    method.toString = function() { return "function " + method.name + "() { [Command Line API] }"; };
-}
+CommandLineAPI.methods["keys"] = function(object) { return @Object.@keys(object); };
+CommandLineAPI.methods["values"] = function(object) { return @Object.@values(object); };
+
+CommandLineAPI.methods["queryInstances"] = function() { return InjectedScriptHost.queryInstances(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["queryObjects"] = function() { return InjectedScriptHost.queryInstances(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["queryHolders"] = function() { return InjectedScriptHost.queryHolders(...createIterableWithoutPrototypeFromArguments(arguments)); };
+
+CommandLineAPI.methods["inspect"] = function(object) { return injectedScript.inspectObject(object); };
+
+CommandLineAPI.methods["assert"] = function() { return inspectedGlobalObject.console.assert(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["clear"] = function() { return inspectedGlobalObject.console.clear(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["count"] = function() { return inspectedGlobalObject.console.count(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["countReset"] = function() { return inspectedGlobalObject.console.countReset(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["debug"] = function() { return inspectedGlobalObject.console.debug(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["dir"] = function() { return inspectedGlobalObject.console.dir(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["dirxml"] = function() { return inspectedGlobalObject.console.dirxml(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["error"] = function() { return inspectedGlobalObject.console.error(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["group"] = function() { return inspectedGlobalObject.console.group(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["groupCollapsed"] = function() { return inspectedGlobalObject.console.groupCollapsed(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["groupEnd"] = function() { return inspectedGlobalObject.console.groupEnd(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["info"] = function() { return inspectedGlobalObject.console.info(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["log"] = function() { return inspectedGlobalObject.console.log(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["profile"] = function() { return inspectedGlobalObject.console.profile(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["profileEnd"] = function() { return inspectedGlobalObject.console.profileEnd(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["record"] = function() { return inspectedGlobalObject.console.record(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["recordEnd"] = function() { return inspectedGlobalObject.console.recordEnd(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["screenshot"] = function() { return inspectedGlobalObject.console.screenshot(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["table"] = function() { return inspectedGlobalObject.console.table(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["takeHeapSnapshot"] = function() { return inspectedGlobalObject.console.takeHeapSnapshot(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["time"] = function() { return inspectedGlobalObject.console.time(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["timeEnd"] = function() { return inspectedGlobalObject.console.timeEnd(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["timeLog"] = function() { return inspectedGlobalObject.console.timeLog(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["timeStamp"] = function() { return inspectedGlobalObject.console.timeStamp(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["trace"] = function() { return inspectedGlobalObject.console.trace(...createIterableWithoutPrototypeFromArguments(arguments)); };
+CommandLineAPI.methods["warn"] = function() { return inspectedGlobalObject.console.warn(...createIterableWithoutPrototypeFromArguments(arguments)); };
+
+for (let name in CommandLineAPI.methods)
+    CommandLineAPI.methods[name].toString = function() { return "function " + name + "() { [Command Line API] }"; };
 
 return injectedScript;
-})
+}

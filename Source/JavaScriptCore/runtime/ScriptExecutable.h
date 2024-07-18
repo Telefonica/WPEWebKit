@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2010, 2013-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,41 +26,46 @@
 #pragma once
 
 #include "ExecutableBase.h"
+#include "ParserModes.h"
 
 namespace JSC {
+
+class JSArray;
+class JSTemplateObjectDescriptor;
+class IsoCellSet;
 
 class ScriptExecutable : public ExecutableBase {
 public:
     typedef ExecutableBase Base;
-    static const unsigned StructureFlags = Base::StructureFlags;
+    static constexpr unsigned StructureFlags = Base::StructureFlags;
 
     static void destroy(JSCell*);
+
+    using TemplateObjectMap = HashMap<uint64_t, WriteBarrier<JSArray>, WTF::IntHash<uint64_t>, WTF::UnsignedWithZeroKeyHashTraits<uint64_t>>;
         
     CodeBlockHash hashFor(CodeSpecializationKind) const;
 
     const SourceCode& source() const { return m_source; }
-    intptr_t sourceID() const { return m_source.providerID(); }
+    SourceID sourceID() const { return m_source.providerID(); }
     const SourceOrigin& sourceOrigin() const { return m_source.provider()->sourceOrigin(); }
-    const String& sourceURL() const { return m_source.provider()->url(); }
+    // This is NOT the path that should be used for computing relative paths from a script. Use SourceOrigin's URL for that, the values may or may not be the same... This should only be used for `error.sourceURL` and stack traces.
+    const String& sourceURL() const { return m_source.provider()->sourceURL(); }
     int firstLine() const { return m_source.firstLine().oneBasedInt(); }
-    void setOverrideLineNumber(int overrideLineNumber) { m_overrideLineNumber = overrideLineNumber; }
-    bool hasOverrideLineNumber() const { return m_overrideLineNumber != -1; }
-    int overrideLineNumber() const { return m_overrideLineNumber; }
-    int lastLine() const { return m_lastLine; }
+    JS_EXPORT_PRIVATE int lastLine() const;
     unsigned startColumn() const { return m_source.startColumn().oneBasedInt(); }
-    unsigned endColumn() const { return m_endColumn; }
-    unsigned typeProfilingStartOffset() const { return m_typeProfilingStartOffset; }
-    unsigned typeProfilingEndOffset() const { return m_typeProfilingEndOffset; }
+    JS_EXPORT_PRIVATE unsigned endColumn() const;
 
-    bool usesEval() const { return m_features & EvalFeature; }
+    std::optional<int> overrideLineNumber(VM&) const;
+    unsigned typeProfilingStartOffset(VM&) const;
+    unsigned typeProfilingEndOffset(VM&) const;
+
     bool usesArguments() const { return m_features & ArgumentsFeature; }
     bool isArrowFunctionContext() const { return m_isArrowFunctionContext; }
-    bool isStrictMode() const { return m_features & StrictModeFeature; }
     DerivedContextType derivedContextType() const { return static_cast<DerivedContextType>(m_derivedContextType); }
     EvalContextType evalContextType() const { return static_cast<EvalContextType>(m_evalContextType); }
+    bool isInStrictContext() const { return m_lexicalScopeFeatures & StrictModeLexicalFeature; }
+    bool usesNonSimpleParameterList() const { return m_features & NonSimpleParameterListFeature; }
 
-    ECMAMode ecmaMode() const { return isStrictMode() ? StrictMode : NotStrictMode; }
-        
     void setNeverInline(bool value) { m_neverInline = value; }
     void setNeverOptimize(bool value) { m_neverOptimize = value; }
     void setNeverFTLOptimize(bool value) { m_neverFTLOptimize = value; }
@@ -73,6 +78,7 @@ public:
     bool isInliningCandidate() const { return !neverInline(); }
     bool isOkToOptimize() const { return !neverOptimize(); }
     bool canUseOSRExitFuzzing() const { return m_canUseOSRExitFuzzing; }
+    bool isInsideOrdinaryFunction() const { return m_isInsideOrdinaryFunction; }
     
     bool* addressOfDidTryToEnterInLoop() { return &m_didTryToEnterInLoop; }
 
@@ -80,19 +86,27 @@ public:
         
     DECLARE_EXPORT_INFO;
 
-    void recordParse(CodeFeatures features, bool hasCapturedVariables, int lastLine, unsigned endColumn)
-    {
-        m_features = features;
-        m_hasCapturedVariables = hasCapturedVariables;
-        m_lastLine = lastLine;
-        ASSERT(endColumn != UINT_MAX);
-        m_endColumn = endColumn;
-    }
-
+    void recordParse(CodeFeatures, LexicalScopeFeatures, bool hasCapturedVariables, int lastLine, unsigned endColumn);
     void installCode(CodeBlock*);
     void installCode(VM&, CodeBlock*, CodeType, CodeSpecializationKind);
-    CodeBlock* newCodeBlockFor(CodeSpecializationKind, JSFunction*, JSScope*, JSObject*& exception);
+    CodeBlock* newCodeBlockFor(CodeSpecializationKind, JSFunction*, JSScope*);
     CodeBlock* newReplacementCodeBlockFor(CodeSpecializationKind);
+
+    void clearCode(IsoCellSet&);
+
+    Intrinsic intrinsic() const
+    {
+        return m_intrinsic;
+    }
+
+    bool hasJITCodeForCall() const
+    {
+        return m_jitCodeForCall;
+    }
+    bool hasJITCodeForConstruct() const
+    {
+        return m_jitCodeForConstruct;
+    }
 
     // This function has an interesting GC story. Callers of this function are asking us to create a CodeBlock
     // that is not jettisoned before this function returns. Callers are essentially asking for a strong reference
@@ -101,43 +115,53 @@ public:
     // to point to it. This forces callers to have a CodeBlock* in a register or on the stack that will be marked
     // by conservative GC if a GC happens after we create the CodeBlock.
     template <typename ExecutableType>
-    JSObject* prepareForExecution(VM&, JSFunction*, JSScope*, CodeSpecializationKind, CodeBlock*& resultCodeBlock);
+    void prepareForExecution(VM&, JSFunction*, JSScope*, CodeSpecializationKind, CodeBlock*&);
+
+    ScriptExecutable* topLevelExecutable();
+    JSArray* createTemplateObject(JSGlobalObject*, JSTemplateObjectDescriptor*);
 
 private:
     friend class ExecutableBase;
-    JSObject* prepareForExecutionImpl(VM&, JSFunction*, JSScope*, CodeSpecializationKind, CodeBlock*&);
+    void prepareForExecutionImpl(VM&, JSFunction*, JSScope*, CodeSpecializationKind, CodeBlock*&);
+
+    bool hasClearableCode() const;
+
+    TemplateObjectMap& ensureTemplateObjectMap(VM&);
 
 protected:
-    ScriptExecutable(Structure*, VM&, const SourceCode&, bool isInStrictContext, DerivedContextType, bool isInArrowFunctionContext, EvalContextType, Intrinsic);
+    ScriptExecutable(Structure*, VM&, const SourceCode&, LexicalScopeFeatures, DerivedContextType, bool isInArrowFunctionContext, bool isInsideOrdinaryFunction, EvalContextType, Intrinsic);
 
-    void finishCreation(VM& vm)
+    void recordParse(CodeFeatures features, LexicalScopeFeatures lexicalScopeFeatures, bool hasCapturedVariables)
     {
-        Base::finishCreation(vm);
-        vm.heap.addExecutable(this); // Balanced by Heap::deleteUnmarkedCompiledCode().
-
-#if ENABLE(CODEBLOCK_SAMPLING)
-        if (SamplingTool* sampler = vm.interpreter->sampler())
-            sampler->notifyOfScope(vm, this);
-#endif
+        m_features = features;
+        m_lexicalScopeFeatures = lexicalScopeFeatures;
+        m_hasCapturedVariables = hasCapturedVariables;
     }
 
+    static TemplateObjectMap& ensureTemplateObjectMapImpl(std::unique_ptr<TemplateObjectMap>& dest);
+
+    template<typename Visitor>
+    static void runConstraint(const ConcurrentJSLocker&, Visitor&, CodeBlock*);
+    template<typename Visitor>
+    static void visitCodeBlockEdge(Visitor&, CodeBlock*);
+    void finalizeCodeBlockEdge(VM&, WriteBarrier<CodeBlock>&);
+
+    SourceCode m_source;
+    Intrinsic m_intrinsic { NoIntrinsic };
+    bool m_didTryToEnterInLoop { false };
     CodeFeatures m_features;
-    bool m_didTryToEnterInLoop;
+    unsigned m_lexicalScopeFeatures : bitWidthOfLexicalScopeFeatures;
+    OptionSet<CodeGenerationMode> m_codeGenerationModeForGeneratorBody;
     bool m_hasCapturedVariables : 1;
     bool m_neverInline : 1;
     bool m_neverOptimize : 1;
     bool m_neverFTLOptimize : 1;
     bool m_isArrowFunctionContext : 1;
     bool m_canUseOSRExitFuzzing : 1;
+    bool m_codeForGeneratorBodyWasGenerated : 1;
+    bool m_isInsideOrdinaryFunction : 1;
     unsigned m_derivedContextType : 2; // DerivedContextType
     unsigned m_evalContextType : 2; // EvalContextType
-
-    int m_overrideLineNumber;
-    int m_lastLine;
-    unsigned m_endColumn;
-    unsigned m_typeProfilingStartOffset;
-    unsigned m_typeProfilingEndOffset;
-    SourceCode m_source;
 };
 
 } // namespace JSC

@@ -26,33 +26,32 @@
 #import "config.h"
 #import "WKAirPlayRoutePicker.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY) && ENABLE(AIRPLAY_PICKER)
 
 #import "UIKitSPI.h"
+#import <WebCore/AudioSession.h>
 #import <pal/spi/ios/MediaPlayerSPI.h>
 #import <wtf/RetainPtr.h>
 #import <wtf/SoftLinking.h>
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED < 110000 || PLATFORM(WATCHOS) || PLATFORM(APPLETV)
+#if PLATFORM(WATCHOS) || PLATFORM(APPLETV)
+#import "UserInterfaceIdiom.h"
 #import "WKContentView.h"
 #import "WKContentViewInteraction.h"
 #import "WebPageProxy.h"
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
 
 SOFT_LINK_FRAMEWORK(MediaPlayer)
 SOFT_LINK_CLASS(MediaPlayer, MPAVRoutingController)
 SOFT_LINK_CLASS(MediaPlayer, MPAudioVideoRoutingPopoverController)
 SOFT_LINK_CLASS(MediaPlayer, MPAVRoutingSheet)
 
-using namespace WebKit;
-
 @implementation WKAirPlayRoutePicker {
     RetainPtr<MPAVRoutingController> _routingController;
     RetainPtr<MPAudioVideoRoutingPopoverController> _popoverController;  // iPad
     RetainPtr<MPAVRoutingSheet> _actionSheet; // iPhone
-    WKContentView* _view; // Weak reference.
+    WKContentView *_view;
 }
 
 - (instancetype)initWithView:(WKContentView *)view
@@ -73,7 +72,9 @@ using namespace WebKit;
     [super dealloc];
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)popoverControllerDidDismissPopover:(UIPopoverController *)popoverController
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     if (popoverController != _popoverController)
         return;
@@ -151,21 +152,41 @@ using namespace WebKit;
     [_routingController setDiscoveryMode:MPRouteDiscoveryModeDetailed];
 
     MPAVItemType itemType = hasVideo ? MPAVItemTypeVideo : MPAVItemTypeAudio;
-    if (UICurrentUserInterfaceIdiomIsPad())
-        [self showAirPlayPickerIPad:itemType fromRect:elementRect];
-    else
+    if (WebKit::currentUserInterfaceIdiomIsSmallScreen())
         [self showAirPlayPickerIPhone:itemType];
+    else
+        [self showAirPlayPickerIPad:itemType fromRect:elementRect];
 }
 
 @end
 
-#pragma clang diagnostic pop
+ALLOW_DEPRECATED_DECLARATIONS_END
 
 #else 
 
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+
 SOFT_LINK_FRAMEWORK(MediaPlayer)
 SOFT_LINK_CLASS(MediaPlayer, MPAVRoutingController)
+SOFT_LINK_CLASS(MediaPlayer, MPMediaControlsConfiguration)
 SOFT_LINK_CLASS(MediaPlayer, MPMediaControlsViewController)
+
+@interface MPMediaControlsConfiguration (WKMPMediaControlsConfiguration)
+@property (nonatomic) BOOL sortByIsVideoRoute;
+@end
+
+enum {
+    WKAirPlayRoutePickerRouteSharingPolicyDefault = 0,
+    WKAirPlayRoutePickerRouteSharingPolicyLongFormAudio = 1,
+    WKAirPlayRoutePickerRouteSharingPolicyIndependent = 2,
+    WKAirPlayRoutePickerRouteSharingPolicyLongFormVideo = 3,
+};
+typedef NSInteger WKAirPlayRoutePickerRouteSharingPolicy;
+
+@interface MPMediaControlsViewController (WKMPMediaControlsViewControllerPrivate)
+- (instancetype)initWithConfiguration:(MPMediaControlsConfiguration *)configuration;
+- (void)setOverrideRouteSharingPolicy:(WKAirPlayRoutePickerRouteSharingPolicy)routeSharingPolicy routingContextUID:(NSString *)routingContextUID;
+@end
 
 @implementation WKAirPlayRoutePicker {
     RetainPtr<MPMediaControlsViewController> _actionSheet;
@@ -177,15 +198,28 @@ SOFT_LINK_CLASS(MediaPlayer, MPMediaControlsViewController)
     [super dealloc];
 }
 
-- (void)showFromView:(UIView *)view
+- (void)showFromView:(UIView *)view routeSharingPolicy:(WebCore::RouteSharingPolicy)routeSharingPolicy routingContextUID:(NSString *)routingContextUID hasVideo:(BOOL)hasVideo
 {
+    static_assert(static_cast<size_t>(WebCore::RouteSharingPolicy::Default) == static_cast<size_t>(WKAirPlayRoutePickerRouteSharingPolicyDefault), "RouteSharingPolicy::Default is not WKAirPlayRoutePickerRouteSharingPolicyDefault as expected");
+    static_assert(static_cast<size_t>(WebCore::RouteSharingPolicy::LongFormAudio) == static_cast<size_t>(WKAirPlayRoutePickerRouteSharingPolicyLongFormAudio), "RouteSharingPolicy::LongFormAudio is not WKAirPlayRoutePickerRouteSharingPolicyLongFormAudio as expected");
+    static_assert(static_cast<size_t>(WebCore::RouteSharingPolicy::Independent) == static_cast<size_t>(WKAirPlayRoutePickerRouteSharingPolicyIndependent), "RouteSharingPolicy::Independent is not WKAirPlayRoutePickerRouteSharingPolicyIndependent as expected");
+    static_assert(static_cast<size_t>(WebCore::RouteSharingPolicy::LongFormVideo) == static_cast<size_t>(WKAirPlayRoutePickerRouteSharingPolicyLongFormVideo), "RouteSharingPolicy::LongFormVideo is not WKAirPlayRoutePickerRouteSharingPolicyLongFormVideo as expected");
     if (_actionSheet)
         return;
 
     __block RetainPtr<MPAVRoutingController> routingController = adoptNS([allocMPAVRoutingControllerInstance() initWithName:@"WebKit - HTML media element showing AirPlay route picker"]);
     [routingController setDiscoveryMode:MPRouteDiscoveryModeDetailed];
 
-    _actionSheet = adoptNS([allocMPMediaControlsViewControllerInstance() init]);
+    RetainPtr<MPMediaControlsConfiguration> configuration;
+    if ([getMPMediaControlsConfigurationClass() instancesRespondToSelector:@selector(setSortByIsVideoRoute:)]) {
+        configuration = adoptNS([allocMPMediaControlsConfigurationInstance() init]);
+        configuration.get().sortByIsVideoRoute = hasVideo;
+    }
+    _actionSheet = adoptNS([allocMPMediaControlsViewControllerInstance() initWithConfiguration:configuration.get()]);
+
+    if ([_actionSheet respondsToSelector:@selector(setOverrideRouteSharingPolicy:routingContextUID:)])
+        [_actionSheet setOverrideRouteSharingPolicy:static_cast<WKAirPlayRoutePickerRouteSharingPolicy>(routeSharingPolicy) routingContextUID:routingContextUID];
+
     _actionSheet.get().didDismissHandler = ^ {
         [routingController setDiscoveryMode:MPRouteDiscoveryModeDisabled];
         routingController = nil;
@@ -198,6 +232,8 @@ SOFT_LINK_CLASS(MediaPlayer, MPMediaControlsViewController)
 
 @end
 
+ALLOW_DEPRECATED_DECLARATIONS_END
+
 #endif
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY) && ENABLE(AIRPLAY_PICKER)

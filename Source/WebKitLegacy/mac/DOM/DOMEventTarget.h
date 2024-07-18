@@ -23,13 +23,14 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import <Foundation/Foundation.h>
 #import <WebKitLegacy/WebKitAvailability.h>
 
 @class DOMEvent;
 @class NSString;
 @protocol DOMEventListener;
 
-WEBKIT_CLASS_AVAILABLE_MAC(10_4)
+WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @protocol DOMEventTarget <NSObject, NSCopying>
 - (void)addEventListener:(NSString *)type listener:(id <DOMEventListener>)listener useCapture:(BOOL)useCapture WEBKIT_AVAILABLE_MAC(10_5);
 - (void)removeEventListener:(NSString *)type listener:(id <DOMEventListener>)listener useCapture:(BOOL)useCapture WEBKIT_AVAILABLE_MAC(10_5);

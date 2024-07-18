@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,18 +29,15 @@
 #import "WebDatabaseManagerPrivate.h"
 
 #import "WebDatabaseManagerClient.h"
+#import "WebDatabaseProvider.h"
 #import "WebPlatformStrategies.h"
 #import "WebSecurityOriginInternal.h"
-
 #import <WebCore/DatabaseManager.h>
 #import <WebCore/DatabaseTracker.h>
 #import <WebCore/SecurityOrigin.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
-#if ENABLE(INDEXED_DATABASE)
-#import "WebDatabaseProvider.h"
-#endif
-
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import "WebDatabaseManagerInternal.h"
 #import <WebCore/DatabaseTracker.h>
 #import <WebCore/WebCoreThread.h>
@@ -58,7 +55,7 @@ NSString *WebDatabaseDidModifyOriginNotification = @"WebDatabaseDidModifyOriginN
 NSString *WebDatabaseDidModifyDatabaseNotification = @"WebDatabaseDidModifyDatabaseNotification";
 NSString *WebDatabaseIdentifierKey = @"WebDatabaseIdentifierKey";
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 CFStringRef WebDatabaseOriginsDidChangeNotification = CFSTR("WebDatabaseOriginsDidChangeNotification");
 #endif
 
@@ -85,32 +82,23 @@ static NSString *databasesDirectoryPath();
     dbManager.initialize(databasesDirectoryPath());
 
     // Set the DatabaseManagerClient
-    dbManager.setClient(WebDatabaseManagerClient::sharedWebDatabaseManagerClient());
+    dbManager.setClient(&WebKit::WebDatabaseManagerClient::sharedWebDatabaseManagerClient());
 
     return self;
 }
 
 - (NSArray *)origins
 {
-    auto coreOrigins = DatabaseTracker::singleton().origins();
-    NSMutableArray *webOrigins = [[NSMutableArray alloc] initWithCapacity:coreOrigins.size()];
-    for (auto& coreOrigin : coreOrigins) {
-        WebSecurityOrigin *webOrigin = [[WebSecurityOrigin alloc] _initWithWebCoreSecurityOrigin:coreOrigin.securityOrigin().ptr()];
-        [webOrigins addObject:webOrigin];
-        [webOrigin release];
-    }
-    return [webOrigins autorelease];
+    return createNSArray(DatabaseTracker::singleton().origins(), [] (auto& origin) {
+        return adoptNS([[WebSecurityOrigin alloc] _initWithWebCoreSecurityOrigin:origin.securityOrigin().ptr()]);
+    }).autorelease();
 }
 
 - (NSArray *)databasesWithOrigin:(WebSecurityOrigin *)origin
 {
     if (!origin)
         return nil;
-    Vector<String> nameVector = DatabaseTracker::singleton().databaseNames(SecurityOriginData::fromSecurityOrigin(*[origin _core]));
-    NSMutableArray *names = [[NSMutableArray alloc] initWithCapacity:nameVector.size()];
-    for (auto& name : nameVector)
-        [names addObject:(NSString *)name];
-    return [names autorelease];
+    return createNSArray(DatabaseTracker::singleton().databaseNames([origin _core]->data())).autorelease();
 }
 
 - (NSDictionary *)detailsForDatabase:(NSString *)databaseIdentifier withOrigin:(WebSecurityOrigin *)origin
@@ -118,22 +106,21 @@ static NSString *databasesDirectoryPath();
     if (!origin)
         return nil;
 
-    DatabaseDetails details = DatabaseManager::singleton().detailsForNameAndOrigin(databaseIdentifier, *[origin _core]);
+    auto details = DatabaseManager::singleton().detailsForNameAndOrigin(databaseIdentifier, *[origin _core]);
     if (details.name().isNull())
         return nil;
-        
-    static const id keys[3] = { WebDatabaseDisplayNameKey, WebDatabaseExpectedSizeKey, WebDatabaseUsageKey };
-    id objects[3];
-    objects[0] = details.displayName().isEmpty() ? databaseIdentifier : (NSString *)details.displayName();
-    objects[1] = [NSNumber numberWithUnsignedLongLong:details.expectedUsage()];
-    objects[2] = [NSNumber numberWithUnsignedLongLong:details.currentUsage()];
-    return [[[NSDictionary alloc] initWithObjects:objects forKeys:keys count:3] autorelease];
+
+    return @{
+        WebDatabaseDisplayNameKey: details.displayName().isEmpty() ? databaseIdentifier : (NSString *)details.displayName(),
+        WebDatabaseExpectedSizeKey: @(details.expectedUsage()),
+        WebDatabaseUsageKey: @(details.currentUsage()),
+    };
 }
 
 - (void)deleteAllDatabases
 {
     DatabaseTracker::singleton().deleteAllDatabasesImmediately();
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     // FIXME: This needs to be removed once DatabaseTrackers in multiple processes
     // are in sync: <rdar://problem/9567500> Remove Website Data pane is not kept in sync with Safari
     [[NSFileManager defaultManager] removeItemAtPath:databasesDirectoryPath() error:NULL];
@@ -142,23 +129,21 @@ static NSString *databasesDirectoryPath();
 
 - (BOOL)deleteOrigin:(WebSecurityOrigin *)origin
 {
-    return origin && DatabaseTracker::singleton().deleteOrigin(SecurityOriginData::fromSecurityOrigin(*[origin _core]));
+    return origin && DatabaseTracker::singleton().deleteOrigin([origin _core]->data());
 }
 
 - (BOOL)deleteDatabase:(NSString *)databaseIdentifier withOrigin:(WebSecurityOrigin *)origin
 {
-    return origin && DatabaseTracker::singleton().deleteDatabase(SecurityOriginData::fromSecurityOrigin(*[origin _core]), databaseIdentifier);
+    return origin && DatabaseTracker::singleton().deleteDatabase([origin _core]->data(), databaseIdentifier);
 }
 
 // For DumpRenderTree support only
 - (void)deleteAllIndexedDatabases
 {
-#if ENABLE(INDEXED_DATABASE)
     WebDatabaseProvider::singleton().deleteAllDatabases();
-#endif
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 static bool isFileHidden(NSString *file)
 {
@@ -229,7 +214,7 @@ static bool isFileHidden(NSString *file)
     });
 }
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)
 
 @end
 

@@ -26,8 +26,7 @@
 #include "config.h"
 #include "PrintInfo.h"
 
-#include "Decoder.h"
-#include "Encoder.h"
+#include "WebCoreArgumentCoders.h"
 
 #if PLATFORM(GTK)
 #include "ArgumentCodersGtk.h"
@@ -40,14 +39,15 @@ void PrintInfo::encode(IPC::Encoder& encoder) const
     encoder << pageSetupScaleFactor;
     encoder << availablePaperWidth;
     encoder << availablePaperHeight;
+    encoder << margin;
 
 #if PLATFORM(GTK)
     IPC::encode(encoder, printSettings.get());
     IPC::encode(encoder, pageSetup.get());
-    encoder.encodeEnum(printMode);
+    encoder << printMode;
 #endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     encoder << snapshotFirstPage;
 #endif
 }
@@ -60,17 +60,19 @@ bool PrintInfo::decode(IPC::Decoder& decoder, PrintInfo& info)
         return false;
     if (!decoder.decode(info.availablePaperHeight))
         return false;
+    if (!decoder.decode(info.margin))
+        return false;
 
 #if PLATFORM(GTK)
     if (!IPC::decode(decoder, info.printSettings))
         return false;
     if (!IPC::decode(decoder, info.pageSetup))
         return false;
-    if (!decoder.decodeEnum(info.printMode))
+    if (!decoder.decode(info.printMode))
         return false;
 #endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     if (!decoder.decode(info.snapshotFirstPage))
         return false;
 #endif

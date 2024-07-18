@@ -49,8 +49,10 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
 
     render()
     {
+        console.assert(!this._element);
         this._element = document.createElement("div");
         this._element.classList.add("console-message");
+        this._element.dir = "ltr";
 
         // FIXME: <https://webkit.org/b/143545> Web Inspector: LogContentView should use higher level objects
         this._element.__message = this._message;
@@ -88,16 +90,24 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
         // FIXME: The location link should include stack trace information.
         this._appendLocationLink();
 
-        this._messageTextElement = this._element.appendChild(document.createElement("span"));
-        this._messageTextElement.classList.add("console-top-level-message");
-        this._messageTextElement.classList.add("console-message-text");
-        this._appendMessageTextAndArguments(this._messageTextElement);
+        this._messageBodyElement = this._element.appendChild(document.createElement("span"));
+        this._messageBodyElement.classList.add("console-top-level-message", "console-message-body");
+        this._appendMessageTextAndArguments(this._messageBodyElement);
         this._appendSavedResultIndex();
 
         this._appendExtraParameters();
         this._appendStackTrace();
 
         this._renderRepeatCount();
+
+        if (this._message.type === WI.ConsoleMessage.MessageType.Dir)
+            this.expand();
+        else if (this._message.type === WI.ConsoleMessage.MessageType.Image) {
+            this._element.classList.add("console-image");
+            this._element.addEventListener("contextmenu", this._handleContextMenu.bind(this));
+        }
+
+        WI.debuggerManager.addEventListener(WI.DebuggerManager.Event.BlackboxChanged, this._handleDebuggerBlackboxChanged, this);
     }
 
     get element()
@@ -197,9 +207,11 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
 
     toClipboardString(isPrefixOptional)
     {
-        let clipboardString = this._messageTextElement.innerText.removeWordBreakCharacters();
-        if (this._message.savedResultIndex)
-            clipboardString = clipboardString.replace(/\s*=\s*(\$\d+)$/, "");
+        let clipboardString = this._messageBodyElement.innerText.removeWordBreakCharacters();
+        if (this._message.savedResultIndex) {
+            let escapedSavedResultPrefix = WI.RuntimeManager.preferredSavedResultPrefix().escapeForRegExp();
+            clipboardString = clipboardString.replace(new RegExp(`\\s*=\\s*${escapedSavedResultPrefix}\\d+\\s*$`), "");
+        }
 
         let hasStackTrace = this._shouldShowStackTrace();
         if (!hasStackTrace) {
@@ -225,7 +237,7 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
 
         if (hasStackTrace) {
             this._message.stackTrace.callFrames.forEach(function(frame) {
-                clipboardString += "\n\t" + (frame.functionName || WI.UIString("(anonymous function)"));
+                clipboardString += "\n\t" + frame.displayName;
                 if (frame.sourceCodeLocation)
                     clipboardString += " (" + frame.sourceCodeLocation.originalLocationString() + ")";
             });
@@ -234,6 +246,17 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
         if (!isPrefixOptional || this._enforcesClipboardPrefixString())
             return this._clipboardPrefixString() + clipboardString;
         return clipboardString;
+    }
+
+    clearSessionState()
+    {
+        for (let node of this._messageBodyElement.querySelectorAll(".console-saved-variable"))
+            node.remove();
+
+        if (this._objectTree instanceof WI.ObjectTreeView)
+            this._objectTree.resetPropertyPath();
+
+        WI.debuggerManager.removeEventListener(WI.DebuggerManager.Event.BlackboxChanged, this._handleDebuggerBlackboxChanged, this);
     }
 
     // Private
@@ -249,10 +272,10 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
                         var prefixedFormatString = WI.UIString("Trace: %s").format(this._message.parameters[0].description);
                         args = [prefixedFormatString].concat(this._message.parameters.slice(1));
                     } else
-                        args = args.concat(this._message.parameters);
+                        args.pushAll(this._message.parameters);
                 }
                 this._appendFormattedArguments(element, args);
-                break;
+                return;
 
             case WI.ConsoleMessage.MessageType.Assert:
                 var args = [WI.UIString("Assertion Failed")];
@@ -261,35 +284,100 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
                         var prefixedFormatString = WI.UIString("Assertion Failed: %s").format(this._message.parameters[0].description);
                         args = [prefixedFormatString].concat(this._message.parameters.slice(1));
                     } else
-                        args = args.concat(this._message.parameters);
+                        args.pushAll(this._message.parameters);
                 }
                 this._appendFormattedArguments(element, args);
-                break;
+                return;
 
             case WI.ConsoleMessage.MessageType.Dir:
                 var obj = this._message.parameters ? this._message.parameters[0] : undefined;
                 this._appendFormattedArguments(element, ["%O", obj]);
-                break;
+                return;
 
             case WI.ConsoleMessage.MessageType.Table:
                 var args = this._message.parameters;
                 element.appendChild(this._formatParameterAsTable(args));
                 this._extraParameters = null;
-                break;
+                return;
 
             case WI.ConsoleMessage.MessageType.StartGroup:
             case WI.ConsoleMessage.MessageType.StartGroupCollapsed:
                 var args = this._message.parameters || [this._message.messageText || WI.UIString("Group")];
                 this._formatWithSubstitutionString(args, element);
                 this._extraParameters = null;
-                break;
+                return;
 
-            default:
-                var args = this._message.parameters || [this._message.messageText];
+            case WI.ConsoleMessage.MessageType.Timing: {
+                let args = [this._message.messageText];
+                if (this._extraParameters)
+                    args.pushAll(this._extraParameters);
                 this._appendFormattedArguments(element, args);
+                return;
+            }
+
+            case WI.ConsoleMessage.MessageType.Image: {
+                if (this._message.level === WI.ConsoleMessage.MessageLevel.Log) {
+                    let divider = null;
+
+                    if (this._message.parameters.length > 1) {
+                        this._appendFormattedArguments(element, this._message.parameters.slice(1));
+
+                        divider = element.appendChild(document.createElement("hr"));
+                    }
+
+                    let target = this._message.parameters[0];
+                    if (target === "Viewport")
+                        target = WI.UIString("Viewport");
+                    this._appendFormattedArguments(element, [target]);
+
+                    if (this._message.messageText) {
+                        let img = document.createElement("img");
+                        img.classList.add("show-grid");
+                        img.src = this._message.messageText;
+                        img.setAttribute("filename", WI.FileUtilities.screenshotString() + ".png");
+                        img.addEventListener("load", (event) => {
+                            if (img.width >= img.height)
+                                img.width = img.width / window.devicePixelRatio;
+                            else
+                                img.height = img.height / window.devicePixelRatio;
+                            element.appendChild(img);
+                        });
+                        img.addEventListener("error", (event) => {
+                            this._element.setAttribute("data-labelprefix", WI.UIString("Error: "));
+                            this._element.classList.add("console-error-level");
+                            this._element.classList.remove("console-log-level");
+
+                            if (divider) {
+                                while (divider.nextSibling)
+                                    divider.nextSibling.remove();
+                            } else
+                                element.removeChildren();
+
+                            let args = [WI.UIString("Could not capture screenshot"), this._message.messageText];
+                            if (this._extraParameters)
+                                args.pushAll(this._extraParameters);
+                            this._appendFormattedArguments(element, args);
+                        });
+                    }
+                    return;
+                }
+
+                if (this._message.level === WI.ConsoleMessage.MessageLevel.Error) {
+                    let args = [];
+                    if (this._message.messageText === "Could not capture screenshot")
+                        args.push(WI.UIString("Could not capture screenshot"));
+                    else
+                        args.push(this._message.messageText);
+                    if (this._extraParameters)
+                        args.pushAll(this._extraParameters);
+                    this._appendFormattedArguments(element, args);
+                    return;
+                }
+
+                console.assert();
                 break;
             }
-            return;
+            }
         }
 
         // FIXME: Better handle WI.ConsoleMessage.MessageSource.Network once it has request info.
@@ -300,7 +388,8 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
 
     _appendSavedResultIndex(element)
     {
-        if (!this._message.savedResultIndex)
+        let savedResultIndex = this._message.savedResultIndex;
+        if (!savedResultIndex)
             return;
 
         console.assert(this._message instanceof WI.ConsoleCommandResultMessage);
@@ -308,12 +397,18 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
 
         var savedVariableElement = document.createElement("span");
         savedVariableElement.classList.add("console-saved-variable");
-        savedVariableElement.textContent = " = $" + this._message.savedResultIndex;
+
+        // FIXME: <https://webkit.org/b/196956> Web Inspector: use weak collections for holding event listeners
+        function updateSavedVariableText() {
+            savedVariableElement.textContent = " = " + WI.RuntimeManager.preferredSavedResultPrefix() + savedResultIndex;
+        }
+        WI.settings.consoleSavedResultAlias.addEventListener(WI.Setting.Event.Changed, updateSavedVariableText, savedVariableElement);
+        updateSavedVariableText();
 
         if (this._objectTree)
             this._objectTree.appendTitleSuffix(savedVariableElement);
         else
-            this._messageTextElement.appendChild(savedVariableElement);
+            this._messageBodyElement.appendChild(savedVariableElement);
     }
 
     _appendLocationLink()
@@ -327,12 +422,11 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
             return;
         }
 
-        var firstNonNativeNonAnonymousCallFrame = this._message.stackTrace.firstNonNativeNonAnonymousCallFrame;
-
         var callFrame;
-        if (firstNonNativeNonAnonymousCallFrame) {
+        let firstNonNativeNonAnonymousNotBlackboxedCallFrame = this._message.stackTrace?.firstNonNativeNonAnonymousNotBlackboxedCallFrame;
+        if (firstNonNativeNonAnonymousNotBlackboxedCallFrame) {
             // JavaScript errors and console.* methods.
-            callFrame = firstNonNativeNonAnonymousCallFrame;
+            callFrame = firstNonNativeNonAnonymousNotBlackboxedCallFrame;
         } else if (this._message.url && !this._shouldHideURL(this._message.url)) {
             // CSS warnings have no stack traces.
             callFrame = WI.CallFrame.fromPayload(this._message.target, {
@@ -343,29 +437,38 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
             });
         }
 
-        if (callFrame && (!callFrame.isConsoleEvaluation || WI.isDebugUIEnabled())) {
-            const showFunctionName = !!callFrame.functionName;
-            var locationElement = new WI.CallFrameView(callFrame, showFunctionName);
-            locationElement.classList.add("console-message-location");
-            this._element.appendChild(locationElement);
+        if (callFrame && (!callFrame.isConsoleEvaluation || WI.settings.debugShowConsoleEvaluations.value)) {
+            let existingCallFrameView = this._callFrameView;
+
+            this._callFrameView = new WI.CallFrameView(callFrame, {showFunctionName: !!callFrame.functionName});
+            this._callFrameView.classList.add("console-message-location");
+
+            if (existingCallFrameView)
+                this._element.replaceChild(this._callFrameView, existingCallFrameView);
+            else
+                this._element.appendChild(this._callFrameView);
             return;
         }
 
         if (this._message.parameters && this._message.parameters.length === 1) {
             var parameter = this._createRemoteObjectIfNeeded(this._message.parameters[0]);
 
-            parameter.findFunctionSourceCodeLocation().then(function(result) {
+            parameter.findFunctionSourceCodeLocation().then((result) => {
                 if (result === WI.RemoteObject.SourceCodeLocationPromise.NoSourceFound || result === WI.RemoteObject.SourceCodeLocationPromise.MissingObjectId)
                     return;
 
-                var link = this._linkifyLocation(result.sourceCode.url, result.lineNumber, result.columnNumber);
+                let link = WI.linkifySourceCode(result.sourceCode, new WI.SourceCodePosition(result.lineNumber, result.columnNumber), {
+                    className: "console-message-url",
+                    ignoreNetworkTab: true,
+                    ignoreSearchTab: true,
+                });
                 link.classList.add("console-message-location");
 
                 if (this._element.hasChildNodes())
                     this._element.insertBefore(link, this._element.firstChild);
                 else
                     this._element.appendChild(link);
-            }.bind(this));
+            });
         }
     }
 
@@ -398,14 +501,13 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
 
         this._makeExpandable();
 
-        // Auto-expand for console.trace.
-        if (this._message.type === WI.ConsoleMessage.MessageType.Trace)
+        if (this._message.type === WI.ConsoleMessage.MessageType.Trace && WI.settings.consoleAutoExpandTrace.value)
             this.expand();
 
         this._stackTraceElement = this._element.appendChild(document.createElement("div"));
-        this._stackTraceElement.classList.add("console-message-text", "console-message-stack-trace-container");
+        this._stackTraceElement.classList.add("console-message-body", "console-message-stack-trace-container");
 
-        var callFramesElement = new WI.StackTraceView(this._message.stackTrace).element;
+        let callFramesElement = new WI.StackTraceView(this._message.stackTrace);
         this._stackTraceElement.appendChild(callFramesElement);
     }
 
@@ -554,12 +656,8 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
 
     _shouldConsiderObjectLossless(object)
     {
-        if (object.type === "string") {
-            const description = object.description;
-            const maxLength = WI.FormattedValue.MAX_PREVIEW_STRING_LENGTH;
-            const longOrMultiLineString = description.length > maxLength || description.slice(0, maxLength).includes("\n");
-            return !longOrMultiLineString;
-        }
+        if (object.type === "string")
+            return WI.FormattedValue.isSimpleString(object.description);
 
         return object.type !== "object" || object.subtype === "null" || object.subtype === "regexp";
     }
@@ -609,7 +707,7 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
             let stackTrace = WI.StackTrace.fromString(this._message.target, object.description);
             if (stackTrace.callFrames.length) {
                 let stackView = new WI.StackTraceView(stackTrace);
-                fragment.appendChild(stackView.element);
+                fragment.appendChild(stackView);
                 return;
             }
         }
@@ -643,10 +741,21 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
 
     _rootPropertyPathForObject(object)
     {
-        if (!this._message.savedResultIndex)
+        let savedResultIndex = this._message.savedResultIndex;
+        if (!savedResultIndex)
             return null;
 
-        return new WI.PropertyPath(object, "$" + this._message.savedResultIndex);
+        function prefixSavedResultIndex() {
+            return WI.RuntimeManager.preferredSavedResultPrefix() + savedResultIndex;
+        }
+
+        let propertyPath = new WI.PropertyPath(object, prefixSavedResultIndex());
+
+        WI.settings.consoleSavedResultAlias.addEventListener(WI.Setting.Event.Changed, function(event) {
+            this.pathComponent = prefixSavedResultIndex();
+        }, propertyPath);
+
+        return propertyPath;
     }
 
     _formatWithSubstitutionString(parameters, formattedResult)
@@ -681,12 +790,12 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
             buffer.setAttribute("style", obj.description);
             for (var i = 0; i < buffer.style.length; i++) {
                 var property = buffer.style[i];
-                if (isWhitelistedProperty(property))
+                if (isAllowedProperty(property))
                     currentStyle[property] = buffer.style[property];
             }
         }
 
-        function isWhitelistedProperty(property)
+        function isAllowedProperty(property)
         {
             for (var prefix of ["background", "border", "color", "font", "line", "margin", "padding", "text"]) {
                 if (property.startsWith(prefix) || property.startsWith("-webkit-" + prefix))
@@ -736,7 +845,7 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
 
     _shouldShowStackTrace()
     {
-        if (!this._message.stackTrace.callFrames.length)
+        if (!this._message.stackTrace?.callFrames.length)
             return false;
 
         return this._message.source === WI.ConsoleMessage.MessageSource.Network
@@ -747,16 +856,6 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
     _shouldHideURL(url)
     {
         return url === "undefined" || url === "[native code]";
-    }
-
-    _linkifyLocation(url, lineNumber, columnNumber)
-    {
-        const options = {
-            className: "console-message-url",
-            ignoreNetworkTab: true,
-            ignoreSearchTab: true,
-        };
-        return WI.linkifyLocation(url, new WI.SourceCodePosition(lineNumber, columnNumber), options);
     }
 
     _userProvidedColumnNames(columnNamesArgument)
@@ -920,6 +1019,34 @@ WI.ConsoleMessageView = class ConsoleMessageView extends WI.Object
         this._element.classList.add("expandable");
 
         this._boundClickHandler = this.toggle.bind(this);
-        this._messageTextElement.addEventListener("click", this._boundClickHandler);
+        this._messageBodyElement.addEventListener("click", this._boundClickHandler);
+    }
+
+    _handleContextMenu(event)
+    {
+        let image = event.target.closest(".console-image > .console-message-body > img");
+        if (!image)
+            return;
+
+        let contextMenu = WI.ContextMenu.createFromEvent(event);
+
+        if (WI.FileUtilities.canSave(WI.FileUtilities.SaveMode.SingleFile)) {
+            contextMenu.appendItem(WI.UIString("Save Image"), () => {
+                const forceSaveAs = true;
+                WI.FileUtilities.save(WI.FileUtilities.SaveMode.SingleFile, {
+                    content: parseDataURL(this._message.messageText).data,
+                    base64Encoded: true,
+                    suggestedName: image.getAttribute("filename"),
+                }, forceSaveAs);
+            });
+        }
+
+        contextMenu.appendSeparator();
+    }
+
+    _handleDebuggerBlackboxChanged(event)
+    {
+        if (this._callFrameView)
+            this._appendLocationLink();
     }
 };

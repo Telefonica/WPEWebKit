@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,124 +33,100 @@
 
 namespace JSC {
 
-class ObjectAllocationProfile {
+class FunctionRareData;
+
+template<typename Derived>
+class ObjectAllocationProfileBase {
     friend class LLIntOffsetsExtractor;
 public:
-    static ptrdiff_t offsetOfAllocator() { return OBJECT_OFFSETOF(ObjectAllocationProfile, m_allocator); }
-    static ptrdiff_t offsetOfStructure() { return OBJECT_OFFSETOF(ObjectAllocationProfile, m_structure); }
-    static ptrdiff_t offsetOfInlineCapacity() { return OBJECT_OFFSETOF(ObjectAllocationProfile, m_inlineCapacity); }
+    static ptrdiff_t offsetOfAllocator() { return OBJECT_OFFSETOF(ObjectAllocationProfileBase, m_allocator); }
+    static ptrdiff_t offsetOfStructure() { return OBJECT_OFFSETOF(ObjectAllocationProfileBase, m_structure); }
 
-    ObjectAllocationProfile()
-        : m_allocator(0)
-        , m_inlineCapacity(0)
-    {
-    }
+    ObjectAllocationProfileBase() = default;
 
     bool isNull() { return !m_structure; }
 
-    void initialize(VM& vm, JSGlobalObject* globalObject, JSCell* owner, JSObject* prototype, unsigned inferredInlineCapacity)
-    {
-        ASSERT(!m_allocator);
-        ASSERT(!m_structure);
-        ASSERT(!m_inlineCapacity);
-
-        unsigned inlineCapacity = 0;
-        if (inferredInlineCapacity < JSFinalObject::defaultInlineCapacity()) {
-            // Try to shrink the object based on static analysis.
-            inferredInlineCapacity += possibleDefaultPropertyCount(vm, prototype);
-
-            if (!inferredInlineCapacity) {
-                // Empty objects are rare, so most likely the static analyzer just didn't
-                // see the real initializer function. This can happen with helper functions.
-                inferredInlineCapacity = JSFinalObject::defaultInlineCapacity();
-            } else if (inferredInlineCapacity > JSFinalObject::defaultInlineCapacity()) {
-                // Default properties are weak guesses, so don't allow them to turn a small
-                // object into a large object.
-                inferredInlineCapacity = JSFinalObject::defaultInlineCapacity();
-            }
-
-            inlineCapacity = inferredInlineCapacity;
-            ASSERT(inlineCapacity < JSFinalObject::maxInlineCapacity());
-        } else {
-            // Normal or large object.
-            inlineCapacity = inferredInlineCapacity;
-            if (inlineCapacity > JSFinalObject::maxInlineCapacity())
-                inlineCapacity = JSFinalObject::maxInlineCapacity();
-        }
-
-        ASSERT(inlineCapacity > 0);
-        ASSERT(inlineCapacity <= JSFinalObject::maxInlineCapacity());
-
-        size_t allocationSize = JSFinalObject::allocationSize(inlineCapacity);
-        MarkedAllocator* allocator = vm.cellSpace.allocatorFor(allocationSize);
-        
-        // Take advantage of extra inline capacity available in the size class.
-        if (allocator) {
-            size_t slop = (allocator->cellSize() - allocationSize) / sizeof(WriteBarrier<Unknown>);
-            inlineCapacity += slop;
-            if (inlineCapacity > JSFinalObject::maxInlineCapacity())
-                inlineCapacity = JSFinalObject::maxInlineCapacity();
-        }
-
-        Structure* structure = vm.prototypeMap.emptyObjectStructureForPrototype(globalObject, prototype, inlineCapacity);
-
-        // Ensure that if another thread sees the structure, it will see it properly created
-        WTF::storeStoreFence();
-
-        m_allocator = allocator;
-        m_structure.set(vm, owner, structure);
-        m_inlineCapacity = inlineCapacity;
-    }
+    void initializeProfile(VM&, JSGlobalObject*, JSCell* owner, JSObject* prototype, unsigned inferredInlineCapacity, JSFunction* constructor = nullptr, FunctionRareData* = nullptr);
 
     Structure* structure()
     {
         Structure* structure = m_structure.get();
         // Ensure that if we see the structure, it has been properly created
-        WTF::loadLoadFence();
+        WTF::dependentLoadLoadFence();
         return structure;
     }
-    unsigned inlineCapacity() { return m_inlineCapacity; }
 
+protected:
     void clear()
     {
-        m_allocator = 0;
+        m_allocator = Allocator();
         m_structure.clear();
-        m_inlineCapacity = 0;
         ASSERT(isNull());
     }
 
-    void visitAggregate(SlotVisitor& visitor)
+    template<typename Visitor>
+    void visitAggregate(Visitor& visitor)
     {
         visitor.append(m_structure);
     }
 
 private:
+    unsigned possibleDefaultPropertyCount(VM&, JSObject* prototype);
 
-    unsigned possibleDefaultPropertyCount(VM& vm, JSObject* prototype)
+    Allocator m_allocator; // Precomputed to make things easier for generated code.
+    WriteBarrier<Structure> m_structure;
+};
+
+class ObjectAllocationProfile : public ObjectAllocationProfileBase<ObjectAllocationProfile> {
+public:
+    using Base = ObjectAllocationProfileBase<ObjectAllocationProfile>;
+
+    ObjectAllocationProfile() = default;
+
+    using Base::clear;
+    using Base::visitAggregate;
+
+    void setPrototype(VM&, JSCell*, JSObject*) { }
+};
+
+class ObjectAllocationProfileWithPrototype : public ObjectAllocationProfileBase<ObjectAllocationProfileWithPrototype> {
+public:
+    using Base = ObjectAllocationProfileBase<ObjectAllocationProfileWithPrototype>;
+
+    static ptrdiff_t offsetOfPrototype() { return OBJECT_OFFSETOF(ObjectAllocationProfileWithPrototype, m_prototype); }
+
+    ObjectAllocationProfileWithPrototype() = default;
+
+    JSObject* prototype()
     {
-        if (prototype == prototype->globalObject()->objectPrototype())
-            return 0;
-
-        size_t count = 0;
-        PropertyNameArray propertyNameArray(&vm, PropertyNameMode::StringsAndSymbols, PrivateSymbolMode::Include);
-        prototype->structure()->getPropertyNamesFromStructure(vm, propertyNameArray, EnumerationMode());
-        PropertyNameArrayData::PropertyNameVector& propertyNameVector = propertyNameArray.data()->propertyNameVector();
-        for (size_t i = 0; i < propertyNameVector.size(); ++i) {
-            JSValue value = prototype->getDirect(vm, propertyNameVector[i]);
-
-            // Functions are common, and are usually class-level objects that are not overridden.
-            if (jsDynamicCast<JSFunction*>(vm, value))
-                continue;
-
-            ++count;
-
-        }
-        return count;
+        JSObject* prototype = m_prototype.get();
+        WTF::dependentLoadLoadFence();
+        return prototype;
     }
 
-    MarkedAllocator* m_allocator; // Precomputed to make things easier for generated code.
-    WriteBarrier<Structure> m_structure;
-    unsigned m_inlineCapacity;
+    void clear()
+    {
+        Base::clear();
+        m_prototype.clear();
+        ASSERT(isNull());
+    }
+
+    template<typename Visitor>
+    void visitAggregate(Visitor& visitor)
+    {
+        Base::visitAggregate(visitor);
+        visitor.append(m_prototype);
+    }
+
+    void setPrototype(VM& vm, JSCell* owner, JSObject* object)
+    {
+        m_prototype.set(vm, owner, object);
+    }
+
+private:
+    WriteBarrier<JSObject> m_prototype;
 };
+
+
 
 } // namespace JSC

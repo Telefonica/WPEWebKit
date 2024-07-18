@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2015 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2013-2017 Apple Inc. All Rights Reserved.
  * Copyright (C) 2011 The Chromium Authors. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,18 +29,14 @@
 #include "InspectorFrontendRouter.h"
 #include "InspectorProtocolTypes.h"
 #include <functional>
-#include <wtf/DeprecatedOptional.h>
-#include <wtf/Optional.h>
+#include <wtf/Function.h>
 #include <wtf/RefCounted.h>
+#include <wtf/RefPtr.h>
 #include <wtf/text/WTFString.h>
 
 namespace Inspector {
 
 class BackendDispatcher;
-
-#if PLATFORM(COCOA)
-class InspectorObject;
-#endif
 
 typedef String ErrorString;
 
@@ -64,7 +60,7 @@ public:
         bool isActive() const;
         void disable() { m_alreadySent = true; }
 
-        void sendSuccess(RefPtr<JSON::Object>&&);
+        void sendSuccess(Ref<JSON::Object>&&);
         void sendFailure(const ErrorString&);
 
     private:
@@ -92,37 +88,28 @@ public:
     // Note that 'unused' is a workaround so the compiler can pick the right sendResponse based on arity.
     // When <http://webkit.org/b/179847> is fixed or this class is renamed for the JSON::Object case,
     // then this alternate method with a dummy parameter can be removed in favor of the one without it.
-    void sendResponse(long requestId, RefPtr<JSON::Object>&& result, bool unused);
-#if PLATFORM(COCOA)
-    // COMPATIBILITY: remove this when no longer needed by system WebInspector.framework.
-    void sendResponse(long requestId, RefPtr<InspectorObject>&& result);
-#endif
-
     void sendResponse(long requestId, RefPtr<JSON::Object>&& result);
+    void sendResponse(long requestId, RefPtr<JSON::Object>&& result, bool unused);
+    void sendResponse(long requestId, Ref<JSON::Object>&& result);
+    void sendResponse(long requestId, Ref<JSON::Object>&& result, bool unused);
     void sendPendingErrors();
 
     void reportProtocolError(CommonErrorCode, const String& errorMessage);
     void reportProtocolError(std::optional<long> relatedRequestId, CommonErrorCode, const String& errorMessage);
 
-    template<typename T>
-    WTF_HIDDEN_DECLARATION
-    T getPropertyValue(JSON::Object*, const String& name, bool* out_optionalValueFound, T defaultValue, std::function<bool(JSON::Value&, T&)>, const char* typeName);
-
-    int getInteger(JSON::Object*, const String& name, bool* valueFound);
-    double getDouble(JSON::Object*, const String& name, bool* valueFound);
-    String getString(JSON::Object*, const String& name, bool* valueFound);
-    bool getBoolean(JSON::Object*, const String& name, bool* valueFound);
-    RefPtr<JSON::Value> getValue(JSON::Object*, const String& name, bool* valueFound);
-    RefPtr<JSON::Object> getObject(JSON::Object*, const String& name, bool* valueFound);
-    RefPtr<JSON::Array> getArray(JSON::Object*, const String& name, bool* valueFound);
+    std::optional<bool> getBoolean(JSON::Object*, const String& name, bool required);
+    std::optional<int> getInteger(JSON::Object*, const String& name, bool required);
+    std::optional<double> getDouble(JSON::Object*, const String& name, bool required);
+    String getString(JSON::Object*, const String& name, bool required);
+    RefPtr<JSON::Value> getValue(JSON::Object*, const String& name, bool required);
+    RefPtr<JSON::Object> getObject(JSON::Object*, const String& name, bool required);
+    RefPtr<JSON::Array> getArray(JSON::Object*, const String& name, bool required);
 
 private:
     BackendDispatcher(Ref<FrontendRouter>&&);
 
-#if PLATFORM(MAC)
-    // This is necessary for some versions of Safari. Remove it when those versions of Safari are no longer supported.
-    void reportProtocolError(WTF::DeprecatedOptional<long> relatedRequestId, CommonErrorCode, const String& errorMessage);
-#endif
+    template<typename T>
+    T getPropertyValue(JSON::Object*, const String& name, bool required, std::function<T(JSON::Value&)> converter, const char* typeName);
 
     Ref<FrontendRouter> m_frontendRouter;
     HashMap<String, SupplementalBackendDispatcher*> m_dispatchers;

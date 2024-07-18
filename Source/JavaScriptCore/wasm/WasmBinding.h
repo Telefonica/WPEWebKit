@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,10 +27,9 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "B3Compilation.h"
-#include "VM.h"
+#include "JITCompilation.h"
+#include "WasmBinding.h"
 #include "WasmFormat.h"
-#include <wtf/Bag.h>
 #include <wtf/Expected.h>
 
 namespace JSC {
@@ -43,8 +42,7 @@ enum class BindingFailure {
     OutOfMemory,
 };
 
-Expected<MacroAssemblerCodeRef, BindingFailure> wasmToWasm(unsigned importIndex);
-Expected<MacroAssemblerCodeRef, BindingFailure> wasmToJs(VM*, Bag<CallLinkInfo>& callLinkInfos, SignatureIndex, unsigned importIndex);
+Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToWasm(unsigned importIndex);
 
 } } // namespace JSC::Wasm
 

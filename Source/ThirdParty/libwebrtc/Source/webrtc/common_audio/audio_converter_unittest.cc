@@ -8,23 +8,23 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <cmath>
+#include "common_audio/audio_converter.h"
+
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <vector>
 
-#include "webrtc/base/arraysize.h"
-#include "webrtc/base/format_macros.h"
-#include "webrtc/common_audio/audio_converter.h"
-#include "webrtc/common_audio/channel_buffer.h"
-#include "webrtc/common_audio/resampler/push_sinc_resampler.h"
-#include "webrtc/test/gtest.h"
+#include "common_audio/channel_buffer.h"
+#include "common_audio/resampler/push_sinc_resampler.h"
+#include "rtc_base/arraysize.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
 typedef std::unique_ptr<ChannelBuffer<float>> ScopedBuffer;
 
-// Sets the signal value to increase by |data| with every sample.
+// Sets the signal value to increase by `data` with every sample.
 ScopedBuffer CreateBuffer(const std::vector<float>& data, size_t frames) {
   const size_t num_channels = data.size();
   ScopedBuffer sb(new ChannelBuffer<float>(frames, num_channels));
@@ -40,8 +40,8 @@ void VerifyParams(const ChannelBuffer<float>& ref,
   EXPECT_EQ(ref.num_frames(), test.num_frames());
 }
 
-// Computes the best SNR based on the error between |ref_frame| and
-// |test_frame|. It searches around |expected_delay| in samples between the
+// Computes the best SNR based on the error between `ref_frame` and
+// `test_frame`. It searches around `expected_delay` in samples between the
 // signals to compensate for the resampling delay.
 float ComputeSNR(const ChannelBuffer<float>& ref,
                  const ChannelBuffer<float>& test,
@@ -52,8 +52,7 @@ float ComputeSNR(const ChannelBuffer<float>& ref,
 
   // Search within one sample of the expected delay.
   for (size_t delay = std::max(expected_delay, static_cast<size_t>(1)) - 1;
-       delay <= std::min(expected_delay + 1, ref.num_frames());
-       ++delay) {
+       delay <= std::min(expected_delay + 1, ref.num_frames()); ++delay) {
     float mse = 0;
     float variance = 0;
     float mean = 0;
@@ -79,7 +78,7 @@ float ComputeSNR(const ChannelBuffer<float>& ref,
       best_delay = delay;
     }
   }
-  printf("SNR=%.1f dB at delay=%" PRIuS "\n", best_snr, best_delay);
+  printf("SNR=%.1f dB at delay=%zu\n", best_snr, best_delay);
   return best_snr;
 }
 
@@ -92,8 +91,8 @@ void RunAudioConverterTest(size_t src_channels,
                            int dst_sample_rate_hz) {
   const float kSrcLeft = 0.0002f;
   const float kSrcRight = 0.0001f;
-  const float resampling_factor = (1.f * src_sample_rate_hz) /
-      dst_sample_rate_hz;
+  const float resampling_factor =
+      (1.f * src_sample_rate_hz) / dst_sample_rate_hz;
   const float dst_left = resampling_factor * kSrcLeft;
   const float dst_right = resampling_factor * kSrcRight;
   const float dst_mono = (dst_left + dst_right) / 2;
@@ -124,13 +123,15 @@ void RunAudioConverterTest(size_t src_channels,
   ScopedBuffer ref_buffer = CreateBuffer(ref_data, dst_frames);
 
   // The sinc resampler has a known delay, which we compute here.
-  const size_t delay_frames = src_sample_rate_hz == dst_sample_rate_hz ? 0 :
-      static_cast<size_t>(
-          PushSincResampler::AlgorithmicDelaySeconds(src_sample_rate_hz) *
-          dst_sample_rate_hz);
+  const size_t delay_frames =
+      src_sample_rate_hz == dst_sample_rate_hz
+          ? 0
+          : static_cast<size_t>(
+                PushSincResampler::AlgorithmicDelaySeconds(src_sample_rate_hz) *
+                dst_sample_rate_hz);
   // SNR reported on the same line later.
-  printf("(%" PRIuS ", %d Hz) -> (%" PRIuS ", %d Hz) ",
-         src_channels, src_sample_rate_hz, dst_channels, dst_sample_rate_hz);
+  printf("(%zu, %d Hz) -> (%zu, %d Hz) ", src_channels, src_sample_rate_hz,
+         dst_channels, dst_sample_rate_hz);
 
   std::unique_ptr<AudioConverter> converter = AudioConverter::Create(
       src_channels, src_frames, dst_channels, dst_frames);
@@ -142,16 +143,13 @@ void RunAudioConverterTest(size_t src_channels,
 }
 
 TEST(AudioConverterTest, ConversionsPassSNRThreshold) {
-  const int kSampleRates[] = {8000, 16000, 32000, 44100, 48000};
-  const size_t kChannels[] = {1, 2};
-  for (size_t src_rate = 0; src_rate < arraysize(kSampleRates); ++src_rate) {
-    for (size_t dst_rate = 0; dst_rate < arraysize(kSampleRates); ++dst_rate) {
-      for (size_t src_channel = 0; src_channel < arraysize(kChannels);
-           ++src_channel) {
-        for (size_t dst_channel = 0; dst_channel < arraysize(kChannels);
-             ++dst_channel) {
-          RunAudioConverterTest(kChannels[src_channel], kSampleRates[src_rate],
-                                kChannels[dst_channel], kSampleRates[dst_rate]);
+  const int kSampleRates[] = {8000, 11025, 16000, 22050, 32000, 44100, 48000};
+  const int kChannels[] = {1, 2};
+  for (int src_rate : kSampleRates) {
+    for (int dst_rate : kSampleRates) {
+      for (size_t src_channels : kChannels) {
+        for (size_t dst_channels : kChannels) {
+          RunAudioConverterTest(src_channels, src_rate, dst_channels, dst_rate);
         }
       }
     }

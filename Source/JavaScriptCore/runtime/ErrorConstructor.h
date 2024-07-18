@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2008-2017 Apple Inc. All rights reserved.
+ *  Copyright (C) 2008-2021 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -27,13 +27,14 @@ namespace JSC {
 class ErrorPrototype;
 class GetterSetter;
 
-class ErrorConstructor : public InternalFunction {
+class ErrorConstructor final : public InternalFunction {
 public:
-    typedef InternalFunction Base;
+    using Base = InternalFunction;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | OverridesPut;
 
     static ErrorConstructor* create(VM& vm, Structure* structure, ErrorPrototype* errorPrototype, GetterSetter*)
     {
-        ErrorConstructor* constructor = new (NotNull, allocateCell<ErrorConstructor>(vm.heap)) ErrorConstructor(vm, structure);
+        ErrorConstructor* constructor = new (NotNull, allocateCell<ErrorConstructor>(vm)) ErrorConstructor(vm, structure);
         constructor->finishCreation(vm, errorPrototype);
         return constructor;
     }
@@ -42,23 +43,18 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype) 
     { 
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info()); 
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info()); 
     }
-
-    std::optional<unsigned> stackTraceLimit() const { return m_stackTraceLimit; }
-
-protected:
-    void finishCreation(VM&, ErrorPrototype*);
-
-    static bool put(JSCell*, ExecState*, PropertyName, JSValue, PutPropertySlot&);
-    static bool deleteProperty(JSCell*, ExecState*, PropertyName);
 
 private:
     ErrorConstructor(VM&, Structure*);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
+    void finishCreation(VM&, ErrorPrototype*);
 
-    std::optional<unsigned> m_stackTraceLimit;
+    static bool put(JSCell*, JSGlobalObject*, PropertyName, JSValue, PutPropertySlot&);
+    static bool deleteProperty(JSCell*, JSGlobalObject*, PropertyName, DeletePropertySlot&);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(ErrorConstructor, InternalFunction);
+
+static_assert(sizeof(ErrorConstructor) == sizeof(InternalFunction));
 
 } // namespace JSC

@@ -25,53 +25,125 @@
 
 #pragma once
 
+namespace WTF {
+class TextStream;
+}
+
 namespace WebCore {
 
 // Must follow CSSValueKeywords.in order
 enum ControlPart {
-    NoControlPart, CheckboxPart, RadioPart, PushButtonPart, SquareButtonPart, ButtonPart,
-    ButtonBevelPart, DefaultButtonPart, InnerSpinButtonPart, ListboxPart, ListItemPart,
-    MediaControlsBackgroundPart, MediaControlsDarkBarBackgroundPart, MediaControlsFullscreenBackgroundPart,
-    MediaControlsLightBarBackgroundPart, MediaCurrentTimePart, MediaEnterFullscreenButtonPart,
-    MediaExitFullscreenButtonPart, MediaFullScreenVolumeSliderPart,
-    MediaFullScreenVolumeSliderThumbPart, MediaMuteButtonPart, MediaOverlayPlayButtonPart,
-    MediaPlayButtonPart, MediaReturnToRealtimeButtonPart, MediaRewindButtonPart, MediaSeekBackButtonPart,
-    MediaSeekForwardButtonPart, MediaSliderPart, MediaSliderThumbPart, MediaTimeRemainingPart,
-    MediaToggleClosedCaptionsButtonPart, MediaVolumeSliderPart, MediaVolumeSliderContainerPart,
-    MediaVolumeSliderMuteButtonPart, MediaVolumeSliderThumbPart,
-    MenulistPart, MenulistButtonPart, MenulistTextPart, MenulistTextFieldPart, MeterPart, ProgressBarPart, ProgressBarValuePart,
-    SliderHorizontalPart, SliderVerticalPart, SliderThumbHorizontalPart,
-    SliderThumbVerticalPart, CaretPart, SearchFieldPart, SearchFieldDecorationPart,
-    SearchFieldResultsDecorationPart, SearchFieldResultsButtonPart,
-    SearchFieldCancelButtonPart, SnapshottedPluginOverlayPart, TextFieldPart,
-    RelevancyLevelIndicatorPart, ContinuousCapacityLevelIndicatorPart, DiscreteCapacityLevelIndicatorPart, RatingLevelIndicatorPart,
-#if ENABLE(SERVICE_CONTROLS)
-    ImageControlsButtonPart,
-#endif
+    NoControlPart,
+    AutoPart,
+    CheckboxPart,
+    RadioPart,
+    PushButtonPart,
+    SquareButtonPart,
+    ButtonPart,
+    DefaultButtonPart,
+    ListboxPart,
+    MenulistPart,
+    MenulistButtonPart,
+    MeterPart,
+    ProgressBarPart,
+    SliderHorizontalPart,
+    SliderVerticalPart,
+    SearchFieldPart,
 #if ENABLE(APPLE_PAY)
     ApplePayButtonPart,
 #endif
-    TextAreaPart,
 #if ENABLE(ATTACHMENT_ELEMENT)
-    AttachmentPart, BorderlessAttachmentPart,
+    AttachmentPart,
+    BorderlessAttachmentPart,
 #endif
-    CapsLockIndicatorPart
+    TextAreaPart,
+    TextFieldPart,
+    // Internal-only Values
+    CapsLockIndicatorPart,
+#if ENABLE(INPUT_TYPE_COLOR)
+    ColorWellPart,
+#endif
+#if ENABLE(SERVICE_CONTROLS)
+    ImageControlsButtonPart,
+#endif
+    InnerSpinButtonPart,
+#if ENABLE(DATALIST_ELEMENT)
+    ListButtonPart,
+#endif
+    SearchFieldDecorationPart,
+    SearchFieldResultsDecorationPart,
+    SearchFieldResultsButtonPart,
+    SearchFieldCancelButtonPart,
+    SliderThumbHorizontalPart,
+    SliderThumbVerticalPart
 };
 
+#if ENABLE(SERVICE_CONTROLS)
+constexpr ControlPart largestControlPart = ImageControlsButtonPart;
+#else
+constexpr ControlPart largestControlPart = CapsLockIndicatorPart;
+#endif
+
+
 enum SelectionPart {
-    SelectionBackground, SelectionForeground
+    SelectionBackground,
+    SelectionForeground
 };
 
 enum ThemeFont {
-    CaptionFont, IconFont, MenuFont, MessageBoxFont, SmallCaptionFont, StatusBarFont, MiniControlFont, SmallControlFont, ControlFont 
+    CaptionFont,
+    IconFont,
+    MenuFont,
+    MessageBoxFont,
+    SmallCaptionFont,
+    StatusBarFont,
+    MiniControlFont,
+    SmallControlFont,
+    ControlFont
 };
 
 enum ThemeColor {
-    ActiveBorderColor, ActiveCaptionColor, AppWorkspaceColor, BackgroundColor, ButtonFaceColor, ButtonHighlightColor, ButtonShadowColor,
-    ButtonTextColor, CaptionTextColor, GrayTextColor, HighlightColor, HighlightTextColor, InactiveBorderColor, InactiveCaptionColor,
-    InactiveCaptionTextColor, InfoBackgroundColor, InfoTextColor, MatchColor, MenuTextColor, ScrollbarColor, ThreeDDarkDhasowColor,
-    ThreeDFaceColor, ThreeDHighlightColor, ThreeDLightShadowColor, ThreeDShadowCLor, WindowColor, WindowFrameColor, WindowTextColor,
+    ActiveBorderColor,
+    ActiveCaptionColor,
+    ActiveTextColor,
+    AppWorkspaceColor,
+    BackgroundColor,
+    ButtonFaceColor,
+    ButtonHighlightColor,
+    ButtonShadowColor,
+    ButtonTextColor,
+    CanvasColor,
+    CanvasTextColor,
+    CaptionTextColor,
+    FieldColor,
+    FieldTextColor,
+    GrayTextColor,
+    HighlightColor,
+    HighlightTextColor,
+    InactiveBorderColor,
+    InactiveCaptionColor,
+    InactiveCaptionTextColor,
+    InfoBackgroundColor,
+    InfoTextColor,
+    LinkTextColor,
+    MatchColor,
+    MenuTextColor,
+    ScrollbarColor,
+    ThreeDDarkShadowColor,
+    ThreeDFaceColor,
+    ThreeDHighlightColor,
+    ThreeDLightShadowColor,
+    ThreeDShadowColor,
+    VisitedTextColor,
+    WindowColor,
+    WindowFrameColor,
+    WindowTextColor,
     FocusRingColor
 };
 
-}
+WTF::TextStream& operator<<(WTF::TextStream&, ControlPart);
+WTF::TextStream& operator<<(WTF::TextStream&, SelectionPart);
+WTF::TextStream& operator<<(WTF::TextStream&, ThemeFont);
+WTF::TextStream& operator<<(WTF::TextStream&, ThemeColor);
+
+} // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,45 +31,55 @@
 #include "ArithProfile.h"
 #include "CCallHelpers.h"
 #include "CodeBlock.h"
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
 
 namespace JSC {
 
-MethodOfGettingAValueProfile MethodOfGettingAValueProfile::fromLazyOperand(
-    CodeBlock* codeBlock, const LazyOperandValueProfileKey& key)
+void MethodOfGettingAValueProfile::emitReportValue(CCallHelpers& jit, CodeBlock* optimizedCodeBlock, JSValueRegs regs, GPRReg tempGPR, TagRegistersMode mode) const
 {
-    MethodOfGettingAValueProfile result;
-    result.m_kind = LazyOperand;
-    result.u.lazyOperand.codeBlock = codeBlock;
-    result.u.lazyOperand.bytecodeOffset = key.bytecodeOffset();
-    result.u.lazyOperand.operand = key.operand().offset();
-    return result;
-}
+    if (m_kind == Kind::None)
+        return;
 
-void MethodOfGettingAValueProfile::emitReportValue(CCallHelpers& jit, JSValueRegs regs) const
-{
+    CodeBlock* baselineCodeBlock = optimizedCodeBlock->baselineAlternative();
+    CodeBlock* profiledBlock = baselineCodeBlockForOriginAndBaselineCodeBlock(m_codeOrigin, baselineCodeBlock);
     switch (m_kind) {
-    case None:
+    case Kind::None:
+        RELEASE_ASSERT_NOT_REACHED();
         return;
         
-    case Ready:
-        jit.storeValue(regs, u.profile->specFailBucket(0));
-        return;
+    case Kind::LazyOperandValueProfile: {
+        LazyOperandValueProfileKey key(m_codeOrigin.bytecodeIndex(), Operand::fromBits(m_rawOperand));
         
-    case LazyOperand: {
-        LazyOperandValueProfileKey key(u.lazyOperand.bytecodeOffset, VirtualRegister(u.lazyOperand.operand));
-        
-        ConcurrentJSLocker locker(u.lazyOperand.codeBlock->m_lock);
-        LazyOperandValueProfile* profile =
-            u.lazyOperand.codeBlock->lazyOperandValueProfiles().add(locker, key);
+        ConcurrentJSLocker locker(profiledBlock->m_lock);
+        LazyOperandValueProfile* profile = profiledBlock->lazyOperandValueProfiles(locker).add(locker, key);
         jit.storeValue(regs, profile->specFailBucket(0));
         return;
     }
         
-    case ArithProfileReady: {
-        u.arithProfile->emitObserveResult(jit, regs, DoNotHaveTagRegisters);
+    case Kind::UnaryArithProfile: {
+        if (UnaryArithProfile* result = profiledBlock->unaryArithProfileForBytecodeIndex(m_codeOrigin.bytecodeIndex()))
+            result->emitObserveResult(jit, regs, tempGPR, mode);
         return;
-    } }
+    }
+
+    case Kind::BinaryArithProfile: {
+        if (BinaryArithProfile* result = profiledBlock->binaryArithProfileForBytecodeIndex(m_codeOrigin.bytecodeIndex()))
+            result->emitObserveResult(jit, regs, tempGPR, mode);
+        return;
+    }
+
+    case Kind::ArgumentValueProfile: {
+        auto& valueProfile = profiledBlock->valueProfileForArgument(Operand::fromBits(m_rawOperand).toArgument());
+        jit.storeValue(regs, valueProfile.specFailBucket(0));
+        return;
+    }
+
+    case Kind::BytecodeValueProfile: {
+        auto& valueProfile = profiledBlock->valueProfileForBytecodeIndex(m_codeOrigin.bytecodeIndex());
+        jit.storeValue(regs, valueProfile.specFailBucket(0));
+        return;
+    }
+    }
     
     RELEASE_ASSERT_NOT_REACHED();
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2016 Apple, Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,87 +26,92 @@
 #include "config.h"
 #include "WeakMapConstructor.h"
 
-#include "Error.h"
 #include "IteratorOperations.h"
 #include "JSCInlines.h"
-#include "JSGlobalObject.h"
-#include "JSObjectInlines.h"
-#include "JSWeakMap.h"
+#include "JSWeakMapInlines.h"
 #include "WeakMapPrototype.h"
 
 namespace JSC {
 
-const ClassInfo WeakMapConstructor::s_info = { "Function", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(WeakMapConstructor) };
+const ClassInfo WeakMapConstructor::s_info = { "Function"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(WeakMapConstructor) };
 
 void WeakMapConstructor::finishCreation(VM& vm, WeakMapPrototype* prototype)
 {
-    Base::finishCreation(vm, prototype->classInfo(vm)->className);
+    Base::finishCreation(vm, 0, "WeakMap"_s, PropertyAdditionMode::WithoutStructureTransition);
     putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(0), PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly);
 }
 
-static EncodedJSValue JSC_HOST_CALL callWeakMap(ExecState* exec)
+static JSC_DECLARE_HOST_FUNCTION(callWeakMap);
+static JSC_DECLARE_HOST_FUNCTION(constructWeakMap);
+
+WeakMapConstructor::WeakMapConstructor(VM& vm, Structure* structure)
+    : Base(vm, structure, callWeakMap, constructWeakMap)
 {
-    VM& vm = exec->vm();
-    auto scope = DECLARE_THROW_SCOPE(vm);
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(exec, scope, "WeakMap"));
 }
 
-static EncodedJSValue JSC_HOST_CALL constructWeakMap(ExecState* exec)
+JSC_DEFINE_HOST_FUNCTION(callWeakMap, (JSGlobalObject* globalObject, CallFrame*))
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "WeakMap"));
+}
+
+JSC_DEFINE_HOST_FUNCTION(constructWeakMap, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    JSGlobalObject* globalObject = asInternalFunction(exec->jsCallee())->globalObject();
-    Structure* weakMapStructure = InternalFunction::createSubclassStructure(exec, exec->newTarget(), globalObject->weakMapStructure());
-    RETURN_IF_EXCEPTION(scope, encodedJSValue());
-    JSWeakMap* weakMap = JSWeakMap::create(exec, weakMapStructure);
-    JSValue iterable = exec->argument(0);
+    JSObject* newTarget = asObject(callFrame->newTarget());
+    Structure* weakMapStructure = JSC_GET_DERIVED_STRUCTURE(vm, weakMapStructure, newTarget, callFrame->jsCallee());
+    RETURN_IF_EXCEPTION(scope, { });
+
+    JSWeakMap* weakMap = JSWeakMap::create(vm, weakMapStructure);
+    JSValue iterable = callFrame->argument(0);
     if (iterable.isUndefinedOrNull())
         return JSValue::encode(weakMap);
 
-    JSValue adderFunction = weakMap->JSObject::get(exec, vm.propertyNames->set);
+    JSValue adderFunction = weakMap->JSObject::get(globalObject, vm.propertyNames->set);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
-    CallData adderFunctionCallData;
-    CallType adderFunctionCallType = getCallData(adderFunction, adderFunctionCallData);
-    if (adderFunctionCallType == CallType::None)
-        return JSValue::encode(throwTypeError(exec, scope));
+    auto adderFunctionCallData = JSC::getCallData(adderFunction);
+    if (adderFunctionCallData.type == CallData::Type::None)
+        return throwVMTypeError(globalObject, scope, "'set' property of a WeakMap should be callable."_s);
+
+    bool canPerformFastSet = adderFunctionCallData.type == CallData::Type::Native && adderFunctionCallData.native.function == protoFuncWeakMapSet;
 
     scope.release();
-    forEachInIterable(exec, iterable, [&](VM& vm, ExecState* exec, JSValue nextItem) {
+    forEachInIterable(globalObject, iterable, [&](VM& vm, JSGlobalObject* globalObject, JSValue nextItem) {
         auto scope = DECLARE_THROW_SCOPE(vm);
         if (!nextItem.isObject()) {
-            throwTypeError(exec, scope);
+            throwTypeError(globalObject, scope);
             return;
         }
 
-        JSValue key = nextItem.get(exec, static_cast<unsigned>(0));
+        JSObject* nextObject = asObject(nextItem);
+
+        JSValue key = nextObject->getIndex(globalObject, static_cast<unsigned>(0));
         RETURN_IF_EXCEPTION(scope, void());
 
-        JSValue value = nextItem.get(exec, static_cast<unsigned>(1));
+        JSValue value = nextObject->getIndex(globalObject, static_cast<unsigned>(1));
         RETURN_IF_EXCEPTION(scope, void());
+
+        if (canPerformFastSet) {
+            if (key.isObject())
+                weakMap->set(vm, asObject(key), value);
+            else
+                throwTypeError(asObject(adderFunction)->globalObject(), scope, WeakMapInvalidKeyError);
+            return;
+        }
 
         MarkedArgumentBuffer arguments;
         arguments.append(key);
         arguments.append(value);
+        ASSERT(!arguments.hasOverflowed());
         scope.release();
-        call(exec, adderFunction, adderFunctionCallType, adderFunctionCallData, weakMap, arguments);
+        call(globalObject, adderFunction, adderFunctionCallData, weakMap, arguments);
     });
 
     return JSValue::encode(weakMap);
-}
-
-ConstructType WeakMapConstructor::getConstructData(JSCell*, ConstructData& constructData)
-{
-    constructData.native.function = constructWeakMap;
-    return ConstructType::Host;
-}
-
-CallType WeakMapConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = callWeakMap;
-    return CallType::Host;
 }
 
 }

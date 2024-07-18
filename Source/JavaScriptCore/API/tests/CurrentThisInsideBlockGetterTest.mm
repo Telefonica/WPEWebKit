@@ -23,7 +23,8 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "CurrentThisInsideBlockGetterTest.h"
+#import "config.h"
+#import "CurrentThisInsideBlockGetterTest.h"
 
 #if JSC_OBJC_API_ENABLED
 

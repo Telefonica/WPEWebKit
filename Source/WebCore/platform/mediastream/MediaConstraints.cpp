@@ -38,7 +38,7 @@
 
 namespace WebCore {
 
-const String& StringConstraint::find(const WTF::Function<bool(const String&)>& filter) const
+const String& StringConstraint::find(const Function<bool(const String&)>& filter) const
 {
     for (auto& constraint : m_exact) {
         if (filter(constraint))
@@ -123,10 +123,8 @@ void StringConstraint::merge(const MediaConstraint& other)
 
 void FlattenedConstraint::set(const MediaConstraint& constraint)
 {
-    for (auto& variant : m_variants) {
-        if (variant.constraintType() == constraint.constraintType())
-            return;
-    }
+    if (find(constraint.constraintType()))
+        return;
 
     append(constraint);
 }
@@ -182,7 +180,7 @@ const MediaConstraint* FlattenedConstraint::find(MediaConstraintType type) const
     return nullptr;
 }
 
-void MediaTrackConstraintSetMap::forEach(WTF::Function<void(const MediaConstraint&)>&& callback) const
+void MediaTrackConstraintSetMap::forEach(Function<void(const MediaConstraint&)>&& callback) const
 {
     filter([callback = WTFMove(callback)] (const MediaConstraint& constraint) mutable {
         callback(constraint);
@@ -190,7 +188,7 @@ void MediaTrackConstraintSetMap::forEach(WTF::Function<void(const MediaConstrain
     });
 }
 
-void MediaTrackConstraintSetMap::filter(const WTF::Function<bool(const MediaConstraint&)>& callback) const
+void MediaTrackConstraintSetMap::filter(const Function<bool(const MediaConstraint&)>& callback) const
 {
     if (m_width && !m_width->isEmpty() && callback(*m_width))
         return;
@@ -242,6 +240,8 @@ void MediaTrackConstraintSetMap::set(MediaConstraintType constraintType, std::op
     case MediaConstraintType::FacingMode:
     case MediaConstraintType::DeviceId:
     case MediaConstraintType::GroupId:
+    case MediaConstraintType::DisplaySurface:
+    case MediaConstraintType::LogicalSurface:
     case MediaConstraintType::Unknown:
         ASSERT_NOT_REACHED();
         break;
@@ -269,6 +269,8 @@ void MediaTrackConstraintSetMap::set(MediaConstraintType constraintType, std::op
     case MediaConstraintType::FacingMode:
     case MediaConstraintType::DeviceId:
     case MediaConstraintType::GroupId:
+    case MediaConstraintType::DisplaySurface:
+    case MediaConstraintType::LogicalSurface:
     case MediaConstraintType::Unknown:
         ASSERT_NOT_REACHED();
         break;
@@ -280,6 +282,12 @@ void MediaTrackConstraintSetMap::set(MediaConstraintType constraintType, std::op
     switch (constraintType) {
     case MediaConstraintType::EchoCancellation:
         m_echoCancellation = WTFMove(constraint);
+        break;
+    case MediaConstraintType::DisplaySurface:
+        m_displaySurface = WTFMove(constraint);
+        break;
+    case MediaConstraintType::LogicalSurface:
+        m_logicalSurface = WTFMove(constraint);
         break;
 
     case MediaConstraintType::Width:
@@ -305,6 +313,8 @@ void MediaTrackConstraintSetMap::set(MediaConstraintType constraintType, std::op
         m_facingMode = WTFMove(constraint);
         break;
     case MediaConstraintType::DeviceId:
+        if (constraint)
+            constraint->removeEmptyStringConstraint();
         m_deviceId = WTFMove(constraint);
         break;
     case MediaConstraintType::GroupId:
@@ -319,6 +329,8 @@ void MediaTrackConstraintSetMap::set(MediaConstraintType constraintType, std::op
     case MediaConstraintType::FrameRate:
     case MediaConstraintType::Volume:
     case MediaConstraintType::EchoCancellation:
+    case MediaConstraintType::DisplaySurface:
+    case MediaConstraintType::LogicalSurface:
     case MediaConstraintType::Unknown:
         ASSERT_NOT_REACHED();
         break;
@@ -358,12 +370,12 @@ static inline void addDefaultVideoConstraints(MediaTrackConstraintSetMap& videoC
     }
     if (addFacingModeConstraint) {
         StringConstraint facingModeConstraint({ }, MediaConstraintType::FacingMode);
-        facingModeConstraint.setIdeal(ASCIILiteral("user"));
+        facingModeConstraint.setIdeal("user"_s);
         videoConstraints.set(MediaConstraintType::FacingMode, WTFMove(facingModeConstraint));
     }
 }
 
-bool MediaConstraints::isConstraintSet(const WTF::Function<bool(const MediaTrackConstraintSetMap&)>& callback)
+bool MediaConstraints::isConstraintSet(const Function<bool(const MediaTrackConstraintSetMap&)>& callback)
 {
     if (callback(mandatoryConstraints))
         return true;
@@ -377,25 +389,56 @@ bool MediaConstraints::isConstraintSet(const WTF::Function<bool(const MediaTrack
 
 void MediaConstraints::setDefaultVideoConstraints()
 {
-    // 640x480, 30fps, font-facing camera
-    bool hasFrameRateConstraints = isConstraintSet([](const MediaTrackConstraintSetMap& constraint) {
-        return !!constraint.frameRate();
+    // 640x480, 30fps, front-facing camera
+    bool needsFrameRateConstraints = !isConstraintSet([](const MediaTrackConstraintSetMap& constraint) {
+        return !!constraint.frameRate() || !!constraint.width() || !!constraint.height();
     });
     
-    bool hasSizeConstraints = isConstraintSet([](const MediaTrackConstraintSetMap& constraint) {
+    bool needsSizeConstraints = !isConstraintSet([](const MediaTrackConstraintSetMap& constraint) {
         return !!constraint.width() || !!constraint.height();
     });
     
-    bool hasFacingModeConstraints = isConstraintSet([](const MediaTrackConstraintSetMap& constraint) {
-        return !!constraint.facingMode();
+    bool needsFacingModeConstraints = !isConstraintSet([](const MediaTrackConstraintSetMap& constraint) {
+        return !!constraint.facingMode() || !!constraint.deviceId();
     });
     
-    if (hasFrameRateConstraints && hasSizeConstraints && hasFacingModeConstraints)
-        return;
-    
-    addDefaultVideoConstraints(mandatoryConstraints, !hasFrameRateConstraints, !hasSizeConstraints, !hasFacingModeConstraints);
+    addDefaultVideoConstraints(mandatoryConstraints, needsFrameRateConstraints, needsSizeConstraints, needsFacingModeConstraints);
 }
-    
+
+void MediaConstraint::log() const
+{
+    switch (dataType()) {
+    case DataType::Boolean:
+        downcast<const BooleanConstraint>(*this).logAsBoolean();
+        break;
+    case DataType::Double:
+        downcast<const DoubleConstraint>(*this).logAsDouble();
+        break;
+    case DataType::Integer:
+        downcast<const IntConstraint>(*this).logAsInt();
+        break;
+    case DataType::None:
+    case DataType::String:
+        WTFLogAlways("MediaConstraint %d of type %d", static_cast<int>(constraintType()), static_cast<int>(dataType()));
+    }
+}
+
+void BooleanConstraint::logAsBoolean() const
+{
+    WTFLogAlways("BooleanConstraint %d, exact %d, ideal %d", static_cast<int>(constraintType()), m_exact ? *m_exact : -1, m_ideal ? *m_ideal : -1);
+}
+
+void DoubleConstraint::logAsDouble() const
+{
+    WTFLogAlways("DoubleConstraint %d, min %f, max %f, exact %f, ideal %f", static_cast<int>(constraintType()), m_min ? *m_min : -1, m_max ? *m_max : -1, m_exact ? *m_exact : -1, m_ideal ? *m_ideal : -1);
+}
+
+void IntConstraint::logAsInt() const
+{
+    WTFLogAlways("IntConstraint %d, min %d, max %d, exact %d, ideal %d", static_cast<int>(constraintType()), m_min ? *m_min : -1, m_max ? *m_max : -1, m_exact ? *m_exact : -1, m_ideal ? *m_ideal : -1);
+}
+
+
 }
 
 #endif // ENABLE(MEDIA_STREAM)

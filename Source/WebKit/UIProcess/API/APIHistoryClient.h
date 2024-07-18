@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef APIHistoryClient_h
-#define APIHistoryClient_h
+#pragma once
 
 #include <wtf/Forward.h>
 
@@ -36,6 +35,7 @@ struct WebNavigationDataStore;
 namespace API {
 
 class HistoryClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~HistoryClient() { }
 
@@ -46,5 +46,3 @@ public:
 };
 
 } // namespace API
-
-#endif // APIHistoryClient_h

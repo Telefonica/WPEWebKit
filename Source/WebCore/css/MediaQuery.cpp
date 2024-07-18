@@ -39,20 +39,20 @@ String MediaQuery::serialize() const
 {
     if (m_ignored) {
         // If query is invalid, serialized text should turn into "not all".
-        return ASCIILiteral("not all");
+        return "not all"_s;
     }
 
     bool shouldOmitMediaType = false;
     StringBuilder result;
     switch (m_restrictor) {
     case MediaQuery::Only:
-        result.appendLiteral("only ");
+        result.append("only ");
         break;
     case MediaQuery::Not:
-        result.appendLiteral("not ");
+        result.append("not ");
         break;
     case MediaQuery::None:
-        shouldOmitMediaType = !m_expressions.isEmpty() && m_mediaType == "all";
+        shouldOmitMediaType = !m_expressions.isEmpty() && m_mediaType == "all"_s;
         break;
     }
     bool needsAnd = false;
@@ -62,7 +62,7 @@ String MediaQuery::serialize() const
     }
     for (auto& expression : m_expressions) {
         if (needsAnd)
-            result.appendLiteral(" and ");
+            result.append(" and ");
         result.append(expression.serialize());
         needsAnd = true;
     }
@@ -70,27 +70,10 @@ String MediaQuery::serialize() const
 }
 
 MediaQuery::MediaQuery(Restrictor restrictor, const String& mediaType, Vector<MediaQueryExpression>&& expressions)
-    : m_restrictor(restrictor)
-    , m_mediaType(mediaType.convertToASCIILowercase())
+    : m_mediaType(mediaType.convertToASCIILowercase())
     , m_expressions(WTFMove(expressions))
+    , m_restrictor(restrictor)
 {
-    std::sort(m_expressions.begin(), m_expressions.end(), [](auto& a, auto& b) {
-        return codePointCompare(a.serialize(), b.serialize()) < 0;
-    });
-
-    // Remove all duplicated expressions.
-    String key;
-    for (int i = m_expressions.size() - 1; i >= 0; --i) {
-
-        // If any expression is invalid the media query must be ignored.
-        if (!m_ignored)
-            m_ignored = !m_expressions[i].isValid();
-
-        if (m_expressions[i].serialize() == key)
-            m_expressions.remove(i);
-        else
-            key = m_expressions[i].serialize();
-    }
 }
 
 // http://dev.w3.org/csswg/cssom/#compare-media-queries

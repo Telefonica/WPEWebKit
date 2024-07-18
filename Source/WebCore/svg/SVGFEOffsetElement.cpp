@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005 Rob Buis <buis@kde.org>
+ * Copyright (C) 2018-2022 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,29 +23,24 @@
 #include "SVGFEOffsetElement.h"
 
 #include "FEOffset.h"
-#include "FilterEffect.h"
-#include "SVGFilterBuilder.h"
 #include "SVGNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-// Animated property definitions
-DEFINE_ANIMATED_STRING(SVGFEOffsetElement, SVGNames::inAttr, In1, in1)
-DEFINE_ANIMATED_NUMBER(SVGFEOffsetElement, SVGNames::dxAttr, Dx, dx)
-DEFINE_ANIMATED_NUMBER(SVGFEOffsetElement, SVGNames::dyAttr, Dy, dy)
-
-BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGFEOffsetElement)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(in1)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(dx)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(dy)
-    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGFilterPrimitiveStandardAttributes)
-END_REGISTER_ANIMATED_PROPERTIES
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFEOffsetElement);
 
 inline SVGFEOffsetElement::SVGFEOffsetElement(const QualifiedName& tagName, Document& document)
     : SVGFilterPrimitiveStandardAttributes(tagName, document)
 {
     ASSERT(hasTagName(SVGNames::feOffsetTag));
-    registerAnimatedPropertiesForSVGFEOffsetElement();
+    
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        PropertyRegistry::registerProperty<SVGNames::inAttr, &SVGFEOffsetElement::m_in1>();
+        PropertyRegistry::registerProperty<SVGNames::dxAttr, &SVGFEOffsetElement::m_dx>();
+        PropertyRegistry::registerProperty<SVGNames::dyAttr, &SVGFEOffsetElement::m_dy>();
+    });
 }
 
 Ref<SVGFEOffsetElement> SVGFEOffsetElement::create(const QualifiedName& tagName, Document& document)
@@ -52,20 +48,20 @@ Ref<SVGFEOffsetElement> SVGFEOffsetElement::create(const QualifiedName& tagName,
     return adoptRef(*new SVGFEOffsetElement(tagName, document));
 }
 
-void SVGFEOffsetElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void SVGFEOffsetElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == SVGNames::dxAttr) {
-        setDxBaseValue(value.toFloat());
+        m_dx->setBaseValInternal(value.toFloat());
         return;
     }
 
     if (name == SVGNames::dyAttr) {
-        setDyBaseValue(value.toFloat());
+        m_dy->setBaseValInternal(value.toFloat());
         return;
     }
 
     if (name == SVGNames::inAttr) {
-        setIn1BaseValue(value);
+        m_in1->setBaseValInternal(value);
         return;
     }
 
@@ -74,25 +70,48 @@ void SVGFEOffsetElement::parseAttribute(const QualifiedName& name, const AtomicS
 
 void SVGFEOffsetElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (attrName == SVGNames::inAttr || attrName == SVGNames::dxAttr || attrName == SVGNames::dyAttr) {
+    if (attrName == SVGNames::inAttr) {
         InstanceInvalidationGuard guard(*this);
-        invalidate();
+        updateSVGRendererForElementChange();
+        return;
+    }
+
+    if (attrName == SVGNames::dxAttr || attrName == SVGNames::dyAttr) {
+        InstanceInvalidationGuard guard(*this);
+        primitiveAttributeChanged(attrName);
         return;
     }
 
     SVGFilterPrimitiveStandardAttributes::svgAttributeChanged(attrName);
 }
 
-RefPtr<FilterEffect> SVGFEOffsetElement::build(SVGFilterBuilder* filterBuilder, Filter& filter)
+bool SVGFEOffsetElement::setFilterEffectAttribute(FilterEffect& effect, const QualifiedName& attrName)
 {
-    FilterEffect* input1 = filterBuilder->getEffectById(in1());
+    auto& offset = downcast<FEOffset>(effect);
 
-    if (!input1)
-        return nullptr;
+    if (attrName == SVGNames::dxAttr)
+        return offset.setDx(dx());
+    if (attrName == SVGNames::dyAttr)
+        return offset.setDy(dy());
 
-    RefPtr<FilterEffect> effect = FEOffset::create(filter, dx(), dy());
-    effect->inputEffects().append(input1);
-    return effect;
+    ASSERT_NOT_REACHED();
+    return false;
 }
 
+bool SVGFEOffsetElement::isIdentity() const
+{
+    return !dx() && !dy();
 }
+
+IntOutsets SVGFEOffsetElement::outsets(const FloatRect& targetBoundingBox, SVGUnitTypes::SVGUnitType primitiveUnits) const
+{
+    auto offset = SVGFilter::calculateResolvedSize({ dx(), dy() }, targetBoundingBox, primitiveUnits);
+    return FEOffset::calculateOutsets(offset);
+}
+
+RefPtr<FilterEffect> SVGFEOffsetElement::createFilterEffect(const FilterEffectVector&, const GraphicsContext&) const
+{
+    return FEOffset::create(dx(), dy());
+}
+
+} // namespace WebCore

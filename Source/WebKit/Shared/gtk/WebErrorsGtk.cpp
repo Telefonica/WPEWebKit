@@ -27,26 +27,15 @@
 #include "WebErrors.h"
 
 #include "APIError.h"
-#include <WebCore/URL.h>
 #include <glib/gi18n-lib.h>
-
-using namespace WebCore;
+#include <wtf/URL.h>
 
 namespace WebKit {
-
-ResourceError printError(const URL& failingURL, const String& localizedDescription)
-{
-    return ResourceError(API::Error::webKitPrintErrorDomain(), API::Error::Print::Generic, failingURL, localizedDescription);
-}
-
-ResourceError printerNotFoundError(const URL& failingURL)
-{
-    return ResourceError(API::Error::webKitPrintErrorDomain(), API::Error::Print::PrinterNotFound, failingURL, _("Printer not found"));
-}
+using namespace WebCore;
 
 ResourceError invalidPageRangeToPrint(const URL& failingURL)
 {
-    return ResourceError(API::Error::webKitPrintErrorDomain(), API::Error::Print::InvalidPageRange, failingURL, _("Invalid page range"));
+    return ResourceError(API::Error::webKitPrintErrorDomain(), API::Error::Print::InvalidPageRange, failingURL, String::fromUTF8(_("Invalid page range")));
 }
 
 } // namespace WebKit

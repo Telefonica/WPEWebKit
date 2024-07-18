@@ -31,16 +31,15 @@
  */
 
 [
-    NoInterfaceObject,
-    ImplementationLacksVTable
+    LegacyNoInterfaceObject,
 ] interface CommandLineAPIHost {
-    void clearConsoleMessages();
-    void copyText(DOMString text);
+    undefined clearConsoleMessages();
+    undefined copyText(DOMString text);
 
-    [CallWith=ScriptState] void inspect(any objectToInspect, any hints);
-    [CallWith=ScriptState] any inspectedObject();
+    [CallWith=CurrentGlobalObject] undefined inspect(any objectToInspect, any hints);
+    [CallWith=CurrentGlobalObject] any inspectedObject();
 
-    [CallWith=ScriptState] record<DOMString, sequence<ListenerEntry>> getEventListeners(Node? node);
+    [CallWith=CurrentGlobalObject] record<DOMString, sequence<ListenerEntry>> getEventListeners(EventTarget target);
 
     DOMString databaseId(Database database);
     DOMString storageId(Storage storage);
@@ -49,6 +48,8 @@
 [
     JSGenerateToJSObject
 ] dictionary ListenerEntry {
-    required object function;
+    required object listener;
     required boolean useCapture;
+    required boolean passive;
+    required boolean once;
 };

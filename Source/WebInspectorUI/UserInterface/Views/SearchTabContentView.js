@@ -25,17 +25,22 @@
 
 WI.SearchTabContentView = class SearchTabContentView extends WI.ContentBrowserTabContentView
 {
-    constructor(identifier)
+    constructor()
     {
-        let {image, title} = WI.SearchTabContentView.tabInfo();
-        let tabBarItem = new WI.GeneralTabBarItem(image, title);
-        let detailsSidebarPanelConstructors = [WI.ResourceDetailsSidebarPanel, WI.ProbeDetailsSidebarPanel,
-            WI.DOMNodeDetailsSidebarPanel, WI.CSSStyleDetailsSidebarPanel];
-
-        if (window.LayerTreeAgent)
+        let detailsSidebarPanelConstructors = [
+            WI.ResourceDetailsSidebarPanel,
+            WI.ProbeDetailsSidebarPanel,
+            WI.DOMNodeDetailsSidebarPanel,
+            WI.ComputedStyleDetailsSidebarPanel,
+            WI.RulesStyleDetailsSidebarPanel,
+        ];
+        if (InspectorBackend.hasDomain("LayerTree"))
             detailsSidebarPanelConstructors.push(WI.LayerTreeDetailsSidebarPanel);
 
-        super(identifier || "search", "search", tabBarItem, WI.SearchSidebarPanel, detailsSidebarPanelConstructors);
+        super(SearchTabContentView.tabInfo(), {
+            navigationSidebarPanelConstructor: WI.SearchSidebarPanel,
+            detailsSidebarPanelConstructors,
+        });
 
         this._forcePerformSearch = false;
     }
@@ -43,14 +48,21 @@ WI.SearchTabContentView = class SearchTabContentView extends WI.ContentBrowserTa
     static tabInfo()
     {
         return {
-            image: "Images/SearchResults.svg",
-            title: WI.UIString("Search"),
+            identifier: SearchTabContentView.Type,
+            image: "Images/Search.svg",
+            displayName: WI.UIString("Search", "Search Tab Name", "Name of Search Tab"),
+            title: WI.UIString("Search (%s)", "Search Tab Title", "Title of Search Tab with keyboard shortcut").format(WI.searchKeyboardShortcut.displayName),
         };
     }
 
-    static isEphemeral()
+    static shouldPinTab()
     {
         return true;
+    }
+
+    static shouldSaveTab()
+    {
+        return false;
     }
 
     // Public
@@ -60,9 +72,9 @@ WI.SearchTabContentView = class SearchTabContentView extends WI.ContentBrowserTa
         return WI.SearchTabContentView.Type;
     }
 
-    shown()
+    attached()
     {
-        super.shown();
+        super.attached();
 
         // Perform on a delay because the field might not be visible yet.
         setTimeout(this.focusSearchField.bind(this));
@@ -70,7 +82,10 @@ WI.SearchTabContentView = class SearchTabContentView extends WI.ContentBrowserTa
 
     canShowRepresentedObject(representedObject)
     {
-        if (!(representedObject instanceof WI.Resource) && !(representedObject instanceof WI.Script) && !(representedObject instanceof WI.DOMTree))
+        if (representedObject instanceof WI.DOMTree)
+            return true;
+
+        if (!(representedObject instanceof WI.Resource) && !(representedObject instanceof WI.Script))
             return false;
 
         return !!this.navigationSidebarPanel.contentTreeOutline.getCachedTreeElement(representedObject);
@@ -92,7 +107,11 @@ WI.SearchTabContentView = class SearchTabContentView extends WI.ContentBrowserTa
 
     handleCopyEvent(event)
     {
-        let selectedTreeElement = this.navigationSidebarPanel.contentTreeOutline.selectedTreeElement;
+        let contentTreeOutline = this.navigationSidebarPanel.contentTreeOutline;
+        if (contentTreeOutline.element !== document.activeElement)
+            return;
+
+        let selectedTreeElement = contentTreeOutline.selectedTreeElement;
         if (!selectedTreeElement)
             return;
 

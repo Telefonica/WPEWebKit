@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,14 +29,15 @@
 
 namespace JSC {
 
-class NullGetterFunction : public InternalFunction {
+class NullGetterFunction final : public InternalFunction {
 public:
     typedef InternalFunction Base;
 
     static NullGetterFunction* create(VM& vm, Structure* structure)
     {
-        NullGetterFunction* function = new (NotNull, allocateCell< NullGetterFunction>(vm.heap))  NullGetterFunction(vm, structure);
-        function->finishCreation(vm, String());
+        // Since NullGetterFunction is per JSGlobalObject, we use put-without-transition in InternalFunction::finishCreation.
+        NullGetterFunction* function = new (NotNull, allocateCell< NullGetterFunction>(vm))  NullGetterFunction(vm, structure);
+        function->finishCreation(vm, 0, String(), PropertyAdditionMode::WithoutStructureTransition);
         return function;
     }
 
@@ -44,16 +45,12 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
 private:
-    NullGetterFunction(VM& vm, Structure* structure)
-        : Base(vm, structure)
-    {
-    }
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
+    NullGetterFunction(VM&, Structure*);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(NullGetterFunction, InternalFunction);
 
 } // namespace JSC

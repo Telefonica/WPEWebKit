@@ -1,5 +1,6 @@
 /*
  * Copyright (C) Research In Motion Limited 2011. All rights reserved.
+ * Copyright (C) 2021-2022 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,47 +18,53 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef FEDropShadow_h
-#define FEDropShadow_h
+#pragma once
 
 #include "Color.h"
-#include "Filter.h"
 #include "FilterEffect.h"
 
 namespace WebCore {
     
 class FEDropShadow : public FilterEffect {
 public:
-    static Ref<FEDropShadow> create(Filter&, float, float, float, float, const Color&, float);
+    WEBCORE_EXPORT static Ref<FEDropShadow> create(float stdX, float stdY, float dx, float dy, const Color& shadowColor, float shadowOpacity);
 
     float stdDeviationX() const { return m_stdX; }
-    void setStdDeviationX(float stdX) { m_stdX = stdX; }
+    bool setStdDeviationX(float);
 
     float stdDeviationY() const { return m_stdY; }
-    void setStdDeviationY(float stdY) { m_stdY = stdY; }
+    bool setStdDeviationY(float);
 
     float dx() const { return m_dx; }
-    void setDx(float dx) { m_dx = dx; }
+    bool setDx(float);
 
     float dy() const { return m_dy; }
-    void setDy(float dy) { m_dy = dy; }
+    bool setDy(float);
 
     const Color& shadowColor() const { return m_shadowColor; } 
-    void setShadowColor(const Color& shadowColor) { m_shadowColor = shadowColor; }
+    bool setShadowColor(const Color&);
 
     float shadowOpacity() const { return m_shadowOpacity; }
-    void setShadowOpacity(float shadowOpacity) { m_shadowOpacity = shadowOpacity; }
+    bool setShadowOpacity(float);
 
-    void platformApplySoftware() override;
-    void dump() override;
+    static IntOutsets calculateOutsets(const FloatSize& offset, const FloatSize& stdDeviation);
 
-    void determineAbsolutePaintRect() override;
+    template<class Encoder> void encode(Encoder&) const;
+    template<class Decoder> static std::optional<Ref<FEDropShadow>> decode(Decoder&);
+#if USE(CAIRO)
+    void setOperatingColorSpace(const DestinationColorSpace&) override { }
+#endif
 
-    WTF::TextStream& externalRepresentation(WTF::TextStream&, int indention) const override;
 
 private:
-    FEDropShadow(Filter&, float, float, float, float, const Color&, float);
-    
+    FEDropShadow(float stdX, float stdY, float dx, float dy, const Color& shadowColor, float shadowOpacity);
+
+    FloatRect calculateImageRect(const Filter&, const FilterImageVector& inputs, const FloatRect& primitiveSubregion) const override;
+
+    std::unique_ptr<FilterEffectApplier> createSoftwareApplier() const override;
+
+    WTF::TextStream& externalRepresentation(WTF::TextStream&, FilterRepresentation) const override;
+
     float m_stdX;
     float m_stdY;
     float m_dx;
@@ -65,7 +72,54 @@ private:
     Color m_shadowColor;
     float m_shadowOpacity;
 };
-    
+
+template<class Encoder>
+void FEDropShadow::encode(Encoder& encoder) const
+{
+    encoder << m_stdX;
+    encoder << m_stdY;
+    encoder << m_dx;
+    encoder << m_dy;
+    encoder << m_shadowColor;
+    encoder << m_shadowOpacity;
+}
+
+template<class Decoder>
+std::optional<Ref<FEDropShadow>> FEDropShadow::decode(Decoder& decoder)
+{
+    std::optional<float> stdX;
+    decoder >> stdX;
+    if (!stdX)
+        return std::nullopt;
+
+    std::optional<float> stdY;
+    decoder >> stdY;
+    if (!stdY)
+        return std::nullopt;
+
+    std::optional<float> dx;
+    decoder >> dx;
+    if (!dx)
+        return std::nullopt;
+
+    std::optional<float> dy;
+    decoder >> dy;
+    if (!dy)
+        return std::nullopt;
+
+    std::optional<Color> shadowColor;
+    decoder >> shadowColor;
+    if (!shadowColor)
+        return std::nullopt;
+
+    std::optional<float> shadowOpacity;
+    decoder >> shadowOpacity;
+    if (!shadowOpacity)
+        return std::nullopt;
+
+    return FEDropShadow::create(*stdX, *stdY, *dx, *dy, *shadowColor, *shadowOpacity);
+}
+
 } // namespace WebCore
 
-#endif // FEDropShadow_h
+SPECIALIZE_TYPE_TRAITS_FILTER_EFFECT(FEDropShadow)

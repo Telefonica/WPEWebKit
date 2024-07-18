@@ -33,6 +33,7 @@ namespace WebCore {
 class ContentSecurityPolicyDirectiveList;
 
 class ContentSecurityPolicyDirective {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     ContentSecurityPolicyDirective(const ContentSecurityPolicyDirectiveList& directiveList, const String& name, const String& value)
         : m_name(name)
@@ -41,8 +42,11 @@ public:
     {
     }
 
+    virtual ~ContentSecurityPolicyDirective() = 0;
+
     const String& name() const { return m_name; }
     const String& text() const { return m_text; }
+    virtual const String& nameForReporting() const { return m_name; }
 
     const ContentSecurityPolicyDirectiveList& directiveList() const { return m_directiveList; }
 

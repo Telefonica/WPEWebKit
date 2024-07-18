@@ -27,7 +27,7 @@
 #ifndef FELightingNEON_h
 #define FELightingNEON_h
 
-#if CPU(ARM_NEON) && CPU(ARM_TRADITIONAL) && COMPILER(GCC_OR_CLANG)
+#if CPU(ARM_NEON) && CPU(ARM_TRADITIONAL) && COMPILER(GCC_COMPATIBLE)
 
 #include "FELighting.h"
 #include "PointLightSource.h"
@@ -93,9 +93,9 @@ extern "C" {
 void neonDrawLighting(FELightingPaintingDataForNeon*);
 }
 
-inline void FELighting::platformApplyNeon(LightingData& data, LightSource::PaintingData& paintingData)
+inline void FELighting::platformApplyNeon(const LightingData& data, const LightSource::PaintingData& paintingData)
 {
-    FELightingFloatArgumentsForNeon floatArguments __attribute__((__aligned__(16)));
+    alignas(16) FELightingFloatArgumentsForNeon floatArguments;
     FELightingPaintingDataForNeon neonData = {
         data.pixels->data(),
         1,
@@ -111,9 +111,11 @@ inline void FELighting::platformApplyNeon(LightingData& data, LightSource::Paint
     // Set light source arguments.
     floatArguments.constOne = 1;
 
-    floatArguments.colorRed = m_lightingColor.red();
-    floatArguments.colorGreen = m_lightingColor.green();
-    floatArguments.colorBlue = m_lightingColor.blue();
+    auto color = m_lightingColor.toColorTypeLossy<SRGBA<uint8_t>>().resolved();
+
+    floatArguments.colorRed = color.red;
+    floatArguments.colorGreen = color.green;
+    floatArguments.colorBlue = color.blue;
     floatArguments.padding4 = 0;
 
     if (m_lightSource->type() == LS_POINT) {
@@ -144,9 +146,9 @@ inline void FELighting::platformApplyNeon(LightingData& data, LightSource::Paint
             neonData.flags |= FLAG_CONE_EXPONENT_IS_1;
     } else {
         ASSERT(m_lightSource->type() == LS_DISTANT);
-        floatArguments.lightX = paintingData.lightVector.x();
-        floatArguments.lightY = paintingData.lightVector.y();
-        floatArguments.lightZ = paintingData.lightVector.z();
+        floatArguments.lightX = paintingData.initialLightingData.lightVector.x();
+        floatArguments.lightY = paintingData.initialLightingData.lightVector.y();
+        floatArguments.lightZ = paintingData.initialLightingData.lightVector.z();
         floatArguments.padding2 = 1;
     }
 
@@ -196,6 +198,6 @@ inline void FELighting::platformApplyNeon(LightingData& data, LightSource::Paint
 
 } // namespace WebCore
 
-#endif // CPU(ARM_NEON) && COMPILER(GCC_OR_CLANG)
+#endif // CPU(ARM_NEON) && COMPILER(GCC_COMPATIBLE)
 
 #endif // FELightingNEON_h

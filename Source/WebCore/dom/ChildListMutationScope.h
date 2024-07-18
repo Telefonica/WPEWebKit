@@ -31,7 +31,7 @@
 #pragma once
 
 #include "ContainerNode.h"
-#include "Document.h"
+#include "DocumentInlines.h"
 #include "MutationObserver.h"
 #include <memory>
 #include <wtf/Noncopyable.h>
@@ -44,7 +44,7 @@ class MutationObserverInterestGroup;
 // ChildListMutationAccumulator is not meant to be used directly; ChildListMutationScope is the public interface.
 class ChildListMutationAccumulator : public RefCounted<ChildListMutationAccumulator> {
 public:
-    static RefPtr<ChildListMutationAccumulator> getOrCreate(ContainerNode&);
+    static Ref<ChildListMutationAccumulator> getOrCreate(ContainerNode&);
     ~ChildListMutationAccumulator();
 
     void childAdded(Node&);
@@ -76,7 +76,7 @@ class ChildListMutationScope {
 public:
     explicit ChildListMutationScope(ContainerNode& target)
     {
-        if (target.document().hasMutationObserversOfType(MutationObserver::ChildList))
+        if (target.document().hasMutationObserversOfType(MutationObserverOptionType::ChildList))
             m_accumulator = ChildListMutationAccumulator::getOrCreate(target);
     }
 

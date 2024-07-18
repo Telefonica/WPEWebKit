@@ -11,6 +11,7 @@
 
 #include "common/debug.h"
 
+#include "libANGLE/Display.h"
 #include "libANGLE/renderer/null/ContextNULL.h"
 #include "libANGLE/renderer/null/DeviceNULL.h"
 #include "libANGLE/renderer/null/ImageNULL.h"
@@ -19,18 +20,12 @@
 namespace rx
 {
 
-DisplayNULL::DisplayNULL(const egl::DisplayState &state) : DisplayImpl(state), mDevice(nullptr)
-{
-}
+DisplayNULL::DisplayNULL(const egl::DisplayState &state) : DisplayImpl(state) {}
 
-DisplayNULL::~DisplayNULL()
-{
-}
+DisplayNULL::~DisplayNULL() {}
 
 egl::Error DisplayNULL::initialize(egl::Display *display)
 {
-    mDevice = new DeviceNULL();
-
     constexpr size_t kMaxTotalAllocationSize = 1 << 28;  // 256MB
     mAllocationTracker.reset(new AllocationTrackerNULL(kMaxTotalAllocationSize));
 
@@ -40,13 +35,17 @@ egl::Error DisplayNULL::initialize(egl::Display *display)
 void DisplayNULL::terminate()
 {
     mAllocationTracker.reset();
-    SafeDelete(mDevice);
 }
 
-egl::Error DisplayNULL::makeCurrent(egl::Surface *drawSurface,
+egl::Error DisplayNULL::makeCurrent(egl::Display *display,
+                                    egl::Surface *drawSurface,
                                     egl::Surface *readSurface,
                                     gl::Context *context)
 {
+    // Ensure that the correct global DebugAnnotator is installed when the end2end tests change
+    // the ANGLE back-end (done frequently).
+    display->setGlobalDebugAnnotator();
+
     return egl::NoError();
 }
 
@@ -98,7 +97,7 @@ bool DisplayNULL::testDeviceLost()
     return false;
 }
 
-egl::Error DisplayNULL::restoreLostDevice()
+egl::Error DisplayNULL::restoreLostDevice(const egl::Display *display)
 {
     return egl::NoError();
 }
@@ -108,25 +107,32 @@ bool DisplayNULL::isValidNativeWindow(EGLNativeWindowType window) const
     return true;
 }
 
-std::string DisplayNULL::getVendorString() const
+std::string DisplayNULL::getRendererDescription()
 {
     return "NULL";
 }
 
-egl::Error DisplayNULL::getDevice(DeviceImpl **device)
+std::string DisplayNULL::getVendorString()
 {
-    *device = mDevice;
+    return "NULL";
+}
+
+std::string DisplayNULL::getVersionString(bool includeFullVersion)
+{
+    return std::string();
+}
+
+DeviceImpl *DisplayNULL::createDevice()
+{
+    return new DeviceNULL();
+}
+
+egl::Error DisplayNULL::waitClient(const gl::Context *context)
+{
     return egl::NoError();
 }
 
-egl::Error DisplayNULL::waitClient() const
-{
-    return egl::NoError();
-}
-
-egl::Error DisplayNULL::waitNative(EGLint engine,
-                                   egl::Surface *drawSurface,
-                                   egl::Surface *readSurface) const
+egl::Error DisplayNULL::waitNative(const gl::Context *context, EGLint engine)
 {
     return egl::NoError();
 }
@@ -134,6 +140,11 @@ egl::Error DisplayNULL::waitNative(EGLint engine,
 gl::Version DisplayNULL::getMaxSupportedESVersion() const
 {
     return gl::Version(3, 2);
+}
+
+gl::Version DisplayNULL::getMaxConformantESVersion() const
+{
+    return getMaxSupportedESVersion();
 }
 
 SurfaceImpl *DisplayNULL::createWindowSurface(const egl::SurfaceState &state,
@@ -164,19 +175,24 @@ SurfaceImpl *DisplayNULL::createPixmapSurface(const egl::SurfaceState &state,
     return new SurfaceNULL(state);
 }
 
-ImageImpl *DisplayNULL::createImage(EGLenum target,
-                                    egl::ImageSibling *buffer,
+ImageImpl *DisplayNULL::createImage(const egl::ImageState &state,
+                                    const gl::Context *context,
+                                    EGLenum target,
                                     const egl::AttributeMap &attribs)
 {
-    return new ImageNULL();
+    return new ImageNULL(state);
 }
 
-ContextImpl *DisplayNULL::createContext(const gl::ContextState &state)
+rx::ContextImpl *DisplayNULL::createContext(const gl::State &state,
+                                            gl::ErrorSet *errorSet,
+                                            const egl::Config *configuration,
+                                            const gl::Context *shareContext,
+                                            const egl::AttributeMap &attribs)
 {
-    return new ContextNULL(state, mAllocationTracker.get());
+    return new ContextNULL(state, errorSet, mAllocationTracker.get());
 }
 
-StreamProducerImpl *DisplayNULL::createStreamProducerD3DTextureNV12(
+StreamProducerImpl *DisplayNULL::createStreamProducerD3DTexture(
     egl::Stream::ConsumerType consumerType,
     const egl::AttributeMap &attribs)
 {
@@ -184,12 +200,16 @@ StreamProducerImpl *DisplayNULL::createStreamProducerD3DTextureNV12(
     return nullptr;
 }
 
+ShareGroupImpl *DisplayNULL::createShareGroup()
+{
+    return new ShareGroupNULL();
+}
+
 void DisplayNULL::generateExtensions(egl::DisplayExtensions *outExtensions) const
 {
     outExtensions->createContextRobustness            = true;
     outExtensions->postSubBuffer                      = true;
     outExtensions->createContext                      = true;
-    outExtensions->deviceQuery                        = true;
     outExtensions->image                              = true;
     outExtensions->imageBase                          = true;
     outExtensions->glTexture2DImage                   = true;
@@ -197,12 +217,19 @@ void DisplayNULL::generateExtensions(egl::DisplayExtensions *outExtensions) cons
     outExtensions->glTexture3DImage                   = true;
     outExtensions->glRenderbufferImage                = true;
     outExtensions->getAllProcAddresses                = true;
-    outExtensions->flexibleSurfaceCompatibility       = true;
+    outExtensions->noConfigContext                    = true;
     outExtensions->directComposition                  = true;
     outExtensions->createContextNoError               = true;
     outExtensions->createContextWebGLCompatibility    = true;
     outExtensions->createContextBindGeneratesResource = true;
     outExtensions->swapBuffersWithDamage              = true;
+    outExtensions->pixelFormatFloat                   = true;
+    outExtensions->surfacelessContext                 = true;
+    outExtensions->displayTextureShareGroup           = true;
+    outExtensions->displaySemaphoreShareGroup         = true;
+    outExtensions->createContextClientArrays          = true;
+    outExtensions->programCacheControlANGLE           = true;
+    outExtensions->robustResourceInitializationANGLE  = true;
 }
 
 void DisplayNULL::generateCaps(egl::Caps *outCaps) const

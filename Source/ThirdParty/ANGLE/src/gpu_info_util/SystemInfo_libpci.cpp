@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2013-2017 The ANGLE Project Authors. All rights reserved.
+// Copyright 2013 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -16,7 +16,7 @@
 #include "common/debug.h"
 
 #if !defined(GPU_INFO_USE_LIBPCI)
-#error SystemInfo_libpci.cpp compiled without GPU_INFO_USE_LIBPCI
+#    error SystemInfo_libpci.cpp compiled without GPU_INFO_USE_LIBPCI
 #endif
 
 namespace angle
@@ -25,11 +25,11 @@ namespace angle
 namespace
 {
 
-struct LibPCI : angle::NonCopyable
+struct LibPCI : private angle::NonCopyable
 {
     LibPCI()
     {
-        if (access("/sys/bus/pci/", F_OK) != 0 && access("/sys/bs/pci_express/", F_OK) != 0)
+        if (access("/sys/bus/pci/", F_OK) != 0 && access("/sys/bus/pci_express/", F_OK) != 0)
         {
             return;
         }
@@ -56,7 +56,9 @@ struct LibPCI : angle::NonCopyable
             (FillInfo = reinterpret_cast<decltype(FillInfo)>(dlsym(mHandle, "pci_fill_info"))) !=
                 nullptr &&
             (LookupName = reinterpret_cast<decltype(LookupName)>(
-                 dlsym(mHandle, "pci_lookup_name"))) != nullptr;
+                 dlsym(mHandle, "pci_lookup_name"))) != nullptr &&
+            (PCIReadByte = reinterpret_cast<decltype(PCIReadByte)>(
+                 dlsym(mHandle, "pci_read_byte"))) != nullptr;
     }
 
     bool IsValid() const { return mValid; }
@@ -75,6 +77,7 @@ struct LibPCI : angle::NonCopyable
     decltype(&::pci_scan_bus) ScanBus       = nullptr;
     decltype(&::pci_fill_info) FillInfo     = nullptr;
     decltype(&::pci_lookup_name) LookupName = nullptr;
+    decltype(&::pci_read_byte) PCIReadByte  = nullptr;
 
   private:
     void *mHandle = nullptr;
@@ -102,14 +105,9 @@ bool GetPCIDevicesWithLibPCI(std::vector<GPUDeviceInfo> *devices)
         pci.FillInfo(device, PCI_FILL_IDENT | PCI_FILL_CLASS);
 
         // Skip non-GPU devices
-        switch (device->device_class)
+        if (device->device_class >> 8 != PCI_BASE_CLASS_DISPLAY)
         {
-            case PCI_CLASS_DISPLAY_VGA:
-            case PCI_CLASS_DISPLAY_XGA:
-            case PCI_CLASS_DISPLAY_3D:
-                break;
-            default:
-                continue;
+            continue;
         }
 
         // Skip unknown devices
@@ -119,8 +117,9 @@ bool GetPCIDevicesWithLibPCI(std::vector<GPUDeviceInfo> *devices)
         }
 
         GPUDeviceInfo info;
-        info.vendorId = device->vendor_id;
-        info.deviceId = device->device_id;
+        info.vendorId   = device->vendor_id;
+        info.deviceId   = device->device_id;
+        info.revisionId = pci.PCIReadByte(device, PCI_REVISION_ID);
 
         devices->push_back(info);
     }
@@ -129,4 +128,4 @@ bool GetPCIDevicesWithLibPCI(std::vector<GPUDeviceInfo> *devices)
 
     return true;
 }
-}
+}  // namespace angle

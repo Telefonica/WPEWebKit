@@ -26,21 +26,29 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SegmentedVector_h
-#define SegmentedVector_h
+#pragma once
 
 #include <wtf/Noncopyable.h>
 #include <wtf/Vector.h>
 
 namespace WTF {
 
+    DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(SegmentedVector);
+
     // An iterator for SegmentedVector. It supports only the pre ++ operator
     template <typename T, size_t SegmentSize = 8> class SegmentedVector;
     template <typename T, size_t SegmentSize = 8> class SegmentedVectorIterator {
+        WTF_MAKE_FAST_ALLOCATED;
     private:
         friend class SegmentedVector<T, SegmentSize>;
     public:
         typedef SegmentedVectorIterator<T, SegmentSize> Iterator;
+
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = T;
+        using difference_type = ptrdiff_t;
+        using pointer = T*;
+        using reference = T&;
 
         ~SegmentedVectorIterator() { }
 
@@ -88,13 +96,16 @@ namespace WTF {
     // optimized for segmented vectors that get large; you may want to use
     // SegmentedVector<thingy, 1> if you don't expect a lot of entries.
     template <typename T, size_t SegmentSize>
-    class SegmentedVector {
+    class SegmentedVector final {
         friend class SegmentedVectorIterator<T, SegmentSize>;
         WTF_MAKE_NONCOPYABLE(SegmentedVector);
         WTF_MAKE_FAST_ALLOCATED;
 
     public:
-        typedef SegmentedVectorIterator<T, SegmentSize> Iterator;
+        using Iterator = SegmentedVectorIterator<T, SegmentSize>;
+
+        using value_type = T;
+        using iterator = Iterator;
 
         SegmentedVector() = default;
 
@@ -227,7 +238,7 @@ namespace WTF {
             for (size_t i = 0; i < m_size; ++i)
                 at(i).~T();
             for (size_t i = 0; i < m_segments.size(); ++i)
-                fastFree(m_segments[i]);
+                SegmentedVectorMalloc::free(m_segments[i]);
         }
 
         bool segmentExistsFor(size_t index)
@@ -263,7 +274,7 @@ namespace WTF {
 
         void allocateSegment()
         {
-            m_segments.append(static_cast<Segment*>(fastMalloc(sizeof(T) * SegmentSize)));
+            m_segments.append(static_cast<Segment*>(SegmentedVectorMalloc::malloc(sizeof(T) * SegmentSize)));
         }
 
         size_t m_size { 0 };
@@ -273,5 +284,3 @@ namespace WTF {
 } // namespace WTF
 
 using WTF::SegmentedVector;
-
-#endif // SegmentedVector_h

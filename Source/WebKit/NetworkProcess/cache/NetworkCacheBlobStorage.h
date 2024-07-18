@@ -26,8 +26,6 @@
 #ifndef NetworkCacheBlobStorage_h
 #define NetworkCacheBlobStorage_h
 
-#if ENABLE(NETWORK_CACHE)
-
 #include "NetworkCacheData.h"
 #include "NetworkCacheKey.h"
 #include <wtf/SHA1.h>
@@ -59,7 +57,7 @@ public:
     void synchronize();
 
 private:
-    String blobDirectoryPath() const;
+    String blobDirectoryPathIsolatedCopy() const;
     String blobPathForHash(const SHA1::Digest&) const;
 
     const String m_blobDirectoryPath;
@@ -71,5 +69,4 @@ private:
 }
 }
 
-#endif
 #endif

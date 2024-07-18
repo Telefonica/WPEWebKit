@@ -27,15 +27,35 @@ WI.CodeMirrorEditor = class CodeMirrorEditor
 {
     static create(element, options)
     {
-        if (options.lineSeparator === undefined)
-            options.lineSeparator = "\n";
-
         // CodeMirror's manual scrollbar positioning results in double scrollbars,
         // nor does it handle braces and brackets well, so default to using LTR.
         // Clients can override this if custom layout for RTL is available.
         element.setAttribute("dir", "ltr");
+        element.classList.toggle("read-only", options.readOnly);
 
-        let codeMirror = new CodeMirror(element, options);
+        let codeMirror = new CodeMirror(element, {
+            // These values will be overridden by any value with the same key in `options`.
+            indentWithTabs: WI.settings.indentWithTabs.value,
+            indentUnit: WI.settings.indentUnit.value,
+            tabSize: WI.settings.tabSize.value,
+            lineWrapping: WI.settings.enableLineWrapping.value,
+            showWhitespaceCharacters: WI.settings.showWhitespaceCharacters.value,
+            ...options,
+        });
+
+        function listenForChange(setting, codeMirrorOption) {
+            if (options[codeMirrorOption] !== undefined)
+                return;
+
+            setting.addEventListener(WI.Setting.Event.Changed, function(event) {
+                this.setOption(codeMirrorOption, setting.value);
+            }, codeMirror);
+        }
+        listenForChange(WI.settings.indentWithTabs, "indentWithTabs");
+        listenForChange(WI.settings.indentUnit, "indentUnit");
+        listenForChange(WI.settings.tabSize, "tabSize");
+        listenForChange(WI.settings.enableLineWrapping, "lineWrapping");
+        listenForChange(WI.settings.showWhitespaceCharacters, "showWhitespaceCharacters");
 
         // Override some Mac specific keybindings.
         if (WI.Platform.name === "mac") {

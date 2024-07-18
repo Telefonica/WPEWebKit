@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,38 +24,91 @@
  */
 
 .navigation-bar .item.button {
-    width: 26px;
     justify-content: center;
+    color: hsl(0, 0%, 18%);
+}
+
+.navigation-bar .item.button:not(.image-only):focus,
+.navigation-bar .item.button.image-only:focus > .glyph {
+    outline: auto -webkit-focus-ring-color;
+}
+
+.navigation-bar .item.button.image-only:focus {
+    outline: none;
+}
+
+.navigation-bar .item.button.image-only {
+    width: var(--image-button-navigation-item-width);
+}
+
+.navigation-bar .item.button.image-and-text {
+    padding: 0 8px;
+}
+
+.navigation-bar .item.button.image-and-text > span {
+    padding-bottom: 1px;
+    padding-inline-start: 4px;
+}
+
+.tab-bar > .navigation-bar .item.button.image-and-text > span {
+    padding-bottom: 0;
 }
 
 .navigation-bar .item.button.text-only {
-    width: auto;
     padding: 1px 8px 3px;
-    margin: 0 2px;
+    margin: 0 2px; /* WI.ButtonNavigationItem.prototype.get totalMargin */
 
+    height: initial;
     line-height: 11px;
-    color: hsl(0, 0%, 18%);
     border: 1px solid transparent;
     border-radius: 3px;
     text-align: center;
 }
 
+.navigation-bar .item.button.text-only:focus {
+    outline-offset: var(--focus-ring-outline-offset);
+}
+
 .navigation-bar .item.button > .glyph {
     color: var(--glyph-color);
+    opacity: var(--glyph-opacity);
 }
 
 .navigation-bar .item.button:not(.disabled):active > .glyph {
     color: var(--glyph-color-pressed);
 }
 
-.navigation-bar .item.button:not(.disabled):matches(:focus, .activate.activated, .radio.selected) > .glyph {
+.navigation-bar .item.button:not(.disabled):is(.activate.activated, .radio.selected) > .glyph {
     color: var(--glyph-color-active);
 }
 
-.navigation-bar .item.button:not(.disabled):active:matches(:focus, .activate.activated, .radio.selected) > .glyph {
+.navigation-bar .item.button:not(.disabled):active:is(.activate.activated, .radio.selected) > .glyph {
     color: var(--glyph-color-active-pressed);
 }
 
+.navigation-bar .item.button.disabled.image-and-text,
 .navigation-bar .item.button.disabled > .glyph {
     color: var(--glyph-color-disabled);
+}
+
+.navigation-bar .item.button.disabled > img {
+    opacity: 0.3;
+}
+
+body.window-inactive .navigation-bar .item.button > img {
+    opacity: 0.6;
+}
+
+body.window-inactive .navigation-bar .item.button.disabled > img {
+    opacity: 0.18;
+}
+
+@media (prefers-color-scheme: dark) {
+    .navigation-bar .item.button {
+        color: var(--text-color-secondary);
+    }
+
+    .navigation-bar .item.button.disabled > img {
+        filter: invert();
+    }
 }

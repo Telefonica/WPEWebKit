@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,9 +25,18 @@
 
 #pragma once
 
-#include "DisplayListItems.h"
+#include "DecomposedGlyphs.h"
+#include "DisplayListItemBuffer.h"
+#include "DisplayListItemType.h"
+#include "DisplayListResourceHeap.h"
+#include "FloatRect.h"
+#include "Font.h"
+#include "GraphicsContext.h"
+#include "ImageBuffer.h"
 #include <wtf/FastMalloc.h>
+#include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
 namespace WTF {
@@ -36,77 +45,90 @@ class TextStream;
 
 namespace WebCore {
 
-class FloatRect;
-class GraphicsContext;
-
 namespace DisplayList {
-
-class Item;
-
-enum AsTextFlag {
-    None                            = 0,
-    IncludesPlatformOperations      = 1 << 0,
-};
-
-typedef unsigned AsTextFlags;
 
 class DisplayList {
     WTF_MAKE_NONCOPYABLE(DisplayList); WTF_MAKE_FAST_ALLOCATED;
-    friend class Recorder;
+    friend class RecorderImpl;
     friend class Replayer;
 public:
-    DisplayList() = default;
-    DisplayList(DisplayList&&) = default;
+    WEBCORE_EXPORT DisplayList();
+    WEBCORE_EXPORT DisplayList(DisplayList&&);
+    WEBCORE_EXPORT DisplayList(ItemBufferHandles&&);
 
-    DisplayList& operator=(DisplayList&&) = default;
+    WEBCORE_EXPORT ~DisplayList();
+
+    WEBCORE_EXPORT DisplayList& operator=(DisplayList&&);
 
     void dump(WTF::TextStream&) const;
 
-    const Vector<Ref<Item>>& list() const { return m_list; }
-    Item& itemAt(size_t index)
-    {
-        ASSERT(index < m_list.size());
-        return m_list[index].get();
-    }
+    WEBCORE_EXPORT void clear();
+    WEBCORE_EXPORT bool isEmpty() const;
+    WEBCORE_EXPORT size_t sizeInBytes() const;
 
-    void clear();
-    void removeItemsFromIndex(size_t);
+    String asText(OptionSet<AsTextFlag>) const;
 
-    size_t itemCount() const { return m_list.size(); }
-    size_t sizeInBytes() const;
-    
-    String asText(AsTextFlags) const;
+    const ResourceHeap& resourceHeap() const { return m_resourceHeap; }
+
+    WEBCORE_EXPORT void setItemBufferReadingClient(ItemBufferReadingClient*);
+    WEBCORE_EXPORT void setItemBufferWritingClient(ItemBufferWritingClient*);
+    WEBCORE_EXPORT void prepareToAppend(ItemBufferHandle&&);
+
+    void shrinkToFit();
 
 #if !defined(NDEBUG) || !LOG_DISABLED
-    WTF::CString description() const;
-    void dump() const;
+    CString description() const;
+    WEBCORE_EXPORT void dump() const;
 #endif
 
+    WEBCORE_EXPORT void forEachItemBuffer(Function<void(const ItemBufferHandle&)>&&) const;
+
+    template<typename T, class... Args> void append(Args&&... args);
+    void append(ItemHandle);
+
+    class Iterator;
+
+    WEBCORE_EXPORT Iterator begin() const;
+    WEBCORE_EXPORT Iterator end() const;
+
 private:
-    Item& append(Ref<Item>&& item)
+    ItemBuffer* itemBufferIfExists() const { return m_items.get(); }
+    WEBCORE_EXPORT ItemBuffer& itemBuffer();
+
+    void cacheImageBuffer(WebCore::ImageBuffer& imageBuffer)
     {
-        m_list.append(WTFMove(item));
-        return m_list.last().get();
+        m_resourceHeap.add(imageBuffer.renderingResourceIdentifier(), Ref { imageBuffer });
     }
 
-    // Less efficient append, only used for tracking replay.
-    void appendItem(Item& item)
+    void cacheNativeImage(NativeImage& image)
     {
-        m_list.append(item);
+        m_resourceHeap.add(image.renderingResourceIdentifier(), Ref { image });
     }
 
-    static bool shouldDumpForFlags(AsTextFlags, const Item&);
+    void cacheFont(Font& font)
+    {
+        m_resourceHeap.add(font.renderingResourceIdentifier(), Ref { font });
+    }
 
-    Vector<Ref<Item>>& list() { return m_list; }
+    void cacheDecomposedGlyphs(WebCore::DecomposedGlyphs& decomposedGlyphs)
+    {
+        m_resourceHeap.add(decomposedGlyphs.renderingResourceIdentifier(), Ref { decomposedGlyphs });
+    }
 
-    Vector<Ref<Item>> m_list;
+    static bool shouldDumpForFlags(OptionSet<AsTextFlag>, ItemHandle);
+
+    LocalResourceHeap m_resourceHeap;
+    std::unique_ptr<ItemBuffer> m_items;
 };
+
+template<typename T, class... Args>
+void DisplayList::append(Args&&... args)
+{
+    itemBuffer().append<T>(std::forward<Args>(args)...);
+}
+
+WTF::TextStream& operator<<(WTF::TextStream&, const DisplayList&);
 
 } // DisplayList
 
-WTF::TextStream& operator<<(WTF::TextStream&, const DisplayList::DisplayList&);
-
 } // WebCore
-
-using WebCore::DisplayList::DisplayList;
-

@@ -31,12 +31,14 @@
 extern "C" {
 #endif
 
-WK_EXPORT WKTypeID WKFramePolicyListenerGetTypeID();
+WK_EXPORT WKTypeID WKFramePolicyListenerGetTypeID(void);
 
 WK_EXPORT void WKFramePolicyListenerUse(WKFramePolicyListenerRef);
+WK_EXPORT void WKFramePolicyListenerUseInNewProcess(WKFramePolicyListenerRef);
 WK_EXPORT void WKFramePolicyListenerDownload(WKFramePolicyListenerRef);
 WK_EXPORT void WKFramePolicyListenerIgnore(WKFramePolicyListenerRef);
 WK_EXPORT void WKFramePolicyListenerUseWithPolicies(WKFramePolicyListenerRef, WKWebsitePoliciesRef);
+WK_EXPORT void WKFramePolicyListenerUseInNewProcessWithPolicies(WKFramePolicyListenerRef, WKWebsitePoliciesRef);
 
 #ifdef __cplusplus
 }

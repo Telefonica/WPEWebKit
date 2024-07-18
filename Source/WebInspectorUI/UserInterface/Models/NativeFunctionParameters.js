@@ -161,7 +161,8 @@ WI.NativeConstructorFunctionParameters = {
 
     Console: {
         assert: "condition, [message], [...values]",
-        count: "[label]",
+        count: "label = \"default\"",
+        countReset: "label = \"default\"",
         debug: "message, [...values]",
         dir: "object",
         dirxml: "object",
@@ -173,10 +174,14 @@ WI.NativeConstructorFunctionParameters = {
         log: "message, [...values]",
         profile: "name",
         profileEnd: "name",
+        record: "object, [options]",
+        recordEnd: "object",
+        screenshot: "[node]",
         table: "data, [columns]",
         takeHeapSnapshot: "[label]",
-        time: "name = \"default\"",
-        timeEnd: "name = \"default\"",
+        time: "label = \"default\"",
+        timeLog: "label = \"default\"",
+        timeEnd: "label = \"default\"",
         timeStamp: "[label]",
         trace: "message, [...values]",
         warn: "message, [...values]",
@@ -244,7 +249,11 @@ WI.NativePrototypeFunctionParameters = {
         filter: "callback, [thisArg]",
         find: "callback, [thisArg]",
         findIndex: "callback, [thisArg]",
+        findLast: "callback, [thisArg]",
+        findLastIndex: "callback, [thisArg]",
         forEach: "callback, [thisArg]",
+        group: "callback, [thisArg]",
+        groupToMap: "callback, [thisArg]",
         includes: "searchValue, [startIndex=0]",
         indexOf: "searchValue, [startIndex=0]",
         join: "[separator=\",\"]",
@@ -483,7 +492,6 @@ WI.NativePrototypeFunctionParameters = {
         getCSSCanvasContext: "contextId, name, width, height",
         getElementById: "id",
         getElementsByName: "name",
-        getOverrideStyle: "[element], [pseudoElement]",
         importNode: "node, deep",
         queryCommandEnabled: "command",
         queryCommandIndeterm: "command",
@@ -642,6 +650,7 @@ WI.NativePrototypeFunctionParameters = {
         clearRect: "x, y, width, height",
         clip: "path, [winding]",
         createImageData: "imagedata",
+        createConicGradient: "angle, x, y",
         createLinearGradient: "x0, y0, x1, y1",
         createPattern: "canvas, repetitionType",
         createRadialGradient: "x0, y0, r0, x1, y1, r1",
@@ -679,8 +688,6 @@ WI.NativePrototypeFunctionParameters = {
         strokeText: "text, x, y, [maxWidth]",
         transform: "m11, m12, m21, m22, dx, dy",
         translate: "tx, ty",
-        webkitGetImageDataHD: "sx, sy, sw, sh",
-        webkitPutImageDataHD: "imagedata, dx, dy",
         __proto__: null,
     },
 
@@ -696,7 +703,7 @@ WI.NativePrototypeFunctionParameters = {
     CommandLineAPIHost: {
         copyText: "text",
         databaseId: "database",
-        getEventListeners: "node",
+        getEventListeners: "target",
         inspect: "objectId, hints",
         storageId: "storage",
         __proto__: null,
@@ -1050,6 +1057,11 @@ WI.NativePrototypeFunctionParameters = {
         __proto__: null,
     },
 
+    ImageBitmapRenderingContext: {
+        transferFromImageBitmap: "[bitmap]",
+        __proto__: null,
+    },
+
     KeyboardEvent: {
         initKeyboardEvent: "[type], [canBubble], [cancelable], [view], [keyIdentifier], [location], [ctrlKey], [altKey], [shiftKey], [metaKey], [altGraphKey]",
         __proto__: null,
@@ -1085,11 +1097,6 @@ WI.NativePrototypeFunctionParameters = {
     MediaQueryList: {
         addListener: "[listener]",
         removeListener: "[listener]",
-        __proto__: null,
-    },
-
-    MediaQueryListListener: {
-        queryChanged: "[list]",
         __proto__: null,
     },
 
@@ -1263,11 +1270,6 @@ WI.NativePrototypeFunctionParameters = {
 
     PositionErrorCallback: {
         handleEvent: "error",
-        __proto__: null,
-    },
-
-    QuickTimePluginReplacement: {
-        postEvent: "eventName",
         __proto__: null,
     },
 
@@ -1694,11 +1696,6 @@ WI.NativePrototypeFunctionParameters = {
         __proto__: null,
     },
 
-    StyleMedia: {
-        matchMedium: "[mediaquery]",
-        __proto__: null,
-    },
-
     StyleSheetList: {
         item: "[index]",
         __proto__: null,
@@ -1870,6 +1867,14 @@ WI.NativePrototypeFunctionParameters = {
 
     WebGLDrawBuffers: {
         drawBuffersWEBGL: "buffers",
+        __proto__: null,
+    },
+
+    WebGLMultiDraw: {
+        multiDrawArraysWebGL: "mode, firstsList, firstsOffset, countsList, countsOffset, drawcount",
+        multiDrawArraysInstancedWebGL: "mode, firstsList, firstsOffset, countsList, countsOffset, instanceCountsList, instanceCountsOffset, drawcount",
+        multiDrawElementsWebGL: "mode, countsList, countsOffset, type, offsetsList, offsetsOffset, drawcount",
+        multiDrawElementsInstancedWebGL: "mode, countsList, countsOffset, type, offsetsList, offsetsOffset, instanceCountsList, instanceCountsOffset, drawcount",
         __proto__: null,
     },
 
@@ -2176,20 +2181,6 @@ WI.NativePrototypeFunctionParameters = {
 };
 
 (function() {
-    // COMPATIBILITY (iOS 9): EventTarget properties were on instances, now there
-    // is an actual EventTarget prototype in the chain.
-    var EventTarget = WI.NativePrototypeFunctionParameters.EventTarget;
-    var eventTargetTypes = [
-        "Node", "Window",
-        "AudioNode", "AudioTrackList", "DOMApplicationCache", "FileReader",
-        "MediaController", "MediaStreamTrack", "MessagePort", "Notification", "RTCDTMFSender",
-        "SpeechSynthesisUtterance", "TextTrack", "TextTrackCue", "TextTrackList",
-        "VideoTrackList", "WebKitMediaKeySession", "WebKitNamedFlow", "WebSocket",
-        "WorkerGlobalScope", "XMLHttpRequest", "webkitMediaStream", "webkitRTCPeerConnection"
-    ];
-    for (var type of eventTargetTypes)
-        Object.assign(WI.NativePrototypeFunctionParameters[type], EventTarget);
-
     var ElementQueries = {
         getElementsByClassName: "classNames",
         getElementsByTagName: "tagName",
@@ -2215,9 +2206,5 @@ WI.NativePrototypeFunctionParameters = {
     Object.assign(WI.NativePrototypeFunctionParameters.Element, ParentNode);
     Object.assign(WI.NativePrototypeFunctionParameters.Document, ParentNode);
     Object.assign(WI.NativePrototypeFunctionParameters.DocumentFragment, ParentNode);
-
-    // COMPATIBILITY (iOS 9): window.console used to be a Console object instance,
-    // now it is just a namespace object on the global object.
-    WI.NativePrototypeFunctionParameters.Console = WI.NativeConstructorFunctionParameters.Console;
 
 })();

@@ -23,10 +23,8 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WebKitLogging_h
-#define WebKitLogging_h
+#pragma once
 
-#include <WebCore/LogMacros.h>
 #include <wtf/Assertions.h>
 #include <wtf/text/WTFString.h>
 
@@ -41,16 +39,39 @@ extern "C" {
 #endif
 
 #define WEBKIT2_LOG_CHANNELS(M) \
+    M(ActivityState) \
+    M(PrivateClickMeasurement) \
+    M(AppSSO) \
+    M(Automation) \
+    M(AutomationInteractions) \
+    M(BackForward) \
+    M(BackForwardCache) \
+    M(CacheStorage) \
+    M(ContentObservation) \
     M(ContextMenu) \
+    M(DisplayLink) \
+    M(DiskPersistency) \
     M(DragAndDrop) \
+    M(EME) \
     M(Fullscreen) \
     M(Gamepad) \
-    M(IconDatabase) \
-    M(IndexedDB) \
-    M(InspectorServer) \
     M(IPC) \
+    M(IPCMessages) \
+    M(ITPDebug) \
+    M(IconDatabase) \
+    M(ImageAnalysis) \
+    M(IncrementalPDF) \
+    M(IncrementalPDFVerbose) \
+    M(IndexedDB) \
+    M(Inspector) \
     M(KeyHandling) \
+    M(Language) \
     M(Layers) \
+    M(Layout) \
+    M(Loading) \
+    M(Media) \
+    M(MemoryPressure) \
+    M(ModelElement) \
     M(MouseHandling) \
     M(Network) \
     M(NetworkCache) \
@@ -58,23 +79,43 @@ extern "C" {
     M(NetworkCacheStorage) \
     M(NetworkScheduling) \
     M(NetworkSession) \
+    M(Notifications) \
     M(PerformanceLogging) \
     M(Plugins) \
     M(Printing) \
+    M(Process) \
     M(ProcessSuspension) \
+    M(ProcessSwapping) \
+    M(ProximityNetworking) \
+    M(Push) \
+    M(RemoteRenderingBufferVolatility) \
     M(RemoteLayerTree) \
     M(Resize) \
     M(ResourceLoadStatistics) \
+    M(Sandbox) \
+    M(ScrollAnimations) \
+    M(Scrolling) \
     M(Selection) \
     M(ServiceWorker) \
     M(SessionState) \
+    M(SharedDisplayLists) \
+    M(SharedWorker) \
+    M(Storage) \
     M(StorageAPI) \
     M(TextInput) \
+    M(Translation) \
+    M(UIHitTesting) \
     M(ViewGestures) \
     M(ViewState) \
+    M(ViewportSizing) \
     M(VirtualMemory) \
     M(VisibleRects) \
+    M(WebAuthn) \
+    M(WebGL) \
     M(WebRTC) \
+    M(WheelEvents) \
+    M(Worker) \
+    M(XR) \
 
 WEBKIT2_LOG_CHANNELS(DECLARE_LOG_CHANNEL)
 
@@ -85,5 +126,3 @@ WEBKIT2_LOG_CHANNELS(DECLARE_LOG_CHANNEL)
 #endif
 
 #endif // !LOG_DISABLED || !RELEASE_LOG_DISABLED
-
-#endif // Logging_h

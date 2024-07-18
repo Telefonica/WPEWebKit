@@ -26,7 +26,7 @@
 #include "StorageSyncManager.h"
 
 #include "StorageThread.h"
-#include <WebCore/FileSystem.h>
+#include <wtf/FileSystem.h>
 #include <wtf/MainThread.h>
 #include <wtf/text/CString.h>
 
@@ -38,7 +38,7 @@ Ref<StorageSyncManager> StorageSyncManager::create(const String& path)
 }
 
 StorageSyncManager::StorageSyncManager(const String& path)
-    : m_thread(std::make_unique<StorageThread>())
+    : m_thread(makeUnique<StorageThread>())
     , m_path(path.isolatedCopy())
 {
     ASSERT(isMainThread());
@@ -55,12 +55,12 @@ StorageSyncManager::~StorageSyncManager()
 // Called on a background thread.
 String StorageSyncManager::fullDatabaseFilename(const String& databaseIdentifier)
 {
-    if (!makeAllDirectories(m_path)) {
+    if (!FileSystem::makeAllDirectories(m_path)) {
         LOG_ERROR("Unabled to create LocalStorage database path %s", m_path.utf8().data());
         return String();
     }
 
-    return pathByAppendingComponent(m_path, databaseIdentifier + ".localstorage");
+    return FileSystem::pathByAppendingComponent(m_path, makeString(databaseIdentifier, ".localstorage"));
 }
 
 void StorageSyncManager::dispatch(Function<void ()>&& function)

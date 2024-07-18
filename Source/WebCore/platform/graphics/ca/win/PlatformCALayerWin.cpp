@@ -30,17 +30,16 @@
 #if USE(CA)
 
 #include "AbstractCACFLayerTreeHost.h"
+#include "ColorSerialization.h"
 #include "FontCascade.h"
 #include "GDIUtilities.h"
-#include "GraphicsContext.h"
+#include "GraphicsContextCG.h"
 #include "PlatformCAAnimationWin.h"
 #include "PlatformCALayerWinInternal.h"
 #include "TextRun.h"
 #include "TileController.h"
 #include "WebTiledBackingLayerWin.h"
 #include <QuartzCore/CoreAnimationCF.h>
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
-#include <wtf/CurrentTime.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
 
@@ -74,7 +73,10 @@ static CFStringRef toCACFFilterType(PlatformCALayer::FilterType type)
 static AbstractCACFLayerTreeHost* layerTreeHostForLayer(const PlatformCALayer* layer)
 {
     // We need the AbstractCACFLayerTreeHost associated with this layer, which is stored in the UserData of the CACFContext
-    void* userData = wkCACFLayerGetContextUserData(layer->platformLayer());
+    void* userData = nullptr;
+    if (CACFContextRef context = CACFLayerGetContext(layer->platformLayer()))
+        userData = CACFContextGetUserData(context);
+
     if (!userData)
         return nullptr;
 
@@ -91,7 +93,7 @@ static PlatformCALayerWinInternal* intern(void* layer)
     return static_cast<PlatformCALayerWinInternal*>(CACFLayerGetUserData(static_cast<CACFLayerRef>(layer)));
 }
 
-PlatformCALayer* PlatformCALayer::platformCALayer(void* platformLayer)
+RefPtr<PlatformCALayer> PlatformCALayer::platformCALayerForLayer(void* platformLayer)
 {
     if (!platformLayer)
         return nullptr;
@@ -100,7 +102,7 @@ PlatformCALayer* PlatformCALayer::platformCALayer(void* platformLayer)
     return layerIntern ? layerIntern->owner() : nullptr;
 }
 
-PlatformCALayer::RepaintRectList PlatformCALayer::collectRectsToPaint(CGContextRef, PlatformCALayer*)
+PlatformCALayer::RepaintRectList PlatformCALayer::collectRectsToPaint(GraphicsContext&, PlatformCALayer*)
 {
     // FIXME: We should actually collect rects to use instead of defaulting to Windows'
     // normal drawing path.
@@ -108,9 +110,9 @@ PlatformCALayer::RepaintRectList PlatformCALayer::collectRectsToPaint(CGContextR
     return dirtyRects;
 }
 
-void PlatformCALayer::drawLayerContents(CGContextRef context, WebCore::PlatformCALayer* platformCALayer, RepaintRectList&, GraphicsLayerPaintBehavior)
+void PlatformCALayer::drawLayerContents(GraphicsContext& context, WebCore::PlatformCALayer* platformCALayer, RepaintRectList&, GraphicsLayerPaintBehavior)
 {
-    intern(platformCALayer)->displayCallback(platformCALayer->platformLayer(), context);
+    intern(platformCALayer)->displayCallback(platformCALayer->platformLayer(), context.platformContext());
 }
 
 CGRect PlatformCALayer::frameForLayer(const PlatformLayer* tileLayer)
@@ -126,14 +128,13 @@ static void displayCallback(CACFLayerRef caLayer, CGContextRef context)
 
 static void layoutSublayersProc(CACFLayerRef caLayer) 
 {
-    PlatformCALayer* layer = PlatformCALayer::platformCALayer(caLayer);
+    auto layer = PlatformCALayer::platformCALayerForLayer(caLayer);
     if (layer && layer->owner())
-        layer->owner()->platformCALayerLayoutSublayersOfLayer(layer);
+        layer->owner()->platformCALayerLayoutSublayersOfLayer(layer.get());
 }
 
 PlatformCALayerWin::PlatformCALayerWin(LayerType layerType, PlatformLayer* layer, PlatformCALayerClient* owner)
     : PlatformCALayer(layer ? LayerTypeCustom : layerType, owner)
-    , m_customAppearance(GraphicsLayer::NoCustomAppearance)
 {
     if (layer) {
         m_layer = layer;
@@ -152,7 +153,7 @@ PlatformCALayerWin::PlatformCALayerWin(LayerType layerType, PlatformLayer* layer
     if (usesTiledBackingLayer()) {
         intern = new WebTiledBackingLayerWin(this);
         TileController* tileController = reinterpret_cast<WebTiledBackingLayerWin*>(intern)->createTileController(this);
-        m_customSublayers = std::make_unique<PlatformCALayerList>(tileController->containerLayers());
+        m_customSublayers = makeUnique<PlatformCALayerList>(tileController->containerLayers());
     } else
         intern = new PlatformCALayerWinInternal(this);
 
@@ -208,7 +209,7 @@ PlatformCALayer* PlatformCALayerWin::rootLayer() const
     return host ? host->rootLayer() : nullptr;
 }
 
-void PlatformCALayerWin::animationStarted(const String& animationKey, CFTimeInterval beginTime)
+void PlatformCALayerWin::animationStarted(const String& animationKey, MonotonicTime beginTime)
 {
     // Update start time for any animation not yet started
     CFTimeInterval cacfBeginTime = currentTimeToMediaTime(beginTime);
@@ -266,7 +267,7 @@ void PlatformCALayerWin::setNeedsLayout()
 
 PlatformCALayer* PlatformCALayerWin::superlayer() const
 {
-    return platformCALayer(CACFLayerGetSuperlayer(m_layer.get()));
+    return platformCALayerForLayer(CACFLayerGetSuperlayer(m_layer.get())).get();
 }
 
 void PlatformCALayerWin::removeFromSuperlayer()
@@ -536,6 +537,11 @@ void PlatformCALayerWin::setSupportsSubpixelAntialiasedText(bool)
 {
 }
 
+bool PlatformCALayerWin::hasContents() const
+{
+    return !!CACFLayerGetContents(m_layer.get());
+}
+
 CFTypeRef PlatformCALayerWin::contents() const
 {
     return CACFLayerGetContents(m_layer.get());
@@ -566,18 +572,12 @@ void PlatformCALayerWin::setMagnificationFilter(FilterType value)
 
 Color PlatformCALayerWin::backgroundColor() const
 {
-    return CACFLayerGetBackgroundColor(m_layer.get());
+    return roundAndClampToSRGBALossy(CACFLayerGetBackgroundColor(m_layer.get()));
 }
 
 void PlatformCALayerWin::setBackgroundColor(const Color& value)
 {
-    CGFloat components[4];
-    value.getRGBA(components[0], components[1], components[2], components[3]);
-
-    RetainPtr<CGColorSpaceRef> colorSpace = adoptCF(CGColorSpaceCreateDeviceRGB());
-    RetainPtr<CGColorRef> color = adoptCF(CGColorCreate(colorSpace.get(), components));
-
-    CACFLayerSetBackgroundColor(m_layer.get(), color.get());
+    CACFLayerSetBackgroundColor(m_layer.get(), cachedCGColor(value).get());
     setNeedsCommit();
 }
 
@@ -671,7 +671,7 @@ void PlatformCALayerWin::setShapeRoundedRect(const FloatRoundedRect&)
 WindRule PlatformCALayerWin::shapeWindRule() const
 {
     // FIXME: implement.
-    return RULE_NONZERO;
+    return WindRule::NonZero;
 }
 
 void PlatformCALayerWin::setShapeWindRule(WindRule)
@@ -698,54 +698,18 @@ static void printIndent(StringBuilder& builder, int indent)
 
 static void printTransform(StringBuilder& builder, const CATransform3D& transform)
 {
-    builder.append('[');
-    builder.appendNumber(transform.m11);
-    builder.append(' ');
-    builder.appendNumber(transform.m12);
-    builder.append(' ');
-    builder.appendNumber(transform.m13);
-    builder.append(' ');
-    builder.appendNumber(transform.m14);
-    builder.append("; ");
-    builder.appendNumber(transform.m21);
-    builder.append(' ');
-    builder.appendNumber(transform.m22);
-    builder.append(' ');
-    builder.appendNumber(transform.m23);
-    builder.append(' ');
-    builder.appendNumber(transform.m24);
-    builder.append("; ");
-    builder.appendNumber(transform.m31);
-    builder.append(' ');
-    builder.appendNumber(transform.m32);
-    builder.append(' ');
-    builder.appendNumber(transform.m33);
-    builder.append(' ');
-    builder.appendNumber(transform.m34);
-    builder.append("; ");
-    builder.appendNumber(transform.m41);
-    builder.append(' ');
-    builder.appendNumber(transform.m42);
-    builder.append(' ');
-    builder.appendNumber(transform.m43);
-    builder.append(' ');
-    builder.appendNumber(transform.m44);
-    builder.append(']');
+    builder.append('[', FormattedNumber::fixedPrecision(transform.m11), ' ', FormattedNumber::fixedPrecision(transform.m12), ' ', FormattedNumber::fixedPrecision(transform.m13), ' ', FormattedNumber::fixedPrecision(transform.m14), "; ", FormattedNumber::fixedPrecision(transform.m21), ' ', FormattedNumber::fixedPrecision(transform.m22), ' ', FormattedNumber::fixedPrecision(transform.m23), ' ', FormattedNumber::fixedPrecision(transform.m24), "; ", FormattedNumber::fixedPrecision(transform.m31), ' ', FormattedNumber::fixedPrecision(transform.m32), ' ', FormattedNumber::fixedPrecision(transform.m33), ' ', FormattedNumber::fixedPrecision(transform.m34), "; ", FormattedNumber::fixedPrecision(transform.m41), ' ', FormattedNumber::fixedPrecision(transform.m42), ' ', FormattedNumber::fixedPrecision(transform.m43), ' ', FormattedNumber::fixedPrecision(transform.m44), ']');
 }
 
-static void printColor(StringBuilder& builder, int indent, const String& label, CGColorRef color)
+static void printColor(StringBuilder& builder, int indent, ASCIILiteral label, CGColorRef color)
 {
-    Color layerColor(color);
+    Color layerColor(roundAndClampToSRGBALossy(color));
     if (!layerColor.isValid())
         return;
 
     builder.append('\n');
     printIndent(builder, indent);
-    builder.append('(');
-    builder.append(label);
-    builder.append(' ');
-    builder.append(layerColor.nameForRenderTreeAsText());
-    builder.append(')');
+    builder.append('(', label, ' ', serializationForRenderTreeAsText(layerColor), ')');
 }
 
 static void printLayer(StringBuilder& builder, const PlatformCALayer* layer, int indent)
@@ -756,7 +720,7 @@ static void printLayer(StringBuilder& builder, const PlatformCALayer* layer, int
     builder.append('\n');
     printIndent(builder, indent);
 
-    char* layerTypeName = nullptr;
+    const char* layerTypeName = nullptr;
     switch (layer->layerType()) {
     case PlatformCALayer::LayerTypeLayer: layerTypeName = "layer"; break;
     case PlatformCALayer::LayerTypeWebLayer: layerTypeName = "web-layer"; break;
@@ -770,36 +734,11 @@ static void printLayer(StringBuilder& builder, const PlatformCALayer* layer, int
     case PlatformCALayer::LayerTypeContentsProvidedLayer: layerTypeName = "contents-provided-layer"; break;
     case PlatformCALayer::LayerTypeBackdropLayer: layerTypeName = "backdrop-layer"; break;
     case PlatformCALayer::LayerTypeShapeLayer: layerTypeName = "shape-layer"; break;
-    case PlatformCALayer::LayerTypeLightSystemBackdropLayer: layerTypeName = "light-system-backdrop-layer"; break;
-    case PlatformCALayer::LayerTypeDarkSystemBackdropLayer: layerTypeName = "dark-system-backdrop-layer"; break;
-    case PlatformCALayer::LayerTypeScrollingLayer: layerTypeName = "scrolling-layer"; break;
+    case PlatformCALayer::LayerTypeScrollContainerLayer: layerTypeName = "scroll-container-layer"; break;
     case PlatformCALayer::LayerTypeCustom: layerTypeName = "custom-layer"; break;
     }
 
-    builder.append("(");
-    builder.append(layerTypeName);
-    builder.append(" [");
-    builder.appendNumber(layerPosition.x());
-    builder.append(' ');
-    builder.appendNumber(layerPosition.y());
-    builder.append(' ');
-    builder.appendNumber(layerPosition.z());
-    builder.append("] [");
-    builder.appendNumber(layerBounds.x());
-    builder.append(' ');
-    builder.appendNumber(layerBounds.y());
-    builder.append(' ');
-    builder.appendNumber(layerBounds.width());
-    builder.append(' ');
-    builder.appendNumber(layerBounds.height());
-    builder.append("] [");
-    builder.appendNumber(layerAnchorPoint.x());
-    builder.append(' ');
-    builder.appendNumber(layerAnchorPoint.y());
-    builder.append(' ');
-    builder.appendNumber(layerAnchorPoint.z());
-    builder.append("] superlayer=");
-    builder.appendNumber(reinterpret_cast<unsigned long long>(layer->superlayer()));
+    builder.append('(', layerTypeName, " [", FormattedNumber::fixedPrecision(layerPosition.x()), ' ', FormattedNumber::fixedPrecision(layerPosition.y()), ' ', FormattedNumber::fixedPrecision(layerPosition.z()), "] [", FormattedNumber::fixedPrecision(layerBounds.x()), ' ', FormattedNumber::fixedPrecision(layerBounds.y()), ' ', FormattedNumber::fixedPrecision(layerBounds.width()), ' ', FormattedNumber::fixedPrecision(layerBounds.height()), "] [", FormattedNumber::fixedPrecision(layerAnchorPoint.x()), ' ', FormattedNumber::fixedPrecision(layerAnchorPoint.y()), ' ', FormattedNumber::fixedPrecision(layerAnchorPoint.z()), "] superlayer=", reinterpret_cast<unsigned long long>(layer->superlayer()));
 
     // Print name if needed
     String layerName = CACFLayerGetName(layer->platformLayer());
@@ -816,15 +755,15 @@ static void printLayer(StringBuilder& builder, const PlatformCALayer* layer, int
         builder.append('\n');
         printIndent(builder, indent + 1);
         builder.append("(borderWidth ");
-        builder.appendNumber(borderWidth);
+        builder.append(FormattedNumber::fixedPrecision(borderWidth));
         builder.append(')');
     }
 
     // Print backgroundColor if needed
-    printColor(builder, indent + 1, "backgroundColor", CACFLayerGetBackgroundColor(layer->platformLayer()));
+    printColor(builder, indent + 1, "backgroundColor"_s, CACFLayerGetBackgroundColor(layer->platformLayer()));
 
     // Print borderColor if needed
-    printColor(builder, indent + 1, "borderColor", CACFLayerGetBorderColor(layer->platformLayer()));
+    printColor(builder, indent + 1, "borderColor"_s, CACFLayerGetBorderColor(layer->platformLayer()));
 
     // Print masksToBounds if needed
     if (bool layerMasksToBounds = layer->masksToBounds()) {
@@ -845,7 +784,7 @@ static void printLayer(StringBuilder& builder, const PlatformCALayer* layer, int
         builder.append('\n');
         printIndent(builder, indent + 1);
         builder.append("(opacity ");
-        builder.appendNumber(layerOpacity);
+        builder.append(FormattedNumber::fixedPrecision(layerOpacity));
         builder.append(')');
     }
 
@@ -875,11 +814,7 @@ static void printLayer(StringBuilder& builder, const PlatformCALayer* layer, int
             CGImageRef imageContents = static_cast<CGImageRef>(const_cast<void*>(layerContents));
             builder.append('\n');
             printIndent(builder, indent + 1);
-            builder.append("(contents (image [");
-            builder.appendNumber(CGImageGetWidth(imageContents));
-            builder.append(' ');
-            builder.appendNumber(CGImageGetHeight(imageContents));
-            builder.append("]))");
+            builder.append("(contents (image [", CGImageGetWidth(imageContents), ' ', CGImageGetHeight(imageContents), "]))");
         }
 
         if (CFGetTypeID(layerContents) == CABackingStoreGetTypeID()) {
@@ -887,11 +822,7 @@ static void printLayer(StringBuilder& builder, const PlatformCALayer* layer, int
             CGImageRef imageContents = CABackingStoreGetCGImage(backingStore);
             builder.append('\n');
             printIndent(builder, indent + 1);
-            builder.append("(contents (backing-store [");
-            builder.appendNumber(CGImageGetWidth(imageContents));
-            builder.append(' ');
-            builder.appendNumber(CGImageGetHeight(imageContents));
-            builder.append("]))");
+            builder.append("(contents (backing-store [", CGImageGetWidth(imageContents), ' ', CGImageGetHeight(imageContents), "]))");
         }
     }
 
@@ -920,17 +851,7 @@ String PlatformCALayerWin::layerTreeAsString() const
     CGRect rootBounds = bounds();
 
     StringBuilder builder;
-    builder.append("\n\n** Render tree at time ");
-    builder.appendNumber(monotonicallyIncreasingTime());
-    builder.append(" (bounds ");
-    builder.appendNumber(rootBounds.origin.x);
-    builder.append(", ");
-    builder.appendNumber(rootBounds.origin.y);
-    builder.append(' ');
-    builder.appendNumber(rootBounds.size.width);
-    builder.append('x');
-    builder.appendNumber(rootBounds.size.height);
-    builder.append(") **\n\n");
+    builder.append("\n\n** Render tree at time ", FormattedNumber::fixedPrecision(MonotonicTime::now().secondsSinceEpoch().seconds()), " (bounds ", FormattedNumber::fixedPrecision(rootBounds.origin.x), ", ", FormattedNumber::fixedPrecision(rootBounds.origin.y), ' ', FormattedNumber::fixedPrecision(rootBounds.size.width), 'x', FormattedNumber::fixedPrecision(rootBounds.size.height), ") **\n\n");
 
     // Print layer tree from the root
     printLayer(builder, this, 0);
@@ -964,10 +885,10 @@ void PlatformCALayerWin::drawTextAtPoint(CGContextRef context, CGFloat x, CGFloa
 
     desc.setComputedSize(scale.width * fontSize);
 
-    FontCascade font = FontCascade(desc, 0, 0);
+    FontCascade font = FontCascade(WTFMove(desc), 0, 0);
     font.update(nullptr);
 
-    GraphicsContext cg(context);
+    GraphicsContextCG cg(context);
     cg.setFillColor(Color::black);
     cg.drawText(font, TextRun(text), IntPoint(x, y));
 }

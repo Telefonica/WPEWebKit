@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,27 +25,22 @@
 
 #import "WKUserContentControllerPrivate.h"
 
-#if WK_API_ENABLED
-
 #import "WKObject.h"
 #import "WebUserContentControllerProxy.h"
 
 namespace WebKit {
+template<> struct WrapperTraits<WebUserContentControllerProxy> {
+    using WrapperClass = WKUserContentController;
+};
 
-class WebUserContentControllerProxy;
-
-inline WKUserContentController *wrapper(WebUserContentControllerProxy& userContentController)
-{
-    ASSERT([userContentController.wrapper() isKindOfClass:[WKUserContentController class]]);
-    return (WKUserContentController *)userContentController.wrapper();
-}
-
+class WebScriptMessageHandler;
 }
 
 @interface WKUserContentController () <WKObject> {
 @package
     API::ObjectStorage<WebKit::WebUserContentControllerProxy> _userContentControllerProxy;
 }
-@end
 
-#endif
+- (void)_addScriptMessageHandler:(WebKit::WebScriptMessageHandler&)scriptMessageHandler;
+
+@end

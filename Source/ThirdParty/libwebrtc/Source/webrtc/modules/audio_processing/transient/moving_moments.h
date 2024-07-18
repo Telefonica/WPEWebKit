@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_TRANSIENT_MOVING_MOMENTS_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_TRANSIENT_MOVING_MOMENTS_H_
+#ifndef MODULES_AUDIO_PROCESSING_TRANSIENT_MOVING_MOMENTS_H_
+#define MODULES_AUDIO_PROCESSING_TRANSIENT_MOVING_MOMENTS_H_
 
 #include <stddef.h>
 
@@ -26,19 +26,21 @@ namespace webrtc {
 // the last values of the moments. When needed.
 class MovingMoments {
  public:
-  // Creates a Moving Moments object, that uses the last |length| values
+  // Creates a Moving Moments object, that uses the last `length` values
   // (including the new value introduced in every new calculation).
   explicit MovingMoments(size_t length);
   ~MovingMoments();
 
-  // Calculates the new values using |in|. Results will be in the out buffers.
-  // |first| and |second| must be allocated with at least |in_length|.
-  void CalculateMoments(const float* in, size_t in_length,
-                        float* first, float* second);
+  // Calculates the new values using `in`. Results will be in the out buffers.
+  // `first` and `second` must be allocated with at least `in_length`.
+  void CalculateMoments(const float* in,
+                        size_t in_length,
+                        float* first,
+                        float* second);
 
  private:
   size_t length_;
-  // A queue holding the |length_| latest input values.
+  // A queue holding the `length_` latest input values.
   std::queue<float> queue_;
   // Sum of the values of the queue.
   float sum_;
@@ -48,5 +50,4 @@ class MovingMoments {
 
 }  // namespace webrtc
 
-
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_TRANSIENT_MOVING_MOMENTS_H_
+#endif  // MODULES_AUDIO_PROCESSING_TRANSIENT_MOVING_MOMENTS_H_

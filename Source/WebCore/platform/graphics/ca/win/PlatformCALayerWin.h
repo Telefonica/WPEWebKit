@@ -45,6 +45,7 @@ public:
     PlatformCALayer* superlayer() const override;
     void removeFromSuperlayer() override;
     void setSublayers(const PlatformCALayerList&) override;
+    PlatformCALayerList sublayersForLogging() const override { return { }; }
     void removeAllSublayers() override;
     void appendSublayer(PlatformCALayer&) override;
     void insertSublayer(PlatformCALayer&, size_t index) override;
@@ -55,7 +56,7 @@ public:
     void addAnimationForKey(const String& key, PlatformCAAnimation&) override;
     void removeAnimationForKey(const String& key) override;
     RefPtr<PlatformCAAnimation> animationForKey(const String& key) override;
-    void animationStarted(const String& key, CFTimeInterval beginTime) override;
+    void animationStarted(const String& key, MonotonicTime beginTime) override;
     void animationEnded(const String& key) override;
 
     void setMask(PlatformCALayer*) override;
@@ -108,6 +109,7 @@ public:
     bool supportsSubpixelAntialiasedText() const override;
     void setSupportsSubpixelAntialiasedText(bool) override;
 
+    bool hasContents() const override;
     CFTypeRef contents() const override;
     void setContents(CFTypeRef) override;
 
@@ -174,7 +176,7 @@ private:
 
     HashMap<String, RefPtr<PlatformCAAnimation>> m_animations;
     std::unique_ptr<PlatformCALayerList> m_customSublayers;
-    GraphicsLayer::CustomAppearance m_customAppearance;
+    GraphicsLayer::CustomAppearance m_customAppearance { GraphicsLayer::CustomAppearance::None };
 };
 
 }

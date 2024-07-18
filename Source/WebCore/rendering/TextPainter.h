@@ -24,16 +24,19 @@
 
 #include "AffineTransform.h"
 #include "FloatRect.h"
+#include "GlyphDisplayListCache.h"
 #include "TextFlags.h"
 #include "TextPaintStyle.h"
-#include <wtf/text/AtomicString.h>
+#include <wtf/text/AtomString.h>
 
 namespace WebCore {
 
+class FilterOperations;
 class FontCascade;
 class RenderCombineText;
 class ShadowData;
 class TextRun;
+class Text;
 
 struct TextPaintStyle;
 
@@ -47,45 +50,63 @@ static inline AffineTransform rotation(const FloatRect& boxRect, RotationDirecti
 
 class TextPainter {
 public:
-    TextPainter(GraphicsContext&);
-    
+    TextPainter(GraphicsContext&, const FontCascade&);
+
     void setStyle(const TextPaintStyle& textPaintStyle) { m_style = textPaintStyle; }
-    void setSelectionStyle(const TextPaintStyle& selectionPaintStyle) { m_selectionStyle = selectionPaintStyle; }
-
     void setShadow(const ShadowData* shadow) { m_shadow = shadow; }
-    void setSelectionShadow(const ShadowData* selectionShadow) { m_selectionShadow = selectionShadow; }
-
-    void setFont(const FontCascade& font) { m_font = &font; }
-
+    void setShadowColorFilter(const FilterOperations* colorFilter) { m_shadowColorFilter = colorFilter; }
     void setIsHorizontal(bool isHorizontal) { m_textBoxIsHorizontal = isHorizontal; }
-
-    void setEmphasisMark(const AtomicString& mark, float offset, RenderCombineText*);
+    void setEmphasisMark(const AtomString& mark, float offset, const RenderCombineText*);
 
     void paintRange(const TextRun&, const FloatRect& boxRect, const FloatPoint& textOrigin, unsigned start, unsigned end);
-    void paint(const TextRun&, unsigned length, const FloatRect& boxRect, const FloatPoint& textOrigin,
-        unsigned selectionStart = 0, unsigned selectionEnd = 0, bool paintSelectedTextOnly = false, bool paintSelectedTextSeparately = false, bool paintNonSelectedTextOnly = false);
+
+    template<typename LayoutRun>
+    void setGlyphDisplayListIfNeeded(const LayoutRun& run, const PaintInfo& paintInfo, const TextRun& textRun)
+    {
+        if (!TextPainter::shouldUseGlyphDisplayList(paintInfo))
+            TextPainter::removeGlyphDisplayList(run);
+        else
+            m_glyphDisplayList = GlyphDisplayListCache::singleton().get(run, m_font, m_context, textRun);
+    }
+
+    template<typename LayoutRun>
+    static void removeGlyphDisplayList(const LayoutRun& run)
+    {
+        GlyphDisplayListCache::singleton().remove(run);
+    }
+
+    static bool shouldUseGlyphDisplayList(const PaintInfo&);
+    WEBCORE_EXPORT static void setForceUseGlyphDisplayListForTesting(bool);
+    WEBCORE_EXPORT static String cachedGlyphDisplayListsForTextNodeAsText(Text&, OptionSet<DisplayList::AsTextFlag>);
+    WEBCORE_EXPORT static void clearGlyphDisplayListCacheForTesting();
 
 private:
-    void paintTextOrEmphasisMarks(const FontCascade&, const TextRun&, const AtomicString& emphasisMark, float emphasisMarkOffset,
+    template<typename LayoutRun>
+    static DisplayList::DisplayList* glyphDisplayListIfExists(const LayoutRun& run)
+    {
+        return GlyphDisplayListCache::singleton().getIfExists(run);
+    }
+
+    void paintTextOrEmphasisMarks(const FontCascade&, const TextRun&, const AtomString& emphasisMark, float emphasisMarkOffset,
         const FloatPoint& textOrigin, unsigned startOffset, unsigned endOffset);
-    void paintTextWithShadows(const ShadowData*, const FontCascade&, const TextRun&, const FloatRect& boxRect, const FloatPoint& textOrigin,
-        unsigned startOffset, unsigned endOffset, const AtomicString& emphasisMark, float emphasisMarkOffset, bool stroked);
+    void paintTextWithShadows(const ShadowData*, const FilterOperations*, const FontCascade&, const TextRun&, const FloatRect& boxRect, const FloatPoint& textOrigin,
+        unsigned startOffset, unsigned endOffset, const AtomString& emphasisMark, float emphasisMarkOffset, bool stroked);
     void paintTextAndEmphasisMarksIfNeeded(const TextRun&, const FloatRect& boxRect, const FloatPoint& textOrigin, unsigned startOffset, unsigned endOffset,
-        const TextPaintStyle&, const ShadowData*);
+        const TextPaintStyle&, const ShadowData*, const FilterOperations*);
 
     GraphicsContext& m_context;
-    const FontCascade* m_font { nullptr };
+    const FontCascade& m_font;
     TextPaintStyle m_style;
-    TextPaintStyle m_selectionStyle;
+    AtomString m_emphasisMark;
     const ShadowData* m_shadow { nullptr };
-    const ShadowData* m_selectionShadow { nullptr };
-    AtomicString m_emphasisMark;
-    RenderCombineText* m_combinedText { nullptr };
+    const FilterOperations* m_shadowColorFilter { nullptr };
+    const RenderCombineText* m_combinedText { nullptr };
+    DisplayList::DisplayList* m_glyphDisplayList { nullptr };
     float m_emphasisMarkOffset { 0 };
     bool m_textBoxIsHorizontal { true };
 };
 
-inline void TextPainter::setEmphasisMark(const AtomicString& mark, float offset, RenderCombineText* combinedText)
+inline void TextPainter::setEmphasisMark(const AtomString& mark, float offset, const RenderCombineText* combinedText)
 {
     m_emphasisMark = mark;
     m_emphasisMarkOffset = offset;
@@ -94,7 +115,7 @@ inline void TextPainter::setEmphasisMark(const AtomicString& mark, float offset,
 
 class ShadowApplier {
 public:
-    ShadowApplier(GraphicsContext&, const ShadowData*, const FloatRect& textRect, bool lastShadowIterationShouldDrawText = true, bool opaque = false, FontOrientation = Horizontal);
+    ShadowApplier(GraphicsContext&, const ShadowData*, const FilterOperations* colorFilter, const FloatRect& textRect, bool lastShadowIterationShouldDrawText = true, bool opaque = false, FontOrientation = FontOrientation::Horizontal);
     FloatSize extraOffset() const { return m_extraOffset; }
     bool nothingToDraw() const { return m_nothingToDraw; }
     bool didSaveContext() const { return m_didSaveContext; }

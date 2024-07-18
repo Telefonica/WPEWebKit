@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -50,10 +50,21 @@ function unblockEventHandlers() {
         document.removeEventListener(name, stopEventPropagation, true);
 }
 
+function urlLastPathComponent(url) {
+    if (!url)
+        return "";
+
+    let slashIndex = url.lastIndexOf("/");
+    if (slashIndex === -1)
+        return url;
+
+    return url.slice(slashIndex + 1);
+}
+
 function handleError(error) {
     handleUncaughtExceptionRecord({
         message: error.message,
-        url: parseURL(error.sourceURL).lastPathComponent,
+        url: urlLastPathComponent(error.sourceURL),
         lineNumber: error.line,
         columnNumber: error.column,
         stack: error.stack,
@@ -64,16 +75,28 @@ function handleError(error) {
 function handleUncaughtException(event) {
     handleUncaughtExceptionRecord({
         message: event.message,
-        url: parseURL(event.filename).lastPathComponent,
+        url: urlLastPathComponent(event.filename),
         lineNumber: event.lineno,
         columnNumber: event.colno,
         stack: typeof event.error === "object" && event.error !== null ? event.error.stack : null,
     });
 }
 
+function handleUnhandledPromiseRejection(event) {
+    handleUncaughtExceptionRecord({
+        message: event.reason.message,
+        url: urlLastPathComponent(event.reason.sourceURL),
+        lineNumber: event.reason.line,
+        columnNumber: event.reason.column,
+        stack: event.reason.stack,
+    });
+}
+
 function handleUncaughtExceptionRecord(exceptionRecord) {
-    if (!WI.settings.enableUncaughtExceptionReporter.value)
-        return;
+    try {
+        if (!WI.settings.debugEnableUncaughtExceptionReporter.value)
+            return;
+    } catch { }
 
     if (!window.__uncaughtExceptions)
         window.__uncaughtExceptions = [];
@@ -97,7 +120,7 @@ function handleUncaughtExceptionRecord(exceptionRecord) {
         // Signal that loading is done even though we can't guarantee that
         // evaluating code on the inspector page will do anything useful.
         // Without this, the frontend host may never show the window.
-        if (InspectorFrontendHost)
+        if (window.InspectorFrontendHost)
             InspectorFrontendHost.loaded();
 
         // Don't tell InspectorFrontendAPI that loading is done, since it can
@@ -115,7 +138,9 @@ function dismissErrorSheet() {
     window.__uncaughtExceptions = [];
 
     // Do this last in case WebInspector's internal state is corrupted.
-    WI.updateWindowTitle();
+    try {
+        WI.updateWindowTitle();
+    } catch { }
 
     // FIXME (151959): tell the frontend host to hide a draggable title bar.
 }
@@ -127,7 +152,7 @@ function createErrorSheet() {
         document.write("<body></body></html>");
 
     // FIXME (151959): tell the frontend host to show a draggable title bar.
-    if (InspectorFrontendHost)
+    if (window.InspectorFrontendHost)
         InspectorFrontendHost.inspectedURLChanged("Internal Error");
 
     // Only allow one sheet element at a time.
@@ -181,8 +206,8 @@ function createErrorSheet() {
 
     let inspectedPageURL = null;
     try {
-        inspectedPageURL = WI.frameResourceManager.mainFrame.url;
-    } catch (e) { }
+        inspectedPageURL = WI.networkManager.mainFrame.url;
+    } catch { }
 
     let topLevelItems = [
         `Inspected URL:        ${inspectedPageURL || "(unknown)"}`,
@@ -192,10 +217,10 @@ function createErrorSheet() {
 
     function stringifyAndTruncateObject(object) {
         let string = JSON.stringify(object);
-        return string.length > 500 ? string.substr(0, 500) + "…" : string;
+        return string.length > 500 ? string.substr(0, 500) + ellipsis : string;
     }
 
-    if (InspectorBackend && InspectorBackend.currentDispatchState) {
+    if (window.InspectorBackend && InspectorBackend.currentDispatchState) {
         let state = InspectorBackend.currentDispatchState;
         if (state.event) {
             topLevelItems.push("Dispatch Source:      Protocol Event");
@@ -218,24 +243,26 @@ function createErrorSheet() {
 
     let formattedErrorDetails = window.__uncaughtExceptions.map((entry) => formattedEntry(entry));
     let detailsForBugReport = formattedErrorDetails.map((line) => ` - ${line}`).join("\n");
-    topLevelItems.push("");
-    topLevelItems.push("Uncaught Exceptions:");
-    topLevelItems.push(detailsForBugReport);
 
-    let encodedBugDescription = encodeURIComponent(`-------
-${topLevelItems.join("\n")}
--------
+    let encodedBugDescription = encodeURIComponent(`Uncaught Exception in Web Inspector.
 
-* STEPS TO REPRODUCE
+Steps to Reproduce:
 1. What were you doing? Include setup or other preparations to reproduce the exception.
 2. Include explicit, accurate, and minimal steps taken. Do not include extraneous or irrelevant steps.
+3. What did you expect to have happen? What actually happened?
 
-* NOTES
-Document any additional information that might be useful in resolving the problem, such as screen shots or other included attachments.
+Uncaught Exceptions:
+-----------------------
+${detailsForBugReport}
+-----------------------
+
+Notes:
+${topLevelItems.join("\n")}
 `);
+
     let encodedBugTitle = encodeURIComponent(`Uncaught Exception: ${firstException.message}`);
     let encodedInspectedURL = encodeURIComponent(inspectedPageURL || "http://");
-    let prefilledBugReportLink = `https://bugs.webkit.org/enter_bug.cgi?alias=&assigned_to=webkit-unassigned%40lists.webkit.org&attach_text=&blocked=&bug_file_loc=${encodedInspectedURL}&bug_severity=Normal&bug_status=NEW&comment=${encodedBugDescription}&component=Web%20Inspector&contenttypeentry=&contenttypemethod=autodetect&contenttypeselection=text%2Fplain&data=&dependson=&description=&flag_type-1=X&flag_type-3=X&form_name=enter_bug&keywords=&op_sys=All&priority=P2&product=WebKit&rep_platform=All&short_desc=${encodedBugTitle}&version=WebKit%20Nightly%20Build`;
+    let prefilledBugReportLink = `https://bugs.webkit.org/enter_bug.cgi?alias=&assigned_to=webkit-unassigned%40lists.webkit.org&attach_text=&blocked=&bug_file_loc=${encodedInspectedURL}&bug_severity=Normal&bug_status=NEW&comment=${encodedBugDescription}&component=Web%20Inspector&contenttypeentry=&contenttypemethod=autodetect&contenttypeselection=text%2Fplain&data=&dependson=&description=&flag_type-1=X&flag_type-3=X&form_name=enter_bug&keywords=&op_sys=All&priority=P2&product=WebKit&rep_platform=All&short_desc=${encodedBugTitle}`;
     let detailsForHTML = formattedErrorDetails.map((line) => `<li>${insertWordBreakCharacters(line)}</li>`).join("\n");
 
     let dismissOptionHTML = !loadCompleted ? "" : `<dt>A frivolous exception will not stop me!</dt>
@@ -253,11 +280,9 @@ Document any additional information that might be useful in resolving the proble
         <dd>Usually, this is caused by a syntax error while modifying the Web Inspector
         UI, or running an updated frontend with out-of-date WebKit build.</dt>
         <dt>I didn't do anything...?</dt>
-        <dd>If you don't think you caused this error to happen,
-        <a href="${prefilledBugReportLink}" target="_blank">click to file a pre-populated
-        bug with this information</a>. It is possible that someone else broke it by accident.</dd>
+        <dd><a href="${prefilledBugReportLink}" id="uncaught-exception-bug-report-link" class="bypass-event-blocking">Click to file a bug</a> as this is likely a Web Inspector bug.</dd>
         <dt>Oops, can I try again?</dt>
-        <dd><a href="javascript:window.location.reload()">Click to reload the Inspector</a>
+        <dd><a href="javascript:InspectorFrontendHost.reopen()" class="bypass-event-blocking">Click to reload the Inspector</a>
         again after making local changes.</dd>
         ${dismissOptionHTML}
     </dl>
@@ -270,9 +295,16 @@ Document any additional information that might be useful in resolving the proble
 
     sheetElement.addEventListener("click", handleLinkClick, true);
     document.body.appendChild(sheetElement);
+
+    document.getElementById("uncaught-exception-bug-report-link").addEventListener("click", (event) => {
+        InspectorFrontendHost.openURLExternally(prefilledBugReportLink);
+        event.stopImmediatePropagation();
+        event.preventDefault();
+    });
 }
 
 window.addEventListener("error", handleUncaughtException);
-window.handlePromiseException = window.handleInternalException = handleError;
+window.addEventListener("unhandledrejection", handleUnhandledPromiseRejection);
+window.handleInternalException = handleError;
 
 })();

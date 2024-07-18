@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,11 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef BINDINGS_OBJC_INSTANCE_H_
-#define BINDINGS_OBJC_INSTANCE_H_
-
-#include "objc_class.h"
-#include "objc_utility.h"
+#import "objc_class.h"
+#import "objc_utility.h"
 
 namespace JSC {
 
@@ -37,30 +34,32 @@ class ObjcClass;
 
 class ObjcInstance : public Instance {
 public:
-    static RefPtr<ObjcInstance> create(ObjectStructPtr, RefPtr<RootObject>&&);
+    static Ref<ObjcInstance> create(ObjectStructPtr, RefPtr<RootObject>&&);
     virtual ~ObjcInstance();
     
     static void setGlobalException(NSString*, JSGlobalObject* exceptionEnvironment = 0); // A null exceptionEnvironment means the exception should propogate to any execution environment.
 
     virtual Class* getClass() const;
         
-    virtual JSValue valueOf(ExecState*) const;
-    virtual JSValue defaultValue(ExecState*, PreferredPrimitiveType) const;
+    virtual JSValue valueOf(JSGlobalObject*) const;
+    virtual JSValue defaultValue(JSGlobalObject*, PreferredPrimitiveType) const;
 
-    virtual JSValue getMethod(ExecState*, PropertyName);
-    JSValue invokeObjcMethod(ExecState*, ObjcMethod* method);
-    virtual JSValue invokeMethod(ExecState*, RuntimeMethod* method);
+    virtual JSValue getMethod(JSGlobalObject*, PropertyName);
+    JSValue invokeObjcMethod(JSGlobalObject*, CallFrame*, ObjcMethod* method);
+    virtual JSValue invokeMethod(JSGlobalObject*, CallFrame*, RuntimeMethod* method);
     virtual bool supportsInvokeDefaultMethod() const;
-    virtual JSValue invokeDefaultMethod(ExecState*);
+    virtual JSValue invokeDefaultMethod(JSGlobalObject*, CallFrame*);
 
-    JSValue getValueOfUndefinedField(ExecState*, PropertyName) const;
-    virtual bool setValueOfUndefinedField(ExecState*, PropertyName, JSValue);
+    JSValue getValueOfUndefinedField(JSGlobalObject*, PropertyName) const;
+    virtual bool setValueOfUndefinedField(JSGlobalObject*, PropertyName, JSValue);
 
     ObjectStructPtr getObject() const { return _instance.get(); }
     
-    JSValue stringValue(ExecState*) const;
-    JSValue numberValue(ExecState*) const;
+    JSValue stringValue(JSGlobalObject*) const;
+    JSValue numberValue(JSGlobalObject*) const;
     JSValue booleanValue() const;
+
+    static bool isInStringValue();
 
 protected:
     virtual void virtualBegin();
@@ -68,20 +67,18 @@ protected:
 
 private:
     friend class ObjcField;
-    static void moveGlobalExceptionToExecState(ExecState*);
+    static void moveGlobalExceptionToExecState(JSGlobalObject*);
 
     ObjcInstance(ObjectStructPtr, RefPtr<RootObject>&&);
 
-    virtual RuntimeObject* newRuntimeObject(ExecState*);
+    virtual RuntimeObject* newRuntimeObject(JSGlobalObject*);
 
     RetainPtr<ObjectStructPtr> _instance;
-    mutable ObjcClass *_class;
-    ObjectStructPtr _pool;
-    int _beginCount;
+    mutable ObjcClass* _class { nullptr };
+    void* m_autoreleasePool { nullptr };
+    int _beginCount { 0 };
 };
 
 } // namespace Bindings
 
 } // namespace JSC
-
-#endif // BINDINGS_OBJC_INSTANCE_H_

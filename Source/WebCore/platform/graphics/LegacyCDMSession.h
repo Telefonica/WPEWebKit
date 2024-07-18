@@ -27,19 +27,19 @@
 
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA)
 
-#include <runtime/Uint8Array.h>
+#include <JavaScriptCore/Forward.h>
 #include <wtf/Forward.h>
-#include <wtf/RefPtr.h>
-#include <wtf/text/WTFString.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
-class CDMSessionClient {
+class LegacyCDMSessionClient : public CanMakeWeakPtr<LegacyCDMSessionClient> {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    virtual ~CDMSessionClient() { }
+    virtual ~LegacyCDMSessionClient() = default;
     virtual void sendMessage(Uint8Array*, String destinationURL) = 0;
 
-    enum {
+    enum : uint8_t {
         MediaKeyErrorUnknown = 1,
         MediaKeyErrorClient,
         MediaKeyErrorService,
@@ -51,30 +51,32 @@ public:
     virtual void sendError(MediaKeyErrorCode, uint32_t systemCode) = 0;
 
     virtual String mediaKeysStorageDirectory() const = 0;
+
+#if !RELEASE_LOG_DISABLED
+    virtual const Logger& logger() const = 0;
+    virtual const void* logIdentifier() const = 0;
+#endif
 };
 
-enum CDMSessionType {
+enum LegacyCDMSessionType {
     CDMSessionTypeUnknown,
     CDMSessionTypeClearKey,
     CDMSessionTypeAVFoundationObjC,
-    CDMSessionTypePlayReady,
     CDMSessionTypeAVStreamSession,
     CDMSessionTypeAVContentKeySession,
+    CDMSessionTypeRemote,
 };
 
-class CDMSession {
+class WEBCORE_EXPORT LegacyCDMSession {
 public:
-    virtual ~CDMSession() { }
+    virtual ~LegacyCDMSession() = default;
 
-    virtual CDMSessionType type() { return CDMSessionTypeUnknown; }
-    virtual void setClient(CDMSessionClient*) = 0;
+    virtual LegacyCDMSessionType type() { return CDMSessionTypeUnknown; }
     virtual const String& sessionId() const = 0;
     virtual RefPtr<Uint8Array> generateKeyRequest(const String& mimeType, Uint8Array* initData, String& destinationURL, unsigned short& errorCode, uint32_t& systemCode) = 0;
     virtual void releaseKeys() = 0;
     virtual bool update(Uint8Array*, RefPtr<Uint8Array>& nextMessage, unsigned short& errorCode, uint32_t& systemCode) = 0;
-    virtual RefPtr<ArrayBuffer> cachedKeyForKeyID(const String&) const { return nullptr; }
-    virtual bool ready() const { return false; }
-    virtual bool keyRequested() const { return false; }
+    virtual RefPtr<ArrayBuffer> cachedKeyForKeyID(const String&) const = 0;
 };
 
 }

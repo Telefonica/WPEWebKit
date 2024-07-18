@@ -41,31 +41,18 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-find_package(PkgConfig)
+find_package(PkgConfig QUIET)
 pkg_check_modules(PC_GLIB QUIET glib-2.0)
 
-find_library(GLIB_LIBRARY
+find_library(GLIB_LIBRARIES
     NAMES glib-2.0
     HINTS ${PC_GLIB_LIBDIR}
           ${PC_GLIB_LIBRARY_DIRS}
 )
 
-set (GLIB_LIBRARIES ${GLIB_LIBRARY})
-
-find_library(GLIB_INTL_LIBRARY
-    NAMES intl
-    HINTS ${PC_GLIB_LIBDIR}
-          ${PC_GLIB_LIBRARY_DIRS}
-)
-
-# Libintl is found
-if (GLIB_INTL_LIBRARY)
-set (GLIB_LIBRARIES ${GLIB_LIBRARIES} ${GLIB_INTL_LIBRARY})
-endif ()
-
 # Files in glib's main include path may include glibconfig.h, which,
 # for some odd reason, is normally in $LIBDIR/glib-2.0/include.
-get_filename_component(_GLIB_LIBRARY_DIR ${GLIB_LIBRARY} PATH)
+get_filename_component(_GLIB_LIBRARY_DIR ${GLIB_LIBRARIES} PATH)
 find_path(GLIBCONFIG_INCLUDE_DIR
     NAMES glibconfig.h
     HINTS ${PC_LIBDIR} ${PC_LIBRARY_DIRS} ${_GLIB_LIBRARY_DIR}
@@ -113,7 +100,7 @@ foreach (_component ${GLIB_FIND_COMPONENTS})
     elseif (${_component} STREQUAL "gio-unix")
         # gio-unix is compiled as part of the gio library, but the include paths
         # are separate from the shared glib ones. Since this is currently only used
-        # by WebKitGTK+ we don't go to extraordinary measures beyond pkg-config.
+        # by WebKitGTK we don't go to extraordinary measures beyond pkg-config.
         pkg_check_modules(GIO_UNIX QUIET gio-unix-2.0)
     endif ()
 endforeach ()

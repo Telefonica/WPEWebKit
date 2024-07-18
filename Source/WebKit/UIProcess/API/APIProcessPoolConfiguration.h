@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 #include "APIObject.h"
 #include "CacheModel.h"
 #include "WebsiteDataStore.h"
+#include <wtf/MemoryPressureHandler.h>
 #include <wtf/ProcessID.h>
 #include <wtf/Ref.h>
 #include <wtf/Vector.h>
@@ -36,66 +37,46 @@
 
 namespace API {
 
+#if PLATFORM(COCOA) && !PLATFORM(IOS_FAMILY_SIMULATOR)
+#define DEFAULT_CAPTURE_DISPLAY_IN_UI_PROCESS true
+#else
+#define DEFAULT_CAPTURE_DISPLAY_IN_UI_PROCESS false
+#endif
+
 class ProcessPoolConfiguration final : public ObjectImpl<Object::Type::ProcessPoolConfiguration> {
 public:
     static Ref<ProcessPoolConfiguration> create();
-    static Ref<ProcessPoolConfiguration> createWithLegacyOptions();
-    static Ref<ProcessPoolConfiguration> createWithWebsiteDataStoreConfiguration(const WebKit::WebsiteDataStore::Configuration&);
 
     explicit ProcessPoolConfiguration();
     virtual ~ProcessPoolConfiguration();
     
     Ref<ProcessPoolConfiguration> copy();
 
-    bool shouldHaveLegacyDataStore() const { return m_shouldHaveLegacyDataStore; }
-    void setShouldHaveLegacyDataStore(bool shouldHaveLegacyDataStore) { m_shouldHaveLegacyDataStore = shouldHaveLegacyDataStore; }
+    bool usesSingleWebProcess() const { return m_usesSingleWebProcess; }
+    void setUsesSingleWebProcess(bool enabled) { m_usesSingleWebProcess = enabled; }
 
-    unsigned maximumProcessCount() const { return m_maximumProcessCount; }
-    void setMaximumProcessCount(unsigned maximumProcessCount) { m_maximumProcessCount = maximumProcessCount; } 
+    bool isAutomaticProcessWarmingEnabled() const
+    {
+        return m_isAutomaticProcessWarmingEnabledByClient.value_or(m_clientWouldBenefitFromAutomaticProcessPrewarming);
+    }
 
-    bool diskCacheSpeculativeValidationEnabled() const { return m_diskCacheSpeculativeValidationEnabled; }
-    void setDiskCacheSpeculativeValidationEnabled(bool enabled) { m_diskCacheSpeculativeValidationEnabled = enabled; }
+    bool wasAutomaticProcessWarmingSetByClient() const { return !!m_isAutomaticProcessWarmingEnabledByClient; }
+    void setIsAutomaticProcessWarmingEnabled(bool value) { m_isAutomaticProcessWarmingEnabledByClient = value; }
 
-    WebKit::CacheModel cacheModel() const { return m_cacheModel; }
-    void setCacheModel(WebKit::CacheModel cacheModel) { m_cacheModel = cacheModel; }
+    void setUsesWebProcessCache(bool value) { m_usesWebProcessCache = value; }
+    bool usesWebProcessCache() const { return m_usesWebProcessCache; }
 
-    int64_t diskCacheSizeOverride() const { return m_diskCacheSizeOverride; }
-    void setDiskCacheSizeOverride(int64_t size) { m_diskCacheSizeOverride = size; }
+    bool clientWouldBenefitFromAutomaticProcessPrewarming() const { return m_clientWouldBenefitFromAutomaticProcessPrewarming; }
+    void setClientWouldBenefitFromAutomaticProcessPrewarming(bool value) { m_clientWouldBenefitFromAutomaticProcessPrewarming = value; }
 
-    const WTF::String& applicationCacheDirectory() const { return m_applicationCacheDirectory; }
-    void setApplicationCacheDirectory(const WTF::String& applicationCacheDirectory) { m_applicationCacheDirectory = applicationCacheDirectory; }
-
-    const WTF::String& applicationCacheFlatFileSubdirectoryName() const { return m_applicationCacheFlatFileSubdirectoryName; }
-
-    const WTF::String& cacheStorageDirectory() const { return m_cacheStorageDirectory; }
-    void setCacheStorageDirectory(WTF::String&& cacheStorageDirectory) { m_cacheStorageDirectory = WTFMove(cacheStorageDirectory); }
-
-    const WTF::String& diskCacheDirectory() const { return m_diskCacheDirectory; }
-    void setDiskCacheDirectory(const WTF::String& diskCacheDirectory) { m_diskCacheDirectory = diskCacheDirectory; }
-
-    const WTF::String& mediaCacheDirectory() const { return m_mediaCacheDirectory; }
-    void setMediaCacheDirectory(const WTF::String& mediaCacheDirectory) { m_mediaCacheDirectory = mediaCacheDirectory; }
-    
-    const WTF::String& indexedDBDatabaseDirectory() const { return m_indexedDBDatabaseDirectory; }
-    void setIndexedDBDatabaseDirectory(const WTF::String& indexedDBDatabaseDirectory) { m_indexedDBDatabaseDirectory = indexedDBDatabaseDirectory; }
+    void setUsesBackForwardCache(bool value) { m_usesBackForwardCache = value; }
+    bool usesBackForwardCache() const { return m_usesBackForwardCache; }
 
     const WTF::String& injectedBundlePath() const { return m_injectedBundlePath; }
     void setInjectedBundlePath(const WTF::String& injectedBundlePath) { m_injectedBundlePath = injectedBundlePath; }
 
-    const WTF::String& localStorageDirectory() const { return m_localStorageDirectory; }
-    void setLocalStorageDirectory(const WTF::String& localStorageDirectory) { m_localStorageDirectory = localStorageDirectory; }
-
-    const WTF::String& webSQLDatabaseDirectory() const { return m_webSQLDatabaseDirectory; }
-    void setWebSQLDatabaseDirectory(const WTF::String& webSQLDatabaseDirectory) { m_webSQLDatabaseDirectory = webSQLDatabaseDirectory; }
-
-    const WTF::String& mediaKeysStorageDirectory() const { return m_mediaKeysStorageDirectory; }
-    void setMediaKeysStorageDirectory(const WTF::String& mediaKeysStorageDirectory) { m_mediaKeysStorageDirectory = mediaKeysStorageDirectory; }
-
-    const WTF::String& resourceLoadStatisticsDirectory() const { return m_resourceLoadStatisticsDirectory; }
-    void setResourceLoadStatisticsDirectory(const WTF::String& resourceLoadStatisticsDirectory) { m_resourceLoadStatisticsDirectory = resourceLoadStatisticsDirectory; }
-
-    const WTF::String& javaScriptConfigurationDirectory() const { return m_javaScriptConfigurationDirectory; }
-    void setJavaScriptConfigurationDirectory(const WTF::String& javaScriptConfigurationDirectory) { m_javaScriptConfigurationDirectory = javaScriptConfigurationDirectory; }
+    const Vector<WTF::String>& customClassesForParameterCoder() const { return m_customClassesForParameterCoder; }
+    void setCustomClassesForParameterCoder(Vector<WTF::String>&& classesForCoder) { m_customClassesForParameterCoder = WTFMove(classesForCoder); }
 
     const Vector<WTF::String>& cachePartitionedURLSchemes() { return m_cachePartitionedURLSchemes; }
     void setCachePartitionedURLSchemes(Vector<WTF::String>&& cachePartitionedURLSchemes) { m_cachePartitionedURLSchemes = WTFMove(cachePartitionedURLSchemes); }
@@ -103,8 +84,8 @@ public:
     const Vector<WTF::String>& alwaysRevalidatedURLSchemes() { return m_alwaysRevalidatedURLSchemes; }
     void setAlwaysRevalidatedURLSchemes(Vector<WTF::String>&& alwaysRevalidatedURLSchemes) { m_alwaysRevalidatedURLSchemes = WTFMove(alwaysRevalidatedURLSchemes); }
 
-    const Vector<WTF::CString>& additionalReadAccessAllowedPaths() { return m_additionalReadAccessAllowedPaths; }
-    void setAdditionalReadAccessAllowedPaths(Vector<WTF::CString>&& additionalReadAccessAllowedPaths) { m_additionalReadAccessAllowedPaths = additionalReadAccessAllowedPaths; }
+    const Vector<WTF::String>& additionalReadAccessAllowedPaths() { return m_additionalReadAccessAllowedPaths; }
+    void setAdditionalReadAccessAllowedPaths(Vector<WTF::String>&& additionalReadAccessAllowedPaths) { m_additionalReadAccessAllowedPaths = additionalReadAccessAllowedPaths; }
 
     bool fullySynchronousModeIsAllowedForTesting() const { return m_fullySynchronousModeIsAllowedForTesting; }
     void setFullySynchronousModeIsAllowedForTesting(bool allowed) { m_fullySynchronousModeIsAllowedForTesting = allowed; }
@@ -112,17 +93,11 @@ public:
     bool ignoreSynchronousMessagingTimeoutsForTesting() const { return m_ignoreSynchronousMessagingTimeoutsForTesting; }
     void setIgnoreSynchronousMessagingTimeoutsForTesting(bool allowed) { m_ignoreSynchronousMessagingTimeoutsForTesting = allowed; }
 
-    const Vector<WTF::String>& overrideLanguages() const { return m_overrideLanguages; }
-    void setOverrideLanguages(Vector<WTF::String>&& languages) { m_overrideLanguages = WTFMove(languages); }
-
-    const WTF::String& sourceApplicationBundleIdentifier() const { return m_sourceApplicationBundleIdentifier; }
-    void setSourceApplicationBundleIdentifier(const WTF::String& sourceApplicationBundleIdentifier) { m_sourceApplicationBundleIdentifier = sourceApplicationBundleIdentifier; }
-
-    const WTF::String& sourceApplicationSecondaryIdentifier() const { return m_sourceApplicationSecondaryIdentifier; }
-    void setSourceApplicationSecondaryIdentifier(const WTF::String& sourceApplicationSecondaryIdentifier) { m_sourceApplicationSecondaryIdentifier = sourceApplicationSecondaryIdentifier; }
-
-    bool allowsCellularAccess() const { return m_allowsCellularAccess; }
-    void setAllowsCellularAccess(bool allowsCellularAccess) { m_allowsCellularAccess = allowsCellularAccess; }
+    bool attrStyleEnabled() const { return m_attrStyleEnabled; }
+    void setAttrStyleEnabled(bool enabled) { m_attrStyleEnabled = enabled; }
+    
+    bool shouldThrowExceptionForGlobalConstantRedeclaration() const { return m_shouldThrowExceptionForGlobalConstantRedeclaration; }
+    void setShouldThrowExceptionForGlobalConstantRedeclaration(bool shouldThrow) { m_shouldThrowExceptionForGlobalConstantRedeclaration = shouldThrow; }
     
     bool alwaysRunsAtBackgroundPriority() const { return m_alwaysRunsAtBackgroundPriority; }
     void setAlwaysRunsAtBackgroundPriority(bool alwaysRunsAtBackgroundPriority) { m_alwaysRunsAtBackgroundPriority = alwaysRunsAtBackgroundPriority; }
@@ -130,57 +105,107 @@ public:
     bool shouldTakeUIBackgroundAssertion() const { return m_shouldTakeUIBackgroundAssertion; }
     void setShouldTakeUIBackgroundAssertion(bool shouldTakeUIBackgroundAssertion) { m_shouldTakeUIBackgroundAssertion = shouldTakeUIBackgroundAssertion; }
 
-    bool shouldCaptureAudioInUIProcess() const { return m_shouldCaptureAudioInUIProcess; }
-    void setShouldCaptureAudioInUIProcess(bool shouldCaptureAudioInUIProcess) { m_shouldCaptureAudioInUIProcess = shouldCaptureAudioInUIProcess; }
+    bool shouldCaptureDisplayInUIProcess() const { return m_shouldCaptureDisplayInUIProcess; }
+    void setShouldCaptureDisplayInUIProcess(bool shouldCaptureDisplayInUIProcess) { m_shouldCaptureDisplayInUIProcess = shouldCaptureDisplayInUIProcess; }
 
-#if PLATFORM(IOS)
-    const WTF::String& ctDataConnectionServiceType() const { return m_ctDataConnectionServiceType; }
-    void setCTDataConnectionServiceType(const WTF::String& ctDataConnectionServiceType) { m_ctDataConnectionServiceType = ctDataConnectionServiceType; }
-#endif
+    bool shouldConfigureJSCForTesting() const { return m_shouldConfigureJSCForTesting; }
+    void setShouldConfigureJSCForTesting(bool value) { m_shouldConfigureJSCForTesting = value; }
+    bool isJITEnabled() const { return m_isJITEnabled; }
+    void setJITEnabled(bool enabled) { m_isJITEnabled = enabled; }
 
     ProcessID presentingApplicationPID() const { return m_presentingApplicationPID; }
     void setPresentingApplicationPID(ProcessID pid) { m_presentingApplicationPID = pid; }
 
-    uint32_t localStorageQuota() const { return m_localStorageQuota; }
-    void setLocalStorageQuota(uint32_t quota) { m_localStorageQuota = quota; }
+#if HAVE(AUDIT_TOKEN)
+    const std::optional<audit_token_t> presentingApplicationProcessToken() const { return m_presentingApplicationProcessToken; }
+    void setPresentingApplicationProcessToken(std::optional<audit_token_t>&& token) { m_presentingApplicationProcessToken = WTFMove(token); }
+#endif
+
+    bool processSwapsOnNavigation() const
+    {
+        return m_processSwapsOnNavigationFromClient.value_or(m_processSwapsOnNavigationFromExperimentalFeatures);
+    }
+    void setProcessSwapsOnNavigation(bool swaps) { m_processSwapsOnNavigationFromClient = swaps; }
+    void setProcessSwapsOnNavigationFromExperimentalFeatures(bool swaps) { m_processSwapsOnNavigationFromExperimentalFeatures = swaps; }
+
+    bool alwaysKeepAndReuseSwappedProcesses() const { return m_alwaysKeepAndReuseSwappedProcesses; }
+    void setAlwaysKeepAndReuseSwappedProcesses(bool keepAndReuse) { m_alwaysKeepAndReuseSwappedProcesses = keepAndReuse; }
+
+    bool processSwapsOnNavigationWithinSameNonHTTPFamilyProtocol() const { return m_processSwapsOnNavigationWithinSameNonHTTPFamilyProtocol; }
+    void setProcessSwapsOnNavigationWithinSameNonHTTPFamilyProtocol(bool swaps) { m_processSwapsOnNavigationWithinSameNonHTTPFamilyProtocol = swaps; }
+
+    bool processSwapsOnWindowOpenWithOpener() const { return m_processSwapsOnWindowOpenWithOpener; }
+    void setProcessSwapsOnWindowOpenWithOpener(bool swaps) { m_processSwapsOnWindowOpenWithOpener = swaps; }
+
+    const WTF::String& customWebContentServiceBundleIdentifier() const { return m_customWebContentServiceBundleIdentifier; }
+    void setCustomWebContentServiceBundleIdentifier(const WTF::String& customWebContentServiceBundleIdentifier) { m_customWebContentServiceBundleIdentifier = customWebContentServiceBundleIdentifier; }
+
+#if PLATFORM(GTK) && !USE(GTK4)
+    bool useSystemAppearanceForScrollbars() const { return m_useSystemAppearanceForScrollbars; }
+    void setUseSystemAppearanceForScrollbars(bool useSystemAppearanceForScrollbars) { m_useSystemAppearanceForScrollbars = useSystemAppearanceForScrollbars; }
+#endif
+
+#if PLATFORM(PLAYSTATION)
+    const WTF::String& webProcessPath() const { return m_webProcessPath; }
+    void setWebProcessPath(const WTF::String& webProcessPath) { m_webProcessPath = webProcessPath; }
+
+    const WTF::String& networkProcessPath() const { return m_networkProcessPath; }
+    void setNetworkProcessPath(const WTF::String& networkProcessPath) { m_networkProcessPath = networkProcessPath; }
+
+    int32_t userId() const { return m_userId; }
+    void setUserId(const int32_t userId) { m_userId = userId; }
+#endif
+
+#if PLATFORM(GTK) || PLATFORM(WPE)
+    void setMemoryPressureHandlerConfiguration(const MemoryPressureHandler::Configuration& configuration) { m_memoryPressureHandlerConfiguration = configuration; }
+    const std::optional<MemoryPressureHandler::Configuration>& memoryPressureHandlerConfiguration() const { return m_memoryPressureHandlerConfiguration; }
+#endif
+
+    void setTimeZoneOverride(const WTF::String& timeZoneOverride) { m_timeZoneOverride = timeZoneOverride; }
+    const WTF::String& timeZoneOverride() const { return m_timeZoneOverride; }
 
 private:
-    bool m_shouldHaveLegacyDataStore { false };
-
-    unsigned m_maximumProcessCount { 0 };
-    bool m_diskCacheSpeculativeValidationEnabled { false };
-    WebKit::CacheModel m_cacheModel { WebKit::CacheModelPrimaryWebBrowser };
-    int64_t m_diskCacheSizeOverride { -1 };
-
-    WTF::String m_applicationCacheDirectory;
-    WTF::String m_applicationCacheFlatFileSubdirectoryName;
-    WTF::String m_cacheStorageDirectory;
-    WTF::String m_diskCacheDirectory;
-    WTF::String m_mediaCacheDirectory;
-    WTF::String m_indexedDBDatabaseDirectory;
     WTF::String m_injectedBundlePath;
-    WTF::String m_localStorageDirectory;
-    WTF::String m_webSQLDatabaseDirectory;
-    WTF::String m_mediaKeysStorageDirectory;
-    WTF::String m_resourceLoadStatisticsDirectory;
-    WTF::String m_javaScriptConfigurationDirectory;
+    Vector<WTF::String> m_customClassesForParameterCoder;
     Vector<WTF::String> m_cachePartitionedURLSchemes;
     Vector<WTF::String> m_alwaysRevalidatedURLSchemes;
-    Vector<WTF::CString> m_additionalReadAccessAllowedPaths;
+    Vector<WTF::String> m_additionalReadAccessAllowedPaths;
     bool m_fullySynchronousModeIsAllowedForTesting { false };
     bool m_ignoreSynchronousMessagingTimeoutsForTesting { false };
-    Vector<WTF::String> m_overrideLanguages;
-    WTF::String m_sourceApplicationBundleIdentifier;
-    WTF::String m_sourceApplicationSecondaryIdentifier;
-    bool m_allowsCellularAccess { true };
+    bool m_attrStyleEnabled { false };
+    bool m_shouldThrowExceptionForGlobalConstantRedeclaration { true };
     bool m_alwaysRunsAtBackgroundPriority { false };
     bool m_shouldTakeUIBackgroundAssertion { true };
-    bool m_shouldCaptureAudioInUIProcess { false };
+    bool m_shouldCaptureDisplayInUIProcess { DEFAULT_CAPTURE_DISPLAY_IN_UI_PROCESS };
     ProcessID m_presentingApplicationPID { getCurrentProcessID() };
-#if PLATFORM(IOS)
-    WTF::String m_ctDataConnectionServiceType;
+    std::optional<bool> m_processSwapsOnNavigationFromClient;
+    bool m_processSwapsOnNavigationFromExperimentalFeatures { false };
+    bool m_alwaysKeepAndReuseSwappedProcesses { false };
+    bool m_processSwapsOnWindowOpenWithOpener { false };
+    bool m_processSwapsOnNavigationWithinSameNonHTTPFamilyProtocol { false };
+    std::optional<bool> m_isAutomaticProcessWarmingEnabledByClient;
+    bool m_usesWebProcessCache { false };
+    bool m_usesBackForwardCache { true };
+    bool m_clientWouldBenefitFromAutomaticProcessPrewarming { false };
+    WTF::String m_customWebContentServiceBundleIdentifier;
+    bool m_shouldConfigureJSCForTesting { false };
+    bool m_isJITEnabled { true };
+    bool m_usesSingleWebProcess { false };
+#if PLATFORM(GTK) && !USE(GTK4)
+    bool m_useSystemAppearanceForScrollbars { false };
 #endif
-    uint32_t m_localStorageQuota { 5 * 1024 * 1024 };
+#if PLATFORM(PLAYSTATION)
+    WTF::String m_webProcessPath;
+    WTF::String m_networkProcessPath;
+    int32_t m_userId { -1 };
+#endif
+#if PLATFORM(GTK) || PLATFORM(WPE)
+    std::optional<MemoryPressureHandler::Configuration> m_memoryPressureHandlerConfiguration;
+#endif
+#if HAVE(AUDIT_TOKEN)
+    std::optional<audit_token_t> m_presentingApplicationProcessToken;
+#endif
+    WTF::String m_timeZoneOverride;
 };
 
 } // namespace API

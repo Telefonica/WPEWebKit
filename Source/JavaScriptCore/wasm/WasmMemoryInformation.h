@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,35 +31,39 @@
 #include "RegisterSet.h"
 #include "WasmMemory.h"
 #include "WasmPageCount.h"
+
+#include <wtf/Forward.h>
 #include <wtf/Ref.h>
 #include <wtf/Vector.h>
 
 namespace JSC { namespace Wasm {
 
 struct PinnedSizeRegisterInfo {
-    GPRReg sizeRegister;
+    GPRReg boundsCheckingSizeRegister;
     unsigned sizeOffset;
 };
 
-struct PinnedRegisterInfo {
-    Vector<PinnedSizeRegisterInfo> sizeRegisters;
-    GPRReg baseMemoryPointer;
-    GPRReg wasmContextPointer;
+class PinnedRegisterInfo {
+public:
+    PinnedRegisterInfo(GPRReg, GPRReg, GPRReg);
+
     static const PinnedRegisterInfo& get();
-    PinnedRegisterInfo(Vector<PinnedSizeRegisterInfo>&&, GPRReg, GPRReg);
 
     RegisterSet toSave(MemoryMode mode) const
     {
         RegisterSet result;
-        result.set(baseMemoryPointer);
-        if (wasmContextPointer != InvalidGPRReg)
-            result.set(wasmContextPointer);
-        if (mode != MemoryMode::Signaling) {
-            for (const auto& info : sizeRegisters)
-                result.set(info.sizeRegister);
-        }
+        if (baseMemoryPointer != InvalidGPRReg)
+            result.set(baseMemoryPointer);
+        if (wasmContextInstancePointer != InvalidGPRReg)
+            result.set(wasmContextInstancePointer);
+        if (mode == MemoryMode::BoundsChecking && boundsCheckingSizeRegister != InvalidGPRReg)
+            result.set(boundsCheckingSizeRegister);
         return result;
     }
+
+    GPRReg boundsCheckingSizeRegister;
+    GPRReg baseMemoryPointer;
+    GPRReg wasmContextInstancePointer;
 };
 
 class MemoryInformation {
@@ -69,10 +73,11 @@ public:
         ASSERT(!*this);
     }
 
-    MemoryInformation(PageCount initial, PageCount maximum, bool isImport);
+    MemoryInformation(PageCount initial, PageCount maximum, bool isShared, bool isImport);
 
     PageCount initial() const { return m_initial; }
     PageCount maximum() const { return m_maximum; }
+    bool isShared() const { return m_isShared; }
     bool isImport() const { return m_isImport; }
 
     explicit operator bool() const { return !!m_initial; }
@@ -80,9 +85,10 @@ public:
 private:
     PageCount m_initial { };
     PageCount m_maximum { };
+    bool m_isShared { false };
     bool m_isImport { false };
 };
 
 } } // namespace JSC::Wasm
 
-#endif // ENABLE(WASM)
+#endif // ENABLE(WEBASSEMBLY)

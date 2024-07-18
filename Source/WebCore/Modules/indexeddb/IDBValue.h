@@ -24,7 +24,6 @@
  */
 
 #pragma once
-#if ENABLE(INDEXED_DATABASE)
 
 #include "ThreadSafeDataBuffer.h"
 #include <wtf/text/WTFString.h>
@@ -34,6 +33,7 @@ namespace WebCore {
 class SerializedScriptValue;
 
 class IDBValue {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WEBCORE_EXPORT IDBValue();
     IDBValue(const SerializedScriptValue&);
@@ -43,7 +43,7 @@ public:
     IDBValue(const ThreadSafeDataBuffer&, const Vector<String>& blobURLs, const Vector<String>& blobFilePaths);
 
     void setAsIsolatedCopy(const IDBValue&);
-    IDBValue isolatedCopy() const;
+    WEBCORE_EXPORT IDBValue isolatedCopy() const;
 
     const ThreadSafeDataBuffer& data() const { return m_data; }
     const Vector<String>& blobURLs() const { return m_blobURLs; }
@@ -52,12 +52,12 @@ public:
     template<class Encoder> void encode(Encoder&) const;
     template<class Decoder> static std::optional<IDBValue> decode(Decoder&);
 
+    size_t size() const;
 private:
     ThreadSafeDataBuffer m_data;
     Vector<String> m_blobURLs;
     Vector<String> m_blobFilePaths;
 };
-
 
 template<class Encoder>
 void IDBValue::encode(Encoder& encoder) const
@@ -80,9 +80,7 @@ std::optional<IDBValue> IDBValue::decode(Decoder& decoder)
     if (!decoder.decode(result.m_blobFilePaths))
         return std::nullopt;
 
-    return WTFMove(result);
+    return result;
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

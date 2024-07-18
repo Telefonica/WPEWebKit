@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "webrtc/modules/audio_coding/codecs/ilbc/ilbc.h"
+#include "modules/audio_coding/codecs/ilbc/ilbc.h"
 
 /*---------------------------------------------------------------*
  *  Main program to test iLBC encoding and decoding
@@ -50,7 +50,6 @@ int main(int argc, char* argv[])
   int len_int, mode;
   short pli;
   int blockcount = 0;
-  int packetlosscount = 0;
   size_t frameLen, len, len_i16s;
   int16_t speechType;
   IlbcEncoderInstance *Enc_Inst;
@@ -189,7 +188,6 @@ int main(int argc, char* argv[])
           /* Packet loss -> remove info from frame */
           memset(encoded_data, 0,
                  sizeof(int16_t)*ILBCNOOFWORDS_MAX);
-          packetlosscount++;
         }
       } else {
         fprintf(stderr, "Error. Channel file too short\n");

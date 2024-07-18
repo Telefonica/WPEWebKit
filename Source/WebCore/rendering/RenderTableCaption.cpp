@@ -21,28 +21,29 @@
 #include "RenderTableCaption.h"
 
 #include "RenderTable.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderTableCaption);
 
 RenderTableCaption::RenderTableCaption(Element& element, RenderStyle&& style)
     : RenderBlockFlow(element, WTFMove(style))
 {
 }
 
-RenderTableCaption::~RenderTableCaption()
+RenderTableCaption::~RenderTableCaption() = default;
+
+void RenderTableCaption::insertedIntoTree(IsInternalMove isInternalMove)
 {
+    RenderBlockFlow::insertedIntoTree(isInternalMove);
+    table()->addCaption(*this);
 }
 
-void RenderTableCaption::insertedIntoTree()
+void RenderTableCaption::willBeRemovedFromTree(IsInternalMove isInternalMove)
 {
-    RenderBlockFlow::insertedIntoTree();
-    table()->addCaption(this);
-}
-
-void RenderTableCaption::willBeRemovedFromTree()
-{
-    RenderBlockFlow::willBeRemovedFromTree();
-    table()->removeCaption(this);
+    RenderBlockFlow::willBeRemovedFromTree(isInternalMove);
+    table()->removeCaption(*this);
 }
 
 RenderTable* RenderTableCaption::table() const

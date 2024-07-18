@@ -28,41 +28,41 @@
 
 #pragma once
 
+#include "AbortSignal.h"
+#include "BlobURL.h"
 #include "ExceptionOr.h"
 #include "FetchBodyOwner.h"
+#include "FetchIdentifier.h"
 #include "FetchOptions.h"
 #include "FetchRequestInit.h"
 #include "ResourceRequest.h"
-#include <wtf/Optional.h>
 
 namespace WebCore {
 
 class Blob;
 class ScriptExecutionContext;
 class URLSearchParams;
+class WebCoreOpaqueRoot;
 
 class FetchRequest final : public FetchBodyOwner {
 public:
     using Init = FetchRequestInit;
-    using Info = Variant<RefPtr<FetchRequest>, String>;
+    using Info = std::variant<RefPtr<FetchRequest>, String>;
 
     using Cache = FetchOptions::Cache;
     using Credentials = FetchOptions::Credentials;
     using Destination = FetchOptions::Destination;
     using Mode = FetchOptions::Mode;
     using Redirect = FetchOptions::Redirect;
-    using Type = FetchOptions::Type;
-
 
     static ExceptionOr<Ref<FetchRequest>> create(ScriptExecutionContext&, Info&&, Init&&);
-    static Ref<FetchRequest> create(ScriptExecutionContext& context, std::optional<FetchBody>&& body, Ref<FetchHeaders>&& headers, ResourceRequest&& request, FetchOptions&& options, String&& referrer) { return adoptRef(*new FetchRequest(context, WTFMove(body), WTFMove(headers), WTFMove(request), WTFMove(options), WTFMove(referrer))); }
+    static Ref<FetchRequest> create(ScriptExecutionContext&, std::optional<FetchBody>&&, Ref<FetchHeaders>&&, ResourceRequest&&, FetchOptions&&, String&& referrer);
 
     const String& method() const { return m_request.httpMethod(); }
     const String& urlString() const;
     FetchHeaders& headers() { return m_headers.get(); }
     const FetchHeaders& headers() const { return m_headers.get(); }
 
-    Type type() const { return m_options.type; }
     Destination destination() const { return m_options.destination; }
     String referrer() const;
     ReferrerPolicy referrerPolicy() const { return m_options.referrerPolicy; }
@@ -71,10 +71,11 @@ public:
     Cache cache() const { return m_options.cache; }
     Redirect redirect() const { return m_options.redirect; }
     bool keepalive() const { return m_options.keepAlive; };
+    AbortSignal& signal() { return m_signal.get(); }
 
     const String& integrity() const { return m_options.integrity; }
 
-    ExceptionOr<Ref<FetchRequest>> clone(ScriptExecutionContext&);
+    ExceptionOr<Ref<FetchRequest>> clone();
 
     const FetchOptions& fetchOptions() const { return m_options; }
     const ResourceRequest& internalRequest() const { return m_request; }
@@ -82,9 +83,11 @@ public:
     const URL& url() const { return m_request.url(); }
 
     ResourceRequest resourceRequest() const;
+    FetchIdentifier navigationPreloadIdentifier() const { return m_navigationPreloadIdentifier; }
+    void setNavigationPreloadIdentifier(FetchIdentifier identifier) { m_navigationPreloadIdentifier = identifier; }
 
 private:
-    FetchRequest(ScriptExecutionContext&, std::optional<FetchBody>&&, Ref<FetchHeaders>&&, ResourceRequest&&, FetchOptions&&, String&& referrer);
+    FetchRequest(ScriptExecutionContext*, std::optional<FetchBody>&&, Ref<FetchHeaders>&&, ResourceRequest&&, FetchOptions&&, String&& referrer);
 
     ExceptionOr<void> initializeOptions(const Init&);
     ExceptionOr<void> initializeWith(FetchRequest&, Init&&);
@@ -92,22 +95,31 @@ private:
     ExceptionOr<void> setBody(FetchBody::Init&&);
     ExceptionOr<void> setBody(FetchRequest&);
 
+    void stop() final;
     const char* activeDOMObjectName() const final;
-    bool canSuspendForDocumentSuspension() const final;
-
 
     ResourceRequest m_request;
     FetchOptions m_options;
     String m_referrer;
     mutable String m_requestURL;
+    BlobURLHandle m_requestBlobURLLifetimeExtender;
+    Ref<AbortSignal> m_signal;
+    FetchIdentifier m_navigationPreloadIdentifier;
 };
 
-inline FetchRequest::FetchRequest(ScriptExecutionContext& context, std::optional<FetchBody>&& body, Ref<FetchHeaders>&& headers, ResourceRequest&& request, FetchOptions&& options, String&& referrer)
+inline FetchRequest::FetchRequest(ScriptExecutionContext* context, std::optional<FetchBody>&& body, Ref<FetchHeaders>&& headers, ResourceRequest&& request, FetchOptions&& options, String&& referrer)
     : FetchBodyOwner(context, WTFMove(body), WTFMove(headers))
     , m_request(WTFMove(request))
     , m_options(WTFMove(options))
     , m_referrer(WTFMove(referrer))
+    , m_signal(AbortSignal::create(context))
 {
+    m_request.setRequester(ResourceRequest::Requester::Fetch);
+    if (m_request.url().protocolIsBlob())
+        m_requestBlobURLLifetimeExtender = m_request.url();
+    updateContentType();
 }
+
+WebCoreOpaqueRoot root(FetchRequest*);
 
 } // namespace WebCore

@@ -1,6 +1,6 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2021 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,12 +20,14 @@
 
 #pragma once
 
-#include "URLHash.h"
+#include "CSSPropertyNames.h"
 #include <wtf/Function.h>
 #include <wtf/HashMap.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
 #include <wtf/TypeCasts.h>
+#include <wtf/URLHash.h>
+#include <wtf/text/ASCIILiteral.h>
 
 namespace WebCore {
 
@@ -33,11 +35,15 @@ class CSSCustomPropertyValue;
 class CSSStyleDeclaration;
 class CachedResource;
 class DeprecatedCSSOMValue;
+class Document;
 class StyleSheetContents;
 
 enum CSSPropertyID : uint16_t;
 
-class CSSValue : public RefCounted<CSSValue> {
+DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(CSSValue);
+class CSSValue {
+    WTF_MAKE_NONCOPYABLE(CSSValue);
+    WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(CSSValue);
 public:
     enum Type {
         CSS_INHERIT = 0,
@@ -49,52 +55,71 @@ public:
         CSS_REVERT = 6
     };
 
-    // Override RefCounted's deref() to ensure operator delete is called on
-    // the appropriate subclass type.
+    static constexpr unsigned refCountFlagIsStatic = 0x1;
+    static constexpr unsigned refCountIncrement = 0x2; // This allows us to ref / deref without disturbing the static CSSValue flag.
+    void ref() const
+    {
+        m_refCount += refCountIncrement;
+    }
+    bool hasOneRef() const { return m_refCount == refCountIncrement; }
+    unsigned refCount() const { return m_refCount / refCountIncrement; }
+    bool hasAtLeastOneRef() const { return m_refCount; }
+
     void deref()
     {
-        if (derefBase())
+        // Customized deref() to ensure operator delete is called on
+        // the appropriate subclass type.
+        unsigned tempRefCount = m_refCount - refCountIncrement;
+        if (!tempRefCount) {
             destroy();
+            return;
+        }
+        m_refCount = tempRefCount;
     }
 
     Type cssValueType() const;
-    String cssText() const;
+    String cssText(Document* = nullptr) const;
+    ASCIILiteral separatorCSSText() const;
 
     bool isPrimitiveValue() const { return m_classType == PrimitiveClass; }
     bool isValueList() const { return m_classType >= ValueListClass; }
+    bool isValuePair() const { return m_classType == ValuePairClass; }
     
     bool isBaseValueList() const { return m_classType == ValueListClass; }
         
 
     bool isAspectRatioValue() const { return m_classType == AspectRatioClass; }
     bool isBorderImageSliceValue() const { return m_classType == BorderImageSliceClass; }
+    bool isBorderImageWidthValue() const { return m_classType == BorderImageWidthClass; }
     bool isCanvasValue() const { return m_classType == CanvasClass; }
     bool isCrossfadeValue() const { return m_classType == CrossfadeClass; }
     bool isCursorImageValue() const { return m_classType == CursorImageClass; }
     bool isCustomPropertyValue() const { return m_classType == CustomPropertyClass; }
     bool isFunctionValue() const { return m_classType == FunctionClass; }
     bool isFontFeatureValue() const { return m_classType == FontFeatureClass; }
-#if ENABLE(VARIATION_FONTS)
     bool isFontVariationValue() const { return m_classType == FontVariationClass; }
-#endif
     bool isFontFaceSrcValue() const { return m_classType == FontFaceSrcClass; }
+    bool isFontPaletteValuesOverrideColorsValue() const { return m_classType == FontPaletteValuesOverrideColorsClass; }
     bool isFontValue() const { return m_classType == FontClass; }
     bool isFontStyleValue() const { return m_classType == FontStyleClass; }
     bool isFontStyleRangeValue() const { return m_classType == FontStyleRangeClass; }
-    bool isImageGeneratorValue() const { return m_classType >= CanvasClass && m_classType <= RadialGradientClass; }
-    bool isGradientValue() const { return m_classType >= LinearGradientClass && m_classType <= RadialGradientClass; }
+    bool isImageGeneratorValue() const { return m_classType >= CanvasClass && m_classType <= ConicGradientClass; }
+    bool isGradientValue() const { return m_classType >= LinearGradientClass && m_classType <= ConicGradientClass; }
     bool isNamedImageValue() const { return m_classType == NamedImageClass; }
     bool isImageSetValue() const { return m_classType == ImageSetClass; }
     bool isImageValue() const { return m_classType == ImageClass; }
     bool isImplicitInitialValue() const;
-    bool isInheritedValue() const { return m_classType == InheritedClass; }
-    bool isInitialValue() const { return m_classType == InitialClass; }
-    bool isUnsetValue() const { return m_classType == UnsetClass; }
-    bool isRevertValue() const { return m_classType == RevertClass; }
+    bool isInheritValue() const;
+    bool isInitialValue() const;
+    bool isUnsetValue() const;
+    bool isRevertValue() const;
+    bool isRevertLayerValue() const;
+    bool isCSSWideKeyword() const;
     bool treatAsInitialValue(CSSPropertyID) const;
     bool treatAsInheritedValue(CSSPropertyID) const;
     bool isLinearGradientValue() const { return m_classType == LinearGradientClass; }
     bool isRadialGradientValue() const { return m_classType == RadialGradientClass; }
+    bool isConicGradientValue() const { return m_classType == ConicGradientClass; }
     bool isReflectValue() const { return m_classType == ReflectClass; }
     bool isShadowValue() const { return m_classType == ShadowClass; }
     bool isCubicBezierTimingFunctionValue() const { return m_classType == CubicBezierTimingFunctionClass; }
@@ -103,28 +128,40 @@ public:
     bool isLineBoxContainValue() const { return m_classType == LineBoxContainClass; }
     bool isCalcValue() const {return m_classType == CalculationClass; }
     bool isFilterImageValue() const { return m_classType == FilterImageClass; }
+#if ENABLE(CSS_PAINTING_API)
+    bool isPaintImageValue() const { return m_classType == PaintImageClass; }
+#endif
     bool isContentDistributionValue() const { return m_classType == CSSContentDistributionClass; }
     bool isGridAutoRepeatValue() const { return m_classType == GridAutoRepeatClass; }
+    bool isGridIntegerRepeatValue() const { return m_classType == GridIntegerRepeatClass; }
     bool isGridTemplateAreasValue() const { return m_classType == GridTemplateAreasClass; }
     bool isGridLineNamesValue() const { return m_classType == GridLineNamesClass; }
+    bool isSubgridValue() const { return m_classType == SubgridClass; }
     bool isUnicodeRangeValue() const { return m_classType == UnicodeRangeClass; }
 
-#if ENABLE(CSS_ANIMATIONS_LEVEL_2)
-    bool isAnimationTriggerScrollValue() const { return m_classType == AnimationTriggerScrollClass; }
-#endif
-
-    bool isCustomIdentValue() const { return m_classType == CustomIdentClass; }
     bool isVariableReferenceValue() const { return m_classType == VariableReferenceClass; }
     bool isPendingSubstitutionValue() const { return m_classType == PendingSubstitutionValueClass; }
-    
+
+    bool isOffsetRotateValue() const { return m_classType == OffsetRotateClass; }
+    bool isRayValue() const { return m_classType == RayClass; }
+
     bool hasVariableReferences() const { return isVariableReferenceValue() || isPendingSubstitutionValue(); }
 
     Ref<DeprecatedCSSOMValue> createDeprecatedCSSOMWrapper(CSSStyleDeclaration&) const;
 
-    bool traverseSubresources(const WTF::Function<bool (const CachedResource&)>& handler) const;
+    bool traverseSubresources(const Function<bool(const CachedResource&)>& handler) const;
+
+    // What properties does this value rely on (eg, font-size for em units)
+    void collectDirectComputationalDependencies(HashSet<CSSPropertyID>&) const;
+    // What properties in the root element does this value rely on (eg. font-size for rem units)
+    void collectDirectRootComputationalDependencies(HashSet<CSSPropertyID>&) const;
 
     bool equals(const CSSValue&) const;
     bool operator==(const CSSValue& other) const { return equals(other); }
+
+    // https://www.w3.org/TR/css-values-4/#local-urls
+    // Empty URLs and fragment-only URLs should not be resolved relative to the base URL.
+    static bool isCSSLocalURL(StringView relativeURL);
 
 protected:
 
@@ -138,11 +175,15 @@ protected:
 
         // Image generator classes.
         CanvasClass,
+#if ENABLE(CSS_PAINTING_API)
+        PaintImageClass,
+#endif
         NamedImageClass,
         CrossfadeClass,
         FilterImageClass,
         LinearGradientClass,
         RadialGradientClass,
+        ConicGradientClass,
 
         // Timing function classes.
         CubicBezierTimingFunctionClass,
@@ -152,20 +193,15 @@ protected:
         // Other class types.
         AspectRatioClass,
         BorderImageSliceClass,
+        BorderImageWidthClass,
         FontFeatureClass,
-#if ENABLE(VARIATION_FONTS)
         FontVariationClass,
-#endif
         FontClass,
         FontStyleClass,
         FontStyleRangeClass,
         FontFaceSrcClass,
+        FontPaletteValuesOverrideColorsClass,
         FunctionClass,
-
-        InheritedClass,
-        InitialClass,
-        UnsetClass,
-        RevertClass,
 
         ReflectClass,
         ShadowClass,
@@ -173,17 +209,16 @@ protected:
         LineBoxContainClass,
         CalculationClass,
         GridTemplateAreasClass,
-#if ENABLE(CSS_ANIMATIONS_LEVEL_2)
-        AnimationTriggerScrollClass,
-#endif
+        ValuePairClass,
 
         CSSContentDistributionClass,
-        
-        CustomIdentClass,
 
         CustomPropertyClass,
         VariableReferenceClass,
         PendingSubstitutionValueClass,
+
+        OffsetRotateClass,
+        RayClass,
 
         // List class types must appear after ValueListClass. Note CSSFunctionValue
         // is deliberately excluded, since we don't want it exposed to the CSS OM
@@ -192,16 +227,19 @@ protected:
         ImageSetClass,
         GridLineNamesClass,
         GridAutoRepeatClass,
+        GridIntegerRepeatClass,
+        SubgridClass,
         // Do not append non-list class types here.
     };
 
 public:
-    static const size_t ValueListSeparatorBits = 2;
-    enum ValueListSeparator {
+    static const size_t ValueSeparatorBits = 2;
+    enum ValueSeparator {
         SpaceSeparator,
         CommaSeparator,
         SlashSeparator
     };
+    enum StaticCSSValueTag { StaticCSSValue };
 
 protected:
     ClassType classType() const { return static_cast<ClassType>(m_classType); }
@@ -209,30 +247,37 @@ protected:
     explicit CSSValue(ClassType classType)
         : m_primitiveUnitType(0)
         , m_hasCachedCSSText(false)
-        , m_isQuirkValue(false)
-        , m_valueListSeparator(SpaceSeparator)
+        , m_valueSeparator(SpaceSeparator)
+        , m_isImplicit(false)
+        , m_cachedCSSTextUsesLegacyPrecision(false)
         , m_classType(classType)
     {
+    }
+
+    void makeStatic()
+    {
+        m_refCount |= refCountFlagIsStatic;
     }
 
     // NOTE: This class is non-virtual for memory and performance reasons.
     // Don't go making it virtual again unless you know exactly what you're doing!
 
-    ~CSSValue() { }
+    ~CSSValue() = default;
 
 private:
     WEBCORE_EXPORT void destroy();
 
+    mutable unsigned m_refCount { refCountIncrement };
 protected:
     // The bits in this section are only used by specific subclasses but kept here
     // to maximize struct packing.
-
     // CSSPrimitiveValue bits:
-    unsigned m_primitiveUnitType : 7; // CSSPrimitiveValue::UnitType
+    unsigned m_primitiveUnitType : 7; // CSSUnitType
     mutable unsigned m_hasCachedCSSText : 1;
-    unsigned m_isQuirkValue : 1;
 
-    unsigned m_valueListSeparator : ValueListSeparatorBits;
+    unsigned m_valueSeparator : ValueSeparatorBits;
+    unsigned m_isImplicit : 1;
+    mutable unsigned m_cachedCSSTextUsesLegacyPrecision : 1;
 
 private:
     unsigned m_classType : ClassTypeBits; // ClassType
@@ -269,7 +314,7 @@ inline bool compareCSSValue(const Ref<CSSValueType>& first, const Ref<CSSValueTy
     return first.get().equals(second);
 }
 
-typedef HashMap<AtomicString, RefPtr<CSSCustomPropertyValue>> CustomPropertyValueMap;
+typedef HashMap<AtomString, RefPtr<CSSCustomPropertyValue>> CustomPropertyValueMap;
 
 } // namespace WebCore
 

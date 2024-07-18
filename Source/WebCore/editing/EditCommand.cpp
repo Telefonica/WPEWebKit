@@ -28,174 +28,150 @@
 
 #include "AXObjectCache.h"
 #include "CompositeEditCommand.h"
-#include "Document.h"
+#include "DocumentInlines.h"
 #include "Editing.h"
 #include "Editor.h"
 #include "Element.h"
-#include "Frame.h"
-#include "HTMLInputElement.h"
-#include "HTMLTextAreaElement.h"
+#include "HTMLTextFormControlElement.h"
 #include "NodeTraversal.h"
 
 namespace WebCore {
 
-String inputTypeNameForEditingAction(EditAction action)
+ASCIILiteral inputTypeNameForEditingAction(EditAction action)
 {
     switch (action) {
-    case EditActionJustify:
-        return ASCIILiteral("formatJustifyFull");
-    case EditActionAlignLeft:
-        return ASCIILiteral("formatJustifyLeft");
-    case EditActionAlignRight:
-        return ASCIILiteral("formatJustifyRight");
-    case EditActionCenter:
-        return ASCIILiteral("formatJustifyCenter");
-    case EditActionSubscript:
-        return ASCIILiteral("formatSubscript");
-    case EditActionSuperscript:
-        return ASCIILiteral("formatSuperscript");
-    case EditActionUnderline:
-        return ASCIILiteral("formatUnderline");
-    case EditActionSetColor:
-        return ASCIILiteral("formatFontColor");
-    case EditActionDeleteByDrag:
-        return ASCIILiteral("deleteByDrag");
-    case EditActionCut:
-        return ASCIILiteral("deleteByCut");
-    case EditActionBold:
-        return ASCIILiteral("formatBold");
-    case EditActionItalics:
-        return ASCIILiteral("formatItalic");
-    case EditActionPaste:
-        return ASCIILiteral("insertFromPaste");
-    case EditActionDelete:
-    case EditActionTypingDeleteSelection:
-        return ASCIILiteral("deleteContent");
-    case EditActionTypingDeleteBackward:
-        return ASCIILiteral("deleteContentBackward");
-    case EditActionTypingDeleteForward:
-        return ASCIILiteral("deleteContentForward");
-    case EditActionTypingDeleteWordBackward:
-        return ASCIILiteral("deleteWordBackward");
-    case EditActionTypingDeleteWordForward:
-        return ASCIILiteral("deleteWordForward");
-    case EditActionTypingDeleteLineBackward:
-        return ASCIILiteral("deleteHardLineBackward");
-    case EditActionTypingDeleteLineForward:
-        return ASCIILiteral("deleteHardLineForward");
-    case EditActionTypingDeletePendingComposition:
-        return ASCIILiteral("deleteCompositionText");
-    case EditActionTypingDeleteFinalComposition:
-        return ASCIILiteral("deleteByComposition");
-    case EditActionInsert:
-    case EditActionTypingInsertText:
-        return ASCIILiteral("insertText");
-    case EditActionInsertReplacement:
-        return ASCIILiteral("insertReplacementText");
-    case EditActionInsertFromDrop:
-        return ASCIILiteral("insertFromDrop");
-    case EditActionTypingInsertLineBreak:
-        return ASCIILiteral("insertLineBreak");
-    case EditActionTypingInsertParagraph:
-        return ASCIILiteral("insertParagraph");
-    case EditActionInsertOrderedList:
-        return ASCIILiteral("insertOrderedList");
-    case EditActionInsertUnorderedList:
-        return ASCIILiteral("insertUnorderedList");
-    case EditActionTypingInsertPendingComposition:
-        return ASCIILiteral("insertCompositionText");
-    case EditActionTypingInsertFinalComposition:
-        return ASCIILiteral("insertFromComposition");
-    case EditActionIndent:
-        return ASCIILiteral("formatIndent");
-    case EditActionOutdent:
-        return ASCIILiteral("formatOutdent");
-    case EditActionSetWritingDirection:
-        return ASCIILiteral("formatSetInlineTextDirection");
+    case EditAction::Justify:
+        return "formatJustifyFull"_s;
+    case EditAction::AlignLeft:
+        return "formatJustifyLeft"_s;
+    case EditAction::AlignRight:
+        return "formatJustifyRight"_s;
+    case EditAction::Center:
+        return "formatJustifyCenter"_s;
+    case EditAction::Subscript:
+        return "formatSubscript"_s;
+    case EditAction::Superscript:
+        return "formatSuperscript"_s;
+    case EditAction::Underline:
+        return "formatUnderline"_s;
+    case EditAction::StrikeThrough:
+        return "formatStrikeThrough"_s;
+    case EditAction::SetColor:
+        return "formatFontColor"_s;
+    case EditAction::DeleteByDrag:
+        return "deleteByDrag"_s;
+    case EditAction::Cut:
+        return "deleteByCut"_s;
+    case EditAction::Bold:
+        return "formatBold"_s;
+    case EditAction::Italics:
+        return "formatItalic"_s;
+    case EditAction::Paste:
+        return "insertFromPaste"_s;
+    case EditAction::Delete:
+    case EditAction::TypingDeleteSelection:
+        return "deleteContent"_s;
+    case EditAction::TypingDeleteBackward:
+        return "deleteContentBackward"_s;
+    case EditAction::TypingDeleteForward:
+        return "deleteContentForward"_s;
+    case EditAction::TypingDeleteWordBackward:
+        return "deleteWordBackward"_s;
+    case EditAction::TypingDeleteWordForward:
+        return "deleteWordForward"_s;
+    case EditAction::TypingDeleteLineBackward:
+        return "deleteHardLineBackward"_s;
+    case EditAction::TypingDeleteLineForward:
+        return "deleteHardLineForward"_s;
+    case EditAction::TypingDeletePendingComposition:
+        return "deleteCompositionText"_s;
+    case EditAction::TypingDeleteFinalComposition:
+        return "deleteByComposition"_s;
+    case EditAction::Insert:
+    case EditAction::TypingInsertText:
+        return "insertText"_s;
+    case EditAction::InsertReplacement:
+        return "insertReplacementText"_s;
+    case EditAction::InsertFromDrop:
+        return "insertFromDrop"_s;
+    case EditAction::TypingInsertLineBreak:
+        return "insertLineBreak"_s;
+    case EditAction::TypingInsertParagraph:
+        return "insertParagraph"_s;
+    case EditAction::InsertOrderedList:
+        return "insertOrderedList"_s;
+    case EditAction::InsertUnorderedList:
+        return "insertUnorderedList"_s;
+    case EditAction::TypingInsertPendingComposition:
+        return "insertCompositionText"_s;
+    case EditAction::TypingInsertFinalComposition:
+        return "insertFromComposition"_s;
+    case EditAction::Indent:
+        return "formatIndent"_s;
+    case EditAction::Outdent:
+        return "formatOutdent"_s;
+    case EditAction::SetInlineWritingDirection:
+        return "formatSetInlineTextDirection"_s;
+    case EditAction::SetBlockWritingDirection:
+        return "formatSetBlockTextDirection"_s;
+    case EditAction::CreateLink:
+        return "insertLink"_s;
     default:
-        return emptyString();
+        return ""_s;
     }
 }
 
 EditCommand::EditCommand(Document& document, EditAction editingAction)
-    : m_document(document)
-    , m_editingAction(editingAction)
+    : m_document { document }
+    , m_startingSelection { m_document->selection().selection() }
+    , m_endingSelection { m_startingSelection }
+    , m_editingAction { editingAction }
 {
-    ASSERT(document.frame());
-    setStartingSelection(m_document->frame()->selection().selection());
-    setEndingSelection(m_startingSelection);
 }
 
 EditCommand::EditCommand(Document& document, const VisibleSelection& startingSelection, const VisibleSelection& endingSelection)
-    : m_document(document)
-{
-    ASSERT(document.frame());
-    setStartingSelection(startingSelection);
-    setEndingSelection(endingSelection);
-}
-
-EditCommand::~EditCommand()
+    : m_document { document }
+    , m_startingSelection { startingSelection }
+    , m_endingSelection { endingSelection }
 {
 }
 
-Frame& EditCommand::frame()
-{
-    ASSERT(document().frame());
-    return *document().frame();
-}
-
-const Frame& EditCommand::frame() const
-{
-    ASSERT(document().frame());
-    return *document().frame();
-}
+EditCommand::~EditCommand() = default;
 
 EditAction EditCommand::editingAction() const
 {
     return m_editingAction;
 }
 
-static inline EditCommandComposition* compositionIfPossible(EditCommand* command)
+static RefPtr<EditCommandComposition> compositionIfPossible(EditCommand& command)
 {
-    if (!command->isCompositeEditCommand())
-        return 0;
-    return toCompositeEditCommand(command)->composition();
+    if (!command.isCompositeEditCommand())
+        return nullptr;
+    return static_cast<CompositeEditCommand&>(command).composition();
 }
 
 bool EditCommand::isEditingTextAreaOrTextInput() const
 {
-    auto* frame = m_document->frame();
-    if (!frame)
-        return false;
-
-    auto* container = frame->selection().selection().start().containerNode();
-    if (!container)
-        return false;
-
-    auto* ancestor = container->shadowHost();
-    if (!ancestor)
-        return false;
-
-    return is<HTMLTextAreaElement>(*ancestor) || (is<HTMLInputElement>(*ancestor) && downcast<HTMLInputElement>(*ancestor).isText());
+    return enclosingTextFormControl(m_document->selection().selection().start());
 }
 
-void EditCommand::setStartingSelection(const VisibleSelection& s)
+void EditCommand::setStartingSelection(const VisibleSelection& selection)
 {
-    for (EditCommand* cmd = this; ; cmd = cmd->m_parent) {
-        if (auto* composition = compositionIfPossible(cmd))
-            composition->setStartingSelection(s);
-        cmd->m_startingSelection = s;
-        if (!cmd->m_parent || cmd->m_parent->isFirstCommand(cmd))
+    for (RefPtr command = this; ; command = command->m_parent.get()) {
+        if (auto composition = compositionIfPossible(*command))
+            composition->setStartingSelection(selection);
+        command->m_startingSelection = selection;
+        if (!command->m_parent || command->m_parent->isFirstCommand(command.get()))
             break;
     }
 }
 
-void EditCommand::setEndingSelection(const VisibleSelection &s)
+void EditCommand::setEndingSelection(const VisibleSelection& selection)
 {
-    for (EditCommand* cmd = this; cmd; cmd = cmd->m_parent) {
-        if (auto* composition = compositionIfPossible(cmd))
-            composition->setEndingSelection(s);
-        cmd->m_endingSelection = s;
+    for (RefPtr command = this; command; command = command->m_parent.get()) {
+        if (auto composition = compositionIfPossible(*command))
+            composition->setEndingSelection(selection);
+        command->m_endingSelection = selection;
     }
 }
 
@@ -213,7 +189,7 @@ void EditCommand::postTextStateChangeNotification(AXTextEditType type, const Str
 {
     if (!AXObjectCache::accessibilityEnabled())
         return;
-    postTextStateChangeNotification(type, text, frame().selection().selection().start());
+    postTextStateChangeNotification(type, text, m_document->selection().selection().start());
 }
 
 void EditCommand::postTextStateChangeNotification(AXTextEditType type, const String& text, const VisiblePosition& position)
@@ -225,8 +201,8 @@ void EditCommand::postTextStateChangeNotification(AXTextEditType type, const Str
     auto* cache = document().existingAXObjectCache();
     if (!cache)
         return;
-    auto* node = highestEditableRoot(position.deepEquivalent(), HasEditableAXRole);
-    cache->postTextStateChangeNotification(node, type, text, position);
+    RefPtr node { highestEditableRoot(position.deepEquivalent(), HasEditableAXRole) };
+    cache->postTextStateChangeNotification(node.get(), type, text, position);
 }
 
 SimpleEditCommand::SimpleEditCommand(Document& document, EditAction editingAction)
@@ -240,10 +216,10 @@ void SimpleEditCommand::doReapply()
 }
 
 #ifndef NDEBUG
-void SimpleEditCommand::addNodeAndDescendants(Node* startNode, HashSet<Node*>& nodes)
+void SimpleEditCommand::addNodeAndDescendants(Node* startNode, HashSet<Ref<Node>>& nodes)
 {
     for (Node* node = startNode; node; node = NodeTraversal::next(*node, startNode))
-        nodes.add(node);
+        nodes.add(*node);
 }
 #endif
 

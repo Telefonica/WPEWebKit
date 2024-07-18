@@ -25,12 +25,16 @@
 
 WI.WebSocketResource = class WebSocketResource extends WI.Resource
 {
-    constructor(url, loaderIdentifier, targetId, requestIdentifier, requestHeaders, requestData, timestamp, walltime, requestSentTimestamp, initiatorSourceCodeLocation)
+    constructor(url, {loaderIdentifier, requestIdentifier, requestHeaders, timestamp, walltime, requestSentTimestamp} = {})
     {
-        const type = WI.Resource.Type.WebSocket;
-        const mimeType = null;
-        const requestMethod = "GET";
-        super(url, mimeType, type, loaderIdentifier, targetId, requestIdentifier, requestMethod, requestHeaders, requestData, requestSentTimestamp, initiatorSourceCodeLocation);
+        super(url, {
+            type: WI.Resource.Type.WebSocket,
+            loaderIdentifier,
+            requestIdentifier,
+            requestMethod: "GET",
+            requestHeaders,
+            requestSentTimestamp,
+        });
 
         this._timestamp = timestamp;
         this._walltime = walltime;
@@ -71,6 +75,8 @@ WI.WebSocketResource = class WebSocketResource extends WI.Resource
 
         let frame = {data: frameData, isOutgoing, opcode, walltime: this._walltimeForWebSocketTimestamp(timestamp)};
         this._frames.push(frame);
+        if (InspectorFrontendHost.isUnderTest())
+            frame.dataForTest = data;
 
         // COMPATIBILITY (iOS 10.3): `payloadLength` did not exist in 10.3 and earlier.
         if (payloadLength === undefined)
@@ -79,6 +85,15 @@ WI.WebSocketResource = class WebSocketResource extends WI.Resource
         this.increaseSize(payloadLength, elapsedTime);
 
         this.dispatchEventToListeners(WI.WebSocketResource.Event.FrameAdded, frame);
+    }
+
+    // Protected
+
+    requestContentFromBackend()
+    {
+        console.assert(false, "A WebSocket's content was requested. WebSockets do not have content so the request is nonsensical.");
+
+        return super.requestContentFromBackend();
     }
 
     // Private
@@ -90,8 +105,8 @@ WI.WebSocketResource = class WebSocketResource extends WI.Resource
 };
 
 WI.WebSocketResource.Event = {
-    FrameAdded: Symbol("web-socket-frame-added"),
-    ReadyStateChanged: Symbol("web-socket-resource-ready-state-changed"),
+    FrameAdded: "web-socket-frame-added",
+    ReadyStateChanged: "web-socket-resource-ready-state-changed",
 };
 
 WI.WebSocketResource.ReadyState = {

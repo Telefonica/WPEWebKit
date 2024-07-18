@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016, 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,25 +28,24 @@
 
 #if PLATFORM(COCOA)
 
-#if PLATFORM(IOS)
-#include <ImageIO/CGImageDestination.h>
-#include <MobileCoreServices/UTCoreTypes.h>
-#include <WebCore/KeyEventCodesIOS.h>
+#import "ViewSnapshotStore.h"
+#import <wtf/FileSystem.h>
+
+#if PLATFORM(IOS_FAMILY)
+#import <ImageIO/CGImageDestination.h>
+#import <MobileCoreServices/UTCoreTypes.h>
+#import <WebCore/KeyEventCodesIOS.h>
 #endif
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
-
-std::optional<String> WebAutomationSession::platformGetBase64EncodedPNGData(const ShareableBitmap::Handle& imageDataHandle)
+static std::optional<String> getBase64EncodedPNGData(const RetainPtr<CGImageRef>&& cgImage)
 {
-    RefPtr<ShareableBitmap> bitmap = ShareableBitmap::create(imageDataHandle, SharedMemory::Protection::ReadOnly);
-    if (!bitmap)
-        return std::nullopt;
-
-    RetainPtr<CGImageRef> cgImage = bitmap->makeCGImage();
     RetainPtr<NSMutableData> imageData = adoptNS([[NSMutableData alloc] init]);
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     RetainPtr<CGImageDestinationRef> destination = adoptCF(CGImageDestinationCreateWithData((CFMutableDataRef)imageData.get(), kUTTypePNG, 1, 0));
+ALLOW_DEPRECATED_DECLARATIONS_END
     if (!destination)
         return std::nullopt;
 
@@ -54,6 +53,47 @@ std::optional<String> WebAutomationSession::platformGetBase64EncodedPNGData(cons
     CGImageDestinationFinalize(destination.get());
 
     return String([imageData base64EncodedStringWithOptions:0]);
+}
+
+
+std::optional<String> WebAutomationSession::platformGetBase64EncodedPNGData(const ShareableBitmap::Handle& imageDataHandle)
+{
+    auto bitmap = ShareableBitmap::create(imageDataHandle, SharedMemory::Protection::ReadOnly);
+    if (!bitmap)
+        return std::nullopt;
+
+    return getBase64EncodedPNGData(bitmap->makeCGImage());
+}
+
+std::optional<String> WebAutomationSession::platformGetBase64EncodedPNGData(const ViewSnapshot& snapshot)
+{
+    auto* snapshotSurface = snapshot.surface();
+    if (!snapshotSurface)
+        return std::nullopt;
+
+    return getBase64EncodedPNGData(snapshotSurface->createImage());
+}
+
+std::optional<String> WebAutomationSession::platformGenerateLocalFilePathForRemoteFile(const String& remoteFilePath, const String& base64EncodedFileContents)
+{
+    RetainPtr<NSData> fileContents = adoptNS([[NSData alloc] initWithBase64EncodedString:base64EncodedFileContents options:0]);
+    if (!fileContents) {
+        LOG_ERROR("WebAutomationSession: unable to decode base64-encoded file contents.");
+        return std::nullopt;
+    }
+
+    NSString *temporaryDirectory = FileSystem::createTemporaryDirectory(@"WebDriver");
+    NSURL *remoteFile = [NSURL fileURLWithPath:remoteFilePath isDirectory:NO];
+    NSString *localFilePath = [temporaryDirectory stringByAppendingPathComponent:remoteFile.lastPathComponent];
+
+    NSError *fileWriteError;
+    [fileContents.get() writeToFile:localFilePath options:NSDataWritingAtomic error:&fileWriteError];
+    if (fileWriteError) {
+        LOG_ERROR("WebAutomationSession: Error writing image data to temporary file: %@", fileWriteError);
+        return std::nullopt;
+    }
+
+    return String(localFilePath);
 }
 
 std::optional<unichar> WebAutomationSession::charCodeForVirtualKey(Inspector::Protocol::Automation::VirtualKey key) const

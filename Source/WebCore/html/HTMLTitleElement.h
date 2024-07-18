@@ -28,19 +28,20 @@
 namespace WebCore {
 
 class HTMLTitleElement final : public HTMLElement {
+    WTF_MAKE_ISO_ALLOCATED(HTMLTitleElement);
 public:
     static Ref<HTMLTitleElement> create(const QualifiedName&, Document&);
 
     WEBCORE_EXPORT String text() const;
-    WEBCORE_EXPORT void setText(const String&);
+    WEBCORE_EXPORT void setText(String&&);
 
     const StringWithDirection& textWithDirection() const { return m_title; }
 
 private:
     HTMLTitleElement(const QualifiedName&, Document&);
 
-    InsertionNotificationRequest insertedInto(ContainerNode&) final;
-    void removedFrom(ContainerNode&) final;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) final;
+    void removedFromAncestor(RemovalType, ContainerNode&) final;
     void childrenChanged(const ChildChange&) final;
 
     StringWithDirection computedTextWithDirection();

@@ -34,7 +34,7 @@
 
 namespace WebCore {
 
-class RenderFlowThread;
+class RenderFragmentedFlow;
 class RenderLayer;
 class RenderLayerModelObject;
 class RenderView;
@@ -73,10 +73,10 @@ struct RenderGeometryMapStep {
 class RenderGeometryMap {
     WTF_MAKE_NONCOPYABLE(RenderGeometryMap);
 public:
-    explicit RenderGeometryMap(MapCoordinatesFlags = UseTransforms);
+    explicit RenderGeometryMap(OptionSet<MapCoordinatesMode> = UseTransforms);
     ~RenderGeometryMap();
 
-    MapCoordinatesFlags mapCoordinatesFlags() const { return m_mapCoordinatesFlags; }
+    OptionSet<MapCoordinatesMode> mapCoordinatesFlags() const { return m_mapCoordinatesFlags; }
 
     FloatPoint absolutePoint(const FloatPoint& p) const
     {
@@ -109,7 +109,7 @@ public:
 
     // RenderView gets special treatment, because it applies the scroll offset only for elements inside in fixed position.
     void pushView(const RenderView*, const LayoutSize& scrollOffset, const TransformationMatrix* = nullptr);
-    void pushRenderFlowThread(const RenderFlowThread*);
+    void pushRenderFragmentedFlow(const RenderFragmentedFlow*);
 
 private:
     void mapToContainer(TransformState&, const RenderLayerModelObject* container = nullptr) const;
@@ -123,13 +123,16 @@ private:
 
     typedef Vector<RenderGeometryMapStep, 32> RenderGeometryMapSteps;
 
-    size_t m_insertionPosition;
-    int m_nonUniformStepsCount;
-    int m_transformedStepsCount;
-    int m_fixedStepsCount;
+    size_t m_insertionPosition { notFound };
+    int m_nonUniformStepsCount { 0 };
+    int m_transformedStepsCount { 0 };
+    int m_fixedStepsCount { 0 };
     RenderGeometryMapSteps m_mapping;
     LayoutSize m_accumulatedOffset;
-    MapCoordinatesFlags m_mapCoordinatesFlags;
+    OptionSet<MapCoordinatesMode> m_mapCoordinatesFlags;
+#if ASSERT_ENABLED
+    bool m_accumulatedOffsetMightBeSaturated { false };
+#endif
 };
 
 } // namespace WebCore

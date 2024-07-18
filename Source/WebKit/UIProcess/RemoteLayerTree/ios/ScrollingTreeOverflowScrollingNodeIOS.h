@@ -25,39 +25,38 @@
 
 #pragma once
 
-#if ENABLE(ASYNC_SCROLLING) && PLATFORM(IOS)
+#if ENABLE(ASYNC_SCROLLING) && PLATFORM(IOS_FAMILY)
 
 #include <WebCore/ScrollingTreeOverflowScrollingNode.h>
+
+OBJC_CLASS UIScrollView;
 
 namespace WebKit {
 
 class ScrollingTreeScrollingNodeDelegateIOS;
 
-class ScrollingTreeOverflowScrollingNodeIOS : public WebCore::ScrollingTreeOverflowScrollingNode {
+class ScrollingTreeOverflowScrollingNodeIOS final : public WebCore::ScrollingTreeOverflowScrollingNode {
 public:
     static Ref<ScrollingTreeOverflowScrollingNodeIOS> create(WebCore::ScrollingTree&, WebCore::ScrollingNodeID);
     virtual ~ScrollingTreeOverflowScrollingNodeIOS();
 
+    UIScrollView* scrollView() const;
+
 private:
     ScrollingTreeOverflowScrollingNodeIOS(WebCore::ScrollingTree&, WebCore::ScrollingNodeID);
 
-    void commitStateBeforeChildren(const WebCore::ScrollingStateNode&) override;
-    void commitStateAfterChildren(const WebCore::ScrollingStateNode&) override;
+    void commitStateBeforeChildren(const WebCore::ScrollingStateNode&) final;
+    void commitStateAfterChildren(const WebCore::ScrollingStateNode&) final;
     
-    WebCore::FloatPoint scrollPosition() const override;
+    void repositionScrollingLayers() final;
 
-    void setScrollLayerPosition(const WebCore::FloatPoint&, const WebCore::FloatRect& layoutViewport) override;
+    bool startAnimatedScrollToPosition(WebCore::FloatPoint) final;
+    void stopAnimatedScroll() final;
 
-    void updateLayersAfterViewportChange(const WebCore::FloatRect& fixedPositionRect, double scale) override { }
-    void updateLayersAfterDelegatedScroll(const WebCore::FloatPoint& scrollPosition) override;
-
-    void updateLayersAfterAncestorChange(const WebCore::ScrollingTreeNode& changedNode, const WebCore::FloatRect& fixedPositionRect, const WebCore::FloatSize& cumulativeDelta) override;
-
-    void handleWheelEvent(const WebCore::PlatformWheelEvent&) override { }
-
+    // The delegate is non-null for subframes.
     std::unique_ptr<ScrollingTreeScrollingNodeDelegateIOS> m_scrollingNodeDelegate;
 };
 
 } // namespace WebKit
 
-#endif // ENABLE(ASYNC_SCROLLING) && PLATFORM(IOS)
+#endif // ENABLE(ASYNC_SCROLLING) && PLATFORM(IOS_FAMILY)

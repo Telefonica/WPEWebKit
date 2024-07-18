@@ -23,8 +23,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// FIXME: <https://webkit.org/b/165155> Web Inspector: Use URL constructor to better handle all kinds of URLs
-
 function removeURLFragment(url)
 {
     var hashIndex = url.indexOf("#");
@@ -93,44 +91,75 @@ function parseDataURL(url)
 
 function parseURL(url)
 {
-    url = url ? url.trim() : "";
+    let result = {
+        scheme: null,
+        userinfo: null,
+        host: null,
+        port: null,
+        origin: null,
+        path: null,
+        queryString: null,
+        fragment: null,
+        lastPathComponent: null,
+    };
 
-    if (url.startsWith("data:"))
-        return {scheme: "data", host: null, port: null, path: null, queryString: null, fragment: null, lastPathComponent: null};
-
-    var match = url.match(/^(?<scheme>[^\/:]+):\/\/(?<host>[^\/#:]*)(?::(?<port>[\d]+))?(?:(?<path>\/[^#]*)?(?:#(?<fragment>.*))?)?$/i);
-    if (!match)
-        return {scheme: null, host: null, port: null, path: null, queryString: null, fragment: null, lastPathComponent: null};
-
-    var scheme = match.groups.scheme.toLowerCase();
-    var host = match.groups.host.toLowerCase();
-    var port = Number(match.groups.port) || null;
-    var wholePath = match.groups.path || null;
-    var fragment = match.groups.fragment || null;
-    var path = wholePath;
-    var queryString = null;
-
-    // Split the path and the query string.
-    if (wholePath) {
-        var indexOfQuery = wholePath.indexOf("?");
-        if (indexOfQuery !== -1) {
-            path = wholePath.substring(0, indexOfQuery);
-            queryString = wholePath.substring(indexOfQuery + 1);
-        }
-        path = resolveDotsInPath(path);
+    // dataURLs should be handled by `parseDataURL`.
+    if (url && url.startsWith("data:")) {
+        result.scheme = "data";
+        return result;
     }
+
+    // Internal sourceURLs will fail in URL constructor anyways.
+    if (isWebKitInternalScript(url))
+        return result;
+
+    let parsed = null;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return result;
+    }
+
+    result.scheme = parsed.protocol.slice(0, -1); // remove trailing ":"
+
+    if (parsed.username)
+        result.userinfo = parsed.username;
+    if (parsed.password)
+        result.userinfo = (result.userinfo || "") + ":" + parsed.password;
+
+    if (parsed.hostname)
+        result.host = parsed.hostname;
+
+    if (parsed.port)
+        result.port = Number(parsed.port);
+
+    if (parsed.origin && parsed.origin !== "null")
+        result.origin = parsed.origin;
+    else if (result.scheme && result.host) {
+        result.origin = result.scheme + "://" + result.host;
+        if (result.port)
+            result.origin += ":" + result.port;
+    }
+
+    if (parsed.pathname)
+        result.path = parsed.pathname;
+
+    if (parsed.search)
+        result.queryString = parsed.search.substring(1); // remove leading "?"
+
+    if (parsed.hash)
+        result.fragment = parsed.hash.substring(1); // remove leading "#"
 
     // Find last path component.
-    var lastPathComponent = null;
-    if (path && path !== "/") {
+    if (result.path && result.path !== "/") {
         // Skip the trailing slash if there is one.
-        var endOffset = path[path.length - 1] === "/" ? 1 : 0;
-        var lastSlashIndex = path.lastIndexOf("/", path.length - 1 - endOffset);
+        let endOffset = result.path.endsWith("/") ? 1 : 0;
+        let lastSlashIndex = result.path.lastIndexOf("/", result.path.length - 1 - endOffset);
         if (lastSlashIndex !== -1)
-            lastPathComponent = path.substring(lastSlashIndex + 1, path.length - endOffset);
+            result.lastPathComponent = result.path.substring(lastSlashIndex + 1, result.path.length - endOffset);
     }
 
-    return {scheme, host, port, path, queryString, fragment, lastPathComponent};
+    return result;
 }
 
 function absoluteURL(partialURL, baseURL)
@@ -185,12 +214,6 @@ function absoluteURL(partialURL, baseURL)
     return baseURLPrefix + resolveDotsInPath(basePath + partialURL);
 }
 
-function parseLocationQueryParameters(arrayResult)
-{
-    // The first character is always the "?".
-    return parseQueryString(window.location.search.substring(1), arrayResult);
-}
-
 function parseQueryString(queryString, arrayResult)
 {
     if (!queryString)
@@ -201,25 +224,30 @@ function parseQueryString(queryString, arrayResult)
         try {
             // Replace "+" with " " then decode percent encoded values.
             return decodeURIComponent(string.replace(/\+/g, " "));
-        } catch (e) {
+        } catch {
             return string;
         }
     }
 
     var parameters = arrayResult ? [] : {};
-    var parameterStrings = queryString.split("&");
-    for (var i = 0; i < parameterStrings.length; ++i) {
-        var pair = parameterStrings[i].split("=").map(decode);
+    for (let parameterString of queryString.split("&")) {
+        let index = parameterString.indexOf("=");
+        if (index === -1)
+            index = parameterString.length;
+
+        let name = decode(parameterString.substring(0, index));
+        let value = decode(parameterString.substring(index + 1));
+
         if (arrayResult)
-            parameters.push({name: pair[0], value: pair[1]});
+            parameters.push({name, value});
         else
-            parameters[pair[0]] = pair[1];
+            parameters[name] = value;
     }
 
     return parameters;
 }
 
-WI.displayNameForURL = function(url, urlComponents)
+WI.displayNameForURL = function(url, urlComponents, options = {})
 {
     if (url.startsWith("data:"))
         return WI.truncateURL(url);
@@ -230,9 +258,12 @@ WI.displayNameForURL = function(url, urlComponents)
     var displayName;
     try {
         displayName = decodeURIComponent(urlComponents.lastPathComponent || "");
-    } catch (e) {
+    } catch {
         displayName = urlComponents.lastPathComponent;
     }
+
+    if (options.allowDirectoryAsName && (urlComponents.path === "/" || (displayName && urlComponents.path.endsWith(displayName + "/"))))
+        displayName = "/";
 
     return displayName || WI.displayNameForHost(urlComponents.host) || url;
 };
@@ -258,8 +289,85 @@ WI.truncateURL = function(url, multiline = false, dataURIMaxSize = 6)
     return header + firstChunk + middleChunk + lastChunk;
 };
 
+WI.urlWithoutExtension = function(urlString)
+{
+    let url = null;
+    try {
+        url = new URL(urlString);
+    } catch { }
+    if (!url)
+        return urlString;
+
+    let firstDotInLastPathComponentIndex = url.pathname.indexOf(".", url.pathname.lastIndexOf("/"));
+    if (firstDotInLastPathComponentIndex !== -1)
+        url.pathname = url.pathname.substring(0, firstDotInLastPathComponentIndex);
+
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+};
+
+WI.urlWithoutFragment = function(urlString)
+{
+    try {
+        let url = new URL(urlString);
+        if (url.hash) {
+            url.hash = "";
+            return url.toString();
+        }
+
+        // URL.toString with an empty hash leaves the hash symbol, so we strip it.
+        let result = url.toString();
+        if (result.endsWith("#"))
+            return result.substring(0, result.length - 1);
+
+        return result;
+    } catch { }
+
+    return urlString;
+};
+
 WI.displayNameForHost = function(host)
 {
+    let extensionName = WI.browserManager.extensionNameForId(host);
+    if (extensionName)
+        return extensionName;
+
     // FIXME <rdar://problem/11237413>: This should decode punycode hostnames.
+
     return host;
+};
+
+// https://tools.ietf.org/html/rfc7540#section-8.1.2.3
+WI.h2Authority = function(components)
+{
+    let {scheme, userinfo, host, port} = components;
+    let result = host || "";
+
+    // The authority MUST NOT include the deprecated "userinfo"
+    // subcomponent for "http" or "https" schemed URIs.
+    if (userinfo && (scheme !== "http" && scheme !== "https"))
+        result = userinfo + "@" + result;
+    if (port)
+        result += ":" + port;
+
+    return result;
+};
+
+// https://tools.ietf.org/html/rfc7540#section-8.1.2.3
+WI.h2Path = function(components)
+{
+    let {scheme, path, queryString} = components;
+    let result = path || "";
+
+    // The ":path" pseudo-header field includes the path and query parts
+    // of the target URI. [...] This pseudo-header field MUST NOT be empty
+    // for "http" or "https" URIs; "http" or "https" URIs that do not contain
+    // a path component MUST include a value of '/'.
+    if (!path && (scheme === "http" || scheme === "https"))
+        result = "/";
+    if (queryString)
+        result += "?" + queryString;
+
+    return result;
 };

@@ -39,14 +39,14 @@
 #import <WebCore/HTMLOptGroupElement.h>
 #import <WebCore/HTMLOptionsCollection.h>
 #import <WebCore/HTMLSelectElement.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/NameNodeList.h>
 #import <WebCore/Node.h>
 #import <WebCore/NodeList.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::HTMLSelectElement*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -185,7 +185,7 @@
         raiseTypeErrorException();
 
     auto& coreElement = *core(element);
-    Variant<RefPtr<WebCore::HTMLOptionElement>, RefPtr<WebCore::HTMLOptGroupElement>> variantElement;
+    std::variant<RefPtr<WebCore::HTMLOptionElement>, RefPtr<WebCore::HTMLOptGroupElement>> variantElement;
     if (is<WebCore::HTMLOptionElement>(coreElement))
         variantElement = &downcast<WebCore::HTMLOptionElement>(coreElement);
     else if (is<WebCore::HTMLOptGroupElement>(coreElement))
@@ -216,3 +216,5 @@ WebCore::HTMLSelectElement* core(DOMHTMLSelectElement *wrapper)
 {
     return wrapper ? reinterpret_cast<WebCore::HTMLSelectElement*>(wrapper->_internal) : 0;
 }
+
+#undef IMPL

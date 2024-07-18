@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WTF_OrderMaker_h
-#define WTF_OrderMaker_h
+#pragma once
 
 #include <wtf/Bag.h>
 #include <wtf/HashMap.h>
@@ -39,6 +38,7 @@ namespace WTF {
 // helper. Note that the type it operates on must be usable as a HashMap key.
 template<typename T>
 class OrderMaker {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(OrderMaker);
     
     struct Node : BasicRawSentinelNode<Node> {
@@ -88,25 +88,25 @@ public:
         {
         }
 
-        iterator(Node* node)
-            : m_node(node)
+        iterator(typename SentinelLinkedList<Node>::iterator iter)
+            : m_iter(iter)
         {
         }
 
         const T& operator*()
         {
-            return m_node->payload;
+            return m_iter->payload;
         }
 
         iterator& operator++()
         {
-            m_node = m_node->next();
+            ++m_iter;
             return *this;
         }
 
         bool operator==(const iterator& other) const
         {
-            return m_node == other.m_node;
+            return m_iter == other.m_iter;
         }
 
         bool operator!=(const iterator& other) const
@@ -115,7 +115,7 @@ public:
         }
         
     private:
-        Node* m_node { nullptr };
+        typename SentinelLinkedList<Node>::iterator m_iter;
     };
 
     iterator begin() const { return iterator(const_cast<SentinelLinkedList<Node>&>(m_list).begin()); }
@@ -138,6 +138,3 @@ private:
 } // namespace WTF
 
 using WTF::OrderMaker;
-
-#endif // WTF_OrderMaker_h
-

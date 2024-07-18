@@ -26,7 +26,7 @@
 #pragma once
 
 #include <stdint.h>
-#include <wtf/EnumTraits.h>
+#include <wtf/Forward.h>
 
 namespace IPC {
 class Decoder;
@@ -35,7 +35,7 @@ class Encoder;
 
 namespace WebKit {
 
-enum class LayerHostingMode {
+enum class LayerHostingMode : uint8_t {
     InProcess,
 #if HAVE(OUT_OF_PROCESS_LAYER_HOSTING)
     OutOfProcess
@@ -48,7 +48,7 @@ public:
     ~LayerTreeContext();
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, LayerTreeContext&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, LayerTreeContext&);
 
     bool isEmpty() const;
 

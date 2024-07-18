@@ -26,19 +26,87 @@
 #pragma once
 
 #include "PageClient.h"
+#include <wtf/Forward.h>
+#include <wtf/WeakObjCPtr.h>
 
+@class NSTextAlternatives;
 @class WKWebView;
+
+namespace API {
+class Attachment;
+}
+
+namespace WebCore {
+class AlternativeTextUIController;
+class Color;
+
+struct AppHighlight;
+}
 
 namespace WebKit {
 
 class PageClientImplCocoa : public PageClient {
 public:
-    PageClientImplCocoa(WKWebView *webView)
-        : m_webView(webView) { }
+    PageClientImplCocoa(WKWebView *);
+    virtual ~PageClientImplCocoa();
+
+    void pageClosed() override;
+
+    void topContentInsetDidChange() final;
+
+#if ENABLE(GPU_PROCESS)
+    void gpuProcessDidFinishLaunching() override;
+    void gpuProcessDidExit() override;
+#endif
+
+    void themeColorWillChange() final;
+    void themeColorDidChange() final;
+    void underPageBackgroundColorWillChange() final;
+    void underPageBackgroundColorDidChange() final;
+    void pageExtendedBackgroundColorWillChange() final;
+    void pageExtendedBackgroundColorDidChange() final;
+    void sampledPageTopColorWillChange() final;
+    void sampledPageTopColorDidChange() final;
     void isPlayingAudioWillChange() final;
     void isPlayingAudioDidChange() final;
+
+    bool scrollingUpdatesDisabledForTesting() final;
+
+#if ENABLE(ATTACHMENT_ELEMENT)
+    void didInsertAttachment(API::Attachment&, const String& source) final;
+    void didRemoveAttachment(API::Attachment&) final;
+    void didInvalidateDataForAttachment(API::Attachment&) final;
+    NSFileWrapper *allocFileWrapperInstance() const final;
+    NSSet *serializableFileWrapperClasses() const final;
+#endif
+
+    WebCore::DictationContext addDictationAlternatives(NSTextAlternatives *) final;
+    void replaceDictationAlternatives(NSTextAlternatives *, WebCore::DictationContext) final;
+    void removeDictationAlternatives(WebCore::DictationContext) final;
+    Vector<String> dictationAlternatives(WebCore::DictationContext) final;
+    NSTextAlternatives *platformDictationAlternatives(WebCore::DictationContext) final;
+
+#if ENABLE(APP_HIGHLIGHTS)
+    void storeAppHighlight(const WebCore::AppHighlight&) final;
+#endif
+
+    void microphoneCaptureWillChange() final;
+    void cameraCaptureWillChange() final;
+    void displayCaptureWillChange() final;
+    void displayCaptureSurfacesWillChange() final;
+    void systemAudioCaptureWillChange() final;
+
+    void microphoneCaptureChanged() final;
+    void cameraCaptureChanged() final;
+    void displayCaptureChanged() final;
+    void displayCaptureSurfacesChanged() final;
+    void systemAudioCaptureChanged() final;
+
+    WindowKind windowKind() final;
+
 protected:
-    WKWebView *m_webView;
+    WeakObjCPtr<WKWebView> m_webView;
+    std::unique_ptr<WebCore::AlternativeTextUIController> m_alternativeTextUIController;
 };
 
 }

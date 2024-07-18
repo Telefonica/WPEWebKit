@@ -28,9 +28,12 @@ WI.ConsoleDrawer = class ConsoleDrawer extends WI.ContentBrowser
     constructor(element)
     {
         const delegate = null;
-        const disableBackForward = true;
-        const disableFindBanner = false;
-        super(element, delegate, disableBackForward, disableFindBanner);
+        super(element, delegate, {
+            hideBackForwardButtons: true,
+            disableBackForwardNavigation: true,
+            disableFindBanner: true,
+            flexibleNavigationItem: new WI.NavigationItem,
+        });
 
         this.element.classList.add("console-drawer");
 
@@ -39,8 +42,11 @@ WI.ConsoleDrawer = class ConsoleDrawer extends WI.ContentBrowser
         this.navigationBar.element.addEventListener("mousedown", this._consoleResizerMouseDown.bind(this));
 
         this._toggleDrawerButton = new WI.ToggleButtonNavigationItem("toggle-drawer", WI.UIString("Hide Console"), WI.UIString("Show Console"), "Images/HideConsoleDrawer.svg", "Images/ShowConsoleDrawer.svg");
+
         this._toggleDrawerButton.visibilityPriority = WI.NavigationItem.VisibilityPriority.High;
-        this._toggleDrawerButton.addEventListener(WI.ButtonNavigationItem.Event.Clicked, () => { WI.toggleSplitConsole(); });
+        this._toggleDrawerButton.addEventListener(WI.ButtonNavigationItem.Event.Clicked, function(event) {
+            WI.toggleSplitConsole();
+        }, this._toggleDrawerButton);
         this.navigationBar.insertNavigationItem(this._toggleDrawerButton, 0);
 
         this.collapsed = true;
@@ -49,6 +55,11 @@ WI.ConsoleDrawer = class ConsoleDrawer extends WI.ContentBrowser
     }
 
     // Public
+
+    toggleButtonShortcutTooltip(keyboardShortcut)
+    {
+        this._toggleDrawerButton.defaultToolTip = WI.UIString("Hide Console (%s)").format(keyboardShortcut.displayName);
+    }
 
     get collapsed()
     {
@@ -65,10 +76,10 @@ WI.ConsoleDrawer = class ConsoleDrawer extends WI.ContentBrowser
 
         this.element.classList.toggle("hidden", this._collapsed);
 
-        if (this._collapsed)
-            this.hidden();
-        else
-            this.shown();
+        // Manually call `attached`/`detached` because we never expect to actually remove this node
+        // from the DOM, meaning that the `WI.ContentViewContainer` would not show/hide entries in
+        // the back/forward list, which is what adds/removes subviews from the DOM.
+        this._didMoveToParent(this._collapsed ? null : WI.View.rootView());
 
         this.dispatchEventToListeners(WI.ConsoleDrawer.Event.CollapsedStateChanged);
     }
@@ -78,24 +89,21 @@ WI.ConsoleDrawer = class ConsoleDrawer extends WI.ContentBrowser
         return this.element.offsetHeight;
     }
 
-    shown()
+    // Protected
+
+    attached()
     {
-        super.shown();
+        super.attached();
 
         this._restoreDrawerHeight();
     }
 
-    // Protected
-
-    layout()
+    sizeDidChange()
     {
+        super.sizeDidChange();
+
         if (this._collapsed)
             return;
-
-        if (this.layoutReason !== WI.View.LayoutReason.Resize)
-            return;
-
-        super.layout();
 
         let height = this.height;
         this._restoreDrawerHeight();
@@ -116,7 +124,8 @@ WI.ConsoleDrawer = class ConsoleDrawer extends WI.ContentBrowser
             return;
 
         let resizerElement = event.target;
-        let mouseOffset = resizerElement.offsetHeight - (event.pageY - resizerElement.totalOffsetTop);
+        let quickConsoleHeight = window.innerHeight - (this.element.totalOffsetTop + this.height);
+        let mouseOffset = quickConsoleHeight - (event.pageY - resizerElement.totalOffsetTop);
 
         function dockedResizerDrag(event)
         {
@@ -147,11 +156,11 @@ WI.ConsoleDrawer = class ConsoleDrawer extends WI.ContentBrowser
         const minimumHeight = 64;
         const maximumHeight = this.element.parentNode.offsetHeight - 100;
 
-        height = Number.constrain(height, minimumHeight, maximumHeight);
-        if (height === this.element.style.height)
+        let heightCSSValue = Number.constrain(height, minimumHeight, maximumHeight) + "px";
+        if (this.element.style.height === heightCSSValue)
             return;
 
-        this.element.style.height = height + "px";
+        this.element.style.height = heightCSSValue;
 
         this.dispatchEventToListeners(WI.ConsoleDrawer.Event.Resized);
     }

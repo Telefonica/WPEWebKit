@@ -8,7 +8,7 @@
  */
 /*
  *
- * Copyright (c) 2014, Cisco Systems, Inc.
+ * Copyright (c) 2014-2017, Cisco Systems, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,13 +41,13 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-#ifndef _UTIL_H
-#define _UTIL_H
+#ifndef SRTP_TEST_UTIL_H
+#define SRTP_TEST_UTIL_H
 
 #define MAX_PRINT_STRING_LEN 1024
 
 int hex_string_to_octet_string(char *raw, char *hex, int len);
-char * octet_string_hex_string(const void *s, int length);
+char *octet_string_hex_string(const void *s, int length);
 int base64_string_to_octet_string(char *raw, int *pad, char *base64, int len);
 
 #endif

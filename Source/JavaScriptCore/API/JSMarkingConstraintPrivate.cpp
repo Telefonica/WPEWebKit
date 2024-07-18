@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc.  All rights reserved.
+ * Copyright (C) 2017-2022 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,9 +27,7 @@
 #include "JSMarkingConstraintPrivate.h"
 
 #include "APICast.h"
-#include "JSCInlines.h"
-#include "MarkingConstraint.h"
-#include "VisitingTimeout.h"
+#include "SimpleMarkingConstraint.h"
 
 using namespace JSC;
 
@@ -38,15 +36,15 @@ namespace {
 Atomic<unsigned> constraintCounter;
 
 struct Marker : JSMarker {
-    SlotVisitor* visitor;
+    AbstractSlotVisitor* visitor;
 };
 
-bool isMarked(JSMarkerRef, JSObjectRef objectRef)
+bool isMarked(JSMarkerRef markerRef, JSObjectRef objectRef)
 {
     if (!objectRef)
         return true; // Null is an immortal object.
     
-    return Heap::isMarked(toJS(objectRef));
+    return static_cast<Marker*>(markerRef)->visitor->isMarked(toJS(objectRef));
 }
 
 void mark(JSMarkerRef markerRef, JSObjectRef objectRef)
@@ -72,19 +70,19 @@ void JSContextGroupAddMarkingConstraint(JSContextGroupRef group, JSMarkingConstr
     // else gets marked.
     ConstraintVolatility volatility = ConstraintVolatility::GreyedByMarking;
     
-    auto constraint = std::make_unique<MarkingConstraint>(
-        toCString("Amc", constraintIndex, "(", RawPointer(bitwise_cast<void*>(constraintCallback)), ")"),
-        toCString("API Marking Constraint #", constraintIndex, " (", RawPointer(bitwise_cast<void*>(constraintCallback)), ", ", RawPointer(userData), ")"),
-        [constraintCallback, userData]
-        (SlotVisitor& slotVisitor, const VisitingTimeout&) {
+    auto constraint = makeUnique<SimpleMarkingConstraint>(
+        toCString("Amc", constraintIndex, "(", RawPointer(constraintCallback), ")"),
+        toCString("API Marking Constraint #", constraintIndex, " (", RawPointer(constraintCallback), ", ", RawPointer(userData), ")"),
+        MAKE_MARKING_CONSTRAINT_EXECUTOR_PAIR(([constraintCallback, userData] (AbstractSlotVisitor& visitor) {
             Marker marker;
             marker.IsMarked = isMarked;
             marker.Mark = mark;
-            marker.visitor = &slotVisitor;
+            marker.visitor = &visitor;
             
             constraintCallback(&marker, userData);
-        },
-        volatility);
+        })),
+        volatility,
+        ConstraintConcurrency::Sequential);
     
     vm.heap.addMarkingConstraint(WTFMove(constraint));
 }

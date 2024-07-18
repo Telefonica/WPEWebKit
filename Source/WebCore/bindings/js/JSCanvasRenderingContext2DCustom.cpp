@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2021 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,33 +20,26 @@
 #include "config.h"
 #include "JSCanvasRenderingContext2D.h"
 
-#include "CanvasGradient.h"
-#include "CanvasPattern.h"
-#include "CanvasRenderingContext2D.h"
-#include "CanvasStyle.h"
-#include "HTMLCanvasElement.h"
-#include "HTMLImageElement.h"
-#include "ImageData.h"
-#include "JSCanvasGradient.h"
-#include "JSCanvasPattern.h"
-#include "JSHTMLCanvasElement.h"
-#include "JSHTMLImageElement.h"
-#include "JSImageData.h"
-
-using namespace JSC;
+#include "JSNodeCustom.h"
+#include "WebCoreOpaqueRoot.h"
 
 namespace WebCore {
 
-bool JSCanvasRenderingContext2DOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor)
+bool JSCanvasRenderingContext2DOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, JSC::AbstractSlotVisitor& visitor, const char** reason)
 {
-    JSCanvasRenderingContext2D* jsCanvasRenderingContext = jsCast<JSCanvasRenderingContext2D*>(handle.slot()->asCell());
-    void* root = WebCore::root(jsCanvasRenderingContext->wrapped().canvas());
-    return visitor.containsOpaqueRoot(root);
+    if (UNLIKELY(reason))
+        *reason = "Canvas is opaque root";
+
+    JSCanvasRenderingContext2D* jsCanvasRenderingContext = JSC::jsCast<JSCanvasRenderingContext2D*>(handle.slot()->asCell());
+    return containsWebCoreOpaqueRoot(visitor, jsCanvasRenderingContext->wrapped().canvas());
 }
 
-void JSCanvasRenderingContext2D::visitAdditionalChildren(SlotVisitor& visitor)
+template<typename Visitor>
+void JSCanvasRenderingContext2D::visitAdditionalChildren(Visitor& visitor)
 {
-    visitor.addOpaqueRoot(root(wrapped().canvas()));
+    addWebCoreOpaqueRoot(visitor, wrapped().canvas());
 }
+
+DEFINE_VISIT_ADDITIONAL_CHILDREN(JSCanvasRenderingContext2D);
 
 } // namespace WebCore

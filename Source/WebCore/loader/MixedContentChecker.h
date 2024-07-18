@@ -30,14 +30,16 @@
 
 #pragma once
 
+#include <optional>
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/KeyValuePair.h>
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
 class Frame;
 class FrameLoaderClient;
-class URL;
 class SecurityOrigin;
 
 class MixedContentChecker {
@@ -48,25 +50,25 @@ public:
         ActiveCanWarn,
     };
 
-    MixedContentChecker(Frame&);
-
     enum class AlwaysDisplayInNonStrictMode {
         No,
         Yes,
     };
 
-    bool canDisplayInsecureContent(SecurityOrigin&, ContentType, const URL&, AlwaysDisplayInNonStrictMode = AlwaysDisplayInNonStrictMode::No) const;
-    bool canRunInsecureContent(SecurityOrigin&, const URL&) const;
-    void checkFormForMixedContent(SecurityOrigin&, const URL&) const;
+    // FIXME: This should probably have a separate client from FrameLoader.
+    static bool canDisplayInsecureContent(Frame&, SecurityOrigin&, ContentType, const URL&, AlwaysDisplayInNonStrictMode = AlwaysDisplayInNonStrictMode::No);
+    static bool canRunInsecureContent(Frame&, SecurityOrigin&, const URL&);
+    static void checkFormForMixedContent(Frame&, SecurityOrigin&, const URL&);
     static bool isMixedContent(SecurityOrigin&, const URL&);
+    static std::optional<String> checkForMixedContentInFrameTree(const Frame&, const URL&);
+
+    static void addMixedContentWhitelistEntry(const String& origin, const String& domain);
+    static void removeMixedContentWhitelistEntry(const String& origin, const String& domain);
+    static void resetMixedContentWhitelist();
 
 private:
-    // FIXME: This should probably have a separate client from FrameLoader.
-    FrameLoaderClient& client() const;
-
-    void logWarning(bool allowed, const String& action, const URL&) const;
-
-    Frame& m_frame;
+    static bool isWhitelisted(const String& origin, const String& domain);
+    static WTF::Vector<WTF::KeyValuePair<WTF::String, WTF::String>> m_whitelist;
 };
 
 } // namespace WebCore

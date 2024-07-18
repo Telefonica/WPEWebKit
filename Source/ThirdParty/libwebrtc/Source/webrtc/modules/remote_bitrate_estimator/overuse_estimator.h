@@ -7,25 +7,29 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#ifndef WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_OVERUSE_ESTIMATOR_H_
-#define WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_OVERUSE_ESTIMATOR_H_
+#ifndef MODULES_REMOTE_BITRATE_ESTIMATOR_OVERUSE_ESTIMATOR_H_
+#define MODULES_REMOTE_BITRATE_ESTIMATOR_OVERUSE_ESTIMATOR_H_
+
+#include <stdint.h>
 
 #include <deque>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/common_types.h"
-#include "webrtc/modules/remote_bitrate_estimator/include/bwe_defines.h"
+#include "api/network_state_predictor.h"
 
 namespace webrtc {
 
 class OveruseEstimator {
  public:
-  explicit OveruseEstimator(const OverUseDetectorOptions& options);
-  ~OveruseEstimator();
+  OveruseEstimator();
+
+  OveruseEstimator(const OveruseEstimator&) = delete;
+  OveruseEstimator& operator=(const OveruseEstimator&) = delete;
+
+  ~OveruseEstimator() = default;
 
   // Update the estimator with a new sample. The deltas should represent deltas
   // between timestamp groups as defined by the InterArrival class.
-  // |current_hypothesis| should be the hypothesis of the over-use detector at
+  // `current_hypothesis` should be the hypothesis of the over-use detector at
   // this time.
   void Update(int64_t t_delta,
               double ts_delta,
@@ -34,40 +38,29 @@ class OveruseEstimator {
               int64_t now_ms);
 
   // Returns the estimated noise/jitter variance in ms^2.
-  double var_noise() const {
-    return var_noise_;
-  }
+  double var_noise() const { return var_noise_; }
 
   // Returns the estimated inter-arrival time delta offset in ms.
-  double offset() const {
-    return offset_;
-  }
+  double offset() const { return offset_; }
 
   // Returns the number of deltas which the current over-use estimator state is
   // based on.
-  unsigned int num_of_deltas() const {
-    return num_of_deltas_;
-  }
+  int num_of_deltas() const { return num_of_deltas_; }
 
  private:
   double UpdateMinFramePeriod(double ts_delta);
   void UpdateNoiseEstimate(double residual, double ts_delta, bool stable_state);
 
-  // Must be first member variable. Cannot be const because we need to be
-  // copyable.
-  OverUseDetectorOptions options_;
-  uint16_t num_of_deltas_;
-  double slope_;
-  double offset_;
-  double prev_offset_;
-  double E_[2][2];
-  double process_noise_[2];
-  double avg_noise_;
-  double var_noise_;
+  int num_of_deltas_ = 0;
+  double slope_ = 8.0 / 512.0;
+  double offset_ = 0;
+  double prev_offset_ = 0;
+  double E_[2][2] = {{100.0, 0.0}, {0.0, 1e-1}};
+  double process_noise_[2] = {1e-13, 1e-3};
+  double avg_noise_ = 0.0;
+  double var_noise_ = 50.0;
   std::deque<double> ts_delta_hist_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(OveruseEstimator);
 };
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_OVERUSE_ESTIMATOR_H_
+#endif  // MODULES_REMOTE_BITRATE_ESTIMATOR_OVERUSE_ESTIMATOR_H_

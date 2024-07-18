@@ -8,13 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_WAVREADER_ABSTRACT_FACTORY_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_WAVREADER_ABSTRACT_FACTORY_H_
+#ifndef MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_WAVREADER_ABSTRACT_FACTORY_H_
+#define MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_WAVREADER_ABSTRACT_FACTORY_H_
 
 #include <memory>
-#include <string>
 
-#include "webrtc/modules/audio_processing/test/conversational_speech/wavreader_interface.h"
+#include "absl/strings/string_view.h"
+#include "modules/audio_processing/test/conversational_speech/wavreader_interface.h"
 
 namespace webrtc {
 namespace test {
@@ -24,11 +24,11 @@ class WavReaderAbstractFactory {
  public:
   virtual ~WavReaderAbstractFactory() = default;
   virtual std::unique_ptr<WavReaderInterface> Create(
-      const std::string& filepath) const = 0;
+      absl::string_view filepath) const = 0;
 };
 
 }  // namespace conversational_speech
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_WAVREADER_ABSTRACT_FACTORY_H_
+#endif  // MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_WAVREADER_ABSTRACT_FACTORY_H_

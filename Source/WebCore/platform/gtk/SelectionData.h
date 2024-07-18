@@ -19,21 +19,16 @@
 #pragma once
 
 #include "Image.h"
-#include "URL.h"
+#include "SharedBuffer.h"
 #include <wtf/HashMap.h>
-#include <wtf/RefCounted.h>
+#include <wtf/URL.h>
 #include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
-class SelectionData : public RefCounted<SelectionData> {
+class SelectionData {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    static Ref<SelectionData> create()
-    {
-        return adoptRef(*new SelectionData);
-    }
-
     void setText(const String&);
     const String& text() const { return m_text; }
     bool hasText() const { return !m_text.isEmpty(); }
@@ -62,13 +57,18 @@ public:
     bool hasImage() const { return m_image; }
     void clearImage() { m_image = nullptr; }
 
-    void setUnknownTypeData(const String& type, const String& data) { m_unknownTypeData.set(type, data); }
-    String unknownTypeData(const String& type) const { return m_unknownTypeData.get(type); }
-    const HashMap<String, String>& unknownTypes() const { return m_unknownTypeData; }
-    bool hasUnknownTypeData() const { return !m_unknownTypeData.isEmpty(); }
-
     void setCanSmartReplace(bool canSmartReplace) { m_canSmartReplace = canSmartReplace; }
     bool canSmartReplace() const { return m_canSmartReplace; }
+
+    void addBuffer(const String& type, const Ref<SharedBuffer>& buffer) { m_buffers.add(type, buffer.get()); }
+    const HashMap<String, Ref<SharedBuffer>>& buffers() const { return m_buffers; }
+    SharedBuffer* buffer(const String& type) { return m_buffers.get(type); }
+    void clearBuffers() { m_buffers.clear(); }
+
+    void setCustomData(Ref<SharedBuffer>&& buffer) { m_customData = WTFMove(buffer); }
+    SharedBuffer* customData() const { return m_customData.get(); }
+    bool hasCustomData() const { return !!m_customData; }
+    void clearCustomData() { m_customData = nullptr; }
 
     void clearAll();
     void clearAllExceptFilenames();
@@ -80,8 +80,9 @@ private:
     String m_uriList;
     Vector<String> m_filenames;
     RefPtr<Image> m_image;
-    HashMap<String, String> m_unknownTypeData;
     bool m_canSmartReplace { false };
+    RefPtr<SharedBuffer> m_customData;
+    HashMap<String, Ref<SharedBuffer>> m_buffers;
 };
 
 } // namespace WebCore

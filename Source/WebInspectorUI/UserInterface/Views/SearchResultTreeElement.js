@@ -29,23 +29,21 @@ WI.SearchResultTreeElement = class SearchResultTreeElement extends WI.GeneralTre
     {
         console.assert(representedObject instanceof WI.DOMSearchMatchObject || representedObject instanceof WI.SourceCodeSearchMatchObject);
 
-        var title = WI.SearchResultTreeElement.truncateAndHighlightTitle(representedObject.title, representedObject.searchTerm, representedObject.sourceCodeTextRange);
+        var title = WI.SearchResultTreeElement.truncateAndHighlightTitle(representedObject.title, representedObject.searchTerm, representedObject.textRange);
         const subtitle = null;
         super(representedObject.className, title, subtitle, representedObject);
     }
 
     // Static
 
-    static truncateAndHighlightTitle(title, searchTerm, sourceCodeTextRange)
+    static truncateAndHighlightTitle(title, searchTerm, textRange)
     {
         let isRTL = WI.resolvedLayoutDirection() === WI.LayoutDirection.RTL;
         const charactersToShowBeforeSearchMatch = isRTL ? 20 : 15;
         const charactersToShowAfterSearchMatch = isRTL ? 15 : 50;
 
-        // Use the original location, since those line/column offsets match the line text in title.
-        var textRange = sourceCodeTextRange.textRange;
-
-        var searchTermIndex = textRange.startColumn;
+        let searchTermIndex = textRange.startColumn;
+        let searchTermLength = textRange.endColumn - textRange.startColumn;
 
         // We should only have one line text ranges, so make sure that is the case.
         console.assert(textRange.startLine === textRange.endLine);
@@ -59,10 +57,7 @@ WI.SearchResultTreeElement = class SearchResultTreeElement extends WI.GeneralTre
         } else
             modifiedTitle = title;
 
-        // Truncate the tail of the title so the tooltip isn't so large.
-        modifiedTitle = modifiedTitle.trimEnd(searchTermIndex + searchTerm.length + charactersToShowAfterSearchMatch);
-
-        console.assert(modifiedTitle.substring(searchTermIndex, searchTermIndex + searchTerm.length).toLowerCase() === searchTerm.toLowerCase());
+        modifiedTitle = modifiedTitle.truncateEnd(searchTermIndex + searchTermLength + charactersToShowAfterSearchMatch);
 
         var highlightedTitle = document.createDocumentFragment();
 
@@ -70,10 +65,10 @@ WI.SearchResultTreeElement = class SearchResultTreeElement extends WI.GeneralTre
 
         var highlightSpan = document.createElement("span");
         highlightSpan.className = "highlighted";
-        highlightSpan.append(modifiedTitle.substring(searchTermIndex, searchTermIndex + searchTerm.length));
+        highlightSpan.append(modifiedTitle.substring(searchTermIndex, searchTermIndex + searchTermLength));
         highlightedTitle.appendChild(highlightSpan);
 
-        highlightedTitle.append(modifiedTitle.substring(searchTermIndex + searchTerm.length));
+        highlightedTitle.append(modifiedTitle.substring(searchTermIndex + searchTermLength));
 
         return highlightedTitle;
     }
@@ -88,5 +83,29 @@ WI.SearchResultTreeElement = class SearchResultTreeElement extends WI.GeneralTre
     get synthesizedTextValue()
     {
         return this.representedObject.sourceCodeTextRange.synthesizedTextValue + ":" + this.representedObject.title;
+    }
+
+    // Protected
+
+    populateContextMenu(contextMenu, event)
+    {
+        if (this.representedObject instanceof WI.DOMSearchMatchObject) {
+            contextMenu.appendItem(WI.UIString("Reveal in Elements Tab"), () => {
+                WI.showMainFrameDOMTree(this.representedObject.domNode, {
+                    ignoreSearchTab: true,
+                    initiatorHint: WI.TabBrowser.TabNavigationInitiator.ContextMenu,
+                });
+            });
+        } else if (this.representedObject instanceof WI.SourceCodeSearchMatchObject) {
+            contextMenu.appendItem(WI.UIString("Reveal in Sources Tab"), () => {
+                WI.showOriginalOrFormattedSourceCodeTextRange(this.representedObject.sourceCodeTextRange, {
+                    ignoreNetworkTab: true,
+                    ignoreSearchTab: true,
+                    initiatorHint: WI.TabBrowser.TabNavigationInitiator.ContextMenu,
+                });
+            });
+        }
+
+        super.populateContextMenu(contextMenu, event);
     }
 };

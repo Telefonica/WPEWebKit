@@ -31,11 +31,11 @@
 #import <WebCore/HTMLCollection.h>
 #import <WebCore/HTMLFormElement.h>
 #import <WebCore/HTMLNames.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::HTMLFormElement*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -56,7 +56,7 @@
 - (NSString *)action
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getURLAttribute(WebCore::HTMLNames::actionAttr);
+    return IMPL->getURLAttribute(WebCore::HTMLNames::actionAttr).string();
 }
 
 - (void)setAction:(NSString *)newAction
@@ -186,3 +186,5 @@ DOMHTMLFormElement *kit(WebCore::HTMLFormElement* value)
     WebCoreThreadViolationCheckRoundOne();
     return static_cast<DOMHTMLFormElement*>(kit(static_cast<WebCore::Node*>(value)));
 }
+
+#undef IMPL

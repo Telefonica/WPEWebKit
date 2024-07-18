@@ -27,6 +27,7 @@
 namespace WebCore {
 
 class HTMLEmbedElement final : public HTMLPlugInImageElement {
+    WTF_MAKE_ISO_ALLOCATED(HTMLEmbedElement);
 public:
     static Ref<HTMLEmbedElement> create(Document&);
     static Ref<HTMLEmbedElement> create(const QualifiedName&, Document&);
@@ -34,14 +35,15 @@ public:
 private:
     HTMLEmbedElement(const QualifiedName&, Document&);
 
-    void parseAttribute(const QualifiedName&, const AtomicString&) final;
-    bool isPresentationAttribute(const QualifiedName&) const final;
-    void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStyleProperties&) final;
+    void parseAttribute(const QualifiedName&, const AtomString&) final;
+    void collectPresentationalHintsForAttribute(const QualifiedName&, const AtomString&, MutableStyleProperties&) final;
 
     bool rendererIsNeeded(const RenderStyle&) final;
 
     bool isURLAttribute(const Attribute&) const final;
-    const AtomicString& imageSourceURL() const final;
+    const AtomString& imageSourceURL() const final;
+
+    bool isInteractiveContent() const final { return true; }
 
     RenderWidget* renderWidgetLoadingPlugin() const final;
 
@@ -49,7 +51,7 @@ private:
 
     void addSubresourceAttributeURLs(ListHashSet<URL>&) const final;
 
-    void parametersForPlugin(Vector<String>& paramNames, Vector<String>& paramValues);
+    void parametersForPlugin(Vector<AtomString>& paramNames, Vector<AtomString>& paramValues);
 };
 
 } // namespace WebCore

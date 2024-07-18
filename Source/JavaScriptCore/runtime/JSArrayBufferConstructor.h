@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,29 +33,34 @@ namespace JSC {
 class JSArrayBufferPrototype;
 class GetterSetter;
 
-class JSArrayBufferConstructor : public InternalFunction {
+template<ArrayBufferSharingMode sharingMode>
+class JSGenericArrayBufferConstructor final : public InternalFunction {
 public:
-    typedef InternalFunction Base;
+    using Base = InternalFunction;
 
-protected:
-    JSArrayBufferConstructor(VM&, Structure*, ArrayBufferSharingMode);
-    void finishCreation(VM&, JSArrayBufferPrototype*, GetterSetter* speciesSymbol);
+    static JSGenericArrayBufferConstructor* create(VM& vm, Structure* structure, JSArrayBufferPrototype* prototype, GetterSetter* speciesSymbol)
+    {
+        JSGenericArrayBufferConstructor* result =
+            new (NotNull, allocateCell<JSGenericArrayBufferConstructor>(vm)) JSGenericArrayBufferConstructor(vm, structure);
+        result->finishCreation(vm, prototype, speciesSymbol);
+        return result;
+    }
 
-public:
-    static JSArrayBufferConstructor* create(VM&, Structure*, JSArrayBufferPrototype*, GetterSetter* speciesSymbol, ArrayBufferSharingMode);
-    
-    DECLARE_INFO;
-    
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue prototype);
     
-    ArrayBufferSharingMode sharingMode() const { return m_sharingMode; }
+    static const ClassInfo s_info; // This is never accessed directly, since that would break linkage on some compilers.
+    static const ClassInfo* info();
 
-protected:
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
+    static EncodedJSValue constructImpl(JSGlobalObject*, CallFrame*);
 
 private:
-    ArrayBufferSharingMode m_sharingMode;
+    JSGenericArrayBufferConstructor(VM&, Structure*);
+    void finishCreation(VM&, JSArrayBufferPrototype*, GetterSetter* speciesSymbol);
 };
+
+using JSArrayBufferConstructor = JSGenericArrayBufferConstructor<ArrayBufferSharingMode::Default>;
+using JSSharedArrayBufferConstructor = JSGenericArrayBufferConstructor<ArrayBufferSharingMode::Shared>;
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSArrayBufferConstructor, InternalFunction);
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSSharedArrayBufferConstructor, InternalFunction);
 
 } // namespace JSC

@@ -25,12 +25,14 @@
 
 WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends WI.Object
 {
-    constructor(codeMirror, delegate, stopCharactersRegex)
+    constructor(mode, codeMirror, delegate, stopCharactersRegex)
     {
+        console.assert(Object.values(WI.CodeMirrorCompletionController.Mode).includes(mode), mode);
+        console.assert(codeMirror instanceof CodeMirror, codeMirror);
+
         super();
 
-        console.assert(codeMirror);
-
+        this._mode = mode;
         this._codeMirror = codeMirror;
         this._stopCharactersRegex = stopCharactersRegex || null;
         this._delegate = delegate || null;
@@ -74,10 +76,7 @@ WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends
 
     // Public
 
-    get delegate()
-    {
-        return this._delegate;
-    }
+    get mode() { return this._mode; }
 
     addExtendedCompletionProvider(modeName, provider)
     {
@@ -256,7 +255,7 @@ WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends
             this._commitCompletionHint();
 
             // The clicked hint marker causes the editor to loose focus. Restore it so the user can keep typing.
-            setTimeout(() => { this._codeMirror.focus() }, 0);
+            setTimeout(() => { this._codeMirror.focus(); }, 0);
         });
 
         this._completionHintMarker = this._codeMirror.setUniqueBookmark(position, {widget: container, insertLeft: true});
@@ -475,8 +474,8 @@ WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends
         var cursor = this._codeMirror.getCursor();
         var token = this._codeMirror.getTokenAt(cursor);
 
-        // Don't try to complete inside comments.
-        if (token.type && /\bcomment\b/.test(token.type)) {
+        // Don't try to complete inside comments or strings.
+        if (token.type && /\b(comment|string)\b/.test(token.type)) {
             this.hideCompletions();
             return;
         }
@@ -563,7 +562,7 @@ WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends
             }
 
             return this._codeMirror.getTokenAt({line: lineNumber, ch: token.start ? token.start : Number.MAX_VALUE});
-        }
+        };
 
         // Inside a function, determine the function name.
         if (token.state.state === "parens") {
@@ -585,7 +584,7 @@ WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends
 
             let functionCompletions = WI.CSSKeywordCompletions.forFunction(functionName).startsWith(this._prefix);
 
-            if (this._delegate && typeof this._delegate.completionControllerCSSFunctionValuesNeeded)
+            if (this._delegate && this._delegate.completionControllerCSSFunctionValuesNeeded)
                 functionCompletions = this._delegate.completionControllerCSSFunctionValuesNeeded(this, functionName, functionCompletions);
 
             return functionCompletions;
@@ -628,7 +627,7 @@ WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends
         this._implicitSuffix = suffix !== ":" ? ": " : "";
 
         // Complete property names.
-        return WI.CSSCompletions.cssNameCompletions.startsWith(this._prefix);
+        return WI.cssManager.propertyNameCompletions.startsWith(this._prefix);
     }
 
     _generateJavaScriptCompletions(mainToken, base, suffix)
@@ -654,36 +653,38 @@ WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends
         // FIXME: Include module keywords if we know this is a module environment.
         // var moduleKeywords = ["default", "export", "import"];
 
-        var allKeywords = [
+        const allKeywords = [
             "break", "case", "catch", "class", "const", "continue", "debugger", "default",
             "delete", "do", "else", "extends", "false", "finally", "for", "function",
             "if", "in", "Infinity", "instanceof", "let", "NaN", "new", "null", "of",
             "return", "static", "super", "switch", "this", "throw", "true", "try",
             "typeof", "undefined", "var", "void", "while", "with", "yield"
         ];
-        var valueKeywords = ["false", "Infinity", "NaN", "null", "this", "true", "undefined"];
+        const valueKeywords = ["false", "Infinity", "NaN", "null", "this", "true", "undefined", "globalThis"];
 
-        var allowedKeywordsInsideBlocks = allKeywords.keySet();
-        var allowedKeywordsWhenDeclaringVariable = valueKeywords.keySet();
-        var allowedKeywordsInsideParenthesis = valueKeywords.concat(["class", "function"]).keySet();
-        var allowedKeywordsInsideBrackets = allowedKeywordsInsideParenthesis;
-        var allowedKeywordsOnlyInsideSwitch = ["case", "default"].keySet();
+        const allowedKeywordsInsideBlocks = new Set(allKeywords);
+        const allowedKeywordsWhenDeclaringVariable = new Set(valueKeywords);
+        const allowedKeywordsInsideParenthesis = new Set(valueKeywords.concat(["class", "function"]));
+        const allowedKeywordsInsideBrackets = allowedKeywordsInsideParenthesis;
+        const allowedKeywordsOnlyInsideSwitch = new Set(["case", "default"]);
 
         function matchKeywords(keywords)
         {
-            matchingWords = matchingWords.concat(keywords.filter(function(word) {
-                if (!insideSwitch && word in allowedKeywordsOnlyInsideSwitch)
-                    return false;
-                if (insideBlock && !(word in allowedKeywordsInsideBlocks))
-                    return false;
-                if (insideBrackets && !(word in allowedKeywordsInsideBrackets))
-                    return false;
-                if (insideParenthesis && !(word in allowedKeywordsInsideParenthesis))
-                    return false;
-                if (declaringVariable && !(word in allowedKeywordsWhenDeclaringVariable))
-                    return false;
-                return word.startsWith(prefix);
-            }));
+            for (let keyword of keywords) {
+                if (!insideSwitch && allowedKeywordsOnlyInsideSwitch.has(keyword))
+                    continue;
+                if (insideBlock && !allowedKeywordsInsideBlocks.has(keyword))
+                    continue;
+                if (insideBrackets && !allowedKeywordsInsideBrackets.has(keyword))
+                    continue;
+                if (insideParenthesis && !allowedKeywordsInsideParenthesis.has(keyword))
+                    continue;
+                if (declaringVariable && !allowedKeywordsWhenDeclaringVariable.has(keyword))
+                    continue;
+                if (!keyword.startsWith(prefix))
+                    continue;
+                matchingWords.push(keyword);
+            }
         }
 
         function matchVariables()
@@ -894,6 +895,14 @@ WI.CodeMirrorCompletionController = class CodeMirrorCompletionController extends
 
         this.hideCompletions();
     }
+};
+
+WI.CodeMirrorCompletionController.Mode = {
+    Basic: "basic",
+    EventBreakpoint: "event-breakpoint",
+    ExceptionBreakpoint: "exception-breakpoint",
+    FullConsoleCommandLineAPI: "full-console-command-line-api",
+    PausedConsoleCommandLineAPI: "paused-console-command-line-api",
 };
 
 WI.CodeMirrorCompletionController.UpdatePromise = {

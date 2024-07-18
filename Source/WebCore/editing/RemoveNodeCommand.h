@@ -31,7 +31,7 @@ namespace WebCore {
 
 class RemoveNodeCommand : public SimpleEditCommand {
 public:
-    static Ref<RemoveNodeCommand> create(Ref<Node>&& node, ShouldAssumeContentIsAlwaysEditable shouldAssumeContentIsAlwaysEditable, EditAction editingAction = EditActionUnspecified)
+    static Ref<RemoveNodeCommand> create(Ref<Node>&& node, ShouldAssumeContentIsAlwaysEditable shouldAssumeContentIsAlwaysEditable, EditAction editingAction = EditAction::Unspecified)
     {
         return adoptRef(*new RemoveNodeCommand(WTFMove(node), shouldAssumeContentIsAlwaysEditable, editingAction));
     }
@@ -43,7 +43,7 @@ private:
     void doUnapply() override;
 
 #ifndef NDEBUG
-    void getNodesInCommand(HashSet<Node*>&) override;
+    void getNodesInCommand(HashSet<Ref<Node>>&) override;
 #endif
 
     Ref<Node> m_node;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,60 +36,143 @@
 #include "DFGVariableEventStream.h"
 #include "ExecutionCounter.h"
 #include "JITCode.h"
+#include <wtf/CompactPointerTuple.h>
 #include <wtf/SegmentedVector.h>
 
 namespace JSC {
 
 class TrackedReferences;
 
+struct SimpleJumpTable;
+struct StringJumpTable;
+
 namespace DFG {
 
+class JITCode;
 class JITCompiler;
 
-class JITCode : public DirectJITCode {
+struct UnlinkedStructureStubInfo : JSC::UnlinkedStructureStubInfo {
+    CodeOrigin codeOrigin;
+    RegisterSet usedRegisters;
+    CallSiteIndex callSiteIndex;
+    GPRReg m_baseGPR { InvalidGPRReg };
+    GPRReg m_valueGPR { InvalidGPRReg };
+    GPRReg m_extraGPR { InvalidGPRReg };
+    GPRReg m_stubInfoGPR { InvalidGPRReg };
+#if USE(JSVALUE32_64)
+    GPRReg m_valueTagGPR { InvalidGPRReg };
+    GPRReg m_baseTagGPR { InvalidGPRReg };
+    GPRReg m_extraTagGPR { InvalidGPRReg };
+#endif
+    bool hasConstantIdentifier { false };
+};
+
+class LinkerIR {
+    WTF_MAKE_NONCOPYABLE(LinkerIR);
 public:
-    JITCode();
-    virtual ~JITCode();
-    
-    CommonData* dfgCommon() override;
-    JITCode* dfg() override;
-    
-    OSREntryData* appendOSREntryData(unsigned bytecodeIndex, unsigned machineCodeOffset)
+    using Constant = unsigned;
+
+    enum class Type : uint16_t {
+        Invalid,
+        StructureStubInfo,
+        CellPointer,
+        NonCellPointer,
+    };
+
+    using Value = CompactPointerTuple<void*, Type>;
+
+    struct ValueHash {
+        static unsigned hash(const Value& p)
+        {
+            return computeHash(p.type(), p.pointer());
+        }
+
+        static bool equal(const Value& a, const Value& b)
+        {
+            return a == b;
+        }
+
+        static constexpr bool safeToCompareToEmptyOrDeleted = true;
+    };
+
+    struct ValueTraits : public WTF::GenericHashTraits<Value> {
+        static constexpr bool emptyValueIsZero = true;
+        static Value emptyValue() { return Value(); }
+        static void constructDeletedValue(Value& slot) { slot = Value(reinterpret_cast<void*>(static_cast<uintptr_t>(0x1)), Type::Invalid); }
+        static bool isDeletedValue(Value value)
+        {
+            return value == Value(reinterpret_cast<void*>(static_cast<uintptr_t>(0x1)), Type::Invalid);
+        }
+    };
+
+    LinkerIR() = default;
+    LinkerIR(LinkerIR&&) = default;
+    LinkerIR& operator=(LinkerIR&&) = default;
+
+    LinkerIR(Vector<Value>&& constants)
+        : m_constants(WTFMove(constants))
     {
-        DFG::OSREntryData entry;
-        entry.m_bytecodeIndex = bytecodeIndex;
-        entry.m_machineCodeOffset = machineCodeOffset;
-        osrEntry.append(entry);
-        return &osrEntry.last();
     }
-    
-    OSREntryData* osrEntryDataForBytecodeIndex(unsigned bytecodeIndex)
+
+    size_t size() const { return m_constants.size(); }
+    Value at(size_t i) const { return m_constants[i]; }
+
+private:
+    FixedVector<Value> m_constants;
+};
+
+class JITData final : public TrailingArray<JITData, void*> {
+    WTF_MAKE_FAST_ALLOCATED;
+    friend class LLIntOffsetsExtractor;
+public:
+    using Base = TrailingArray<JITData, void*>;
+    using ExitVector = FixedVector<MacroAssemblerCodeRef<OSRExitPtrTag>>;
+
+    static ptrdiff_t offsetOfExits() { return OBJECT_OFFSETOF(JITData, m_exits); }
+    static ptrdiff_t offsetOfIsInvalidated() { return OBJECT_OFFSETOF(JITData, m_isInvalidated); }
+
+    static std::unique_ptr<JITData> create(const JITCode& jitCode, ExitVector&& exits);
+
+    void setExitCode(unsigned exitIndex, MacroAssemblerCodeRef<OSRExitPtrTag> code)
     {
-        return tryBinarySearch<OSREntryData, unsigned>(
-            osrEntry, osrEntry.size(), bytecodeIndex,
+        m_exits[exitIndex] = WTFMove(code);
+    }
+    const MacroAssemblerCodeRef<OSRExitPtrTag>& exitCode(unsigned exitIndex) const { return m_exits[exitIndex]; }
+
+    bool isInvalidated() const { return !!m_isInvalidated; }
+
+    void invalidate()
+    {
+        m_isInvalidated = 1;
+    }
+
+    FixedVector<StructureStubInfo>& stubInfos() { return m_stubInfos; }
+
+private:
+    explicit JITData(const JITCode&, ExitVector&&);
+
+    FixedVector<StructureStubInfo> m_stubInfos;
+    ExitVector m_exits;
+    uint8_t m_isInvalidated { 0 };
+};
+
+class JITCode final : public DirectJITCode {
+public:
+    JITCode(bool isUnlinked);
+    ~JITCode() final;
+    
+    CommonData* dfgCommon() final;
+    JITCode* dfg() final;
+    bool isUnlinked() const { return common.isUnlinked(); }
+    
+    OSREntryData* osrEntryDataForBytecodeIndex(BytecodeIndex bytecodeIndex)
+    {
+        return tryBinarySearch<OSREntryData, BytecodeIndex>(
+            m_osrEntry, m_osrEntry.size(), bytecodeIndex,
             getOSREntryDataBytecodeIndex);
     }
 
-    void finalizeOSREntrypoints();
-
-    unsigned appendOSRExit(const OSRExit& exit)
-    {
-        unsigned result = osrExit.size();
-        osrExit.append(exit);
-        return result;
-    }
-    
-    OSRExit& lastOSRExit()
-    {
-        return osrExit.last();
-    }
-    
-    unsigned appendSpeculationRecovery(const SpeculationRecovery& recovery)
-    {
-        unsigned result = speculationRecovery.size();
-        speculationRecovery.append(recovery);
-        return result;
-    }
+    void finalizeOSREntrypoints(Vector<DFG::OSREntryData>&&);
     
     void reconstruct(
         CodeBlock*, CodeOrigin, unsigned streamIndex, Operands<ValueRecovery>& result);
@@ -98,7 +181,7 @@ public:
     // stack. Currently, it also has the restriction that the values must be in their
     // bytecode-designated stack slots.
     void reconstruct(
-        ExecState*, CodeBlock*, CodeOrigin, unsigned streamIndex, Operands<JSValue>& result);
+        CallFrame*, CodeBlock*, CodeOrigin, unsigned streamIndex, Operands<std::optional<JSValue>>& result);
 
 #if ENABLE(FTL_JIT)
     // NB. All of these methods take CodeBlock* because they may want to use
@@ -113,31 +196,39 @@ public:
     void setOptimizationThresholdBasedOnCompilationResult(CodeBlock*, CompilationResult);
 #endif // ENABLE(FTL_JIT)
     
-    void validateReferences(const TrackedReferences&) override;
+    void validateReferences(const TrackedReferences&) final;
     
-    void shrinkToFit();
+    void shrinkToFit(const ConcurrentJSLocker&) final;
 
-    RegisterSet liveRegistersToPreserveAtExceptionHandlingCallSite(CodeBlock*, CallSiteIndex) override;
+    RegisterSet liveRegistersToPreserveAtExceptionHandlingCallSite(CodeBlock*, CallSiteIndex) final;
 #if ENABLE(FTL_JIT)
     CodeBlock* osrEntryBlock() { return m_osrEntryBlock.get(); }
     void setOSREntryBlock(VM&, const JSCell* owner, CodeBlock* osrEntryBlock);
-    void clearOSREntryBlock() { m_osrEntryBlock.clear(); }
+    void clearOSREntryBlockAndResetThresholds(CodeBlock* dfgCodeBlock);
 #endif
 
     static ptrdiff_t commonDataOffset() { return OBJECT_OFFSETOF(JITCode, common); }
 
-    std::optional<CodeOrigin> findPC(CodeBlock*, void* pc) override;
+    std::optional<CodeOrigin> findPC(CodeBlock*, void* pc) final;
+
+    using DirectJITCode::initializeCodeRefForDFG;
+
+    PCToCodeOriginMap* pcToCodeOriginMap() override { return common.m_pcToCodeOriginMap.get(); }
     
 private:
     friend class JITCompiler; // Allow JITCompiler to call setCodeRef().
 
 public:
     CommonData common;
-    Vector<DFG::OSREntryData> osrEntry;
-    SegmentedVector<DFG::OSRExit, 8> osrExit;
-    Vector<DFG::SpeculationRecovery> speculationRecovery;
+    FixedVector<DFG::OSREntryData> m_osrEntry;
+    FixedVector<DFG::OSRExit> m_osrExit;
+    FixedVector<DFG::SpeculationRecovery> m_speculationRecovery;
+    FixedVector<SimpleJumpTable> m_switchJumpTables;
+    FixedVector<StringJumpTable> m_stringSwitchJumpTables;
+    FixedVector<UnlinkedStructureStubInfo> m_unlinkedStubInfos;
     DFG::VariableEventStream variableEventStream;
     DFG::MinifiedGraph minifiedDFG;
+    LinkerIR m_linkerIR;
 
 #if ENABLE(FTL_JIT)
     uint8_t neverExecutedEntry { 1 };
@@ -149,10 +240,10 @@ public:
     //
     // The key may not always be a target for OSR Entry but the list in the value is guaranteed
     // to be usable for OSR Entry.
-    HashMap<unsigned, Vector<unsigned>> tierUpInLoopHierarchy;
+    HashMap<BytecodeIndex, FixedVector<BytecodeIndex>> tierUpInLoopHierarchy;
 
     // Map each bytecode of CheckTierUpAndOSREnter to its stream index.
-    HashMap<unsigned, unsigned, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> bytecodeIndexToStreamIndex;
+    HashMap<BytecodeIndex, unsigned> bytecodeIndexToStreamIndex;
 
     enum class TriggerReason : uint8_t {
         DontTrigger,
@@ -163,16 +254,18 @@ public:
     // Map each bytecode of CheckTierUpAndOSREnter to its trigger forcing OSR Entry.
     // This can never be modified after it has been initialized since the addresses of the triggers
     // are used by the JIT.
-    HashMap<unsigned, TriggerReason> tierUpEntryTriggers;
-
-    // Set of bytecode that were the target of a TierUp operation.
-    HashSet<unsigned, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> tierUpEntrySeen;
+    HashMap<BytecodeIndex, TriggerReason> tierUpEntryTriggers;
 
     WriteBarrier<CodeBlock> m_osrEntryBlock;
-    unsigned osrEntryRetry;
-    bool abandonOSREntry;
+    unsigned osrEntryRetry { 0 };
+    bool abandonOSREntry { false };
 #endif // ENABLE(FTL_JIT)
 };
+
+inline std::unique_ptr<JITData> JITData::create(const JITCode& jitCode, ExitVector&& exits)
+{
+    return std::unique_ptr<JITData> { new (NotNull, fastMalloc(Base::allocationSize(jitCode.m_linkerIR.size()))) JITData(jitCode, WTFMove(exits)) };
+}
 
 } } // namespace JSC::DFG
 

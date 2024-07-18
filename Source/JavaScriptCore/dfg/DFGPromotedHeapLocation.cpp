@@ -29,7 +29,7 @@
 #if ENABLE(DFG_JIT)
 
 #include "DFGGraph.h"
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
 
 namespace JSC { namespace DFG {
 
@@ -121,6 +121,22 @@ void printInternal(PrintStream& out, PromotedLocationKind kind)
 
     case NewArrayWithSpreadArgumentPLoc:
         out.print("NewArrayWithSpreadArgumentPLoc");
+        return;
+
+    case NewArrayBufferPLoc:
+        out.print("NewArrayBufferPLoc");
+        return;
+
+    case RegExpObjectRegExpPLoc:
+        out.print("RegExpObjectRegExpPLoc");
+        return;
+
+    case RegExpObjectLastIndexPLoc:
+        out.print("RegExpObjectLastIndexPLoc");
+        return;
+
+    case InternalFieldObjectPLoc:
+        out.print("InternalFieldObjectPLoc");
         return;
     }
     

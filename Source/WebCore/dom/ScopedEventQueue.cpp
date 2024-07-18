@@ -32,8 +32,7 @@
 #include "ScopedEventQueue.h"
 
 #include "Event.h"
-#include "EventDispatcher.h"
-#include "EventTarget.h"
+#include "Node.h"
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
@@ -46,22 +45,25 @@ ScopedEventQueue& ScopedEventQueue::singleton()
 
 void ScopedEventQueue::enqueueEvent(Ref<Event>&& event)
 {
+    ASSERT(is<Node>(event->target()));
+    auto& target = downcast<Node>(*event->target());
+    ScopedEvent scopedEvent = { WTFMove(event), target };
     if (m_scopingLevel)
-        m_queuedEvents.append(WTFMove(event));
+        m_queuedEvents.append(WTFMove(scopedEvent));
     else
-        dispatchEvent(event);
+        dispatchEvent(scopedEvent);
 }
 
-void ScopedEventQueue::dispatchEvent(Event& event) const
+void ScopedEventQueue::dispatchEvent(const ScopedEvent& event) const
 {
-    ASSERT(event.target());
-    ASSERT(event.target()->toNode());
-    EventDispatcher::dispatchEvent(*event.target()->toNode(), event);
+    if (event.event->eventInterface() == MutationEventInterfaceType && event.target->isInShadowTree())
+        return;
+    event.target->dispatchEvent(event.event);
 }
 
 void ScopedEventQueue::dispatchAllEvents()
 {
-    Vector<Ref<Event>> queuedEvents = WTFMove(m_queuedEvents);
+    auto queuedEvents = std::exchange(m_queuedEvents, { });
     for (auto& queuedEvent : queuedEvents)
         dispatchEvent(queuedEvent);
 }

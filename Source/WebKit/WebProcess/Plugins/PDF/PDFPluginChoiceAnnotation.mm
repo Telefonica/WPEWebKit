@@ -28,22 +28,20 @@
 #import "config.h"
 #import "PDFPluginChoiceAnnotation.h"
 
-#import "PDFKitImports.h"
 #import "PDFLayerControllerSPI.h"
-#import <PDFKit/PDFKit.h>
+#import <Quartz/Quartz.h>
 #import <WebCore/CSSPrimitiveValue.h>
 #import <WebCore/CSSPropertyNames.h>
 #import <WebCore/ColorMac.h>
+#import <WebCore/ColorSerialization.h>
 #import <WebCore/HTMLElement.h>
 #import <WebCore/HTMLNames.h>
 #import <WebCore/HTMLOptionElement.h>
 #import <WebCore/HTMLSelectElement.h>
 #import <WebCore/Page.h>
 
-using namespace WebCore;
-
 namespace WebKit {
-
+using namespace WebCore;
 using namespace HTMLNames;
 
 Ref<PDFPluginChoiceAnnotation> PDFPluginChoiceAnnotation::create(PDFAnnotation *annotation, PDFLayerController *pdfLayerController, PDFPlugin* plugin)
@@ -56,7 +54,7 @@ void PDFPluginChoiceAnnotation::updateGeometry()
     PDFPluginAnnotation::updateGeometry();
 
     StyledElement* styledElement = static_cast<StyledElement*>(element());
-    styledElement->setInlineStyleProperty(CSSPropertyFontSize, choiceAnnotation().font.pointSize * pdfLayerController().contentScaleFactor, CSSPrimitiveValue::CSS_PX);
+    styledElement->setInlineStyleProperty(CSSPropertyFontSize, choiceAnnotation().font.pointSize * pdfLayerController().contentScaleFactor, CSSUnitType::CSS_PX);
 }
 
 void PDFPluginChoiceAnnotation::commit()
@@ -69,17 +67,16 @@ void PDFPluginChoiceAnnotation::commit()
 Ref<Element> PDFPluginChoiceAnnotation::createAnnotationElement()
 {
     Document& document = parent()->document();
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     PDFAnnotationChoiceWidget *choiceAnnotation = this->choiceAnnotation();
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
     auto element = document.createElement(selectTag, false);
 
     auto& styledElement = downcast<StyledElement>(element.get());
 
     // FIXME: Match font weight and style as well?
-    styledElement.setInlineStyleProperty(CSSPropertyColor, colorFromNSColor(choiceAnnotation.fontColor).serialized());
+    styledElement.setInlineStyleProperty(CSSPropertyColor, serializationForHTML(colorFromCocoaColor(choiceAnnotation.fontColor)));
     styledElement.setInlineStyleProperty(CSSPropertyFontFamily, choiceAnnotation.font.familyName);
 
     NSArray *choices = choiceAnnotation.choices;
@@ -91,7 +88,7 @@ Ref<Element> PDFPluginChoiceAnnotation::createAnnotationElement()
         choiceOption->setTextContent(choice);
 
         if (choice == selectedChoice)
-            choiceOption->setAttributeWithoutSynchronization(selectedAttr, AtomicString("selected", AtomicString::ConstructFromLiteral));
+            choiceOption->setAttributeWithoutSynchronization(selectedAttr, "selected"_s);
 
         styledElement.appendChild(choiceOption);
     }

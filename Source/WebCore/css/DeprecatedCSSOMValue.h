@@ -31,11 +31,12 @@
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
 #include <wtf/TypeCasts.h>
+#include <wtf/WeakPtr.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-class DeprecatedCSSOMValue : public RefCounted<DeprecatedCSSOMValue> {
+class DeprecatedCSSOMValue : public RefCounted<DeprecatedCSSOMValue>, public CanMakeWeakPtr<DeprecatedCSSOMValue> {
 public:
     // Exactly match the IDL. No reason to add anything if it's not in the IDL.
     enum Type {
@@ -57,9 +58,6 @@ public:
 
     WEBCORE_EXPORT String cssText() const;
     ExceptionOr<void> setCssText(const String&) { return { }; } // Will never implement.
-
-    bool equals(const DeprecatedCSSOMValue& other) const;
-    bool operator==(const DeprecatedCSSOMValue& other) const { return equals(other); }
 
     bool isComplexValue() const { return m_classType == DeprecatedComplexValueClass; }
     bool isPrimitiveValue() const { return m_classType == DeprecatedPrimitiveValueClass; }
@@ -85,13 +83,13 @@ protected:
 
     // NOTE: This class is non-virtual for memory and performance reasons.
     // Don't go making it virtual again unless you know exactly what you're doing!
-    ~DeprecatedCSSOMValue() { }
+    ~DeprecatedCSSOMValue() = default;
 
 private:
     WEBCORE_EXPORT void destroy();
 
 protected:
-    unsigned m_valueListSeparator : CSSValue::ValueListSeparatorBits;
+    unsigned m_valueSeparator : CSSValue::ValueSeparatorBits;
     unsigned m_classType : ClassTypeBits; // ClassType
     
     Ref<CSSStyleDeclaration> m_owner;
@@ -104,7 +102,6 @@ public:
         return adoptRef(*new DeprecatedCSSOMComplexValue(value, owner));
     }
 
-    bool equals(const DeprecatedCSSOMComplexValue& other) const { return m_value->equals(other.m_value); }
     String cssText() const { return m_value->cssText(); }
 
     unsigned cssValueType() const { return m_value->cssValueType(); }

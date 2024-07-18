@@ -36,8 +36,8 @@
 #include "RenderListMarker.h"
 #include "RenderText.h"
 #include "RenderTextFragment.h"
-#include "RenderTreeUpdaterFirstLetter.h"
-#include "RenderTreeUpdaterListItem.h"
+#include "RenderTreeBuilder.h"
+#include "Settings.h"
 #include "StyleResolver.h"
 
 namespace WebCore {
@@ -45,6 +45,11 @@ namespace WebCore {
 static RenderStyle cloneRenderStyleWithState(const RenderStyle& currentStyle)
 {
     auto newStyle = RenderStyle::clone(currentStyle);
+
+    // FIXME: This should probably handle at least ::first-line too.
+    if (auto* firstLetterStyle = currentStyle.getCachedPseudoStyle(PseudoId::FirstLetter))
+        newStyle.addCachedPseudoStyle(makeUnique<RenderStyle>(RenderStyle::clone(*firstLetterStyle)));
+
     if (currentStyle.lastChildState())
         newStyle.setLastChildState();
     if (currentStyle.firstChildState())
@@ -68,8 +73,6 @@ void TextAutoSizingValue::addTextNode(Text& node, float size)
     node.renderer()->setCandidateComputedTextSize(size);
     m_autoSizedNodes.add(&node);
 }
-
-static const float maxScaleIncrease = 1.7f;
 
 auto TextAutoSizingValue::adjustTextNodeSizes() -> StillHasNodes
 {
@@ -98,6 +101,9 @@ auto TextAutoSizingValue::adjustTextNodeSizes() -> StillHasNodes
 
     float averageSize = std::round(cumulativeSize / m_autoSizedNodes.size());
 
+    // FIXME: Figure out how to make this code use RenderTreeUpdater/Builder properly.
+    RenderTreeBuilder builder((*m_autoSizedNodes.begin())->renderer()->view());
+
     // Adjust sizes.
     bool firstPass = true;
     for (auto& node : m_autoSizedNodes) {
@@ -106,6 +112,7 @@ auto TextAutoSizingValue::adjustTextNodeSizes() -> StillHasNodes
             continue;
 
         float specifiedSize = renderer.style().fontDescription().specifiedSize();
+        float maxScaleIncrease = renderer.settings().maxTextAutosizingScaleIncrease();
         float scaleChange = averageSize / specifiedSize;
         if (scaleChange > maxScaleIncrease && firstPass) {
             firstPass = false;
@@ -120,7 +127,7 @@ auto TextAutoSizingValue::adjustTextNodeSizes() -> StillHasNodes
         auto style = cloneRenderStyleWithState(renderer.style());
         auto fontDescription = style.fontDescription();
         fontDescription.setComputedSize(averageSize);
-        style.setFontDescription(fontDescription);
+        style.setFontDescription(FontCascadeDescription { fontDescription });
         style.fontCascade().update(&node->document().fontSelector());
         parentRenderer->setStyle(WTFMove(style));
 
@@ -131,7 +138,7 @@ auto TextAutoSizingValue::adjustTextNodeSizes() -> StillHasNodes
         if (is<RenderListMarker>(*parentRenderer->firstChild())) {
             auto& listMarkerRenderer = downcast<RenderListMarker>(*parentRenderer->firstChild());
             auto style = cloneRenderStyleWithState(listMarkerRenderer.style());
-            style.setFontDescription(fontDescription);
+            style.setFontDescription(FontCascadeDescription { fontDescription });
             style.fontCascade().update(&node->document().fontSelector());
             listMarkerRenderer.setStyle(WTFMove(style));
         }
@@ -152,14 +159,13 @@ auto TextAutoSizingValue::adjustTextNodeSizes() -> StillHasNodes
             continue;
 
         auto newParentStyle = cloneRenderStyleWithState(parentStyle);
-        newParentStyle.setLineHeight(Length(lineHeight, Fixed));
+        newParentStyle.setLineHeight(lineHeightLength.isNegative() ? Length(lineHeightLength) : Length(lineHeight, LengthType::Fixed));
         newParentStyle.setSpecifiedLineHeight(Length { lineHeightLength });
-        newParentStyle.setFontDescription(fontDescription);
+        newParentStyle.setFontDescription(WTFMove(fontDescription));
         newParentStyle.fontCascade().update(&node->document().fontSelector());
         parentRenderer->setStyle(WTFMove(newParentStyle));
 
-        if (is<RenderListItem>(*parentRenderer))
-            RenderTreeUpdater::ListItem::updateMarker(downcast<RenderListItem>(*parentRenderer));
+        builder.updateAfterDescendants(*parentRenderer);
     }
 
     for (auto& node : m_autoSizedNodes) {
@@ -169,8 +175,22 @@ auto TextAutoSizingValue::adjustTextNodeSizes() -> StillHasNodes
         auto* block = downcast<RenderTextFragment>(textRenderer).blockForAccompanyingFirstLetter();
         if (!block)
             continue;
-        // FIXME: All render tree mutations should be done by RenderTreeUpdater commit.
-        RenderTreeUpdater::FirstLetter::update(*block);
+
+        RenderObject* firstLetterRenderer;
+        RenderElement* dummy;
+        block->getFirstLetter(firstLetterRenderer, dummy);
+        if (firstLetterRenderer && firstLetterRenderer->parent() && firstLetterRenderer->parent()->parent()) {
+            auto& parentStyle = firstLetterRenderer->parent()->parent()->style();
+            auto* firstLetterStyle = parentStyle.getCachedPseudoStyle(PseudoId::FirstLetter);
+            if (!firstLetterStyle)
+                continue;
+            auto fontDescription = firstLetterStyle->fontDescription();
+            fontDescription.setComputedSize(averageSize * fontDescription.specifiedSize() / parentStyle.fontDescription().specifiedSize());
+            firstLetterStyle->setFontDescription(FontCascadeDescription { fontDescription });
+            firstLetterStyle->fontCascade().update(&node->document().fontSelector());
+        }
+
+        builder.updateAfterDescendants(*block);
     }
 
     return stillHasNodes;
@@ -198,7 +218,7 @@ void TextAutoSizingValue::reset()
         if (fontDescription.computedSize() != originalSize) {
             fontDescription.setComputedSize(originalSize);
             auto style = cloneRenderStyleWithState(renderer->style());
-            style.setFontDescription(fontDescription);
+            style.setFontDescription(FontCascadeDescription { fontDescription });
             style.fontCascade().update(&node->document().fontSelector());
             parentRenderer->setStyle(WTFMove(style));
         }
@@ -214,7 +234,7 @@ void TextAutoSizingValue::reset()
 
         auto newParentStyle = cloneRenderStyleWithState(parentStyle);
         newParentStyle.setLineHeight(Length { originalLineHeight });
-        newParentStyle.setFontDescription(fontDescription);
+        newParentStyle.setFontDescription(WTFMove(fontDescription));
         newParentStyle.fontCascade().update(&node->document().fontSelector());
         parentRenderer->setStyle(WTFMove(newParentStyle));
     }
@@ -225,7 +245,7 @@ void TextAutoSizing::addTextNode(Text& node, float candidateSize)
     LOG(TextAutosizing, " addAutoSizedNode %p candidateSize=%f", &node, candidateSize);
     auto addResult = m_textNodes.add<TextAutoSizingHashTranslator>(node.renderer()->style(), nullptr);
     if (addResult.isNewEntry)
-        addResult.iterator->value = std::make_unique<TextAutoSizingValue>();
+        addResult.iterator->value = makeUnique<TextAutoSizingValue>();
     addResult.iterator->value->addTextNode(node, candidateSize);
 }
 

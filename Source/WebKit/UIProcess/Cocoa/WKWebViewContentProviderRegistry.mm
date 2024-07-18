@@ -26,44 +26,52 @@
 #import "config.h"
 #import "WKWebViewContentProviderRegistry.h"
 
-#if WK_API_ENABLED
-
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WKPDFView.h"
+#import "WKUSDPreviewView.h"
 #import "WKWebViewInternal.h"
 #import "WebPageProxy.h"
 #import <WebCore/MIMETypeRegistry.h>
+#import <WebKit/WKPreferencesPrivate.h>
+#import <WebKit/WKWebViewConfigurationPrivate.h>
+#import <wtf/FixedVector.h>
 #import <wtf/HashCountedSet.h>
 #import <wtf/HashMap.h>
 #import <wtf/text/StringHash.h>
-#import <wtf/text/WTFString.h>
-
-using namespace WebKit;
 
 @implementation WKWebViewContentProviderRegistry {
     HashMap<String, Class <WKWebViewContentProvider>, ASCIICaseInsensitiveHash> _contentProviderForMIMEType;
-    HashCountedSet<WebPageProxy*> _pages;
+    HashCountedSet<WebKit::WebPageProxy*> _pages;
 }
 
-- (instancetype)init
+- (instancetype)initWithConfiguration:(WKWebViewConfiguration *)configuration
 {
     if (!(self = [super init]))
         return nil;
 
-    for (auto& mimeType : WebCore::MIMETypeRegistry::getPDFMIMETypes())
-        [self registerProvider:[WKPDFView class] forMIMEType:mimeType];
+#if ENABLE(WKPDFVIEW)
+    for (auto& type : WebCore::MIMETypeRegistry::pdfMIMETypes())
+        [self registerProvider:[WKPDFView class] forMIMEType:@(type.characters())];
+#endif
+
+#if USE(SYSTEM_PREVIEW) && !HAVE(UIKIT_WEBKIT_INTERNALS)
+    if (configuration._systemPreviewEnabled && !configuration.preferences._modelDocumentEnabled) {
+        for (auto& type : WebCore::MIMETypeRegistry::usdMIMETypes())
+            [self registerProvider:[WKUSDPreviewView class] forMIMEType:@(type.characters())];
+    }
+#endif
 
     return self;
 }
 
-- (void)addPage:(WebPageProxy&)page
+- (void)addPage:(WebKit::WebPageProxy&)page
 {
     ASSERT(!_pages.contains(&page));
     _pages.add(&page);
 }
 
-- (void)removePage:(WebPageProxy&)page
+- (void)removePage:(WebKit::WebPageProxy&)page
 {
     ASSERT(_pages.contains(&page));
     _pages.remove(&page);
@@ -79,6 +87,9 @@ using namespace WebKit;
 
 - (Class <WKWebViewContentProvider>)providerForMIMEType:(const String&)mimeType
 {
+    if (mimeType.isEmpty())
+        return nil;
+
     const auto& representation = _contentProviderForMIMEType.find(mimeType);
 
     if (representation == _contentProviderForMIMEType.end())
@@ -89,13 +100,9 @@ using namespace WebKit;
 
 - (Vector<String>)_mimeTypesWithCustomContentProviders
 {
-    Vector<String> mimeTypes;
-    copyKeysToVector(_contentProviderForMIMEType, mimeTypes);
-    return mimeTypes;
+    return copyToVector(_contentProviderForMIMEType.keys());
 }
 
 @end
 
-#endif // PLATFORM(IOS)
-
-#endif // WK_API_ENABLED
+#endif // PLATFORM(IOS_FAMILY)

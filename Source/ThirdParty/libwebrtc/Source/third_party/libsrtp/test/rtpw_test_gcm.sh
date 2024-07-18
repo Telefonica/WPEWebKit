@@ -4,7 +4,7 @@
 # 
 # tests the rtpw sender and receiver functions
 #
-# Copyright (c) 2001-2006, Cisco Systems, Inc.
+# Copyright (c) 2001-2017, Cisco Systems, Inc.
 # All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without
@@ -37,7 +37,28 @@
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-RTPW=./rtpw
+case $(uname -s) in
+    *CYGWIN*|*MINGW*)
+        EXE=".exe"
+        ;;
+    *Linux*)
+        EXE=""
+        if [ -n "$CRYPTO_LIBDIR" ]
+        then
+            export LD_LIBRARY_PATH="$CRYPTO_LIBDIR"
+        fi
+        ;;
+    *Darwin*)
+        EXE=""
+        if [ -n "$CRYPTO_LIBDIR" ]
+        then
+            export DYLD_LIBRARY_PATH="$CRYPTO_LIBDIR"
+        fi
+        ;;
+esac
+
+RTPW=./rtpw$EXE
+[ -n "$MESON_EXE_WRAPPER" ] && RTPW="$MESON_EXE_WRAPPER $RTPW"
 DEST_PORT=9999
 DURATION=3
 
@@ -49,7 +70,7 @@ DURATION=3
 
 killall rtpw 2>/dev/null
 
-if test -x $RTPW; then
+if test -n $MESON_EXE_WRAPPER || test -x $RTPW; then
 
 GCMARGS128="-k 01234567890123456789012345678901234567890123456789012345 -g -e 128"
 echo  $0 ": starting GCM mode 128-bit rtpw receiver process... "
@@ -63,7 +84,7 @@ echo $0 ": receiver PID = $receiver_pid"
 sleep 1 
 
 # verify that the background job is running
-ps | grep -q $receiver_pid
+ps -e | grep -q $receiver_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -80,7 +101,7 @@ sender_pid=$!
 echo $0 ": sender PID = $sender_pid"
 
 # verify that the background job is running
-ps | grep -q $sender_pid
+ps -e | grep -q $sender_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -92,6 +113,9 @@ sleep $DURATION
 
 kill $receiver_pid
 kill $sender_pid
+
+wait $receiver_pid 2>/dev/null
+wait $sender_pid 2>/dev/null
 
 GCMARGS128="-k 01234567890123456789012345678901234567890123456789012345 -g -t 16 -e 128"
 echo  $0 ": starting GCM mode 128-bit (16 byte tag) rtpw receiver process... "
@@ -105,7 +129,7 @@ echo $0 ": receiver PID = $receiver_pid"
 sleep 1 
 
 # verify that the background job is running
-ps | grep -q $receiver_pid
+ps -e | grep -q $receiver_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -122,7 +146,7 @@ sender_pid=$!
 echo $0 ": sender PID = $sender_pid"
 
 # verify that the background job is running
-ps | grep -q $sender_pid
+ps -e | grep -q $sender_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -135,6 +159,8 @@ sleep $DURATION
 kill $receiver_pid
 kill $sender_pid
 
+wait $receiver_pid 2>/dev/null
+wait $sender_pid 2>/dev/null
 
 
 GCMARGS256="-k 0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567 -g -e 256"
@@ -149,7 +175,7 @@ echo $0 ": receiver PID = $receiver_pid"
 sleep 1 
 
 # verify that the background job is running
-ps | grep -q $receiver_pid
+ps -e | grep -q $receiver_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -166,7 +192,7 @@ sender_pid=$!
 echo $0 ": sender PID = $sender_pid"
 
 # verify that the background job is running
-ps | grep -q $sender_pid
+ps -e | grep -q $sender_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -179,6 +205,8 @@ sleep $DURATION
 kill $receiver_pid
 kill $sender_pid
 
+wait $receiver_pid 2>/dev/null
+wait $sender_pid 2>/dev/null
 
 GCMARGS256="-k a123456789012345678901234567890123456789012345678901234567890123456789012345678901234567 -g -t 16 -e 256"
 echo  $0 ": starting GCM mode 256-bit (16 byte tag) rtpw receiver process... "
@@ -192,7 +220,7 @@ echo $0 ": receiver PID = $receiver_pid"
 sleep 1 
 
 # verify that the background job is running
-ps | grep -q $receiver_pid
+ps -e | grep -q $receiver_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -209,7 +237,7 @@ sender_pid=$!
 echo $0 ": sender PID = $sender_pid"
 
 # verify that the background job is running
-ps | grep -q $sender_pid
+ps -e | grep -q $sender_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -222,6 +250,8 @@ sleep $DURATION
 kill $receiver_pid
 kill $sender_pid
 
+wait $receiver_pid 2>/dev/null
+wait $sender_pid 2>/dev/null
 
 echo $0 ": done (test passed)"
 

@@ -8,9 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/test/rtcp_packet_parser.h"
+#include "test/rtcp_packet_parser.h"
+
+#include "modules/rtp_rtcp/source/rtcp_packet/psfb.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/rtpfb.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
 namespace test {
@@ -18,15 +21,18 @@ namespace test {
 RtcpPacketParser::RtcpPacketParser() = default;
 RtcpPacketParser::~RtcpPacketParser() = default;
 
-bool RtcpPacketParser::Parse(const void* data, size_t length) {
-  const uint8_t* const buffer = static_cast<const uint8_t*>(data);
-  const uint8_t* const buffer_end = buffer + length;
+bool RtcpPacketParser::Parse(rtc::ArrayView<const uint8_t> data) {
+  ++processed_rtcp_packets_;
+
+  const uint8_t* const buffer = data.data();
+  const uint8_t* const buffer_end = buffer + data.size();
+
   rtcp::CommonHeader header;
   for (const uint8_t* next_packet = buffer; next_packet != buffer_end;
        next_packet = header.NextPacket()) {
     RTC_DCHECK_GT(buffer_end - next_packet, 0);
     if (!header.Parse(next_packet, buffer_end - next_packet)) {
-      LOG(LS_WARNING)
+      RTC_LOG(LS_WARNING)
           << "Invalid rtcp header or unaligned rtcp packet at position "
           << (next_packet - buffer);
       return false;
@@ -41,9 +47,6 @@ bool RtcpPacketParser::Parse(const void* data, size_t length) {
       case rtcp::ExtendedReports::kPacketType:
         xr_.Parse(header, &sender_ssrc_);
         break;
-      case rtcp::ExtendedJitterReport::kPacketType:
-        ij_.Parse(header);
-        break;
       case rtcp::Psfb::kPacketType:
         switch (header.fmt()) {
           case rtcp::Fir::kFeedbackMessageType:
@@ -52,12 +55,16 @@ bool RtcpPacketParser::Parse(const void* data, size_t length) {
           case rtcp::Pli::kFeedbackMessageType:
             pli_.Parse(header, &sender_ssrc_);
             break;
-          case rtcp::Remb::kFeedbackMessageType:
-            remb_.Parse(header, &sender_ssrc_);
+          case rtcp::Psfb::kAfbMessageType:
+            if (!loss_notification_.Parse(header, &sender_ssrc_) &&
+                !remb_.Parse(header, &sender_ssrc_)) {
+              RTC_LOG(LS_WARNING) << "Unknown application layer FB message.";
+            }
             break;
           default:
-            LOG(LS_WARNING) << "Unknown rtcp payload specific feedback type "
-                            << header.fmt();
+            RTC_LOG(LS_WARNING)
+                << "Unknown rtcp payload specific feedback type "
+                << header.fmt();
             break;
         }
         break;
@@ -82,8 +89,8 @@ bool RtcpPacketParser::Parse(const void* data, size_t length) {
             transport_feedback_.Parse(header, &sender_ssrc_);
             break;
           default:
-            LOG(LS_WARNING) << "Unknown rtcp transport feedback type "
-                            << header.fmt();
+            RTC_LOG(LS_WARNING)
+                << "Unknown rtcp transport feedback type " << header.fmt();
             break;
         }
         break;
@@ -94,7 +101,7 @@ bool RtcpPacketParser::Parse(const void* data, size_t length) {
         sender_report_.Parse(header, &sender_ssrc_);
         break;
       default:
-        LOG(LS_WARNING) << "Unknown rtcp packet type " << header.type();
+        RTC_LOG(LS_WARNING) << "Unknown rtcp packet type " << header.type();
         break;
     }
   }

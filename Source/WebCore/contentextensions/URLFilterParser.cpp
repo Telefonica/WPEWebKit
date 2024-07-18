@@ -40,7 +40,7 @@ namespace ContentExtensions {
 
 class PatternParser {
 public:
-    PatternParser(bool patternIsCaseSensitive)
+    explicit PatternParser(bool patternIsCaseSensitive)
         : m_patternIsCaseSensitive(patternIsCaseSensitive)
         , m_parseStatus(URLFilterParser::Ok)
     {
@@ -101,7 +101,7 @@ public:
         sinkFloatingTermIfNecessary();
         ASSERT(!m_floatingTerm.isValid());
 
-        if (builtInCharacterClassID == JSC::Yarr::DotClassID && !inverted)
+        if (builtInCharacterClassID == JSC::Yarr::BuiltInCharacterClassID::DotClassID && !inverted)
             m_floatingTerm = Term(Term::UniversalTransition);
         else
             fail(URLFilterParser::UnsupportedCharacterClass);
@@ -129,11 +129,16 @@ public:
         fail(URLFilterParser::BackReference);
     }
 
-    void atomNamedBackReference(String)
+    void atomNamedBackReference(const String&)
     {
         fail(URLFilterParser::BackReference);
     }
 
+    void atomNamedForwardReference(const String&)
+    {
+        fail(URLFilterParser::ForwardReference);
+    }
+    
     void assertionBOL()
     {
         if (hasError())
@@ -239,6 +244,11 @@ public:
         fail(URLFilterParser::Disjunction);
     }
 
+    NO_RETURN_DUE_TO_CRASH void resetForReparsing()
+    {
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+
 private:
     bool hasError() const
     {
@@ -337,21 +347,18 @@ URLFilterParser::URLFilterParser(CombinedURLFilters& combinedURLFilters)
 {
 }
 
-URLFilterParser::~URLFilterParser()
-{
-}
+URLFilterParser::~URLFilterParser() = default;
 
-URLFilterParser::ParseStatus URLFilterParser::addPattern(const String& pattern, bool patternIsCaseSensitive, uint64_t patternId)
+URLFilterParser::ParseStatus URLFilterParser::addPattern(StringView pattern, bool patternIsCaseSensitive, uint64_t patternId)
 {
-    if (!pattern.containsOnlyASCII())
+    if (!pattern.isAllASCII())
         return NonASCII;
     if (pattern.isEmpty())
         return EmptyPattern;
 
     ParseStatus status = Ok;
     PatternParser patternParser(patternIsCaseSensitive);
-    String error = String(JSC::Yarr::parse(patternParser, pattern, false, 0));
-    if (error.isNull())
+    if (!JSC::Yarr::hasError(JSC::Yarr::parse(patternParser, pattern, false, 0, false)))
         patternParser.finalize(patternId, m_combinedURLFilters);
     else
         status = YarrError;
@@ -362,38 +369,42 @@ URLFilterParser::ParseStatus URLFilterParser::addPattern(const String& pattern, 
     return status;
 }
 
-String URLFilterParser::statusString(ParseStatus status)
+ASCIILiteral URLFilterParser::statusString(ParseStatus status)
 {
     switch (status) {
     case Ok:
-        return "Ok";
+        return "Ok"_s;
     case MatchesEverything:
-        return "Matches everything.";
+        return "Matches everything."_s;
     case NonASCII:
-        return "Only ASCII characters are supported in pattern.";
+        return "Only ASCII characters are supported in pattern."_s;
     case UnsupportedCharacterClass:
-        return "Character class is not supported.";
+        return "Character class is not supported."_s;
     case BackReference:
-        return "Patterns cannot contain backreferences.";
+        return "Patterns cannot contain backreferences."_s;
+    case ForwardReference:
+        return "Patterns cannot contain forward references."_s;
     case MisplacedStartOfLine:
-        return "Start of line assertion can only appear as the first term in a filter.";
+        return "Start of line assertion can only appear as the first term in a filter."_s;
     case WordBoundary:
-        return "Word boundaries assertions are not supported yet.";
+        return "Word boundaries assertions are not supported yet."_s;
     case AtomCharacter:
-        return "Builtins character class atoms are not supported yet.";
+        return "Builtins character class atoms are not supported yet."_s;
     case Group:
-        return "Groups are not supported yet.";
+        return "Groups are not supported yet."_s;
     case Disjunction:
-        return "Disjunctions are not supported yet.";
+        return "Disjunctions are not supported yet."_s;
     case MisplacedEndOfLine:
-        return "The end of line assertion must be the last term in an expression.";
+        return "The end of line assertion must be the last term in an expression."_s;
     case EmptyPattern:
-        return "Empty pattern.";
+        return "Empty pattern."_s;
     case YarrError:
-        return "Internal error in YARR.";
+        return "Internal error in YARR."_s;
     case InvalidQuantifier:
-        return "Arbitrary atom repetitions are not supported.";
+        return "Arbitrary atom repetitions are not supported."_s;
     }
+
+    RELEASE_ASSERT_NOT_REACHED();
 }
     
 } // namespace ContentExtensions

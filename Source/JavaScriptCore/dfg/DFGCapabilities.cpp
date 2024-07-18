@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,66 +30,64 @@
 
 #include "CodeBlock.h"
 #include "DFGCommon.h"
-#include "InterpreterInlines.h"
-#include "JSCInlines.h"
+#include "JSCellInlines.h"
 #include "Options.h"
 
 namespace JSC { namespace DFG {
 
 bool isSupported()
 {
-    return Options::useDFGJIT()
-        && MacroAssembler::supportsFloatingPoint();
+    return Options::useDFGJIT() && MacroAssembler::supportsFloatingPoint();
 }
 
 bool isSupportedForInlining(CodeBlock* codeBlock)
 {
-    return codeBlock->ownerScriptExecutable()->isInliningCandidate();
+    return codeBlock->ownerExecutable()->isInliningCandidate();
 }
 
 bool mightCompileEval(CodeBlock* codeBlock)
 {
     return isSupported()
-        && codeBlock->instructionCount() <= Options::maximumOptimizationCandidateInstructionCount()
-        && codeBlock->ownerScriptExecutable()->isOkToOptimize();
+        && codeBlock->bytecodeCost() <= Options::maximumOptimizationCandidateBytecodeCost()
+        && codeBlock->ownerExecutable()->isOkToOptimize();
 }
 bool mightCompileProgram(CodeBlock* codeBlock)
 {
     return isSupported()
-        && codeBlock->instructionCount() <= Options::maximumOptimizationCandidateInstructionCount()
-        && codeBlock->ownerScriptExecutable()->isOkToOptimize();
+        && codeBlock->bytecodeCost() <= Options::maximumOptimizationCandidateBytecodeCost()
+        && codeBlock->ownerExecutable()->isOkToOptimize();
 }
 bool mightCompileFunctionForCall(CodeBlock* codeBlock)
 {
     return isSupported()
-        && codeBlock->instructionCount() <= Options::maximumOptimizationCandidateInstructionCount()
-        && codeBlock->ownerScriptExecutable()->isOkToOptimize();
+        && codeBlock->bytecodeCost() <= Options::maximumOptimizationCandidateBytecodeCost()
+        && codeBlock->ownerExecutable()->isOkToOptimize();
 }
 bool mightCompileFunctionForConstruct(CodeBlock* codeBlock)
 {
     return isSupported()
-        && codeBlock->instructionCount() <= Options::maximumOptimizationCandidateInstructionCount()
-        && codeBlock->ownerScriptExecutable()->isOkToOptimize();
+        && codeBlock->bytecodeCost() <= Options::maximumOptimizationCandidateBytecodeCost()
+        && codeBlock->ownerExecutable()->isOkToOptimize();
 }
 
 bool mightInlineFunctionForCall(CodeBlock* codeBlock)
 {
-    return codeBlock->instructionCount() <= Options::maximumFunctionForCallInlineCandidateInstructionCount()
+    return codeBlock->bytecodeCost() <= Options::maximumFunctionForCallInlineCandidateBytecodeCost()
         && isSupportedForInlining(codeBlock);
 }
 bool mightInlineFunctionForClosureCall(CodeBlock* codeBlock)
 {
-    return codeBlock->instructionCount() <= Options::maximumFunctionForClosureCallInlineCandidateInstructionCount()
+    return codeBlock->bytecodeCost() <= Options::maximumFunctionForClosureCallInlineCandidateBytecodeCost()
         && isSupportedForInlining(codeBlock);
 }
 bool mightInlineFunctionForConstruct(CodeBlock* codeBlock)
 {
-    return codeBlock->instructionCount() <= Options::maximumFunctionForConstructInlineCandidateInstructionCount()
+    return codeBlock->bytecodeCost() <= Options::maximumFunctionForConstructInlineCandidateBytecoodeCost()
         && isSupportedForInlining(codeBlock);
 }
 bool canUseOSRExitFuzzing(CodeBlock* codeBlock)
 {
-    return codeBlock->ownerScriptExecutable()->canUseOSRExitFuzzing();
+    return codeBlock->ownerExecutable()->canUseOSRExitFuzzing();
 }
 
 static bool verboseCapabilities()
@@ -103,17 +101,24 @@ inline void debugFail(CodeBlock* codeBlock, OpcodeID opcodeID, CapabilityLevel r
         dataLog("DFG rejecting opcode in ", *codeBlock, " because of opcode ", opcodeNames[opcodeID], "\n");
 }
 
-CapabilityLevel capabilityLevel(OpcodeID opcodeID, CodeBlock* codeBlock, Instruction* pc)
+CapabilityLevel capabilityLevel(OpcodeID opcodeID, CodeBlock* codeBlock, const JSInstruction* pc)
 {
     UNUSED_PARAM(codeBlock); // This function does some bytecode parsing. Ordinarily bytecode parsing requires the owning CodeBlock. It's sort of strange that we don't use it here right now.
     UNUSED_PARAM(pc);
     
     switch (opcodeID) {
+    case op_wide16:
+    case op_wide32:
+        RELEASE_ASSERT_NOT_REACHED();
     case op_enter:
     case op_to_this:
     case op_argument_count:
     case op_check_tdz:
     case op_create_this:
+    case op_create_promise:
+    case op_create_generator:
+    case op_create_async_generator:
+    case op_bitnot:
     case op_bitand:
     case op_bitor:
     case op_bitxor:
@@ -139,18 +144,24 @@ CapabilityLevel capabilityLevel(OpcodeID opcodeID, CodeBlock* codeBlock, Instruc
     case op_instanceof:
     case op_instanceof_custom:
     case op_is_empty:
-    case op_is_undefined:
+    case op_typeof_is_undefined:
+    case op_typeof_is_object:
+    case op_typeof_is_function:
+    case op_is_undefined_or_null:
     case op_is_boolean:
     case op_is_number:
+    case op_is_big_int:
     case op_is_object:
-    case op_is_object_or_null:
     case op_is_cell_with_type:
-    case op_is_function:
+    case op_is_callable:
+    case op_is_constructor:
     case op_not:
     case op_less:
     case op_lesseq:
     case op_greater:
     case op_greatereq:
+    case op_below:
+    case op_beloweq:
     case op_eq:
     case op_eq_null:
     case op_stricteq:
@@ -162,11 +173,10 @@ CapabilityLevel capabilityLevel(OpcodeID opcodeID, CodeBlock* codeBlock, Instruc
     case op_put_by_val_direct:
     case op_try_get_by_id:
     case op_get_by_id:
-    case op_get_by_id_proto_load:
-    case op_get_by_id_unset:
     case op_get_by_id_with_this:
+    case op_get_by_id_direct:
     case op_get_by_val_with_this:
-    case op_get_array_length:
+    case op_get_prototype_of:
     case op_put_by_id:
     case op_put_by_id_with_this:
     case op_put_by_val_with_this:
@@ -184,6 +194,8 @@ CapabilityLevel capabilityLevel(OpcodeID opcodeID, CodeBlock* codeBlock, Instruc
     case op_jfalse:
     case op_jeq_null:
     case op_jneq_null:
+    case op_jundefined_or_null:
+    case op_jnundefined_or_null:
     case op_jless:
     case op_jlesseq:
     case op_jgreater:
@@ -192,12 +204,20 @@ CapabilityLevel capabilityLevel(OpcodeID opcodeID, CodeBlock* codeBlock, Instruc
     case op_jnlesseq:
     case op_jngreater:
     case op_jngreatereq:
+    case op_jeq:
+    case op_jneq:
+    case op_jstricteq:
+    case op_jnstricteq:
+    case op_jbelow:
+    case op_jbeloweq:
     case op_loop_hint:
     case op_check_traps:
     case op_nop:
     case op_ret:
     case op_end:
     case op_new_object:
+    case op_new_promise:
+    case op_new_generator:
     case op_new_array:
     case op_new_array_with_size:
     case op_new_array_buffer:
@@ -217,27 +237,26 @@ CapabilityLevel capabilityLevel(OpcodeID opcodeID, CodeBlock* codeBlock, Instruc
     case op_create_direct_arguments:
     case op_create_scoped_arguments:
     case op_create_cloned_arguments:
+    case op_create_arguments_butterfly:
     case op_get_from_arguments:
     case op_put_to_arguments:
     case op_get_argument:
+    case op_jeq_ptr:
     case op_jneq_ptr:
     case op_typeof:
     case op_to_number:
+    case op_to_numeric:
     case op_to_string:
+    case op_to_object:
     case op_switch_imm:
     case op_switch_char:
-    case op_in:
+    case op_in_by_val:
+    case op_in_by_id:
+    case op_has_private_name:
+    case op_has_private_brand:
     case op_get_scope:
     case op_get_from_scope:
-    case op_get_enumerable_length:
-    case op_has_generic_property:
-    case op_has_structure_property:
-    case op_has_indexed_property:
-    case op_get_direct_pname:
     case op_get_property_enumerator:
-    case op_enumerator_structure_pname:
-    case op_enumerator_generic_pname:
-    case op_to_index_string:
     case op_new_func:
     case op_new_func_exp:
     case op_new_generator_func:
@@ -253,40 +272,126 @@ CapabilityLevel capabilityLevel(OpcodeID opcodeID, CodeBlock* codeBlock, Instruc
     case op_catch:
     case op_create_rest:
     case op_get_rest_length:
+    case op_iterator_open:
+    case op_iterator_next:
     case op_log_shadow_chicken_prologue:
     case op_log_shadow_chicken_tail:
     case op_put_to_scope:
     case op_resolve_scope:
     case op_resolve_scope_for_hoisting_func_decl_in_eval:
     case op_new_regexp:
+    case op_get_internal_field:
+    case op_put_internal_field:
+    case op_to_property_key:
     case op_unreachable:
+    case op_super_sampler_begin:
+    case op_super_sampler_end:
+    case op_get_private_name:
+    case op_put_private_name:
+    case op_set_private_brand:
+    case op_check_private_brand:
+    case op_switch_string:
+    case op_enumerator_next:
+    case op_enumerator_get_by_val:
+    case op_enumerator_in_by_val:
+    case op_enumerator_has_own_property:
         return CanCompileAndInline;
 
-    case op_switch_string: // Don't inline because we don't want to copy string tables in the concurrent JIT.
     case op_call_eval:
         return CanCompile;
 
-    default:
+    case op_yield:
+    case op_create_generator_frame_environment:
+    case llint_program_prologue:
+    case llint_eval_prologue:
+    case llint_module_program_prologue:
+    case llint_function_for_call_prologue:
+    case llint_function_for_construct_prologue:
+    case llint_function_for_call_arity_check:
+    case llint_function_for_construct_arity_check:
+    case llint_generic_return_point:
+    case llint_throw_from_slow_path_trampoline:
+    case llint_throw_during_call_trampoline:
+    case llint_native_call_trampoline:
+    case llint_native_construct_trampoline:
+    case llint_internal_function_call_trampoline:
+    case llint_internal_function_construct_trampoline:
+    case llint_link_call_trampoline:
+    case llint_virtual_call_trampoline:
+    case llint_virtual_construct_trampoline:
+    case llint_virtual_tail_call_trampoline:
+    case llint_get_host_call_return_value:
+    case llint_handle_uncaught_exception:
+    case checkpoint_osr_exit_from_inlined_call_trampoline:
+    case checkpoint_osr_exit_trampoline:
+    case normal_osr_exit_trampoline:
+    case fuzzer_return_early_from_loop_hint:
+    case op_iterator_open_return_location:
+    case op_iterator_next_return_location:
+    case op_call_return_location:
+    case op_construct_return_location:
+    case op_call_varargs_return_location:
+    case op_construct_varargs_return_location:
+    case op_call_varargs_slow_return_location:
+    case op_construct_varargs_slow_return_location:
+    case op_get_by_id_return_location:
+    case op_get_by_val_return_location:
+    case op_put_by_id_return_location:
+    case op_put_by_val_return_location:
+    case op_call_slow_return_location:
+    case op_construct_slow_return_location:
+    case op_iterator_open_slow_return_location:
+    case op_iterator_next_slow_return_location:
+    case op_tail_call_slow_return_location:
+    case op_tail_call_forward_arguments_slow_return_location:
+    case op_tail_call_varargs_slow_return_location:
+    case op_call_eval_slow_return_location:
+    case wasm_function_prologue:
+    case wasm_function_prologue_no_tls:
+    case js_trampoline_op_call:
+    case js_trampoline_op_construct:
+    case js_trampoline_op_call_varargs:
+    case js_trampoline_op_construct_varargs:
+    case js_trampoline_op_iterator_next:
+    case js_trampoline_op_iterator_open:
+    case js_trampoline_op_call_slow:
+    case js_trampoline_op_tail_call_slow:
+    case js_trampoline_op_construct_slow:
+    case js_trampoline_op_call_varargs_slow:
+    case js_trampoline_op_tail_call_varargs_slow:
+    case js_trampoline_op_tail_call_forward_arguments_slow:
+    case js_trampoline_op_construct_varargs_slow:
+    case js_trampoline_op_call_eval_slow:
+    case js_trampoline_op_iterator_next_slow:
+    case js_trampoline_op_iterator_open_slow:
+    case js_trampoline_llint_function_for_call_arity_check_untag:
+    case js_trampoline_llint_function_for_call_arity_check_tag:
+    case js_trampoline_llint_function_for_construct_arity_check_untag:
+    case js_trampoline_llint_function_for_construct_arity_check_tag:
+    case wasm_trampoline_wasm_call:
+    case wasm_trampoline_wasm_call_no_tls:
+    case wasm_trampoline_wasm_call_indirect:
+    case wasm_trampoline_wasm_call_indirect_no_tls:
+    case wasm_trampoline_wasm_call_ref:
+    case wasm_trampoline_wasm_call_ref_no_tls:
         return CannotCompile;
     }
+    return CannotCompile;
 }
 
 CapabilityLevel capabilityLevel(CodeBlock* codeBlock)
 {
-    Instruction* instructionsBegin = codeBlock->instructions().begin();
-    unsigned instructionCount = codeBlock->instructions().size();
     CapabilityLevel result = CanCompileAndInline;
     
-    for (unsigned bytecodeOffset = 0; bytecodeOffset < instructionCount; ) {
-        switch (Interpreter::getOpcodeID(instructionsBegin[bytecodeOffset].u.opcode)) {
+    for (const auto& instruction : codeBlock->instructions()) {
+        switch (instruction->opcodeID()) {
 #define DEFINE_OP(opcode, length) \
         case opcode: { \
-            CapabilityLevel newResult = leastUpperBound(result, capabilityLevel(opcode, codeBlock, instructionsBegin + bytecodeOffset)); \
+            CapabilityLevel newResult = leastUpperBound(result, capabilityLevel(opcode, codeBlock, instruction.ptr())); \
             if (newResult != result) { \
                 debugFail(codeBlock, opcode, newResult); \
                 result = newResult; \
             } \
-            bytecodeOffset += length; \
             break; \
         }
             FOR_EACH_OPCODE_ID(DEFINE_OP)

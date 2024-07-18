@@ -28,10 +28,8 @@
 
 #import "WKFoundation.h"
 
-#if WK_API_ENABLED
-
 #import "APIFindClient.h"
-#import "WeakObjCPtr.h"
+#import <wtf/WeakObjCPtr.h>
 
 @class WKWebView;
 @protocol _WKFindDelegate;
@@ -39,6 +37,7 @@
 namespace WebKit {
 
 class FindClient final : public API::FindClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit FindClient(WKWebView *);
     
@@ -50,6 +49,9 @@ private:
     virtual void didCountStringMatches(WebPageProxy*, const String&, uint32_t matchCount);
     virtual void didFindString(WebPageProxy*, const String&, const Vector<WebCore::IntRect>&, uint32_t matchCount, int32_t matchIndex, bool didWrapAround);
     virtual void didFailToFindString(WebPageProxy*, const String&);
+
+    virtual void didAddLayerForFindOverlay(WebKit::WebPageProxy*, CALayer *);
+    virtual void didRemoveLayerForFindOverlay(WebKit::WebPageProxy*);
     
     WKWebView *m_webView;
     WeakObjCPtr<id <_WKFindDelegate>> m_delegate;
@@ -58,11 +60,11 @@ private:
         bool webviewDidCountStringMatches : 1;
         bool webviewDidFindString : 1;
         bool webviewDidFailToFindString : 1;
+        bool webviewDidAddLayerForFindOverlay : 1;
+        bool webviewDidRemoveLayerForFindOverlay : 1;
     } m_delegateMethods;
 };
     
 } // namespace WebKit
-
-#endif // WK_API_ENABLED
 
 #endif // FindClient_h

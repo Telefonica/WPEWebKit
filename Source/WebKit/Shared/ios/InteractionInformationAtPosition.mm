@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,42 +26,48 @@
 #import "config.h"
 #import "InteractionInformationAtPosition.h"
 
-#import "ArgumentCodersCF.h"
+#import "ArgumentCodersCocoa.h"
 #import "WebCoreArgumentCoders.h"
-#import <pal/spi/cocoa/DataDetectorsCoreSPI.h>
-#import <wtf/SoftLinking.h>
-
-SOFT_LINK_PRIVATE_FRAMEWORK(DataDetectorsCore)
-SOFT_LINK_CLASS(DataDetectorsCore, DDScannerResult)
+#import <pal/cocoa/DataDetectorsCoreSoftLink.h>
 
 namespace WebKit {
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 void InteractionInformationAtPosition::encode(IPC::Encoder& encoder) const
 {
     encoder << request;
 
-    encoder << nodeAtPositionIsAssistedNode;
-#if ENABLE(DATA_INTERACTION)
-    encoder << hasSelectionAtPosition;
-#endif
-    encoder << isSelectable;
+    encoder << canBeValid;
+    encoder << nodeAtPositionHasDoubleClickHandler;
+    encoder << selectability;
+    encoder << isSelected;
+    encoder << prefersDraggingOverTextSelection;
     encoder << isNearMarkedText;
     encoder << touchCalloutEnabled;
     encoder << isLink;
     encoder << isImage;
     encoder << isAttachment;
     encoder << isAnimatedImage;
+    encoder << isPausedVideo;
     encoder << isElement;
+    encoder << isContentEditable;
+    encoder << containerScrollingNodeID;
     encoder << adjustedPointForNodeRespondingToClickEvents;
     encoder << url;
     encoder << imageURL;
+    encoder << imageMIMEType;
     encoder << title;
     encoder << idAttribute;
     encoder << bounds;
+#if PLATFORM(MACCATALYST)
+    encoder << caretRect;
+#endif
     encoder << textBefore;
     encoder << textAfter;
+    encoder << caretLength;
+    encoder << lineCaretExtent;
+    encoder << cursor;
     encoder << linkIndicator;
 
     ShareableBitmap::Handle handle;
@@ -70,17 +76,19 @@ void InteractionInformationAtPosition::encode(IPC::Encoder& encoder) const
     encoder << handle;
 #if ENABLE(DATA_DETECTION)
     encoder << isDataDetectorLink;
-    if (isDataDetectorLink) {
-        encoder << dataDetectorIdentifier;
-        RetainPtr<NSMutableData> data = adoptNS([[NSMutableData alloc] init]);
-        RetainPtr<NSKeyedArchiver> archiver = adoptNS([[NSKeyedArchiver alloc] initForWritingWithMutableData:data.get()]);
-        [archiver setRequiresSecureCoding:YES];
-        [archiver encodeObject:dataDetectorResults.get() forKey:@"dataDetectorResults"];
-        [archiver finishEncoding];
-        
-        IPC::encode(encoder, reinterpret_cast<CFDataRef>(data.get()));        
-    }
+    encoder << dataDetectorIdentifier;
+    encoder << dataDetectorResults;
+    encoder << dataDetectorBounds;
 #endif
+#if ENABLE(DATALIST_ELEMENT)
+    encoder << preventTextInteraction;
+#endif
+    encoder << elementContainsImageOverlay;
+    encoder << shouldNotUseIBeamInEditableContent;
+    encoder << isImageOverlayText;
+    encoder << isVerticalWritingMode;
+    encoder << elementContext;
+    encoder << hostImageOrVideoElementContext;
 }
 
 bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, InteractionInformationAtPosition& result)
@@ -88,15 +96,19 @@ bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, Interaction
     if (!decoder.decode(result.request))
         return false;
 
-    if (!decoder.decode(result.nodeAtPositionIsAssistedNode))
+    if (!decoder.decode(result.canBeValid))
         return false;
 
-#if ENABLE(DATA_INTERACTION)
-    if (!decoder.decode(result.hasSelectionAtPosition))
+    if (!decoder.decode(result.nodeAtPositionHasDoubleClickHandler))
         return false;
-#endif
 
-    if (!decoder.decode(result.isSelectable))
+    if (!decoder.decode(result.selectability))
+        return false;
+
+    if (!decoder.decode(result.isSelected))
+        return false;
+
+    if (!decoder.decode(result.prefersDraggingOverTextSelection))
         return false;
 
     if (!decoder.decode(result.isNearMarkedText))
@@ -116,8 +128,17 @@ bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, Interaction
     
     if (!decoder.decode(result.isAnimatedImage))
         return false;
+
+    if (!decoder.decode(result.isPausedVideo))
+        return false;
     
     if (!decoder.decode(result.isElement))
+        return false;
+
+    if (!decoder.decode(result.isContentEditable))
+        return false;
+
+    if (!decoder.decode(result.containerScrollingNodeID))
         return false;
 
     if (!decoder.decode(result.adjustedPointForNodeRespondingToClickEvents))
@@ -129,6 +150,9 @@ bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, Interaction
     if (!decoder.decode(result.imageURL))
         return false;
 
+    if (!decoder.decode(result.imageMIMEType))
+        return false;
+
     if (!decoder.decode(result.title))
         return false;
 
@@ -137,15 +161,32 @@ bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, Interaction
     
     if (!decoder.decode(result.bounds))
         return false;
+    
+#if PLATFORM(MACCATALYST)
+    if (!decoder.decode(result.caretRect))
+        return false;
+#endif
 
     if (!decoder.decode(result.textBefore))
         return false;
     
     if (!decoder.decode(result.textAfter))
         return false;
-    
-    if (!decoder.decode(result.linkIndicator))
+
+    if (!decoder.decode(result.caretLength))
         return false;
+
+    if (!decoder.decode(result.lineCaretExtent))
+        return false;
+
+    if (!decoder.decode(result.cursor))
+        return false;
+    
+    std::optional<WebCore::TextIndicatorData> linkIndicator;
+    decoder >> linkIndicator;
+    if (!linkIndicator)
+        return false;
+    result.linkIndicator = WTFMove(*linkIndicator);
 
     ShareableBitmap::Handle handle;
     if (!decoder.decode(handle))
@@ -157,26 +198,42 @@ bool InteractionInformationAtPosition::decode(IPC::Decoder& decoder, Interaction
 #if ENABLE(DATA_DETECTION)
     if (!decoder.decode(result.isDataDetectorLink))
         return false;
-    
-    if (result.isDataDetectorLink) {
-        if (!decoder.decode(result.dataDetectorIdentifier))
-            return false;
-        RetainPtr<CFDataRef> data;
-        if (!IPC::decode(decoder, data))
-            return false;
-        
-        RetainPtr<NSKeyedUnarchiver> unarchiver = adoptNS([[NSKeyedUnarchiver alloc] initForReadingWithData:(NSData *)data.get()]);
-        [unarchiver setRequiresSecureCoding:YES];
-        @try {
-            result.dataDetectorResults = [unarchiver decodeObjectOfClasses:[NSSet setWithArray:@[ [NSArray class], getDDScannerResultClass()] ] forKey:@"dataDetectorResults"];
-        } @catch (NSException *exception) {
-            LOG_ERROR("Failed to decode NSArray of DDScanResult: %@", exception);
-            return false;
-        }
-        
-        [unarchiver finishDecoding];
-    }
+
+    if (!decoder.decode(result.dataDetectorIdentifier))
+        return false;
+
+    auto dataDetectorResults = IPC::decode<NSArray>(decoder, @[ NSArray.class, PAL::getDDScannerResultClass() ]);
+    if (!dataDetectorResults)
+        return false;
+
+    result.dataDetectorResults = WTFMove(*dataDetectorResults);
+
+    if (!decoder.decode(result.dataDetectorBounds))
+        return false;
 #endif
+
+#if ENABLE(DATALIST_ELEMENT)
+    if (!decoder.decode(result.preventTextInteraction))
+        return false;
+#endif
+
+    if (!decoder.decode(result.elementContainsImageOverlay))
+        return false;
+
+    if (!decoder.decode(result.shouldNotUseIBeamInEditableContent))
+        return false;
+
+    if (!decoder.decode(result.isImageOverlayText))
+        return false;
+
+    if (!decoder.decode(result.isVerticalWritingMode))
+        return false;
+
+    if (!decoder.decode(result.elementContext))
+        return false;
+
+    if (!decoder.decode(result.hostImageOrVideoElementContext))
+        return false;
 
     return true;
 }
@@ -193,6 +250,6 @@ void InteractionInformationAtPosition::mergeCompatibleOptionalInformation(const 
         linkIndicator = oldInformation.linkIndicator;
 }
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)
 
 }

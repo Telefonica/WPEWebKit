@@ -23,14 +23,14 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef PDFDocumentImage_h
-#define PDFDocumentImage_h
+#pragma once
 
 #include "AffineTransform.h"
 #include "FloatRect.h"
 #include "GraphicsTypes.h"
 #include "Image.h"
-#include "Settings.h"
+#include "PDFImageCachingPolicy.h"
+#include "RuntimeApplicationChecks.h"
 
 #if USE(CG)
 
@@ -50,10 +50,15 @@ class PDFDocumentImage final : public Image {
 public:
     static Ref<PDFDocumentImage> create(ImageObserver* observer)
     {
+#if ENABLE(GPU_PROCESS)
+        RELEASE_ASSERT(!isInGPUProcess());
+#endif
         return adoptRef(*new PDFDocumentImage(observer));
     }
 
     void setPdfImageCachingPolicy(PDFImageCachingPolicy);
+    
+    unsigned cachingCountForTesting() const { return m_cachingCountForTesting; }
 
 private:
     PDFDocumentImage(ImageObserver*);
@@ -70,9 +75,9 @@ private:
     void destroyDecodedData(bool /*destroyAll*/ = true) override;
 
     void computeIntrinsicDimensions(Length& intrinsicWidth, Length& intrinsicHeight, FloatSize& intrinsicRatio) override;
-    FloatSize size() const override;
+    FloatSize size(ImageOrientation = ImageOrientation::FromImage) const override;
 
-    ImageDrawResult draw(GraphicsContext&, const FloatRect& dstRect, const FloatRect& srcRect, CompositeOperator, BlendMode, DecodingMode, ImageOrientationDescription) override;
+    ImageDrawResult draw(GraphicsContext&, const FloatRect& dstRect, const FloatRect& srcRect, const ImagePaintingOptions& = { }) override;
 
     // FIXME: Implement this to be less conservative.
     bool currentFrameKnownToBeOpaque() const override { return false; }
@@ -88,7 +93,7 @@ private:
     void updateCachedImageIfNeeded(GraphicsContext&, const FloatRect& dstRect, const FloatRect& srcRect);
     bool cacheParametersMatch(GraphicsContext&, const FloatRect& dstRect, const FloatRect& srcRect) const;
 
-    PDFImageCachingPolicy m_pdfImageCachingPolicy { PDFImageCachingDefault };
+    PDFImageCachingPolicy m_pdfImageCachingPolicy { defaultPDFImageCachingPolicy };
 
 #if USE(PDFKIT_FOR_PDFDOCUMENTIMAGE)
     RetainPtr<PDFDocument> m_document;
@@ -96,22 +101,21 @@ private:
     RetainPtr<CGPDFDocumentRef> m_document;
 #endif
 
-    std::unique_ptr<ImageBuffer> m_cachedImageBuffer;
+    RefPtr<ImageBuffer> m_cachedImageBuffer;
     FloatRect m_cachedImageRect;
     AffineTransform m_cachedTransform;
-    FloatSize m_cachedDestinationSize;
+    FloatRect m_cachedDestinationRect;
     FloatRect m_cachedSourceRect;
-    size_t m_cachedBytes;
+    size_t m_cachedBytes { 0 };
+    unsigned m_cachingCountForTesting { 0 };
 
     FloatRect m_cropBox;
-    int m_rotationDegrees; // Can only be 0, 90, 180, or 270 degrees.
-    bool m_hasPage;
+    int m_rotationDegrees { 0 }; // Can only be 0, 90, 180, or 270 degrees.
+    bool m_hasPage { false };
 };
 
-}
+} // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_IMAGE(PDFDocumentImage)
 
 #endif // USE(CG)
-
-#endif // PDFDocumentImage_h

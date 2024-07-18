@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,16 +23,22 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import <WebKit/WKFoundation.h>
-
-#if WK_API_ENABLED
-
 #import <Foundation/Foundation.h>
+#import <WebKit/WKFoundation.h>
 
 @class UITextSuggestion;
 @class WKWebView;
+
 @protocol _WKFocusedElementInfo;
 @protocol _WKFormInputSession;
+
+#if TARGET_OS_IPHONE
+typedef NS_ENUM(NSInteger, _WKFocusStartsInputSessionPolicy) {
+    _WKFocusStartsInputSessionPolicyAuto,
+    _WKFocusStartsInputSessionPolicyAllow,
+    _WKFocusStartsInputSessionPolicyDisallow,
+} WK_API_AVAILABLE(ios(12.0));
+#endif
 
 @protocol _WKInputDelegate <NSObject>
 
@@ -43,10 +49,17 @@
 
 #if TARGET_OS_IPHONE
 - (BOOL)_webView:(WKWebView *)webView focusShouldStartInputSession:(id <_WKFocusedElementInfo>)info;
+- (_WKFocusStartsInputSessionPolicy)_webView:(WKWebView *)webView decidePolicyForFocusedElement:(id <_WKFocusedElementInfo>)info WK_API_AVAILABLE(ios(12.0));
 - (void)_webView:(WKWebView *)webView accessoryViewCustomButtonTappedInFormInputSession:(id <_WKFormInputSession>)inputSession;
 - (void)_webView:(WKWebView *)webView insertTextSuggestion:(UITextSuggestion *)suggestion inInputSession:(id <_WKFormInputSession>)inputSession WK_API_AVAILABLE(ios(10.0));
+- (void)_webView:(WKWebView *)webView willStartInputSession:(id <_WKFormInputSession>)inputSession WK_API_AVAILABLE(ios(12.0));
+- (BOOL)_webView:(WKWebView *)webView focusRequiresStrongPasswordAssistance:(id <_WKFocusedElementInfo>)info WK_API_AVAILABLE(ios(12.0));
+
+- (NSDictionary<id, NSString *> *)_webViewAdditionalContextForStrongPasswordAssistance:(WKWebView *)webView WK_API_AVAILABLE(ios(13.4));
+
+- (BOOL)_webView:(WKWebView *)webView shouldRevealFocusOverlayForInputSession:(id <_WKFormInputSession>)inputSession WK_API_AVAILABLE(ios(12.0));
+- (CGFloat)_webView:(WKWebView *)webView focusedElementContextViewHeightForFittingSize:(CGSize)fittingSize inputSession:(id <_WKFormInputSession>)inputSession WK_API_AVAILABLE(ios(12.0));
+- (UIView *)_webView:(WKWebView *)webView focusedElementContextViewForInputSession:(id <_WKFormInputSession>)inputSession WK_API_AVAILABLE(ios(12.0));
 #endif
 
 @end
-
-#endif // WK_API_ENABLED

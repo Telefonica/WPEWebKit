@@ -24,7 +24,7 @@
  */
 
 #include "config.h"
-#include "CPUTime.h"
+#include <wtf/CPUTime.h>
 
 #include <windows.h>
 
@@ -58,6 +58,16 @@ std::optional<CPUTime> CPUTime::get()
         return std::nullopt;
 
     return CPUTime { MonotonicTime::now(), fileTimeToSeconds(userTime), fileTimeToSeconds(kernelTime) };
+}
+
+Seconds CPUTime::forCurrentThread()
+{
+    FILETIME userTime, kernelTime, creationTime, exitTime;
+
+    BOOL ret = GetThreadTimes(GetCurrentThread(), &creationTime, &exitTime, &kernelTime, &userTime);
+    RELEASE_ASSERT(ret);
+
+    return fileTimeToSeconds(userTime) + fileTimeToSeconds(kernelTime);
 }
 
 }

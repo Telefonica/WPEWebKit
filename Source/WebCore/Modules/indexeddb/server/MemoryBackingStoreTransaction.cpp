@@ -26,8 +26,6 @@
 #include "config.h"
 #include "MemoryBackingStoreTransaction.h"
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBKeyRangeData.h"
 #include "IDBValue.h"
 #include "IndexedDB.h"
@@ -41,7 +39,7 @@ namespace IDBServer {
 
 std::unique_ptr<MemoryBackingStoreTransaction> MemoryBackingStoreTransaction::create(MemoryIDBBackingStore& backingStore, const IDBTransactionInfo& info)
 {
-    return std::make_unique<MemoryBackingStoreTransaction>(backingStore, info);
+    return makeUnique<MemoryBackingStoreTransaction>(backingStore, info);
 }
 
 MemoryBackingStoreTransaction::MemoryBackingStoreTransaction(MemoryIDBBackingStore& backingStore, const IDBTransactionInfo& info)
@@ -52,7 +50,7 @@ MemoryBackingStoreTransaction::MemoryBackingStoreTransaction(MemoryIDBBackingSto
         IDBDatabaseInfo info;
         auto error = m_backingStore.getOrEstablishDatabaseInfo(info);
         if (error.isNull())
-            m_originalDatabaseInfo = std::make_unique<IDBDatabaseInfo>(info);
+            m_originalDatabaseInfo = makeUnique<IDBDatabaseInfo>(info);
     }
 }
 
@@ -94,15 +92,6 @@ void MemoryBackingStoreTransaction::addExistingIndex(MemoryIndex& index)
 void MemoryBackingStoreTransaction::indexDeleted(Ref<MemoryIndex>&& index)
 {
     m_indexes.remove(&index.get());
-
-    // If this MemoryIndex belongs to an object store that will not get restored if this transaction aborts,
-    // then we can forget about it altogether.
-    auto& objectStore = index->objectStore();
-    if (auto deletedObjectStore = m_deletedObjectStores.get(objectStore.info().name())) {
-        if (deletedObjectStore != &objectStore)
-            return;
-    }
-
     auto addResult = m_deletedIndexes.add(index->info().name(), nullptr);
     if (addResult.isNewEntry)
         addResult.iterator->value = WTFMove(index);
@@ -126,8 +115,17 @@ void MemoryBackingStoreTransaction::objectStoreDeleted(Ref<MemoryObjectStore>&& 
 {
     ASSERT(m_objectStores.contains(&objectStore.get()));
     m_objectStores.remove(&objectStore.get());
-
     objectStore->deleteAllIndexes(*this);
+
+    // If the store removed is previously added in this transaction, we don't need to
+    // keep it for transaction abort.
+    if (auto addedObjectStore = m_versionChangeAddedObjectStores.take(&objectStore.get())) {
+        // We don't need to track its indexes either.
+        m_deletedIndexes.removeIf([identifier = objectStore->info().identifier()](auto& entry) {
+            return entry.value->objectStore().info().identifier() == identifier;
+        });
+        return;
+    }
 
     auto addResult = m_deletedObjectStores.add(objectStore->info().name(), nullptr);
     if (addResult.isNewEntry)
@@ -195,7 +193,7 @@ void MemoryBackingStoreTransaction::recordValueChanged(MemoryObjectStore& object
 
     auto originalAddResult = m_originalValues.add(&objectStore, nullptr);
     if (originalAddResult.isNewEntry)
-        originalAddResult.iterator->value = std::make_unique<KeyValueMap>();
+        originalAddResult.iterator->value = makeUnique<KeyValueMap>();
 
     auto* map = originalAddResult.iterator->value.get();
 
@@ -211,18 +209,21 @@ void MemoryBackingStoreTransaction::abort()
 {
     LOG(IndexedDB, "MemoryBackingStoreTransaction::abort()");
 
-    SetForScope<bool> change(m_isAborting, true);
+    SetForScope change(m_isAborting, true);
 
-    for (auto iterator : m_originalIndexNames)
+    for (const auto& iterator : m_originalIndexNames)
         iterator.key->rename(iterator.value);
     m_originalIndexNames.clear();
 
-    for (auto iterator : m_originalObjectStoreNames)
-        iterator.key->rename(iterator.value);
+    for (const auto& iterator : m_originalObjectStoreNames)
+        m_backingStore.renameObjectStoreForVersionChangeAbort(*iterator.key, iterator.value);
     m_originalObjectStoreNames.clear();
 
-    for (auto objectStore : m_versionChangeAddedObjectStores)
+    for (const auto& objectStore : m_versionChangeAddedObjectStores)
         m_backingStore.removeObjectStoreForVersionChangeAbort(*objectStore);
+    m_deletedIndexes.removeIf([&](auto& entry) {
+        return m_versionChangeAddedObjectStores.contains(&entry.value->objectStore());
+    });
     m_versionChangeAddedObjectStores.clear();
 
     for (auto& objectStore : m_deletedObjectStores.values()) {
@@ -257,14 +258,16 @@ void MemoryBackingStoreTransaction::abort()
         if (!keyValueMap)
             continue;
 
-        for (auto entry : *keyValueMap) {
+        for (const auto& entry : *keyValueMap) {
             objectStore->deleteRecord(entry.key);
             objectStore->addRecord(*this, entry.key, { entry.value });
         }
     }
 
-    for (auto& index : m_deletedIndexes.values())
+    for (auto& index : m_deletedIndexes.values()) {
+        RELEASE_ASSERT(m_backingStore.hasObjectStore(index->info().objectStoreIdentifier()));
         index->objectStore().maybeRestoreDeletedIndex(*index);
+    }
     m_deletedIndexes.clear();
 
     finish();
@@ -292,5 +295,3 @@ void MemoryBackingStoreTransaction::finish()
 
 } // namespace IDBServer
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

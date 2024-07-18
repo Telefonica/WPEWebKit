@@ -3,207 +3,163 @@ include(platform/FreeType.cmake)
 include(platform/GCrypt.cmake)
 include(platform/GStreamer.cmake)
 include(platform/ImageDecoders.cmake)
+include(platform/Soup.cmake)
 include(platform/TextureMapper.cmake)
+include(PlatformGLib.cmake)
 
-# Allow building ANGLE on platforms that don't provide X11 headers.
-list(APPEND ANGLE_PLATFORM_DEFINITIONS "USE_WPE")
+if (USE_EXTERNAL_HOLEPUNCH)
+    include(platform/HolePunch.cmake)
+endif ()
 
-list(APPEND WebCore_INCLUDE_DIRECTORIES
-    "${DERIVED_SOURCES_JAVASCRIPTCORE_DIR}"
-    "${DERIVED_SOURCES_JAVASCRIPTCORE_DIR}/inspector"
-    ${JAVASCRIPTCORE_DIR}
-    "${JAVASCRIPTCORE_DIR}/ForwardingHeaders"
-    "${JAVASCRIPTCORE_DIR}/API"
-    "${JAVASCRIPTCORE_DIR}/assembler"
-    "${JAVASCRIPTCORE_DIR}/bytecode"
-    "${JAVASCRIPTCORE_DIR}/bytecompiler"
-    "${JAVASCRIPTCORE_DIR}/dfg"
-    "${JAVASCRIPTCORE_DIR}/disassembler"
-    "${JAVASCRIPTCORE_DIR}/domjit"
-    "${JAVASCRIPTCORE_DIR}/heap"
-    "${JAVASCRIPTCORE_DIR}/debugger"
-    "${JAVASCRIPTCORE_DIR}/interpreter"
-    "${JAVASCRIPTCORE_DIR}/jit"
-    "${JAVASCRIPTCORE_DIR}/llint"
-    "${JAVASCRIPTCORE_DIR}/parser"
-    "${JAVASCRIPTCORE_DIR}/profiler"
-    "${JAVASCRIPTCORE_DIR}/runtime"
-    "${JAVASCRIPTCORE_DIR}/yarr"
-    "${THIRDPARTY_DIR}/ANGLE/"
-    "${THIRDPARTY_DIR}/ANGLE/include/KHR"
+list(APPEND WebCore_UNIFIED_SOURCE_LIST_FILES
+    "SourcesWPE.txt"
+
+    "platform/SourcesGLib.txt"
+)
+
+list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
+    "${WEBCORE_DIR}/platform/adwaita"
+    "${WEBCORE_DIR}/platform/audio/glib"
+    "${WEBCORE_DIR}/platform/glib"
     "${WEBCORE_DIR}/platform/graphics/egl"
     "${WEBCORE_DIR}/platform/graphics/epoxy"
+    "${WEBCORE_DIR}/platform/graphics/gbm"
     "${WEBCORE_DIR}/platform/graphics/glx"
     "${WEBCORE_DIR}/platform/graphics/gstreamer"
     "${WEBCORE_DIR}/platform/graphics/opengl"
     "${WEBCORE_DIR}/platform/graphics/opentype"
-    "${WEBCORE_DIR}/platform/graphics/wpe"
+    "${WEBCORE_DIR}/platform/graphics/libwpe"
     "${WEBCORE_DIR}/platform/graphics/wayland"
     "${WEBCORE_DIR}/platform/mock/mediasource"
-    "${WEBCORE_DIR}/platform/network/soup"
+    "${WEBCORE_DIR}/platform/mediacapabilities"
+    "${WEBCORE_DIR}/platform/mediastream/gstreamer"
+    "${WEBCORE_DIR}/platform/network/glib"
     "${WEBCORE_DIR}/platform/text/icu"
-    ${WTF_DIR}
+    "${WEBCORE_DIR}/platform/wpe"
 )
+if (USE_ATK)
+    list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES "${WEBCORE_DIR}/accessibility/atk")
+else ()
+    list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES "${WEBCORE_DIR}/accessibility/atspi")
+endif ()
 
-list(APPEND WebCore_SOURCES
-    accessibility/wpe/AXObjectCacheWPE.cpp
-    accessibility/wpe/AccessibilityObjectWPE.cpp
+list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+    platform/glib/ApplicationGLib.h
 
-    loader/soup/CachedRawResourceSoup.cpp
-    loader/soup/SubresourceLoaderSoup.cpp
-
-    page/linux/ResourceUsageOverlayLinux.cpp
-    page/linux/ResourceUsageThreadLinux.cpp
-
-    page/scrolling/ScrollingStateStickyNode.cpp
-    page/scrolling/ScrollingThread.cpp
-    page/scrolling/ScrollingTreeNode.cpp
-    page/scrolling/ScrollingTreeScrollingNode.cpp
-
-    page/scrolling/coordinatedgraphics/ScrollingCoordinatorCoordinatedGraphics.cpp
-    page/scrolling/coordinatedgraphics/ScrollingStateNodeCoordinatedGraphics.cpp
-
-    platform/Cursor.cpp
-    platform/PlatformStrategies.cpp
-    platform/Theme.cpp
-    platform/UserAgentQuirks.cpp
-
-    platform/audio/glib/AudioBusGLib.cpp
-
-    platform/glib/EventLoopGlib.cpp
-    platform/glib/FileSystemGlib.cpp
-    platform/glib/KeyedDecoderGlib.cpp
-    platform/glib/KeyedEncoderGlib.cpp
-    platform/glib/MainThreadSharedTimerGLib.cpp
-    platform/glib/SSLKeyGeneratorGLib.cpp
-    platform/glib/SharedBufferGlib.cpp
-    platform/glib/UserAgentGLib.cpp
-
-    platform/graphics/GLContext.cpp
-    platform/graphics/GraphicsContext3DPrivate.cpp
-    platform/graphics/PlatformDisplay.cpp
-    platform/graphics/WOFFFileFormat.cpp
-
-    platform/graphics/egl/GLContextEGL.cpp
-
-    platform/graphics/opengl/Extensions3DOpenGLCommon.cpp
-    platform/graphics/opengl/Extensions3DOpenGLES.cpp
-    platform/graphics/opengl/GraphicsContext3DOpenGLCommon.cpp
-    platform/graphics/opengl/GraphicsContext3DOpenGLES.cpp
-    platform/graphics/opengl/TemporaryOpenGLSetting.cpp
-
-    platform/graphics/opentype/OpenTypeVerticalData.cpp
-
-    platform/graphics/wpe/PlatformDisplayWPE.cpp
-
-    platform/image-encoders/JPEGImageEncoder.cpp
-
-    platform/network/soup/AuthenticationChallengeSoup.cpp
-    platform/network/soup/CertificateInfo.cpp
-    platform/network/soup/CookieJarSoup.cpp
-    platform/network/soup/CookieStorageSoup.cpp
-    platform/network/soup/CredentialStorageSoup.cpp
-    platform/network/soup/DNSSoup.cpp
-    platform/network/soup/GRefPtrSoup.cpp
-    platform/network/soup/NetworkStorageSessionSoup.cpp
-    platform/network/soup/ProxyServerSoup.cpp
-    platform/network/soup/ResourceErrorSoup.cpp
-    platform/network/soup/ResourceHandleSoup.cpp
-    platform/network/soup/ResourceRequestSoup.cpp
-    platform/network/soup/ResourceResponseSoup.cpp
-    platform/network/soup/SocketStreamHandleImplSoup.cpp
-    platform/network/soup/SoupNetworkSession.cpp
-    platform/network/soup/SynchronousLoaderClientSoup.cpp
-    platform/network/soup/WebKitSoupRequestGeneric.cpp
-    platform/network/soup/gwildcardproxyresolver.c
-
-    platform/soup/PublicSuffixSoup.cpp
-    platform/soup/SharedBufferSoup.cpp
-    platform/soup/URLSoup.cpp
-
-    platform/text/Hyphenation.cpp
-    platform/text/LocaleICU.cpp
-    platform/text/TextCodecICU.cpp
-    platform/text/TextEncodingDetectorICU.cpp
-
-    platform/unix/LoggingUnix.cpp
-
-    platform/xdg/MIMETypeRegistryXdg.cpp
+    platform/graphics/wayland/PlatformDisplayWayland.h
+    platform/graphics/wayland/WlUniquePtr.h
 )
+if (USE_ATK)
+    list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+        accessibility/atk/WebKitAccessible.h
+    )
+else ()
+    list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+        accessibility/atspi/AccessibilityAtspi.h
+        accessibility/atspi/AccessibilityAtspiEnums.h
+        accessibility/atspi/AccessibilityObjectAtspi.h
+        accessibility/atspi/AccessibilityRootAtspi.h
+    )
+endif ()
 
-list(APPEND WebCorePlatformWPE_SOURCES
-    editing/wpe/EditorWPE.cpp
-
-    platform/glib/EventHandlerGLib.cpp
-
-    platform/graphics/egl/GLContextEGLWPE.cpp
-
-    platform/graphics/wpe/IconWPE.cpp
-    platform/graphics/wpe/ImageWPE.cpp
-
-    platform/wpe/CursorWPE.cpp
-    platform/wpe/LocalizedStringsWPE.cpp
-    platform/wpe/PasteboardWPE.cpp
-    platform/wpe/PlatformKeyboardEventWPE.cpp
-    platform/wpe/PlatformPasteboardWPE.cpp
-    platform/wpe/PlatformScreenWPE.cpp
-    platform/wpe/RenderThemeWPE.cpp
-    platform/wpe/ScrollbarThemeWPE.cpp
-    platform/wpe/ThemeWPE.cpp
-    platform/wpe/WidgetWPE.cpp
-)
+set(CSS_VALUE_PLATFORM_DEFINES "HAVE_OS_DARK_MODE_SUPPORT=1")
 
 list(APPEND WebCore_USER_AGENT_STYLE_SHEETS
-    ${WEBCORE_DIR}/Modules/mediacontrols/mediaControlsBase.css
+    ${WEBCORE_DIR}/css/themeAdwaita.css
+    ${WebCore_DERIVED_SOURCES_DIR}/ModernMediaControls.css
 )
 
 set(WebCore_USER_AGENT_SCRIPTS
-    ${WEBCORE_DIR}/English.lproj/mediaControlsLocalizedStrings.js
-    ${WEBCORE_DIR}/Modules/mediacontrols/mediaControlsBase.js
+    ${WebCore_DERIVED_SOURCES_DIR}/ModernMediaControls.js
 )
 
 set(WebCore_USER_AGENT_SCRIPTS_DEPENDENCIES ${WEBCORE_DIR}/platform/wpe/RenderThemeWPE.cpp)
 
 list(APPEND WebCore_LIBRARIES
-    ${BCM_HOST_LIBRARIES}
-    ${CAIRO_LIBRARIES}
+    WPE::libwpe
     ${GLIB_GIO_LIBRARIES}
     ${GLIB_GMODULE_LIBRARIES}
     ${GLIB_GOBJECT_LIBRARIES}
     ${GLIB_LIBRARIES}
-    ${ICU_LIBRARIES}
-    ${LIBSOUP_LIBRARIES}
     ${LIBTASN1_LIBRARIES}
-    ${LIBXML2_LIBRARIES}
-    ${LIBXSLT_LIBRARIES}
-    ${OPENCDM_LIBRARIES}
-    ${SQLITE_LIBRARIES}
-    ${WPE_LIBRARIES}
+    ${UPOWERGLIB_LIBRARIES}
 )
+if (USE_ATK)
+    list(APPEND WebCore_LIBRARIES ${ATK_LIBRARIES})
+endif ()
 
-list(APPEND WebCore_INCLUDE_DIRECTORIES
-    ${BCM_HOST_INCLUDE_DIRS}
-    ${CAIRO_INCLUDE_DIRS}
+list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES
     ${GIO_UNIX_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
-    ${ICU_INCLUDE_DIRS}
-    ${LIBSOUP_INCLUDE_DIRS}
     ${LIBTASN1_INCLUDE_DIRS}
-    ${LIBXML2_INCLUDE_DIR}
-    ${LIBXSLT_INCLUDE_DIR}
-    ${OPENCDM_INCLUDE_DIRS}
-    ${SQLITE_INCLUDE_DIR}
-    ${WPE_INCLUDE_DIRS}
+    ${UPOWERGLIB_INCLUDE_DIRS}
 )
+if (USE_ATK)
+    list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES ${ATK_INCLUDE_DIRS})
+endif ()
 
-add_library(WebCorePlatformWPE ${WebCore_LIBRARY_TYPE} ${WebCorePlatformWPE_SOURCES})
-add_dependencies(WebCorePlatformWPE WebCore)
-target_include_directories(WebCorePlatformWPE PRIVATE
-    ${WebCore_INCLUDE_DIRECTORIES}
-)
-target_include_directories(WebCorePlatformWPE SYSTEM PRIVATE
-    ${WebCore_SYSTEM_INCLUDE_DIRECTORIES}
-)
-target_link_libraries(WebCorePlatformWPE
-    ${WebCore_LIBRARIES}
-)
+if (USE_WPE_VIDEO_PLANE_DISPLAY_DMABUF OR USE_WPEBACKEND_FDO_AUDIO_EXTENSION)
+    list(APPEND WebCore_LIBRARIES ${WPEBACKEND_FDO_LIBRARIES})
+    list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES ${WPE_INCLUDE_DIRS})
+    list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES ${WPEBACKEND_FDO_INCLUDE_DIRS})
+endif ()
+
+if (USE_OPENXR)
+    list(APPEND WebCore_LIBRARIES ${OPENXR_LIBRARIES})
+    list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES ${OPENXR_INCLUDE_DIRS})
+endif ()
+
+if (USE_ATSPI)
+    set(WebCore_AtspiInterfaceFiles
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Accessible.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Action.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Application.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Cache.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Collection.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Component.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/DeviceEventController.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/DeviceEventListener.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Document.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/EditableText.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Event.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Hyperlink.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Hypertext.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Image.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Registry.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Selection.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Socket.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/TableCell.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Table.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Text.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Value.xml
+    )
+
+    add_custom_command(
+        OUTPUT ${WebCore_DERIVED_SOURCES_DIR}/AccessibilityAtspiInterfaces.h ${WebCore_DERIVED_SOURCES_DIR}/AccessibilityAtspiInterfaces.c
+        DEPENDS ${WebCore_AtspiInterfaceFiles}
+        COMMAND gdbus-codegen --interface-prefix=org.a11y.atspi --c-namespace=webkit --pragma-once --interface-info-header --output=${WebCore_DERIVED_SOURCES_DIR}/AccessibilityAtspiInterfaces.h ${WebCore_AtspiInterfaceFiles}
+        COMMAND gdbus-codegen --interface-prefix=org.a11y.atspi --c-namespace=webkit --interface-info-body --output=${WebCore_DERIVED_SOURCES_DIR}/AccessibilityAtspiInterfaces.c ${WebCore_AtspiInterfaceFiles}
+        VERBATIM
+    )
+
+    list(APPEND WebCore_SOURCES
+        ${WebCore_DERIVED_SOURCES_DIR}/AccessibilityAtspiInterfaces.c
+    )
+endif ()
+
+if (USE_LIBGBM)
+    list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES
+        ${GBM_INCLUDE_DIR}
+        ${LIBDRM_INCLUDE_DIR}
+    )
+    list(APPEND WebCore_LIBRARIES
+        ${GBM_LIBRARIES}
+        ${LIBDRM_LIBRARIES}
+    )
+endif ()
+
+if (ENABLE_GAMEPAD)
+    list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+        platform/gamepad/wpe/WPEGamepadProvider.h
+    )
+endif ()

@@ -28,10 +28,11 @@
 
 namespace WebCore {
 
-GLContextEGL::GLContextEGL(PlatformDisplay& display, EGLContext context, EGLSurface surface, XUniquePixmap&& pixmap)
+GLContextEGL::GLContextEGL(PlatformDisplay& display, EGLContext context, EGLSurface surface, EGLConfig config, XUniquePixmap&& pixmap)
     : GLContext(display)
     , m_context(context)
     , m_surface(surface)
+    , m_config(config)
     , m_type(PixmapSurface)
     , m_pixmap(WTFMove(pixmap))
 {
@@ -49,13 +50,7 @@ std::unique_ptr<GLContextEGL> GLContextEGL::createPixmapContext(PlatformDisplay&
     if (!getEGLConfig(display, &config, PixmapSurface))
         return nullptr;
 
-    static const EGLint contextAttributes[] = {
-#if USE(OPENGL_ES_2)
-        EGL_CONTEXT_CLIENT_VERSION, 2,
-#endif
-        EGL_NONE
-    };
-    EGLContext context = eglCreateContext(display, config, sharingContext, contextAttributes);
+    EGLContext context = createContextForEGLVersion(platformDisplay, config, sharingContext);
     if (context == EGL_NO_CONTEXT)
         return nullptr;
 
@@ -96,7 +91,7 @@ std::unique_ptr<GLContextEGL> GLContextEGL::createPixmapContext(PlatformDisplay&
         return nullptr;
     }
 
-    return std::unique_ptr<GLContextEGL>(new GLContextEGL(platformDisplay, context, surface, WTFMove(pixmap)));
+    return std::unique_ptr<GLContextEGL>(new GLContextEGL(platformDisplay, context, surface, config, WTFMove(pixmap)));
 }
 
 } // namespace WebCore

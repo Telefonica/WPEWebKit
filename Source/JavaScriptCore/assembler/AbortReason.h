@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,9 +42,10 @@ enum AbortReason {
     AHIsNotJSNumber                                   =  80,
     AHIsNotNull                                       =  90,
     AHStackPointerMisaligned                          = 100,
+    AHInvalidCodeBlock                                = 101,
     AHStructureIDIsValid                              = 110,
-    AHTagMaskNotInPlace                               = 120,
-    AHTagTypeNumberNotInPlace                         = 130,
+    AHNotCellMaskNotInPlace                           = 120,
+    AHNumberTagNotInPlace                             = 130,
     AHTypeInfoInlineTypeFlagsAreValid                 = 140,
     AHTypeInfoIsValid                                 = 150,
     B3Oops                                            = 155,
@@ -65,15 +66,16 @@ enum AbortReason {
     JITGetByValResultIsNotEmpty                       = 250,
     JITNotSupported                                   = 260,
     JITOffsetIsNotOutOfLine                           = 270,
-    JITUncoughtExceptionAfterCall                     = 275,
+    JITUncaughtExceptionAfterCall                     = 275,
     JITUnexpectedCallFrameSize                        = 277,
     JITUnreasonableLoopHintJumpTarget                 = 280,
+    MacroAssemblerOops                                = 285,
     RPWUnreasonableJumpTarget                         = 290,
     RepatchIneffectiveWatchpoint                      = 300,
     RepatchInsaneArgumentCount                        = 310,
     TGInvalidPointer                                  = 320,
     TGNotSupported                                    = 330,
-    YARRNoInputConsumed                               = 340,
+    UncheckedOverflow                                 = 335,
 };
 
 // This enum is for CRASH_WITH_SECURITY_IMPLICATION_AND_INFO so we can easily identify which assertion

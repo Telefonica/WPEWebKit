@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,25 +28,35 @@
 
 #if ENABLE(ASSEMBLER)
 
+#include "JSCPtrTag.h"
+#include "Options.h"
 #include "ProbeContext.h"
 #include <wtf/PrintStream.h>
+#include <wtf/ScopedLambda.h>
 
 namespace JSC {
 
 const double MacroAssembler::twoToThe32 = (double)0x100000000ull;
 
-#if ENABLE(MASM_PROBE)
+void MacroAssembler::jitAssert(const ScopedLambda<Jump(void)>& functor)
+{
+    if (Options::enableJITDebugAssertions()) {
+        Jump passed = functor();
+        breakpoint();
+        passed.link(this);
+    }
+}
+
 static void stdFunctionCallback(Probe::Context& context)
 {
-    auto func = static_cast<const std::function<void(Probe::Context&)>*>(context.arg);
+    auto func = context.arg<const Function<void(Probe::Context&)>*>();
     (*func)(context);
 }
     
-void MacroAssembler::probe(std::function<void(Probe::Context&)> func)
+void MacroAssembler::probeDebug(Function<void(Probe::Context&)> func)
 {
-    probe(stdFunctionCallback, new std::function<void(Probe::Context&)>(func));
+    probe(tagCFunction<JITProbePtrTag>(stdFunctionCallback), new Function<void(Probe::Context&)>(WTFMove(func)));
 }
-#endif // ENABLE(MASM_PROBE)
 
 } // namespace JSC
 
@@ -116,23 +126,23 @@ void printInternal(PrintStream& out, MacroAssembler::ResultCondition cond)
 void printInternal(PrintStream& out, MacroAssembler::DoubleCondition cond)
 {
     switch (cond) {
-    case MacroAssembler::DoubleEqual:
-        out.print("DoubleEqual");
+    case MacroAssembler::DoubleEqualAndOrdered:
+        out.print("DoubleEqualAndOrdered");
         return;
-    case MacroAssembler::DoubleNotEqual:
-        out.print("DoubleNotEqual");
+    case MacroAssembler::DoubleNotEqualAndOrdered:
+        out.print("DoubleNotEqualAndOrdered");
         return;
-    case MacroAssembler::DoubleGreaterThan:
-        out.print("DoubleGreaterThan");
+    case MacroAssembler::DoubleGreaterThanAndOrdered:
+        out.print("DoubleGreaterThanAndOrdered");
         return;
-    case MacroAssembler::DoubleGreaterThanOrEqual:
-        out.print("DoubleGreaterThanOrEqual");
+    case MacroAssembler::DoubleGreaterThanOrEqualAndOrdered:
+        out.print("DoubleGreaterThanOrEqualAndOrdered");
         return;
-    case MacroAssembler::DoubleLessThan:
-        out.print("DoubleLessThan");
+    case MacroAssembler::DoubleLessThanAndOrdered:
+        out.print("DoubleLessThanAndOrdered");
         return;
-    case MacroAssembler::DoubleLessThanOrEqual:
-        out.print("DoubleLessThanOrEqual");
+    case MacroAssembler::DoubleLessThanOrEqualAndOrdered:
+        out.print("DoubleLessThanOrEqualAndOrdered");
         return;
     case MacroAssembler::DoubleEqualOrUnordered:
         out.print("DoubleEqualOrUnordered");

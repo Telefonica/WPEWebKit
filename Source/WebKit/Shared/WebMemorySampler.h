@@ -52,8 +52,8 @@
 #if ENABLE(MEMORY_SAMPLER)
 
 #include "SandboxExtension.h"
-#include <WebCore/FileSystem.h>
 #include <WebCore/Timer.h>
+#include <wtf/FileSystem.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
@@ -73,7 +73,7 @@ class WebMemorySampler {
 public:
     static WebMemorySampler* singleton();
     void start(const double interval = 0);
-    void start(const SandboxExtension::Handle&, const String&, const double interval = 0);
+    void start(SandboxExtension::Handle&&, const String&, const double interval = 0);
     void stop();
     bool isRunning() const;
     
@@ -82,12 +82,12 @@ private:
     ~WebMemorySampler();
     
     void initializeTempLogFile();
-    void initializeSandboxedLogFile(const SandboxExtension::Handle&, const String&);
+    void initializeSandboxedLogFile(SandboxExtension::Handle&&, const String&);
     void writeHeaders();
     void initializeTimers(double);
     void sampleTimerFired();
     void stopTimerFired();
-    void appendCurrentMemoryUsageToFile(WebCore::PlatformFileHandle&);
+    void appendCurrentMemoryUsageToFile(FileSystem::PlatformFileHandle&);
     void sendMemoryPressureEvent();
     
     SystemMallocStats sampleSystemMalloc() const;
@@ -95,7 +95,7 @@ private:
     WebMemoryStatistics sampleWebKit() const;
     String processName() const;
     
-    WebCore::PlatformFileHandle m_sampleLogFile { WebCore::invalidPlatformFileHandle };
+    FileSystem::PlatformFileHandle m_sampleLogFile { FileSystem::invalidPlatformFileHandle };
     String m_sampleLogFilePath;
     WebCore::Timer m_sampleTimer;
     WebCore::Timer m_stopTimer;

@@ -27,86 +27,53 @@
 #include "config.h"
 #include "CacheStorageConnection.h"
 
-using namespace WebCore::DOMCacheEngine;
+#include "FetchResponse.h"
+#include <wtf/RandomNumber.h>
 
 namespace WebCore {
+using namespace WebCore::DOMCacheEngine;
 
-void CacheStorageConnection::open(const String& origin, const String& cacheName, CacheIdentifierCallback&& callback)
+static inline uint64_t formDataSize(const FormData& formData)
 {
-    uint64_t requestIdentifier = ++m_lastRequestIdentifier;
-    m_openAndRemoveCachePendingRequests.add(requestIdentifier, WTFMove(callback));
+    if (isMainThread())
+        return formData.lengthInBytes();
 
-    doOpen(requestIdentifier, origin, cacheName);
+    uint64_t resultSize;
+    callOnMainThreadAndWait([formData = formData.isolatedCopy(), &resultSize] {
+        resultSize = formData->lengthInBytes();
+    });
+    return resultSize;
 }
 
-void CacheStorageConnection::remove(uint64_t cacheIdentifier, CacheIdentifierCallback&& callback)
+uint64_t CacheStorageConnection::computeRealBodySize(const DOMCacheEngine::ResponseBody& body)
 {
-    uint64_t requestIdentifier = ++m_lastRequestIdentifier;
-    m_openAndRemoveCachePendingRequests.add(requestIdentifier, WTFMove(callback));
-
-    doRemove(requestIdentifier, cacheIdentifier);
+    uint64_t result = 0;
+    WTF::switchOn(body, [&] (const Ref<FormData>& formData) {
+        result = formDataSize(formData);
+    }, [&] (const Ref<SharedBuffer>& buffer) {
+        result = buffer->size();
+    }, [] (const std::nullptr_t&) {
+    });
+    return result;
 }
 
-void CacheStorageConnection::retrieveCaches(const String& origin, uint64_t updateCounter, CacheInfosCallback&& callback)
+uint64_t CacheStorageConnection::computeRecordBodySize(const FetchResponse& response, const DOMCacheEngine::ResponseBody& body)
 {
-    uint64_t requestIdentifier = ++m_lastRequestIdentifier;
-    m_retrieveCachesPendingRequests.add(requestIdentifier, WTFMove(callback));
+    if (!response.opaqueLoadIdentifier()) {
+        ASSERT(response.tainting() != ResourceResponse::Tainting::Opaque);
+        return computeRealBodySize(body);
+    }
 
-    doRetrieveCaches(requestIdentifier, origin, updateCounter);
-}
+    return m_opaqueResponseToSizeWithPaddingMap.ensure(response.opaqueLoadIdentifier(), [&] () {
+        uint64_t realSize = computeRealBodySize(body);
 
-void CacheStorageConnection::retrieveRecords(uint64_t cacheIdentifier, const URL& url, RecordsCallback&& callback)
-{
-    uint64_t requestIdentifier = ++m_lastRequestIdentifier;
-    m_retrieveRecordsPendingRequests.add(requestIdentifier, WTFMove(callback));
+        // Padding the size as per https://github.com/whatwg/storage/issues/31.
+        uint64_t sizeWithPadding = realSize + static_cast<uint64_t>(randomNumber() * 128000);
+        sizeWithPadding = ((sizeWithPadding / 32000) + 1) * 32000;
 
-    doRetrieveRecords(requestIdentifier, cacheIdentifier, url);
-}
-
-void CacheStorageConnection::batchDeleteOperation(uint64_t cacheIdentifier, const ResourceRequest& request, CacheQueryOptions&& options, RecordIdentifiersCallback&& callback)
-{
-    uint64_t requestIdentifier = ++m_lastRequestIdentifier;
-    m_batchDeleteAndPutPendingRequests.add(requestIdentifier, WTFMove(callback));
-
-    doBatchDeleteOperation(requestIdentifier, cacheIdentifier, request, WTFMove(options));
-}
-
-void CacheStorageConnection::batchPutOperation(uint64_t cacheIdentifier, Vector<Record>&& records, RecordIdentifiersCallback&& callback)
-{
-    uint64_t requestIdentifier = ++m_lastRequestIdentifier;
-    m_batchDeleteAndPutPendingRequests.add(requestIdentifier, WTFMove(callback));
-
-    doBatchPutOperation(requestIdentifier, cacheIdentifier, WTFMove(records));
-}
-
-void CacheStorageConnection::openOrRemoveCompleted(uint64_t requestIdentifier, const CacheIdentifierOrError& result)
-{
-    if (auto callback = m_openAndRemoveCachePendingRequests.take(requestIdentifier))
-        callback(result);
-}
-
-void CacheStorageConnection::updateCaches(uint64_t requestIdentifier, CacheInfosOrError&& result)
-{
-    if (auto callback = m_retrieveCachesPendingRequests.take(requestIdentifier))
-        callback(WTFMove(result));
-}
-
-void CacheStorageConnection::updateRecords(uint64_t requestIdentifier, RecordsOrError&& result)
-{
-    if (auto callback = m_retrieveRecordsPendingRequests.take(requestIdentifier))
-        callback(WTFMove(result));
-}
-
-void CacheStorageConnection::deleteRecordsCompleted(uint64_t requestIdentifier, Expected<Vector<uint64_t>, Error>&& result)
-{
-    if (auto callback = m_batchDeleteAndPutPendingRequests.take(requestIdentifier))
-        callback(WTFMove(result));
-}
-
-void CacheStorageConnection::putRecordsCompleted(uint64_t requestIdentifier, Expected<Vector<uint64_t>, Error>&& result)
-{
-    if (auto callback = m_batchDeleteAndPutPendingRequests.take(requestIdentifier))
-        callback(WTFMove(result));
+        m_opaqueResponseToSizeWithPaddingMap.set(response.opaqueLoadIdentifier(), sizeWithPadding);
+        return sizeWithPadding;
+    }).iterator->value;
 }
 
 } // namespace WebCore

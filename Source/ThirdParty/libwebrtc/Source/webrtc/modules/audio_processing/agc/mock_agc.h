@@ -8,29 +8,25 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AGC_MOCK_AGC_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_AGC_MOCK_AGC_H_
+#ifndef MODULES_AUDIO_PROCESSING_AGC_MOCK_AGC_H_
+#define MODULES_AUDIO_PROCESSING_AGC_MOCK_AGC_H_
 
-#include "webrtc/modules/audio_processing/agc/agc.h"
-
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/test/gmock.h"
+#include "api/array_view.h"
+#include "modules/audio_processing/agc/agc.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
 class MockAgc : public Agc {
  public:
-  MOCK_METHOD2(AnalyzePreproc, float(const int16_t* audio, size_t length));
-  MOCK_METHOD3(Process, int(const int16_t* audio, size_t length,
-                            int sample_rate_hz));
-  MOCK_METHOD1(GetRmsErrorDb, bool(int* error));
-  MOCK_METHOD0(Reset, void());
-  MOCK_METHOD1(set_target_level_dbfs, int(int level));
-  MOCK_CONST_METHOD0(target_level_dbfs, int());
-  MOCK_METHOD1(EnableStandaloneVad, void(bool enable));
-  MOCK_CONST_METHOD0(standalone_vad_enabled, bool());
+  virtual ~MockAgc() {}
+  MOCK_METHOD(void, Process, (rtc::ArrayView<const int16_t> audio), (override));
+  MOCK_METHOD(bool, GetRmsErrorDb, (int* error), (override));
+  MOCK_METHOD(void, Reset, (), (override));
+  MOCK_METHOD(int, set_target_level_dbfs, (int level), (override));
+  MOCK_METHOD(int, target_level_dbfs, (), (const, override));
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AGC_MOCK_AGC_H_
+#endif  // MODULES_AUDIO_PROCESSING_AGC_MOCK_AGC_H_

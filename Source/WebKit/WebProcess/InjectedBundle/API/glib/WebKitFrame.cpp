@@ -20,13 +20,33 @@
 #include "config.h"
 #include "WebKitFrame.h"
 
+#include "WebKitDOMNodePrivate.h"
 #include "WebKitFramePrivate.h"
 #include "WebKitScriptWorldPrivate.h"
+#include <JavaScriptCore/APICast.h>
+#include <JavaScriptCore/JSGlobalObjectInlines.h>
+#include <JavaScriptCore/JSLock.h>
+#include <WebCore/Frame.h>
+#include <WebCore/FrameLoader.h>
+#include <WebCore/JSNode.h>
+#include <WebCore/ScriptController.h>
+#include <jsc/JSCContextPrivate.h>
 #include <wtf/glib/WTFGType.h>
 #include <wtf/text/CString.h>
 
 using namespace WebKit;
 using namespace WebCore;
+
+/**
+ * WebKitFrame:
+ *
+ * A web page frame.
+ *
+ * Each `WebKitWebPage` has at least one main frame, and can have any number
+ * of subframes.
+ *
+ * Since: 2.26
+ */
 
 struct _WebKitFramePrivate {
     RefPtr<WebFrame> webFrame;
@@ -40,16 +60,60 @@ static void webkit_frame_class_init(WebKitFrameClass*)
 {
 }
 
+static CString getURL(WebFrame* webFrame)
+{
+    auto* documentLoader = webFrame->coreFrame()->loader().provisionalDocumentLoader();
+    if (!documentLoader)
+        documentLoader = webFrame->coreFrame()->loader().documentLoader();
+
+    ASSERT(documentLoader);
+
+    if (!documentLoader->unreachableURL().isEmpty())
+        return documentLoader->unreachableURL().string().utf8();
+
+    return documentLoader->url().string().utf8();
+}
+
 WebKitFrame* webkitFrameCreate(WebFrame* webFrame)
 {
     WebKitFrame* frame = WEBKIT_FRAME(g_object_new(WEBKIT_TYPE_FRAME, NULL));
     frame->priv->webFrame = webFrame;
+
+    frame->priv->uri = getURL(webFrame);
+
     return frame;
 }
 
 WebFrame* webkitFrameGetWebFrame(WebKitFrame* frame)
 {
     return frame->priv->webFrame.get();
+}
+
+void webkitFrameSetURI(WebKitFrame* frame, const CString& uri)
+{
+    if (frame->priv->uri == uri)
+        return;
+
+    frame->priv->uri = uri;
+}
+
+/**
+ * webkit_frame_get_id:
+ * @frame: a #WebKitFrame
+ *
+ * Gets the process-unique identifier of this #WebKitFrame. No other
+ * frame in the same web process will have the same ID; however, frames
+ * in other web processes may.
+ *
+ * Returns: the identifier of @frame
+ *
+ * Since: 2.26
+ */
+guint64 webkit_frame_get_id(WebKitFrame* frame)
+{
+    g_return_val_if_fail(WEBKIT_IS_FRAME(frame), 0);
+
+    return frame->priv->webFrame->frameID().toUInt64();
 }
 
 /**
@@ -90,8 +154,9 @@ const gchar* webkit_frame_get_uri(WebKitFrame* frame)
     return frame->priv->uri.data();
 }
 
+#if PLATFORM(GTK)
 /**
- * webkit_frame_get_javascript_global_context:
+ * webkit_frame_get_javascript_global_context: (skip)
  * @frame: a #WebKitFrame
  *
  * Gets the global JavaScript execution context. Use this function to bridge
@@ -100,6 +165,8 @@ const gchar* webkit_frame_get_uri(WebKitFrame* frame)
  * Returns: (transfer none): the global JavaScript context of @frame
  *
  * Since: 2.2
+ *
+ * Deprecated: 2.22: Use webkit_frame_get_js_context() instead.
  */
 JSGlobalContextRef webkit_frame_get_javascript_global_context(WebKitFrame* frame)
 {
@@ -109,7 +176,7 @@ JSGlobalContextRef webkit_frame_get_javascript_global_context(WebKitFrame* frame
 }
 
 /**
- * webkit_frame_get_javascript_context_for_script_world:
+ * webkit_frame_get_javascript_context_for_script_world: (skip)
  * @frame: a #WebKitFrame
  * @world: a #WebKitScriptWorld
  *
@@ -118,6 +185,8 @@ JSGlobalContextRef webkit_frame_get_javascript_global_context(WebKitFrame* frame
  * Returns: (transfer none): the JavaScript context of @frame for @world
  *
  * Since: 2.2
+ *
+ * Deprecated: 2.22: Use webkit_frame_get_js_context_for_script_world() instead.
  */
 JSGlobalContextRef webkit_frame_get_javascript_context_for_script_world(WebKitFrame* frame, WebKitScriptWorld* world)
 {
@@ -125,4 +194,91 @@ JSGlobalContextRef webkit_frame_get_javascript_context_for_script_world(WebKitFr
     g_return_val_if_fail(WEBKIT_IS_SCRIPT_WORLD(world), 0);
 
     return frame->priv->webFrame->jsContextForWorld(webkitScriptWorldGetInjectedBundleScriptWorld(world));
+}
+#endif
+
+/**
+ * webkit_frame_get_js_context:
+ * @frame: a #WebKitFrame
+ *
+ * Get the JavaScript execution context of @frame. Use this function to bridge
+ * between the WebKit and JavaScriptCore APIs.
+ *
+ * Returns: (transfer full): the #JSCContext for the JavaScript execution context of @frame.
+ *
+ * Since: 2.22
+ */
+JSCContext* webkit_frame_get_js_context(WebKitFrame* frame)
+{
+    g_return_val_if_fail(WEBKIT_IS_FRAME(frame), nullptr);
+
+    return jscContextGetOrCreate(frame->priv->webFrame->jsContext()).leakRef();
+}
+
+/**
+ * webkit_frame_get_js_context_for_script_world:
+ * @frame: a #WebKitFrame
+ * @world: a #WebKitScriptWorld
+ *
+ * Get the JavaScript execution context of @frame for the given #WebKitScriptWorld.
+ *
+ * Returns: (transfer full): the #JSCContext for the JavaScript execution context of @frame for @world.
+ *
+ * Since: 2.22
+ */
+JSCContext* webkit_frame_get_js_context_for_script_world(WebKitFrame* frame, WebKitScriptWorld* world)
+{
+    g_return_val_if_fail(WEBKIT_IS_FRAME(frame), nullptr);
+    g_return_val_if_fail(WEBKIT_IS_SCRIPT_WORLD(world), nullptr);
+
+    return jscContextGetOrCreate(frame->priv->webFrame->jsContextForWorld(webkitScriptWorldGetInjectedBundleScriptWorld(world))).leakRef();
+}
+
+/**
+ * webkit_frame_get_js_value_for_dom_object:
+ * @frame: a #WebKitFrame
+ * @dom_object: a #WebKitDOMObject
+ *
+ * Get a #JSCValue referencing the given DOM object. The value is created in the JavaScript execution
+ * context of @frame.
+ *
+ * Returns: (transfer full): the #JSCValue referencing @dom_object.
+ *
+ * Since: 2.22
+ */
+JSCValue* webkit_frame_get_js_value_for_dom_object(WebKitFrame* frame, WebKitDOMObject* domObject)
+{
+    return webkit_frame_get_js_value_for_dom_object_in_script_world(frame, domObject, webkit_script_world_get_default());
+}
+
+/**
+ * webkit_frame_get_js_value_for_dom_object_in_script_world:
+ * @frame: a #WebKitFrame
+ * @dom_object: a #WebKitDOMObject
+ * @world: a #WebKitScriptWorld
+ *
+ * Get a #JSCValue referencing the given DOM object. The value is created in the JavaScript execution
+ * context of @frame for the given #WebKitScriptWorld.
+ *
+ * Returns: (transfer full): the #JSCValue referencing @dom_object
+ *
+ * Since: 2.22
+ */
+JSCValue* webkit_frame_get_js_value_for_dom_object_in_script_world(WebKitFrame* frame, WebKitDOMObject* domObject, WebKitScriptWorld* world)
+{
+    g_return_val_if_fail(WEBKIT_IS_FRAME(frame), nullptr);
+    g_return_val_if_fail(WEBKIT_DOM_IS_OBJECT(domObject), nullptr);
+    g_return_val_if_fail(WEBKIT_IS_SCRIPT_WORLD(world), nullptr);
+
+    auto* wkWorld = webkitScriptWorldGetInjectedBundleScriptWorld(world);
+    auto jsContext = jscContextGetOrCreate(frame->priv->webFrame->jsContextForWorld(wkWorld));
+    JSDOMWindow* globalObject = frame->priv->webFrame->coreFrame()->script().globalObject(wkWorld->coreWorld());
+    JSValueRef jsValue = nullptr;
+    {
+        JSC::JSLockHolder lock(globalObject);
+        if (WEBKIT_DOM_IS_NODE(domObject))
+            jsValue = toRef(globalObject, toJS(globalObject, globalObject, WebKit::core(WEBKIT_DOM_NODE(domObject))));
+    }
+
+    return jsValue ? jscContextGetOrCreateValue(jsContext.get(), jsValue).leakRef() : nullptr;
 }

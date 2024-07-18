@@ -26,7 +26,7 @@
 #include "config.h"
 #include "CryptoAlgorithmECDH.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 #include "CommonCryptoUtilities.h"
 #include "CryptoKeyEC.h"
@@ -36,7 +36,7 @@ namespace WebCore {
 std::optional<Vector<uint8_t>> CryptoAlgorithmECDH::platformDeriveBits(const CryptoKeyEC& baseKey, const CryptoKeyEC& publicKey)
 {
     std::optional<Vector<uint8_t>> result = std::nullopt;
-    Vector<uint8_t> derivedKey(baseKey.keySizeInBits() / 8); // Per https://tools.ietf.org/html/rfc6090#section-4.
+    Vector<uint8_t> derivedKey(baseKey.keySizeInBytes()); // Per https://tools.ietf.org/html/rfc6090#section-4.
     size_t size = derivedKey.size();
     if (!CCECCryptorComputeSharedSecret(baseKey.platformKey(), publicKey.platformKey(), derivedKey.data(), &size))
         result = WTFMove(derivedKey);
@@ -45,4 +45,4 @@ std::optional<Vector<uint8_t>> CryptoAlgorithmECDH::platformDeriveBits(const Cry
 
 }
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

@@ -24,26 +24,28 @@
 
 #include "ImageOrientation.h"
 #include "TextureMapperGLHeaders.h"
+#include "TextureMapperPlatformLayerBuffer.h"
+#include "TextureMapperShaderProgram.h"
 #include "TransformationMatrix.h"
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
 
-class TextureMapperShaderProgram;
-class ImageOrientation;
+struct ImageOrientation;
 
 class VideoTextureCopierGStreamer {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     enum class ColorConversion {
-        AlreadyRGBA,
         ConvertBGRAToRGBA,
-        ConvertARGBToRGBA
+        ConvertARGBToRGBA,
+        NoConvert,
     };
 
     VideoTextureCopierGStreamer(ColorConversion);
     ~VideoTextureCopierGStreamer();
 
-    bool copyVideoTextureToPlatformTexture(GLuint inputTexture, IntSize& frameSize, GLuint outputTexture, GLenum outputTarget, GLint level, GLenum internalFormat, GLenum format, GLenum type, bool flipY, ImageOrientation& sourceOrientation);
+    bool copyVideoTextureToPlatformTexture(TextureMapperPlatformLayerBuffer& inputTexture, IntSize& frameSize, GLuint outputTexture, GLenum outputTarget, GLint level, GLenum internalFormat, GLenum format, GLenum type, bool flipY, ImageOrientation sourceOrientation, bool premultiplyAlpha);
     void updateColorConversionMatrix(ColorConversion);
     void updateTextureSpaceMatrix();
     void updateTransformationMatrix();
@@ -51,9 +53,10 @@ public:
 
 private:
     RefPtr<TextureMapperShaderProgram> m_shaderProgram;
+    TextureMapperShaderProgram::Options m_shaderOptions;
     GLuint m_framebuffer { 0 };
     GLuint m_vbo { 0 };
-#if !USE(OPENGL_ES_2)
+#if !USE(OPENGL_ES)
     GLuint m_vao { 0 };
 #endif
     bool m_flipY { false };

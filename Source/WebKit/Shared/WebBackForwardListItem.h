@@ -23,12 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WebBackForwardListItem_h
-#define WebBackForwardListItem_h
+#pragma once
 
 #include "APIObject.h"
 #include "SessionState.h"
-#include <wtf/RefPtr.h>
+#include "WebPageProxyIdentifier.h"
+#include <wtf/Ref.h>
+#include <wtf/WeakPtr.h>
 #include <wtf/text/WTFString.h>
 
 namespace API {
@@ -42,40 +43,69 @@ class Encoder;
 
 namespace WebKit {
 
+class SuspendedPageProxy;
+class WebBackForwardCache;
+class WebBackForwardCacheEntry;
+
 class WebBackForwardListItem : public API::ObjectImpl<API::Object::Type::BackForwardListItem> {
 public:
-    static Ref<WebBackForwardListItem> create(BackForwardListItemState&&, uint64_t pageID);
+    static Ref<WebBackForwardListItem> create(BackForwardListItemState&&, WebPageProxyIdentifier);
     virtual ~WebBackForwardListItem();
 
-    uint64_t itemID() const { return m_itemState.identifier; }
-    const BackForwardListItemState& itemState() { return m_itemState; }
-    uint64_t pageID() const { return m_pageID; }
+    static WebBackForwardListItem* itemForID(const WebCore::BackForwardItemIdentifier&);
+    static HashMap<WebCore::BackForwardItemIdentifier, WebBackForwardListItem*>& allItems();
 
-    void setPageState(PageState pageState) { m_itemState.pageState = WTFMove(pageState); }
+    const WebCore::BackForwardItemIdentifier& itemID() const { return m_itemState.identifier; }
+    const BackForwardListItemState& itemState() { return m_itemState; }
+    WebPageProxyIdentifier pageID() const { return m_pageID; }
+
+    WebCore::ProcessIdentifier lastProcessIdentifier() const { return m_lastProcessIdentifier; }
+    void setLastProcessIdentifier(const WebCore::ProcessIdentifier& identifier) { m_lastProcessIdentifier = identifier; }
+
+    void setPageState(PageState&& pageState) { m_itemState.pageState = WTFMove(pageState); }
     const PageState& pageState() const { return m_itemState.pageState; }
 
     const String& originalURL() const { return m_itemState.pageState.mainFrameState.originalURLString; }
     const String& url() const { return m_itemState.pageState.mainFrameState.urlString; }
     const String& title() const { return m_itemState.pageState.title; }
+    bool wasCreatedByJSWithoutUserInteraction() const { return m_itemState.pageState.wasCreatedByJSWithoutUserInteraction; }
+
+    const URL& resourceDirectoryURL() const { return m_resourceDirectoryURL; }
+    void setResourceDirectoryURL(URL&& url) { m_resourceDirectoryURL = WTFMove(url); }
 
     bool itemIsInSameDocument(const WebBackForwardListItem&) const;
+    bool itemIsClone(const WebBackForwardListItem&);
 
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) || PLATFORM(GTK)
     ViewSnapshot* snapshot() const { return m_itemState.snapshot.get(); }
     void setSnapshot(RefPtr<ViewSnapshot>&& snapshot) { m_itemState.snapshot = WTFMove(snapshot); }
 #endif
 
-    static uint64_t highestUsedItemID();
+    void wasRemovedFromBackForwardList();
+
+    WebBackForwardCacheEntry* backForwardCacheEntry() const { return m_backForwardCacheEntry.get(); }
+    SuspendedPageProxy* suspendedPage() const;
+
+#if !LOG_DISABLED
+    const char* loggingString();
+#endif
 
 private:
-    explicit WebBackForwardListItem(BackForwardListItemState&&, uint64_t pageID);
+    WebBackForwardListItem(BackForwardListItemState&&, WebPageProxyIdentifier);
+
+    void removeFromBackForwardCache();
+
+    // WebBackForwardCache.
+    friend class WebBackForwardCache;
+    void setBackForwardCacheEntry(std::unique_ptr<WebBackForwardCacheEntry>&&);
 
     BackForwardListItemState m_itemState;
-    uint64_t m_pageID;
+    URL m_resourceDirectoryURL;
+    WebPageProxyIdentifier m_pageID;
+    WebCore::ProcessIdentifier m_lastProcessIdentifier;
+    std::unique_ptr<WebBackForwardCacheEntry> m_backForwardCacheEntry;
 };
 
-typedef Vector<RefPtr<WebBackForwardListItem>> BackForwardListItemVector;
+typedef Vector<Ref<WebBackForwardListItem>> BackForwardListItemVector;
 
 } // namespace WebKit
-
-#endif // WebBackForwardListItem_h

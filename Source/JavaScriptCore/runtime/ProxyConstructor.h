@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,10 +29,10 @@
 
 namespace JSC {
 
-class ProxyConstructor : public InternalFunction {
+class ProxyConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
-    static const unsigned StructureFlags = Base::StructureFlags;
+    static constexpr unsigned StructureFlags = Base::StructureFlags;
 
     static ProxyConstructor* create(VM&, Structure*);
 
@@ -40,17 +40,16 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype) 
     { 
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info()); 
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info()); 
     }
 
-    void finishCreation(VM&, const char* name, JSGlobalObject*);
+    void finishCreation(VM&, JSGlobalObject*);
 
 private:
     ProxyConstructor(VM&, Structure*);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
 
-    static EncodedJSValue getGetter(ExecState*, EncodedJSValue thisValue, PropertyName);
+    static EncodedJSValue getGetter(JSGlobalObject*, EncodedJSValue thisValue, PropertyName);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(ProxyConstructor, InternalFunction);
 
 } // namespace JSC

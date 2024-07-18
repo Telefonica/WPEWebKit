@@ -23,34 +23,51 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef NetworkLoadParameters_h
-#define NetworkLoadParameters_h
+#pragma once
 
+#include "NetworkActivityTracker.h"
+#include "PolicyDecision.h"
+#include "WebPageProxyIdentifier.h"
 #include <WebCore/BlobDataFileReference.h>
+#include <WebCore/FrameIdentifier.h>
+#include <WebCore/PageIdentifier.h>
 #include <WebCore/ResourceLoaderOptions.h>
 #include <WebCore/ResourceRequest.h>
-#include <pal/SessionID.h>
+#include <WebCore/SecurityOrigin.h>
+#include <WebCore/ShouldRelaxThirdPartyCookieBlocking.h>
+#include <wtf/EnumTraits.h>
+#include <wtf/ProcessID.h>
 
 namespace WebKit {
 
+enum class PreconnectOnly : bool { No, Yes };
+
 class NetworkLoadParameters {
 public:
-    uint64_t webPageID { 0 };
-    uint64_t webFrameID { 0 };
-    PAL::SessionID sessionID { PAL::SessionID::emptySessionID() };
+    WebPageProxyIdentifier webPageProxyID;
+    WebCore::PageIdentifier webPageID;
+    WebCore::FrameIdentifier webFrameID;
+    RefPtr<WebCore::SecurityOrigin> topOrigin;
+    RefPtr<WebCore::SecurityOrigin> sourceOrigin;
+    WTF::ProcessID parentPID { 0 };
+#if HAVE(AUDIT_TOKEN)
+    std::optional<audit_token_t> networkProcessAuditToken;
+#endif
     WebCore::ResourceRequest request;
-    WebCore::ContentSniffingPolicy contentSniffingPolicy { WebCore::SniffContent };
+    WebCore::ContentSniffingPolicy contentSniffingPolicy { WebCore::ContentSniffingPolicy::SniffContent };
+    WebCore::ContentEncodingSniffingPolicy contentEncodingSniffingPolicy { WebCore::ContentEncodingSniffingPolicy::Default };
     WebCore::StoredCredentialsPolicy storedCredentialsPolicy { WebCore::StoredCredentialsPolicy::DoNotUse };
     WebCore::ClientCredentialPolicy clientCredentialPolicy { WebCore::ClientCredentialPolicy::CannotAskClientForCredentials };
-    bool shouldFollowRedirects { true };
     bool shouldClearReferrerOnHTTPSToHTTPRedirect { true };
-    bool defersLoading { false };
     bool needsCertificateInfo { false };
-#if USE(NETWORK_SESSION)
+    bool isMainFrameNavigation { false };
+    bool isMainResourceNavigationForAnyFrame { false };
+    WebCore::ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking { WebCore::ShouldRelaxThirdPartyCookieBlocking::No };
     Vector<RefPtr<WebCore::BlobDataFileReference>> blobFileReferences;
-#endif
+    PreconnectOnly shouldPreconnectOnly { PreconnectOnly::No };
+    std::optional<NetworkActivityTracker> networkActivityTracker;
+    std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain { NavigatingToAppBoundDomain::No };
+    bool hadMainFrameMainResourcePrivateRelayed { false };
 };
 
 } // namespace WebKit
-
-#endif // NetworkLoadParameters_h

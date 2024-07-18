@@ -23,24 +23,25 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WKAccessibilityWebPageObjectBase_h
-#define WKAccessibilityWebPageObjectBase_h
+#import <WebCore/PageIdentifier.h>
+#import <wtf/NakedPtr.h>
 
 namespace WebKit {
 class WebPage;
 }
 
 @interface WKAccessibilityWebPageObjectBase : NSObject {
-    WebKit::WebPage* m_page;
-    id m_parent;
+    NakedPtr<WebKit::WebPage> m_page;
+    WebCore::PageIdentifier m_pageID;
+    RetainPtr<id> m_parent;
+    bool m_hasMainFramePlugin;
 }
 
-- (void)setWebPage:(WebKit::WebPage*)page;
+- (void)setWebPage:(NakedPtr<WebKit::WebPage>)page;
 - (void)setRemoteParent:(id)parent;
+- (void)setHasMainFramePlugin:(bool)hasPlugin;
 
 - (id)accessibilityRootObjectWrapper;
 - (id)accessibilityFocusedUIElement;
 
 @end
-
-#endif // WKAccessibilityWebPageObjectBase_h

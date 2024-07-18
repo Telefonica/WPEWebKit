@@ -26,8 +26,6 @@
 #include "WebGeolocationPosition.h"
 #include <WebCore/COMPtr.h>
 
-#include <WebCore/GeolocationPosition.h>
-
 using namespace WebCore;
 
 COMPtr<WebGeolocationPosition> WebGeolocationPosition::createInstance()
@@ -38,13 +36,13 @@ COMPtr<WebGeolocationPosition> WebGeolocationPosition::createInstance()
 WebGeolocationPosition::WebGeolocationPosition()
 {
     gClassCount++;
-    gClassNameCount().add("WebGeolocationPosition");
+    gClassNameCount().add("WebGeolocationPosition"_s);
 }
 
 WebGeolocationPosition::~WebGeolocationPosition()
 {
     gClassCount--;
-    gClassNameCount().remove("WebGeolocationPosition");
+    gClassNameCount().remove("WebGeolocationPosition"_s);
 }
 
 HRESULT WebGeolocationPosition::QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppvObject)
@@ -81,18 +79,18 @@ ULONG WebGeolocationPosition::Release()
 
 HRESULT WebGeolocationPosition::initWithTimestamp(double timestamp, double latitude, double longitude, double accuracy)
 {
-    m_position = GeolocationPosition::create(timestamp, latitude, longitude, accuracy);
+    m_position = GeolocationPositionData { timestamp, latitude, longitude, accuracy };
     return S_OK;
 }
 
-GeolocationPosition* core(IWebGeolocationPosition* position)
+std::optional<GeolocationPositionData> core(IWebGeolocationPosition* position)
 {
     if (!position)
-        return 0;
+        return std::nullopt;
 
     COMPtr<WebGeolocationPosition> webGeolocationPosition(Query, position);
     if (!webGeolocationPosition)
-        return 0;
+        return std::nullopt;
 
     return webGeolocationPosition->impl();
 }

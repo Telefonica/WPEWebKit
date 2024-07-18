@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebGeolocationInternal.h"
 #import <WebCore/Geolocation.h>
@@ -50,7 +50,7 @@ using namespace WebCore;
 
 - (void)setIsAllowed:(BOOL)allowed
 {
-    reinterpret_cast<Geolocation*>(_private)->setIsAllowed(allowed);
+    reinterpret_cast<Geolocation*>(_private)->setIsAllowed(allowed, { });
 }
 
 - (void)dealloc
@@ -62,4 +62,4 @@ using namespace WebCore;
 
 @end
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

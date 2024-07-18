@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,13 +30,12 @@
 
 #include "WebPage.h"
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 void WebDragClient::willPerformDragDestinationAction(DragDestinationAction action, const DragData&)
 {
-    if (action == DragDestinationActionLoad)
+    if (action == DragDestinationAction::Load)
         m_page->willPerformLoadDragDestinationAction();
     else
         m_page->mayPerformUploadDragDestinationAction(); // Upload can happen from a drop event handler, so we should prepare early.
@@ -46,9 +45,9 @@ void WebDragClient::willPerformDragSourceAction(DragSourceAction, const IntPoint
 {
 }
 
-DragSourceAction WebDragClient::dragSourceActionMaskForPoint(const IntPoint&)
+OptionSet<DragSourceAction> WebDragClient::dragSourceActionMaskForPoint(const IntPoint&)
 {
-    return DragSourceActionAny;
+    return m_page->allowedDragSourceActions();
 }
 
 #if !PLATFORM(COCOA) && !PLATFORM(GTK)
@@ -60,11 +59,6 @@ void WebDragClient::didConcludeEditDrag()
 {
 }
 #endif
-
-void WebDragClient::dragControllerDestroyed()
-{
-    delete this;
-}
 
 } // namespace WebKit
 

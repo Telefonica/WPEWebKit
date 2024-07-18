@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2006 Apple Inc.  All rights reserved.
+ * Copyright (C) 2003-2022 Apple Inc.  All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,55 +41,41 @@ namespace WebCore {
 
 class ResourceRequest : public ResourceRequestBase {
 public:
-    ResourceRequest(const String& url) 
-        : ResourceRequestBase(URL(ParsedURLString, url), UseProtocolCachePolicy)
+    explicit ResourceRequest(const String& url) 
+        : ResourceRequestBase(URL({ }, url), ResourceRequestCachePolicy::UseProtocolCachePolicy)
     {
     }
 
     ResourceRequest(const URL& url) 
-        : ResourceRequestBase(url, UseProtocolCachePolicy)
+        : ResourceRequestBase(url, ResourceRequestCachePolicy::UseProtocolCachePolicy)
     {
     }
 
-    ResourceRequest(const URL& url, const String& referrer, ResourceRequestCachePolicy policy = UseProtocolCachePolicy)
+    ResourceRequest(const URL& url, const String& referrer, ResourceRequestCachePolicy policy = ResourceRequestCachePolicy::UseProtocolCachePolicy)
         : ResourceRequestBase(url, policy)
     {
         setHTTPReferrer(referrer);
     }
     
     ResourceRequest()
-        : ResourceRequestBase(URL(), UseProtocolCachePolicy)
+        : ResourceRequestBase(URL(), ResourceRequestCachePolicy::UseProtocolCachePolicy)
     {
     }
     
 #if USE(CFURLCONNECTION)
-#if PLATFORM(COCOA)
-    WEBCORE_EXPORT ResourceRequest(NSURLRequest *);
-    void updateNSURLRequest();
-    void clearOrUpdateNSURLRequest();
-#endif
-
     ResourceRequest(CFURLRequestRef cfRequest)
         : ResourceRequestBase()
         , m_cfRequest(cfRequest)
     {
     }
 #else
-    ResourceRequest(NSURLRequest *nsRequest)
-        : ResourceRequestBase()
-        , m_nsRequest(nsRequest)
-    {
-    }
+    WEBCORE_EXPORT ResourceRequest(NSURLRequest *);
 #endif
 
     WEBCORE_EXPORT void updateFromDelegatePreservingOldProperties(const ResourceRequest&);
 
 #if PLATFORM(COCOA)
-#if USE(CFURLCONNECTION)
-    bool encodingRequiresPlatformData() const { return m_httpBody || m_cfRequest; }
-#else
     bool encodingRequiresPlatformData() const { return m_httpBody || m_nsRequest; }
-#endif
     WEBCORE_EXPORT NSURLRequest *nsURLRequest(HTTPBodyUpdatePolicy) const;
 
     WEBCORE_EXPORT static CFStringRef isUserInitiatedKey();
@@ -104,6 +90,8 @@ public:
     WEBCORE_EXPORT static void setHTTPPipeliningEnabled(bool);
 
     static bool resourcePrioritiesEnabled();
+
+    WEBCORE_EXPORT void replacePlatformRequest(HTTPBodyUpdatePolicy);
 
 private:
     friend class ResourceRequestBase;
@@ -129,7 +117,7 @@ inline bool ResourceRequest::resourcePrioritiesEnabled()
 {
 #if PLATFORM(MAC)
     return true;
-#elif PLATFORM(IOS)
+#elif PLATFORM(IOS_FAMILY)
     return true;
 #elif PLATFORM(WIN)
     return false;
@@ -137,7 +125,7 @@ inline bool ResourceRequest::resourcePrioritiesEnabled()
 }
 
 #if PLATFORM(COCOA)
-NSURLRequest *copyRequestWithStorageSession(CFURLStorageSessionRef, NSURLRequest *);
+RetainPtr<NSURLRequest> copyRequestWithStorageSession(CFURLStorageSessionRef, NSURLRequest *);
 WEBCORE_EXPORT NSCachedURLResponse *cachedResponseForRequest(CFURLStorageSessionRef, NSURLRequest *);
 #endif
 

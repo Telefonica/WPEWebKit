@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,8 +34,13 @@
 
 namespace JSC { namespace B3 {
 
-bool shouldDumpIR(B3ComplitationMode mode)
+const char* const tierName = "b3  ";
+
+bool shouldDumpIR(Procedure& procedure, B3CompilationMode mode)
 {
+    if (procedure.shouldDumpIR())
+        return true;
+
 #if ENABLE(FTL_JIT)
     return FTL::verboseCompilationEnabled() || FTL::shouldDumpDisassembly() || shouldDumpIRAtEachPhase(mode);
 #else
@@ -43,7 +48,7 @@ bool shouldDumpIR(B3ComplitationMode mode)
 #endif
 }
 
-bool shouldDumpIRAtEachPhase(B3ComplitationMode mode)
+bool shouldDumpIRAtEachPhase(B3CompilationMode mode)
 {
     if (mode == B3Mode)
         return Options::dumpGraphAtEachPhase() || Options::dumpB3GraphAtEachPhase();
@@ -65,17 +70,13 @@ bool shouldSaveIRBeforePhase()
     return Options::verboseValidationFailure();
 }
 
-bool shouldMeasurePhaseTiming()
+GPRReg extendedOffsetAddrRegister()
 {
-    return Options::logB3PhaseTimes();
-}
-
-std::optional<GPRReg> pinnedExtendedOffsetAddrRegister()
-{
-#if CPU(ARM64)
-    return static_cast<GPRReg>(+MacroAssembler::dataTempRegister);
+    RELEASE_ASSERT(isARM64() || isRISCV64());
+#if CPU(ARM64) || CPU(RISCV64)
+    return MacroAssembler::linkRegister;
 #elif CPU(X86_64)
-    return std::nullopt;
+    return GPRReg::InvalidGPRReg;
 #else
 #error Unhandled architecture.
 #endif

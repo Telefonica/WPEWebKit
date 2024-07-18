@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2013 The WebRTC project authors. All Rights Reserved.
+ *  Copyright (c) 2020 The WebRTC project authors. All Rights Reserved.
  *
  *  Use of this source code is governed by a BSD-style license
  *  that can be found in the LICENSE file in the root of the source
@@ -8,151 +8,208 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_VIDEO_RECEIVE_STATISTICS_PROXY_H_
-#define WEBRTC_VIDEO_RECEIVE_STATISTICS_PROXY_H_
+#ifndef VIDEO_RECEIVE_STATISTICS_PROXY_H_
+#define VIDEO_RECEIVE_STATISTICS_PROXY_H_
 
 #include <map>
+#include <memory>
 #include <string>
+#include <vector>
 
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/rate_statistics.h"
-#include "webrtc/base/ratetracker.h"
-#include "webrtc/base/thread_annotations.h"
-#include "webrtc/common_types.h"
-#include "webrtc/common_video/include/frame_callback.h"
-#include "webrtc/modules/video_coding/include/video_coding_defines.h"
-#include "webrtc/video/quality_threshold.h"
-#include "webrtc/video/report_block_stats.h"
-#include "webrtc/video/stats_counter.h"
-#include "webrtc/video/video_stream_decoder.h"
-#include "webrtc/video_receive_stream.h"
+#include "absl/types/optional.h"
+#include "api/sequence_checker.h"
+#include "api/task_queue/pending_task_safety_flag.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/units/timestamp.h"
+#include "api/video_codecs/video_decoder.h"
+#include "call/video_receive_stream.h"
+#include "modules/include/module_common_types.h"
+#include "rtc_base/numerics/histogram_percentile_counter.h"
+#include "rtc_base/numerics/moving_max_counter.h"
+#include "rtc_base/numerics/sample_counter.h"
+#include "rtc_base/rate_statistics.h"
+#include "rtc_base/rate_tracker.h"
+#include "rtc_base/system/no_unique_address.h"
+#include "rtc_base/thread_annotations.h"
+#include "video/stats_counter.h"
+#include "video/video_quality_observer2.h"
+#include "video/video_stream_buffer_controller.h"
 
 namespace webrtc {
 
 class Clock;
-class ViECodec;
-class ViEDecoderObserver;
 struct CodecSpecificInfo;
 
-class ReceiveStatisticsProxy : public VCMReceiveStatisticsCallback,
-                               public RtcpStatisticsCallback,
-                               public RtcpPacketTypeCounterObserver,
-                               public StreamDataCountersCallback,
-                               public CallStatsObserver {
+namespace internal {
+// Declared in video_receive_stream2.h.
+struct VideoFrameMetaData;
+
+class ReceiveStatisticsProxy : public VideoStreamBufferControllerStatsObserver,
+                               public RtcpCnameCallback,
+                               public RtcpPacketTypeCounterObserver {
  public:
-  ReceiveStatisticsProxy(const VideoReceiveStream::Config* config,
-                         Clock* clock);
-  virtual ~ReceiveStatisticsProxy();
+  ReceiveStatisticsProxy(uint32_t remote_ssrc,
+                         Clock* clock,
+                         TaskQueueBase* worker_thread);
+  ~ReceiveStatisticsProxy() override;
 
-  VideoReceiveStream::Stats GetStats() const;
+  VideoReceiveStreamInterface::Stats GetStats() const;
 
-  void OnDecodedFrame(rtc::Optional<uint8_t> qp, VideoContentType content_type);
-  void OnSyncOffsetUpdated(int64_t sync_offset_ms, double estimated_freq_khz);
-  void OnRenderedFrame(const VideoFrame& frame);
+  void OnDecodedFrame(const VideoFrame& frame,
+                      absl::optional<uint8_t> qp,
+                      TimeDelta decode_time,
+                      VideoContentType content_type,
+                      VideoFrameType frame_type);
+
+  // Called asyncronously on the worker thread as a result of a call to the
+  // above OnDecodedFrame method, which is called back on the thread where
+  // the actual decoding happens.
+  void OnDecodedFrame(const VideoFrameMetaData& frame_meta,
+                      absl::optional<uint8_t> qp,
+                      TimeDelta decode_time,
+                      TimeDelta processing_delay,
+                      TimeDelta assembly_time,
+                      VideoContentType content_type,
+                      VideoFrameType frame_type);
+
+  void OnSyncOffsetUpdated(int64_t video_playout_ntp_ms,
+                           int64_t sync_offset_ms,
+                           double estimated_freq_khz);
+  void OnRenderedFrame(const VideoFrameMetaData& frame_meta);
   void OnIncomingPayloadType(int payload_type);
-  void OnDecoderImplementationName(const char* implementation_name);
-  void OnIncomingRate(unsigned int framerate, unsigned int bitrate_bps);
+  void OnDecoderInfo(const VideoDecoder::DecoderInfo& decoder_info);
 
-  void OnPreDecode(const EncodedImage& encoded_image,
-                   const CodecSpecificInfo* codec_specific_info);
+  void OnPreDecode(VideoCodecType codec_type, int qp);
 
-  // Overrides VCMReceiveStatisticsCallback.
-  void OnReceiveRatesUpdated(uint32_t bitRate, uint32_t frameRate) override;
-  void OnFrameCountsUpdated(const FrameCounts& frame_counts) override;
-  void OnDiscardedPacketsUpdated(int discarded_packets) override;
-  void OnCompleteFrame(bool is_keyframe, size_t size_bytes) override;
-  void OnFrameBufferTimingsUpdated(int decode_ms,
-                                   int max_decode_ms,
+  void OnUniqueFramesCounted(int num_unique_frames);
+
+  // Indicates video stream has been paused (no incoming packets).
+  void OnStreamInactive();
+
+  // Implements VideoStreamBufferControllerStatsObserver.
+  void OnCompleteFrame(bool is_keyframe,
+                       size_t size_bytes,
+                       VideoContentType content_type) override;
+  void OnDroppedFrames(uint32_t frames_dropped) override;
+  void OnDecodableFrame(TimeDelta jitter_buffer_delay,
+                        TimeDelta target_delay,
+                        TimeDelta minimum_delay) override;
+  void OnFrameBufferTimingsUpdated(int estimated_max_decode_time_ms,
                                    int current_delay_ms,
                                    int target_delay_ms,
-                                   int jitter_buffer_ms,
+                                   int jitter_delay_ms,
                                    int min_playout_delay_ms,
                                    int render_delay_ms) override;
+  void OnTimingFrameInfoUpdated(const TimingFrameInfo& info) override;
 
-  // Overrides RtcpStatisticsCallback.
-  void StatisticsUpdated(const webrtc::RtcpStatistics& statistics,
-                         uint32_t ssrc) override;
-  void CNameChanged(const char* cname, uint32_t ssrc) override;
+  // Implements RtcpCnameCallback.
+  void OnCname(uint32_t ssrc, absl::string_view cname) override;
 
-  // Overrides RtcpPacketTypeCounterObserver.
+  // Implements RtcpPacketTypeCounterObserver.
   void RtcpPacketTypesCounterUpdated(
       uint32_t ssrc,
       const RtcpPacketTypeCounter& packet_counter) override;
-  // Overrides StreamDataCountersCallback.
-  void DataCountersUpdated(const webrtc::StreamDataCounters& counters,
-                           uint32_t ssrc) override;
 
-  // Implements CallStatsObserver.
-  void OnRttUpdate(int64_t avg_rtt_ms, int64_t max_rtt_ms) override;
+  void OnRttUpdate(int64_t avg_rtt_ms);
+
+  // Notification methods that are used to check our internal state and validate
+  // threading assumptions. These are called by VideoReceiveStreamInterface.
+  void DecoderThreadStarting();
+  void DecoderThreadStopped();
+
+  // Produce histograms. Must be called after DecoderThreadStopped(), typically
+  // at the end of the call.
+  void UpdateHistograms(absl::optional<int> fraction_lost,
+                        const StreamDataCounters& rtp_stats,
+                        const StreamDataCounters* rtx_stats);
 
  private:
-  struct SampleCounter {
-    SampleCounter() : sum(0), num_samples(0) {}
-    void Add(int sample);
-    int Avg(int64_t min_required_samples) const;
-    void Reset();
-
-   private:
-    int64_t sum;
-    int64_t num_samples;
-  };
   struct QpCounters {
-    SampleCounter vp8;
+    rtc::SampleCounter vp8;
   };
 
-  void UpdateHistograms() EXCLUSIVE_LOCKS_REQUIRED(crit_);
+  struct ContentSpecificStats {
+    ContentSpecificStats();
+    ~ContentSpecificStats();
 
-  void QualitySample() EXCLUSIVE_LOCKS_REQUIRED(crit_);
+    void Add(const ContentSpecificStats& other);
+
+    rtc::SampleCounter e2e_delay_counter;
+    rtc::SampleCounter interframe_delay_counter;
+    int64_t flow_duration_ms = 0;
+    int64_t total_media_bytes = 0;
+    rtc::SampleCounter received_width;
+    rtc::SampleCounter received_height;
+    rtc::SampleCounter qp_counter;
+    FrameCounts frame_counts;
+    rtc::HistogramPercentileCounter interframe_delay_percentiles;
+  };
 
   // Removes info about old frames and then updates the framerate.
-  void UpdateFramerate(int64_t now_ms) const EXCLUSIVE_LOCKS_REQUIRED(crit_);
+  void UpdateFramerate(int64_t now_ms) const;
+
+  absl::optional<int64_t> GetCurrentEstimatedPlayoutNtpTimestampMs(
+      int64_t now_ms) const;
 
   Clock* const clock_;
-  // Ownership of this object lies with the owner of the ReceiveStatisticsProxy
-  // instance.  Lifetime is guaranteed to outlive |this|.
-  // TODO(tommi): In practice the config_ reference is only used for accessing
-  // config_.rtp.ulpfec.ulpfec_payload_type.  Instead of holding a pointer back,
-  // we could just store the value of ulpfec_payload_type and change the
-  // ReceiveStatisticsProxy() ctor to accept a const& of Config (since we'll
-  // then no longer store a pointer to the object).
-  const VideoReceiveStream::Config& config_;
   const int64_t start_ms_;
 
-  rtc::CriticalSection crit_;
-  int64_t last_sample_time_ GUARDED_BY(crit_);
-  QualityThreshold fps_threshold_ GUARDED_BY(crit_);
-  QualityThreshold qp_threshold_ GUARDED_BY(crit_);
-  QualityThreshold variance_threshold_ GUARDED_BY(crit_);
-  SampleCounter qp_sample_ GUARDED_BY(crit_);
-  int num_bad_states_ GUARDED_BY(crit_);
-  int num_certain_states_ GUARDED_BY(crit_);
-  mutable VideoReceiveStream::Stats stats_ GUARDED_BY(crit_);
-  RateStatistics decode_fps_estimator_ GUARDED_BY(crit_);
-  RateStatistics renders_fps_estimator_ GUARDED_BY(crit_);
-  rtc::RateTracker render_fps_tracker_ GUARDED_BY(crit_);
-  rtc::RateTracker render_pixel_tracker_ GUARDED_BY(crit_);
-  rtc::RateTracker total_byte_tracker_ GUARDED_BY(crit_);
-  SampleCounter render_width_counter_ GUARDED_BY(crit_);
-  SampleCounter render_height_counter_ GUARDED_BY(crit_);
-  SampleCounter sync_offset_counter_ GUARDED_BY(crit_);
-  SampleCounter decode_time_counter_ GUARDED_BY(crit_);
-  SampleCounter jitter_buffer_delay_counter_ GUARDED_BY(crit_);
-  SampleCounter target_delay_counter_ GUARDED_BY(crit_);
-  SampleCounter current_delay_counter_ GUARDED_BY(crit_);
-  SampleCounter delay_counter_ GUARDED_BY(crit_);
-  SampleCounter e2e_delay_counter_video_ GUARDED_BY(crit_);
-  SampleCounter e2e_delay_counter_screenshare_ GUARDED_BY(crit_);
-  int64_t e2e_delay_max_ms_video_ GUARDED_BY(crit_);
-  int64_t e2e_delay_max_ms_screenshare_ GUARDED_BY(crit_);
-  MaxCounter freq_offset_counter_ GUARDED_BY(crit_);
-  int64_t first_report_block_time_ms_ GUARDED_BY(crit_);
-  ReportBlockStats report_block_stats_ GUARDED_BY(crit_);
-  QpCounters qp_counters_;  // Only accessed on the decoding thread.
-  std::map<uint32_t, StreamDataCounters> rtx_stats_ GUARDED_BY(crit_);
-  int64_t avg_rtt_ms_ GUARDED_BY(crit_);
-  mutable std::map<int64_t, size_t> frame_window_ GUARDED_BY(&crit_);
-  VideoContentType last_content_type_ GUARDED_BY(&crit_);
+  // Note: The `stats_.rtp_stats` member is not used or populated by this class.
+  mutable VideoReceiveStreamInterface::Stats stats_
+      RTC_GUARDED_BY(main_thread_);
+  // Same as stats_.ssrc, but const (no lock required).
+  const uint32_t remote_ssrc_;
+  RateStatistics decode_fps_estimator_ RTC_GUARDED_BY(main_thread_);
+  RateStatistics renders_fps_estimator_ RTC_GUARDED_BY(main_thread_);
+  rtc::RateTracker render_fps_tracker_ RTC_GUARDED_BY(main_thread_);
+  rtc::RateTracker render_pixel_tracker_ RTC_GUARDED_BY(main_thread_);
+  rtc::SampleCounter sync_offset_counter_ RTC_GUARDED_BY(main_thread_);
+  rtc::SampleCounter decode_time_counter_ RTC_GUARDED_BY(main_thread_);
+  rtc::SampleCounter jitter_delay_counter_ RTC_GUARDED_BY(main_thread_);
+  rtc::SampleCounter target_delay_counter_ RTC_GUARDED_BY(main_thread_);
+  rtc::SampleCounter current_delay_counter_ RTC_GUARDED_BY(main_thread_);
+  rtc::SampleCounter oneway_delay_counter_ RTC_GUARDED_BY(main_thread_);
+  std::unique_ptr<VideoQualityObserver> video_quality_observer_
+      RTC_GUARDED_BY(main_thread_);
+  mutable rtc::MovingMaxCounter<int> interframe_delay_max_moving_
+      RTC_GUARDED_BY(main_thread_);
+  std::map<VideoContentType, ContentSpecificStats> content_specific_stats_
+      RTC_GUARDED_BY(main_thread_);
+  MaxCounter freq_offset_counter_ RTC_GUARDED_BY(main_thread_);
+  QpCounters qp_counters_ RTC_GUARDED_BY(main_thread_);
+  int64_t avg_rtt_ms_ RTC_GUARDED_BY(main_thread_) = 0;
+  mutable std::map<int64_t, size_t> frame_window_ RTC_GUARDED_BY(main_thread_);
+  VideoContentType last_content_type_ RTC_GUARDED_BY(&main_thread_);
+  VideoCodecType last_codec_type_ RTC_GUARDED_BY(main_thread_);
+  absl::optional<int64_t> first_frame_received_time_ms_
+      RTC_GUARDED_BY(main_thread_);
+  absl::optional<int64_t> first_decoded_frame_time_ms_
+      RTC_GUARDED_BY(main_thread_);
+  absl::optional<int64_t> last_decoded_frame_time_ms_
+      RTC_GUARDED_BY(main_thread_);
+  size_t num_delayed_frames_rendered_ RTC_GUARDED_BY(main_thread_);
+  int64_t sum_missed_render_deadline_ms_ RTC_GUARDED_BY(main_thread_);
+  // Mutable because calling Max() on MovingMaxCounter is not const. Yet it is
+  // called from const GetStats().
+  mutable rtc::MovingMaxCounter<TimingFrameInfo> timing_frame_info_counter_
+      RTC_GUARDED_BY(main_thread_);
+  absl::optional<int> num_unique_frames_ RTC_GUARDED_BY(main_thread_);
+  absl::optional<int64_t> last_estimated_playout_ntp_timestamp_ms_
+      RTC_GUARDED_BY(main_thread_);
+  absl::optional<int64_t> last_estimated_playout_time_ms_
+      RTC_GUARDED_BY(main_thread_);
+
+  // The thread on which this instance is constructed and some of its main
+  // methods are invoked on such as GetStats().
+  TaskQueueBase* const worker_thread_;
+
+  ScopedTaskSafety task_safety_;
+
+  RTC_NO_UNIQUE_ADDRESS SequenceChecker decode_queue_;
+  SequenceChecker main_thread_;
+  RTC_NO_UNIQUE_ADDRESS SequenceChecker incoming_render_queue_;
 };
 
+}  // namespace internal
 }  // namespace webrtc
-#endif  // WEBRTC_VIDEO_RECEIVE_STATISTICS_PROXY_H_
+#endif  // VIDEO_RECEIVE_STATISTICS_PROXY_H_

@@ -29,10 +29,11 @@
 #pragma once
 
 #include "ImageDecoder.h"
-#include "ImageFrame.h"
 #include "IntRect.h"
+#include "ScalableImageDecoderFrame.h"
 #include "SharedBuffer.h"
 #include <wtf/Assertions.h>
+#include <wtf/Lock.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
@@ -40,7 +41,7 @@
 namespace WebCore {
 
 // ScalableImageDecoder is a base for all format-specific decoders
-// (e.g. JPEGImageDecoder). This base manages the ImageFrame cache.
+// (e.g. JPEGImageDecoder). This base manages the ScalableImageDecoderFrame cache.
 
 class ScalableImageDecoder : public ImageDecoder {
     WTF_MAKE_NONCOPYABLE(ScalableImageDecoder); WTF_MAKE_FAST_ALLOCATED;
@@ -55,9 +56,11 @@ public:
     {
     }
 
+    static bool supportsMediaType(MediaType type) { return type == MediaType::Image; }
+
     // Returns nullptr if we can't sniff a supported type from the provided data (possibly
     // because there isn't enough data yet).
-    static RefPtr<ScalableImageDecoder> create(SharedBuffer& data, AlphaOption, GammaAndColorProfileOption);
+    static RefPtr<ScalableImageDecoder> create(FragmentedSharedBuffer& data, AlphaOption, GammaAndColorProfileOption);
 
     bool premultiplyAlpha() const { return m_premultiplyAlpha; }
 
@@ -67,12 +70,14 @@ public:
         return m_encodedDataStatus == EncodedDataStatus::Complete;
     }
 
-    void setData(SharedBuffer& data, bool allDataReceived) override
+    void setData(const FragmentedSharedBuffer& data, bool allDataReceived) override
     {
+        Locker locker { m_lock };
         if (m_encodedDataStatus == EncodedDataStatus::Error)
             return;
 
-        m_data = &data;
+        m_data = data.makeContiguous();
+
         if (m_encodedDataStatus == EncodedDataStatus::TypeAvailable) {
             m_decodingSizeFromSetData = true;
             tryDecodeSize(allDataReceived);
@@ -93,11 +98,6 @@ public:
     bool isSizeAvailable() const override { return m_encodedDataStatus >= EncodedDataStatus::SizeAvailable; }
 
     IntSize size() const override { return isSizeAvailable() ? m_size : IntSize(); }
-
-    IntSize scaledSize()
-    {
-        return m_scaled ? IntSize(m_scaledColumns.size(), m_scaledRows.size()) : size();
-    }
 
     // This will only differ from size() for ICO (where each frame is a
     // different icon) or other formats where different frames are different
@@ -130,7 +130,7 @@ public:
 
     // Decodes as much of the requested frame as possible, and returns an
     // ScalableImageDecoder-owned pointer.
-    virtual ImageFrame* frameBufferAtIndex(size_t) = 0;
+    virtual ScalableImageDecoderFrame* frameBufferAtIndex(size_t) = 0;
 
     bool frameIsCompleteAtIndex(size_t) const override;
 
@@ -142,12 +142,12 @@ public:
 
     Seconds frameDurationAtIndex(size_t) const final;
 
-    NativeImagePtr createFrameImageAtIndex(size_t, SubsamplingLevel = SubsamplingLevel::Default, const DecodingOptions& = DecodingMode::Synchronous) override;
+    PlatformImagePtr createFrameImageAtIndex(size_t, SubsamplingLevel = SubsamplingLevel::Default, const DecodingOptions& = DecodingOptions(DecodingMode::Synchronous)) override;
 
     void setIgnoreGammaAndColorProfile(bool flag) { m_ignoreGammaAndColorProfile = flag; }
     bool ignoresGammaAndColorProfile() const { return m_ignoreGammaAndColorProfile; }
 
-    ImageOrientation frameOrientationAtIndex(size_t) const override { return m_orientation; }
+    ImageDecoder::FrameMetadata frameMetadataAtIndex(size_t) const override { return { m_orientation, m_densityCorrectedSize }; }
 
     bool frameAllowSubsamplingAtIndex(size_t) const override { return false; }
 
@@ -193,21 +193,13 @@ public:
     std::optional<IntPoint> hotSpot() const override { return std::nullopt; }
 
 protected:
-    void prepareScaleDataIfNecessary();
-    int upperBoundScaledX(int origX, int searchStart = 0);
-    int lowerBoundScaledX(int origX, int searchStart = 0);
-    int upperBoundScaledY(int origY, int searchStart = 0);
-    int lowerBoundScaledY(int origY, int searchStart = 0);
-    int scaledY(int origY, int searchStart = 0);
-
-    RefPtr<SharedBuffer> m_data; // The encoded data.
-    Vector<ImageFrame, 1> m_frameBufferCache;
-    bool m_scaled { false };
-    Vector<int> m_scaledColumns;
-    Vector<int> m_scaledRows;
+    RefPtr<const SharedBuffer> m_data;
+    Vector<ScalableImageDecoderFrame, 1> m_frameBufferCache WTF_GUARDED_BY_LOCK(m_lock);
+    mutable Lock m_lock;
     bool m_premultiplyAlpha;
     bool m_ignoreGammaAndColorProfile;
     ImageOrientation m_orientation;
+    std::optional<IntSize> m_densityCorrectedSize;
 
 private:
     virtual void tryDecodeSize(bool) = 0;
@@ -215,12 +207,6 @@ private:
     IntSize m_size;
     EncodedDataStatus m_encodedDataStatus { EncodedDataStatus::TypeAvailable };
     bool m_decodingSizeFromSetData { false };
-
-    // FIXME: Evaluate the need for decoded data scaling. m_scaled,
-    // m_scaledColumns and m_scaledRows are member variables that are
-    // affected by this value, and are not used at all since the value
-    // is negavite (see prepareScaleDataIfNecessary()).
-    static const int m_maxNumPixels { -1 };
 };
 
 } // namespace WebCore

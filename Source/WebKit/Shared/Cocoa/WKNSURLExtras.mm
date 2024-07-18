@@ -26,38 +26,14 @@
 #import "config.h"
 #import "WKNSURLExtras.h"
 
-#import <WebCore/CFURLExtras.h>
-#import <wtf/text/CString.h>
-#import <wtf/text/WTFString.h>
-
-using namespace WebCore;
+#import <wtf/URL.h>
 
 @implementation NSURL (WKExtras)
 
-static inline NSURL *urlWithWTFString(const String& string, NSURL *baseURL = nil)
-{
-    if (!string)
-        return nil;
-
-    CString buffer = string.utf8();
-    return (NSURL *)createCFURLFromBuffer(buffer.data(), buffer.length(), (CFURLRef)baseURL).autorelease();
-}
-
 + (instancetype)_web_URLWithWTFString:(const String&)string
 {
-    return urlWithWTFString(string);
-}
-
-+ (instancetype)_web_URLWithWTFString:(const String&)string relativeToURL:(NSURL *)baseURL
-{
-    return urlWithWTFString(string, baseURL);
-}
-
-- (String)_web_originalDataAsWTFString
-{
-    CString originalData;
-    getURLBytes((CFURLRef)self, originalData);
-    return String::fromUTF8(originalData);
+    URL url { URL { }, string };
+    return (NSURL *)url;
 }
 
 @end

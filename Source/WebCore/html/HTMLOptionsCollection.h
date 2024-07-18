@@ -30,6 +30,7 @@
 namespace WebCore {
 
 class HTMLOptionsCollection final : public CachedHTMLCollection<HTMLOptionsCollection, CollectionTypeTraits<SelectOptions>::traversalType> {
+    WTF_MAKE_ISO_ALLOCATED_EXPORT(HTMLOptionsCollection, WEBCORE_EXPORT);
 public:
     using Base = CachedHTMLCollection<HTMLOptionsCollection, CollectionTypeTraits<SelectOptions>::traversalType>;
 
@@ -39,12 +40,12 @@ public:
     const HTMLSelectElement& selectElement() const { return downcast<HTMLSelectElement>(ownerNode()); }
 
     HTMLOptionElement* item(unsigned offset) const final;
-    HTMLOptionElement* namedItem(const AtomicString& name) const final;
+    HTMLOptionElement* namedItem(const AtomString& name) const final;
     
     ExceptionOr<void> setItem(unsigned index, HTMLOptionElement*);
     
-    using OptionOrOptGroupElement = Variant<RefPtr<HTMLOptionElement>, RefPtr<HTMLOptGroupElement>>;
-    using HTMLElementOrInt = Variant<RefPtr<HTMLElement>, int>;
+    using OptionOrOptGroupElement = std::variant<RefPtr<HTMLOptionElement>, RefPtr<HTMLOptGroupElement>>;
+    using HTMLElementOrInt = std::variant<RefPtr<HTMLElement>, int>;
     WEBCORE_EXPORT ExceptionOr<void> add(const OptionOrOptGroupElement&, const std::optional<HTMLElementOrInt>& before);
     WEBCORE_EXPORT void remove(int index);
 
@@ -65,7 +66,7 @@ inline HTMLOptionElement* HTMLOptionsCollection::item(unsigned offset) const
     return downcast<HTMLOptionElement>(Base::item(offset));
 }
 
-inline HTMLOptionElement* HTMLOptionsCollection::namedItem(const AtomicString& name) const
+inline HTMLOptionElement* HTMLOptionsCollection::namedItem(const AtomString& name) const
 {
     return downcast<HTMLOptionElement>(Base::namedItem(name));
 }

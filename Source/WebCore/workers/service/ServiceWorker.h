@@ -27,43 +27,69 @@
 
 #if ENABLE(SERVICE_WORKER)
 
+#include "ActiveDOMObject.h"
+#include "ContextDestructionObserver.h"
 #include "EventTarget.h"
-#include <heap/Strong.h>
+#include "ServiceWorkerData.h"
+#include <JavaScriptCore/Strong.h>
+#include <wtf/RefCounted.h>
+#include <wtf/URL.h>
 
 namespace JSC {
-class ExecState;
+class JSGlobalObject;
 class JSValue;
 }
 
 namespace WebCore {
 
 class Frame;
+class SWClientConnection;
 
-class ServiceWorker final : public EventTargetWithInlineData {
+struct StructuredSerializeOptions;
+
+class ServiceWorker final : public RefCounted<ServiceWorker>, public EventTargetWithInlineData, public ActiveDOMObject {
+    WTF_MAKE_ISO_ALLOCATED(ServiceWorker);
 public:
-    static Ref<ServiceWorker> create(Frame& frame) { return adoptRef(*new ServiceWorker(frame)); }
-    virtual ~ServiceWorker() = default;
+    using State = ServiceWorkerState;
+    static Ref<ServiceWorker> getOrCreate(ScriptExecutionContext&, ServiceWorkerData&&);
 
-    enum class State {
-        Installing,
-        Installed,
-        Activating,
-        Activated,
-        Redundant,
-    };
+    virtual ~ServiceWorker();
 
-    const String& scriptURL() const;
-    State state() const;
+    const URL& scriptURL() const { return m_data.scriptURL; }
 
-    ExceptionOr<void> postMessage(JSC::ExecState&, JSC::JSValue message, Vector<JSC::Strong<JSC::JSObject>>&&);
+    State state() const { return m_data.state; }
+    
+    void updateState(State);
+
+    ExceptionOr<void> postMessage(JSC::JSGlobalObject&, JSC::JSValue message, StructuredSerializeOptions&&);
+
+    ServiceWorkerIdentifier identifier() const { return m_data.identifier; }
+    ServiceWorkerRegistrationIdentifier registrationIdentifier() const { return m_data.registrationIdentifier; }
+    WorkerType workerType() const { return m_data.type; }
+
+    using RefCounted::ref;
+    using RefCounted::deref;
+
+    const ServiceWorkerData& data() const { return m_data; }
 
 private:
-    explicit ServiceWorker(Frame&);
+    ServiceWorker(ScriptExecutionContext&, ServiceWorkerData&&);
+    void updatePendingActivityForEventDispatch();
 
-    virtual EventTargetInterface eventTargetInterface() const;
-    virtual ScriptExecutionContext* scriptExecutionContext() const;
+    EventTargetInterface eventTargetInterface() const final;
+    ScriptExecutionContext* scriptExecutionContext() const final;
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
+
+    // ActiveDOMObject.
+    const char* activeDOMObjectName() const final;
+    void stop() final;
+
+    SWClientConnection& swConnection();
+
+    ServiceWorkerData m_data;
+    bool m_isStopped { false };
+    RefPtr<PendingActivity<ServiceWorker>> m_pendingActivityForEventDispatch;
 };
 
 } // namespace WebCore

@@ -26,14 +26,16 @@
 #import "config.h"
 #import "WKContentRuleListInternal.h"
 
-#if WK_API_ENABLED
-
-#include "WebCompiledContentRuleList.h"
+#import "WebCompiledContentRuleList.h"
+#import <WebCore/WebCoreObjCExtras.h>
 
 @implementation WKContentRuleList
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKContentRuleList.class, self))
+        return;
+
     _contentRuleList->~ContentRuleList();
 
     [super dealloc];
@@ -48,9 +50,24 @@
 
 - (NSString *)identifier
 {
+#if ENABLE(CONTENT_EXTENSIONS)
     return _contentRuleList->name();
+#else
+    return nil;
+#endif
 }
 
 @end
 
-#endif // WK_API_ENABLED
+@implementation WKContentRuleList (WKPrivate)
+
++ (BOOL)_supportsRegularExpression:(NSString *)regex
+{
+#if ENABLE(CONTENT_EXTENSIONS)
+    return API::ContentRuleList::supportsRegularExpression(regex);
+#else
+    return NO;
+#endif
+}
+
+@end

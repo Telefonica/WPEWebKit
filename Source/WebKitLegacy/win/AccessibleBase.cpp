@@ -62,13 +62,13 @@ AccessibleBase::AccessibleBase(AccessibilityObject* obj, HWND window)
     ASSERT_ARG(obj, obj);
     m_object->setWrapper(this);
     ++gClassCount;
-    gClassNameCount().add("AccessibleBase");
+    gClassNameCount().add("AccessibleBase"_s);
 }
 
 AccessibleBase::~AccessibleBase()
 {
     --gClassCount;
-    gClassNameCount().remove("AccessibleBase");
+    gClassNameCount().remove("AccessibleBase"_s);
 }
 
 AccessibleBase* AccessibleBase::createInstance(AccessibilityObject* obj, HWND window)
@@ -143,9 +143,9 @@ HRESULT AccessibleBase::get_attribute(_In_ BSTR key, _Out_ VARIANT* value)
     if (!value)
         return E_POINTER;
 
-    AtomicString keyAtomic(key, ::SysStringLen(key));
+    AtomString keyAtom(key, ::SysStringLen(key));
 
-    accessibilityAttributeValue(keyAtomic, value);
+    accessibilityAttributeValue(keyAtom, value);
 
     return S_OK;
 }
@@ -303,7 +303,7 @@ HRESULT AccessibleBase::get_uniqueID(_Out_ long* uniqueID)
     if (!m_object)
         return E_FAIL;
 
-    *uniqueID = static_cast<long>(m_object->axObjectID());
+    *uniqueID = static_cast<long>(m_object->objectID().toUInt64());
     return S_OK;
 }
 
@@ -326,7 +326,11 @@ HRESULT AccessibleBase::get_locale(_Out_ IA2Locale* locale)
     if (!m_object)
         return E_FAIL;
 
+#if USE(CF)
     locale->language = BString(m_object->language().createCFString().get()).release();
+#else
+    locale->language = BString(m_object->language()).release();
+#endif
 
     return S_OK;
 }
@@ -354,7 +358,7 @@ HRESULT AccessibleBase::get_accParent(_COM_Outptr_opt_ IDispatch** parent)
     if (!m_object)
         return E_FAIL;
 
-    AccessibilityObject* parentObject = m_object->parentObjectUnignored();
+    AccessibilityObject* parentObject = static_cast<AccessibilityObject*>(m_object->parentObjectUnignored());
     if (parentObject) {
         *parent = wrapper(parentObject);
         (*parent)->AddRef();
@@ -530,7 +534,7 @@ long AccessibleBase::state() const
     if (m_object->isCollapsed())
         state |= STATE_SYSTEM_COLLAPSED;
 
-    if (m_object->roleValue() == PopUpButtonRole) {
+    if (m_object->roleValue() == AccessibilityRole::PopUpButton) {
         state |= STATE_SYSTEM_HASPOPUP;
 
         if (!m_object->isCollapsed())
@@ -601,14 +605,14 @@ HRESULT AccessibleBase::get_accKeyboardShortcut(VARIANT vChild, __deref_opt_out 
         // Follow the same order as Mozilla MSAA implementation:
         // Ctrl+Alt+Shift+Meta+key. MSDN states that keyboard shortcut strings
         // should not be localized and defines the separator as "+".
-        if (modifiers.contains(PlatformEvent::Modifier::CtrlKey))
-            accessKeyModifiersBuilder.appendLiteral("Ctrl+");
+        if (modifiers.contains(PlatformEvent::Modifier::ControlKey))
+            accessKeyModifiersBuilder.append("Ctrl+");
         if (modifiers.contains(PlatformEvent::Modifier::AltKey))
-            accessKeyModifiersBuilder.appendLiteral("Alt+");
+            accessKeyModifiersBuilder.append("Alt+");
         if (modifiers.contains(PlatformEvent::Modifier::ShiftKey))
-            accessKeyModifiersBuilder.appendLiteral("Shift+");
+            accessKeyModifiersBuilder.append("Shift+");
         if (modifiers.contains(PlatformEvent::Modifier::MetaKey))
-            accessKeyModifiersBuilder.appendLiteral("Win+");
+            accessKeyModifiersBuilder.append("Win+");
         accessKeyModifiers = accessKeyModifiersBuilder.toString();
     }
     *shortcut = BString(String(accessKeyModifiers + accessKey)).release();
@@ -639,7 +643,7 @@ HRESULT AccessibleBase::accSelect(long selectionFlags, VARIANT vChild)
 
     if (selectionFlags & SELFLAG_TAKESELECTION) {
         if (is<AccessibilityListBox>(*parentObject)) {
-            Vector<RefPtr<AccessibilityObject> > selectedChildren(1);
+            Vector<RefPtr<AXCoreObject> > selectedChildren(1);
             selectedChildren[0] = childObject;
             downcast<AccessibilityListBox>(*parentObject).setSelectedChildren(selectedChildren);
         } else { // any element may be selectable by virtue of it having the aria-selected property
@@ -684,18 +688,18 @@ HRESULT AccessibleBase::get_accFocus(_Out_ VARIANT* pvFocusedChild)
     if (!m_object)
         return E_FAIL;
 
-    AccessibilityObject* focusedObj = m_object->focusedUIElement();
-    if (!focusedObj)
+    auto focusedObject = downcast<AccessibilityObject>(m_object->focusedUIElement());
+    if (!focusedObject)
         return S_FALSE;
 
-    if (focusedObj == m_object) {
+    if (focusedObject == m_object) {
         V_VT(pvFocusedChild) = VT_I4;
         V_I4(pvFocusedChild) = CHILDID_SELF;
         return S_OK;
     }
 
     V_VT(pvFocusedChild) = VT_DISPATCH;
-    V_DISPATCH(pvFocusedChild) = wrapper(focusedObj);
+    V_DISPATCH(pvFocusedChild) = wrapper(focusedObject);
     V_DISPATCH(pvFocusedChild)->AddRef();
     return S_OK;
 }
@@ -713,7 +717,7 @@ HRESULT AccessibleBase::get_accDefaultAction(VARIANT vChild, __deref_opt_out BST
     if (FAILED(hr))
         return hr;
 
-    if (*action = BString(childObj->actionVerb()).release())
+    if (*action = BString(childObj->localizedActionVerb()).release())
         return S_OK;
     return S_FALSE;
 }
@@ -810,22 +814,22 @@ HRESULT AccessibleBase::accHitTest(long x, long y, _Out_ VARIANT* pvChildAtPoint
         return E_FAIL;
 
     IntPoint point = m_object->documentFrameView()->screenToContents(IntPoint(x, y));
-    AccessibilityObject* childObj = m_object->accessibilityHitTest(point);
+    auto childObject = downcast<AccessibilityObject>(m_object->accessibilityHitTest(point));
 
-    if (!childObj) {
+    if (!childObject) {
         // If we did not hit any child objects, test whether the point hit us, and
         // report that.
         if (!m_object->boundingBoxRect().contains(point))
             return S_FALSE;
-        childObj = m_object;
+        childObject = m_object;
     }
 
-    if (childObj == m_object) {
+    if (childObject == m_object) {
         V_VT(pvChildAtPoint) = VT_I4;
         V_I4(pvChildAtPoint) = CHILDID_SELF;
     } else {
         V_VT(pvChildAtPoint) = VT_DISPATCH;
-        V_DISPATCH(pvChildAtPoint) = static_cast<IDispatch*>(wrapper(childObj));
+        V_DISPATCH(pvChildAtPoint) = static_cast<IDispatch*>(wrapper(childObject));
         V_DISPATCH(pvChildAtPoint)->AddRef();
     }
     return S_OK;
@@ -859,153 +863,153 @@ String AccessibleBase::value() const
 static long MSAARole(AccessibilityRole role)
 {
     switch (role) {
-        case WebCore::ButtonRole:
-            return ROLE_SYSTEM_PUSHBUTTON;
-        case WebCore::RadioButtonRole:
-            return ROLE_SYSTEM_RADIOBUTTON;
-        case WebCore::CheckBoxRole:
-        case WebCore::ToggleButtonRole:
-        case WebCore::SwitchRole:
-            return ROLE_SYSTEM_CHECKBUTTON;
-        case WebCore::SliderRole:
-            return ROLE_SYSTEM_SLIDER;
-        case WebCore::TabGroupRole:
-        case WebCore::TabListRole:
-            return ROLE_SYSTEM_PAGETABLIST;
-        case WebCore::TextFieldRole:
-        case WebCore::TextAreaRole:
-        case WebCore::EditableTextRole:
-            return ROLE_SYSTEM_TEXT;
-        case WebCore::HeadingRole:
-        case WebCore::ListMarkerRole:
-        case WebCore::StaticTextRole:
-        case WebCore::LabelRole:
-            return ROLE_SYSTEM_STATICTEXT;
-        case WebCore::OutlineRole:
-            return ROLE_SYSTEM_OUTLINE;
-        case WebCore::ColumnRole:
-            return ROLE_SYSTEM_COLUMN;
-        case WebCore::RowRole:
-            return ROLE_SYSTEM_ROW;
-        case WebCore::ApplicationGroupRole:
-        case WebCore::GroupRole:
-        case WebCore::RadioGroupRole:
-            return ROLE_SYSTEM_GROUPING;
-        case WebCore::DescriptionListRole:
-        case WebCore::DirectoryRole:
-        case WebCore::ListRole:
-        case WebCore::ListBoxRole:
-        case WebCore::MenuListPopupRole:
-            return ROLE_SYSTEM_LIST;
-        case WebCore::GridRole:
-        case WebCore::TableRole:
-            return ROLE_SYSTEM_TABLE;
-        case WebCore::ImageMapLinkRole:
-        case WebCore::LinkRole:
-        case WebCore::WebCoreLinkRole:
-            return ROLE_SYSTEM_LINK;
-        case WebCore::CanvasRole:
-        case WebCore::ImageMapRole:
-        case WebCore::ImageRole:
-            return ROLE_SYSTEM_GRAPHIC;
-        case WebCore::ListItemRole:
-            return ROLE_SYSTEM_LISTITEM;
-        case WebCore::ListBoxOptionRole:
-        case WebCore::MenuListOptionRole:
-            return ROLE_SYSTEM_STATICTEXT;
-        case WebCore::ComboBoxRole:
-        case WebCore::PopUpButtonRole:
-            return ROLE_SYSTEM_COMBOBOX;
-        case WebCore::DivRole:
-        case WebCore::FooterRole:
-        case WebCore::FormRole:
-        case WebCore::ParagraphRole:
-            return ROLE_SYSTEM_GROUPING;
-        case WebCore::HorizontalRuleRole:
-        case WebCore::SplitterRole:
-            return ROLE_SYSTEM_SEPARATOR;
-        case WebCore::ApplicationAlertRole:
-        case WebCore::ApplicationAlertDialogRole:
-            return ROLE_SYSTEM_ALERT;
-        case WebCore::DisclosureTriangleRole:
-            return ROLE_SYSTEM_BUTTONDROPDOWN;
-        case WebCore::IncrementorRole:
-        case WebCore::SpinButtonRole:
-            return ROLE_SYSTEM_SPINBUTTON;
-        case WebCore::SpinButtonPartRole:
-            return ROLE_SYSTEM_PUSHBUTTON;
-        case WebCore::ToolbarRole:
-            return ROLE_SYSTEM_TOOLBAR;
-        case WebCore::UserInterfaceTooltipRole:
-            return ROLE_SYSTEM_TOOLTIP;
-        case WebCore::TreeRole:
-        case WebCore::TreeGridRole:
-            return ROLE_SYSTEM_OUTLINE;
-        case WebCore::TreeItemRole:
-            return ROLE_SYSTEM_OUTLINEITEM;
-        case WebCore::TabPanelRole:
-            return ROLE_SYSTEM_GROUPING;
-        case WebCore::TabRole:
-            return ROLE_SYSTEM_PAGETAB;
-        case WebCore::ApplicationRole:
-            return ROLE_SYSTEM_APPLICATION;
-        case WebCore::ApplicationDialogRole:
-            return ROLE_SYSTEM_DIALOG;
-        case WebCore::ApplicationLogRole:
-        case WebCore::ApplicationMarqueeRole:
-            return ROLE_SYSTEM_GROUPING;
-        case WebCore::ApplicationStatusRole:
-            return ROLE_SYSTEM_STATUSBAR;
-        case WebCore::ApplicationTimerRole:
-            return ROLE_SYSTEM_CLOCK;
-        case WebCore::CellRole:
-            return ROLE_SYSTEM_CELL;
-        case WebCore::ColumnHeaderRole:
-            return ROLE_SYSTEM_COLUMNHEADER;
-        case WebCore::DefinitionRole:
-        case WebCore::DescriptionListDetailRole:
-        case WebCore::DescriptionListTermRole:
-        case WebCore::DocumentRole:
-        case WebCore::DocumentArticleRole:
-        case WebCore::DocumentNoteRole:
-            return ROLE_SYSTEM_GROUPING;
-        case WebCore::DocumentMathRole:
-        case WebCore::MathElementRole:
-            return ROLE_SYSTEM_EQUATION;
-        case WebCore::HelpTagRole:
-            return ROLE_SYSTEM_HELPBALLOON;
-        case WebCore::WebApplicationRole:
-        case WebCore::LandmarkBannerRole:
-        case WebCore::LandmarkComplementaryRole:
-        case WebCore::LandmarkContentInfoRole:
-        case WebCore::LandmarkMainRole:
-        case WebCore::LandmarkNavigationRole:
-        case WebCore::LandmarkRegionRole:
-        case WebCore::LandmarkSearchRole:
-        case WebCore::LegendRole:
-            return ROLE_SYSTEM_GROUPING;
-        case WebCore::MenuRole:
-            return ROLE_SYSTEM_MENUPOPUP;
-        case WebCore::MenuItemRole:
-        case WebCore::MenuButtonRole:
-            return ROLE_SYSTEM_MENUITEM;
-        case WebCore::MenuBarRole:
-            return ROLE_SYSTEM_MENUBAR;
-        case WebCore::ProgressIndicatorRole:
-            return ROLE_SYSTEM_PROGRESSBAR;
-        case WebCore::RowHeaderRole:
-            return ROLE_SYSTEM_ROWHEADER;
-        case WebCore::ScrollBarRole:
-            return ROLE_SYSTEM_SCROLLBAR;
-        case WebCore::SVGRootRole:
-            return ROLE_SYSTEM_GROUPING;
-        case WebCore::TableHeaderContainerRole:
-            return ROLE_SYSTEM_GROUPING;
-        case WebCore::WindowRole:
-            return ROLE_SYSTEM_WINDOW;
-        default:
-            // This is the default role for MSAA.
-            return ROLE_SYSTEM_CLIENT;
+    case AccessibilityRole::Button:
+        return ROLE_SYSTEM_PUSHBUTTON;
+    case AccessibilityRole::RadioButton:
+        return ROLE_SYSTEM_RADIOBUTTON;
+    case AccessibilityRole::CheckBox:
+    case AccessibilityRole::ToggleButton:
+    case AccessibilityRole::Switch:
+        return ROLE_SYSTEM_CHECKBUTTON;
+    case AccessibilityRole::Slider:
+        return ROLE_SYSTEM_SLIDER;
+    case AccessibilityRole::TabGroup:
+    case AccessibilityRole::TabList:
+        return ROLE_SYSTEM_PAGETABLIST;
+    case AccessibilityRole::TextField:
+    case AccessibilityRole::TextArea:
+    case AccessibilityRole::EditableText:
+        return ROLE_SYSTEM_TEXT;
+    case AccessibilityRole::Heading:
+    case AccessibilityRole::ListMarker:
+    case AccessibilityRole::StaticText:
+    case AccessibilityRole::Label:
+        return ROLE_SYSTEM_STATICTEXT;
+    case AccessibilityRole::Outline:
+        return ROLE_SYSTEM_OUTLINE;
+    case AccessibilityRole::Column:
+        return ROLE_SYSTEM_COLUMN;
+    case AccessibilityRole::Row:
+        return ROLE_SYSTEM_ROW;
+    case AccessibilityRole::ApplicationGroup:
+    case AccessibilityRole::Group:
+    case AccessibilityRole::RadioGroup:
+        return ROLE_SYSTEM_GROUPING;
+    case AccessibilityRole::DescriptionList:
+    case AccessibilityRole::Directory:
+    case AccessibilityRole::List:
+    case AccessibilityRole::ListBox:
+    case AccessibilityRole::MenuListPopup:
+        return ROLE_SYSTEM_LIST;
+    case AccessibilityRole::Grid:
+    case AccessibilityRole::Table:
+        return ROLE_SYSTEM_TABLE;
+    case AccessibilityRole::ImageMapLink:
+    case AccessibilityRole::Link:
+    case AccessibilityRole::WebCoreLink:
+        return ROLE_SYSTEM_LINK;
+    case AccessibilityRole::Canvas:
+    case AccessibilityRole::ImageMap:
+    case AccessibilityRole::Image:
+        return ROLE_SYSTEM_GRAPHIC;
+    case AccessibilityRole::ListItem:
+        return ROLE_SYSTEM_LISTITEM;
+    case AccessibilityRole::ListBoxOption:
+    case AccessibilityRole::MenuListOption:
+        return ROLE_SYSTEM_STATICTEXT;
+    case AccessibilityRole::ComboBox:
+    case AccessibilityRole::PopUpButton:
+        return ROLE_SYSTEM_COMBOBOX;
+    case AccessibilityRole::Div:
+    case AccessibilityRole::Footer:
+    case AccessibilityRole::Form:
+    case AccessibilityRole::Paragraph:
+        return ROLE_SYSTEM_GROUPING;
+    case AccessibilityRole::HorizontalRule:
+    case AccessibilityRole::Splitter:
+        return ROLE_SYSTEM_SEPARATOR;
+    case AccessibilityRole::ApplicationAlert:
+    case AccessibilityRole::ApplicationAlertDialog:
+        return ROLE_SYSTEM_ALERT;
+    case AccessibilityRole::DisclosureTriangle:
+        return ROLE_SYSTEM_BUTTONDROPDOWN;
+    case AccessibilityRole::Incrementor:
+    case AccessibilityRole::SpinButton:
+        return ROLE_SYSTEM_SPINBUTTON;
+    case AccessibilityRole::SpinButtonPart:
+        return ROLE_SYSTEM_PUSHBUTTON;
+    case AccessibilityRole::Toolbar:
+        return ROLE_SYSTEM_TOOLBAR;
+    case AccessibilityRole::UserInterfaceTooltip:
+        return ROLE_SYSTEM_TOOLTIP;
+    case AccessibilityRole::Tree:
+    case AccessibilityRole::TreeGrid:
+        return ROLE_SYSTEM_OUTLINE;
+    case AccessibilityRole::TreeItem:
+        return ROLE_SYSTEM_OUTLINEITEM;
+    case AccessibilityRole::TabPanel:
+        return ROLE_SYSTEM_GROUPING;
+    case AccessibilityRole::Tab:
+        return ROLE_SYSTEM_PAGETAB;
+    case AccessibilityRole::Application:
+        return ROLE_SYSTEM_APPLICATION;
+    case AccessibilityRole::ApplicationDialog:
+        return ROLE_SYSTEM_DIALOG;
+    case AccessibilityRole::ApplicationLog:
+    case AccessibilityRole::ApplicationMarquee:
+        return ROLE_SYSTEM_GROUPING;
+    case AccessibilityRole::ApplicationStatus:
+        return ROLE_SYSTEM_STATUSBAR;
+    case AccessibilityRole::ApplicationTimer:
+        return ROLE_SYSTEM_CLOCK;
+    case AccessibilityRole::Cell:
+        return ROLE_SYSTEM_CELL;
+    case AccessibilityRole::ColumnHeader:
+        return ROLE_SYSTEM_COLUMNHEADER;
+    case AccessibilityRole::Definition:
+    case AccessibilityRole::DescriptionListDetail:
+    case AccessibilityRole::DescriptionListTerm:
+    case AccessibilityRole::Document:
+    case AccessibilityRole::DocumentArticle:
+    case AccessibilityRole::DocumentNote:
+        return ROLE_SYSTEM_GROUPING;
+    case AccessibilityRole::DocumentMath:
+    case AccessibilityRole::MathElement:
+        return ROLE_SYSTEM_EQUATION;
+    case AccessibilityRole::HelpTag:
+        return ROLE_SYSTEM_HELPBALLOON;
+    case AccessibilityRole::WebApplication:
+    case AccessibilityRole::LandmarkBanner:
+    case AccessibilityRole::LandmarkComplementary:
+    case AccessibilityRole::LandmarkContentInfo:
+    case AccessibilityRole::LandmarkMain:
+    case AccessibilityRole::LandmarkNavigation:
+    case AccessibilityRole::LandmarkRegion:
+    case AccessibilityRole::LandmarkSearch:
+    case AccessibilityRole::Legend:
+        return ROLE_SYSTEM_GROUPING;
+    case AccessibilityRole::Menu:
+        return ROLE_SYSTEM_MENUPOPUP;
+    case AccessibilityRole::MenuItem:
+    case AccessibilityRole::MenuButton:
+        return ROLE_SYSTEM_MENUITEM;
+    case AccessibilityRole::MenuBar:
+        return ROLE_SYSTEM_MENUBAR;
+    case AccessibilityRole::ProgressIndicator:
+        return ROLE_SYSTEM_PROGRESSBAR;
+    case AccessibilityRole::RowHeader:
+        return ROLE_SYSTEM_ROWHEADER;
+    case AccessibilityRole::ScrollBar:
+        return ROLE_SYSTEM_SCROLLBAR;
+    case AccessibilityRole::SVGRoot:
+        return ROLE_SYSTEM_GROUPING;
+    case AccessibilityRole::TableHeaderContainer:
+        return ROLE_SYSTEM_GROUPING;
+    case AccessibilityRole::Window:
+        return ROLE_SYSTEM_WINDOW;
+    default:
+        // This is the default role for MSAA.
+        return ROLE_SYSTEM_CLIENT;
     }
 }
 
@@ -1035,13 +1039,13 @@ HRESULT AccessibleBase::getAccessibilityObjectForChild(VARIANT vChild, Accessibi
         if (!document)
             return E_FAIL;
 
-        childObj = document->axObjectCache()->objectFromAXID(-vChild.lVal);
+        childObj = document->axObjectCache()->objectForID(makeObjectIdentifier<AXIDType>(-vChild.lVal));
     } else {
         size_t childIndex = static_cast<size_t>(vChild.lVal - 1);
 
         if (childIndex >= m_object->children().size())
             return E_FAIL;
-        childObj = m_object->children().at(childIndex).get();
+        childObj = static_cast<AccessibilityObject*>(m_object->children().at(childIndex).get());
     }
 
     if (!childObj)

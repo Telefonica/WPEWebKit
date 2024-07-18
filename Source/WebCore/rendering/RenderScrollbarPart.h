@@ -33,12 +33,13 @@ namespace WebCore {
 class RenderScrollbar;
 
 class RenderScrollbarPart final : public RenderBlock {
+    WTF_MAKE_ISO_ALLOCATED(RenderScrollbarPart);
 public:
     RenderScrollbarPart(Document&, RenderStyle&&, RenderScrollbar* = nullptr, ScrollbarPart = NoPart);
     
     virtual ~RenderScrollbarPart();
 
-    const char* renderName() const override { return "RenderScrollbarPart"; }
+    ASCIILiteral renderName() const override { return "RenderScrollbarPart"_s; }
     
     bool requiresLayer() const override { return false; }
 
@@ -54,11 +55,10 @@ public:
 
     RenderBox* rendererOwningScrollbar() const;
 
-protected:
+private:
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override;
     void imageChanged(WrappedImagePtr, const IntRect* = nullptr) override;
 
-private:
     bool isRenderScrollbarPart() const override { return true; }
     void computePreferredLogicalWidths() override;
 

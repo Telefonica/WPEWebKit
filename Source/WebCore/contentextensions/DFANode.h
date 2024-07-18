@@ -28,7 +28,6 @@
 #if ENABLE(CONTENT_EXTENSIONS)
 
 #include "ContentExtensionsDebugging.h"
-#include <wtf/HashMap.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {
@@ -38,8 +37,8 @@ namespace ContentExtensions {
 struct DFA;
 
 struct CharRange {
-    char first;
-    char last;
+    signed char first;
+    signed char last;
     unsigned size() const { return last - first + 1; }
 };
 
@@ -145,7 +144,6 @@ public:
 
     void setActions(uint32_t start, uint16_t length)
     {
-        ASSERT(!m_actionsStart);
         ASSERT(!m_actionsLength);
         m_actionsStart = start;
         m_actionsLength = length;
@@ -168,7 +166,7 @@ private:
     const uint8_t IsKilled = 0x01;
 };
 
-COMPILE_ASSERT(sizeof(DFANode) <= 16, Keep the DFANodes small);
+static_assert(sizeof(DFANode) <= 16, "Keep the DFANodes small");
 
 } // namespace ContentExtensions
 } // namespace WebCore

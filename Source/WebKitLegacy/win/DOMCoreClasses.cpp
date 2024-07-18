@@ -30,7 +30,7 @@
 #include "DOMEventsClasses.h"
 #include "DOMHTMLClasses.h"
 #include "WebKitGraphics.h"
-
+#include <WebCore/AddEventListenerOptions.h>
 #include <WebCore/Attr.h>
 #include <WebCore/BString.h>
 #include <WebCore/COMPtr.h>
@@ -54,9 +54,12 @@
 #include <WebCore/Range.h>
 #include <WebCore/RenderElement.h>
 #include <WebCore/RenderTreeAsText.h>
+#include <WebCore/ScrollIntoViewOptions.h>
+#include <WebCore/SimpleRange.h>
 #include <WebCore/StyledElement.h>
-
 #include <initguid.h>
+#include <wtf/text/win/WCharStringExtras.h>
+
 // {3B0C0EFF-478B-4b0b-8290-D2321E08E23E}
 DEFINE_GUID(IID_DOMElement, 0x3b0c0eff, 0x478b, 0x4b0b, 0x82, 0x90, 0xd2, 0x32, 0x1e, 0x8, 0xe2, 0x3e);
 
@@ -65,7 +68,7 @@ DEFINE_GUID(IID_DOMElement, 0x3b0c0eff, 0x478b, 0x4b0b, 0x82, 0x90, 0xd2, 0x32, 
 // "DOMObject" exists both in the WebCore namespace and unnamespaced in this
 // file, which leads to ambiguities if we say "using namespace WebCore".
 using namespace WebCore::HTMLNames;
-using WTF::AtomicString;
+using WTF::AtomString;
 using WebCore::BString;
 using WebCore::Element;
 using WebCore::ExceptionCode;
@@ -413,7 +416,7 @@ HRESULT DOMNode::setTextContent(_In_ BSTR /*text*/)
 HRESULT DOMNode::addEventListener(_In_ BSTR type, _In_opt_ IDOMEventListener* listener, BOOL useCapture)
 {
     auto webListener = WebEventListener::create(listener);
-    m_node->addEventListener(type, WTFMove(webListener), useCapture);
+    m_node->addEventListener(AtomString(type), WTFMove(webListener), useCapture);
 
     return S_OK;
 }
@@ -425,7 +428,7 @@ HRESULT DOMNode::removeEventListener(_In_ BSTR type, _In_opt_ IDOMEventListener*
     if (!m_node)
         return E_FAIL;
     auto webListener = WebEventListener::create(listener);
-    m_node->removeEventListener(type, webListener, useCapture);
+    m_node->removeEventListener(AtomString(type), webListener, useCapture);
     return S_OK;
 }
 
@@ -640,7 +643,7 @@ HRESULT DOMDocument::createElement(_In_ BSTR tagName, _COM_Outptr_opt_ IDOMEleme
     if (!m_document)
         return E_FAIL;
 
-    String tagNameString(tagName);
+    AtomString tagNameString(tagName);
     auto createElementResult = m_document->createElementForBindings(tagNameString);
     if (createElementResult.hasException())
         return E_FAIL;
@@ -719,7 +722,7 @@ HRESULT DOMDocument::getElementsByTagName(_In_ BSTR tagName, _COM_Outptr_opt_ ID
     if (!m_document)
         return E_FAIL;
 
-    String tagNameString(tagName);
+    AtomString tagNameString(tagName);
     RefPtr<WebCore::NodeList> elements;
     if (!tagNameString.isNull())
         elements = m_document->getElementsByTagName(tagNameString);
@@ -762,8 +765,8 @@ HRESULT DOMDocument::getElementsByTagNameNS(_In_ BSTR namespaceURI, _In_ BSTR lo
     if (!m_document)
         return E_FAIL;
 
-    String namespaceURIString(namespaceURI);
-    String localNameString(localName);
+    AtomString namespaceURIString(namespaceURI);
+    AtomString localNameString(localName);
     RefPtr<WebCore::NodeList> elements;
     if (!localNameString.isNull())
         elements = m_document->getElementsByTagNameNS(namespaceURIString, localNameString);
@@ -802,7 +805,7 @@ HRESULT DOMDocument::getComputedStyle(_In_opt_ IDOMElement* elt, _In_ BSTR pseud
     if (!element)
         return E_FAIL;
 
-    WebCore::DOMWindow* dv = m_document->defaultView();
+    auto* dv = m_document->domWindow();
     String pseudoEltString(pseudoElt);
     
     if (!dv)
@@ -923,7 +926,7 @@ HRESULT DOMWindow::addEventListener(_In_ BSTR type, _In_opt_ IDOMEventListener* 
     if (!m_window)
         return E_FAIL;
     auto webListener = WebEventListener::create(listener);
-    m_window->addEventListener(type, WTFMove(webListener), useCapture);
+    m_window->addEventListener(AtomString(type), WTFMove(webListener), useCapture);
     return S_OK;
 }
 
@@ -934,7 +937,7 @@ HRESULT DOMWindow::removeEventListener(_In_ BSTR type, _In_opt_ IDOMEventListene
     if (!m_window)
         return E_FAIL;
     auto webListener = WebEventListener::create(listener);
-    m_window->removeEventListener(type, webListener, useCapture);
+    m_window->removeEventListener(AtomString(type), webListener, useCapture);
     return S_OK;
 }
 
@@ -967,10 +970,12 @@ HRESULT DOMWindow::dispatchEvent(_In_opt_ IDOMEvent* evt, _Out_ BOOL* result)
 DOMWindow::DOMWindow(WebCore::DOMWindow* w)
     : m_window(w)
 {
+    m_window->ref();
 }
 
 DOMWindow::~DOMWindow()
 {
+    m_window->deref();
 }
 
 IDOMWindow* DOMWindow::createInstance(WebCore::DOMWindow* w)
@@ -1065,7 +1070,7 @@ HRESULT DOMElement::getAttribute(_In_ BSTR name, __deref_opt_out BSTR* result)
     *result = nullptr;
     if (!m_element)
         return E_FAIL;
-    WTF::String nameString(name, SysStringLen(name));
+    WTF::AtomString nameString(name, SysStringLen(name));
     WTF::String& attrValueString = (WTF::String&) m_element->getAttribute(nameString);
     *result = BString(attrValueString).release();
     if (attrValueString.length() && !*result)
@@ -1078,8 +1083,8 @@ HRESULT DOMElement::setAttribute(_In_ BSTR name, _In_ BSTR value)
     if (!m_element)
         return E_FAIL;
 
-    WTF::String nameString(name, SysStringLen(name));
-    WTF::String valueString(value, SysStringLen(value));
+    WTF::AtomString nameString(name, SysStringLen(name));
+    WTF::AtomString valueString(value, SysStringLen(value));
     auto result = m_element->setAttribute(nameString, valueString);
     return result.hasException() ? E_FAIL : S_OK;
 }
@@ -1285,17 +1290,17 @@ HRESULT DOMElement::font(_Out_ WebFontDescription* webFontDescription)
         return E_FAIL;
 
     auto fontDescription = renderer->style().fontCascade().fontDescription();
-    AtomicString family = fontDescription.firstFamily();
+    AtomString family = fontDescription.firstFamily();
 
     // FIXME: This leaks. Delete this whole function to get rid of the leak.
     UChar* familyCharactersBuffer = new UChar[family.length()];
     StringView(family.string()).getCharactersWithUpconvert(familyCharactersBuffer);
 
-    webFontDescription->family = familyCharactersBuffer;
+    webFontDescription->family = wcharFrom(familyCharactersBuffer);
     webFontDescription->familyLength = family.length();
     webFontDescription->size = fontDescription.computedSize();
     webFontDescription->bold = isFontWeightBold(fontDescription.weight());
-    webFontDescription->italic = fontDescription.italic();
+    webFontDescription->italic = isItalic(fontDescription.italic());
 
     return S_OK;
 }
@@ -1594,10 +1599,12 @@ HRESULT DOMRange::QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppvObject
 DOMRange::DOMRange(WebCore::Range* e)
     : m_range(e)
 {
+    m_range->ref();
 }
 
 DOMRange::~DOMRange()
 {
+    m_range->deref();
 }
 
 IDOMRange* DOMRange::createInstance(WebCore::Range* range)
@@ -1612,6 +1619,11 @@ IDOMRange* DOMRange::createInstance(WebCore::Range* range)
         return nullptr;
 
     return newRange;
+}
+
+IDOMRange* DOMRange::createInstance(const std::optional<WebCore::SimpleRange>& range)
+{
+    return createInstance(createLiveRange(range).get());
 }
 
 HRESULT DOMRange::startContainer(_COM_Outptr_opt_ IDOMNode** node)
@@ -1815,10 +1827,12 @@ HRESULT DOMRange::detach()
 DOMNamedNodeMap::DOMNamedNodeMap(WebCore::NamedNodeMap* nodeMap)
     : m_nodeMap(nodeMap)
 {
+    m_nodeMap->ref();
 }
 
 DOMNamedNodeMap::~DOMNamedNodeMap()
 {
+    m_nodeMap->deref();
 }
 
 IDOMNamedNodeMap* DOMNamedNodeMap::createInstance(WebCore::NamedNodeMap* nodeMap)

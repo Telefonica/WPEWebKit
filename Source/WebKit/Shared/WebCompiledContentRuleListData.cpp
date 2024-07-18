@@ -29,54 +29,100 @@
 #if ENABLE(CONTENT_EXTENSIONS)
 
 #include "ArgumentCoders.h"
+#include "DataReference.h"
 
 namespace WebKit {
+static size_t ruleListDataSize(size_t topURLFiltersBytecodeOffset, size_t topURLFiltersBytecodeSize)
+{
+    return topURLFiltersBytecodeOffset + topURLFiltersBytecodeSize;
+}
 
 void WebCompiledContentRuleListData::encode(IPC::Encoder& encoder) const
 {
+    ASSERT(data->size() >= ruleListDataSize(topURLFiltersBytecodeOffset, topURLFiltersBytecodeSize));
+    encoder << identifier;
+
     SharedMemory::Handle handle;
     data->createHandle(handle, SharedMemory::Protection::ReadOnly);
     encoder << handle;
 
-    encoder << conditionsApplyOnlyToDomainOffset;
     encoder << actionsOffset;
     encoder << actionsSize;
-    encoder << filtersWithoutConditionsBytecodeOffset;
-    encoder << filtersWithoutConditionsBytecodeSize;
-    encoder << filtersWithConditionsBytecodeOffset;
-    encoder << filtersWithConditionsBytecodeSize;
+    encoder << urlFiltersBytecodeOffset;
+    encoder << urlFiltersBytecodeSize;
     encoder << topURLFiltersBytecodeOffset;
     encoder << topURLFiltersBytecodeSize;
+    encoder << frameURLFiltersBytecodeOffset;
+    encoder << frameURLFiltersBytecodeSize;
 }
 
 std::optional<WebCompiledContentRuleListData> WebCompiledContentRuleListData::decode(IPC::Decoder& decoder)
 {
-    WebCompiledContentRuleListData compiledContentRuleListData;
+    std::optional<String> identifier;
+    decoder >> identifier;
+    if (!identifier)
+        return std::nullopt;
+
     SharedMemory::Handle handle;
     if (!decoder.decode(handle))
         return std::nullopt;
-    compiledContentRuleListData.data = SharedMemory::map(handle, SharedMemory::Protection::ReadOnly);
 
-    if (!decoder.decode(compiledContentRuleListData.conditionsApplyOnlyToDomainOffset))
-        return std::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.actionsOffset))
-        return std::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.actionsSize))
-        return std::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.filtersWithoutConditionsBytecodeOffset))
-        return std::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.filtersWithoutConditionsBytecodeSize))
-        return std::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.filtersWithConditionsBytecodeOffset))
-        return std::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.filtersWithConditionsBytecodeSize))
-        return std::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.topURLFiltersBytecodeOffset))
-        return std::nullopt;
-    if (!decoder.decode(compiledContentRuleListData.topURLFiltersBytecodeSize))
+    std::optional<size_t> actionsOffset;
+    decoder >> actionsOffset;
+    if (!actionsOffset)
         return std::nullopt;
 
-    return WTFMove(compiledContentRuleListData);
+    std::optional<size_t> actionsSize;
+    decoder >> actionsSize;
+    if (!actionsSize)
+        return std::nullopt;
+
+    std::optional<size_t> urlFiltersBytecodeOffset;
+    decoder >> urlFiltersBytecodeOffset;
+    if (!urlFiltersBytecodeOffset)
+        return std::nullopt;
+
+    std::optional<size_t> urlFiltersBytecodeSize;
+    decoder >> urlFiltersBytecodeSize;
+    if (!urlFiltersBytecodeSize)
+        return std::nullopt;
+
+    std::optional<size_t> topURLFiltersBytecodeOffset;
+    decoder >> topURLFiltersBytecodeOffset;
+    if (!topURLFiltersBytecodeOffset)
+        return std::nullopt;
+
+    std::optional<size_t> topURLFiltersBytecodeSize;
+    decoder >> topURLFiltersBytecodeSize;
+    if (!topURLFiltersBytecodeSize)
+        return std::nullopt;
+
+    std::optional<size_t> frameURLFiltersBytecodeOffset;
+    decoder >> frameURLFiltersBytecodeOffset;
+    if (!frameURLFiltersBytecodeOffset)
+        return std::nullopt;
+
+    std::optional<size_t> frameURLFiltersBytecodeSize;
+    decoder >> frameURLFiltersBytecodeSize;
+    if (!frameURLFiltersBytecodeSize)
+        return std::nullopt;
+    auto data = SharedMemory::map(handle, SharedMemory::Protection::ReadOnly);
+    if (!data)
+        return std::nullopt;
+    if (data->size() < ruleListDataSize(*topURLFiltersBytecodeOffset, *topURLFiltersBytecodeSize))
+        return std::nullopt;
+    return {{
+        WTFMove(*identifier),
+        data.releaseNonNull(),
+        WTFMove(*actionsOffset),
+        WTFMove(*actionsSize),
+        WTFMove(*urlFiltersBytecodeOffset),
+        WTFMove(*urlFiltersBytecodeSize),
+        WTFMove(*topURLFiltersBytecodeOffset),
+        WTFMove(*topURLFiltersBytecodeSize),
+        WTFMove(*frameURLFiltersBytecodeOffset),
+        WTFMove(*frameURLFiltersBytecodeSize)
+    }};
 }
 
 } // namespace WebKit

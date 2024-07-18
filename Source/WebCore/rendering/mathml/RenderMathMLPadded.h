@@ -33,16 +33,17 @@
 namespace WebCore {
 
 class RenderMathMLPadded final : public RenderMathMLRow {
+    WTF_MAKE_ISO_ALLOCATED(RenderMathMLPadded);
 public:
     RenderMathMLPadded(MathMLPaddedElement&, RenderStyle&&);
 
 private:
-    const char* renderName() const final { return "RenderMathMLPadded"; }
+    ASCIILiteral renderName() const final { return "RenderMathMLPadded"_s; }
     bool isRenderMathMLPadded() const final { return true; }
 
     void computePreferredLogicalWidths() final;
-    void layoutBlock(bool relayoutChildren, LayoutUnit pageLogicalHeight = 0) final;
-    std::optional<int> firstLineBaseline() const final;
+    void layoutBlock(bool relayoutChildren, LayoutUnit pageLogicalHeight = 0_lu) final;
+    std::optional<LayoutUnit> firstLineBaseline() const final;
 
     MathMLPaddedElement& element() const { return static_cast<MathMLPaddedElement&>(nodeForNonAnonymous()); }
     LayoutUnit voffset() const;

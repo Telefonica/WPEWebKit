@@ -29,15 +29,27 @@
 
 namespace WebCore {
 
-WorkerNavigator::WorkerNavigator(ScriptExecutionContext& context, const String& userAgent)
-    : NavigatorBase(context)
+WorkerNavigator::WorkerNavigator(ScriptExecutionContext& context, const String& userAgent, bool isOnline)
+    : NavigatorBase(&context)
     , m_userAgent(userAgent)
+    , m_isOnline(isOnline)
 {
 }
 
-String WorkerNavigator::userAgent() const
+const String& WorkerNavigator::userAgent() const
 {
     return m_userAgent;
+}
+
+bool WorkerNavigator::onLine() const
+{
+    return m_isOnline;
+}
+
+GPU* WorkerNavigator::gpu()
+{
+    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=233622 Implement this.
+    return nullptr;
 }
 
 } // namespace WebCore

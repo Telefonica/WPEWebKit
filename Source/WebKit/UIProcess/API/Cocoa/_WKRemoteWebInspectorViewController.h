@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,32 +24,30 @@
  */
 
 #import <WebKit/WKFoundation.h>
-
-#if WK_API_ENABLED
+#import <WebKit/_WKInspectorExtensionHost.h>
+#import <WebKit/_WKInspectorIBActions.h>
 
 #if !TARGET_OS_IPHONE
 
 @class WKWebView;
+@class _WKInspectorConfiguration;
+@class _WKInspectorDebuggableInfo;
+
 @protocol _WKRemoteWebInspectorViewControllerDelegate;
 
 NS_ASSUME_NONNULL_BEGIN
 
-typedef NS_ENUM(NSInteger, WKRemoteWebInspectorDebuggableType) {
-    WKRemoteWebInspectorDebuggableTypeJavaScript,
-    WKRemoteWebInspectorDebuggableTypeWeb,
-} WK_API_AVAILABLE(macosx(10.12.3), ios(10.3));
+WK_CLASS_AVAILABLE(macos(10.12.3))
+@interface _WKRemoteWebInspectorViewController : NSObject <_WKInspectorExtensionHost, _WKInspectorIBActions>
 
-WK_CLASS_AVAILABLE(macosx(10.12.3), ios(10.3))
-@interface _WKRemoteWebInspectorViewController : NSObject
-
-@property (nonatomic, assign) id <_WKRemoteWebInspectorViewControllerDelegate> delegate;
+@property (nonatomic, weak) id <_WKRemoteWebInspectorViewControllerDelegate> delegate;
 
 @property (nonatomic, readonly, retain) NSWindow *window;
 @property (nonatomic, readonly, retain) WKWebView *webView;
+@property (nonatomic, readonly, copy) _WKInspectorConfiguration *configuration WK_API_AVAILABLE(macos(12.0));
 
-- (void)loadForDebuggableType:(WKRemoteWebInspectorDebuggableType)debuggableType backendCommandsURL:(NSURL *)backendCommandsURL;
-- (void)close;
-- (void)show;
+- (instancetype)initWithConfiguration:(_WKInspectorConfiguration *)configuration WK_API_AVAILABLE(macos(12.0));
+- (void)loadForDebuggable:(_WKInspectorDebuggableInfo *)debuggableInfo backendCommandsURL:(NSURL *)backendCommandsURL WK_API_AVAILABLE(macos(12.0));
 
 - (void)sendMessageToFrontend:(NSString *)message;
 
@@ -64,5 +62,3 @@ WK_CLASS_AVAILABLE(macosx(10.12.3), ios(10.3))
 NS_ASSUME_NONNULL_END
 
 #endif // !TARGET_OS_IPHONE
-
-#endif // WK_API_ENABLED

@@ -40,8 +40,8 @@ class SharedTimer {
     WTF_MAKE_NONCOPYABLE(SharedTimer); WTF_MAKE_FAST_ALLOCATED;
 public:
     SharedTimer() = default;
-    virtual ~SharedTimer() { }
-    virtual void setFiredFunction(WTF::Function<void()>&&) = 0;
+    virtual ~SharedTimer() = default;
+    virtual void setFiredFunction(Function<void()>&&) = 0;
 
     // The fire interval is in seconds relative to the current monotonic clock time.
     virtual void setFireInterval(Seconds) = 0;

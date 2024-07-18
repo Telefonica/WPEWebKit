@@ -34,7 +34,7 @@
 #endif
 
 #if USE(CFURLCONNECTION)
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
+#include <pal/spi/win/CFNetworkSPIWin.h>
 #endif
 
 using namespace WebCore;
@@ -42,17 +42,17 @@ using namespace WebCore;
 // WebError ---------------------------------------------------------------------
 
 WebError::WebError(const ResourceError& error, IPropertyBag* userInfo)
-    : m_error(error)
-    , m_userInfo(userInfo)
+    : m_userInfo(userInfo)
+    , m_error(error)
 {
     gClassCount++;
-    gClassNameCount().add("WebError");
+    gClassNameCount().add("WebError"_s);
 }
 
 WebError::~WebError()
 {
     gClassCount--;
-    gClassNameCount().remove("WebError");
+    gClassNameCount().remove("WebError"_s);
 }
 
 WebError* WebError::createInstance(const ResourceError& error, IPropertyBag* userInfo)
@@ -107,7 +107,7 @@ ULONG WebError::Release()
 
 HRESULT WebError::init(_In_ BSTR domain, int code, _In_ BSTR url)
 {
-    m_error = ResourceError(String(domain, SysStringLen(domain)), code, URL(URL(), String(url, SysStringLen(url))), String());
+    m_error = ResourceError(String(domain, SysStringLen(domain)), code, URL { String(url, SysStringLen(url)) }, String());
     return S_OK;
 }
   
@@ -138,7 +138,7 @@ HRESULT WebError::localizedDescription(__deref_opt_out BSTR* result)
 #if USE(CFURLCONNECTION)
     if (!*result) {
         if (int code = m_error.errorCode())
-            *result = BString(wkCFNetworkErrorGetLocalizedDescription(code)).release();
+            *result = BString(_CFNetworkErrorGetLocalizedDescription(code)).release();
     }
 #endif
 
@@ -229,10 +229,10 @@ HRESULT WebError::sslPeerCertificate(_Out_ ULONG_PTR* result)
     if (!m_cfErrorUserInfoDict)
         return E_FAIL;
 
-    void* data = wkGetSSLPeerCertificateDataBytePtr(m_cfErrorUserInfoDict.get());
+    const void* data = ResourceError::getSSLPeerCertificateDataBytePtr(m_cfErrorUserInfoDict.get());
     if (!data)
         return E_FAIL;
-    *result = reinterpret_cast<ULONG_PTR>(data);
+    *result = reinterpret_cast<ULONG_PTR>(const_cast<void*>(data));
 #endif
     return *result ? S_OK : E_FAIL;
 }

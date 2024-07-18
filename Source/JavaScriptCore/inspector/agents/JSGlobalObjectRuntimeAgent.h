@@ -35,19 +35,20 @@ class JSGlobalObject;
 namespace Inspector {
 
 class JSGlobalObjectRuntimeAgent final : public InspectorRuntimeAgent {
+    WTF_MAKE_NONCOPYABLE(JSGlobalObjectRuntimeAgent);
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     JSGlobalObjectRuntimeAgent(JSAgentContext&);
+    ~JSGlobalObjectRuntimeAgent() final;
 
-    void didCreateFrontendAndBackend(FrontendRouter*, BackendDispatcher*) override;
-
-    InjectedScript injectedScriptForEval(ErrorString&, const int* executionContextId) override;
+private:
+    InjectedScript injectedScriptForEval(Protocol::ErrorString&, std::optional<Protocol::Runtime::ExecutionContextId>&&) final;
 
     // NOTE: JavaScript inspector does not yet need to mute a console because no messages
     // are sent to the console outside of the API boundary or console object.
-    void muteConsole() override { }
-    void unmuteConsole() override { }
+    void muteConsole() final { }
+    void unmuteConsole() final { }
 
-private:
     std::unique_ptr<RuntimeFrontendDispatcher> m_frontendDispatcher;
     RefPtr<RuntimeBackendDispatcher> m_backendDispatcher;
     JSC::JSGlobalObject& m_globalObject;

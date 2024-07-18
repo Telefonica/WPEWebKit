@@ -23,9 +23,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if ENABLE(FULLSCREEN_API)
+#if ENABLE(FULLSCREEN_API) && PLATFORM(MAC)
 
+#import <AppKit/AppKit.h>
 #import "GenericCallback.h"
+#import <wtf/NakedPtr.h>
+#import <wtf/NakedRef.h>
 #import <wtf/RetainPtr.h>
 
 namespace WebKit { 
@@ -45,8 +48,9 @@ typedef enum FullScreenState : NSInteger FullScreenState;
 @interface WKFullScreenWindowController : NSWindowController<NSWindowDelegate> {
 @private
     NSView *_webView; // Cannot be retained, see <rdar://problem/14884666>.
-    WebKit::WebPageProxy* _page;
+    NakedPtr<WebKit::WebPageProxy> _page;
     RetainPtr<WebCoreFullScreenPlaceholderView> _webViewPlaceholder;
+    RetainPtr<NSView> _exitPlaceholder;
     RetainPtr<NSView> _clipView;
     RetainPtr<NSView> _backgroundView;
     NSRect _initialFrame;
@@ -54,10 +58,10 @@ typedef enum FullScreenState : NSInteger FullScreenState;
     RetainPtr<NSTimer> _watchdogTimer;
     RetainPtr<NSArray> _savedConstraints;
 
+    bool _requestedExitFullScreen;
     FullScreenState _fullScreenState;
 
     double _savedScale;
-    RefPtr<WebKit::VoidCallback> _repaintCallback;
     float _savedTopContentInset;
 }
 
@@ -65,7 +69,7 @@ typedef enum FullScreenState : NSInteger FullScreenState;
 @property (readonly) NSRect finalFrame;
 @property (assign) NSArray *savedConstraints;
 
-- (id)initWithWindow:(NSWindow *)window webView:(NSView *)webView page:(WebKit::WebPageProxy&)page;
+- (id)initWithWindow:(NSWindow *)window webView:(NSView *)webView page:(NakedRef<WebKit::WebPageProxy>)page;
 
 - (WebCoreFullScreenPlaceholderView*)webViewPlaceholder;
 
@@ -73,10 +77,13 @@ typedef enum FullScreenState : NSInteger FullScreenState;
 
 - (void)enterFullScreen:(NSScreen *)screen;
 - (void)exitFullScreen;
+- (void)exitFullScreenImmediately;
 - (void)requestExitFullScreen;
 - (void)close;
-- (void)beganEnterFullScreenWithInitialFrame:(const WebCore::IntRect&)initialFrame finalFrame:(const WebCore::IntRect&)finalFrame;
-- (void)beganExitFullScreenWithInitialFrame:(const WebCore::IntRect&)initialFrame finalFrame:(const WebCore::IntRect&)finalFrame;
+- (void)beganEnterFullScreenWithInitialFrame:(NSRect)initialFrame finalFrame:(NSRect)finalFrame;
+- (void)beganExitFullScreenWithInitialFrame:(NSRect)initialFrame finalFrame:(NSRect)finalFrame;
+
+- (void)videoControlsManagerDidChange;
 
 @end
 

@@ -30,12 +30,11 @@
 
 #include "WebPageProxy.h"
 #include <WebCore/GtkUtilities.h>
+#include <WebCore/GtkVersioning.h>
 #include <glib/gi18n-lib.h>
-#include <gtk/gtk.h>
-
-using namespace WebCore;
 
 namespace WebKit {
+using namespace WebCore;
 
 Ref<WebColorPickerGtk> WebColorPickerGtk::create(WebPageProxy& page, const Color& initialColor, const IntRect& rect)
 {

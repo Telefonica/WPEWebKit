@@ -28,8 +28,9 @@
 
 #pragma once
 
+#include "DisabledAdaptations.h"
 #include <wtf/Function.h>
-#include <wtf/Optional.h>
+#include <wtf/OptionSet.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
@@ -53,14 +54,16 @@ struct WindowFeatures {
     bool fullscreen { false };
     bool dialog { false };
     bool noopener { false };
+    bool noreferrer { false };
 
     Vector<String> additionalFeatures;
 };
 
 WindowFeatures parseWindowFeatures(StringView windowFeaturesString);
-WindowFeatures parseDialogFeatures(const String& dialogFeaturesString, const FloatRect& screenAvailableRect);
+WindowFeatures parseDialogFeatures(StringView dialogFeaturesString, const FloatRect& screenAvailableRect);
+OptionSet<DisabledAdaptations> parseDisabledAdaptations(StringView);
 
 enum class FeatureMode { Window, Viewport };
-void processFeaturesString(StringView features, FeatureMode, const WTF::Function<void(StringView type, StringView value)>& callback);
+void processFeaturesString(StringView features, FeatureMode, const Function<void(StringView type, StringView value)>& callback);
 
 } // namespace WebCore

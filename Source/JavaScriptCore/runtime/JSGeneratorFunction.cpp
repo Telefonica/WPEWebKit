@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015 Yusuke Suzuki <utatane.tea@gmail.com>.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,18 +27,13 @@
 #include "config.h"
 #include "JSGeneratorFunction.h"
 
-#include "Error.h"
-#include "JSCInlines.h"
-#include "JSCJSValue.h"
-#include "JSFunction.h"
+#include "JSCellInlines.h"
 #include "JSFunctionInlines.h"
-#include "JSObject.h"
-#include "PropertySlot.h"
 #include "VM.h"
 
 namespace JSC {
 
-const ClassInfo JSGeneratorFunction::s_info = { "GeneratorFunction", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSGeneratorFunction) };
+const ClassInfo JSGeneratorFunction::s_info = { "GeneratorFunction"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSGeneratorFunction) };
 
 JSGeneratorFunction::JSGeneratorFunction(VM& vm, FunctionExecutable* executable, JSScope* scope, Structure* structure)
     : Base(vm, executable, scope, structure)
@@ -46,7 +42,7 @@ JSGeneratorFunction::JSGeneratorFunction(VM& vm, FunctionExecutable* executable,
 
 JSGeneratorFunction* JSGeneratorFunction::createImpl(VM& vm, FunctionExecutable* executable, JSScope* scope, Structure* structure)
 {
-    JSGeneratorFunction* generatorFunction = new (NotNull, allocateCell<JSGeneratorFunction>(vm.heap)) JSGeneratorFunction(vm, executable, scope, structure);
+    JSGeneratorFunction* generatorFunction = new (NotNull, allocateCell<JSGeneratorFunction>(vm)) JSGeneratorFunction(vm, executable, scope, structure);
     ASSERT(generatorFunction->structure()->globalObject());
     generatorFunction->finishCreation(vm);
     return generatorFunction;
@@ -60,7 +56,7 @@ JSGeneratorFunction* JSGeneratorFunction::create(VM& vm, FunctionExecutable* exe
 JSGeneratorFunction* JSGeneratorFunction::create(VM& vm, FunctionExecutable* executable, JSScope* scope, Structure* structure)
 {
     JSGeneratorFunction* generatorFunction = createImpl(vm, executable, scope, structure);
-    executable->singletonFunction()->notifyWrite(vm, generatorFunction, "Allocating a generator function");
+    executable->notifyCreation(vm, generatorFunction, "Allocating a generator function");
     return generatorFunction;
 }
 

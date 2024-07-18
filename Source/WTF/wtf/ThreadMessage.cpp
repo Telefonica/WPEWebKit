@@ -24,28 +24,25 @@
  */
 
 #include "config.h"
-#include "ThreadMessage.h"
+#include <wtf/ThreadMessage.h>
 
 #include <wtf/Lock.h>
 #include <wtf/Locker.h>
 
 namespace WTF {
 
-MessageStatus sendMessageScoped(Thread& thread, const ThreadMessage& message)
+MessageStatus sendMessageScoped(const ThreadSuspendLocker& locker, Thread& thread, const ThreadMessage& message)
 {
-    static StaticLock messageLock;
-    auto lockholder = holdLock(messageLock);
-
-    auto result = thread.suspend();
+    auto result = thread.suspend(locker);
     if (!result)
         return MessageStatus::ThreadExited;
 
     PlatformRegisters registers;
-    thread.getRegisters(registers);
+    thread.getRegisters(locker, registers);
 
     message(registers);
 
-    thread.resume();
+    thread.resume(locker);
     return MessageStatus::MessageRan;
 }
 

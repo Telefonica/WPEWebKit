@@ -22,14 +22,22 @@
 
 #include "FloatQuad.h"
 #include "RenderBlock.h"
+#include "RenderLayer.h"
+#include "RenderSVGInlineInlines.h"
+#include "RenderSVGShape.h"
+#include "SVGElementTypeHelpers.h"
+#include "SVGGeometryElement.h"
 #include "SVGInlineTextBox.h"
 #include "SVGNames.h"
 #include "SVGPathData.h"
 #include "SVGPathElement.h"
 #include "SVGRootInlineBox.h"
 #include "SVGTextPathElement.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderSVGTextPath);
 
 RenderSVGTextPath::RenderSVGTextPath(SVGTextPathElement& element, RenderStyle&& style)
     : RenderSVGInline(element, WTFMove(style))
@@ -41,29 +49,44 @@ SVGTextPathElement& RenderSVGTextPath::textPathElement() const
     return downcast<SVGTextPathElement>(RenderSVGInline::graphicsElement());
 }
 
+SVGGeometryElement* RenderSVGTextPath::targetElement() const
+{
+    auto target = SVGURIReference::targetElementFromIRIString(textPathElement().href(), textPathElement().treeScope());
+    return dynamicDowncast<SVGGeometryElement>(target.element.get());
+}
+
 Path RenderSVGTextPath::layoutPath() const
 {
-    Element* targetElement = SVGURIReference::targetElementFromIRIString(textPathElement().href(), document());
-    if (!targetElement || !targetElement->hasTagName(SVGNames::pathTag))
-        return Path();
-    
-    SVGPathElement& pathElement = downcast<SVGPathElement>(*targetElement);
-    
-    Path pathData;
-    updatePathFromGraphicsElement(&pathElement, pathData);
+    auto element = targetElement();
+    if (!is<SVGGeometryElement>(element))
+        return { };
+
+    auto path = pathFromGraphicsElement(element);
 
     // Spec:  The transform attribute on the referenced 'path' element represents a
     // supplemental transformation relative to the current user coordinate system for
     // the current 'text' element, including any adjustments to the current user coordinate
     // system due to a possible transform attribute on the current 'text' element.
     // http://www.w3.org/TR/SVG/text.html#TextPathElement
-    pathData.transform(pathElement.animatedLocalTransform());
-    return pathData;
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    if (element->renderer() && document().settings().layerBasedSVGEngineEnabled()) {
+        auto& renderer = downcast<RenderSVGShape>(*element->renderer());
+        if (auto* layer = renderer.layer()) {
+            const auto& layerTransform = layer->currentTransform(RenderStyle::individualTransformOperations).toAffineTransform();
+            if (!layerTransform.isIdentity())
+                path.transform(layerTransform);
+            return path;
+        }
+    }
+#endif
+
+    path.transform(element->animatedLocalTransform());
+    return path;
 }
 
-float RenderSVGTextPath::startOffset() const
+const SVGLengthValue& RenderSVGTextPath::startOffset() const
 {
-    return textPathElement().startOffset().valueAsPercentage();
+    return textPathElement().startOffset();
 }
 
 bool RenderSVGTextPath::exactAlignment() const

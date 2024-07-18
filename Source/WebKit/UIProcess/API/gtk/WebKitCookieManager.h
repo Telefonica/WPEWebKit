@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2012 Igalia S.L.
+ * Copyright (C) 2017 Endless Mobile, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,6 +27,7 @@
 
 #include <gio/gio.h>
 #include <glib-object.h>
+#include <libsoup/soup.h>
 #include <webkit2/WebKitDefines.h>
 
 G_BEGIN_DECLS
@@ -72,12 +74,14 @@ typedef enum {
 struct _WebKitCookieManager {
     GObject parent;
 
+    /*< private >*/
     WebKitCookieManagerPrivate *priv;
 };
 
 struct _WebKitCookieManagerClass {
     GObjectClass parent_class;
 
+    /*< private >*/
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
@@ -104,6 +108,42 @@ webkit_cookie_manager_get_accept_policy               (WebKitCookieManager      
 
 WEBKIT_API WebKitCookieAcceptPolicy
 webkit_cookie_manager_get_accept_policy_finish        (WebKitCookieManager          *cookie_manager,
+                                                       GAsyncResult                 *result,
+                                                       GError                      **error);
+
+WEBKIT_API void
+webkit_cookie_manager_add_cookie                      (WebKitCookieManager          *cookie_manager,
+                                                       SoupCookie                   *cookie,
+                                                       GCancellable                 *cancellable,
+                                                       GAsyncReadyCallback           callback,
+                                                       gpointer                      user_data);
+
+WEBKIT_API gboolean
+webkit_cookie_manager_add_cookie_finish               (WebKitCookieManager          *cookie_manager,
+                                                       GAsyncResult                 *result,
+                                                       GError                      **error);
+
+WEBKIT_API void
+webkit_cookie_manager_get_cookies                     (WebKitCookieManager          *cookie_manager,
+                                                       const gchar                  *uri,
+                                                       GCancellable                 *cancellable,
+                                                       GAsyncReadyCallback           callback,
+                                                       gpointer                      user_data);
+
+WEBKIT_API GList *
+webkit_cookie_manager_get_cookies_finish              (WebKitCookieManager          *cookie_manager,
+                                                       GAsyncResult                 *result,
+                                                       GError                      **error);
+
+WEBKIT_API void
+webkit_cookie_manager_delete_cookie                   (WebKitCookieManager          *cookie_manager,
+                                                       SoupCookie                   *cookie,
+                                                       GCancellable                 *cancellable,
+                                                       GAsyncReadyCallback           callback,
+                                                       gpointer                      user_data);
+
+WEBKIT_API gboolean
+webkit_cookie_manager_delete_cookie_finish            (WebKitCookieManager          *cookie_manager,
                                                        GAsyncResult                 *result,
                                                        GError                      **error);
 

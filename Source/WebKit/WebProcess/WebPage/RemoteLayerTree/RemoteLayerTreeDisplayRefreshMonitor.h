@@ -25,9 +25,8 @@
 
 #pragma once
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-
 #include "RemoteLayerTreeDrawingArea.h"
+#include <WebCore/AnimationFrameRate.h>
 #include <WebCore/DisplayRefreshMonitor.h>
 
 namespace WebKit {
@@ -41,16 +40,24 @@ public:
     
     virtual ~RemoteLayerTreeDisplayRefreshMonitor();
 
-    bool requestRefreshCallback() override;
+    bool requestRefreshCallback() final;
 
     void didUpdateLayers();
+    void updateDrawingArea(RemoteLayerTreeDrawingArea&);
 
 private:
     explicit RemoteLayerTreeDisplayRefreshMonitor(WebCore::PlatformDisplayID, RemoteLayerTreeDrawingArea&);
 
+    bool startNotificationMechanism() final { return true; }
+    void stopNotificationMechanism() final { }
+    std::optional<WebCore::FramesPerSecond> displayNominalFramesPerSecond() final;
+
+    void adjustPreferredFramesPerSecond(WebCore::FramesPerSecond) final;
+
     WeakPtr<RemoteLayerTreeDrawingArea> m_drawingArea;
+
+    WebCore::FramesPerSecond m_preferredFramesPerSecond;
+    WebCore::DisplayUpdate m_currentUpdate;
 };
 
-}
-
-#endif // USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
+} // namespace WebKit

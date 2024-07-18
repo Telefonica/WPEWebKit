@@ -29,8 +29,6 @@
 #import "WebSecurityOriginInternal.h"
 #import <WebCore/ApplicationCacheStorage.h>
 
-using namespace WebCore;
-
 @implementation WebApplicationCacheQuotaManager
 
 - (id)initWithOrigin:(WebSecurityOrigin *)origin
@@ -51,7 +49,7 @@ using namespace WebCore;
 - (unsigned long long)usage
 {
     long long usage;
-    if (webApplicationCacheStorage().calculateUsageForOrigin([_origin _core], usage))
+    if (webApplicationCacheStorage().calculateUsageForOrigin([_origin _core]->data(), usage))
         return usage;
     return 0;
 }

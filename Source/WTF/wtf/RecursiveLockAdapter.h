@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include <wtf/Lock.h>
 #include <wtf/Threading.h>
 
 namespace WTF {
@@ -32,14 +33,15 @@ namespace WTF {
 template<typename LockType>
 class RecursiveLockAdapter {
 public:
-    RecursiveLockAdapter()
+    RecursiveLockAdapter() = default;
+
+    // Use WTF_IGNORES_THREAD_SAFETY_ANALYSIS because the function does conditional locking, which is
+    // not supported by analysis. Also RecursiveLockAdapter may wrap a lock type besides WTF::Lock
+    // which doesn't support analysis.
+    void lock() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
     {
-    }
-    
-    void lock()
-    {
-        ThreadIdentifier me = currentThread();
-        if (me == m_owner) {
+        Thread& me = Thread::current();
+        if (&me == m_owner) {
             m_recursionCount++;
             return;
         }
@@ -47,22 +49,28 @@ public:
         m_lock.lock();
         ASSERT(!m_owner);
         ASSERT(!m_recursionCount);
-        m_owner = me;
+        m_owner = &me;
         m_recursionCount = 1;
     }
     
-    void unlock()
+    // Use WTF_IGNORES_THREAD_SAFETY_ANALYSIS because the function does conditional unlocking, which is
+    // not supported by analysis. Also RecursiveLockAdapter may wrap a lock type besides WTF::Lock
+    // which doesn't support analysis.
+    void unlock() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
     {
         if (--m_recursionCount)
             return;
-        m_owner = 0;
+        m_owner = nullptr;
         m_lock.unlock();
     }
     
-    bool tryLock()
+    // Use WTF_IGNORES_THREAD_SAFETY_ANALYSIS because the function does conditional locking, which is
+    // not supported by analysis. Also RecursiveLockAdapter may wrap a lock type besides WTF::Lock
+    // which doesn't support analysis.
+    bool tryLock() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
     {
-        ThreadIdentifier me = currentThread();
-        if (me == m_owner) {
+        Thread& me = Thread::current();
+        if (&me == m_owner) {
             m_recursionCount++;
             return true;
         }
@@ -72,7 +80,7 @@ public:
         
         ASSERT(!m_owner);
         ASSERT(!m_recursionCount);
-        m_owner = me;
+        m_owner = &me;
         m_recursionCount = 1;
         return true;
     }
@@ -81,13 +89,17 @@ public:
     {
         return m_lock.isLocked();
     }
+
+    bool isOwner() const { return m_owner == &Thread::current(); }
     
 private:
-    ThreadIdentifier m_owner { 0 };
+    Thread* m_owner { nullptr }; // Use Thread* instead of RefPtr<Thread> since m_owner thread is always alive while m_onwer is set.
     unsigned m_recursionCount { 0 };
     LockType m_lock;
 };
 
+using RecursiveLock = RecursiveLockAdapter<Lock>;
+
 } // namespace WTF
 
-
+using WTF::RecursiveLock;

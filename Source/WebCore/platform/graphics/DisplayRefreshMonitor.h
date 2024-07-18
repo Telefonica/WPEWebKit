@@ -23,77 +23,90 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef DisplayRefreshMonitor_h
-#define DisplayRefreshMonitor_h
+#pragma once
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-
+#include "AnimationFrameRate.h"
+#include "DisplayUpdate.h"
 #include "PlatformScreen.h"
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
-#include <wtf/RefCounted.h>
+#include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
 
 class DisplayAnimationClient;
 class DisplayRefreshMonitorClient;
+class DisplayRefreshMonitorFactory;
 
-class DisplayRefreshMonitor : public RefCounted<DisplayRefreshMonitor> {
+class DisplayRefreshMonitor : public ThreadSafeRefCounted<DisplayRefreshMonitor> {
+    friend class DisplayRefreshMonitorManager;
 public:
-    static RefPtr<DisplayRefreshMonitor> create(DisplayRefreshMonitorClient&);
+    static RefPtr<DisplayRefreshMonitor> create(DisplayRefreshMonitorFactory*, PlatformDisplayID);
     WEBCORE_EXPORT virtual ~DisplayRefreshMonitor();
     
+    WEBCORE_EXPORT virtual void stop();
+
     // Return true if callback request was scheduled, false if it couldn't be
     // (e.g., hardware refresh is not available)
-    virtual bool requestRefreshCallback() = 0;
+    WEBCORE_EXPORT virtual bool requestRefreshCallback();
+
     void windowScreenDidChange(PlatformDisplayID);
     
     bool hasClients() const { return m_clients.size(); }
     void addClient(DisplayRefreshMonitorClient&);
     bool removeClient(DisplayRefreshMonitorClient&);
-    
+
+    void clientPreferredFramesPerSecondChanged(DisplayRefreshMonitorClient&);
+    std::optional<FramesPerSecond> maxClientPreferredFramesPerSecond() const { return m_maxClientPreferredFramesPerSecond; }
+
+    virtual std::optional<FramesPerSecond> displayNominalFramesPerSecond() { return std::nullopt; }
+
     PlatformDisplayID displayID() const { return m_displayID; }
 
-    bool shouldBeTerminated() const
-    {
-        const int maxInactiveFireCount = 10;
-        return !m_scheduled && m_unscheduledFireCount > maxInactiveFireCount;
-    }
-
-    bool isActive() const { return m_active; }
-    void setIsActive(bool active) { m_active = active; }
-
-    bool isScheduled() const { return m_scheduled; }
-    void setIsScheduled(bool scheduled) { m_scheduled = scheduled; }
-
-    bool isPreviousFrameDone() const { return m_previousFrameDone; }
-    void setIsPreviousFrameDone(bool done) { m_previousFrameDone = done; }
-
-    Lock& mutex() { return m_mutex; }
-
     static RefPtr<DisplayRefreshMonitor> createDefaultDisplayRefreshMonitor(PlatformDisplayID);
+    WEBCORE_EXPORT virtual void displayLinkFired(const DisplayUpdate&);
 
 protected:
     WEBCORE_EXPORT explicit DisplayRefreshMonitor(PlatformDisplayID);
-    WEBCORE_EXPORT static void handleDisplayRefreshedNotificationOnMainThread(void* data);
+
+    WEBCORE_EXPORT virtual void dispatchDisplayDidRefresh(const DisplayUpdate&);
+
+    Lock& lock() WTF_RETURNS_LOCK(m_lock) { return m_lock; }
+    void setMaxUnscheduledFireCount(unsigned count) WTF_REQUIRES_LOCK(m_lock) { m_maxUnscheduledFireCount = count; }
+
+    // Returns true if the start was successful.
+    WEBCORE_EXPORT virtual bool startNotificationMechanism() = 0;
+    WEBCORE_EXPORT virtual void stopNotificationMechanism() = 0;
+
+    bool isScheduled() const WTF_REQUIRES_LOCK(m_lock) { return m_scheduled; }
+    void setIsScheduled(bool scheduled) WTF_REQUIRES_LOCK(m_lock) { m_scheduled = scheduled; }
+
+    bool isPreviousFrameDone() const WTF_REQUIRES_LOCK(m_lock) { return m_previousFrameDone; }
+    void setIsPreviousFrameDone(bool done) WTF_REQUIRES_LOCK(m_lock) { m_previousFrameDone = done; }
+
+    WEBCORE_EXPORT void displayDidRefresh(const DisplayUpdate&);
 
 private:
-    void displayDidRefresh();
+    bool firedAndReachedMaxUnscheduledFireCount() WTF_REQUIRES_LOCK(m_lock);
 
-    bool m_active;
-    bool m_scheduled;
-    bool m_previousFrameDone;
-    int m_unscheduledFireCount; // Number of times the display link has fired with no clients.
-    PlatformDisplayID m_displayID;
-    Lock m_mutex;
+    virtual void adjustPreferredFramesPerSecond(FramesPerSecond) { }
+
+    std::optional<FramesPerSecond> maximumClientPreferredFramesPerSecond() const;
+    void computeMaxPreferredFramesPerSecond();
 
     HashSet<DisplayRefreshMonitorClient*> m_clients;
-    HashSet<DisplayRefreshMonitorClient*>* m_clientsToBeNotified;
+    HashSet<DisplayRefreshMonitorClient*>* m_clientsToBeNotified { nullptr };
+
+    PlatformDisplayID m_displayID { 0 };
+    std::optional<FramesPerSecond> m_maxClientPreferredFramesPerSecond;
+
+    Lock m_lock;
+    bool m_scheduled WTF_GUARDED_BY_LOCK(m_lock) { false };
+    bool m_previousFrameDone WTF_GUARDED_BY_LOCK(m_lock) { true };
+    
+    unsigned m_unscheduledFireCount WTF_GUARDED_BY_LOCK(m_lock) { 0 };
+    unsigned m_maxUnscheduledFireCount WTF_GUARDED_BY_LOCK(m_lock) { 0 };
 };
 
 }
-
-#endif // USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-
-#endif

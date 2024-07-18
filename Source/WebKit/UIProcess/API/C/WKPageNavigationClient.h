@@ -69,7 +69,15 @@ typedef void (*WKPageNavigationWebProcessDidCrashCallback)(WKPageRef page, const
 typedef void (*WKPageNavigationWebProcessDidTerminateCallback)(WKPageRef page, WKProcessTerminationReason reason, const void* clientInfo);
 
 typedef WKDataRef (*WKPageNavigationCopyWebCryptoMasterKeyCallback)(WKPageRef page, const void* clientInfo);
-    
+
+typedef WKStringRef (*WKPageNavigationCopySignedPublicKeyAndChallengeStringCallback)(WKPageRef page, const void* clientInfo);
+
+typedef void (*WKPageNavigationActionDidBecomeDownloadCallback)(WKPageRef page, WKNavigationActionRef navigationAction, WKDownloadRef download, const void* clientInfo);
+
+typedef void (*WKPageNavigationResponseDidBecomeDownloadCallback)(WKPageRef page, WKNavigationResponseRef navigationResponse, WKDownloadRef download, const void* clientInfo);
+
+typedef void (*WKPageNavigationContextMenuDidCreateDownloadCallback)(WKPageRef page, WKDownloadRef download, const void* clientInfo);
+
 typedef WKPluginLoadPolicy (*WKPageNavigationDecidePolicyForPluginLoadCallback)(WKPageRef page, WKPluginLoadPolicy currentPluginLoadPolicy, WKDictionaryRef pluginInfoDictionary, WKStringRef* unavailabilityDescription, const void* clientInfo);
 
 typedef void (*WKPageNavigationDidBeginNavigationGesture)(WKPageRef page, const void* clientInfo);
@@ -80,6 +88,7 @@ typedef void (*WKPageNavigationDidEndNavigationGesture)(WKPageRef page, WKBackFo
 
 typedef void (*WKPageNavigationDidRemoveNavigationGestureSnapshot)(WKPageRef page, const void* clientInfo);
 
+typedef void (*WKPageNavigationContentRuleListNotificationCallback)(WKPageRef, WKURLRef, WKArrayRef, WKArrayRef, const void* clientInfo);
 
 typedef struct WKPageNavigationClientBase {
     int version;
@@ -142,6 +151,78 @@ typedef struct WKPageNavigationClientV1 {
     // Version 1.
     WKPageNavigationWebProcessDidTerminateCallback webProcessDidTerminate;
 } WKPageNavigationClientV1;
+
+typedef struct WKPageNavigationClientV2 {
+    WKPageNavigationClientBase base;
+    
+    // Version 0.
+    WKPageNavigationDecidePolicyForNavigationActionCallback decidePolicyForNavigationAction;
+    WKPageNavigationDecidePolicyForNavigationResponseCallback decidePolicyForNavigationResponse;
+    WKPageNavigationDecidePolicyForPluginLoadCallback decidePolicyForPluginLoad;
+    WKPageNavigationDidStartProvisionalNavigationCallback didStartProvisionalNavigation;
+    WKPageNavigationDidReceiveServerRedirectForProvisionalNavigationCallback didReceiveServerRedirectForProvisionalNavigation;
+    WKPageNavigationDidFailProvisionalNavigationCallback didFailProvisionalNavigation;
+    WKPageNavigationDidCommitNavigationCallback didCommitNavigation;
+    WKPageNavigationDidFinishNavigationCallback didFinishNavigation;
+    WKPageNavigationDidFailNavigationCallback didFailNavigation;
+    WKPageNavigationDidFailProvisionalLoadInSubframeCallback didFailProvisionalLoadInSubframe;
+    WKPageNavigationDidFinishDocumentLoadCallback didFinishDocumentLoad;
+    WKPageNavigationDidSameDocumentNavigationCallback didSameDocumentNavigation;
+    WKPageNavigationRenderingProgressDidChangeCallback renderingProgressDidChange;
+    WKPageNavigationCanAuthenticateAgainstProtectionSpaceCallback canAuthenticateAgainstProtectionSpace;
+    WKPageNavigationDidReceiveAuthenticationChallengeCallback didReceiveAuthenticationChallenge;
+    WKPageNavigationWebProcessDidCrashCallback webProcessDidCrash;
+    WKPageNavigationCopyWebCryptoMasterKeyCallback copyWebCryptoMasterKey;
+    WKPageNavigationDidBeginNavigationGesture didBeginNavigationGesture;
+    WKPageNavigationWillEndNavigationGesture willEndNavigationGesture;
+    WKPageNavigationDidEndNavigationGesture didEndNavigationGesture;
+    WKPageNavigationDidRemoveNavigationGestureSnapshot didRemoveNavigationGestureSnapshot;
+    
+    // Version 1.
+    WKPageNavigationWebProcessDidTerminateCallback webProcessDidTerminate;
+
+    // Version 2.
+    WKPageNavigationContentRuleListNotificationCallback contentRuleListNotification;
+} WKPageNavigationClientV2;
+
+typedef struct WKPageNavigationClientV3 {
+    WKPageNavigationClientBase base;
+
+    // Version 0.
+    WKPageNavigationDecidePolicyForNavigationActionCallback decidePolicyForNavigationAction;
+    WKPageNavigationDecidePolicyForNavigationResponseCallback decidePolicyForNavigationResponse;
+    WKPageNavigationDecidePolicyForPluginLoadCallback decidePolicyForPluginLoad;
+    WKPageNavigationDidStartProvisionalNavigationCallback didStartProvisionalNavigation;
+    WKPageNavigationDidReceiveServerRedirectForProvisionalNavigationCallback didReceiveServerRedirectForProvisionalNavigation;
+    WKPageNavigationDidFailProvisionalNavigationCallback didFailProvisionalNavigation;
+    WKPageNavigationDidCommitNavigationCallback didCommitNavigation;
+    WKPageNavigationDidFinishNavigationCallback didFinishNavigation;
+    WKPageNavigationDidFailNavigationCallback didFailNavigation;
+    WKPageNavigationDidFailProvisionalLoadInSubframeCallback didFailProvisionalLoadInSubframe;
+    WKPageNavigationDidFinishDocumentLoadCallback didFinishDocumentLoad;
+    WKPageNavigationDidSameDocumentNavigationCallback didSameDocumentNavigation;
+    WKPageNavigationRenderingProgressDidChangeCallback renderingProgressDidChange;
+    WKPageNavigationCanAuthenticateAgainstProtectionSpaceCallback canAuthenticateAgainstProtectionSpace;
+    WKPageNavigationDidReceiveAuthenticationChallengeCallback didReceiveAuthenticationChallenge;
+    WKPageNavigationWebProcessDidCrashCallback webProcessDidCrash;
+    WKPageNavigationCopyWebCryptoMasterKeyCallback copyWebCryptoMasterKey;
+    WKPageNavigationDidBeginNavigationGesture didBeginNavigationGesture;
+    WKPageNavigationWillEndNavigationGesture willEndNavigationGesture;
+    WKPageNavigationDidEndNavigationGesture didEndNavigationGesture;
+    WKPageNavigationDidRemoveNavigationGestureSnapshot didRemoveNavigationGestureSnapshot;
+
+    // Version 1.
+    WKPageNavigationWebProcessDidTerminateCallback webProcessDidTerminate;
+
+    // Version 2.
+    WKPageNavigationContentRuleListNotificationCallback contentRuleListNotification;
+
+    // Version 3.
+    WKPageNavigationCopySignedPublicKeyAndChallengeStringCallback copySignedPublicKeyAndChallengeString;
+    WKPageNavigationActionDidBecomeDownloadCallback navigationActionDidBecomeDownload;
+    WKPageNavigationResponseDidBecomeDownloadCallback navigationResponseDidBecomeDownload;
+    WKPageNavigationContextMenuDidCreateDownloadCallback contextMenuDidCreateDownload;
+} WKPageNavigationClientV3;
 
 #ifdef __cplusplus
 }

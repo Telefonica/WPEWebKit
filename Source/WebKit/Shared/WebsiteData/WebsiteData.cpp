@@ -27,7 +27,10 @@
 #include "WebsiteData.h"
 
 #include "ArgumentCoders.h"
+#include "WebsiteDataType.h"
+#include <WebCore/RegistrableDomain.h>
 #include <WebCore/SecurityOriginData.h>
+#include <wtf/CrossThreadCopier.h>
 #include <wtf/text/StringHash.h>
 
 namespace WebKit {
@@ -35,7 +38,7 @@ namespace WebKit {
 void WebsiteData::Entry::encode(IPC::Encoder& encoder) const
 {
     encoder << origin;
-    encoder.encodeEnum(type);
+    encoder << type;
     encoder << size;
 }
 
@@ -49,23 +52,23 @@ auto WebsiteData::Entry::decode(IPC::Decoder& decoder) -> std::optional<Entry>
         return std::nullopt;
     result.origin = WTFMove(*securityOriginData);
 
-    if (!decoder.decodeEnum(result.type))
+    if (!decoder.decode(result.type))
         return std::nullopt;
 
     if (!decoder.decode(result.size))
         return std::nullopt;
 
-    return WTFMove(result);
+    return result;
 }
 
 void WebsiteData::encode(IPC::Encoder& encoder) const
 {
     encoder << entries;
     encoder << hostNamesWithCookies;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    encoder << hostNamesWithPluginData;
+    encoder << hostNamesWithHSTSCache;
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+    encoder << registrableDomainsWithResourceLoadStatistics;
 #endif
-    encoder << originsWithCredentials;
 }
 
 bool WebsiteData::decode(IPC::Decoder& decoder, WebsiteData& result)
@@ -74,13 +77,108 @@ bool WebsiteData::decode(IPC::Decoder& decoder, WebsiteData& result)
         return false;
     if (!decoder.decode(result.hostNamesWithCookies))
         return false;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    if (!decoder.decode(result.hostNamesWithPluginData))
+    if (!decoder.decode(result.hostNamesWithHSTSCache))
+        return false;
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+    if (!decoder.decode(result.registrableDomainsWithResourceLoadStatistics))
         return false;
 #endif
-    if (!decoder.decode(result.originsWithCredentials))
-        return false;
     return true;
+}
+
+WebsiteDataProcessType WebsiteData::ownerProcess(WebsiteDataType dataType)
+{
+    switch (dataType) {
+    case WebsiteDataType::Cookies:
+        return WebsiteDataProcessType::Network;
+    case WebsiteDataType::DiskCache:
+        return WebsiteDataProcessType::Network;
+    case WebsiteDataType::MemoryCache:
+        return WebsiteDataProcessType::Web;
+    case WebsiteDataType::OfflineWebApplicationCache:
+        return WebsiteDataProcessType::UI;
+    case WebsiteDataType::SessionStorage:
+        return WebsiteDataProcessType::Network;
+    case WebsiteDataType::LocalStorage:
+        return WebsiteDataProcessType::Network;
+    case WebsiteDataType::WebSQLDatabases:
+        return WebsiteDataProcessType::UI;
+    case WebsiteDataType::IndexedDBDatabases:
+        return WebsiteDataProcessType::Network;
+    case WebsiteDataType::MediaKeys:
+        return WebsiteDataProcessType::UI;
+    case WebsiteDataType::HSTSCache:
+        return WebsiteDataProcessType::Network;
+    case WebsiteDataType::SearchFieldRecentSearches:
+        return WebsiteDataProcessType::UI;
+    case WebsiteDataType::ResourceLoadStatistics:
+        return WebsiteDataProcessType::Network;
+    case WebsiteDataType::Credentials:
+        return WebsiteDataProcessType::Network;
+#if ENABLE(SERVICE_WORKER)
+    case WebsiteDataType::ServiceWorkerRegistrations:
+        return WebsiteDataProcessType::Network;
+#endif
+    case WebsiteDataType::DOMCache:
+        return WebsiteDataProcessType::Network;
+    case WebsiteDataType::DeviceIdHashSalt:
+        return WebsiteDataProcessType::UI;
+    case WebsiteDataType::PrivateClickMeasurements:
+        return WebsiteDataProcessType::Network;
+#if HAVE(CFNETWORK_ALTERNATIVE_SERVICE)
+    case WebsiteDataType::AlternativeServices:
+        return WebsiteDataProcessType::Network;
+#endif
+    case WebsiteDataType::FileSystem:
+        return WebsiteDataProcessType::Network;
+    }
+
+    RELEASE_ASSERT_NOT_REACHED();
+}
+
+OptionSet<WebsiteDataType> WebsiteData::filter(OptionSet<WebsiteDataType> unfilteredWebsiteDataTypes, WebsiteDataProcessType WebsiteDataProcessType)
+{
+    OptionSet<WebsiteDataType> filtered;
+    for (auto dataType : unfilteredWebsiteDataTypes) {
+        if (ownerProcess(dataType) == WebsiteDataProcessType)
+            filtered.add(dataType);
+    }
+    
+    return filtered;
+}
+
+WebsiteData WebsiteData::isolatedCopy() const &
+{
+    return WebsiteData {
+        crossThreadCopy(entries),
+        crossThreadCopy(hostNamesWithCookies),
+        crossThreadCopy(hostNamesWithHSTSCache),
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+        crossThreadCopy(registrableDomainsWithResourceLoadStatistics),
+#endif
+    };
+}
+
+WebsiteData WebsiteData::isolatedCopy() &&
+{
+    return WebsiteData {
+        crossThreadCopy(WTFMove(entries)),
+        crossThreadCopy(WTFMove(hostNamesWithCookies)),
+        crossThreadCopy(WTFMove(hostNamesWithHSTSCache)),
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+        crossThreadCopy(WTFMove(registrableDomainsWithResourceLoadStatistics)),
+#endif
+    };
+}
+
+auto WebsiteData::Entry::isolatedCopy() const & -> Entry
+{
+    return { crossThreadCopy(origin), type, size };
+}
+
+auto WebsiteData::Entry::isolatedCopy() && -> Entry
+{
+    return { crossThreadCopy(WTFMove(origin)), type, size };
 }
 
 }

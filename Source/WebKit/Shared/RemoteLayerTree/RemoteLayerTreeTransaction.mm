@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,18 +31,21 @@
 #import "PlatformCALayerRemote.h"
 #import "WebCoreArgumentCoders.h"
 #import <QuartzCore/QuartzCore.h>
+#import <WebCore/EventRegion.h>
 #import <WebCore/LengthFunctions.h>
+#import <WebCore/Model.h>
 #import <WebCore/TimingFunction.h>
 #import <wtf/text/CString.h>
 #import <wtf/text/TextStream.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+
+RemoteLayerTreeTransaction::RemoteLayerTreeTransaction(RemoteLayerTreeTransaction&&) = default;
+RemoteLayerTreeTransaction& RemoteLayerTreeTransaction::operator=(RemoteLayerTreeTransaction&&) = default;
 
 RemoteLayerTreeTransaction::LayerCreationProperties::LayerCreationProperties()
     : layerID(0)
-    , type(PlatformCALayer::LayerTypeLayer)
+    , type(WebCore::PlatformCALayer::LayerTypeLayer)
     , hostingContextID(0)
     , hostingDeviceScaleFactor(1)
 {
@@ -51,9 +54,18 @@ RemoteLayerTreeTransaction::LayerCreationProperties::LayerCreationProperties()
 void RemoteLayerTreeTransaction::LayerCreationProperties::encode(IPC::Encoder& encoder) const
 {
     encoder << layerID;
-    encoder.encodeEnum(type);
+    encoder << type;
+    
+    // PlatformCALayerRemoteCustom
     encoder << hostingContextID;
     encoder << hostingDeviceScaleFactor;
+    
+#if ENABLE(MODEL_ELEMENT)
+    // PlatformCALayerRemoteModelHosting
+    encoder << !!model;
+    if (model)
+        encoder << *model;
+#endif
 }
 
 auto RemoteLayerTreeTransaction::LayerCreationProperties::decode(IPC::Decoder& decoder) -> std::optional<LayerCreationProperties>
@@ -62,23 +74,35 @@ auto RemoteLayerTreeTransaction::LayerCreationProperties::decode(IPC::Decoder& d
     if (!decoder.decode(result.layerID))
         return std::nullopt;
 
-    if (!decoder.decodeEnum(result.type))
+    if (!decoder.decode(result.type))
         return std::nullopt;
-
+    
+    // PlatformCALayerRemoteCustom
     if (!decoder.decode(result.hostingContextID))
         return std::nullopt;
 
     if (!decoder.decode(result.hostingDeviceScaleFactor))
         return std::nullopt;
+    
+#if ENABLE(MODEL_ELEMENT)
+    // PlatformCALayerRemoteModelHosting
+    bool hasModel;
+    if (!decoder.decode(hasModel))
+        return std::nullopt;
+    if (hasModel) {
+        auto model = WebCore::Model::decode(decoder);
+        if (!model)
+            return std::nullopt;
+        result.model = model;
+    }
+#endif
 
     return WTFMove(result);
 }
 
 RemoteLayerTreeTransaction::LayerProperties::LayerProperties()
-    : changedProperties(NoChange)
-    , everChangedProperties(NoChange)
-    , anchorPoint(0.5, 0.5, 0)
-    , contentsRect(FloatPoint(), FloatSize(1, 1))
+    : anchorPoint(0.5, 0.5, 0)
+    , contentsRect(WebCore::FloatPoint(), WebCore::FloatSize(1, 1))
     , maskLayerID(0)
     , clonedLayerID(0)
     , timeOffset(0)
@@ -87,14 +111,14 @@ RemoteLayerTreeTransaction::LayerProperties::LayerProperties()
     , cornerRadius(0)
     , borderWidth(0)
     , opacity(1)
-    , backgroundColor(Color::transparent)
-    , borderColor(Color::black)
+    , backgroundColor(WebCore::Color::transparentBlack)
+    , borderColor(WebCore::Color::black)
     , edgeAntialiasingMask(kCALayerLeftEdge | kCALayerRightEdge | kCALayerBottomEdge | kCALayerTopEdge)
-    , customAppearance(GraphicsLayer::NoCustomAppearance)
-    , minificationFilter(PlatformCALayer::FilterType::Linear)
-    , magnificationFilter(PlatformCALayer::FilterType::Linear)
-    , blendMode(BlendModeNormal)
-    , windRule(RULE_NONZERO)
+    , customAppearance(WebCore::GraphicsLayer::CustomAppearance::None)
+    , minificationFilter(WebCore::PlatformCALayer::FilterType::Linear)
+    , magnificationFilter(WebCore::PlatformCALayer::FilterType::Linear)
+    , blendMode(WebCore::BlendMode::Normal)
+    , windRule(WebCore::WindRule::NonZero)
     , hidden(false)
     , backingStoreAttached(true)
     , geometryFlipped(false)
@@ -103,12 +127,18 @@ RemoteLayerTreeTransaction::LayerProperties::LayerProperties()
     , opaque(false)
     , contentsHidden(false)
     , userInteractionEnabled(true)
+#if HAVE(CORE_ANIMATION_SEPARATED_LAYERS)
+    , isSeparated(false)
+#if HAVE(CORE_ANIMATION_SEPARATED_PORTALS)
+    , isSeparatedPortal(false)
+    , isDescendentOfSeparatedPortal(false)
+#endif
+#endif
 {
 }
 
 RemoteLayerTreeTransaction::LayerProperties::LayerProperties(const LayerProperties& other)
     : changedProperties(other.changedProperties)
-    , everChangedProperties(other.everChangedProperties)
     , name(other.name)
     , children(other.children)
     , addedAnimations(other.addedAnimations)
@@ -142,23 +172,31 @@ RemoteLayerTreeTransaction::LayerProperties::LayerProperties(const LayerProperti
     , opaque(other.opaque)
     , contentsHidden(other.contentsHidden)
     , userInteractionEnabled(other.userInteractionEnabled)
+    , eventRegion(other.eventRegion)
+#if HAVE(CORE_ANIMATION_SEPARATED_LAYERS)
+    , isSeparated(other.isSeparated)
+#if HAVE(CORE_ANIMATION_SEPARATED_PORTALS)
+    , isSeparatedPortal(other.isSeparatedPortal)
+    , isDescendentOfSeparatedPortal(other.isDescendentOfSeparatedPortal)
+#endif
+#endif
 {
     // FIXME: LayerProperties should reference backing store by ID, so that two layers can have the same backing store (for clones).
     // FIXME: LayerProperties shouldn't be copyable; PlatformCALayerRemote::clone should copy the relevant properties.
 
     if (other.transform)
-        transform = std::make_unique<TransformationMatrix>(*other.transform);
+        transform = makeUnique<WebCore::TransformationMatrix>(*other.transform);
 
     if (other.sublayerTransform)
-        sublayerTransform = std::make_unique<TransformationMatrix>(*other.sublayerTransform);
+        sublayerTransform = makeUnique<WebCore::TransformationMatrix>(*other.sublayerTransform);
 
     if (other.filters)
-        filters = std::make_unique<FilterOperations>(*other.filters);
+        filters = makeUnique<WebCore::FilterOperations>(*other.filters);
 }
 
 void RemoteLayerTreeTransaction::LayerProperties::encode(IPC::Encoder& encoder) const
 {
-    encoder.encodeEnum(changedProperties);
+    encoder << changedProperties;
 
     if (changedProperties & NameChanged)
         encoder << name;
@@ -238,16 +276,16 @@ void RemoteLayerTreeTransaction::LayerProperties::encode(IPC::Encoder& encoder) 
         encoder << shapePath;
 
     if (changedProperties & MinificationFilterChanged)
-        encoder.encodeEnum(minificationFilter);
+        encoder << minificationFilter;
 
     if (changedProperties & MagnificationFilterChanged)
-        encoder.encodeEnum(magnificationFilter);
+        encoder << magnificationFilter;
 
     if (changedProperties & BlendModeChanged)
-        encoder.encodeEnum(blendMode);
+        encoder << blendMode;
 
     if (changedProperties & WindRuleChanged)
-        encoder.encodeEnum(windRule);
+        encoder << windRule;
 
     if (changedProperties & SpeedChanged)
         encoder << speed;
@@ -272,15 +310,31 @@ void RemoteLayerTreeTransaction::LayerProperties::encode(IPC::Encoder& encoder) 
         encoder << edgeAntialiasingMask;
 
     if (changedProperties & CustomAppearanceChanged)
-        encoder.encodeEnum(customAppearance);
+        encoder << customAppearance;
 
     if (changedProperties & UserInteractionEnabledChanged)
         encoder << userInteractionEnabled;
+
+    if (changedProperties & EventRegionChanged)
+        encoder << eventRegion;
+
+#if HAVE(CORE_ANIMATION_SEPARATED_LAYERS)
+    if (changedProperties & SeparatedChanged)
+        encoder << isSeparated;
+
+#if HAVE(CORE_ANIMATION_SEPARATED_PORTALS)
+    if (changedProperties & SeparatedPortalChanged)
+        encoder << isSeparatedPortal;
+
+    if (changedProperties & DescendentOfSeparatedPortalChanged)
+        encoder << isDescendentOfSeparatedPortal;
+#endif
+#endif
 }
 
 bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, LayerProperties& result)
 {
-    if (!decoder.decodeEnum(result.changedProperties))
+    if (!decoder.decode(result.changedProperties))
         return false;
 
     if (result.changedProperties & NameChanged) {
@@ -342,19 +396,19 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
     }
 
     if (result.changedProperties & TransformChanged) {
-        TransformationMatrix transform;
+        WebCore::TransformationMatrix transform;
         if (!decoder.decode(transform))
             return false;
         
-        result.transform = std::make_unique<TransformationMatrix>(transform);
+        result.transform = makeUnique<WebCore::TransformationMatrix>(transform);
     }
 
     if (result.changedProperties & SublayerTransformChanged) {
-        TransformationMatrix transform;
+        WebCore::TransformationMatrix transform;
         if (!decoder.decode(transform))
             return false;
 
-        result.sublayerTransform = std::make_unique<TransformationMatrix>(transform);
+        result.sublayerTransform = makeUnique<WebCore::TransformationMatrix>(transform);
     }
 
     if (result.changedProperties & HiddenChanged) {
@@ -413,15 +467,15 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
     }
 
     if (result.changedProperties & ShapeRoundedRectChanged) {
-        FloatRoundedRect roundedRect;
+        WebCore::FloatRoundedRect roundedRect;
         if (!decoder.decode(roundedRect))
             return false;
         
-        result.shapeRoundedRect = std::make_unique<FloatRoundedRect>(roundedRect);
+        result.shapeRoundedRect = makeUnique<WebCore::FloatRoundedRect>(roundedRect);
     }
 
     if (result.changedProperties & ShapePathChanged) {
-        Path path;
+        WebCore::Path path;
         if (!decoder.decode(path))
             return false;
         
@@ -429,22 +483,22 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
     }
 
     if (result.changedProperties & MinificationFilterChanged) {
-        if (!decoder.decodeEnum(result.minificationFilter))
+        if (!decoder.decode(result.minificationFilter))
             return false;
     }
 
     if (result.changedProperties & MagnificationFilterChanged) {
-        if (!decoder.decodeEnum(result.magnificationFilter))
+        if (!decoder.decode(result.magnificationFilter))
             return false;
     }
 
     if (result.changedProperties & BlendModeChanged) {
-        if (!decoder.decodeEnum(result.blendMode))
+        if (!decoder.decode(result.blendMode))
             return false;
     }
 
     if (result.changedProperties & WindRuleChanged) {
-        if (!decoder.decodeEnum(result.windRule))
+        if (!decoder.decode(result.windRule))
             return false;
     }
 
@@ -463,7 +517,7 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
         if (!decoder.decode(hasFrontBuffer))
             return false;
         if (hasFrontBuffer) {
-            std::unique_ptr<RemoteLayerBackingStore> backingStore = std::make_unique<RemoteLayerBackingStore>(nullptr);
+            auto backingStore = makeUnique<RemoteLayerBackingStore>(nullptr);
             if (!decoder.decode(*backingStore))
                 return false;
             
@@ -478,7 +532,7 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
     }
 
     if (result.changedProperties & FiltersChanged) {
-        std::unique_ptr<FilterOperations> filters = std::make_unique<FilterOperations>();
+        auto filters = makeUnique<WebCore::FilterOperations>();
         if (!decoder.decode(*filters))
             return false;
         result.filters = WTFMove(filters);
@@ -490,7 +544,7 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
     }
 
     if (result.changedProperties & CustomAppearanceChanged) {
-        if (!decoder.decodeEnum(result.customAppearance))
+        if (!decoder.decode(result.customAppearance))
             return false;
     }
 
@@ -499,16 +553,38 @@ bool RemoteLayerTreeTransaction::LayerProperties::decode(IPC::Decoder& decoder, 
             return false;
     }
 
+    if (result.changedProperties & EventRegionChanged) {
+        std::optional<WebCore::EventRegion> eventRegion;
+        decoder >> eventRegion;
+        if (!eventRegion)
+            return false;
+        result.eventRegion = WTFMove(*eventRegion);
+    }
+
+#if HAVE(CORE_ANIMATION_SEPARATED_LAYERS)
+    if (result.changedProperties & SeparatedChanged) {
+        if (!decoder.decode(result.isSeparated))
+            return false;
+    }
+
+#if HAVE(CORE_ANIMATION_SEPARATED_PORTALS)
+    if (result.changedProperties & SeparatedPortalChanged) {
+        if (!decoder.decode(result.isSeparatedPortal))
+            return false;
+    }
+
+    if (result.changedProperties & DescendentOfSeparatedPortalChanged) {
+        if (!decoder.decode(result.isDescendentOfSeparatedPortal))
+            return false;
+    }
+#endif
+#endif
+
     return true;
 }
 
-RemoteLayerTreeTransaction::RemoteLayerTreeTransaction()
-{
-}
-
-RemoteLayerTreeTransaction::~RemoteLayerTreeTransaction()
-{
-}
+RemoteLayerTreeTransaction::RemoteLayerTreeTransaction() = default;
+RemoteLayerTreeTransaction::~RemoteLayerTreeTransaction() = default;
 
 void RemoteLayerTreeTransaction::encode(IPC::Encoder& encoder) const
 {
@@ -517,7 +593,7 @@ void RemoteLayerTreeTransaction::encode(IPC::Encoder& encoder) const
 
     encoder << static_cast<uint64_t>(m_changedLayers.size());
 
-    for (RefPtr<PlatformCALayerRemote> layer : m_changedLayers) {
+    for (const auto& layer : m_changedLayers) {
         encoder << layer->layerID();
         encoder << layer->properties();
     }
@@ -533,10 +609,12 @@ void RemoteLayerTreeTransaction::encode(IPC::Encoder& encoder) const
     encoder << m_minStableLayoutViewportOrigin;
     encoder << m_maxStableLayoutViewportOrigin;
 
-#if PLATFORM(MAC)
     encoder << m_scrollPosition;
-#endif
+
+    encoder << m_themeColor;
     encoder << m_pageExtendedBackgroundColor;
+    encoder << m_sampledPageTopColor;
+
     encoder << m_pageScaleFactor;
     encoder << m_minimumScaleFactor;
     encoder << m_maximumScaleFactor;
@@ -545,8 +623,9 @@ void RemoteLayerTreeTransaction::encode(IPC::Encoder& encoder) const
 
     encoder << m_renderTreeSize;
     encoder << m_transactionID;
+    encoder << m_activityStateChangeID;
 
-    encoder << m_newlyReachedLayoutMilestones;
+    encoder << m_newlyReachedPaintingMilestones;
 
     encoder << m_scaleWasSetByUIProcess;
     encoder << m_allowsUserScaling;
@@ -563,6 +642,10 @@ void RemoteLayerTreeTransaction::encode(IPC::Encoder& encoder) const
     encoder << hasEditorState();
     if (m_editorState)
         encoder << *m_editorState;
+
+#if PLATFORM(IOS_FAMILY)
+    encoder << m_dynamicViewportSizeUpdateID;
+#endif
 }
 
 bool RemoteLayerTreeTransaction::decode(IPC::Decoder& decoder, RemoteLayerTreeTransaction& result)
@@ -580,11 +663,11 @@ bool RemoteLayerTreeTransaction::decode(IPC::Decoder& decoder, RemoteLayerTreeTr
         return false;
 
     for (uint64_t i = 0; i < numChangedLayerProperties; ++i) {
-        GraphicsLayer::PlatformLayerID layerID;
+        WebCore::GraphicsLayer::PlatformLayerID layerID;
         if (!decoder.decode(layerID))
             return false;
 
-        std::unique_ptr<LayerProperties> layerProperties = std::make_unique<LayerProperties>();
+        std::unique_ptr<LayerProperties> layerProperties = makeUnique<LayerProperties>();
         if (!decoder.decode(*layerProperties))
             return false;
 
@@ -624,13 +707,17 @@ bool RemoteLayerTreeTransaction::decode(IPC::Decoder& decoder, RemoteLayerTreeTr
 
     if (!decoder.decode(result.m_maxStableLayoutViewportOrigin))
         return false;
-    
-#if PLATFORM(MAC)
+
     if (!decoder.decode(result.m_scrollPosition))
         return false;
-#endif
-    
+
+    if (!decoder.decode(result.m_themeColor))
+        return false;
+
     if (!decoder.decode(result.m_pageExtendedBackgroundColor))
+        return false;
+
+    if (!decoder.decode(result.m_sampledPageTopColor))
         return false;
 
     if (!decoder.decode(result.m_pageScaleFactor))
@@ -654,7 +741,10 @@ bool RemoteLayerTreeTransaction::decode(IPC::Decoder& decoder, RemoteLayerTreeTr
     if (!decoder.decode(result.m_transactionID))
         return false;
 
-    if (!decoder.decode(result.m_newlyReachedLayoutMilestones))
+    if (!decoder.decode(result.m_activityStateChangeID))
+        return false;
+
+    if (!decoder.decode(result.m_newlyReachedPaintingMilestones))
         return false;
 
     if (!decoder.decode(result.m_scaleWasSetByUIProcess))
@@ -692,10 +782,15 @@ bool RemoteLayerTreeTransaction::decode(IPC::Decoder& decoder, RemoteLayerTreeTr
         result.setEditorState(editorState);
     }
 
+#if PLATFORM(IOS_FAMILY)
+    if (!decoder.decode(result.m_dynamicViewportSizeUpdateID))
+        return false;
+#endif
+
     return true;
 }
 
-void RemoteLayerTreeTransaction::setRootLayerID(GraphicsLayer::PlatformLayerID rootLayerID)
+void RemoteLayerTreeTransaction::setRootLayerID(WebCore::GraphicsLayer::PlatformLayerID rootLayerID)
 {
     ASSERT_ARG(rootLayerID, rootLayerID);
 
@@ -704,7 +799,7 @@ void RemoteLayerTreeTransaction::setRootLayerID(GraphicsLayer::PlatformLayerID r
 
 void RemoteLayerTreeTransaction::layerPropertiesChanged(PlatformCALayerRemote& remoteLayer)
 {
-    m_changedLayers.append(&remoteLayer);
+    m_changedLayers.add(&remoteLayer);
 }
 
 void RemoteLayerTreeTransaction::setCreatedLayers(Vector<LayerCreationProperties> createdLayers)
@@ -712,17 +807,28 @@ void RemoteLayerTreeTransaction::setCreatedLayers(Vector<LayerCreationProperties
     m_createdLayers = WTFMove(createdLayers);
 }
 
-void RemoteLayerTreeTransaction::setDestroyedLayerIDs(Vector<GraphicsLayer::PlatformLayerID> destroyedLayerIDs)
+void RemoteLayerTreeTransaction::setDestroyedLayerIDs(Vector<WebCore::GraphicsLayer::PlatformLayerID> destroyedLayerIDs)
 {
     m_destroyedLayerIDs = WTFMove(destroyedLayerIDs);
 }
 
-void RemoteLayerTreeTransaction::setLayerIDsWithNewlyUnreachableBackingStore(Vector<GraphicsLayer::PlatformLayerID> layerIDsWithNewlyUnreachableBackingStore)
+void RemoteLayerTreeTransaction::setLayerIDsWithNewlyUnreachableBackingStore(Vector<WebCore::GraphicsLayer::PlatformLayerID> layerIDsWithNewlyUnreachableBackingStore)
 {
     m_layerIDsWithNewlyUnreachableBackingStore = WTFMove(layerIDsWithNewlyUnreachableBackingStore);
 }
 
 #if !defined(NDEBUG) || !LOG_DISABLED
+
+static const char* nameForBackingStoreType(RemoteLayerBackingStore::Type type)
+{
+    switch (type) {
+    case RemoteLayerBackingStore::Type::IOSurface:
+        return "IOSurface";
+    case RemoteLayerBackingStore::Type::Bitmap:
+        return "Bitmap";
+    }
+    return nullptr;
+}
 
 static TextStream& operator<<(TextStream& ts, const RemoteLayerBackingStore& backingStore)
 {
@@ -730,8 +836,7 @@ static TextStream& operator<<(TextStream& ts, const RemoteLayerBackingStore& bac
     ts << " scale=" << backingStore.scale();
     if (backingStore.isOpaque())
         ts << " opaque";
-    if (backingStore.acceleratesDrawing())
-        ts << " accelerated";
+    ts << " " << nameForBackingStoreType(backingStore.type());
     return ts;
 }
 
@@ -744,8 +849,7 @@ static void dumpChangedLayers(TextStream& ts, const RemoteLayerTreeTransaction::
     ts << "changed-layers";
 
     // Dump the layer properties sorted by layer ID.
-    Vector<GraphicsLayer::PlatformLayerID> layerIDs;
-    copyKeysToVector(changedLayerProperties, layerIDs);
+    auto layerIDs = copyToVector(changedLayerProperties.keys());
     std::sort(layerIDs.begin(), layerIDs.end());
 
     for (auto& layerID : layerIDs) {
@@ -758,7 +862,7 @@ static void dumpChangedLayers(TextStream& ts, const RemoteLayerTreeTransaction::
             ts.dumpProperty("name", layerProperties.name);
 
         if (layerProperties.changedProperties & RemoteLayerTreeTransaction::ChildrenChanged)
-            ts.dumpProperty<Vector<GraphicsLayer::PlatformLayerID>>("children", layerProperties.children);
+            ts.dumpProperty<Vector<WebCore::GraphicsLayer::PlatformLayerID>>("children", layerProperties.children);
 
         if (layerProperties.changedProperties & RemoteLayerTreeTransaction::PositionChanged)
             ts.dumpProperty("position", layerProperties.position);
@@ -782,10 +886,10 @@ static void dumpChangedLayers(TextStream& ts, const RemoteLayerTreeTransaction::
             ts.dumpProperty("opacity", layerProperties.opacity);
 
         if (layerProperties.changedProperties & RemoteLayerTreeTransaction::TransformChanged)
-            ts.dumpProperty("transform", layerProperties.transform ? *layerProperties.transform : TransformationMatrix());
+            ts.dumpProperty("transform", layerProperties.transform ? *layerProperties.transform : WebCore::TransformationMatrix());
 
         if (layerProperties.changedProperties & RemoteLayerTreeTransaction::SublayerTransformChanged)
-            ts.dumpProperty("sublayerTransform", layerProperties.sublayerTransform ? *layerProperties.sublayerTransform : TransformationMatrix());
+            ts.dumpProperty("sublayerTransform", layerProperties.sublayerTransform ? *layerProperties.sublayerTransform : WebCore::TransformationMatrix());
 
         if (layerProperties.changedProperties & RemoteLayerTreeTransaction::HiddenChanged)
             ts.dumpProperty("hidden", layerProperties.hidden);
@@ -821,7 +925,7 @@ static void dumpChangedLayers(TextStream& ts, const RemoteLayerTreeTransaction::
             ts.dumpProperty("cornerRadius", layerProperties.cornerRadius);
 
         if (layerProperties.changedProperties & RemoteLayerTreeTransaction::ShapeRoundedRectChanged)
-            ts.dumpProperty("shapeRect", layerProperties.shapeRoundedRect ? *layerProperties.shapeRoundedRect : FloatRoundedRect());
+            ts.dumpProperty("shapeRect", layerProperties.shapeRoundedRect ? *layerProperties.shapeRoundedRect : WebCore::FloatRoundedRect());
 
         if (layerProperties.changedProperties & RemoteLayerTreeTransaction::MinificationFilterChanged)
             ts.dumpProperty("minificationFilter", layerProperties.minificationFilter);
@@ -849,7 +953,7 @@ static void dumpChangedLayers(TextStream& ts, const RemoteLayerTreeTransaction::
             ts.dumpProperty("backingStoreAttached", layerProperties.backingStoreAttached);
 
         if (layerProperties.changedProperties & RemoteLayerTreeTransaction::FiltersChanged)
-            ts.dumpProperty("filters", layerProperties.filters ? *layerProperties.filters : FilterOperations());
+            ts.dumpProperty("filters", layerProperties.filters ? *layerProperties.filters : WebCore::FilterOperations());
 
         if (layerProperties.changedProperties & RemoteLayerTreeTransaction::AnimationsChanged) {
             for (const auto& keyAnimationPair : layerProperties.addedAnimations)
@@ -867,15 +971,28 @@ static void dumpChangedLayers(TextStream& ts, const RemoteLayerTreeTransaction::
 
         if (layerProperties.changedProperties & RemoteLayerTreeTransaction::UserInteractionEnabledChanged)
             ts.dumpProperty("userInteractionEnabled", layerProperties.userInteractionEnabled);
+
+#if HAVE(CORE_ANIMATION_SEPARATED_LAYERS)
+        if (layerProperties.changedProperties & RemoteLayerTreeTransaction::SeparatedChanged)
+            ts.dumpProperty("isSeparated", layerProperties.isSeparated);
+
+#if HAVE(CORE_ANIMATION_SEPARATED_PORTALS)
+        if (layerProperties.changedProperties & RemoteLayerTreeTransaction::SeparatedPortalChanged)
+            ts.dumpProperty("isSeparatedPortal", layerProperties.isSeparatedPortal);
+
+        if (layerProperties.changedProperties & RemoteLayerTreeTransaction::DescendentOfSeparatedPortalChanged)
+            ts.dumpProperty("isDescendentOfSeparatedPortal", layerProperties.isDescendentOfSeparatedPortal);
+#endif
+#endif
     }
 }
 
 void RemoteLayerTreeTransaction::dump() const
 {
-    fprintf(stderr, "%s", description().data());
+    fprintf(stderr, "%s", description().utf8().data());
 }
 
-CString RemoteLayerTreeTransaction::description() const
+String RemoteLayerTreeTransaction::description() const
 {
     TextStream ts;
 
@@ -884,14 +1001,14 @@ CString RemoteLayerTreeTransaction::description() const
 
     ts.dumpProperty("transactionID", m_transactionID);
     ts.dumpProperty("contentsSize", m_contentsSize);
-    if (m_scrollOrigin != IntPoint::zero())
+    if (m_scrollOrigin != WebCore::IntPoint::zero())
         ts.dumpProperty("scrollOrigin", m_scrollOrigin);
 
-    ts.dumpProperty("baseLayoutViewportSize", FloatSize(m_baseLayoutViewportSize));
+    ts.dumpProperty("baseLayoutViewportSize", WebCore::FloatSize(m_baseLayoutViewportSize));
 
-    if (m_minStableLayoutViewportOrigin != LayoutPoint::zero())
-        ts.dumpProperty("minStableLayoutViewportOrigin", FloatPoint(m_minStableLayoutViewportOrigin));
-    ts.dumpProperty("maxStableLayoutViewportOrigin", FloatPoint(m_maxStableLayoutViewportOrigin));
+    if (m_minStableLayoutViewportOrigin != WebCore::LayoutPoint::zero())
+        ts.dumpProperty("minStableLayoutViewportOrigin", WebCore::FloatPoint(m_minStableLayoutViewportOrigin));
+    ts.dumpProperty("maxStableLayoutViewportOrigin", WebCore::FloatPoint(m_maxStableLayoutViewportOrigin));
 
     if (m_pageScaleFactor != 1)
         ts.dumpProperty("pageScaleFactor", m_pageScaleFactor);
@@ -906,8 +1023,7 @@ CString RemoteLayerTreeTransaction::description() const
     ts.dumpProperty("avoidsUnsafeArea", m_avoidsUnsafeArea);
     ts.dumpProperty("isInStableState", m_isInStableState);
     ts.dumpProperty("renderTreeSize", m_renderTreeSize);
-
-    ts << "root-layer " << m_rootLayerID << ")";
+    ts.dumpProperty("root-layer", m_rootLayerID);
 
     if (!m_createdLayers.isEmpty()) {
         TextStream::GroupScope group(ts);
@@ -916,15 +1032,17 @@ CString RemoteLayerTreeTransaction::description() const
             TextStream::GroupScope group(ts);
             ts << createdLayer.type <<" " << createdLayer.layerID;
             switch (createdLayer.type) {
-            case PlatformCALayer::LayerTypeAVPlayerLayer:
+            case WebCore::PlatformCALayer::LayerTypeAVPlayerLayer:
                 ts << " (context-id " << createdLayer.hostingContextID << ")";
                 break;
-            case PlatformCALayer::LayerTypeContentsProvidedLayer:
+            case WebCore::PlatformCALayer::LayerTypeCustom:
                 ts << " (context-id " << createdLayer.hostingContextID << ")";
                 break;
-            case PlatformCALayer::LayerTypeCustom:
-                ts << " (context-id " << createdLayer.hostingContextID << ")";
+#if ENABLE(MODEL_ELEMENT)
+            case WebCore::PlatformCALayer::LayerTypeModelLayer:
+                ts << " (model " << *createdLayer.model << ")";
                 break;
+#endif
             default:
                 break;
             }
@@ -934,11 +1052,17 @@ CString RemoteLayerTreeTransaction::description() const
     dumpChangedLayers(ts, m_changedLayerProperties);
 
     if (!m_destroyedLayerIDs.isEmpty())
-        ts.dumpProperty<Vector<GraphicsLayer::PlatformLayerID>>("destroyed-layers", m_destroyedLayerIDs);
+        ts.dumpProperty<Vector<WebCore::GraphicsLayer::PlatformLayerID>>("destroyed-layers", m_destroyedLayerIDs);
+
+    if (m_editorState) {
+        TextStream::GroupScope scope(ts);
+        ts << "EditorState";
+        ts << *m_editorState;
+    }
 
     ts.endGroup();
 
-    return ts.release().utf8();
+    return ts.release();
 }
 
 #endif // !defined(NDEBUG) || !LOG_DISABLED

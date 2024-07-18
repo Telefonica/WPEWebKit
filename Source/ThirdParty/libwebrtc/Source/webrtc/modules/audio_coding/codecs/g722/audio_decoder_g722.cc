@@ -8,13 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/codecs/g722/audio_decoder_g722.h"
+#include "modules/audio_coding/codecs/g722/audio_decoder_g722.h"
 
 #include <string.h>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/audio_coding/codecs/legacy_encoded_audio_frame.h"
-#include "webrtc/modules/audio_coding/codecs/g722/g722_interface.h"
+#include <utility>
+
+#include "modules/audio_coding/codecs/g722/g722_interface.h"
+#include "modules/audio_coding/codecs/legacy_encoded_audio_frame.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -69,34 +71,40 @@ size_t AudioDecoderG722Impl::Channels() const {
   return 1;
 }
 
-AudioDecoderG722Stereo::AudioDecoderG722Stereo() {
+AudioDecoderG722StereoImpl::AudioDecoderG722StereoImpl() {
   WebRtcG722_CreateDecoder(&dec_state_left_);
   WebRtcG722_CreateDecoder(&dec_state_right_);
   WebRtcG722_DecoderInit(dec_state_left_);
   WebRtcG722_DecoderInit(dec_state_right_);
 }
 
-AudioDecoderG722Stereo::~AudioDecoderG722Stereo() {
+AudioDecoderG722StereoImpl::~AudioDecoderG722StereoImpl() {
   WebRtcG722_FreeDecoder(dec_state_left_);
   WebRtcG722_FreeDecoder(dec_state_right_);
 }
 
-int AudioDecoderG722Stereo::DecodeInternal(const uint8_t* encoded,
-                                           size_t encoded_len,
-                                           int sample_rate_hz,
-                                           int16_t* decoded,
-                                           SpeechType* speech_type) {
+int AudioDecoderG722StereoImpl::DecodeInternal(const uint8_t* encoded,
+                                               size_t encoded_len,
+                                               int sample_rate_hz,
+                                               int16_t* decoded,
+                                               SpeechType* speech_type) {
   RTC_DCHECK_EQ(SampleRateHz(), sample_rate_hz);
-  int16_t temp_type = 1;  // Default is speech.
+  // Adjust the encoded length down to ensure the same number of samples in each
+  // channel.
+  const size_t encoded_len_adjusted = PacketDuration(encoded, encoded_len) *
+                                      Channels() /
+                                      2;  // 1/2 byte per sample per channel
+  int16_t temp_type = 1;                  // Default is speech.
   // De-interleave the bit-stream into two separate payloads.
-  uint8_t* encoded_deinterleaved = new uint8_t[encoded_len];
-  SplitStereoPacket(encoded, encoded_len, encoded_deinterleaved);
+  uint8_t* encoded_deinterleaved = new uint8_t[encoded_len_adjusted];
+  SplitStereoPacket(encoded, encoded_len_adjusted, encoded_deinterleaved);
   // Decode left and right.
-  size_t decoded_len = WebRtcG722_Decode(dec_state_left_, encoded_deinterleaved,
-                                         encoded_len / 2, decoded, &temp_type);
+  size_t decoded_len =
+      WebRtcG722_Decode(dec_state_left_, encoded_deinterleaved,
+                        encoded_len_adjusted / 2, decoded, &temp_type);
   size_t ret = WebRtcG722_Decode(
-      dec_state_right_, &encoded_deinterleaved[encoded_len / 2],
-      encoded_len / 2, &decoded[decoded_len], &temp_type);
+      dec_state_right_, &encoded_deinterleaved[encoded_len_adjusted / 2],
+      encoded_len_adjusted / 2, &decoded[decoded_len], &temp_type);
   if (ret == decoded_len) {
     ret += decoded_len;  // Return total number of samples.
     // Interleave output.
@@ -112,20 +120,28 @@ int AudioDecoderG722Stereo::DecodeInternal(const uint8_t* encoded,
   return static_cast<int>(ret);
 }
 
-int AudioDecoderG722Stereo::SampleRateHz() const {
+int AudioDecoderG722StereoImpl::PacketDuration(const uint8_t* encoded,
+                                               size_t encoded_len) const {
+  // 1/2 encoded byte per sample per channel. Make sure the length represents
+  // an equal number of bytes per channel. Otherwise, we cannot de-interleave
+  // the encoded data later.
+  return static_cast<int>(2 * (encoded_len / Channels()));
+}
+
+int AudioDecoderG722StereoImpl::SampleRateHz() const {
   return 16000;
 }
 
-size_t AudioDecoderG722Stereo::Channels() const {
+size_t AudioDecoderG722StereoImpl::Channels() const {
   return 2;
 }
 
-void AudioDecoderG722Stereo::Reset() {
+void AudioDecoderG722StereoImpl::Reset() {
   WebRtcG722_DecoderInit(dec_state_left_);
   WebRtcG722_DecoderInit(dec_state_right_);
 }
 
-std::vector<AudioDecoder::ParseResult> AudioDecoderG722Stereo::ParsePayload(
+std::vector<AudioDecoder::ParseResult> AudioDecoderG722StereoImpl::ParsePayload(
     rtc::Buffer&& payload,
     uint32_t timestamp) {
   return LegacyEncodedAudioFrame::SplitBySamples(this, std::move(payload),
@@ -134,9 +150,10 @@ std::vector<AudioDecoder::ParseResult> AudioDecoderG722Stereo::ParsePayload(
 
 // Split the stereo packet and place left and right channel after each other
 // in the output array.
-void AudioDecoderG722Stereo::SplitStereoPacket(const uint8_t* encoded,
-                                               size_t encoded_len,
-                                               uint8_t* encoded_deinterleaved) {
+void AudioDecoderG722StereoImpl::SplitStereoPacket(
+    const uint8_t* encoded,
+    size_t encoded_len,
+    uint8_t* encoded_deinterleaved) {
   // Regroup the 4 bits/sample so |l1 l2| |r1 r2| |l3 l4| |r3 r4| ...,
   // where "lx" is 4 bits representing left sample number x, and "rx" right
   // sample. Two samples fit in one byte, represented with |...|.

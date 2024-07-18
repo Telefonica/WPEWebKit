@@ -20,13 +20,17 @@
 #include "config.h"
 #include "QualifiedName.h"
 
+#include "CommonAtomStrings.h"
 #include "QualifiedNameCache.h"
 #include "ThreadGlobalData.h"
 #include <wtf/Assertions.h>
 
 namespace WebCore {
 
-QualifiedName::QualifiedName(const AtomicString& p, const AtomicString& l, const AtomicString& n)
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(QualifiedName);
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(QualifiedNameQualifiedNameImpl);
+
+QualifiedName::QualifiedName(const AtomString& p, const AtomString& l, const AtomString& n)
     : m_impl(threadGlobalData().qualifiedNameCache().getOrCreate(QualifiedNameComponents { p.impl(), l.impl(), n.isEmpty() ? nullptr : n.impl() }))
 {
 }
@@ -45,7 +49,6 @@ void QualifiedName::init()
     if (initialized)
         return;
 
-    ASSERT_WITH_MESSAGE(WTF::nullAtomData.isConstructed(), "AtomicString::init should have been called");
     anyName.construct(nullAtom(), starAtom(), starAtom());
     initialized = true;
 }
@@ -56,7 +59,7 @@ const QualifiedName& nullQName()
     return nullName;
 }
 
-const AtomicString& QualifiedName::localNameUpper() const
+const AtomString& QualifiedName::localNameUpper() const
 {
     if (!m_impl->m_localNameUpper)
         m_impl->m_localNameUpper = m_impl->m_localName.convertToASCIIUppercase();
@@ -66,17 +69,7 @@ const AtomicString& QualifiedName::localNameUpper() const
 unsigned QualifiedName::QualifiedNameImpl::computeHash() const
 {
     QualifiedNameComponents components = { m_prefix.impl(), m_localName.impl(), m_namespace.impl() };
-    return hashComponents(components);
-}
-
-void createQualifiedName(void* targetAddress, StringImpl* name, const AtomicString& nameNamespace)
-{
-    new (NotNull, reinterpret_cast<void*>(targetAddress)) QualifiedName(nullAtom(), AtomicString(name), nameNamespace);
-}
-
-void createQualifiedName(void* targetAddress, StringImpl* name)
-{
-    new (NotNull, reinterpret_cast<void*>(targetAddress)) QualifiedName(nullAtom(), AtomicString(name), nullAtom());
+    return WTF::computeHash(components);
 }
 
 }

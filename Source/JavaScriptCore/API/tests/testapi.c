@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2017 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006-2020 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,7 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <wtf/Platform.h>
+#define ASSERT_ENABLED 1
+#include "config.h"
 
 #if USE(CF)
 #include "JavaScriptCore.h"
@@ -39,12 +40,18 @@
 #include "JSScriptRefPrivate.h"
 #include "JSStringRefPrivate.h"
 #include "JSWeakPrivate.h"
+#if !OS(WINDOWS)
+#include <libgen.h>
+#endif
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#define ASSERT_DISABLED 0
+#if !OS(WINDOWS)
+#include <unistd.h>
+#endif
 #include <wtf/Assertions.h>
 
 #if OS(WINDOWS)
@@ -62,9 +69,16 @@
 #include "PingPongStackOverflowTest.h"
 #include "TypedArrayCTest.h"
 
-#if JSC_OBJC_API_ENABLED
-void testObjectiveCAPI(void);
+#if COMPILER(MSVC)
+#pragma warning(disable:4204)
 #endif
+
+#if JSC_OBJC_API_ENABLED
+void testObjectiveCAPI(const char*);
+#endif
+
+void configureJSCForTesting(void);
+int testCAPIViaCpp(const char* filter);
 
 bool assertTrue(bool value, const char* message);
 
@@ -164,7 +178,7 @@ static void assertEqualsAsCharactersPtr(JSValueRef value, const char* expectedVa
     JSStringRelease(valueAsString);
 }
 
-static bool timeZoneIsPST()
+static bool timeZoneIsPST(void)
 {
     char timeZoneName[70];
     struct tm gtm;
@@ -195,6 +209,16 @@ static bool MyObject_hasProperty(JSContextRef context, JSObjectRef object, JSStr
     return false;
 }
 
+static JSValueRef throwException(JSContextRef context, JSObjectRef object, JSValueRef* exception)
+{
+    JSStringRef script = JSStringCreateWithUTF8CString("throw 'an exception'");
+    JSStringRef sourceURL = JSStringCreateWithUTF8CString("test script");
+    JSValueRef result = JSEvaluateScript(context, script, object, sourceURL, 1, exception);
+    JSStringRelease(script);
+    JSStringRelease(sourceURL);
+    return result;
+}
+
 static JSValueRef MyObject_getProperty(JSContextRef context, JSObjectRef object, JSStringRef propertyName, JSValueRef* exception)
 {
     UNUSED_PARAM(context);
@@ -217,7 +241,7 @@ static JSValueRef MyObject_getProperty(JSContextRef context, JSObjectRef object,
     }
 
     if (JSStringIsEqualToUTF8CString(propertyName, "throwOnGet")) {
-        return JSEvaluateScript(context, JSStringCreateWithUTF8CString("throw 'an exception'"), object, JSStringCreateWithUTF8CString("test script"), 1, exception);
+        return throwException(context, object, exception);
     }
 
     if (JSStringIsEqualToUTF8CString(propertyName, "0")) {
@@ -239,7 +263,7 @@ static bool MyObject_setProperty(JSContextRef context, JSObjectRef object, JSStr
         return true; // pretend we set the property in order to swallow it
     
     if (JSStringIsEqualToUTF8CString(propertyName, "throwOnSet")) {
-        JSEvaluateScript(context, JSStringCreateWithUTF8CString("throw 'an exception'"), object, JSStringCreateWithUTF8CString("test script"), 1, exception);
+        throwException(context, object, exception);
     }
     
     return false;
@@ -254,7 +278,7 @@ static bool MyObject_deleteProperty(JSContextRef context, JSObjectRef object, JS
         return true;
     
     if (JSStringIsEqualToUTF8CString(propertyName, "throwOnDelete")) {
-        JSEvaluateScript(context, JSStringCreateWithUTF8CString("throw 'an exception'"), object, JSStringCreateWithUTF8CString("test script"), 1, exception);
+        throwException(context, object, exception);
         return false;
     }
 
@@ -277,6 +301,18 @@ static void MyObject_getPropertyNames(JSContextRef context, JSObjectRef object, 
     JSStringRelease(propertyName);
 }
 
+static bool isValueEqualToString(JSContextRef context, JSValueRef value, const char* string)
+{
+    if (!JSValueIsString(context, value))
+        return false;
+    JSStringRef valueString = JSValueToStringCopy(context, value, NULL);
+    if (!valueString)
+        return false;
+    bool isEqual = JSStringIsEqualToUTF8CString(valueString, string);
+    JSStringRelease(valueString);
+    return isEqual;
+}
+
 static JSValueRef MyObject_callAsFunction(JSContextRef context, JSObjectRef object, JSObjectRef thisObject, size_t argumentCount, const JSValueRef arguments[], JSValueRef* exception)
 {
     UNUSED_PARAM(context);
@@ -284,8 +320,8 @@ static JSValueRef MyObject_callAsFunction(JSContextRef context, JSObjectRef obje
     UNUSED_PARAM(thisObject);
     UNUSED_PARAM(exception);
 
-    if (argumentCount > 0 && JSValueIsString(context, arguments[0]) && JSStringIsEqualToUTF8CString(JSValueToStringCopy(context, arguments[0], 0), "throwOnCall")) {
-        JSEvaluateScript(context, JSStringCreateWithUTF8CString("throw 'an exception'"), object, JSStringCreateWithUTF8CString("test script"), 1, exception);
+    if (argumentCount > 0 && isValueEqualToString(context, arguments[0], "throwOnCall")) {
+        throwException(context, object, exception);
         return JSValueMakeUndefined(context);
     }
 
@@ -300,8 +336,8 @@ static JSObjectRef MyObject_callAsConstructor(JSContextRef context, JSObjectRef 
     UNUSED_PARAM(context);
     UNUSED_PARAM(object);
 
-    if (argumentCount > 0 && JSValueIsString(context, arguments[0]) && JSStringIsEqualToUTF8CString(JSValueToStringCopy(context, arguments[0], 0), "throwOnConstruct")) {
-        JSEvaluateScript(context, JSStringCreateWithUTF8CString("throw 'an exception'"), object, JSStringCreateWithUTF8CString("test script"), 1, exception);
+    if (argumentCount > 0 && isValueEqualToString(context, arguments[0], "throwOnConstruct")) {
+        throwException(context, object, exception);
         return object;
     }
 
@@ -316,8 +352,8 @@ static bool MyObject_hasInstance(JSContextRef context, JSObjectRef constructor, 
     UNUSED_PARAM(context);
     UNUSED_PARAM(constructor);
 
-    if (JSValueIsString(context, possibleValue) && JSStringIsEqualToUTF8CString(JSValueToStringCopy(context, possibleValue, 0), "throwOnHasInstance")) {
-        JSEvaluateScript(context, JSStringCreateWithUTF8CString("throw 'an exception'"), constructor, JSStringCreateWithUTF8CString("test script"), 1, exception);
+    if (isValueEqualToString(context, possibleValue, "throwOnHasInstance")) {
+        throwException(context, constructor, exception);
         return false;
     }
 
@@ -982,19 +1018,21 @@ static JSValueRef functionGC(JSContextRef context, JSObjectRef function, JSObjec
 
 static JSStaticValue globalObject_staticValues[] = {
     { "globalStaticValue", globalObject_get, globalObject_set, kJSPropertyAttributeNone },
+    { "globalStaticValue2", globalObject_get, 0, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontEnum },
     { 0, 0, 0, 0 }
 };
 
 static JSStaticFunction globalObject_staticFunctions[] = {
     { "globalStaticFunction", globalObject_call, kJSPropertyAttributeNone },
     { "globalStaticFunction2", globalObject_call, kJSPropertyAttributeNone },
+    { "globalStaticFunction3", globalObject_call, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontEnum },
     { "gc", functionGC, kJSPropertyAttributeNone },
     { 0, 0, 0 }
 };
 
 static char* createStringWithContentsOfFile(const char* fileName);
 
-static void testInitializeFinalize()
+static void testInitializeFinalize(void)
 {
     JSObjectRef o = JSObjectMake(context, Derived_class(context), (void*)1);
     UNUSED_PARAM(o);
@@ -1024,7 +1062,7 @@ bool assertTrue(bool value, const char* message)
     return value;
 }
 
-static bool checkForCycleInPrototypeChain()
+static bool checkForCycleInPrototypeChain(void)
 {
     bool result = true;
     JSGlobalContextRef context = JSGlobalContextCreate(0);
@@ -1076,7 +1114,7 @@ static JSValueRef valueToObjectExceptionCallAsFunction(JSContextRef ctx, JSObjec
     
     return JSValueMakeUndefined(ctx);
 }
-static bool valueToObjectExceptionTest()
+static bool valueToObjectExceptionTest(void)
 {
     JSGlobalContextRef testContext;
     JSClassDefinition globalObjectClassDefinition = kJSClassDefinitionEmpty;
@@ -1103,7 +1141,7 @@ static bool valueToObjectExceptionTest()
     return true;
 }
 
-static bool globalContextNameTest()
+static bool globalContextNameTest(void)
 {
     bool result = true;
     JSGlobalContextRef context = JSGlobalContextCreate(0);
@@ -1131,23 +1169,20 @@ static bool globalContextNameTest()
     JSStringRelease(fetchName1);
     JSStringRelease(fetchName2);
 
+    JSGlobalContextRelease(context);
+
     return result;
 }
 
-#if COMPILER(GCC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-#endif
-static void checkConstnessInJSObjectNames()
+IGNORE_GCC_WARNINGS_BEGIN("unused-but-set-variable")
+static void checkConstnessInJSObjectNames(void)
 {
     JSStaticFunction fun;
     fun.name = "something";
     JSStaticValue val;
     val.name = "something";
 }
-#if COMPILER(GCC)
-#pragma GCC diagnostic pop
-#endif
+IGNORE_GCC_WARNINGS_END
 
 #ifdef __cplusplus
 extern "C" {
@@ -1190,7 +1225,6 @@ static void heapFinalizer(JSContextGroupRef group, void *userData)
 static void testMarkingConstraintsAndHeapFinalizers(void)
 {
     JSContextGroupRef group;
-    JSContextRef context;
     JSWeakRef *weakRefs;
     unsigned i;
     unsigned deadCount;
@@ -1200,11 +1234,11 @@ static void testMarkingConstraintsAndHeapFinalizers(void)
     group = JSContextGroupCreate();
     expectedContextGroup = group;
     
-    context = JSGlobalContextCreateInGroup(group, NULL);
+    JSGlobalContextRef context = JSGlobalContextCreateInGroup(group, NULL);
 
     weakRefs = (JSWeakRef*)calloc(numWeakRefs, sizeof(JSWeakRef));
 
-    JSContextGroupAddMarkingConstraint(group, markingConstraint, weakRefs);
+    JSContextGroupAddMarkingConstraint(group, markingConstraint, (void*)weakRefs);
     JSContextGroupAddHeapFinalizer(group, heapFinalizer, (void*)(uintptr_t)42);
     
     for (i = numWeakRefs; i--;)
@@ -1215,7 +1249,7 @@ static void testMarkingConstraintsAndHeapFinalizers(void)
     
     deadCount = 0;
     for (i = 0; i < numWeakRefs; i += 2) {
-        assertTrue(JSWeakGetObject(weakRefs[i]), "Marked objects stayed alive");
+        assertTrue((bool)JSWeakGetObject(weakRefs[i]), "Marked objects stayed alive");
         if (!JSWeakGetObject(weakRefs[i + 1]))
             deadCount++;
     }
@@ -1237,7 +1271,8 @@ static void testMarkingConstraintsAndHeapFinalizers(void)
     didRunHeapFinalizer = false;
     JSSynchronousGarbageCollectForDebugging(context);
     assertTrue(!didRunHeapFinalizer, "Did not run heap finalizer");
-    
+
+    JSGlobalContextRelease(context);
     JSContextGroupRelease(group);
 
     printf("PASS: Marking Constraints and Heap Finalizers.\n");
@@ -1349,23 +1384,34 @@ static void testCFStrings(void)
 int main(int argc, char* argv[])
 {
 #if OS(WINDOWS)
-    // Cygwin calls ::SetErrorMode(SEM_FAILCRITICALERRORS), which we will inherit. This is bad for
+    // Cygwin calls SetErrorMode(SEM_FAILCRITICALERRORS), which we will inherit. This is bad for
     // testing/debugging, as it causes the post-mortem debugger not to be invoked. We reset the
     // error mode here to work around Cygwin's behavior. See <http://webkit.org/b/55222>.
-    ::SetErrorMode(0);
+    SetErrorMode(0);
 #endif
+
+    configureJSCForTesting();
+
+#if !OS(WINDOWS)
+    char resolvedPath[PATH_MAX];
+    if (!realpath(argv[0], resolvedPath))
+        fprintf(stdout, "Could not get the absolute pathname for: %s\n", argv[0]);
+    char* newCWD = dirname(resolvedPath);
+    if (chdir(newCWD))
+        fprintf(stdout, "Could not chdir to: %s\n", newCWD);
+#endif
+
+    const char* filter = argc > 1 ? argv[1] : NULL;
+#if JSC_OBJC_API_ENABLED
+    testObjectiveCAPI(filter);
+#endif
+
+    RELEASE_ASSERT(!testCAPIViaCpp(filter));
+    if (filter)
+        return 0;
 
     testCompareAndSwap();
     startMultithreadedMultiVMExecutionTest();
-
-#if JSC_OBJC_API_ENABLED
-    testObjectiveCAPI();
-#endif
-
-    const char *scriptPath = "testapi.js";
-    if (argc > 1) {
-        scriptPath = argv[1];
-    }
     
     // Test garbage collection with a fresh context
     context = JSGlobalContextCreateInGroup(NULL, NULL);
@@ -1576,7 +1622,7 @@ int main(int argc, char* argv[])
         failed = 1;
     } else
         printf("PASS: Correctly returned null for invalid JSON data.\n");
-    JSValueRef exception;
+    JSValueRef exception = NULL;
     JSStringRef str = JSValueCreateJSONString(context, jsonObject, 0, 0);
     if (!JSStringIsEqualToUTF8CString(str, "{\"aProperty\":true}")) {
         printf("FAIL: Did not correctly serialise with indent of 0.\n");
@@ -1862,7 +1908,7 @@ int main(int argc, char* argv[])
     JSValueRef argumentsDateValues[] = { JSValueMakeNumber(context, 0) };
     o = JSObjectMakeDate(context, 1, argumentsDateValues, NULL);
     if (timeZoneIsPST())
-        assertEqualsAsUTF8String(o, "Wed Dec 31 1969 16:00:00 GMT-0800 (PST)");
+        assertEqualsAsUTF8String(o, "Wed Dec 31 1969 16:00:00 GMT-0800 (Pacific Standard Time)");
 
     string = JSStringCreateWithUTF8CString("an error message");
     JSValueRef argumentsErrorValues[] = { JSValueMakeString(context, string) };
@@ -1947,6 +1993,19 @@ int main(int argc, char* argv[])
     JSStringRelease(sourceURL);
     JSStringRelease(sourceURLKey);
 
+    JSGlobalContextSetEvalEnabled(context, false, jsOneIString);
+    exception = NULL;
+    script = JSStringCreateWithUTF8CString("eval(\"3\");");
+    JSEvaluateScript(context, script, NULL, NULL, 1, &exception);
+    ASSERT(exception);
+    JSStringRelease(script);
+    exception = NULL;
+    script = JSStringCreateWithUTF8CString("Function(\"return 3;\");");
+    JSEvaluateScript(context, script, NULL, NULL, 1, &exception);
+    ASSERT(exception);
+    JSStringRelease(script);
+    JSGlobalContextSetEvalEnabled(context, true, NULL);
+
     // Verify that creating a constructor for a class with no static functions does not trigger
     // an assert inside putDirect or lead to a crash during GC. <https://bugs.webkit.org/show_bug.cgi?id=25785>
     nullDefinition = kJSClassDefinitionEmpty;
@@ -1954,6 +2013,7 @@ int main(int argc, char* argv[])
     JSObjectMakeConstructor(context, nullClass, 0);
     JSClassRelease(nullClass);
 
+    const char* scriptPath = "./testapiScripts/testapi.js";
     char* scriptUTF8 = createStringWithContentsOfFile(scriptPath);
     if (!scriptUTF8) {
         printf("FAIL: Test script could not be loaded.\n");
@@ -2026,7 +2086,7 @@ int main(int argc, char* argv[])
             JSValueRef exception;
             JSStringRef code = JSStringCreateWithUTF8CString("result = 0; Promise.resolve(42).then(function (value) { result = value; });");
             JSStringRef file = JSStringCreateWithUTF8CString("");
-            assertTrue(JSEvaluateScript(context, code, globalObject, file, 1, &exception), "An exception should not be thrown");
+            assertTrue((bool)JSEvaluateScript(context, code, globalObject, file, 1, &exception), "An exception should not be thrown");
             JSStringRelease(code);
             JSStringRelease(file);
 
@@ -2056,13 +2116,11 @@ int main(int argc, char* argv[])
         }
         JSGlobalContextRelease(context);
     }
-    failed = testTypedArrayCAPI() || failed;
-    failed = testExecutionTimeLimit() || failed;
-    failed = testFunctionOverrides() || failed;
-    failed = testGlobalContextWithFinalizer() || failed;
-    failed = testPingPongStackOverflow() || failed;
-    failed = testJSONParse() || failed;
-    failed = testJSObjectGetProxyTarget() || failed;
+    failed |= testTypedArrayCAPI();
+    failed |= testFunctionOverrides();
+    failed |= testGlobalContextWithFinalizer();
+    failed |= testJSONParse();
+    failed |= testJSObjectGetProxyTarget();
 
     // Clear out local variables pointing at JSObjectRefs to allow their values to be collected
     function = NULL;
@@ -2111,7 +2169,19 @@ int main(int argc, char* argv[])
     globalObjectSetPrototypeTest();
     globalObjectPrivatePropertyTest();
 
-    failed = finalizeMultithreadedMultiVMExecutionTest() || failed;
+    failed |= finalizeMultithreadedMultiVMExecutionTest();
+
+    // Don't run these tests till after the MultithreadedMultiVMExecutionTest has finished.
+    // 1. testPingPongStackOverflow() changes stack size per thread configuration at runtime to very small value,
+    // which can cause stack-overflow on MultithreadedMultiVMExecutionTest test.
+    // 2. testExecutionTimeLimit() modifies JIT options at runtime
+    // as part of its testing. This can wreak havoc on the rest of the system that
+    // expects the options to be frozen. Ideally, we'll find a way for testExecutionTimeLimit()
+    // to do its work without changing JIT options, but that is not easy to do.
+    //
+    // For now, we'll just run them here at the end as a workaround.
+    failed |= testPingPongStackOverflow();
+    failed |= testExecutionTimeLimit();
 
     if (failed) {
         printf("FAIL: Some tests failed.\n");
@@ -2154,8 +2224,8 @@ static char* createStringWithContentsOfFile(const char* fileName)
 }
 
 #if OS(WINDOWS)
-extern "C" __declspec(dllexport) int WINAPI dllLauncherEntryPoint(int argc, const char* argv[])
+__declspec(dllexport) int WINAPI dllLauncherEntryPoint(int argc, char* argv[])
 {
-    return main(argc, const_cast<char**>(argv));
+    return main(argc, argv);
 }
 #endif

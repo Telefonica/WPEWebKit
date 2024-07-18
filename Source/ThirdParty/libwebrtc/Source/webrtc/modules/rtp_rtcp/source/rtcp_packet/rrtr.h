@@ -9,11 +9,13 @@
  *
  */
 
-#ifndef WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_RRTR_H_
-#define WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_RRTR_H_
+#ifndef MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_RRTR_H_
+#define MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_RRTR_H_
 
-#include "webrtc/base/basictypes.h"
-#include "webrtc/system_wrappers/include/ntp_time.h"
+#include <stddef.h>
+#include <stdint.h>
+
+#include "system_wrappers/include/ntp_time.h"
 
 namespace webrtc {
 namespace rtcp {
@@ -44,6 +46,14 @@ class Rrtr {
   NtpTime ntp_;
 };
 
+inline bool operator==(const Rrtr& rrtr1, const Rrtr& rrtr2) {
+  return rrtr1.ntp() == rrtr2.ntp();
+}
+
+inline bool operator!=(const Rrtr& rrtr1, const Rrtr& rrtr2) {
+  return !(rrtr1 == rrtr2);
+}
+
 }  // namespace rtcp
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_RRTR_H_
+#endif  // MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_RRTR_H_

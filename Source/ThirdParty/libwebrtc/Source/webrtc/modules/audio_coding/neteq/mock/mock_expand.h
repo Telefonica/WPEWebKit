@@ -8,12 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_EXPAND_H_
-#define WEBRTC_MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_EXPAND_H_
+#ifndef MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_EXPAND_H_
+#define MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_EXPAND_H_
 
-#include "webrtc/modules/audio_coding/neteq/expand.h"
-
-#include "webrtc/test/gmock.h"
+#include "modules/audio_coding/neteq/expand.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
@@ -31,18 +30,13 @@ class MockExpand : public Expand {
                statistics,
                fs,
                num_channels) {}
-  virtual ~MockExpand() { Die(); }
-  MOCK_METHOD0(Die, void());
-  MOCK_METHOD0(Reset,
-      void());
-  MOCK_METHOD1(Process,
-      int(AudioMultiVector* output));
-  MOCK_METHOD0(SetParametersForNormalAfterExpand,
-      void());
-  MOCK_METHOD0(SetParametersForMergeAfterExpand,
-      void());
-  MOCK_CONST_METHOD0(overlap_length,
-      size_t());
+  ~MockExpand() override { Die(); }
+  MOCK_METHOD(void, Die, ());
+  MOCK_METHOD(void, Reset, (), (override));
+  MOCK_METHOD(int, Process, (AudioMultiVector * output), (override));
+  MOCK_METHOD(void, SetParametersForNormalAfterExpand, (), (override));
+  MOCK_METHOD(void, SetParametersForMergeAfterExpand, (), (override));
+  MOCK_METHOD(size_t, overlap_length, (), (const, override));
 };
 
 }  // namespace webrtc
@@ -51,14 +45,16 @@ namespace webrtc {
 
 class MockExpandFactory : public ExpandFactory {
  public:
-  MOCK_CONST_METHOD6(Create,
-                     Expand*(BackgroundNoise* background_noise,
-                             SyncBuffer* sync_buffer,
-                             RandomVector* random_vector,
-                             StatisticsCalculator* statistics,
-                             int fs,
-                             size_t num_channels));
+  MOCK_METHOD(Expand*,
+              Create,
+              (BackgroundNoise * background_noise,
+               SyncBuffer* sync_buffer,
+               RandomVector* random_vector,
+               StatisticsCalculator* statistics,
+               int fs,
+               size_t num_channels),
+              (const, override));
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_EXPAND_H_
+#endif  // MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_EXPAND_H_

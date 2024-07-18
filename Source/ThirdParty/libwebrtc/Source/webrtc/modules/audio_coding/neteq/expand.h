@@ -8,19 +8,17 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_NETEQ_EXPAND_H_
-#define WEBRTC_MODULES_AUDIO_CODING_NETEQ_EXPAND_H_
+#ifndef MODULES_AUDIO_CODING_NETEQ_EXPAND_H_
+#define MODULES_AUDIO_CODING_NETEQ_EXPAND_H_
 
-#include <assert.h>
 #include <memory>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/audio_coding/neteq/audio_multi_vector.h"
-#include "webrtc/typedefs.h"
+#include "modules/audio_coding/neteq/audio_vector.h"
 
 namespace webrtc {
 
 // Forward declarations.
+class AudioMultiVector;
 class BackgroundNoise;
 class RandomVector;
 class StatisticsCalculator;
@@ -41,11 +39,14 @@ class Expand {
 
   virtual ~Expand();
 
+  Expand(const Expand&) = delete;
+  Expand& operator=(const Expand&) = delete;
+
   // Resets the object.
   virtual void Reset();
 
   // The main method to produce concealment data. The data is appended to the
-  // end of |output|.
+  // end of `output`.
   virtual int Process(AudioMultiVector* output);
 
   // Prepare the object to do extra expansion during normal operation following
@@ -56,9 +57,9 @@ class Expand {
   // a period of expands.
   virtual void SetParametersForMergeAfterExpand();
 
-  // Returns the mute factor for |channel|.
-  int16_t MuteFactor(size_t channel) {
-    assert(channel < num_channels_);
+  // Returns the mute factor for `channel`.
+  int16_t MuteFactor(size_t channel) const {
+    RTC_DCHECK_LT(channel, num_channels_);
     return channel_parameters_[channel].mute_factor;
   }
 
@@ -76,19 +77,12 @@ class Expand {
                             size_t length,
                             int16_t* random_vector);
 
-  void GenerateBackgroundNoise(int16_t* random_vector,
-                               size_t channel,
-                               int mute_slope,
-                               bool too_many_expands,
-                               size_t num_noise_samples,
-                               int16_t* buffer);
-
   // Initializes member variables at the beginning of an expand period.
   void InitializeForAnExpandPeriod();
 
   bool TooManyExpands();
 
-  // Analyzes the signal history in |sync_buffer_|, and set up all parameters
+  // Analyzes the signal history in `sync_buffer_`, and set up all parameters
   // necessary to produce concealment data.
   void AnalyzeSignal(int16_t* random_vector);
 
@@ -114,7 +108,7 @@ class Expand {
     int16_t ar_filter_state[kUnvoicedLpcOrder];
     int16_t ar_gain;
     int16_t ar_gain_scale;
-    int16_t voice_mix_factor; /* Q14 */
+    int16_t voice_mix_factor;         /* Q14 */
     int16_t current_voice_mix_factor; /* Q14 */
     AudioVector expand_vector0;
     AudioVector expand_vector1;
@@ -122,9 +116,9 @@ class Expand {
     int mute_slope; /* Q20 */
   };
 
-  // Calculate the auto-correlation of |input|, with length |input_length|
+  // Calculate the auto-correlation of `input`, with length `input_length`
   // samples. The correlation is calculated from a downsampled version of
-  // |input|, and is written to |output|.
+  // `input`, and is written to `output`.
   void Correlation(const int16_t* input,
                    size_t input_length,
                    int16_t* output) const;
@@ -141,8 +135,6 @@ class Expand {
   bool stop_muting_;
   size_t expand_duration_samples_;
   std::unique_ptr<ChannelParameters[]> channel_parameters_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(Expand);
 };
 
 struct ExpandFactory {
@@ -158,4 +150,4 @@ struct ExpandFactory {
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_EXPAND_H_
+#endif  // MODULES_AUDIO_CODING_NETEQ_EXPAND_H_

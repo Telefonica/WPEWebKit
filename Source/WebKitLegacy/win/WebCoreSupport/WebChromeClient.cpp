@@ -38,20 +38,22 @@
 #include "WebView.h"
 #include <WebCore/BString.h>
 #include <WebCore/ContextMenu.h>
+#include <WebCore/CookieConsentDecisionResult.h>
 #include <WebCore/Cursor.h>
 #include <WebCore/FileChooser.h>
 #include <WebCore/FileIconLoader.h>
 #include <WebCore/FloatRect.h>
 #include <WebCore/Frame.h>
-#include <WebCore/FrameLoadRequest.h>
 #include <WebCore/FrameView.h>
 #include <WebCore/FullScreenController.h>
+#include <WebCore/FullscreenManager.h>
 #include <WebCore/GraphicsLayer.h>
 #include <WebCore/HTMLNames.h>
 #include <WebCore/HTMLVideoElement.h>
 #include <WebCore/Icon.h>
 #include <WebCore/LocalWindowsContext.h>
 #include <WebCore/LocalizedStrings.h>
+#include <WebCore/ModalContainerTypes.h>
 #include <WebCore/NavigationAction.h>
 #include <WebCore/NotImplemented.h>
 #include <WebCore/Page.h>
@@ -71,7 +73,7 @@ static const size_t maxFilePathsListSize = USHRT_MAX;
 WebChromeClient::WebChromeClient(WebView* webView)
     : m_webView(webView)
 #if ENABLE(NOTIFICATIONS)
-    , m_notificationsDelegate(std::make_unique<WebDesktopNotificationsDelegate>(webView))
+    , m_notificationsDelegate(makeUnique<WebDesktopNotificationsDelegate>(webView))
 #endif
 {
 }
@@ -139,7 +141,7 @@ void WebChromeClient::unfocus()
 bool WebChromeClient::canTakeFocus(FocusDirection direction)
 {
     IWebUIDelegate* uiDelegate = 0;
-    BOOL bForward = (direction == FocusDirectionForward) ? TRUE : FALSE;
+    BOOL bForward = (direction == FocusDirection::Forward) ? TRUE : FALSE;
     BOOL result = FALSE;
     if (SUCCEEDED(m_webView->uiDelegate(&uiDelegate))) {
         uiDelegate->canTakeFocus(m_webView, bForward, &result);
@@ -152,7 +154,7 @@ bool WebChromeClient::canTakeFocus(FocusDirection direction)
 void WebChromeClient::takeFocus(FocusDirection direction)
 {
     IWebUIDelegate* uiDelegate = 0;
-    BOOL bForward = (direction == FocusDirectionForward) ? TRUE : FALSE;
+    BOOL bForward = (direction == FocusDirection::Forward) ? TRUE : FALSE;
     if (SUCCEEDED(m_webView->uiDelegate(&uiDelegate))) {
         uiDelegate->takeFocus(m_webView, bForward);
         uiDelegate->Release();
@@ -189,15 +191,15 @@ static COMPtr<IPropertyBag> createWindowFeaturesPropertyBag(const WindowFeatures
     return COMPtr<IPropertyBag>(AdoptCOM, COMPropertyBag<COMVariant>::adopt(map));
 }
 
-Page* WebChromeClient::createWindow(Frame& frame, const FrameLoadRequest&, const WindowFeatures& features, const NavigationAction& navigationAction)
+Page* WebChromeClient::createWindow(Frame& frame, const WindowFeatures& features, const NavigationAction& navigationAction)
 {
     COMPtr<IWebUIDelegate> delegate = uiDelegate();
     if (!delegate)
         return 0;
 
 #if ENABLE(FULLSCREEN_API)
-    if (frame.document() && frame.document()->webkitCurrentFullScreenElement())
-        frame.document()->webkitCancelFullScreen();
+    if (frame.document() && frame.document()->fullscreenManager().currentFullscreenElement())
+        frame.document()->fullscreenManager().cancelFullscreen();
 #endif
 
     COMPtr<WebMutableURLRequest> request = adoptCOM(WebMutableURLRequest::createInstance(ResourceRequest(navigationAction.url())));
@@ -373,7 +375,7 @@ bool WebChromeClient::runBeforeUnloadConfirmPanel(const String& message, Frame& 
     return !!result;
 }
 
-void WebChromeClient::closeWindowSoon()
+void WebChromeClient::closeWindow()
 {
     // We need to remove the parent WebView from WebViewSets here, before it actually
     // closes, to make sure that JavaScript code that executes before it closes
@@ -390,7 +392,7 @@ void WebChromeClient::closeWindowSoon()
 
     m_webView->setGroupName(0);
     m_webView->stopLoading(0);
-    m_webView->closeWindowSoon();
+    m_webView->closeWindow();
 }
 
 void WebChromeClient::runJavaScriptAlert(Frame&, const String& message)
@@ -471,6 +473,16 @@ void WebChromeClient::scroll(const IntSize& delta, const IntRect& scrollViewRect
     m_webView->scrollBackingStore(core(m_webView->topLevelFrame())->view(), delta.width(), delta.height(), scrollViewRect, clipRect);
 }
 
+IntPoint WebChromeClient::accessibilityScreenToRootView(const WebCore::IntPoint& point) const
+{
+    return screenToRootView(point);
+}
+
+IntRect WebChromeClient::rootViewToAccessibilityScreen(const WebCore::IntRect& rect) const
+{
+    return rootViewToScreen(rect);
+}
+
 IntRect WebChromeClient::rootViewToScreen(const IntRect& rect) const
 {
     HWND viewWindow;
@@ -513,16 +525,21 @@ void WebChromeClient::contentsSizeChanged(Frame&, const IntSize&) const
     notImplemented();
 }
 
-void WebChromeClient::mouseDidMoveOverElement(const HitTestResult& result, unsigned modifierFlags)
+void WebChromeClient::intrinsicContentsSizeChanged(const IntSize&) const
+{
+    notImplemented();
+}
+
+void WebChromeClient::mouseDidMoveOverElement(const HitTestResult& result, unsigned modifierFlags, const String& toolTip, TextDirection)
 {
     COMPtr<IWebUIDelegate> uiDelegate;
-    if (FAILED(m_webView->uiDelegate(&uiDelegate)))
-        return;
+    if (SUCCEEDED(m_webView->uiDelegate(&uiDelegate))) {
+        COMPtr<WebElementPropertyBag> element;
+        element.adoptRef(WebElementPropertyBag::createInstance(result));
 
-    COMPtr<WebElementPropertyBag> element;
-    element.adoptRef(WebElementPropertyBag::createInstance(result));
-
-    uiDelegate->mouseDidMoveOverElement(m_webView, element.get(), modifierFlags);
+        uiDelegate->mouseDidMoveOverElement(m_webView, element.get(), modifierFlags);
+    }
+    m_webView->setToolTip(toolTip);
 }
 
 bool WebChromeClient::shouldUnavailablePluginMessageBeButton(RenderEmbeddedObject::PluginUnavailabilityReason pluginUnavailabilityReason) const
@@ -556,12 +573,7 @@ void WebChromeClient::unavailablePluginButtonClicked(Element& element, RenderEmb
     uiDelegatePrivate3->didPressMissingPluginButton(e.get());
 }
 
-void WebChromeClient::setToolTip(const String& toolTip, TextDirection)
-{
-    m_webView->setToolTip(toolTip);
-}
-
-void WebChromeClient::print(Frame& frame)
+void WebChromeClient::print(Frame& frame, const StringWithDirection&)
 {
     COMPtr<IWebUIDelegate> uiDelegate;
     if (SUCCEEDED(m_webView->uiDelegate(&uiDelegate)))
@@ -605,7 +617,7 @@ void WebChromeClient::exceededDatabaseQuota(Frame& frame, const String& database
 }
 
 // FIXME: Move this include to the top of the file with the other includes.
-#include "ApplicationCacheStorage.h"
+#include <WebCore/ApplicationCacheStorage.h>
 
 void WebChromeClient::reachedMaxAppCacheSize(int64_t spaceNeeded)
 {
@@ -636,16 +648,15 @@ void WebChromeClient::runOpenPanel(Frame&, FileChooser& fileChooser)
 
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = viewWindow;
-    String allFiles = allFilesText();
-    allFiles.append(L"\0*.*\0\0", 6);
+    String allFiles = makeString(allFilesText(), String("\0*.*\0\0", 6));
 
-    Vector<UChar> filterCharacters = allFiles.charactersWithNullTermination(); // Retain buffer long enough to make the GetOpenFileName call
+    Vector<wchar_t> filterCharacters = allFiles.wideCharacters(); // Retain buffer long enough to make the GetOpenFileName call
     ofn.lpstrFilter = filterCharacters.data();
 
     ofn.lpstrFile = fileBuf.data();
     ofn.nMaxFile = fileBuf.size();
     String dialogTitle = uploadFileText();
-    Vector<UChar> dialogTitleCharacters = dialogTitle.charactersWithNullTermination(); // Retain buffer long enough to make the GetOpenFileName call
+    Vector<wchar_t> dialogTitleCharacters = dialogTitle.wideCharacters(); // Retain buffer long enough to make the GetOpenFileName call
     ofn.lpstrTitle = dialogTitleCharacters.data();
     ofn.Flags = OFN_ENABLESIZING | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
     if (multiFile)
@@ -688,6 +699,10 @@ RefPtr<Icon> WebChromeClient::createIconForFiles(const Vector<String>& filenames
     return Icon::createIconForFiles(filenames);
 }
 
+void WebChromeClient::didFinishLoadingImageForElement(WebCore::HTMLImageElement&)
+{
+}
+
 void WebChromeClient::setCursor(const Cursor& cursor)
 {
     if (!cursor.platformCursor())
@@ -727,12 +742,12 @@ void WebChromeClient::attachRootGraphicsLayer(Frame&, GraphicsLayer* graphicsLay
     m_webView->setRootChildLayer(graphicsLayer);
 }
 
-void WebChromeClient::attachViewOverlayGraphicsLayer(Frame&, GraphicsLayer*)
+void WebChromeClient::attachViewOverlayGraphicsLayer(GraphicsLayer*)
 {
     // FIXME: If we want view-relative page overlays in Legacy WebKit on Windows, this would be the place to hook them up.
 }
 
-void WebChromeClient::scheduleCompositingLayerFlush()
+void WebChromeClient::triggerRenderingUpdate()
 {
     m_webView->flushPendingGraphicsLayerChangesSoon();
 }
@@ -758,14 +773,15 @@ bool WebChromeClient::supportsVideoFullscreen(HTMLMediaElementEnums::VideoFullsc
     return true;
 }
 
-void WebChromeClient::enterVideoFullscreenForVideoElement(HTMLVideoElement& videoElement, HTMLMediaElementEnums::VideoFullscreenMode)
+void WebChromeClient::enterVideoFullscreenForVideoElement(HTMLVideoElement& videoElement, HTMLMediaElementEnums::VideoFullscreenMode, bool)
 {
     m_webView->enterVideoFullscreenForVideoElement(videoElement);
 }
 
-void WebChromeClient::exitVideoFullscreenForVideoElement(HTMLVideoElement& videoElement)
+void WebChromeClient::exitVideoFullscreenForVideoElement(HTMLVideoElement& videoElement, CompletionHandler<void(bool)>&& completionHandler)
 {
     m_webView->exitVideoFullscreenForVideoElement(videoElement);
+    completionHandler(true);
 }
 
 #endif
@@ -860,4 +876,19 @@ bool WebChromeClient::shouldUseTiledBackingForFrameView(const FrameView& frameVi
 #else
     return false;
 #endif
+}
+
+void WebChromeClient::requestCookieConsent(CompletionHandler<void(CookieConsentDecisionResult)>&& completion)
+{
+    completion(CookieConsentDecisionResult::NotSupported);
+}
+
+void WebChromeClient::classifyModalContainerControls(Vector<String>&&, CompletionHandler<void(Vector<ModalContainerControlType>&&)>&& completion)
+{
+    completion({ });
+}
+
+void WebChromeClient::decidePolicyForModalContainer(OptionSet<ModalContainerControlType>, CompletionHandler<void(ModalContainerDecision)>&& completion)
+{
+    completion(ModalContainerDecision::Show);
 }

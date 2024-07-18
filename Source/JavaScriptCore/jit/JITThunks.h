@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,14 +28,19 @@
 #if ENABLE(JIT)
 
 #include "CallData.h"
+#include "ImplementationVisibility.h"
 #include "Intrinsic.h"
 #include "MacroAssemblerCodeRef.h"
+#include "SlowPathFunction.h"
 #include "ThunkGenerator.h"
 #include "Weak.h"
 #include "WeakHandleOwner.h"
 #include <tuple>
 #include <wtf/HashMap.h>
-#include <wtf/text/StringHash.h>
+#include <wtf/HashSet.h>
+#include <wtf/PackedRefPtr.h>
+#include <wtf/RecursiveLockAdapter.h>
+#include <wtf/Hasher.h>
 
 namespace JSC {
 namespace DOMJIT {
@@ -49,62 +54,70 @@ class JITThunks final : private WeakHandleOwner {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     JITThunks();
-    virtual ~JITThunks();
+    ~JITThunks() final;
 
-    MacroAssemblerCodePtr ctiNativeCall(VM*);
-    MacroAssemblerCodePtr ctiNativeConstruct(VM*);
-    MacroAssemblerCodePtr ctiNativeTailCall(VM*);    
-    MacroAssemblerCodePtr ctiNativeTailCallWithoutSavedTags(VM*);    
+    MacroAssemblerCodePtr<JITThunkPtrTag> ctiNativeCall(VM&);
+    MacroAssemblerCodePtr<JITThunkPtrTag> ctiNativeConstruct(VM&);
+    MacroAssemblerCodePtr<JITThunkPtrTag> ctiNativeTailCall(VM&);
+    MacroAssemblerCodePtr<JITThunkPtrTag> ctiNativeTailCallWithoutSavedTags(VM&);
+    MacroAssemblerCodePtr<JITThunkPtrTag> ctiInternalFunctionCall(VM&);
+    MacroAssemblerCodePtr<JITThunkPtrTag> ctiInternalFunctionConstruct(VM&);
 
-    MacroAssemblerCodeRef ctiStub(VM*, ThunkGenerator);
-    MacroAssemblerCodeRef existingCTIStub(ThunkGenerator);
+    MacroAssemblerCodeRef<JITThunkPtrTag> ctiStub(VM&, ThunkGenerator);
+    MacroAssemblerCodeRef<JITThunkPtrTag> ctiSlowPathFunctionStub(VM&, SlowPathFunction);
 
-    NativeExecutable* hostFunctionStub(VM*, NativeFunction, NativeFunction constructor, const String& name);
-    NativeExecutable* hostFunctionStub(VM*, NativeFunction, NativeFunction constructor, ThunkGenerator, Intrinsic, const DOMJIT::Signature*, const String& name);
-    NativeExecutable* hostFunctionStub(VM*, NativeFunction, ThunkGenerator, Intrinsic, const String& name);
-
-    void clearHostFunctionStubs();
+    NativeExecutable* hostFunctionStub(VM&, TaggedNativeFunction, TaggedNativeFunction constructor, ImplementationVisibility, const String& name);
+    NativeExecutable* hostFunctionStub(VM&, TaggedNativeFunction, TaggedNativeFunction constructor, ThunkGenerator, ImplementationVisibility, Intrinsic, const DOMJIT::Signature*, const String& name);
+    NativeExecutable* hostFunctionStub(VM&, TaggedNativeFunction, ThunkGenerator, ImplementationVisibility, Intrinsic, const String& name);
 
 private:
-    void finalize(Handle<Unknown>, void* context) override;
+    template <typename GenerateThunk>
+    MacroAssemblerCodeRef<JITThunkPtrTag> ctiStubImpl(ThunkGenerator key, GenerateThunk);
+
+    void finalize(Handle<Unknown>, void* context) final;
     
-    typedef HashMap<ThunkGenerator, MacroAssemblerCodeRef> CTIStubMap;
+    struct Entry {
+        PackedRefPtr<ExecutableMemoryHandle> handle;
+        bool needsCrossModifyingCodeFence;
+    };
+    using CTIStubMap = HashMap<ThunkGenerator, Entry>;
     CTIStubMap m_ctiStubMap;
 
-    typedef std::tuple<NativeFunction, NativeFunction, String> HostFunctionKey;
+    using HostFunctionKey = std::tuple<TaggedNativeFunction, TaggedNativeFunction, ImplementationVisibility, String>;
 
-    struct HostFunctionHash {
+    struct WeakNativeExecutableHash {
+        static inline unsigned hash(const Weak<NativeExecutable>&);
+        static inline unsigned hash(NativeExecutable*);
         static unsigned hash(const HostFunctionKey& key)
         {
-            unsigned hash = WTF::pairIntHash(hashPointer(std::get<0>(key)), hashPointer(std::get<1>(key)));
-            if (!std::get<2>(key).isNull())
-                hash = WTF::pairIntHash(hash, DefaultHash<String>::Hash::hash(std::get<2>(key)));
-            return hash;
+            return hash(std::get<0>(key), std::get<1>(key), std::get<2>(key), std::get<3>(key));
         }
-        static bool equal(const HostFunctionKey& a, const HostFunctionKey& b)
-        {
-            return (std::get<0>(a) == std::get<0>(b)) && (std::get<1>(a) == std::get<1>(b)) && (std::get<2>(a) == std::get<2>(b));
-        }
-        static const bool safeToCompareToEmptyOrDeleted = true;
+
+        static inline bool equal(const Weak<NativeExecutable>&, const Weak<NativeExecutable>&);
+        static inline bool equal(const Weak<NativeExecutable>&, const HostFunctionKey&);
+        static inline bool equal(const Weak<NativeExecutable>&, NativeExecutable*);
+        static inline bool equal(NativeExecutable&, NativeExecutable&);
+        static constexpr bool safeToCompareToEmptyOrDeleted = false;
 
     private:
-        static inline unsigned hashPointer(NativeFunction p)
+        static unsigned hash(TaggedNativeFunction function, TaggedNativeFunction constructor, ImplementationVisibility implementationVisibility, const String& name)
         {
-            return DefaultHash<NativeFunction>::Hash::hash(p);
+            Hasher hasher;
+            WTF::add(hasher, function);
+            WTF::add(hasher, constructor);
+            WTF::add(hasher, implementationVisibility);
+            if (!name.isNull())
+                WTF::add(hasher, name);
+            return hasher.hash();
         }
     };
+    struct HostKeySearcher;
+    struct NativeExecutableTranslator;
 
-    struct HostFunctionHashTrait : WTF::GenericHashTraits<HostFunctionKey> {
-        static const bool emptyValueIsZero = true;
-        static EmptyValueType emptyValue() { return std::make_tuple(nullptr, nullptr, String()); }
+    using WeakNativeExecutableSet = HashSet<Weak<NativeExecutable>, WeakNativeExecutableHash>;
+    WeakNativeExecutableSet m_nativeExecutableSet;
 
-        static void constructDeletedValue(HostFunctionKey& slot) { std::get<0>(slot) = reinterpret_cast<NativeFunction>(-1); }
-        static bool isDeletedValue(const HostFunctionKey& value) { return std::get<0>(value) == reinterpret_cast<NativeFunction>(-1); }
-    };
-    
-    typedef HashMap<HostFunctionKey, Weak<NativeExecutable>, HostFunctionHash, HostFunctionHashTrait> HostFunctionStubMap;
-    std::unique_ptr<HostFunctionStubMap> m_hostFunctionStubMap;
-    Lock m_lock;
+    WTF::RecursiveLock m_lock;
 };
 
 } // namespace JSC

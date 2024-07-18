@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Igalia S.L.
+ * Copyright (C) 2014, 2020 Igalia S.L.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -52,38 +52,71 @@ struct _WebKitUserContentManager {
 struct _WebKitUserContentManagerClass {
     GObjectClass parent_class;
 
+    /*< private >*/
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
     void (*_webkit_reserved3) (void);
 };
 
-
 WEBKIT_API GType
-webkit_user_content_manager_get_type                          (void);
+webkit_user_content_manager_get_type                                   (void);
 
 WEBKIT_API WebKitUserContentManager *
-webkit_user_content_manager_new                               (void);
+webkit_user_content_manager_new                                        (void);
 
 WEBKIT_API void
-webkit_user_content_manager_add_style_sheet                   (WebKitUserContentManager *manager,
-                                                               WebKitUserStyleSheet     *stylesheet);
+webkit_user_content_manager_add_style_sheet                            (WebKitUserContentManager *manager,
+                                                                        WebKitUserStyleSheet     *stylesheet);
+
 WEBKIT_API void
-webkit_user_content_manager_remove_all_style_sheets           (WebKitUserContentManager *manager);
+webkit_user_content_manager_remove_style_sheet                         (WebKitUserContentManager *manager,
+                                                                        WebKitUserStyleSheet     *stylesheet);
+
+WEBKIT_API void
+webkit_user_content_manager_remove_all_style_sheets                    (WebKitUserContentManager *manager);
 
 WEBKIT_API gboolean
-webkit_user_content_manager_register_script_message_handler   (WebKitUserContentManager *manager,
-                                                               const gchar              *name);
+webkit_user_content_manager_register_script_message_handler            (WebKitUserContentManager *manager,
+                                                                        const gchar              *name);
 WEBKIT_API void
-webkit_user_content_manager_unregister_script_message_handler (WebKitUserContentManager *manager,
-                                                               const gchar              *name);
+webkit_user_content_manager_unregister_script_message_handler          (WebKitUserContentManager *manager,
+                                                                        const gchar              *name);
+
+WEBKIT_API gboolean
+webkit_user_content_manager_register_script_message_handler_in_world   (WebKitUserContentManager *manager,
+                                                                        const gchar              *name,
+                                                                        const gchar              *world_name);
+WEBKIT_API void
+webkit_user_content_manager_unregister_script_message_handler_in_world (WebKitUserContentManager *manager,
+                                                                        const gchar              *name,
+                                                                        const gchar              *world_name);
 
 WEBKIT_API void
-webkit_user_content_manager_add_script              (WebKitUserContentManager *manager,
-                                                     WebKitUserScript         *script);
+webkit_user_content_manager_add_script                                 (WebKitUserContentManager *manager,
+                                                                        WebKitUserScript         *script);
 
 WEBKIT_API void
-webkit_user_content_manager_remove_all_scripts      (WebKitUserContentManager *manager);
+webkit_user_content_manager_remove_script                              (WebKitUserContentManager *manager,
+                                                                        WebKitUserScript         *script);
+
+WEBKIT_API void
+webkit_user_content_manager_remove_all_scripts                         (WebKitUserContentManager *manager);
+
+WEBKIT_API void
+webkit_user_content_manager_add_filter                                 (WebKitUserContentManager *manager,
+                                                                        WebKitUserContentFilter  *filter);
+
+WEBKIT_API void
+webkit_user_content_manager_remove_filter                              (WebKitUserContentManager *manager,
+                                                                        WebKitUserContentFilter  *filter);
+
+WEBKIT_API void
+webkit_user_content_manager_remove_filter_by_id                        (WebKitUserContentManager *manager,
+                                                                        const char               *filter_id);
+
+WEBKIT_API void
+webkit_user_content_manager_remove_all_filters                         (WebKitUserContentManager *manager);
 
 G_END_DECLS
 

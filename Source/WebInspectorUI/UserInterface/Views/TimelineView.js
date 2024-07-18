@@ -32,6 +32,7 @@ WI.TimelineView = class TimelineView extends WI.ContentView
 
         // This class should not be instantiated directly. Create a concrete subclass instead.
         console.assert(this.constructor !== WI.TimelineView && this instanceof WI.TimelineView);
+        console.assert(this.constructor.ReferencePage, this);
 
         this.element.classList.add("timeline-view");
 
@@ -54,6 +55,12 @@ WI.TimelineView = class TimelineView extends WI.ContentView
     {
         // Implemented by sub-classes if needed.
         return true;
+    }
+
+    get showsImportedRecordingMessage()
+    {
+        // Implemented by sub-classes if needed.
+        return false;
     }
 
     get showsFilterBar()
@@ -224,15 +231,6 @@ WI.TimelineView = class TimelineView extends WI.ContentView
         return true;
     }
 
-    needsLayout()
-    {
-        // FIXME: needsLayout can be removed once <https://webkit.org/b/150741> is fixed.
-        if (!this.visible)
-            return;
-
-        super.needsLayout();
-    }
-
     // DataGrid filter delegate
 
     dataGridMatchNodeAgainstCustomFilters(node)
@@ -295,9 +293,11 @@ WI.TimelineView = class TimelineView extends WI.ContentView
 
     // Protected
 
-    userSelectedRecordFromOverview(timelineRecord)
+    initialLayout()
     {
-        // Implemented by sub-classes if needed.
+        super.initialLayout();
+
+        this.element.appendChild(this.constructor.ReferencePage.createLinkElement());
     }
 
     filterDidChange()
@@ -340,5 +340,10 @@ WI.TimelineView = class TimelineView extends WI.ContentView
 };
 
 WI.TimelineView.Event = {
-    RecordWasFiltered: "record-was-filtered"
+    RecordWasFiltered: "timeline-view-record-was-filtered",
+    RecordWasSelected: "timeline-view-record-was-selected",
+    ScannerShow: "timeline-view-scanner-show",
+    ScannerHide: "timeline-view-scanner-hide",
+    NeedsEntireSelectedRange: "timeline-view-needs-entire-selected-range",
+    NeedsFiltersCleared: "timeline-view-needs-filters-cleared",
 };

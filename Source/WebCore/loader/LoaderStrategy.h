@@ -25,51 +25,79 @@
 
 #pragma once
 
+#include "FetchOptions.h"
+#include "LoadSchedulingMode.h"
+#include "PageIdentifier.h"
 #include "ResourceLoadPriority.h"
+#include "ResourceLoaderIdentifier.h"
 #include "ResourceLoaderOptions.h"
 #include "StoredCredentialsPolicy.h"
 #include <wtf/Forward.h>
-#include <wtf/SHA1.h>
 
 namespace WebCore {
 
 class CachedResource;
 class ContentSecurityPolicy;
 class Frame;
+class FrameLoader;
 class HTTPHeaderMap;
 class NetscapePlugInStreamLoader;
 class NetscapePlugInStreamLoaderClient;
-class NetworkingContext;
+struct NetworkTransactionInformation;
+class NetworkLoadMetrics;
+class Page;
 class ResourceError;
 class ResourceLoader;
 class ResourceRequest;
 class ResourceResponse;
 class SecurityOrigin;
-class SharedBuffer;
+class FragmentedSharedBuffer;
 class SubresourceLoader;
-class URL;
 
 struct FetchOptions;
 
 class WEBCORE_EXPORT LoaderStrategy {
 public:
-    virtual RefPtr<SubresourceLoader> loadResource(Frame&, CachedResource&, const ResourceRequest&, const ResourceLoaderOptions&) = 0;
-    virtual void loadResourceSynchronously(NetworkingContext*, unsigned long identifier, const ResourceRequest&, StoredCredentialsPolicy, ClientCredentialPolicy, ResourceError&, ResourceResponse&, Vector<char>& data) = 0;
+    virtual void loadResource(Frame&, CachedResource&, ResourceRequest&&, const ResourceLoaderOptions&, CompletionHandler<void(RefPtr<SubresourceLoader>&&)>&&) = 0;
+    virtual void loadResourceSynchronously(FrameLoader&, ResourceLoaderIdentifier, const ResourceRequest&, ClientCredentialPolicy, const FetchOptions&, const HTTPHeaderMap&, ResourceError&, ResourceResponse&, Vector<uint8_t>& data) = 0;
+    virtual void pageLoadCompleted(Page&) = 0;
+    virtual void browsingContextRemoved(Frame&) = 0;
 
     virtual void remove(ResourceLoader*) = 0;
-    virtual void setDefersLoading(ResourceLoader*, bool) = 0;
+    virtual void setDefersLoading(ResourceLoader&, bool) = 0;
     virtual void crossOriginRedirectReceived(ResourceLoader*, const URL& redirectURL) = 0;
 
     virtual void servePendingRequests(ResourceLoadPriority minimumPriority = ResourceLoadPriority::VeryLow) = 0;
     virtual void suspendPendingRequests() = 0;
     virtual void resumePendingRequests() = 0;
 
-    using PingLoadCompletionHandler = WTF::Function<void(const ResourceError&)>;
-    virtual void startPingLoad(Frame&, ResourceRequest&, const HTTPHeaderMap& originalRequestHeaders, const FetchOptions&, PingLoadCompletionHandler&& = { }) = 0;
+    virtual void setResourceLoadSchedulingMode(Page&, LoadSchedulingMode);
+    virtual void prioritizeResourceLoads(const Vector<SubresourceLoader*>&);
 
-    virtual void storeDerivedDataToCache(const SHA1::Digest& bodyKey, const String& type, const String& partition, WebCore::SharedBuffer&) = 0;
+    virtual bool usePingLoad() const { return true; }
+    using PingLoadCompletionHandler = Function<void(const ResourceError&, const ResourceResponse&)>;
+    virtual void startPingLoad(Frame&, ResourceRequest&, const HTTPHeaderMap& originalRequestHeaders, const FetchOptions&, ContentSecurityPolicyImposition, PingLoadCompletionHandler&& = { }) = 0;
+
+    using PreconnectCompletionHandler = Function<void(const ResourceError&)>;
+    enum class ShouldPreconnectAsFirstParty : bool { No, Yes };
+    virtual void preconnectTo(FrameLoader&, const URL&, StoredCredentialsPolicy, ShouldPreconnectAsFirstParty, PreconnectCompletionHandler&&) = 0;
 
     virtual void setCaptureExtraNetworkLoadMetricsEnabled(bool) = 0;
+
+    virtual bool isOnLine() const = 0;
+    virtual void addOnlineStateChangeListener(Function<void(bool)>&&) = 0;
+
+    virtual bool shouldPerformSecurityChecks() const { return false; }
+    virtual bool havePerformedSecurityChecks(const ResourceResponse&) const { return false; }
+
+    virtual ResourceResponse responseFromResourceLoadIdentifier(ResourceLoaderIdentifier);
+    virtual Vector<NetworkTransactionInformation> intermediateLoadInformationFromResourceLoadIdentifier(ResourceLoaderIdentifier);
+    virtual NetworkLoadMetrics networkMetricsFromResourceLoadIdentifier(ResourceLoaderIdentifier);
+
+    virtual void isResourceLoadFinished(CachedResource&, CompletionHandler<void(bool)>&& callback) = 0;
+
+    // Used for testing only.
+    virtual Vector<ResourceLoaderIdentifier> ongoingLoads() const { return { }; }
 
 protected:
     virtual ~LoaderStrategy();

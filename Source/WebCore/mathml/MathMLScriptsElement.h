@@ -32,8 +32,12 @@
 namespace WebCore {
 
 class MathMLScriptsElement : public MathMLPresentationElement {
+    WTF_MAKE_ISO_ALLOCATED(MathMLScriptsElement);
 public:
     static Ref<MathMLScriptsElement> create(const QualifiedName& tagName, Document&);
+
+    enum class ScriptType { Sub, Super, SubSup, Multiscripts, Under, Over, UnderOver };
+    ScriptType scriptType() const { return m_scriptType; }
     const Length& subscriptShift();
     const Length& superscriptShift();
 
@@ -42,8 +46,9 @@ protected:
 
 private:
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) override;
-    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    void parseAttribute(const QualifiedName&, const AtomString&) override;
 
+    const ScriptType m_scriptType;
     std::optional<Length> m_subscriptShift;
     std::optional<Length> m_superscriptShift;
 };

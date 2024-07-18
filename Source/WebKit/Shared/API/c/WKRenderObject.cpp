@@ -28,71 +28,44 @@
 
 #include "APIArray.h"
 #include "WKAPICast.h"
-#include "WebRenderObject.h"
 
-using namespace WebCore;
-using namespace WebKit;
-
-WKTypeID WKRenderObjectGetTypeID()
+// These functions should be kept around for compatibility with SafariForWebKitDevelopment.
+void WKRenderObjectGetTypeID()
 {
-    return toAPI(WebRenderObject::APIType);
 }
 
-WKStringRef WKRenderObjectCopyName(WKRenderObjectRef renderObjectRef)
+void WKRenderObjectCopyName()
 {
-    return toCopiedAPI(toImpl(renderObjectRef)->name());
 }
 
-WKStringRef WKRenderObjectCopyTextSnippet(WKRenderObjectRef renderObjectRef)
+void WKRenderObjectCopyTextSnippet()
 {
-    WebRenderObject* renderObject = toImpl(renderObjectRef);
-    if (!renderObject->textSnippet().isNull())
-        return toCopiedAPI(renderObject->textSnippet());
-
-    return nullptr;
 }
 
-unsigned WKRenderObjectGetTextLength(WKRenderObjectRef renderObjectRef)
+void WKRenderObjectGetTextLength()
 {
-    return toImpl(renderObjectRef)->textLength();
 }
 
-WKStringRef WKRenderObjectCopyElementTagName(WKRenderObjectRef renderObjectRef)
+void WKRenderObjectCopyElementTagName()
 {
-    WebRenderObject* renderObject = toImpl(renderObjectRef);
-    if (!renderObject->elementTagName().isNull())
-        return toCopiedAPI(renderObject->elementTagName());
-
-    return nullptr;
 }
 
-WKStringRef WKRenderObjectCopyElementID(WKRenderObjectRef renderObjectRef)
+void WKRenderObjectCopyElementID()
 {
-    WebRenderObject* renderObject = toImpl(renderObjectRef);
-    if (!renderObject->elementID().isNull())
-        return toCopiedAPI(renderObject->elementID());
-
-    return nullptr;
 }
 
-WKArrayRef WKRenderObjectGetElementClassNames(WKRenderObjectRef renderObjectRef)
+void WKRenderObjectGetElementClassNames()
 {
-    return toAPI(toImpl(renderObjectRef)->elementClassNames());
 }
 
-WKPoint WKRenderObjectGetAbsolutePosition(WKRenderObjectRef renderObjectRef)
+void WKRenderObjectGetAbsolutePosition()
 {
-    IntPoint absolutePosition = toImpl(renderObjectRef)->absolutePosition();
-    return WKPointMake(absolutePosition.x(), absolutePosition.y());
 }
 
-WKRect WKRenderObjectGetFrameRect(WKRenderObjectRef renderObjectRef)
+void WKRenderObjectGetFrameRect()
 {
-    IntRect frameRect = toImpl(renderObjectRef)->frameRect();
-    return WKRectMake(frameRect.x(), frameRect.y(), frameRect.width(), frameRect.height());
 }
 
-WKArrayRef WKRenderObjectGetChildren(WKRenderObjectRef renderObjectRef)
+void WKRenderObjectGetChildren()
 {
-    return toAPI(toImpl(renderObjectRef)->children());
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2018 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,7 +44,7 @@ WI.Table = class Table extends WI.View
         // synchronized scrolling between multiple elements, or making `position: sticky`
         // respect different vertical / horizontal scroll containers.
 
-        this.element.classList.add("table");
+        this.element.classList.add("table", identifier);
         this.element.tabIndex = 0;
         this.element.addEventListener("keydown", this._handleKeyDown.bind(this));
 
@@ -56,8 +56,7 @@ WI.Table = class Table extends WI.View
         this._scrollContainerElement.className = "data-container";
         this._scrollContainerElement.addEventListener("scroll", scrollHandler);
         this._scrollContainerElement.addEventListener("mousewheel", scrollHandler);
-        if (this._delegate.tableCellClicked)
-            this._scrollContainerElement.addEventListener("click", this._handleClick.bind(this));
+        this._scrollContainerElement.addEventListener("mousedown", this._handleMouseDown.bind(this));
         if (this._delegate.tableCellContextMenuClicked)
             this._scrollContainerElement.addEventListener("contextmenu", this._handleContextMenu.bind(this));
 
@@ -73,6 +72,9 @@ WI.Table = class Table extends WI.View
         this._fillerRow = this._listElement.appendChild(document.createElement("li"));
         this._fillerRow.className = "filler";
 
+        this._resizersElement = this._element.appendChild(document.createElement("div"));
+        this._resizersElement.className = "resizers";
+
         this._cachedRows = new Map;
 
         this._columnSpecs = new Map;
@@ -80,10 +82,12 @@ WI.Table = class Table extends WI.View
         this._visibleColumns = [];
         this._hiddenColumns = [];
 
+        this._widthGeneration = 1;
         this._columnWidths = null; // Calculated in _resizeColumnsAndFiller.
         this._fillerHeight = 0; // Calculated in _resizeColumnsAndFiller.
 
-        this._selectedRowIndex = NaN;
+        let selectionComparator = WI.SelectionController.createListComparator(this._indexForRepresentedObject.bind(this));
+        this._selectionController = new WI.SelectionController(this, selectionComparator);
 
         this._resizers = [];
         this._currentResizer = null;
@@ -92,21 +96,26 @@ WI.Table = class Table extends WI.View
         this._resizeOriginalColumnWidths = null;
         this._lastColumnIndexToAcceptRemainderPixel = 0;
 
-        this._sortOrder = WI.Table.SortOrder.Indeterminate;
-        this._sortColumnIdentifier = null;
-        this._sortRequestIdentifier = undefined;
-
-        this._sortOrderSetting = new WI.Setting(this._identifier + "-sort-order", this._sortOrder);
-        this._sortColumnIdentifierSetting = new WI.Setting(this._identifier + "-sort", this._sortColumnIdentifier);
+        this._sortOrderSetting = new WI.Setting(this._identifier + "-sort-order", WI.Table.SortOrder.Indeterminate);
+        this._sortColumnIdentifierSetting = new WI.Setting(this._identifier + "-sort", null);
         this._columnVisibilitySetting = new WI.Setting(this._identifier + "-column-visibility", {});
 
+        this._sortOrder = this._sortOrderSetting.value;
+        this._sortColumnIdentifier = this._sortColumnIdentifierSetting.value;
+
+        this._cachedWidth = NaN;
+        this._cachedHeight = NaN;
         this._cachedScrollTop = NaN;
-        this._cachedScrollableOffsetHeight = NaN;
+        this._previousCachedWidth = NaN;
         this._previousRevealedRowCount = NaN;
         this._topSpacerHeight = NaN;
         this._bottomSpacerHeight = NaN;
         this._visibleRowIndexStart = NaN;
         this._visibleRowIndexEnd = NaN;
+
+        console.assert(this._dataSource.tableNumberOfRows, "Table data source must implement tableNumberOfRows.");
+        console.assert(this._dataSource.tableIndexForRepresentedObject, "Table data source must implement tableIndexForRepresentedObject.");
+        console.assert(this._dataSource.tableRepresentedObjectForIndex, "Table data source must implement tableRepresentedObjectForIndex.");
 
         console.assert(this._delegate.tablePopulateCell, "Table delegate must implement tablePopulateCell.");
     }
@@ -117,7 +126,28 @@ WI.Table = class Table extends WI.View
     get dataSource() { return this._dataSource; }
     get delegate() { return this._delegate; }
     get rowHeight() { return this._rowHeight; }
-    get selectedRow() { return this._selectedRowIndex; }
+
+    get selectedRow()
+    {
+        let item = this._selectionController.lastSelectedItem;
+        let index = this._indexForRepresentedObject(item);
+        return index >= 0 ? index : NaN;
+    }
+
+    get selectedRows()
+    {
+        let rowIndexes = [];
+        for (let item of this._selectionController.selectedItems)
+            rowIndexes.push(this._indexForRepresentedObject(item));
+        return rowIndexes;
+    }
+
+    get scrollContainer() { return this._scrollContainerElement; }
+
+    get numberOfRows()
+    {
+        return this._dataSource.tableNumberOfRows(this);
+    }
 
     get sortOrder()
     {
@@ -126,7 +156,7 @@ WI.Table = class Table extends WI.View
 
     set sortOrder(sortOrder)
     {
-        if (sortOrder === this._sortOrder)
+        if (sortOrder === this._sortOrder && this.didInitialLayout)
             return;
 
         console.assert(sortOrder === WI.Table.SortOrder.Indeterminate || sortOrder === WI.Table.SortOrder.Ascending || sortOrder === WI.Table.SortOrder.Descending);
@@ -155,7 +185,7 @@ WI.Table = class Table extends WI.View
 
     set sortColumnIdentifier(columnIdentifier)
     {
-        if (columnIdentifier === this._sortColumnIdentifier)
+        if (columnIdentifier === this._sortColumnIdentifier && this.didInitialLayout)
             return;
 
         let column = this._columnSpecs.get(columnIdentifier);
@@ -195,17 +225,33 @@ WI.Table = class Table extends WI.View
             this._dataSource.tableSortChanged(this);
     }
 
-    resize()
+    get allowsMultipleSelection()
     {
-        this._resizeColumnsAndFiller();
+        return this._selectionController.allowsMultipleSelection;
+    }
+
+    set allowsMultipleSelection(flag)
+    {
+        this._selectionController.allowsMultipleSelection = flag;
+    }
+
+    get columns()
+    {
+        return Array.from(this._columnSpecs.values());
+    }
+
+    isRowSelected(rowIndex)
+    {
+        return this._selectionController.hasSelectedItem(this._representedObjectForIndex(rowIndex));
     }
 
     reloadData()
     {
         this._cachedRows.clear();
 
-        this._previousRevealedRowCount = NaN;
+        this._selectionController.reset();
 
+        this._previousRevealedRowCount = NaN;
         this.needsLayout();
     }
 
@@ -228,6 +274,36 @@ WI.Table = class Table extends WI.View
 
         // Non-visible row, will populate when it becomes visible.
         this._cachedRows.delete(rowIndex);
+    }
+
+    restyleRow(rowIndex)
+    {
+        if (!this._isRowVisible(rowIndex))
+            return;
+
+        let row = this._cachedRows.get(rowIndex);
+        if (!row)
+            return;
+
+        this._styleRow(row);
+    }
+
+    reloadVisibleColumnCells(column)
+    {
+        let columnIndex = this._visibleColumns.indexOf(column);
+        if (columnIndex === -1)
+            return;
+
+        let numberOfRows = Math.min(this._visibleRowIndexEnd, this.numberOfRows);
+        for (let rowIndex = this._visibleRowIndexStart; rowIndex < numberOfRows; ++rowIndex) {
+            let row = this._cachedRows.get(rowIndex);
+            if (!row)
+                continue;
+            let cell = row.children[columnIndex];
+            if (!cell)
+                continue;
+            this._delegate.tablePopulateCell(this, cell, column, rowIndex);
+        }
     }
 
     reloadCell(rowIndex, columnIdentifier)
@@ -253,40 +329,99 @@ WI.Table = class Table extends WI.View
         this._cachedRows.delete(rowIndex);
     }
 
-    selectRow(rowIndex)
+    selectRow(rowIndex, extendSelection = false)
     {
-        if (this._selectedRowIndex === rowIndex)
-            return;
-
-        let oldSelectedRow = this._cachedRows.get(this._selectedRowIndex);
-        if (oldSelectedRow)
-            oldSelectedRow.classList.remove("selected");
-
-        this._selectedRowIndex = rowIndex;
-
-        let newSelectedRow = this._cachedRows.get(this._selectedRowIndex)
-        if (newSelectedRow)
-            newSelectedRow.classList.add("selected");
-
-        if (this._delegate.tableSelectedRowChanged)
-            this._delegate.tableSelectedRowChanged(this, this._selectedRowIndex);
+        this._selectionController.selectItem(this._representedObjectForIndex(rowIndex), extendSelection);
     }
 
-    clearSelectedRow()
+    deselectRow(rowIndex)
     {
-        if (isNaN(this._selectedRowIndex))
+        this._selectionController.deselectItem(this._representedObjectForIndex(rowIndex));
+    }
+
+    selectAll()
+    {
+        this._selectionController.selectAll();
+    }
+
+    deselectAll()
+    {
+        this._selectionController.deselectAll();
+    }
+
+    removeRow(rowIndex)
+    {
+        console.assert(rowIndex >= 0 && rowIndex < this.numberOfRows);
+
+        if (this.isRowSelected(rowIndex))
+            this.deselectRow(rowIndex);
+
+        this._removeRows(new Set([this._representedObjectForIndex(rowIndex)]));
+    }
+
+    removeSelectedRows()
+    {
+        let selectedItems = this._selectionController.selectedItems;
+        if (!selectedItems.size)
             return;
 
-        let oldSelectedRow = this._cachedRows.get(this._selectedRowIndex);
-        if (oldSelectedRow)
-            oldSelectedRow.classList.remove("selected");
+        // Change the selection before removing rows. This matches the behavior
+        // of macOS Finder (in list and column modes) when removing selected items.
+        this._selectionController.removeSelectedItems();
 
-        this._selectedRowIndex = NaN;
+        this._removeRows(selectedItems);
+    }
+
+    revealRow(rowIndex)
+    {
+        console.assert(rowIndex >= 0 && rowIndex < this.numberOfRows);
+        if (rowIndex < 0 || rowIndex >= this.numberOfRows)
+            return;
+
+        if (this._isRowVisible(rowIndex)) {
+            let row = this._cachedRows.get(rowIndex);
+            console.assert(row, "Visible rows should always be in the cache.");
+            if (row) {
+                row.scrollIntoViewIfNeeded(false);
+                this._cachedScrollTop = NaN;
+                this.needsLayout();
+            }
+        } else {
+            let rowPosition = rowIndex * this._rowHeight;
+            let scrollableOffsetHeight = this._calculateOffsetHeight();
+            let scrollTop = this._calculateScrollTop();
+            let newScrollTop = NaN;
+            if (rowPosition + this._rowHeight < scrollTop)
+                newScrollTop = rowPosition;
+            else if (rowPosition > scrollTop + scrollableOffsetHeight)
+                newScrollTop = scrollTop + scrollableOffsetHeight - this._rowHeight;
+
+            if (!isNaN(newScrollTop)) {
+                this._scrollContainerElement.scrollTop = newScrollTop;
+                this.updateLayout();
+            }
+        }
     }
 
     columnWithIdentifier(identifier)
     {
         return this._columnSpecs.get(identifier);
+    }
+
+    cellForRowAndColumn(rowIndex, column)
+    {
+        if (!this._isRowVisible(rowIndex))
+            return null;
+
+        let row = this._cachedRows.get(rowIndex);
+        if (!row)
+            return null;
+
+        let columnIndex = this._visibleColumns.indexOf(column);
+        if (columnIndex === -1)
+            return null;
+
+        return row.children[columnIndex];
     }
 
     addColumn(column)
@@ -301,6 +436,8 @@ WI.Table = class Table extends WI.View
             this._visibleColumns.push(column);
             this._headerElement.appendChild(this._createHeaderCell(column));
             this._fillerRow.appendChild(this._createFillerCell(column));
+            if (column.headerView)
+                this.addSubview(column.headerView);
         }
 
         // Restore saved user-specified column visibility.
@@ -326,7 +463,7 @@ WI.Table = class Table extends WI.View
         if (!column.hidden)
             return;
 
-        column.setHidden(false);
+        column.hidden = false;
 
         let columnIndex = this._hiddenColumns.indexOf(column);
         this._hiddenColumns.splice(columnIndex, 1);
@@ -348,6 +485,15 @@ WI.Table = class Table extends WI.View
         this._headerElement.insertBefore(this._createHeaderCell(column), this._headerElement.children[newColumnIndex]);
         this._fillerRow.insertBefore(this._createFillerCell(column), this._fillerRow.children[newColumnIndex]);
 
+        if (column.headerView)
+            this.addSubview(column.headerView);
+
+        if (this._sortColumnIdentifier === column.identifier) {
+            let headerCell = this._headerElement.children[newColumnIndex];
+            headerCell.classList.toggle("sort-ascending", this._sortOrder === WI.Table.SortOrder.Ascending);
+            headerCell.classList.toggle("sort-descending", this._sortOrder === WI.Table.SortOrder.Descending);
+        }
+
         // We haven't yet done any layout, nothing to do.
         if (!this._columnWidths)
             return;
@@ -365,12 +511,21 @@ WI.Table = class Table extends WI.View
         }
 
         // Re-layout all columns to make space.
+        this._widthGeneration++;
         this._columnWidths = null;
-        this.resize();
+        this._resizeColumnsAndFiller();
 
         // Now populate only the new cells for this column.
         for (let cell of cellsToPopulate)
             this._delegate.tablePopulateCell(this, cell, column, cell.parentElement.__index);
+
+        // Now populate columns that may be sensitive to resizes.
+        for (let visibleColumn of this._visibleColumns) {
+            if (visibleColumn !== column) {
+                if (visibleColumn.needsReloadOnResize)
+                    this.reloadVisibleColumnCells(visibleColumn);
+            }
+        }
     }
 
     hideColumn(column)
@@ -380,10 +535,14 @@ WI.Table = class Table extends WI.View
         if (column.locked)
             return;
 
+        console.assert(column.hideable, "Column is not hideable so should always be shown.");
+        if (!column.hideable)
+            return;
+
         if (column.hidden)
             return;
 
-        column.setHidden(true);
+        column.hidden = true;
 
         this._hiddenColumns.push(column);
 
@@ -404,27 +563,39 @@ WI.Table = class Table extends WI.View
         this._headerElement.removeChild(this._headerElement.children[columnIndex]);
         this._fillerRow.removeChild(this._fillerRow.children[columnIndex]);
 
+        if (column.headerView)
+            this.removeSubview(column.headerView);
+
         // We haven't yet done any layout, nothing to do.
         if (!this._columnWidths)
             return;
-
-        this._columnWidths.splice(columnIndex, 1);
 
         for (let row of this._listElement.children) {
             if (row !== this._fillerRow)
                 row.removeChild(row.children[columnIndex]);
         }
 
-        this.needsLayout();
-    }
+        // Re-layout all columns to make space.
+        this._widthGeneration++;
+        this._columnWidths = null;
+        this._resizeColumnsAndFiller();
 
-    restoreScrollPosition()
-    {
-        if (this._cachedScrollTop && !this._scrollContainerElement.scrollTop)
-            this._scrollContainerElement.scrollTop = this._cachedScrollTop;
+        // Now populate columns that may be sensitive to resizes.
+        for (let visibleColumn of this._visibleColumns) {
+            if (visibleColumn.needsReloadOnResize)
+                this.reloadVisibleColumnCells(visibleColumn);
+        }
     }
 
     // Protected
+
+    attached()
+    {
+        super.attached();
+
+        if (this._cachedScrollTop && !this._scrollContainerElement.scrollTop)
+            this._scrollContainerElement.scrollTop = this._cachedScrollTop;
+    }
 
     initialLayout()
     {
@@ -440,8 +611,69 @@ WI.Table = class Table extends WI.View
     layout()
     {
         this._updateVisibleRows();
+        this._resizeColumnsAndFiller();
+    }
 
-        this.resize();
+    sizeDidChange()
+    {
+        super.sizeDidChange();
+
+        this._previousCachedWidth = this._cachedWidth;
+        this._cachedWidth = NaN;
+        this._cachedHeight = NaN;
+    }
+
+    // SelectionController delegate
+
+    selectionControllerSelectionDidChange(controller, deselectedItems, selectedItems)
+    {
+        for (let item of deselectedItems) {
+            let rowIndex = this._indexForRepresentedObject(item);
+            let row = this._cachedRows.get(rowIndex);
+            if (row)
+                row.classList.toggle("selected", false);
+        }
+
+        for (let item of selectedItems) {
+            let rowIndex = this._indexForRepresentedObject(item);
+            let row = this._cachedRows.get(rowIndex);
+            if (row)
+                row.classList.toggle("selected", true);
+        }
+
+        if (this._selectionController.lastSelectedItem) {
+            let rowIndex = this._indexForRepresentedObject(this._selectionController.lastSelectedItem);
+            this.revealRow(rowIndex);
+        }
+
+        if (this._delegate.tableSelectionDidChange)
+            this._delegate.tableSelectionDidChange(this);
+    }
+
+    selectionControllerFirstSelectableItem(controller)
+    {
+        return this._representedObjectForIndex(0);
+    }
+
+    selectionControllerLastSelectableItem(controller)
+    {
+        return this._representedObjectForIndex(this.numberOfRows - 1);
+    }
+
+    selectionControllerPreviousSelectableItem(controller, item)
+    {
+        let index = this._indexForRepresentedObject(item);
+        console.assert(index >= 0 && index < this.numberOfRows);
+
+        return index > 0 ? this._representedObjectForIndex(index - 1) : null;
+    }
+
+    selectionControllerNextSelectableItem(controller, item)
+    {
+        let index = this._indexForRepresentedObject(item);
+        console.assert(index >= 0 && index < this.numberOfRows);
+
+        return index < this.numberOfRows - 1 ? this._representedObjectForIndex(index + 1) : null;
     }
 
     // Resizer delegate
@@ -548,7 +780,11 @@ WI.Table = class Table extends WI.View
             delta -= incrementalDelta;
         }
 
+        // We have new column widths.
+        this._widthGeneration++;
+
         this._applyColumnWidths();
+        this._positionHeaderViews();
     }
 
     resizerDragEnded(resizer)
@@ -563,6 +799,7 @@ WI.Table = class Table extends WI.View
         this._resizeOriginalColumnWidths = null;
 
         this._positionResizerElements();
+        this._positionHeaderViews();
     }
 
     // Private
@@ -611,11 +848,32 @@ WI.Table = class Table extends WI.View
 
         let row = document.createElement("li");
         row.__index = rowIndex;
-        if (rowIndex === this._selectedRowIndex)
-            row.classList.add("selected");
+        row.__widthGeneration = 0;
+        this._styleRow(row);
+
+        if (this._delegate.tableRowHovered) {
+            this._boundHandleRowMouseEnter ??= this._handleRowMouseEnter.bind(this);
+            this._boundHandleRowMouseLeave ??= this._handleRowMouseLeave.bind(this);
+
+            row.addEventListener("mouseenter", this._boundHandleRowMouseEnter);
+            row.addEventListener("mouseleave", this._boundHandleRowMouseLeave);
+        }
 
         this._cachedRows.set(rowIndex, row);
         return row;
+    }
+
+    _styleRow(row)
+    {
+        let selected = row.classList.contains("selected");
+
+        row.className = "";
+
+        if (selected || this.isRowSelected(row.__index))
+            row.classList.add("selected");
+
+        if (this._delegate.tableRowClassNames)
+            row.classList.add(...this._delegate.tableRowClassNames(this, row.__index));
     }
 
     _populatedCellForColumnAndRow(column, columnIndex, rowIndex)
@@ -641,18 +899,27 @@ WI.Table = class Table extends WI.View
 
     _resizeColumnsAndFiller()
     {
-        this._fillerRow.remove();
-
-        let availableWidth = this._listElement.offsetWidth;
-        let availableHeight = this._listElement.offsetHeight;
+        if (isNaN(this._cachedWidth) || !this._cachedWidth)
+            this._cachedWidth = this._scrollContainerElement.realOffsetWidth;
 
         // Not visible yet.
-        if (!availableWidth)
+        if (!this._cachedWidth)
             return;
 
-        let numberOfRows = this._dataSource.tableNumberOfRows(this);
-        let contentHeight = numberOfRows * this._rowHeight;
+        let availableWidth = this._cachedWidth;
+        let availableHeight = this._cachedHeight;
+
+        let contentHeight = this.numberOfRows * this._rowHeight;
         this._fillerHeight = Math.max(availableHeight - contentHeight, 0);
+
+        // No change to layout metrics so no resizing is needed.
+        if (this._columnWidths && this._cachedWidth === this._previousCachedWidth) {
+            this._updateFillerRowWithNewHeight();
+            this._applyColumnWidthsToColumnsIfNeeded();
+            return;
+        }
+
+        this._previousCachedWidth = this._cachedWidth;
 
         let lockedWidth = 0;
         let lockedColumnCount = 0;
@@ -784,6 +1051,13 @@ WI.Table = class Table extends WI.View
                     this._columnWidths[i] = column.width;
             }
 
+            // Best fit with the preferred initial width for flexible columns.
+            bestFit.call(this, (column, width) => {
+                if (!column.preferredInitialWidth || width <= column.preferredInitialWidth)
+                    return -1;
+                return column.preferredInitialWidth;
+            });
+
             // Best fit max size flexible columns. May make more pixels available for other columns.
             bestFit.call(this, (column, width) => {
                 if (!column.maxWidth || width <= column.maxWidth)
@@ -818,18 +1092,15 @@ WI.Table = class Table extends WI.View
             distributeRemainingPixels.call(this, remainder, shrinking);
         }
 
+        // We have new column widths.
+        this._widthGeneration++;
+
         // Apply widths.
 
-        if (this._fillerHeight > 0) {
-            const heightPastEdge = 100; // Extend past edge some reasonable amount.
-            this._fillerHeight += this._rowHeight + heightPastEdge;
-            this._scrollContainerElement.classList.add("not-scrollable");
-            this._listElement.appendChild(this._fillerRow);
-        } else
-            this._scrollContainerElement.classList.remove("not-scrollable");
-
+        this._updateFillerRowWithNewHeight();
         this._applyColumnWidths();
         this._positionResizerElements();
+        this._positionHeaderViews();
     }
 
     _updateVisibleRows()
@@ -838,14 +1109,8 @@ WI.Table = class Table extends WI.View
         let updateOffsetThreshold = rowHeight * 10;
         let overflowPadding = updateOffsetThreshold * 3;
 
-        if (isNaN(this._cachedScrollTop))
-            this._cachedScrollTop = this._scrollContainerElement.scrollTop;
-
-        if (isNaN(this._cachedScrollableOffsetHeight) || !this._cachedScrollableOffsetHeight)
-            this._cachedScrollableOffsetHeight = this._scrollContainerElement.offsetHeight;
-
-        let scrollTop = this._cachedScrollTop;
-        let scrollableOffsetHeight = this._cachedScrollableOffsetHeight;
+        let scrollTop = this._calculateScrollTop();
+        let scrollableOffsetHeight = this._calculateOffsetHeight();
 
         let visibleRowCount = Math.ceil((scrollableOffsetHeight + (overflowPadding * 2)) / rowHeight);
         let currentTopMargin = this._topSpacerHeight;
@@ -858,8 +1123,23 @@ WI.Table = class Table extends WI.View
         if (belowTopThreshold && aboveBottomThreshold && !isNaN(this._previousRevealedRowCount))
             return;
 
-        let numberOfRows = this._dataSource.tableNumberOfRows(this);
+        let numberOfRows = this.numberOfRows;
         this._previousRevealedRowCount = numberOfRows;
+
+        // Scroll back up if the number of rows was reduced such that the existing
+        // scroll top value is larger than it could otherwise have been. We only
+        // need to do this adjustment if there are more rows than would fit on screen,
+        // because when the filler row activates it will reset our scroll.
+        if (scrollTop) {
+            let rowsThatCanFitOnScreen = Math.ceil(scrollableOffsetHeight / rowHeight);
+            if (numberOfRows >= rowsThatCanFitOnScreen) {
+                let maximumScrollTop = Math.max(0, (numberOfRows * rowHeight) - scrollableOffsetHeight);
+                if (scrollTop > maximumScrollTop) {
+                    this._scrollContainerElement.scrollTop = maximumScrollTop;
+                    this._cachedScrollTop = maximumScrollTop;
+                }
+            }
+        }
 
         let topHiddenRowCount = Math.max(0, Math.floor((scrollTop - overflowPadding) / rowHeight));
         let bottomHiddenRowCount = Math.max(0, this._previousRevealedRowCount - topHiddenRowCount - visibleRowCount);
@@ -880,8 +1160,11 @@ WI.Table = class Table extends WI.View
         this._visibleRowIndexStart = topHiddenRowCount;
         this._visibleRowIndexEnd = this._visibleRowIndexStart + visibleRowCount;
 
+        // Completely remove all rows and add new ones.
         this._listElement.removeChildren();
-        this._listElement.classList.toggle("odd-first-zebra-stripe", !!(topHiddenRowCount % 2));
+
+        // If there are an odd number of rows hidden, the first visible row must be an even row.
+        this._listElement.classList.toggle("even-first-zebra-stripe", !!(topHiddenRowCount % 2));
 
         for (let i = this._visibleRowIndexStart; i < this._visibleRowIndexEnd && i < numberOfRows; ++i) {
             let row = this._getOrCreateRow(i);
@@ -891,27 +1174,70 @@ WI.Table = class Table extends WI.View
         this._listElement.appendChild(this._fillerRow);
     }
 
+    _updateFillerRowWithNewHeight()
+    {
+        if (!this._fillerHeight) {
+            this._scrollContainerElement.classList.remove("not-scrollable");
+            this._fillerRow.remove();
+            return;
+        }
+
+        this._scrollContainerElement.classList.add("not-scrollable");
+
+        // In the event that we just made the table not scrollable then the number
+        // of rows can fit on screen. Reset the scroll top.
+        if (this._cachedScrollTop) {
+            this._scrollContainerElement.scrollTop = 0;
+            this._cachedScrollTop = 0;
+        }
+
+        // Extend past edge some reasonable amount. At least 200px.
+        const paddingPastTheEdge = 200;
+        this._fillerHeight += paddingPastTheEdge;
+
+        for (let cell of this._fillerRow.children)
+            cell.style.height = this._fillerHeight + "px";
+
+        if (!this._fillerRow.parentElement)
+            this._listElement.appendChild(this._fillerRow);
+    }
+
     _applyColumnWidths()
     {
-        for (let i = 0; i < this._visibleColumns.length; ++i)
-            this._visibleColumns[i].width = this._columnWidths[i];
-
         for (let i = 0; i < this._headerElement.children.length; ++i)
             this._headerElement.children[i].style.width = this._columnWidths[i] + "px";
 
         for (let row of this._listElement.children) {
             for (let i = 0; i < row.children.length; ++i)
                 row.children[i].style.width = this._columnWidths[i] + "px";
+            row.__widthGeneration = this._widthGeneration;
         }
 
-        for (let cell of this._fillerRow.children)
-            cell.style.height = this._fillerHeight + "px";
+        // Update Table Columns after cells since events may respond to this.
+        for (let i = 0; i < this._visibleColumns.length; ++i)
+            this._visibleColumns[i].width = this._columnWidths[i];
 
         // Create missing cells after we've sized.
         for (let row of this._listElement.children) {
             if (row !== this._fillerRow) {
                 if (row.children.length !== this._visibleColumns.length)
                     this._populateRow(row);
+            }
+        }
+    }
+
+    _applyColumnWidthsToColumnsIfNeeded()
+    {
+        // Apply and create missing cells only if row needs a width update.
+        for (let row of this._listElement.children) {
+            if (row.__widthGeneration !== this._widthGeneration) {
+                for (let i = 0; i < row.children.length; ++i)
+                    row.children[i].style.width = this._columnWidths[i] + "px";
+                if (row !== this._fillerRow) {
+                    if (row.children.length !== this._visibleColumns.length)
+                        this._populateRow(row);
+                }
+                row.__widthGeneration = this._widthGeneration;
             }
         }
     }
@@ -927,12 +1253,12 @@ WI.Table = class Table extends WI.View
                 do {
                     let resizer = new WI.Resizer(WI.Resizer.RuleOrientation.Vertical, this);
                     this._resizers.push(resizer);
-                    this.element.appendChild(resizer.element);
+                    this._resizersElement.appendChild(resizer.element);
                 } while (this._resizers.length < resizersNeededCount);
             } else {
                 do {
                     let resizer = this._resizers.pop();
-                    this.element.removeChild(resizer.element);
+                    this._resizersElement.removeChild(resizer.element);
                 } while (this._resizers.length > resizersNeededCount);
             }
         }
@@ -944,6 +1270,29 @@ WI.Table = class Table extends WI.View
         for (let i = 0; i < resizersNeededCount; ++i) {
             totalWidth += this._columnWidths[i];
             this._resizers[i].element.style[positionAttribute] = (totalWidth - columnResizerAdjustment) + "px";
+        }
+    }
+
+    _positionHeaderViews()
+    {
+        if (!this.subviews.length)
+            return;
+
+        let offset = 0;
+        let updates = [];
+        for (let i = 0; i < this._visibleColumns.length; ++i) {
+            let column = this._visibleColumns[i];
+            let width = this._columnWidths[i];
+            if (column.headerView)
+                updates.push({headerView: column.headerView, offset, width});
+            offset += width;
+        }
+
+        let styleProperty = WI.resolvedLayoutDirection() === WI.LayoutDirection.RTL ? "right" : "left";
+        for (let {headerView, offset, width} of updates) {
+            headerView.element.style.setProperty(styleProperty, offset + "px");
+            headerView.element.style.width = width + "px";
+            headerView.updateLayout(WI.View.LayoutReason.Resize);
         }
     }
 
@@ -983,42 +1332,12 @@ WI.Table = class Table extends WI.View
 
     _handleKeyDown(event)
     {
-        if (!this._isRowVisible(this._selectedRowIndex))
-            return;
-
-        if (event.shiftKey || event.metaKey || event.ctrlKey)
-            return;
-
-        let rowToSelect = NaN;
-
-        if (event.keyIdentifier === "Up") {
-            if (this._selectedRowIndex > 0)
-                rowToSelect = this._selectedRowIndex - 1;
-        } else if (event.keyIdentifier === "Down") {
-            let numberOfRows = this._dataSource.tableNumberOfRows(this);
-            if (this._selectedRowIndex < (numberOfRows - 1))
-                rowToSelect = this._selectedRowIndex + 1;
-        }
-
-        if (!isNaN(rowToSelect)) {
-            this.selectRow(rowToSelect);
-
-            let row = this._cachedRows.get(this._selectedRowIndex);
-            console.assert(row, "Moving up or down by one should always find a cached row since it is within the overflow bounds.");
-            row.scrollIntoViewIfNeeded();
-
-            // Force our own scroll update because we may have scrolled.
-            this._cachedScrollTop = NaN;
-            this.needsLayout();
-
-            event.preventDefault();
-            event.stopPropagation();
-        }
+        this._selectionController.handleKeyDown(event);
     }
 
-    _handleClick(event)
+    _handleMouseDown(event)
     {
-        let cell = event.target.enclosingNodeOrSelfWithClass("cell");
+        let cell = event.target.closest(".cell");
         if (!cell)
             return;
 
@@ -1026,16 +1345,23 @@ WI.Table = class Table extends WI.View
         if (row === this._fillerRow)
             return;
 
-        let columnIndex = Array.from(row.children).indexOf(cell);
-        let column = this._visibleColumns[columnIndex];
         let rowIndex = row.__index;
 
-        this._delegate.tableCellClicked(this, cell, column, rowIndex, event);
+        // Before checking if multiple selection is allowed, check if clicking the
+        // row would cause it to be selected, and whether it is allowed by the delegate.
+        if (!this.isRowSelected(rowIndex) && this._delegate.tableShouldSelectRow) {
+            let columnIndex = Array.from(row.children).indexOf(cell);
+            let column = this._visibleColumns[columnIndex];
+            if (!this._delegate.tableShouldSelectRow(this, cell, column, rowIndex))
+                return;
+        }
+
+        this._selectionController.handleItemMouseDown(this._representedObjectForIndex(rowIndex), event);
     }
 
     _handleContextMenu(event)
     {
-        let cell = event.target.enclosingNodeOrSelfWithClass("cell");
+        let cell = event.target.closest(".cell");
         if (!cell)
             return;
 
@@ -1084,9 +1410,20 @@ WI.Table = class Table extends WI.View
 
         contextMenu.appendSeparator();
 
+        let didAppendHeaderItem = false;
+
         for (let [columnIdentifier, column] of this._columnSpecs) {
             if (column.locked)
                 continue;
+            if (!column.hideable)
+                continue;
+
+            // Add a header item before the list of toggleable columns.
+            if (!didAppendHeaderItem) {
+                const disabled = true;
+                contextMenu.appendItem(WI.UIString("Displayed Columns"), () => {}, disabled);
+                didAppendHeaderItem = true;
+            }
 
             let checked = !column.hidden;
             contextMenu.appendCheckboxItem(column.name, () => {
@@ -1096,6 +1433,90 @@ WI.Table = class Table extends WI.View
                     this.hideColumn(column);
             }, checked);
         }
+    }
+
+    _handleRowMouseEnter(event)
+    {
+        let row = event.target;
+
+        this.delegate.tableRowHovered(this, row.__index);
+    }
+
+    _handleRowMouseLeave(event)
+    {
+        this.delegate.tableRowHovered(this, NaN);
+    }
+
+    _removeRows(representedObjects)
+    {
+        let removed = 0;
+
+        let adjustRowAtIndex = (index) => {
+            let row = this._cachedRows.get(index);
+            if (row) {
+                this._cachedRows.delete(index);
+                row.__index -= removed;
+                this._cachedRows.set(row.__index, row);
+            }
+        };
+
+        let rowIndexes = [];
+        for (let object of representedObjects)
+            rowIndexes.push(this._indexForRepresentedObject(object));
+
+        rowIndexes.sort((a, b) => a - b);
+
+        let lastIndex = rowIndexes.lastValue;
+        for (let index = rowIndexes[0]; index <= lastIndex; ++index) {
+            if (rowIndexes.binaryIndexOf(index) >= 0) {
+                let row = this._cachedRows.get(index);
+                if (row) {
+                    this._cachedRows.delete(index);
+                    row.remove();
+                }
+                removed++;
+                continue;
+            }
+
+            if (removed)
+                adjustRowAtIndex(index);
+        }
+
+        if (!removed)
+            return;
+
+        for (let index = lastIndex + 1; index < this.numberOfRows; ++index)
+            adjustRowAtIndex(index);
+
+
+        this._selectionController.didRemoveItems(representedObjects);
+
+        if (this._delegate.tableDidRemoveRows)
+            this._delegate.tableDidRemoveRows(this, rowIndexes);
+    }
+
+    _indexForRepresentedObject(object)
+    {
+        return this.dataSource.tableIndexForRepresentedObject(this, object);
+    }
+
+    _representedObjectForIndex(index)
+    {
+        return this.dataSource.tableRepresentedObjectForIndex(this, index);
+    }
+
+    _calculateOffsetHeight()
+    {
+        if (isNaN(this._cachedHeight))
+            this._cachedHeight = this._scrollContainerElement.realOffsetHeight;
+        return this._cachedHeight;
+    }
+
+    _calculateScrollTop()
+    {
+        if (isNaN(this._cachedScrollTop))
+            this._cachedScrollTop = this._scrollContainerElement.scrollTop;
+        return this._cachedScrollTop;
     }
 };
 

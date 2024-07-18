@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,10 +25,9 @@
 
 #pragma once
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBKeyData.h"
 #include "IDBObjectStoreInfo.h"
+#include "IndexKey.h"
 #include "MemoryIndex.h"
 #include "MemoryObjectStoreCursor.h"
 #include "ThreadSafeDataBuffer.h"
@@ -46,8 +45,8 @@ class IDBValue;
 struct IDBKeyRangeData;
 
 namespace IndexedDB {
-enum class GetAllType;
-enum class IndexRecordType;
+enum class GetAllType : uint8_t;
+enum class IndexRecordType : bool;
 }
 
 namespace IDBServer {
@@ -75,6 +74,7 @@ public:
     void deleteRecord(const IDBKeyData&);
     void deleteRange(const IDBKeyRangeData&);
     IDBError addRecord(MemoryBackingStoreTransaction&, const IDBKeyData&, const IDBValue&);
+    IDBError addRecord(MemoryBackingStoreTransaction&, const IDBKeyData&, const IndexIDToIndexKeyMap&, const IDBValue&);
 
     uint64_t currentKeyGeneratorValue() const { return m_keyGeneratorValue; }
     void setKeyGeneratorValue(uint64_t value) { m_keyGeneratorValue = value; }
@@ -109,7 +109,7 @@ private:
     IDBKeyDataSet::iterator lowestIteratorInRange(const IDBKeyRangeData&, bool reverse) const;
 
     IDBError populateIndexWithExistingRecords(MemoryIndex&);
-    IDBError updateIndexesForPutRecord(const IDBKeyData&, const ThreadSafeDataBuffer& value);
+    IDBError updateIndexesForPutRecord(const IDBKeyData&, const IndexIDToIndexKeyMap&);
     void updateIndexesForDeleteRecord(const IDBKeyData& value);
     void updateCursorsForPutRecord(IDBKeyDataSet::iterator);
     void updateCursorsForDeleteRecord(const IDBKeyData&);
@@ -132,5 +132,3 @@ private:
 
 } // namespace IDBServer
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,20 +34,23 @@
 #import "DOMPrivate.h"
 #import "ExceptionHandlers.h"
 
-// FIXME <radar:34583628>: Simplyfy this once the UIKit work is available in the build.
-#if USE(APPLE_INTERNAL_SDK) && TARGET_OS_IPHONE
-#if __has_include(<UIKit/UIKeyboardLoginCredentialsSuggestion.h>)
-#import <UIKit/UIKeyboardLoginCredentialsSuggestion.h>
-#else
-#import <UIKit/UITextInput_Private.h>
-@interface UIKeyboardLoginCredentialsSuggestion : UITextSuggestion
+#if TARGET_OS_IPHONE
+#if __has_include(<UIKit/UITextAutofillSuggestion.h>)
 
+#import <UIKit/UITextAutofillSuggestion.h>
+
+#else
+
+@interface UITextSuggestion : NSObject
+@end
+
+@interface UITextAutofillSuggestion : UITextSuggestion
 @property (nonatomic, assign) NSString *username;
 @property (nonatomic, assign) NSString *password;
-
 @end
-#endif // __has_include(<UIKit/UIKeyboardLoginCredentialsSuggestion.h>)
-#endif // USE(APPLE_INTERNAL_SDK) && TARGET_OS_IPHONE
+
+#endif // __has_include(<UIKit/UITextAutofillSuggestion.h>)
+#endif // TARGET_OS_IPHONE
 
 #import <WebCore/AutofillElements.h>
 #import <WebCore/FileList.h>
@@ -56,14 +59,14 @@
 #import <WebCore/HTMLInputElement.h>
 #import <WebCore/HTMLNames.h>
 #import <WebCore/HitTestResult.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/NameNodeList.h>
 #import <WebCore/NodeList.h>
 #import <WebCore/RenderElement.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::HTMLInputElement*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -394,13 +397,13 @@
 - (void)setSize:(NSString *)newSize
 {
     WebCore::JSMainThreadNullState state;
-    IMPL->setSize(WTF::String(newSize).toInt());
+    IMPL->setSize(newSize.intValue);
 }
 
 - (NSString *)src
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getURLAttribute(WebCore::HTMLNames::srcAttr);
+    return IMPL->getURLAttribute(WebCore::HTMLNames::srcAttr).string();
 }
 
 - (void)setSrc:(NSString *)newSrc
@@ -656,13 +659,13 @@
 - (void)setRangeText:(NSString *)replacement
 {
     WebCore::JSMainThreadNullState state;
-    raiseOnDOMError(IMPL->setRangeText(replacement));
+    raiseOnDOMError(IMPL->setRangeText(String { replacement }));
 }
 
 - (void)setRangeText:(NSString *)replacement start:(unsigned)start end:(unsigned)end selectionMode:(NSString *)selectionMode
 {
     WebCore::JSMainThreadNullState state;
-    raiseOnDOMError(IMPL->setRangeText(replacement, start, end, selectionMode));
+    raiseOnDOMError(IMPL->setRangeText(String { replacement }, start, end, selectionMode));
 }
 
 - (void)setSelectionRange:(int)start end:(int)end
@@ -683,28 +686,41 @@
     IMPL->setValueForUser(inValue);
 }
 
-- (BOOL)acceptsAutofilledLoginCredentials
+- (NSDictionary *)_autofillContext
 {
     WebCore::JSMainThreadNullState state;
-    return !!WebCore::AutofillElements::computeAutofillElements(*IMPL);
+    if (!WebCore::AutofillElements::computeAutofillElements(*IMPL))
+        return nil;
+
+    NSURL *documentURL = [NSURL URLWithString:self.ownerDocument.URL];
+    if (!documentURL)
+        return nil;
+
+    return @{ @"_WebViewURL" : documentURL };
 }
 
-- (NSURL *)representingPageURL
-{
-    WebCore::JSMainThreadNullState state;
-    return [NSURL URLWithString:self.ownerDocument.URL];
-}
-
-#if USE(APPLE_INTERNAL_SDK) && TARGET_OS_IPHONE
-- (void)insertTextSuggestion:(UIKeyboardLoginCredentialsSuggestion *)credentialsSuggestion
+#if TARGET_OS_IPHONE
+- (void)insertTextSuggestion:(UITextAutofillSuggestion *)credentialSuggestion
 {
     WebCore::JSMainThreadNullState state;
     if (is<WebCore::HTMLInputElement>(IMPL)) {
         if (auto autofillElements = WebCore::AutofillElements::computeAutofillElements(*IMPL))
-            autofillElements->autofill(credentialsSuggestion.username, credentialsSuggestion.password);
+            autofillElements->autofill(credentialSuggestion.username, credentialSuggestion.password);
     }
 }
-#endif // USE(APPLE_INTERNAL_SDK) && TARGET_OS_IPHONE
+#endif // TARGET_OS_IPHONE
+
+- (BOOL)canShowPlaceholder
+{
+    WebCore::JSMainThreadNullState state;
+    return IMPL->canShowPlaceholder();
+}
+
+- (void)setCanShowPlaceholder:(BOOL)canShowPlaceholder
+{
+    WebCore::JSMainThreadNullState state;
+    IMPL->setCanShowPlaceholder(canShowPlaceholder);
+}
 
 @end
 
@@ -718,3 +734,5 @@ DOMHTMLInputElement *kit(WebCore::HTMLInputElement* value)
     WebCoreThreadViolationCheckRoundOne();
     return static_cast<DOMHTMLInputElement*>(kit(static_cast<WebCore::Node*>(value)));
 }
+
+#undef IMPL

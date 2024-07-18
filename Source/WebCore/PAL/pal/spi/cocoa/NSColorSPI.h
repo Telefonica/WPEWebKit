@@ -28,6 +28,7 @@
 #if PLATFORM(MAC) && USE(APPLE_INTERNAL_SDK)
 
 #import <AppKit/NSColor_Private.h>
+#import <AppKit/NSColor_UserAccent.h>
 
 #else
 
@@ -41,6 +42,24 @@
 + (NSColor *)systemPinkColor;
 + (NSColor *)systemPurpleColor;
 + (NSColor *)systemGrayColor;
++ (NSColor *)linkColor;
++ (NSColor *)findHighlightColor;
++ (NSColor *)placeholderTextColor;
++ (NSColor *)containerBorderColor;
 @end
+
+typedef NS_ENUM(NSInteger, NSUserAccentColor) {
+    NSUserAccentColorRed = 0,
+    NSUserAccentColorOrange,
+    NSUserAccentColorYellow,
+    NSUserAccentColorGreen,
+    NSUserAccentColorBlue,
+    NSUserAccentColorPurple,
+    NSUserAccentColorPink,
+
+    NSUserAccentColorNoColor = -1,
+};
+
+extern "C" NSUserAccentColor NSColorGetUserAccentColor(void);
 
 #endif

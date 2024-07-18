@@ -23,28 +23,27 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebGeolocationProviderIOS.h"
 
+#import "WebDelegateImplementationCaching.h"
 #import "WebGeolocationCoreLocationProvider.h"
 #import <WebGeolocationPosition.h>
+#import <WebUIDelegatePrivate.h>
 #import <WebCore/GeolocationPosition.h>
 #import <WebCore/WebCoreThread.h>
 #import <WebCore/WebCoreThreadRun.h>
 #import <wtf/HashSet.h>
 #import <wtf/HashMap.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/RunLoop.h>
 #import <wtf/Vector.h>
-
-#if PLATFORM(IOS)
-#import "WebDelegateImplementationCaching.h"
-#endif
 
 using namespace WebCore;
 
 @interface WebGeolocationPosition (Internal)
-- (id)initWithGeolocationPosition:(RefPtr<GeolocationPosition>&&)coreGeolocationPosition;
+- (id)initWithGeolocationPosition:(GeolocationPositionData&&)coreGeolocationPosition;
 @end
 
 // CoreLocation runs in the main thread. WebGeolocationProviderIOS lives on the WebThread.
@@ -99,11 +98,11 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
 + (WebGeolocationProviderIOS *)sharedGeolocationProvider
 {
     static dispatch_once_t once;
-    static WebGeolocationProviderIOS *sharedGeolocationProvider;
+    static NeverDestroyed<RetainPtr<WebGeolocationProviderIOS>> sharedGeolocationProvider;
     dispatch_once(&once, ^{
-        sharedGeolocationProvider = [[WebGeolocationProviderIOS alloc] init];
+        sharedGeolocationProvider.get() = adoptNS([[WebGeolocationProviderIOS alloc] init]);
     });
-    return sharedGeolocationProvider;
+    return sharedGeolocationProvider.get().get();
 }
 
 - (void)suspend
@@ -160,10 +159,8 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
     ASSERT(WebThreadIsCurrent());
 
     if (_lastPosition) {
-        Vector<WebView*> webViewsCopy;
-        copyToVector(_pendingInitialPositionWebView, webViewsCopy);
-        for (size_t i = 0; i < webViewsCopy.size(); ++i)
-            [webViewsCopy[i] _geolocationDidChangePosition:_lastPosition.get()];
+        for (auto& webView : copyToVector(_pendingInitialPositionWebView))
+            [webView _geolocationDidChangePosition:_lastPosition.get()];
     }
     abortSendLastPosition(self);
 }
@@ -178,13 +175,11 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
         return;
 
     _registeredWebViews.add(webView);
-#if PLATFORM(IOS)
     if (!CallUIDelegateReturningBoolean(YES, webView, @selector(webViewCanCheckGeolocationAuthorizationStatus:)))
         return;
-#endif
 
     if (!_isSuspended) {
-        dispatch_async(dispatch_get_main_queue(), ^{
+        RunLoop::main().dispatch([self, strongSelf = retainPtr(self)] {
             if (!_coreLocationProvider) {
                 ASSERT(!_coreLocationUpdateListenerProxy);
                 _coreLocationUpdateListenerProxy = adoptNS([[_WebCoreLocationUpdateThreadingProxy alloc] initWithProvider:self]);
@@ -214,7 +209,7 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
     _pendingInitialPositionWebView.remove(webView);
 
     if (_registeredWebViews.isEmpty()) {
-        dispatch_async(dispatch_get_main_queue(), ^{
+        RunLoop::main().dispatch([self, strongSelf = retainPtr(self)] {
             [_coreLocationProvider stop];
         });
         _enableHighAccuracy = NO;
@@ -232,7 +227,7 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
 {
     ASSERT(WebThreadIsLockedOrDisabled());
     _enableHighAccuracy = _enableHighAccuracy || enableHighAccuracy;
-    dispatch_async(dispatch_get_main_queue(), ^{
+    RunLoop::main().dispatch([self, strongSelf = retainPtr(self)] {
         [_coreLocationProvider setEnableHighAccuracy:_enableHighAccuracy];
     });
 }
@@ -241,14 +236,13 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
 {
     ASSERT(WebThreadIsLockedOrDisabled());
 
-#if PLATFORM(IOS)
     if (!CallUIDelegateReturningBoolean(YES, webView, @selector(webViewCanCheckGeolocationAuthorizationStatus:)))
         return;
-#endif
+
     _webViewsWaitingForCoreLocationAuthorization.add(webView, listener);
     _trackedWebViews.add(webView);
 
-    dispatch_async(dispatch_get_main_queue(), ^{
+    RunLoop::main().dispatch([self, strongSelf = retainPtr(self)] {
         if (!_coreLocationProvider) {
             ASSERT(!_coreLocationUpdateListenerProxy);
             _coreLocationUpdateListenerProxy = adoptNS([[_WebCoreLocationUpdateThreadingProxy alloc] initWithProvider:self]);
@@ -295,10 +289,8 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
     abortSendLastPosition(self);
 
     _lastPosition = position;
-    Vector<WebView*> webViewsCopy;
-    copyToVector(_registeredWebViews, webViewsCopy);
-    for (size_t i = 0; i < webViewsCopy.size(); ++i)
-        [webViewsCopy.at(i) _geolocationDidChangePosition:_lastPosition.get()];
+    for (auto& webView : copyToVector(_registeredWebViews))
+        [webView _geolocationDidChangePosition:_lastPosition.get()];
 }
 
 - (void)errorOccurred:(NSString *)errorMessage
@@ -307,10 +299,8 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
 
     _lastPosition.clear();
 
-    Vector<WebView*> webViewsCopy;
-    copyToVector(_registeredWebViews, webViewsCopy);
-    for (size_t i = 0; i < webViewsCopy.size(); ++i)
-        [webViewsCopy.at(i) _geolocationDidFailWithMessage:errorMessage];
+    for (auto& webView : copyToVector(_registeredWebViews))
+        [webView _geolocationDidFailWithMessage:errorMessage];
 }
 
 - (void)resetGeolocation
@@ -327,10 +317,8 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
     abortSendLastPosition(self);
 
     // 2) Reset the views, each frame will register back if needed.
-    Vector<WebView*> webViewsCopy;
-    copyToVector(_trackedWebViews, webViewsCopy);
-    for (size_t i = 0; i < webViewsCopy.size(); ++i)
-        [webViewsCopy.at(i) _resetAllGeolocationPermission];
+    for (auto& webView : copyToVector(_trackedWebViews))
+        [webView _resetAllGeolocationPermission];
 }
 @end
 
@@ -361,9 +349,9 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
     });
 }
 
-- (void)positionChanged:(WebCore::GeolocationPosition*)position
+- (void)positionChanged:(WebCore::GeolocationPositionData&&)position
 {
-    RetainPtr<WebGeolocationPosition> webPosition = adoptNS([[WebGeolocationPosition alloc] initWithGeolocationPosition:position]);
+    RetainPtr<WebGeolocationPosition> webPosition = adoptNS([[WebGeolocationPosition alloc] initWithGeolocationPosition:WTFMove(position)]);
     WebThreadRun(^{
         [_provider positionChanged:webPosition.get()];
     });
@@ -384,4 +372,4 @@ static inline void abortSendLastPosition(WebGeolocationProviderIOS* provider)
 }
 @end
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

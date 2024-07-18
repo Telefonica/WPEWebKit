@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,8 +28,8 @@
 #if ENABLE(DFG_JIT)
 
 #include "DFGValueStrength.h"
-#include "JSCell.h"
 #include "JSCJSValue.h"
+#include "JSCast.h"
 #include "Structure.h"
 
 namespace JSC { namespace DFG {
@@ -58,7 +58,7 @@ public:
         , m_strength(strength)
     {
         ASSERT((!!value && value.isCell()) == !!structure);
-        ASSERT(!value || !value.isCell() || value.asCell()->classInfo(*value.asCell()->vm()) == structure->classInfo());
+        ASSERT(!value || !value.isCell() || value.asCell()->classInfo() == structure->classInfoForCells());
         ASSERT(!!structure || (strength == WeakValue));
     }
     
@@ -70,12 +70,12 @@ public:
     JSCell* cell() const { return m_value.asCell(); }
     
     template<typename T>
-    T dynamicCast(VM& vm)
+    T dynamicCast()
     {
         JSValue theValue = value();
         if (!theValue)
             return nullptr;
-        return jsDynamicCast<T>(vm, theValue);
+        return jsDynamicCast<T>(theValue);
     }
     template<typename T>
     T cast()

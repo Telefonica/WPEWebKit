@@ -29,34 +29,26 @@
 
 #include "Document.h"
 #include "EventNames.h"
+#include "Frame.h"
 #include "FrameView.h"
 #include "GraphicsLayer.h"
-#include "MainFrame.h"
 #include "Page.h"
 #include "PlatformWheelEvent.h"
 #include "PluginViewBase.h"
 #include "Region.h"
 #include "RenderLayerCompositor.h"
+#include "RenderLayerScrollableArea.h"
 #include "RenderView.h"
 #include "ScrollAnimator.h"
 #include "Settings.h"
 #include <wtf/MainThread.h>
-#include <wtf/text/StringBuilder.h>
 #include <wtf/text/TextStream.h>
-
-#if USE(COORDINATED_GRAPHICS)
-#include "ScrollingCoordinatorCoordinatedGraphics.h"
-#endif
 
 namespace WebCore {
 
-#if !PLATFORM(COCOA)
+#if PLATFORM(IOS_FAMILY) || !ENABLE(ASYNC_SCROLLING)
 Ref<ScrollingCoordinator> ScrollingCoordinator::create(Page* page)
 {
-#if USE(COORDINATED_GRAPHICS)
-    return adoptRef(*new ScrollingCoordinatorCoordinatedGraphics(page));
-#endif
-
     return adoptRef(*new ScrollingCoordinator(page));
 }
 #endif
@@ -83,16 +75,29 @@ bool ScrollingCoordinator::coordinatesScrollingForFrameView(const FrameView& fra
     ASSERT(m_page);
 
     if (!frameView.frame().isMainFrame() && !m_page->settings().scrollingTreeIncludesFrames()
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || USE(NICOSIA)
         && !m_page->settings().asyncFrameScrollingEnabled()
 #endif
     )
         return false;
 
-    RenderView* renderView = frameView.frame().contentRenderer();
+    auto* renderView = frameView.frame().contentRenderer();
     if (!renderView)
         return false;
     return renderView->usesCompositing();
+}
+
+bool ScrollingCoordinator::coordinatesScrollingForOverflowLayer(const RenderLayer& layer) const
+{
+    ASSERT(isMainThread());
+    ASSERT(m_page);
+
+    return layer.hasCompositedScrollableOverflow();
+}
+
+ScrollingNodeID ScrollingCoordinator::scrollableContainerNodeID(const RenderObject&) const
+{
+    return 0;
 }
 
 EventTrackingRegions ScrollingCoordinator::absoluteEventTrackingRegionsForFrame(const Frame& frame) const
@@ -106,7 +111,7 @@ EventTrackingRegions ScrollingCoordinator::absoluteEventTrackingRegionsForFrame(
     ASSERT(frame.isMainFrame());
     auto* document = frame.document();
     if (!document)
-        return EventTrackingRegions();
+        return { };
     return document->eventTrackingRegions();
 #else
     auto* frameView = frame.view();
@@ -121,7 +126,7 @@ EventTrackingRegions ScrollingCoordinator::absoluteEventTrackingRegionsForFrame(
     if (auto* scrollableAreas = frameView->scrollableAreas()) {
         for (auto& scrollableArea : *scrollableAreas) {
             // Composited scrollable areas can be scrolled off the main thread.
-            if (scrollableArea->usesAsyncScrolling())
+            if (!scrollableArea->isVisibleToHitTesting() || scrollableArea->usesAsyncScrolling())
                 continue;
 
             bool isInsideFixed;
@@ -147,7 +152,7 @@ EventTrackingRegions ScrollingCoordinator::absoluteEventTrackingRegionsForFrame(
     EventTrackingRegions eventTrackingRegions;
 
     // FIXME: if we've already accounted for this subframe as a scrollable area, we can avoid recursing into it here.
-    for (Frame* subframe = frame.tree().firstChild(); subframe; subframe = subframe->tree().nextSibling()) {
+    for (auto* subframe = frame.tree().firstChild(); subframe; subframe = subframe->tree().nextSibling()) {
         auto* subframeView = subframe->view();
         if (!subframeView)
             continue;
@@ -161,6 +166,7 @@ EventTrackingRegions ScrollingCoordinator::absoluteEventTrackingRegionsForFrame(
         eventTrackingRegions.unite(subframeRegion);
     }
 
+#if !ENABLE(WHEEL_EVENT_REGIONS)
     auto wheelHandlerRegion = frame.document()->absoluteRegionForEventTargets(frame.document()->wheelEventTargets());
     bool wheelHandlerInFixedContent = wheelHandlerRegion.second;
     if (wheelHandlerInFixedContent) {
@@ -170,9 +176,10 @@ EventTrackingRegions ScrollingCoordinator::absoluteEventTrackingRegionsForFrame(
     }
     
     nonFastScrollableRegion.unite(wheelHandlerRegion.first);
+#endif
 
     // FIXME: If this is not the main frame, we could clip the region to the frame's bounds.
-    eventTrackingRegions.uniteSynchronousRegion(eventNames().wheelEvent, nonFastScrollableRegion);
+    eventTrackingRegions.uniteSynchronousRegion(EventTrackingRegions::EventType::Wheel, nonFastScrollableRegion);
 
     return eventTrackingRegions;
 #endif
@@ -181,17 +188,6 @@ EventTrackingRegions ScrollingCoordinator::absoluteEventTrackingRegionsForFrame(
 EventTrackingRegions ScrollingCoordinator::absoluteEventTrackingRegions() const
 {
     return absoluteEventTrackingRegionsForFrame(m_page->mainFrame());
-}
-
-void ScrollingCoordinator::frameViewHasSlowRepaintObjectsDidChange(FrameView& frameView)
-{
-    ASSERT(isMainThread());
-    ASSERT(m_page);
-
-    if (!coordinatesScrollingForFrameView(frameView))
-        return;
-
-    updateSynchronousScrollingReasons(frameView);
 }
 
 void ScrollingCoordinator::frameViewFixedObjectsDidChange(FrameView& frameView)
@@ -205,22 +201,24 @@ void ScrollingCoordinator::frameViewFixedObjectsDidChange(FrameView& frameView)
     updateSynchronousScrollingReasons(frameView);
 }
 
-GraphicsLayer* ScrollingCoordinator::scrollLayerForScrollableArea(ScrollableArea& scrollableArea)
+GraphicsLayer* ScrollingCoordinator::scrollContainerLayerForFrameView(FrameView& frameView)
 {
-    return scrollableArea.layerForScrolling();
+    if (auto* renderView = frameView.frame().contentRenderer())
+        return renderView->compositor().scrollContainerLayer();
+    return nullptr;
 }
 
-GraphicsLayer* ScrollingCoordinator::scrollLayerForFrameView(FrameView& frameView)
+GraphicsLayer* ScrollingCoordinator::scrolledContentsLayerForFrameView(FrameView& frameView)
 {
-    if (RenderView* renderView = frameView.frame().contentRenderer())
-        return renderView->compositor().scrollLayer();
+    if (auto* renderView = frameView.frame().contentRenderer())
+        return renderView->compositor().scrolledContentsLayer();
     return nullptr;
 }
 
 GraphicsLayer* ScrollingCoordinator::headerLayerForFrameView(FrameView& frameView)
 {
-#if ENABLE(RUBBER_BANDING)
-    if (RenderView* renderView = frameView.frame().contentRenderer())
+#if HAVE(RUBBER_BANDING)
+    if (auto* renderView = frameView.frame().contentRenderer())
         return renderView->compositor().headerLayer();
     return nullptr;
 #else
@@ -231,8 +229,8 @@ GraphicsLayer* ScrollingCoordinator::headerLayerForFrameView(FrameView& frameVie
 
 GraphicsLayer* ScrollingCoordinator::footerLayerForFrameView(FrameView& frameView)
 {
-#if ENABLE(RUBBER_BANDING)
-    if (RenderView* renderView = frameView.frame().contentRenderer())
+#if HAVE(RUBBER_BANDING)
+    if (auto* renderView = frameView.frame().contentRenderer())
         return renderView->compositor().footerLayer();
     return nullptr;
 #else
@@ -243,22 +241,22 @@ GraphicsLayer* ScrollingCoordinator::footerLayerForFrameView(FrameView& frameVie
 
 GraphicsLayer* ScrollingCoordinator::counterScrollingLayerForFrameView(FrameView& frameView)
 {
-    if (RenderView* renderView = frameView.frame().contentRenderer())
+    if (auto* renderView = frameView.frame().contentRenderer())
         return renderView->compositor().fixedRootBackgroundLayer();
     return nullptr;
 }
 
 GraphicsLayer* ScrollingCoordinator::insetClipLayerForFrameView(FrameView& frameView)
 {
-    if (RenderView* renderView = frameView.frame().contentRenderer())
+    if (auto* renderView = frameView.frame().contentRenderer())
         return renderView->compositor().clipLayer();
     return nullptr;
 }
 
 GraphicsLayer* ScrollingCoordinator::contentShadowLayerForFrameView(FrameView& frameView)
 {
-#if ENABLE(RUBBER_BANDING)
-    if (RenderView* renderView = frameView.frame().contentRenderer())
+#if HAVE(RUBBER_BANDING)
+    if (auto* renderView = frameView.frame().contentRenderer())
         return renderView->compositor().layerForContentShadow();
     
     return nullptr;
@@ -268,10 +266,10 @@ GraphicsLayer* ScrollingCoordinator::contentShadowLayerForFrameView(FrameView& f
 #endif
 }
 
-GraphicsLayer* ScrollingCoordinator::rootContentLayerForFrameView(FrameView& frameView)
+GraphicsLayer* ScrollingCoordinator::rootContentsLayerForFrameView(FrameView& frameView)
 {
-    if (RenderView* renderView = frameView.frame().contentRenderer())
-        return renderView->compositor().rootContentLayer();
+    if (auto* renderView = frameView.frame().contentRenderer())
+        return renderView->compositor().rootContentsLayer();
     return nullptr;
 }
 
@@ -287,32 +285,16 @@ void ScrollingCoordinator::frameViewRootLayerDidChange(FrameView& frameView)
     updateSynchronousScrollingReasons(frameView);
 }
 
-#if PLATFORM(COCOA)
-void ScrollingCoordinator::handleWheelEventPhase(PlatformWheelEventPhase phase)
-{
-    ASSERT(isMainThread());
-
-    if (!m_page)
-        return;
-
-    FrameView* frameView = m_page->mainFrame().view();
-    if (!frameView)
-        return;
-
-    frameView->scrollAnimator().handleWheelEventPhase(phase);
-}
-#endif
-
 bool ScrollingCoordinator::hasVisibleSlowRepaintViewportConstrainedObjects(const FrameView& frameView) const
 {
-    const FrameView::ViewportConstrainedObjectSet* viewportConstrainedObjects = frameView.viewportConstrainedObjects();
+    auto* viewportConstrainedObjects = frameView.viewportConstrainedObjects();
     if (!viewportConstrainedObjects)
         return false;
 
     for (auto& viewportConstrainedObject : *viewportConstrainedObjects) {
-        if (!is<RenderBoxModelObject>(*viewportConstrainedObject) || !viewportConstrainedObject->hasLayer())
+        if (!is<RenderBoxModelObject>(viewportConstrainedObject) || !viewportConstrainedObject.hasLayer())
             return true;
-        RenderLayer& layer = *downcast<RenderBoxModelObject>(*viewportConstrainedObject).layer();
+        auto& layer = *downcast<RenderBoxModelObject>(viewportConstrainedObject).layer();
         // Any explicit reason that a fixed position element is not composited shouldn't cause slow scrolling.
         if (!layer.isComposited() && layer.viewportConstrainedNotCompositedReason() == RenderLayer::NoNotCompositedReason)
             return true;
@@ -320,32 +302,32 @@ bool ScrollingCoordinator::hasVisibleSlowRepaintViewportConstrainedObjects(const
     return false;
 }
 
-SynchronousScrollingReasons ScrollingCoordinator::synchronousScrollingReasons(const FrameView& frameView) const
-{
-    SynchronousScrollingReasons synchronousScrollingReasons = (SynchronousScrollingReasons)0;
-
-    if (m_forceSynchronousScrollLayerPositionUpdates)
-        synchronousScrollingReasons |= ForcedOnMainThread;
-    if (frameView.hasSlowRepaintObjects())
-        synchronousScrollingReasons |= HasSlowRepaintObjects;
-    if (hasVisibleSlowRepaintViewportConstrainedObjects(frameView))
-        synchronousScrollingReasons |= HasNonLayerViewportConstrainedObjects;
-    if (frameView.frame().mainFrame().document() && frameView.frame().document()->isImageDocument())
-        synchronousScrollingReasons |= IsImageDocument;
-
-    return synchronousScrollingReasons;
-}
-
 void ScrollingCoordinator::updateSynchronousScrollingReasons(FrameView& frameView)
 {
     ASSERT(coordinatesScrollingForFrameView(frameView));
-    setSynchronousScrollingReasons(frameView, synchronousScrollingReasons(frameView));
+
+    OptionSet<SynchronousScrollingReason> newSynchronousScrollingReasons;
+
+    // RenderLayerCompositor::updateSynchronousScrollingReasons maintains this bit, so maintain its current value.
+    if (synchronousScrollingReasons(frameView.scrollingNodeID()).contains(SynchronousScrollingReason::HasSlowRepaintObjects))
+        newSynchronousScrollingReasons.add(SynchronousScrollingReason::HasSlowRepaintObjects);
+
+    if (m_forceSynchronousScrollLayerPositionUpdates)
+        newSynchronousScrollingReasons.add(SynchronousScrollingReason::ForcedOnMainThread);
+
+    if (hasVisibleSlowRepaintViewportConstrainedObjects(frameView))
+        newSynchronousScrollingReasons.add(SynchronousScrollingReason::HasNonLayerViewportConstrainedObjects);
+
+    if (frameView.frame().mainFrame().document() && frameView.frame().document()->isImageDocument())
+        newSynchronousScrollingReasons.add(SynchronousScrollingReason::IsImageDocument);
+
+    setSynchronousScrollingReasons(frameView.scrollingNodeID(), newSynchronousScrollingReasons);
 }
 
 void ScrollingCoordinator::updateSynchronousScrollingReasonsForAllFrames()
 {
     for (Frame* frame = &m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
-        if (FrameView* frameView = frame->view()) {
+        if (auto* frameView = frame->view()) {
             if (coordinatesScrollingForFrameView(*frameView))
                 updateSynchronousScrollingReasons(*frameView);
         }
@@ -364,46 +346,42 @@ void ScrollingCoordinator::setForceSynchronousScrollLayerPositionUpdates(bool fo
 bool ScrollingCoordinator::shouldUpdateScrollLayerPositionSynchronously(const FrameView& frameView) const
 {
     if (&frameView == m_page->mainFrame().view())
-        return synchronousScrollingReasons(frameView);
+        return !synchronousScrollingReasons(frameView.scrollingNodeID()).isEmpty();
     
     return true;
 }
 
-ScrollingNodeID ScrollingCoordinator::uniqueScrollLayerID()
+ScrollingNodeID ScrollingCoordinator::uniqueScrollingNodeID()
 {
-    static ScrollingNodeID uniqueScrollLayerID = 1;
-    return uniqueScrollLayerID++;
+    static ScrollingNodeID uniqueScrollingNodeID = 1;
+    return uniqueScrollingNodeID++;
 }
 
-String ScrollingCoordinator::scrollingStateTreeAsText(ScrollingStateTreeAsTextBehavior) const
+String ScrollingCoordinator::scrollingStateTreeAsText(OptionSet<ScrollingStateTreeAsTextBehavior>) const
 {
-    return String();
+    return emptyString();
 }
 
-String ScrollingCoordinator::synchronousScrollingReasonsAsText(SynchronousScrollingReasons reasons)
+String ScrollingCoordinator::scrollingTreeAsText(OptionSet<ScrollingStateTreeAsTextBehavior>) const
 {
-    StringBuilder stringBuilder;
+    return emptyString();
+}
 
-    if (reasons & ScrollingCoordinator::ForcedOnMainThread)
-        stringBuilder.appendLiteral("Forced on main thread, ");
-    if (reasons & ScrollingCoordinator::HasSlowRepaintObjects)
-        stringBuilder.appendLiteral("Has slow repaint objects, ");
-    if (reasons & ScrollingCoordinator::HasViewportConstrainedObjectsWithoutSupportingFixedLayers)
-        stringBuilder.appendLiteral("Has viewport constrained objects without supporting fixed layers, ");
-    if (reasons & ScrollingCoordinator::HasNonLayerViewportConstrainedObjects)
-        stringBuilder.appendLiteral("Has non-layer viewport-constrained objects, ");
-    if (reasons & ScrollingCoordinator::IsImageDocument)
-        stringBuilder.appendLiteral("Is image document, ");
-
-    if (stringBuilder.length())
-        stringBuilder.resize(stringBuilder.length() - 2);
-    return stringBuilder.toString();
+String ScrollingCoordinator::synchronousScrollingReasonsAsText(OptionSet<SynchronousScrollingReason> reasons)
+{
+    auto string = makeString(reasons.contains(SynchronousScrollingReason::ForcedOnMainThread) ? "Forced on main thread, " : "",
+        reasons.contains(SynchronousScrollingReason::HasSlowRepaintObjects) ? "Has slow repaint objects, " : "",
+        reasons.contains(SynchronousScrollingReason::HasViewportConstrainedObjectsWithoutSupportingFixedLayers) ? "Has viewport constrained objects without supporting fixed layers, " : "",
+        reasons.contains(SynchronousScrollingReason::HasNonLayerViewportConstrainedObjects) ? "Has non-layer viewport-constrained objects, " : "",
+        reasons.contains(SynchronousScrollingReason::IsImageDocument) ? "Is image document, " : "",
+        reasons.contains(SynchronousScrollingReason::DescendantScrollersHaveSynchronousScrolling) ? "Has slow repaint descendant scrollers, " : "");
+    return string.isEmpty() ? string : string.left(string.length() - 2);
 }
 
 String ScrollingCoordinator::synchronousScrollingReasonsAsText() const
 {
-    if (FrameView* frameView = m_page->mainFrame().view())
-        return synchronousScrollingReasonsAsText(synchronousScrollingReasons(*frameView));
+    if (auto* frameView = m_page->mainFrame().view())
+        return synchronousScrollingReasonsAsText(synchronousScrollingReasons(frameView->scrollingNodeID()));
 
     return String();
 }
@@ -414,10 +392,16 @@ TextStream& operator<<(TextStream& ts, ScrollableAreaParameters scrollableAreaPa
     ts.dumpProperty("vertical scroll elasticity", scrollableAreaParameters.verticalScrollElasticity);
     ts.dumpProperty("horizontal scrollbar mode", scrollableAreaParameters.horizontalScrollbarMode);
     ts.dumpProperty("vertical scrollbar mode", scrollableAreaParameters.verticalScrollbarMode);
-    if (scrollableAreaParameters.hasEnabledHorizontalScrollbar)
-        ts.dumpProperty("has enabled horizontal scrollbar", scrollableAreaParameters.hasEnabledHorizontalScrollbar);
-    if (scrollableAreaParameters.hasEnabledVerticalScrollbar)
-        ts.dumpProperty("has enabled vertical scrollbar", scrollableAreaParameters.hasEnabledVerticalScrollbar);
+
+    if (scrollableAreaParameters.allowsHorizontalScrolling)
+        ts.dumpProperty("allows horizontal scrolling", scrollableAreaParameters.allowsHorizontalScrolling);
+    if (scrollableAreaParameters.allowsVerticalScrolling)
+        ts.dumpProperty("allows vertical scrolling", scrollableAreaParameters.allowsVerticalScrolling);
+
+    if (scrollableAreaParameters.horizontalScrollbarHiddenByStyle)
+        ts.dumpProperty("horizontal scrollbar hidden by style", scrollableAreaParameters.horizontalScrollbarHiddenByStyle);
+    if (scrollableAreaParameters.verticalScrollbarHiddenByStyle)
+        ts.dumpProperty("vertical scrollbar hidden by style", scrollableAreaParameters.verticalScrollbarHiddenByStyle);
 
     return ts;
 }
@@ -425,17 +409,29 @@ TextStream& operator<<(TextStream& ts, ScrollableAreaParameters scrollableAreaPa
 TextStream& operator<<(TextStream& ts, ScrollingNodeType nodeType)
 {
     switch (nodeType) {
-    case FrameScrollingNode:
-        ts << "frame-scrolling";
+    case ScrollingNodeType::MainFrame:
+        ts << "main-frame-scrolling";
         break;
-    case OverflowScrollingNode:
+    case ScrollingNodeType::Subframe:
+        ts << "subframe-scrolling";
+        break;
+    case ScrollingNodeType::FrameHosting:
+        ts << "frame-hosting";
+        break;
+    case ScrollingNodeType::Overflow:
         ts << "overflow-scrolling";
         break;
-    case FixedNode:
+    case ScrollingNodeType::OverflowProxy:
+        ts << "overflow-scroll-proxy";
+        break;
+    case ScrollingNodeType::Fixed:
         ts << "fixed";
         break;
-    case StickyNode:
+    case ScrollingNodeType::Sticky:
         ts << "sticky";
+        break;
+    case ScrollingNodeType::Positioned:
+        ts << "positioned";
         break;
     }
     return ts;

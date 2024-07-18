@@ -8,23 +8,23 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/vad/vad_audio_proc.h"
+#include "modules/audio_processing/vad/vad_audio_proc.h"
 
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/common_audio/fft4g.h"
-#include "webrtc/modules/audio_processing/vad/vad_audio_proc_internal.h"
-#include "webrtc/modules/audio_processing/vad/pitch_internal.h"
-#include "webrtc/modules/audio_processing/vad/pole_zero_filter.h"
+#include "common_audio/third_party/ooura/fft_size_256/fft4g.h"
+#include "modules/audio_processing/vad/pitch_internal.h"
+#include "modules/audio_processing/vad/pole_zero_filter.h"
+#include "modules/audio_processing/vad/vad_audio_proc_internal.h"
+#include "rtc_base/checks.h"
 extern "C" {
-#include "webrtc/modules/audio_coding/codecs/isac/main/source/codec.h"
-#include "webrtc/modules/audio_coding/codecs/isac/main/source/lpc_analysis.h"
-#include "webrtc/modules/audio_coding/codecs/isac/main/source/pitch_estimator.h"
-#include "webrtc/modules/audio_coding/codecs/isac/main/source/structs.h"
+#include "modules/audio_coding/codecs/isac/main/source/filter_functions.h"
+#include "modules/audio_coding/codecs/isac/main/source/isac_vad.h"
+#include "modules/audio_coding/codecs/isac/main/source/pitch_estimator.h"
+#include "modules/audio_coding/codecs/isac/main/source/structs.h"
 }
-#include "webrtc/modules/include/module_common_types.h"
 
 namespace webrtc {
 
@@ -33,9 +33,9 @@ namespace webrtc {
 struct VadAudioProc::PitchAnalysisStruct : public ::PitchAnalysisStruct {};
 struct VadAudioProc::PreFiltBankstr : public ::PreFiltBankstr {};
 
-static const float kFrequencyResolution =
+static constexpr float kFrequencyResolution =
     kSampleRateHz / static_cast<float>(VadAudioProc::kDftSize);
-static const int kSilenceRms = 5;
+static constexpr int kSilenceRms = 5;
 
 // TODO(turajs): Make a Create or Init for VadAudioProc.
 VadAudioProc::VadAudioProc()
@@ -67,8 +67,7 @@ VadAudioProc::VadAudioProc()
   WebRtcIsac_InitPitchAnalysis(pitch_analysis_handle_.get());
 }
 
-VadAudioProc::~VadAudioProc() {
-}
+VadAudioProc::~VadAudioProc() {}
 
 void VadAudioProc::ResetBuffer() {
   memcpy(audio_buffer_, &audio_buffer_[kNumSamplesToProcess],
@@ -133,7 +132,7 @@ void VadAudioProc::SubframeCorrelation(double* corr,
                       kNumSubframeSamples + kNumPastSignalSamples, kLpcOrder);
 }
 
-// Compute |kNum10msSubframes| sets of LPC coefficients, one per 10 ms input.
+// Compute `kNum10msSubframes` sets of LPC coefficients, one per 10 ms input.
 // The analysis window is 15 ms long and it is centered on the first half of
 // each 10ms sub-frame. This is equivalent to computing LPC coefficients for the
 // first half of each 10 ms subframe.
@@ -170,7 +169,7 @@ static float QuadraticInterpolation(float prev_val,
   return fractional_index;
 }
 
-// 1 / A(z), where A(z) is defined by |lpc| is a model of the spectral envelope
+// 1 / A(z), where A(z) is defined by `lpc` is a model of the spectral envelope
 // of the input signal. The local maximum of the spectral envelope corresponds
 // with the local minimum of A(z). It saves complexity, as we save one
 // inversion. Furthermore, we find the first local maximum of magnitude squared,

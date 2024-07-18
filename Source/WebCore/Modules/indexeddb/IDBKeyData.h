@@ -25,11 +25,10 @@
 
 #pragma once
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBKey.h"
-#include <set>
-#include <wtf/Variant.h>
+#include <variant>
+#include <wtf/Hasher.h>
+#include <wtf/StdSet.h>
 #include <wtf/text/StringHash.h>
 
 namespace WebCore {
@@ -38,9 +37,10 @@ class KeyedDecoder;
 class KeyedEncoder;
 
 class IDBKeyData {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     IDBKeyData()
-        : m_type(KeyType::Invalid)
+        : m_type(IndexedDB::KeyType::Invalid)
         , m_isNull(true)
     {
     }
@@ -53,7 +53,7 @@ public:
     static IDBKeyData minimum()
     {
         IDBKeyData result;
-        result.m_type = KeyType::Min;
+        result.m_type = IndexedDB::KeyType::Min;
         result.m_isNull = false;
         return result;
     }
@@ -61,17 +61,17 @@ public:
     static IDBKeyData maximum()
     {
         IDBKeyData result;
-        result.m_type = KeyType::Max;
+        result.m_type = IndexedDB::KeyType::Max;
         result.m_isNull = false;
         return result;
     }
 
     WEBCORE_EXPORT RefPtr<IDBKey> maybeCreateIDBKey() const;
 
-    IDBKeyData isolatedCopy() const;
+    WEBCORE_EXPORT IDBKeyData isolatedCopy() const;
 
     WEBCORE_EXPORT void encode(KeyedEncoder&) const;
-    WEBCORE_EXPORT static bool decode(KeyedDecoder&, IDBKeyData&);
+    WEBCORE_EXPORT static WARN_UNUSED_RETURN bool decode(KeyedDecoder&, IDBKeyData&);
 
     // compare() has the same semantics as strcmp().
     //   - Returns negative if this IDBKeyData is less than other.
@@ -93,8 +93,8 @@ public:
 #endif
 
     bool isNull() const { return m_isNull; }
-    bool isValid() const { return m_type != KeyType::Invalid; }
-    KeyType type() const { return m_type; }
+    bool isValid() const;
+    IndexedDB::KeyType type() const { return m_type; }
 
     bool operator<(const IDBKeyData&) const;
     bool operator>(const IDBKeyData& other) const
@@ -118,86 +118,79 @@ public:
         return !(*this == other);
     }
 
-    unsigned hash() const
-    {
-        Vector<unsigned> hashCodes;
-        hashCodes.append(static_cast<unsigned>(m_type));
-        hashCodes.append(m_isNull ? 1 : 0);
-        hashCodes.append(m_isDeletedValue ? 1 : 0);
-        switch (m_type) {
-        case KeyType::Invalid:
-        case KeyType::Max:
-        case KeyType::Min:
-            break;
-        case KeyType::Number:
-        case KeyType::Date:
-            hashCodes.append(StringHasher::hashMemory<sizeof(double)>(&WTF::get<double>(m_value)));
-            break;
-        case KeyType::String:
-            hashCodes.append(StringHash::hash(WTF::get<String>(m_value)));
-            break;
-        case KeyType::Binary: {
-            auto* data = WTF::get<ThreadSafeDataBuffer>(m_value).data();
-            if (!data)
-                hashCodes.append(0);
-            else
-                hashCodes.append(StringHasher::hashMemory(data->data(), data->size()));
-            break;
-        }
-        case KeyType::Array:
-            for (auto& key : WTF::get<Vector<IDBKeyData>>(m_value))
-                hashCodes.append(key.hash());
-            break;
-        }
-
-        return StringHasher::hashMemory(hashCodes.data(), hashCodes.size() * sizeof(unsigned));
-    }
-
-    static IDBKeyData deletedValue();
-    bool isDeletedValue() const { return m_isDeletedValue; }
-
     String string() const
     {
-        ASSERT(m_type == KeyType::String);
-        return WTF::get<String>(m_value);
+        ASSERT(m_type == IndexedDB::KeyType::String);
+        return std::get<String>(m_value);
     }
 
     double date() const
     {
-        ASSERT(m_type == KeyType::Date);
-        return WTF::get<double>(m_value);
+        ASSERT(m_type == IndexedDB::KeyType::Date);
+        return std::get<double>(m_value);
     }
 
     double number() const
     {
-        ASSERT(m_type == KeyType::Number);
-        return WTF::get<double>(m_value);
+        ASSERT(m_type == IndexedDB::KeyType::Number);
+        return std::get<double>(m_value);
     }
 
     const ThreadSafeDataBuffer& binary() const
     {
-        ASSERT(m_type == KeyType::Binary);
-        return WTF::get<ThreadSafeDataBuffer>(m_value);
+        ASSERT(m_type == IndexedDB::KeyType::Binary);
+        return std::get<ThreadSafeDataBuffer>(m_value);
     }
 
     const Vector<IDBKeyData>& array() const
     {
-        ASSERT(m_type == KeyType::Array);
-        return WTF::get<Vector<IDBKeyData>>(m_value);
+        ASSERT(m_type == IndexedDB::KeyType::Array);
+        return std::get<Vector<IDBKeyData>>(m_value);
     }
 
+    size_t size() const;
+
 private:
+    friend struct IDBKeyDataHashTraits;
+
     static void isolatedCopy(const IDBKeyData& source, IDBKeyData& destination);
 
-    KeyType m_type;
-    Variant<Vector<IDBKeyData>, String, double, ThreadSafeDataBuffer> m_value;
-
+    IndexedDB::KeyType m_type;
     bool m_isNull { false };
     bool m_isDeletedValue { false };
+
+    std::variant<Vector<IDBKeyData>, String, double, ThreadSafeDataBuffer> m_value;
 };
 
+inline void add(Hasher& hasher, const IDBKeyData& keyData)
+{
+    add(hasher, keyData.type());
+    add(hasher, keyData.isNull());
+    switch (keyData.type()) {
+    case IndexedDB::KeyType::Invalid:
+    case IndexedDB::KeyType::Max:
+    case IndexedDB::KeyType::Min:
+        break;
+    case IndexedDB::KeyType::Number:
+        add(hasher, keyData.number());
+        break;
+    case IndexedDB::KeyType::Date:
+        add(hasher, keyData.date());
+        break;
+    case IndexedDB::KeyType::String:
+        add(hasher, keyData.string());
+        break;
+    case IndexedDB::KeyType::Binary:
+        add(hasher, keyData.binary());
+        break;
+    case IndexedDB::KeyType::Array:
+        add(hasher, keyData.array());
+        break;
+    }
+}
+
 struct IDBKeyDataHash {
-    static unsigned hash(const IDBKeyData& a) { return a.hash(); }
+    static unsigned hash(const IDBKeyData& a) { return computeHash(a); }
     static bool equal(const IDBKeyData& a, const IDBKeyData& b) { return a == b; }
     static const bool safeToCompareToEmptyOrDeleted = false;
 };
@@ -206,15 +199,8 @@ struct IDBKeyDataHashTraits : public WTF::CustomHashTraits<IDBKeyData> {
     static const bool emptyValueIsZero = false;
     static const bool hasIsEmptyValueFunction = true;
 
-    static void constructDeletedValue(IDBKeyData& key)
-    {
-        key = IDBKeyData::deletedValue();
-    }
-
-    static bool isDeletedValue(const IDBKeyData& key)
-    {
-        return key.isDeletedValue();
-    }
+    static void constructDeletedValue(IDBKeyData& key) { key.m_isDeletedValue = true; }
+    static bool isDeletedValue(const IDBKeyData& key) { return key.m_isDeletedValue; }
 
     static IDBKeyData emptyValue()
     {
@@ -234,25 +220,25 @@ void IDBKeyData::encode(Encoder& encoder) const
     if (m_isNull)
         return;
 
-    encoder.encodeEnum(m_type);
+    encoder << m_type;
 
     switch (m_type) {
-    case KeyType::Invalid:
-    case KeyType::Max:
-    case KeyType::Min:
+    case IndexedDB::KeyType::Invalid:
+    case IndexedDB::KeyType::Max:
+    case IndexedDB::KeyType::Min:
         break;
-    case KeyType::Array:
-        encoder << WTF::get<Vector<IDBKeyData>>(m_value);
+    case IndexedDB::KeyType::Array:
+        encoder << std::get<Vector<IDBKeyData>>(m_value);
         break;
-    case KeyType::Binary:
-        encoder << WTF::get<ThreadSafeDataBuffer>(m_value);
+    case IndexedDB::KeyType::Binary:
+        encoder << std::get<ThreadSafeDataBuffer>(m_value);
         break;
-    case KeyType::String:
-        encoder << WTF::get<String>(m_value);
+    case IndexedDB::KeyType::String:
+        encoder << std::get<String>(m_value);
         break;
-    case KeyType::Date:
-    case KeyType::Number:
-        encoder << WTF::get<double>(m_value);
+    case IndexedDB::KeyType::Date:
+    case IndexedDB::KeyType::Number:
+        encoder << std::get<double>(m_value);
         break;
     }
 }
@@ -265,44 +251,42 @@ std::optional<IDBKeyData> IDBKeyData::decode(Decoder& decoder)
         return std::nullopt;
 
     if (keyData.m_isNull)
-        return WTFMove(keyData);
+        return keyData;
 
-    if (!decoder.decodeEnum(keyData.m_type))
+    if (!decoder.decode(keyData.m_type))
         return std::nullopt;
 
     switch (keyData.m_type) {
-    case KeyType::Invalid:
-    case KeyType::Max:
-    case KeyType::Min:
+    case IndexedDB::KeyType::Invalid:
+    case IndexedDB::KeyType::Max:
+    case IndexedDB::KeyType::Min:
         break;
-    case KeyType::Array:
+    case IndexedDB::KeyType::Array:
         keyData.m_value = Vector<IDBKeyData>();
-        if (!decoder.decode(WTF::get<Vector<IDBKeyData>>(keyData.m_value)))
+        if (!decoder.decode(std::get<Vector<IDBKeyData>>(keyData.m_value)))
             return std::nullopt;
         break;
-    case KeyType::Binary:
+    case IndexedDB::KeyType::Binary:
         keyData.m_value = ThreadSafeDataBuffer();
-        if (!decoder.decode(WTF::get<ThreadSafeDataBuffer>(keyData.m_value)))
+        if (!decoder.decode(std::get<ThreadSafeDataBuffer>(keyData.m_value)))
             return std::nullopt;
         break;
-    case KeyType::String:
+    case IndexedDB::KeyType::String:
         keyData.m_value = String();
-        if (!decoder.decode(WTF::get<String>(keyData.m_value)))
+        if (!decoder.decode(std::get<String>(keyData.m_value)))
             return std::nullopt;
         break;
-    case KeyType::Date:
-    case KeyType::Number:
+    case IndexedDB::KeyType::Date:
+    case IndexedDB::KeyType::Number:
         keyData.m_value = 0.0;
-        if (!decoder.decode(WTF::get<double>(keyData.m_value)))
+        if (!decoder.decode(std::get<double>(keyData.m_value)))
             return std::nullopt;
         break;
     }
 
-    return WTFMove(keyData);
+    return keyData;
 }
 
-using IDBKeyDataSet = std::set<IDBKeyData, std::less<IDBKeyData>, FastAllocator<IDBKeyData>>;
+using IDBKeyDataSet = StdSet<IDBKeyData>;
 
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

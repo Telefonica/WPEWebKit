@@ -23,10 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef APIDownloadClient_h
-#define APIDownloadClient_h
+#pragma once
 
-#include <wtf/Function.h>
+#include "AuthenticationChallengeDisposition.h"
+#include "AuthenticationChallengeProxy.h"
+#include "AuthenticationDecisionListener.h"
+#include "DownloadID.h"
+#include <wtf/CompletionHandler.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
@@ -38,31 +41,31 @@ class ResourceResponse;
 namespace WebKit {
 class AuthenticationChallengeProxy;
 class DownloadProxy;
-class WebProcessPool;
+class WebsiteDataStore;
 class WebProtectionSpace;
+
+enum class AllowOverwrite : bool;
 }
 
 namespace API {
 
-class DownloadClient {
+class Data;
+
+class DownloadClient : public RefCounted<DownloadClient> {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~DownloadClient() { }
 
-    virtual void didStart(WebKit::WebProcessPool*, WebKit::DownloadProxy*) { }
-    virtual void didReceiveAuthenticationChallenge(WebKit::WebProcessPool*, WebKit::DownloadProxy*, WebKit::AuthenticationChallengeProxy*) { }
-    virtual void didReceiveResponse(WebKit::WebProcessPool*, WebKit::DownloadProxy*, const WebCore::ResourceResponse&) { }
-    virtual void didReceiveData(WebKit::WebProcessPool*, WebKit::DownloadProxy*, uint64_t) { }
-    virtual bool shouldDecodeSourceDataOfMIMEType(WebKit::WebProcessPool*, WebKit::DownloadProxy*, const WTF::String&) { return true; }
-    virtual WTF::String decideDestinationWithSuggestedFilename(WebKit::WebProcessPool*, WebKit::DownloadProxy*, const WTF::String&, bool&) { return { }; }
-    virtual void didCreateDestination(WebKit::WebProcessPool*, WebKit::DownloadProxy*, const WTF::String&) { }
-    virtual void didFinish(WebKit::WebProcessPool*, WebKit::DownloadProxy*) { }
-    virtual void didFail(WebKit::WebProcessPool*, WebKit::DownloadProxy*, const WebCore::ResourceError&) { }
-    virtual void didCancel(WebKit::WebProcessPool*, WebKit::DownloadProxy*) { }
-    virtual void processDidCrash(WebKit::WebProcessPool*, WebKit::DownloadProxy*) { }
-    virtual bool canAuthenticateAgainstProtectionSpace(WebKit::WebProtectionSpace*) { return true; }
-    virtual void willSendRequest(WebKit::WebProcessPool*, WebKit::DownloadProxy*, const WebCore::ResourceRequest& request, const WebCore::ResourceResponse&, WTF::Function<void(const WebCore::ResourceRequest&)>&& callback) { callback(request); }
+    virtual void legacyDidStart(WebKit::DownloadProxy&) { }
+    virtual void didReceiveAuthenticationChallenge(WebKit::DownloadProxy&, WebKit::AuthenticationChallengeProxy& challenge) { challenge.listener().completeChallenge(WebKit::AuthenticationChallengeDisposition::Cancel); }
+    virtual void didReceiveData(WebKit::DownloadProxy&, uint64_t, uint64_t, uint64_t) { }
+    virtual void decideDestinationWithSuggestedFilename(WebKit::DownloadProxy&, const WebCore::ResourceResponse&, const WTF::String&, CompletionHandler<void(WebKit::AllowOverwrite, WTF::String)>&& completionHandler) { completionHandler(WebKit::AllowOverwrite::No, { }); }
+    virtual void didCreateDestination(WebKit::DownloadProxy&, const WTF::String&) { }
+    virtual void didFinish(WebKit::DownloadProxy&) { }
+    virtual void didFail(WebKit::DownloadProxy&, const WebCore::ResourceError&, API::Data* resumeData) { }
+    virtual void legacyDidCancel(WebKit::DownloadProxy&) { }
+    virtual void processDidCrash(WebKit::DownloadProxy&) { }
+    virtual void willSendRequest(WebKit::DownloadProxy&, WebCore::ResourceRequest&& request, const WebCore::ResourceResponse&, CompletionHandler<void(WebCore::ResourceRequest&&)>&& completionHandler) { completionHandler(WTFMove(request)); }
 };
 
 } // namespace API
-
-#endif // APIDownloadClient_h

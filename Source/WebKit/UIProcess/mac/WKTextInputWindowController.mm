@@ -28,11 +28,13 @@
 
 #if USE(APPKIT)
 
-#import <WebKitSystemInterface.h>
+#import <Carbon/Carbon.h>
+#import <pal/spi/mac/HIToolboxSPI.h>
 #import <pal/system/mac/WebPanel.h>
+#import <wtf/NeverDestroyed.h>
+#import <wtf/RetainPtr.h>
 
-@interface WKTextInputView : NSTextView {
-}
+@interface WKTextInputView : NSTextView
 @end
 
 @implementation WKTextInputView
@@ -40,16 +42,13 @@
 - (NSArray *)validAttributesForMarkedText
 {
     // Let TSM know that a bottom input window would be created for marked text.
-    NSArray *regularAttributes = [super validAttributesForMarkedText];
-    NSMutableArray *floatingWindowAttributes = [NSMutableArray arrayWithArray:regularAttributes];
-    [floatingWindowAttributes addObject:@"__NSUsesFloatingInputWindow"];
-    return floatingWindowAttributes;
+    return [[super validAttributesForMarkedText] arrayByAddingObject:@"__NSUsesFloatingInputWindow"];
 }
 
 @end
 
 @interface WKTextInputPanel : WebPanel {
-    NSTextView *_inputTextView;
+    RetainPtr<NSTextView> _inputTextView;
 }
 
 - (NSTextInputContext *)_inputContext;
@@ -68,8 +67,6 @@
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     
-    [_inputTextView release];
-    
     [super dealloc];
 }
 
@@ -85,13 +82,12 @@
      
     [self setFrame:frame display:NO];
         
-    _inputTextView = [[WKTextInputView alloc] initWithFrame:[(NSView *)self.contentView frame]];
-    _inputTextView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMaxXMargin | NSViewMinXMargin | NSViewMaxYMargin | NSViewMinYMargin;
+    _inputTextView = adoptNS([[WKTextInputView alloc] initWithFrame:[(NSView *)self.contentView frame]]);
+    [_inputTextView setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable | NSViewMaxXMargin | NSViewMinXMargin | NSViewMaxYMargin | NSViewMinYMargin];
         
-    NSScrollView* scrollView = [[NSScrollView alloc] initWithFrame:[(NSView *)self.contentView frame]];
-    scrollView.documentView = _inputTextView;
-    self.contentView = scrollView;
-    [scrollView release];
+    auto scrollView = adoptNS([[NSScrollView alloc] initWithFrame:[(NSView *)self.contentView frame]]);
+    [scrollView setDocumentView: _inputTextView.get()];
+    self.contentView = scrollView.get();
         
     [self setFloatingPanel:YES];
 
@@ -106,10 +102,9 @@
 
 - (BOOL)_interpretKeyEvent:(NSEvent *)event usingLegacyCocoaTextInput:(BOOL)usingLegacyCocoaTextInput string:(NSString **)string
 {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     BOOL hadMarkedText = [_inputTextView hasMarkedText];
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
  
     *string = nil;
 
@@ -124,10 +119,9 @@
     if (![[_inputTextView inputContext] handleEvent:event])
         return NO;
     
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     if ([_inputTextView hasMarkedText]) {
-#pragma clang diagnostic pop
+        ALLOW_DEPRECATED_DECLARATIONS_END
         // Don't show the input method window for dead keys
         if ([[event characters] length] > 0)
             [self orderFront:nil];
@@ -147,7 +141,7 @@
 
         NSString *text = [[_inputTextView textStorage] string];
         if ([text length] > 0)
-            *string = [[text copy] autorelease];
+            *string = adoptNS([text copy]).autorelease();
     }
             
     [_inputTextView setString:@""];
@@ -161,10 +155,9 @@
 
 - (BOOL)_hasMarkedText
 {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     return [_inputTextView hasMarkedText];
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
 }
 
 @end
@@ -173,11 +166,8 @@
 
 + (WKTextInputWindowController *)sharedTextInputWindowController
 {
-    static WKTextInputWindowController *textInputWindowController;
-    if (!textInputWindowController)
-        textInputWindowController = [[WKTextInputWindowController alloc] init];
-    
-    return textInputWindowController;
+    static NeverDestroyed<RetainPtr<WKTextInputWindowController>> textInputWindowController = adoptNS([[WKTextInputWindowController alloc] init]);
+    return textInputWindowController.get().get();
 }
 
 - (id)init

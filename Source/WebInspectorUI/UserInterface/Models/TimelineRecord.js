@@ -25,7 +25,7 @@
 
 WI.TimelineRecord = class TimelineRecord extends WI.Object
 {
-    constructor(type, startTime, endTime, callFrames, sourceCodeLocation)
+    constructor(type, startTime, endTime, stackTrace, sourceCodeLocation)
     {
         super();
 
@@ -37,9 +37,43 @@ WI.TimelineRecord = class TimelineRecord extends WI.Object
         this._type = type;
         this._startTime = startTime || NaN;
         this._endTime = endTime || NaN;
-        this._callFrames = callFrames || null;
+        this._stackTrace = stackTrace || null;
         this._sourceCodeLocation = sourceCodeLocation || null;
         this._children = [];
+    }
+
+    // Import / Export
+
+    static async fromJSON(json)
+    {
+        switch (json.type) {
+        case WI.TimelineRecord.Type.Network:
+            return WI.ResourceTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.Layout:
+            return WI.LayoutTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.Script:
+            return WI.ScriptTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.RenderingFrame:
+            return WI.RenderingFrameTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.CPU:
+            return WI.CPUTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.Memory:
+            return WI.MemoryTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.HeapAllocations:
+            return WI.HeapAllocationsTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.Media:
+            return WI.MediaTimelineRecord.fromJSON(json);
+        case WI.TimelineRecord.Type.Screenshots:
+            return WI.ScreenshotsTimelineRecord.fromJSON(json);
+        default:
+            console.error("Unknown TimelineRecord.Type: " + json.type, json);
+            return null;
+        }
+    }
+
+    toJSON()
+    {
+        throw WI.NotImplementedError.subclassMustOverride();
     }
 
     // Public
@@ -58,13 +92,25 @@ WI.TimelineRecord = class TimelineRecord extends WI.Object
     get activeStartTime()
     {
         // Implemented by subclasses if needed.
-        return this._startTime;
+        return this.startTime;
+    }
+
+    get unadjustedStartTime()
+    {
+        // Overridden by subclasses if needed.
+        return this.startTime;
     }
 
     get endTime()
     {
         // Implemented by subclasses if needed.
         return this._endTime;
+    }
+
+    get unadjustedEndTime()
+    {
+        // Overridden by subclasses if needed.
+        return this.endTime;
     }
 
     get duration()
@@ -97,21 +143,20 @@ WI.TimelineRecord = class TimelineRecord extends WI.Object
         return false;
     }
 
-    get callFrames()
+    get stackTrace()
     {
-        return this._callFrames;
+        return this._stackTrace;
     }
 
     get initiatorCallFrame()
     {
-        if (!this._callFrames || !this._callFrames.length)
+        if (!this._stackTrace)
             return null;
 
         // Return the first non-native code call frame as the initiator.
-        for (var i = 0; i < this._callFrames.length; ++i) {
-            if (this._callFrames[i].nativeCode)
-                continue;
-            return this._callFrames[i];
+        for (let frame of this._stackTrace.callFrames) {
+            if (!frame.nativeCode)
+                return frame;
         }
 
         return null;
@@ -158,8 +203,11 @@ WI.TimelineRecord.Type = {
     Layout: "timeline-record-type-layout",
     Script: "timeline-record-type-script",
     RenderingFrame: "timeline-record-type-rendering-frame",
+    CPU: "timeline-record-type-cpu",
     Memory: "timeline-record-type-memory",
     HeapAllocations: "timeline-record-type-heap-allocations",
+    Media: "timeline-record-type-media",
+    Screenshots: "timeline-record-type-screenshots",
 };
 
 WI.TimelineRecord.TypeIdentifier = "timeline-record";

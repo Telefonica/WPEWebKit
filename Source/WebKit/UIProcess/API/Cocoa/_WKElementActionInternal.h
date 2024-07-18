@@ -25,21 +25,19 @@
 
 #import "_WKElementAction.h"
 
-#if WK_API_ENABLED
-
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 @class WKActionSheetAssistant;
 @class WKContentView;
 
+UIActionIdentifier elementActionTypeToUIActionIdentifier(_WKElementActionType);
+
 @interface _WKElementAction ()
 
-+ (instancetype)_elementActionWithType:(_WKElementActionType)type assistant:(WKActionSheetAssistant *)assistant;
++ (instancetype)_elementActionWithType:(_WKElementActionType)type info:(_WKActivatedElementInfo *)info assistant:(WKActionSheetAssistant *)assistant;
 + (instancetype)_elementActionWithType:(_WKElementActionType)type title:(NSString *)title actionHandler:(WKElementActionHandler)actionHandler;
 - (void)_runActionWithElementInfo:(_WKActivatedElementInfo *)info forActionSheetAssistant:(WKActionSheetAssistant *)assistant;
 
 @end
 
-#endif // PLATFORM(IOS)
-
-#endif // WK_API_ENABLED
+#endif // PLATFORM(IOS_FAMILY)

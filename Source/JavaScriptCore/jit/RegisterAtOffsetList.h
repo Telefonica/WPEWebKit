@@ -25,15 +25,17 @@
 
 #pragma once
 
-#if ENABLE(JIT)
+#if ENABLE(ASSEMBLER)
 
 #include "RegisterAtOffset.h"
 #include "RegisterSet.h"
+#include <wtf/FixedVector.h>
 
 namespace JSC {
 
+DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(RegisterAtOffsetList);
 class RegisterAtOffsetList {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_STRUCT_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(RegisterAtOffsetList);
 public:
     enum OffsetBaseType { FramePointerBased, ZeroBased };
 
@@ -42,31 +44,46 @@ public:
 
     void dump(PrintStream&) const;
 
-    void clear()
+    size_t registerCount() const { return m_registers.size(); }
+    size_t sizeOfAreaInBytes() const
     {
-        m_registers.clear();
+#if USE(JSVALUE64)
+        static_assert(sizeof(CPURegister) == sizeof(double));
+        return registerCount() * sizeof(CPURegister);
+#elif USE(JSVALUE32_64)
+        return m_sizeOfAreaInBytes;
+#endif
     }
 
-    size_t size() const
-    {
-        return m_registers.size();
-    }
-
-    RegisterAtOffset& at(size_t index)
+    const RegisterAtOffset& at(size_t index) const
     {
         return m_registers.at(index);
     }
-    
+
+    void adjustOffsets(ptrdiff_t addend)
+    {
+        // This preserves m_sizeOfAreaInBytes
+        for (RegisterAtOffset &item : m_registers)
+            item = RegisterAtOffset { item.reg(), item.offset() + addend };
+    }
+
     RegisterAtOffset* find(Reg) const;
     unsigned indexOf(Reg) const; // Returns UINT_MAX if not found.
 
-    Vector<RegisterAtOffset>::const_iterator begin() const { return m_registers.begin(); }
-    Vector<RegisterAtOffset>::const_iterator end() const { return m_registers.end(); }
+    FixedVector<RegisterAtOffset>::const_iterator begin() const { return m_registers.begin(); }
+    FixedVector<RegisterAtOffset>::const_iterator end() const { return m_registers.end(); }
+
+
+    static const RegisterAtOffsetList& llintBaselineCalleeSaveRegisters(); // Registers and Offsets saved and used by the LLInt.
+    static const RegisterAtOffsetList& dfgCalleeSaveRegisters(); // Registers and Offsets saved and used by DFG.
 
 private:
-    Vector<RegisterAtOffset> m_registers;
+    FixedVector<RegisterAtOffset> m_registers;
+#if USE(JSVALUE32_64) // On JSVALUE64, we can compute this cheaply
+    size_t m_sizeOfAreaInBytes { 0 };
+#endif
 };
 
 } // namespace JSC
 
-#endif // ENABLE(JIT)
+#endif // ENABLE(ASSEMBLER)

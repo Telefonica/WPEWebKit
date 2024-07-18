@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,8 +30,8 @@
 
 namespace JSC {
 
-template <typename T>
-inline void WriteBarrierBase<T>::set(VM& vm, const JSCell* owner, T* value)
+template <typename T, typename Traits>
+inline void WriteBarrierBase<T, Traits>::set(VM& vm, const JSCell* owner, T* value)
 {
     ASSERT(value);
     ASSERT(!Options::useConcurrentJIT() || !isCompilationThread());
@@ -39,26 +39,51 @@ inline void WriteBarrierBase<T>::set(VM& vm, const JSCell* owner, T* value)
     setEarlyValue(vm, owner, value);
 }
 
-template <typename T>
-inline void WriteBarrierBase<T>::setMayBeNull(VM& vm, const JSCell* owner, T* value)
+template <typename T, typename Traits>
+inline void WriteBarrierBase<T, Traits>::setMayBeNull(VM& vm, const JSCell* owner, T* value)
 {
     if (value)
         validateCell(value);
     setEarlyValue(vm, owner, value);
 }
 
-template <typename T>
-inline void WriteBarrierBase<T>::setEarlyValue(VM& vm, const JSCell* owner, T* value)
+template <typename T, typename Traits>
+inline void WriteBarrierBase<T, Traits>::setEarlyValue(VM& vm, const JSCell* owner, T* value)
 {
-    this->m_cell = reinterpret_cast<JSCell*>(value);
-    vm.heap.writeBarrier(owner, this->m_cell);
+    Traits::exchange(this->m_cell, value);
+    vm.writeBarrier(owner, static_cast<JSCell*>(value));
 }
 
-inline void WriteBarrierBase<Unknown>::set(VM& vm, const JSCell* owner, JSValue value)
+inline void WriteBarrierBase<Unknown, RawValueTraits<Unknown>>::set(VM& vm, const JSCell* owner, JSValue value)
 {
     ASSERT(!Options::useConcurrentJIT() || !isCompilationThread());
     m_value = JSValue::encode(value);
-    vm.heap.writeBarrier(owner, value);
+    vm.writeBarrier(owner, value);
+}
+
+inline void WriteBarrierStructureID::set(VM& vm, const JSCell* owner, Structure* value)
+{
+    ASSERT(value);
+    ASSERT(!Options::useConcurrentJIT() || !isCompilationThread());
+    validateCell(reinterpret_cast<JSCell*>(value));
+    setEarlyValue(vm, owner, value);
+}
+
+inline void WriteBarrierStructureID::setMayBeNull(VM& vm, const JSCell* owner, Structure* value)
+{
+    if (value)
+        validateCell(reinterpret_cast<JSCell*>(value));
+    setEarlyValue(vm, owner, value);
+}
+
+inline void WriteBarrierStructureID::setEarlyValue(VM& vm, const JSCell* owner, Structure* value)
+{
+    if (!value) {
+        m_structureID = { };
+        return;
+    }
+    m_structureID = StructureID::encode(value);
+    vm.writeBarrier(owner, reinterpret_cast<JSCell*>(value));
 }
 
 } // namespace JSC 

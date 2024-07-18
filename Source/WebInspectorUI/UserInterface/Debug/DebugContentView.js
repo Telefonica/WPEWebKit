@@ -37,16 +37,16 @@ WI.DebugContentView = class DebugContentView extends WI.ContentView
 
     // Protected
 
-    shown()
+    attached()
     {
-        super.shown();
-        console.debug(`shown: ${this._string}`);
+        super.attached();
+        console.debug(`attached: ${this._string}`);
     }
 
-    hidden()
+    detached()
     {
-        console.debug(`hidden: ${this._string}`);
-        super.hidden();
+        console.debug(`detached: ${this._string}`);
+        super.detached();
     }
 
     closed()
@@ -54,4 +54,4 @@ WI.DebugContentView = class DebugContentView extends WI.ContentView
         console.debug(`closed: ${this._string}`);
         super.closed();
     }
-}
+};

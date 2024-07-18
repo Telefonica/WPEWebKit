@@ -38,30 +38,25 @@ CSSNamespaceRule::CSSNamespaceRule(StyleRuleNamespace& namespaceRule, CSSStyleSh
 {
 }
 
-CSSNamespaceRule::~CSSNamespaceRule()
-{
-}
+CSSNamespaceRule::~CSSNamespaceRule() = default;
 
-AtomicString CSSNamespaceRule::namespaceURI() const
+AtomString CSSNamespaceRule::namespaceURI() const
 {
     return m_namespaceRule->uri();
 }
     
-AtomicString CSSNamespaceRule::prefix() const
+AtomString CSSNamespaceRule::prefix() const
 {
     return m_namespaceRule->prefix();
 }
 
 String CSSNamespaceRule::cssText() const
 {
+    auto prefix = this->prefix();
     StringBuilder result;
-    result.appendLiteral("@namespace ");
-    serializeIdentifier(prefix(), result);
-    if (!prefix().isEmpty())
-        result.append(' ');
-    result.append("url(");
-    result.append(serializeString(namespaceURI()));
-    result.append(");");
+    result.append("@namespace ");
+    serializeIdentifier(prefix, result);
+    result.append(prefix.isEmpty() ? "" : " ", "url(", serializeString(namespaceURI()), ");");
     return result.toString();
 }
 

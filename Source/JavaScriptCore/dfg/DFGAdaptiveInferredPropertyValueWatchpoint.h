@@ -31,15 +31,20 @@
 
 namespace JSC { namespace DFG {
 
-class AdaptiveInferredPropertyValueWatchpoint : public AdaptiveInferredPropertyValueWatchpointBase {
+class AdaptiveInferredPropertyValueWatchpoint final : public AdaptiveInferredPropertyValueWatchpointBase {
 public:
     typedef AdaptiveInferredPropertyValueWatchpointBase Base;
     AdaptiveInferredPropertyValueWatchpoint(const ObjectPropertyCondition&, CodeBlock*);
+    AdaptiveInferredPropertyValueWatchpoint() = default;
+
+    void initialize(const ObjectPropertyCondition&, CodeBlock*);
 
 private:
-    void handleFire(const FireDetail&) override;
+    bool isValid() const final;
 
-    CodeBlock* m_codeBlock;
+    void handleFire(VM&, const FireDetail&) final;
+
+    CodeBlock* m_codeBlock { nullptr };
 };
 
 } } // namespace JSC::DFG

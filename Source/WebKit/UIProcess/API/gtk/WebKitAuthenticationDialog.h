@@ -17,10 +17,10 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef WebKitAuthenticationDialog_h
-#define WebKitAuthenticationDialog_h
+#pragma once
 
 #include "WebKitAuthenticationRequest.h"
+#include "WebKitWebViewDialog.h"
 #include <gtk/gtk.h>
 
 enum CredentialStorageMode {
@@ -42,18 +42,17 @@ typedef struct _WebKitAuthenticationDialogClass   WebKitAuthenticationDialogClas
 typedef struct _WebKitAuthenticationDialogPrivate WebKitAuthenticationDialogPrivate;
 
 struct _WebKitAuthenticationDialog {
-    GtkEventBox parent;
+    WebKitWebViewDialog parent;
 
+    /*< private >*/
     WebKitAuthenticationDialogPrivate* priv;
 };
 
 struct _WebKitAuthenticationDialogClass {
-    GtkEventBoxClass parentClass;
+    WebKitWebViewDialogClass parentClass;
 };
 
 GType webkit_authentication_dialog_get_type();
 GtkWidget* webkitAuthenticationDialogNew(WebKitAuthenticationRequest*, CredentialStorageMode);
 
 G_END_DECLS
-
-#endif // WebKitAuthenticationDialog_h

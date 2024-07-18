@@ -23,8 +23,9 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ScrollAnimatorIOS_h
-#define ScrollAnimatorIOS_h
+#pragma once
+
+#if PLATFORM(IOS_FAMILY)
 
 #include "ScrollAnimator.h"
 
@@ -54,19 +55,19 @@ private:
         AxisLatchHorizontal,
         AxisLatchVertical
     };
-    AxisLatch m_touchScrollAxisLatch;
-    bool m_inTouchSequence;
-    bool m_committedToScrollAxis;
-    bool m_startedScroll;
+    AxisLatch m_touchScrollAxisLatch { AxisLatchNotComputed };
+    bool m_inTouchSequence { false };
+    bool m_committedToScrollAxis { false };
+    bool m_startedScroll { false };
     IntPoint m_firstTouchPoint;
     IntPoint m_lastTouchPoint;
 
     // When we're in a touch sequence, this will point to the scrollable area that
     // should actually be scrolled during the sequence.
-    ScrollableArea* m_scrollableAreaForTouchSequence;
+    ScrollableArea* m_scrollableAreaForTouchSequence { nullptr };
 #endif
 };
 
 } // namespace WebCore
 
-#endif // ScrollAnimatorIOS_h
+#endif // PLATFORM(IOS_FAMILY)

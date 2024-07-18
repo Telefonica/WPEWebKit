@@ -30,7 +30,7 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
         super();
 
         this._results = [];
-        this._shouldResendResults = true;
+        this._testPageHasLoaded = false;
 
         // Options that are set per-test for debugging purposes.
         this.dumpActivityToSystemConsole = false;
@@ -77,16 +77,37 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
         this.evaluateInPage(`TestPage.debugLog(unescape("${escape(stringifiedMessage)}"));`);
     }
 
-    evaluateInPage(expression, callback)
+    evaluateInPage(expression, callback, options = {})
     {
+        let remoteObjectOnly = !!options.remoteObjectOnly;
+        let target = WI.assumingMainTarget();
+
         // If we load this page outside of the inspector, or hit an early error when loading
         // the test frontend, then defer evaluating the commands (indefinitely in the former case).
-        if (this._originalConsole && !window.RuntimeAgent) {
+        if (this._originalConsole && (!target || !target.hasDomain("Runtime"))) {
             this._originalConsole["error"]("Tried to evaluate in test page, but connection not yet established:", expression);
             return;
         }
 
-        RuntimeAgent.evaluate.invoke({expression, objectGroup: "test", includeCommandLineAPI: false}, callback);
+        // Return primitive values directly, otherwise return a WI.RemoteObject instance.
+        function translateResult(result) {
+            let remoteObject = WI.RemoteObject.fromPayload(result);
+            return (!remoteObjectOnly && remoteObject.hasValue()) ? remoteObject.value : remoteObject;
+        }
+
+        let response = target.RuntimeAgent.evaluate.invoke({expression, objectGroup: "test", includeCommandLineAPI: false});
+        if (callback && typeof callback === "function") {
+            response = response.then(({result, wasThrown}) => callback(null, translateResult(result), wasThrown));
+            response = response.catch((error) => callback(error, null, false));
+        } else {
+            // Turn a thrown Error result into a promise rejection.
+            return response.then(({result, wasThrown}) => {
+                result = translateResult(result);
+                if (result && wasThrown)
+                    return Promise.reject(new Error(result.description));
+                return Promise.resolve(result);
+            });
+        }
     }
 
     debug()
@@ -106,13 +127,22 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
         }
     }
 
+    deferOutputUntilTestPageIsReloaded()
+    {
+        console.assert(!this._testPageIsReloading);
+        this._testPageIsReloading = true;
+    }
+
     testPageDidLoad()
     {
         if (this.dumpActivityToSystemConsole)
             InspectorFrontendHost.unbufferedLog("testPageDidLoad()");
 
         this._testPageIsReloading = false;
-        this._resendResults();
+        if (this._testPageHasLoaded)
+            this._resendResults();
+        else
+            this._testPageHasLoaded = true;
 
         this.dispatchEventToListeners(FrontendTestHarness.Event.TestPageDidLoad);
 
@@ -120,7 +150,7 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
             this.completeTest();
     }
 
-    reloadPage(options={})
+    reloadPage(options = {})
     {
         console.assert(!this._testPageIsReloading);
         console.assert(!this._testPageReloadedOnce);
@@ -131,13 +161,53 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
         ignoreCache = !!ignoreCache;
         revalidateAllResources = !!revalidateAllResources;
 
-        return PageAgent.reload.invoke({ignoreCache, revalidateAllResources})
+        let target = WI.assumingMainTarget();
+        return target.PageAgent.reload.invoke({ignoreCache, revalidateAllResources})
             .then(() => {
-                this._shouldResendResults = true;
                 this._testPageReloadedOnce = true;
 
                 return Promise.resolve(null);
             });
+    }
+
+    redirectRequestAnimationFrame()
+    {
+        console.assert(!this._originalRequestAnimationFrame);
+        if (this._originalRequestAnimationFrame)
+            return;
+
+        this._originalRequestAnimationFrame = window.requestAnimationFrame;
+        this._requestAnimationFrameCallbacks = new Map;
+        this._nextRequestIdentifier = 1;
+
+        window.requestAnimationFrame = (callback) => {
+            let requestIdentifier = this._nextRequestIdentifier++;
+            this._requestAnimationFrameCallbacks.set(requestIdentifier, callback);
+            if (this._requestAnimationFrameTimer)
+                return requestIdentifier;
+
+            let dispatchCallbacks = () => {
+                let callbacks = this._requestAnimationFrameCallbacks;
+                this._requestAnimationFrameCallbacks = new Map;
+                this._requestAnimationFrameTimer = undefined;
+                let timestamp = window.performance.now();
+                for (let callback of callbacks.values())
+                    callback(timestamp);
+            };
+
+            this._requestAnimationFrameTimer = setTimeout(dispatchCallbacks, 0);
+            return requestIdentifier;
+        };
+
+        window.cancelAnimationFrame = (requestIdentifier) => {
+            if (!this._requestAnimationFrameCallbacks.delete(requestIdentifier))
+                return;
+
+            if (!this._requestAnimationFrameCallbacks.size) {
+                clearTimeout(this._requestAnimationFrameTimer);
+                this._requestAnimationFrameTimer = undefined;
+            }
+        };
     }
 
     redirectConsoleToTestOutput()
@@ -190,7 +260,7 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
 
         // If the connection to the test page is not set up, then just dump to console and give up.
         // Errors encountered this early can be debugged by loading Test.html in a normal browser page.
-        if (this._originalConsole && !this._testPageHasLoaded())
+        if (this._originalConsole && !this._testPageHasLoaded)
             this._originalConsole["error"](result);
 
         this.addResult(result);
@@ -226,7 +296,7 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
 
         // If the connection to the test page is not set up, then just dump to console and give up.
         // Errors encountered this early can be debugged by loading Test.html in a normal browser page.
-        if (this._originalConsole && !this._testPageHasLoaded())
+        if (this._originalConsole && !this._testPageHasLoaded)
             this._originalConsole["error"](result);
 
         this.addResult(result);
@@ -237,19 +307,14 @@ FrontendTestHarness = class FrontendTestHarness extends TestHarness
 
     // Private
 
-    _testPageHasLoaded()
-    {
-        return self._shouldResendResults;
-    }
-
     _resendResults()
     {
-        console.assert(this._shouldResendResults);
-        this._shouldResendResults = false;
+        console.assert(this._testPageHasLoaded);
 
         if (this.dumpActivityToSystemConsole)
             InspectorFrontendHost.unbufferedLog("_resendResults()");
 
+        this.evaluateInPage("TestPage.clearOutput()");
         for (let result of this._results)
             this.evaluateInPage(`TestPage.addResult(unescape("${escape(result)}"))`);
     }

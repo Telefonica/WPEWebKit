@@ -23,44 +23,55 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef VideoTrackPrivateGStreamer_h
-#define VideoTrackPrivateGStreamer_h
+#pragma once
 
-#if ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO) && USE(GSTREAMER)
 
 #include "GStreamerCommon.h"
 #include "TrackPrivateBaseGStreamer.h"
 #include "VideoTrackPrivate.h"
 
+#include <wtf/WeakPtr.h>
+
 namespace WebCore {
+class MediaPlayerPrivateGStreamer;
 
 class VideoTrackPrivateGStreamer final : public VideoTrackPrivate, public TrackPrivateBaseGStreamer {
 public:
-    static Ref<VideoTrackPrivateGStreamer> create(GRefPtr<GstElement> playbin, gint index, GRefPtr<GstPad> pad)
+    static Ref<VideoTrackPrivateGStreamer> create(WeakPtr<MediaPlayerPrivateGStreamer> player, unsigned index, GRefPtr<GstPad>&& pad, bool shouldHandleStreamStartEvent = true)
     {
-        return adoptRef(*new VideoTrackPrivateGStreamer(playbin, index, pad));
+        return adoptRef(*new VideoTrackPrivateGStreamer(player, index, WTFMove(pad), shouldHandleStreamStartEvent));
     }
 
-    void disconnect() override;
+    static Ref<VideoTrackPrivateGStreamer> create(WeakPtr<MediaPlayerPrivateGStreamer> player, unsigned index, GstStream* stream)
+    {
+        return adoptRef(*new VideoTrackPrivateGStreamer(player, index, stream));
+    }
 
-    void setSelected(bool) override;
-    void setActive(bool enabled) override { setSelected(enabled); }
+    Kind kind() const final;
 
-    int trackIndex() const override { return m_index; }
+    void disconnect() final;
 
-    AtomicString id() const override { return m_id; }
-    AtomicString label() const override { return m_label; }
-    AtomicString language() const override { return m_language; }
+    void setSelected(bool) final;
+    void setActive(bool enabled) final { setSelected(enabled); }
+
+    int trackIndex() const final { return m_index; }
+
+    AtomString id() const final { return m_id; }
+    AtomString label() const final { return m_label; }
+    AtomString language() const final { return m_language; }
+
+protected:
+    void updateConfigurationFromCaps() override;
+    void updateConfigurationFromTags() override;
 
 private:
-    VideoTrackPrivateGStreamer(GRefPtr<GstElement> playbin, gint index, GRefPtr<GstPad>);
+    VideoTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivateGStreamer>, unsigned index, GRefPtr<GstPad>&&, bool shouldHandleStreamStartEvent);
+    VideoTrackPrivateGStreamer(WeakPtr<MediaPlayerPrivateGStreamer>, unsigned index, GstStream*);
 
-    AtomicString m_id;
-    GRefPtr<GstElement> m_playbin;
+    WeakPtr<MediaPlayerPrivateGStreamer> m_player;
 };
 
 } // namespace WebCore
 
-#endif // ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(VIDEO_TRACK)
-
-#endif // VideoTrackPrivateGStreamer_h
+#endif // ENABLE(VIDEO) && USE(GSTREAMER)

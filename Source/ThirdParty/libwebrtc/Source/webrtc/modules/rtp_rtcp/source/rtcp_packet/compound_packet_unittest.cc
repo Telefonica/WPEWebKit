@@ -8,16 +8,23 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/compound_packet.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/compound_packet.h"
 
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/bye.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/fir.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/sender_report.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/rtcp_packet_parser.h"
+#include <memory>
+#include <utility>
 
+#include "modules/rtp_rtcp/source/rtcp_packet.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/bye.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/fir.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/sender_report.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
+#include "test/rtcp_packet_parser.h"
+
+using ::testing::_;
+using ::testing::Invoke;
+using ::testing::MockFunction;
 using webrtc::rtcp::Bye;
 using webrtc::rtcp::CompoundPacket;
 using webrtc::rtcp::Fir;
@@ -34,18 +41,18 @@ const uint8_t kSeqNo = 13;
 
 TEST(RtcpCompoundPacketTest, AppendPacket) {
   CompoundPacket compound;
-  Fir fir;
-  fir.AddRequestTo(kRemoteSsrc, kSeqNo);
+  auto fir = std::make_unique<Fir>();
+  fir->AddRequestTo(kRemoteSsrc, kSeqNo);
   ReportBlock rb;
-  ReceiverReport rr;
-  rr.SetSenderSsrc(kSenderSsrc);
-  EXPECT_TRUE(rr.AddReportBlock(rb));
-  compound.Append(&rr);
-  compound.Append(&fir);
+  auto rr = std::make_unique<ReceiverReport>();
+  rr->SetSenderSsrc(kSenderSsrc);
+  EXPECT_TRUE(rr->AddReportBlock(rb));
+  compound.Append(std::move(rr));
+  compound.Append(std::move(fir));
 
   rtc::Buffer packet = compound.Build();
   RtcpPacketParser parser;
-  parser.Parse(packet.data(), packet.size());
+  parser.Parse(packet);
   EXPECT_EQ(1, parser.receiver_report()->num_packets());
   EXPECT_EQ(kSenderSsrc, parser.receiver_report()->sender_ssrc());
   EXPECT_EQ(1u, parser.receiver_report()->report_blocks().size());
@@ -54,25 +61,26 @@ TEST(RtcpCompoundPacketTest, AppendPacket) {
 
 TEST(RtcpCompoundPacketTest, AppendPacketWithOwnAppendedPacket) {
   CompoundPacket root;
-  CompoundPacket leaf;
-  Fir fir;
-  fir.AddRequestTo(kRemoteSsrc, kSeqNo);
-  Bye bye;
+  auto leaf = std::make_unique<CompoundPacket>();
+
+  auto fir = std::make_unique<Fir>();
+  fir->AddRequestTo(kRemoteSsrc, kSeqNo);
+  auto bye = std::make_unique<Bye>();
   ReportBlock rb;
 
-  ReceiverReport rr;
-  EXPECT_TRUE(rr.AddReportBlock(rb));
-  leaf.Append(&rr);
-  leaf.Append(&fir);
+  auto rr = std::make_unique<ReceiverReport>();
+  EXPECT_TRUE(rr->AddReportBlock(rb));
+  leaf->Append(std::move(rr));
+  leaf->Append(std::move(fir));
 
-  SenderReport sr;
-  root.Append(&sr);
-  root.Append(&bye);
-  root.Append(&leaf);
+  auto sr = std::make_unique<SenderReport>();
+  root.Append(std::move(sr));
+  root.Append(std::move(bye));
+  root.Append(std::move(leaf));
 
   rtc::Buffer packet = root.Build();
   RtcpPacketParser parser;
-  parser.Parse(packet.data(), packet.size());
+  parser.Parse(packet);
   EXPECT_EQ(1, parser.sender_report()->num_packets());
   EXPECT_EQ(1, parser.receiver_report()->num_packets());
   EXPECT_EQ(1u, parser.receiver_report()->report_blocks().size());
@@ -82,80 +90,66 @@ TEST(RtcpCompoundPacketTest, AppendPacketWithOwnAppendedPacket) {
 
 TEST(RtcpCompoundPacketTest, BuildWithInputBuffer) {
   CompoundPacket compound;
-  Fir fir;
-  fir.AddRequestTo(kRemoteSsrc, kSeqNo);
+  auto fir = std::make_unique<Fir>();
+  fir->AddRequestTo(kRemoteSsrc, kSeqNo);
   ReportBlock rb;
-  ReceiverReport rr;
-  rr.SetSenderSsrc(kSenderSsrc);
-  EXPECT_TRUE(rr.AddReportBlock(rb));
-  compound.Append(&rr);
-  compound.Append(&fir);
+  auto rr = std::make_unique<ReceiverReport>();
+  rr->SetSenderSsrc(kSenderSsrc);
+  EXPECT_TRUE(rr->AddReportBlock(rb));
+  compound.Append(std::move(rr));
+  compound.Append(std::move(fir));
 
   const size_t kRrLength = 8;
   const size_t kReportBlockLength = 24;
   const size_t kFirLength = 20;
 
-  class Verifier : public rtcp::RtcpPacket::PacketReadyCallback {
-   public:
-    void OnPacketReady(uint8_t* data, size_t length) override {
-      RtcpPacketParser parser;
-      parser.Parse(data, length);
-      EXPECT_EQ(1, parser.receiver_report()->num_packets());
-      EXPECT_EQ(1u, parser.receiver_report()->report_blocks().size());
-      EXPECT_EQ(1, parser.fir()->num_packets());
-      ++packets_created_;
-    }
-
-    int packets_created_ = 0;
-  } verifier;
   const size_t kBufferSize = kRrLength + kReportBlockLength + kFirLength;
-  uint8_t buffer[kBufferSize];
-  EXPECT_TRUE(compound.BuildExternalBuffer(buffer, kBufferSize, &verifier));
-  EXPECT_EQ(1, verifier.packets_created_);
+  MockFunction<void(rtc::ArrayView<const uint8_t>)> callback;
+  EXPECT_CALL(callback, Call(_))
+      .WillOnce(Invoke([&](rtc::ArrayView<const uint8_t> packet) {
+        RtcpPacketParser parser;
+        parser.Parse(packet);
+        EXPECT_EQ(1, parser.receiver_report()->num_packets());
+        EXPECT_EQ(1u, parser.receiver_report()->report_blocks().size());
+        EXPECT_EQ(1, parser.fir()->num_packets());
+      }));
+
+  EXPECT_TRUE(compound.Build(kBufferSize, callback.AsStdFunction()));
 }
 
 TEST(RtcpCompoundPacketTest, BuildWithTooSmallBuffer_FragmentedSend) {
   CompoundPacket compound;
-  Fir fir;
-  fir.AddRequestTo(kRemoteSsrc, kSeqNo);
+  auto fir = std::make_unique<Fir>();
+  fir->AddRequestTo(kRemoteSsrc, kSeqNo);
   ReportBlock rb;
-  ReceiverReport rr;
-  rr.SetSenderSsrc(kSenderSsrc);
-  EXPECT_TRUE(rr.AddReportBlock(rb));
-  compound.Append(&rr);
-  compound.Append(&fir);
+  auto rr = std::make_unique<ReceiverReport>();
+  rr->SetSenderSsrc(kSenderSsrc);
+  EXPECT_TRUE(rr->AddReportBlock(rb));
+  compound.Append(std::move(rr));
+  compound.Append(std::move(fir));
 
   const size_t kRrLength = 8;
   const size_t kReportBlockLength = 24;
 
-  class Verifier : public rtcp::RtcpPacket::PacketReadyCallback {
-   public:
-    void OnPacketReady(uint8_t* data, size_t length) override {
-      RtcpPacketParser parser;
-      parser.Parse(data, length);
-      switch (packets_created_++) {
-        case 0:
-          EXPECT_EQ(1, parser.receiver_report()->num_packets());
-          EXPECT_EQ(1U, parser.receiver_report()->report_blocks().size());
-          EXPECT_EQ(0, parser.fir()->num_packets());
-          break;
-        case 1:
-          EXPECT_EQ(0, parser.receiver_report()->num_packets());
-          EXPECT_EQ(0U, parser.receiver_report()->report_blocks().size());
-          EXPECT_EQ(1, parser.fir()->num_packets());
-          break;
-        default:
-          ADD_FAILURE() << "OnPacketReady not expected to be called "
-                        << packets_created_ << " times.";
-      }
-    }
-
-    int packets_created_ = 0;
-  } verifier;
   const size_t kBufferSize = kRrLength + kReportBlockLength;
-  uint8_t buffer[kBufferSize];
-  EXPECT_TRUE(compound.BuildExternalBuffer(buffer, kBufferSize, &verifier));
-  EXPECT_EQ(2, verifier.packets_created_);
+  MockFunction<void(rtc::ArrayView<const uint8_t>)> callback;
+  EXPECT_CALL(callback, Call(_))
+      .WillOnce(Invoke([&](rtc::ArrayView<const uint8_t> packet) {
+        RtcpPacketParser parser;
+        parser.Parse(packet);
+        EXPECT_EQ(1, parser.receiver_report()->num_packets());
+        EXPECT_EQ(1U, parser.receiver_report()->report_blocks().size());
+        EXPECT_EQ(0, parser.fir()->num_packets());
+      }))
+      .WillOnce(Invoke([&](rtc::ArrayView<const uint8_t> packet) {
+        RtcpPacketParser parser;
+        parser.Parse(packet);
+        EXPECT_EQ(0, parser.receiver_report()->num_packets());
+        EXPECT_EQ(0U, parser.receiver_report()->report_blocks().size());
+        EXPECT_EQ(1, parser.fir()->num_packets());
+      }));
+
+  EXPECT_TRUE(compound.Build(kBufferSize, callback.AsStdFunction()));
 }
 
 }  // namespace webrtc

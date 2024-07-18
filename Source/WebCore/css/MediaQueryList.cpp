@@ -20,29 +20,44 @@
 #include "config.h"
 #include "MediaQueryList.h"
 
-#include "MediaList.h"
-#include "MediaQueryEvaluator.h"
-#include "MediaQueryListListener.h"
-#include "MediaQueryMatcher.h"
+#include "AddEventListenerOptions.h"
+#include "EventNames.h"
+#include "HTMLFrameOwnerElement.h"
+#include "MediaQuery.h"
+#include "MediaQueryListEvent.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-inline MediaQueryList::MediaQueryList(MediaQueryMatcher& matcher, Ref<MediaQuerySet>&& media, bool matches)
-    : m_matcher(matcher)
+WTF_MAKE_ISO_ALLOCATED_IMPL(MediaQueryList);
+
+MediaQueryList::MediaQueryList(Document& document, MediaQueryMatcher& matcher, Ref<MediaQuerySet>&& media, bool matches)
+    : ActiveDOMObject(&document)
+    , m_matcher(&matcher)
     , m_media(WTFMove(media))
-    , m_evaluationRound(m_matcher->evaluationRound())
+    , m_evaluationRound(matcher.evaluationRound())
     , m_changeRound(m_evaluationRound - 1) // Any value that is not the same as m_evaluationRound would do.
     , m_matches(matches)
 {
+    matcher.addMediaQueryList(*this);
 }
 
-Ref<MediaQueryList> MediaQueryList::create(MediaQueryMatcher& matcher, Ref<MediaQuerySet>&& media, bool matches)
+Ref<MediaQueryList> MediaQueryList::create(Document& document, MediaQueryMatcher& matcher, Ref<MediaQuerySet>&& media, bool matches)
 {
-    return adoptRef(*new MediaQueryList(matcher, WTFMove(media), matches));
+    auto list = adoptRef(*new MediaQueryList(document, matcher, WTFMove(media), matches));
+    list->suspendIfNeeded();
+    return list;
 }
 
 MediaQueryList::~MediaQueryList()
 {
+    if (m_matcher)
+        m_matcher->removeMediaQueryList(*this);
+}
+
+void MediaQueryList::detachFromMatcher()
+{
+    m_matcher = nullptr;
 }
 
 String MediaQueryList::media() const
@@ -50,31 +65,44 @@ String MediaQueryList::media() const
     return m_media->mediaText();
 }
 
-void MediaQueryList::addListener(RefPtr<MediaQueryListListener>&& listener)
+void MediaQueryList::addListener(RefPtr<EventListener>&& listener)
 {
     if (!listener)
         return;
 
-    m_matcher->addListener(listener.releaseNonNull(), *this);
+    addEventListener(eventNames().changeEvent, listener.releaseNonNull(), { });
 }
 
-void MediaQueryList::removeListener(RefPtr<MediaQueryListListener>&& listener)
+void MediaQueryList::removeListener(RefPtr<EventListener>&& listener)
 {
     if (!listener)
         return;
 
-    m_matcher->removeListener(*listener, *this);
+    removeEventListener(eventNames().changeEvent, *listener, { });
 }
 
-void MediaQueryList::evaluate(MediaQueryEvaluator& evaluator, bool& notificationNeeded)
+void MediaQueryList::evaluate(MediaQueryEvaluator& evaluator, MediaQueryMatcher::EventMode eventMode)
 {
+    RELEASE_ASSERT(m_matcher);
     if (m_evaluationRound != m_matcher->evaluationRound())
         setMatches(evaluator.evaluate(m_media.get()));
-    notificationNeeded = m_changeRound == m_matcher->evaluationRound();
+
+    m_needsNotification = m_changeRound == m_matcher->evaluationRound() || m_needsNotification;
+    if (!m_needsNotification || eventMode == MediaQueryMatcher::EventMode::Schedule)
+        return;
+    ASSERT(eventMode == MediaQueryMatcher::EventMode::DispatchNow);
+
+    RefPtr document = dynamicDowncast<Document>(scriptExecutionContext());
+    if (document && document->quirks().shouldSilenceMediaQueryListChangeEvents())
+        return;
+
+    dispatchEvent(MediaQueryListEvent::create(eventNames().changeEvent, media(), matches()));
+    m_needsNotification = false;
 }
 
 void MediaQueryList::setMatches(bool newValue)
 {
+    ASSERT(m_matcher);
     m_evaluationRound = m_matcher->evaluationRound();
 
     if (newValue == m_matches)
@@ -86,9 +114,46 @@ void MediaQueryList::setMatches(bool newValue)
 
 bool MediaQueryList::matches()
 {
+    if (!m_matcher)
+        return m_matches;
+
+    if (RefPtr document = dynamicDowncast<Document>(scriptExecutionContext())) {
+        if (RefPtr ownerElement = document->ownerElement()) {
+            bool isViewportDependent = [&]() {
+                for (auto& query : m_media->queryVector()) {
+                    for (auto& expression : query.expressions()) {
+                        if (expression.isViewportDependent())
+                            return true;
+                    }
+                }
+                return false;
+            }();
+
+            if (isViewportDependent) {
+                ownerElement->document().updateLayout();
+                m_matcher->evaluateAll(MediaQueryMatcher::EventMode::Schedule);
+            }
+        }
+    }
+
     if (m_evaluationRound != m_matcher->evaluationRound())
         setMatches(m_matcher->evaluate(m_media.get()));
     return m_matches;
+}
+
+void MediaQueryList::eventListenersDidChange()
+{
+    m_hasChangeEventListener = hasEventListeners(eventNames().changeEvent);
+}
+
+const char* MediaQueryList::activeDOMObjectName() const
+{
+    return "MediaQueryList";
+}
+
+bool MediaQueryList::virtualHasPendingActivity() const
+{
+    return m_hasChangeEventListener && m_matcher;
 }
 
 }

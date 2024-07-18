@@ -21,7 +21,8 @@
 #include "config.h"
 #include "SVGTextChunk.h"
 
-#include "SVGInlineTextBox.h"
+#include "RenderSVGInlineText.h"
+#include "SVGInlineTextBoxInlines.h"
 #include "SVGTextContentElement.h"
 #include "SVGTextFragment.h"
 
@@ -43,12 +44,12 @@ SVGTextChunk::SVGTextChunk(const Vector<SVGInlineTextBox*>& lineLayoutBoxes, uns
         m_chunkStyle |= SVGTextChunk::VerticalText;
     
     switch (svgStyle.textAnchor()) {
-    case TA_START:
+    case TextAnchor::Start:
         break;
-    case TA_MIDDLE:
+    case TextAnchor::Middle:
         m_chunkStyle |= MiddleAnchor;
         break;
-    case TA_END:
+    case TextAnchor::End:
         m_chunkStyle |= EndAnchor;
         break;
     }
@@ -69,8 +70,7 @@ SVGTextChunk::SVGTextChunk(const Vector<SVGInlineTextBox*>& lineLayoutBoxes, uns
         }
     }
 
-    for (unsigned i = first; i < limit; ++i)
-        m_boxes.append(lineLayoutBoxes[i]);
+    m_boxes.append(&lineLayoutBoxes[first], limit - first);
 }
 
 unsigned SVGTextChunk::totalCharacters() const

@@ -23,6 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#import <CoreGraphics/CoreGraphics.h>
+#import <Foundation/Foundation.h>
+
 #if TARGET_OS_IPHONE
 @class WebFrame;
 #endif
@@ -36,11 +39,6 @@
 #if TARGET_OS_IPHONE
 + (void)emptyInMemoryResources;
 + (void)sizeOfDeadResources:(int *)resources;
-// SPI to add a CGImageRef directly to the WebCore cache.
-+ (bool)addImageToCache:(CGImageRef)image forURL:(NSURL *)url;
-+ (bool)addImageToCache:(CGImageRef)image forURL:(NSURL *)url forFrame:(WebFrame *)frame;
-+ (void)removeImageFromCacheForURL:(NSURL *)url;
-+ (void)removeImageFromCacheForURL:(NSURL *)url forFrame:(WebFrame *)frame;
 + (CGImageRef)imageForURL:(NSURL *)url;
 #endif
 + (void)setDisabled:(BOOL)disabled;

@@ -28,7 +28,6 @@
  */
 
 #include "config.h"
-
 #include "CSSBasicShapes.h"
 
 #include "CSSMarkup.h"
@@ -38,8 +37,6 @@
 #include "SVGPathByteStream.h"
 #include "SVGPathUtilities.h"
 #include <wtf/text/StringBuilder.h>
-
-using namespace WTF;
 
 namespace WebCore {
 
@@ -68,19 +65,19 @@ static Ref<CSSPrimitiveValue> buildSerializablePositionOffset(CSSPrimitiveValue*
 
     auto& cssValuePool = CSSValuePool::singleton();
     if (!amount)
-        amount = cssValuePool.createValue(Length(side == CSSValueCenter ? 50 : 0, Percent));
+        amount = cssValuePool.createValue(Length(side == CSSValueCenter ? 50 : 0, LengthType::Percent));
     
     if (side == CSSValueCenter)
         side = defaultSide;
     else if ((side == CSSValueRight || side == CSSValueBottom)
         && amount->isPercentage()) {
         side = defaultSide;
-        amount = cssValuePool.createValue(Length(100 - amount->floatValue(), Percent));
+        amount = cssValuePool.createValue(Length(100 - amount->floatValue(), LengthType::Percent));
     } else if (amount->isLength() && !amount->floatValue()) {
         if (side == CSSValueRight || side == CSSValueBottom)
-            amount = cssValuePool.createValue(Length(100, Percent));
+            amount = cssValuePool.createValue(Length(100, LengthType::Percent));
         else
-            amount = cssValuePool.createValue(Length(0, Percent));
+            amount = cssValuePool.createValue(Length(0, LengthType::Percent));
         side = defaultSide;
     }
 
@@ -89,24 +86,16 @@ static Ref<CSSPrimitiveValue> buildSerializablePositionOffset(CSSPrimitiveValue*
 
 static String buildCircleString(const String& radius, const String& centerX, const String& centerY)
 {
-    char opening[] = "circle(";
-    char at[] = "at";
-    char separator[] = " ";
     StringBuilder result;
-    result.appendLiteral(opening);
+    result.append("circle(");
     if (!radius.isNull())
         result.append(radius);
-
     if (!centerX.isNull() || !centerY.isNull()) {
         if (!radius.isNull())
-            result.appendLiteral(separator);
-        result.appendLiteral(at);
-        result.appendLiteral(separator);
-        result.append(centerX);
-        result.appendLiteral(separator);
-        result.append(centerY);
+            result.append(' ');
+        result.append("at ", centerX, ' ', centerY);
     }
-    result.appendLiteral(")");
+    result.append(')');
     return result.toString();
 }
 
@@ -137,11 +126,8 @@ bool CSSBasicShapeCircle::equals(const CSSBasicShape& shape) const
 
 static String buildEllipseString(const String& radiusX, const String& radiusY, const String& centerX, const String& centerY)
 {
-    char opening[] = "ellipse(";
-    char at[] = "at";
-    char separator[] = " ";
     StringBuilder result;
-    result.appendLiteral(opening);
+    result.append("ellipse(");
     bool needsSeparator = false;
     if (!radiusX.isNull()) {
         result.append(radiusX);
@@ -149,21 +135,16 @@ static String buildEllipseString(const String& radiusX, const String& radiusY, c
     }
     if (!radiusY.isNull()) {
         if (needsSeparator)
-            result.appendLiteral(separator);
+            result.append(' ');
         result.append(radiusY);
         needsSeparator = true;
     }
-
     if (!centerX.isNull() || !centerY.isNull()) {
         if (needsSeparator)
-            result.appendLiteral(separator);
-        result.appendLiteral(at);
-        result.appendLiteral(separator);
-        result.append(centerX);
-        result.appendLiteral(separator);
-        result.append(centerY);
+            result.append(' ');
+        result.append("at ", centerX, ' ', centerY);
     }
-    result.appendLiteral(")");
+    result.append(')');
     return result.toString();
 }
 
@@ -175,16 +156,13 @@ String CSSBasicShapeEllipse::cssText() const
     String radiusX;
     String radiusY;
     if (m_radiusX) {
-        bool shouldSerializeRadiusXValue = m_radiusX->valueID() != CSSValueClosestSide;
-        bool shouldSerializeRadiusYValue = false;
-
-        if (m_radiusY) {
-            shouldSerializeRadiusYValue = m_radiusY->valueID() != CSSValueClosestSide;
-            if (shouldSerializeRadiusYValue)
-                radiusY = m_radiusY->cssText();
-        }
-        if (shouldSerializeRadiusXValue || (!shouldSerializeRadiusXValue && shouldSerializeRadiusYValue))
+        ASSERT(m_radiusY);
+        bool radiusXClosestSide = m_radiusX->valueID() == CSSValueClosestSide;
+        bool radiusYClosestSide = m_radiusY->valueID() == CSSValueClosestSide;
+        if (!radiusXClosestSide || !radiusYClosestSide) {
             radiusX = m_radiusX->cssText();
+            radiusY = m_radiusY->cssText();
+        }
     }
     return buildEllipseString(radiusX, radiusY,
         serializePositionOffset(*normalizedCX->pairValue(), *normalizedCY->pairValue()),
@@ -211,10 +189,10 @@ CSSBasicShapePath::CSSBasicShapePath(std::unique_ptr<SVGPathByteStream>&& pathDa
 static String buildPathString(const WindRule& windRule, const String& path, const String& box)
 {
     StringBuilder result;
-    if (windRule == RULE_EVENODD)
-        result.appendLiteral("path(evenodd, ");
+    if (windRule == WindRule::EvenOdd)
+        result.append("path(evenodd, ");
     else
-        result.appendLiteral("path(");
+        result.append("path(");
 
     serializeString(path, result);
     result.append(')');
@@ -252,7 +230,7 @@ static String buildPolygonString(const WindRule& windRule, const Vector<String>&
     char evenOddOpening[] = "polygon(evenodd, ";
     char nonZeroOpening[] = "polygon(";
     char commaSeparator[] = ", ";
-    COMPILE_ASSERT(sizeof(evenOddOpening) >= sizeof(nonZeroOpening), polygon_evenodd_is_longest_string_opening);
+    static_assert(sizeof(evenOddOpening) >= sizeof(nonZeroOpening), "polygon evenodd is longest string opening");
 
     // Compute the required capacity in advance to reduce allocations.
     size_t length = sizeof(evenOddOpening) - 1;
@@ -265,17 +243,15 @@ static String buildPolygonString(const WindRule& windRule, const Vector<String>&
 
     result.reserveCapacity(length);
 
-    if (windRule == RULE_EVENODD)
-        result.appendLiteral(evenOddOpening);
+    if (windRule == WindRule::EvenOdd)
+        result.append(evenOddOpening);
     else
-        result.appendLiteral(nonZeroOpening);
+        result.append(nonZeroOpening);
 
     for (size_t i = 0; i < points.size(); i += 2) {
         if (i)
-            result.appendLiteral(commaSeparator);
-        result.append(points[i]);
-        result.append(' ');
-        result.append(points[i + 1]);
+            result.append(commaSeparator);
+        result.append(points[i], ' ', points[i + 1]);
     }
 
     result.append(')');
@@ -285,13 +261,10 @@ static String buildPolygonString(const WindRule& windRule, const Vector<String>&
 
 String CSSBasicShapePolygon::cssText() const
 {
-    Vector<String> points;
-    points.reserveInitialCapacity(m_values.size());
-
-    for (auto& shapeValue : m_values)
-        points.uncheckedAppend(shapeValue->cssText());
-
-    return buildPolygonString(m_windRule, points);
+    auto points = m_values.map([](auto& shapeValue) {
+        return shapeValue->cssText();
+    });
+    return buildPolygonString(m_windRule, WTFMove(points));
 }
 
 bool CSSBasicShapePolygon::equals(const CSSBasicShape& shape) const
@@ -316,7 +289,7 @@ static bool buildInsetRadii(Vector<String>& radii, const String& topLeftRadius, 
     if (showBottomLeft)
         radii.append(bottomLeftRadius);
 
-    return radii.size() == 1 && radii[0] == "0px";
+    return radii.size() == 1 && radii[0] == "0px"_s;
 }
 
 static String buildInsetString(const String& top, const String& right, const String& bottom, const String& left,
@@ -325,28 +298,18 @@ static String buildInsetString(const String& top, const String& right, const Str
     const String& bottomRightRadiusWidth, const String& bottomRightRadiusHeight,
     const String& bottomLeftRadiusWidth, const String& bottomLeftRadiusHeight)
 {
-    char opening[] = "inset(";
-    char separator[] = " ";
-    char cornersSeparator[] = "round";
     StringBuilder result;
-    result.appendLiteral(opening);
-    result.append(top);
+    result.append("inset(", top);
 
     bool showLeftArg = !left.isNull() && left != right;
     bool showBottomArg = !bottom.isNull() && (bottom != top || showLeftArg);
     bool showRightArg = !right.isNull() && (right != top || showBottomArg);
-    if (showRightArg) {
-        result.appendLiteral(separator);
-        result.append(right);
-    }
-    if (showBottomArg) {
-        result.appendLiteral(separator);
-        result.append(bottom);
-    }
-    if (showLeftArg) {
-        result.appendLiteral(separator);
-        result.append(left);
-    }
+    if (showRightArg)
+        result.append(' ', right);
+    if (showBottomArg)
+        result.append(' ', bottom);
+    if (showLeftArg)
+        result.append(' ', left);
 
     if (!topLeftRadiusWidth.isNull() && !topLeftRadiusHeight.isNull()) {
         Vector<String> horizontalRadii;
@@ -356,23 +319,16 @@ static String buildInsetString(const String& top, const String& right, const Str
         areDefaultCornerRadii &= buildInsetRadii(verticalRadii, topLeftRadiusHeight, topRightRadiusHeight, bottomRightRadiusHeight, bottomLeftRadiusHeight);
 
         if (!areDefaultCornerRadii) {
-            result.appendLiteral(separator);
-            result.appendLiteral(cornersSeparator);
+            result.append(" round");
 
-            for (size_t i = 0; i < horizontalRadii.size(); ++i) {
-                result.appendLiteral(separator);
-                result.append(horizontalRadii[i]);
-            }
+            for (auto& radius : horizontalRadii)
+                result.append(' ', radius);
 
             if (verticalRadii.size() != horizontalRadii.size()
-                || !VectorComparer<false, String>::compare(verticalRadii.data(), horizontalRadii.data(), verticalRadii.size())) {
-                result.appendLiteral(separator);
-                result.appendLiteral("/");
-
-                for (size_t i = 0; i < verticalRadii.size(); ++i) {
-                    result.appendLiteral(separator);
-                    result.append(verticalRadii[i]);
-                }
+                || !WTF::VectorComparer<false, String>::compare(verticalRadii.data(), horizontalRadii.data(), verticalRadii.size())) {
+                result.append(" /");
+                for (auto& radius : verticalRadii)
+                    result.append(' ', radius);
             }
         }
     }
@@ -386,7 +342,7 @@ static inline void updateCornerRadiusWidthAndHeight(CSSPrimitiveValue* corner, S
         return;
 
     Pair* radius = corner->pairValue();
-    width = radius->first() ? radius->first()->cssText() : String("0");
+    width = radius->first() ? radius->first()->cssText() : "0"_str;
     if (radius->second())
         height = radius->second()->cssText();
 }
@@ -438,4 +394,3 @@ bool CSSBasicShapeInset::equals(const CSSBasicShape& shape) const
 }
 
 } // namespace WebCore
-

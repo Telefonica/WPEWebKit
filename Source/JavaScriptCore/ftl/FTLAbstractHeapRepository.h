@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,33 +32,65 @@
 #include "FTLAbstractHeap.h"
 #include "HasOwnPropertyCache.h"
 #include "IndexingType.h"
-#include "JSFixedArray.h"
+#include "JSGlobalObject.h"
 #include "JSMap.h"
 #include "JSSet.h"
+#include "JSWeakMap.h"
 #include "Symbol.h"
 
 namespace JSC { namespace FTL {
 
 #define FOR_EACH_ABSTRACT_HEAP(macro) \
-    macro(typedArrayProperties)
+    macro(typedArrayProperties) \
+    macro(JSCellHeaderAndNamedProperties) \
 
 #define FOR_EACH_ABSTRACT_FIELD(macro) \
     macro(ArrayBuffer_data, ArrayBuffer::offsetOfData()) \
+    macro(ArrayStorage_numValuesInVector, ArrayStorage::numValuesInVectorOffset()) \
     macro(Butterfly_arrayBuffer, Butterfly::offsetOfArrayBuffer()) \
     macro(Butterfly_publicLength, Butterfly::offsetOfPublicLength()) \
     macro(Butterfly_vectorLength, Butterfly::offsetOfVectorLength()) \
     macro(CallFrame_callerFrame, CallFrame::callerFrameOffset()) \
     macro(ClassInfo_parentClass, ClassInfo::offsetOfParentClass()) \
+    macro(DateInstance_internalNumber, DateInstance::offsetOfInternalNumber()) \
+    macro(DateInstance_data, DateInstance::offsetOfData()) \
+    macro(DateInstanceData_gregorianDateTimeCachedForMS, DateInstanceData::offsetOfGregorianDateTimeCachedForMS()) \
+    macro(DateInstanceData_gregorianDateTimeUTCCachedForMS, DateInstanceData::offsetOfGregorianDateTimeUTCCachedForMS()) \
+    macro(DateInstanceData_cachedGregorianDateTime_year, DateInstanceData::offsetOfCachedGregorianDateTime() + GregorianDateTime::offsetOfYear()) \
+    macro(DateInstanceData_cachedGregorianDateTimeUTC_year, DateInstanceData::offsetOfCachedGregorianDateTimeUTC() + GregorianDateTime::offsetOfYear()) \
+    macro(DateInstanceData_cachedGregorianDateTime_month, DateInstanceData::offsetOfCachedGregorianDateTime() + GregorianDateTime::offsetOfMonth()) \
+    macro(DateInstanceData_cachedGregorianDateTimeUTC_month, DateInstanceData::offsetOfCachedGregorianDateTimeUTC() + GregorianDateTime::offsetOfMonth()) \
+    macro(DateInstanceData_cachedGregorianDateTime_monthDay, DateInstanceData::offsetOfCachedGregorianDateTime() + GregorianDateTime::offsetOfMonthDay()) \
+    macro(DateInstanceData_cachedGregorianDateTimeUTC_monthDay, DateInstanceData::offsetOfCachedGregorianDateTimeUTC() + GregorianDateTime::offsetOfMonthDay()) \
+    macro(DateInstanceData_cachedGregorianDateTime_weekDay, DateInstanceData::offsetOfCachedGregorianDateTime() + GregorianDateTime::offsetOfWeekDay()) \
+    macro(DateInstanceData_cachedGregorianDateTimeUTC_weekDay, DateInstanceData::offsetOfCachedGregorianDateTimeUTC() + GregorianDateTime::offsetOfWeekDay()) \
+    macro(DateInstanceData_cachedGregorianDateTime_hour, DateInstanceData::offsetOfCachedGregorianDateTime() + GregorianDateTime::offsetOfHour()) \
+    macro(DateInstanceData_cachedGregorianDateTimeUTC_hour, DateInstanceData::offsetOfCachedGregorianDateTimeUTC() + GregorianDateTime::offsetOfHour()) \
+    macro(DateInstanceData_cachedGregorianDateTime_minute, DateInstanceData::offsetOfCachedGregorianDateTime() + GregorianDateTime::offsetOfMinute()) \
+    macro(DateInstanceData_cachedGregorianDateTimeUTC_minute, DateInstanceData::offsetOfCachedGregorianDateTimeUTC() + GregorianDateTime::offsetOfMinute()) \
+    macro(DateInstanceData_cachedGregorianDateTime_second, DateInstanceData::offsetOfCachedGregorianDateTime() + GregorianDateTime::offsetOfSecond()) \
+    macro(DateInstanceData_cachedGregorianDateTimeUTC_second, DateInstanceData::offsetOfCachedGregorianDateTimeUTC() + GregorianDateTime::offsetOfSecond()) \
+    macro(DateInstanceData_cachedGregorianDateTime_utcOffsetInMinute, DateInstanceData::offsetOfCachedGregorianDateTime() + GregorianDateTime::offsetOfUTCOffsetInMinute()) \
+    macro(DateInstanceData_cachedGregorianDateTimeUTC_utcOffsetInMinute, DateInstanceData::offsetOfCachedGregorianDateTimeUTC() + GregorianDateTime::offsetOfUTCOffsetInMinute()) \
     macro(DirectArguments_callee, DirectArguments::offsetOfCallee()) \
     macro(DirectArguments_length, DirectArguments::offsetOfLength()) \
     macro(DirectArguments_minCapacity, DirectArguments::offsetOfMinCapacity()) \
     macro(DirectArguments_mappedArguments, DirectArguments::offsetOfMappedArguments()) \
     macro(DirectArguments_modifiedArgumentsDescriptor, DirectArguments::offsetOfModifiedArgumentsDescriptor()) \
+    macro(FunctionExecutable_rareData, FunctionExecutable::offsetOfRareData()) \
+    macro(FunctionExecutableRareData_asString, FunctionExecutable::RareData::offsetOfAsString()) \
+    macro(FunctionRareData_allocator, FunctionRareData::offsetOfObjectAllocationProfile() + ObjectAllocationProfileWithPrototype::offsetOfAllocator()) \
+    macro(FunctionRareData_structure, FunctionRareData::offsetOfObjectAllocationProfile() + ObjectAllocationProfileWithPrototype::offsetOfStructure()) \
+    macro(FunctionRareData_prototype, FunctionRareData::offsetOfObjectAllocationProfile() + ObjectAllocationProfileWithPrototype::offsetOfPrototype()) \
+    macro(FunctionRareData_allocationProfileWatchpointSet, FunctionRareData::offsetOfAllocationProfileWatchpointSet()) \
+    macro(FunctionRareData_executable, FunctionRareData::offsetOfExecutable()) \
+    macro(FunctionRareData_internalFunctionAllocationProfile_structureID, FunctionRareData::offsetOfInternalFunctionAllocationProfile() + InternalFunctionAllocationProfile::offsetOfStructureID()) \
     macro(GetterSetter_getter, GetterSetter::offsetOfGetter()) \
     macro(GetterSetter_setter, GetterSetter::offsetOfSetter()) \
     macro(JSArrayBufferView_length, JSArrayBufferView::offsetOfLength()) \
     macro(JSArrayBufferView_mode, JSArrayBufferView::offsetOfMode()) \
     macro(JSArrayBufferView_vector, JSArrayBufferView::offsetOfVector()) \
+    macro(JSBigInt_length, JSBigInt::offsetOfLength()) \
     macro(JSCell_cellState, JSCell::cellStateOffset()) \
     macro(JSCell_header, 0) \
     macro(JSCell_indexingTypeAndMisc, JSCell::indexingTypeAndMiscOffset()) \
@@ -66,9 +98,13 @@ namespace JSC { namespace FTL {
     macro(JSCell_typeInfoFlags, JSCell::typeInfoFlagsOffset()) \
     macro(JSCell_typeInfoType, JSCell::typeInfoTypeOffset()) \
     macro(JSCell_usefulBytes, JSCell::indexingTypeAndMiscOffset()) \
-    macro(JSFunction_executable, JSFunction::offsetOfExecutable()) \
+    macro(JSFunction_executableOrRareData, JSFunction::offsetOfExecutableOrRareData()) \
     macro(JSFunction_scope, JSFunction::offsetOfScopeChain()) \
-    macro(JSFunction_rareData, JSFunction::offsetOfRareData()) \
+    macro(JSGlobalObject_regExpGlobalData_cachedResult_lastRegExp, JSGlobalObject::regExpGlobalDataOffset() + RegExpGlobalData::offsetOfCachedResult() + RegExpCachedResult::offsetOfLastRegExp()) \
+    macro(JSGlobalObject_regExpGlobalData_cachedResult_lastInput, JSGlobalObject::regExpGlobalDataOffset() + RegExpGlobalData::offsetOfCachedResult() + RegExpCachedResult::offsetOfLastInput()) \
+    macro(JSGlobalObject_regExpGlobalData_cachedResult_result_start, JSGlobalObject::regExpGlobalDataOffset() + RegExpGlobalData::offsetOfCachedResult() + RegExpCachedResult::offsetOfResult() + OBJECT_OFFSETOF(MatchResult, start)) \
+    macro(JSGlobalObject_regExpGlobalData_cachedResult_result_end, JSGlobalObject::regExpGlobalDataOffset() + RegExpGlobalData::offsetOfCachedResult() + RegExpCachedResult::offsetOfResult() + OBJECT_OFFSETOF(MatchResult, end)) \
+    macro(JSGlobalObject_regExpGlobalData_cachedResult_reified, JSGlobalObject::regExpGlobalDataOffset() + RegExpGlobalData::offsetOfCachedResult() + RegExpCachedResult::offsetOfReified()) \
     macro(JSObject_butterfly, JSObject::butterflyOffset()) \
     macro(JSPropertyNameEnumerator_cachedInlineCapacity, JSPropertyNameEnumerator::cachedInlineCapacityOffset()) \
     macro(JSPropertyNameEnumerator_cachedPropertyNamesVector, JSPropertyNameEnumerator::cachedPropertyNamesVectorOffset()) \
@@ -76,19 +112,17 @@ namespace JSC { namespace FTL {
     macro(JSPropertyNameEnumerator_endGenericPropertyIndex, JSPropertyNameEnumerator::endGenericPropertyIndexOffset()) \
     macro(JSPropertyNameEnumerator_endStructurePropertyIndex, JSPropertyNameEnumerator::endStructurePropertyIndexOffset()) \
     macro(JSPropertyNameEnumerator_indexLength, JSPropertyNameEnumerator::indexedLengthOffset()) \
+    macro(JSPropertyNameEnumerator_flags, JSPropertyNameEnumerator::flagsOffset()) \
+    macro(JSRopeString_flags, JSRopeString::offsetOfFlags()) \
+    macro(JSRopeString_length, JSRopeString::offsetOfLength()) \
+    macro(JSRopeString_fiber0, JSRopeString::offsetOfFiber0()) \
+    macro(JSRopeString_fiber1, JSRopeString::offsetOfFiber1()) \
+    macro(JSRopeString_fiber2, JSRopeString::offsetOfFiber2()) \
     macro(JSScope_next, JSScope::offsetOfNext()) \
-    macro(JSString_flags, JSString::offsetOfFlags()) \
-    macro(JSString_length, JSString::offsetOfLength()) \
-    macro(JSString_value, JSString::offsetOfValue()) \
     macro(JSSymbolTableObject_symbolTable, JSSymbolTableObject::offsetOfSymbolTable()) \
-    macro(JSWrapperObject_internalValue, JSWrapperObject::internalValueOffset()) \
-    macro(RegExpConstructor_cachedResult_lastRegExp, RegExpConstructor::offsetOfCachedResult() + RegExpCachedResult::offsetOfLastRegExp()) \
-    macro(RegExpConstructor_cachedResult_lastInput, RegExpConstructor::offsetOfCachedResult() + RegExpCachedResult::offsetOfLastInput()) \
-    macro(RegExpConstructor_cachedResult_result_start, RegExpConstructor::offsetOfCachedResult() + RegExpCachedResult::offsetOfResult() + OBJECT_OFFSETOF(MatchResult, start)) \
-    macro(RegExpConstructor_cachedResult_result_end, RegExpConstructor::offsetOfCachedResult() + RegExpCachedResult::offsetOfResult() + OBJECT_OFFSETOF(MatchResult, end)) \
-    macro(RegExpConstructor_cachedResult_reified, RegExpConstructor::offsetOfCachedResult() + RegExpCachedResult::offsetOfReified()) \
+    macro(NativeExecutable_asString, NativeExecutable::offsetOfAsString()) \
+    macro(RegExpObject_regExpAndFlags, RegExpObject::offsetOfRegExpAndFlags()) \
     macro(RegExpObject_lastIndex, RegExpObject::offsetOfLastIndex()) \
-    macro(RegExpObject_lastIndexIsWritable, RegExpObject::offsetOfLastIndexIsWritable()) \
     macro(ShadowChicken_Packet_callee, OBJECT_OFFSETOF(ShadowChicken::Packet, callee)) \
     macro(ShadowChicken_Packet_frame, OBJECT_OFFSETOF(ShadowChicken::Packet, frame)) \
     macro(ShadowChicken_Packet_callerFrame, OBJECT_OFFSETOF(ShadowChicken::Packet, callerFrame)) \
@@ -98,6 +132,7 @@ namespace JSC { namespace FTL {
     macro(ShadowChicken_Packet_callSiteIndex, OBJECT_OFFSETOF(ShadowChicken::Packet, callSiteIndex)) \
     macro(ScopedArguments_overrodeThings, ScopedArguments::offsetOfOverrodeThings()) \
     macro(ScopedArguments_scope, ScopedArguments::offsetOfScope()) \
+    macro(ScopedArguments_storage, ScopedArguments::offsetOfStorage()) \
     macro(ScopedArguments_table, ScopedArguments::offsetOfTable()) \
     macro(ScopedArguments_totalLength, ScopedArguments::offsetOfTotalLength()) \
     macro(ScopedArgumentsTable_arguments, ScopedArgumentsTable::offsetOfArguments()) \
@@ -107,28 +142,34 @@ namespace JSC { namespace FTL {
     macro(StringImpl_length, StringImpl::lengthMemoryOffset()) \
     macro(Structure_classInfo, Structure::classInfoOffset()) \
     macro(Structure_globalObject, Structure::globalObjectOffset()) \
-    macro(Structure_prototype, Structure::prototypeOffset()) \
-    macro(Structure_structureID, Structure::structureIDOffset()) \
+    macro(Structure_indexingModeIncludingHistory, Structure::indexingModeIncludingHistoryOffset()) \
     macro(Structure_inlineCapacity, Structure::inlineCapacityOffset()) \
-    macro(Structure_indexingTypeIncludingHistory, Structure::indexingTypeIncludingHistoryOffset()) \
+    macro(Structure_outOfLineTypeFlags, Structure::outOfLineTypeFlagsOffset()) \
+    macro(Structure_previousOrRareData, Structure::previousOrRareDataOffset()) \
+    macro(Structure_prototype, Structure::prototypeOffset()) \
+    macro(StructureRareData_cachedKeys, StructureRareData::offsetOfCachedPropertyNames(CachedPropertyNamesKind::Keys)) \
+    macro(StructureRareData_cachedGetOwnPropertyNames, StructureRareData::offsetOfCachedPropertyNames(CachedPropertyNamesKind::GetOwnPropertyNames)) \
+    macro(StructureRareData_cachedPropertyNameEnumeratorAndFlag, StructureRareData::offsetOfCachedPropertyNameEnumeratorAndFlag()) \
     macro(HashMapImpl_capacity, HashMapImpl<HashMapBucket<HashMapBucketDataKey>>::offsetOfCapacity()) \
     macro(HashMapImpl_buffer,  HashMapImpl<HashMapBucket<HashMapBucketDataKey>>::offsetOfBuffer()) \
     macro(HashMapImpl_head,  HashMapImpl<HashMapBucket<HashMapBucketDataKey>>::offsetOfHead()) \
     macro(HashMapBucket_value, HashMapBucket<HashMapBucketDataKeyValue>::offsetOfValue()) \
     macro(HashMapBucket_key, HashMapBucket<HashMapBucketDataKeyValue>::offsetOfKey()) \
     macro(HashMapBucket_next, HashMapBucket<HashMapBucketDataKeyValue>::offsetOfNext()) \
-    macro(HashMapBucket_deleted, HashMapBucket<HashMapBucketDataKeyValue>::offsetOfDeleted()) \
+    macro(WeakMapImpl_capacity, WeakMapImpl<WeakMapBucket<WeakMapBucketDataKey>>::offsetOfCapacity()) \
+    macro(WeakMapImpl_buffer,  WeakMapImpl<WeakMapBucket<WeakMapBucketDataKey>>::offsetOfBuffer()) \
+    macro(WeakMapBucket_value, WeakMapBucket<WeakMapBucketDataKeyValue>::offsetOfValue()) \
+    macro(WeakMapBucket_key, WeakMapBucket<WeakMapBucketDataKeyValue>::offsetOfKey()) \
     macro(Symbol_symbolImpl, Symbol::offsetOfSymbolImpl()) \
-    macro(JSFixedArray_size, JSFixedArray::offsetOfSize()) \
 
 #define FOR_EACH_INDEXED_ABSTRACT_HEAP(macro) \
     macro(ArrayStorage_vector, ArrayStorage::vectorOffset(), sizeof(WriteBarrier<Unknown>)) \
+    macro(CompleteSubspace_allocatorForSizeStep, CompleteSubspace::offsetOfAllocatorForSizeStep(), sizeof(Allocator)) \
     macro(DirectArguments_storage, DirectArguments::storageOffset(), sizeof(EncodedJSValue)) \
     macro(JSLexicalEnvironment_variables, JSLexicalEnvironment::offsetOfVariables(), sizeof(EncodedJSValue)) \
     macro(JSPropertyNameEnumerator_cachedPropertyNamesVectorContents, 0, sizeof(WriteBarrier<JSString>)) \
-    macro(JSRopeString_fibers, JSRopeString::offsetOfFibers(), sizeof(WriteBarrier<JSString>)) \
-    macro(ScopedArguments_overflowStorage, ScopedArguments::overflowStorageOffset(), sizeof(EncodedJSValue)) \
-    macro(Subspace_allocatorForSizeStep, Subspace::offsetOfAllocatorForSizeStep(), sizeof(MarkedAllocator*)) \
+    macro(JSInternalFieldObjectImpl_internalFields, JSInternalFieldObjectImpl<>::offsetOfInternalFields(), sizeof(WriteBarrier<Unknown>)) \
+    macro(ScopedArguments_Storage_storage, 0, sizeof(EncodedJSValue)) \
     macro(WriteBarrierBuffer_bufferContents, 0, sizeof(JSCell*)) \
     macro(characters8, 0, sizeof(LChar)) \
     macro(characters16, 0, sizeof(UChar)) \
@@ -140,7 +181,6 @@ namespace JSC { namespace FTL {
     macro(structureTable, 0, sizeof(Structure*)) \
     macro(variables, 0, sizeof(Register)) \
     macro(HasOwnPropertyCache, 0, sizeof(HasOwnPropertyCache::Entry)) \
-    macro(JSFixedArray_buffer, JSFixedArray::offsetOfData(), sizeof(EncodedJSValue)) \
     
 #define FOR_EACH_NUMBERED_ABSTRACT_HEAP(macro) \
     macro(properties)
@@ -165,6 +205,8 @@ public:
 #undef ABSTRACT_FIELD_DECLARATION
     
     AbstractHeap& JSCell_freeListNext;
+    AbstractHeap& ArrayStorage_publicLength;
+    AbstractHeap& ArrayStorage_vectorLength;
     
 #define INDEXED_ABSTRACT_HEAP_DECLARATION(name, offset, size) IndexedAbstractHeap name;
     FOR_EACH_INDEXED_ABSTRACT_HEAP(INDEXED_ABSTRACT_HEAP_DECLARATION)
@@ -174,6 +216,9 @@ public:
     FOR_EACH_NUMBERED_ABSTRACT_HEAP(NUMBERED_ABSTRACT_HEAP_DECLARATION)
 #undef NUMBERED_ABSTRACT_HEAP_DECLARATION
 
+    AbstractHeap& JSString_value;
+    AbstractHeap& JSWrapperObject_internalValue;
+
     AbsoluteAbstractHeap absolute;
     
     IndexedAbstractHeap* forIndexingType(IndexingType indexingType)
@@ -181,7 +226,7 @@ public:
         switch (indexingType) {
         case ALL_BLANK_INDEXING_TYPES:
         case ALL_UNDECIDED_INDEXING_TYPES:
-            return 0;
+            return nullptr;
             
         case ALL_INT32_INDEXING_TYPES:
             return &indexedInt32Properties;
@@ -197,7 +242,7 @@ public:
             
         default:
             RELEASE_ASSERT_NOT_REACHED();
-            return 0;
+            return nullptr;
         }
     }
     

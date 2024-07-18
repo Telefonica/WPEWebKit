@@ -30,13 +30,13 @@
 #import "DOMMediaListInternal.h"
 #import "DOMNodeInternal.h"
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/MediaList.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL reinterpret_cast<WebCore::MediaList*>(_internal)
 
@@ -61,7 +61,7 @@
 - (void)setMediaText:(NSString *)newMediaText
 {
     WebCore::JSMainThreadNullState state;
-    raiseOnDOMError(IMPL->setMediaText(newMediaText));
+    IMPL->setMediaText(newMediaText);
 }
 
 - (unsigned)length
@@ -85,7 +85,7 @@
 - (void)appendMedium:(NSString *)newMedium
 {
     WebCore::JSMainThreadNullState state;
-    raiseOnDOMError(IMPL->appendMedium(newMedium));
+    IMPL->appendMedium(newMedium);
 }
 
 @end
@@ -96,10 +96,12 @@ DOMMediaList *kit(WebCore::MediaList* value)
     if (!value)
         return nil;
     if (DOMMediaList *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMMediaList *wrapper = [[DOMMediaList alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    auto wrapper = adoptNS([[DOMMediaList alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
+
+#undef IMPL

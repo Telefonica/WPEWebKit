@@ -26,10 +26,12 @@
 #pragma once
 
 #include "SecurityOriginHash.h"
-#include <wtf/Forward.h>
 #include <wtf/HashMap.h>
-#include <wtf/HashSet.h>
 #include <wtf/RefCounted.h>
+
+namespace PAL {
+class SessionID;
+}
 
 namespace WebCore {
 
@@ -44,28 +46,25 @@ public:
     WEBCORE_EXPORT StorageNamespaceProvider();
     WEBCORE_EXPORT virtual ~StorageNamespaceProvider();
 
-    virtual RefPtr<StorageNamespace> createSessionStorageNamespace(Page&, unsigned quota) = 0;
-    virtual RefPtr<StorageNamespace> createEphemeralLocalStorageNamespace(Page&, unsigned quota) = 0;
+    virtual Ref<StorageNamespace> createSessionStorageNamespace(Page&, unsigned quota) = 0;
 
-    RefPtr<StorageArea> localStorageArea(Document&);
+    Ref<StorageArea> localStorageArea(Document&);
 
-    void addPage(Page&);
-    void removePage(Page&);
+    WEBCORE_EXPORT void setSessionIDForTesting(PAL::SessionID);
 
 protected:
     StorageNamespace* optionalLocalStorageNamespace() { return m_localStorageNamespace.get(); }
 
 private:
-    StorageNamespace& localStorageNamespace(unsigned);
-    StorageNamespace& transientLocalStorageNamespace(SecurityOrigin&, unsigned);
+    friend class Internals;
+    WEBCORE_EXPORT StorageNamespace& localStorageNamespace(unsigned quota, PAL::SessionID);
+    StorageNamespace& transientLocalStorageNamespace(SecurityOrigin&, unsigned quota, PAL::SessionID);
 
-    virtual RefPtr<StorageNamespace> createLocalStorageNamespace(unsigned quota) = 0;
-    virtual RefPtr<StorageNamespace> createTransientLocalStorageNamespace(SecurityOrigin&, unsigned quota) = 0;
-
-    HashSet<Page*> m_pages;
+    virtual Ref<StorageNamespace> createLocalStorageNamespace(unsigned quota, PAL::SessionID) = 0;
+    virtual Ref<StorageNamespace> createTransientLocalStorageNamespace(SecurityOrigin&, unsigned quota, PAL::SessionID) = 0;
 
     RefPtr<StorageNamespace> m_localStorageNamespace;
-    HashMap<RefPtr<SecurityOrigin>, RefPtr<StorageNamespace>> m_transientLocalStorageMap;
+    HashMap<SecurityOriginData, RefPtr<StorageNamespace>> m_transientLocalStorageNamespaces;
 };
 
 } // namespace WebCore

@@ -31,10 +31,15 @@
 #include "config.h"
 
 #include "RenderRubyBase.h"
+
+#include "RenderChildIterator.h"
 #include "RenderRubyRun.h"
 #include "RenderRubyText.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderRubyBase);
 
 RenderRubyBase::RenderRubyBase(Document& document, RenderStyle&& style)
     : RenderBlockFlow(document, WTFMove(style))
@@ -44,90 +49,11 @@ RenderRubyBase::RenderRubyBase(Document& document, RenderStyle&& style)
     setInline(false);
 }
 
-RenderRubyBase::~RenderRubyBase()
-{
-}
+RenderRubyBase::~RenderRubyBase() = default;
 
 bool RenderRubyBase::isChildAllowed(const RenderObject& child, const RenderStyle&) const
 {
     return child.isInline();
-}
-
-void RenderRubyBase::moveChildren(RenderRubyBase* toBase, RenderObject* beforeChild)
-{
-    // This function removes all children that are before (!) beforeChild
-    // and appends them to toBase.
-    ASSERT_ARG(toBase, toBase);
-
-    if (beforeChild && beforeChild->parent() != this)
-        beforeChild = splitAnonymousBoxesAroundChild(beforeChild);
-
-    if (childrenInline())
-        moveInlineChildren(toBase, beforeChild);
-    else
-        moveBlockChildren(toBase, beforeChild);
-
-    setNeedsLayoutAndPrefWidthsRecalc();
-    toBase->setNeedsLayoutAndPrefWidthsRecalc();
-}
-
-void RenderRubyBase::mergeChildrenWithBase(RenderRubyBase& toBlock)
-{
-    moveChildren(&toBlock);
-    addFloatsToNewParent(toBlock);
-}
-
-void RenderRubyBase::moveInlineChildren(RenderRubyBase* toBase, RenderObject* beforeChild)
-{
-    ASSERT(childrenInline());
-    ASSERT_ARG(toBase, toBase);
-
-    if (!firstChild())
-        return;
-
-    RenderBlock* toBlock;
-    if (toBase->childrenInline()) {
-        // The standard and easy case: move the children into the target base
-        toBlock = toBase;
-    } else {
-        // We need to wrap the inline objects into an anonymous block.
-        // If toBase has a suitable block, we re-use it, otherwise create a new one.
-        RenderObject* lastChild = toBase->lastChild();
-        if (lastChild && lastChild->isAnonymousBlock() && lastChild->childrenInline())
-            toBlock = downcast<RenderBlock>(lastChild);
-        else {
-            toBlock = toBase->createAnonymousBlock();
-            toBase->insertChildInternal(toBlock, nullptr, NotifyChildren);
-        }
-    }
-    // Move our inline children into the target block we determined above.
-    moveChildrenTo(toBlock, firstChild(), beforeChild);
-}
-
-void RenderRubyBase::moveBlockChildren(RenderRubyBase* toBase, RenderObject* beforeChild)
-{
-    ASSERT(!childrenInline());
-    ASSERT_ARG(toBase, toBase);
-
-    if (!firstChild())
-        return;
-
-    if (toBase->childrenInline())
-        toBase->makeChildrenNonInline();
-
-    // If an anonymous block would be put next to another such block, then merge those.
-    RenderObject* firstChildHere = firstChild();
-    RenderObject* lastChildThere = toBase->lastChild();
-    if (firstChildHere->isAnonymousBlock() && firstChildHere->childrenInline() 
-            && lastChildThere && lastChildThere->isAnonymousBlock() && lastChildThere->childrenInline()) {            
-        RenderBlock* anonBlockHere = downcast<RenderBlock>(firstChildHere);
-        RenderBlock* anonBlockThere = downcast<RenderBlock>(lastChildThere);
-        anonBlockHere->moveAllChildrenTo(anonBlockThere, true);
-        anonBlockHere->deleteLines();
-        anonBlockHere->destroy();
-    }
-    // Move all remaining children normally.
-    moveChildrenTo(toBase, firstChild(), beforeChild);
 }
 
 RenderRubyRun* RenderRubyBase::rubyRun() const
@@ -136,20 +62,20 @@ RenderRubyRun* RenderRubyBase::rubyRun() const
     return downcast<RenderRubyRun>(parent());
 }
 
-ETextAlign RenderRubyBase::textAlignmentForLine(bool /* endsWithSoftBreak */) const
+std::optional<TextAlignMode> RenderRubyBase::overrideTextAlignmentForLine(bool /* endsWithSoftBreak */) const
 {
-    return JUSTIFY;
+    return TextAlignMode::Justify;
 }
 
 void RenderRubyBase::adjustInlineDirectionLineBounds(int expansionOpportunityCount, float& logicalLeft, float& logicalWidth) const
 {
-    if (rubyRun()->hasOverrideLogicalContentWidth() && firstRootBox() && !firstRootBox()->nextRootBox()) {
+    if (rubyRun()->hasOverridingLogicalWidth() && firstRootBox() && !firstRootBox()->nextRootBox()) {
         logicalLeft += m_initialOffset;
         logicalWidth -= 2 * m_initialOffset;
         return;
     }
 
-    LayoutUnit maxPreferredLogicalWidth = rubyRun() && rubyRun()->hasOverrideLogicalContentWidth() ? rubyRun()->overrideLogicalContentWidth() : this->maxPreferredLogicalWidth();
+    LayoutUnit maxPreferredLogicalWidth = rubyRun() && rubyRun()->hasOverridingLogicalWidth() ? rubyRun()->overridingLogicalWidth() : this->maxPreferredLogicalWidth();
     if (maxPreferredLogicalWidth >= logicalWidth)
         return;
 
@@ -165,6 +91,22 @@ void RenderRubyBase::cachePriorCharactersIfNeeded(const LazyLineBreakIterator& l
     auto* run = rubyRun();
     if (run)
         run->setCachedPriorCharacters(lineBreakIterator.lastCharacter(), lineBreakIterator.secondToLastCharacter());
+}
+
+bool RenderRubyBase::isEmptyOrHasInFlowContent() const
+{
+    auto* firstChild = this->firstChild();
+    if (!firstChild || !is<RenderElement>(*firstChild))
+        return true;
+
+    if (firstChild->isOutOfFlowPositioned())
+        return false;
+
+    for (auto& child : childrenOfType<RenderObject>(*downcast<RenderElement>(firstChild))) {
+        if (!child.isOutOfFlowPositioned())
+            return true;
+    }
+    return false;
 }
 
 } // namespace WebCore

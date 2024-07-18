@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,13 +23,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WTF_AutomaticThread_h
-#define WTF_AutomaticThread_h
+#pragma once
 
 #include <wtf/Box.h>
 #include <wtf/Condition.h>
 #include <wtf/Lock.h>
 #include <wtf/ThreadSafeRefCounted.h>
+#include <wtf/Threading.h>
 #include <wtf/Vector.h>
 
 namespace WTF {
@@ -38,7 +38,7 @@ namespace WTF {
 //
 //     for (;;) {
 //         {
-//             LockHolder locker(m_lock);
+//             Locker locker { m_lock };
 //             for (;;) {
 //  [1]            stuff that could break, return, or fall through;
 //                 m_condition.wait(m_lock);
@@ -69,7 +69,7 @@ class AutomaticThread;
 
 class AutomaticThreadCondition : public ThreadSafeRefCounted<AutomaticThreadCondition> {
 public:
-    static WTF_EXPORT_PRIVATE RefPtr<AutomaticThreadCondition> create();
+    static WTF_EXPORT_PRIVATE Ref<AutomaticThreadCondition> create();
     
     WTF_EXPORT_PRIVATE ~AutomaticThreadCondition();
     
@@ -81,8 +81,8 @@ public:
     // One known-good case for one-true-condition is when the communication involves just two
     // threads. In such cases, the thread doing the notifyAll() can wake up at most one thread -
     // its partner.
-    WTF_EXPORT_PRIVATE void wait(Lock&);
-    WTF_EXPORT_PRIVATE bool waitFor(Lock&, Seconds);
+    WTF_EXPORT_PRIVATE void wait(Lock& lock) WTF_REQUIRES_LOCK(lock);
+    WTF_EXPORT_PRIVATE bool waitFor(Lock& lock, Seconds) WTF_REQUIRES_LOCK(lock);
     
 private:
     friend class AutomaticThread;
@@ -131,7 +131,9 @@ public:
 protected:
     // This logically creates the thread, but in reality the thread won't be created until someone
     // calls AutomaticThreadCondition::notifyOne() or notifyAll().
-    AutomaticThread(const AbstractLocker&, Box<Lock>, RefPtr<AutomaticThreadCondition>, Seconds timeout = 10_s);
+    AutomaticThread(const AbstractLocker&, Box<Lock>, Ref<AutomaticThreadCondition>&&, Seconds timeout = 10_s);
+
+    AutomaticThread(const AbstractLocker&, Box<Lock>, Ref<AutomaticThreadCondition>&&, ThreadType, Seconds timeout = 10_s);
     
     // To understand PollResult and WorkResult, imagine that poll() and work() are being called like
     // so:
@@ -140,7 +142,7 @@ protected:
     // {
     //     for (;;) {
     //         {
-    //             LockHolder locker(m_lock);
+    //             Locker locker { m_lock };
     //             for (;;) {
     //                 PollResult result = poll();
     //                 if (result == PollResult::Work)
@@ -182,8 +184,9 @@ private:
     void start(const AbstractLocker&);
     
     Box<Lock> m_lock;
-    RefPtr<AutomaticThreadCondition> m_condition;
+    Ref<AutomaticThreadCondition> m_condition;
     Seconds m_timeout;
+    ThreadType m_threadType { ThreadType::Unknown };
     bool m_isRunning { true };
     bool m_isWaiting { false };
     bool m_hasUnderlyingThread { false };
@@ -195,6 +198,3 @@ private:
 
 using WTF::AutomaticThread;
 using WTF::AutomaticThreadCondition;
-
-#endif // WTF_AutomaticThread_h
-

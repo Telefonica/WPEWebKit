@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2016 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2012-2021 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,28 +25,37 @@
 
 #pragma once
 
+#include "ArithProfile.h"
+#include "ArrayProfile.h"
 #include "BytecodeConventions.h"
 #include "CodeType.h"
+#include "DFGExitProfile.h"
+#include "ExecutionCounter.h"
 #include "ExpressionRangeInfo.h"
 #include "HandlerInfo.h"
 #include "Identifier.h"
-#include "JSCell.h"
-#include "LockDuringMarking.h"
+#include "InstructionStream.h"
+#include "JSCast.h"
+#include "Opcode.h"
 #include "ParserModes.h"
 #include "RegExp.h"
-#include "SpecialPointer.h"
 #include "UnlinkedFunctionExecutable.h"
+#include "UnlinkedMetadataTable.h"
+#include "ValueProfile.h"
 #include "VirtualRegister.h"
 #include <algorithm>
 #include <wtf/BitVector.h>
-#include <wtf/HashSet.h>
+#include <wtf/FixedVector.h>
+#include <wtf/RobinHoodHashMap.h>
 #include <wtf/TriState.h>
 #include <wtf/Vector.h>
 #include <wtf/text/UniquedStringImpl.h>
 
 namespace JSC {
 
+class BytecodeLivenessAnalysis;
 class BytecodeRewriter;
+class CodeBlock;
 class Debugger;
 class FunctionExecutable;
 class ParserError;
@@ -54,189 +63,146 @@ class ScriptExecutable;
 class SourceCode;
 class SourceProvider;
 class UnlinkedCodeBlock;
+class UnlinkedCodeBlockGenerator;
 class UnlinkedFunctionCodeBlock;
 class UnlinkedFunctionExecutable;
-class UnlinkedInstructionStream;
+class BaselineJITCode;
 struct ExecutableInfo;
+enum class LinkTimeConstant : int32_t;
 
-typedef unsigned UnlinkedValueProfile;
-typedef unsigned UnlinkedArrayProfile;
+template<typename CodeBlockType>
+class CachedCodeBlock;
+
 typedef unsigned UnlinkedArrayAllocationProfile;
 typedef unsigned UnlinkedObjectAllocationProfile;
-typedef unsigned UnlinkedLLIntCallLinkInfo;
-using ConstantIndentifierSetEntry = std::pair<IdentifierSet, unsigned>;
 
 struct UnlinkedStringJumpTable {
     struct OffsetLocation {
-        int32_t branchOffset;
+        int32_t m_branchOffset;
+        unsigned m_indexInTable;
     };
 
-    typedef HashMap<RefPtr<StringImpl>, OffsetLocation> StringOffsetTable;
-    StringOffsetTable offsetTable;
+    using StringOffsetTable = MemoryCompactLookupOnlyRobinHoodHashMap<RefPtr<StringImpl>, OffsetLocation>;
+    StringOffsetTable m_offsetTable;
 
-    inline int32_t offsetForValue(StringImpl* value, int32_t defaultOffset)
+    inline int32_t offsetForValue(StringImpl* value, int32_t defaultOffset) const
     {
-        StringOffsetTable::const_iterator end = offsetTable.end();
-        StringOffsetTable::const_iterator loc = offsetTable.find(value);
-        if (loc == end)
+        auto loc = m_offsetTable.find(value);
+        if (loc == m_offsetTable.end())
             return defaultOffset;
-        return loc->value.branchOffset;
+        return loc->value.m_branchOffset;
     }
 
+    inline unsigned indexForValue(StringImpl* value, unsigned defaultIndex) const
+    {
+        auto loc = m_offsetTable.find(value);
+        if (loc == m_offsetTable.end())
+            return defaultIndex;
+        return loc->value.m_indexInTable;
+    }
 };
 
 struct UnlinkedSimpleJumpTable {
-    Vector<int32_t> branchOffsets;
-    int32_t min;
+    FixedVector<int32_t> m_branchOffsets;
+    int32_t m_min;
 
-    int32_t offsetForValue(int32_t value, int32_t defaultOffset);
+    inline int32_t offsetForValue(int32_t value, int32_t defaultOffset) const
+    {
+        if (value >= m_min && static_cast<uint32_t>(value - m_min) < m_branchOffsets.size()) {
+            int32_t offset = m_branchOffsets[value - m_min];
+            if (offset)
+                return offset;
+        }
+        return defaultOffset;
+    }
+
     void add(int32_t key, int32_t offset)
     {
-        if (!branchOffsets[key])
-            branchOffsets[key] = offset;
+        if (!m_branchOffsets[key])
+            m_branchOffsets[key] = offset;
     }
-};
-
-struct UnlinkedInstruction {
-    UnlinkedInstruction() { u.operand = 0; }
-    UnlinkedInstruction(OpcodeID opcode) { u.opcode = opcode; }
-    UnlinkedInstruction(int operand) { u.operand = operand; }
-    union {
-        OpcodeID opcode;
-        int32_t operand;
-        unsigned unsignedValue;
-    } u;
 };
 
 class UnlinkedCodeBlock : public JSCell {
 public:
     typedef JSCell Base;
-    static const unsigned StructureFlags = Base::StructureFlags;
+    static constexpr unsigned StructureFlags = Base::StructureFlags;
 
-    static const bool needsDestruction = true;
+    static constexpr bool needsDestruction = true;
+
+    template<typename, SubspaceAccess>
+    static void subspaceFor(VM&)
+    {
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+
+    friend class LLIntOffsetsExtractor;
 
     enum { CallFunction, ApplyFunction };
 
-    typedef UnlinkedInstruction Instruction;
-    typedef Vector<UnlinkedInstruction, 0, UnsafeVectorOverflow> UnpackedInstructions;
+    void initializeLoopHintExecutionCounter();
 
     bool isConstructor() const { return m_isConstructor; }
-    bool isStrictMode() const { return m_isStrictMode; }
-    bool usesEval() const { return m_usesEval; }
+    bool usesCallEval() const { return m_usesCallEval; }
+    void setUsesCallEval() { m_usesCallEval = true; }
     SourceParseMode parseMode() const { return m_parseMode; }
     bool isArrowFunction() const { return isArrowFunctionParseMode(parseMode()); }
     DerivedContextType derivedContextType() const { return static_cast<DerivedContextType>(m_derivedContextType); }
     EvalContextType evalContextType() const { return static_cast<EvalContextType>(m_evalContextType); }
     bool isArrowFunctionContext() const { return m_isArrowFunctionContext; }
     bool isClassContext() const { return m_isClassContext; }
-
-    void addExpressionInfo(unsigned instructionOffset, int divot,
-        int startOffset, int endOffset, unsigned line, unsigned column);
-
-    void addTypeProfilerExpressionInfo(unsigned instructionOffset, unsigned startDivot, unsigned endDivot);
+    bool hasTailCalls() const { return m_hasTailCalls; }
+    void setHasTailCalls() { m_hasTailCalls = true; }
+    bool allowDirectEvalCache() const { return !(m_features & NoEvalCacheFeature); }
 
     bool hasExpressionInfo() { return m_expressionInfo.size(); }
-    const Vector<ExpressionRangeInfo>& expressionInfo() { return m_expressionInfo; }
+    const FixedVector<ExpressionRangeInfo>& expressionInfo() { return m_expressionInfo; }
+
+    bool hasCheckpoints() const { return m_hasCheckpoints; }
+    void setHasCheckpoints() { m_hasCheckpoints = true; }
 
     // Special registers
     void setThisRegister(VirtualRegister thisRegister) { m_thisRegister = thisRegister; }
     void setScopeRegister(VirtualRegister scopeRegister) { m_scopeRegister = scopeRegister; }
 
-    bool usesGlobalObject() const { return m_globalObjectRegister.isValid(); }
-    void setGlobalObjectRegister(VirtualRegister globalObjectRegister) { m_globalObjectRegister = globalObjectRegister; }
-    VirtualRegister globalObjectRegister() const { return m_globalObjectRegister; }
-
     // Parameter information
     void setNumParameters(int newValue) { m_numParameters = newValue; }
-    void addParameter() { m_numParameters++; }
     unsigned numParameters() const { return m_numParameters; }
-
-    unsigned addRegExp(RegExp* r)
-    {
-        createRareDataIfNecessary();
-        VM& vm = *this->vm();
-        auto locker = lockDuringMarking(vm.heap, *this);
-        unsigned size = m_rareData->m_regexps.size();
-        m_rareData->m_regexps.append(WriteBarrier<RegExp>(vm, this, r));
-        return size;
-    }
-    unsigned numberOfRegExps() const
-    {
-        if (!m_rareData)
-            return 0;
-        return m_rareData->m_regexps.size();
-    }
-    RegExp* regexp(int index) const { ASSERT(m_rareData); return m_rareData->m_regexps[index].get(); }
 
     // Constant Pools
 
     size_t numberOfIdentifiers() const { return m_identifiers.size(); }
-    void addIdentifier(const Identifier& i) { return m_identifiers.append(i); }
     const Identifier& identifier(int index) const { return m_identifiers[index]; }
-    const Vector<Identifier>& identifiers() const { return m_identifiers; }
+    const FixedVector<Identifier>& identifiers() const { return m_identifiers; }
 
-    const Vector<BitVector>& bitVectors() const { return m_bitVectors; }
-    BitVector& bitVector(size_t i) { return m_bitVectors[i]; }
-    unsigned addBitVector(BitVector&& bitVector)
-    {
-        m_bitVectors.append(WTFMove(bitVector));
-        return m_bitVectors.size() - 1;
-    }
+    BitVector& bitVector(size_t i) { ASSERT(m_rareData); return m_rareData->m_bitVectors[i]; }
 
-    void addSetConstant(IdentifierSet& set)
-    {
-        VM& vm = *this->vm();
-        auto locker = lockDuringMarking(vm.heap, *this);
-        unsigned result = m_constantRegisters.size();
-        m_constantRegisters.append(WriteBarrier<Unknown>());
-        m_constantsSourceCodeRepresentation.append(SourceCodeRepresentation::Other);
-        m_constantIdentifierSets.append(ConstantIndentifierSetEntry(set, result));
-    }
+    const FixedVector<WriteBarrier<Unknown>>& constantRegisters() { return m_constantRegisters; }
+    const WriteBarrier<Unknown>& constantRegister(VirtualRegister reg) const { return m_constantRegisters[reg.toConstantIndex()]; }
+    WriteBarrier<Unknown>& constantRegister(VirtualRegister reg) { return m_constantRegisters[reg.toConstantIndex()]; }
+    ALWAYS_INLINE JSValue getConstant(VirtualRegister reg) const { return m_constantRegisters[reg.toConstantIndex()].get(); }
+    const FixedVector<SourceCodeRepresentation>& constantsSourceCodeRepresentation() { return m_constantsSourceCodeRepresentation; }
 
-    unsigned addConstant(JSValue v, SourceCodeRepresentation sourceCodeRepresentation = SourceCodeRepresentation::Other)
+    SourceCodeRepresentation constantSourceCodeRepresentation(VirtualRegister reg) const
     {
-        VM& vm = *this->vm();
-        auto locker = lockDuringMarking(vm.heap, *this);
-        unsigned result = m_constantRegisters.size();
-        m_constantRegisters.append(WriteBarrier<Unknown>());
-        m_constantRegisters.last().set(vm, this, v);
-        m_constantsSourceCodeRepresentation.append(sourceCodeRepresentation);
-        return result;
+        return constantSourceCodeRepresentation(reg.toConstantIndex());
     }
-    unsigned addConstant(LinkTimeConstant type)
+    SourceCodeRepresentation constantSourceCodeRepresentation(unsigned index) const
     {
-        VM& vm = *this->vm();
-        auto locker = lockDuringMarking(vm.heap, *this);
-        unsigned result = m_constantRegisters.size();
-        ASSERT(result);
-        unsigned index = static_cast<unsigned>(type);
-        ASSERT(index < LinkTimeConstantCount);
-        m_linkTimeConstants[index] = result;
-        m_constantRegisters.append(WriteBarrier<Unknown>());
-        m_constantsSourceCodeRepresentation.append(SourceCodeRepresentation::Other);
-        return result;
+        if (index < m_constantsSourceCodeRepresentation.size())
+            return m_constantsSourceCodeRepresentation[index];
+        return SourceCodeRepresentation::Other;
     }
 
-    unsigned registerIndexForLinkTimeConstant(LinkTimeConstant type)
-    {
-        unsigned index = static_cast<unsigned>(type);
-        ASSERT(index < LinkTimeConstantCount);
-        return m_linkTimeConstants[index];
-    }
-    const Vector<WriteBarrier<Unknown>>& constantRegisters() { return m_constantRegisters; }
-    const Vector<ConstantIndentifierSetEntry>& constantIdentifierSets() { return m_constantIdentifierSets; }
-    const WriteBarrier<Unknown>& constantRegister(int index) const { return m_constantRegisters[index - FirstConstantRegisterIndex]; }
-    ALWAYS_INLINE bool isConstantRegisterIndex(int index) const { return index >= FirstConstantRegisterIndex; }
-    ALWAYS_INLINE JSValue getConstant(int index) const { return m_constantRegisters[index - FirstConstantRegisterIndex].get(); }
-    const Vector<SourceCodeRepresentation>& constantsSourceCodeRepresentation() { return m_constantsSourceCodeRepresentation; }
+    unsigned numberOfConstantIdentifierSets() const { return m_rareData ? m_rareData->m_constantIdentifierSets.size() : 0; }
+    const FixedVector<IdentifierSet>& constantIdentifierSets() { ASSERT(m_rareData); return m_rareData->m_constantIdentifierSets; }
 
     // Jumps
     size_t numberOfJumpTargets() const { return m_jumpTargets.size(); }
-    void addJumpTarget(unsigned jumpTarget) { m_jumpTargets.append(jumpTarget); }
     unsigned jumpTarget(int index) const { return m_jumpTargets[index]; }
     unsigned lastJumpTarget() const { return m_jumpTargets.last(); }
 
-    UnlinkedHandlerInfo* handlerForBytecodeOffset(unsigned bytecodeOffset, RequiredHandler = RequiredHandler::AnyHandler);
+    UnlinkedHandlerInfo* handlerForBytecodeIndex(BytecodeIndex, RequiredHandler = RequiredHandler::AnyHandler);
     UnlinkedHandlerInfo* handlerForIndex(unsigned, RequiredHandler = RequiredHandler::AnyHandler);
 
     bool isBuiltinFunction() const { return m_isBuiltinFunction; }
@@ -245,138 +211,74 @@ public:
     SuperBinding superBinding() const { return static_cast<SuperBinding>(m_superBinding); }
     JSParserScriptMode scriptMode() const { return static_cast<JSParserScriptMode>(m_scriptMode); }
 
-    void shrinkToFit();
+    const JSInstructionStream& instructions() const;
+    const JSInstruction* instructionAt(BytecodeIndex index) const { return instructions().at(index).ptr(); }
+    unsigned bytecodeOffset(const JSInstruction* instruction)
+    {
+        const auto* instructionsBegin = instructions().at(0).ptr();
+        const auto* instructionsEnd = reinterpret_cast<const JSInstruction*>(reinterpret_cast<uintptr_t>(instructionsBegin) + instructions().size());
+        RELEASE_ASSERT(instruction >= instructionsBegin && instruction < instructionsEnd);
+        return instruction - instructionsBegin;
+    }
+    unsigned instructionsSize() const { return instructions().size(); }
 
-    void setInstructions(std::unique_ptr<UnlinkedInstructionStream>);
-    const UnlinkedInstructionStream& instructions() const;
-
-    int numCalleeLocals() const { return m_numCalleeLocals; }
-
-    int m_numVars;
-    int m_numCapturedVars;
-    int m_numCalleeLocals;
+    unsigned numCalleeLocals() const { return m_numCalleeLocals; }
+    unsigned numVars() const { return m_numVars; }
 
     // Jump Tables
 
-    size_t numberOfSwitchJumpTables() const { return m_rareData ? m_rareData->m_switchJumpTables.size() : 0; }
-    UnlinkedSimpleJumpTable& addSwitchJumpTable() { createRareDataIfNecessary(); m_rareData->m_switchJumpTables.append(UnlinkedSimpleJumpTable()); return m_rareData->m_switchJumpTables.last(); }
-    UnlinkedSimpleJumpTable& switchJumpTable(int tableIndex) { ASSERT(m_rareData); return m_rareData->m_switchJumpTables[tableIndex]; }
+    size_t numberOfUnlinkedSwitchJumpTables() const { return m_rareData ? m_rareData->m_unlinkedSwitchJumpTables.size() : 0; }
+    const UnlinkedSimpleJumpTable& unlinkedSwitchJumpTable(int tableIndex) const { ASSERT(m_rareData); return m_rareData->m_unlinkedSwitchJumpTables[tableIndex]; }
 
-    size_t numberOfStringSwitchJumpTables() const { return m_rareData ? m_rareData->m_stringSwitchJumpTables.size() : 0; }
-    UnlinkedStringJumpTable& addStringSwitchJumpTable() { createRareDataIfNecessary(); m_rareData->m_stringSwitchJumpTables.append(UnlinkedStringJumpTable()); return m_rareData->m_stringSwitchJumpTables.last(); }
-    UnlinkedStringJumpTable& stringSwitchJumpTable(int tableIndex) { ASSERT(m_rareData); return m_rareData->m_stringSwitchJumpTables[tableIndex]; }
+    size_t numberOfUnlinkedStringSwitchJumpTables() const { return m_rareData ? m_rareData->m_unlinkedStringSwitchJumpTables.size() : 0; }
+    const UnlinkedStringJumpTable& unlinkedStringSwitchJumpTable(int tableIndex) const { ASSERT(m_rareData); return m_rareData->m_unlinkedStringSwitchJumpTables[tableIndex]; }
 
-    unsigned addFunctionDecl(UnlinkedFunctionExecutable* n)
-    {
-        VM& vm = *this->vm();
-        auto locker = lockDuringMarking(vm.heap, *this);
-        unsigned size = m_functionDecls.size();
-        m_functionDecls.append(WriteBarrier<UnlinkedFunctionExecutable>());
-        m_functionDecls.last().set(vm, this, n);
-        return size;
-    }
     UnlinkedFunctionExecutable* functionDecl(int index) { return m_functionDecls[index].get(); }
     size_t numberOfFunctionDecls() { return m_functionDecls.size(); }
-    unsigned addFunctionExpr(UnlinkedFunctionExecutable* n)
-    {
-        VM& vm = *this->vm();
-        auto locker = lockDuringMarking(vm.heap, *this);
-        unsigned size = m_functionExprs.size();
-        m_functionExprs.append(WriteBarrier<UnlinkedFunctionExecutable>());
-        m_functionExprs.last().set(vm, this, n);
-        return size;
-    }
     UnlinkedFunctionExecutable* functionExpr(int index) { return m_functionExprs[index].get(); }
     size_t numberOfFunctionExprs() { return m_functionExprs.size(); }
 
     // Exception handling support
     size_t numberOfExceptionHandlers() const { return m_rareData ? m_rareData->m_exceptionHandlers.size() : 0; }
-    void addExceptionHandler(const UnlinkedHandlerInfo& handler) { createRareDataIfNecessary(); return m_rareData->m_exceptionHandlers.append(handler); }
     UnlinkedHandlerInfo& exceptionHandler(int index) { ASSERT(m_rareData); return m_rareData->m_exceptionHandlers[index]; }
 
-    UnlinkedArrayProfile addArrayProfile() { return m_arrayProfileCount++; }
-    unsigned numberOfArrayProfiles() { return m_arrayProfileCount; }
-    UnlinkedArrayAllocationProfile addArrayAllocationProfile() { return m_arrayAllocationProfileCount++; }
-    unsigned numberOfArrayAllocationProfiles() { return m_arrayAllocationProfileCount; }
-    UnlinkedObjectAllocationProfile addObjectAllocationProfile() { return m_objectAllocationProfileCount++; }
-    unsigned numberOfObjectAllocationProfiles() { return m_objectAllocationProfileCount; }
-    UnlinkedValueProfile addValueProfile() { return m_valueProfileCount++; }
-    unsigned numberOfValueProfiles() { return m_valueProfileCount; }
-
-    UnlinkedLLIntCallLinkInfo addLLIntCallLinkInfo() { return m_llintCallLinkInfoCount++; }
-    unsigned numberOfLLintCallLinkInfos() { return m_llintCallLinkInfoCount; }
-
-    CodeType codeType() const { return m_codeType; }
+    CodeType codeType() const { return static_cast<CodeType>(m_codeType); }
 
     VirtualRegister thisRegister() const { return m_thisRegister; }
     VirtualRegister scopeRegister() const { return m_scopeRegister; }
 
-    void addPropertyAccessInstruction(unsigned propertyAccessInstruction)
-    {
-        m_propertyAccessInstructions.append(propertyAccessInstruction);
-    }
-
-    size_t numberOfPropertyAccessInstructions() const { return m_propertyAccessInstructions.size(); }
-    const Vector<unsigned>& propertyAccessInstructions() const { return m_propertyAccessInstructions; }
-
-    typedef Vector<JSValue> ConstantBuffer;
-
-    size_t constantBufferCount() { ASSERT(m_rareData); return m_rareData->m_constantBuffers.size(); }
-    unsigned addConstantBuffer(unsigned length)
-    {
-        createRareDataIfNecessary();
-        unsigned size = m_rareData->m_constantBuffers.size();
-        m_rareData->m_constantBuffers.append(Vector<JSValue>(length));
-        return size;
-    }
-
-    const ConstantBuffer& constantBuffer(unsigned index) const
-    {
-        ASSERT(m_rareData);
-        return m_rareData->m_constantBuffers[index];
-    }
-
-    ConstantBuffer& constantBuffer(unsigned index)
-    {
-        ASSERT(m_rareData);
-        return m_rareData->m_constantBuffers[index];
-    }
-
     bool hasRareData() const { return m_rareData.get(); }
 
-    int lineNumberForBytecodeOffset(unsigned bytecodeOffset);
+    int lineNumberForBytecodeIndex(BytecodeIndex);
 
-    void expressionRangeForBytecodeOffset(unsigned bytecodeOffset, int& divot,
+    void expressionRangeForBytecodeIndex(BytecodeIndex, int& divot,
         int& startOffset, int& endOffset, unsigned& line, unsigned& column) const;
 
     bool typeProfilerExpressionInfoForBytecodeOffset(unsigned bytecodeOffset, unsigned& startDivot, unsigned& endDivot);
 
-    void recordParse(CodeFeatures features, bool hasCapturedVariables, unsigned lineCount, unsigned endColumn)
+    void recordParse(CodeFeatures features, LexicalScopeFeatures lexicalScopeFeatures, bool hasCapturedVariables, unsigned lineCount, unsigned endColumn)
     {
         m_features = features;
+        m_lexicalScopeFeatures = lexicalScopeFeatures;
         m_hasCapturedVariables = hasCapturedVariables;
         m_lineCount = lineCount;
         // For the UnlinkedCodeBlock, startColumn is always 0.
         m_endColumn = endColumn;
     }
 
-    const String& sourceURLDirective() const { return m_sourceURLDirective; }
-    const String& sourceMappingURLDirective() const { return m_sourceMappingURLDirective; }
-    void setSourceURLDirective(const String& sourceURL) { m_sourceURLDirective = sourceURL; }
-    void setSourceMappingURLDirective(const String& sourceMappingURL) { m_sourceMappingURLDirective = sourceMappingURL; }
+    StringImpl* sourceURLDirective() const { return m_sourceURLDirective.get(); }
+    StringImpl* sourceMappingURLDirective() const { return m_sourceMappingURLDirective.get(); }
+    void setSourceURLDirective(const String& sourceURL) { m_sourceURLDirective = sourceURL.impl(); }
+    void setSourceMappingURLDirective(const String& sourceMappingURL) { m_sourceMappingURLDirective = sourceMappingURL.impl(); }
 
     CodeFeatures codeFeatures() const { return m_features; }
+    LexicalScopeFeatures lexicalScopeFeatures() const { return static_cast<LexicalScopeFeatures>(m_lexicalScopeFeatures); }
     bool hasCapturedVariables() const { return m_hasCapturedVariables; }
     unsigned lineCount() const { return m_lineCount; }
     ALWAYS_INLINE unsigned startColumn() const { return 0; }
     unsigned endColumn() const { return m_endColumn; }
 
-    void addOpProfileControlFlowBytecodeOffset(size_t offset)
-    {
-        createRareDataIfNecessary();
-        m_rareData->m_opProfileControlFlowBytecodeOffsets.append(offset);
-    }
-    const Vector<size_t>& opProfileControlFlowBytecodeOffsets() const
+    const FixedVector<JSInstructionStream::Offset>& opProfileControlFlowBytecodeOffsets() const
     {
         ASSERT(m_rareData);
         return m_rareData->m_opProfileControlFlowBytecodeOffsets;
@@ -388,15 +290,87 @@ public:
 
     void dumpExpressionRangeInfo(); // For debugging purpose only.
 
-    bool wasCompiledWithDebuggingOpcodes() const { return m_wasCompiledWithDebuggingOpcodes; }
+    bool wasCompiledWithDebuggingOpcodes() const { return m_codeGenerationMode.contains(CodeGenerationMode::Debugger); }
+    bool wasCompiledWithTypeProfilerOpcodes() const { return m_codeGenerationMode.contains(CodeGenerationMode::TypeProfiler); }
+    bool wasCompiledWithControlFlowProfilerOpcodes() const { return m_codeGenerationMode.contains(CodeGenerationMode::ControlFlowProfiler); }
+    OptionSet<CodeGenerationMode> codeGenerationMode() const { return m_codeGenerationMode; }
 
-    TriState didOptimize() const { return m_didOptimize; }
-    void setDidOptimize(TriState didOptimize) { m_didOptimize = didOptimize; }
+    TriState didOptimize() const { return static_cast<TriState>(m_didOptimize); }
+    void setDidOptimize(TriState didOptimize) { m_didOptimize = static_cast<unsigned>(didOptimize); }
+
+    static constexpr unsigned maxAge = 7;
+
+    unsigned age() const { return m_age; }
+    void resetAge() { m_age = 0; }
+
+    NeedsClassFieldInitializer needsClassFieldInitializer() const
+    {
+        if (m_rareData)
+            return static_cast<NeedsClassFieldInitializer>(m_rareData->m_needsClassFieldInitializer);
+        return NeedsClassFieldInitializer::No;
+    }
+
+    PrivateBrandRequirement privateBrandRequirement() const
+    {
+        if (m_rareData)
+            return static_cast<PrivateBrandRequirement>(m_rareData->m_privateBrandRequirement);
+        return PrivateBrandRequirement::None;
+    }
 
     void dump(PrintStream&) const;
 
+    BytecodeLivenessAnalysis& livenessAnalysis(CodeBlock* codeBlock)
+    {
+        if (m_liveness)
+            return *m_liveness;
+        return livenessAnalysisSlow(codeBlock);
+    }
+
+#if ENABLE(DFG_JIT)
+    bool hasExitSite(const ConcurrentJSLocker& locker, const DFG::FrequentExitSite& site) const
+    {
+        return m_exitProfile.hasExitSite(locker, site);
+    }
+
+    bool hasExitSite(const DFG::FrequentExitSite& site)
+    {
+        ConcurrentJSLocker locker(m_lock);
+        return hasExitSite(locker, site);
+    }
+
+    DFG::ExitProfile& exitProfile() { return m_exitProfile; }
+#endif
+
+    UnlinkedMetadataTable& metadata() { return m_metadata.get(); }
+
+    size_t metadataSizeInBytes()
+    {
+        return m_metadata->sizeInBytes();
+    }
+
+    bool loopHintsAreEligibleForFuzzingEarlyReturn()
+    {
+        // Some builtins are required to always complete the loops they run.
+        return !isBuiltinFunction();
+    }
+    void allocateSharedProfiles(unsigned numBinaryArithProfiles, unsigned numUnaryArithProfiles);
+    UnlinkedValueProfile& unlinkedValueProfile(unsigned index) { return m_valueProfiles[index]; }
+    UnlinkedArrayProfile& unlinkedArrayProfile(unsigned index) { return m_arrayProfiles[index]; }
+    unsigned numberOfValueProfiles() const { return m_valueProfiles.size(); }
+    unsigned numberOfArrayProfiles() const { return m_arrayProfiles.size(); }
+
+#if ASSERT_ENABLED
+    bool hasIdentifier(UniquedStringImpl*);
+#endif
+
+    int32_t thresholdForJIT(int32_t threshold);
+
 protected:
-    UnlinkedCodeBlock(VM*, Structure*, CodeType, const ExecutableInfo&, DebuggerMode);
+    UnlinkedCodeBlock(VM&, Structure*, CodeType, const ExecutableInfo&, OptionSet<CodeGenerationMode>);
+
+    template<typename CodeBlockType>
+    UnlinkedCodeBlock(Decoder&, Structure*, const CachedCodeBlock<CodeBlockType>&);
+
     ~UnlinkedCodeBlock();
 
     void finishCreation(VM& vm)
@@ -406,104 +380,144 @@ protected:
 
 private:
     friend class BytecodeRewriter;
-    void applyModification(BytecodeRewriter&);
+    friend class UnlinkedCodeBlockGenerator;
+    template<typename Traits>
+    friend class BytecodeGeneratorBase;
 
-    void createRareDataIfNecessary()
+    template<typename CodeBlockType>
+    friend class CachedCodeBlock;
+
+    void createRareDataIfNecessary(const AbstractLocker&)
     {
-        if (!m_rareData) {
-            auto locker = lockDuringMarking(*heap(), *this);
-            m_rareData = std::make_unique<RareData>();
-        }
+        if (!m_rareData)
+            m_rareData = makeUnique<RareData>();
     }
 
     void getLineAndColumn(const ExpressionRangeInfo&, unsigned& line, unsigned& column) const;
+    BytecodeLivenessAnalysis& livenessAnalysisSlow(CodeBlock*);
 
-    int m_numParameters;
-
-    std::unique_ptr<UnlinkedInstructionStream> m_unlinkedInstructions;
 
     VirtualRegister m_thisRegister;
     VirtualRegister m_scopeRegister;
-    VirtualRegister m_globalObjectRegister;
 
-    String m_sourceURLDirective;
-    String m_sourceMappingURLDirective;
-
-    unsigned m_usesEval : 1;
-    unsigned m_isStrictMode : 1;
+    unsigned m_numVars : 31;
+    unsigned m_usesCallEval : 1;
+    unsigned m_numCalleeLocals : 31;
     unsigned m_isConstructor : 1;
+    unsigned m_numParameters : 31;
     unsigned m_hasCapturedVariables : 1;
+
     unsigned m_isBuiltinFunction : 1;
     unsigned m_superBinding : 1;
     unsigned m_scriptMode: 1;
     unsigned m_isArrowFunctionContext : 1;
     unsigned m_isClassContext : 1;
-    unsigned m_wasCompiledWithDebuggingOpcodes : 1;
+    unsigned m_hasTailCalls : 1;
     unsigned m_constructorKind : 2;
     unsigned m_derivedContextType : 2;
     unsigned m_evalContextType : 2;
-    unsigned m_lineCount;
-    unsigned m_endColumn;
-
-    TriState m_didOptimize;
+    unsigned m_codeType : 2;
+    unsigned m_didOptimize : 2;
+    unsigned m_age : 3;
+    static_assert(((1U << 3) - 1) >= maxAge);
+    bool m_hasCheckpoints : 1;
+    unsigned m_lexicalScopeFeatures : bitWidthOfLexicalScopeFeatures;
+public:
+    ConcurrentJSLock m_lock;
+#if ENABLE(JIT)
+    RefPtr<BaselineJITCode> m_unlinkedBaselineCode;
+#endif
+private:
+    CodeFeatures m_features { 0 };
     SourceParseMode m_parseMode;
-    CodeFeatures m_features;
-    CodeType m_codeType;
+    OptionSet<CodeGenerationMode> m_codeGenerationMode;
 
-    Vector<unsigned> m_jumpTargets;
+    unsigned m_lineCount { 0 };
+    unsigned m_endColumn { UINT_MAX };
 
-    Vector<unsigned> m_propertyAccessInstructions;
+    PackedRefPtr<StringImpl> m_sourceURLDirective;
+    PackedRefPtr<StringImpl> m_sourceMappingURLDirective;
+
+    FixedVector<JSInstructionStream::Offset> m_jumpTargets;
+    Ref<UnlinkedMetadataTable> m_metadata;
+    std::unique_ptr<JSInstructionStream> m_instructions;
+    std::unique_ptr<BytecodeLivenessAnalysis> m_liveness;
+
+#if ENABLE(DFG_JIT)
+    DFG::ExitProfile m_exitProfile;
+#endif
 
     // Constant Pools
-    Vector<Identifier> m_identifiers;
-    Vector<BitVector> m_bitVectors;
-    Vector<WriteBarrier<Unknown>> m_constantRegisters;
-    Vector<ConstantIndentifierSetEntry> m_constantIdentifierSets;
-    Vector<SourceCodeRepresentation> m_constantsSourceCodeRepresentation;
-    typedef Vector<WriteBarrier<UnlinkedFunctionExecutable>> FunctionExpressionVector;
+    FixedVector<Identifier> m_identifiers;
+    FixedVector<WriteBarrier<Unknown>> m_constantRegisters;
+    FixedVector<SourceCodeRepresentation> m_constantsSourceCodeRepresentation;
+    using FunctionExpressionVector = FixedVector<WriteBarrier<UnlinkedFunctionExecutable>>;
     FunctionExpressionVector m_functionDecls;
     FunctionExpressionVector m_functionExprs;
-    std::array<unsigned, LinkTimeConstantCount> m_linkTimeConstants;
-
-    unsigned m_arrayProfileCount;
-    unsigned m_arrayAllocationProfileCount;
-    unsigned m_objectAllocationProfileCount;
-    unsigned m_valueProfileCount;
-    unsigned m_llintCallLinkInfoCount;
 
 public:
     struct RareData {
-        WTF_MAKE_FAST_ALLOCATED;
-    public:
-        Vector<UnlinkedHandlerInfo> m_exceptionHandlers;
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
 
-        // Rare Constants
-        Vector<WriteBarrier<RegExp>> m_regexps;
+        size_t sizeInBytes(const AbstractLocker&) const;
 
-        // Buffers used for large array literals
-        Vector<ConstantBuffer> m_constantBuffers;
+        FixedVector<UnlinkedHandlerInfo> m_exceptionHandlers;
 
         // Jump Tables
-        Vector<UnlinkedSimpleJumpTable> m_switchJumpTables;
-        Vector<UnlinkedStringJumpTable> m_stringSwitchJumpTables;
+        FixedVector<UnlinkedSimpleJumpTable> m_unlinkedSwitchJumpTables;
+        FixedVector<UnlinkedStringJumpTable> m_unlinkedStringSwitchJumpTables;
 
-        Vector<ExpressionRangeInfo::FatPosition> m_expressionInfoFatPositions;
+        FixedVector<ExpressionRangeInfo::FatPosition> m_expressionInfoFatPositions;
 
         struct TypeProfilerExpressionRange {
             unsigned m_startDivot;
             unsigned m_endDivot;
         };
         HashMap<unsigned, TypeProfilerExpressionRange> m_typeProfilerInfoMap;
-        Vector<size_t> m_opProfileControlFlowBytecodeOffsets;
+        FixedVector<JSInstructionStream::Offset> m_opProfileControlFlowBytecodeOffsets;
+        FixedVector<BitVector> m_bitVectors;
+        FixedVector<IdentifierSet> m_constantIdentifierSets;
+
+        unsigned m_needsClassFieldInitializer : 1;
+        unsigned m_privateBrandRequirement : 1;
     };
 
+    int outOfLineJumpOffset(JSInstructionStream::Offset);
+    int outOfLineJumpOffset(const JSInstructionStream::Ref& instruction)
+    {
+        return outOfLineJumpOffset(instruction.offset());
+    }
+    int outOfLineJumpOffset(const JSInstruction* pc)
+    {
+        unsigned bytecodeOffset = this->bytecodeOffset(pc);
+        return outOfLineJumpOffset(bytecodeOffset);
+    }
+
+    BinaryArithProfile& binaryArithProfile(unsigned i) { return m_binaryArithProfiles[i]; }
+    UnaryArithProfile& unaryArithProfile(unsigned i) { return m_unaryArithProfiles[i]; }
+
+    BaselineExecutionCounter& llintExecuteCounter() { return m_llintExecuteCounter; }
+
 private:
+    using OutOfLineJumpTargets = HashMap<JSInstructionStream::Offset, int>;
+
+    OutOfLineJumpTargets m_outOfLineJumpTargets;
     std::unique_ptr<RareData> m_rareData;
-    Vector<ExpressionRangeInfo> m_expressionInfo;
+    FixedVector<ExpressionRangeInfo> m_expressionInfo;
+    BaselineExecutionCounter m_llintExecuteCounter;
+    FixedVector<UnlinkedValueProfile> m_valueProfiles;
+    FixedVector<UnlinkedArrayProfile> m_arrayProfiles;
+    FixedVector<BinaryArithProfile> m_binaryArithProfiles;
+    FixedVector<UnaryArithProfile> m_unaryArithProfiles;
+
+#if ASSERT_ENABLED
+    Lock m_cachedIdentifierUidsLock;
+    HashSet<UniquedStringImpl*> m_cachedIdentifierUids;
+#endif
 
 protected:
-    static void visitChildren(JSCell*, SlotVisitor&);
-    static size_t estimatedSize(JSCell*);
+    DECLARE_VISIT_CHILDREN;
+    static size_t estimatedSize(JSCell*, VM&);
 
 public:
     DECLARE_INFO;

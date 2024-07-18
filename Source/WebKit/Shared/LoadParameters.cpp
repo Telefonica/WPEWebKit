@@ -26,6 +26,7 @@
 #include "config.h"
 #include "LoadParameters.h"
 
+#include "FormDataReference.h"
 #include "WebCoreArgumentCoders.h"
 
 namespace WebKit {
@@ -36,20 +37,33 @@ void LoadParameters::encode(IPC::Encoder& encoder) const
     encoder << request;
 
     encoder << static_cast<bool>(request.httpBody());
-    if (request.httpBody())
-        request.httpBody()->encode(encoder);
+    if (request.httpBody()) {
+        // FormDataReference encoder / decoder takes care of passing and consuming the needed sandbox extensions.
+        encoder << IPC::FormDataReference { request.httpBody() };
+    }
 
     encoder << sandboxExtensionHandle;
     encoder << data;
-    encoder << string;
     encoder << MIMEType;
     encoder << encodingName;
     encoder << baseURLString;
     encoder << unreachableURLString;
     encoder << provisionalLoadErrorURLString;
+    encoder << websitePolicies;
     encoder << shouldOpenExternalURLsPolicy;
+    encoder << shouldTreatAsContinuingLoad;
     encoder << userData;
-
+    encoder << lockHistory;
+    encoder << lockBackForwardList;
+    encoder << clientRedirectSourceForHistory;
+    encoder << effectiveSandboxFlags;
+    encoder << isNavigatingToAppBoundDomain;
+    encoder << existingNetworkResourceLoadIdentifierToResume;
+    encoder << isServiceWorkerLoad;
+    encoder << sessionHistoryVisibility;
+#if ENABLE(PUBLIC_SUFFIX_LIST)
+    encoder << topPrivatelyControlledDomain;
+#endif
     platformEncode(encoder);
 }
 
@@ -66,19 +80,22 @@ bool LoadParameters::decode(IPC::Decoder& decoder, LoadParameters& data)
         return false;
 
     if (hasHTTPBody) {
-        RefPtr<WebCore::FormData> formData = WebCore::FormData::decode(decoder);
-        if (!formData)
+        // FormDataReference encoder / decoder takes care of passing and consuming the needed sandbox extensions.
+        std::optional<IPC::FormDataReference> formDataReference;
+        decoder >> formDataReference;
+        if (!formDataReference)
             return false;
-        data.request.setHTTPBody(WTFMove(formData));
+
+        data.request.setHTTPBody(formDataReference->takeData());
     }
 
-    if (!decoder.decode(data.sandboxExtensionHandle))
+    std::optional<SandboxExtension::Handle> sandboxExtensionHandle;
+    decoder >> sandboxExtensionHandle;
+    if (!sandboxExtensionHandle)
         return false;
+    data.sandboxExtensionHandle = WTFMove(*sandboxExtensionHandle);
 
     if (!decoder.decode(data.data))
-        return false;
-
-    if (!decoder.decode(data.string))
         return false;
 
     if (!decoder.decode(data.MIMEType))
@@ -96,11 +113,55 @@ bool LoadParameters::decode(IPC::Decoder& decoder, LoadParameters& data)
     if (!decoder.decode(data.provisionalLoadErrorURLString))
         return false;
 
+    std::optional<std::optional<WebsitePoliciesData>> websitePolicies;
+    decoder >> websitePolicies;
+    if (!websitePolicies)
+        return false;
+    data.websitePolicies = WTFMove(*websitePolicies);
+
     if (!decoder.decode(data.shouldOpenExternalURLsPolicy))
+        return false;
+
+    if (!decoder.decode(data.shouldTreatAsContinuingLoad))
         return false;
 
     if (!decoder.decode(data.userData))
         return false;
+
+    if (!decoder.decode(data.lockHistory))
+        return false;
+
+    if (!decoder.decode(data.lockBackForwardList))
+        return false;
+
+    std::optional<String> clientRedirectSourceForHistory;
+    decoder >> clientRedirectSourceForHistory;
+    if (!clientRedirectSourceForHistory)
+        return false;
+    data.clientRedirectSourceForHistory = WTFMove(*clientRedirectSourceForHistory);
+
+    std::optional<WebCore::SandboxFlags> effectiveSandboxFlags;
+    decoder >> effectiveSandboxFlags;
+    if (!effectiveSandboxFlags)
+        return false;
+    data.effectiveSandboxFlags = *effectiveSandboxFlags;
+    
+    if (!decoder.decode(data.isNavigatingToAppBoundDomain))
+        return false;
+
+    if (!decoder.decode(data.existingNetworkResourceLoadIdentifierToResume))
+        return false;
+
+    if (!decoder.decode(data.isServiceWorkerLoad))
+        return false;
+    
+    if (!decoder.decode(data.sessionHistoryVisibility))
+        return false;
+
+#if ENABLE(PUBLIC_SUFFIX_LIST)
+    if (!decoder.decode(data.topPrivatelyControlledDomain))
+        return false;
+#endif
 
     if (!platformDecode(decoder, data))
         return false;

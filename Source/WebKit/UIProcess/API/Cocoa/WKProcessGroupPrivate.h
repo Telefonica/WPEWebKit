@@ -25,8 +25,6 @@
 
 #import <WebKit/WKProcessGroup.h>
 
-#if WK_API_ENABLED
-
 #import <WebKit/WKBase.h>
 
 #if TARGET_OS_IPHONE
@@ -37,12 +35,8 @@
 
 @property(readonly) WKContextRef _contextRef;
 
-- (void)_setAllowsSpecificHTTPSCertificate:(NSArray *)certificateChain forHost:(NSString *)host;
-
 #if TARGET_OS_IPHONE
 @property(readonly) WKGeolocationProviderIOS *_geolocationProvider;
 #endif
 
 @end
-
-#endif // WK_API_ENABLED

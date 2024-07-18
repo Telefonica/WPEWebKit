@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,18 +25,20 @@
 
 #pragma once
 
+#include "ConstraintConcurrency.h"
+#include "ConstraintParallelism.h"
 #include "ConstraintVolatility.h"
-#include "VisitingTimeout.h"
 #include <limits.h>
 #include <wtf/FastMalloc.h>
-#include <wtf/Function.h>
-#include <wtf/MonotonicTime.h>
+#include <wtf/Lock.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/SharedTask.h>
 #include <wtf/text/CString.h>
 
 namespace JSC {
 
 class MarkingConstraintSet;
+class AbstractSlotVisitor;
 class SlotVisitor;
 
 class MarkingConstraint {
@@ -44,17 +46,11 @@ class MarkingConstraint {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     JS_EXPORT_PRIVATE MarkingConstraint(
-        CString abbreviatedName, CString name,
-        ::Function<void(SlotVisitor&, const VisitingTimeout&)>,
-        ConstraintVolatility);
+        CString abbreviatedName, CString name, ConstraintVolatility,
+        ConstraintConcurrency = ConstraintConcurrency::Concurrent,
+        ConstraintParallelism = ConstraintParallelism::Sequential);
     
-    JS_EXPORT_PRIVATE MarkingConstraint(
-        CString abbreviatedName, CString name,
-        ::Function<void(SlotVisitor&, const VisitingTimeout&)>,
-        ::Function<double(SlotVisitor&)>,
-        ConstraintVolatility);
-    
-    JS_EXPORT_PRIVATE ~MarkingConstraint();
+    JS_EXPORT_PRIVATE virtual ~MarkingConstraint();
     
     unsigned index() const { return m_index; }
     
@@ -65,32 +61,43 @@ public:
     
     size_t lastVisitCount() const { return m_lastVisitCount; }
     
-    void execute(SlotVisitor&, bool& didVisitSomething, MonotonicTime timeout);
+    // The following functions are only used by the real GC via the MarkingConstraintSolver.
+    // Hence, we only need the SlotVisitor version.
+    void execute(SlotVisitor&);
+
+    JS_EXPORT_PRIVATE virtual double quickWorkEstimate(SlotVisitor&);
     
-    double quickWorkEstimate(SlotVisitor& visitor)
-    {
-        if (!m_quickWorkEstimateFunction)
-            return 0;
-        return m_quickWorkEstimateFunction(visitor);
-    }
+    double workEstimate(SlotVisitor&);
     
-    double workEstimate(SlotVisitor& visitor)
-    {
-        return lastVisitCount() + quickWorkEstimate(visitor);
-    }
+    void prepareToExecute(const AbstractLocker& constraintSolvingLocker, SlotVisitor&);
+    
+    void doParallelWork(SlotVisitor&, SharedTask<void(SlotVisitor&)>&);
     
     ConstraintVolatility volatility() const { return m_volatility; }
     
+    ConstraintConcurrency concurrency() const { return m_concurrency; }
+    ConstraintParallelism parallelism() const { return m_parallelism; }
+
+protected:
+    virtual void executeImpl(AbstractSlotVisitor&) = 0;
+    virtual void executeImpl(SlotVisitor&) = 0;
+    JS_EXPORT_PRIVATE virtual void prepareToExecuteImpl(const AbstractLocker& constraintSolvingLocker, AbstractSlotVisitor&);
+
+    // This function is only used by the verifier GC via Heap::verifyGC().
+    // Hence, we only need the AbstractSlotVisitor version.
+    void executeSynchronously(AbstractSlotVisitor&);
+
 private:
     friend class MarkingConstraintSet; // So it can set m_index.
     
-    unsigned m_index { UINT_MAX };
     CString m_abbreviatedName;
     CString m_name;
-    ::Function<void(SlotVisitor&, const VisitingTimeout& timeout)> m_executeFunction;
-    ::Function<double(SlotVisitor&)> m_quickWorkEstimateFunction;
-    ConstraintVolatility m_volatility;
     size_t m_lastVisitCount { 0 };
+    unsigned m_index { UINT_MAX };
+    ConstraintVolatility m_volatility;
+    ConstraintConcurrency m_concurrency;
+    ConstraintParallelism m_parallelism;
+    Lock m_lock;
 };
 
 } // namespace JSC

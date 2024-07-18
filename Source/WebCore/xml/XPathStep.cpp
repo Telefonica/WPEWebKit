@@ -29,8 +29,9 @@
 #include "XPathStep.h"
 
 #include "Attr.h"
+#include "CommonAtomStrings.h"
 #include "Document.h"
-#include "HTMLDocument.h"
+#include "ElementInlines.h"
 #include "HTMLElement.h"
 #include "NodeTraversal.h"
 #include "XMLNSNames.h"
@@ -53,9 +54,7 @@ Step::Step(Axis axis, NodeTest nodeTest, Vector<std::unique_ptr<Expression>> pre
 {
 }
 
-Step::~Step()
-{
-}
+Step::~Step() = default;
 
 void Step::optimize()
 {
@@ -147,7 +146,7 @@ void Step::evaluate(Node& context, NodeSet& nodes) const
     }
 }
 
-#if !ASSERT_DISABLED
+#if ASSERT_ENABLED
 static inline Node::NodeType primaryNodeType(Step::Axis axis)
 {
     switch (axis) {
@@ -157,7 +156,7 @@ static inline Node::NodeType primaryNodeType(Step::Axis axis)
             return Node::ELEMENT_NODE;
     }
 }
-#endif
+#endif // ASSERT_ENABLED
 
 // Evaluate NodeTest without considering merged predicates.
 inline bool nodeMatchesBasicTest(Node& node, Step::Axis axis, const Step::NodeTest& nodeTest)
@@ -168,14 +167,14 @@ inline bool nodeMatchesBasicTest(Node& node, Step::Axis axis, const Step::NodeTe
         case Step::NodeTest::CommentNodeTest:
             return node.nodeType() == Node::COMMENT_NODE;
         case Step::NodeTest::ProcessingInstructionNodeTest: {
-            const AtomicString& name = nodeTest.m_data;
+            const AtomString& name = nodeTest.m_data;
             return node.nodeType() == Node::PROCESSING_INSTRUCTION_NODE && (name.isEmpty() || node.nodeName() == name);
         }
         case Step::NodeTest::AnyNodeTest:
             return true;
         case Step::NodeTest::NameTest: {
-            const AtomicString& name = nodeTest.m_data;
-            const AtomicString& namespaceURI = nodeTest.m_namespaceURI;
+            const AtomString& name = nodeTest.m_data;
+            const AtomString& namespaceURI = nodeTest.m_namespaceURI;
 
             if (axis == Step::AttributeAxis) {
                 ASSERT(node.isAttributeNode());
@@ -201,7 +200,7 @@ inline bool nodeMatchesBasicTest(Node& node, Step::Axis axis, const Step::NodeTe
             if (name == starAtom())
                 return namespaceURI.isEmpty() || namespaceURI == node.namespaceURI();
 
-            if (is<HTMLDocument>(node.document())) {
+            if (node.document().isHTMLDocument()) {
                 if (is<HTMLElement>(node)) {
                     // Paths without namespaces should match HTML elements in HTML documents despite those having an XHTML namespace. Names are compared case-insensitively.
                     return equalIgnoringASCIICase(downcast<HTMLElement>(node).localName(), name) && (namespaceURI.isNull() || namespaceURI == node.namespaceURI());
@@ -260,7 +259,7 @@ void Step::nodesInAxis(Node& context, NodeSet& nodes) const
         case ParentAxis:
             if (context.isAttributeNode()) {
                 Element* node = static_cast<Attr&>(context).ownerElement();
-                if (nodeMatches(*node, ParentAxis, m_nodeTest))
+                if (node && nodeMatches(*node, ParentAxis, m_nodeTest))
                     nodes.append(node);
             } else {
                 ContainerNode* node = context.parentNode();
@@ -272,6 +271,8 @@ void Step::nodesInAxis(Node& context, NodeSet& nodes) const
             Node* node = &context;
             if (context.isAttributeNode()) {
                 node = static_cast<Attr&>(context).ownerElement();
+                if (!node)
+                    return;
                 if (nodeMatches(*node, AncestorAxis, m_nodeTest))
                     nodes.append(node);
             }
@@ -302,6 +303,8 @@ void Step::nodesInAxis(Node& context, NodeSet& nodes) const
         case FollowingAxis:
             if (context.isAttributeNode()) {
                 Node* node = static_cast<Attr&>(context).ownerElement();
+                if (!node)
+                    return;
                 while ((node = NodeTraversal::next(*node))) {
                     if (nodeMatches(*node, FollowingAxis, m_nodeTest))
                         nodes.append(node);
@@ -321,9 +324,11 @@ void Step::nodesInAxis(Node& context, NodeSet& nodes) const
             return;
         case PrecedingAxis: {
             Node* node;
-            if (context.isAttributeNode())
+            if (context.isAttributeNode()) {
                 node = static_cast<Attr&>(context).ownerElement();
-            else
+                if (!node)
+                    return;
+            } else
                 node = &context;
             while (ContainerNode* parent = node->parentNode()) {
                 for (node = NodeTraversal::previous(*node); node != parent; node = NodeTraversal::previous(*node)) {
@@ -384,6 +389,8 @@ void Step::nodesInAxis(Node& context, NodeSet& nodes) const
             Node* node = &context;
             if (context.isAttributeNode()) {
                 node = static_cast<Attr&>(context).ownerElement();
+                if (!node)
+                    return;
                 if (nodeMatches(*node, AncestorOrSelfAxis, m_nodeTest))
                     nodes.append(node);
             }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,81 +26,104 @@
 #include "config.h"
 #include "WebSocketStream.h"
 
-#include "DataReference.h"
 #include "NetworkConnectionToWebProcessMessages.h"
 #include "NetworkProcessConnection.h"
 #include "NetworkSocketStreamMessages.h"
 #include "WebCoreArgumentCoders.h"
 #include "WebProcess.h"
+#include <WebCore/CookieRequestHeaderFieldProxy.h>
 #include <WebCore/SocketStreamError.h>
 #include <WebCore/SocketStreamHandleClient.h>
-#include <pal/SessionID.h>
+#include <wtf/Lock.h>
 #include <wtf/NeverDestroyed.h>
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
-
-static HashMap<uint64_t, WebSocketStream*>& globalWebSocketStreamMap()
+static Lock globalWebSocketStreamMapLock;
+static HashMap<WebSocketIdentifier, WebSocketStream*>& globalWebSocketStreamMap() WTF_REQUIRES_LOCK(globalWebSocketStreamMapLock)
 {
-    static NeverDestroyed<HashMap<uint64_t, WebSocketStream*>> globalMap;
+    static NeverDestroyed<HashMap<WebSocketIdentifier, WebSocketStream*>> globalMap;
     return globalMap;
 }
 
-WebSocketStream* WebSocketStream::streamWithIdentifier(uint64_t identifier)
+WebSocketStream* WebSocketStream::streamWithIdentifier(WebSocketIdentifier identifier)
 {
+    Locker stateLocker { globalWebSocketStreamMapLock };
     return globalWebSocketStreamMap().get(identifier);
 }
 
 void WebSocketStream::networkProcessCrashed()
 {
-    for (auto& stream : globalWebSocketStreamMap().values()) {
-        for (auto& callback : stream->m_sendDataCallbacks.values())
-            callback(false);
-        stream->m_client.didFailSocketStream(*stream, SocketStreamError(0, { }, "Network process crashed."));
+    Vector<RefPtr<WebSocketStream>> sockets;
+    {
+        Locker stateLocker { globalWebSocketStreamMapLock };
+        sockets = copyToVectorOf<RefPtr<WebSocketStream>>(globalWebSocketStreamMap().values());
     }
 
+    for (auto& stream : sockets) {
+        for (auto& callback : stream->m_sendDataCallbacks.values())
+            callback(false);
+        for (auto& callback : stream->m_sendHandshakeCallbacks.values())
+            callback(false, false);
+        stream->m_client.didFailSocketStream(*stream, SocketStreamError(0, { }, "Network process crashed."_s));
+        stream = nullptr;
+    }
+
+    Locker stateLocker { globalWebSocketStreamMapLock };
     globalWebSocketStreamMap().clear();
 }
 
-Ref<WebSocketStream> WebSocketStream::create(const URL& url, SocketStreamHandleClient& client, PAL::SessionID sessionID, const String& credentialPartition)
+Ref<WebSocketStream> WebSocketStream::create(const URL& url, SocketStreamHandleClient& client, WebSocketIdentifier identifier, const String& credentialPartition)
 {
-    return adoptRef(*new WebSocketStream(url, client, sessionID, credentialPartition));
+    return adoptRef(*new WebSocketStream(url, client, identifier, credentialPartition));
 }
 
-WebSocketStream::WebSocketStream(const WebCore::URL& url, WebCore::SocketStreamHandleClient& client, PAL::SessionID sessionID, const String& cachePartition)
+WebSocketStream::WebSocketStream(const URL& url, WebCore::SocketStreamHandleClient& client, WebSocketIdentifier identifier, const String& cachePartition)
     : SocketStreamHandle(url, client)
+    ,  m_identifier(identifier)
     , m_client(client)
 {
-    WebProcess::singleton().networkConnection().connection().send(Messages::NetworkConnectionToWebProcess::CreateSocketStream(url, sessionID, cachePartition, identifier()), 0);
+    WebProcess::singleton().ensureNetworkProcessConnection().connection().send(Messages::NetworkConnectionToWebProcess::CreateSocketStream(url, cachePartition, m_identifier), 0);
 
-    ASSERT(!globalWebSocketStreamMap().contains(identifier()));
-    globalWebSocketStreamMap().set(identifier(), this);
+    Locker stateLocker { globalWebSocketStreamMapLock };
+    ASSERT(!globalWebSocketStreamMap().contains(m_identifier));
+    globalWebSocketStreamMap().set(m_identifier, this);
 }
 
 WebSocketStream::~WebSocketStream()
 {
-    ASSERT(globalWebSocketStreamMap().contains(identifier()));
-    globalWebSocketStreamMap().remove(identifier());
+    Locker stateLocker { globalWebSocketStreamMapLock };
+    ASSERT(globalWebSocketStreamMap().contains(m_identifier));
+    globalWebSocketStreamMap().remove(m_identifier);
 }
 
-IPC::Connection* WebSocketStream::messageSenderConnection()
+IPC::Connection* WebSocketStream::messageSenderConnection() const
 {
-    return &WebProcess::singleton().networkConnection().connection();
+    return &WebProcess::singleton().ensureNetworkProcessConnection().connection();
 }
 
-uint64_t WebSocketStream::messageSenderDestinationID()
+uint64_t WebSocketStream::messageSenderDestinationID() const
 {
-    return identifier();
+    return m_identifier.toUInt64();
 }
 
-void WebSocketStream::platformSend(const char* data, size_t length, Function<void(bool)>&& completionHandler)
+void WebSocketStream::platformSend(const uint8_t* data, size_t length, Function<void(bool)>&& completionHandler)
 {
     static uint64_t nextDataIdentifier = 1;
     uint64_t dataIdentifier = nextDataIdentifier++;
-    send(Messages::NetworkSocketStream::SendData(IPC::DataReference(reinterpret_cast<const uint8_t *>(data), length), dataIdentifier));
+    send(Messages::NetworkSocketStream::SendData(IPC::DataReference(data, length), dataIdentifier));
     ASSERT(!m_sendDataCallbacks.contains(dataIdentifier));
-    m_sendDataCallbacks.set(dataIdentifier, WTFMove(completionHandler));
+    m_sendDataCallbacks.add(dataIdentifier, WTFMove(completionHandler));
+}
+
+void WebSocketStream::platformSendHandshake(const uint8_t* data, size_t length, const std::optional<CookieRequestHeaderFieldProxy>& headerFieldProxy, Function<void(bool, bool)>&& completionHandler)
+{
+    static uint64_t nextDataIdentifier = 1;
+    uint64_t dataIdentifier = nextDataIdentifier++;
+    send(Messages::NetworkSocketStream::SendHandshake(IPC::DataReference(data, length), headerFieldProxy, dataIdentifier));
+    ASSERT(!m_sendHandshakeCallbacks.contains(dataIdentifier));
+    m_sendHandshakeCallbacks.add(dataIdentifier, WTFMove(completionHandler));
 }
 
 void WebSocketStream::didSendData(uint64_t identifier, bool success)
@@ -108,7 +131,13 @@ void WebSocketStream::didSendData(uint64_t identifier, bool success)
     ASSERT(m_sendDataCallbacks.contains(identifier));
     m_sendDataCallbacks.take(identifier)(success);
 }
-    
+
+void WebSocketStream::didSendHandshake(uint64_t identifier, bool success, bool didAccessSecureCookies)
+{
+    ASSERT(m_sendHandshakeCallbacks.contains(identifier));
+    m_sendHandshakeCallbacks.take(identifier)(success, didAccessSecureCookies);
+}
+
 void WebSocketStream::platformClose()
 {
     send(Messages::NetworkSocketStream::Close());
@@ -133,7 +162,7 @@ void WebSocketStream::didCloseSocketStream()
 
 void WebSocketStream::didReceiveSocketStreamData(const IPC::DataReference& data)
 {
-    m_client.didReceiveSocketStreamData(*this, reinterpret_cast<const char*>(data.data()), data.size());
+    m_client.didReceiveSocketStreamData(*this, data.data(), data.size());
 }
 
 void WebSocketStream::didFailToReceiveSocketStreamData()

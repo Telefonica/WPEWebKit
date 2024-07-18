@@ -56,6 +56,7 @@
 
 #include <openssl/asn1.h>
 
+#include <limits.h>
 #include <string.h>
 
 #include <openssl/err.h>
@@ -66,10 +67,10 @@
 
 int ASN1_BIT_STRING_set(ASN1_BIT_STRING *x, unsigned char *d, int len)
 {
-    return M_ASN1_BIT_STRING_set(x, d, len);
+    return ASN1_STRING_set(x, d, len);
 }
 
-int i2c_ASN1_BIT_STRING(ASN1_BIT_STRING *a, unsigned char **pp)
+int i2c_ASN1_BIT_STRING(const ASN1_BIT_STRING *a, unsigned char **pp)
 {
     int ret, j, bits, len;
     unsigned char *p, *d;
@@ -139,8 +140,13 @@ ASN1_BIT_STRING *c2i_ASN1_BIT_STRING(ASN1_BIT_STRING **a,
         goto err;
     }
 
+    if (len > INT_MAX) {
+      OPENSSL_PUT_ERROR(ASN1, ASN1_R_STRING_TOO_LONG);
+      goto err;
+    }
+
     if ((a == NULL) || ((*a) == NULL)) {
-        if ((ret = M_ASN1_BIT_STRING_new()) == NULL)
+        if ((ret = ASN1_BIT_STRING_new()) == NULL)
             return (NULL);
     } else
         ret = (*a);
@@ -182,7 +188,7 @@ ASN1_BIT_STRING *c2i_ASN1_BIT_STRING(ASN1_BIT_STRING **a,
     return (ret);
  err:
     if ((ret != NULL) && ((a == NULL) || (*a != ret)))
-        M_ASN1_BIT_STRING_free(ret);
+        ASN1_BIT_STRING_free(ret);
     return (NULL);
 }
 
@@ -211,8 +217,7 @@ int ASN1_BIT_STRING_set_bit(ASN1_BIT_STRING *a, int n, int value)
         if (a->data == NULL)
             c = (unsigned char *)OPENSSL_malloc(w + 1);
         else
-            c = (unsigned char *)OPENSSL_realloc_clean(a->data,
-                                                       a->length, w + 1);
+            c = (unsigned char *)OPENSSL_realloc(a->data, w + 1);
         if (c == NULL) {
             OPENSSL_PUT_ERROR(ASN1, ERR_R_MALLOC_FAILURE);
             return 0;
@@ -228,7 +233,7 @@ int ASN1_BIT_STRING_set_bit(ASN1_BIT_STRING *a, int n, int value)
     return (1);
 }
 
-int ASN1_BIT_STRING_get_bit(ASN1_BIT_STRING *a, int n)
+int ASN1_BIT_STRING_get_bit(const ASN1_BIT_STRING *a, int n)
 {
     int w, v;
 
@@ -245,7 +250,7 @@ int ASN1_BIT_STRING_get_bit(ASN1_BIT_STRING *a, int n)
  * which is not specified in 'flags', 1 otherwise.
  * 'len' is the length of 'flags'.
  */
-int ASN1_BIT_STRING_check(ASN1_BIT_STRING *a,
+int ASN1_BIT_STRING_check(const ASN1_BIT_STRING *a,
                           unsigned char *flags, int flags_len)
 {
     int i, ok;

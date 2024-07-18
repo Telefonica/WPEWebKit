@@ -29,7 +29,6 @@
 namespace WebKit {
 
 class NetworkProcessProxy;
-class StorageProcessProxy;
 class WebProcessPool;
 class WebProcessProxy;
 
@@ -45,18 +44,6 @@ public:
     }
 
     virtual void processPoolDestroyed()
-    {
-    }
-
-    virtual void processDidClose(WebProcessProxy*)
-    {
-    }
-
-    virtual void processDidClose(NetworkProcessProxy*)
-    {
-    }
-
-    virtual void processDidClose(StorageProcessProxy*)
     {
     }
 

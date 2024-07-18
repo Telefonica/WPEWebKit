@@ -33,10 +33,13 @@
 #include "RealtimeMediaSourceSupportedConstraints.h"
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RetainPtr.h>
+#include <wtf/WorkQueue.h>
 #include <wtf/text/WTFString.h>
 
 OBJC_CLASS AVCaptureDevice;
 OBJC_CLASS AVCaptureSession;
+OBJC_CLASS NSArray;
+OBJC_CLASS NSMutableArray;
 OBJC_CLASS NSString;
 OBJC_CLASS WebCoreAVCaptureDeviceManagerObserver;
 
@@ -45,28 +48,29 @@ namespace WebCore {
 class AVCaptureDeviceManager final : public CaptureDeviceManager {
     friend class NeverDestroyed<AVCaptureDeviceManager>;
 public:
-    Vector<CaptureDevice>& captureDevices() final;
-
     static AVCaptureDeviceManager& singleton();
 
-    void deviceConnected();
-    void deviceDisconnected(AVCaptureDevice*);
+    void refreshCaptureDevices(CompletionHandler<void()>&& = [] { });
 
-    Vector<CaptureDevice> getAudioSourcesInfo() final;
-    Vector<CaptureDevice> getVideoSourcesInfo() final;
-
-protected:
+private:
     static bool isAvailable();
 
     AVCaptureDeviceManager();
     ~AVCaptureDeviceManager() final;
 
-    void refreshCaptureDevices() final;
+    void computeCaptureDevices(CompletionHandler<void()>&&) final;
+    const Vector<CaptureDevice>& captureDevices() final;
+
     void registerForDeviceNotifications();
-    void refreshAVCaptureDevicesOfType(CaptureDevice::DeviceType);
+    void updateCachedAVCaptureDevices();
+    Vector<CaptureDevice> retrieveCaptureDevices();
 
     RetainPtr<WebCoreAVCaptureDeviceManagerObserver> m_objcObserver;
     Vector<CaptureDevice> m_devices;
+    RetainPtr<NSMutableArray> m_avCaptureDevices;
+    bool m_isInitialized { false };
+
+    Ref<WorkQueue> m_dispatchQueue;
 };
 
 } // namespace WebCore

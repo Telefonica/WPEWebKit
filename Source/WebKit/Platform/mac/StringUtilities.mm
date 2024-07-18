@@ -28,16 +28,15 @@
 
 #import "WKSharedAPICast.h"
 #import "WKStringCF.h"
-#import <wtf/ObjcRuntimeExtras.h>
+#import <JavaScriptCore/RegularExpression.h>
 #import <wtf/SoftLinking.h>
 #import <wtf/text/StringBuilder.h>
-#import <yarr/RegularExpression.h>
 
 namespace WebKit {
 
 NSString *nsStringFromWebCoreString(const String& string)
 {
-    return string.isEmpty() ? @"" : CFBridgingRelease(WKStringCopyCFString(0, toAPI(string.impl())));
+    return string.isEmpty() ? @"" : adoptCF(WKStringCopyCFString(0, toAPI(string.impl()))).bridgingAutorelease();
 }
 
 #if ENABLE(TELEPHONE_NUMBER_DETECTION) && PLATFORM(MAC)
@@ -62,15 +61,15 @@ NSString *formattedPhoneNumberString(NSString *originalPhoneNumber)
 {
     NSString *countryCode = [[[NSLocale currentLocale] objectForKey:NSLocaleCountryCode] lowercaseString];
 
-    RetainPtr<CFPhoneNumberRef> phoneNumber = adoptCF(CFPhoneNumberCreate(kCFAllocatorDefault, (CFStringRef)originalPhoneNumber, (CFStringRef)countryCode));
+    RetainPtr<CFPhoneNumberRef> phoneNumber = adoptCF(CFPhoneNumberCreate(kCFAllocatorDefault, (__bridge CFStringRef)originalPhoneNumber, (__bridge CFStringRef)countryCode));
     if (!phoneNumber)
         return originalPhoneNumber;
 
-    CFStringRef phoneNumberString = CFPhoneNumberCopyFormattedRepresentation(phoneNumber.get());
+    auto phoneNumberString = adoptCF(CFPhoneNumberCopyFormattedRepresentation(phoneNumber.get()));
     if (!phoneNumberString)
-        phoneNumberString = CFPhoneNumberCopyUnformattedRepresentation(phoneNumber.get());
+        phoneNumberString = adoptCF(CFPhoneNumberCopyUnformattedRepresentation(phoneNumber.get()));
 
-    return [(NSString *)phoneNumberString autorelease];
+    return phoneNumberString.bridgingAutorelease();
 }
 
 #else

@@ -46,13 +46,6 @@ public:
     virtual void setupConnectionScheduling(CFURLConnectionRef) = 0;
     virtual void releaseHandle();
 
-    virtual void continueWillSendRequest(CFURLRequestRef) = 0;
-    virtual void continueDidReceiveResponse() = 0;
-    virtual void continueWillCacheResponse(CFCachedURLResponseRef) = 0;
-#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
-    virtual void continueCanAuthenticateAgainstProtectionSpace(bool) = 0;
-#endif // USE(PROTECTION_SPACE_AUTH_CALLBACK)
-
 protected:
     RetainPtr<CFURLResponseRef> synthesizeRedirectResponseIfNecessary(CFURLRequestRef, CFURLResponseRef);
     ResourceRequest createResourceRequest(CFURLRequestRef, CFURLResponseRef);
@@ -73,7 +66,7 @@ private:
     static Boolean canRespondToProtectionSpaceCallback(CFURLConnectionRef, CFURLProtectionSpaceRef, const void* clientInfo);
 #endif // USE(PROTECTION_SPACE_AUTH_CALLBACK)
 
-    virtual CFURLRequestRef willSendRequest(CFURLRequestRef, CFURLResponseRef) = 0;
+    virtual RetainPtr<CFURLRequestRef> willSendRequest(CFURLRequestRef, CFURLResponseRef) = 0;
     virtual void didReceiveResponse(CFURLConnectionRef, CFURLResponseRef) = 0;
     virtual void didReceiveData(CFDataRef, CFIndex originalLength) = 0;
     virtual void didFinishLoading() = 0;

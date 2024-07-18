@@ -26,26 +26,22 @@
 #include "config.h"
 #include "CryptoAlgorithmHKDF.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
-#include "CommonCryptoUtilities.h"
 #include "CryptoAlgorithmHkdfParams.h"
 #include "CryptoKeyRaw.h"
+#include "CryptoUtilitiesCocoa.h"
 
 namespace WebCore {
 
-ExceptionOr<Vector<uint8_t>> CryptoAlgorithmHKDF::platformDeriveBits(CryptoAlgorithmHkdfParams& parameters, const CryptoKeyRaw& key, size_t length)
+ExceptionOr<Vector<uint8_t>> CryptoAlgorithmHKDF::platformDeriveBits(const CryptoAlgorithmHkdfParams& parameters, const CryptoKeyRaw& key, size_t length)
 {
-    Vector<uint8_t> result(length / 8);
     CCDigestAlgorithm digestAlgorithm;
     getCommonCryptoDigestAlgorithm(parameters.hashIdentifier, digestAlgorithm);
 
-    // <rdar://problem/32439455> Currently, when key data is empty, CCKeyDerivationHMac will bail out.
-    if (CCKeyDerivationHMac(kCCKDFAlgorithmHKDF, digestAlgorithm, 0, key.key().data(), key.key().size(), 0, 0, parameters.infoVector().data(), parameters.infoVector().size(), 0, 0, parameters.saltVector().data(), parameters.saltVector().size(), result.data(), result.size()))
-        return Exception { OperationError };
-    return WTFMove(result);
+    return deriveHDKFBits(digestAlgorithm, key.key().data(), key.key().size(), parameters.saltVector().data(), parameters.saltVector().size(), parameters.infoVector().data(), parameters.infoVector().size(), length);
 }
 
 }
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

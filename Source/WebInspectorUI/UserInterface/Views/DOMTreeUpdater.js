@@ -30,13 +30,13 @@
 
 WI.DOMTreeUpdater = function(treeOutline)
 {
-    WI.domTreeManager.addEventListener(WI.DOMTreeManager.Event.NodeInserted, this._nodeInserted, this);
-    WI.domTreeManager.addEventListener(WI.DOMTreeManager.Event.NodeRemoved, this._nodeRemoved, this);
-    WI.domTreeManager.addEventListener(WI.DOMTreeManager.Event.AttributeModified, this._attributesUpdated, this);
-    WI.domTreeManager.addEventListener(WI.DOMTreeManager.Event.AttributeRemoved, this._attributesUpdated, this);
-    WI.domTreeManager.addEventListener(WI.DOMTreeManager.Event.CharacterDataModified, this._characterDataModified, this);
-    WI.domTreeManager.addEventListener(WI.DOMTreeManager.Event.DocumentUpdated, this._documentUpdated, this);
-    WI.domTreeManager.addEventListener(WI.DOMTreeManager.Event.ChildNodeCountUpdated, this._childNodeCountUpdated, this);
+    WI.domManager.addEventListener(WI.DOMManager.Event.NodeInserted, this._nodeInserted, this);
+    WI.domManager.addEventListener(WI.DOMManager.Event.NodeRemoved, this._nodeRemoved, this);
+    WI.domManager.addEventListener(WI.DOMManager.Event.AttributeModified, this._attributesUpdated, this);
+    WI.domManager.addEventListener(WI.DOMManager.Event.AttributeRemoved, this._attributesUpdated, this);
+    WI.domManager.addEventListener(WI.DOMManager.Event.CharacterDataModified, this._characterDataModified, this);
+    WI.domManager.addEventListener(WI.DOMManager.Event.DocumentUpdated, this._documentUpdated, this);
+    WI.domManager.addEventListener(WI.DOMManager.Event.ChildNodeCountUpdated, this._childNodeCountUpdated, this);
 
     this._treeOutline = treeOutline;
 
@@ -48,12 +48,22 @@ WI.DOMTreeUpdater = function(treeOutline)
 
     // Dummy "attribute" that is used to track textContent changes.
     this._textContentAttributeSymbol = Symbol("text-content-attribute");
+
+    this._updateModifiedNodesDebouncer = new Debouncer(() => {
+        this._updateModifiedNodes();
+    });
 };
 
 WI.DOMTreeUpdater.prototype = {
     close: function()
     {
-        WI.domTreeManager.removeEventListener(null, null, this);
+        WI.domManager.removeEventListener(WI.DOMManager.Event.NodeInserted, this._nodeInserted, this);
+        WI.domManager.removeEventListener(WI.DOMManager.Event.NodeRemoved, this._nodeRemoved, this);
+        WI.domManager.removeEventListener(WI.DOMManager.Event.AttributeModified, this._attributesUpdated, this);
+        WI.domManager.removeEventListener(WI.DOMManager.Event.AttributeRemoved, this._attributesUpdated, this);
+        WI.domManager.removeEventListener(WI.DOMManager.Event.CharacterDataModified, this._characterDataModified, this);
+        WI.domManager.removeEventListener(WI.DOMManager.Event.DocumentUpdated, this._documentUpdated, this);
+        WI.domManager.removeEventListener(WI.DOMManager.Event.ChildNodeCountUpdated, this._childNodeCountUpdated, this);
     },
 
     _documentUpdated: function(event)
@@ -81,21 +91,25 @@ WI.DOMTreeUpdater.prototype = {
         this._recentlyModifiedNodes.add(node);
 
         if (this._treeOutline._visible)
-            this.onNextFrame._updateModifiedNodes();
+            this._updateModifiedNodesDebouncer.delayForFrame();
       },
 
     _nodeInserted: function(event)
     {
         this._recentlyInsertedNodes.set(event.data.node, {parent: event.data.parent});
         if (this._treeOutline._visible)
-            this.onNextFrame._updateModifiedNodes();
+            this._updateModifiedNodesDebouncer.delayForFrame();
     },
 
     _nodeRemoved: function(event)
     {
-        this._recentlyDeletedNodes.set(event.data.node, {parent: event.data.parent});
+        let parent = event.data.parent;
+        if (!parent)
+            return;
+
+        this._recentlyDeletedNodes.set(event.data.node, {parent});
         if (this._treeOutline._visible)
-            this.onNextFrame._updateModifiedNodes();
+            this._updateModifiedNodesDebouncer.delayForFrame();
     },
 
     _childNodeCountUpdated: function(event)
@@ -120,14 +134,16 @@ WI.DOMTreeUpdater.prototype = {
         this._recentlyDeletedNodes.forEach(markNodeParentForUpdate);
 
         for (let parentTreeElement of parentElementsToUpdate) {
-            parentTreeElement.updateTitle();
-            parentTreeElement.updateChildren();
+            if (parentTreeElement.treeOutline && parentTreeElement.listItemElement) {
+                parentTreeElement.updateTitle();
+                parentTreeElement.updateChildren();
+            }
         }
 
         for (let node of this._recentlyModifiedNodes.values()) {
             let nodeTreeElement = this._treeOutline.findTreeElement(node);
             if (!nodeTreeElement)
-                return;
+                continue;
 
             for (let [attribute, nodes] of this._recentlyModifiedAttributes.entries()) {
                 // Don't report textContent changes as attribute modifications.
@@ -149,7 +165,7 @@ WI.DOMTreeUpdater.prototype = {
 
     _reset: function()
     {
-        WI.domTreeManager.hideDOMNodeHighlight();
+        WI.domManager.hideDOMNodeHighlight();
 
         this._recentlyInsertedNodes.clear();
         this._recentlyDeletedNodes.clear();

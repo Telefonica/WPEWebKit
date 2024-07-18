@@ -30,45 +30,27 @@
 
 namespace WebCore {
 
-bool DeprecatedCSSOMValueList::equals(const DeprecatedCSSOMValueList& other) const
-{
-    if (m_valueListSeparator != other.m_valueListSeparator)
-        return false;
-    
-    if (m_values.size() != other.m_values.size())
-        return false;
-    
-    for (unsigned i = 0, size = m_values.size(); i < size; ++i) {
-        if (!m_values[i].get().equals(other.m_values[i]))
-            return false;
-    }
-    return true;
-}
-
 String DeprecatedCSSOMValueList::cssText() const
 {
-    StringBuilder result;
-    String separator;
-    switch (m_valueListSeparator) {
+    const char* separator;
+    switch (m_valueSeparator) {
     case CSSValue::SpaceSeparator:
-        separator = ASCIILiteral(" ");
+        separator = " ";
         break;
     case CSSValue::CommaSeparator:
-        separator = ASCIILiteral(", ");
+        separator = ", ";
         break;
     case CSSValue::SlashSeparator:
-        separator = ASCIILiteral(" / ");
+        separator = " / ";
         break;
     default:
         ASSERT_NOT_REACHED();
+        separator = "";
     }
     
-    for (auto& value : m_values) {
-        if (!result.isEmpty())
-            result.append(separator);
-        result.append(value.get().cssText());
-    }
-    
+    StringBuilder result;
+    for (auto& value : m_values)
+        result.append(result.isEmpty() ? "" : separator, value.get().cssText());
     return result.toString();
 }
 

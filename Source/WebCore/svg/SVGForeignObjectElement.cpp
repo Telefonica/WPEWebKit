@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2019 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2014 Adobe Systems Incorporated. All rights reserved.
  *
@@ -25,41 +25,28 @@
 #include "CSSPropertyNames.h"
 #include "RenderSVGForeignObject.h"
 #include "RenderSVGResource.h"
+#include "SVGElementInlines.h"
 #include "SVGLengthValue.h"
 #include "SVGNames.h"
-#include "XLinkNames.h"
 #include <wtf/Assertions.h>
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
 
-// Animated property definitions
-DEFINE_ANIMATED_LENGTH(SVGForeignObjectElement, SVGNames::xAttr, X, x)
-DEFINE_ANIMATED_LENGTH(SVGForeignObjectElement, SVGNames::yAttr, Y, y)
-DEFINE_ANIMATED_LENGTH(SVGForeignObjectElement, SVGNames::widthAttr, Width, width)
-DEFINE_ANIMATED_LENGTH(SVGForeignObjectElement, SVGNames::heightAttr, Height, height)
-DEFINE_ANIMATED_STRING(SVGForeignObjectElement, XLinkNames::hrefAttr, Href, href)
-DEFINE_ANIMATED_BOOLEAN(SVGForeignObjectElement, SVGNames::externalResourcesRequiredAttr, ExternalResourcesRequired, externalResourcesRequired)
-
-BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGForeignObjectElement)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(x)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(y)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(width)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(height)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(href)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(externalResourcesRequired)
-    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGGraphicsElement)
-END_REGISTER_ANIMATED_PROPERTIES
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGForeignObjectElement);
 
 inline SVGForeignObjectElement::SVGForeignObjectElement(const QualifiedName& tagName, Document& document)
     : SVGGraphicsElement(tagName, document)
-    , m_x(LengthModeWidth)
-    , m_y(LengthModeHeight)
-    , m_width(LengthModeWidth)
-    , m_height(LengthModeHeight)
 {
     ASSERT(hasTagName(SVGNames::foreignObjectTag));
-    registerAnimatedPropertiesForSVGForeignObjectElement();
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        PropertyRegistry::registerProperty<SVGNames::xAttr, &SVGForeignObjectElement::m_x>();
+        PropertyRegistry::registerProperty<SVGNames::yAttr, &SVGForeignObjectElement::m_y>();
+        PropertyRegistry::registerProperty<SVGNames::widthAttr, &SVGForeignObjectElement::m_width>();
+        PropertyRegistry::registerProperty<SVGNames::heightAttr, &SVGForeignObjectElement::m_height>();
+    });
 }
 
 Ref<SVGForeignObjectElement> SVGForeignObjectElement::create(const QualifiedName& tagName, Document& document)
@@ -67,61 +54,44 @@ Ref<SVGForeignObjectElement> SVGForeignObjectElement::create(const QualifiedName
     return adoptRef(*new SVGForeignObjectElement(tagName, document));
 }
 
-bool SVGForeignObjectElement::isSupportedAttribute(const QualifiedName& attrName)
-{
-    static const auto supportedAttributes = makeNeverDestroyed([] {
-        HashSet<QualifiedName> set;
-        SVGLangSpace::addSupportedAttributes(set);
-        SVGExternalResourcesRequired::addSupportedAttributes(set);
-        set.add({ SVGNames::xAttr, SVGNames::yAttr, SVGNames::widthAttr, SVGNames::heightAttr });
-        return set;
-    }());
-    return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGForeignObjectElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void SVGForeignObjectElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     SVGParsingError parseError = NoError;
 
     if (name == SVGNames::xAttr)
-        setXBaseValue(SVGLengthValue::construct(LengthModeWidth, value, parseError));
+        m_x->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Width, value, parseError));
     else if (name == SVGNames::yAttr)
-        setYBaseValue(SVGLengthValue::construct(LengthModeHeight, value, parseError));
+        m_y->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Height, value, parseError));
     else if (name == SVGNames::widthAttr)
-        setWidthBaseValue(SVGLengthValue::construct(LengthModeWidth, value, parseError));
+        m_width->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Width, value, parseError));
     else if (name == SVGNames::heightAttr)
-        setHeightBaseValue(SVGLengthValue::construct(LengthModeHeight, value, parseError));
+        m_height->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Height, value, parseError));
 
     reportAttributeParsingError(parseError, name, value);
 
     SVGGraphicsElement::parseAttribute(name, value);
-    SVGExternalResourcesRequired::parseAttribute(name, value);
 }
 
 void SVGForeignObjectElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (!isSupportedAttribute(attrName)) {
-        SVGGraphicsElement::svgAttributeChanged(attrName);
+    if (PropertyRegistry::isKnownAttribute(attrName)) {
+        InstanceInvalidationGuard guard(*this);
+        if (attrName == SVGNames::widthAttr || attrName == SVGNames::heightAttr)
+            setPresentationalHintStyleIsDirty();
+        else {
+            ASSERT(attrName == SVGNames::xAttr || attrName == SVGNames::yAttr);
+            updateRelativeLengthsInformation();
+            updateSVGRendererForElementChange();
+        }
         return;
     }
 
-    InstanceInvalidationGuard guard(*this);
-
-    if (attrName == SVGNames::widthAttr
-        || attrName == SVGNames::heightAttr) {
-        invalidateSVGPresentationAttributeStyle();
-        return;
-    }
-
-    if (attrName == SVGNames::xAttr || attrName == SVGNames::yAttr)
-        updateRelativeLengthsInformation();
-
-    if (auto renderer = this->renderer())
-        RenderSVGResource::markForLayoutAndParentResourceInvalidation(*renderer);
+    SVGGraphicsElement::svgAttributeChanged(attrName);
 }
 
 RenderPtr<RenderElement> SVGForeignObjectElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
+    document().setMayHaveRenderedSVGForeignObjects();
     return createRenderer<RenderSVGForeignObject>(*this, WTFMove(style));
 }
 
@@ -142,7 +112,10 @@ bool SVGForeignObjectElement::rendererIsNeeded(const RenderStyle& style)
     // Note that we currently do not support foreignObject instantiation via <use>, hence it is safe
     // to use parentElement() here. If that changes, this method should be updated to use
     // parentOrShadowHostElement() instead.
-    Element* ancestor = parentElement();
+    RefPtr ancestor = parentElement();
+    if (!ancestor)
+        return false;
+
     while (ancestor && ancestor->isSVGElement()) {
         if (ancestor->renderer() && ancestor->renderer()->isSVGHiddenContainer())
             return false;

@@ -29,13 +29,13 @@
 #import "DOMInternal.h"
 #import "ExceptionHandlers.h"
 #import <WebCore/Attr.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/NamedNodeMap.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL reinterpret_cast<WebCore::NamedNodeMap*>(_internal)
 
@@ -125,10 +125,12 @@ DOMNamedNodeMap *kit(WebCore::NamedNodeMap* value)
     if (!value)
         return nil;
     if (DOMNamedNodeMap *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMNamedNodeMap *wrapper = [[DOMNamedNodeMap alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    auto wrapper = adoptNS([[DOMNamedNodeMap alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
+
+#undef IMPL

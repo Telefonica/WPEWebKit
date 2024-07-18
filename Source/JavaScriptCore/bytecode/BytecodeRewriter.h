@@ -26,7 +26,9 @@
 
 #pragma once
 
+#include "BytecodeGenerator.h"
 #include "BytecodeGraph.h"
+#include "BytecodeStructs.h"
 #include "Bytecodes.h"
 #include "Opcode.h"
 #include "UnlinkedCodeBlock.h"
@@ -93,10 +95,10 @@ public:
     };
 
     struct InsertionPoint {
-        int bytecodeOffset;
+        int32_t bytecodeOffset;
         Position position;
 
-        InsertionPoint(int offset, Position pos)
+        InsertionPoint(JSInstructionStream::Offset offset, Position pos)
             : bytecodeOffset(offset)
             , position(pos)
         {
@@ -130,92 +132,117 @@ private:
         Type type;
         IncludeBranch includeBranch;
         size_t removeLength;
-        Vector<UnlinkedInstruction> instructions;
+        JSInstructionStreamWriter instructions;
     };
 
 public:
     class Fragment {
     WTF_MAKE_NONCOPYABLE(Fragment);
     public:
-        Fragment(Vector<UnlinkedInstruction>& fragment, IncludeBranch& includeBranch)
-            : m_fragment(fragment)
+        Fragment(BytecodeGenerator& bytecodeGenerator, JSInstructionStreamWriter& writer, IncludeBranch& includeBranch)
+            : m_bytecodeGenerator(bytecodeGenerator)
+            , m_writer(writer)
             , m_includeBranch(includeBranch)
         {
         }
 
-        template<class... Args>
-        void appendInstruction(OpcodeID opcodeID, Args... args)
+        template<class Op, class... Args>
+        void appendInstruction(Args... args)
         {
-            if (isBranch(opcodeID))
+            if (isBranch(Op::opcodeID))
                 m_includeBranch = IncludeBranch::Yes;
 
-            UnlinkedInstruction instructions[sizeof...(args) + 1] = {
-                UnlinkedInstruction(opcodeID),
-                UnlinkedInstruction(args)...
-            };
-            m_fragment.append(instructions, sizeof...(args) + 1);
+            m_bytecodeGenerator.withWriter(m_writer, [&] {
+                Op::emit(&m_bytecodeGenerator, std::forward<Args>(args)...);
+            });
+        }
+
+        void align(size_t congruent = 0)
+        {
+            UNUSED_PARAM(congruent);
+#if CPU(NEEDS_ALIGNED_ACCESS)
+            congruent = congruent % OpcodeSize::Wide32;
+            m_bytecodeGenerator.withWriter(m_writer, [&] {
+                while (m_bytecodeGenerator.instructions().size() % OpcodeSize::Wide32 != congruent)
+                    OpNop::emit<OpcodeSize::Narrow>(&m_bytecodeGenerator);
+            });
+#endif
         }
 
     private:
-        Vector<UnlinkedInstruction>& m_fragment;
+        BytecodeGenerator& m_bytecodeGenerator;
+        JSInstructionStreamWriter& m_writer;
         IncludeBranch& m_includeBranch;
     };
 
-    BytecodeRewriter(BytecodeGraph<UnlinkedCodeBlock>& graph)
-        : m_graph(graph)
+    BytecodeRewriter(BytecodeGenerator& bytecodeGenerator, BytecodeGraph& graph, UnlinkedCodeBlockGenerator* codeBlock, JSInstructionStreamWriter& writer)
+        : m_bytecodeGenerator(bytecodeGenerator)
+        , m_graph(graph)
+        , m_codeBlock(codeBlock)
+        , m_writer(writer)
     {
     }
 
     template<class Function>
-    void insertFragmentBefore(unsigned bytecodeOffset, Function function)
+    void insertFragmentBefore(const JSInstructionStream::Ref& instruction, Function function)
     {
         IncludeBranch includeBranch = IncludeBranch::No;
-        Vector<UnlinkedInstruction> instructions;
-        Fragment fragment(instructions, includeBranch);
+        JSInstructionStreamWriter writer;
+        Fragment fragment(m_bytecodeGenerator, writer, includeBranch);
         function(fragment);
-        insertImpl(InsertionPoint(bytecodeOffset, Position::Before), includeBranch, WTFMove(instructions));
+        fragment.align();
+        insertImpl(InsertionPoint(instruction.offset(), Position::Before), includeBranch, WTFMove(writer));
     }
 
     template<class Function>
-    void insertFragmentAfter(unsigned bytecodeOffset, Function function)
+    void insertFragmentAfter(const JSInstructionStream::Ref& instruction, Function function, size_t alignCongruent = 0)
     {
         IncludeBranch includeBranch = IncludeBranch::No;
-        Vector<UnlinkedInstruction> instructions;
-        Fragment fragment(instructions, includeBranch);
+        JSInstructionStreamWriter writer;
+        Fragment fragment(m_bytecodeGenerator, writer, includeBranch);
         function(fragment);
-        insertImpl(InsertionPoint(bytecodeOffset, Position::After), includeBranch, WTFMove(instructions));
+        fragment.align(alignCongruent);
+        insertImpl(InsertionPoint(instruction.offset(), Position::After), includeBranch, WTFMove(writer));
     }
 
-    void removeBytecode(unsigned bytecodeOffset)
+    template<class Function>
+    void replaceBytecodeWithFragment(const JSInstructionStream::Ref& instruction, Function function)
     {
-        m_insertions.append(Insertion { InsertionPoint(bytecodeOffset, Position::OriginalBytecodePoint), Insertion::Type::Remove, IncludeBranch::No, opcodeLength(m_graph.instructions()[bytecodeOffset].u.opcode), { } });
+        // Note: This function preserves the alignment of the subsequent bytecode (on targets where this matters)
+        m_insertions.append(Insertion { InsertionPoint(instruction.offset(), Position::OriginalBytecodePoint), Insertion::Type::Remove, IncludeBranch::No, instruction->size(), { } });
+        insertFragmentAfter(instruction, function, instruction->size());
     }
 
     void execute();
 
-    BytecodeGraph<UnlinkedCodeBlock>& graph() { return m_graph; }
+    BytecodeGraph& graph() { return m_graph; }
 
-    int adjustAbsoluteOffset(int absoluteOffset)
+    int32_t adjustAbsoluteOffset(JSInstructionStream::Offset absoluteOffset)
     {
         return adjustJumpTarget(InsertionPoint(0, Position::EntryPoint), InsertionPoint(absoluteOffset, Position::LabelPoint));
     }
 
-    int adjustJumpTarget(int originalBytecodeOffset, int originalJumpTarget)
+    int32_t adjustJumpTarget(JSInstructionStream::Offset originalBytecodeOffset, int32_t originalJumpTarget)
     {
         return adjustJumpTarget(InsertionPoint(originalBytecodeOffset, Position::LabelPoint), InsertionPoint(originalJumpTarget, Position::LabelPoint));
     }
 
-private:
-    void insertImpl(InsertionPoint, IncludeBranch, Vector<UnlinkedInstruction>&& fragment);
+    void adjustJumpTargets();
 
-    friend class UnlinkedCodeBlock;
+private:
+    void insertImpl(InsertionPoint, IncludeBranch, JSInstructionStreamWriter&& fragment);
+
+    friend class UnlinkedCodeBlockGenerator;
     void applyModification();
     void adjustJumpTargetsInFragment(unsigned finalOffset, Insertion&);
 
     int adjustJumpTarget(InsertionPoint startPoint, InsertionPoint jumpTargetPoint);
     template<typename Iterator> int calculateDifference(Iterator begin, Iterator end);
 
-    BytecodeGraph<UnlinkedCodeBlock>& m_graph;
+    BytecodeGenerator& m_bytecodeGenerator;
+    BytecodeGraph& m_graph;
+    UnlinkedCodeBlockGenerator* m_codeBlock;
+    JSInstructionStreamWriter& m_writer;
     Vector<Insertion, 8> m_insertions;
 };
 

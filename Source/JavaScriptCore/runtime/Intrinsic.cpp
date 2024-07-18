@@ -79,10 +79,54 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "ArrayPopIntrinsic";
     case ArraySliceIntrinsic:
         return "ArraySliceIntrinsic";
+    case ArrayValuesIntrinsic:
+        return "ArrayValuesIntrinsic";
+    case ArrayKeysIntrinsic:
+        return "ArrayKeysIntrinsic";
+    case ArrayEntriesIntrinsic:
+        return "ArrayEntriesIntrinsic";
     case CharCodeAtIntrinsic:
         return "CharCodeAtIntrinsic";
     case CharAtIntrinsic:
         return "CharAtIntrinsic";
+    case DatePrototypeGetTimeIntrinsic:
+        return "DatePrototypeGetTimeIntrinsic";
+    case DatePrototypeGetFullYearIntrinsic:
+        return "DatePrototypeGetFullYearIntrinsic";
+    case DatePrototypeGetUTCFullYearIntrinsic:
+        return "DatePrototypeGetUTCFullYearIntrinsic";
+    case DatePrototypeGetMonthIntrinsic:
+        return "DatePrototypeGetMonthIntrinsic";
+    case DatePrototypeGetUTCMonthIntrinsic:
+        return "DatePrototypeGetUTCMonthIntrinsic";
+    case DatePrototypeGetDateIntrinsic:
+        return "DatePrototypeGetDateIntrinsic";
+    case DatePrototypeGetUTCDateIntrinsic:
+        return "DatePrototypeGetUTCDateIntrinsic";
+    case DatePrototypeGetDayIntrinsic:
+        return "DatePrototypeGetDayIntrinsic";
+    case DatePrototypeGetUTCDayIntrinsic:
+        return "DatePrototypeGetUTCDayIntrinsic";
+    case DatePrototypeGetHoursIntrinsic:
+        return "DatePrototypeGetHoursIntrinsic";
+    case DatePrototypeGetUTCHoursIntrinsic:
+        return "DatePrototypeGetUTCHoursIntrinsic";
+    case DatePrototypeGetMinutesIntrinsic:
+        return "DatePrototypeGetMinutesIntrinsic";
+    case DatePrototypeGetUTCMinutesIntrinsic:
+        return "DatePrototypeGetUTCMinutesIntrinsic";
+    case DatePrototypeGetSecondsIntrinsic:
+        return "DatePrototypeGetSecondsIntrinsic";
+    case DatePrototypeGetUTCSecondsIntrinsic:
+        return "DatePrototypeGetUTCSecondsIntrinsic";
+    case DatePrototypeGetMillisecondsIntrinsic:
+        return "DatePrototypeGetMillisecondsIntrinsic";
+    case DatePrototypeGetUTCMillisecondsIntrinsic:
+        return "DatePrototypeGetUTCMillisecondsIntrinsic";
+    case DatePrototypeGetTimezoneOffsetIntrinsic:
+        return "DatePrototypeGetTimezoneOffsetIntrinsic";
+    case DatePrototypeGetYearIntrinsic:
+        return "DatePrototypeGetYearIntrinsic";
     case FromCharCodeIntrinsic:
         return "FromCharCodeIntrinsic";
     case PowIntrinsic:
@@ -111,16 +155,38 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "RegExpTestIntrinsic";
     case RegExpTestFastIntrinsic:
         return "RegExpTestFastIntrinsic";
+    case RegExpMatchFastIntrinsic:
+        return "RegExpMatchFastIntrinsic";
+    case ObjectAssignIntrinsic:
+        return "ObjectAssignIntrinsic";
+    case ObjectCreateIntrinsic:
+        return "ObjectCreateIntrinsic";
+    case ObjectGetOwnPropertyNamesIntrinsic:
+        return "ObjectGetOwnPropertyNamesIntrinsic";
+    case ObjectGetPrototypeOfIntrinsic:
+        return "ObjectGetPrototypeOfIntrinsic";
+    case ObjectIsIntrinsic:
+        return "ObjectIsIntrinsic";
+    case ObjectKeysIntrinsic:
+        return "ObjectKeysIntrinsic";
+    case ReflectGetPrototypeOfIntrinsic:
+        return "ReflectGetPrototypeOfIntrinsic";
+    case StringPrototypeCodePointAtIntrinsic:
+        return "StringPrototypeCodePointAtIntrinsic";
     case StringPrototypeValueOfIntrinsic:
         return "StringPrototypeValueOfIntrinsic";
     case StringPrototypeReplaceIntrinsic:
         return "StringPrototypeReplaceIntrinsic";
     case StringPrototypeReplaceRegExpIntrinsic:
         return "StringPrototypeReplaceRegExpIntrinsic";
+    case StringPrototypeSliceIntrinsic:
+        return "StringPrototypeSliceIntrinsic";
     case StringPrototypeToLowerCaseIntrinsic:
         return "StringPrototypeToLowerCaseIntrinsic";
     case NumberPrototypeToStringIntrinsic:
         return "NumberPrototypeToStringIntrinsic";
+    case NumberIsIntegerIntrinsic:
+        return "NumberIsIntegerIntrinsic";
     case IMulIntrinsic:
         return "IMulIntrinsic";
     case RandomIntrinsic:
@@ -129,14 +195,30 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "FRoundIntrinsic";
     case TruncIntrinsic:
         return "TruncIntrinsic";
+    case TypedArrayValuesIntrinsic:
+        return "TypedArrayValuesIntrinsic";
+    case TypedArrayKeysIntrinsic:
+        return "TypedArrayKeysIntrinsic";
+    case TypedArrayEntriesIntrinsic:
+        return "TypedArrayEntriesIntrinsic";
     case IsTypedArrayViewIntrinsic:
         return "IsTypedArrayViewIntrinsic";
-    case BoundThisNoArgsFunctionCallIntrinsic:
-        return "BoundThisNoArgsFunctionCallIntrinsic";
+    case BoundFunctionCallIntrinsic:
+        return "BoundFunctionCallIntrinsic";
+    case RemoteFunctionCallIntrinsic:
+        return "RemoteFunctionCallIntrinsic";
     case JSMapGetIntrinsic:
         return "JSMapGetIntrinsic";
     case JSMapHasIntrinsic:
         return "JSMapHasIntrinsic";
+    case JSMapSetIntrinsic:
+        return "JSMapSetIntrinsic";
+    case JSMapValuesIntrinsic:
+        return "JSMapValuesIntrinsic";
+    case JSMapKeysIntrinsic:
+        return "JSMapKeysIntrinsic";
+    case JSMapEntriesIntrinsic:
+        return "JSMapEntriesIntrinsic";
     case JSMapBucketHeadIntrinsic:
         return "JSMapBucketHeadIntrinsic";
     case JSMapBucketNextIntrinsic:
@@ -147,6 +229,12 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "JSMapBucketValueIntrinsic";
     case JSSetHasIntrinsic:
         return "JSSetHasIntrinsic";
+    case JSSetAddIntrinsic:
+        return "JSSetAddIntrinsic";
+    case JSSetValuesIntrinsic:
+        return "JSSetValuesIntrinsic";
+    case JSSetEntriesIntrinsic:
+        return "JSSetEntriesIntrinsic";
     case JSSetBucketHeadIntrinsic:
         return "JSSetBucketHeadIntrinsic";
     case JSSetBucketNextIntrinsic:
@@ -155,6 +243,14 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "JSSetBucketKeyIntrinsic";
     case JSWeakMapGetIntrinsic:
         return "JSWeakMapGetIntrinsic";
+    case JSWeakMapHasIntrinsic:
+        return "JSWeakMapHasIntrinsic";
+    case JSWeakMapSetIntrinsic:
+        return "JSWeakMapSetIntrinsic";
+    case JSWeakSetHasIntrinsic:
+        return "JSWeakSetHasIntrinsic";
+    case JSWeakSetAddIntrinsic:
+        return "JSWeakSetAddIntrinsic";
     case HasOwnPropertyIntrinsic:
         return "HasOwnPropertyIntrinsic";
     case AtomicsAddIntrinsic:
@@ -169,6 +265,8 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "AtomicsIsLockFreeIntrinsic";
     case AtomicsLoadIntrinsic:
         return "AtomicsLoadIntrinsic";
+    case AtomicsNotifyIntrinsic:
+        return "AtomicsNotifyIntrinsic";
     case AtomicsOrIntrinsic:
         return "AtomicsOrIntrinsic";
     case AtomicsStoreIntrinsic:
@@ -177,20 +275,24 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "AtomicsSubIntrinsic";
     case AtomicsWaitIntrinsic:
         return "AtomicsWaitIntrinsic";
-    case AtomicsWakeIntrinsic:
-        return "AtomicsWakeIntrinsic";
     case AtomicsXorIntrinsic:
         return "AtomicsXorIntrinsic";
     case ParseIntIntrinsic:
         return "ParseIntIntrinsic";
+    case FunctionToStringIntrinsic:
+        return "FunctionToStringIntrinsic";
     case TypedArrayLengthIntrinsic:
         return "TypedArrayLengthIntrinsic";
     case TypedArrayByteLengthIntrinsic:
         return "TypedArrayByteLengthIntrinsic";
     case TypedArrayByteOffsetIntrinsic:
         return "TypedArrayByteOffsetIntrinsic";
+    case UnderscoreProtoIntrinsic:
+        return "UnderscoreProtoIntrinsic";
     case DFGTrueIntrinsic:
         return "DFGTrueIntrinsic";
+    case FTLTrueIntrinsic:
+        return "FTLTrueIntrinsic";
     case OSRExitIntrinsic:
         return "OSRExitIntrinsic";
     case IsFinalTierIntrinsic:
@@ -201,10 +303,70 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "CheckInt32Intrinsic";
     case FiatInt52Intrinsic:
         return "FiatInt52Intrinsic";
+    case CPUMfenceIntrinsic:
+        return "CPUMfenceIntrinsic";
+    case CPURdtscIntrinsic:
+        return "CPURdtscIntrinsic";
+    case CPUCpuidIntrinsic:
+        return "CPUCpuidIntrinsic";
+    case CPUPauseIntrinsic:
+        return "CPUPauseIntrinsic";
+    case DataViewGetInt8:
+        return "DataViewGetInt8";
+    case DataViewGetUint8:
+        return "DataViewGetUint8";
+    case DataViewGetInt16:
+        return "DataViewGetInt16";
+    case DataViewGetUint16:
+        return "DataViewGetUint16";
+    case DataViewGetInt32:
+        return "DataViewGetInt32";
+    case DataViewGetUint32:
+        return "DataViewGetUint32";
+    case DataViewGetFloat32:
+        return "DataViewGetFloat32";
+    case DataViewGetFloat64:
+        return "DataViewGetFloat64";
+    case DataViewSetInt8:
+        return "DataViewSetInt8";
+    case DataViewSetUint8:
+        return "DataViewSetUint8";
+    case DataViewSetInt16:
+        return "DataViewSetInt16";
+    case DataViewSetUint16:
+        return "DataViewSetUint16";
+    case DataViewSetInt32:
+        return "DataViewSetInt32";
+    case DataViewSetUint32:
+        return "DataViewSetUint32";
+    case DataViewSetFloat32:
+        return "DataViewSetFloat32";
+    case DataViewSetFloat64:
+        return "DataViewSetFloat64";
+    case WasmFunctionIntrinsic:
+        return "WasmFunctionIntrinsic";
     }
     RELEASE_ASSERT_NOT_REACHED();
     return nullptr;
 }
+
+std::optional<IterationKind> interationKindForIntrinsic(Intrinsic intrinsic)
+{
+    switch (intrinsic) {
+    case ArrayValuesIntrinsic:
+    case TypedArrayValuesIntrinsic:
+        return IterationKind::Values;
+    case ArrayKeysIntrinsic:
+    case TypedArrayKeysIntrinsic:
+        return IterationKind::Keys;
+    case ArrayEntriesIntrinsic:
+    case TypedArrayEntriesIntrinsic:
+        return IterationKind::Entries;
+    default:
+        return std::nullopt;
+    }
+}
+
 
 } // namespace JSC
 

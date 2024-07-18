@@ -26,7 +26,7 @@
 #import "config.h"
 #import "WKFormPopover.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "UIKitSPI.h"
 #import "WKContentView.h"
@@ -36,8 +36,7 @@
 
 using namespace WebKit;
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
 
 @implementation WKFormRotatingAccessoryPopover
 
@@ -76,6 +75,7 @@ using namespace WebKit;
     WKContentView *_view;
 
     BOOL _isRotating;
+    BOOL _isPreservingFocus;
     CGPoint _presentationPoint;
     RetainPtr<UIPopoverController> _popoverController;
     id <WKRotatingPopoverDelegate> _dismissionDelegate;
@@ -133,26 +133,30 @@ using namespace WebKit;
 
 - (void)presentPopoverAnimated:(BOOL)animated
 {
-    UIPopoverArrowDirection directions = [self popoverArrowDirections];
-
-    BOOL presentWithPoint = !CGPointEqualToPoint(self.presentationPoint, CGPointZero);
-    if (presentWithPoint) {
-        CGFloat scale = [_view page]->pageScaleFactor();
-        [_popoverController presentPopoverFromRect:CGRectIntegral(CGRectMake(self.presentationPoint.x * scale, self.presentationPoint.y * scale, 1, 1))
-                                            inView:_view
-                          permittedArrowDirections:directions
-                                          animated:animated];
-    } else {
-        CGRect boundingBoxOfDOMNode = _view.assistedNodeInformation.elementRect;
-        [_popoverController presentPopoverFromRect:CGRectIntegral(boundingBoxOfDOMNode)
-                                            inView:_view
-                          permittedArrowDirections:directions
-                                          animated:animated];
+    auto directions = [self popoverArrowDirections];
+    CGRect presentationRect;
+    if (CGPointEqualToPoint(self.presentationPoint, CGPointZero))
+        presentationRect = _view.focusedElementInformation.interactionRect;
+    else {
+        auto scale = _view.page->pageScaleFactor();
+        presentationRect = CGRectMake(self.presentationPoint.x * scale, self.presentationPoint.y * scale, 1, 1);
     }
+
+    if (!CGRectIntersectsRect(presentationRect, _view.bounds))
+        return;
+
+#if PLATFORM(MACCATALYST)
+    [_view startRelinquishingFirstResponderToFocusedElement];
+#endif
+    [_popoverController presentPopoverFromRect:CGRectIntegral(presentationRect) inView:_view permittedArrowDirections:directions animated:animated];
 }
 
 - (void)dismissPopoverAnimated:(BOOL)animated
 {
+#if PLATFORM(MACCATALYST)
+    [_view stopRelinquishingFirstResponderToFocusedElement];
+#endif
+
     [_popoverController dismissPopoverAnimated:animated];
 }
 
@@ -168,7 +172,9 @@ using namespace WebKit;
     [self presentPopoverAnimated:NO];
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)popoverControllerDidDismissPopover:(UIPopoverController *)popoverController
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     if (_isRotating)
         return;
@@ -178,6 +184,6 @@ using namespace WebKit;
 
 @end
 
-#pragma clang diagnostic pop
+ALLOW_DEPRECATED_DECLARATIONS_END
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

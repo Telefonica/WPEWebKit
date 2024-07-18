@@ -8,14 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/test/echo_canceller_test_tools.h"
+#include "modules/audio_processing/test/echo_canceller_test_tools.h"
 
 #include <vector>
 
-#include "webrtc/base/array_view.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/base/random.h"
-#include "webrtc/test/gtest.h"
+#include "api/array_view.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/random.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
@@ -66,6 +66,17 @@ TEST(EchoCancellerTestTools, RandomizeSampleVector) {
   v_ref = v;
   RandomizeSampleVector(&random_generator, v);
   EXPECT_NE(v, v_ref);
+}
+
+TEST(EchoCancellerTestTools, RandomizeSampleVectorWithAmplitude) {
+  Random random_generator(42U);
+  std::vector<float> v(50, 0.f);
+  RandomizeSampleVector(&random_generator, v, 1000.f);
+  EXPECT_GE(1000.f, *std::max_element(v.begin(), v.end()));
+  EXPECT_LE(-1000.f, *std::min_element(v.begin(), v.end()));
+  RandomizeSampleVector(&random_generator, v, 100.f);
+  EXPECT_GE(100.f, *std::max_element(v.begin(), v.end()));
+  EXPECT_LE(-100.f, *std::min_element(v.begin(), v.end()));
 }
 
 }  // namespace webrtc

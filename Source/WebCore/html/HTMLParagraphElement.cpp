@@ -27,8 +27,11 @@
 #include "CSSValueKeywords.h"
 #include "Document.h"
 #include "HTMLNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLParagraphElement);
 
 using namespace HTMLNames;
 
@@ -48,26 +51,19 @@ Ref<HTMLParagraphElement> HTMLParagraphElement::create(const QualifiedName& tagN
     return adoptRef(*new HTMLParagraphElement(tagName, document));
 }
 
-bool HTMLParagraphElement::isPresentationAttribute(const QualifiedName& name) const
-{
-    if (name == alignAttr)
-        return true;
-    return HTMLElement::isPresentationAttribute(name);
-}
-
-void HTMLParagraphElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStyleProperties& style)
+void HTMLParagraphElement::collectPresentationalHintsForAttribute(const QualifiedName& name, const AtomString& value, MutableStyleProperties& style)
 {
     if (name == alignAttr) {
-        if (equalLettersIgnoringASCIICase(value, "middle") || equalLettersIgnoringASCIICase(value, "center"))
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitCenter);
-        else if (equalLettersIgnoringASCIICase(value, "left"))
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitLeft);
-        else if (equalLettersIgnoringASCIICase(value, "right"))
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitRight);
+        if (equalLettersIgnoringASCIICase(value, "middle"_s) || equalLettersIgnoringASCIICase(value, "center"_s))
+            addPropertyToPresentationalHintStyle(style, CSSPropertyTextAlign, CSSValueWebkitCenter);
+        else if (equalLettersIgnoringASCIICase(value, "left"_s))
+            addPropertyToPresentationalHintStyle(style, CSSPropertyTextAlign, CSSValueWebkitLeft);
+        else if (equalLettersIgnoringASCIICase(value, "right"_s))
+            addPropertyToPresentationalHintStyle(style, CSSPropertyTextAlign, CSSValueWebkitRight);
         else
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyTextAlign, value);
+            addPropertyToPresentationalHintStyle(style, CSSPropertyTextAlign, value);
     } else
-        HTMLElement::collectStyleForPresentationAttribute(name, value, style);
+        HTMLElement::collectPresentationalHintsForAttribute(name, value, style);
 }
 
 }

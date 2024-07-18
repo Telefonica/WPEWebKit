@@ -27,36 +27,36 @@
 #include "LayerPool.h"
 
 #include "Logging.h"
-#include <wtf/CurrentTime.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
 
-static const double capacityDecayTime = 5;
+static constexpr Seconds capacityDecayTime { 5_s };
 
 LayerPool::LayerPool()
-    : m_totalBytes(0)
-    , m_maxBytesForPool(48 * 1024 * 1024)
+    : m_maxBytesForPool(48 * 1024 * 1024)
     , m_pruneTimer(*this, &LayerPool::pruneTimerFired)
-    , m_lastAddTime(0)
 {
+    RELEASE_ASSERT(isMainThread());
     allLayerPools().add(this);
 }
 
 LayerPool::~LayerPool()
 {
+    RELEASE_ASSERT(isMainThread());
     allLayerPools().remove(this);
 }
 
 HashSet<LayerPool*>& LayerPool::allLayerPools()
 {
+    RELEASE_ASSERT(isMainThread());
     static NeverDestroyed<HashSet<LayerPool*>> allLayerPools;
     return allLayerPools.get();
 }
 
 unsigned LayerPool::backingStoreBytesForSize(const IntSize& size)
 {
-    return (size.area() * 4).unsafeGet();
+    return size.area() * 4;
 }
 
 LayerPool::LayerList& LayerPool::listOfLayersWithSize(const IntSize& size, AccessType accessType)
@@ -74,6 +74,7 @@ LayerPool::LayerList& LayerPool::listOfLayersWithSize(const IntSize& size, Acces
 
 void LayerPool::addLayer(const RefPtr<PlatformCALayer>& layer)
 {
+    RELEASE_ASSERT(isMainThread());
     IntSize layerSize(expandedIntSize(layer->bounds().size()));
     if (!canReuseLayerWithSize(layerSize))
         return;
@@ -81,12 +82,13 @@ void LayerPool::addLayer(const RefPtr<PlatformCALayer>& layer)
     listOfLayersWithSize(layerSize).prepend(layer);
     m_totalBytes += backingStoreBytesForSize(layerSize);
     
-    m_lastAddTime = monotonicallyIncreasingTime();
+    m_lastAddTime = MonotonicTime::now();
     schedulePrune();
 }
 
 RefPtr<PlatformCALayer> LayerPool::takeLayerWithSize(const IntSize& size)
 {
+    RELEASE_ASSERT(isMainThread());
     if (!canReuseLayerWithSize(size))
         return nullptr;
     LayerList& reuseList = listOfLayersWithSize(size, MarkAsUsed);
@@ -99,7 +101,7 @@ RefPtr<PlatformCALayer> LayerPool::takeLayerWithSize(const IntSize& size)
 unsigned LayerPool::decayedCapacity() const
 {
     // Decay to one quarter over capacityDecayTime
-    double timeSinceLastAdd = monotonicallyIncreasingTime() - m_lastAddTime;
+    Seconds timeSinceLastAdd = MonotonicTime::now() - m_lastAddTime;
     if (timeSinceLastAdd > capacityDecayTime)
         return m_maxBytesForPool / 4;
     float decayProgess = float(timeSinceLastAdd / capacityDecayTime);
@@ -115,28 +117,33 @@ void LayerPool::schedulePrune()
 
 void LayerPool::pruneTimerFired()
 {
+    RELEASE_ASSERT(isMainThread());
     unsigned shrinkTo = decayedCapacity();
     while (m_totalBytes > shrinkTo) {
-        ASSERT(!m_sizesInPruneOrder.isEmpty());
+        RELEASE_ASSERT(!m_sizesInPruneOrder.isEmpty());
         IntSize sizeToDrop = m_sizesInPruneOrder.first();
-        LayerList& oldestReuseList = m_reuseLists.find(sizeToDrop)->value;
+        auto it = m_reuseLists.find(sizeToDrop);
+        RELEASE_ASSERT(it != m_reuseLists.end());
+        LayerList& oldestReuseList = it->value;
         if (oldestReuseList.isEmpty()) {
             m_reuseLists.remove(sizeToDrop);
             m_sizesInPruneOrder.remove(0);
             continue;
         }
 
+        ASSERT(m_totalBytes >= backingStoreBytesForSize(sizeToDrop));
         m_totalBytes -= backingStoreBytesForSize(sizeToDrop);
         // The last element in the list is the oldest, hence most likely not to
         // still have a backing store.
-        oldestReuseList.remove(--oldestReuseList.end());
+        oldestReuseList.removeLast();
     }
-    if (monotonicallyIncreasingTime() - m_lastAddTime <= capacityDecayTime)
+    if (MonotonicTime::now() - m_lastAddTime <= capacityDecayTime)
         schedulePrune();
 }
 
 void LayerPool::drain()
 {
+    RELEASE_ASSERT(isMainThread());
     m_reuseLists.clear();
     m_sizesInPruneOrder.clear();
     m_totalBytes = 0;

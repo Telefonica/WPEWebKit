@@ -26,18 +26,18 @@
 #include "config.h"
 #include "PageOverlay.h"
 
+#include "Frame.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
-#include "MainFrame.h"
+#include "Logging.h"
 #include "Page.h"
 #include "PageOverlayController.h"
 #include "PlatformMouseEvent.h"
 #include "ScrollbarTheme.h"
-#include <wtf/CurrentTime.h>
 
 namespace WebCore {
 
-static const double fadeAnimationDuration = 0.2;
+static const Seconds fadeAnimationDuration { 200_ms };
 static const double fadeAnimationFrameRate = 30;
 
 static PageOverlay::PageOverlayID generatePageOverlayID()
@@ -46,30 +46,29 @@ static PageOverlay::PageOverlayID generatePageOverlayID()
     return ++pageOverlayID;
 }
 
-Ref<PageOverlay> PageOverlay::create(Client& client, OverlayType overlayType)
+Ref<PageOverlay> PageOverlay::create(Client& client, OverlayType overlayType, AlwaysTileOverlayLayer alwaysTileOverlayLayer)
 {
-    return adoptRef(*new PageOverlay(client, overlayType));
+    return adoptRef(*new PageOverlay(client, overlayType, alwaysTileOverlayLayer));
 }
 
-PageOverlay::PageOverlay(Client& client, OverlayType overlayType)
+PageOverlay::PageOverlay(Client& client, OverlayType overlayType, AlwaysTileOverlayLayer alwaysTileOverlayLayer)
     : m_client(client)
     , m_fadeAnimationTimer(*this, &PageOverlay::fadeAnimationTimerFired)
     , m_fadeAnimationDuration(fadeAnimationDuration)
     , m_needsSynchronousScrolling(overlayType == OverlayType::View)
     , m_overlayType(overlayType)
+    , m_alwaysTileOverlayLayer(alwaysTileOverlayLayer)
     , m_pageOverlayID(generatePageOverlayID())
 {
 }
 
-PageOverlay::~PageOverlay()
-{
-}
+PageOverlay::~PageOverlay() = default;
 
 PageOverlayController* PageOverlay::controller() const
 {
     if (!m_page)
         return nullptr;
-    return &m_page->mainFrame().pageOverlayController();
+    return &m_page->pageOverlayController();
 }
 
 IntRect PageOverlay::bounds() const
@@ -255,13 +254,19 @@ void PageOverlay::stopFadeOutAnimation()
 
 void PageOverlay::startFadeAnimation()
 {
-    m_fadeAnimationStartTime = currentTime();
+    ASSERT(m_page);
+    if (!m_page)
+        RELEASE_LOG_FAULT(Animations, "PageOverlay::startFadeAnimation() was called on a PageOverlay without a page");
+    m_fadeAnimationStartTime = WallTime::now();
     m_fadeAnimationTimer.startRepeating(1_s / fadeAnimationFrameRate);
 }
 
 void PageOverlay::fadeAnimationTimerFired()
 {
-    float animationProgress = (currentTime() - m_fadeAnimationStartTime) / m_fadeAnimationDuration;
+    auto controller = this->controller();
+    ASSERT(controller);
+
+    float animationProgress = (WallTime::now() - m_fadeAnimationStartTime) / m_fadeAnimationDuration;
 
     if (animationProgress >= 1.0)
         animationProgress = 1.0;
@@ -270,7 +275,9 @@ void PageOverlay::fadeAnimationTimerFired()
     float fadeAnimationValue = sine * sine;
 
     m_fractionFadedIn = (m_fadeAnimationType == FadeInAnimation) ? fadeAnimationValue : 1 - fadeAnimationValue;
-    controller()->setPageOverlayOpacity(*this, m_fractionFadedIn);
+
+    if (controller)
+        controller->setPageOverlayOpacity(*this, m_fractionFadedIn);
 
     if (animationProgress == 1.0) {
         m_fadeAnimationTimer.stop();
@@ -279,8 +286,8 @@ void PageOverlay::fadeAnimationTimerFired()
         m_fadeAnimationType = NoAnimation;
 
         // If this was a fade out, uninstall the page overlay.
-        if (wasFadingOut)
-            controller()->uninstallPageOverlay(*this, PageOverlay::FadeMode::DoNotFade);
+        if (wasFadingOut && controller)
+            controller->uninstallPageOverlay(*this, PageOverlay::FadeMode::DoNotFade);
     }
 }
 

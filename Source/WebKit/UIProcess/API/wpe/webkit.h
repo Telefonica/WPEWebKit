@@ -38,6 +38,7 @@
 #include <wpe/WebKitCookieManager.h>
 #include <wpe/WebKitCredential.h>
 #include <wpe/WebKitDefines.h>
+#include <wpe/WebKitDeviceInfoPermissionRequest.h>
 #include <wpe/WebKitDownload.h>
 #include <wpe/WebKitEditingCommands.h>
 #include <wpe/WebKitEditorState.h>
@@ -46,17 +47,24 @@
 #include <wpe/WebKitFaviconDatabase.h>
 #include <wpe/WebKitFindController.h>
 #include <wpe/WebKitFormSubmissionRequest.h>
+#include <wpe/WebKitGeolocationManager.h>
 #include <wpe/WebKitGeolocationPermissionRequest.h>
 #include <wpe/WebKitHitTestResult.h>
+#include <wpe/WebKitInputMethodContext.h>
 #include <wpe/WebKitInstallMissingMediaPluginsPermissionRequest.h>
 #include <wpe/WebKitJavascriptResult.h>
+#include <wpe/WebKitMediaKeySystemPermissionRequest.h>
+#include <wpe/WebKitMemoryPressureSettings.h>
 #include <wpe/WebKitMimeInfo.h>
 #include <wpe/WebKitNavigationAction.h>
 #include <wpe/WebKitNavigationPolicyDecision.h>
 #include <wpe/WebKitNetworkProxySettings.h>
 #include <wpe/WebKitNotification.h>
 #include <wpe/WebKitNotificationPermissionRequest.h>
+#include <wpe/WebKitOptionMenu.h>
+#include <wpe/WebKitOptionMenuItem.h>
 #include <wpe/WebKitPermissionRequest.h>
+#include <wpe/WebKitPermissionStateQuery.h>
 #include <wpe/WebKitPlugin.h>
 #include <wpe/WebKitResponsePolicyDecision.h>
 #include <wpe/WebKitScriptDialog.h>
@@ -66,16 +74,25 @@
 #include <wpe/WebKitURIRequest.h>
 #include <wpe/WebKitURIResponse.h>
 #include <wpe/WebKitURISchemeRequest.h>
+#include <wpe/WebKitURISchemeResponse.h>
+#include <wpe/WebKitURIUtilities.h>
 #include <wpe/WebKitUserContent.h>
+#include <wpe/WebKitUserContentFilterStore.h>
 #include <wpe/WebKitUserContentManager.h>
 #include <wpe/WebKitUserMediaPermissionRequest.h>
+#include <wpe/WebKitUserMessage.h>
+#include <wpe/WebKitVersion.h>
 #include <wpe/WebKitWebContext.h>
 #include <wpe/WebKitWebResource.h>
 #include <wpe/WebKitWebView.h>
+#include <wpe/WebKitWebViewBackend.h>
 #include <wpe/WebKitWebViewSessionState.h>
 #include <wpe/WebKitWebsiteData.h>
+#include <wpe/WebKitWebsiteDataAccessPermissionRequest.h>
 #include <wpe/WebKitWebsiteDataManager.h>
 #include <wpe/WebKitWindowProperties.h>
+
+#include <wpe/WebKitAutocleanups.h>
 
 #undef __WEBKIT_H_INSIDE__
 

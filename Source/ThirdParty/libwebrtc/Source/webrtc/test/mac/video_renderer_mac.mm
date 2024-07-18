@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/test/mac/video_renderer_mac.h"
+#include "test/mac/video_renderer_mac.h"
 
 #import <Cocoa/Cocoa.h>
 
@@ -61,7 +61,7 @@
   NSInteger yOrigin = nextYOrigin_;
   NSRect windowFrame = NSMakeRect(xOrigin, yOrigin, width_, height_);
   window_ = [[NSWindow alloc] initWithContentRect:windowFrame
-                                        styleMask:NSTitledWindowMask
+                                        styleMask:NSWindowStyleMaskTitled
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
 

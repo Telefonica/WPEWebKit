@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,9 +34,8 @@
 
 namespace WebKit {
 
-RemoteObjectRegistry::RemoteObjectRegistry(_WKRemoteObjectRegistry *remoteObjectRegistry, IPC::MessageSender& messageSender)
+RemoteObjectRegistry::RemoteObjectRegistry(_WKRemoteObjectRegistry *remoteObjectRegistry)
     : m_remoteObjectRegistry(remoteObjectRegistry)
-    , m_messageSender(messageSender)
 {
 }
 
@@ -46,37 +45,44 @@ RemoteObjectRegistry::~RemoteObjectRegistry()
 
 void RemoteObjectRegistry::sendInvocation(const RemoteObjectInvocation& invocation)
 {
-    m_messageSender.send(Messages::RemoteObjectRegistry::InvokeMethod(invocation));
+
+    if (auto* replyInfo = invocation.replyInfo()) {
+        ASSERT(!m_pendingReplies.contains(replyInfo->replyID));
+        m_pendingReplies.add(replyInfo->replyID, backgroundActivity("RemoteObjectRegistry invocation"_s));
+    }
+
+    messageSender().send(Messages::RemoteObjectRegistry::InvokeMethod(invocation), messageDestinationID());
 }
 
 void RemoteObjectRegistry::sendReplyBlock(uint64_t replyID, const UserData& blockInvocation)
 {
-    m_messageSender.send(Messages::RemoteObjectRegistry::CallReplyBlock(replyID, blockInvocation));
+    messageSender().send(Messages::RemoteObjectRegistry::CallReplyBlock(replyID, blockInvocation), messageDestinationID());
 }
 
 void RemoteObjectRegistry::sendUnusedReply(uint64_t replyID)
 {
-    m_messageSender.send(Messages::RemoteObjectRegistry::ReleaseUnusedReplyBlock(replyID));
+    messageSender().send(Messages::RemoteObjectRegistry::ReleaseUnusedReplyBlock(replyID), messageDestinationID());
 }
 
 void RemoteObjectRegistry::invokeMethod(const RemoteObjectInvocation& invocation)
 {
-#if WK_API_ENABLED
     [m_remoteObjectRegistry _invokeMethod:invocation];
-#endif
 }
 
 void RemoteObjectRegistry::callReplyBlock(uint64_t replyID, const UserData& blockInvocation)
 {
-#if WK_API_ENABLED
+    bool wasRemoved = m_pendingReplies.remove(replyID);
+    ASSERT_UNUSED(wasRemoved, wasRemoved);
+
     [m_remoteObjectRegistry _callReplyWithID:replyID blockInvocation:blockInvocation];
-#endif
 }
 
 void RemoteObjectRegistry::releaseUnusedReplyBlock(uint64_t replyID)
 {
-#if WK_API_ENABLED
+    bool wasRemoved = m_pendingReplies.remove(replyID);
+    ASSERT_UNUSED(wasRemoved, wasRemoved);
+
     [m_remoteObjectRegistry _releaseReplyWithID:replyID];
-#endif
 }
+
 } // namespace WebKit

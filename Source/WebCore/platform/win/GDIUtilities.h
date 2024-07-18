@@ -26,7 +26,7 @@
 #ifndef GDIUtilties_h
 #define GDIUtilties_h
 
-#include <IntPoint.h>
+#include "IntPoint.h"
 
 #include <windows.h>
 
@@ -39,6 +39,25 @@ inline LPARAM makeScaledPoint(IntPoint point, float scaleFactor)
     float inverseScaleFactor = 1.0f / scaleFactor;
     point.scale(inverseScaleFactor, inverseScaleFactor);
     return MAKELPARAM(point.x(), point.y());
+}
+
+inline unsigned short buttonsForEvent(WPARAM wparam)
+{
+    unsigned short buttons = 0;
+    if (wparam & MK_LBUTTON)
+        buttons |= 1;
+    if (wparam & MK_MBUTTON)
+        buttons |= 4;
+    if (wparam & MK_RBUTTON)
+        buttons |= 2;
+    return buttons;
+}
+
+inline LONG getDoubleClickTime()
+{
+    // GetDoubleClickTime() returns 0 in the non-interactive window station on Windows 10 version 2004
+    LONG doubleClickTime = GetDoubleClickTime();
+    return doubleClickTime ? doubleClickTime : 500;
 }
 
 } // namespace WebCore

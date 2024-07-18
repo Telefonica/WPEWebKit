@@ -26,38 +26,69 @@
 #import "config.h"
 #import "TextChecker.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "TextCheckerState.h"
+#import "UIKitSPI.h"
 #import <WebCore/NotImplemented.h>
+#import <pal/spi/cocoa/FoundationSPI.h>
+#import <wtf/HashMap.h>
+#import <wtf/NeverDestroyed.h>
+#import <wtf/RetainPtr.h>
+#import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/text/StringView.h>
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
-    
-TextCheckerState textCheckerState;
+static TextCheckerState& mutableState()
+{
+    static NeverDestroyed state = [] {
+        TextCheckerState initialState;
+        initialState.isContinuousSpellCheckingEnabled = TextChecker::isContinuousSpellCheckingAllowed();
+#if ENABLE(POST_EDITING_GRAMMAR_CHECKING)
+        initialState.isGrammarCheckingEnabled = [UITextChecker respondsToSelector:@selector(grammarCheckingEnabled)] && [UITextChecker grammarCheckingEnabled];
+#else
+        initialState.isGrammarCheckingEnabled = false;
+#endif
+        return initialState;
+    }();
+    return state;
+}
 
 const TextCheckerState& TextChecker::state()
 {
-    notImplemented();
-    return textCheckerState;
+    return mutableState();
 }
 
 bool TextChecker::isContinuousSpellCheckingAllowed()
 {
-    notImplemented();
+#if USE(UNIFIED_TEXT_CHECKING)
+    return true;
+#else
     return false;
+#endif
 }
 
-void TextChecker::setContinuousSpellCheckingEnabled(bool)
+bool TextChecker::setContinuousSpellCheckingEnabled(bool enabled)
 {
-    notImplemented();
+    if (state().isContinuousSpellCheckingEnabled == enabled)
+        return false;
+
+    mutableState().isContinuousSpellCheckingEnabled = enabled;
+    return true;
 }
 
-void TextChecker::setGrammarCheckingEnabled(bool)
+void TextChecker::setGrammarCheckingEnabled(bool isGrammarCheckingEnabled)
 {
-    notImplemented();
+#if ENABLE(POST_EDITING_GRAMMAR_CHECKING)
+    if (state().isGrammarCheckingEnabled == isGrammarCheckingEnabled)
+        return;
+
+    mutableState().isGrammarCheckingEnabled = isGrammarCheckingEnabled;
+#else
+    UNUSED_PARAM(isGrammarCheckingEnabled);
+#endif
 }
 
 void TextChecker::setAutomaticSpellingCorrectionEnabled(bool)
@@ -97,13 +128,13 @@ bool TextChecker::isTestingMode()
     return testingModeEnabled;
 }
 
-
-static bool smartInsertDeleteEnabled;
-
 bool TextChecker::isSmartInsertDeleteEnabled()
 {
-    notImplemented();
-    return smartInsertDeleteEnabled;
+#if HAVE(UIKEYBOARDIMPL_SMARTINSERTDELETE_CLASS_METHOD)
+    return [UIKeyboardImpl smartInsertDeleteIsEnabled];
+#else
+    return [[UIKeyboardImpl sharedInstance] smartInsertDeleteIsEnabled];
+#endif
 }
 
 void TextChecker::setSmartInsertDeleteEnabled(bool)
@@ -122,9 +153,9 @@ void TextChecker::toggleSubstitutionsPanelIsShowing()
     notImplemented();
 }
 
-void TextChecker::continuousSpellCheckingEnabledStateChanged(bool)
+void TextChecker::continuousSpellCheckingEnabledStateChanged(bool enabled)
 {
-    notImplemented();
+    mutableState().isContinuousSpellCheckingEnabled = enabled;
 }
 
 void TextChecker::grammarCheckingEnabledStateChanged(bool)
@@ -132,34 +163,169 @@ void TextChecker::grammarCheckingEnabledStateChanged(bool)
     notImplemented();
 }
 
-int64_t TextChecker::uniqueSpellDocumentTag(WebPageProxy*)
-{
-    notImplemented();
-    return 0;
-}
-
-void TextChecker::closeSpellDocumentWithTag(int64_t)
-{
-    notImplemented();
-}
-
 #if USE(UNIFIED_TEXT_CHECKING)
 
-Vector<TextCheckingResult> TextChecker::checkTextOfParagraph(int64_t, StringView, int32_t, uint64_t, bool)
+static HashMap<SpellDocumentTag, RetainPtr<UITextChecker>>& spellDocumentTagMap()
 {
-    notImplemented();
-    return Vector<TextCheckingResult>();
+    static NeverDestroyed<HashMap<SpellDocumentTag, RetainPtr<UITextChecker>>> tagMap;
+    return tagMap;
 }
 
 #endif
 
-void TextChecker::checkSpellingOfString(int64_t, StringView, int32_t&, int32_t&)
+SpellDocumentTag TextChecker::uniqueSpellDocumentTag(WebPageProxy*)
 {
+#if USE(UNIFIED_TEXT_CHECKING)
+    static SpellDocumentTag nextSpellDocumentTag;
+    return ++nextSpellDocumentTag;
+#else
+    return { };
+#endif
+}
+
+void TextChecker::closeSpellDocumentWithTag(SpellDocumentTag spellDocumentTag)
+{
+#if USE(UNIFIED_TEXT_CHECKING)
+    spellDocumentTagMap().remove(spellDocumentTag);
+#else
+    UNUSED_PARAM(spellDocumentTag);
+#endif
+}
+
+#if USE(UNIFIED_TEXT_CHECKING)
+
+static RetainPtr<UITextChecker> textCheckerFor(SpellDocumentTag spellDocumentTag)
+{
+    auto addResult = spellDocumentTagMap().add(spellDocumentTag, nullptr);
+    if (addResult.isNewEntry)
+        addResult.iterator->value = adoptNS([[UITextChecker alloc] _initWithAsynchronousLoading:YES]);
+    return addResult.iterator->value;
+}
+
+Vector<TextCheckingResult> TextChecker::checkTextOfParagraph(SpellDocumentTag spellDocumentTag, StringView text, int32_t insertionPoint, OptionSet<TextCheckingType> checkingTypes, bool /* initialCapitalizationEnabled */)
+{
+    Vector<TextCheckingResult> results;
+    if (!checkingTypes.contains(TextCheckingType::Spelling))
+        return results;
+
+    auto textChecker = textCheckerFor(spellDocumentTag);
+    if (![textChecker _doneLoading])
+        return results;
+
+    NSArray<NSString *> *keyboardLanguages = @[ ];
+    auto *currentInputMode = [UIKeyboardInputModeController sharedInputModeController].currentInputMode;
+    if (currentInputMode.multilingualLanguages.count)
+        keyboardLanguages = currentInputMode.multilingualLanguages;
+    else if (currentInputMode.primaryLanguage)
+        keyboardLanguages = @[ currentInputMode.languageWithRegion ];
+
+    auto stringToCheck = text.createNSStringWithoutCopying();
+    auto range = NSMakeRange(0, [stringToCheck length]);
+
+#if ENABLE(POST_EDITING_GRAMMAR_CHECKING)
+    if ([textChecker respondsToSelector:@selector(checkString:range:types:languages:options:)]) {
+        NSTextCheckingTypes types = 0;
+        if (checkingTypes.contains(TextCheckingType::Spelling))
+            types |= NSTextCheckingTypeSpelling;
+        if (checkingTypes.contains(TextCheckingType::Grammar))
+            types |= NSTextCheckingTypeGrammar;
+        if (checkingTypes.contains(TextCheckingType::Correction))
+            types |= NSTextCheckingTypeCorrection;
+        NSDictionary *options = @{
+            @"InsertionPoint" : @(insertionPoint)
+        };
+        NSArray *incomingResults = [textChecker checkString:stringToCheck.get() range:range types:types languages:keyboardLanguages options:options];
+        for (NSTextCheckingResult *incomingResult in incomingResults) {
+            NSTextCheckingType resultType = [incomingResult resultType];
+            ASSERT(incomingResult.range.location != NSNotFound);
+            ASSERT(incomingResult.range.length > 0);
+            auto resultRange = incomingResult.range;
+            if (resultType == NSTextCheckingTypeSpelling && checkingTypes.contains(TextCheckingType::Spelling)) {
+                TextCheckingResult result;
+                result.type = TextCheckingType::Spelling;
+                result.range = resultRange;
+                results.append(WTFMove(result));
+            } else if (resultType == NSTextCheckingTypeGrammar && checkingTypes.contains(TextCheckingType::Grammar)) {
+                TextCheckingResult result;
+                NSArray *details = [incomingResult grammarDetails];
+                result.type = TextCheckingType::Grammar;
+                result.range = resultRange;
+                result.details.reserveInitialCapacity(details.count);
+                for (NSDictionary *incomingDetail in details) {
+                    ASSERT(incomingDetail);
+                    GrammarDetail detail;
+                    
+                    NSValue *detailRangeAsNSValue = [incomingDetail objectForKey:@"NSGrammarRange"];
+                    ASSERT(detailRangeAsNSValue);
+                    
+                    NSRange detailNSRange = [detailRangeAsNSValue rangeValue];
+                    ASSERT(detailNSRange.location != NSNotFound);
+                    ASSERT(detailNSRange.length > 0);
+                    
+                    detail.range = detailNSRange;
+                    detail.userDescription = [incomingDetail objectForKey:@"NSGrammarUserDescription"];
+                    detail.guesses = makeVector<String>([incomingDetail objectForKey:@"NSGrammarCorrections"]);
+                    result.details.uncheckedAppend(WTFMove(detail));
+                }
+                results.append(WTFMove(result));
+            } else if (resultType == NSTextCheckingTypeCorrection && checkingTypes.contains(TextCheckingType::Correction)) {
+                TextCheckingResult result;
+                result.type = TextCheckingType::Correction;
+                result.range = resultRange;
+                result.replacement = [incomingResult replacementString];
+                if ([incomingResult respondsToSelector:@selector(detail)]) {
+                    NSDictionary *incomingDetail = [incomingResult detail];
+                    if (incomingDetail) {
+                        result.details.reserveInitialCapacity(1);
+                        GrammarDetail detail;
+
+                        NSValue *detailRangeAsNSValue = [incomingDetail objectForKey:@"NSGrammarRange"];
+                        ASSERT(detailRangeAsNSValue);
+
+                        NSRange detailNSRange = [detailRangeAsNSValue rangeValue];
+                        ASSERT(detailNSRange.location != NSNotFound);
+                        ASSERT(detailNSRange.length > 0);
+
+                        detail.range = detailNSRange;
+                        detail.userDescription = [incomingDetail objectForKey:@"NSGrammarUserDescription"];
+                        detail.guesses = makeVector<String>([incomingDetail objectForKey:@"NSGrammarCorrections"]);
+                        result.details.uncheckedAppend(WTFMove(detail));
+                    }
+                }
+                results.append(WTFMove(result));
+            }
+        }
+    } else
+#endif
+    {
+        NSUInteger offsetSoFar = 0;
+        do {
+            auto misspelledRange = [textChecker rangeOfMisspelledWordInString:stringToCheck.get() range:range startingAt:offsetSoFar wrap:NO languages:keyboardLanguages];
+            if (misspelledRange.location == NSNotFound)
+                break;
+
+            TextCheckingResult result;
+            result.type = TextCheckingType::Spelling;
+            result.range = misspelledRange;
+            results.append(WTFMove(result));
+
+            offsetSoFar = misspelledRange.location + misspelledRange.length;
+        } while (offsetSoFar < [stringToCheck length]);
+    }
+    return results;
+}
+
+#endif
+
+void TextChecker::checkSpellingOfString(SpellDocumentTag, StringView, int32_t&, int32_t&)
+{
+    // iOS uses checkTextOfParagraph() instead.
     notImplemented();
 }
 
-void TextChecker::checkGrammarOfString(int64_t, StringView, Vector<WebCore::GrammarDetail>&, int32_t&, int32_t&)
+void TextChecker::checkGrammarOfString(SpellDocumentTag, StringView, Vector<WebCore::GrammarDetail>&, int32_t&, int32_t&)
 {
+    // iOS uses checkTextOfParagraph() instead.
     notImplemented();
 }
 
@@ -174,27 +340,27 @@ void TextChecker::toggleSpellingUIIsShowing()
     notImplemented();
 }
 
-void TextChecker::updateSpellingUIWithMisspelledWord(int64_t, const String&)
+void TextChecker::updateSpellingUIWithMisspelledWord(SpellDocumentTag, const String&)
 {
     notImplemented();
 }
 
-void TextChecker::updateSpellingUIWithGrammarString(int64_t, const String&, const GrammarDetail&)
+void TextChecker::updateSpellingUIWithGrammarString(SpellDocumentTag, const String&, const GrammarDetail&)
 {
     notImplemented();
 }
 
-void TextChecker::getGuessesForWord(int64_t, const String&, const String&, int32_t, Vector<String>&, bool)
+void TextChecker::getGuessesForWord(SpellDocumentTag, const String&, const String&, int32_t, Vector<String>&, bool)
 {
     notImplemented();
 }
 
-void TextChecker::learnWord(int64_t, const String&)
+void TextChecker::learnWord(SpellDocumentTag, const String&)
 {
     notImplemented();
 }
 
-void TextChecker::ignoreWord(int64_t, const String&)
+void TextChecker::ignoreWord(SpellDocumentTag, const String&)
 {
     notImplemented();
 }
@@ -206,4 +372,4 @@ void TextChecker::requestCheckingOfString(Ref<TextCheckerCompletion>&&, int32_t)
 
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

@@ -8,14 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/video/stats_counter.h"
+#include "video/stats_counter.h"
 
 #include <algorithm>
 #include <limits>
 #include <map>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/system_wrappers/include/clock.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/strings/string_builder.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 
@@ -30,12 +31,12 @@ std::string AggregatedStats::ToString() const {
 }
 
 std::string AggregatedStats::ToStringWithMultiplier(int multiplier) const {
-  std::stringstream ss;
+  rtc::StringBuilder ss;
   ss << "periodic_samples:" << num_samples << ", {";
   ss << "min:" << (min * multiplier) << ", ";
   ss << "avg:" << (average * multiplier) << ", ";
   ss << "max:" << (max * multiplier) << "}";
-  return ss.str();
+  return ss.Release();
 }
 
 // Class holding periodically computed metrics.
@@ -227,7 +228,7 @@ bool StatsCounter::TimeToProcess(int* elapsed_intervals) {
   if (diff_ms < process_intervals_ms_)
     return false;
 
-  // Advance number of complete |process_intervals_ms_| that have passed.
+  // Advance number of complete `process_intervals_ms_` that have passed.
   int64_t num_intervals = diff_ms / process_intervals_ms_;
   last_process_time_ms_ += num_intervals * process_intervals_ms_;
 
@@ -337,7 +338,7 @@ MaxCounter::MaxCounter(Clock* clock,
                        int64_t process_intervals_ms)
     : StatsCounter(clock,
                    process_intervals_ms,
-                   false,  // |include_empty_intervals|
+                   false,  // `include_empty_intervals`
                    observer) {}
 
 void MaxCounter::Add(int sample) {
@@ -353,14 +354,14 @@ bool MaxCounter::GetMetric(int* metric) const {
 }
 
 int MaxCounter::GetValueForEmptyInterval() const {
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return 0;
 }
 
 PercentCounter::PercentCounter(Clock* clock, StatsCounterObserver* observer)
     : StatsCounter(clock,
                    kDefaultProcessIntervalMs,
-                   false,  // |include_empty_intervals|
+                   false,  // `include_empty_intervals`
                    observer) {}
 
 void PercentCounter::Add(bool sample) {
@@ -377,14 +378,14 @@ bool PercentCounter::GetMetric(int* metric) const {
 }
 
 int PercentCounter::GetValueForEmptyInterval() const {
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return 0;
 }
 
 PermilleCounter::PermilleCounter(Clock* clock, StatsCounterObserver* observer)
     : StatsCounter(clock,
                    kDefaultProcessIntervalMs,
-                   false,  // |include_empty_intervals|
+                   false,  // `include_empty_intervals`
                    observer) {}
 
 void PermilleCounter::Add(bool sample) {
@@ -401,7 +402,7 @@ bool PermilleCounter::GetMetric(int* metric) const {
 }
 
 int PermilleCounter::GetValueForEmptyInterval() const {
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return 0;
 }
 

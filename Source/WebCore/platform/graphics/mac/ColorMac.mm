@@ -26,10 +26,24 @@
 #import "config.h"
 #import "ColorMac.h"
 
+#if USE(APPKIT)
+
+#import "GraphicsContextCG.h"
+#import "LocalCurrentGraphicsContext.h"
 #import <wtf/BlockObjCExceptions.h>
+#import <wtf/Lock.h>
 #import <wtf/NeverDestroyed.h>
 #import <wtf/RetainPtr.h>
-#import <wtf/StdLibExtras.h>
+#import <wtf/TinyLRUCache.h>
+
+namespace WTF {
+
+template<> RetainPtr<NSColor> TinyLRUCachePolicy<WebCore::Color, RetainPtr<NSColor>>::createValueForKey(const WebCore::Color& color)
+{
+    return [NSColor colorWithCGColor:cachedCGColor(color).get()];
+}
+
+} // namespace WTF
 
 namespace WebCore {
 
@@ -37,7 +51,7 @@ static bool useOldAquaFocusRingColor;
 
 Color oldAquaFocusRingColor()
 {
-    return 0xFF7DADD9;
+    return SRGBA<uint8_t> { 125, 173, 217 };
 }
 
 void setUsesTestModeFocusRingColor(bool newValue)
@@ -50,66 +64,93 @@ bool usesTestModeFocusRingColor()
     return useOldAquaFocusRingColor;
 }
 
-static RGBA32 makeRGBAFromNSColor(NSColor *c)
+static std::optional<SRGBA<uint8_t>> makeSimpleColorFromNSColor(NSColor *color)
 {
+    // FIXME: ExtendedColor - needs to handle color spaces.
+
+    if (!color)
+        return std::nullopt;
+
     CGFloat redComponent;
     CGFloat greenComponent;
     CGFloat blueComponent;
     CGFloat alpha;
 
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    NSColor *rgbColor = [c colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
-    if (!rgbColor)
-        return makeRGBA(0, 0, 0, 0);
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
+    NSColor *rgbColor = [color colorUsingColorSpace:NSColorSpace.deviceRGBColorSpace];
+    if (!rgbColor) {
+        // The color space conversion above can fail if the NSColor is in the NSPatternColorSpace.
+        // These colors are actually a repeating pattern, not just a solid color. To workaround
+        // this we simply draw a one pixel image of the color and use that pixel's color.
+        // FIXME: It might be better to use an average of the colors in the pattern instead.
+        RetainPtr<NSBitmapImageRep> offscreenRep = adoptNS([[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nil pixelsWide:1 pixelsHigh:1
+            bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:4 bitsPerPixel:32]);
+
+        GraphicsContextCG bitmapContext([NSGraphicsContext graphicsContextWithBitmapImageRep:offscreenRep.get()].CGContext);
+        LocalCurrentGraphicsContext localContext(bitmapContext);
+
+        [color drawSwatchInRect:NSMakeRect(0, 0, 1, 1)];
+
+        NSUInteger pixel[4];
+        [offscreenRep getPixel:pixel atX:0 y:0];
+
+        return makeFromComponentsClamping<SRGBA<uint8_t>>(pixel[0], pixel[1], pixel[2], pixel[3]);
+    }
 
     [rgbColor getRed:&redComponent green:&greenComponent blue:&blueComponent alpha:&alpha];
-    END_BLOCK_OBJC_EXCEPTIONS;
+    END_BLOCK_OBJC_EXCEPTIONS
 
-    return makeRGBA(255 * redComponent, 255 * greenComponent, 255 * blueComponent, 255 * alpha);
+    return convertColor<SRGBA<uint8_t>>(SRGBA<float> { static_cast<float>(redComponent), static_cast<float>(greenComponent), static_cast<float>(blueComponent), static_cast<float>(alpha) });
 }
 
-Color colorFromNSColor(NSColor *c)
+Color colorFromCocoaColor(NSColor *color)
 {
-    return Color(makeRGBAFromNSColor(c));
+    return makeSimpleColorFromNSColor(color);
 }
 
-NSColor *nsColor(const Color& color)
+Color semanticColorFromNSColor(NSColor *color)
 {
-    if (!color.isValid()) {
-        // Need this to avoid returning nil because cachedRGBAValues will default to 0.
-        static NeverDestroyed<NSColor *> clearColor = [[NSColor colorWithSRGBRed:0 green:0 blue:0 alpha:0] retain];
-        return clearColor;
-    }
-
-    if (Color::isBlackColor(color)) {
-        static NeverDestroyed<NSColor *> blackColor = [[NSColor colorWithSRGBRed:0 green:0 blue:0 alpha:1] retain];
-        return blackColor;
-    }
-
-    if (Color::isWhiteColor(color)) {
-        static NeverDestroyed<NSColor *> whiteColor = [[NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:1] retain];
-        return whiteColor;
-    }
-
-    const int cacheSize = 32;
-    static unsigned cachedRGBAValues[cacheSize];
-    static RetainPtr<NSColor>* cachedColors = new RetainPtr<NSColor>[cacheSize];
-
-    unsigned hash = color.hash();
-    for (int i = 0; i < cacheSize; ++i) {
-        if (cachedRGBAValues[i] == hash)
-            return cachedColors[i].get();
-    }
-
-    NSColor *result = [NSColor colorWithCGColor:cachedCGColor(color)];
-
-    static int cursor;
-    cachedRGBAValues[cursor] = hash;
-    cachedColors[cursor] = result;
-    if (++cursor == cacheSize)
-        cursor = 0;
-    return result;
+    return Color(makeSimpleColorFromNSColor(color), Color::Flags::Semantic);
 }
 
+RetainPtr<NSColor> cocoaColor(const Color& color)
+{
+    if (auto srgb = color.tryGetAsSRGBABytes()) {
+        switch (PackedColor::RGBA { *srgb }.value) {
+        case PackedColor::RGBA { Color::transparentBlack }.value: {
+            static LazyNeverDestroyed<RetainPtr<NSColor>> clearColor;
+            static std::once_flag onceFlag;
+            std::call_once(onceFlag, [] {
+                clearColor.construct([NSColor colorWithSRGBRed:0 green:0 blue:0 alpha:0]);
+            });
+            return clearColor.get();
+        }
+        case PackedColor::RGBA { Color::black }.value: {
+            static LazyNeverDestroyed<RetainPtr<NSColor>> blackColor;
+            static std::once_flag onceFlag;
+            std::call_once(onceFlag, [] {
+                blackColor.construct([NSColor colorWithSRGBRed:0 green:0 blue:0 alpha:1]);
+            });
+            return blackColor.get();
+        }
+        case PackedColor::RGBA { Color::white }.value: {
+            static LazyNeverDestroyed<RetainPtr<NSColor>> whiteColor;
+            static std::once_flag onceFlag;
+            std::call_once(onceFlag, [] {
+                whiteColor.construct([NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:1]);
+            });
+            return whiteColor.get();
+        }
+        }
+    }
+
+    static Lock cachedColorLock;
+    Locker locker { cachedColorLock };
+
+    static NeverDestroyed<TinyLRUCache<Color, RetainPtr<NSColor>, 32>> cache;
+    return cache.get().get(color);
+}
 
 } // namespace WebCore
+
+#endif // USE(APPKIT)

@@ -28,10 +28,10 @@
 using namespace WebKit;
 
 /**
- * SECTION: WebKitNotificationPermissionRequest
- * @Short_description: A permission request for displaying web notifications
- * @Title: WebKitNotificationPermissionRequest
+ * WebKitNotificationPermissionRequest:
  * @See_also: #WebKitPermissionRequest, #WebKitWebView
+ *
+ * A permission request for displaying web notifications.
  *
  * WebKitNotificationPermissionRequest represents a request for
  * permission to decide whether WebKit should provide the user with
@@ -64,7 +64,7 @@ static void webkitNotificationPermissionRequestAllow(WebKitPermissionRequest* re
     if (priv->madeDecision)
         return;
 
-    priv->request->allow();
+    priv->request->didReceiveDecision(true);
     priv->madeDecision = true;
 }
 
@@ -78,7 +78,7 @@ static void webkitNotificationPermissionRequestDeny(WebKitPermissionRequest* req
     if (priv->madeDecision)
         return;
 
-    priv->request->deny();
+    priv->request->didReceiveDecision(false);
     priv->madeDecision = true;
 }
 

@@ -38,20 +38,37 @@ void WebContextClient::plugInAutoStartOriginHashesChanged(WebProcessPool* proces
     m_client.plugInAutoStartOriginHashesChanged(toAPI(processPool), m_client.base.clientInfo);
 }
 
-void WebContextClient::networkProcessDidCrash(WebProcessPool* processPool)
+void WebContextClient::networkProcessDidCrash(WebProcessPool* processPool, ProcessID processID, ProcessTerminationReason reason)
 {
-    if (!m_client.networkProcessDidCrash)
+    if (m_client.networkProcessDidCrashWithDetails) {
+        m_client.networkProcessDidCrashWithDetails(toAPI(processPool), processID, toAPI(reason), m_client.base.clientInfo);
         return;
+    }
 
-    m_client.networkProcessDidCrash(toAPI(processPool), m_client.base.clientInfo);
+    if (m_client.networkProcessDidCrash)
+        m_client.networkProcessDidCrash(toAPI(processPool), m_client.base.clientInfo);
 }
 
-void WebContextClient::storageProcessDidCrash(WebProcessPool* processPool)
+void WebContextClient::serviceWorkerProcessDidCrash(WebProcessPool* processPool, ProcessID processID, ProcessTerminationReason reason)
 {
-    if (!m_client.databaseProcessDidCrash)
+    if (m_client.serviceWorkerProcessDidCrashWithDetails) {
+        m_client.serviceWorkerProcessDidCrashWithDetails(toAPI(processPool), processID, toAPI(reason), m_client.base.clientInfo);
         return;
+    }
 
-    m_client.databaseProcessDidCrash(toAPI(processPool), m_client.base.clientInfo);
+    if (m_client.serviceWorkerProcessDidCrash)
+        m_client.serviceWorkerProcessDidCrash(toAPI(processPool), processID, m_client.base.clientInfo);
+}
+
+void WebContextClient::gpuProcessDidCrash(WebProcessPool* processPool, ProcessID processID, ProcessTerminationReason reason)
+{
+    if (m_client.gpuProcessDidCrashWithDetails) {
+        m_client.gpuProcessDidCrashWithDetails(toAPI(processPool), processID, toAPI(reason), m_client.base.clientInfo);
+        return;
+    }
+
+    if (m_client.gpuProcessDidCrash)
+        m_client.gpuProcessDidCrash(toAPI(processPool), processID, m_client.base.clientInfo);
 }
 
 } // namespace WebKit

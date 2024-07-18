@@ -17,7 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#if !defined(__WEBKIT_H_INSIDE__) && !defined(WEBKIT2_COMPILATION)
+#if !defined(__WEBKIT_H_INSIDE__) && !defined(WEBKIT2_COMPILATION) && !defined(__WEBKIT_WEB_EXTENSION_H_INSIDE__)
 #error "Only <wpe/webkit.h> can be included directly."
 #endif
 
@@ -59,7 +59,7 @@ webkit_security_origin_get_host     (WebKitSecurityOrigin *origin);
 WEBKIT_API guint16
 webkit_security_origin_get_port     (WebKitSecurityOrigin *origin);
 
-WEBKIT_API gboolean
+WEBKIT_DEPRECATED gboolean
 webkit_security_origin_is_opaque    (WebKitSecurityOrigin *origin);
 
 WEBKIT_API gchar *

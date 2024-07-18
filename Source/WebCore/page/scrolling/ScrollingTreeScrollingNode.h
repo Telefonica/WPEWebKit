@@ -29,65 +29,132 @@
 
 #include "IntRect.h"
 #include "ScrollSnapOffsetsInfo.h"
-#include "ScrollTypes.h"
-#include "ScrollingCoordinator.h"
+#include "ScrollableArea.h"
+#include "ScrollingTree.h"
 #include "ScrollingTreeNode.h"
-
-#if PLATFORM(IOS)
-class ScrollingTreeScrollingNodeDelegate;
-#endif
 
 namespace WebCore {
 
 class ScrollingTree;
 class ScrollingStateScrollingNode;
+struct WheelEventHandlingResult;
 
-class ScrollingTreeScrollingNode : public ScrollingTreeNode {
-#if PLATFORM(IOS)
+struct ScrollPropagationInfo {
+    bool shouldBlockScrollPropagation { false };
+    bool isHandled { false };
+};
+
+class WEBCORE_EXPORT ScrollingTreeScrollingNode : public ScrollingTreeNode {
     friend class ScrollingTreeScrollingNodeDelegate;
+#if PLATFORM(MAC)
+    friend class ScrollingTreeScrollingNodeDelegateMac;
 #endif
+#if USE(NICOSIA)
+    friend class ScrollingTreeScrollingNodeDelegateNicosia;
+#endif
+    friend class ScrollingTree;
+    friend class ThreadedScrollingTree;
 
 public:
     virtual ~ScrollingTreeScrollingNode();
 
-    WEBCORE_EXPORT void commitStateBeforeChildren(const ScrollingStateNode&) override;
-    WEBCORE_EXPORT void commitStateAfterChildren(const ScrollingStateNode&) override;
+    void commitStateBeforeChildren(const ScrollingStateNode&) override;
+    void commitStateAfterChildren(const ScrollingStateNode&) override;
+    void didCompleteCommitForNode() final;
 
-    WEBCORE_EXPORT void updateLayersAfterAncestorChange(const ScrollingTreeNode& changedNode, const FloatRect& fixedPositionRect, const FloatSize& cumulativeDelta) override;
+    virtual bool canHandleWheelEvent(const PlatformWheelEvent&, EventTargeting) const;
+    virtual WheelEventHandlingResult handleWheelEvent(const PlatformWheelEvent&, EventTargeting = EventTargeting::Propagate);
 
-    virtual void handleWheelEvent(const PlatformWheelEvent&) = 0;
-    WEBCORE_EXPORT virtual void setScrollPosition(const FloatPoint&);
-    WEBCORE_EXPORT virtual void setScrollPositionWithoutContentEdgeConstraints(const FloatPoint&);
+    FloatPoint currentScrollPosition() const { return m_currentScrollPosition; }
+    FloatPoint currentScrollOffset() const { return ScrollableArea::scrollOffsetFromPosition(m_currentScrollPosition, toFloatSize(m_scrollOrigin)); }
+    FloatPoint lastCommittedScrollPosition() const { return m_lastCommittedScrollPosition; }
+    FloatSize scrollDeltaSinceLastCommit() const { return m_currentScrollPosition - m_lastCommittedScrollPosition; }
 
-    virtual void updateLayersAfterViewportChange(const FloatRect& fixedPositionRect, double scale) = 0;
-    virtual void updateLayersAfterDelegatedScroll(const FloatPoint&) { }
+    const IntPoint& scrollOrigin() const { return m_scrollOrigin; }
 
-    virtual FloatPoint scrollPosition() const = 0;
+    RectEdges<bool> edgePinnedState() const;
 
-#if ENABLE(CSS_SCROLL_SNAP)
-    const Vector<float>& horizontalSnapOffsets() const { return m_snapOffsetsInfo.horizontalSnapOffsets; }
-    const Vector<float>& verticalSnapOffsets() const { return m_snapOffsetsInfo.verticalSnapOffsets; }
-    const Vector<ScrollOffsetRange<float>>& horizontalSnapOffsetRanges() const { return m_snapOffsetsInfo.horizontalSnapOffsetRanges; }
-    const Vector<ScrollOffsetRange<float>>& verticalSnapOffsetRanges() const { return m_snapOffsetsInfo.verticalSnapOffsetRanges; }
-    unsigned currentHorizontalSnapPointIndex() const { return m_currentHorizontalSnapPointIndex; }
-    unsigned currentVerticalSnapPointIndex() const { return m_currentVerticalSnapPointIndex; }
-    void setCurrentHorizontalSnapPointIndex(unsigned index) { m_currentHorizontalSnapPointIndex = index; }
-    void setCurrentVerticalSnapPointIndex(unsigned index) { m_currentVerticalSnapPointIndex = index; }
+    bool isUserScrollInProgress() const;
+    void setUserScrollInProgress(bool);
+
+    bool isScrollSnapInProgress() const;
+    void setScrollSnapInProgress(bool);
+
+    virtual void serviceScrollAnimation(MonotonicTime) { }
+
+    // These are imperative; they adjust the scrolling layers.
+    void scrollTo(const FloatPoint&, ScrollType = ScrollType::User, ScrollClamping = ScrollClamping::Clamped);
+    void scrollBy(const FloatSize&, ScrollClamping = ScrollClamping::Clamped);
+
+    void handleScrollPositionRequest(const RequestedScrollData&);
+
+    void wasScrolledByDelegatedScrolling(const FloatPoint& position, std::optional<FloatRect> overrideLayoutViewport = { }, ScrollingLayerPositionAction = ScrollingLayerPositionAction::Sync);
+    
+#if ENABLE(SCROLLING_THREAD)
+    OptionSet<SynchronousScrollingReason> synchronousScrollingReasons() const { return m_synchronousScrollingReasons; }
+    void addSynchronousScrollingReason(SynchronousScrollingReason reason) { m_synchronousScrollingReasons.add(reason); }
+    bool hasSynchronousScrollingReasons() const { return !m_synchronousScrollingReasons.isEmpty(); }
 #endif
+
+    const FloatSize& scrollableAreaSize() const { return m_scrollableAreaSize; }
+    const FloatSize& totalContentsSize() const { return m_totalContentsSize; }
+
+    bool horizontalScrollbarHiddenByStyle() const { return m_scrollableAreaParameters.horizontalScrollbarHiddenByStyle; }
+    bool verticalScrollbarHiddenByStyle() const { return m_scrollableAreaParameters.verticalScrollbarHiddenByStyle; }
+    bool canHaveHorizontalScrollbar() const { return m_scrollableAreaParameters.horizontalScrollbarMode != ScrollbarMode::AlwaysOff; }
+    bool canHaveVerticalScrollbar() const { return m_scrollableAreaParameters.verticalScrollbarMode != ScrollbarMode::AlwaysOff; }
+    bool canHaveScrollbars() const { return m_scrollableAreaParameters.horizontalScrollbarMode != ScrollbarMode::AlwaysOff || m_scrollableAreaParameters.verticalScrollbarMode != ScrollbarMode::AlwaysOff; }
+
+    const FloatScrollSnapOffsetsInfo& snapOffsetsInfo() const;
+    std::optional<unsigned> currentHorizontalSnapPointIndex() const;
+    std::optional<unsigned> currentVerticalSnapPointIndex() const;
+    void setCurrentHorizontalSnapPointIndex(std::optional<unsigned>);
+    void setCurrentVerticalSnapPointIndex(std::optional<unsigned>);
+
+    bool useDarkAppearanceForScrollbars() const { return m_scrollableAreaParameters.useDarkAppearanceForScrollbars; }
+
+    bool eventCanScrollContents(const PlatformWheelEvent&) const;
+    
+    bool scrolledSinceLastCommit() const { return m_scrolledSinceLastCommit; }
+
+    const LayerRepresentation& scrollContainerLayer() const { return m_scrollContainerLayer; }
+    const LayerRepresentation& scrolledContentsLayer() const { return m_scrolledContentsLayer; }
+    
+    OverscrollBehavior horizontalOverscrollBehavior() const { return m_scrollableAreaParameters.horizontalOverscrollBehavior; }
+    OverscrollBehavior verticalOverscrollBehavior() const { return m_scrollableAreaParameters.verticalOverscrollBehavior; }
 
 protected:
     ScrollingTreeScrollingNode(ScrollingTree&, ScrollingNodeType, ScrollingNodeID);
 
-    WEBCORE_EXPORT virtual FloatPoint minimumScrollPosition() const;
-    WEBCORE_EXPORT virtual FloatPoint maximumScrollPosition() const;
+    virtual FloatPoint minimumScrollPosition() const;
+    virtual FloatPoint maximumScrollPosition() const;
 
-    virtual void setScrollLayerPosition(const FloatPoint&, const FloatRect& layoutViewport) = 0;
+    FloatPoint clampScrollPosition(const FloatPoint&) const;
+    
+    virtual void willDoProgrammaticScroll(const FloatPoint&) { }
+    
+    virtual FloatPoint adjustedScrollPosition(const FloatPoint&, ScrollClamping = ScrollClamping::Clamped) const;
+    
+    virtual bool startAnimatedScrollToPosition(FloatPoint) { return false; }
+    virtual void stopAnimatedScroll() { }
 
-    FloatPoint lastCommittedScrollPosition() const { return m_lastCommittedScrollPosition; }
-    const FloatSize& scrollableAreaSize() const { return m_scrollableAreaSize; }
-    const FloatSize& totalContentsSize() const { return m_totalContentsSize; }
+    void willStartAnimatedScroll();
+    void didStopAnimatedScroll();
+
+    void setScrollAnimationInProgress(bool);
+
+    virtual void currentScrollPositionChanged(ScrollType, ScrollingLayerPositionAction = ScrollingLayerPositionAction::Sync);
+    virtual void updateViewportForCurrentScrollPosition(std::optional<FloatRect> = { }) { }
+    virtual bool scrollPositionAndLayoutViewportMatch(const FloatPoint& position, std::optional<FloatRect> overrideLayoutViewport);
+
+    virtual void repositionScrollingLayers() { }
+    virtual void repositionRelatedLayers() { }
+
+    void applyLayerPositions() override;
+
     const FloatSize& reachableContentsSize() const { return m_reachableContentsSize; }
-    const IntPoint& scrollOrigin() const { return m_scrollOrigin; }
+    
+    bool isLatchedNode() const;
 
     // If the totalContentsSize changes in the middle of a rubber-band, we still want to use the old totalContentsSize for the sake of
     // computing the stretchAmount(). Using the old value will keep the animation smooth. When there is no rubber-band in progress at
@@ -98,12 +165,15 @@ protected:
     ScrollElasticity horizontalScrollElasticity() const { return m_scrollableAreaParameters.horizontalScrollElasticity; }
     ScrollElasticity verticalScrollElasticity() const { return m_scrollableAreaParameters.verticalScrollElasticity; }
 
-    bool hasEnabledHorizontalScrollbar() const { return m_scrollableAreaParameters.hasEnabledHorizontalScrollbar; }
-    bool hasEnabledVerticalScrollbar() const { return m_scrollableAreaParameters.hasEnabledVerticalScrollbar; }
-
-    bool canHaveScrollbars() const { return m_scrollableAreaParameters.horizontalScrollbarMode != ScrollbarAlwaysOff || m_scrollableAreaParameters.verticalScrollbarMode != ScrollbarAlwaysOff; }
-
-    WEBCORE_EXPORT void dumpProperties(WTF::TextStream&, ScrollingStateTreeAsTextBehavior) const override;
+    bool allowsHorizontalScrolling() const { return m_scrollableAreaParameters.allowsHorizontalScrolling; }
+    bool allowsVerticalScrolling() const { return m_scrollableAreaParameters.allowsVerticalScrolling; }
+    bool horizontalOverscrollBehaviorPreventsPropagation() const { return m_scrollableAreaParameters.horizontalOverscrollBehavior != OverscrollBehavior::Auto; }
+    bool verticalOverscrollBehaviorPreventsPropagation() const { return m_scrollableAreaParameters.verticalOverscrollBehavior != OverscrollBehavior::Auto; }
+    PlatformWheelEvent eventForPropagation(const PlatformWheelEvent&) const;
+    ScrollPropagationInfo computeScrollPropagation(const FloatSize&) const;
+    bool overscrollBehaviorAllowsRubberBand() const { return m_scrollableAreaParameters.horizontalOverscrollBehavior != OverscrollBehavior::None ||  m_scrollableAreaParameters.verticalOverscrollBehavior != OverscrollBehavior::None; }
+    bool shouldRubberBand(const PlatformWheelEvent&, EventTargeting) const;
+    void dumpProperties(WTF::TextStream&, OptionSet<ScrollingStateTreeAsTextBehavior>) const override;
 
 private:
     FloatSize m_scrollableAreaSize;
@@ -111,13 +181,20 @@ private:
     FloatSize m_totalContentsSizeForRubberBand;
     FloatSize m_reachableContentsSize;
     FloatPoint m_lastCommittedScrollPosition;
+    FloatPoint m_currentScrollPosition;
     IntPoint m_scrollOrigin;
-#if ENABLE(CSS_SCROLL_SNAP)
-    ScrollSnapOffsetsInfo<float> m_snapOffsetsInfo;
-    unsigned m_currentHorizontalSnapPointIndex { 0 };
-    unsigned m_currentVerticalSnapPointIndex { 0 };
-#endif
+    FloatScrollSnapOffsetsInfo m_snapOffsetsInfo;
+    std::optional<unsigned> m_currentHorizontalSnapPointIndex;
+    std::optional<unsigned> m_currentVerticalSnapPointIndex;
     ScrollableAreaParameters m_scrollableAreaParameters;
+#if ENABLE(SCROLLING_THREAD)
+    OptionSet<SynchronousScrollingReason> m_synchronousScrollingReasons;
+#endif
+    bool m_isFirstCommit { true };
+    bool m_scrolledSinceLastCommit { false };
+
+    LayerRepresentation m_scrollContainerLayer;
+    LayerRepresentation m_scrolledContentsLayer;
 };
 
 } // namespace WebCore

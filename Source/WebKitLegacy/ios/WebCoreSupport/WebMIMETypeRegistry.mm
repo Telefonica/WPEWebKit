@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebMIMETypeRegistry.h"
 
@@ -35,12 +35,12 @@ using WebCore::MIMETypeRegistry;
 
 + (NSString *)mimeTypeForExtension:(NSString *)extension
 {
-    return MIMETypeRegistry::getMIMETypeForExtension(extension);
+    return MIMETypeRegistry::mimeTypeForExtension(String(extension));
 }
 
 + (NSString *)preferredExtensionForMIMEType:(NSString *)mimeType
 {
-    return MIMETypeRegistry::getPreferredExtensionForMIMEType(mimeType);
+    return MIMETypeRegistry::preferredExtensionForMIMEType(mimeType);
 }
 
 + (BOOL)isSupportedImageMIMEType:(NSString *)mimeType
@@ -55,4 +55,4 @@ using WebCore::MIMETypeRegistry;
 
 @end
 
-#endif  // PLATFORM(IOS)
+#endif  // PLATFORM(IOS_FAMILY)

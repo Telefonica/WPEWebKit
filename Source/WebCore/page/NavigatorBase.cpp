@@ -27,12 +27,17 @@
 #include "config.h"
 #include "NavigatorBase.h"
 
-#include "NetworkStateNotifier.h"
+#include "Document.h"
+#include "GPU.h"
 #include "ServiceWorkerContainer.h"
+#include "StorageManager.h"
+#include "WebCoreOpaqueRoot.h"
+#include "WebLockManager.h"
 #include <mutex>
 #include <wtf/Language.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/NumberOfCores.h>
+#include <wtf/UniqueRef.h>
 #include <wtf/text/WTFString.h>
 
 #if OS(LINUX)
@@ -40,34 +45,20 @@
 #include <wtf/StdLibExtras.h>
 #endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #include "Device.h"
 #endif
 
-#ifndef WEBCORE_NAVIGATOR_PLATFORM
-#if PLATFORM(IOS)
-#define WEBCORE_NAVIGATOR_PLATFORM deviceName()
-#elif OS(MAC_OS_X) && (CPU(PPC) || CPU(PPC64))
-#define WEBCORE_NAVIGATOR_PLATFORM ASCIILiteral("MacPPC")
-#elif OS(MAC_OS_X) && (CPU(X86) || CPU(X86_64))
-#define WEBCORE_NAVIGATOR_PLATFORM ASCIILiteral("MacIntel")
-#elif OS(WINDOWS)
-#define WEBCORE_NAVIGATOR_PLATFORM ASCIILiteral("Win32")
-#else
-#define WEBCORE_NAVIGATOR_PLATFORM emptyString()
-#endif
-#endif // ifndef WEBCORE_NAVIGATOR_PLATFORM
-
 #ifndef WEBCORE_NAVIGATOR_PRODUCT
-#define WEBCORE_NAVIGATOR_PRODUCT ASCIILiteral("Gecko")
+#define WEBCORE_NAVIGATOR_PRODUCT "Gecko"_s
 #endif // ifndef WEBCORE_NAVIGATOR_PRODUCT
 
 #ifndef WEBCORE_NAVIGATOR_PRODUCT_SUB
-#define WEBCORE_NAVIGATOR_PRODUCT_SUB ASCIILiteral("20030107")
+#define WEBCORE_NAVIGATOR_PRODUCT_SUB "20030107"_s
 #endif // ifndef WEBCORE_NAVIGATOR_PRODUCT_SUB
 
 #ifndef WEBCORE_NAVIGATOR_VENDOR
-#define WEBCORE_NAVIGATOR_VENDOR ASCIILiteral("Apple Computer, Inc.")
+#define WEBCORE_NAVIGATOR_VENDOR "Apple Computer, Inc."_s
 #endif // ifndef WEBCORE_NAVIGATOR_VENDOR
 
 #ifndef WEBCORE_NAVIGATOR_VENDOR_SUB
@@ -76,23 +67,16 @@
 
 namespace WebCore {
 
-NavigatorBase::NavigatorBase(ScriptExecutionContext& context)
-#if ENABLE(SERVICE_WORKER)
-    : m_serviceWorkerContainer(makeUniqueRef<ServiceWorkerContainer>(context, *this))
-#endif
+NavigatorBase::NavigatorBase(ScriptExecutionContext* context)
+    : ContextDestructionObserver(context)
 {
-#if !ENABLE(SERVICE_WORKER)
-    UNUSED_PARAM(context);
-#endif
 }
 
-NavigatorBase::~NavigatorBase()
-{
-}
+NavigatorBase::~NavigatorBase() = default;
 
 String NavigatorBase::appName()
 {
-    return ASCIILiteral("Netscape");
+    return "Netscape"_s;
 }
 
 String NavigatorBase::appVersion() const
@@ -102,22 +86,30 @@ String NavigatorBase::appVersion() const
     return agent.substring(agent.find('/') + 1);
 }
 
-String NavigatorBase::platform()
+String NavigatorBase::platform() const
 {
 #if OS(LINUX)
-    if (!String(WEBCORE_NAVIGATOR_PLATFORM).isEmpty())
-        return WEBCORE_NAVIGATOR_PLATFORM;
-    struct utsname osname;
-    static NeverDestroyed<String> platformName(uname(&osname) >= 0 ? String(osname.sysname) + String(" ") + String(osname.machine) : emptyString());
-    return platformName;
+    static LazyNeverDestroyed<String> platformName;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [] {
+        struct utsname osname;
+        platformName.construct(uname(&osname) >= 0 ? makeString(osname.sysname, " ", osname.machine) : emptyString());
+    });
+    return platformName->isolatedCopy();
+#elif PLATFORM(IOS_FAMILY)
+    return deviceName();
+#elif OS(MAC_OS_X)
+    return "MacIntel"_s;
+#elif OS(WINDOWS)
+    return "Win32"_s;
 #else
-    return WEBCORE_NAVIGATOR_PLATFORM;
+    return ""_s;
 #endif
 }
 
 String NavigatorBase::appCodeName()
 {
-    return ASCIILiteral("Mozilla");
+    return "Mozilla"_s;
 }
 
 String NavigatorBase::product()
@@ -140,11 +132,6 @@ String NavigatorBase::vendorSub()
     return WEBCORE_NAVIGATOR_VENDOR_SUB;
 }
 
-bool NavigatorBase::onLine()
-{
-    return NetworkStateNotifier::singleton().onLine();
-}
-
 String NavigatorBase::language()
 {
     return defaultLanguage();
@@ -156,11 +143,62 @@ Vector<String> NavigatorBase::languages()
     return { defaultLanguage() };
 }
 
-#if ENABLE(SERVICE_WORKER)
-ServiceWorkerContainer* NavigatorBase::serviceWorker()
+StorageManager& NavigatorBase::storage()
 {
-    return &m_serviceWorkerContainer;
+    if (!m_storageManager)
+        m_storageManager = StorageManager::create(*this);
+
+    return *m_storageManager;
+}
+
+WebLockManager& NavigatorBase::locks()
+{
+    if (!m_webLockManager)
+        m_webLockManager = WebLockManager::create(*this);
+
+    return *m_webLockManager;
+}
+
+#if ENABLE(SERVICE_WORKER)
+ServiceWorkerContainer& NavigatorBase::serviceWorker()
+{
+    ASSERT(!scriptExecutionContext() || scriptExecutionContext()->settingsValues().serviceWorkersEnabled);
+    if (!m_serviceWorkerContainer)
+        m_serviceWorkerContainer = ServiceWorkerContainer::create(scriptExecutionContext(), *this).moveToUniquePtr();
+    return *m_serviceWorkerContainer;
+}
+
+ExceptionOr<ServiceWorkerContainer&> NavigatorBase::serviceWorker(ScriptExecutionContext& context)
+{
+    if (is<Document>(context) && downcast<Document>(context).isSandboxed(SandboxOrigin))
+        return Exception { SecurityError, "Service Worker is disabled because the context is sandboxed and lacks the 'allow-same-origin' flag"_s };
+    return serviceWorker();
 }
 #endif
+
+int NavigatorBase::hardwareConcurrency()
+{
+    static int numberOfCores;
+
+    static std::once_flag once;
+    std::call_once(once, [] {
+        // Enforce a maximum for the number of cores reported to mitigate
+        // fingerprinting for the minority of machines with large numbers of cores.
+        // If machines with more than 8 cores become commonplace, we should bump this number.
+        // see https://bugs.webkit.org/show_bug.cgi?id=132588 for the
+        // rationale behind this decision.
+        if (WTF::numberOfProcessorCores() < 8)
+            numberOfCores = 4;
+        else
+            numberOfCores = 8;
+    });
+
+    return numberOfCores;
+}
+
+WebCoreOpaqueRoot root(NavigatorBase* navigator)
+{
+    return WebCoreOpaqueRoot { navigator };
+}
 
 } // namespace WebCore

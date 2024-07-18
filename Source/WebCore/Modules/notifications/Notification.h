@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
- * Copyright (C) 2009, 2011, 2012, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2009, 2011, 2012, 2016, 2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -37,17 +37,26 @@
 #include "EventTarget.h"
 #include "NotificationDirection.h"
 #include "NotificationPermission.h"
-#include "Timer.h"
-#include "URL.h"
+#include "NotificationResources.h"
+#include "ScriptExecutionContextIdentifier.h"
+#include "SerializedScriptValue.h"
+#include <wtf/CompletionHandler.h>
+#include <wtf/URL.h>
+#include <wtf/UUID.h>
 #include "WritingMode.h"
 
 namespace WebCore {
 
+class DeferredPromise;
 class Document;
+class NotificationClient;
 class NotificationPermissionCallback;
+class NotificationResourcesLoader;
 
-class Notification final : public RefCounted<Notification>, public ActiveDOMObject, public EventTargetWithInlineData {
-    WTF_MAKE_FAST_ALLOCATED;
+struct NotificationData;
+
+class Notification final : public ThreadSafeRefCounted<Notification>, public ActiveDOMObject, public EventTargetWithInlineData {
+    WTF_MAKE_ISO_ALLOCATED_EXPORT(Notification, WEBCORE_EXPORT);
 public:
     using Permission = NotificationPermission;
     using Direction = NotificationDirection;
@@ -58,12 +67,17 @@ public:
         String body;
         String tag;
         String icon;
+        JSC::JSValue data;
     };
-    static Ref<Notification> create(Document&, const String& title, const Options&);
-    
-    virtual ~Notification();
+    // For JS constructor only.
+    static ExceptionOr<Ref<Notification>> create(ScriptExecutionContext&, String&& title, Options&&);
 
-    void show();
+    static ExceptionOr<Ref<Notification>> createForServiceWorker(ScriptExecutionContext&, String&& title, Options&&, const URL&);
+    static Ref<Notification> create(ScriptExecutionContext&, NotificationData&&);
+
+    WEBCORE_EXPORT virtual ~Notification();
+
+    void show(CompletionHandler<void()>&& = [] { });
     void close();
 
     const String& title() const { return m_title; }
@@ -72,8 +86,9 @@ public:
     const String& lang() const { return m_lang; }
     const String& tag() const { return m_tag; }
     const URL& icon() const { return m_icon; }
+    JSC::JSValue dataForBindings(JSC::JSGlobalObject&);
 
-    TextDirection direction() const { return m_direction == Direction::Rtl ? RTL : LTR; }
+    TextDirection direction() const { return m_direction == Direction::Rtl ? TextDirection::RTL : TextDirection::LTR; }
 
     WEBCORE_EXPORT void dispatchClickEvent();
     WEBCORE_EXPORT void dispatchCloseEvent();
@@ -82,26 +97,44 @@ public:
 
     WEBCORE_EXPORT void finalize();
 
-    static Permission permission(Document&);
-    static void requestPermission(Document&, RefPtr<NotificationPermissionCallback>&&);
+    static Permission permission(ScriptExecutionContext&);
+    static void requestPermission(Document&, RefPtr<NotificationPermissionCallback>&&, Ref<DeferredPromise>&&);
 
     ScriptExecutionContext* scriptExecutionContext() const final { return ActiveDOMObject::scriptExecutionContext(); }
 
-    using RefCounted::ref;
-    using RefCounted::deref;
+    WEBCORE_EXPORT NotificationData data() const;
+    RefPtr<NotificationResources> resources() const { return m_resources; }
+
+    using ThreadSafeRefCounted::ref;
+    using ThreadSafeRefCounted::deref;
+
+    void markAsShown();
+    void showSoon();
+
+    UUID identifier() const { return m_identifier; }
+
+    bool isPersistent() const { return !m_serviceWorkerRegistrationURL.isNull(); }
 
 private:
-    Notification(Document&, const String& title, const Options&);
+    Notification(ScriptExecutionContext&, UUID, String&& title, Options&&, Ref<SerializedScriptValue>&&);
 
+    NotificationClient* clientFromContext();
     EventTargetInterface eventTargetInterface() const final { return NotificationEventTargetInterfaceType; }
+
+    void stopResourcesLoader();
 
     // ActiveDOMObject
     const char* activeDOMObjectName() const final;
-    bool canSuspendForDocumentSuspension() const final;
+    void suspend(ReasonForSuspension);
     void stop() final;
+    bool virtualHasPendingActivity() const final;
 
+    // EventTarget
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
+    void eventListenersDidChange() final;
+
+    UUID m_identifier;
 
     String m_title;
     Direction m_direction;
@@ -109,11 +142,21 @@ private:
     String m_body;
     String m_tag;
     URL m_icon;
+    Ref<SerializedScriptValue> m_dataForBindings;
 
     enum State { Idle, Showing, Closed };
     State m_state { Idle };
+    bool m_hasRelevantEventListener { false };
 
-    std::unique_ptr<Timer> m_taskTimer;
+    enum class NotificationSource : bool {
+        Document,
+        ServiceWorker,
+    };
+    NotificationSource m_notificationSource;
+    ScriptExecutionContextIdentifier m_contextIdentifier;
+    URL m_serviceWorkerRegistrationURL;
+    std::unique_ptr<NotificationResourcesLoader> m_resourcesLoader;
+    RefPtr<NotificationResources> m_resources;
 };
 
 } // namespace WebCore

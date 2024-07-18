@@ -26,24 +26,23 @@
 #import "config.h"
 #import "_WKAutomationSessionInternal.h"
 
-#if WK_API_ENABLED
-
 #import "AutomationSessionClient.h"
 #import "WKAPICast.h"
 #import "WKProcessPool.h"
-#import "WeakObjCPtr.h"
 #import "WebAutomationSession.h"
 #import "_WKAutomationSessionConfiguration.h"
 #import "_WKAutomationSessionDelegate.h"
+#import <WebCore/WebCoreObjCExtras.h>
+#import <wtf/WeakObjCPtr.h>
 
 @implementation _WKAutomationSession {
     RetainPtr<_WKAutomationSessionConfiguration> _configuration;
-    WebKit::WeakObjCPtr<id <_WKAutomationSessionDelegate>> _delegate;
+    WeakObjCPtr<id <_WKAutomationSessionDelegate>> _delegate;
 }
 
 - (instancetype)init
 {
-    return [self initWithConfiguration:[[[_WKAutomationSessionConfiguration alloc] init] autorelease]];
+    return [self initWithConfiguration:adoptNS([[_WKAutomationSessionConfiguration alloc] init]).get()];
 }
 
 - (instancetype)initWithConfiguration:(_WKAutomationSessionConfiguration *)configuration
@@ -60,6 +59,9 @@
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(_WKAutomationSession.class, self))
+        return;
+
     _session->setClient(nullptr);
     _session->~WebAutomationSession();
 
@@ -74,7 +76,7 @@
 - (void)setDelegate:(id <_WKAutomationSessionDelegate>)delegate
 {
     _delegate = delegate;
-    _session->setClient(delegate ? std::make_unique<WebKit::AutomationSessionClient>(delegate) : nullptr);
+    _session->setClient(delegate ? makeUnique<WebKit::AutomationSessionClient>(delegate) : nullptr);
 }
 
 - (NSString *)sessionIdentifier
@@ -89,7 +91,7 @@
 
 - (_WKAutomationSessionConfiguration *)configuration
 {
-    return [[_configuration copy] autorelease];
+    return adoptNS([_configuration copy]).autorelease();
 }
 
 - (BOOL)isPaired
@@ -97,9 +99,19 @@
     return _session->isPaired();
 }
 
+- (BOOL)isPendingTermination
+{
+    return _session->isPendingTermination();
+}
+
 - (BOOL)isSimulatingUserInteraction
 {
     return _session->isSimulatingUserInteraction();
+}
+
+- (void)terminate
+{
+    _session->terminate();
 }
 
 #if PLATFORM(MAC)
@@ -122,5 +134,3 @@
 }
 
 @end
-
-#endif // WK_API_ENABLED

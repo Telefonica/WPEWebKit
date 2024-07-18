@@ -23,27 +23,40 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#if PLATFORM(IOS_FAMILY)
+
+WTF_EXTERN_C_BEGIN
+typedef struct __GSKeyboard* GSKeyboardRef;
+WTF_EXTERN_C_END
+
 #if USE(APPLE_INTERNAL_SDK)
 
+#import <UIKit/NSParagraphStyle_Private.h>
+#import <UIKit/NSTextAlternatives.h>
+#import <UIKit/NSTextAttachment_Private.h>
+#import <UIKit/NSTextList.h>
 #import <UIKit/UIApplicationSceneConstants.h>
 #import <UIKit/UIApplication_Private.h>
+#import <UIKit/UIColor_Private.h>
+#import <UIKit/UIFocusRingStyle.h>
+#import <UIKit/UIFont_Private.h>
 #import <UIKit/UIInterface_Private.h>
+#import <UIKit/UIPasteboard_Private.h>
 #import <UIKit/UIScreen_Private.h>
+#import <UIKit/UITextEffectsWindow.h>
 #import <UIKit/UIViewController_Private.h>
-
-#if ENABLE(DATA_INTERACTION)
-#import <UIKit/NSAttributedString+UIItemProvider.h>
-#import <UIKit/NSString+UIItemProvider.h>
+#import <UIKit/NSItemProvider+UIKitAdditions.h>
+#import <UIKit/NSItemProvider+UIKitAdditions_Private.h>
 #import <UIKit/NSURL+UIItemProvider.h>
-#import <UIKit/UIImage+UIItemProvider.h>
-#import <UIKit/UIItemProvider_Private.h>
-#endif
 
 @interface UIApplication ()
 + (UIApplicationSceneClassicMode)_classicMode;
+- (GSKeyboardRef)_hardwareKeyboard;
+- (CGFloat)_iOSMacScale;
 @end
 
-#else
+
+#else // USE(APPLE_INTERNAL_SDK)
 
 #import <UIKit/UIKit.h>
 
@@ -51,28 +64,93 @@
 #import <UIKit/NSItemProvider+UIKitAdditions.h>
 #endif
 
-NS_ASSUME_NONNULL_BEGIN
-
 typedef NS_ENUM(NSInteger, UIApplicationSceneClassicMode) {
     UIApplicationSceneClassicModeOriginalPad = 4,
 };
 
-@interface UIApplication ()
+typedef enum {
+    UIFontTraitPlain       = 0x00000000,
+    UIFontTraitItalic      = 0x00000001, // 1 << 0
+    UIFontTraitBold        = 0x00000002, // 1 << 1
+    UIFontTraitThin        = (1 << 2),
+    UIFontTraitLight       = (1 << 3),
+    UIFontTraitUltraLight  = (1 << 4)
+} UIFontTrait;
 
+@interface NSParagraphStyle ()
+- (NSArray *)textLists;
+@end
+
+@interface NSMutableParagraphStyle ()
+- (void)setTextLists:(NSArray *)textLists;
+@end
+
+@interface NSTextAttachment ()
+- (id)initWithFileWrapper:(NSFileWrapper *)fileWrapper;
+@end
+
+@interface NSTextList : NSObject
+- (instancetype)initWithMarkerFormat:(NSString *)format options:(NSUInteger)mask;
+@property (readonly, copy) NSString *markerFormat;
+@property NSInteger startingItemNumber;
+- (NSString *)markerForItemNumber:(NSInteger)itemNum;
+@end
+
+@interface NSTextAlternatives : NSObject
+@property (readonly) NSArray<NSString *> *alternativeStrings;
+@end
+
+@interface UIApplication ()
 - (BOOL)_isClassic;
 + (UIApplicationSceneClassicMode)_classicMode;
-
+- (GSKeyboardRef)_hardwareKeyboard;
 @end
 
 @interface UIColor ()
 
 + (UIColor *)systemBlueColor;
++ (UIColor *)systemBrownColor;
 + (UIColor *)systemGrayColor;
 + (UIColor *)systemGreenColor;
++ (UIColor *)systemIndigoColor;
 + (UIColor *)systemOrangeColor;
 + (UIColor *)systemPinkColor;
++ (UIColor *)systemPurpleColor;
 + (UIColor *)systemRedColor;
++ (UIColor *)systemTealColor;
 + (UIColor *)systemYellowColor;
+
++ (UIColor *)systemBackgroundColor;
++ (UIColor *)secondarySystemBackgroundColor;
++ (UIColor *)tertiarySystemBackgroundColor;
+
++ (UIColor *)systemFillColor;
++ (UIColor *)secondarySystemFillColor;
++ (UIColor *)tertiarySystemFillColor;
+
++ (UIColor *)systemGroupedBackgroundColor;
++ (UIColor *)secondarySystemGroupedBackgroundColor;
++ (UIColor *)tertiarySystemGroupedBackgroundColor;
+
++ (UIColor *)labelColor;
++ (UIColor *)secondaryLabelColor;
++ (UIColor *)tertiaryLabelColor;
++ (UIColor *)quaternaryLabelColor;
+
++ (UIColor *)placeholderTextColor;
+
++ (UIColor *)separatorColor;
++ (UIColor *)opaqueSeparatorColor;
+
++ (UIColor *)_disambiguated_due_to_CIImage_colorWithCGColor:(CGColorRef)cgColor;
+
+- (CGFloat)alphaComponent;
+
+@end
+
+@interface UIFont ()
+
++ (UIFont *)fontWithFamilyName:(NSString *)familyName traits:(UIFontTrait)traits size:(CGFloat)fontSize;
 
 @end
 
@@ -86,51 +164,31 @@ typedef NS_ENUM(NSInteger, UIApplicationSceneClassicMode) {
 + (UIViewController *)viewControllerForView:(UIView *)view;
 @end
 
-NS_ASSUME_NONNULL_END
-
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
 @interface NSURL ()
-@property (nonatomic, copy, nullable, setter=_setTitle:) NSString *_title;
-@end
-#endif
-
-#if ENABLE(DATA_INTERACTION)
-
-NS_ASSUME_NONNULL_BEGIN
-
-@interface UIItemProvider : NSItemProvider
+@property (nonatomic, copy, setter=_setTitle:) NSString *_title;
 @end
 
-#define UIItemProviderRepresentationOptionsVisibilityAll NSItemProviderRepresentationVisibilityAll
-
-@protocol UIItemProviderReading <NSItemProviderReading>
-
-@required
-- (nullable instancetype)initWithItemProviderData:(NSData *)data typeIdentifier:(NSString *)typeIdentifier error:(NSError **)outError;
-
+@interface UIFocusRingStyle : NSObject
++ (CGFloat)borderThickness;
++ (CGFloat)maxAlpha;
++ (CGFloat)alphaThreshold;
 @end
 
-@protocol UIItemProviderWriting <NSItemProviderWriting>
-
-@required
-- (NSProgress * _Nullable)loadDataWithTypeIdentifier:(NSString *)typeIdentifier forItemProviderCompletionHandler:(void (^)(NSData * _Nullable, NSError * _Nullable))completionHandler;
-
+@interface UIApplicationRotationFollowingWindow : UIWindow
 @end
 
-@interface NSAttributedString () <UIItemProviderReading, UIItemProviderWriting>
+@interface UIAutoRotatingWindow : UIApplicationRotationFollowingWindow
 @end
 
-@interface NSString () <UIItemProviderReading, UIItemProviderWriting>
+@interface UITextEffectsWindow : UIAutoRotatingWindow
++ (UITextEffectsWindow *)sharedTextEffectsWindowForWindowScene:(UIWindowScene *)windowScene;
 @end
 
-@interface NSURL () <UIItemProviderReading, UIItemProviderWriting>
+#endif // USE(APPLE_INTERNAL_SDK)
+
+@interface UIColor (IPI)
++ (UIColor *)keyboardFocusIndicatorColor;
++ (UIColor *)tableCellDefaultSelectionTintColor;
 @end
 
-@interface UIImage () <UIItemProviderReading, UIItemProviderWriting>
-@end
-
-NS_ASSUME_NONNULL_END
-
-#endif
-
-#endif
+#endif // PLATFORM(IOS_FAMILY)

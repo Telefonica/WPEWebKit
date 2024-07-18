@@ -30,14 +30,10 @@
 
 class WebFrame;
 
-class WebHTMLRepresentation : public IWebHTMLRepresentation, IWebDocumentRepresentation
+class WebHTMLRepresentation final : public IWebHTMLRepresentation, IWebDocumentRepresentation
 {
 public:
     static WebHTMLRepresentation* createInstance(WebFrame* frame);
-protected:
-    WebHTMLRepresentation();
-    ~WebHTMLRepresentation();
-public:
 
     // IUnknown
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppvObject);
@@ -72,7 +68,10 @@ public:
     virtual HRESULT STDMETHODCALLTYPE documentSource(__deref_opt_out BSTR*);
     virtual HRESULT STDMETHODCALLTYPE title(__deref_opt_out BSTR*);
 
-protected:
+private:
+    WebHTMLRepresentation();
+    ~WebHTMLRepresentation();
+
     ULONG m_refCount { 0 };
     WebFrame* m_frame { nullptr };
 };

@@ -8,14 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/common_video/include/bitrate_adjuster.h"
+#include "common_video/include/bitrate_adjuster.h"
 
 #include <algorithm>
 #include <cmath>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/system_wrappers/include/clock.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/time_utils.h"
 
 namespace webrtc {
 
@@ -30,11 +29,9 @@ const float BitrateAdjuster::kBitrateTolerancePct = .1f;
 
 const float BitrateAdjuster::kBytesPerMsToBitsPerSecond = 8 * 1000;
 
-BitrateAdjuster::BitrateAdjuster(Clock* clock,
-                                 float min_adjusted_bitrate_pct,
+BitrateAdjuster::BitrateAdjuster(float min_adjusted_bitrate_pct,
                                  float max_adjusted_bitrate_pct)
-    : clock_(clock),
-      min_adjusted_bitrate_pct_(min_adjusted_bitrate_pct),
+    : min_adjusted_bitrate_pct_(min_adjusted_bitrate_pct),
       max_adjusted_bitrate_pct_(max_adjusted_bitrate_pct),
       bitrate_tracker_(1.5 * kBitrateUpdateIntervalMs,
                        kBytesPerMsToBitsPerSecond) {
@@ -42,7 +39,7 @@ BitrateAdjuster::BitrateAdjuster(Clock* clock,
 }
 
 void BitrateAdjuster::SetTargetBitrateBps(uint32_t bitrate_bps) {
-  rtc::CritScope cs(&crit_);
+  MutexLock lock(&mutex_);
   // If the change in target bitrate is large, update the adjusted bitrate
   // immediately since it's likely we have gained or lost a sizeable amount of
   // bandwidth and we'll want to respond quickly.
@@ -61,23 +58,23 @@ void BitrateAdjuster::SetTargetBitrateBps(uint32_t bitrate_bps) {
 }
 
 uint32_t BitrateAdjuster::GetTargetBitrateBps() const {
-  rtc::CritScope cs(&crit_);
+  MutexLock lock(&mutex_);
   return target_bitrate_bps_;
 }
 
 uint32_t BitrateAdjuster::GetAdjustedBitrateBps() const {
-  rtc::CritScope cs(&crit_);
+  MutexLock lock(&mutex_);
   return adjusted_bitrate_bps_;
 }
 
-rtc::Optional<uint32_t> BitrateAdjuster::GetEstimatedBitrateBps() {
-  rtc::CritScope cs(&crit_);
-  return bitrate_tracker_.Rate(clock_->TimeInMilliseconds());
+absl::optional<uint32_t> BitrateAdjuster::GetEstimatedBitrateBps() {
+  MutexLock lock(&mutex_);
+  return bitrate_tracker_.Rate(rtc::TimeMillis());
 }
 
 void BitrateAdjuster::Update(size_t frame_size) {
-  rtc::CritScope cs(&crit_);
-  uint32_t current_time_ms = clock_->TimeInMilliseconds();
+  MutexLock lock(&mutex_);
+  uint32_t current_time_ms = rtc::TimeMillis();
   bitrate_tracker_.Update(frame_size, current_time_ms);
   UpdateBitrate(current_time_ms);
 }
@@ -103,7 +100,7 @@ uint32_t BitrateAdjuster::GetMaxAdjustedBitrateBps() const {
 
 // Only safe to call this after Update calls have stopped
 void BitrateAdjuster::Reset() {
-  rtc::CritScope cs(&crit_);
+  MutexLock lock(&mutex_);
   target_bitrate_bps_ = 0;
   adjusted_bitrate_bps_ = 0;
   last_adjusted_target_bitrate_bps_ = 0;
@@ -142,15 +139,15 @@ void BitrateAdjuster::UpdateBitrate(uint32_t current_time_ms) {
     // Set the adjustment if it's not already set.
     float last_adjusted_bitrate_bps = adjusted_bitrate_bps_;
     if (adjusted_bitrate_bps != last_adjusted_bitrate_bps) {
-      LOG(LS_VERBOSE) << "Adjusting encoder bitrate:"
-                      << "\n  target_bitrate:"
-                      << static_cast<uint32_t>(target_bitrate_bps)
-                      << "\n  estimated_bitrate:"
-                      << static_cast<uint32_t>(estimated_bitrate_bps)
-                      << "\n  last_adjusted_bitrate:"
-                      << static_cast<uint32_t>(last_adjusted_bitrate_bps)
-                      << "\n  adjusted_bitrate:"
-                      << static_cast<uint32_t>(adjusted_bitrate_bps);
+      RTC_LOG(LS_VERBOSE) << "Adjusting encoder bitrate:"
+                             "\n  target_bitrate:"
+                          << static_cast<uint32_t>(target_bitrate_bps)
+                          << "\n  estimated_bitrate:"
+                          << static_cast<uint32_t>(estimated_bitrate_bps)
+                          << "\n  last_adjusted_bitrate:"
+                          << static_cast<uint32_t>(last_adjusted_bitrate_bps)
+                          << "\n  adjusted_bitrate:"
+                          << static_cast<uint32_t>(adjusted_bitrate_bps);
       adjusted_bitrate_bps_ = adjusted_bitrate_bps;
     }
   }

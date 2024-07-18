@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,23 +28,22 @@
 
 #include "JSDOMConvertBufferSource.h"
 #include "JSDOMGlobalObject.h"
-#include <runtime/ArrayBuffer.h>
-#include <runtime/JSArrayBuffer.h>
-#include <runtime/JSCInlines.h>
+#include <JavaScriptCore/ArrayBuffer.h>
+#include <JavaScriptCore/JSArrayBuffer.h>
+#include <JavaScriptCore/JSCInlines.h>
 
 namespace WebCore {
 
-WebCoreTypedArrayController::WebCoreTypedArrayController()
+WebCoreTypedArrayController::WebCoreTypedArrayController(bool allowAtomicsWait)
+    : m_allowAtomicsWait(allowAtomicsWait)
 {
 }
 
-WebCoreTypedArrayController::~WebCoreTypedArrayController()
-{
-}
+WebCoreTypedArrayController::~WebCoreTypedArrayController() = default;
 
-JSC::JSArrayBuffer* WebCoreTypedArrayController::toJS(JSC::ExecState* state, JSC::JSGlobalObject* globalObject, JSC::ArrayBuffer* buffer)
+JSC::JSArrayBuffer* WebCoreTypedArrayController::toJS(JSC::JSGlobalObject* lexicalGlobalObject, JSC::JSGlobalObject* globalObject, JSC::ArrayBuffer* buffer)
 {
-    return JSC::jsCast<JSC::JSArrayBuffer*>(WebCore::toJS(state, JSC::jsCast<JSDOMGlobalObject*>(globalObject), buffer));
+    return JSC::jsCast<JSC::JSArrayBuffer*>(WebCore::toJS(lexicalGlobalObject, JSC::jsCast<JSDOMGlobalObject*>(globalObject), buffer));
 }
 
 void WebCoreTypedArrayController::registerWrapper(JSC::JSGlobalObject* globalObject, JSC::ArrayBuffer* native, JSC::JSArrayBuffer* wrapper)
@@ -54,11 +53,13 @@ void WebCoreTypedArrayController::registerWrapper(JSC::JSGlobalObject* globalObj
 
 bool WebCoreTypedArrayController::isAtomicsWaitAllowedOnCurrentThread()
 {
-    return !isMainThread();
+    return m_allowAtomicsWait;
 }
 
-bool WebCoreTypedArrayController::JSArrayBufferOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, JSC::SlotVisitor& visitor)
+bool WebCoreTypedArrayController::JSArrayBufferOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, JSC::AbstractSlotVisitor& visitor, const char** reason)
 {
+    if (UNLIKELY(reason))
+        *reason = "ArrayBuffer is opaque root";
     auto& wrapper = *JSC::jsCast<JSC::JSArrayBuffer*>(handle.slot()->asCell());
     return visitor.containsOpaqueRoot(wrapper.impl());
 }

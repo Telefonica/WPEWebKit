@@ -28,10 +28,11 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include "CompilationResult.h"
-#include "VM.h"
 #include "WasmB3IRGenerator.h"
+#include "WasmEmbedder.h"
 #include "WasmModuleInformation.h"
 #include <wtf/Bag.h>
+#include <wtf/CrossThreadCopier.h>
 #include <wtf/SharedTask.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/Vector.h>
@@ -39,20 +40,22 @@
 namespace JSC {
 
 class CallLinkInfo;
-class JSGlobalObject;
-class JSPromiseDeferred;
+class VM;
 
 namespace Wasm {
 
+class CalleeGroup;
+
 class Plan : public ThreadSafeRefCounted<Plan> {
 public:
-    typedef void CallbackType(VM*, Plan&);
+    typedef void CallbackType(Plan&);
     using CompletionTask = RefPtr<SharedTask<CallbackType>>;
-    static CompletionTask dontFinalize() { return createSharedTask<CallbackType>([](VM*, Plan&) { }); }
-    Plan(VM*, Ref<ModuleInformation>, CompletionTask&&);
+
+    static CompletionTask dontFinalize() { return createSharedTask<CallbackType>([](Plan&) { }); }
+    Plan(VM&, Ref<ModuleInformation>, CompletionTask&&);
 
     // Note: This constructor should only be used if you are not actually building a module e.g. validation/function tests
-    JS_EXPORT_PRIVATE Plan(VM*, const uint8_t*, size_t, CompletionTask&&);
+    JS_EXPORT_PRIVATE Plan(VM&, CompletionTask&&);
     virtual JS_EXPORT_PRIVATE ~Plan();
 
     // If you guarantee the ordering here, you can rely on FIFO of the
@@ -62,9 +65,9 @@ public:
     void setMode(MemoryMode mode) { m_mode = mode; }
     MemoryMode mode() const { return m_mode; }
 
-    const String& errorMessage() const { return m_errorMessage; }
+    String errorMessage() const { return crossThreadCopy(m_errorMessage); }
 
-    bool WARN_UNUSED_RETURN failed() const { return !errorMessage().isNull(); }
+    bool WARN_UNUSED_RETURN failed() const { return !m_errorMessage.isNull(); }
     virtual bool hasWork() const = 0;
     enum CompilationEffort { All, Partial };
     virtual void work(CompilationEffort = All) = 0;
@@ -72,21 +75,23 @@ public:
 
     void waitForCompletion();
     // Returns true if it cancelled the plan.
-    bool tryRemoveVMAndCancelIfLast(VM&);
+    bool tryRemoveContextAndCancelIfLast(VM&);
 
 protected:
-    void runCompletionTasks(const AbstractLocker&);
-    void fail(const AbstractLocker&, String&& errorMessage);
+    void runCompletionTasks() WTF_REQUIRES_LOCK(m_lock);
+    void fail(String&& errorMessage) WTF_REQUIRES_LOCK(m_lock);
 
     virtual bool isComplete() const = 0;
-    virtual void complete(const AbstractLocker&) = 0;
+    virtual void complete() WTF_REQUIRES_LOCK(m_lock) = 0;
+
+#if ENABLE(WEBASSEMBLY_B3JIT)
+    static void updateCallSitesToCallUs(const AbstractLocker& calleeGroupLocker, CalleeGroup&, CodeLocationLabel<WasmEntryPtrTag> entrypoint, uint32_t functionIndex, uint32_t functionIndexSpace);
+#endif
 
     Ref<ModuleInformation> m_moduleInformation;
 
     Vector<std::pair<VM*, CompletionTask>, 1> m_completionTasks;
 
-    const uint8_t* m_source;
-    const size_t m_sourceLength;
     String m_errorMessage;
     MemoryMode m_mode { MemoryMode::BoundsChecking };
     Lock m_lock;

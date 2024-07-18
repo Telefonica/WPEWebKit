@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,7 +31,7 @@
 #include "AirBasicBlock.h"
 #include "AirCode.h"
 #include "AirInst.h"
-#include "B3Value.h"
+#include "CCallHelpers.h"
 #include "Disassembler.h"
 #include "LinkBuffer.h"
 
@@ -63,21 +63,24 @@ void Disassembler::startBlock(BasicBlock* block, CCallHelpers& jit)
     m_blocks.append(block);
 }
 
-void Disassembler::addInst(Inst* inst, CCallHelpers::Label start, CCallHelpers::Label end)
+void Disassembler::addInst(Inst* inst, MacroAssembler::Label start, MacroAssembler::Label end)
 {
     auto addResult = m_instToRange.add(inst, std::make_pair(start, end));
     RELEASE_ASSERT(addResult.isNewEntry);
 }
 
-void Disassembler::dump(Code& code, PrintStream& out, LinkBuffer& linkBuffer, const char* airPrefix, const char* asmPrefix, std::function<void(Inst&)> doToEachInst)
+void Disassembler::dump(Code& code, PrintStream& out, LinkBuffer& linkBuffer, const char* airPrefix, const char* asmPrefix, const ScopedLambda<void(Inst&)>& doToEachInst)
 {
+    void* codeStart = linkBuffer.entrypoint<DisassemblyPtrTag>().untaggedExecutableAddress();
+    void* codeEnd = bitwise_cast<uint8_t*>(codeStart) +  linkBuffer.size();
+
     auto dumpAsmRange = [&] (CCallHelpers::Label startLabel, CCallHelpers::Label endLabel) {
         RELEASE_ASSERT(startLabel.isSet());
         RELEASE_ASSERT(endLabel.isSet());
-        CodeLocationLabel start = linkBuffer.locationOf(startLabel);
-        CodeLocationLabel end = linkBuffer.locationOf(endLabel);
-        RELEASE_ASSERT(bitwise_cast<uintptr_t>(end.executableAddress()) >= bitwise_cast<uintptr_t>(start.executableAddress()));
-        disassemble(start, bitwise_cast<uintptr_t>(end.executableAddress()) - bitwise_cast<uintptr_t>(start.executableAddress()), asmPrefix, out);
+        CodeLocationLabel<DisassemblyPtrTag> start = linkBuffer.locationOf<DisassemblyPtrTag>(startLabel);
+        CodeLocationLabel<DisassemblyPtrTag> end = linkBuffer.locationOf<DisassemblyPtrTag>(endLabel);
+        RELEASE_ASSERT(end.dataLocation<uintptr_t>() >= start.dataLocation<uintptr_t>());
+        disassemble(start, end.dataLocation<uintptr_t>() - start.dataLocation<uintptr_t>(), codeStart, codeEnd, asmPrefix, out);
     };
 
     for (BasicBlock* block : m_blocks) {
@@ -105,7 +108,7 @@ void Disassembler::dump(Code& code, PrintStream& out, LinkBuffer& linkBuffer, co
 
     // FIXME: We could be better about various late paths. We can implement
     // this later if we find a strong use for it.
-    out.print("# Late paths\n");
+    out.print(tierName, "# Late paths\n");
     dumpAsmRange(m_latePathStart, m_latePathEnd);
 }
 

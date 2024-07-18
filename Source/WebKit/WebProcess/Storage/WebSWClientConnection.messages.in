@@ -24,8 +24,23 @@
 
 messages -> WebSWClientConnection {
     # When possible, these messages can be implemented directly by WebCore::SWServer::Connection
-    JobRejectedInServer(uint64_t identifier, struct WebCore::ExceptionData exception)
-    JobResolvedInServer(uint64_t identifier, struct WebCore::ServiceWorkerRegistrationData registration)
+    JobRejectedInServer(WebCore::ServiceWorkerJobIdentifier jobDataIdentifier, struct WebCore::ExceptionData exception)
+    RegistrationJobResolvedInServer(WebCore::ServiceWorkerJobIdentifier jobDataIdentifier, struct WebCore::ServiceWorkerRegistrationData registration, enum:bool WebCore::ShouldNotifyWhenResolved shouldNotifyWhenResolved)
+    StartScriptFetchForServer(WebCore::ServiceWorkerJobIdentifier jobDataIdentifier, WebCore::ServiceWorkerRegistrationKey registrationKey, WebCore::FetchOptions::Cache cachePolicy)
+    UpdateRegistrationState(WebCore::ServiceWorkerRegistrationIdentifier identifier, enum:uint8_t WebCore::ServiceWorkerRegistrationState state, std::optional<WebCore::ServiceWorkerData> serviceWorkerIdentifier)
+    UpdateWorkerState(WebCore::ServiceWorkerIdentifier serviceWorkerIdentifier, enum:uint8_t WebCore::ServiceWorkerState state)
+    FireUpdateFoundEvent(WebCore::ServiceWorkerRegistrationIdentifier identifier)
+    SetRegistrationLastUpdateTime(WebCore::ServiceWorkerRegistrationIdentifier identifier, WallTime lastUpdateTime)
+    SetRegistrationUpdateViaCache(WebCore::ServiceWorkerRegistrationIdentifier identifier, enum:uint8_t WebCore::ServiceWorkerUpdateViaCache updateViaCache);
+    NotifyClientsOfControllerChange(HashSet<WebCore::ScriptExecutionContextIdentifier> contextIdentifiers, struct WebCore::ServiceWorkerData newController)
+
+    SetSWOriginTableIsImported()
+    SetSWOriginTableSharedMemory(WebKit::SharedMemory::Handle handle)
+    PostMessageToServiceWorkerClient(WebCore::ScriptExecutionContextIdentifier destinationContextIdentifier, struct WebCore::MessageWithMessagePorts message, struct WebCore::ServiceWorkerData source, String sourceOrigin)
+
+    SetServiceWorkerClientIsControlled(WebCore::ScriptExecutionContextIdentifier workerIdentifier, struct WebCore::ServiceWorkerRegistrationData data) -> (bool isSuccess)
+
+    FocusServiceWorkerClient(WebCore::ScriptExecutionContextIdentifier clientIdentifier) -> (std::optional<WebCore::ServiceWorkerClientData> result)
 }
 
 #endif // ENABLE(SERVICE_WORKER)

@@ -23,7 +23,8 @@
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
 #include <WebCore/Element.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/FileChooser.h>
+#include <WebCore/JSExecState.h>
 #include <WebCore/HTMLCollection.h>
 #include "WebKitDOMDocumentPrivate.h"
 #include "WebKitDOMElementPrivate.h"
@@ -37,6 +38,8 @@
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
 #include <wtf/text/WTFString.h>
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 gchar* webkit_dom_html_element_get_inner_html(WebKitDOMHTMLElement* self)
 {
@@ -75,7 +78,7 @@ WebKitDOMNodeList* webkit_dom_document_get_elements_by_tag_name(WebKitDOMDocumen
 
     WebCore::JSMainThreadNullState state;
     WebCore::Document* document = WebKit::core(self);
-    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(document->getElementsByTagName(String::fromUTF8(tagName)));
+    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(document->getElementsByTagName(AtomString::fromUTF8(tagName)));
     return WebKit::kit(nodeList.get());
 }
 
@@ -87,7 +90,7 @@ WebKitDOMNodeList* webkit_dom_document_get_elements_by_tag_name_ns(WebKitDOMDocu
 
     WebCore::JSMainThreadNullState state;
     WebCore::Document* document = WebKit::core(self);
-    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(document->getElementsByTagNameNS(String::fromUTF8(namespaceURI), String::fromUTF8(tagName)));
+    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(document->getElementsByTagNameNS(AtomString::fromUTF8(namespaceURI), AtomString::fromUTF8(tagName)));
     return WebKit::kit(nodeList.get());
 }
 
@@ -98,7 +101,7 @@ WebKitDOMNodeList* webkit_dom_document_get_elements_by_class_name(WebKitDOMDocum
 
     WebCore::JSMainThreadNullState state;
     WebCore::Document* document = WebKit::core(self);
-    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(document->getElementsByClassName(String::fromUTF8(className)));
+    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(document->getElementsByClassName(AtomString::fromUTF8(className)));
     return WebKit::kit(nodeList.get());
 }
 
@@ -109,7 +112,7 @@ WebKitDOMNodeList* webkit_dom_element_get_elements_by_tag_name(WebKitDOMElement*
 
     WebCore::JSMainThreadNullState state;
     WebCore::Element* element = WebKit::core(self);
-    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(element->getElementsByTagName(String::fromUTF8(tagName)));
+    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(element->getElementsByTagName(AtomString::fromUTF8(tagName)));
     return WebKit::kit(nodeList.get());
 }
 
@@ -121,7 +124,7 @@ WebKitDOMNodeList* webkit_dom_element_get_elements_by_tag_name_ns(WebKitDOMEleme
 
     WebCore::JSMainThreadNullState state;
     WebCore::Element* element = WebKit::core(self);
-    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(element->getElementsByTagNameNS(String::fromUTF8(namespaceURI), String::fromUTF8(tagName)));
+    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(element->getElementsByTagNameNS(AtomString::fromUTF8(namespaceURI), AtomString::fromUTF8(tagName)));
     return WebKit::kit(nodeList.get());
 }
 
@@ -132,7 +135,7 @@ WebKitDOMNodeList* webkit_dom_element_get_elements_by_class_name(WebKitDOMElemen
 
     WebCore::JSMainThreadNullState state;
     WebCore::Element* element = WebKit::core(self);
-    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(element->getElementsByClassName(String::fromUTF8(className)));
+    RefPtr<WebCore::NodeList> nodeList = WTF::getPtr(element->getElementsByClassName(AtomString::fromUTF8(className)));
     return WebKit::kit(nodeList.get());
 }
 
@@ -154,7 +157,8 @@ WebKitDOMText* webkit_dom_text_replace_whole_text(WebKitDOMText* self, const gch
     g_return_val_if_fail(!error || !*error, nullptr);
 
     WebCore::JSMainThreadNullState state;
-    return WebKit::kit(WebKit::core(self)->replaceWholeText(WTF::String::fromUTF8(content)).get());
+    RefPtr { WebKit::core(self) }->replaceWholeText(WTF::String::fromUTF8(content));
+    return self;
 }
 
 gboolean webkit_dom_html_input_element_get_capture(WebKitDOMHTMLInputElement* self)
@@ -164,7 +168,7 @@ gboolean webkit_dom_html_input_element_get_capture(WebKitDOMHTMLInputElement* se
 #if ENABLE(MEDIA_CAPTURE)
     WebCore::JSMainThreadNullState state;
     WebCore::HTMLInputElement* item = WebKit::core(self);
-    return item->mediaCaptureType() != WebCore::MediaCaptureTypeNone;
+    return item->mediaCaptureType() != WebCore::MediaCaptureType::MediaCaptureTypeNone;
 #else
     UNUSED_PARAM(self);
     WEBKIT_WARN_FEATURE_NOT_PRESENT("Media Capture")
@@ -234,8 +238,7 @@ void webkit_dom_node_set_prefix(WebKitDOMNode* self, const gchar* value, GError*
 
     WebCore::JSMainThreadNullState state;
     WebCore::Node* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    auto result = item->setPrefix(convertedValue);
+    auto result = item->setPrefix(WTF::AtomString::fromUTF8(value));
     if (result.hasException()) {
         auto description = WebCore::DOMException::description(result.releaseException().code());
         g_set_error_literal(error, g_quark_from_string("WEBKIT_DOM"), description.legacyCode, description.name);
@@ -319,3 +322,10 @@ void webkit_dom_html_base_font_element_set_size(WebKitDOMHTMLBaseFontElement*, g
 {
     g_warning("%s: HTMLBaseFont has been removed from DOM spec, this function does nothing.", __func__);
 }
+
+gchar* webkit_dom_element_get_webkit_region_overset(WebKitDOMElement*)
+{
+    g_warning("%s: CSS Regions support has been removed, this function does nothing.", __func__);
+    return nullptr;
+}
+G_GNUC_END_IGNORE_DEPRECATIONS;

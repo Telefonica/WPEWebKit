@@ -8,14 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_TEST_WAV_BASED_SIMULATOR_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_TEST_WAV_BASED_SIMULATOR_H_
+#ifndef MODULES_AUDIO_PROCESSING_TEST_WAV_BASED_SIMULATOR_H_
+#define MODULES_AUDIO_PROCESSING_TEST_WAV_BASED_SIMULATOR_H_
 
 #include <vector>
 
-#include "webrtc/modules/audio_processing/test/audio_processing_simulator.h"
-
-#include "webrtc/base/constructormagic.h"
+#include "absl/strings/string_view.h"
+#include "modules/audio_processing/test/audio_processing_simulator.h"
 
 namespace webrtc {
 namespace test {
@@ -23,11 +22,22 @@ namespace test {
 // Used to perform an audio processing simulation from wav files.
 class WavBasedSimulator final : public AudioProcessingSimulator {
  public:
-  explicit WavBasedSimulator(const SimulationSettings& settings);
+  WavBasedSimulator(const SimulationSettings& settings,
+                    rtc::scoped_refptr<AudioProcessing> audio_processing,
+                    std::unique_ptr<AudioProcessingBuilder> ap_builder);
+
+  WavBasedSimulator() = delete;
+  WavBasedSimulator(const WavBasedSimulator&) = delete;
+  WavBasedSimulator& operator=(const WavBasedSimulator&) = delete;
+
   ~WavBasedSimulator() override;
 
   // Processes the WAV input.
   void Process() override;
+
+  // Only analyzes the data for the simulation, instead of perform any
+  // processing.
+  void Analyze() override;
 
  private:
   enum SimulationEventType {
@@ -42,15 +52,12 @@ class WavBasedSimulator final : public AudioProcessingSimulator {
   void PrepareReverseProcessStreamCall();
   static std::vector<SimulationEventType> GetDefaultEventChain();
   static std::vector<SimulationEventType> GetCustomEventChain(
-      const std::string& filename);
+      absl::string_view filename);
 
   std::vector<SimulationEventType> call_chain_;
-  int last_specified_microphone_level_ = 100;
-
-  RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(WavBasedSimulator);
 };
 
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_TEST_WAV_BASED_SIMULATOR_H_
+#endif  // MODULES_AUDIO_PROCESSING_TEST_WAV_BASED_SIMULATOR_H_

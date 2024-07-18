@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_EXAMPLES_PEERCONNECTION_SERVER_PEER_CHANNEL_H_
-#define WEBRTC_EXAMPLES_PEERCONNECTION_SERVER_PEER_CHANNEL_H_
+#ifndef EXAMPLES_PEERCONNECTION_SERVER_PEER_CHANNEL_H_
+#define EXAMPLES_PEERCONNECTION_SERVER_PEER_CHANNEL_H_
 
 #include <time.h>
 
@@ -44,8 +44,10 @@ class ChannelMember {
 
   void OnClosing(DataSocket* ds);
 
-  void QueueResponse(const std::string& status, const std::string& content_type,
-                     const std::string& extra_headers, const std::string& data);
+  void QueueResponse(const std::string& status,
+                     const std::string& content_type,
+                     const std::string& extra_headers,
+                     const std::string& data);
 
   void SetWaitingSocket(DataSocket* ds);
 
@@ -68,12 +70,9 @@ class PeerChannel {
  public:
   typedef std::vector<ChannelMember*> Members;
 
-  PeerChannel() {
-  }
+  PeerChannel() {}
 
-  ~PeerChannel() {
-    DeleteAll();
-  }
+  ~PeerChannel() { DeleteAll(); }
 
   const Members& members() const { return members_; }
 
@@ -81,7 +80,7 @@ class PeerChannel {
   // request.  Otherwise the request is not peerconnection related.
   static bool IsPeerConnection(const DataSocket* ds);
 
-  // Finds a connected peer that's associated with the |ds| socket.
+  // Finds a connected peer that's associated with the `ds` socket.
   ChannelMember* Lookup(DataSocket* ds) const;
 
   // Checks if the request has a "peer_id" parameter and if so, looks up the
@@ -116,4 +115,4 @@ class PeerChannel {
   Members members_;
 };
 
-#endif  // WEBRTC_EXAMPLES_PEERCONNECTION_SERVER_PEER_CHANNEL_H_
+#endif  // EXAMPLES_PEERCONNECTION_SERVER_PEER_CHANNEL_H_

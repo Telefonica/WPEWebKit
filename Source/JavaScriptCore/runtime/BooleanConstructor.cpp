@@ -22,61 +22,53 @@
 #include "BooleanConstructor.h"
 
 #include "BooleanPrototype.h"
-#include "JSGlobalObject.h"
 #include "JSCInlines.h"
 
 namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(BooleanConstructor);
 
-const ClassInfo BooleanConstructor::s_info = { "Function", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(BooleanConstructor) };
+const ClassInfo BooleanConstructor::s_info = { "Function"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(BooleanConstructor) };
 
-BooleanConstructor::BooleanConstructor(VM& vm, Structure* structure)
-    : InternalFunction(vm, structure)
-{
-}
+static JSC_DECLARE_HOST_FUNCTION(callBooleanConstructor);
+static JSC_DECLARE_HOST_FUNCTION(constructWithBooleanConstructor);
 
-void BooleanConstructor::finishCreation(VM& vm, BooleanPrototype* booleanPrototype)
+// ECMA 15.6.1
+JSC_DEFINE_HOST_FUNCTION(callBooleanConstructor, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
-    Base::finishCreation(vm, booleanPrototype->classInfo()->className);
-    putDirectWithoutTransition(vm, vm.propertyNames->prototype, booleanPrototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
+    return JSValue::encode(jsBoolean(callFrame->argument(0).toBoolean(globalObject)));
 }
 
 // ECMA 15.6.2
-static EncodedJSValue JSC_HOST_CALL constructWithBooleanConstructor(ExecState* exec)
+JSC_DEFINE_HOST_FUNCTION(constructWithBooleanConstructor, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    JSValue boolean = jsBoolean(exec->argument(0).toBoolean(exec));
-    Structure* booleanStructure = InternalFunction::createSubclassStructure(exec, exec->newTarget(), asInternalFunction(exec->jsCallee())->globalObject()->booleanObjectStructure());
-    RETURN_IF_EXCEPTION(scope, encodedJSValue());
+    JSValue boolean = jsBoolean(callFrame->argument(0).toBoolean(globalObject));
+
+    JSObject* newTarget = asObject(callFrame->newTarget());
+    Structure* booleanStructure = JSC_GET_DERIVED_STRUCTURE(vm, booleanObjectStructure, newTarget, callFrame->jsCallee());
+    RETURN_IF_EXCEPTION(scope, { });
+
     BooleanObject* obj = BooleanObject::create(vm, booleanStructure);
     obj->setInternalValue(vm, boolean);
     return JSValue::encode(obj);
 }
 
-ConstructType BooleanConstructor::getConstructData(JSCell*, ConstructData& constructData)
+BooleanConstructor::BooleanConstructor(VM& vm, Structure* structure)
+    : InternalFunction(vm, structure, callBooleanConstructor, constructWithBooleanConstructor)
 {
-    constructData.native.function = constructWithBooleanConstructor;
-    return ConstructType::Host;
 }
 
-// ECMA 15.6.1
-static EncodedJSValue JSC_HOST_CALL callBooleanConstructor(ExecState* exec)
+void BooleanConstructor::finishCreation(VM& vm, BooleanPrototype* booleanPrototype)
 {
-    return JSValue::encode(jsBoolean(exec->argument(0).toBoolean(exec)));
+    Base::finishCreation(vm, 1, vm.propertyNames->Boolean.string(), PropertyAdditionMode::WithoutStructureTransition);
+    putDirectWithoutTransition(vm, vm.propertyNames->prototype, booleanPrototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
 }
 
-CallType BooleanConstructor::getCallData(JSCell*, CallData& callData)
+JSObject* constructBooleanFromImmediateBoolean(JSGlobalObject* globalObject, JSValue immediateBooleanValue)
 {
-    callData.native.function = callBooleanConstructor;
-    return CallType::Host;
-}
-
-JSObject* constructBooleanFromImmediateBoolean(ExecState* exec, JSGlobalObject* globalObject, JSValue immediateBooleanValue)
-{
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     BooleanObject* obj = BooleanObject::create(vm, globalObject->booleanObjectStructure());
     obj->setInternalValue(vm, immediateBooleanValue);
     return obj;

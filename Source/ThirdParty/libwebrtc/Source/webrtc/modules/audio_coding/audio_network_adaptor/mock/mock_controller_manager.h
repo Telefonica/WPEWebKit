@@ -8,26 +8,27 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_MOCK_MOCK_CONTROLLER_MANAGER_H_
-#define WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_MOCK_MOCK_CONTROLLER_MANAGER_H_
+#ifndef MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_MOCK_MOCK_CONTROLLER_MANAGER_H_
+#define MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_MOCK_MOCK_CONTROLLER_MANAGER_H_
 
 #include <vector>
 
-#include "webrtc/modules/audio_coding/audio_network_adaptor/controller_manager.h"
-#include "webrtc/test/gmock.h"
+#include "modules/audio_coding/audio_network_adaptor/controller_manager.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
 class MockControllerManager : public ControllerManager {
  public:
-  virtual ~MockControllerManager() { Die(); }
-  MOCK_METHOD0(Die, void());
-  MOCK_METHOD1(
-      GetSortedControllers,
-      std::vector<Controller*>(const Controller::NetworkMetrics& metrics));
-  MOCK_CONST_METHOD0(GetControllers, std::vector<Controller*>());
+  ~MockControllerManager() override { Die(); }
+  MOCK_METHOD(void, Die, ());
+  MOCK_METHOD(std::vector<Controller*>,
+              GetSortedControllers,
+              (const Controller::NetworkMetrics& metrics),
+              (override));
+  MOCK_METHOD(std::vector<Controller*>, GetControllers, (), (const, override));
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_MOCK_MOCK_CONTROLLER_MANAGER_H_
+#endif  // MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_MOCK_MOCK_CONTROLLER_MANAGER_H_

@@ -23,13 +23,11 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "WebDatabaseProvider.h"
 
 #include <shlobj.h>
 #include <shlwapi.h>
 
-#if ENABLE(INDEXED_DATABASE)
 String WebDatabaseProvider::indexedDatabaseDirectoryPath()
 {
     char executablePath[MAX_PATH];
@@ -49,6 +47,5 @@ String WebDatabaseProvider::indexedDatabaseDirectoryPath()
         && ::GetLastError() != ERROR_ALREADY_EXISTS)
         return emptyString();
 
-    return String(databaseDirectory);
+    return String::fromLatin1(databaseDirectory);
 }
-#endif

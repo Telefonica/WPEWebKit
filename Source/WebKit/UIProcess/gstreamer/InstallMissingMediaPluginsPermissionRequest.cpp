@@ -26,7 +26,7 @@
 #include "config.h"
 #include "InstallMissingMediaPluginsPermissionRequest.h"
 
-#if ENABLE(VIDEO) && USE(GSTREAMER)
+#if ENABLE(VIDEO) && USE(GSTREAMER) && !USE(GSTREAMER_FULL)
 #include "WebPageMessages.h"
 #include "WebPageProxy.h"
 #include <wtf/text/CString.h>
@@ -46,7 +46,7 @@ InstallMissingMediaPluginsPermissionRequest::~InstallMissingMediaPluginsPermissi
 
 void InstallMissingMediaPluginsPermissionRequest::allow(GUniquePtr<GstInstallPluginsContext>&& context)
 {
-    if (!m_page->isValid())
+    if (!m_page->hasRunningProcess())
         return;
 
     CString detail = m_details.utf8();
@@ -72,7 +72,7 @@ void InstallMissingMediaPluginsPermissionRequest::deny()
 
 void InstallMissingMediaPluginsPermissionRequest::didEndRequestInstallMissingMediaPlugins(uint32_t result)
 {
-    if (!m_page->isValid())
+    if (!m_page->hasRunningProcess())
         return;
 
     m_page->send(Messages::WebPage::DidEndRequestInstallMissingMediaPlugins(result));
@@ -80,4 +80,4 @@ void InstallMissingMediaPluginsPermissionRequest::didEndRequestInstallMissingMed
 
 } // namespace WebKit
 
-#endif // ENABLE(VIDEO) && USE(GSTREAMER)
+#endif // ENABLE(VIDEO) && USE(GSTREAMER) && !USE(GSTREAMER_FULL)

@@ -10,7 +10,6 @@
 
 package org.webrtc;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
@@ -18,10 +17,10 @@ import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
+import android.os.Build.VERSION;
+import android.os.Build.VERSION_CODES;
 import android.view.Surface;
-
-import java.util.ArrayList;
-import java.util.List;
+import androidx.annotation.Nullable;
 
 /**
  * An implementation of VideoCapturer to capture the screen content as a video stream.
@@ -29,14 +28,12 @@ import java.util.List;
  * {@code SurfaceTexture} using a {@code SurfaceTextureHelper}.
  * The {@code SurfaceTextureHelper} is created by the native code and passed to this capturer in
  * {@code VideoCapturer.initialize()}. On receiving a new frame, this capturer passes it
- * as a texture to the native code via {@code CapturerObserver.onTextureFrameCaptured()}. This takes
+ * as a texture to the native code via {@code CapturerObserver.onFrameCaptured()}. This takes
  * place on the HandlerThread of the given {@code SurfaceTextureHelper}. When done with each frame,
  * the native code returns the buffer to the  {@code SurfaceTextureHelper} to be used for new
  * frames. At any time, at most one frame is being processed.
  */
-@TargetApi(21)
-public class ScreenCapturerAndroid
-    implements VideoCapturer, SurfaceTextureHelper.OnTextureFrameAvailableListener {
+public class ScreenCapturerAndroid implements VideoCapturer, VideoSink {
   private static final int DISPLAY_FLAGS =
       DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC | DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION;
   // DPI for VirtualDisplay, does not seem to matter for us.
@@ -47,13 +44,13 @@ public class ScreenCapturerAndroid
 
   private int width;
   private int height;
-  private VirtualDisplay virtualDisplay;
-  private SurfaceTextureHelper surfaceTextureHelper;
-  private CapturerObserver capturerObserver;
-  private long numCapturedFrames = 0;
-  private MediaProjection mediaProjection;
-  private boolean isDisposed = false;
-  private MediaProjectionManager mediaProjectionManager;
+  @Nullable private VirtualDisplay virtualDisplay;
+  @Nullable private SurfaceTextureHelper surfaceTextureHelper;
+  @Nullable private CapturerObserver capturerObserver;
+  private long numCapturedFrames;
+  @Nullable private MediaProjection mediaProjection;
+  private boolean isDisposed;
+  @Nullable private MediaProjectionManager mediaProjectionManager;
 
   /**
    * Constructs a new Screen Capturer.
@@ -76,9 +73,16 @@ public class ScreenCapturerAndroid
     }
   }
 
+  @Nullable
+  public MediaProjection getMediaProjection() {
+    return mediaProjection;
+  }
+
   @Override
+  // TODO(bugs.webrtc.org/8491): Remove NoSynchronizedMethodCheck suppression.
+  @SuppressWarnings("NoSynchronizedMethodCheck")
   public synchronized void initialize(final SurfaceTextureHelper surfaceTextureHelper,
-      final Context applicationContext, final VideoCapturer.CapturerObserver capturerObserver) {
+      final Context applicationContext, final CapturerObserver capturerObserver) {
     checkNotDisposed();
 
     if (capturerObserver == null) {
@@ -96,6 +100,8 @@ public class ScreenCapturerAndroid
   }
 
   @Override
+  // TODO(bugs.webrtc.org/8491): Remove NoSynchronizedMethodCheck suppression.
+  @SuppressWarnings("NoSynchronizedMethodCheck")
   public synchronized void startCapture(
       final int width, final int height, final int ignoredFramerate) {
     checkNotDisposed();
@@ -109,12 +115,14 @@ public class ScreenCapturerAndroid
     // Let MediaProjection callback use the SurfaceTextureHelper thread.
     mediaProjection.registerCallback(mediaProjectionCallback, surfaceTextureHelper.getHandler());
 
-    createVirtualDisplay();
+    updateVirtualDisplay();
     capturerObserver.onCapturerStarted(true);
     surfaceTextureHelper.startListening(ScreenCapturerAndroid.this);
   }
 
   @Override
+  // TODO(bugs.webrtc.org/8491): Remove NoSynchronizedMethodCheck suppression.
+  @SuppressWarnings("NoSynchronizedMethodCheck")
   public synchronized void stopCapture() {
     checkNotDisposed();
     ThreadUtils.invokeAtFrontUninterruptibly(surfaceTextureHelper.getHandler(), new Runnable() {
@@ -140,6 +148,8 @@ public class ScreenCapturerAndroid
   }
 
   @Override
+  // TODO(bugs.webrtc.org/8491): Remove NoSynchronizedMethodCheck suppression.
+  @SuppressWarnings("NoSynchronizedMethodCheck")
   public synchronized void dispose() {
     isDisposed = true;
   }
@@ -153,6 +163,8 @@ public class ScreenCapturerAndroid
    * @param ignoredFramerate ignored
    */
   @Override
+  // TODO(bugs.webrtc.org/8491): Remove NoSynchronizedMethodCheck suppression.
+  @SuppressWarnings("NoSynchronizedMethodCheck")
   public synchronized void changeCaptureFormat(
       final int width, final int height, final int ignoredFramerate) {
     checkNotDisposed();
@@ -161,24 +173,33 @@ public class ScreenCapturerAndroid
     this.height = height;
 
     if (virtualDisplay == null) {
-      // Capturer is stopped, the virtual display will be created in startCaptuer().
+      // Capturer is stopped, the virtual display will be created in startCapture().
       return;
     }
 
     // Create a new virtual display on the surfaceTextureHelper thread to avoid interference
     // with frame processing, which happens on the same thread (we serialize events by running
     // them on the same thread).
-    ThreadUtils.invokeAtFrontUninterruptibly(surfaceTextureHelper.getHandler(), new Runnable() {
-      @Override
-      public void run() {
-        virtualDisplay.release();
-        createVirtualDisplay();
-      }
-    });
+    ThreadUtils.invokeAtFrontUninterruptibly(
+        surfaceTextureHelper.getHandler(), this::updateVirtualDisplay);
   }
 
+  private void updateVirtualDisplay() {
+    surfaceTextureHelper.setTextureSize(width, height);
+    // Before Android S (12), resizing the virtual display can cause the captured screen to be
+    // scaled incorrectly, so keep the behavior of recreating the virtual display prior to Android
+    // S.
+    if (virtualDisplay == null || VERSION.SDK_INT < VERSION_CODES.S) {
+      createVirtualDisplay();
+    } else {
+      virtualDisplay.resize(width, height, VIRTUAL_DISPLAY_DPI);
+      virtualDisplay.setSurface(new Surface(surfaceTextureHelper.getSurfaceTexture()));
+    }
+  }
   private void createVirtualDisplay() {
-    surfaceTextureHelper.getSurfaceTexture().setDefaultBufferSize(width, height);
+    if (virtualDisplay != null) {
+      virtualDisplay.release();
+    }
     virtualDisplay = mediaProjection.createVirtualDisplay("WebRTC_ScreenCapture", width, height,
         VIRTUAL_DISPLAY_DPI, DISPLAY_FLAGS, new Surface(surfaceTextureHelper.getSurfaceTexture()),
         null /* callback */, null /* callback handler */);
@@ -186,10 +207,9 @@ public class ScreenCapturerAndroid
 
   // This is called on the internal looper thread of {@Code SurfaceTextureHelper}.
   @Override
-  public void onTextureFrameAvailable(int oesTextureId, float[] transformMatrix, long timestampNs) {
+  public void onFrame(VideoFrame frame) {
     numCapturedFrames++;
-    capturerObserver.onTextureFrameCaptured(
-        width, height, oesTextureId, transformMatrix, 0 /* rotation */, timestampNs);
+    capturerObserver.onFrameCaptured(frame);
   }
 
   @Override

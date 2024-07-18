@@ -37,16 +37,17 @@ namespace WebCore {
 
 class MediaPlayerPrivateAVFoundationCF;
 
-class CDMSessionAVFoundationCF final : public CDMSession {
+class CDMSessionAVFoundationCF final : public LegacyCDMSession {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    CDMSessionAVFoundationCF(MediaPlayerPrivateAVFoundationCF& parent, CDMSessionClient*);
+    CDMSessionAVFoundationCF(MediaPlayerPrivateAVFoundationCF& parent, LegacyCDMSessionClient&);
 
 private:
-    void setClient(CDMSessionClient* client) final { }
     const String& sessionId() const final { return m_sessionId; }
     RefPtr<Uint8Array> generateKeyRequest(const String& mimeType, Uint8Array* initData, String& destinationURL, unsigned short& errorCode, uint32_t& systemCode) final;
     void releaseKeys() final;
     bool update(Uint8Array*, RefPtr<Uint8Array>& nextMessage, unsigned short& errorCode, uint32_t& systemCode) final;
+    RefPtr<ArrayBuffer> cachedKeyForKeyID(const String&) const final;
 
     MediaPlayerPrivateAVFoundationCF& m_parent;
     const String m_sessionId;

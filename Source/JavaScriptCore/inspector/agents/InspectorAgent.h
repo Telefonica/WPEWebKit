@@ -29,9 +29,9 @@
 
 #pragma once
 
+#include "InspectorAgentBase.h"
 #include "InspectorBackendDispatchers.h"
 #include "InspectorFrontendDispatchers.h"
-#include "inspector/InspectorAgentBase.h"
 #include <wtf/Forward.h>
 #include <wtf/Vector.h>
 
@@ -40,29 +40,26 @@ namespace Inspector {
 class BackendDispatcher;
 class InspectorEnvironment;
 
-typedef String ErrorString;
-
 class JS_EXPORT_PRIVATE InspectorAgent final : public InspectorAgentBase, public InspectorBackendDispatcherHandler {
     WTF_MAKE_NONCOPYABLE(InspectorAgent);
     WTF_MAKE_FAST_ALLOCATED;
 public:
     InspectorAgent(AgentContext&);
-    virtual ~InspectorAgent();
+    ~InspectorAgent() final;
 
-    void didCreateFrontendAndBackend(FrontendRouter*, BackendDispatcher*) override;
-    void willDestroyFrontendAndBackend(DisconnectReason) override;
+    // InspectorAgentBase
+    void didCreateFrontendAndBackend(FrontendRouter*, BackendDispatcher*) final;
+    void willDestroyFrontendAndBackend(DisconnectReason) final;
 
-    void enable(ErrorString&) override;
-    void disable(ErrorString&) override;
-    void initialized(ErrorString&) override;
+    // InspectorBackendDispatcherHandler
+    Protocol::ErrorStringOr<void> enable() final;
+    Protocol::ErrorStringOr<void> disable() final;
+    Protocol::ErrorStringOr<void> initialized() final;
 
-    void inspect(RefPtr<Protocol::Runtime::RemoteObject>&& objectToInspect, RefPtr<JSON::Object>&& hints);
+    // CommandLineAPI
+    void inspect(Ref<Protocol::Runtime::RemoteObject>&&, Ref<JSON::Object>&& hints);
+
     void evaluateForTestInFrontend(const String& script);
-
-#if ENABLE(INSPECTOR_ALTERNATE_DISPATCHERS)
-    void activateExtraDomain(const String&);
-    void activateExtraDomains(const Vector<String>&);
-#endif
 
 private:
     InspectorEnvironment& m_environment;
@@ -71,9 +68,6 @@ private:
 
     Vector<String> m_pendingEvaluateTestCommands;
     std::pair<RefPtr<Protocol::Runtime::RemoteObject>, RefPtr<JSON::Object>> m_pendingInspectData;
-#if ENABLE(INSPECTOR_ALTERNATE_DISPATCHERS)
-    RefPtr<JSON::ArrayOf<String>> m_pendingExtraDomainsData;
-#endif
     bool m_enabled { false };
 };
 

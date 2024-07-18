@@ -28,32 +28,50 @@
 
 namespace WebKit {
 
-static const Seconds responsivenessTimeout { 3_s };
-
-ResponsivenessTimer::ResponsivenessTimer(ResponsivenessTimer::Client& client)
+ResponsivenessTimer::ResponsivenessTimer(ResponsivenessTimer::Client& client, Seconds responsivenessTimeout)
     : m_client(client)
-    , m_isResponsive(true)
     , m_timer(RunLoop::main(), this, &ResponsivenessTimer::timerFired)
+    , m_responsivenessTimeout(responsivenessTimeout)
 {
 }
 
-ResponsivenessTimer::~ResponsivenessTimer()
-{
-    m_timer.stop();
-}
+ResponsivenessTimer::~ResponsivenessTimer() = default;
 
 void ResponsivenessTimer::invalidate()
 {
     m_timer.stop();
+    m_restartFireTime = MonotonicTime();
+    m_waitingForTimer = false;
+    m_useLazyStop = false;
 }
 
 void ResponsivenessTimer::timerFired()
 {
+    if (!m_waitingForTimer)
+        return;
+
+    if (m_restartFireTime) {
+        MonotonicTime now = MonotonicTime::now();
+        MonotonicTime restartFireTime = m_restartFireTime;
+        m_restartFireTime = MonotonicTime();
+
+        if (restartFireTime > now) {
+            m_timer.startOneShot(restartFireTime - now);
+            return;
+        }
+    }
+
+    m_waitingForTimer = false;
+    m_useLazyStop = false;
+
     if (!m_isResponsive)
         return;
 
-    if (!m_client.mayBecomeUnresponsive()) {
-        m_timer.startOneShot(responsivenessTimeout);
+    Ref protectedClient { m_client };
+
+    if (!mayBecomeUnresponsive()) {
+        m_waitingForTimer = true;
+        m_timer.startOneShot(m_responsivenessTimeout);
         return;
     }
 
@@ -66,15 +84,58 @@ void ResponsivenessTimer::timerFired()
     
 void ResponsivenessTimer::start()
 {
-    if (m_timer.isActive())
+    if (m_waitingForTimer)
         return;
 
-    m_timer.startOneShot(responsivenessTimeout);
+    m_waitingForTimer = true;
+    m_useLazyStop = false;
+
+    if (m_timer.isActive()) {
+        // The timer is still active from a lazy stop.
+        // Instead of restarting the timer, we schedule a new delay after this one finishes.
+        //
+        // In most cases, stop is called before we get to schedule the second timer, saving us
+        // the scheduling of the timer entirely.
+        m_restartFireTime = MonotonicTime::now() + m_responsivenessTimeout;
+    } else {
+        m_restartFireTime = MonotonicTime();
+        m_timer.startOneShot(m_responsivenessTimeout);
+    }
+}
+
+bool ResponsivenessTimer::mayBecomeUnresponsive() const
+{
+#if !defined(NDEBUG) || ASAN_ENABLED
+    return false;
+#else
+    static bool isLibgmallocEnabled = [] {
+        char* variable = getenv("DYLD_INSERT_LIBRARIES");
+        if (!variable)
+            return false;
+        if (!strstr(variable, "libgmalloc"))
+            return false;
+        return true;
+    }();
+    if (isLibgmallocEnabled)
+        return false;
+
+    return m_client.mayBecomeUnresponsive();
+#endif
+}
+
+void ResponsivenessTimer::startWithLazyStop()
+{
+    if (!m_waitingForTimer) {
+        start();
+        m_useLazyStop = true;
+    }
 }
 
 void ResponsivenessTimer::stop()
 {
     if (!m_isResponsive) {
+        Ref protectedClient { m_client };
+
         // We got a life sign from the web process.
         m_client.willChangeIsResponsive();
         m_isResponsive = true;
@@ -83,13 +144,17 @@ void ResponsivenessTimer::stop()
         m_client.didBecomeResponsive();
     }
 
-    m_timer.stop();
+    m_waitingForTimer = false;
+
+    if (m_useLazyStop)
+        m_useLazyStop = false;
+    else
+        m_timer.stop();
 }
 
 void ResponsivenessTimer::processTerminated()
 {
-    // Since there is no web process, we must not be waiting for it anymore.
-    stop();
+    invalidate();
 }
 
 } // namespace WebKit

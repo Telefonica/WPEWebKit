@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,52 +25,56 @@
 
 #pragma once
 
+#include "DataReference.h"
 #include "MessageReceiver.h"
 #include "MessageSender.h"
+#include <WebCore/SocketStreamError.h>
 #include <WebCore/SocketStreamHandleClient.h>
 #include <WebCore/SocketStreamHandleImpl.h>
+#include <WebCore/Timer.h>
+#include <WebCore/WebSocketIdentifier.h>
 #include <pal/SessionID.h>
 
 namespace IPC {
 class Connection;
 class Decoder;
-class DataReference;
-}
-
-namespace WebCore {
-class SocketStreamHandleImpl;
-class URL;
 }
 
 namespace WebKit {
 
+class NetworkProcess;
+
 class NetworkSocketStream : public RefCounted<NetworkSocketStream>, public IPC::MessageSender, public IPC::MessageReceiver, public WebCore::SocketStreamHandleClient {
 public:
-    static Ref<NetworkSocketStream> create(WebCore::URL&&, PAL::SessionID, const String& credentialPartition, uint64_t, IPC::Connection&, WebCore::SourceApplicationAuditToken&&);
+    static Ref<NetworkSocketStream> create(NetworkProcess&, URL&&, PAL::SessionID, const String& credentialPartition, WebCore::WebSocketIdentifier, IPC::Connection&, WebCore::SourceApplicationAuditToken&&, bool shouldAcceptInsecureCertificates);
     ~NetworkSocketStream();
 
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&);
 
     void sendData(const IPC::DataReference&, uint64_t);
+    void sendHandshake(const IPC::DataReference&, const std::optional<WebCore::CookieRequestHeaderFieldProxy>&, uint64_t);
     void close();
     
     // SocketStreamHandleClient
     void didOpenSocketStream(WebCore::SocketStreamHandle&) final;
     void didCloseSocketStream(WebCore::SocketStreamHandle&) final;
-    void didReceiveSocketStreamData(WebCore::SocketStreamHandle&, const char*, size_t) final;
+    void didReceiveSocketStreamData(WebCore::SocketStreamHandle&, const uint8_t*, size_t) final;
     void didFailToReceiveSocketStreamData(WebCore::SocketStreamHandle&) final;
     void didUpdateBufferedAmount(WebCore::SocketStreamHandle&, size_t) final;
     void didFailSocketStream(WebCore::SocketStreamHandle&, const WebCore::SocketStreamError&) final;
 
 private:
-    IPC::Connection* messageSenderConnection() final;
-    uint64_t messageSenderDestinationID() final;
+    void sendDelayedFailMessage();
+    IPC::Connection* messageSenderConnection() const final;
+    uint64_t messageSenderDestinationID() const final;
 
-    NetworkSocketStream(WebCore::URL&&, PAL::SessionID, const String& credentialPartition, uint64_t, IPC::Connection&, WebCore::SourceApplicationAuditToken&&);
+    NetworkSocketStream(NetworkProcess&, URL&&, PAL::SessionID, const String& credentialPartition, WebCore::WebSocketIdentifier, IPC::Connection&, WebCore::SourceApplicationAuditToken&&, bool shouldAcceptInsecureCertificates);
 
-    uint64_t m_identifier;
+    WebCore::WebSocketIdentifier m_identifier;
     IPC::Connection& m_connection;
     Ref<WebCore::SocketStreamHandleImpl> m_impl;
+    WebCore::Timer m_delayFailTimer;
+    WebCore::SocketStreamError m_closedPortError;
 };
 
 } // namespace WebKit

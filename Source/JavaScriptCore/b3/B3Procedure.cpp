@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,29 +29,29 @@
 #if ENABLE(B3_JIT)
 
 #include "AirCode.h"
+#include "AirStackSlotKind.h"
 #include "B3BackwardsCFG.h"
 #include "B3BackwardsDominators.h"
-#include "B3BasicBlockInlines.h"
 #include "B3BasicBlockUtils.h"
-#include "B3BlockWorklist.h"
 #include "B3CFG.h"
 #include "B3DataSection.h"
 #include "B3Dominators.h"
 #include "B3NaturalLoops.h"
-#include "B3OpaqueByproducts.h"
-#include "B3PhiChildren.h"
-#include "B3StackSlot.h"
+#include "B3ProcedureInlines.h"
 #include "B3ValueInlines.h"
 #include "B3Variable.h"
+#include "JITOpaqueByproducts.h"
 
 namespace JSC { namespace B3 {
 
 Procedure::Procedure()
     : m_cfg(new CFG(*this))
     , m_lastPhaseName("initial")
-    , m_byproducts(std::make_unique<OpaqueByproducts>())
-    , m_code(new Air::Code(*this))
+    , m_byproducts(makeUnique<OpaqueByproducts>())
 {
+    // Initialize all our fields before constructing Air::Code since
+    // it looks into our fields.
+    m_code = std::unique_ptr<Air::Code>(new Air::Code(*this));
     m_code->setNumEntrypoints(m_numEntrypoints);
 }
 
@@ -75,14 +75,32 @@ BasicBlock* Procedure::addBlock(double frequency)
     return result;
 }
 
-StackSlot* Procedure::addStackSlot(unsigned byteSize)
+Air::StackSlot* Procedure::addStackSlot(uint64_t byteSize)
 {
-    return m_stackSlots.addNew(byteSize);
+    return m_code->addStackSlot(byteSize, Air::StackSlotKind::Locked);
 }
 
 Variable* Procedure::addVariable(Type type)
 {
     return m_variables.addNew(type); 
+}
+
+Type Procedure::addTuple(Vector<Type>&& types)
+{
+    Type result = Type::tupleFromIndex(m_tuples.size());
+    m_tuples.append(WTFMove(types));
+    ASSERT(result.isTuple());
+    return result;
+}
+
+bool Procedure::isValidTuple(Type tuple) const
+{
+    return tuple.tupleIndex() < m_tuples.size();
+}
+
+const Vector<Type>& Procedure::tupleForType(Type tuple) const
+{
+    return m_tuples[tuple.tupleIndex()];
 }
 
 Value* Procedure::clone(Value* value)
@@ -93,10 +111,9 @@ Value* Procedure::clone(Value* value)
     return m_values.add(WTFMove(clone));
 }
 
-
 Value* Procedure::addIntConstant(Origin origin, Type type, int64_t value)
 {
-    switch (type) {
+    switch (type.kind()) {
     case Int32:
         return add<Const32Value>(origin, static_cast<int32_t>(value));
     case Int64:
@@ -118,7 +135,7 @@ Value* Procedure::addIntConstant(Value* likeValue, int64_t value)
 
 Value* Procedure::addConstant(Origin origin, Type type, uint64_t bits)
 {
-    switch (type) {
+    switch (type.kind()) {
     case Int32:
         return add<Const32Value>(origin, static_cast<int32_t>(bits));
     case Int64:
@@ -135,6 +152,8 @@ Value* Procedure::addConstant(Origin origin, Type type, uint64_t bits)
 
 Value* Procedure::addBottom(Origin origin, Type type)
 {
+    if (type.isTuple())
+        return add<BottomTupleValue>(origin, type);
     return addIntConstant(origin, type, 0);
 }
 
@@ -147,13 +166,13 @@ Value* Procedure::addBoolConstant(Origin origin, TriState triState)
 {
     int32_t value = 0;
     switch (triState) {
-    case FalseTriState:
+    case TriState::False:
         value = 0;
         break;
-    case TrueTriState:
+    case TriState::True:
         value = 1;
         break;
-    case MixedTriState:
+    case TriState::Indeterminate:
         return nullptr;
     }
 
@@ -211,6 +230,7 @@ void Procedure::invalidateCFG()
 
 void Procedure::dump(PrintStream& out) const
 {
+    out.print("Opt Level: ", optLevel(), "\n");
     IndexSet<Value*> valuesInBlocks;
     for (BasicBlock* block : *this) {
         out.print(deepDump(*this, block));
@@ -222,22 +242,22 @@ void Procedure::dump(PrintStream& out) const
             continue;
 
         if (!didPrint) {
-            dataLog("Orphaned values:\n");
+            dataLog(tierName, "Orphaned values:\n");
             didPrint = true;
         }
-        dataLog("    ", deepDump(*this, value), "\n");
+        dataLog(tierName, "    ", deepDump(*this, value), "\n");
     }
     if (hasQuirks())
-        out.print("Has Quirks: True\n");
+        out.print(tierName, "Has Quirks: True\n");
     if (variables().size()) {
-        out.print("Variables:\n");
+        out.print(tierName, "Variables:\n");
         for (Variable* variable : variables())
-            out.print("    ", deepDump(variable), "\n");
+            out.print(tierName, "    ", deepDump(variable), "\n");
     }
     if (stackSlots().size()) {
-        out.print("Stack slots:\n");
-        for (StackSlot* slot : stackSlots())
-            out.print("    ", pointerDump(slot), ": ", deepDump(slot), "\n");
+        out.print(tierName, "Stack slots:\n");
+        for (Air::StackSlot* slot : stackSlots())
+            out.print(tierName, "    ", pointerDump(slot), ": ", deepDump(slot), "\n");
     }
     if (m_byproducts->count())
         out.print(*m_byproducts);
@@ -251,11 +271,6 @@ Vector<BasicBlock*> Procedure::blocksInPreOrder()
 Vector<BasicBlock*> Procedure::blocksInPostOrder()
 {
     return B3::blocksInPostOrder(at(0));
-}
-
-void Procedure::deleteStackSlot(StackSlot* stackSlot)
-{
-    m_stackSlots.remove(stackSlot);
 }
 
 void Procedure::deleteVariable(Variable* variable)
@@ -294,28 +309,28 @@ void Procedure::deleteOrphans()
 Dominators& Procedure::dominators()
 {
     if (!m_dominators)
-        m_dominators = std::make_unique<Dominators>(*this);
+        m_dominators = makeUnique<Dominators>(*this);
     return *m_dominators;
 }
 
 NaturalLoops& Procedure::naturalLoops()
 {
     if (!m_naturalLoops)
-        m_naturalLoops = std::make_unique<NaturalLoops>(*this);
+        m_naturalLoops = makeUnique<NaturalLoops>(*this);
     return *m_naturalLoops;
 }
 
 BackwardsCFG& Procedure::backwardsCFG()
 {
     if (!m_backwardsCFG)
-        m_backwardsCFG = std::make_unique<BackwardsCFG>(*this);
+        m_backwardsCFG = makeUnique<BackwardsCFG>(*this);
     return *m_backwardsCFG;
 }
 
 BackwardsDominators& Procedure::backwardsDominators()
 {
     if (!m_backwardsDominators)
-        m_backwardsDominators = std::make_unique<BackwardsDominators>(*this);
+        m_backwardsDominators = makeUnique<BackwardsDominators>(*this);
     return *m_backwardsDominators;
 }
 
@@ -332,16 +347,11 @@ bool Procedure::isFastConstant(const ValueKey& constant)
     return m_fastConstants.contains(constant);
 }
 
-CCallHelpers::Label Procedure::entrypointLabel(unsigned index) const
-{
-    return m_code->entrypointLabel(index);
-}
-
 void* Procedure::addDataSection(size_t size)
 {
     if (!size)
         return nullptr;
-    std::unique_ptr<DataSection> dataSection = std::make_unique<DataSection>(size);
+    std::unique_ptr<DataSection> dataSection = makeUnique<DataSection>(size);
     void* result = dataSection->data();
     m_byproducts->add(WTFMove(dataSection));
     return result;
@@ -425,6 +435,63 @@ void Procedure::setNumEntrypoints(unsigned numEntrypoints)
 {
     m_numEntrypoints = numEntrypoints;
     m_code->setNumEntrypoints(numEntrypoints);
+}
+
+void Procedure::freeUnneededB3ValuesAfterLowering()
+{
+    // We cannot clear m_stackSlots() or m_tuples here, as they are unfortunately modified and read respectively by Air.
+    m_variables.clearAll();
+    m_blocks.clear();
+    m_cfg = nullptr;
+    m_dominators = nullptr;
+    m_naturalLoops = nullptr;
+    m_backwardsCFG = nullptr;
+    m_backwardsDominators = nullptr;
+    m_fastConstants.clear();
+
+    if (m_code->shouldPreserveB3Origins())
+        return;
+
+    BitVector valuesToPreserve;
+    valuesToPreserve.ensureSize(m_values.size());
+    for (Value* value : m_values) {
+        switch (value->opcode()) {
+        // Ideally we would also be able to get rid of all of those.
+        // But Air currently relies on these origins being preserved, see https://bugs.webkit.org/show_bug.cgi?id=194040
+        case WasmBoundsCheck:
+            valuesToPreserve.quickSet(value->index());
+            break;
+        case CCall:
+        case Patchpoint:
+        case CheckAdd:
+        case CheckSub:
+        case CheckMul:
+        case Check:
+            valuesToPreserve.quickSet(value->index());
+            for (Value* child : value->children())
+                valuesToPreserve.quickSet(child->index());
+            break;
+        default:
+            break;
+        }
+    }
+    for (Value* value : m_values) {
+        if (!valuesToPreserve.quickGet(value->index()))
+            m_values.remove(value);
+    }
+    m_values.packIndices();
+}
+
+void Procedure::setShouldDumpIR()
+{
+    m_shouldDumpIR = true;
+    m_code->forcePreservationOfB3Origins();
+}
+
+void Procedure::setNeedsPCToOriginMap()
+{ 
+    m_needsPCToOriginMap = true;
+    m_code->forcePreservationOfB3Origins();
 }
 
 } } // namespace JSC::B3

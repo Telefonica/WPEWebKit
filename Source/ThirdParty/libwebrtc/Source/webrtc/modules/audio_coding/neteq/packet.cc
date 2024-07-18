@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/neteq/packet.h"
+#include "modules/audio_coding/neteq/packet.h"
 
 namespace webrtc {
 
@@ -28,6 +28,7 @@ Packet Packet::Clone() const {
   clone.payload_type = payload_type;
   clone.payload.SetData(payload.data(), payload.size());
   clone.priority = priority;
+  clone.packet_info = packet_info;
 
   return clone;
 }

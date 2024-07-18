@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2012 Google Inc. All rights reserved.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -31,16 +32,20 @@
 #include "config.h"
 #include "JSHTMLTemplateElement.h"
 
+#include "JSDOMConvert.h"
 #include "JSDocumentFragment.h"
-
-using namespace JSC;
+#include "WebCoreOpaqueRoot.h"
 
 namespace WebCore {
+using namespace JSC;
 
-void JSHTMLTemplateElement::visitAdditionalChildren(JSC::SlotVisitor& visitor)
+template<typename Visitor>
+void JSHTMLTemplateElement::visitAdditionalChildren(Visitor& visitor)
 {
     if (auto* content = wrapped().contentIfAvailable())
-        visitor.addOpaqueRoot(root(content));
+        addWebCoreOpaqueRoot(visitor, *content);
 }
+
+DEFINE_VISIT_ADDITIONAL_CHILDREN(JSHTMLTemplateElement);
 
 } // namespace WebCore

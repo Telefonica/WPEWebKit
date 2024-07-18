@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,8 +27,9 @@
 #include "ThrowScope.h"
 
 #include "Exception.h"
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
 #include "VM.h"
+#include <wtf/StackTrace.h>
 
 namespace JSC {
     
@@ -56,42 +57,34 @@ ThrowScope::~ThrowScope()
     }
 
     bool willBeHandleByLLIntOrJIT = false;
-    void* previousScope = m_previousScope;
-    void* topVMEntryFrame = m_vm.topVMEntryFrame;
+    const void* previousScopeStackPosition = m_previousScope ? m_previousScope->stackPosition() : nullptr;
+    void* topEntryFrame = m_vm.topEntryFrame;
 
-    // If the topVMEntryFrame was pushed on the stack after the previousScope was instantiated,
+    // If the topEntryFrame was pushed on the stack after the previousScope was instantiated,
     // then this throwScope will be returning to LLINT or JIT code that always do an exception
     // check. In that case, skip the simulated throw because the LLInt and JIT will be
     // checking for the exception their own way instead of calling ThrowScope::exception().
-    if (topVMEntryFrame && previousScope > topVMEntryFrame)
+    if (topEntryFrame && previousScopeStackPosition > topEntryFrame)
         willBeHandleByLLIntOrJIT = true;
-    
+
     if (!willBeHandleByLLIntOrJIT)
         simulateThrow();
 }
 
-void ThrowScope::throwException(ExecState* exec, Exception* exception)
+Exception* ThrowScope::throwException(JSGlobalObject* globalObject, Exception* exception)
 {
     if (m_vm.exception() && m_vm.exception() != exception)
         m_vm.verifyExceptionCheckNeedIsSatisfied(m_recursionDepth, m_location);
     
-    m_vm.throwException(exec, exception);
+    return m_vm.throwException(globalObject, exception);
 }
 
-JSValue ThrowScope::throwException(ExecState* exec, JSValue error)
+Exception* ThrowScope::throwException(JSGlobalObject* globalObject, JSValue error)
 {
-    if (!error.isCell() || !jsDynamicCast<Exception*>(m_vm, error.asCell()))
+    if (!error.isCell() || error.isObject() || !jsDynamicCast<Exception*>(error.asCell()))
         m_vm.verifyExceptionCheckNeedIsSatisfied(m_recursionDepth, m_location);
     
-    return m_vm.throwException(exec, error);
-}
-
-JSObject* ThrowScope::throwException(ExecState* exec, JSObject* obj)
-{
-    if (!jsDynamicCast<Exception*>(m_vm, obj))
-        m_vm.verifyExceptionCheckNeedIsSatisfied(m_recursionDepth, m_location);
-    
-    return m_vm.throwException(exec, obj);
+    return m_vm.throwException(globalObject, error);
 }
 
 void ThrowScope::simulateThrow()

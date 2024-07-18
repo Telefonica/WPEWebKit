@@ -23,12 +23,11 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef PDFLayerControllerSPI_h
-#define PDFLayerControllerSPI_h
+#pragma once
 
 #if ENABLE(PDFKIT_PLUGIN)
 
-#import <PDFKit/PDFKit.h>
+#import <Quartz/Quartz.h>
 
 @class CPReadingModel;
 @class PDFViewLayout;
@@ -68,6 +67,7 @@ typedef NS_ENUM(NSInteger, PDFLayerControllerCursorType) {
 @property (retain) CALayer *parentLayer;
 @property (retain) PDFDocument *document;
 @property (retain) id<PDFLayerControllerDelegate> delegate;
+@property (nonatomic, strong) NSString *URLFragment;
 
 - (void)setFrameSize:(CGSize)size;
 
@@ -86,6 +86,12 @@ typedef NS_ENUM(NSInteger, PDFLayerControllerCursorType) {
 
 - (void)snapshotInContext:(CGContextRef)context;
 
+#if ENABLE(UI_PROCESS_PDF_HUD)
+- (void)setDisplaysPDFHUDController:(BOOL)displaysController;
+- (void)zoomIn:(id)atPoint;
+- (void)zoomOut:(id)atPoint;
+#endif
+
 - (void)magnifyWithMagnification:(CGFloat)magnification atPoint:(CGPoint)point immediately:(BOOL)immediately;
 
 - (CGPoint)scrollPosition;
@@ -100,6 +106,7 @@ typedef NS_ENUM(NSInteger, PDFLayerControllerCursorType) {
 - (void)mouseEntered:(NSEvent *)event;
 - (void)mouseExited:(NSEvent *)event;
 
+- (NSMenu *)menuForEvent:(NSEvent *)event withUserInterfaceLayoutDirection:(NSUserInterfaceLayoutDirection)direction;
 - (NSMenu *)menuForEvent:(NSEvent *)event;
 
 - (NSArray *)findString:(NSString *)string caseSensitive:(BOOL)isCaseSensitive highlightMatches:(BOOL)shouldHighlightMatches;
@@ -159,20 +166,15 @@ typedef NS_ENUM(NSInteger, PDFLayerControllerCursorType) {
 - (NSValue *)accessibilityRangeForLineAttributeForParameter:(id)parameter;
 - (NSString *)accessibilityStringForRangeAttributeForParameter:(id)parameter;
 - (NSValue *)accessibilityBoundsForRangeAttributeForParameter:(id)parameter;
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
 - (NSArray *)accessibilityChildren;
 - (void)setAccessibilityParent:(id)parent;
 - (id)accessibilityElementForAnnotation:(PDFAnnotation *)annotation;
-#endif
+- (void)setDeviceColorSpace:(CGColorSpaceRef)colorSpace;
 
 @end
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
 @interface PDFAnnotation (AccessibilityPrivate)
 - (id)accessibilityNode;
 @end
-#endif
 
-#endif
-
-#endif // PDFLayerControllerSPI_h
+#endif // ENABLE(PDFKIT_PLUGIN)

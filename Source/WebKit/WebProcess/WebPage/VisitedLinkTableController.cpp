@@ -30,12 +30,11 @@
 #include "VisitedLinkTableControllerMessages.h"
 #include "WebPage.h"
 #include "WebProcess.h"
-#include <WebCore/PageCache.h>
+#include <WebCore/BackForwardCache.h>
 #include <wtf/NeverDestroyed.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 static HashMap<uint64_t, VisitedLinkTableController*>& visitedLinkTableControllers()
 {
@@ -71,21 +70,18 @@ VisitedLinkTableController::~VisitedLinkTableController()
     visitedLinkTableControllers().remove(m_identifier);
 }
 
-bool VisitedLinkTableController::isLinkVisited(Page&, LinkHash linkHash, const URL&, const AtomicString&)
+bool VisitedLinkTableController::isLinkVisited(Page&, SharedStringHash linkHash, const URL&, const AtomString&)
 {
-    return m_visitedLinkTable.isLinkVisited(linkHash);
+    return m_visitedLinkTable.contains(linkHash);
 }
 
-void VisitedLinkTableController::addVisitedLink(Page& page, LinkHash linkHash)
+void VisitedLinkTableController::addVisitedLink(Page& page, SharedStringHash linkHash)
 {
-    if (m_visitedLinkTable.isLinkVisited(linkHash))
+    if (m_visitedLinkTable.contains(linkHash))
         return;
 
-    WebPage* webPage = WebPage::fromCorePage(&page);
-    if (!webPage)
-        return;
-
-    WebProcess::singleton().parentProcessConnection()->send(Messages::VisitedLinkStore::AddVisitedLinkHashFromPage(webPage->pageID(), linkHash), m_identifier);
+    auto& webPage = WebPage::fromCorePage(page);
+    WebProcess::singleton().parentProcessConnection()->send(Messages::VisitedLinkStore::AddVisitedLinkHashFromPage(webPage.webPageProxyIdentifier(), linkHash), m_identifier);
 }
 
 void VisitedLinkTableController::setVisitedLinkTable(const SharedMemory::Handle& handle)
@@ -99,7 +95,7 @@ void VisitedLinkTableController::setVisitedLinkTable(const SharedMemory::Handle&
     invalidateStylesForAllLinks();
 }
 
-void VisitedLinkTableController::visitedLinkStateChanged(const Vector<WebCore::LinkHash>& linkHashes)
+void VisitedLinkTableController::visitedLinkStateChanged(const Vector<WebCore::SharedStringHash>& linkHashes)
 {
     for (auto linkHash : linkHashes)
         invalidateStylesForLink(linkHash);
@@ -112,7 +108,7 @@ void VisitedLinkTableController::allVisitedLinkStateChanged()
 
 void VisitedLinkTableController::removeAllVisitedLinks()
 {
-    m_visitedLinkTable.clear();
+    m_visitedLinkTable.setSharedMemory(nullptr);
 
     invalidateStylesForAllLinks();
 }

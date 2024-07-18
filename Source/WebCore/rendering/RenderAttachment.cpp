@@ -32,16 +32,23 @@
 #include "FloatRoundedRect.h"
 #include "FrameSelection.h"
 #include "HTMLAttachmentElement.h"
+#include "RenderChildIterator.h"
 #include "RenderTheme.h"
-#include "URL.h"
+#include <wtf/IsoMallocInlines.h>
+#include <wtf/URL.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderAttachment);
+
 RenderAttachment::RenderAttachment(HTMLAttachmentElement& element, RenderStyle&& style)
     : RenderReplaced(element, WTFMove(style), LayoutSize())
 {
+#if ENABLE(SERVICE_CONTROLS)
+    m_hasShadowControls = element.isImageMenuEnabled();
+#endif
 }
 
 HTMLAttachmentElement& RenderAttachment::attachmentElement() const
@@ -52,11 +59,18 @@ HTMLAttachmentElement& RenderAttachment::attachmentElement() const
 void RenderAttachment::layout()
 {
     LayoutSize newIntrinsicSize = theme().attachmentIntrinsicSize(*this);
-    m_minimumIntrinsicWidth = std::max(m_minimumIntrinsicWidth, newIntrinsicSize.width());
-    newIntrinsicSize.setWidth(m_minimumIntrinsicWidth);
+
+    if (!theme().attachmentShouldAllowWidthToShrink(*this)) {
+        m_minimumIntrinsicWidth = std::max(m_minimumIntrinsicWidth, newIntrinsicSize.width());
+        newIntrinsicSize.setWidth(m_minimumIntrinsicWidth);
+    }
+
     setIntrinsicSize(newIntrinsicSize);
 
     RenderReplaced::layout();
+    
+    if (hasShadowContent())
+        layoutShadowContent(newIntrinsicSize);
 }
 
 void RenderAttachment::invalidate()
@@ -65,16 +79,38 @@ void RenderAttachment::invalidate()
     repaint();
 }
 
-int RenderAttachment::baselinePosition(FontBaseline, bool, LineDirectionMode, LinePositionMode) const
+LayoutUnit RenderAttachment::baselinePosition(FontBaseline, bool, LineDirectionMode, LinePositionMode) const
 {
     return theme().attachmentBaseline(*this);
 }
 
 bool RenderAttachment::shouldDrawBorder() const
 {
-    if (style().appearance() == BorderlessAttachmentPart)
+    if (style().effectiveAppearance() == BorderlessAttachmentPart)
         return false;
     return m_shouldDrawBorder;
+}
+
+void RenderAttachment::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& offset)
+{
+    if (paintInfo.phase != PaintPhase::Selection || !hasVisibleBoxDecorations() || !style().hasEffectiveAppearance())
+        return;
+
+    auto paintRect = borderBoxRect();
+    paintRect.moveBy(offset);
+
+    ControlStates controlStates;
+    theme().paint(*this, controlStates, paintInfo, paintRect);
+}
+
+void RenderAttachment::layoutShadowContent(const LayoutSize& size)
+{
+    for (auto& renderBox : childrenOfType<RenderBox>(*this)) {
+        renderBox.mutableStyle().setHeight(Length(size.height(), LengthType::Fixed));
+        renderBox.mutableStyle().setWidth(Length(size.width(), LengthType::Fixed));
+        renderBox.setNeedsLayout(MarkOnlyThis);
+        renderBox.layout();
+    }
 }
 
 } // namespace WebCore

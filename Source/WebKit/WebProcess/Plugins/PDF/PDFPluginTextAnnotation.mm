@@ -29,13 +29,14 @@
 #if ENABLE(PDFKIT_PLUGIN)
 
 #import "PDFAnnotationTextWidgetDetails.h"
-#import "PDFKitImports.h"
 #import "PDFLayerControllerSPI.h"
 #import "PDFPlugin.h"
-#import <PDFKit/PDFKit.h>
+#import <Quartz/Quartz.h>
+#import <WebCore/AddEventListenerOptions.h>
 #import <WebCore/CSSPrimitiveValue.h>
 #import <WebCore/CSSPropertyNames.h>
 #import <WebCore/ColorMac.h>
+#import <WebCore/ColorSerialization.h>
 #import <WebCore/Event.h>
 #import <WebCore/EventNames.h>
 #import <WebCore/HTMLElement.h>
@@ -45,25 +46,23 @@
 #import <WebCore/KeyboardEvent.h>
 #import <WebCore/Page.h>
 
-using namespace WebCore;
-
 namespace WebKit {
-
+using namespace WebCore;
 using namespace HTMLNames;
 
 static const String cssAlignmentValueForNSTextAlignment(NSTextAlignment alignment)
 {
     switch (alignment) {
     case NSTextAlignmentLeft:
-        return "left";
+        return "left"_s;
     case NSTextAlignmentRight:
-        return "right";
+        return "right"_s;
     case NSTextAlignmentCenter:
-        return "center";
+        return "center"_s;
     case NSTextAlignmentJustified:
-        return "justify";
+        return "justify"_s;
     case NSTextAlignmentNatural:
-        return "-webkit-start";
+        return "-webkit-start"_s;
     }
     ASSERT_NOT_REACHED();
     return String();
@@ -82,10 +81,9 @@ PDFPluginTextAnnotation::~PDFPluginTextAnnotation()
 Ref<Element> PDFPluginTextAnnotation::createAnnotationElement()
 {
     Document& document = parent()->document();
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     PDFAnnotationTextWidget *textAnnotation = this->textAnnotation();
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
     bool isMultiline = textAnnotation.isMultiline;
 
     auto element = document.createElement(isMultiline ? textareaTag : inputTag, false);
@@ -97,7 +95,7 @@ Ref<Element> PDFPluginTextAnnotation::createAnnotationElement()
         return element;
 
     // FIXME: Match font weight and style as well?
-    styledElement.setInlineStyleProperty(CSSPropertyColor, colorFromNSColor(textAnnotation.fontColor).serialized());
+    styledElement.setInlineStyleProperty(CSSPropertyColor, serializationForHTML(colorFromCocoaColor(textAnnotation.fontColor)));
     styledElement.setInlineStyleProperty(CSSPropertyFontFamily, textAnnotation.font.familyName);
     styledElement.setInlineStyleProperty(CSSPropertyTextAlign, cssAlignmentValueForNSTextAlignment(textAnnotation.alignment));
 
@@ -114,7 +112,7 @@ void PDFPluginTextAnnotation::updateGeometry()
     PDFPluginAnnotation::updateGeometry();
 
     StyledElement* styledElement = static_cast<StyledElement*>(element());
-    styledElement->setInlineStyleProperty(CSSPropertyFontSize, textAnnotation().font.pointSize * pdfLayerController().contentScaleFactor, CSSPrimitiveValue::CSS_PX);
+    styledElement->setInlineStyleProperty(CSSPropertyFontSize, textAnnotation().font.pointSize * pdfLayerController().contentScaleFactor, CSSUnitType::CSS_PX);
 }
 
 void PDFPluginTextAnnotation::commit()
@@ -136,7 +134,7 @@ bool PDFPluginTextAnnotation::handleEvent(Event& event)
     if (event.isKeyboardEvent() && event.type() == eventNames().keydownEvent) {
         auto& keyboardEvent = downcast<KeyboardEvent>(event);
 
-        if (keyboardEvent.keyIdentifier() == "U+0009") {
+        if (keyboardEvent.keyIdentifier() == "U+0009"_s) {
             if (keyboardEvent.ctrlKey() || keyboardEvent.metaKey() || keyboardEvent.altGraphKey())
                 return false;
 

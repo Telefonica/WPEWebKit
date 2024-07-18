@@ -28,7 +28,7 @@
 #import <WebCore/CDATASection.h>
 #import "DOMNodeInternal.h"
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
@@ -44,3 +44,5 @@ DOMCDATASection *kit(WebCore::CDATASection* value)
     WebCoreThreadViolationCheckRoundOne();
     return static_cast<DOMCDATASection*>(kit(static_cast<WebCore::Node*>(value)));
 }
+
+#undef IMPL

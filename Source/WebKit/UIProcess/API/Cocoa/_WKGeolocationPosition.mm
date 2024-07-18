@@ -26,11 +26,10 @@
 #import "config.h"
 #import "_WKGeolocationPositionInternal.h"
 
-#if WK_API_ENABLED && TARGET_OS_IPHONE
+#if PLATFORM(IOS_FAMILY)
 
 #import <CoreLocation/CLLocation.h>
-
-using namespace WebKit;
+#import <WebCore/WebCoreObjCExtras.h>
 
 @implementation _WKGeolocationPosition
 
@@ -39,33 +38,14 @@ using namespace WebKit;
     if (!location)
         return nil;
 
-    bool canProvideAltitude = true;
-    bool canProvideAltitudeAccuracy = true;
-    double altitude = location.altitude;
-    double altitudeAccuracy = location.verticalAccuracy;
-    if (altitudeAccuracy < 0.0) {
-        canProvideAltitude = false;
-        canProvideAltitudeAccuracy = false;
-    }
-
-    bool canProvideSpeed = true;
-    double speed = location.speed;
-    if (speed < 0.0)
-        canProvideSpeed = false;
-
-    bool canProvideHeading = true;
-    double heading = location.course;
-    if (heading < 0.0)
-        canProvideHeading = false;
-
-    CLLocationCoordinate2D coordinate = location.coordinate;
-    double timestamp = location.timestamp.timeIntervalSince1970;
-
-    return [wrapper(WebGeolocationPosition::create(timestamp, coordinate.latitude, coordinate.longitude, location.horizontalAccuracy, canProvideAltitude, altitude, canProvideAltitudeAccuracy, altitudeAccuracy, canProvideHeading, heading, canProvideSpeed, speed).leakRef()) autorelease];
+    return wrapper(WebKit::WebGeolocationPosition::create(WebCore::GeolocationPositionData { location }));
 }
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(_WKGeolocationPosition.class, self))
+        return;
+
     _geolocationPosition->~WebGeolocationPosition();
 
     [super dealloc];
@@ -80,4 +60,4 @@ using namespace WebKit;
 
 @end
 
-#endif // WK_API_ENABLED && TARGET_OS_IPHONE
+#endif // PLATFORM(IOS_FAMILY)

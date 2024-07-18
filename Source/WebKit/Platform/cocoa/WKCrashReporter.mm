@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,31 +25,16 @@
 
 #import "config.h"
 #import "WKCrashReporter.h"
+#import <wtf/cocoa/CrashReporter.h>
 
-#import "CrashReporterClientSPI.h"
-
-// Avoid having to link with libCrashReporterClient.a
-CRASH_REPORTER_CLIENT_HIDDEN
-struct crashreporter_annotations_t gCRAnnotations
-__attribute__((section("__DATA," CRASHREPORTER_ANNOTATIONS_SECTION)))
-    = { CRASHREPORTER_ANNOTATIONS_VERSION, 0, 0, 0, 0, 0, 0, 0 };
+#import <cstdlib>
 
 namespace WebKit {
 
-void setCrashReportApplicationSpecificInformation(CFStringRef infoString)
+void logAndSetCrashLogMessage(const char* infoString)
 {
-    if (!infoString) {
-        CRSetCrashLogMessage(nullptr);
-        return;
-    }
-
-    char* oldMessage = (char*)CRGetCrashLogMessage();
-    if (oldMessage)
-        free(oldMessage);
-
-    // We have to copy the string, because CRSetCrashLogMessage doesn't copy the data.
-    char* lastInfoChars = strdup([(NSString *)infoString UTF8String]);
-    CRSetCrashLogMessage(lastInfoChars);
+    WTFLogAlways("%s", infoString);
+    WTF::setCrashLogMessage(infoString);
 }
 
 }

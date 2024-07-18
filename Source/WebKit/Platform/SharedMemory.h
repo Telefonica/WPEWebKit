@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2017 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,16 +24,18 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SharedMemory_h
-#define SharedMemory_h
+#pragma once
 
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
-#include <wtf/RefCounted.h>
+#include <wtf/ThreadSafeRefCounted.h>
 
 #if USE(UNIX_DOMAIN_SOCKETS)
 #include "Attachment.h"
-#include <wtf/Optional.h>
+#endif
+
+#if OS(WINDOWS)
+#include <windows.h>
 #endif
 
 namespace IPC {
@@ -40,15 +43,23 @@ class Decoder;
 class Encoder;
 }
 
-#if OS(DARWIN)
 namespace WebCore {
+class FragmentedSharedBuffer;
+class ProcessIdentity;
+class SharedBuffer;
+}
+
+#if OS(DARWIN)
+namespace WTF {
 class MachSendRight;
 }
 #endif
 
 namespace WebKit {
 
-class SharedMemory : public RefCounted<SharedMemory> {
+enum class MemoryLedger { None, Default, Network, Media, Graphics, Neural };
+
+class SharedMemory : public ThreadSafeRefCounted<SharedMemory> {
 public:
     enum class Protection {
         ReadOnly,
@@ -60,33 +71,52 @@ public:
     public:
         Handle();
         ~Handle();
+        Handle(Handle&&);
+        Handle& operator=(Handle&&);
 
         bool isNull() const;
 
-        void clear();
+        size_t size() const { return m_size; }
 
-        void encode(IPC::Encoder&) const;
-        static bool decode(IPC::Decoder&, Handle&);
+        // Take/Set ownership of the memory for jetsam purposes.
+        void takeOwnershipOfMemory(MemoryLedger) const;
+        void setOwnershipOfMemory(const WebCore::ProcessIdentity&, MemoryLedger) const;
+
+        void clear();
 
 #if USE(UNIX_DOMAIN_SOCKETS)
         IPC::Attachment releaseAttachment() const;
         void adoptAttachment(IPC::Attachment&&);
 #endif
+#if OS(WINDOWS)
+        static void encodeHandle(IPC::Encoder&, HANDLE);
+        static std::optional<HANDLE> decodeHandle(IPC::Decoder&);
+#endif
+        void encode(IPC::Encoder&) const;
+        static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, Handle&);
     private:
         friend class SharedMemory;
 #if USE(UNIX_DOMAIN_SOCKETS)
         mutable IPC::Attachment m_attachment;
 #elif OS(DARWIN)
-        mutable mach_port_t m_port;
-        size_t m_size;
+        mutable mach_port_t m_port { MACH_PORT_NULL };
+#elif OS(WINDOWS)
+        mutable HANDLE m_handle;
 #endif
+        size_t m_size;
     };
 
+    // FIXME: Change these factory functions to return Ref<SharedMemory> and crash on failure.
     static RefPtr<SharedMemory> allocate(size_t);
-    static RefPtr<SharedMemory> create(void*, size_t, Protection);
+    static RefPtr<SharedMemory> copyBuffer(const WebCore::FragmentedSharedBuffer&);
     static RefPtr<SharedMemory> map(const Handle&, Protection);
 #if USE(UNIX_DOMAIN_SOCKETS)
     static RefPtr<SharedMemory> wrapMap(void*, size_t, int fileDescriptor);
+#elif OS(DARWIN)
+    static RefPtr<SharedMemory> wrapMap(void*, size_t, Protection);
+#endif
+#if OS(WINDOWS)
+    static RefPtr<SharedMemory> adopt(HANDLE, size_t, Protection);
 #endif
 
     ~SharedMemory();
@@ -100,12 +130,19 @@ public:
         return m_data;
     }
 
-    // Return the system page size in bytes.
-    static unsigned systemPageSize();
+#if OS(WINDOWS)
+    HANDLE handle() const { return m_handle; }
+#endif
+
+#if PLATFORM(COCOA)
+    Protection protection() const { return m_protection; }
+#endif
+
+    Ref<WebCore::SharedBuffer> createSharedBuffer(size_t) const;
 
 private:
 #if OS(DARWIN)
-    WebCore::MachSendRight createSendRight(Protection) const;
+    WTF::MachSendRight createSendRight(Protection) const;
 #endif
 
     size_t m_size;
@@ -118,10 +155,10 @@ private:
     std::optional<int> m_fileDescriptor;
     bool m_isWrappingMap { false };
 #elif OS(DARWIN)
-    mach_port_t m_port;
+    mach_port_t m_port { MACH_PORT_NULL };
+#elif OS(WINDOWS)
+    HANDLE m_handle;
 #endif
 };
 
 };
-
-#endif // SharedMemory_h

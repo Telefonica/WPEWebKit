@@ -28,7 +28,7 @@
 
 #if ENABLE(B3_JIT)
 
-#include "B3StackSlot.h"
+#include "AirStackSlot.h"
 
 namespace JSC { namespace B3 {
 
@@ -39,11 +39,6 @@ SlotBaseValue::~SlotBaseValue()
 void SlotBaseValue::dumpMeta(CommaPrinter& comma, PrintStream& out) const
 {
     out.print(comma, pointerDump(m_slot));
-}
-
-Value* SlotBaseValue::cloneImpl() const
-{
-    return new SlotBaseValue(*this);
 }
 
 } } // namespace JSC::B3

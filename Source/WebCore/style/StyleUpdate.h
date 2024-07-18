@@ -28,7 +28,6 @@
 #include "Node.h"
 #include "StyleChange.h"
 #include <wtf/HashMap.h>
-#include <wtf/HashSet.h>
 #include <wtf/ListHashSet.h>
 
 namespace WebCore {
@@ -38,37 +37,21 @@ class Document;
 class Element;
 class Node;
 class RenderStyle;
+class SVGElement;
 class Text;
 
 namespace Style {
 
 struct ElementUpdate {
-#if !COMPILER_SUPPORTS(NSDMI_FOR_AGGREGATES)
-    ElementUpdate() = default;
-    ElementUpdate(std::unique_ptr<RenderStyle> style, Change change, bool recompositeLayer)
-        : style { WTFMove(style) }
-        , change { change }
-        , recompositeLayer { recompositeLayer }
-    {
-    }
-#endif
     std::unique_ptr<RenderStyle> style;
-    Change change { NoChange };
+    Change change { Change::None };
     bool recompositeLayer { false };
 };
 
 struct TextUpdate {
-#if !COMPILER_SUPPORTS(NSDMI_FOR_AGGREGATES)
-    TextUpdate() = default;
-    TextUpdate(unsigned offset, unsigned length)
-        : offset { offset }
-        , length { length }
-    {
-    }
-#endif
-
     unsigned offset { 0 };
     unsigned length { std::numeric_limits<unsigned>::max() };
+    std::optional<std::unique_ptr<RenderStyle>> inheritedDisplayContentsStyle;
 };
 
 class Update {
@@ -76,7 +59,7 @@ class Update {
 public:
     Update(Document&);
 
-    const ListHashSet<ContainerNode*>& roots() const { return m_roots; }
+    const ListHashSet<RefPtr<ContainerNode>>& roots() const { return m_roots; }
 
     const ElementUpdate* elementUpdate(const Element&) const;
     ElementUpdate* elementUpdate(const Element&);
@@ -88,19 +71,21 @@ public:
 
     const Document& document() const { return m_document; }
 
+    bool isEmpty() const { return !size(); }
     unsigned size() const { return m_elements.size() + m_texts.size(); }
 
     void addElement(Element&, Element* parent, ElementUpdate&&);
     void addText(Text&, Element* parent, TextUpdate&&);
     void addText(Text&, TextUpdate&&);
+    void addSVGRendererUpdate(SVGElement&);
 
 private:
     void addPossibleRoot(Element*);
 
-    Document& m_document;
-    ListHashSet<ContainerNode*> m_roots;
-    HashMap<const Element*, ElementUpdate> m_elements;
-    HashMap<const Text*, TextUpdate> m_texts;
+    Ref<Document> m_document;
+    ListHashSet<RefPtr<ContainerNode>> m_roots;
+    HashMap<RefPtr<const Element>, ElementUpdate> m_elements;
+    HashMap<RefPtr<const Text>, TextUpdate> m_texts;
 };
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,19 +26,22 @@
 
 #pragma once
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY) && ENABLE(VIDEO_PRESENTATION_MODE) && !HAVE(PIP_CONTROLLER)
 
 #include "EventListener.h"
 #include "HTMLMediaElementEnums.h"
+#include "MediaPlayerIdentifier.h"
 #include "PlatformLayer.h"
 #include "PlaybackSessionInterfaceAVKit.h"
 #include "VideoFullscreenModel.h"
 #include <objc/objc.h>
+#include <wtf/Forward.h>
 #include <wtf/Function.h>
-#include <wtf/RefCounted.h>
-#include <wtf/RefPtr.h>
+#include <wtf/OptionSet.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/RunLoop.h>
+#include <wtf/ThreadSafeRefCounted.h>
+#include <wtf/WeakPtr.h>
 
 OBJC_CLASS AVPlayerViewController;
 OBJC_CLASS UIViewController;
@@ -48,44 +51,50 @@ OBJC_CLASS CALayer;
 OBJC_CLASS WebAVPlayerController;
 OBJC_CLASS WebAVPlayerLayerView;
 OBJC_CLASS WebAVPlayerLayer;
+OBJC_CLASS WebAVPlayerViewController;
 OBJC_CLASS WebAVPlayerViewControllerDelegate;
-
-namespace WTF {
-class String;
-}
+OBJC_CLASS NSError;
 
 namespace WebCore {
-class IntRect;
+class FloatRect;
 class FloatSize;
 class VideoFullscreenModel;
 class VideoFullscreenChangeObserver;
-    
-class WEBCORE_EXPORT VideoFullscreenInterfaceAVKit final
+
+class VideoFullscreenInterfaceAVKit final
     : public VideoFullscreenModelClient
     , public PlaybackSessionModelClient
-    , public ThreadSafeRefCounted<VideoFullscreenInterfaceAVKit> {
-
+    , public ThreadSafeRefCounted<VideoFullscreenInterfaceAVKit, WTF::DestructionThread::MainRunLoop>
+    , public CanMakeWeakPtr<VideoFullscreenInterfaceAVKit> {
 public:
-    static Ref<VideoFullscreenInterfaceAVKit> create(PlaybackSessionInterfaceAVKit&);
+    WEBCORE_EXPORT static Ref<VideoFullscreenInterfaceAVKit> create(PlaybackSessionInterfaceAVKit&);
     virtual ~VideoFullscreenInterfaceAVKit();
     WEBCORE_EXPORT void setVideoFullscreenModel(VideoFullscreenModel*);
     WEBCORE_EXPORT void setVideoFullscreenChangeObserver(VideoFullscreenChangeObserver*);
+    PlaybackSessionInterfaceAVKit& playbackSessionInterface() const { return m_playbackSessionInterface.get(); }
     PlaybackSessionModel* playbackSessionModel() const { return m_playbackSessionInterface->playbackSessionModel(); }
 
     // VideoFullscreenModelClient
     WEBCORE_EXPORT void hasVideoChanged(bool) final;
     WEBCORE_EXPORT void videoDimensionsChanged(const FloatSize&) final;
+    WEBCORE_EXPORT void modelDestroyed() final;
+    WEBCORE_EXPORT void setPlayerIdentifier(std::optional<MediaPlayerIdentifier>) final;
 
     // PlaybackSessionModelClient
     WEBCORE_EXPORT void externalPlaybackChanged(bool enabled, PlaybackSessionModel::ExternalPlaybackTargetType, const String& localizedDeviceName) final;
 
-    WEBCORE_EXPORT virtual void setupFullscreen(UIView&, const IntRect& initialRect, UIView *, HTMLMediaElementEnums::VideoFullscreenMode, bool allowsPictureInPicturePlayback);
-    WEBCORE_EXPORT virtual void enterFullscreen();
-    WEBCORE_EXPORT virtual void exitFullscreen(const IntRect& finalRect);
-    WEBCORE_EXPORT virtual void cleanupFullscreen();
-    WEBCORE_EXPORT virtual void invalidate();
-    WEBCORE_EXPORT virtual void requestHideAndExitFullscreen();
-    WEBCORE_EXPORT virtual void preparedToReturnToInline(bool visible, const IntRect& inlineRect);
+    WEBCORE_EXPORT void setupFullscreen(UIView& videoView, const FloatRect& initialRect, const FloatSize& videoDimensions, UIView* parentView, HTMLMediaElementEnums::VideoFullscreenMode, bool allowsPictureInPicturePlayback, bool standby, bool blocksReturnToFullscreenFromPictureInPicture);
+    WEBCORE_EXPORT void enterFullscreen();
+    WEBCORE_EXPORT bool exitFullscreen(const FloatRect& finalRect);
+    WEBCORE_EXPORT void cleanupFullscreen();
+    WEBCORE_EXPORT void invalidate();
+    WEBCORE_EXPORT void requestHideAndExitFullscreen();
+    WEBCORE_EXPORT void preparedToReturnToInline(bool visible, const FloatRect& inlineRect);
+    WEBCORE_EXPORT void preparedToExitFullscreen();
+    WEBCORE_EXPORT void setHasVideoContentLayer(bool);
+    WEBCORE_EXPORT void setInlineRect(const FloatRect&, bool visible);
+    WEBCORE_EXPORT void preparedToReturnToStandby();
+    bool changingStandbyOnly() { return m_changingStandbyOnly; }
 
     enum class ExitFullScreenReason {
         DoneButtonTapped,
@@ -95,14 +104,46 @@ public:
         PictureInPictureStarted
     };
 
-    VideoFullscreenModel* model() const { return m_videoFullscreenModel; }
+    class Mode {
+        HTMLMediaElementEnums::VideoFullscreenMode m_mode { HTMLMediaElementEnums::VideoFullscreenModeNone };
+
+    public:
+        Mode() = default;
+        Mode(const Mode&) = default;
+        Mode(HTMLMediaElementEnums::VideoFullscreenMode mode) : m_mode(mode) { }
+        void operator=(HTMLMediaElementEnums::VideoFullscreenMode mode) { m_mode = mode; }
+        HTMLMediaElementEnums::VideoFullscreenMode mode() const { return m_mode; }
+
+        void setModeValue(HTMLMediaElementEnums::VideoFullscreenMode mode, bool value) { value ? setMode(mode) : clearMode(mode); }
+        void setMode(HTMLMediaElementEnums::VideoFullscreenMode mode) { m_mode |= mode; }
+        void clearMode(HTMLMediaElementEnums::VideoFullscreenMode mode) { m_mode &= ~mode; }
+        bool hasMode(HTMLMediaElementEnums::VideoFullscreenMode mode) const { return m_mode & mode; }
+
+        bool isPictureInPicture() const { return m_mode == HTMLMediaElementEnums::VideoFullscreenModePictureInPicture; }
+        bool isFullscreen() const { return m_mode == HTMLMediaElementEnums::VideoFullscreenModeStandard; }
+
+        void setPictureInPicture(bool value) { setModeValue(HTMLMediaElementEnums::VideoFullscreenModePictureInPicture, value); }
+        void setFullscreen(bool value) { setModeValue(HTMLMediaElementEnums::VideoFullscreenModeStandard, value); }
+
+        bool hasFullscreen() const { return hasMode(HTMLMediaElementEnums::VideoFullscreenModeStandard); }
+        bool hasPictureInPicture() const { return hasMode(HTMLMediaElementEnums::VideoFullscreenModePictureInPicture); }
+
+        bool hasVideo() const { return m_mode & (HTMLMediaElementEnums::VideoFullscreenModeStandard | HTMLMediaElementEnums::VideoFullscreenModePictureInPicture); }
+    };
+
+    Mode m_currentMode;
+    Mode m_targetMode;
+
+    VideoFullscreenModel* videoFullscreenModel() const { return m_videoFullscreenModel; }
     bool shouldExitFullscreenWithReason(ExitFullScreenReason);
-    HTMLMediaElementEnums::VideoFullscreenMode mode() const { return m_mode; }
+    HTMLMediaElementEnums::VideoFullscreenMode mode() const { return m_currentMode.mode(); }
     bool allowsPictureInPicturePlayback() const { return m_allowsPictureInPicturePlayback; }
     WEBCORE_EXPORT bool mayAutomaticallyShowVideoPictureInPicture() const;
-    void fullscreenMayReturnToInline(WTF::Function<void(bool)>&& callback);
+    void prepareForPictureInPictureStop(Function<void(bool)>&& callback);
     bool wirelessVideoPlaybackDisabled() const;
-    void applicationDidBecomeActive();
+    WEBCORE_EXPORT void applicationDidBecomeActive();
+    bool inPictureInPicture() const { return m_enteringPictureInPicture || m_currentMode.hasPictureInPicture(); }
+    bool returningToStandby() const { return m_returningToStandby; }
 
     void willStartPictureInPicture();
     void didStartPictureInPicture();
@@ -110,48 +151,100 @@ public:
     void willStopPictureInPicture();
     void didStopPictureInPicture();
     void prepareForPictureInPictureStopWithCompletionHandler(void (^)(BOOL));
+    bool isPlayingVideoInEnhancedFullscreen() const;
 
-    void setMode(HTMLMediaElementEnums::VideoFullscreenMode);
-    void clearMode(HTMLMediaElementEnums::VideoFullscreenMode);
-    bool hasMode(HTMLMediaElementEnums::VideoFullscreenMode mode) const { return m_mode & mode; }
-    bool isMode(HTMLMediaElementEnums::VideoFullscreenMode mode) const { return m_mode == mode; }
+    WEBCORE_EXPORT void setMode(HTMLMediaElementEnums::VideoFullscreenMode, bool shouldNotifyModel);
+    void clearMode(HTMLMediaElementEnums::VideoFullscreenMode, bool shouldNotifyModel);
+    bool hasMode(HTMLMediaElementEnums::VideoFullscreenMode mode) const { return m_currentMode.hasMode(mode); }
+
+#if PLATFORM(WATCHOS)
+    UIViewController *presentingViewController();
+    UIViewController *fullscreenViewController() const { return m_viewController.get(); }
+#endif
+    WebAVPlayerLayerView* playerLayerView() const { return m_playerLayerView.get(); }
+    WEBCORE_EXPORT bool pictureInPictureWasStartedWhenEnteringBackground() const;
+
+    std::optional<MediaPlayerIdentifier> playerIdentifier() const { return m_playerIdentifier; }
+    WEBCORE_EXPORT AVPlayerViewController *avPlayerViewController() const;
 
 protected:
     WEBCORE_EXPORT VideoFullscreenInterfaceAVKit(PlaybackSessionInterfaceAVKit&);
-    void beginSession();
-    void enterPictureInPicture();
-    void enterFullscreenStandard();
+
+    void doSetup();
+    void finalizeSetup();
+    void doExitFullscreen();
+    void returnToStandby();
+    void doEnterFullscreen();
     void watchdogTimerFired();
     WebAVPlayerController *playerController() const;
 
     Ref<PlaybackSessionInterfaceAVKit> m_playbackSessionInterface;
+    std::optional<MediaPlayerIdentifier> m_playerIdentifier;
     RetainPtr<WebAVPlayerViewControllerDelegate> m_playerViewControllerDelegate;
-    RetainPtr<AVPlayerViewController> m_playerViewController;
+    RetainPtr<WebAVPlayerViewController> m_playerViewController;
     VideoFullscreenModel* m_videoFullscreenModel { nullptr };
     VideoFullscreenChangeObserver* m_fullscreenChangeObserver { nullptr };
 
     // These are only used when fullscreen is presented in a separate window.
     RetainPtr<UIWindow> m_window;
     RetainPtr<UIViewController> m_viewController;
+    RetainPtr<UIView> m_videoView;
     RetainPtr<UIView> m_parentView;
     RetainPtr<UIWindow> m_parentWindow;
     RetainPtr<WebAVPlayerLayerView> m_playerLayerView;
-    HTMLMediaElementEnums::VideoFullscreenMode m_mode { HTMLMediaElementEnums::VideoFullscreenModeNone };
-    WTF::Function<void(bool)> m_prepareToInlineCallback;
+    Function<void(bool)> m_prepareToInlineCallback;
     RunLoop::Timer<VideoFullscreenInterfaceAVKit> m_watchdogTimer;
+    FloatRect m_inlineRect;
+    RouteSharingPolicy m_routeSharingPolicy { RouteSharingPolicy::Default };
+    String m_routingContextUID;
     bool m_allowsPictureInPicturePlayback { false };
-    bool m_exitRequested { false };
-    bool m_exitCompleted { false };
-    bool m_enterRequested { false };
     bool m_wirelessVideoPlaybackDisabled { true };
-    bool m_shouldReturnToFullscreenWhenStoppingPiP { false };
-    bool m_shouldReturnToFullscreenAfterEnteringForeground { false };
-    bool m_restoringFullscreenForPictureInPictureStop { false };
+    bool m_shouldReturnToFullscreenWhenStoppingPictureInPicture { false };
+    bool m_blocksReturnToFullscreenFromPictureInPicture { false };
+    bool m_returningToStandby { false };
 
-    void doEnterFullscreen();
+    bool m_setupNeedsInlineRect { false };
+    bool m_exitFullscreenNeedInlineRect { false };
+
+    bool m_finalizeSetupNeedsVideoContentLayer { false };
+    bool m_cleanupNeedsReturnVideoContentLayer { false };
+
+    bool m_returnToStandbyNeedsReturnVideoContentLayer { false };
+    bool m_finalizeSetupNeedsReturnVideoContentLayer { false };
+
+    bool m_exitFullscreenNeedsExitPictureInPicture { false };
+    bool m_exitFullscreenNeedsReturnContentLayer { false };
+
+    bool m_enterFullscreenNeedsEnterPictureInPicture { false };
+    bool m_enterFullscreenNeedsExitPictureInPicture { false };
+
+    bool m_hasVideoContentLayer { false };
+
+    bool m_hasUpdatedInlineRect { false };
+    bool m_inlineIsVisible { false };
+    bool m_standby { false };
+    bool m_targetStandby { false };
+    bool m_changingStandbyOnly { false };
+
+#if PLATFORM(WATCHOS)
+    bool m_waitingForPreparedToExit { false };
+#endif
+    bool m_shouldIgnoreAVKitCallbackAboutExitFullscreenReason { false };
+    bool m_enteringPictureInPicture { false };
+    bool m_exitingPictureInPicture { false };
+
+private:
+    enum class NextAction {
+        NeedsEnterFullScreen = 1 << 0,
+        NeedsExitFullScreen = 1 << 1,
+    };
+    using NextActions = OptionSet<NextAction>;
+
+    void exitFullscreenHandler(BOOL success, NSError *, NextActions = NextActions());
+    void enterFullscreenHandler(BOOL success, NSError *, NextActions = NextActions());
 };
 
 }
 
-#endif
+#endif // PLATFORM(IOS_FAMILY)
 

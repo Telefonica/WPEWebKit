@@ -27,6 +27,7 @@
 
 #if ENABLE(REMOTE_INSPECTOR)
 
+#include "JSExportMacros.h"
 #include <wtf/TypeCasts.h>
 #include <wtf/text/WTFString.h>
 
@@ -38,6 +39,8 @@ namespace Inspector {
 
 class FrontendChannel;
 
+using TargetID = unsigned;
+
 class JS_EXPORT_PRIVATE RemoteControllableTarget {
 public:
     virtual ~RemoteControllableTarget();
@@ -45,23 +48,31 @@ public:
     void init();
     void update();
 
-    virtual void connect(FrontendChannel*, bool isAutomaticConnection = false, bool immediatelyPause = false) = 0;
-    virtual void disconnect(FrontendChannel*) = 0;
+    virtual void connect(FrontendChannel&, bool isAutomaticConnection = false, bool immediatelyPause = false) = 0;
+    virtual void disconnect(FrontendChannel&) = 0;
 
-    unsigned targetIdentifier() const { return m_identifier; }
-    void setTargetIdentifier(unsigned identifier) { m_identifier = identifier; }
+    TargetID targetIdentifier() const { return m_identifier; }
+    void setTargetIdentifier(TargetID identifier) { m_identifier = identifier; }
 
-    enum class Type { JavaScript, Web, Automation };
+    enum class Type {
+        Automation,
+        ITML,
+        JavaScript,
+        Page,
+        ServiceWorker,
+        WebPage,
+    };
     virtual Type type() const = 0;
     virtual bool remoteControlAllowed() const = 0;
-    virtual void dispatchMessageFromRemote(const String& message) = 0;
+    virtual void dispatchMessageFromRemote(String&& message) = 0;
 
 #if USE(CF)
     // The dispatch block will be scheduled on a global run loop if null is returned.
-    virtual CFRunLoopRef targetRunLoop() { return nullptr; }
+    virtual CFRunLoopRef targetRunLoop() const { return nullptr; }
 #endif
+
 private:
-    unsigned m_identifier {0};
+    TargetID m_identifier { 0 };
 };
 
 } // namespace Inspector

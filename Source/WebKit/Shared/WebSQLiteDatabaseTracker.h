@@ -23,38 +23,40 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WebSQLiteDatabaseTracker_h
-#define WebSQLiteDatabaseTracker_h
+#pragma once
 
-#include <WebCore/HysteresisActivity.h>
 #include <WebCore/SQLiteDatabaseTrackerClient.h>
+#include <wtf/Forward.h>
+#include <wtf/Lock.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/RunLoop.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebKit {
 
-class ChildProcess;
-class NetworkProcess;
-class WebProcess;
-
-class WebSQLiteDatabaseTracker : public WebCore::SQLiteDatabaseTrackerClient {
+// Use eager initialization for the WeakPtrFactory since we construct WeakPtrs from a non-main thread.
+class WebSQLiteDatabaseTracker final : public WebCore::SQLiteDatabaseTrackerClient, public CanMakeWeakPtr<WebSQLiteDatabaseTracker, WeakPtrFactoryInitialization::Eager> {
     WTF_MAKE_NONCOPYABLE(WebSQLiteDatabaseTracker)
 public:
-    explicit WebSQLiteDatabaseTracker(NetworkProcess&);
-    explicit WebSQLiteDatabaseTracker(WebProcess&);
+    // IsHoldingLockedFilesHandler may get called on a non-main thread, but while holding a Lock.
+    using IsHoldingLockedFilesHandler = Function<void(bool)>;
+    explicit WebSQLiteDatabaseTracker(IsHoldingLockedFilesHandler&&);
 
-    // WebCore::SQLiteDatabaseTrackerClient
-    void willBeginFirstTransaction() override;
-    void didFinishLastTransaction() override;
+    ~WebSQLiteDatabaseTracker();
+
+    void setIsSuspended(bool);
 
 private:
-    void hysteresisUpdated(WebCore::HysteresisState);
+    void setIsHoldingLockedFiles(bool) WTF_REQUIRES_LOCK(m_lock);
 
-    ChildProcess& m_process;
-    WebCore::HysteresisActivity m_hysteresis;
-    enum class ChildProcessType { Network, WebContent };
-    ChildProcessType m_childProcessType;
+    // WebCore::SQLiteDatabaseTrackerClient.
+    void willBeginFirstTransaction() final;
+    void didFinishLastTransaction() final;
+
+    IsHoldingLockedFilesHandler m_isHoldingLockedFilesHandler;
+    Lock m_lock;
+    uint64_t m_currentHystererisID WTF_GUARDED_BY_LOCK(m_lock) { 0 };
+    bool m_isSuspended WTF_GUARDED_BY_LOCK(m_lock) { false };
 };
 
 } // namespace WebKit
-
-#endif // WebSQLiteDatabaseTracker_h

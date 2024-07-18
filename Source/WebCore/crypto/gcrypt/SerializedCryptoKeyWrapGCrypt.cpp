@@ -26,18 +26,16 @@
 #include "config.h"
 #include "SerializedCryptoKeyWrap.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 #include "NotImplemented.h"
 
 namespace WebCore {
 
-bool getDefaultWebCryptoMasterKey(Vector<uint8_t>& masterKey)
+std::optional<Vector<uint8_t>> defaultWebCryptoMasterKey()
 {
     notImplemented();
-    UNUSED_PARAM(masterKey);
-
-    return false;
+    return std::nullopt;
 }
 
 // Initially these helper functions were intended to perform KEK wrapping and unwrapping,
@@ -65,4 +63,4 @@ bool unwrapSerializedCryptoKey(const Vector<uint8_t>& masterKey, const Vector<ui
 
 }
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

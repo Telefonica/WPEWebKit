@@ -31,6 +31,7 @@
 #include <wtf/Forward.h>
 
 namespace WebCore {
+class ContextMenuContext;
 class ContextMenuItem;
 class HitTestResult;
 }
@@ -48,10 +49,11 @@ class Object;
 namespace InjectedBundle {
 
 class PageContextMenuClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~PageContextMenuClient() { }
 
-    virtual bool getCustomMenuFromDefaultItems(WebKit::WebPage&, const WebCore::HitTestResult&, const Vector<WebCore::ContextMenuItem>& /* defaultMenu */, Vector<WebKit::WebContextMenuItemData>& /* newMenu */, RefPtr<API::Object>& /* userData */) { return false; }
+    virtual bool getCustomMenuFromDefaultItems(WebKit::WebPage&, const WebCore::HitTestResult&, const Vector<WebCore::ContextMenuItem>& /* defaultMenu */, Vector<WebKit::WebContextMenuItemData>& /* newMenu */, const WebCore::ContextMenuContext&, RefPtr<API::Object>& /* userData */) { return false; }
     virtual void prepareForImmediateAction(WebKit::WebPage&, const WebCore::HitTestResult&, RefPtr<API::Object>& /* userData */) { }
 };
 

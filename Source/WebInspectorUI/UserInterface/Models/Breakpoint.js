@@ -25,100 +25,79 @@
 
 WI.Breakpoint = class Breakpoint extends WI.Object
 {
-    constructor(sourceCodeLocationOrInfo, disabled, condition)
+    constructor({disabled, condition, actions, ignoreCount, autoContinue} = {})
     {
+        console.assert(!disabled || typeof disabled === "boolean", disabled);
+        console.assert(!condition || typeof condition === "string", condition);
+        console.assert(!actions || Array.isArray(actions), actions);
+        console.assert(!ignoreCount || !isNaN(ignoreCount), ignoreCount);
+        console.assert(!autoContinue || typeof autoContinue === "boolean", autoContinue);
+
         super();
 
-        if (sourceCodeLocationOrInfo instanceof WI.SourceCodeLocation) {
-            var sourceCode = sourceCodeLocationOrInfo.sourceCode;
-            var contentIdentifier = sourceCode ? sourceCode.contentIdentifier : null;
-            var scriptIdentifier = sourceCode instanceof WI.Script ? sourceCode.id : null;
-            var target = sourceCode instanceof WI.Script ? sourceCode.target : null;
-            var location = sourceCodeLocationOrInfo;
-        } else if (sourceCodeLocationOrInfo && typeof sourceCodeLocationOrInfo === "object") {
-            // The 'url' fallback is for transitioning from older frontends and should be removed.
-            var contentIdentifier = sourceCodeLocationOrInfo.contentIdentifier || sourceCodeLocationOrInfo.url;
-            var lineNumber = sourceCodeLocationOrInfo.lineNumber || 0;
-            var columnNumber = sourceCodeLocationOrInfo.columnNumber || 0;
-            var location = new WI.SourceCodeLocation(null, lineNumber, columnNumber);
-            var ignoreCount = sourceCodeLocationOrInfo.ignoreCount || 0;
-            var autoContinue = sourceCodeLocationOrInfo.autoContinue || false;
-            var actions = sourceCodeLocationOrInfo.actions || [];
-            for (var i = 0; i < actions.length; ++i)
-                actions[i] = new WI.BreakpointAction(this, actions[i]);
-            disabled = sourceCodeLocationOrInfo.disabled;
-            condition = sourceCodeLocationOrInfo.condition;
-        } else
-            console.error("Unexpected type passed to WI.Breakpoint", sourceCodeLocationOrInfo);
+        // This class should not be instantiated directly. Create a concrete subclass instead.
+        console.assert(this.constructor !== WI.Breakpoint && this instanceof WI.Breakpoint);
+        console.assert(this.constructor.ReferencePage, "Should have a link to a reference page.");
 
-        this._id = null;
-        this._contentIdentifier = contentIdentifier || null;
-        this._scriptIdentifier = scriptIdentifier || null;
-        this._target = target || null;
         this._disabled = disabled || false;
         this._condition = condition || "";
         this._ignoreCount = ignoreCount || 0;
         this._autoContinue = autoContinue || false;
         this._actions = actions || [];
-        this._resolved = false;
 
-        this._sourceCodeLocation = location;
-        this._sourceCodeLocation.addEventListener(WI.SourceCodeLocation.Event.LocationChanged, this._sourceCodeLocationLocationChanged, this);
-        this._sourceCodeLocation.addEventListener(WI.SourceCodeLocation.Event.DisplayLocationChanged, this._sourceCodeLocationDisplayLocationChanged, this);
+        for (let action of this._actions)
+            action.addEventListener(WI.BreakpointAction.Event.Modified, this._handleBreakpointActionModified, this);
+    }
+
+    // Import / Export
+
+    toJSON(key)
+    {
+        let json = {};
+        if (this._disabled)
+            json.disabled = this._disabled;
+        if (this.editable) {
+            if (this._condition)
+                json.condition = this._condition;
+            if (this._ignoreCount)
+                json.ignoreCount = this._ignoreCount;
+            if (this._actions.length)
+                json.actions = this._actions.map((action) => action.toJSON());
+            if (this._autoContinue)
+                json.autoContinue = this._autoContinue;
+        }
+        return json;
     }
 
     // Public
 
-    get identifier()
+    get displayName()
     {
-        return this._id;
+        throw WI.NotImplementedError.subclassMustOverride();
     }
 
-    set identifier(id)
+    get special()
     {
-        this._id = id || null;
+        // Overridden by subclasses if needed.
+        return false;
     }
 
-    get contentIdentifier()
+    get removable()
     {
-        return this._contentIdentifier;
+        // Overridden by subclasses if needed.
+        return true;
     }
 
-    get scriptIdentifier()
+    get editable()
     {
-        return this._scriptIdentifier;
-    }
-
-    get target()
-    {
-        return this._target;
-    }
-
-    get sourceCodeLocation()
-    {
-        return this._sourceCodeLocation;
+        // Overridden by subclasses if needed.
+        return false;
     }
 
     get resolved()
     {
-        return this._resolved;
-    }
-
-    set resolved(resolved)
-    {
-        if (this._resolved === resolved)
-            return;
-
-        function isSpecialBreakpoint()
-        {
-            return this._sourceCodeLocation.isEqual(new WI.SourceCodeLocation(null, Infinity, Infinity));
-        }
-
-        console.assert(!resolved || this._sourceCodeLocation.sourceCode || isSpecialBreakpoint.call(this), "Breakpoints must have a SourceCode to be resolved.", this);
-
-        this._resolved = resolved || false;
-
-        this.dispatchEventToListeners(WI.Breakpoint.Event.ResolvedStateDidChange);
+        // Overridden by subclasses if needed.
+        return WI.debuggerManager.breakpointsEnabled;
     }
 
     get disabled()
@@ -143,6 +122,9 @@ WI.Breakpoint = class Breakpoint extends WI.Object
 
     set condition(condition)
     {
+        console.assert(this.editable, this);
+        console.assert(typeof condition === "string");
+
         if (this._condition === condition)
             return;
 
@@ -153,11 +135,15 @@ WI.Breakpoint = class Breakpoint extends WI.Object
 
     get ignoreCount()
     {
+        console.assert(this.editable, this);
+
         return this._ignoreCount;
     }
 
     set ignoreCount(ignoreCount)
     {
+        console.assert(this.editable, this);
+
         console.assert(ignoreCount >= 0, "Ignore count cannot be negative.");
         if (ignoreCount < 0)
             return;
@@ -172,11 +158,15 @@ WI.Breakpoint = class Breakpoint extends WI.Object
 
     get autoContinue()
     {
+        console.assert(this.editable, this);
+
         return this._autoContinue;
     }
 
     set autoContinue(cont)
     {
+        console.assert(this.editable, this);
+
         if (this._autoContinue === cont)
             return;
 
@@ -187,107 +177,54 @@ WI.Breakpoint = class Breakpoint extends WI.Object
 
     get actions()
     {
+        console.assert(this.editable, this);
+
         return this._actions;
-    }
-
-    get options()
-    {
-        return {
-            condition: this._condition,
-            ignoreCount: this._ignoreCount,
-            actions: this._serializableActions(),
-            autoContinue: this._autoContinue
-        };
-    }
-
-    get info()
-    {
-        // The id, scriptIdentifier, target, and resolved state are tied to the current session, so don't include them for serialization.
-        return {
-            contentIdentifier: this._contentIdentifier,
-            lineNumber: this._sourceCodeLocation.lineNumber,
-            columnNumber: this._sourceCodeLocation.columnNumber,
-            disabled: this._disabled,
-            condition: this._condition,
-            ignoreCount: this._ignoreCount,
-            actions: this._serializableActions(),
-            autoContinue: this._autoContinue
-        };
     }
 
     get probeActions()
     {
+        console.assert(this.editable, this);
+
         return this._actions.filter(function(action) {
             return action.type === WI.BreakpointAction.Type.Probe;
         });
     }
 
-    cycleToNextMode()
+    addAction(action, {precedingAction} = {})
     {
-        if (this.disabled) {
-            // When cycling, clear auto-continue when going from disabled to enabled.
-            this.autoContinue = false;
-            this.disabled = false;
-            return;
-        }
+        console.assert(this.editable, this);
+        console.assert(action instanceof WI.BreakpointAction, action);
 
-        if (this.autoContinue) {
-            this.disabled = true;
-            return;
-        }
-
-        if (this.actions.length) {
-            this.autoContinue = true;
-            return;
-        }
-
-        this.disabled = true;
-    }
-
-    createAction(type, precedingAction, data)
-    {
-        var newAction = new WI.BreakpointAction(this, type, data || null);
+        action.addEventListener(WI.BreakpointAction.Event.Modified, this._handleBreakpointActionModified, this);
 
         if (!precedingAction)
-            this._actions.push(newAction);
+            this._actions.push(action);
         else {
             var index = this._actions.indexOf(precedingAction);
             console.assert(index !== -1);
             if (index === -1)
-                this._actions.push(newAction);
+                this._actions.push(action);
             else
-                this._actions.splice(index + 1, 0, newAction);
+                this._actions.splice(index + 1, 0, action);
         }
 
         this.dispatchEventToListeners(WI.Breakpoint.Event.ActionsDidChange);
-
-        return newAction;
-    }
-
-    recreateAction(type, actionToReplace)
-    {
-        var newAction = new WI.BreakpointAction(this, type, null);
-
-        var index = this._actions.indexOf(actionToReplace);
-        console.assert(index !== -1);
-        if (index === -1)
-            return null;
-
-        this._actions[index] = newAction;
-
-        this.dispatchEventToListeners(WI.Breakpoint.Event.ActionsDidChange);
-
-        return newAction;
     }
 
     removeAction(action)
     {
+        console.assert(this.editable, this);
+        console.assert(action instanceof WI.BreakpointAction, action);
+
         var index = this._actions.indexOf(action);
         console.assert(index !== -1);
         if (index === -1)
             return;
 
         this._actions.splice(index, 1);
+
+        action.removeEventListener(WI.BreakpointAction.Event.Modified, this._handleBreakpointActionModified, this);
 
         if (!this._actions.length)
             this.autoContinue = false;
@@ -297,6 +234,8 @@ WI.Breakpoint = class Breakpoint extends WI.Object
 
     clearActions(type)
     {
+        console.assert(this.editable, this);
+
         if (!type)
             this._actions = [];
         else
@@ -305,60 +244,84 @@ WI.Breakpoint = class Breakpoint extends WI.Object
         this.dispatchEventToListeners(WI.Breakpoint.Event.ActionsDidChange);
     }
 
-    saveIdentityToCookie(cookie)
+    reset()
     {
-        cookie[WI.Breakpoint.ContentIdentifierCookieKey] = this.contentIdentifier;
-        cookie[WI.Breakpoint.LineNumberCookieKey] = this.sourceCodeLocation.lineNumber;
-        cookie[WI.Breakpoint.ColumnNumberCookieKey] = this.sourceCodeLocation.columnNumber;
+        console.assert(this.editable, this);
+
+        this.condition = "";
+        this.ignoreCount = 0;
+        this.autoContinue = false;
+        this.clearActions();
     }
 
-    // Protected (Called by BreakpointAction)
-
-    breakpointActionDidChange(action)
+    remove()
     {
-        var index = this._actions.indexOf(action);
-        console.assert(index !== -1);
-        if (index === -1)
-            return;
+        console.assert(this.removable, this);
 
-        this.dispatchEventToListeners(WI.Breakpoint.Event.ActionsDidChange);
+        // Overridden by subclasses if needed.
+    }
+
+    optionsToProtocol()
+    {
+        console.assert(this.editable, this);
+
+        let payload = {};
+
+        if (this._condition)
+            payload.condition = this._condition;
+
+        if (this._actions.length) {
+            payload.actions = this._actions.map((action) => action.toProtocol()).filter((action) => {
+                if (action.type !== WI.BreakpointAction.Type.Log)
+                    return true;
+
+                if (!/\$\{.*?\}/.test(action.data))
+                    return true;
+
+                let lexer = new WI.BreakpointLogMessageLexer;
+                let tokens = lexer.tokenize(action.data);
+                if (!tokens)
+                    return false;
+
+                let templateLiteral = tokens.reduce((text, token) => {
+                    if (token.type === WI.BreakpointLogMessageLexer.TokenType.PlainText)
+                        return text + token.data.escapeCharacters("`\\");
+                    if (token.type === WI.BreakpointLogMessageLexer.TokenType.Expression)
+                        return text + "${" + token.data + "}";
+                    return text;
+                }, "");
+
+                action.data = "console.log(`" + templateLiteral + "`)";
+                action.type = WI.BreakpointAction.Type.Evaluate;
+                return true;
+            });
+        }
+
+        if (this._autoContinue)
+            payload.autoContinue = this._autoContinue;
+
+        if (this._ignoreCount)
+            payload.ignoreCount = this._ignoreCount;
+
+        return !isEmptyObject(payload) ? payload : undefined;
     }
 
     // Private
 
-    _serializableActions()
+    _handleBreakpointActionModified(event)
     {
-        var actions = [];
-        for (var i = 0; i < this._actions.length; ++i)
-            actions.push(this._actions[i].info);
-        return actions;
-    }
+        console.assert(this.editable, this);
 
-    _sourceCodeLocationLocationChanged(event)
-    {
-        this.dispatchEventToListeners(WI.Breakpoint.Event.LocationDidChange, event.data);
-    }
-
-    _sourceCodeLocationDisplayLocationChanged(event)
-    {
-        this.dispatchEventToListeners(WI.Breakpoint.Event.DisplayLocationDidChange, event.data);
+        this.dispatchEventToListeners(WI.Breakpoint.Event.ActionsDidChange);
     }
 };
 
-WI.Breakpoint.DefaultBreakpointActionType = WI.BreakpointAction.Type.Log;
-
 WI.Breakpoint.TypeIdentifier = "breakpoint";
-WI.Breakpoint.ContentIdentifierCookieKey = "breakpoint-content-identifier";
-WI.Breakpoint.LineNumberCookieKey = "breakpoint-line-number";
-WI.Breakpoint.ColumnNumberCookieKey = "breakpoint-column-number";
 
 WI.Breakpoint.Event = {
     DisabledStateDidChange: "breakpoint-disabled-state-did-change",
-    ResolvedStateDidChange: "breakpoint-resolved-state-did-change",
     ConditionDidChange: "breakpoint-condition-did-change",
     IgnoreCountDidChange: "breakpoint-ignore-count-did-change",
     ActionsDidChange: "breakpoint-actions-did-change",
     AutoContinueDidChange: "breakpoint-auto-continue-did-change",
-    LocationDidChange: "breakpoint-location-did-change",
-    DisplayLocationDidChange: "breakpoint-display-location-did-change",
 };

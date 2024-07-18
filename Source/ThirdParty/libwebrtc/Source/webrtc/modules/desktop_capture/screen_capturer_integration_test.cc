@@ -17,23 +17,22 @@
 #include <utility>
 
 // TODO(zijiehe): Remove once flaky has been resolved.
-#include "webrtc/base/base64.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/modules/desktop_capture/desktop_capturer.h"
-#include "webrtc/modules/desktop_capture/desktop_capture_options.h"
-#include "webrtc/modules/desktop_capture/desktop_frame.h"
-#include "webrtc/modules/desktop_capture/desktop_region.h"
-#include "webrtc/modules/desktop_capture/mock_desktop_capturer_callback.h"
-#include "webrtc/modules/desktop_capture/rgba_color.h"
-#include "webrtc/modules/desktop_capture/screen_drawer.h"
-#include "webrtc/test/gmock.h"
-#include "webrtc/test/gtest.h"
+#include "modules/desktop_capture/desktop_capture_options.h"
+#include "modules/desktop_capture/desktop_capturer.h"
+#include "modules/desktop_capture/desktop_frame.h"
+#include "modules/desktop_capture/desktop_region.h"
+#include "modules/desktop_capture/mock_desktop_capturer_callback.h"
+#include "modules/desktop_capture/rgba_color.h"
+#include "modules/desktop_capture/screen_drawer.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/third_party/base64/base64.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
 
 #if defined(WEBRTC_WIN)
-#include "webrtc/base/win32.h"
-#include "webrtc/modules/desktop_capture/win/screen_capturer_win_directx.h"
+#include "modules/desktop_capture/win/screen_capturer_win_directx.h"
+#include "rtc_base/win/windows_version.h"
 #endif  // defined(WEBRTC_WIN)
 
 using ::testing::_;
@@ -47,7 +46,7 @@ ACTION_P2(SaveCaptureResult, result, dest) {
   *dest = std::move(*arg1);
 }
 
-// Returns true if color in |rect| of |frame| is |color|.
+// Returns true if color in `rect` of `frame` is `color`.
 bool ArePixelsColoredBy(const DesktopFrame& frame,
                         DesktopRect rect,
                         RgbaColor color,
@@ -61,7 +60,7 @@ bool ArePixelsColoredBy(const DesktopFrame& frame,
     }
   }
 
-  // Color in the |rect| should be |color|.
+  // Color in the `rect` should be `color`.
   uint8_t* row = frame.GetFrameDataAtPos(rect.top_left());
   for (int i = 0; i < rect.height(); i++) {
     uint8_t* column = row;
@@ -78,7 +77,7 @@ bool ArePixelsColoredBy(const DesktopFrame& frame,
 
 }  // namespace
 
-class ScreenCapturerIntegrationTest : public testing::Test {
+class ScreenCapturerIntegrationTest : public ::testing::Test {
  public:
   void SetUp() override {
     capturer_ = DesktopCapturer::CreateScreenCapturer(
@@ -89,8 +88,8 @@ class ScreenCapturerIntegrationTest : public testing::Test {
   void TestCaptureUpdatedRegion(
       std::initializer_list<DesktopCapturer*> capturers) {
     RTC_DCHECK(capturers.size() > 0);
-    // A large enough area for the tests, which should be able to be fulfilled
-    // by most systems.
+// A large enough area for the tests, which should be able to be fulfilled
+// by most systems.
 #if defined(WEBRTC_WIN)
     // On Windows, an interesting warning window may pop up randomly. The root
     // cause is still under investigation, so reduce the test area to work
@@ -102,13 +101,15 @@ class ScreenCapturerIntegrationTest : public testing::Test {
     const int kRectSize = 32;
     std::unique_ptr<ScreenDrawer> drawer = ScreenDrawer::Create();
     if (!drawer || drawer->DrawableRegion().is_empty()) {
-      LOG(LS_WARNING) << "No ScreenDrawer implementation for current platform.";
+      RTC_LOG(LS_WARNING)
+          << "No ScreenDrawer implementation for current platform.";
       return;
     }
     if (drawer->DrawableRegion().width() < kTestArea ||
         drawer->DrawableRegion().height() < kTestArea) {
-      LOG(LS_WARNING) << "ScreenDrawer::DrawableRegion() is too small for the "
-                         "CaptureUpdatedRegion tests.";
+      RTC_LOG(LS_WARNING)
+          << "ScreenDrawer::DrawableRegion() is too small for the "
+             "CaptureUpdatedRegion tests.";
       return;
     }
 
@@ -116,9 +117,9 @@ class ScreenCapturerIntegrationTest : public testing::Test {
       capturer->Start(&callback_);
     }
 
-    // Draw a set of |kRectSize| by |kRectSize| rectangles at (|i|, |i|), or
-    // |i| by |i| rectangles at (|kRectSize|, |kRectSize|). One of (controlled
-    // by |c|) its primary colors is |i|, and the other two are 0x7f. So we
+    // Draw a set of `kRectSize` by `kRectSize` rectangles at (`i`, `i`), or
+    // `i` by `i` rectangles at (`kRectSize`, `kRectSize`). One of (controlled
+    // by `c`) its primary colors is `i`, and the other two are 0x7f. So we
     // won't draw a black or white rectangle.
     for (int c = 0; c < 3; c++) {
       // A fixed size rectangle.
@@ -163,18 +164,12 @@ class ScreenCapturerIntegrationTest : public testing::Test {
 
   bool CreateDirectxCapturer() {
     if (!ScreenCapturerWinDirectx::IsSupported()) {
-      LOG(LS_WARNING) << "Directx capturer is not supported";
+      RTC_LOG(LS_WARNING) << "Directx capturer is not supported";
       return false;
     }
 
     MaybeCreateDirectxCapturer();
     return true;
-  }
-
-  void CreateMagnifierCapturer() {
-    DesktopCaptureOptions options(DesktopCaptureOptions::CreateDefault());
-    options.set_allow_use_magnification_api(true);
-    capturer_ = DesktopCapturer::CreateScreenCapturer(options);
   }
 #endif  // defined(WEBRTC_WIN)
 
@@ -182,9 +177,9 @@ class ScreenCapturerIntegrationTest : public testing::Test {
   MockDesktopCapturerCallback callback_;
 
  private:
-  // Repeats capturing the frame by using |capturers| one-by-one for 600 times,
-  // typically 30 seconds, until they succeeded captured a |color| rectangle at
-  // |rect|. This function uses |drawer|->WaitForPendingDraws() between two
+  // Repeats capturing the frame by using `capturers` one-by-one for 600 times,
+  // typically 30 seconds, until they succeeded captured a `color` rectangle at
+  // `rect`. This function uses `drawer`->WaitForPendingDraws() between two
   // attempts to wait for the screen to update.
   void TestCaptureOneFrame(std::vector<DesktopCapturer*> capturers,
                            ScreenDrawer* drawer,
@@ -210,8 +205,8 @@ class ScreenCapturerIntegrationTest : public testing::Test {
           return;
         }
 
-        if (ArePixelsColoredBy(
-            *frame, rect, color, drawer->MayDrawIncompleteShapes())) {
+        if (ArePixelsColoredBy(*frame, rect, color,
+                               drawer->MayDrawIncompleteShapes())) {
           capturers[j] = nullptr;
           succeeded_capturers++;
         }
@@ -220,17 +215,15 @@ class ScreenCapturerIntegrationTest : public testing::Test {
         // been resolved.
         else if (i == wait_capture_round - 1) {
           std::string result;
-          rtc::Base64::EncodeFromArray(frame->data(),
-                                       frame->size().height() * frame->stride(),
-                                       &result);
+          rtc::Base64::EncodeFromArray(
+              frame->data(), frame->size().height() * frame->stride(), &result);
           std::cout << frame->size().width() << " x " << frame->size().height()
                     << std::endl;
           // Split the entire string (can be over 4M) into several lines to
           // avoid browser from sticking.
           static const size_t kLineLength = 32768;
           const char* result_end = result.c_str() + result.length();
-          for (const char* it = result.c_str();
-               it < result_end;
+          for (const char* it = result.c_str(); it < result_end;
                it += kLineLength) {
             const size_t max_length = result_end - it;
             std::cout << std::string(it, std::min(kLineLength, max_length))
@@ -262,7 +255,7 @@ class ScreenCapturerIntegrationTest : public testing::Test {
     ASSERT_EQ(succeeded_capturers, capturers.size());
   }
 
-  // Expects |capturer| to successfully capture a frame, and returns it.
+  // Expects `capturer` to successfully capture a frame, and returns it.
   std::unique_ptr<DesktopFrame> CaptureFrame(DesktopCapturer* capturer) {
     for (int i = 0; i < 10; i++) {
       std::unique_ptr<DesktopFrame> frame;
@@ -270,7 +263,7 @@ class ScreenCapturerIntegrationTest : public testing::Test {
       EXPECT_CALL(callback_, OnCaptureResultPtr(_, _))
           .WillOnce(SaveCaptureResult(&result, &frame));
       capturer->CaptureFrame();
-      testing::Mock::VerifyAndClearExpectations(&callback_);
+      ::testing::Mock::VerifyAndClearExpectations(&callback_);
       if (result == DesktopCapturer::Result::SUCCESS) {
         EXPECT_TRUE(frame);
         return frame;
@@ -310,7 +303,10 @@ TEST_F(ScreenCapturerIntegrationTest, MAYBE_TwoCapturers) {
 
 #if defined(WEBRTC_WIN)
 
-TEST_F(ScreenCapturerIntegrationTest, CaptureUpdatedRegionWithDirectxCapturer) {
+// Windows cannot capture contents on VMs hosted in GCE. See bug
+// https://bugs.chromium.org/p/webrtc/issues/detail?id=8153.
+TEST_F(ScreenCapturerIntegrationTest,
+       DISABLED_CaptureUpdatedRegionWithDirectxCapturer) {
   if (!CreateDirectxCapturer()) {
     return;
   }
@@ -318,7 +314,7 @@ TEST_F(ScreenCapturerIntegrationTest, CaptureUpdatedRegionWithDirectxCapturer) {
   TestCaptureUpdatedRegion();
 }
 
-TEST_F(ScreenCapturerIntegrationTest, TwoDirectxCapturers) {
+TEST_F(ScreenCapturerIntegrationTest, DISABLED_TwoDirectxCapturers) {
   if (!CreateDirectxCapturer()) {
     return;
   }
@@ -329,37 +325,8 @@ TEST_F(ScreenCapturerIntegrationTest, TwoDirectxCapturers) {
 }
 
 TEST_F(ScreenCapturerIntegrationTest,
-       CaptureUpdatedRegionWithMagnifierCapturer) {
-  // On Windows 8 or later, magnifier APIs return a frame with a border on test
-  // environment, so disable these tests.
-  // Bug https://bugs.chromium.org/p/webrtc/issues/detail?id=6844
-  // TODO(zijiehe): Find the root cause of the border and failure, which cannot
-  // reproduce on my dev machine.
-  if (rtc::IsWindows8OrLater()) {
-    return;
-  }
-  CreateMagnifierCapturer();
-  TestCaptureUpdatedRegion();
-}
-
-TEST_F(ScreenCapturerIntegrationTest, TwoMagnifierCapturers) {
-  // On Windows 8 or later, magnifier APIs return a frame with a border on test
-  // environment, so disable these tests.
-  // Bug https://bugs.chromium.org/p/webrtc/issues/detail?id=6844
-  // TODO(zijiehe): Find the root cause of the border and failure, which cannot
-  // reproduce on my dev machine.
-  if (rtc::IsWindows8OrLater()) {
-    return;
-  }
-  CreateMagnifierCapturer();
-  std::unique_ptr<DesktopCapturer> capturer2 = std::move(capturer_);
-  CreateMagnifierCapturer();
-  TestCaptureUpdatedRegion({capturer_.get(), capturer2.get()});
-}
-
-TEST_F(ScreenCapturerIntegrationTest,
-       MaybeCaptureUpdatedRegionWithDirectxCapturer) {
-  if (!rtc::IsWindows8OrLater()) {
+       DISABLED_MaybeCaptureUpdatedRegionWithDirectxCapturer) {
+  if (rtc::rtc_win::GetVersion() < rtc::rtc_win::Version::VERSION_WIN8) {
     // ScreenCapturerWinGdi randomly returns blank screen, the root cause is
     // still unknown. Bug,
     // https://bugs.chromium.org/p/webrtc/issues/detail?id=6843.

@@ -32,11 +32,11 @@
 #import "ExceptionHandlers.h"
 #import <WebCore/HTMLAreaElement.h>
 #import <WebCore/HTMLNames.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::HTMLAreaElement*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -153,7 +153,7 @@
 - (NSString *)href
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getURLAttribute(WebCore::HTMLNames::hrefAttr);
+    return IMPL->getURLAttribute(WebCore::HTMLNames::hrefAttr).string();
 }
 
 - (void)setHref:(NSString *)newHref
@@ -216,3 +216,5 @@ WebCore::HTMLAreaElement* core(DOMHTMLAreaElement *wrapper)
 {
     return wrapper ? reinterpret_cast<WebCore::HTMLAreaElement*>(wrapper->_internal) : 0;
 }
+
+#undef IMPL

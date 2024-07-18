@@ -26,20 +26,48 @@
 #import "config.h"
 #import "WebProcessProxy.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
-#import <WebCore/NotImplemented.h>
-
+#import "AccessibilitySupportSPI.h"
+#import "WKFullKeyboardAccessWatcher.h"
+#import "WKMouseDeviceObserver.h"
+#import "WKStylusDeviceObserver.h"
 #import "WebProcessMessages.h"
+#import "WebProcessPool.h"
 
 namespace WebKit {
 
+void WebProcessProxy::platformInitialize()
+{
+#if HAVE(MOUSE_DEVICE_OBSERVATION)
+    [[WKMouseDeviceObserver sharedInstance] start];
+#endif
+#if HAVE(STYLUS_DEVICE_OBSERVATION)
+    [[WKStylusDeviceObserver sharedInstance] start];
+#endif
+
+    m_throttler.setAllowsActivities(!m_processPool->processesShouldSuspend());
+}
+
+void WebProcessProxy::platformDestroy()
+{
+#if HAVE(MOUSE_DEVICE_OBSERVATION)
+    [[WKMouseDeviceObserver sharedInstance] stop];
+#endif
+#if HAVE(STYLUS_DEVICE_OBSERVATION)
+    [[WKStylusDeviceObserver sharedInstance] stop];
+#endif
+}
+
 bool WebProcessProxy::fullKeyboardAccessEnabled()
 {
-    notImplemented();
-    return false;
+#if ENABLE(FULL_KEYBOARD_ACCESS)
+    return [WKFullKeyboardAccessWatcher fullKeyboardAccessEnabled];
+#else
+    return NO;
+#endif
 }
 
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

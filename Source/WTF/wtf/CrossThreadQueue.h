@@ -31,12 +31,12 @@
 #include <wtf/Deque.h>
 #include <wtf/Lock.h>
 #include <wtf/Noncopyable.h>
-#include <wtf/Optional.h>
 
 namespace WTF {
 
 template<typename DataType>
-class CrossThreadQueue {
+class CrossThreadQueue final {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(CrossThreadQueue);
 public:
     CrossThreadQueue() = default;
@@ -52,15 +52,15 @@ public:
 
 private:
     mutable Lock m_lock;
+    Deque<DataType> m_queue WTF_GUARDED_BY_LOCK(m_lock);
     Condition m_condition;
-    Deque<DataType> m_queue;
-    bool m_killed { false };
+    bool m_killed WTF_GUARDED_BY_LOCK(m_lock) { false };
 };
 
 template<typename DataType>
 void CrossThreadQueue<DataType>::append(DataType&& message)
 {
-    LockHolder lock(m_lock);
+    Locker locker { m_lock };
     ASSERT(!m_killed);
     m_queue.append(WTFMove(message));
     m_condition.notifyOne();
@@ -69,16 +69,18 @@ void CrossThreadQueue<DataType>::append(DataType&& message)
 template<typename DataType>
 DataType CrossThreadQueue<DataType>::waitForMessage()
 {
-    LockHolder lock(m_lock);
+    Locker locker { m_lock };
 
     auto found = m_queue.end();
-    while (found == m_queue.end()) {
+    while (!m_killed && found == m_queue.end()) {
         found = m_queue.begin();
         if (found != m_queue.end())
             break;
 
         m_condition.wait(m_lock);
     }
+    if (m_killed)
+        return { };
 
     return m_queue.takeFirst();
 }
@@ -86,7 +88,7 @@ DataType CrossThreadQueue<DataType>::waitForMessage()
 template<typename DataType>
 std::optional<DataType> CrossThreadQueue<DataType>::tryGetMessage()
 {
-    LockHolder lock(m_lock);
+    Locker locker { m_lock };
 
     if (m_queue.isEmpty())
         return { };
@@ -97,7 +99,7 @@ std::optional<DataType> CrossThreadQueue<DataType>::tryGetMessage()
 template<typename DataType>
 void CrossThreadQueue<DataType>::kill()
 {
-    LockHolder lock(m_lock);
+    Locker locker { m_lock };
     m_killed = true;
     m_condition.notifyAll();
 }
@@ -105,14 +107,14 @@ void CrossThreadQueue<DataType>::kill()
 template<typename DataType>
 bool CrossThreadQueue<DataType>::isKilled() const
 {
-    LockHolder lock(m_lock);
+    Locker locker { m_lock };
     return m_killed;
 }
 
 template<typename DataType>
 bool CrossThreadQueue<DataType>::isEmpty() const
 {
-    LockHolder lock(m_lock);
+    Locker locker { m_lock };
     return m_queue.isEmpty();
 }
 

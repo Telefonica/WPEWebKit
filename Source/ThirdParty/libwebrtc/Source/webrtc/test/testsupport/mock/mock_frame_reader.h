@@ -8,26 +8,33 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_TEST_TESTSUPPORT_MOCK_MOCK_FRAME_READER_H_
-#define WEBRTC_TEST_TESTSUPPORT_MOCK_MOCK_FRAME_READER_H_
+#ifndef TEST_TESTSUPPORT_MOCK_MOCK_FRAME_READER_H_
+#define TEST_TESTSUPPORT_MOCK_MOCK_FRAME_READER_H_
 
-#include "webrtc/test/testsupport/frame_reader.h"
-
-#include "webrtc/test/gmock.h"
+#include "api/video/i420_buffer.h"
+#include "test/gmock.h"
+#include "test/testsupport/frame_reader.h"
 
 namespace webrtc {
 namespace test {
 
 class MockFrameReader : public FrameReader {
  public:
-  MOCK_METHOD0(Init, bool());
-  MOCK_METHOD0(ReadFrame, rtc::scoped_refptr<I420Buffer>());
-  MOCK_METHOD0(Close, void());
-  MOCK_METHOD0(FrameLength, size_t());
-  MOCK_METHOD0(NumberOfFrames, int());
+  MOCK_METHOD(rtc::scoped_refptr<I420Buffer>, PullFrame, (), (override));
+  MOCK_METHOD(rtc::scoped_refptr<I420Buffer>, PullFrame, (int*), (override));
+  MOCK_METHOD(rtc::scoped_refptr<I420Buffer>,
+              PullFrame,
+              (int*, Resolution, Ratio),
+              (override));
+  MOCK_METHOD(rtc::scoped_refptr<I420Buffer>, ReadFrame, (int), (override));
+  MOCK_METHOD(rtc::scoped_refptr<I420Buffer>,
+              ReadFrame,
+              (int, Resolution),
+              (override));
+  MOCK_METHOD(int, num_frames, (), (const override));
 };
 
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_TESTSUPPORT_MOCK_MOCK_FRAME_READER_H_
+#endif  // TEST_TESTSUPPORT_MOCK_MOCK_FRAME_READER_H_

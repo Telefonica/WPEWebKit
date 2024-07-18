@@ -29,15 +29,66 @@ WI.MemoryManager = class MemoryManager extends WI.Object
     {
         super();
 
-        if (window.MemoryAgent)
-            MemoryAgent.enable();
+        this._enabled = false;
+    }
+
+    // Agent
+
+    get domains() { return ["Memory"]; }
+
+    activateExtraDomain(domain)
+    {
+        // COMPATIBILITY (iOS 14.0): Inspector.activateExtraDomains was removed in favor of a declared debuggable type
+
+        console.assert(domain === "Memory");
+
+        for (let target of WI.targets)
+            this.initializeTarget(target);
+    }
+
+    // Target
+
+    initializeTarget(target)
+    {
+        if (!this._enabled)
+            return;
+
+        if (target.hasDomain("Memory"))
+            target.MemoryAgent.enable();
     }
 
     // Public
 
+    enable()
+    {
+        if (this._enabled)
+            return;
+
+        this._enabled = true;
+
+        for (let target of WI.targets)
+            this.initializeTarget(target);
+    }
+
+    disable()
+    {
+        if (!this._enabled)
+            return;
+
+        for (let target of WI.targets) {
+            if (target.hasDomain("Memory"))
+                target.MemoryAgent.disable();
+        }
+
+        this._enabled = false;
+    }
+
+    // MemoryObserver
+
     memoryPressure(timestamp, protocolSeverity)
     {
-        // Called from WI.MemoryObserver.
+        if (!this._enabled)
+            return;
 
         let memoryPressureEvent = WI.MemoryPressureEvent.fromPayload(timestamp, protocolSeverity);
         this.dispatchEventToListeners(WI.MemoryManager.Event.MemoryPressure, {memoryPressureEvent});

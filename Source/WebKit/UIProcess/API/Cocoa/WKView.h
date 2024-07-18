@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,26 +30,29 @@
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WKDeclarationSpecifiers.h>
 
+#if !defined(WK_UNUSED_INSTANCE_VARIABLE)
+#define WK_UNUSED_INSTANCE_VARIABLE
+#endif
+
 @class WKBrowsingContextController;
 @class WKBrowsingContextGroup;
 @class WKProcessGroup;
 @class WKViewData;
 
-WK_EXPORT
+WK_CLASS_DEPRECATED_WITH_REPLACEMENT("WKWebView", macos(10.10, 10.14.4), ios(8.0, 12.2))
 @interface WKView : NSView <NSTextInputClient> {
 @private
     WKViewData *_data;
-    unsigned _unused;
+    WK_UNUSED_INSTANCE_VARIABLE unsigned _unused;
 }
-
-#if WK_API_ENABLED
 
 - (id)initWithFrame:(NSRect)frame processGroup:(WKProcessGroup *)processGroup browsingContextGroup:(WKBrowsingContextGroup *)browsingContextGroup;
 - (id)initWithFrame:(NSRect)frame processGroup:(WKProcessGroup *)processGroup browsingContextGroup:(WKBrowsingContextGroup *)browsingContextGroup relatedToView:(WKView *)relatedView;
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 @property(readonly) WKBrowsingContextController *browsingContextController;
-
-#endif // WK_API_ENABLED
+#pragma clang diagnostic pop
 
 @property BOOL drawsBackground;
 @property BOOL drawsTransparentBackground;

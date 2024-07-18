@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,77 +25,55 @@
 
 #pragma once
 
-#if USE(NETWORK_SESSION)
-
 #include "NetworkDataTask.h"
 #include "NetworkResourceLoadParameters.h"
-#include <WebCore/ContentExtensionsBackend.h>
 #include <WebCore/ResourceError.h>
-
-namespace WebCore {
-class ContentSecurityPolicy;
-class HTTPHeaderMap;
-class URL;
-}
+#include <WebCore/ResourceResponse.h>
+#include <wtf/CompletionHandler.h>
+#include <wtf/UniqueRef.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebKit {
 
-class NetworkCORSPreflightChecker;
 class NetworkConnectionToWebProcess;
+class NetworkLoadChecker;
+class NetworkProcess;
+class NetworkSchemeRegistry;
 
-class PingLoad final : private NetworkDataTaskClient {
+class PingLoad final : public CanMakeWeakPtr<PingLoad>, private NetworkDataTaskClient {
 public:
-    PingLoad(NetworkResourceLoadParameters&&, WebCore::HTTPHeaderMap&& originalRequestHeaders, Ref<NetworkConnectionToWebProcess>&&);
-    
+    PingLoad(NetworkProcess&, PAL::SessionID, NetworkResourceLoadParameters&&, CompletionHandler<void(const WebCore::ResourceError&, const WebCore::ResourceResponse&)>&&);
+    PingLoad(NetworkConnectionToWebProcess&, NetworkResourceLoadParameters&&, CompletionHandler<void(const WebCore::ResourceError&, const WebCore::ResourceResponse&)>&&);
+
 private:
     ~PingLoad();
+    void initialize(NetworkProcess&);
 
-    WebCore::ContentSecurityPolicy* contentSecurityPolicy() const;
+    const URL& currentURL() const;
 
     void willPerformHTTPRedirection(WebCore::ResourceResponse&&, WebCore::ResourceRequest&&, RedirectCompletionHandler&&) final;
-    void didReceiveChallenge(const WebCore::AuthenticationChallenge&, ChallengeCompletionHandler&&) final;
-    void didReceiveResponseNetworkSession(WebCore::ResourceResponse&&, ResponseCompletionHandler&&) final;
-    void didReceiveData(Ref<WebCore::SharedBuffer>&&) final;
+    void didReceiveChallenge(WebCore::AuthenticationChallenge&&, NegotiatedLegacyTLS, ChallengeCompletionHandler&&) final;
+    void didReceiveResponse(WebCore::ResourceResponse&&, NegotiatedLegacyTLS, PrivateRelayed, ResponseCompletionHandler&&) final;
+    void didReceiveData(const WebCore::SharedBuffer&) final;
     void didCompleteWithError(const WebCore::ResourceError&, const WebCore::NetworkLoadMetrics&) final;
     void didSendData(uint64_t totalBytesSent, uint64_t totalBytesExpectedToSend) final;
     void wasBlocked() final;
     void cannotShowURL() final;
+    void wasBlockedByRestrictions() final;
+    void wasBlockedByDisabledFTP() final;
     void timeoutTimerFired();
 
-    void loadRequest(WebCore::ResourceRequest&&);
-    bool isAllowedRedirect(const WebCore::URL&) const;
-    void makeCrossOriginAccessRequest(WebCore::ResourceRequest&&);
-    void makeSimpleCrossOriginAccessRequest(WebCore::ResourceRequest&&);
-    void makeCrossOriginAccessRequestWithPreflight(WebCore::ResourceRequest&&);
-    void preflightSuccess(WebCore::ResourceRequest&&);
+    void loadRequest(NetworkProcess&, WebCore::ResourceRequest&&);
 
-#if ENABLE(CONTENT_EXTENSIONS)
-    WebCore::ContentExtensions::ContentExtensionsBackend& contentExtensionsBackend();
-    WebCore::ContentExtensions::BlockedStatus processContentExtensionRulesForLoad(WebCore::ResourceRequest&);
-#endif
-
-    WebCore::SecurityOrigin& securityOrigin() const;
-
-    const WebCore::ResourceRequest& currentRequest() const;
-    void didFinish(const WebCore::ResourceError& = { });
+    void didFinish(const WebCore::ResourceError& = { }, const WebCore::ResourceResponse& response = { });
     
+    PAL::SessionID m_sessionID;
     NetworkResourceLoadParameters m_parameters;
-    WebCore::HTTPHeaderMap m_originalRequestHeaders; // Needed for CORS checks.
-    Ref<NetworkConnectionToWebProcess> m_connection;
+    CompletionHandler<void(const WebCore::ResourceError&, const WebCore::ResourceResponse&)> m_completionHandler;
     RefPtr<NetworkDataTask> m_task;
     WebCore::Timer m_timeoutTimer;
-    std::unique_ptr<NetworkCORSPreflightChecker> m_corsPreflightChecker;
-    RefPtr<WebCore::SecurityOrigin> m_origin;
-    bool m_isSameOriginRequest;
-    bool m_isSimpleRequest { true };
-    RedirectCompletionHandler m_redirectHandler;
-    mutable std::unique_ptr<WebCore::ContentSecurityPolicy> m_contentSecurityPolicy;
-#if ENABLE(CONTENT_EXTENSIONS)
-    std::unique_ptr<WebCore::ContentExtensions::ContentExtensionsBackend> m_contentExtensionsBackend;
-#endif
-    std::optional<WebCore::ResourceRequest> m_lastRedirectionRequest;
+    UniqueRef<NetworkLoadChecker> m_networkLoadChecker;
+    Vector<RefPtr<WebCore::BlobDataFileReference>> m_blobFiles;
 };
 
 }
-
-#endif // USE(NETWORK_SESSION)

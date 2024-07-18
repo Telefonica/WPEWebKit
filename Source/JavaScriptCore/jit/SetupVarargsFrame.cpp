@@ -29,7 +29,7 @@
 #if ENABLE(JIT)
 
 #include "Interpreter.h"
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
 #include "StackAlignment.h"
 
 namespace JSC {
@@ -56,8 +56,7 @@ void emitSetVarargsFrame(CCallHelpers& jit, GPRReg lengthGPR, bool lengthInclude
     
     // Now resultGPR has the right stack frame offset in Register units.
     jit.negPtr(resultGPR);
-    jit.lshiftPtr(CCallHelpers::Imm32(3), resultGPR);
-    jit.addPtr(GPRInfo::callFrameRegister, resultGPR);
+    jit.getEffectiveAddress(CCallHelpers::BaseIndex(GPRInfo::callFrameRegister, resultGPR, CCallHelpers::TimesEight), resultGPR);
 }
 
 static void emitSetupVarargsFrameFastCase(VM& vm, CCallHelpers& jit, GPRReg numUsedSlotsGPR, GPRReg scratchGPR1, GPRReg scratchGPR2, GPRReg scratchGPR3, ValueRecovery argCountRecovery, VirtualRegister firstArgumentReg, unsigned firstVarArgOffset, CCallHelpers::JumpList& slowCase)
@@ -89,7 +88,7 @@ static void emitSetupVarargsFrameFastCase(VM& vm, CCallHelpers& jit, GPRReg numU
     jit.addPtr(CCallHelpers::TrustedImm32(sizeof(CallerFrameAndPC)), scratchGPR2, CCallHelpers::stackPointerRegister);
 
     // Initialize ArgumentCount.
-    jit.store32(scratchGPR1, CCallHelpers::Address(scratchGPR2, CallFrameSlot::argumentCount * static_cast<int>(sizeof(Register)) + PayloadOffset));
+    jit.store32(scratchGPR1, CCallHelpers::Address(scratchGPR2, CallFrameSlot::argumentCountIncludingThis * static_cast<int>(sizeof(Register)) + PayloadOffset));
 
     // Copy arguments.
     jit.signExtend32ToPtr(scratchGPR1, scratchGPR1);
@@ -123,13 +122,13 @@ void emitSetupVarargsFrameFastCase(VM& vm, CCallHelpers& jit, GPRReg numUsedSlot
         } else {
             argumentCountRecovery = ValueRecovery::constant(jsNumber(inlineCallFrame->argumentCountIncludingThis));
         }
-        if (inlineCallFrame->argumentsWithFixup.size() > 1)
-            firstArgumentReg = inlineCallFrame->argumentsWithFixup[1].virtualRegister();
+        if (inlineCallFrame->m_argumentsWithFixup.size() > 1)
+            firstArgumentReg = inlineCallFrame->m_argumentsWithFixup[1].virtualRegister();
         else
             firstArgumentReg = VirtualRegister(0);
     } else {
         argumentCountRecovery = ValueRecovery::displacedInJSStack(
-            VirtualRegister(CallFrameSlot::argumentCount), DataFormatInt32);
+            CallFrameSlot::argumentCountIncludingThis, DataFormatInt32);
         firstArgumentReg = VirtualRegister(CallFrame::argumentOffset(0));
     }
     emitSetupVarargsFrameFastCase(vm, jit, numUsedSlotsGPR, scratchGPR1, scratchGPR2, scratchGPR3, argumentCountRecovery, firstArgumentReg, firstVarArgOffset, slowCase);

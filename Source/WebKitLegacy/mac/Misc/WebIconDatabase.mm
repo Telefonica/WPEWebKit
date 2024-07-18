@@ -26,17 +26,18 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 
 #import "WebIconDatabase.h"
 
-#import "WebKitVersionChecks.h"
+#import <JavaScriptCore/InitializeThreading.h>
 #import <WebCore/Image.h>
 #import <WebCore/ThreadCheck.h>
-#import <runtime/InitializeThreading.h>
+#import <WebCore/WebCoreJITOperations.h>
 #import <wtf/MainThread.h>
 #import <wtf/NeverDestroyed.h>
 #import <wtf/RunLoop.h>
+#import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
 
 using namespace WebCore;
 
@@ -91,27 +92,29 @@ static const unsigned char defaultIconData[] = { 0x4D, 0x4D, 0x00, 0x2A, 0x00, 0
     0x00, 0x00, 0x01, 0x52, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x08, 0x00, 0x08, 0x00, 0x08, 0x00, 0x0A, 
     0xFC, 0x80, 0x00, 0x00, 0x27, 0x10, 0x00, 0x0A, 0xFC, 0x80, 0x00, 0x00, 0x27, 0x10 };
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 @implementation WebIconDatabase
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 + (void)initialize
 {
-    JSC::initializeThreading();
-    WTF::initializeMainThreadToProcessMainThread();
-    RunLoop::initializeMainRunLoop();
+    JSC::initialize();
+    WTF::initializeMainThread();
+    WebCore::populateJITOperations();
 }
 
 + (WebIconDatabase *)sharedIconDatabase
 {
-    static WebIconDatabase *database;
+    static NeverDestroyed<RetainPtr<WebIconDatabase>> database;
     static dispatch_once_t once;
     dispatch_once(&once, ^ {
-        if (linkedOnOrAfter(SDKVersion::FirstWithWebIconDatabaseWarning))
+        if (linkedOnOrAfterSDKWithBehavior(SDKAlignedBehavior::WebIconDatabaseWarning))
             NSLog(@"+[WebIconDatabase sharedIconDatabase] is not API and should not be used. WebIconDatabase no longer handles icon loading and it will be removed in a future release.");
 
-        database = [[WebIconDatabase alloc] init];
+        database.get() = adoptNS([[WebIconDatabase alloc] init]);
     });
 
-    return database;
+    return database.get().get();
 }
 
 - (id)init
@@ -181,4 +184,4 @@ static const unsigned char defaultIconData[] = { 0x4D, 0x4D, 0x00, 0x2A, 0x00, 0
 
 @end
 
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)

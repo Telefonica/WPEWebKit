@@ -27,74 +27,52 @@
 #include "DownloadManager.h"
 
 #include "Download.h"
-#include "NetworkBlobRegistry.h"
+#include "DownloadProxyMessages.h"
+#include "NetworkConnectionToWebProcess.h"
 #include "NetworkLoad.h"
 #include "NetworkSession.h"
 #include "PendingDownload.h"
-#include "SessionTracker.h"
 #include <WebCore/NotImplemented.h>
 #include <pal/SessionID.h>
 #include <wtf/StdLibExtras.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 DownloadManager::DownloadManager(Client& client)
     : m_client(client)
 {
 }
 
-void DownloadManager::startDownload(NetworkConnectionToWebProcess* connection, PAL::SessionID sessionID, DownloadID downloadID, const ResourceRequest& request, const String& suggestedName)
+void DownloadManager::startDownload(PAL::SessionID sessionID, DownloadID downloadID, const ResourceRequest& request, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain, const String& suggestedName)
 {
-#if USE(NETWORK_SESSION)
-    auto* networkSession = SessionTracker::networkSession(sessionID);
+    auto* networkSession = client().networkSession(sessionID);
     if (!networkSession)
         return;
 
     NetworkLoadParameters parameters;
-    parameters.sessionID = sessionID;
     parameters.request = request;
     parameters.clientCredentialPolicy = ClientCredentialPolicy::MayAskClientForCredentials;
-    if (request.url().protocolIsBlob() && connection)
-        parameters.blobFileReferences = NetworkBlobRegistry::singleton().filesInBlob(*connection, request.url());
+    parameters.isNavigatingToAppBoundDomain = isNavigatingToAppBoundDomain;
+    if (request.url().protocolIsBlob())
+        parameters.blobFileReferences = client().networkSession(sessionID)->blobRegistry().filesInBlob(request.url());
     parameters.storedCredentialsPolicy = sessionID.isEphemeral() ? StoredCredentialsPolicy::DoNotUse : StoredCredentialsPolicy::Use;
 
-    m_pendingDownloads.add(downloadID, std::make_unique<PendingDownload>(WTFMove(parameters), downloadID, *networkSession, suggestedName));
-#else
-    auto download = std::make_unique<Download>(*this, downloadID, request, suggestedName);
-    if (request.url().protocolIsBlob() && connection) {
-        auto blobFileReferences = NetworkBlobRegistry::singleton().filesInBlob(*connection, request.url());
-        for (auto& fileReference : blobFileReferences)
-            fileReference->prepareForFileAccess();
-        download->setBlobFileReferences(WTFMove(blobFileReferences));
-    }
-    download->start();
-
-    ASSERT(!m_downloads.contains(downloadID));
-    m_downloads.add(downloadID, WTFMove(download));
-#endif
+    m_pendingDownloads.add(downloadID, makeUnique<PendingDownload>(m_client.parentProcessConnectionForDownloads(), WTFMove(parameters), downloadID, *networkSession, &client().networkSession(sessionID)->blobRegistry(), suggestedName));
 }
 
-#if USE(NETWORK_SESSION)
 void DownloadManager::dataTaskBecameDownloadTask(DownloadID downloadID, std::unique_ptr<Download>&& download)
 {
     ASSERT(m_pendingDownloads.contains(downloadID));
-    m_pendingDownloads.remove(downloadID);
+    if (auto pendingDownload = m_pendingDownloads.take(downloadID)) {
+#if PLATFORM(COCOA)
+        pendingDownload->didBecomeDownload(download);
+#endif
+    }
     ASSERT(!m_downloads.contains(downloadID));
     m_downloadsAfterDestinationDecided.remove(downloadID);
     m_downloads.add(downloadID, WTFMove(download));
 }
-
-#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
-void DownloadManager::continueCanAuthenticateAgainstProtectionSpace(DownloadID downloadID, bool canAuthenticate)
-{
-    auto* pendingDownload = m_pendingDownloads.get(downloadID);
-    ASSERT(pendingDownload);
-    if (pendingDownload)
-        pendingDownload->continueCanAuthenticateAgainstProtectionSpace(canAuthenticate);
-}
-#endif
 
 void DownloadManager::continueWillSendRequest(DownloadID downloadID, WebCore::ResourceRequest&& request)
 {
@@ -104,112 +82,68 @@ void DownloadManager::continueWillSendRequest(DownloadID downloadID, WebCore::Re
         pendingDownload->continueWillSendRequest(WTFMove(request));
 }
 
-void DownloadManager::willDecidePendingDownloadDestination(NetworkDataTask& networkDataTask, ResponseCompletionHandler&& completionHandler)
+void DownloadManager::convertNetworkLoadToDownload(DownloadID downloadID, std::unique_ptr<NetworkLoad>&& networkLoad, ResponseCompletionHandler&& completionHandler, Vector<RefPtr<WebCore::BlobDataFileReference>>&& blobFileReferences, const ResourceRequest& request, const ResourceResponse& response)
 {
-    auto downloadID = networkDataTask.pendingDownloadID();
-    auto addResult = m_downloadsWaitingForDestination.set(downloadID, std::make_pair<RefPtr<NetworkDataTask>, ResponseCompletionHandler>(&networkDataTask, WTFMove(completionHandler)));
-    ASSERT_UNUSED(addResult, addResult.isNewEntry);
-}
-#endif // USE(NETWORK_SESSION)
-
-void DownloadManager::convertNetworkLoadToDownload(DownloadID downloadID, std::unique_ptr<NetworkLoad>&& networkLoad, Vector<RefPtr<WebCore::BlobDataFileReference>>&& blobFileReferences, const ResourceRequest& request, const ResourceResponse& response)
-{
-#if USE(NETWORK_SESSION)
     ASSERT(!m_pendingDownloads.contains(downloadID));
-    m_pendingDownloads.add(downloadID, std::make_unique<PendingDownload>(WTFMove(networkLoad), downloadID, request, response));
-#else
-    auto download = std::make_unique<Download>(*this, downloadID, request);
-    download->setBlobFileReferences(WTFMove(blobFileReferences));
-
-    auto* handle = networkLoad->handle();
-    ASSERT(handle);
-    download->startWithHandle(handle, response);
-    ASSERT(!m_downloads.contains(downloadID));
-    m_downloads.add(downloadID, WTFMove(download));
-
-    // Unblock the URL connection operation queue.
-    handle->continueDidReceiveResponse();
-#endif
+    m_pendingDownloads.add(downloadID, makeUnique<PendingDownload>(m_client.parentProcessConnectionForDownloads(), WTFMove(networkLoad), WTFMove(completionHandler), downloadID, request, response));
 }
 
-void DownloadManager::continueDecidePendingDownloadDestination(DownloadID downloadID, String destination, const SandboxExtension::Handle& sandboxExtensionHandle, bool allowOverwrite)
+void DownloadManager::downloadDestinationDecided(DownloadID downloadID, Ref<NetworkDataTask>&& networkDataTask)
 {
-#if USE(NETWORK_SESSION)
-    if (m_downloadsWaitingForDestination.contains(downloadID)) {
-        auto pair = m_downloadsWaitingForDestination.take(downloadID);
-        auto networkDataTask = WTFMove(pair.first);
-        auto completionHandler = WTFMove(pair.second);
-        ASSERT(networkDataTask);
-        ASSERT(completionHandler);
-        ASSERT(m_pendingDownloads.contains(downloadID));
-
-        networkDataTask->setPendingDownloadLocation(destination, sandboxExtensionHandle, allowOverwrite);
-        completionHandler(PolicyAction::Download);
-        if (networkDataTask->state() == NetworkDataTask::State::Canceling || networkDataTask->state() == NetworkDataTask::State::Completed)
-            return;
-
-        if (m_downloads.contains(downloadID)) {
-            // The completion handler already called dataTaskBecameDownloadTask().
-            return;
-        }
-
-        ASSERT(!m_downloadsAfterDestinationDecided.contains(downloadID));
-        m_downloadsAfterDestinationDecided.set(downloadID, networkDataTask);
-    }
-#else
-    if (auto* waitingDownload = download(downloadID))
-        waitingDownload->didDecideDownloadDestination(destination, sandboxExtensionHandle, allowOverwrite);
-#endif
+    ASSERT(!m_downloadsAfterDestinationDecided.contains(downloadID));
+    m_downloadsAfterDestinationDecided.set(downloadID, WTFMove(networkDataTask));
 }
 
-void DownloadManager::resumeDownload(PAL::SessionID, DownloadID downloadID, const IPC::DataReference& resumeData, const String& path, const SandboxExtension::Handle& sandboxExtensionHandle)
+void DownloadManager::resumeDownload(PAL::SessionID sessionID, DownloadID downloadID, const IPC::DataReference& resumeData, const String& path, SandboxExtension::Handle&& sandboxExtensionHandle, CallDownloadDidStart callDownloadDidStart)
 {
-#if USE(NETWORK_SESSION)
+#if !PLATFORM(COCOA)
     notImplemented();
 #else
-    // Download::resume() is responsible for setting the Download's resource request.
-    auto download = std::make_unique<Download>(*this, downloadID, ResourceRequest());
+    auto* networkSession = m_client.networkSession(sessionID);
+    if (!networkSession)
+        return;
+    auto download = makeUnique<Download>(*this, downloadID, nullptr, *networkSession);
 
-    download->resume(resumeData, path, sandboxExtensionHandle);
+    download->resume(resumeData, path, WTFMove(sandboxExtensionHandle));
+
+    // For compatibility with the legacy download API, only send DidStart if we're using the new API.
+    if (callDownloadDidStart == CallDownloadDidStart::Yes)
+        download->send(Messages::DownloadProxy::DidStart({ }, { }));
+
     ASSERT(!m_downloads.contains(downloadID));
     m_downloads.add(downloadID, WTFMove(download));
 #endif
 }
 
-void DownloadManager::cancelDownload(DownloadID downloadID)
+void DownloadManager::cancelDownload(DownloadID downloadID, CompletionHandler<void(const IPC::DataReference&)>&& completionHandler)
 {
-    if (Download* download = m_downloads.get(downloadID)) {
-#if USE(NETWORK_SESSION)
-        ASSERT(!m_downloadsWaitingForDestination.contains(downloadID));
+    if (auto* download = m_downloads.get(downloadID)) {
         ASSERT(!m_pendingDownloads.contains(downloadID));
-#endif
-        download->cancel();
+        download->cancel(WTFMove(completionHandler), Download::IgnoreDidFailCallback::Yes);
         return;
     }
-#if USE(NETWORK_SESSION)
-    auto pendingDownload = m_pendingDownloads.take(downloadID);
-    if (m_downloadsWaitingForDestination.contains(downloadID)) {
-        auto pair = m_downloadsWaitingForDestination.take(downloadID);
-        auto networkDataTask = WTFMove(pair.first);
-        auto completionHandler = WTFMove(pair.second);
-        ASSERT(networkDataTask);
-        ASSERT(completionHandler);
-
-        networkDataTask->cancel();
-        completionHandler(PolicyAction::Ignore);
-        m_client.pendingDownloadCanceled(downloadID);
+    if (auto pendingDownload = m_pendingDownloads.take(downloadID)) {
+        pendingDownload->cancel(WTFMove(completionHandler));
         return;
     }
-
-    if (pendingDownload)
-        pendingDownload->cancel();
-#endif
+    ASSERT_NOT_REACHED();
+    completionHandler({ });
 }
 
-void DownloadManager::downloadFinished(Download* download)
+#if PLATFORM(COCOA)
+void DownloadManager::publishDownloadProgress(DownloadID downloadID, const URL& url, SandboxExtension::Handle&& sandboxExtensionHandle)
 {
-    ASSERT(m_downloads.contains(download->downloadID()));
-    m_downloads.remove(download->downloadID());
+    if (auto* download = m_downloads.get(downloadID))
+        download->publishProgress(url, WTFMove(sandboxExtensionHandle));
+    else if (auto* pendingDownload = m_pendingDownloads.get(downloadID))
+        pendingDownload->publishProgress(url, WTFMove(sandboxExtensionHandle));
+}
+#endif // PLATFORM(COCOA)
+
+void DownloadManager::downloadFinished(Download& download)
+{
+    ASSERT(m_downloads.contains(download.downloadID()));
+    m_downloads.remove(download.downloadID());
 }
 
 void DownloadManager::didCreateDownload()
@@ -230,6 +164,18 @@ IPC::Connection* DownloadManager::downloadProxyConnection()
 AuthenticationManager& DownloadManager::downloadsAuthenticationManager()
 {
     return m_client.downloadsAuthenticationManager();
+}
+
+void DownloadManager::applicationDidEnterBackground()
+{
+    for (auto& download : m_downloads.values())
+        download->applicationDidEnterBackground();
+}
+
+void DownloadManager::applicationWillEnterForeground()
+{
+    for (auto& download : m_downloads.values())
+        download->applicationWillEnterForeground();
 }
 
 } // namespace WebKit

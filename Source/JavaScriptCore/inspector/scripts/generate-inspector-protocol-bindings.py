@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2014, 2016 Apple Inc. All rights reserved.
 # Copyright (c) 2014 University of Washington. All rights reserved.
@@ -27,13 +27,14 @@
 # This script generates JS, Objective C, and C++ bindings for the inspector protocol.
 # Generators for individual files are located in the codegen/ directory.
 
-import os.path
+import os
 import re
 import sys
 import string
 from string import Template
 import optparse
 import logging
+import subprocess
 
 try:
     import json
@@ -48,8 +49,8 @@ try:
 
 # When copying generator files to JavaScriptCore's private headers on Mac,
 # the codegen/ module directory is flattened. So, import directly.
-except ImportError, e:
-    # log.error(e) # Uncomment this to debug early import errors.
+except ImportError as e:
+    #log.error(e) # Uncomment this to debug early import errors.
     import models
     from models import *
     from generator import *
@@ -103,6 +104,9 @@ class IncrementalFileWriter:
             pass
 
         if text_changed or self.force_output:
+            dirname = os.path.dirname(self._filepath)
+            if not os.path.isdir(dirname):
+                os.makedirs(dirname)
             out_file = open(self._filepath, "w")
             out_file.write(self._output)
             out_file.close()
@@ -114,19 +118,18 @@ def generate_from_specification(primary_specification_filepath=None,
                                 output_dirpath=None,
                                 force_output=False,
                                 framework_name="",
-                                platform_name="",
                                 generate_frontend=True,
                                 generate_backend=True):
 
     def load_specification(protocol, filepath, isSupplemental=False):
         try:
             with open(filepath, "r") as input_file:
-                parsed_json = json.load(input_file)
+                regex = re.compile(r"\/\*.*?\*\/", re.DOTALL)
+                parsed_json = json.loads(re.sub(regex, "", input_file.read()))
                 protocol.parse_specification(parsed_json, isSupplemental)
         except ValueError as e:
             raise Exception("Error parsing valid JSON in file: " + filepath + "\nParse error: " + str(e))
 
-    platform = Platform.fromString(platform_name)
     protocol = models.Protocol(framework_name)
     for specification in supplemental_specification_filepaths:
         load_specification(protocol, specification, isSupplemental=True)
@@ -134,7 +137,7 @@ def generate_from_specification(primary_specification_filepath=None,
 
     protocol.resolve_types()
 
-    generator_arguments = [protocol, platform, primary_specification_filepath]
+    generator_arguments = [protocol, primary_specification_filepath]
     generators = []
 
     if protocol.framework is Frameworks.Test:
@@ -192,6 +195,9 @@ def generate_from_specification(primary_specification_filepath=None,
         generators.append(ObjCProtocolTypeConversionsHeaderGenerator(*generator_arguments))
         generators.append(ObjCProtocolTypesImplementationGenerator(*generator_arguments))
 
+    elif protocol.framework is Frameworks.WebInspectorUI:
+        generators.append(JSBackendCommandsGenerator(*generator_arguments))
+
     single_output_file_contents = []
 
     for generator in generators:
@@ -203,13 +209,49 @@ def generate_from_specification(primary_specification_filepath=None,
             generator.set_generator_setting('generate_frontend', True)
 
         output = generator.generate_output()
-        if concatenate_output:
-            single_output_file_contents.append('### Begin File: %s' % generator.output_filename())
+
+        output_filename = generator.output_filename()
+        output_filepath = os.path.join(output_dirpath, output_filename)
+
+        if generator.needs_preprocess():
+            temporary_input_filename = output_filename + ".in"
+            temporary_input_filepath = os.path.join(output_dirpath, temporary_input_filename)
+
+            temporary_output_filename = output_filename + ".out"
+            temporary_output_filepath = os.path.join(output_dirpath, temporary_output_filename)
+
+            if concatenate_output:
+                single_output_file_contents.append('### Begin File: %s' % temporary_input_filename)
+                single_output_file_contents.append(output)
+                single_output_file_contents.append('### End File: %s' % temporary_input_filename)
+                single_output_file_contents.append('')
+
+            temporary_input_file = open(temporary_input_filepath, "w")
+            temporary_input_file.write(output)
+            temporary_input_file.close()
+
+            subprocess.check_call(["perl", os.path.join(os.path.dirname(__file__), "codegen", "preprocess.pl"), "--input", temporary_input_filepath, "--defines", protocol.condition_flags, "--output", temporary_output_filepath])
+
+            temporary_output_file = open(temporary_output_filepath, "r")
+            output = temporary_output_file.read()
+            temporary_output_file.close()
+
+            if concatenate_output:
+                single_output_file_contents.append('### Begin File: %s' % temporary_output_filename)
+                single_output_file_contents.append(output)
+                single_output_file_contents.append('### End File: %s' % temporary_output_filename)
+                single_output_file_contents.append('')
+
+            os.remove(temporary_input_filepath)
+            os.remove(temporary_output_filepath)
+        elif concatenate_output:
+            single_output_file_contents.append('### Begin File: %s' % output_filename)
             single_output_file_contents.append(output)
-            single_output_file_contents.append('### End File: %s' % generator.output_filename())
+            single_output_file_contents.append('### End File: %s' % output_filename)
             single_output_file_contents.append('')
-        else:
-            output_file = IncrementalFileWriter(os.path.join(output_dirpath, generator.output_filename()), force_output)
+
+        if not concatenate_output:
+            output_file = IncrementalFileWriter(output_filepath, force_output)
             output_file.write(output)
             output_file.close()
 
@@ -221,8 +263,7 @@ def generate_from_specification(primary_specification_filepath=None,
 
 
 if __name__ == '__main__':
-    allowed_framework_names = ['JavaScriptCore', 'WebInspector', 'WebKit', 'Test']
-    allowed_platform_names = ['iOS', 'macOS', 'all', 'generic']
+    allowed_framework_names = ['JavaScriptCore', 'WebInspector', 'WebInspectorUI', 'WebKit', 'Test']
     cli_parser = optparse.OptionParser(usage="usage: %prog [options] PrimaryProtocol.json [SupplementalProtocol.json ...]")
     cli_parser.add_option("-o", "--outputDir", help="Directory where generated files should be written.")
     cli_parser.add_option("--framework", type="choice", choices=allowed_framework_names, help="The framework that the primary specification belongs to.")
@@ -231,7 +272,6 @@ if __name__ == '__main__':
     cli_parser.add_option("-t", "--test", action="store_true", help="Enable test mode. Use unique output filenames created by prepending the input filename.")
     cli_parser.add_option("--frontend", action="store_true", help="Generate code for the frontend-side of the protocol only.")
     cli_parser.add_option("--backend", action="store_true", help="Generate code for the backend-side of the protocol only.")
-    cli_parser.add_option("--platform", default="generic", help="The platform of the backend being generated. For example, we compile WebKit2 for either macOS or iOS. This value is case-insensitive. Allowed values: %s" % ", ".join(allowed_platform_names))
     options = None
 
     arg_options, arg_values = cli_parser.parse_args()
@@ -257,7 +297,6 @@ if __name__ == '__main__':
         'output_dirpath': arg_options.outputDir,
         'concatenate_output': arg_options.test,
         'framework_name': arg_options.framework,
-        'platform_name': arg_options.platform,
         'force_output': arg_options.force,
         'generate_backend': generate_backend,
         'generate_frontend': generate_frontend,
@@ -267,6 +306,6 @@ if __name__ == '__main__':
         generate_from_specification(**options)
     except (ParseException, TypecheckException) as e:
         if arg_options.test:
-            log.error(e.message)
+            log.error(str(e))
         else:
             raise  # Force the build to fail.

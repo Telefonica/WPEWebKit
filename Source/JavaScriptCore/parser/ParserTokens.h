@@ -28,12 +28,19 @@
 #include <limits.h>
 #include <stdint.h>
 
+namespace WTF {
+class PrintStream;
+}
+
 namespace JSC {
 
 class Identifier;
 
-enum {
-    // Token Bitfield: 0b000000000RTE000IIIIPPPPKUXXXXXXX
+#define BINARY_OP_PRECEDENCE(prec) (((prec) << BinaryOpTokenPrecedenceShift) | ((prec) << (BinaryOpTokenPrecedenceShift + BinaryOpTokenAllowsInPrecedenceAdditionalShift)))
+#define IN_OP_PRECEDENCE(prec) ((prec) << (BinaryOpTokenPrecedenceShift + BinaryOpTokenAllowsInPrecedenceAdditionalShift))
+
+enum JSTokenType {
+    // Token Bitfield: 0b000000000RTE00IIIIPPPPKUXXXXXXXX
     // R = right-associative bit
     // T = unterminated error flag
     // E = error flag
@@ -41,20 +48,18 @@ enum {
     // P = binary operator precedence
     // K = keyword flag
     // U = unary operator flag
-    UnaryOpTokenFlag = 128,
-    KeywordTokenFlag = 256,
-    BinaryOpTokenPrecedenceShift = 9,
+    //
+    // We must keep the upper 8bit (1byte) region empty. JSTokenType must be 24bits.
+    UnaryOpTokenFlag = 1 << 8,
+    KeywordTokenFlag = 1 << 9,
+    BinaryOpTokenPrecedenceShift = 10,
     BinaryOpTokenAllowsInPrecedenceAdditionalShift = 4,
     BinaryOpTokenPrecedenceMask = 15 << BinaryOpTokenPrecedenceShift,
-    ErrorTokenFlag = 1 << (BinaryOpTokenAllowsInPrecedenceAdditionalShift + BinaryOpTokenPrecedenceShift + 7),
-    UnterminatedErrorTokenFlag = ErrorTokenFlag << 1,
-    RightAssociativeBinaryOpTokenFlag = UnterminatedErrorTokenFlag << 1
-};
+    CanBeErrorTokenFlag = 1 << (BinaryOpTokenAllowsInPrecedenceAdditionalShift + BinaryOpTokenPrecedenceShift + 6),
+    UnterminatedCanBeErrorTokenFlag = CanBeErrorTokenFlag << 1,
+    RightAssociativeBinaryOpTokenFlag = UnterminatedCanBeErrorTokenFlag << 1,
 
-#define BINARY_OP_PRECEDENCE(prec) (((prec) << BinaryOpTokenPrecedenceShift) | ((prec) << (BinaryOpTokenPrecedenceShift + BinaryOpTokenAllowsInPrecedenceAdditionalShift)))
-#define IN_OP_PRECEDENCE(prec) ((prec) << (BinaryOpTokenPrecedenceShift + BinaryOpTokenAllowsInPrecedenceAdditionalShift))
 
-enum JSTokenType {
     NULLTOKEN = KeywordTokenFlag,
     TRUETOKEN,
     FALSETOKEN,
@@ -83,7 +88,7 @@ enum JSTokenType {
     DEBUGGER,
     ELSE,
     IMPORT,
-    EXPORT,
+    EXPORT_,
     CLASSTOKEN,
     EXTENDS,
     SUPER,
@@ -93,12 +98,9 @@ enum JSTokenType {
     LET,
     YIELD,
     AWAIT,
-    ASYNC,
 
     FirstContextualKeywordToken = LET,
-    LastContextualKeywordToken = ASYNC,
-    FirstSafeContextualKeywordToken = AWAIT,
-    LastSafeContextualKeywordToken = LastContextualKeywordToken,
+    LastContextualKeywordToken = AWAIT,
 
     OPENBRACE = 0,
     CLOSEBRACE,
@@ -111,7 +113,9 @@ enum JSTokenType {
     BACKQUOTE,
     INTEGER,
     DOUBLE,
+    BIGINT,
     IDENT,
+    PRIVATENAME,
     STRING,
     TEMPLATE,
     REGEXP,
@@ -127,13 +131,17 @@ enum JSTokenType {
     LSHIFTEQUAL,
     RSHIFTEQUAL,
     URSHIFTEQUAL,
-    ANDEQUAL,
     MODEQUAL,
     POWEQUAL,
-    XOREQUAL,
+    BITANDEQUAL,
+    BITXOREQUAL,
+    BITOREQUAL,
+    COALESCEEQUAL,
     OREQUAL,
+    ANDEQUAL,
     DOTDOTDOT,
     ARROWFUNCTION,
+    QUESTIONDOT,
     LastUntaggedToken,
 
     // Begin tagged tokens
@@ -146,54 +154,63 @@ enum JSTokenType {
     TYPEOF = 6 | UnaryOpTokenFlag | KeywordTokenFlag,
     VOIDTOKEN = 7 | UnaryOpTokenFlag | KeywordTokenFlag,
     DELETETOKEN = 8 | UnaryOpTokenFlag | KeywordTokenFlag,
-    OR = 0 | BINARY_OP_PRECEDENCE(1),
-    AND = 1 | BINARY_OP_PRECEDENCE(2),
-    BITOR = 2 | BINARY_OP_PRECEDENCE(3),
-    BITXOR = 3 | BINARY_OP_PRECEDENCE(4),
-    BITAND = 4 | BINARY_OP_PRECEDENCE(5),
-    EQEQ = 5 | BINARY_OP_PRECEDENCE(6),
-    NE = 6 | BINARY_OP_PRECEDENCE(6),
-    STREQ = 7 | BINARY_OP_PRECEDENCE(6),
-    STRNEQ = 8 | BINARY_OP_PRECEDENCE(6),
-    LT = 9 | BINARY_OP_PRECEDENCE(7),
-    GT = 10 | BINARY_OP_PRECEDENCE(7),
-    LE = 11 | BINARY_OP_PRECEDENCE(7),
-    GE = 12 | BINARY_OP_PRECEDENCE(7),
-    INSTANCEOF = 13 | BINARY_OP_PRECEDENCE(7) | KeywordTokenFlag,
-    INTOKEN = 14 | IN_OP_PRECEDENCE(7) | KeywordTokenFlag,
-    LSHIFT = 15 | BINARY_OP_PRECEDENCE(8),
-    RSHIFT = 16 | BINARY_OP_PRECEDENCE(8),
-    URSHIFT = 17 | BINARY_OP_PRECEDENCE(8),
-    PLUS = 18 | BINARY_OP_PRECEDENCE(9) | UnaryOpTokenFlag,
-    MINUS = 19 | BINARY_OP_PRECEDENCE(9) | UnaryOpTokenFlag,
-    TIMES = 20 | BINARY_OP_PRECEDENCE(10),
-    DIVIDE = 21 | BINARY_OP_PRECEDENCE(10),
-    MOD = 22 | BINARY_OP_PRECEDENCE(10),
-    POW = 23 | BINARY_OP_PRECEDENCE(11) | RightAssociativeBinaryOpTokenFlag, // Make sure that POW has the highest operator precedence.
-    ERRORTOK = 0 | ErrorTokenFlag,
-    UNTERMINATED_IDENTIFIER_ESCAPE_ERRORTOK = 0 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
-    INVALID_IDENTIFIER_ESCAPE_ERRORTOK = 1 | ErrorTokenFlag,
-    UNTERMINATED_IDENTIFIER_UNICODE_ESCAPE_ERRORTOK = 2 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
-    INVALID_IDENTIFIER_UNICODE_ESCAPE_ERRORTOK = 3 | ErrorTokenFlag,
-    UNTERMINATED_MULTILINE_COMMENT_ERRORTOK = 4 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
-    UNTERMINATED_NUMERIC_LITERAL_ERRORTOK = 5 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
-    UNTERMINATED_OCTAL_NUMBER_ERRORTOK = 6 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
-    INVALID_NUMERIC_LITERAL_ERRORTOK = 7 | ErrorTokenFlag,
-    UNTERMINATED_STRING_LITERAL_ERRORTOK = 8 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
-    INVALID_STRING_LITERAL_ERRORTOK = 9 | ErrorTokenFlag,
-    INVALID_PRIVATE_NAME_ERRORTOK = 10 | ErrorTokenFlag,
-    UNTERMINATED_HEX_NUMBER_ERRORTOK = 11 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
-    UNTERMINATED_BINARY_NUMBER_ERRORTOK = 12 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
-    UNTERMINATED_TEMPLATE_LITERAL_ERRORTOK = 13 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
-    UNTERMINATED_REGEXP_LITERAL_ERRORTOK = 14 | ErrorTokenFlag | UnterminatedErrorTokenFlag,
-    INVALID_TEMPLATE_LITERAL_ERRORTOK = 15 | ErrorTokenFlag,
-    UNEXPECTED_ESCAPE_ERRORTOK = 16 | ErrorTokenFlag,
+    COALESCE = 0 | BINARY_OP_PRECEDENCE(1),
+    OR = 0 | BINARY_OP_PRECEDENCE(2),
+    AND = 0 | BINARY_OP_PRECEDENCE(3),
+    BITOR = 0 | BINARY_OP_PRECEDENCE(4),
+    BITXOR = 0 | BINARY_OP_PRECEDENCE(5),
+    BITAND = 0 | BINARY_OP_PRECEDENCE(6),
+    EQEQ = 0 | BINARY_OP_PRECEDENCE(7),
+    NE = 1 | BINARY_OP_PRECEDENCE(7),
+    STREQ = 2 | BINARY_OP_PRECEDENCE(7),
+    STRNEQ = 3 | BINARY_OP_PRECEDENCE(7),
+    LT = 0 | BINARY_OP_PRECEDENCE(8),
+    GT = 1 | BINARY_OP_PRECEDENCE(8),
+    LE = 2 | BINARY_OP_PRECEDENCE(8),
+    GE = 3 | BINARY_OP_PRECEDENCE(8),
+    INSTANCEOF = 4 | BINARY_OP_PRECEDENCE(8) | KeywordTokenFlag,
+    INTOKEN = 5 | IN_OP_PRECEDENCE(8) | KeywordTokenFlag,
+    LSHIFT = 0 | BINARY_OP_PRECEDENCE(9),
+    RSHIFT = 1 | BINARY_OP_PRECEDENCE(9),
+    URSHIFT = 2 | BINARY_OP_PRECEDENCE(9),
+    PLUS = 0 | BINARY_OP_PRECEDENCE(10) | UnaryOpTokenFlag,
+    MINUS = 1 | BINARY_OP_PRECEDENCE(10) | UnaryOpTokenFlag,
+    TIMES = 0 | BINARY_OP_PRECEDENCE(11),
+    DIVIDE = 1 | BINARY_OP_PRECEDENCE(11),
+    MOD = 2 | BINARY_OP_PRECEDENCE(11),
+    POW = 0 | BINARY_OP_PRECEDENCE(12) | RightAssociativeBinaryOpTokenFlag, // Make sure that POW has the highest operator precedence.
+    ERRORTOK = 0 | CanBeErrorTokenFlag,
+    UNTERMINATED_IDENTIFIER_ESCAPE_ERRORTOK = 0 | CanBeErrorTokenFlag | UnterminatedCanBeErrorTokenFlag,
+    INVALID_IDENTIFIER_ESCAPE_ERRORTOK = 1 | CanBeErrorTokenFlag,
+    UNTERMINATED_IDENTIFIER_UNICODE_ESCAPE_ERRORTOK = 2 | CanBeErrorTokenFlag | UnterminatedCanBeErrorTokenFlag,
+    INVALID_IDENTIFIER_UNICODE_ESCAPE_ERRORTOK = 3 | CanBeErrorTokenFlag,
+    UNTERMINATED_MULTILINE_COMMENT_ERRORTOK = 4 | CanBeErrorTokenFlag | UnterminatedCanBeErrorTokenFlag,
+    UNTERMINATED_NUMERIC_LITERAL_ERRORTOK = 5 | CanBeErrorTokenFlag | UnterminatedCanBeErrorTokenFlag,
+    UNTERMINATED_OCTAL_NUMBER_ERRORTOK = 6 | CanBeErrorTokenFlag | UnterminatedCanBeErrorTokenFlag,
+    INVALID_NUMERIC_LITERAL_ERRORTOK = 7 | CanBeErrorTokenFlag,
+    UNTERMINATED_STRING_LITERAL_ERRORTOK = 8 | CanBeErrorTokenFlag | UnterminatedCanBeErrorTokenFlag,
+    INVALID_STRING_LITERAL_ERRORTOK = 9 | CanBeErrorTokenFlag,
+    INVALID_PRIVATE_NAME_ERRORTOK = 10 | CanBeErrorTokenFlag,
+    UNTERMINATED_HEX_NUMBER_ERRORTOK = 11 | CanBeErrorTokenFlag | UnterminatedCanBeErrorTokenFlag,
+    UNTERMINATED_BINARY_NUMBER_ERRORTOK = 12 | CanBeErrorTokenFlag | UnterminatedCanBeErrorTokenFlag,
+    UNTERMINATED_TEMPLATE_LITERAL_ERRORTOK = 13 | CanBeErrorTokenFlag | UnterminatedCanBeErrorTokenFlag,
+    UNTERMINATED_REGEXP_LITERAL_ERRORTOK = 14 | CanBeErrorTokenFlag | UnterminatedCanBeErrorTokenFlag,
+    INVALID_TEMPLATE_LITERAL_ERRORTOK = 15 | CanBeErrorTokenFlag,
+    ESCAPED_KEYWORD = 16 | CanBeErrorTokenFlag,
+    INVALID_UNICODE_ENCODING_ERRORTOK = 17 | CanBeErrorTokenFlag,
+    INVALID_IDENTIFIER_UNICODE_ERRORTOK = 18 | CanBeErrorTokenFlag,
 };
+static_assert(static_cast<unsigned>(POW) <= 0x00ffffffU, "JSTokenType must be 24bits.");
 
 struct JSTextPosition {
-    JSTextPosition() : line(0), offset(0), lineStartOffset(0) { }
-    JSTextPosition(int _line, int _offset, int _lineStartOffset) : line(_line), offset(_offset), lineStartOffset(_lineStartOffset) { }
-    JSTextPosition(const JSTextPosition& other) : line(other.line), offset(other.offset), lineStartOffset(other.lineStartOffset) { }
+    JSTextPosition() = default;
+    JSTextPosition(int _line, int _offset, int _lineStartOffset) 
+        : line(_line)
+        , offset(_offset)
+        , lineStartOffset(_lineStartOffset)
+    { 
+        checkConsistency();
+    }
 
     JSTextPosition operator+(int adjustment) const { return JSTextPosition(line, offset + adjustment, lineStartOffset); }
     JSTextPosition operator+(unsigned adjustment) const { return *this + static_cast<int>(adjustment); }
@@ -202,23 +219,51 @@ struct JSTextPosition {
 
     operator int() const { return offset; }
 
-    int line;
-    int offset;
-    int lineStartOffset;
+    bool operator==(const JSTextPosition& other) const
+    {
+        return line == other.line
+            && offset == other.offset
+            && lineStartOffset == other.lineStartOffset;
+    }
+    bool operator!=(const JSTextPosition& other) const
+    {
+        return !(*this == other);
+    }
+
+    int column() const { return offset - lineStartOffset; }
+    void checkConsistency()
+    {
+        // FIXME: We should test ASSERT(offset >= lineStartOffset); but that breaks a lot of tests.
+        ASSERT(line >= 0);
+        ASSERT(offset >= 0);
+        ASSERT(lineStartOffset >= 0);
+    }
+
+    // FIXME: these should be unsigned.
+    int line { -1 };
+    int offset { -1 };
+    int lineStartOffset { -1 };
 };
 
 union JSTokenData {
+    struct {
+        const Identifier* cooked;
+        const Identifier* raw;
+        bool isTail;
+    };
     struct {
         uint32_t line;
         uint32_t offset;
         uint32_t lineStartOffset;
     };
     double doubleValue;
-    const Identifier* ident;
     struct {
-        const Identifier* cooked;
-        const Identifier* raw;
-        bool isTail;
+        const Identifier* ident;
+        bool escaped;
+    };
+    struct {
+        const Identifier* bigIntString;
+        uint8_t radix;
     };
     struct {
         const Identifier* pattern;
@@ -227,27 +272,22 @@ union JSTokenData {
 };
 
 struct JSTokenLocation {
-    JSTokenLocation() : line(0), lineStartOffset(0), startOffset(0) { }
-    JSTokenLocation(const JSTokenLocation& location)
-    {
-        line = location.line;
-        lineStartOffset = location.lineStartOffset;
-        startOffset = location.startOffset;
-        endOffset = location.endOffset;
-    }
+    JSTokenLocation() = default;
 
-    int line;
-    unsigned lineStartOffset;
-    unsigned startOffset;
-    unsigned endOffset;
+    int line { 0 };
+    unsigned lineStartOffset { 0 };
+    unsigned startOffset { 0 };
+    unsigned endOffset { 0 };
 };
 
 struct JSToken {
-    JSTokenType m_type;
-    JSTokenData m_data;
+    JSTokenType m_type { ERRORTOK };
+    JSTokenData m_data { { nullptr, nullptr, false } };
     JSTokenLocation m_location;
     JSTextPosition m_startPosition;
     JSTextPosition m_endPosition;
+
+    void dump(WTF::PrintStream&) const;
 };
 
 ALWAYS_INLINE bool isUpdateOp(JSTokenType token)

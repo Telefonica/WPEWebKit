@@ -25,14 +25,17 @@
 
 #pragma once
 
+#include "DiagnosticLoggingDomain.h"
 #include "DiagnosticLoggingResultType.h"
+#include <variant>
 #include <wtf/FastMalloc.h>
-#include <wtf/Forward.h>
+#include <wtf/HashMap.h>
 #include <wtf/RandomNumber.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-enum class ShouldSample { No, Yes };
+enum class ShouldSample : bool { No, Yes };
 
 class DiagnosticLoggingClient {
     WTF_MAKE_FAST_ALLOCATED;
@@ -42,9 +45,15 @@ public:
     virtual void logDiagnosticMessageWithValue(const String& message, const String& description, double value, unsigned significantFigures, ShouldSample) = 0;
     virtual void logDiagnosticMessageWithEnhancedPrivacy(const String& message, const String& description, ShouldSample) = 0;
 
+    using ValuePayload = std::variant<String, uint64_t, int64_t, bool, double>;
+    using ValueDictionary = HashMap<String, ValuePayload>;
+
+    virtual void logDiagnosticMessageWithValueDictionary(const String& message, const String& description, const ValueDictionary&, ShouldSample) = 0;
+    virtual void logDiagnosticMessageWithDomain(const String& message, DiagnosticLoggingDomain) = 0;
+
     static bool shouldLogAfterSampling(ShouldSample);
 
-    virtual ~DiagnosticLoggingClient() { }
+    virtual ~DiagnosticLoggingClient() = default;
 };
 
 inline bool DiagnosticLoggingClient::shouldLogAfterSampling(ShouldSample shouldSample)

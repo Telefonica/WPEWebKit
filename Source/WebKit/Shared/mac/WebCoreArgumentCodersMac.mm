@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2021 Apple Inc. All rights reserved.
  * Copyright (C) 2013 Company 100 Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,327 +28,94 @@
 #import "WebCoreArgumentCoders.h"
 
 #import "ArgumentCodersCF.h"
+#import "ArgumentCodersCocoa.h"
+#import "DaemonDecoder.h"
+#import "DaemonEncoder.h"
 #import "DataReference.h"
-#import "WebKitSystemInterface.h"
 #import <WebCore/CertificateInfo.h>
 #import <WebCore/ContentFilterUnblockHandler.h>
 #import <WebCore/Credential.h>
 #import <WebCore/KeyboardEvent.h>
-#import <WebCore/MachSendRight.h>
 #import <WebCore/ProtectionSpace.h>
 #import <WebCore/ResourceError.h>
 #import <WebCore/ResourceRequest.h>
+#import <WebCore/SerializedPlatformDataCueMac.h>
 #import <pal/spi/cf/CFNetworkSPI.h>
-
-#if USE(CFURLCONNECTION)
-#import <CFNetwork/CFURLRequest.h>
-#endif
-
-#if ENABLE(WIRELESS_PLAYBACK_TARGET)
-#import <WebCore/MediaPlaybackTargetContext.h>
-#import <objc/runtime.h>
-#import <pal/spi/mac/AVFoundationSPI.h>
-#import <wtf/SoftLinking.h>
-
-SOFT_LINK_FRAMEWORK_OPTIONAL(AVFoundation)
-SOFT_LINK_CLASS(AVFoundation, AVOutputContext)
-#endif
-
-using namespace WebCore;
+#import <wtf/MachSendRight.h>
+#import <wtf/cf/TypeCastsCF.h>
 
 namespace IPC {
 
-static RetainPtr<CFMutableDictionaryRef> createSerializableRepresentation(CFIndex version, CFTypeRef* objects, CFIndex objectCount, CFDictionaryRef protocolProperties, CFNumberRef expectedContentLength, CFStringRef mimeType, CFTypeRef tokenNull)
+template<>
+void ArgumentCoder<WebCore::CertificateInfo>::encode(Encoder& encoder, const WebCore::CertificateInfo& certificateInfo)
 {
-    auto archiveListArray = adoptCF(CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks));
-
-    for (CFIndex i = 0; i < objectCount; ++i) {
-        CFTypeRef object = objects[i];
-        if (object) {
-            CFArrayAppendValue(archiveListArray.get(), object);
-            CFRelease(object);
-        } else {
-            // Append our token null representation.
-            CFArrayAppendValue(archiveListArray.get(), tokenNull);
-        }
-    }
-
-    auto dictionary = adoptCF(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
-
-    auto versionNumber = adoptCF(CFNumberCreate(kCFAllocatorDefault, kCFNumberCFIndexType, &version));
-    CFDictionarySetValue(dictionary.get(), CFSTR("version"), versionNumber.get());
-    CFDictionarySetValue(dictionary.get(), CFSTR("archiveList"), archiveListArray.get());
-
-    if (protocolProperties) {
-        CFDictionarySetValue(dictionary.get(), CFSTR("protocolProperties"), protocolProperties);
-        CFRelease(protocolProperties);
-    }
-
-    if (expectedContentLength) {
-        CFDictionarySetValue(dictionary.get(), CFSTR("expectedContentLength"), expectedContentLength);
-        CFRelease(expectedContentLength);
-    }
-
-    if (mimeType) {
-        CFDictionarySetValue(dictionary.get(), CFSTR("mimeType"), mimeType);
-        CFRelease(mimeType);
-    }
-
-    CFAllocatorDeallocate(kCFAllocatorDefault, objects);
-
-    return dictionary;
-}
-
-static CFTypeRef dictionaryValueOfType(CFDictionaryRef dictionary, CFStringRef key, CFTypeID type)
-{
-    CFTypeRef value = CFDictionaryGetValue(dictionary, key);
-    if (value && CFGetTypeID(value) == type)
-        return value;
-    return nullptr;
-}
-
-static bool createArchiveList(CFDictionaryRef representation, CFTypeRef tokenNull, CFIndex* version, CFTypeRef** objects, CFIndex* objectCount, CFDictionaryRef* protocolProperties, CFNumberRef* expectedContentLength, CFStringRef* mimeType)
-{
-    CFNumberRef versionNumber = (CFNumberRef)dictionaryValueOfType(representation, CFSTR("version"), CFNumberGetTypeID());
-    if (!versionNumber)
-        return false;
-
-    if (!CFNumberGetValue(versionNumber, kCFNumberCFIndexType, version))
-        return false;
-
-    CFArrayRef archiveListArray = (CFArrayRef)dictionaryValueOfType(representation, CFSTR("archiveList"), CFArrayGetTypeID());
-    if (!archiveListArray)
-        return false;
-
-    *objectCount = CFArrayGetCount(archiveListArray);
-    *objects = (CFTypeRef*)malloc(sizeof(CFTypeRef) * *objectCount);
-    for (CFIndex i = 0; i < *objectCount; ++i) {
-        CFTypeRef object = CFArrayGetValueAtIndex(archiveListArray, i);
-        if (object == tokenNull)
-            (*objects)[i] = nullptr;
-        else
-            (*objects)[i] = object;
-    }
-
-    if (protocolProperties)
-        *protocolProperties = (CFDictionaryRef)dictionaryValueOfType(representation, CFSTR("protocolProperties"), CFDictionaryGetTypeID());
-
-    if (expectedContentLength)
-        *expectedContentLength = (CFNumberRef)dictionaryValueOfType(representation, CFSTR("expectedContentLength"), CFNumberGetTypeID());
-
-    if (mimeType)
-        *mimeType = (CFStringRef)dictionaryValueOfType(representation, CFSTR("mimeType"), CFStringGetTypeID());
-
-    return true;
-}
-
-static RetainPtr<CFDictionaryRef> createSerializableRepresentation(CFURLRequestRef cfRequest, CFTypeRef tokenNull)
-{
-    CFIndex version;
-    CFTypeRef* objects;
-    CFIndex objectCount;
-    CFDictionaryRef protocolProperties;
-
-    // FIXME (12889518): Do not serialize HTTP message body.
-    // 1. It can be large and thus costly to send across.
-    // 2. It is misleading to provide a body with some requests, while others use body streams, which cannot be serialized at all.
-
-    _CFURLRequestCreateArchiveList(kCFAllocatorDefault, cfRequest, &version, &objects, &objectCount, &protocolProperties);
-
-    // This will deallocate the passed in arguments.
-    return createSerializableRepresentation(version, objects, objectCount, protocolProperties, nullptr, nullptr, tokenNull);
-}
-
-static RetainPtr<CFURLRequestRef> createCFURLRequestFromSerializableRepresentation(CFDictionaryRef representation, CFTypeRef tokenNull)
-{
-    CFIndex version;
-    CFTypeRef* objects;
-    CFIndex objectCount;
-    CFDictionaryRef protocolProperties;
-
-    if (!createArchiveList(representation, tokenNull, &version, &objects, &objectCount, &protocolProperties, nullptr, nullptr))
-        return nullptr;
-
-    auto cfRequest = adoptCF(_CFURLRequestCreateFromArchiveList(kCFAllocatorDefault, version, objects, objectCount, protocolProperties));
-    free(objects);
-    return WTFMove(cfRequest);
-}
-
-static RetainPtr<CFDictionaryRef> createSerializableRepresentation(NSURLRequest *request, CFTypeRef tokenNull)
-{
-    return createSerializableRepresentation([request _CFURLRequest], tokenNull);
-}
-
-static RetainPtr<NSURLRequest> createNSURLRequestFromSerializableRepresentation(CFDictionaryRef representation, CFTypeRef tokenNull)
-{
-    auto cfRequest = createCFURLRequestFromSerializableRepresentation(representation, tokenNull);
-    if (!cfRequest)
-        return nullptr;
-
-    return adoptNS([[NSURLRequest alloc] _initWithCFURLRequest:cfRequest.get()]);
-}
-
-#if USE(CFURLCONNECTION)
-void ArgumentCoder<ResourceRequest>::encodePlatformData(Encoder& encoder, const ResourceRequest& resourceRequest)
-{
-    RetainPtr<CFURLRequestRef> requestToSerialize = resourceRequest.cfURLRequest(DoNotUpdateHTTPBody);
-
-    bool requestIsPresent = requestToSerialize;
-    encoder << requestIsPresent;
-
-    if (!requestIsPresent)
-        return;
-
-    // We don't send HTTP body over IPC for better performance.
-    // Also, it's not always possible to do, as streams can only be created in process that does networking.
-    RetainPtr<CFDataRef> requestHTTPBody = adoptCF(CFURLRequestCopyHTTPRequestBody(requestToSerialize.get()));
-    RetainPtr<CFReadStreamRef> requestHTTPBodyStream = adoptCF(CFURLRequestCopyHTTPRequestBodyStream(requestToSerialize.get()));
-    if (requestHTTPBody || requestHTTPBodyStream) {
-        CFMutableURLRequestRef mutableRequest = CFURLRequestCreateMutableCopy(0, requestToSerialize.get());
-        requestToSerialize = adoptCF(mutableRequest);
-        CFURLRequestSetHTTPRequestBody(mutableRequest, nil);
-        CFURLRequestSetHTTPRequestBodyStream(mutableRequest, nil);
-    }
-
-    RetainPtr<CFDictionaryRef> dictionary = createSerializableRepresentation(requestToSerialize.get(), IPC::tokenNullTypeRef());
-    IPC::encode(encoder, dictionary.get());
-
-    // The fallback array is part of CFURLRequest, but it is not encoded by WKCFURLRequestCreateSerializableRepresentation.
-    encoder << resourceRequest.responseContentDispositionEncodingFallbackArray();
-    encoder.encodeEnum(resourceRequest.requester());
-    encoder.encodeEnum(resourceRequest.cachePolicy());
-}
-#else
-void ArgumentCoder<ResourceRequest>::encodePlatformData(Encoder& encoder, const ResourceRequest& resourceRequest)
-{
-    RetainPtr<NSURLRequest> requestToSerialize = resourceRequest.nsURLRequest(DoNotUpdateHTTPBody);
-
-    bool requestIsPresent = requestToSerialize;
-    encoder << requestIsPresent;
-
-    if (!requestIsPresent)
-        return;
-
-    // We don't send HTTP body over IPC for better performance.
-    // Also, it's not always possible to do, as streams can only be created in process that does networking.
-    if ([requestToSerialize HTTPBody] || [requestToSerialize HTTPBodyStream]) {
-        requestToSerialize = adoptNS([requestToSerialize mutableCopy]);
-        [(NSMutableURLRequest *)requestToSerialize setHTTPBody:nil];
-        [(NSMutableURLRequest *)requestToSerialize setHTTPBodyStream:nil];
-    }
-
-    RetainPtr<CFDictionaryRef> dictionary = createSerializableRepresentation(requestToSerialize.get(), IPC::tokenNullTypeRef());
-    IPC::encode(encoder, dictionary.get());
-
-    // The fallback array is part of NSURLRequest, but it is not encoded by WKNSURLRequestCreateSerializableRepresentation.
-    encoder << resourceRequest.responseContentDispositionEncodingFallbackArray();
-    encoder.encodeEnum(resourceRequest.requester());
-    encoder.encodeEnum(resourceRequest.cachePolicy());
-}
-#endif
-
-bool ArgumentCoder<ResourceRequest>::decodePlatformData(Decoder& decoder, ResourceRequest& resourceRequest)
-{
-    bool requestIsPresent;
-    if (!decoder.decode(requestIsPresent))
-        return false;
-
-    if (!requestIsPresent) {
-        resourceRequest = ResourceRequest();
-        return true;
-    }
-
-    RetainPtr<CFDictionaryRef> dictionary;
-    if (!IPC::decode(decoder, dictionary))
-        return false;
-
-#if USE(CFURLCONNECTION)
-    RetainPtr<CFURLRequestRef> cfURLRequest = createCFURLRequestFromSerializableRepresentation(dictionary.get(), IPC::tokenNullTypeRef());
-    if (!cfURLRequest)
-        return false;
-
-    resourceRequest = ResourceRequest(cfURLRequest.get());
-#else
-    RetainPtr<NSURLRequest> nsURLRequest = createNSURLRequestFromSerializableRepresentation(dictionary.get(), IPC::tokenNullTypeRef());
-    if (!nsURLRequest)
-        return false;
-
-    resourceRequest = ResourceRequest(nsURLRequest.get());
-#endif
-    
-    Vector<String> responseContentDispositionEncodingFallbackArray;
-    if (!decoder.decode(responseContentDispositionEncodingFallbackArray))
-        return false;
-
-    resourceRequest.setResponseContentDispositionEncodingFallbackArray(
-        responseContentDispositionEncodingFallbackArray.size() > 0 ? responseContentDispositionEncodingFallbackArray[0] : String(),
-        responseContentDispositionEncodingFallbackArray.size() > 1 ? responseContentDispositionEncodingFallbackArray[1] : String(),
-        responseContentDispositionEncodingFallbackArray.size() > 2 ? responseContentDispositionEncodingFallbackArray[2] : String()
-    );
-
-    ResourceRequest::Requester requester;
-    if (!decoder.decodeEnum(requester))
-        return false;
-    resourceRequest.setRequester(requester);
-
-    ResourceRequestCachePolicy cachePolicy;
-    if (!decoder.decodeEnum(cachePolicy))
-        return false;
-    resourceRequest.setCachePolicy(cachePolicy);
-
-    return true;
-}
-
-void ArgumentCoder<CertificateInfo>::encode(Encoder& encoder, const CertificateInfo& certificateInfo)
-{
-    encoder.encodeEnum(certificateInfo.type());
+    encoder << certificateInfo.type();
 
     switch (certificateInfo.type()) {
 #if HAVE(SEC_TRUST_SERIALIZATION)
-    case CertificateInfo::Type::Trust:
-        IPC::encode(encoder, certificateInfo.trust());
+    case WebCore::CertificateInfo::Type::Trust:
+        encoder << certificateInfo.trust();
         break;
 #endif
-    case CertificateInfo::Type::CertificateChain:
-        IPC::encode(encoder, certificateInfo.certificateChain());
+    case WebCore::CertificateInfo::Type::CertificateChain:
+        encoder << certificateInfo.certificateChain();
         break;
-    case CertificateInfo::Type::None:
+    case WebCore::CertificateInfo::Type::None:
         // Do nothing.
         break;
     }
 }
 
-bool ArgumentCoder<CertificateInfo>::decode(Decoder& decoder, CertificateInfo& certificateInfo)
+template<>
+void ArgumentCoder<WebCore::CertificateInfo>::encode(WebKit::Daemon::Encoder& encoder, const WebCore::CertificateInfo& certificateInfo)
 {
-    CertificateInfo::Type certificateInfoType;
-    if (!decoder.decodeEnum(certificateInfoType))
-        return false;
+    ASSERT(certificateInfo.type() == WebCore::CertificateInfo::Type::Trust);
+    encoder << certificateInfo.trust();
+}
 
-    switch (certificateInfoType) {
+template<>
+std::optional<WebCore::CertificateInfo> ArgumentCoder<WebCore::CertificateInfo>::decode(Decoder& decoder)
+{
+    std::optional<WebCore::CertificateInfo::Type> certificateInfoType;
+    decoder >> certificateInfoType;
+    if (!certificateInfoType)
+        return std::nullopt;
+
+    switch (*certificateInfoType) {
 #if HAVE(SEC_TRUST_SERIALIZATION)
-    case CertificateInfo::Type::Trust: {
-        RetainPtr<SecTrustRef> trust;
-        if (!IPC::decode(decoder, trust))
-            return false;
+    case WebCore::CertificateInfo::Type::Trust: {
+        std::optional<RetainPtr<SecTrustRef>> trust;
+        decoder >> trust;
+        if (!trust || !*trust)
+            return std::nullopt;
 
-        certificateInfo = CertificateInfo(WTFMove(trust));
-        return true;
+        return WebCore::CertificateInfo(WTFMove(*trust));
     }
 #endif
-    case CertificateInfo::Type::CertificateChain: {
-        RetainPtr<CFArrayRef> certificateChain;
-        if (!IPC::decode(decoder, certificateChain))
-            return false;
+    case WebCore::CertificateInfo::Type::CertificateChain: {
+        std::optional<RetainPtr<CFArrayRef>> certificateChain;
+        decoder >> certificateChain;
+        if (!certificateChain || !*certificateChain)
+            return std::nullopt;
 
-        certificateInfo = CertificateInfo(WTFMove(certificateChain));
-        return true;
-    }    
-    case CertificateInfo::Type::None:
+        return WebCore::CertificateInfo(WTFMove(*certificateChain));
+    }
+    case WebCore::CertificateInfo::Type::None:
         // Do nothing.
         break;
     }
 
-    return true;
+    return {{ }};
+}
+
+template<>
+std::optional<WebCore::CertificateInfo> ArgumentCoder<WebCore::CertificateInfo>::decode(WebKit::Daemon::Decoder& decoder)
+{
+    std::optional<RetainPtr<SecTrustRef>> trust;
+    decoder >> trust;
+    if (!trust || !*trust)
+        return std::nullopt;
+    return WebCore::CertificateInfo(WTFMove(*trust));
 }
 
 static void encodeNSError(Encoder& encoder, NSError *nsError)
@@ -365,41 +132,64 @@ static void encodeNSError(Encoder& encoder, NSError *nsError)
 
     [userInfo enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL*) {
         if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSURL class]] || [value isKindOfClass:[NSNumber class]])
-            CFDictionarySetValue(filteredUserInfo.get(), key, value);
+            CFDictionarySetValue(filteredUserInfo.get(), (__bridge CFTypeRef)key, (__bridge CFTypeRef)value);
     }];
 
     if (NSArray *clientIdentityAndCertificates = [userInfo objectForKey:@"NSErrorClientCertificateChainKey"]) {
         ASSERT([clientIdentityAndCertificates isKindOfClass:[NSArray class]]);
         ASSERT(^{
             for (id object in clientIdentityAndCertificates) {
-                if (CFGetTypeID(object) != SecIdentityGetTypeID() && CFGetTypeID(object) != SecCertificateGetTypeID())
+                if (CFGetTypeID((__bridge CFTypeRef)object) != SecIdentityGetTypeID() && CFGetTypeID((__bridge CFTypeRef)object) != SecCertificateGetTypeID())
                     return false;
             }
             return true;
         }());
 
-        CFDictionarySetValue(filteredUserInfo.get(), @"NSErrorClientCertificateChainKey", clientIdentityAndCertificates);
+        // Turn SecIdentity members into SecCertificate to strip out private key information.
+        id clientCertificates = [NSMutableArray arrayWithCapacity:clientIdentityAndCertificates.count];
+        for (id object in clientIdentityAndCertificates) {
+            if (CFGetTypeID((__bridge CFTypeRef)object) != SecIdentityGetTypeID()) {
+                [clientCertificates addObject:object];
+                continue;
+            }
+            SecCertificateRef certificate = nil;
+            OSStatus status = SecIdentityCopyCertificate((SecIdentityRef)object, &certificate);
+            RetainPtr<SecCertificateRef> retainCertificate = adoptCF(certificate);
+            // The SecIdentity member is the key information of this attribute. Without it, we should nil
+            // the attribute.
+            if (status != errSecSuccess) {
+                LOG_ERROR("Failed to encode nsError.userInfo[NSErrorClientCertificateChainKey]: %d", status);
+                clientCertificates = nil;
+                break;
+            }
+            [clientCertificates addObject:(__bridge id)certificate];
+        }
+        CFDictionarySetValue(filteredUserInfo.get(), CFSTR("NSErrorClientCertificateChainKey"), (__bridge CFTypeRef)clientCertificates);
     }
 
     id peerCertificateChain = [userInfo objectForKey:@"NSErrorPeerCertificateChainKey"];
     if (!peerCertificateChain) {
-        if (SecTrustRef peerTrust = (SecTrustRef)[userInfo objectForKey:NSURLErrorFailingURLPeerTrustErrorKey]) {
+        if (SecTrustRef peerTrust = (__bridge SecTrustRef)[userInfo objectForKey:NSURLErrorFailingURLPeerTrustErrorKey]) {
+#if HAVE(SEC_TRUST_COPY_CERTIFICATE_CHAIN)
+            peerCertificateChain = (__bridge NSArray *)adoptCF(SecTrustCopyCertificateChain(peerTrust)).autorelease();
+#else
             CFIndex count = SecTrustGetCertificateCount(peerTrust);
             peerCertificateChain = [NSMutableArray arrayWithCapacity:count];
             for (CFIndex i = 0; i < count; ++i)
-                [peerCertificateChain addObject:(id)SecTrustGetCertificateAtIndex(peerTrust, i)];
+                [peerCertificateChain addObject:(__bridge id)SecTrustGetCertificateAtIndex(peerTrust, i)];
+#endif
         }
     }
     ASSERT(!peerCertificateChain || [peerCertificateChain isKindOfClass:[NSArray class]]);
     if (peerCertificateChain)
-        CFDictionarySetValue(filteredUserInfo.get(), @"NSErrorPeerCertificateChainKey", peerCertificateChain);
+        CFDictionarySetValue(filteredUserInfo.get(), CFSTR("NSErrorPeerCertificateChainKey"), (__bridge CFTypeRef)peerCertificateChain);
 
 #if HAVE(SEC_TRUST_SERIALIZATION)
-    if (SecTrustRef peerTrust = (SecTrustRef)[userInfo objectForKey:NSURLErrorFailingURLPeerTrustErrorKey])
-        CFDictionarySetValue(filteredUserInfo.get(), NSURLErrorFailingURLPeerTrustErrorKey, peerTrust);
+    if (SecTrustRef peerTrust = (__bridge SecTrustRef)[userInfo objectForKey:NSURLErrorFailingURLPeerTrustErrorKey])
+        CFDictionarySetValue(filteredUserInfo.get(), (__bridge CFStringRef)NSURLErrorFailingURLPeerTrustErrorKey, peerTrust);
 #endif
 
-    IPC::encode(encoder, filteredUserInfo.get());
+    encoder << static_cast<CFDictionaryRef>(filteredUserInfo.get());
 
     if (id underlyingError = [userInfo objectForKey:NSUnderlyingErrorKey]) {
         ASSERT([underlyingError isKindOfClass:[NSError class]]);
@@ -409,179 +199,90 @@ static void encodeNSError(Encoder& encoder, NSError *nsError)
         encoder << false;
 }
 
-void ArgumentCoder<ResourceError>::encodePlatformData(Encoder& encoder, const ResourceError& resourceError)
+void ArgumentCoder<WebCore::ResourceError>::encodePlatformData(Encoder& encoder, const WebCore::ResourceError& resourceError)
 {
-    bool errorIsNull = resourceError.isNull();
-    encoder << errorIsNull;
-
-    if (errorIsNull)
-        return;
-
-    NSError *nsError = resourceError.nsError();
-    encodeNSError(encoder, nsError);
+    encodeNSError(encoder, resourceError.nsError());
 }
 
-static bool decodeNSError(Decoder& decoder, RetainPtr<NSError>& nsError)
+static RetainPtr<NSError> decodeNSError(Decoder& decoder)
 {
     String domain;
     if (!decoder.decode(domain))
-        return false;
+        return nil;
 
     int64_t code;
     if (!decoder.decode(code))
-        return false;
+        return nil;
 
     RetainPtr<CFDictionaryRef> userInfo;
-    if (!IPC::decode(decoder, userInfo))
-        return false;
+    if (!decoder.decode(userInfo) || !userInfo)
+        return nil;
 
     bool hasUnderlyingError = false;
     if (!decoder.decode(hasUnderlyingError))
-        return false;
+        return nil;
 
     if (hasUnderlyingError) {
-        RetainPtr<NSError> underlyingNSError;
-        if (!decodeNSError(decoder, underlyingNSError))
-            return false;
+        auto underlyingNSError = decodeNSError(decoder);
+        if (!underlyingNSError)
+            return nil;
 
-        userInfo = adoptCF(CFDictionaryCreateMutableCopy(kCFAllocatorDefault, CFDictionaryGetCount(userInfo.get()) + 1, userInfo.get()));
-        CFDictionarySetValue((CFMutableDictionaryRef)userInfo.get(), NSUnderlyingErrorKey, underlyingNSError.get());
+        auto mutableUserInfo = adoptCF(CFDictionaryCreateMutableCopy(kCFAllocatorDefault, CFDictionaryGetCount(userInfo.get()) + 1, userInfo.get()));
+        CFDictionarySetValue(mutableUserInfo.get(), (__bridge CFStringRef)NSUnderlyingErrorKey, (__bridge CFTypeRef)underlyingNSError.get());
+        userInfo = WTFMove(mutableUserInfo);
     }
 
-    nsError = adoptNS([[NSError alloc] initWithDomain:domain code:code userInfo:(NSDictionary *)userInfo.get()]);
+    return adoptNS([[NSError alloc] initWithDomain:domain code:code userInfo:(__bridge NSDictionary *)userInfo.get()]);
+}
+
+bool ArgumentCoder<WebCore::ResourceError>::decodePlatformData(Decoder& decoder, WebCore::ResourceError& resourceError)
+{
+    auto nsError = decodeNSError(decoder);
+    if (!nsError)
+        return false;
+
+    resourceError = WebCore::ResourceError(nsError.get());
     return true;
 }
 
-bool ArgumentCoder<ResourceError>::decodePlatformData(Decoder& decoder, ResourceError& resourceError)
+void ArgumentCoder<WebCore::ProtectionSpace>::encodePlatformData(Encoder& encoder, const WebCore::ProtectionSpace& space)
 {
-    bool errorIsNull;
-    if (!decoder.decode(errorIsNull))
-        return false;
-    
-    if (errorIsNull) {
-        resourceError = ResourceError();
-        return true;
-    }
-    
-    RetainPtr<NSError> nsError;
-    if (!decodeNSError(decoder, nsError))
+    encoder << space.nsSpace();
+}
+
+bool ArgumentCoder<WebCore::ProtectionSpace>::decodePlatformData(Decoder& decoder, WebCore::ProtectionSpace& space)
+{
+    auto platformData = IPC::decode<NSURLProtectionSpace>(decoder);
+    if (!platformData)
         return false;
 
-    resourceError = ResourceError(nsError.get());
+    space = WebCore::ProtectionSpace { platformData->get() };
     return true;
 }
 
-void ArgumentCoder<ProtectionSpace>::encodePlatformData(Encoder& encoder, const ProtectionSpace& space)
-{
-    RetainPtr<NSMutableData> data = adoptNS([[NSMutableData alloc] init]);
-    RetainPtr<NSKeyedArchiver> archiver = adoptNS([[NSKeyedArchiver alloc] initForWritingWithMutableData:data.get()]);
-    [archiver setRequiresSecureCoding:YES];
-    [archiver encodeObject:space.nsSpace() forKey:@"protectionSpace"];
-    [archiver finishEncoding];
-    IPC::encode(encoder, reinterpret_cast<CFDataRef>(data.get()));
-}
-
-bool ArgumentCoder<ProtectionSpace>::decodePlatformData(Decoder& decoder, ProtectionSpace& space)
-{
-    RetainPtr<CFDataRef> data;
-    if (!IPC::decode(decoder, data))
-        return false;
-
-    RetainPtr<NSKeyedUnarchiver> unarchiver = adoptNS([[NSKeyedUnarchiver alloc] initForReadingWithData:(NSData *)data.get()]);
-    [unarchiver setRequiresSecureCoding:YES];
-    @try {
-        if (RetainPtr<NSURLProtectionSpace> nsSpace = [unarchiver decodeObjectOfClass:[NSURLProtectionSpace class] forKey:@"protectionSpace"])
-            space = ProtectionSpace(nsSpace.get());
-    } @catch (NSException *exception) {
-        LOG_ERROR("Failed to decode NSURLProtectionSpace: %@", exception);
-    }
-
-    [unarchiver finishDecoding];
-    return true;
-}
-
-void ArgumentCoder<Credential>::encodePlatformData(Encoder& encoder, const Credential& credential)
+void ArgumentCoder<WebCore::Credential>::encodePlatformData(Encoder& encoder, const WebCore::Credential& credential)
 {
     NSURLCredential *nsCredential = credential.nsCredential();
-    // NSURLCredential doesn't serialize identities correctly, so we encode the pieces individually
-    // in the identity case. See <rdar://problem/18802434>.
-    if (SecIdentityRef identity = nsCredential.identity) {
-        encoder << true;
-        IPC::encode(encoder, identity);
-
-        if (NSArray *certificates = nsCredential.certificates) {
-            encoder << true;
-            IPC::encode(encoder, reinterpret_cast<CFArrayRef>(certificates));
-        } else
-            encoder << false;
-
-        encoder << static_cast<uint64_t>(nsCredential.persistence);
-        return;
-    }
-
-    encoder << false;
-    RetainPtr<NSMutableData> data = adoptNS([[NSMutableData alloc] init]);
-    RetainPtr<NSKeyedArchiver> archiver = adoptNS([[NSKeyedArchiver alloc] initForWritingWithMutableData:data.get()]);
-    [archiver setRequiresSecureCoding:YES];
-    [archiver encodeObject:nsCredential forKey:@"credential"];
-    [archiver finishEncoding];
-    IPC::encode(encoder, reinterpret_cast<CFDataRef>(data.get()));
+    encoder << nsCredential;
 }
 
-bool ArgumentCoder<Credential>::decodePlatformData(Decoder& decoder, Credential& credential)
+bool ArgumentCoder<WebCore::Credential>::decodePlatformData(Decoder& decoder, WebCore::Credential& credential)
 {
-    bool hasIdentity;
-    if (!decoder.decode(hasIdentity))
+    auto nsCredential = IPC::decode<NSURLCredential>(decoder);
+    if (!nsCredential)
         return false;
-
-    if (hasIdentity) {
-        RetainPtr<SecIdentityRef> identity;
-        if (!IPC::decode(decoder, identity))
-            return false;
-
-        RetainPtr<CFArrayRef> certificates;
-        bool hasCertificates;
-        if (!decoder.decode(hasCertificates))
-            return false;
-
-        if (hasCertificates) {
-            if (!IPC::decode(decoder, certificates))
-                return false;
-        }
-
-        uint64_t persistence;
-        if (!decoder.decode(persistence))
-            return false;
-
-        credential = Credential(adoptNS([[NSURLCredential alloc] initWithIdentity:identity.get() certificates:(NSArray *)certificates.get() persistence:(NSURLCredentialPersistence)persistence]).get());
-        return true;
-    }
-
-    RetainPtr<CFDataRef> data;
-    if (!IPC::decode(decoder, data))
-        return false;
-
-    RetainPtr<NSKeyedUnarchiver> unarchiver = adoptNS([[NSKeyedUnarchiver alloc] initForReadingWithData:(NSData *)data.get()]);
-    [unarchiver setRequiresSecureCoding:YES];
-    @try {
-        if (RetainPtr<NSURLCredential> nsCredential = [unarchiver decodeObjectOfClass:[NSURLCredential class] forKey:@"credential"])
-            credential = Credential(nsCredential.get());
-    } @catch (NSException *exception) {
-        LOG_ERROR("Failed to decode NSURLCredential: %@", exception);
-    }
-
-    [unarchiver finishDecoding];
+    credential = WebCore::Credential { nsCredential->get() };
     return true;
 }
 
 void ArgumentCoder<MachSendRight>::encode(Encoder& encoder, const MachSendRight& sendRight)
 {
-    encoder << Attachment(sendRight.copySendRight().leakSendRight(), MACH_MSG_TYPE_MOVE_SEND);
+    encoder << Attachment { sendRight };
 }
 
 void ArgumentCoder<MachSendRight>::encode(Encoder& encoder, MachSendRight&& sendRight)
 {
-    encoder << Attachment(sendRight.leakSendRight(), MACH_MSG_TYPE_MOVE_SEND);
+    encoder << Attachment { WTFMove(sendRight) };
 }
 
 bool ArgumentCoder<MachSendRight>::decode(Decoder& decoder, MachSendRight& sendRight)
@@ -590,19 +291,16 @@ bool ArgumentCoder<MachSendRight>::decode(Decoder& decoder, MachSendRight& sendR
     if (!decoder.decode(attachment))
         return false;
 
-    if (attachment.disposition() != MACH_MSG_TYPE_MOVE_SEND)
-        return false;
-
-    sendRight = MachSendRight::adopt(attachment.port());
+    sendRight = WTFMove(attachment);
     return true;
 }
 
-void ArgumentCoder<KeypressCommand>::encode(Encoder& encoder, const KeypressCommand& keypressCommand)
+void ArgumentCoder<WebCore::KeypressCommand>::encode(Encoder& encoder, const WebCore::KeypressCommand& keypressCommand)
 {
     encoder << keypressCommand.commandName << keypressCommand.text;
 }
     
-std::optional<KeypressCommand> ArgumentCoder<KeypressCommand>::decode(Decoder& decoder)
+std::optional<WebCore::KeypressCommand> ArgumentCoder<WebCore::KeypressCommand>::decode(Decoder& decoder)
 {
     std::optional<String> commandName;
     decoder >> commandName;
@@ -614,85 +312,58 @@ std::optional<KeypressCommand> ArgumentCoder<KeypressCommand>::decode(Decoder& d
     if (!text)
         return std::nullopt;
     
-    KeypressCommand command;
+    WebCore::KeypressCommand command;
     command.commandName = WTFMove(*commandName);
     command.text = WTFMove(*text);
     return WTFMove(command);
 }
 
 #if ENABLE(CONTENT_FILTERING)
-void ArgumentCoder<ContentFilterUnblockHandler>::encode(Encoder& encoder, const ContentFilterUnblockHandler& contentFilterUnblockHandler)
+
+void ArgumentCoder<WebCore::ContentFilterUnblockHandler>::encode(Encoder& encoder, const WebCore::ContentFilterUnblockHandler& contentFilterUnblockHandler)
 {
-    RetainPtr<NSMutableData> data = adoptNS([[NSMutableData alloc] init]);
-    RetainPtr<NSKeyedArchiver> archiver = adoptNS([[NSKeyedArchiver alloc] initForWritingWithMutableData:data.get()]);
-    [archiver setRequiresSecureCoding:YES];
+    auto archiver = adoptNS([[NSKeyedArchiver alloc] initRequiringSecureCoding:YES]);
     contentFilterUnblockHandler.encode(archiver.get());
-    [archiver finishEncoding];
-    IPC::encode(encoder, reinterpret_cast<CFDataRef>(data.get()));
+    encoder << (__bridge CFDataRef)archiver.get().encodedData;
 }
 
-bool ArgumentCoder<ContentFilterUnblockHandler>::decode(Decoder& decoder, ContentFilterUnblockHandler& contentFilterUnblockHandler)
+bool ArgumentCoder<WebCore::ContentFilterUnblockHandler>::decode(Decoder& decoder, WebCore::ContentFilterUnblockHandler& contentFilterUnblockHandler)
 {
     RetainPtr<CFDataRef> data;
-    if (!IPC::decode(decoder, data))
+    if (!decoder.decode(data) || !data)
         return false;
 
-    RetainPtr<NSKeyedUnarchiver> unarchiver = adoptNS([[NSKeyedUnarchiver alloc] initForReadingWithData:(NSData *)data.get()]);
-    [unarchiver setRequiresSecureCoding:YES];
-    if (!ContentFilterUnblockHandler::decode(unarchiver.get(), contentFilterUnblockHandler))
+    auto unarchiver = adoptNS([[NSKeyedUnarchiver alloc] initForReadingFromData:(__bridge NSData *)data.get() error:nullptr]);
+    unarchiver.get().decodingFailurePolicy = NSDecodingFailurePolicyRaiseException;
+    if (!WebCore::ContentFilterUnblockHandler::decode(unarchiver.get(), contentFilterUnblockHandler))
         return false;
 
     [unarchiver finishDecoding];
     return true;
 }
+
 #endif
 
-#if ENABLE(WIRELESS_PLAYBACK_TARGET)
-
-static NSString *deviceContextKey()
+#if ENABLE(VIDEO)
+void ArgumentCoder<WebCore::SerializedPlatformDataCueValue>::encodePlatformData(Encoder& encoder, const WebCore::SerializedPlatformDataCueValue& value)
 {
-    static NSString * const key = @"deviceContext";
-    return key;
+    ASSERT(value.platformType() == WebCore::SerializedPlatformDataCueValue::PlatformType::ObjC);
+    if (value.platformType() == WebCore::SerializedPlatformDataCueValue::PlatformType::ObjC)
+        encodeObject(encoder, value.nativeValue().get());
 }
 
-void ArgumentCoder<MediaPlaybackTargetContext>::encodePlatformData(Encoder& encoder, const MediaPlaybackTargetContext& target)
+std::optional<WebCore::SerializedPlatformDataCueValue>  ArgumentCoder<WebCore::SerializedPlatformDataCueValue>::decodePlatformData(Decoder& decoder, WebCore::SerializedPlatformDataCueValue::PlatformType platformType)
 {
-    RetainPtr<NSMutableData> data = adoptNS([[NSMutableData alloc] init]);
-    RetainPtr<NSKeyedArchiver> archiver = adoptNS([[NSKeyedArchiver alloc] initForWritingWithMutableData:data.get()]);
-    [archiver setRequiresSecureCoding:YES];
+    ASSERT(platformType == WebCore::SerializedPlatformDataCueValue::PlatformType::ObjC);
 
-    if ([getAVOutputContextClass() conformsToProtocol:@protocol(NSSecureCoding)])
-        [archiver encodeObject:target.avOutputContext() forKey:deviceContextKey()];
+    if (platformType != WebCore::SerializedPlatformDataCueValue::PlatformType::ObjC)
+        return std::nullopt;
 
-    [archiver finishEncoding];
-    IPC::encode(encoder, reinterpret_cast<CFDataRef>(data.get()));
+    auto object = decodeObject(decoder, WebCore::SerializedPlatformDataCueMac::allowedClassesForNativeValues());
+    if (!object)
+        return std::nullopt;
 
-}
-
-bool ArgumentCoder<MediaPlaybackTargetContext>::decodePlatformData(Decoder& decoder, MediaPlaybackTargetContext& target)
-{
-    if (![getAVOutputContextClass() conformsToProtocol:@protocol(NSSecureCoding)])
-        return false;
-
-    RetainPtr<CFDataRef> data;
-    if (!IPC::decode(decoder, data))
-        return false;
-
-    RetainPtr<NSKeyedUnarchiver> unarchiver = adoptNS([[NSKeyedUnarchiver alloc] initForReadingWithData:(NSData *)data.get()]);
-    [unarchiver setRequiresSecureCoding:YES];
-
-    AVOutputContext *context = nil;
-    @try {
-        context = [unarchiver decodeObjectOfClass:getAVOutputContextClass() forKey:deviceContextKey()];
-    } @catch (NSException *exception) {
-        LOG_ERROR("The target picker being decoded is not an AVOutputContext.");
-        return false;
-    }
-
-    target = MediaPlaybackTargetContext(context);
-    
-    [unarchiver finishDecoding];
-    return true;
+    return WebCore::SerializedPlatformDataCueValue { platformType, object.value().get() };
 }
 #endif
 

@@ -31,7 +31,7 @@
 #include <WebCore/CSSImportRule.h>
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
 #include <WebCore/SVGTests.h>
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
@@ -41,6 +41,8 @@
 typedef struct _WebKitDOMDOMImplementationPrivate {
     RefPtr<WebCore::DOMImplementation> coreObject;
 } WebKitDOMDOMImplementationPrivate;
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 namespace WebKit {
 
@@ -124,9 +126,9 @@ WebKitDOMDocumentType* webkit_dom_dom_implementation_create_document_type(WebKit
     g_return_val_if_fail(systemId, 0);
     g_return_val_if_fail(!error || !*error, 0);
     WebCore::DOMImplementation* item = WebKit::core(self);
-    WTF::String convertedQualifiedName = WTF::String::fromUTF8(qualifiedName);
-    WTF::String convertedPublicId = WTF::String::fromUTF8(publicId);
-    WTF::String convertedSystemId = WTF::String::fromUTF8(systemId);
+    auto convertedQualifiedName = WTF::AtomString::fromUTF8(qualifiedName);
+    auto convertedPublicId = WTF::String::fromUTF8(publicId);
+    auto convertedSystemId = WTF::String::fromUTF8(systemId);
     auto result = item->createDocumentType(convertedQualifiedName, convertedPublicId, convertedSystemId);
     if (result.hasException()) {
         auto description = WebCore::DOMException::description(result.releaseException().code());
@@ -144,8 +146,8 @@ WebKitDOMDocument* webkit_dom_dom_implementation_create_document(WebKitDOMDOMImp
     g_return_val_if_fail(!doctype || WEBKIT_DOM_IS_DOCUMENT_TYPE(doctype), 0);
     g_return_val_if_fail(!error || !*error, 0);
     WebCore::DOMImplementation* item = WebKit::core(self);
-    WTF::String convertedNamespaceURI = WTF::String::fromUTF8(namespaceURI);
-    WTF::String convertedQualifiedName = WTF::String::fromUTF8(qualifiedName);
+    auto convertedNamespaceURI = WTF::AtomString::fromUTF8(namespaceURI);
+    auto convertedQualifiedName = WTF::AtomString::fromUTF8(qualifiedName);
     WebCore::DocumentType* convertedDoctype = WebKit::core(doctype);
     auto result = item->createDocument(convertedNamespaceURI, convertedQualifiedName, convertedDoctype);
     if (result.hasException()) {
@@ -177,7 +179,8 @@ WebKitDOMHTMLDocument* webkit_dom_dom_implementation_create_html_document(WebKit
     g_return_val_if_fail(title, 0);
     WebCore::DOMImplementation* item = WebKit::core(self);
     WTF::String convertedTitle = WTF::String::fromUTF8(title);
-    RefPtr<WebCore::HTMLDocument> gobjectResult = WTF::getPtr(item->createHTMLDocument(convertedTitle));
+    RefPtr<WebCore::HTMLDocument> gobjectResult = WTF::getPtr(item->createHTMLDocument(WTFMove(convertedTitle)));
     return WebKit::kit(gobjectResult.get());
 }
 
+G_GNUC_END_IGNORE_DEPRECATIONS;

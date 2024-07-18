@@ -27,39 +27,52 @@
 
 #if USE(LIBWEBRTC)
 
+#include "LibWebRTCResolverIdentifier.h"
 #include <WebCore/LibWebRTCMacros.h>
-#include <webrtc/base/nethelpers.h>
-#include <webrtc/p2p/base/packetsocketfactory.h>
+#include <webrtc/api/packet_socket_factory.h>
+#include <webrtc/rtc_base/async_dns_resolver.h>
 #include <wtf/Vector.h>
+
+namespace IPC {
+class Connection;
+}
 
 namespace WebKit {
 class LibWebRTCSocketFactory;
 
-class LibWebRTCResolver final : public rtc::AsyncResolverInterface {
+class LibWebRTCResolver final : public webrtc::AsyncDnsResolverInterface {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    LibWebRTCResolver(uint64_t identifier) : m_identifier(identifier) { }
+    LibWebRTCResolver() : m_identifier(LibWebRTCResolverIdentifier::generate()) { }
 
     bool isResolving() const { return m_isResolving; }
-    uint64_t identifier() const { return m_identifier; }
+    LibWebRTCResolverIdentifier identifier() const { return m_identifier; }
 
 private:
     friend class WebRTCResolver;
 
     // AsyncResolverInterface API.
-    void Start(const rtc::SocketAddress&) final;
-    bool GetResolvedAddress(int, rtc::SocketAddress*) const final;
-    int GetError() const final { return m_error; }
-    void Destroy(bool) final;
+    void Start(const rtc::SocketAddress& addr,
+                     absl::AnyInvocable<void()> callback) final;
+    virtual void Start(const rtc::SocketAddress& addr,
+                     int family,
+                     absl::AnyInvocable<void()> callback) final;
+    virtual const webrtc::AsyncDnsResolverResult& result() const final;
 
+    void doDestroy();
     void setError(int);
     void setResolvedAddress(const Vector<rtc::IPAddress>&);
 
-    uint64_t m_identifier;
+    static void sendOnMainThread(Function<void(IPC::Connection&)>&&);
+
+    LibWebRTCResolverIdentifier m_identifier;
     Vector<rtc::IPAddress> m_addresses;
     rtc::SocketAddress m_addressToResolve;
     int m_error { 0 };
     uint16_t m_port { 0 };
     bool m_isResolving { false };
+    bool m_isProvidingResults { false };
+    bool m_shouldDestroy { false };
 };
 
 } // namespace WebKit

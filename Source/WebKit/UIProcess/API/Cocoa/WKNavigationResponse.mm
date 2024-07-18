@@ -26,14 +26,16 @@
 #import "config.h"
 #import "WKNavigationResponseInternal.h"
 
-#if WK_API_ENABLED
-
 #import "WKFrameInfoInternal.h"
+#import <WebCore/WebCoreObjCExtras.h>
 
 @implementation WKNavigationResponse
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKNavigationResponse.class, self))
+        return;
+
     _navigationResponse->~NavigationResponse();
 
     [super dealloc];
@@ -77,10 +79,13 @@
 
 - (NSURLRequest *)_request
 {
-    return _navigationResponse->request().nsURLRequest(WebCore::DoNotUpdateHTTPBody);
+    return _navigationResponse->request().nsURLRequest(WebCore::HTTPBodyUpdatePolicy::DoNotUpdateHTTPBody);
+}
+
+- (NSString *)_downloadAttribute
+{
+    const String& attribute = _navigationResponse->downloadAttribute();
+    return attribute.isNull() ? nil : (NSString *)attribute;
 }
 
 @end
-
-
-#endif

@@ -33,44 +33,29 @@
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
 
-#if USE(DIRECT2D)
-#include <dwrite.h>
-#endif
-
 using std::min;
 
 namespace WebCore {
 
-FontPlatformData::FontPlatformData(GDIObject<HFONT> font, float size, bool bold, bool oblique, bool useGDI)
-    : m_font(SharedGDIObject<HFONT>::create(WTFMove(font)))
-    , m_size(size)
-    , m_syntheticBold(bold)
-    , m_syntheticOblique(oblique)
-    , m_useGDI(useGDI)
+FontPlatformData::FontPlatformData(GDIObject<HFONT> font, float size, bool bold, bool oblique, bool useGDI, const CreationData* creationData)
+    : FontPlatformData(size, bold, oblique, FontOrientation::Horizontal, FontWidthVariant::RegularWidth, TextRenderingMode::AutoTextRendering, creationData)
 {
+    m_font = SharedGDIObject<HFONT>::create(WTFMove(font));
+    m_useGDI = useGDI;
+
     HWndDC hdc(0);
     SaveDC(hdc);
     
     ::SelectObject(hdc, m_font->get());
-    UINT bufferSize = GetOutlineTextMetrics(hdc, 0, NULL);
 
-    ASSERT_WITH_MESSAGE(bufferSize, "Bitmap fonts not supported with CoreGraphics.");
-
-    if (bufferSize) {
-        static const constexpr unsigned InitialBufferSize { 256 };
-        Vector<char, InitialBufferSize> buffer(bufferSize);
-        auto* metrics = reinterpret_cast<OUTLINETEXTMETRICW*>(buffer.data());
-
-        GetOutlineTextMetricsW(hdc, bufferSize, metrics);
-        WCHAR* faceName = (WCHAR*)((uintptr_t)metrics + (uintptr_t)metrics->otmpFaceName);
-
-        platformDataInit(m_font->get(), size, hdc, faceName);
-    }
+    wchar_t faceName[LF_FACESIZE];
+    GetTextFace(hdc, LF_FACESIZE, faceName);
+    platformDataInit(m_font->get(), size, hdc, faceName);
 
     RestoreDC(hdc, -1);
 }
 
-RefPtr<SharedBuffer> FontPlatformData::openTypeTable(uint32_t table) const
+RefPtr<SharedBuffer> FontPlatformData::platformOpenTypeTable(uint32_t table) const
 {
     HWndDC hdc(0);
     HGDIOBJ oldFont = SelectObject(hdc, hfont());
@@ -78,21 +63,14 @@ RefPtr<SharedBuffer> FontPlatformData::openTypeTable(uint32_t table) const
     DWORD size = GetFontData(hdc, table, 0, 0, 0);
     RefPtr<SharedBuffer> buffer;
     if (size != GDI_ERROR) {
-        Vector<char> data(size);
+        Vector<uint8_t> data(size);
         DWORD result = GetFontData(hdc, table, 0, (PVOID)data.data(), size);
-        ASSERT(result == size);
+        ASSERT_UNUSED(result, result == size);
         buffer = SharedBuffer::create(WTFMove(data));
     }
 
     SelectObject(hdc, oldFont);
     return buffer;
 }
-
-#ifndef NDEBUG
-String FontPlatformData::description() const
-{
-    return String();
-}
-#endif
 
 }

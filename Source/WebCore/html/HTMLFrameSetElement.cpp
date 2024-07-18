@@ -36,12 +36,16 @@
 #include "HTMLCollection.h"
 #include "HTMLFrameElement.h"
 #include "HTMLNames.h"
+#include "HTMLParserIdioms.h"
 #include "Length.h"
 #include "MouseEvent.h"
 #include "RenderFrameSet.h"
 #include "Text.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLFrameSetElement);
 
 using namespace HTMLNames;
 
@@ -65,22 +69,22 @@ Ref<HTMLFrameSetElement> HTMLFrameSetElement::create(const QualifiedName& tagNam
     return adoptRef(*new HTMLFrameSetElement(tagName, document));
 }
 
-bool HTMLFrameSetElement::isPresentationAttribute(const QualifiedName& name) const
+bool HTMLFrameSetElement::hasPresentationalHintsForAttribute(const QualifiedName& name) const
 {
     if (name == bordercolorAttr)
         return true;
-    return HTMLElement::isPresentationAttribute(name);
+    return HTMLElement::hasPresentationalHintsForAttribute(name);
 }
 
-void HTMLFrameSetElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStyleProperties& style)
+void HTMLFrameSetElement::collectPresentationalHintsForAttribute(const QualifiedName& name, const AtomString& value, MutableStyleProperties& style)
 {
     if (name == bordercolorAttr)
         addHTMLColorToStyle(style, CSSPropertyBorderColor, value);
     else
-        HTMLElement::collectStyleForPresentationAttribute(name, value, style);
+        HTMLElement::collectPresentationalHintsForAttribute(name, value, style);
 }
 
-void HTMLFrameSetElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLFrameSetElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == rowsAttr) {
         // FIXME: What is the right thing to do when removing this attribute?
@@ -106,10 +110,10 @@ void HTMLFrameSetElement::parseAttribute(const QualifiedName& name, const Atomic
 
     if (name == frameborderAttr) {
         if (!value.isNull()) {
-            if (equalLettersIgnoringASCIICase(value, "no") || value == "0") {
+            if (equalLettersIgnoringASCIICase(value, "no"_s) || value == "0"_s) {
                 m_frameborder = false;
                 m_frameborderSet = true;
-            } else if (equalLettersIgnoringASCIICase(value, "yes") || value == "1") {
+            } else if (equalLettersIgnoringASCIICase(value, "yes"_s) || value == "1"_s) {
                 m_frameborderSet = true;
             }
         } else {
@@ -128,7 +132,7 @@ void HTMLFrameSetElement::parseAttribute(const QualifiedName& name, const Atomic
 
     if (name == borderAttr) {
         if (!value.isNull()) {
-            m_border = value.toInt();
+            m_border = parseHTMLInteger(value).value_or(0);
             m_borderSet = true;
         } else
             m_borderSet = false;
@@ -167,7 +171,7 @@ RenderPtr<RenderElement> HTMLFrameSetElement::createElementRenderer(RenderStyle&
     return createRenderer<RenderFrameSet>(*this, WTFMove(style));
 }
 
-HTMLFrameSetElement* HTMLFrameSetElement::findContaining(Element* descendant)
+RefPtr<HTMLFrameSetElement> HTMLFrameSetElement::findContaining(Element* descendant)
 {
     return ancestorsOfType<HTMLFrameSetElement>(*descendant).first();
 }
@@ -176,7 +180,7 @@ void HTMLFrameSetElement::willAttachRenderers()
 {
     // Inherit default settings from parent frameset.
     // FIXME: This is not dynamic.
-    const HTMLFrameSetElement* containingFrameSet = findContaining(this);
+    const auto containingFrameSet = findContaining(this);
     if (!containingFrameSet)
         return;
     if (!m_frameborderSet)
@@ -208,38 +212,27 @@ void HTMLFrameSetElement::willRecalcStyle(Style::Change)
         renderer()->setNeedsLayout();
 }
 
-Node::InsertionNotificationRequest HTMLFrameSetElement::insertedInto(ContainerNode& insertionPoint)
+Node::InsertedIntoAncestorResult HTMLFrameSetElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    HTMLElement::insertedInto(insertionPoint);
-    if (insertionPoint.isConnected()) {
-        if (Frame* frame = document().frame())
-            frame->loader().client().dispatchDidBecomeFrameset(document().isFrameSet());
-    }
-
-    return InsertionDone;
+    HTMLElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    return InsertedIntoAncestorResult::Done;
 }
 
-void HTMLFrameSetElement::removedFrom(ContainerNode& insertionPoint)
+void HTMLFrameSetElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
 {
-    HTMLElement::removedFrom(insertionPoint);
-    if (insertionPoint.isConnected()) {
-        if (Frame* frame = document().frame())
-            frame->loader().client().dispatchDidBecomeFrameset(document().isFrameSet());
-    }
+    HTMLElement::removedFromAncestor(removalType, oldParentOfRemovedTree);
 }
 
-DOMWindow* HTMLFrameSetElement::namedItem(const AtomicString& name)
+WindowProxy* HTMLFrameSetElement::namedItem(const AtomString& name)
 {
-    auto* frameElement = children()->namedItem(name);
+    RefPtr frameElement = children()->namedItem(name);
     if (!is<HTMLFrameElement>(frameElement))
         return nullptr;
 
-    if (auto* document = downcast<HTMLFrameElement>(*frameElement).contentDocument())
-        return document->domWindow();
-    return nullptr;
+    return downcast<HTMLFrameElement>(*frameElement).contentWindow();
 }
 
-Vector<AtomicString> HTMLFrameSetElement::supportedPropertyNames() const
+Vector<AtomString> HTMLFrameSetElement::supportedPropertyNames() const
 {
     // NOTE: Left empty as no specification defines this named getter and we
     //       have not historically exposed these named items for enumeration.

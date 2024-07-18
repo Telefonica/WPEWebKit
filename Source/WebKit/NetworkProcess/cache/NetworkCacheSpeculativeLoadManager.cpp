@@ -32,9 +32,11 @@
 #include "NetworkCacheEntry.h"
 #include "NetworkCacheSpeculativeLoad.h"
 #include "NetworkCacheSubresourcesEntry.h"
+#include "NetworkLoadParameters.h"
 #include "NetworkProcess.h"
+#include "PreconnectTask.h"
 #include <WebCore/DiagnosticLoggingKeys.h>
-#include <WebCore/HysteresisActivity.h>
+#include <pal/HysteresisActivity.h>
 #include <wtf/HashCountedSet.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RefCounted.h>
@@ -46,7 +48,6 @@ namespace WebKit {
 namespace NetworkCache {
 
 using namespace WebCore;
-using namespace std::literals::chrono_literals;
 
 static const Seconds preloadedEntryLifetime { 10_s };
 
@@ -60,24 +61,24 @@ static HashCountedSet<String>& allSpeculativeLoadingDiagnosticMessages()
 static void printSpeculativeLoadingDiagnosticMessageCounts()
 {
     LOG(NetworkCacheSpeculativePreloading, "-- Speculative loading statistics --");
-    for (auto& pair : allSpeculativeLoadingDiagnosticMessages())
-        LOG(NetworkCacheSpeculativePreloading, "%s: %u", pair.key.utf8().data(), pair.value);
+    for (auto& [message, count] : allSpeculativeLoadingDiagnosticMessages())
+        LOG(NetworkCacheSpeculativePreloading, "%s: %u", message.utf8().data(), count);
 }
 #endif
 
-static void logSpeculativeLoadingDiagnosticMessage(const GlobalFrameID& frameID, const String& message)
+static void logSpeculativeLoadingDiagnosticMessage(NetworkProcess& networkProcess, const GlobalFrameID& frameID, const String& message)
 {
 #if !LOG_DISABLED
-    if (WebKit2LogNetworkCacheSpeculativePreloading.state == WTFLogChannelOn)
+    if (WebKit2LogNetworkCacheSpeculativePreloading.state == WTFLogChannelState::On)
         allSpeculativeLoadingDiagnosticMessages().add(message);
 #endif
-    NetworkProcess::singleton().logDiagnosticMessage(frameID.first, WebCore::DiagnosticLoggingKeys::networkCacheKey(), message, WebCore::ShouldSample::Yes);
+    networkProcess.logDiagnosticMessage(frameID.webPageProxyID, WebCore::DiagnosticLoggingKeys::networkCacheKey(), message, WebCore::ShouldSample::Yes);
 }
 
-static const AtomicString& subresourcesType()
+static const AtomString& subresourcesType()
 {
     ASSERT(RunLoop::isMain());
-    static NeverDestroyed<const AtomicString> resource("SubResources", AtomicString::ConstructFromLiteral);
+    static NeverDestroyed<const AtomString> resource("SubResources"_s);
     return resource;
 }
 
@@ -91,6 +92,10 @@ static inline ResourceRequest constructRevalidationRequest(const Key& key, const
     ResourceRequest revalidationRequest(key.identifier());
     revalidationRequest.setHTTPHeaderFields(subResourceInfo.requestHeaders());
     revalidationRequest.setFirstPartyForCookies(subResourceInfo.firstPartyForCookies());
+    revalidationRequest.setIsSameSite(subResourceInfo.isSameSite());
+    revalidationRequest.setIsTopSite(subResourceInfo.isTopSite());
+    revalidationRequest.setIsAppInitiated(subResourceInfo.isAppInitiated());
+
     if (!key.partition().isEmpty())
         revalidationRequest.setCachePartition(key.partition());
     ASSERT_WITH_MESSAGE(key.range().isEmpty(), "range is not supported");
@@ -111,14 +116,14 @@ static inline ResourceRequest constructRevalidationRequest(const Key& key, const
     return revalidationRequest;
 }
 
-static bool responseNeedsRevalidation(const ResourceResponse& response, std::chrono::system_clock::time_point timestamp)
+static bool responseNeedsRevalidation(const ResourceResponse& response, WallTime timestamp)
 {
     if (response.cacheControlContainsNoCache())
         return true;
 
     auto age = computeCurrentAge(response, timestamp);
     auto lifetime = computeFreshnessLifetimeForHTTPFamily(response, timestamp);
-    return age - lifetime > 0ms;
+    return age - lifetime > 0_ms;
 }
 
 class SpeculativeLoadManager::ExpiringEntry {
@@ -166,14 +171,12 @@ public:
 
     ~PendingFrameLoad()
     {
-        ASSERT(m_didFinishLoad);
-        ASSERT(m_didRetrieveExistingEntry);
     }
 
     void registerSubresourceLoad(const ResourceRequest& request, const Key& subresourceKey)
     {
         ASSERT(RunLoop::isMain());
-        m_subresourceLoads.append(std::make_unique<SubresourceLoad>(request, subresourceKey));
+        m_subresourceLoads.append(makeUnique<SubresourceLoad>(request, subresourceKey));
         m_loadHysteresisActivity.impulse();
     }
 
@@ -202,12 +205,22 @@ public:
         saveToDiskIfReady();
     }
 
+    bool didReceiveMainResourceResponse() const { return m_didReceiveMainResourceResponse; }
+    void markMainResourceResponseAsReceived()
+    {
+        m_didReceiveMainResourceResponse = true;
+        for (auto& task : m_postMainResourceResponseTasks)
+            task();
+    }
+
+    void addPostMainResourceResponseTask(Function<void()>&& task) { m_postMainResourceResponseTasks.append(WTFMove(task)); }
+
 private:
     PendingFrameLoad(Storage& storage, const Key& mainResourceKey, WTF::Function<void()>&& loadCompletionHandler)
         : m_storage(storage)
         , m_mainResourceKey(mainResourceKey)
         , m_loadCompletionHandler(WTFMove(loadCompletionHandler))
-        , m_loadHysteresisActivity([this](HysteresisState state) { if (state == HysteresisState::Stopped) markLoadAsCompleted(); })
+        , m_loadHysteresisActivity([this](PAL::HysteresisState state) { if (state == PAL::HysteresisState::Stopped) markLoadAsCompleted(); })
     {
         m_loadHysteresisActivity.impulse();
     }
@@ -239,10 +252,12 @@ private:
     Key m_mainResourceKey;
     Vector<std::unique_ptr<SubresourceLoad>> m_subresourceLoads;
     WTF::Function<void()> m_loadCompletionHandler;
-    HysteresisActivity m_loadHysteresisActivity;
+    PAL::HysteresisActivity m_loadHysteresisActivity;
     std::unique_ptr<SubresourcesEntry> m_existingEntry;
+    Vector<Function<void()>> m_postMainResourceResponseTasks;
     bool m_didFinishLoad { false };
     bool m_didRetrieveExistingEntry { false };
+    bool m_didReceiveMainResourceResponse { false };
 };
 
 SpeculativeLoadManager::SpeculativeLoadManager(Cache& cache, Storage& storage)
@@ -253,43 +268,6 @@ SpeculativeLoadManager::SpeculativeLoadManager(Cache& cache, Storage& storage)
 
 SpeculativeLoadManager::~SpeculativeLoadManager()
 {
-}
-
-#if !LOG_DISABLED
-
-static void dumpHTTPHeadersDiff(const HTTPHeaderMap& headersA, const HTTPHeaderMap& headersB)
-{
-    auto aEnd = headersA.end();
-    for (auto it = headersA.begin(); it != aEnd; ++it) {
-        String valueB = headersB.get(it->key);
-        if (valueB.isNull())
-            LOG(NetworkCacheSpeculativePreloading, "* '%s' HTTP header is only in first request (value: %s)", it->key.utf8().data(), it->value.utf8().data());
-        else if (it->value != valueB)
-            LOG(NetworkCacheSpeculativePreloading, "* '%s' HTTP header differs in both requests: %s != %s", it->key.utf8().data(), it->value.utf8().data(), valueB.utf8().data());
-    }
-    auto bEnd = headersB.end();
-    for (auto it = headersB.begin(); it != bEnd; ++it) {
-        if (!headersA.contains(it->key))
-            LOG(NetworkCacheSpeculativePreloading, "* '%s' HTTP header is only in second request (value: %s)", it->key.utf8().data(), it->value.utf8().data());
-    }
-}
-
-#endif
-
-static bool requestsHeadersMatch(const ResourceRequest& speculativeValidationRequest, const ResourceRequest& actualRequest)
-{
-    ASSERT(!actualRequest.isConditional());
-    ResourceRequest speculativeRequest = speculativeValidationRequest;
-    speculativeRequest.makeUnconditional();
-
-    if (speculativeRequest.httpHeaderFields() != actualRequest.httpHeaderFields()) {
-        LOG(NetworkCacheSpeculativePreloading, "Cannot reuse speculatively validated entry because HTTP headers used for validation do not match");
-#if !LOG_DISABLED
-        dumpHTTPHeadersDiff(speculativeRequest.httpHeaderFields(), actualRequest.httpHeaderFields());
-#endif
-        return false;
-    }
-    return true;
 }
 
 bool SpeculativeLoadManager::canUsePreloadedEntry(const PreloadedEntry& entry, const ResourceRequest& actualRequest)
@@ -312,12 +290,12 @@ bool SpeculativeLoadManager::canRetrieve(const Key& storageKey, const WebCore::R
     if (auto preloadedEntry = m_preloadedEntries.get(storageKey)) {
         if (!canUsePreloadedEntry(*preloadedEntry, request)) {
             LOG(NetworkCacheSpeculativePreloading, "(NetworkProcess) Retrieval: Could not use preloaded entry to satisfy request for '%s' due to HTTP headers mismatch:", storageKey.identifier().utf8().data());
-            logSpeculativeLoadingDiagnosticMessage(frameID, preloadedEntry->wasRevalidated() ? DiagnosticLoggingKeys::wastedSpeculativeWarmupWithRevalidationKey() : DiagnosticLoggingKeys::wastedSpeculativeWarmupWithoutRevalidationKey());
+            logSpeculativeLoadingDiagnosticMessage(m_cache.networkProcess(), frameID, preloadedEntry->wasRevalidated() ? DiagnosticLoggingKeys::wastedSpeculativeWarmupWithRevalidationKey() : DiagnosticLoggingKeys::wastedSpeculativeWarmupWithoutRevalidationKey());
             return false;
         }
 
         LOG(NetworkCacheSpeculativePreloading, "(NetworkProcess) Retrieval: Using preloaded entry to satisfy request for '%s':", storageKey.identifier().utf8().data());
-        logSpeculativeLoadingDiagnosticMessage(frameID, preloadedEntry->wasRevalidated() ? DiagnosticLoggingKeys::successfulSpeculativeWarmupWithRevalidationKey() : DiagnosticLoggingKeys::successfulSpeculativeWarmupWithoutRevalidationKey());
+        logSpeculativeLoadingDiagnosticMessage(m_cache.networkProcess(), frameID, preloadedEntry->wasRevalidated() ? DiagnosticLoggingKeys::successfulSpeculativeWarmupWithRevalidationKey() : DiagnosticLoggingKeys::successfulSpeculativeWarmupWithoutRevalidationKey());
         return true;
     }
 
@@ -325,16 +303,16 @@ bool SpeculativeLoadManager::canRetrieve(const Key& storageKey, const WebCore::R
     auto* pendingPreload = m_pendingPreloads.get(storageKey);
     if (!pendingPreload) {
         if (m_notPreloadedEntries.get(storageKey))
-            logSpeculativeLoadingDiagnosticMessage(frameID, DiagnosticLoggingKeys::entryWronglyNotWarmedUpKey());
+            logSpeculativeLoadingDiagnosticMessage(m_cache.networkProcess(), frameID, DiagnosticLoggingKeys::entryWronglyNotWarmedUpKey());
         else
-            logSpeculativeLoadingDiagnosticMessage(frameID, DiagnosticLoggingKeys::unknownEntryRequestKey());
+            logSpeculativeLoadingDiagnosticMessage(m_cache.networkProcess(), frameID, DiagnosticLoggingKeys::unknownEntryRequestKey());
 
         return false;
     }
 
     if (!canUsePendingPreload(*pendingPreload, request)) {
         LOG(NetworkCacheSpeculativePreloading, "(NetworkProcess) Retrieval: revalidation already in progress for '%s' but unusable due to HTTP headers mismatch:", storageKey.identifier().utf8().data());
-        logSpeculativeLoadingDiagnosticMessage(frameID, DiagnosticLoggingKeys::wastedSpeculativeWarmupWithRevalidationKey());
+        logSpeculativeLoadingDiagnosticMessage(m_cache.networkProcess(), frameID, DiagnosticLoggingKeys::wastedSpeculativeWarmupWithRevalidationKey());
         return false;
     }
 
@@ -354,19 +332,26 @@ void SpeculativeLoadManager::retrieve(const Key& storageKey, RetrieveCompletionH
     ASSERT(m_pendingPreloads.contains(storageKey));
     // FIXME: This breaks incremental loading when the revalidation is not successful.
     auto addResult = m_pendingRetrieveRequests.ensure(storageKey, [] {
-        return std::make_unique<Vector<RetrieveCompletionHandler>>();
+        return makeUnique<Vector<RetrieveCompletionHandler>>();
     });
     addResult.iterator->value->append(WTFMove(completionHandler));
 }
 
-void SpeculativeLoadManager::registerLoad(const GlobalFrameID& frameID, const ResourceRequest& request, const Key& resourceKey)
+bool SpeculativeLoadManager::shouldRegisterLoad(const WebCore::ResourceRequest& request)
+{
+    if (request.httpMethod() != "GET"_s)
+        return false;
+    if (!request.httpHeaderField(HTTPHeaderName::Range).isEmpty())
+        return false;
+    return true;
+}
+
+void SpeculativeLoadManager::registerLoad(const GlobalFrameID& frameID, const ResourceRequest& request, const Key& resourceKey, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain)
 {
     ASSERT(RunLoop::isMain());
     ASSERT(request.url().protocolIsInHTTPFamily());
 
-    if (request.httpMethod() != "GET")
-        return;
-    if (!request.httpHeaderField(HTTPHeaderName::Range).isEmpty())
+    if (!shouldRegisterLoad(request))
         return;
 
     auto isMainResource = request.requester() == ResourceRequest::Requester::Main;
@@ -385,9 +370,12 @@ void SpeculativeLoadManager::registerLoad(const GlobalFrameID& frameID, const Re
         m_pendingFrameLoads.add(frameID, pendingFrameLoad.copyRef());
 
         // Retrieve the subresources entry if it exists to start speculative revalidation and to update it.
-        retrieveSubresourcesEntry(resourceKey, [this, frameID, pendingFrameLoad = WTFMove(pendingFrameLoad)](std::unique_ptr<SubresourcesEntry> entry) {
+        retrieveSubresourcesEntry(resourceKey, [this, weakThis = WeakPtr { *this }, frameID, pendingFrameLoad = WTFMove(pendingFrameLoad), requestIsAppInitiated = request.isAppInitiated(), isNavigatingToAppBoundDomain](std::unique_ptr<SubresourcesEntry> entry) {
+            if (!weakThis)
+                return;
+
             if (entry)
-                startSpeculativeRevalidation(frameID, *entry);
+                startSpeculativeRevalidation(frameID, *entry, requestIsAppInitiated, isNavigatingToAppBoundDomain);
 
             pendingFrameLoad->setExistingSubresourcesEntry(WTFMove(entry));
         });
@@ -398,24 +386,36 @@ void SpeculativeLoadManager::registerLoad(const GlobalFrameID& frameID, const Re
         pendingFrameLoad->registerSubresourceLoad(request, resourceKey);
 }
 
+void SpeculativeLoadManager::registerMainResourceLoadResponse(const GlobalFrameID& frameID, const WebCore::ResourceRequest& request, const WebCore::ResourceResponse& response)
+{
+    if (!shouldRegisterLoad(request))
+        return;
+
+    if (response.isRedirection())
+        return;
+
+    if (auto* pendingFrameLoad = m_pendingFrameLoads.get(frameID))
+        pendingFrameLoad->markMainResourceResponseAsReceived();
+}
+
 void SpeculativeLoadManager::addPreloadedEntry(std::unique_ptr<Entry> entry, const GlobalFrameID& frameID, std::optional<ResourceRequest>&& revalidationRequest)
 {
     ASSERT(entry);
     ASSERT(!entry->needsValidation());
     auto key = entry->key();
-    m_preloadedEntries.add(key, std::make_unique<PreloadedEntry>(WTFMove(entry), WTFMove(revalidationRequest), [this, key, frameID] {
+    m_preloadedEntries.add(key, makeUnique<PreloadedEntry>(WTFMove(entry), WTFMove(revalidationRequest), [this, key, frameID] {
         auto preloadedEntry = m_preloadedEntries.take(key);
         ASSERT(preloadedEntry);
         if (preloadedEntry->wasRevalidated())
-            logSpeculativeLoadingDiagnosticMessage(frameID, DiagnosticLoggingKeys::wastedSpeculativeWarmupWithRevalidationKey());
+            logSpeculativeLoadingDiagnosticMessage(m_cache.networkProcess(), frameID, DiagnosticLoggingKeys::wastedSpeculativeWarmupWithRevalidationKey());
         else
-            logSpeculativeLoadingDiagnosticMessage(frameID, DiagnosticLoggingKeys::wastedSpeculativeWarmupWithoutRevalidationKey());
+            logSpeculativeLoadingDiagnosticMessage(m_cache.networkProcess(), frameID, DiagnosticLoggingKeys::wastedSpeculativeWarmupWithoutRevalidationKey());
     }));
 }
 
 void SpeculativeLoadManager::retrieveEntryFromStorage(const SubresourceInfo& info, RetrieveCompletionHandler&& completionHandler)
 {
-    m_storage.retrieve(info.key(), static_cast<unsigned>(info.priority()), [completionHandler = WTFMove(completionHandler)](auto record) {
+    m_storage.retrieve(info.key(), static_cast<unsigned>(info.priority()), [completionHandler = WTFMove(completionHandler)](auto record, auto timings) {
         if (!record) {
             completionHandler(nullptr);
             return false;
@@ -448,12 +448,37 @@ bool SpeculativeLoadManager::satisfyPendingRequests(const Key& key, Entry* entry
         return false;
 
     for (auto& completionHandler : *completionHandlers)
-        completionHandler(entry ? std::make_unique<Entry>(*entry) : nullptr);
+        completionHandler(entry ? makeUnique<Entry>(*entry) : nullptr);
 
     return true;
 }
 
-void SpeculativeLoadManager::revalidateSubresource(const SubresourceInfo& subresourceInfo, std::unique_ptr<Entry> entry, const GlobalFrameID& frameID)
+void SpeculativeLoadManager::preconnectForSubresource(const SubresourceInfo& subresourceInfo, Entry* entry, const GlobalFrameID& frameID, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain)
+{
+#if ENABLE(SERVER_PRECONNECT)
+    auto* networkSession = m_cache.networkProcess().networkSession(m_cache.sessionID());
+    if (!networkSession)
+        return;
+
+    NetworkLoadParameters parameters;
+    parameters.webPageProxyID = frameID.webPageProxyID;
+    parameters.webPageID = frameID.webPageID;
+    parameters.webFrameID = frameID.frameID;
+    parameters.storedCredentialsPolicy = StoredCredentialsPolicy::Use;
+    parameters.contentSniffingPolicy = ContentSniffingPolicy::DoNotSniffContent;
+    parameters.contentEncodingSniffingPolicy = ContentEncodingSniffingPolicy::Default;
+    parameters.shouldPreconnectOnly = PreconnectOnly::Yes;
+    parameters.request = constructRevalidationRequest(subresourceInfo.key(), subresourceInfo, entry);
+    parameters.isNavigatingToAppBoundDomain = isNavigatingToAppBoundDomain;
+    (new PreconnectTask(*networkSession, WTFMove(parameters), [](const WebCore::ResourceError&, const WebCore::NetworkLoadMetrics&) { }))->start();
+#else
+    UNUSED_PARAM(subresourceInfo);
+    UNUSED_PARAM(entry);
+    UNUSED_PARAM(frameID);
+#endif
+}
+
+void SpeculativeLoadManager::revalidateSubresource(const SubresourceInfo& subresourceInfo, std::unique_ptr<Entry> entry, const GlobalFrameID& frameID, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain)
 {
     ASSERT(!entry || entry->needsValidation());
 
@@ -463,11 +488,26 @@ void SpeculativeLoadManager::revalidateSubresource(const SubresourceInfo& subres
     if (!key.range().isEmpty())
         return;
 
+    auto* pendingLoad = m_pendingFrameLoads.get(frameID);
+
+    // Delay first-party speculative loads until we've received the response for the main resource, in case the main resource
+    // response sets cookies that are needed for subsequent loads.
+    if (pendingLoad && !pendingLoad->didReceiveMainResourceResponse() && subresourceInfo.isFirstParty()) {
+        preconnectForSubresource(subresourceInfo, entry.get(), frameID, isNavigatingToAppBoundDomain);
+        pendingLoad->addPostMainResourceResponseTask([this, subresourceInfo, entry = WTFMove(entry), frameID, isNavigatingToAppBoundDomain]() mutable {
+            if (m_pendingPreloads.contains(subresourceInfo.key()))
+                return;
+
+            revalidateSubresource(subresourceInfo, WTFMove(entry), frameID, isNavigatingToAppBoundDomain);
+        });
+        return;
+    }
+
     ResourceRequest revalidationRequest = constructRevalidationRequest(key, subresourceInfo, entry.get());
 
     LOG(NetworkCacheSpeculativePreloading, "(NetworkProcess) Speculatively revalidating '%s':", key.identifier().utf8().data());
 
-    auto revalidator = std::make_unique<SpeculativeLoad>(m_cache, frameID, revalidationRequest, WTFMove(entry), [this, key, revalidationRequest, frameID](std::unique_ptr<Entry> revalidatedEntry) {
+    auto revalidator = makeUnique<SpeculativeLoad>(m_cache, frameID, revalidationRequest, WTFMove(entry), isNavigatingToAppBoundDomain, [this, key, revalidationRequest, frameID](std::unique_ptr<Entry> revalidatedEntry) {
         ASSERT(!revalidatedEntry || !revalidatedEntry->needsValidation());
         ASSERT(!revalidatedEntry || revalidatedEntry->key() == key);
 
@@ -476,7 +516,7 @@ void SpeculativeLoadManager::revalidateSubresource(const SubresourceInfo& subres
 
         if (satisfyPendingRequests(key, revalidatedEntry.get())) {
             if (revalidatedEntry)
-                logSpeculativeLoadingDiagnosticMessage(frameID, DiagnosticLoggingKeys::successfulSpeculativeWarmupWithRevalidationKey());
+                logSpeculativeLoadingDiagnosticMessage(m_cache.networkProcess(), frameID, DiagnosticLoggingKeys::successfulSpeculativeWarmupWithRevalidationKey());
             return;
         }
 
@@ -495,24 +535,24 @@ static bool canRevalidate(const SubresourceInfo& subresourceInfo, const Entry* e
         return true;
     
     auto seenAge = subresourceInfo.lastSeen() - subresourceInfo.firstSeen();
-    if (seenAge == 0ms) {
+    if (seenAge == 0_ms) {
         LOG(NetworkCacheSpeculativePreloading, "Speculative load: Seen only once");
         return false;
     }
     
-    auto now = std::chrono::system_clock::now();
+    auto now = WallTime::now();
     auto firstSeenAge = now - subresourceInfo.firstSeen();
     auto lastSeenAge = now - subresourceInfo.lastSeen();
     // Sanity check.
-    if (seenAge <= 0ms || firstSeenAge <= 0ms || lastSeenAge <= 0ms)
+    if (seenAge <= 0_ms || firstSeenAge <= 0_ms || lastSeenAge <= 0_ms)
         return false;
     
     // Load full resources speculatively if they seem to stay the same.
     const auto minimumAgeRatioToLoad = 2. / 3;
     const auto recentMinimumAgeRatioToLoad = 1. / 3;
-    const auto recentThreshold = 5min;
+    const auto recentThreshold = 5_min;
     
-    auto ageRatio = std::chrono::duration_cast<std::chrono::duration<double>>(seenAge) / firstSeenAge;
+    auto ageRatio = seenAge / firstSeenAge;
     auto minimumAgeRatio = lastSeenAge > recentThreshold ? minimumAgeRatioToLoad : recentMinimumAgeRatioToLoad;
     
     LOG(NetworkCacheSpeculativePreloading, "Speculative load: ok=%d ageRatio=%f entry=%d", ageRatio > minimumAgeRatio, ageRatio, !!entry);
@@ -523,26 +563,29 @@ static bool canRevalidate(const SubresourceInfo& subresourceInfo, const Entry* e
     return false;
 }
 
-void SpeculativeLoadManager::preloadEntry(const Key& key, const SubresourceInfo& subresourceInfo, const GlobalFrameID& frameID)
+void SpeculativeLoadManager::preloadEntry(const Key& key, const SubresourceInfo& subresourceInfo, const GlobalFrameID& frameID, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain)
 {
     if (m_pendingPreloads.contains(key))
         return;
     m_pendingPreloads.add(key, nullptr);
     
-    retrieveEntryFromStorage(subresourceInfo, [this, key, subresourceInfo, frameID](std::unique_ptr<Entry> entry) {
+    retrieveEntryFromStorage(subresourceInfo, [this, weakThis = WeakPtr { *this }, key, subresourceInfo, frameID, isNavigatingToAppBoundDomain](std::unique_ptr<Entry> entry) {
+        if (!weakThis)
+            return;
+
         ASSERT(!m_pendingPreloads.get(key));
         bool removed = m_pendingPreloads.remove(key);
         ASSERT_UNUSED(removed, removed);
 
         if (satisfyPendingRequests(key, entry.get())) {
             if (entry)
-                logSpeculativeLoadingDiagnosticMessage(frameID, DiagnosticLoggingKeys::successfulSpeculativeWarmupWithoutRevalidationKey());
+                logSpeculativeLoadingDiagnosticMessage(m_cache.networkProcess(), frameID, DiagnosticLoggingKeys::successfulSpeculativeWarmupWithoutRevalidationKey());
             return;
         }
         
         if (!entry || entry->needsValidation()) {
             if (canRevalidate(subresourceInfo, entry.get()))
-                revalidateSubresource(subresourceInfo, WTFMove(entry), frameID);
+                revalidateSubresource(subresourceInfo, WTFMove(entry), frameID, isNavigatingToAppBoundDomain);
             return;
         }
         
@@ -550,16 +593,17 @@ void SpeculativeLoadManager::preloadEntry(const Key& key, const SubresourceInfo&
     });
 }
 
-void SpeculativeLoadManager::startSpeculativeRevalidation(const GlobalFrameID& frameID, SubresourcesEntry& entry)
+void SpeculativeLoadManager::startSpeculativeRevalidation(const GlobalFrameID& frameID, SubresourcesEntry& entry, bool requestIsAppInitiated, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain)
 {
     for (auto& subresourceInfo : entry.subresources()) {
         auto& key = subresourceInfo.key();
+        subresourceInfo.setIsAppInitiated(requestIsAppInitiated);
         if (!subresourceInfo.isTransient())
-            preloadEntry(key, subresourceInfo, frameID);
+            preloadEntry(key, subresourceInfo, frameID, isNavigatingToAppBoundDomain);
         else {
             LOG(NetworkCacheSpeculativePreloading, "(NetworkProcess) Not preloading '%s' because it is marked as transient", key.identifier().utf8().data());
-            m_notPreloadedEntries.add(key, std::make_unique<ExpiringEntry>([this, key, frameID] {
-                logSpeculativeLoadingDiagnosticMessage(frameID, DiagnosticLoggingKeys::entryRightlyNotWarmedUpKey());
+            m_notPreloadedEntries.add(key, makeUnique<ExpiringEntry>([this, key, frameID] {
+                logSpeculativeLoadingDiagnosticMessage(m_cache.networkProcess(), frameID, DiagnosticLoggingKeys::entryRightlyNotWarmedUpKey());
                 m_notPreloadedEntries.remove(key);
             }));
         }
@@ -568,9 +612,9 @@ void SpeculativeLoadManager::startSpeculativeRevalidation(const GlobalFrameID& f
 
 void SpeculativeLoadManager::retrieveSubresourcesEntry(const Key& storageKey, WTF::Function<void (std::unique_ptr<SubresourcesEntry>)>&& completionHandler)
 {
-    ASSERT(storageKey.type() == "Resource");
+    ASSERT(storageKey.type() == "Resource"_s);
     auto subresourcesStorageKey = makeSubresourcesKey(storageKey, m_storage.salt());
-    m_storage.retrieve(subresourcesStorageKey, static_cast<unsigned>(ResourceLoadPriority::Medium), [completionHandler = WTFMove(completionHandler)](auto record) {
+    m_storage.retrieve(subresourcesStorageKey, static_cast<unsigned>(ResourceLoadPriority::Medium), [completionHandler = WTFMove(completionHandler)](auto record, auto timings) {
         if (!record) {
             completionHandler(nullptr);
             return false;

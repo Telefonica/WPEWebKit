@@ -40,13 +40,3 @@ bool WKNavigationResponseCanShowMIMEType(WKNavigationResponseRef response)
 {
     return toImpl(response)->canShowMIMEType();
 }
-
-WKURLResponseRef WKNavigationResponseGetURLResponse(WKNavigationResponseRef response)
-{
-    return toAPI(toImpl(response)->response());
-}
-
-bool WKNavigationResponseIsMainFrame(WKNavigationResponseRef response)
-{
-    return toImpl(response)->frame().isMainFrame();
-}

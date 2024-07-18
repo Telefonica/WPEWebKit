@@ -8,31 +8,46 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_BLOCK_PROCESSOR_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_BLOCK_PROCESSOR_H_
+#ifndef MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_BLOCK_PROCESSOR_H_
+#define MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_BLOCK_PROCESSOR_H_
 
 #include <vector>
 
-#include "webrtc/modules/audio_processing/aec3/block_processor.h"
-#include "webrtc/test/gmock.h"
+#include "modules/audio_processing/aec3/block_processor.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 namespace test {
 
 class MockBlockProcessor : public BlockProcessor {
  public:
-  virtual ~MockBlockProcessor() {}
+  MockBlockProcessor();
+  virtual ~MockBlockProcessor();
 
-  MOCK_METHOD3(ProcessCapture,
-               void(bool level_change,
-                    bool saturated_microphone_signal,
-                    std::vector<std::vector<float>>* capture_block));
-  MOCK_METHOD1(BufferRender,
-               void(const std::vector<std::vector<float>>& block));
-  MOCK_METHOD1(UpdateEchoLeakageStatus, void(bool leakage_detected));
+  MOCK_METHOD(void,
+              ProcessCapture,
+              (bool level_change,
+               bool saturated_microphone_signal,
+               Block* linear_output,
+               Block* capture_block),
+              (override));
+  MOCK_METHOD(void, BufferRender, (const Block& block), (override));
+  MOCK_METHOD(void,
+              UpdateEchoLeakageStatus,
+              (bool leakage_detected),
+              (override));
+  MOCK_METHOD(void,
+              GetMetrics,
+              (EchoControl::Metrics * metrics),
+              (const, override));
+  MOCK_METHOD(void, SetAudioBufferDelay, (int delay_ms), (override));
+  MOCK_METHOD(void,
+              SetCaptureOutputUsage,
+              (bool capture_output_used),
+              (override));
 };
 
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_BLOCK_PROCESSOR_H_
+#endif  // MODULES_AUDIO_PROCESSING_AEC3_MOCK_MOCK_BLOCK_PROCESSOR_H_

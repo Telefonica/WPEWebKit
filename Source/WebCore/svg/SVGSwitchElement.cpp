@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2004, 2005 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005, 2006 Rob Buis <buis@kde.org>
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,24 +23,19 @@
 #include "SVGSwitchElement.h"
 
 #include "ElementIterator.h"
+#include "LegacyRenderSVGTransformableContainer.h"
 #include "RenderSVGTransformableContainer.h"
-#include "SVGNames.h"
+#include "SVGElementTypeHelpers.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-// Animated property definitions
-DEFINE_ANIMATED_BOOLEAN(SVGSwitchElement, SVGNames::externalResourcesRequiredAttr, ExternalResourcesRequired, externalResourcesRequired)
-
-BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGSwitchElement)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(externalResourcesRequired)
-    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGGraphicsElement)
-END_REGISTER_ANIMATED_PROPERTIES
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGSwitchElement);
 
 inline SVGSwitchElement::SVGSwitchElement(const QualifiedName& tagName, Document& document)
     : SVGGraphicsElement(tagName, document)
 {
     ASSERT(hasTagName(SVGNames::switchTag));
-    registerAnimatedPropertiesForSVGSwitchElement();
 }
 
 Ref<SVGSwitchElement> SVGSwitchElement::create(const QualifiedName& tagName, Document& document)
@@ -62,7 +58,11 @@ bool SVGSwitchElement::childShouldCreateRenderer(const Node& child) const
 
 RenderPtr<RenderElement> SVGSwitchElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
-    return createRenderer<RenderSVGTransformableContainer>(*this, WTFMove(style));
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    if (document().settings().layerBasedSVGEngineEnabled())
+        return createRenderer<RenderSVGTransformableContainer>(*this, WTFMove(style));
+#endif
+    return createRenderer<LegacyRenderSVGTransformableContainer>(*this, WTFMove(style));
 }
 
 }

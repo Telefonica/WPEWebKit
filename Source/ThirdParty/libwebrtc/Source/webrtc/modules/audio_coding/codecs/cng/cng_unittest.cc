@@ -10,9 +10,9 @@
 #include <memory>
 #include <string>
 
-#include "webrtc/modules/audio_coding/codecs/cng/webrtc_cng.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/testsupport/fileutils.h"
+#include "modules/audio_coding/codecs/cng/webrtc_cng.h"
+#include "test/gtest.h"
+#include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 
@@ -29,10 +29,7 @@ enum : size_t {
   kCNGNumParamsTooHigh = WEBRTC_CNG_MAX_LPC_ORDER + 1
 };
 
-enum {
-  kNoSid,
-  kForceSid
-};
+enum { kNoSid, kForceSid };
 
 class CngTest : public ::testing::Test {
  protected:
@@ -43,14 +40,16 @@ class CngTest : public ::testing::Test {
   int16_t speech_data_[640];  // Max size of CNG internal buffers.
 };
 
+class CngDeathTest : public CngTest {};
+
 void CngTest::SetUp() {
   FILE* input_file;
   const std::string file_name =
-        webrtc::test::ResourcePath("audio_coding/testfile32kHz", "pcm");
+      webrtc::test::ResourcePath("audio_coding/testfile32kHz", "pcm");
   input_file = fopen(file_name.c_str(), "rb");
   ASSERT_TRUE(input_file != NULL);
-  ASSERT_EQ(640, static_cast<int32_t>(fread(speech_data_, sizeof(int16_t),
-                                             640, input_file)));
+  ASSERT_EQ(640, static_cast<int32_t>(
+                     fread(speech_data_, sizeof(int16_t), 640, input_file)));
   fclose(input_file);
   input_file = NULL;
 }
@@ -72,17 +71,24 @@ void CngTest::TestCngEncode(int sample_rate_hz, int quality) {
 
 #if GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
 // Create CNG encoder, init with faulty values, free CNG encoder.
-TEST_F(CngTest, CngInitFail) {
+TEST_F(CngDeathTest, CngInitFail) {
   // Call with too few parameters.
-  EXPECT_DEATH({ ComfortNoiseEncoder(8000, kSidNormalIntervalUpdate,
-                                     kCNGNumParamsLow); }, "");
+  EXPECT_DEATH(
+      {
+        ComfortNoiseEncoder(8000, kSidNormalIntervalUpdate, kCNGNumParamsLow);
+      },
+      "");
   // Call with too many parameters.
-  EXPECT_DEATH({ ComfortNoiseEncoder(8000, kSidNormalIntervalUpdate,
-                                     kCNGNumParamsTooHigh); }, "");
+  EXPECT_DEATH(
+      {
+        ComfortNoiseEncoder(8000, kSidNormalIntervalUpdate,
+                            kCNGNumParamsTooHigh);
+      },
+      "");
 }
 
 // Encode Cng with too long input vector.
-TEST_F(CngTest, CngEncodeTooLong) {
+TEST_F(CngDeathTest, CngEncodeTooLong) {
   rtc::Buffer sid_data;
 
   // Create encoder.
@@ -209,13 +215,15 @@ TEST_F(CngTest, CngAutoSid) {
 
   // Normal Encode, 100 msec, where no SID data should be generated.
   for (int i = 0; i < 10; i++) {
-    EXPECT_EQ(0U, cng_encoder.Encode(
-        rtc::ArrayView<const int16_t>(speech_data_, 160), kNoSid, &sid_data));
+    EXPECT_EQ(
+        0U, cng_encoder.Encode(rtc::ArrayView<const int16_t>(speech_data_, 160),
+                               kNoSid, &sid_data));
   }
 
   // We have reached 100 msec, and SID data should be generated.
-  EXPECT_EQ(kCNGNumParamsNormal + 1, cng_encoder.Encode(
-      rtc::ArrayView<const int16_t>(speech_data_, 160), kNoSid, &sid_data));
+  EXPECT_EQ(kCNGNumParamsNormal + 1,
+            cng_encoder.Encode(rtc::ArrayView<const int16_t>(speech_data_, 160),
+                               kNoSid, &sid_data));
 }
 
 // Test automatic SID, with very short interval.
@@ -228,13 +236,16 @@ TEST_F(CngTest, CngAutoSidShort) {
   ComfortNoiseDecoder cng_decoder;
 
   // First call will never generate SID, unless forced to.
-  EXPECT_EQ(0U, cng_encoder.Encode(
-      rtc::ArrayView<const int16_t>(speech_data_, 160), kNoSid, &sid_data));
+  EXPECT_EQ(0U,
+            cng_encoder.Encode(rtc::ArrayView<const int16_t>(speech_data_, 160),
+                               kNoSid, &sid_data));
 
   // Normal Encode, 100 msec, SID data should be generated all the time.
   for (int i = 0; i < 10; i++) {
-    EXPECT_EQ(kCNGNumParamsNormal + 1, cng_encoder.Encode(
-        rtc::ArrayView<const int16_t>(speech_data_, 160), kNoSid, &sid_data));
+    EXPECT_EQ(
+        kCNGNumParamsNormal + 1,
+        cng_encoder.Encode(rtc::ArrayView<const int16_t>(speech_data_, 160),
+                           kNoSid, &sid_data));
   }
 }
 

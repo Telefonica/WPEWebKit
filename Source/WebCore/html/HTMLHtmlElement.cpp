@@ -28,11 +28,17 @@
 #include "Document.h"
 #include "DocumentLoader.h"
 #include "DocumentParser.h"
+#include "ElementInlines.h"
 #include "Frame.h"
+#include "FrameDestructionObserverInlines.h"
 #include "FrameLoader.h"
 #include "HTMLNames.h"
+#include "Logging.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLHtmlElement);
 
 using namespace HTMLNames;
 
@@ -66,15 +72,18 @@ void HTMLHtmlElement::insertedByParser()
     if (!document().frame())
         return;
 
-    auto* documentLoader = document().frame()->loader().documentLoader();
+    RefPtr documentLoader = document().frame()->loader().documentLoader();
     if (!documentLoader)
         return;
 
     auto& manifest = attributeWithoutSynchronization(manifestAttr);
     if (manifest.isEmpty())
         documentLoader->applicationCacheHost().selectCacheWithoutManifest();
-    else
+    else {
+        RELEASE_LOG_FAULT(Storage, "HTMLHtmlElement::insertedByParser: ApplicationCache is deprecated.");
+        document().addConsoleMessage(MessageSource::AppCache, MessageLevel::Warning, "ApplicationCache is deprecated. Please use ServiceWorkers instead."_s);
         documentLoader->applicationCacheHost().selectCacheWithManifest(document().completeURL(manifest));
+    }
 }
 
 }

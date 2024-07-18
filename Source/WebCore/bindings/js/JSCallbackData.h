@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2009, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,9 +31,9 @@
 #include "JSDOMBinding.h"
 #include "JSDOMGlobalObject.h"
 #include "ScriptExecutionContext.h"
-#include <heap/Strong.h>
-#include <heap/StrongInlines.h>
-#include <runtime/JSObject.h>
+#include <JavaScriptCore/JSObject.h>
+#include <JavaScriptCore/Strong.h>
+#include <JavaScriptCore/StrongInlines.h>
 #include <wtf/Threading.h>
 
 namespace WebCore {
@@ -43,39 +43,37 @@ namespace WebCore {
 // (and synchronization would be slow).
 
 class JSCallbackData {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     enum class CallbackType { Function, Object, FunctionOrObject };
 
     JSDOMGlobalObject* globalObject() { return m_globalObject.get(); }
 
+    WEBCORE_EXPORT static JSC::JSValue invokeCallback(JSDOMGlobalObject&, JSC::JSObject* callback, JSC::JSValue thisValue, JSC::MarkedArgumentBuffer&, CallbackType, JSC::PropertyName functionName, NakedPtr<JSC::Exception>& returnedException);
+
 protected:
     explicit JSCallbackData(JSDOMGlobalObject* globalObject)
         : m_globalObject(globalObject)
-#ifndef NDEBUG
-        , m_thread(currentThread())
-#endif
     {
     }
     
     ~JSCallbackData()
     {
-#if !PLATFORM(IOS)
-        ASSERT(m_thread == currentThread());
+#if !PLATFORM(IOS_FAMILY)
+        ASSERT(m_thread.ptr() == &Thread::current());
 #endif
     }
-    
-    static JSC::JSValue invokeCallback(JSDOMGlobalObject&, JSC::JSObject* callback, JSC::JSValue thisValue, JSC::MarkedArgumentBuffer&, CallbackType, JSC::PropertyName functionName, NakedPtr<JSC::Exception>& returnedException);
 
 private:
     JSC::Weak<JSDOMGlobalObject> m_globalObject;
-#ifndef NDEBUG
-    ThreadIdentifier m_thread;
+#if ASSERT_ENABLED
+    Ref<Thread> m_thread { Thread::current() };
 #endif
 };
 
 class JSCallbackDataStrong : public JSCallbackData {
 public:
-    JSCallbackDataStrong(JSC::JSObject* callback, JSDOMGlobalObject* globalObject, void*)
+    JSCallbackDataStrong(JSC::JSObject* callback, JSDOMGlobalObject* globalObject, void* = nullptr)
         : JSCallbackData(globalObject)
         , m_callback(globalObject->vm(), callback)
     {
@@ -115,11 +113,11 @@ public:
         return JSCallbackData::invokeCallback(*globalObject, callback(), thisValue, args, callbackType, functionName, returnedException);
     }
 
-    void visitJSFunction(JSC::SlotVisitor&);
+    template<typename Visitor> void visitJSFunction(Visitor&);
 
 private:
     class WeakOwner : public JSC::WeakHandleOwner {
-        bool isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, JSC::SlotVisitor&) override;
+        bool isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, JSC::AbstractSlotVisitor&, const char**) override;
     };
     WeakOwner m_weakOwner;
     JSC::Weak<JSC::JSObject> m_callback;

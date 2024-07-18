@@ -29,22 +29,24 @@ namespace WebCore {
 class CounterNode;
 
 class RenderCounter final : public RenderText {
+    WTF_MAKE_ISO_ALLOCATED(RenderCounter);
 public:
     RenderCounter(Document&, const CounterContent&);
     virtual ~RenderCounter();
 
     static void destroyCounterNodes(RenderElement&);
-    static void destroyCounterNode(RenderElement&, const AtomicString& identifier);
+    static void destroyCounterNode(RenderElement&, const AtomString& identifier);
     static void rendererSubtreeAttached(RenderElement&);
     static void rendererRemovedFromTree(RenderElement&);
-    static void rendererStyleChanged(RenderElement&, const RenderStyle* oldStyle, const RenderStyle* newStyle);
+    static void rendererStyleChanged(RenderElement&, const RenderStyle* oldStyle, const RenderStyle& newStyle);
 
     void updateCounter();
 
 private:
     void willBeDestroyed() override;
+    static void rendererStyleChangedSlowCase(RenderElement&, const RenderStyle* oldStyle, const RenderStyle& newStyle);
     
-    const char* renderName() const override;
+    ASCIILiteral renderName() const override;
     bool isCounter() const override;
     String originalText() const override;
     
@@ -55,6 +57,15 @@ private:
     RenderCounter* m_nextForSameCounter { nullptr };
     friend class CounterNode;
 };
+
+
+inline void RenderCounter::rendererStyleChanged(RenderElement& renderer, const RenderStyle* oldStyle, const RenderStyle& newStyle)
+{
+    if ((!oldStyle || !oldStyle->counterDirectives()) && !newStyle.counterDirectives())
+        return;
+
+    rendererStyleChangedSlowCase(renderer, oldStyle, newStyle);
+}
 
 } // namespace WebCore
 

@@ -27,37 +27,42 @@
 
 namespace JSC {
 
-typedef uintptr_t Bits;
-
+template <typename Bits = uintptr_t>
 class TinyBloomFilter {
 public:
-    TinyBloomFilter();
+    TinyBloomFilter() = default;
+    TinyBloomFilter(Bits);
 
     void add(Bits);
     void add(TinyBloomFilter&);
     bool ruleOut(Bits) const; // True for 0.
     void reset();
+    Bits bits() const { return m_bits; }
 
 private:
-    Bits m_bits;
+    Bits m_bits { 0 };
 };
 
-inline TinyBloomFilter::TinyBloomFilter()
-    : m_bits(0)
+template <typename Bits>
+inline TinyBloomFilter<Bits>::TinyBloomFilter(Bits bits)
+    : m_bits(bits)
 {
 }
 
-inline void TinyBloomFilter::add(Bits bits)
+template <typename Bits>
+inline void TinyBloomFilter<Bits>::add(Bits bits)
 {
     m_bits |= bits;
 }
 
-inline void TinyBloomFilter::add(TinyBloomFilter& other)
+template <typename Bits>
+inline void TinyBloomFilter<Bits>::add(TinyBloomFilter& other)
 {
     m_bits |= other.m_bits;
 }
 
-inline bool TinyBloomFilter::ruleOut(Bits bits) const
+template <typename Bits>
+inline bool TinyBloomFilter<Bits>::ruleOut(Bits bits) const
 {
     if (!bits)
         return true;
@@ -68,7 +73,8 @@ inline bool TinyBloomFilter::ruleOut(Bits bits) const
     return false;
 }
 
-inline void TinyBloomFilter::reset()
+template <typename Bits>
+inline void TinyBloomFilter<Bits>::reset()
 {
     m_bits = 0;
 }

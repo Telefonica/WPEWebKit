@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,88 +27,86 @@
 
 #include "CSSValue.h"
 #include "CSSVariableData.h"
-#include <wtf/RefPtr.h>
-#include <wtf/text/WTFString.h>
+#include "CSSVariableReferenceValue.h"
+#include "Length.h"
+#include "StyleImage.h"
+#include <variant>
 
 namespace WebCore {
 
+class CSSParserToken;
+
 class CSSCustomPropertyValue final : public CSSValue {
 public:
-    static Ref<CSSCustomPropertyValue> createWithVariableData(const AtomicString& name, Ref<CSSVariableData>&& value)
+    using VariantValue = std::variant<std::monostate, Ref<CSSVariableReferenceValue>, CSSValueID, Ref<CSSVariableData>, Length, Ref<StyleImage>>;
+
+    static Ref<CSSCustomPropertyValue> createEmpty(const AtomString& name);
+
+    static Ref<CSSCustomPropertyValue> createUnresolved(const AtomString& name, Ref<CSSVariableReferenceValue>&& value)
     {
-        return adoptRef(*new CSSCustomPropertyValue(name, WTFMove(value)));
-    }
-    
-    static Ref<CSSCustomPropertyValue> createWithID(const AtomicString& name, CSSValueID value)
-    {
-        return adoptRef(*new CSSCustomPropertyValue(name, value));
-    }
-    
-    static Ref<CSSCustomPropertyValue> createInvalid()
-    {
-        return adoptRef(*new CSSCustomPropertyValue(emptyString(), emptyString()));
-    }
-    
-    String customCSSText() const
-    {
-        if (!m_serialized) {
-            m_serialized = true;
-            if (m_value)
-                m_stringValue = m_value->tokenRange().serialize();
-            else if (m_valueId != CSSValueInvalid)
-                m_stringValue = getValueName(m_valueId);
-            else
-                m_stringValue = emptyString();
-        }
-        return m_stringValue;
+        return adoptRef(*new CSSCustomPropertyValue(name, VariantValue { std::in_place_type<Ref<CSSVariableReferenceValue>>, WTFMove(value) }));
     }
 
-    const AtomicString& name() const { return m_name; }
-    
-    bool equals(const CSSCustomPropertyValue& other) const { return m_name == other.m_name && m_value == other.m_value && m_valueId == other.m_valueId; }
+    static Ref<CSSCustomPropertyValue> createUnresolved(const AtomString& name, CSSValueID value)
+    {
+        return adoptRef(*new CSSCustomPropertyValue(name, { value }));
+    }
 
-    bool containsVariables() const { return m_containsVariables; }
-    bool checkVariablesForCycles(const AtomicString& name, CustomPropertyValueMap&, HashSet<AtomicString>& seenProperties, HashSet<AtomicString>& invalidProperties) const;
+    static Ref<CSSCustomPropertyValue> createWithID(const AtomString& name, CSSValueID);
 
-    void resolveVariableReferences(const CustomPropertyValueMap&, Vector<Ref<CSSCustomPropertyValue>>&) const;
+    static Ref<CSSCustomPropertyValue> createSyntaxAll(const AtomString& name, Ref<CSSVariableData>&& value)
+    {
+        return adoptRef(*new CSSCustomPropertyValue(name, VariantValue { std::in_place_type<Ref<CSSVariableData>>, WTFMove(value) }));
+    }
 
-    CSSValueID valueID() const { return m_valueId; }
-    CSSVariableData* value() const { return m_value.get(); }
+    static Ref<CSSCustomPropertyValue> createSyntaxLength(const AtomString& name, Length value)
+    {
+        ASSERT(!value.isUndefined());
+        ASSERT(!value.isCalculated());
+        return adoptRef(*new CSSCustomPropertyValue(name, { WTFMove(value) }));
+    }
+
+    static Ref<CSSCustomPropertyValue> createSyntaxImage(const AtomString& name, Ref<StyleImage>&& value)
+    {
+        return adoptRef(*new CSSCustomPropertyValue(name, { WTFMove(value) }));
+    }
+
+    static Ref<CSSCustomPropertyValue> create(const CSSCustomPropertyValue& other)
+    {
+        return adoptRef(*new CSSCustomPropertyValue(other));
+    }
+
+    String customCSSText() const;
+
+    const AtomString& name() const { return m_name; }
+    bool isResolved() const { return !std::holds_alternative<Ref<CSSVariableReferenceValue>>(m_value); }
+    bool isUnset() const { return std::holds_alternative<CSSValueID>(m_value) && std::get<CSSValueID>(m_value) == CSSValueUnset; }
+    bool isInvalid() const { return std::holds_alternative<CSSValueID>(m_value) && std::get<CSSValueID>(m_value) == CSSValueInvalid; }
+
+    const VariantValue& value() const { return m_value; }
+
+    Vector<CSSParserToken> tokens() const;
+    bool equals(const CSSCustomPropertyValue&) const;
 
 private:
-    CSSCustomPropertyValue(const AtomicString& name, const String& serializedValue)
-        : CSSValue(CustomPropertyClass)
-        , m_name(name)
-        , m_stringValue(serializedValue)
-        , m_serialized(true)
-    {
-    }
-
-    CSSCustomPropertyValue(const AtomicString& name, CSSValueID id)
-        : CSSValue(CustomPropertyClass)
-        , m_name(name)
-        , m_valueId(id)
-    {
-        ASSERT(id == CSSValueInherit || id == CSSValueInitial || id == CSSValueUnset || id == CSSValueRevert || id == CSSValueInvalid);
-    }
-    
-    CSSCustomPropertyValue(const AtomicString& name, Ref<CSSVariableData>&& value)
+    CSSCustomPropertyValue(const AtomString& name, VariantValue&& value)
         : CSSValue(CustomPropertyClass)
         , m_name(name)
         , m_value(WTFMove(value))
-        , m_valueId(CSSValueInternalVariableValue)
-        , m_containsVariables(m_value->needsVariableResolution())
     {
     }
-    
-    const AtomicString m_name;
-    
-    RefPtr<CSSVariableData> m_value;
-    CSSValueID m_valueId { CSSValueInvalid };
-    
+
+    CSSCustomPropertyValue(const CSSCustomPropertyValue& other)
+        : CSSValue(CustomPropertyClass)
+        , m_name(other.m_name)
+        , m_value(other.m_value)
+        , m_stringValue(other.m_stringValue)
+    {
+    }
+
+    const AtomString m_name;
+    const VariantValue m_value;
     mutable String m_stringValue;
-    bool m_containsVariables { false };
-    mutable bool m_serialized { false };
 };
 
 } // namespace WebCore

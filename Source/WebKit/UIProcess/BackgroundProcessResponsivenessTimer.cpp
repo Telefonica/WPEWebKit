@@ -116,6 +116,8 @@ void BackgroundProcessResponsivenessTimer::setResponsive(bool isResponsive)
     if (m_isResponsive == isResponsive)
         return;
 
+    Ref protectedClient { client() };
+
     client().willChangeIsResponsive();
     m_isResponsive = isResponsive;
     client().didChangeIsResponsive();
@@ -131,8 +133,12 @@ void BackgroundProcessResponsivenessTimer::setResponsive(bool isResponsive)
 
 bool BackgroundProcessResponsivenessTimer::shouldBeActive() const
 {
-#if !PLATFORM(IOS)
-    return !m_webProcessProxy.visiblePageCount() && m_webProcessProxy.pageCount();
+#if !PLATFORM(IOS_FAMILY)
+    if (m_webProcessProxy.visiblePageCount())
+        return false;
+    if (m_webProcessProxy.isStandaloneServiceWorkerProcess())
+        return true;
+    return m_webProcessProxy.pageCount();
 #else
     // Disable background process responsiveness checking on iOS since such processes usually get suspended.
     return false;

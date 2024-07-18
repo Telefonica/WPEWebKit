@@ -10,25 +10,22 @@
 
 package org.webrtc;
 
-import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
-import android.support.test.runner.AndroidJUnit4;
+import androidx.test.InstrumentationRegistry;
+import androidx.test.filters.SmallTest;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 import org.webrtc.PeerConnectionFactory;
 
 // This test is intended to run on ARM and catch LoadLibrary errors when we load the WebRTC
 // JNI. It can't really be setting up calls since ARM emulators are too slow, but instantiating
 // a peer connection isn't timing-sensitive, so we can at least do that.
-@RunWith(AndroidJUnit4.class)
 public class WebRtcJniBootTest {
   @Test
   @SmallTest
   public void testJniLoadsWithoutError() throws InterruptedException {
-    PeerConnectionFactory.initializeAndroidGlobals(InstrumentationRegistry.getTargetContext(),
-        false /* videoCodecHwAcceleration */);
-
-    PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
-    new PeerConnectionFactory(options);
+    PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions
+                                         .builder(InstrumentationRegistry.getTargetContext())
+                                         .setNativeLibraryName(TestConstants.NATIVE_LIBRARY)
+                                         .createInitializationOptions());
+    PeerConnectionFactory.builder().createPeerConnectionFactory();
   }
 }

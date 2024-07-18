@@ -33,29 +33,37 @@
 #include "config.h"
 #include "HTTPParsers.h"
 
+#include "CommonAtomStrings.h"
+#include "HTTPHeaderField.h"
 #include "HTTPHeaderNames.h"
+#include "ParsedContentType.h"
+#include <wtf/CheckedArithmetic.h>
 #include <wtf/DateMath.h>
-#include <wtf/Language.h>
 #include <wtf/NeverDestroyed.h>
-#include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
-#include <wtf/text/WTFString.h>
+#include <wtf/text/StringToIntegerConversion.h>
 #include <wtf/unicode/CharacterNames.h>
 
-using namespace WTF;
-
 namespace WebCore {
+
+// True if characters which satisfy the predicate are present, incrementing
+// "pos" to the next character which does not satisfy the predicate.
+// Note: might return pos == str.length().
+static inline bool skipWhile(const String& str, unsigned& pos, const Function<bool(const UChar)>& predicate)
+{
+    const unsigned start = pos;
+    const unsigned len = str.length();
+    while (pos < len && predicate(str[pos]))
+        ++pos;
+    return pos != start;
+}
 
 // true if there is more to parse, after incrementing pos past whitespace.
 // Note: Might return pos == str.length()
 static inline bool skipWhiteSpace(const String& str, unsigned& pos)
 {
-    unsigned len = str.length();
-
-    while (pos < len && (str[pos] == '\t' || str[pos] == ' '))
-        ++pos;
-
-    return pos < len;
+    skipWhile(str, pos, RFC7230::isWhitespace);
+    return pos < str.length();
 }
 
 // Returns true if the function can match the whole token (case insensitive)
@@ -85,7 +93,7 @@ static inline bool skipEquals(const String& str, unsigned &pos)
     return skipWhiteSpace(str, pos) && str[pos++] == '=' && skipWhiteSpace(str, pos);
 }
 
-// True if a value present, incrementing pos to next space or semicolon, if any.  
+// True if a value present, incrementing pos to next space or semicolon, if any.
 // Note: might return pos == str.length().
 static inline bool skipValue(const String& str, unsigned& pos)
 {
@@ -104,13 +112,13 @@ bool isValidReasonPhrase(const String& value)
 {
     for (unsigned i = 0; i < value.length(); ++i) {
         UChar c = value[i];
-        if (c == 0x7F || c > 0xFF || (c < 0x20 && c != '\t'))
+        if (c == 0x7F || !isLatin1(c) || (c < 0x20 && c != '\t'))
             return false;
     }
     return true;
 }
 
-// See RFC 7230, Section 3.2.3.
+// See https://fetch.spec.whatwg.org/#concept-header
 bool isValidHTTPHeaderValue(const String& value)
 {
     UChar c = value[0];
@@ -121,19 +129,10 @@ bool isValidHTTPHeaderValue(const String& value)
         return false;
     for (unsigned i = 0; i < value.length(); ++i) {
         c = value[i];
-        if (c == 0x7F || c > 0xFF || (c < 0x20 && c != '\t'))
+        if (c == 0x00 || c == 0x0A || c == 0x0D)
             return false;
     }
     return true;
-}
-
-// See RFC 7230, Section 3.2.6.
-static bool isDelimiterCharacter(const UChar c)
-{
-    // DQUOTE and "(),/:;<=>?@[\]{}"
-    return (c == '"' || c == '(' || c == ')' || c == ',' || c == '/' || c == ':' || c == ';'
-        || c == '<' || c == '=' || c == '>' || c == '?' || c == '@' || c == '[' || c == '\\'
-        || c == ']' || c == '{' || c == '}');
 }
 
 // See RFC 7231, Section 5.3.2.
@@ -141,17 +140,37 @@ bool isValidAcceptHeaderValue(const String& value)
 {
     for (unsigned i = 0; i < value.length(); ++i) {
         UChar c = value[i];
-        // First check for alphanumeric for performance reasons then whitelist four delimiter characters.
+
+        // First check for alphanumeric for performance reasons then allowlist four delimiter characters.
         if (isASCIIAlphanumeric(c) || c == ',' || c == '/' || c == ';' || c == '=')
             continue;
-        if (isDelimiterCharacter(c))
+
+        ASSERT(isLatin1(c));
+        if (c == 0x7F || (c < 0x20 && c != '\t'))
+            return false;
+
+        if (RFC7230::isDelimiter(c))
             return false;
     }
     
     return true;
 }
 
+static bool containsCORSUnsafeRequestHeaderBytes(const String& value)
+{
+    for (unsigned i = 0; i < value.length(); ++i) {
+        UChar c = value[i];
+        // https://fetch.spec.whatwg.org/#cors-unsafe-request-header-byte
+        if ((c < 0x20 && c != '\t') || (c == '"' || c == '(' || c == ')' || c == ':' || c == '<' || c == '>' || c == '?'
+            || c == '@' || c == '[' || c == '\\' || c == ']' || c == 0x7B || c == '{' || c == '}' || c == 0x7F))
+            return true;
+    }
+
+    return false;
+}
+
 // See RFC 7231, Section 5.3.5 and 3.1.3.2.
+// https://fetch.spec.whatwg.org/#cors-safelisted-request-header
 bool isValidLanguageHeaderValue(const String& value)
 {
     for (unsigned i = 0; i < value.length(); ++i) {
@@ -160,107 +179,152 @@ bool isValidLanguageHeaderValue(const String& value)
             continue;
         return false;
     }
-    
-    // FIXME: Validate further by splitting into language tags and optional quality
-    // values (q=) and then check each language tag.
-    // Language tags https://tools.ietf.org/html/rfc7231#section-3.1.3.1
-    // Language tag syntax https://tools.ietf.org/html/bcp47#section-2.1
     return true;
 }
 
 // See RFC 7230, Section 3.2.6.
-bool isValidHTTPToken(const String& value)
+bool isValidHTTPToken(StringView value)
 {
     if (value.isEmpty())
         return false;
-    auto valueStringView = StringView(value);
-    for (UChar c : valueStringView.codeUnits()) {
-        if (c <= 0x20 || c >= 0x7F
-            || c == '(' || c == ')' || c == '<' || c == '>' || c == '@'
-            || c == ',' || c == ';' || c == ':' || c == '\\' || c == '"'
-            || c == '/' || c == '[' || c == ']' || c == '?' || c == '='
-            || c == '{' || c == '}')
-        return false;
+    for (UChar c : value.codeUnits()) {
+        if (!RFC7230::isTokenCharacter(c))
+            return false;
     }
     return true;
 }
 
-static const size_t maxInputSampleSize = 128;
-static String trimInputSample(const char* p, size_t length)
+bool isValidHTTPToken(const String& value)
 {
-    String s = String(p, std::min<size_t>(length, maxInputSampleSize));
-    if (length > maxInputSampleSize)
-        s.append(horizontalEllipsis);
-    return s;
+    return isValidHTTPToken(StringView(value));
 }
 
-bool parseHTTPRefresh(const String& refresh, double& delay, String& url)
+#if USE(GLIB)
+// True if the character at the given position satisifies a predicate, incrementing "pos" by one.
+// Note: Might return pos == str.length()
+static inline bool skipCharacter(const String& value, unsigned& pos, Function<bool(const UChar)>&& predicate)
 {
-    unsigned len = refresh.length();
-    unsigned pos = 0;
-    
-    if (!skipWhiteSpace(refresh, pos))
-        return false;
-    
-    while (pos != len && refresh[pos] != ',' && refresh[pos] != ';')
+    if (pos < value.length() && predicate(value[pos])) {
         ++pos;
-    
-    if (pos == len) { // no URL
-        url = String();
-        bool ok;
-        delay = refresh.stripWhiteSpace().toDouble(&ok);
-        return ok;
-    } else {
-        bool ok;
-        delay = refresh.left(pos).stripWhiteSpace().toDouble(&ok);
-        if (!ok)
-            return false;
-        
-        ++pos;
-        skipWhiteSpace(refresh, pos);
-        unsigned urlStartPos = pos;
-        if (refresh.find("url", urlStartPos, false) == urlStartPos) {
-            urlStartPos += 3;
-            skipWhiteSpace(refresh, urlStartPos);
-            if (refresh[urlStartPos] == '=') {
-                ++urlStartPos;
-                skipWhiteSpace(refresh, urlStartPos);
-            } else
-                urlStartPos = pos;  // e.g. "Refresh: 0; url.html"
-        }
-
-        unsigned urlEndPos = len;
-
-        if (refresh[urlStartPos] == '"' || refresh[urlStartPos] == '\'') {
-            UChar quotationMark = refresh[urlStartPos];
-            urlStartPos++;
-            while (urlEndPos > urlStartPos) {
-                urlEndPos--;
-                if (refresh[urlEndPos] == quotationMark)
-                    break;
-            }
-            
-            // https://bugs.webkit.org/show_bug.cgi?id=27868
-            // Sometimes there is no closing quote for the end of the URL even though there was an opening quote.
-            // If we looped over the entire alleged URL string back to the opening quote, just use everything
-            // after the opening quote instead.
-            if (urlEndPos == urlStartPos)
-                urlEndPos = len;
-        }
-
-        url = refresh.substring(urlStartPos, urlEndPos - urlStartPos).stripWhiteSpace();
         return true;
     }
+    return false;
 }
 
-std::optional<std::chrono::system_clock::time_point> parseHTTPDate(const String& value)
+// True if the "expected" character is at the given position, incrementing "pos" by one.
+// Note: Might return pos == str.length()
+static inline bool skipCharacter(const String& value, unsigned& pos, const UChar expected)
+{
+    return skipCharacter(value, pos, [expected](const UChar c) {
+        return c == expected;
+    });
+}
+
+// True if a quoted pair is present, incrementing "pos" to the position after the quoted pair.
+// Note: Might return pos == str.length()
+// See RFC 7230, Section 3.2.6.
+static constexpr auto QuotedPairStartCharacter = '\\';
+static bool skipQuotedPair(const String& value, unsigned& pos)
+{
+    // quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
+    return skipCharacter(value, pos, QuotedPairStartCharacter)
+        && skipCharacter(value, pos, RFC7230::isQuotedPairSecondOctet);
+}
+
+// True if a comment is present, incrementing "pos" to the position after the comment.
+// Note: Might return pos == str.length()
+// See RFC 7230, Section 3.2.6.
+static constexpr auto CommentStartCharacter = '(';
+static constexpr auto CommentEndCharacter = ')';
+static bool skipComment(const String& value, unsigned& pos)
+{
+    // comment = "(" *( ctext / quoted-pair / comment ) ")"
+    // ctext   = HTAB / SP / %x21-27 / %x2A-5B / %x5D-7E / obs-text
+    if (!skipCharacter(value, pos, CommentStartCharacter))
+        return false;
+
+    const unsigned end = value.length();
+    while (pos < end && value[pos] != CommentEndCharacter) {
+        switch (value[pos]) {
+        case CommentStartCharacter:
+            if (!skipComment(value, pos))
+                return false;
+            break;
+        case QuotedPairStartCharacter:
+            if (!skipQuotedPair(value, pos))
+                return false;
+            break;
+        default:
+            if (!skipWhile(value, pos, RFC7230::isCommentText))
+                return false;
+        }
+    }
+    return skipCharacter(value, pos, CommentEndCharacter);
+}
+
+// True if an HTTP header token is present, incrementing "pos" to the position after it.
+// Note: Might return pos == str.length()
+// See RFC 7230, Section 3.2.6.
+static bool skipHTTPToken(const String& value, unsigned& pos)
+{
+    return skipWhile(value, pos, RFC7230::isTokenCharacter);
+}
+
+// True if a product specifier (as in an User-Agent header) is present, incrementing "pos" to the position after it.
+// Note: Might return pos == str.length()
+// See RFC 7231, Section 5.5.3.
+static bool skipUserAgentProduct(const String& value, unsigned& pos)
+{
+    // product         = token ["/" product-version]
+    // product-version = token
+    if (!skipHTTPToken(value, pos))
+        return false;
+    if (skipCharacter(value, pos, '/'))
+        return skipHTTPToken(value, pos);
+    return true;
+}
+
+// See RFC 7231, Section 5.5.3
+bool isValidUserAgentHeaderValue(const String& value)
+{
+    // User-Agent = product *( RWS ( product / comment ) )
+    unsigned pos = 0;
+    if (!skipUserAgentProduct(value, pos))
+        return false;
+
+    while (pos < value.length()) {
+        if (!skipWhiteSpace(value, pos))
+            return false;
+        if (value[pos] == CommentStartCharacter) {
+            if (!skipComment(value, pos))
+                return false;
+        } else {
+            if (!skipUserAgentProduct(value, pos))
+                return false;
+        }
+    }
+
+    return pos == value.length();
+}
+#endif
+
+static const size_t maxInputSampleSize = 128;
+template<typename CharType>
+static String trimInputSample(CharType* p, size_t length)
+{
+    if (length <= maxInputSampleSize)
+        return String(p, length);
+    return makeString(StringView(p, length).left(maxInputSampleSize), horizontalEllipsis);
+}
+
+std::optional<WallTime> parseHTTPDate(const String& value)
 {
     double dateInMillisecondsSinceEpoch = parseDateFromNullTerminatedCharacters(value.utf8().data());
     if (!std::isfinite(dateInMillisecondsSinceEpoch))
-        return { };
+        return std::nullopt;
     // This assumes system_clock epoch equals Unix epoch which is true for all implementations but unspecified.
-    // FIXME: The parsing function should be switched to std::chrono too.
-    return std::chrono::system_clock::time_point(std::chrono::milliseconds(static_cast<long long>(dateInMillisecondsSinceEpoch)));
+    // FIXME: The parsing function should be switched to WallTime too.
+    return WallTime::fromRawSeconds(dateInMillisecondsSinceEpoch / 1000.0);
 }
 
 // FIXME: This function doesn't comply with RFC 6266.
@@ -268,26 +332,22 @@ std::optional<std::chrono::system_clock::time_point> parseHTTPDate(const String&
 // that arises from quoted-string, nor does this function properly unquote
 // attribute values. Further this function appears to process parameter names
 // in a case-sensitive manner. (There are likely other bugs as well.)
-String filenameFromHTTPContentDisposition(const String& value)
+StringView filenameFromHTTPContentDisposition(StringView value)
 {
-    Vector<String> keyValuePairs;
-    value.split(';', keyValuePairs);
-
-    unsigned length = keyValuePairs.size();
-    for (unsigned i = 0; i < length; i++) {
-        size_t valueStartPos = keyValuePairs[i].find('=');
+    for (auto keyValuePair : value.split(';')) {
+        size_t valueStartPos = keyValuePair.find('=');
         if (valueStartPos == notFound)
             continue;
 
-        String key = keyValuePairs[i].left(valueStartPos).stripWhiteSpace();
+        auto key = keyValuePair.left(valueStartPos).stripWhiteSpace();
 
-        if (key.isEmpty() || key != "filename")
+        if (key.isEmpty() || key != "filename"_s)
             continue;
         
-        String value = keyValuePairs[i].substring(valueStartPos + 1).stripWhiteSpace();
+        auto value = keyValuePair.substring(valueStartPos + 1).stripWhiteSpace();
 
         // Remove quotes if there are any
-        if (value[0] == '\"')
+        if (value.length() > 1 && value[0] == '\"')
             value = value.substring(1, value.length() - 2);
 
         return value;
@@ -298,14 +358,23 @@ String filenameFromHTTPContentDisposition(const String& value)
 
 String extractMIMETypeFromMediaType(const String& mediaType)
 {
-    StringBuilder mimeType;
+    unsigned position = 0;
     unsigned length = mediaType.length();
-    mimeType.reserveCapacity(length);
-    for (unsigned i = 0; i < length; i++) {
-        UChar c = mediaType[i];
 
-        if (c == ';')
+    for (; position < length; ++position) {
+        UChar c = mediaType[position];
+        if (c != '\t' && c != ' ')
             break;
+    }
+
+    if (position == length)
+        return mediaType;
+
+    unsigned typeStart = position;
+
+    unsigned typeEnd = position;
+    for (; position < length; ++position) {
+        UChar c = mediaType[position];
 
         // While RFC 2616 does not allow it, other browsers allow multiple values in the HTTP media
         // type header field, Content-Type. In such cases, the media type string passed here may contain
@@ -316,70 +385,59 @@ String extractMIMETypeFromMediaType(const String& mediaType)
         if (c == ',')
             break;
 
-        // FIXME: The following is not correct. RFC 2616 allows linear white space before and
-        // after the MIME type, but not within the MIME type itself. And linear white space
-        // includes only a few specific ASCII characters; a small subset of isSpaceOrNewline.
-        // See https://bugs.webkit.org/show_bug.cgi?id=8644 for a bug tracking part of this.
-        if (isSpaceOrNewline(c))
-            continue;
+        if (c == '\t' || c == ' ' || c == ';')
+            break;
 
-        mimeType.append(c);
+        typeEnd = position + 1;
     }
 
-    if (mimeType.length() == length)
-        return mediaType;
-    return mimeType.toString();
+    return mediaType.substring(typeStart, typeEnd - typeStart);
 }
 
-String extractCharsetFromMediaType(const String& mediaType)
+StringView extractCharsetFromMediaType(StringView mediaType)
 {
-    unsigned int pos, len;
-    findCharsetInMediaType(mediaType, pos, len);
-    return mediaType.substring(pos, len);
-}
-
-void findCharsetInMediaType(const String& mediaType, unsigned int& charsetPos, unsigned int& charsetLen, unsigned int start)
-{
-    charsetPos = start;
-    charsetLen = 0;
-
-    size_t pos = start;
+    unsigned charsetPos = 0, charsetLen = 0;
+    size_t pos = 0;
     unsigned length = mediaType.length();
-    
+
     while (pos < length) {
-        pos = mediaType.find("charset", pos, false);
+        pos = mediaType.findIgnoringASCIICase("charset"_s, pos);
         if (pos == notFound || pos == 0) {
             charsetLen = 0;
-            return;
+            break;
         }
-        
+
         // is what we found a beginning of a word?
-        if (mediaType[pos-1] > ' ' && mediaType[pos-1] != ';') {
+        if (mediaType[pos - 1] > ' ' && mediaType[pos - 1] != ';') {
             pos += 7;
             continue;
         }
-        
+
         pos += 7;
 
         // skip whitespace
-        while (pos != length && mediaType[pos] <= ' ')
+        while (pos < length && mediaType[pos] <= ' ')
             ++pos;
-    
+
+        if (pos >= length)
+            break;
+
         if (mediaType[pos++] != '=') // this "charset" substring wasn't a parameter name, but there may be others
             continue;
 
-        while (pos != length && (mediaType[pos] <= ' ' || mediaType[pos] == '"' || mediaType[pos] == '\''))
+        while (pos < length && (mediaType[pos] <= ' ' || mediaType[pos] == '"' || mediaType[pos] == '\''))
             ++pos;
 
         // we don't handle spaces within quoted parameter values, because charset names cannot have any
         unsigned endpos = pos;
-        while (pos != length && mediaType[endpos] > ' ' && mediaType[endpos] != '"' && mediaType[endpos] != '\'' && mediaType[endpos] != ';')
+        while (endpos < length && mediaType[endpos] > ' ' && mediaType[endpos] != '"' && mediaType[endpos] != '\'' && mediaType[endpos] != ';')
             ++endpos;
 
         charsetPos = pos;
         charsetLen = endpos - pos;
-        return;
+        break;
     }
+    return mediaType.substring(charsetPos, charsetLen);
 }
 
 XSSProtectionDisposition parseXSSProtectionHeader(const String& header, String& failureReason, unsigned& failurePosition, String& reportURL)
@@ -471,16 +529,17 @@ XSSProtectionDisposition parseXSSProtectionHeader(const String& header, String& 
     }
 }
 
-ContentTypeOptionsDisposition parseContentTypeOptionsHeader(const String& header)
+ContentTypeOptionsDisposition parseContentTypeOptionsHeader(StringView header)
 {
-    if (equalLettersIgnoringASCIICase(header.stripWhiteSpace(), "nosniff"))
-        return ContentTypeOptionsNosniff;
-    return ContentTypeOptionsNone;
+    StringView leftToken = header.left(header.find(','));
+    if (equalLettersIgnoringASCIICase(stripLeadingAndTrailingHTTPSpaces(leftToken), "nosniff"_s))
+        return ContentTypeOptionsDisposition::Nosniff;
+    return ContentTypeOptionsDisposition::None;
 }
 
 // For example: "HTTP/1.1 200 OK" => "OK".
 // Note that HTTP/2 does not include a reason phrase, so we return the empty atom.
-AtomicString extractReasonPhraseFromHTTPStatusLine(const String& statusLine)
+AtomString extractReasonPhraseFromHTTPStatusLine(const String& statusLine)
 {
     StringView view = statusLine;
     size_t spacePos = view.find(' ');
@@ -490,40 +549,125 @@ AtomicString extractReasonPhraseFromHTTPStatusLine(const String& statusLine)
     if (spacePos == notFound)
         return emptyAtom();
 
-    return view.substring(spacePos + 1).toAtomicString();
+    return view.substring(spacePos + 1).toAtomString();
 }
 
-XFrameOptionsDisposition parseXFrameOptionsHeader(const String& header)
+XFrameOptionsDisposition parseXFrameOptionsHeader(StringView header)
 {
-    XFrameOptionsDisposition result = XFrameOptionsNone;
+    XFrameOptionsDisposition result = XFrameOptionsDisposition::None;
 
     if (header.isEmpty())
         return result;
 
-    Vector<String> headers;
-    header.split(',', headers);
-
-    for (size_t i = 0; i < headers.size(); i++) {
-        String currentHeader = headers[i].stripWhiteSpace();
-        XFrameOptionsDisposition currentValue = XFrameOptionsNone;
-        if (equalLettersIgnoringASCIICase(currentHeader, "deny"))
-            currentValue = XFrameOptionsDeny;
-        else if (equalLettersIgnoringASCIICase(currentHeader, "sameorigin"))
-            currentValue = XFrameOptionsSameOrigin;
-        else if (equalLettersIgnoringASCIICase(currentHeader, "allowall"))
-            currentValue = XFrameOptionsAllowAll;
+    for (auto currentHeader : header.splitAllowingEmptyEntries(',')) {
+        currentHeader = currentHeader.stripWhiteSpace();
+        XFrameOptionsDisposition currentValue = XFrameOptionsDisposition::None;
+        if (equalLettersIgnoringASCIICase(currentHeader, "deny"_s))
+            currentValue = XFrameOptionsDisposition::Deny;
+        else if (equalLettersIgnoringASCIICase(currentHeader, "sameorigin"_s))
+            currentValue = XFrameOptionsDisposition::SameOrigin;
+        else if (equalLettersIgnoringASCIICase(currentHeader, "allowall"_s))
+            currentValue = XFrameOptionsDisposition::AllowAll;
         else
-            currentValue = XFrameOptionsInvalid;
+            currentValue = XFrameOptionsDisposition::Invalid;
 
-        if (result == XFrameOptionsNone)
+        if (result == XFrameOptionsDisposition::None)
             result = currentValue;
         else if (result != currentValue)
-            return XFrameOptionsConflict;
+            return XFrameOptionsDisposition::Conflict;
     }
     return result;
 }
 
-bool parseRange(const String& range, long long& rangeOffset, long long& rangeEnd, long long& rangeSuffixLength)
+// https://fetch.spec.whatwg.org/#concept-header-list-get-structured-header
+// FIXME: For now, this assumes the type is "item".
+std::optional<std::pair<StringView, HashMap<String, String>>> parseStructuredFieldValue(StringView header)
+{
+    header = stripLeadingAndTrailingHTTPSpaces(header);
+    if (header.isEmpty())
+        return std::nullopt;
+
+    // Parse a token (https://datatracker.ietf.org/doc/html/rfc8941#section-4.2.6).
+    if (!isASCIIAlpha(header[0]) && header[0] != '*')
+        return std::nullopt;
+    size_t index = 1;
+    while (index < header.length()) {
+        UChar c = header[index];
+        if (!RFC7230::isTokenCharacter(c) && c != ':' && c != '/')
+            break;
+        ++index;
+    }
+    StringView bareItem = header.left(index);
+
+    // Parse parameters (https://datatracker.ietf.org/doc/html/rfc8941#section-4.2.3.2).
+    HashMap<String, String> parameters;
+    while (index < header.length()) {
+        if (header[index] != ';')
+            break;
+        ++index; // Consume ';'.
+        while (index < header.length() && header[index] == ' ')
+            ++index;
+        if (index == header.length())
+            return std::nullopt;
+        // Parse a key (https://datatracker.ietf.org/doc/html/rfc8941#section-4.2.3.3)
+        if (!isASCIILower(header[index]))
+            return std::nullopt;
+        size_t keyStart = index++;
+        while (index < header.length()) {
+            UChar c = header[index];
+            if (!isASCIILower(c) && !isASCIIDigit(c) && c != '_' && c != '-' && c != '.' && c != '*')
+                break;
+            ++index;
+        }
+        StringView key = header.substring(keyStart, index - keyStart);
+        String value = trueAtom();
+        if (index < header.length() && header[index] == '=') {
+            ++index; // Consume '='.
+            if (isASCIIAlpha(header[index]) || header[index] == '*') {
+                // https://datatracker.ietf.org/doc/html/rfc8941#section-4.2.6
+                size_t valueStart = index++;
+                while (index < header.length()) {
+                    UChar c = header[index];
+                    if (!RFC7230::isTokenCharacter(c) && c != ':' && c != '/')
+                        break;
+                    ++index;
+                }
+                value = header.substring(valueStart, index - valueStart).toString();
+            } else if (header[index] == '"') {
+                // https://datatracker.ietf.org/doc/html/rfc8941#section-4.2.5
+                StringBuilder valueBuilder;
+                ++index; // Skip DQUOTE.
+                while (index < header.length()) {
+                    if (header[index] == '\\') {
+                        ++index;
+                        if (index == header.length())
+                            return std::nullopt;
+                        if (header[index] != '\\' && header[index] != '"')
+                            return std::nullopt;
+                        valueBuilder.append(header[index]);
+                    } else if (header[index] == '\"') {
+                        value = valueBuilder.toString();
+                        break;
+                    } else if (header[index] <= 0x1F || (header[index] >= 0x7F && header[index] <= 0xFF)) // Not in VCHAR or SP.
+                        return std::nullopt;
+                    else
+                        valueBuilder.append(header[index]);
+                    ++index;
+                }
+                if (index == header.length())
+                    return std::nullopt;
+                ++index; // Skip DQUOTE.
+            } else
+                return std::nullopt;
+        }
+        parameters.set(key.toString(), WTFMove(value));
+    }
+    if (index != header.length())
+        return std::nullopt;
+    return std::make_pair(bareItem, parameters);
+}
+
+bool parseRange(StringView range, long long& rangeOffset, long long& rangeEnd, long long& rangeSuffixLength)
 {
     // The format of "Range" header is defined in RFC 2616 Section 14.35.1.
     // http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.35.1
@@ -532,10 +676,11 @@ bool parseRange(const String& range, long long& rangeOffset, long long& rangeEnd
     rangeOffset = rangeEnd = rangeSuffixLength = -1;
 
     // The "bytes" unit identifier should be present.
-    static const char bytesStart[] = "bytes="; 
-    if (!range.startsWith(bytesStart, false))
+    static const unsigned bytesLength = 6;
+    if (!startsWithLettersIgnoringASCIICase(range, "bytes="_s))
         return false;
-    String byteRange = range.substring(sizeof(bytesStart) - 1);
+
+    StringView byteRange = range.substring(bytesLength);
 
     // The '-' character needs to be present.
     int index = byteRange.find('-');
@@ -546,11 +691,8 @@ bool parseRange(const String& range, long long& rangeOffset, long long& rangeEnd
     // Example:
     //     -500
     if (!index) {
-        String suffixLengthString = byteRange.substring(index + 1).stripWhiteSpace();
-        bool ok;
-        long long value = suffixLengthString.toInt64Strict(&ok);
-        if (ok)
-            rangeSuffixLength = value;
+        if (auto value = parseInteger<long long>(byteRange.substring(index + 1)))
+            rangeSuffixLength = *value;
         return true;
     }
 
@@ -558,99 +700,36 @@ bool parseRange(const String& range, long long& rangeOffset, long long& rangeEnd
     // Examples:
     //     0-499
     //     500-
-    String firstBytePosStr = byteRange.left(index).stripWhiteSpace();
-    bool ok;
-    long long firstBytePos = firstBytePosStr.toInt64Strict(&ok);
-    if (!ok)
+    auto firstBytePos = parseInteger<long long>(byteRange.left(index));
+    if (!firstBytePos)
         return false;
 
-    String lastBytePosStr = byteRange.substring(index + 1).stripWhiteSpace();
+    auto lastBytePosStr = stripLeadingAndTrailingHTTPSpaces(byteRange.substring(index + 1));
     long long lastBytePos = -1;
     if (!lastBytePosStr.isEmpty()) {
-        lastBytePos = lastBytePosStr.toInt64Strict(&ok);
-        if (!ok)
+        auto value = parseInteger<long long>(lastBytePosStr);
+        if (!value)
             return false;
+        lastBytePos = *value;
     }
 
-    if (firstBytePos < 0 || !(lastBytePos == -1 || lastBytePos >= firstBytePos))
+    if (*firstBytePos < 0 || !(lastBytePos == -1 || lastBytePos >= *firstBytePos))
         return false;
 
-    rangeOffset = firstBytePos;
+    rangeOffset = *firstBytePos;
     rangeEnd = lastBytePos;
     return true;
 }
 
-// HTTP/1.1 - RFC 2616
-// http://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html#sec5.1
-// Request-Line = Method SP Request-URI SP HTTP-Version CRLF
-size_t parseHTTPRequestLine(const char* data, size_t length, String& failureReason, String& method, String& url, HTTPVersion& httpVersion)
-{
-    method = String();
-    url = String();
-    httpVersion = Unknown;
-
-    const char* space1 = 0;
-    const char* space2 = 0;
-    const char* p;
-    size_t consumedLength;
-
-    for (p = data, consumedLength = 0; consumedLength < length; p++, consumedLength++) {
-        if (*p == ' ') {
-            if (!space1)
-                space1 = p;
-            else if (!space2)
-                space2 = p;
-        } else if (*p == '\n')
-            break;
-    }
-
-    // Haven't finished header line.
-    if (consumedLength == length) {
-        failureReason = ASCIILiteral("Incomplete Request Line");
-        return 0;
-    }
-
-    // RequestLine does not contain 3 parts.
-    if (!space1 || !space2) {
-        failureReason = ASCIILiteral("Request Line does not appear to contain: <Method> <Url> <HTTPVersion>.");
-        return 0;
-    }
-
-    // The line must end with "\r\n".
-    const char* end = p + 1;
-    if (*(end - 2) != '\r') {
-        failureReason = ASCIILiteral("Request line does not end with CRLF");
-        return 0;
-    }
-
-    // Request Method.
-    method = String(data, space1 - data); // For length subtract 1 for space, but add 1 for data being the first character.
-
-    // Request URI.
-    url = String(space1 + 1, space2 - space1 - 1); // For length subtract 1 for space.
-
-    // HTTP Version.
-    String httpVersionString(space2 + 1, end - space2 - 3); // For length subtract 1 for space, and 2 for "\r\n".
-    if (httpVersionString.length() != 8 || !httpVersionString.startsWith("HTTP/1."))
-        httpVersion = Unknown;
-    else if (httpVersionString[7] == '0')
-        httpVersion = HTTP_1_0;
-    else if (httpVersionString[7] == '1')
-        httpVersion = HTTP_1_1;
-    else
-        httpVersion = Unknown;
-
-    return end - data;
-}
-
-static inline bool isValidHeaderNameCharacter(const char* character)
+template<typename CharacterType>
+static inline bool isValidHeaderNameCharacter(CharacterType character)
 {
     // https://tools.ietf.org/html/rfc7230#section-3.2
     // A header name should only contain one or more of
     // alphanumeric or ! # $ % & ' * + - . ^ _ ` | ~
-    if (isASCIIAlphanumeric(*character))
+    if (isASCIIAlphanumeric(character))
         return true;
-    switch (*character) {
+    switch (character) {
     case '!':
     case '#':
     case '$':
@@ -672,16 +751,16 @@ static inline bool isValidHeaderNameCharacter(const char* character)
     }
 }
 
-size_t parseHTTPHeader(const char* start, size_t length, String& failureReason, StringView& nameStr, String& valueStr, bool strict)
+size_t parseHTTPHeader(const uint8_t* start, size_t length, String& failureReason, StringView& nameStr, String& valueStr, bool strict)
 {
-    const char* p = start;
-    const char* end = start + length;
+    auto p = start;
+    auto end = start + length;
 
-    Vector<char> name;
-    Vector<char> value;
+    Vector<uint8_t> name;
+    Vector<uint8_t> value;
 
     bool foundFirstNameChar = false;
-    const char* namePtr = nullptr;
+    const uint8_t* namePtr = nullptr;
     size_t nameSize = 0;
 
     nameStr = StringView();
@@ -704,9 +783,9 @@ size_t parseHTTPHeader(const char* start, size_t length, String& failureReason, 
         case ':':
             break;
         default:
-            if (!isValidHeaderNameCharacter(p)) {
+            if (!isValidHeaderNameCharacter(*p)) {
                 if (name.size() < 1)
-                    failureReason = "Unexpected start character in header name";
+                    failureReason = "Unexpected start character in header name"_s;
                 else
                     failureReason = makeString("Unexpected character in header name at ", trimInputSample(name.data(), name.size()));
                 return 0;
@@ -725,7 +804,7 @@ size_t parseHTTPHeader(const char* start, size_t length, String& failureReason, 
     }
 
     nameSize = name.size();
-    nameStr = StringView(reinterpret_cast<const LChar*>(namePtr), nameSize);
+    nameStr = StringView(namePtr, nameSize);
 
     for (; p < end && *p == 0x20; p++) { }
 
@@ -753,13 +832,13 @@ size_t parseHTTPHeader(const char* start, size_t length, String& failureReason, 
     }
     valueStr = String::fromUTF8(value.data(), value.size());
     if (valueStr.isNull()) {
-        failureReason = ASCIILiteral("Invalid UTF-8 sequence in header value");
+        failureReason = "Invalid UTF-8 sequence in header value"_s;
         return 0;
     }
     return p - start;
 }
 
-size_t parseHTTPRequestBody(const char* data, size_t length, Vector<unsigned char>& body)
+size_t parseHTTPRequestBody(const uint8_t* data, size_t length, Vector<uint8_t>& body)
 {
     body.clear();
     body.append(data, length);
@@ -767,18 +846,7 @@ size_t parseHTTPRequestBody(const char* data, size_t length, Vector<unsigned cha
     return length;
 }
 
-void parseAccessControlExposeHeadersAllowList(const String& headerValue, HTTPHeaderSet& headerSet)
-{
-    Vector<String> headers;
-    headerValue.split(',', false, headers);
-    for (auto& header : headers) {
-        String strippedHeader = header.stripWhiteSpace();
-        if (!strippedHeader.isEmpty())
-            headerSet.add(strippedHeader);
-    }
-}
-
-// Implementation of https://fetch.spec.whatwg.org/#cors-safelisted-response-header-name
+// Implements <https://fetch.spec.whatwg.org/#forbidden-header-name>.
 bool isForbiddenHeaderName(const String& name)
 {
     HTTPHeaderName headerName;
@@ -809,12 +877,43 @@ bool isForbiddenHeaderName(const String& name)
             break;
         }
     }
-    return startsWithLettersIgnoringASCIICase(name, "sec-") || startsWithLettersIgnoringASCIICase(name, "proxy-");
+    return startsWithLettersIgnoringASCIICase(name, "sec-"_s) || startsWithLettersIgnoringASCIICase(name, "proxy-"_s);
 }
 
+// Implements <https://fetch.spec.whatwg.org/#no-cors-safelisted-request-header-name>.
+bool isNoCORSSafelistedRequestHeaderName(const String& name)
+{
+    HTTPHeaderName headerName;
+    if (findHTTPHeaderName(name, headerName)) {
+        switch (headerName) {
+        case HTTPHeaderName::Accept:
+        case HTTPHeaderName::AcceptLanguage:
+        case HTTPHeaderName::ContentLanguage:
+        case HTTPHeaderName::ContentType:
+            return true;
+        default:
+            break;
+        }
+    }
+    return false;
+}
+
+// Implements <https://fetch.spec.whatwg.org/#privileged-no-cors-request-header-name>.
+bool isPriviledgedNoCORSRequestHeaderName(const String& name)
+{
+    return equalLettersIgnoringASCIICase(name, "range"_s);
+}
+
+// Implements <https://fetch.spec.whatwg.org/#forbidden-response-header-name>.
 bool isForbiddenResponseHeaderName(const String& name)
 {
-    return equalLettersIgnoringASCIICase(name, "set-cookie") || equalLettersIgnoringASCIICase(name, "set-cookie2");
+    return equalLettersIgnoringASCIICase(name, "set-cookie"_s) || equalLettersIgnoringASCIICase(name, "set-cookie2"_s);
+}
+
+// Implements <https://fetch.spec.whatwg.org/#forbidden-method>.
+bool isForbiddenMethod(const String& name)
+{
+    return equalLettersIgnoringASCIICase(name, "connect"_s) || equalLettersIgnoringASCIICase(name, "trace"_s) || equalLettersIgnoringASCIICase(name, "track"_s);
 }
 
 bool isSimpleHeader(const String& name, const String& value)
@@ -830,6 +929,7 @@ bool isCrossOriginSafeHeader(HTTPHeaderName name, const HTTPHeaderSet& accessCon
     switch (name) {
     case HTTPHeaderName::CacheControl:
     case HTTPHeaderName::ContentLanguage:
+    case HTTPHeaderName::ContentLength:
     case HTTPHeaderName::ContentType:
     case HTTPHeaderName::Expires:
     case HTTPHeaderName::LastModified:
@@ -842,36 +942,135 @@ bool isCrossOriginSafeHeader(HTTPHeaderName name, const HTTPHeaderSet& accessCon
     default:
         break;
     }
-    return accessControlExposeHeaderSet.contains(httpHeaderNameString(name).toStringWithoutCopying());
+    return accessControlExposeHeaderSet.contains<ASCIICaseInsensitiveStringViewHashTranslator>(httpHeaderNameString(name));
 }
 
 bool isCrossOriginSafeHeader(const String& name, const HTTPHeaderSet& accessControlExposeHeaderSet)
 {
-#ifndef ASSERT_DISABLED
+#if ASSERT_ENABLED
     HTTPHeaderName headerName;
     ASSERT(!findHTTPHeaderName(name, headerName));
 #endif
     return accessControlExposeHeaderSet.contains(name);
 }
 
+static bool isSimpleRangeHeaderValue(const String& value)
+{
+    if (!value.startsWith("bytes="_s))
+        return false;
+
+    unsigned start = 0;
+    unsigned end = 0;
+    bool hasHyphen = false;
+
+    for (size_t cptr = 6; cptr < value.length(); ++cptr) {
+        auto character = value[cptr];
+        if (character >= '0' && character <= '9') {
+            if (productOverflows<unsigned>(hasHyphen ? end : start, 10))
+                return false;
+            auto newDecimal = (hasHyphen ? end : start) * 10;
+            auto sum = Checked<unsigned, RecordOverflow>(newDecimal) + Checked<unsigned, RecordOverflow>(character - '0');
+            if (sum.hasOverflowed())
+                return false;
+
+            if (hasHyphen)
+                end = sum.value();
+            else
+                start = sum.value();
+            continue;
+        }
+        if (character == '-' && !hasHyphen) {
+            hasHyphen = true;
+            continue;
+        }
+        return false;
+    }
+
+    return hasHyphen && (!end || start < end);
+}
+
 // Implements https://fetch.spec.whatwg.org/#cors-safelisted-request-header
 bool isCrossOriginSafeRequestHeader(HTTPHeaderName name, const String& value)
 {
+    if (value.length() > 128)
+        return false;
+
     switch (name) {
     case HTTPHeaderName::Accept:
-        return isValidAcceptHeaderValue(value);
+        if (!isValidAcceptHeaderValue(value))
+            return false;
+        break;
     case HTTPHeaderName::AcceptLanguage:
     case HTTPHeaderName::ContentLanguage:
-        return isValidLanguageHeaderValue(value);
+        if (!isValidLanguageHeaderValue(value))
+            return false;
+        break;
     case HTTPHeaderName::ContentType: {
         // Preflight is required for MIME types that can not be sent via form submission.
-        String mimeType = extractMIMETypeFromMediaType(value);
-        return equalLettersIgnoringASCIICase(mimeType, "application/x-www-form-urlencoded") || equalLettersIgnoringASCIICase(mimeType, "multipart/form-data") || equalLettersIgnoringASCIICase(mimeType, "text/plain");
+        if (containsCORSUnsafeRequestHeaderBytes(value))
+            return false;
+        auto parsedContentType = ParsedContentType::create(value);
+        if (!parsedContentType)
+            return false;
+        String mimeType = parsedContentType->mimeType();
+        if (!(equalLettersIgnoringASCIICase(mimeType, "application/x-www-form-urlencoded"_s) || equalLettersIgnoringASCIICase(mimeType, "multipart/form-data"_s) || equalLettersIgnoringASCIICase(mimeType, "text/plain"_s)))
+            return false;
+        break;
     }
+    case HTTPHeaderName::Range:
+        if (!isSimpleRangeHeaderValue(value))
+            return false;
+        break;
     default:
         // FIXME: Should we also make safe other headers (DPR, Downlink, Save-Data...)? That would require validating their values.
         return false;
     }
+    return true;
+}
+
+// Implements <https://fetch.spec.whatwg.org/#concept-method-normalize>.
+String normalizeHTTPMethod(const String& method)
+{
+    const ASCIILiteral methods[] = { "DELETE"_s, "GET"_s, "HEAD"_s, "OPTIONS"_s, "POST"_s, "PUT"_s };
+    for (auto value : methods) {
+        if (equalIgnoringASCIICase(method, value)) {
+            // Don't bother allocating a new string if it's already all uppercase.
+            if (method == value)
+                break;
+            return value;
+        }
+    }
+    return method;
+}
+
+// Defined by https://tools.ietf.org/html/rfc7231#section-4.2.1
+bool isSafeMethod(const String& method)
+{
+    const ASCIILiteral safeMethods[] = { "GET"_s, "HEAD"_s, "OPTIONS"_s, "TRACE"_s };
+    for (auto value : safeMethods) {
+        if (equalIgnoringASCIICase(method, value))
+            return true;
+    }
+    return false;
+}
+
+CrossOriginResourcePolicy parseCrossOriginResourcePolicyHeader(StringView header)
+{
+    auto strippedHeader = stripLeadingAndTrailingHTTPSpaces(header);
+
+    if (strippedHeader.isEmpty())
+        return CrossOriginResourcePolicy::None;
+
+    if (strippedHeader == "same-origin"_s)
+        return CrossOriginResourcePolicy::SameOrigin;
+
+    if (strippedHeader == "same-site"_s)
+        return CrossOriginResourcePolicy::SameSite;
+
+    if (strippedHeader == "cross-origin"_s)
+        return CrossOriginResourcePolicy::CrossOrigin;
+
+    return CrossOriginResourcePolicy::Invalid;
 }
 
 }

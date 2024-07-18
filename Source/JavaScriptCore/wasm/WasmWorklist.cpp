@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -22,19 +22,20 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 #include "config.h"
 #include "WasmWorklist.h"
+#include "WasmLLIntGenerator.h"
 
 #if ENABLE(WEBASSEMBLY)
 
+#include "CPU.h"
 #include "WasmPlan.h"
-
-#include <wtf/NumberOfCores.h>
 
 namespace JSC { namespace Wasm {
 
 namespace WasmWorklistInternal {
-static const bool verbose = false;
+static constexpr bool verbose = false;
 }
 
 const char* Worklist::priorityString(Priority priority)
@@ -48,6 +49,11 @@ const char* Worklist::priorityString(Priority priority)
     RELEASE_ASSERT_NOT_REACHED();
 }
 
+void Worklist::dump(PrintStream& out) const
+{
+    out.print("Queue Size = ", m_queue.size());
+}
+
 // The Thread class is designed to prevent threads from blocking when there is still work
 // in the queue. Wasm's Plans have some phases, Validiation, Preparation, and Completion,
 // that can only be done by one thread, and another phase, Compilation, that can be done
@@ -57,14 +63,14 @@ class Worklist::Thread final : public AutomaticThread {
 public:
     using Base = AutomaticThread;
     Thread(const AbstractLocker& locker, Worklist& work)
-        : Base(locker, work.m_lock, work.m_planEnqueued)
+        : Base(locker, work.m_lock, work.m_planEnqueued.copyRef())
         , worklist(work)
     {
 
     }
 
-protected:
-    PollResult poll(const AbstractLocker&) override
+private:
+    PollResult poll(const AbstractLocker&) final
     {
         auto& queue = worklist.m_queue;
         synchronize.notifyAll();
@@ -89,7 +95,7 @@ protected:
         return PollResult::Wait;
     }
 
-    WorkResult work() override
+    WorkResult work() final
     {
         auto complete = [&] (const AbstractLocker&) {
             // We need to hold the lock to release our plan otherwise the main thread, while canceling plans
@@ -106,17 +112,17 @@ protected:
 
         ASSERT(!plan->hasWork() || plan->multiThreaded());
         if (plan->hasWork() && !wasMultiThreaded && plan->multiThreaded()) {
-            LockHolder locker(*worklist.m_lock);
+            Locker locker { *worklist.m_lock };
             element.setToNextPriority();
             worklist.m_queue.enqueue(WTFMove(element));
             worklist.m_planEnqueued->notifyAll(locker);
             return complete(locker);
         }
 
-        return complete(holdLock(*worklist.m_lock));
+        return complete(Locker { *worklist.m_lock });
     }
 
-    const char* name() const override
+    const char* name() const final
     {
         return "Wasm Worklist Helper Thread";
     }
@@ -144,22 +150,26 @@ void Worklist::QueueElement::setToNextPriority()
 
 void Worklist::enqueue(Ref<Plan> plan)
 {
-    LockHolder locker(*m_lock);
+    Locker locker { *m_lock };
 
-    if (!ASSERT_DISABLED) {
+    if (ASSERT_ENABLED) {
         for (const auto& element : m_queue)
             ASSERT_UNUSED(element, element.plan.get() != &plan.get());
     }
 
     dataLogLnIf(WasmWorklistInternal::verbose, "Enqueuing plan");
-    m_queue.enqueue({ Priority::Preparation, nextTicket(),  WTFMove(plan) });
-    m_planEnqueued->notifyOne(locker);
+    bool multiThreaded = plan->multiThreaded();
+    m_queue.enqueue({ multiThreaded ? Priority::Compilation : Priority::Preparation, nextTicket(),  WTFMove(plan) });
+    if (multiThreaded)
+        m_planEnqueued->notifyAll(locker);
+    else
+        m_planEnqueued->notifyOne(locker);
 }
 
 void Worklist::completePlanSynchronously(Plan& plan)
 {
     {
-        LockHolder locker(*m_lock);
+        Locker locker { *m_lock };
         m_queue.decreaseKey([&] (QueueElement& element) {
             if (element.plan == &plan) {
                 element.priority = Priority::Synchronous;
@@ -177,13 +187,13 @@ void Worklist::completePlanSynchronously(Plan& plan)
     plan.waitForCompletion();
 }
 
-void Worklist::stopAllPlansForVM(VM& vm)
+void Worklist::stopAllPlansForContext(VM& vm)
 {
-    LockHolder locker(*m_lock);
+    Locker locker { *m_lock };
     Vector<QueueElement> elements;
     while (!m_queue.isEmpty()) {
         QueueElement element = m_queue.dequeue();
-        bool didCancel = element.plan->tryRemoveVMAndCancelIfLast(vm);
+        bool didCancel = element.plan->tryRemoveContextAndCancelIfLast(vm);
         if (!didCancel)
             elements.append(WTFMove(element));
     }
@@ -193,7 +203,7 @@ void Worklist::stopAllPlansForVM(VM& vm)
 
     for (auto& thread : m_threads) {
         if (thread->element.plan) {
-            bool didCancel = thread->element.plan->tryRemoveVMAndCancelIfLast(vm);
+            bool didCancel = thread->element.plan->tryRemoveContextAndCancelIfLast(vm);
             if (didCancel) {
                 // We don't have to worry about the deadlocking since the thread can't block without checking for a new plan and must hold the lock to do so.
                 thread->synchronize.wait(*m_lock);
@@ -206,17 +216,17 @@ Worklist::Worklist()
     : m_lock(Box<Lock>::create())
     , m_planEnqueued(AutomaticThreadCondition::create())
 {
-    unsigned numberOfCompilationThreads = Options::useConcurrentJIT() ? WTF::numberOfProcessorCores() : 1;
-    m_threads.reserveCapacity(numberOfCompilationThreads);
-    LockHolder locker(*m_lock);
-    for (unsigned i = 0; i < numberOfCompilationThreads; i++)
-        m_threads.uncheckedAppend(std::make_unique<Worklist::Thread>(locker, *this));
+    unsigned numberOfCompilationThreads = Options::useConcurrentJIT() ? kernTCSMAwareNumberOfProcessorCores() : 1;
+    m_threads.reserveInitialCapacity(numberOfCompilationThreads);
+    Locker locker { *m_lock };
+    for (unsigned i = 0; i < numberOfCompilationThreads; ++i)
+        m_threads.uncheckedAppend(makeUnique<Worklist::Thread>(locker, *this));
 }
 
 Worklist::~Worklist()
 {
     {
-        LockHolder locker(*m_lock);
+        Locker locker { *m_lock };
         m_queue.enqueue({ Priority::Shutdown, nextTicket(), nullptr });
         m_planEnqueued->notifyAll(locker);
     }
@@ -231,7 +241,9 @@ Worklist& ensureWorklist()
 {
     static std::once_flag initializeWorklist;
     std::call_once(initializeWorklist, [] {
-        globalWorklist = new Worklist();
+        Worklist* worklist = new Worklist();
+        WTF::storeStoreFence();
+        globalWorklist = worklist;
     });
     return *globalWorklist;
 }

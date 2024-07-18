@@ -56,6 +56,7 @@
 
 #include <openssl/asn1.h>
 
+#include <limits.h>
 #include <string.h>
 
 #include <openssl/asn1t.h>
@@ -64,6 +65,15 @@
 #include <openssl/mem.h>
 
 #include "../internal.h"
+#include "asn1_locl.h"
+
+/*
+ * Constructed types with a recursive definition (such as can be found in PKCS7)
+ * could eventually exceed the stack given malicious input with excessive
+ * recursion. Therefore we limit the stack depth. This is the maximum number of
+ * recursive invocations of asn1_item_embed_d2i().
+ */
+#define ASN1_MAX_CONSTRUCTED_NEST 30
 
 static int asn1_check_eoc(const unsigned char **in, long len);
 static int asn1_find_end(const unsigned char **in, long len, char inf);
@@ -81,11 +91,13 @@ static int asn1_check_tlen(long *olen, int *otag, unsigned char *oclass,
 static int asn1_template_ex_d2i(ASN1_VALUE **pval,
                                 const unsigned char **in, long len,
                                 const ASN1_TEMPLATE *tt, char opt,
-                                ASN1_TLC *ctx);
+                                ASN1_TLC *ctx, int depth);
 static int asn1_template_noexp_d2i(ASN1_VALUE **val,
                                    const unsigned char **in, long len,
                                    const ASN1_TEMPLATE *tt, char opt,
-                                   ASN1_TLC *ctx);
+                                   ASN1_TLC *ctx, int depth);
+static int asn1_ex_c2i(ASN1_VALUE **pval, const unsigned char *cont, int len,
+                       int utype, char *free_cont, const ASN1_ITEM *it);
 static int asn1_d2i_ex_primitive(ASN1_VALUE **pval,
                                  const unsigned char **in, long len,
                                  const ASN1_ITEM *it,
@@ -147,38 +159,26 @@ ASN1_VALUE *ASN1_item_d2i(ASN1_VALUE **pval,
     return NULL;
 }
 
-int ASN1_template_d2i(ASN1_VALUE **pval,
-                      const unsigned char **in, long len,
-                      const ASN1_TEMPLATE *tt)
-{
-    ASN1_TLC c;
-    asn1_tlc_clear_nc(&c);
-    return asn1_template_ex_d2i(pval, in, len, tt, 0, &c);
-}
-
 /*
  * Decode an item, taking care of IMPLICIT tagging, if any. If 'opt' set and
  * tag mismatch return -1 to handle OPTIONAL
  */
 
-int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
-                     const ASN1_ITEM *it,
-                     int tag, int aclass, char opt, ASN1_TLC *ctx)
+static int asn1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in,
+                            long len, const ASN1_ITEM *it, int tag, int aclass,
+                            char opt, ASN1_TLC *ctx, int depth)
 {
     const ASN1_TEMPLATE *tt, *errtt = NULL;
-    const ASN1_COMPAT_FUNCS *cf;
     const ASN1_EXTERN_FUNCS *ef;
     const ASN1_AUX *aux = it->funcs;
     ASN1_aux_cb *asn1_cb;
     const unsigned char *p = NULL, *q;
-    unsigned char *wp = NULL;   /* BIG FAT WARNING! BREAKS CONST WHERE USED */
-    unsigned char imphack = 0, oclass;
+    unsigned char oclass;
     char seq_eoc, seq_nolen, cst, isopt;
-    long tmplen;
     int i;
     int otag;
     int ret = 0;
-    ASN1_VALUE **pchptr, *ptmpval;
+    ASN1_VALUE **pchptr;
     int combine = aclass & ASN1_TFLG_COMBINE;
     aclass &= ~ASN1_TFLG_COMBINE;
     if (!pval)
@@ -187,6 +187,19 @@ int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
         asn1_cb = aux->asn1_cb;
     else
         asn1_cb = 0;
+
+    /*
+     * Bound |len| to comfortably fit in an int. Lengths in this module often
+     * switch between int and long without overflow checks.
+     */
+    if (len > INT_MAX/2) {
+        len = INT_MAX/2;
+    }
+
+    if (++depth > ASN1_MAX_CONSTRUCTED_NEST) {
+        OPENSSL_PUT_ERROR(ASN1, ASN1_R_NESTED_TOO_DEEP);
+        goto err;
+    }
 
     switch (it->itype) {
     case ASN1_ITYPE_PRIMITIVE:
@@ -203,13 +216,22 @@ int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
                 goto err;
             }
             return asn1_template_ex_d2i(pval, in, len,
-                                        it->templates, opt, ctx);
+                                        it->templates, opt, ctx, depth);
         }
         return asn1_d2i_ex_primitive(pval, in, len, it,
                                      tag, aclass, opt, ctx);
         break;
 
     case ASN1_ITYPE_MSTRING:
+        /*
+         * It never makes sense for multi-strings to have implicit tagging, so
+         * if tag != -1, then this looks like an error in the template.
+         */
+        if (tag != -1) {
+            OPENSSL_PUT_ERROR(ASN1, ASN1_R_BAD_TEMPLATE);
+            goto err;
+        }
+
         p = *in;
         /* Just read in tag and class */
         ret = asn1_check_tlen(NULL, &otag, &oclass, NULL, NULL,
@@ -242,67 +264,16 @@ int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
         ef = it->funcs;
         return ef->asn1_ex_d2i(pval, in, len, it, tag, aclass, opt, ctx);
 
-    case ASN1_ITYPE_COMPAT:
-        /* we must resort to old style evil hackery */
-        cf = it->funcs;
-
-        /* If OPTIONAL see if it is there */
-        if (opt) {
-            int exptag;
-            p = *in;
-            if (tag == -1)
-                exptag = it->utype;
-            else
-                exptag = tag;
-            /*
-             * Don't care about anything other than presence of expected tag
-             */
-
-            ret = asn1_check_tlen(NULL, NULL, NULL, NULL, NULL,
-                                  &p, len, exptag, aclass, 1, ctx);
-            if (!ret) {
-                OPENSSL_PUT_ERROR(ASN1, ASN1_R_NESTED_ASN1_ERROR);
-                goto err;
-            }
-            if (ret == -1)
-                return -1;
-        }
-
-        /*
-         * This is the old style evil hack IMPLICIT handling: since the
-         * underlying code is expecting a tag and class other than the one
-         * present we change the buffer temporarily then change it back
-         * afterwards. This doesn't and never did work for tags > 30. Yes
-         * this is *horrible* but it is only needed for old style d2i which
-         * will hopefully not be around for much longer. FIXME: should copy
-         * the buffer then modify it so the input buffer can be const: we
-         * should *always* copy because the old style d2i might modify the
-         * buffer.
-         */
-
-        if (tag != -1) {
-            wp = *(unsigned char **)in;
-            imphack = *wp;
-            if (p == NULL) {
-                OPENSSL_PUT_ERROR(ASN1, ASN1_R_NESTED_ASN1_ERROR);
-                goto err;
-            }
-            *wp = (unsigned char)((*p & V_ASN1_CONSTRUCTED)
-                                  | it->utype);
-        }
-
-        ptmpval = cf->asn1_d2i(pval, in, len);
-
-        if (tag != -1)
-            *wp = imphack;
-
-        if (ptmpval)
-            return 1;
-
-        OPENSSL_PUT_ERROR(ASN1, ASN1_R_NESTED_ASN1_ERROR);
-        goto err;
-
     case ASN1_ITYPE_CHOICE:
+        /*
+         * It never makes sense for CHOICE types to have implicit tagging, so if
+         * tag != -1, then this looks like an error in the template.
+         */
+        if (tag != -1) {
+            OPENSSL_PUT_ERROR(ASN1, ASN1_R_BAD_TEMPLATE);
+            goto err;
+        }
+
         if (asn1_cb && !asn1_cb(ASN1_OP_D2I_PRE, pval, it, NULL))
             goto auxerr;
 
@@ -326,7 +297,7 @@ int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
             /*
              * We mark field as OPTIONAL so its absence can be recognised.
              */
-            ret = asn1_template_ex_d2i(pchptr, &p, len, tt, 1, ctx);
+            ret = asn1_template_ex_d2i(pchptr, &p, len, tt, 1, ctx, depth);
             /* If field not present, try the next one */
             if (ret == -1)
                 continue;
@@ -357,10 +328,8 @@ int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
         *in = p;
         return 1;
 
-    case ASN1_ITYPE_NDEF_SEQUENCE:
     case ASN1_ITYPE_SEQUENCE:
         p = *in;
-        tmplen = len;
 
         /* If no IMPLICIT tagging set to SEQUENCE, UNIVERSAL */
         if (tag == -1) {
@@ -375,13 +344,8 @@ int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
             goto err;
         } else if (ret == -1)
             return -1;
-        if (aux && (aux->flags & ASN1_AFLG_BROKEN)) {
-            len = tmplen - (p - *in);
-            seq_nolen = 1;
-        }
         /* If indefinite we don't do a length check */
-        else
-            seq_nolen = seq_eoc;
+        seq_nolen = seq_eoc;
         if (!cst) {
             OPENSSL_PUT_ERROR(ASN1, ASN1_R_SEQUENCE_NOT_CONSTRUCTED);
             goto err;
@@ -444,7 +408,8 @@ int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
              * attempt to read in field, allowing each to be OPTIONAL
              */
 
-            ret = asn1_template_ex_d2i(pseqval, &p, len, seqtt, isopt, ctx);
+            ret = asn1_template_ex_d2i(pseqval, &p, len, seqtt, isopt, ctx,
+                                       depth);
             if (!ret) {
                 errtt = seqtt;
                 goto err;
@@ -514,6 +479,13 @@ int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
     return 0;
 }
 
+int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
+                     const ASN1_ITEM *it,
+                     int tag, int aclass, char opt, ASN1_TLC *ctx)
+{
+    return asn1_item_ex_d2i(pval, in, len, it, tag, aclass, opt, ctx, 0);
+}
+
 /*
  * Templates are handled with two separate functions. One handles any
  * EXPLICIT tag and the other handles the rest.
@@ -522,7 +494,7 @@ int ASN1_item_ex_d2i(ASN1_VALUE **pval, const unsigned char **in, long len,
 static int asn1_template_ex_d2i(ASN1_VALUE **val,
                                 const unsigned char **in, long inlen,
                                 const ASN1_TEMPLATE *tt, char opt,
-                                ASN1_TLC *ctx)
+                                ASN1_TLC *ctx, int depth)
 {
     int flags, aclass;
     int ret;
@@ -556,7 +528,7 @@ static int asn1_template_ex_d2i(ASN1_VALUE **val,
             return 0;
         }
         /* We've found the field so it can't be OPTIONAL now */
-        ret = asn1_template_noexp_d2i(val, &p, len, tt, 0, ctx);
+        ret = asn1_template_noexp_d2i(val, &p, len, tt, 0, ctx, depth);
         if (!ret) {
             OPENSSL_PUT_ERROR(ASN1, ASN1_R_NESTED_ASN1_ERROR);
             return 0;
@@ -579,7 +551,7 @@ static int asn1_template_ex_d2i(ASN1_VALUE **val,
             }
         }
     } else
-        return asn1_template_noexp_d2i(val, in, inlen, tt, opt, ctx);
+        return asn1_template_noexp_d2i(val, in, inlen, tt, opt, ctx, depth);
 
     *in = p;
     return 1;
@@ -592,7 +564,7 @@ static int asn1_template_ex_d2i(ASN1_VALUE **val,
 static int asn1_template_noexp_d2i(ASN1_VALUE **val,
                                    const unsigned char **in, long len,
                                    const ASN1_TEMPLATE *tt, char opt,
-                                   ASN1_TLC *ctx)
+                                   ASN1_TLC *ctx, int depth)
 {
     int flags, aclass;
     int ret;
@@ -628,7 +600,7 @@ static int asn1_template_noexp_d2i(ASN1_VALUE **val,
         } else if (ret == -1)
             return -1;
         if (!*val)
-            *val = (ASN1_VALUE *)sk_new_null();
+            *val = (ASN1_VALUE *)sk_ASN1_VALUE_new_null();
         else {
             /*
              * We've got a valid STACK: free up any items present
@@ -661,8 +633,8 @@ static int asn1_template_noexp_d2i(ASN1_VALUE **val,
                 break;
             }
             skfield = NULL;
-            if (!ASN1_item_ex_d2i(&skfield, &p, len,
-                                  ASN1_ITEM_ptr(tt->item), -1, 0, 0, ctx)) {
+             if (!asn1_item_ex_d2i(&skfield, &p, len, ASN1_ITEM_ptr(tt->item),
+                                   -1, 0, 0, ctx, depth)) {
                 OPENSSL_PUT_ERROR(ASN1, ASN1_R_NESTED_ASN1_ERROR);
                 goto err;
             }
@@ -679,9 +651,8 @@ static int asn1_template_noexp_d2i(ASN1_VALUE **val,
         }
     } else if (flags & ASN1_TFLG_IMPTAG) {
         /* IMPLICIT tagging */
-        ret = ASN1_item_ex_d2i(val, &p, len,
-                               ASN1_ITEM_ptr(tt->item), tt->tag, aclass, opt,
-                               ctx);
+        ret = asn1_item_ex_d2i(val, &p, len, ASN1_ITEM_ptr(tt->item), tt->tag,
+                               aclass, opt, ctx, depth);
         if (!ret) {
             OPENSSL_PUT_ERROR(ASN1, ASN1_R_NESTED_ASN1_ERROR);
             goto err;
@@ -689,8 +660,9 @@ static int asn1_template_noexp_d2i(ASN1_VALUE **val,
             return -1;
     } else {
         /* Nothing special */
-        ret = ASN1_item_ex_d2i(val, &p, len, ASN1_ITEM_ptr(tt->item),
-                               -1, tt->flags & ASN1_TFLG_COMBINE, opt, ctx);
+        ret = asn1_item_ex_d2i(val, &p, len, ASN1_ITEM_ptr(tt->item),
+                               -1, tt->flags & ASN1_TFLG_COMBINE, opt, ctx,
+                               depth);
         if (!ret) {
             OPENSSL_PUT_ERROR(ASN1, ASN1_R_NESTED_ASN1_ERROR);
             goto err;
@@ -839,19 +811,19 @@ static int asn1_d2i_ex_primitive(ASN1_VALUE **pval,
 
 /* Translate ASN1 content octets into a structure */
 
-int asn1_ex_c2i(ASN1_VALUE **pval, const unsigned char *cont, int len,
-                int utype, char *free_cont, const ASN1_ITEM *it)
+static int asn1_ex_c2i(ASN1_VALUE **pval, const unsigned char *cont, int len,
+                       int utype, char *free_cont, const ASN1_ITEM *it)
 {
     ASN1_VALUE **opval = NULL;
     ASN1_STRING *stmp;
     ASN1_TYPE *typ = NULL;
     int ret = 0;
-    const ASN1_PRIMITIVE_FUNCS *pf;
     ASN1_INTEGER **tint;
-    pf = it->funcs;
 
-    if (pf && pf->prim_c2i)
-        return pf->prim_c2i(pval, cont, len, utype, free_cont, it);
+    /* Historically, |it->funcs| for primitive types contained an
+     * |ASN1_PRIMITIVE_FUNCS| table of callbacks. */
+    assert(it->funcs == NULL);
+
     /* If ANY type clear type and set pointer to internal value */
     if (it->utype == V_ASN1_ANY) {
         if (!*pval) {
@@ -1034,15 +1006,13 @@ static int asn1_find_end(const unsigned char **in, long len, char inf)
  * constructed type and 'inf' should be set if it is indefinite length.
  */
 
-#ifndef ASN1_MAX_STRING_NEST
 /*
  * This determines how many levels of recursion are permitted in ASN1 string
  * types. If it is not limited stack overflows can occur. If set to zero no
  * recursion is allowed at all. Although zero should be adequate examples
  * exist that require a value of 1. So 5 should be more than enough.
  */
-# define ASN1_MAX_STRING_NEST 5
-#endif
+#define ASN1_MAX_STRING_NEST 5
 
 static int asn1_collect(BUF_MEM *buf, const unsigned char **in, long len,
                         char inf, int tag, int aclass, int depth)

@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2007-2008, 2013, 2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2007-2019 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -29,42 +29,37 @@ class ObjectPrototype;
 class RegExp;
 class RegExpObject;
 
-class StringPrototype : public StringObject {
-private:
-    StringPrototype(VM&, Structure*);
-
+class StringPrototype final : public StringObject {
 public:
-    typedef StringObject Base;
-    static const unsigned StructureFlags = HasStaticPropertyTable | Base::StructureFlags;
+    using Base = StringObject;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
 
     static StringPrototype* create(VM&, JSGlobalObject*, Structure*);
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(DerivedStringObjectType, StructureFlags), info());
     }
 
     DECLARE_INFO;
 
-protected:
-    void finishCreation(VM&, JSGlobalObject*, JSString*);
+private:
+    StringPrototype(VM&, Structure*);
+    void finishCreation(VM&, JSGlobalObject*);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(StringPrototype, StringObject);
 
-EncodedJSValue JIT_OPERATION operationStringProtoFuncReplaceGeneric(
-    ExecState*, EncodedJSValue thisValue, EncodedJSValue searchValue, EncodedJSValue replaceValue);
+JSC_DECLARE_JIT_OPERATION(operationStringProtoFuncReplaceGeneric, JSCell*, (JSGlobalObject*, EncodedJSValue thisValue, EncodedJSValue searchValue, EncodedJSValue replaceValue));
+JSC_DECLARE_JIT_OPERATION(operationStringProtoFuncReplaceRegExpEmptyStr, JSCell*, (JSGlobalObject*, JSString* thisValue, RegExpObject* searchValue));
+JSC_DECLARE_JIT_OPERATION(operationStringProtoFuncReplaceRegExpString, JSCell*, (JSGlobalObject*, JSString* thisValue, RegExpObject* searchValue, JSString* replaceValue));
 
-EncodedJSValue JIT_OPERATION operationStringProtoFuncReplaceRegExpEmptyStr(
-    ExecState*, JSString* thisValue, RegExpObject* searchValue);
+void substituteBackreferences(StringBuilder& result, const String& replacement, StringView source, const int* ovector, RegExp*);
 
-EncodedJSValue JIT_OPERATION operationStringProtoFuncReplaceRegExpString(
-    ExecState*, JSString* thisValue, RegExpObject* searchValue, JSString* replaceValue);
+JSC_DECLARE_HOST_FUNCTION(stringProtoFuncRepeatCharacter);
+JSC_DECLARE_HOST_FUNCTION(stringProtoFuncSplitFast);
 
-String substituteBackreferences(const String& replacement, StringView source, const int* ovector, RegExp* reg);
-
-EncodedJSValue JSC_HOST_CALL stringProtoFuncRepeatCharacter(ExecState*);
-EncodedJSValue JSC_HOST_CALL stringProtoFuncSplitFast(ExecState*);
-
-EncodedJSValue JSC_HOST_CALL builtinStringSubstrInternal(ExecState*);
-EncodedJSValue JSC_HOST_CALL builtinStringIncludesInternal(ExecState*);
+JSC_DECLARE_HOST_FUNCTION(builtinStringSubstringInternal);
+JSC_DECLARE_HOST_FUNCTION(builtinStringIncludesInternal);
+JSC_DECLARE_HOST_FUNCTION(builtinStringIndexOfInternal);
 
 } // namespace JSC

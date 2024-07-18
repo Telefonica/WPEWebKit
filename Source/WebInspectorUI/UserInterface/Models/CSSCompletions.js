@@ -33,141 +33,115 @@
 
 WI.CSSCompletions = class CSSCompletions
 {
-    constructor(properties, acceptEmptyPrefix)
+    constructor(values, {acceptEmptyPrefix} = {})
     {
-        this._values = [];
-        this._longhands = {};
-        this._shorthands = {};
+        console.assert(Array.isArray(values), values);
+        console.assert(!values.length || typeof values[0] === "string", "Expected an array of string values or an empty array", values);
 
-        // The `properties` parameter can be either a list of objects with 'name' / 'longhand'
-        // properties when initialized from the protocol for CSSCompletions.cssNameCompletions.
-        // Or it may just a list of strings when quickly initialized for other completion purposes.
-        if (properties.length && typeof properties[0] === "string")
-            this._values = this._values.concat(properties);
-        else {
-            for (var property of properties) {
-                var propertyName = property.name;
-                console.assert(propertyName);
-
-                this._values.push(propertyName);
-
-                var longhands = property.longhands;
-                if (longhands) {
-                    this._longhands[propertyName] = longhands;
-
-                    for (var j = 0; j < longhands.length; ++j) {
-                        var longhandName = longhands[j];
-
-                        var shorthands = this._shorthands[longhandName];
-                        if (!shorthands) {
-                            shorthands = [];
-                            this._shorthands[longhandName] = shorthands;
-                        }
-
-                        shorthands.push(propertyName);
-                    }
-                }
-            }
-        }
-
+        this._values = values.slice();
         this._values.sort();
-
-        this._acceptEmptyPrefix = acceptEmptyPrefix;
+        this._acceptEmptyPrefix = !!acceptEmptyPrefix;
+        this._queryController = null;
     }
 
     // Static
 
-    static requestCSSCompletions()
+    static completeUnbalancedValue(value)
     {
-        if (WI.CSSCompletions.cssNameCompletions)
-            return;
+        const State = {
+            Data: 0,
+            SingleQuoteString: 1,
+            DoubleQuoteString: 2,
+            Comment: 3
+        };
 
-        function propertyNamesCallback(error, names)
-        {
-            if (error)
-                return;
+        let state = State.Data;
+        let unclosedParenthesisCount = 0;
+        let trailingBackslash = false;
+        let length = value.length;
 
-            WI.CSSCompletions.cssNameCompletions = new WI.CSSCompletions(names, false);
+        for (let i = 0; i < length; ++i) {
+            switch (value[i]) {
+            case "'":
+                if (state === State.Data)
+                    state = State.SingleQuoteString;
+                else if (state === State.SingleQuoteString)
+                    state = State.Data;
+                break;
 
-            WI.CSSKeywordCompletions.addCustomCompletions(names);
+            case "\"":
+                if (state === State.Data)
+                    state = State.DoubleQuoteString;
+                else if (state === State.DoubleQuoteString)
+                    state = State.Data;
+                break;
 
-            // CodeMirror is not included by tests so we shouldn't assume it always exists.
-            // If it isn't available we skip MIME type associations.
-            if (!window.CodeMirror)
-                return;
+            case "(":
+                if (state === State.Data)
+                    ++unclosedParenthesisCount;
+                break;
 
-            var propertyNamesForCodeMirror = {};
-            var valueKeywordsForCodeMirror = {"inherit": true, "initial": true, "unset": true, "revert": true, "var": true, "constant": true, "env": true};
-            var colorKeywordsForCodeMirror = {};
+            case ")":
+                if (state === State.Data && unclosedParenthesisCount)
+                    --unclosedParenthesisCount;
+                break;
 
-            function nameForCodeMirror(name)
-            {
-                // CodeMirror parses the vendor prefix separate from the property or keyword name,
-                // so we need to strip vendor prefixes from our names. Also strip function parenthesis.
-                return name.replace(/^-[^-]+-/, "").replace(/\(\)$/, "").toLowerCase();
-            }
-
-            function collectPropertyNameForCodeMirror(propertyName)
-            {
-                // Properties can also be value keywords, like when used in a transition.
-                // So we add them to both lists.
-                var codeMirrorPropertyName = nameForCodeMirror(propertyName);
-                propertyNamesForCodeMirror[codeMirrorPropertyName] = true;
-                valueKeywordsForCodeMirror[codeMirrorPropertyName] = true;
-            }
-
-            for (var property of names)
-                collectPropertyNameForCodeMirror(property.name);
-
-            for (var propertyName in WI.CSSKeywordCompletions._propertyKeywordMap) {
-                var keywords = WI.CSSKeywordCompletions._propertyKeywordMap[propertyName];
-                for (var i = 0; i < keywords.length; ++i) {
-                    // Skip numbers, like the ones defined for font-weight.
-                    if (!isNaN(Number(keywords[i])))
-                        continue;
-                    valueKeywordsForCodeMirror[nameForCodeMirror(keywords[i])] = true;
+            case "/":
+                if (state === State.Data) {
+                    if (value[i + 1] === "*")
+                        state = State.Comment;
                 }
+                break;
+
+            case "\\":
+                if (i === length - 1)
+                    trailingBackslash = true;
+                else
+                    ++i; // Skip next character.
+                break;
+
+            case "*":
+                if (state === State.Comment) {
+                    if (value[i + 1] === "/")
+                        state = State.Data;
+                }
+                break;
             }
-
-            WI.CSSKeywordCompletions._colors.forEach(function(colorName) {
-                colorKeywordsForCodeMirror[nameForCodeMirror(colorName)] = true;
-            });
-
-            function updateCodeMirrorCSSMode(mimeType)
-            {
-                var modeSpec = CodeMirror.resolveMode(mimeType);
-
-                console.assert(modeSpec.propertyKeywords);
-                console.assert(modeSpec.valueKeywords);
-                console.assert(modeSpec.colorKeywords);
-
-                modeSpec.propertyKeywords = propertyNamesForCodeMirror;
-                modeSpec.valueKeywords = valueKeywordsForCodeMirror;
-                modeSpec.colorKeywords = colorKeywordsForCodeMirror;
-
-                CodeMirror.defineMIME(mimeType, modeSpec);
-            }
-
-            updateCodeMirrorCSSMode("text/css");
-            updateCodeMirrorCSSMode("text/x-scss");
         }
 
-        function fontFamilyNamesCallback(error, fontFamilyNames)
-        {
-            if (error)
-                return;
+        let suffix = "";
 
-            WI.CSSKeywordCompletions.addPropertyCompletionValues("font-family", fontFamilyNames);
-            WI.CSSKeywordCompletions.addPropertyCompletionValues("font", fontFamilyNames);
+        if (trailingBackslash)
+            suffix += "\\";
+
+        switch (state) {
+        case State.SingleQuoteString:
+            suffix += "'";
+            break;
+        case State.DoubleQuoteString:
+            suffix += "\"";
+            break;
+        case State.Comment:
+            suffix += "*/";
+            break;
         }
 
-        if (window.CSSAgent) {
-            CSSAgent.getSupportedCSSProperties(propertyNamesCallback);
+        suffix += ")".repeat(unclosedParenthesisCount);
 
-            // COMPATIBILITY (iOS 9): CSS.getSupportedSystemFontFamilyNames did not exist.
-            if (CSSAgent.getSupportedSystemFontFamilyNames)
-                CSSAgent.getSupportedSystemFontFamilyNames(fontFamilyNamesCallback);
-        }
+        return suffix;
+    }
+
+    static getCompletionText(completion)
+    {
+        console.assert(typeof completion === "string" || completion instanceof WI.QueryResult, completion);
+
+        if (typeof completion === "string")
+            return completion;
+
+        if (completion instanceof WI.QueryResult)
+            return completion.value;
+
+        return "";
     }
 
     // Public
@@ -177,17 +151,46 @@ WI.CSSCompletions = class CSSCompletions
         return this._values;
     }
 
+    executeQuery(query)
+    {
+        if (!query)
+            return this._acceptEmptyPrefix ? this._values.slice() : [];
+
+        this._queryController ||= new WI.CSSQueryController(this._values);
+
+        return this._queryController.executeQuery(query);
+    }
+
     startsWith(prefix)
     {
-        var firstIndex = this._firstIndexOfPrefix(prefix);
+        if (!prefix)
+            return this._acceptEmptyPrefix ? this._values.slice() : [];
+
+        let firstIndex = this._firstIndexOfPrefix(prefix);
         if (firstIndex === -1)
             return [];
 
-        var results = [];
+        let results = [];
         while (firstIndex < this._values.length && this._values[firstIndex].startsWith(prefix))
             results.push(this._values[firstIndex++]);
         return results;
     }
+
+    // Protected
+
+    replaceValues(values)
+    {
+        console.assert(Array.isArray(values), values);
+        console.assert(typeof values[0] === "string", "Expect an array of string values", values);
+
+        this._values = values;
+        this._values.sort();
+
+        this._queryController?.reset();
+        this._queryController?.addValues(values);
+    }
+
+    // Private
 
     _firstIndexOfPrefix(prefix)
     {
@@ -220,79 +223,42 @@ WI.CSSCompletions = class CSSCompletions
 
         return foundIndex;
     }
-
-    keySet()
-    {
-        if (!this._keySet)
-            this._keySet = this._values.keySet();
-        return this._keySet;
-    }
-
-    next(str, prefix)
-    {
-        return this._closest(str, prefix, 1);
-    }
-
-    previous(str, prefix)
-    {
-        return this._closest(str, prefix, -1);
-    }
-
-    _closest(str, prefix, shift)
-    {
-        if (!str)
-            return "";
-
-        var index = this._values.indexOf(str);
-        if (index === -1)
-            return "";
-
-        if (!prefix) {
-            index = (index + this._values.length + shift) % this._values.length;
-            return this._values[index];
-        }
-
-        var propertiesWithPrefix = this.startsWith(prefix);
-        var j = propertiesWithPrefix.indexOf(str);
-        j = (j + propertiesWithPrefix.length + shift) % propertiesWithPrefix.length;
-        return propertiesWithPrefix[j];
-    }
-
-    isShorthandPropertyName(shorthand)
-    {
-        return shorthand in this._longhands;
-    }
-
-    shorthandsForLonghand(longhand)
-    {
-        return this._shorthands[longhand] || [];
-    }
-
-    isValidPropertyName(name)
-    {
-        return this._values.includes(name);
-    }
-
-    propertyRequiresWebkitPrefix(name)
-    {
-        return this._values.includes("-webkit-" + name) && !this._values.includes(name);
-    }
-
-    getClosestPropertyName(name)
-    {
-        var bestMatches = [{distance: Infinity, name: null}];
-
-        for (var property of this._values) {
-            var distance = name.levenshteinDistance(property);
-
-            if (distance < bestMatches[0].distance)
-                bestMatches = [{distance, name: property}];
-            else if (distance === bestMatches[0].distance)
-                bestMatches.push({distance, name: property});
-        }
-
-        return bestMatches.length < 3 ? bestMatches[0].name : false;
-    }
 };
 
-WI.CSSCompletions.cssNameCompletions = null;
+WI.CSSCompletions.lengthUnits = new Set([
+    "ch",
+    "cm",
+    "dvb",
+    "dvh",
+    "dvi",
+    "dvmax",
+    "dvmin",
+    "dvw",
+    "em",
+    "ex",
+    "in",
+    "lvb",
+    "lvh",
+    "lvi",
+    "lvmax",
+    "lvmin",
+    "lvw",
+    "mm",
+    "pc",
+    "pt",
+    "px",
+    "q",
+    "rem",
+    "svb",
+    "svh",
+    "svi",
+    "svmax",
+    "svmin",
+    "svw",
+    "vb",
+    "vh",
+    "vi",
+    "vmax",
+    "vmin",
+    "vw",
+]);

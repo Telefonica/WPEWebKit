@@ -32,9 +32,12 @@
 #include "HTMLNames.h"
 #include "RenderView.h"
 #include "Settings.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/StackStats.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderIFrame);
 
 using namespace HTMLNames;
     
@@ -60,7 +63,7 @@ bool RenderIFrame::isInlineBlockOrInlineTable() const
 
 bool RenderIFrame::requiresLayer() const
 {
-    return RenderFrameBase::requiresLayer() || style().resize() != RESIZE_NONE;
+    return RenderFrameBase::requiresLayer() || style().resize() != Resize::None;
 }
 
 RenderView* RenderIFrame::contentRootRenderer() const
@@ -73,23 +76,23 @@ bool RenderIFrame::isFullScreenIFrame() const
 {
     // Some authors implement fullscreen popups as out-of-flow iframes with size set to full viewport (using vw/vh units).
     // The size used may not perfectly match the viewport size so the following heuristic uses a relaxed constraint.
-    return style().hasOutOfFlowPosition() && style().hasViewportUnits();
+    return style().hasOutOfFlowPosition() && style().usesViewportUnits();
 }
 
 bool RenderIFrame::flattenFrame() const
 {
-    if (settings().frameFlattening() == FrameFlatteningDisabled)
+    if (view().frameView().effectiveFrameFlattening() == FrameFlattening::Disabled)
         return false;
 
     if (style().width().isFixed() && style().height().isFixed()) {
         // Do not flatten iframes with scrolling="no".
-        if (iframeElement().scrollingMode() == ScrollbarAlwaysOff)
+        if (iframeElement().scrollingMode() == ScrollbarMode::AlwaysOff)
             return false;
         // Do not flatten iframes that have zero size, as flattening might make them visible.
         if (style().width().value() <= 0 || style().height().value() <= 0)
             return false;
         // Do not flatten "fullscreen" iframes or they could become larger than the viewport.
-        if (settings().frameFlattening() <= FrameFlatteningEnabledForNonFullScreenIFrames && isFullScreenIFrame())
+        if (view().frameView().effectiveFrameFlattening() <= FrameFlattening::EnabledForNonFullScreenIFrames && isFullScreenIFrame())
             return false;
     }
 

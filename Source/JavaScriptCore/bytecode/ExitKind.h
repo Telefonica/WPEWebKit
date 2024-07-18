@@ -25,12 +25,14 @@
 
 #pragma once
 
+#include <wtf/Forward.h>
+
 namespace JSC {
 
 enum ExitKind : uint8_t {
     ExitKindUnset,
     BadType, // We exited because a type prediction was wrong.
-    BadCell, // We exited because we made an incorrect assumption about what cell we would see. Usually used for function checks.
+    BadConstantValue, // We exited because we made an incorrect assumption about what value we would see. Usually used for function checks.
     BadIdent, // We exited because we made an incorrect assumption about what identifier we would see. Usually used for cached Id check in get_by_val.
     BadExecutable, // We exited because we made an incorrect assumption about what executable we would see.
     BadCache, // We exited because an inline cache was wrong.
@@ -39,6 +41,7 @@ enum ExitKind : uint8_t {
     BadTypeInfoFlags, // We exited because we made an incorrect assumption about what TypeInfo flags we would see.
     Overflow, // We exited because of overflow.
     NegativeZero, // We exited because we encountered negative zero.
+    NegativeIndex, // We exited because we encountered a negative index in a place we didn't want to see it.
     Int52Overflow, // We exited because of an Int52 overflow.
     StoreToHole, // We had a store to a hole.
     LoadFromHole, // We had a load from a hole.
@@ -46,7 +49,6 @@ enum ExitKind : uint8_t {
     InadequateCoverage, // We exited because we ended up in code that didn't have profiling coverage.
     ArgumentsEscaped, // We exited because arguments escaped but we didn't expect them to.
     ExoticObjectMode, // We exited because some exotic object that we were accessing was in an exotic mode (like Arguments with slow arguments).
-    NotStringObject, // We exited because we shouldn't have attempted to optimize string object access.
     VarargsOverflow, // We exited because a varargs call passed more arguments than we expected.
     TDZFailure, // We exited because we were in the TDZ and accessed the variable.
     HoistingFailed, // Something that was hoisted exited. So, assume that hoisting is a bad idea.
@@ -55,10 +57,11 @@ enum ExitKind : uint8_t {
     WatchdogTimerFired, // We exited because we need to service the watchdog timer.
     DebuggerEvent, // We exited because we need to service the debugger.
     ExceptionCheck, // We exited because a direct exception check showed that we threw an exception from a C call.
-    GenericUnwind, // We exited because a we arrived at this OSR exit from genericUnwind.
+    GenericUnwind, // We exited because we arrived at this OSR exit from genericUnwind.
+    BigInt32Overflow, // We exited because of an BigInt32 overflow.
 };
 
-const char* exitKindToString(ExitKind);
+ASCIILiteral exitKindToString(ExitKind);
 bool exitKindMayJettison(ExitKind);
 
 } // namespace JSC

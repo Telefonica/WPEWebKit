@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2012 Google, Inc.
+ * Copyright (C) 2020, 2021, 2022 Igalia S.L.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,24 +27,26 @@
 
 #pragma once
 
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "RenderSVGShape.h"
 
 namespace WebCore {
 
 class RenderSVGEllipse final : public RenderSVGShape {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGEllipse);
 public:
     RenderSVGEllipse(SVGGraphicsElement&, RenderStyle&&);
     virtual ~RenderSVGEllipse();
 
 private:
-    const char* renderName() const override { return "RenderSVGEllipse"; }
+    ASCIILiteral renderName() const override { return "RenderSVGEllipse"_s; }
 
     void updateShapeFromElement() override;
     bool isEmpty() const override { return m_usePathFallback ? RenderSVGShape::isEmpty() : m_fillBoundingBox.isEmpty(); }
     bool isRenderingDisabled() const override;
     void fillShape(GraphicsContext&) const override;
     void strokeShape(GraphicsContext&) const override;
-    bool shapeDependentStrokeContains(const FloatPoint&) override;
+    bool shapeDependentStrokeContains(const FloatPoint&, PointCoordinateSpace = GlobalCoordinateSpace) override;
     bool shapeDependentFillContains(const FloatPoint&, const WindRule) const override;
     void calculateRadiiAndCenter();
 
@@ -54,3 +57,5 @@ private:
 };
 
 } // namespace WebCore
+
+#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

@@ -18,9 +18,10 @@ import unittest
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.join(SCRIPT_DIR, os.pardir)
 sys.path.append(PARENT_DIR)
-import roll_deps
+import roll_deps  # pylint: disable=wrong-import-position
 from roll_deps import CalculateChangedDeps, GetMatchingDepsEntries, \
-  ParseDepsDict, ParseLocalDepsFile, UpdateDepsFile
+  ParseDepsDict, ParseLocalDepsFile, \
+  UpdateDepsFile  # pylint: disable=wrong-import-position
 
 
 TEST_DATA_VARS = {
@@ -81,6 +82,11 @@ class TestRollChromiumRevision(unittest.TestCase):
     shutil.rmtree(self._output_dir, ignore_errors=True)
     self.assertEqual(self.fake.expectations, [])
     setattr(roll_deps, '_RunCommand', self.old_RunCommand)
+
+  def testVarLookup(self):
+    local_scope = {'foo': 'wrong', 'vars': {'foo': 'bar'}}
+    lookup = roll_deps.VarLookup(local_scope)
+    self.assertEquals(lookup('foo'), 'bar')
 
   def testUpdateDepsFile(self):
     new_rev = 'aaaaabbbbbcccccdddddeeeeefffff0000011111'

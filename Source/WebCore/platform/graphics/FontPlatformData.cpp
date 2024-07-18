@@ -21,19 +21,7 @@
 #include "config.h"
 #include "FontPlatformData.h"
 
-#include <wtf/HashMap.h>
-#include <wtf/RetainPtr.h>
-#include <wtf/text/StringHash.h>
-#include <wtf/text/WTFString.h>
-
-#if OS(DARWIN) && USE(CG)
-#include "SharedBuffer.h"
-#include <CoreGraphics/CGFont.h>
-#endif
-
-#if USE(DIRECT2D)
-#include <dwrite.h>
-#endif
+#include <wtf/SortedArrayMap.h>
 
 namespace WebCore {
 
@@ -46,24 +34,16 @@ FontPlatformData::FontPlatformData()
 {
 }
 
-FontPlatformData::FontPlatformData(float size, bool syntheticBold, bool syntheticOblique, FontOrientation orientation, FontWidthVariant widthVariant, TextRenderingMode textRenderingMode)
+FontPlatformData::FontPlatformData(float size, bool syntheticBold, bool syntheticOblique, FontOrientation orientation, FontWidthVariant widthVariant, TextRenderingMode textRenderingMode, const CreationData* creationData)
     : m_size(size)
     , m_orientation(orientation)
     , m_widthVariant(widthVariant)
     , m_textRenderingMode(textRenderingMode)
+    , m_creationData(makeOptionalFromPointer(creationData))
     , m_syntheticBold(syntheticBold)
     , m_syntheticOblique(syntheticOblique)
 {
 }
-
-#if USE(CG) && (PLATFORM(WIN) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101200))
-FontPlatformData::FontPlatformData(CGFontRef cgFont, float size, bool syntheticBold, bool syntheticOblique, FontOrientation orientation, FontWidthVariant widthVariant, TextRenderingMode textRenderingMode)
-    : FontPlatformData(size, syntheticBold, syntheticOblique, orientation, widthVariant, textRenderingMode)
-{
-    m_cgFont = cgFont;
-    ASSERT(m_cgFont);
-}
-#endif
 
 #if !USE(FREETYPE)
 FontPlatformData FontPlatformData::cloneWithOrientation(const FontPlatformData& source, FontOrientation orientation)
@@ -85,6 +65,14 @@ FontPlatformData FontPlatformData::cloneWithSize(const FontPlatformData& source,
     FontPlatformData copy(source);
     copy.m_size = size;
     return copy;
+}
+#endif
+
+#if !PLATFORM(COCOA) && !USE(FREETYPE)
+Vector<FontPlatformData::FontVariationAxis> FontPlatformData::variationAxes(ShouldLocalizeAxisNames) const
+{
+    // FIXME: <webkit.org/b/219614> Not implemented yet.
+    return { };
 }
 #endif
 

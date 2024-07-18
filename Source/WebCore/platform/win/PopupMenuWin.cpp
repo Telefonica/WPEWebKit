@@ -33,6 +33,7 @@
 #include "FrameView.h"
 #include "GDIUtilities.h"
 #include "GraphicsContext.h"
+#include "GraphicsContextWin.h"
 #include "HTMLNames.h"
 #include "HWndDC.h"
 #include "HostWindow.h"
@@ -49,7 +50,9 @@
 #include "ScrollbarThemeWin.h"
 #include "TextRun.h"
 #include "WebCoreInstanceHandle.h"
+#include <wtf/HexNumber.h>
 #include <wtf/WindowsExtras.h>
+#include <wtf/text/StringBuilder.h>
 
 #include <windows.h>
 #include <windowsx.h>
@@ -94,7 +97,7 @@ static void translatePoint(LPARAM& lParam, HWND from, HWND to)
     lParam = MAKELPARAM(pt.x, pt.y);
 }
 
-static FloatRect monitorFromHwnd(HWND hwnd)
+static IntRect monitorFromHwnd(HWND hwnd)
 {
     HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFOEX monitorInfo;
@@ -139,7 +142,7 @@ void PopupMenuWin::show(const IntRect& r, FrameView* view, int index)
 
     if (!m_scrollbar && visibleItems() < client()->listSize()) {
         // We need a scroll bar
-        m_scrollbar = client()->createScrollbar(*this, VerticalScrollbar, SmallScrollbar);
+        m_scrollbar = client()->createScrollbar(*this, ScrollbarOrientation::Vertical, ScrollbarControlSize::Small);
         m_scrollbar->styleChanged();
     }
 
@@ -161,7 +164,7 @@ void PopupMenuWin::show(const IntRect& r, FrameView* view, int index)
         shouldAnimate = FALSE;
 
     if (shouldAnimate) {
-        RECT viewRect = {0};
+        RECT viewRect { };
         ::GetWindowRect(hostWindow, &viewRect);
         if (!::IsRectEmpty(&viewRect))
             ::AnimateWindow(m_popup, defaultAnimationDuration, AW_BLEND);
@@ -302,7 +305,7 @@ void PopupMenuWin::calculatePositionAndSize(const IntRect& r, FrameView* v)
     } else
         ::MoveWindow(m_popup, absoluteScreenCoords.x(), absoluteScreenCoords.y(), absoluteScreenCoords.width(), absoluteScreenCoords.height(), false);
 
-    FloatRect screen = monitorFromHwnd(m_popup);
+    IntRect screen = monitorFromHwnd(m_popup);
     
     // Now we determine the actual location and measurements of the popup itself.
     // r is in absolute document coordinates, but we want to be in screen coordinates.
@@ -322,12 +325,12 @@ void PopupMenuWin::calculatePositionAndSize(const IntRect& r, FrameView* v)
     m_font = client()->menuStyle().font();
     auto d = m_font.fontDescription();
     d.setComputedSize(d.computedSize() * m_scaleFactor);
-    m_font = FontCascade(d, m_font.letterSpacing(), m_font.wordSpacing());
+    m_font = FontCascade(WTFMove(d), m_font.letterSpacing(), m_font.wordSpacing());
     m_font.update(m_popupClient->fontSelector());
 
     // First, determine the popup's height
     int itemCount = client()->listSize();
-    m_itemHeight = m_font.fontMetrics().height() + optionSpacingMiddle;
+    m_itemHeight = m_font.metricsOfPrimaryFont().height() + optionSpacingMiddle;
 
     int naturalHeight = m_itemHeight * itemCount;
     int popupHeight = std::min(maxPopupHeight, naturalHeight);
@@ -345,7 +348,7 @@ void PopupMenuWin::calculatePositionAndSize(const IntRect& r, FrameView* v)
         if (client()->itemIsLabel(i)) {
             auto d = itemFont.fontDescription();
             d.setWeight(d.bolderWeight());
-            itemFont = FontCascade(d, itemFont.letterSpacing(), itemFont.wordSpacing());
+            itemFont = FontCascade(WTFMove(d), itemFont.letterSpacing(), itemFont.wordSpacing());
             itemFont.update(m_popupClient->fontSelector());
         }
 
@@ -354,7 +357,7 @@ void PopupMenuWin::calculatePositionAndSize(const IntRect& r, FrameView* v)
 
     if (naturalHeight > maxPopupHeight)
         // We need room for a scrollbar
-        popupWidth += ScrollbarTheme::theme().scrollbarThickness(SmallScrollbar);
+        popupWidth += ScrollbarTheme::theme().scrollbarThickness(ScrollbarControlSize::Small);
 
     // Add padding to align the popup text with the <select> text
     popupWidth += std::max<int>(0, client()->clientPaddingRight() - client()->clientInsetRight()) + std::max<int>(0, client()->clientPaddingLeft() - client()->clientInsetLeft());
@@ -552,12 +555,12 @@ bool PopupMenuWin::scrollToRevealSelection()
     int index = focusedIndex();
 
     if (index < m_scrollOffset) {
-        ScrollableArea::scrollToOffsetWithoutAnimation(VerticalScrollbar, index);
+        ScrollableArea::scrollToOffsetWithoutAnimation(ScrollbarOrientation::Vertical, index);
         return true;
     }
 
     if (index >= m_scrollOffset + visibleItems()) {
-        ScrollableArea::scrollToOffsetWithoutAnimation(VerticalScrollbar, index - visibleItems() + 1);
+        ScrollableArea::scrollToOffsetWithoutAnimation(ScrollbarOrientation::Vertical, index - visibleItems() + 1);
         return true;
     }
 
@@ -572,8 +575,7 @@ void PopupMenuWin::updateFromElement()
     m_focusedIndex = client()->selectedIndex();
 
     ::InvalidateRect(m_popup, 0, TRUE);
-    if (!scrollToRevealSelection())
-        ::UpdateWindow(m_popup);
+    scrollToRevealSelection();
 }
 
 const int separatorPadding = 4;
@@ -608,11 +610,9 @@ void PopupMenuWin::paint(const IntRect& damageRect, HDC hdc)
         ::SelectObject(m_DC.get(), m_bmp.get());
     }
 
-    GraphicsContext context(m_DC.get());
+    GraphicsContextWin context(m_DC.get());
 
-    int itemCount = client()->listSize();
-
-    // listRect is the damageRect translated into the coordinates of the entire menu list (which is itemCount * m_itemHeight pixels tall)
+    // listRect is the damageRect translated into the coordinates of the entire menu list (which is listSize * m_itemHeight pixels tall)
     IntRect listRect = damageRect;
     listRect.move(IntSize(0, m_scrollOffset * m_itemHeight));
 
@@ -622,8 +622,8 @@ void PopupMenuWin::paint(const IntRect& damageRect, HDC hdc)
         Color optionBackgroundColor, optionTextColor;
         PopupMenuStyle itemStyle = client()->itemStyle(index);
         if (index == focusedIndex()) {
-            optionBackgroundColor = RenderTheme::singleton().activeListBoxSelectionBackgroundColor();
-            optionTextColor = RenderTheme::singleton().activeListBoxSelectionForegroundColor();
+            optionBackgroundColor = RenderTheme::singleton().activeListBoxSelectionBackgroundColor({ });
+            optionTextColor = RenderTheme::singleton().activeListBoxSelectionForegroundColor({ });
         } else {
             optionBackgroundColor = itemStyle.backgroundColor();
             optionTextColor = itemStyle.foregroundColor();
@@ -644,21 +644,21 @@ void PopupMenuWin::paint(const IntRect& damageRect, HDC hdc)
 
         String itemText = client()->itemText(index);
 
-        TextRun textRun(itemText, 0, 0, AllowTrailingExpansion, itemStyle.textDirection(), itemStyle.hasTextDirectionOverride());
+        TextRun textRun(itemText, 0, 0, ExpansionBehavior::allowLeftOnly(), itemStyle.textDirection(), itemStyle.hasTextDirectionOverride());
         context.setFillColor(optionTextColor);
 
         FontCascade itemFont = m_font;
         if (client()->itemIsLabel(index)) {
             auto d = itemFont.fontDescription();
             d.setWeight(d.bolderWeight());
-            itemFont = FontCascade(d, itemFont.letterSpacing(), itemFont.wordSpacing());
+            itemFont = FontCascade(WTFMove(d), itemFont.letterSpacing(), itemFont.wordSpacing());
             itemFont.update(m_popupClient->fontSelector());
         }
         
         // Draw the item text
         if (itemStyle.isVisible()) {
             int textX = 0;
-            if (client()->menuStyle().textDirection() == LTR) {
+            if (client()->menuStyle().textDirection() == TextDirection::LTR) {
                 textX = std::max<int>(0, client()->clientPaddingLeft() - client()->clientInsetLeft());
                 if (RenderTheme::singleton().popupOptionSupportsTextIndent())
                     textX += minimumIntValueForLength(itemStyle.textIndent(), itemRect.width());
@@ -668,7 +668,7 @@ void PopupMenuWin::paint(const IntRect& damageRect, HDC hdc)
                 if (RenderTheme::singleton().popupOptionSupportsTextIndent())
                     textX -= minimumIntValueForLength(itemStyle.textIndent(), itemRect.width());
             }
-            int textY = itemRect.y() + itemFont.fontMetrics().ascent() + (itemRect.height() - itemFont.fontMetrics().height()) / 2;
+            int textY = itemRect.y() + itemFont.metricsOfPrimaryFont().ascent() + (itemRect.height() - itemFont.metricsOfPrimaryFont().height()) / 2;
             context.drawBidiText(itemFont, textRun, IntPoint(textX, textY));
         }
     }
@@ -682,14 +682,9 @@ void PopupMenuWin::paint(const IntRect& damageRect, HDC hdc)
     ::BitBlt(localDC, damageRect.x(), damageRect.y(), damageRect.width(), damageRect.height(), m_DC.get(), damageRect.x(), damageRect.y(), SRCCOPY);
 }
 
-int PopupMenuWin::scrollSize(ScrollbarOrientation orientation) const
+ScrollPosition PopupMenuWin::scrollPosition() const
 {
-    return ((orientation == VerticalScrollbar) && m_scrollbar) ? (m_scrollbar->totalSize() - m_scrollbar->visibleSize()) : 0;
-}
-
-int PopupMenuWin::scrollOffset(ScrollbarOrientation) const
-{
-    return m_scrollOffset;
+    return { 0, m_scrollOffset };
 }
 
 void PopupMenuWin::setScrollOffset(const IntPoint& offset)
@@ -824,8 +819,6 @@ LRESULT CALLBACK PopupMenuWin::PopupMenuWndProc(HWND hWnd, UINT message, WPARAM 
     return ::DefWindowProc(hWnd, message, wParam, lParam);
 }
 
-const int smoothScrollAnimationDuration = 5000;
-
 LRESULT PopupMenuWin::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     LRESULT lResult = 0;
@@ -897,9 +890,9 @@ LRESULT PopupMenuWin::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
                     focusLast();
                     break;
                 case VK_PRIOR:
-                    if (focusedIndex() != scrollOffset()) {
+                    if (focusedIndex() != m_scrollOffset) {
                         // Set the selection to the first visible item
-                        int firstVisibleItem = scrollOffset();
+                        int firstVisibleItem = m_scrollOffset;
                         up(focusedIndex() - firstVisibleItem);
                     } else {
                         // The first visible item is selected, so move the selection back one page
@@ -907,7 +900,7 @@ LRESULT PopupMenuWin::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
                     }
                     break;
                 case VK_NEXT: {
-                    int lastVisibleItem = scrollOffset() + visibleItems() - 1;
+                    int lastVisibleItem = m_scrollOffset + visibleItems() - 1;
                     if (focusedIndex() != lastVisibleItem) {
                         // Set the selection to the last visible item
                         down(lastVisibleItem - focusedIndex());
@@ -1067,7 +1060,7 @@ LRESULT PopupMenuWin::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
                     --i;
             }
 
-            ScrollableArea::scroll(i > 0 ? ScrollUp : ScrollDown, ScrollByLine, abs(i));
+            ScrollableArea::scroll(i > 0 ? ScrollUp : ScrollDown, ScrollGranularity::Line, abs(i));
             break;
         }
 
@@ -1092,14 +1085,17 @@ LRESULT PopupMenuWin::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
     return lResult;
 }
 
+String PopupMenuWin::debugDescription() const
+{
+    return makeString("PopupMenuWin 0x", hex(reinterpret_cast<uintptr_t>(this), Lowercase));
+}
+
 AccessiblePopupMenu::AccessiblePopupMenu(const PopupMenuWin& popupMenu)
     : m_popupMenu(popupMenu)
 {
 }
 
-AccessiblePopupMenu::~AccessiblePopupMenu()
-{
-}
+AccessiblePopupMenu::~AccessiblePopupMenu() = default;
 
 HRESULT AccessiblePopupMenu::QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppvObject)
 {

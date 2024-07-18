@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,67 +27,70 @@
 #include "TrackBase.h"
 
 #include "Logging.h"
+#include "ScriptExecutionContext.h"
+#include "TrackListBase.h"
 #include <wtf/Language.h>
 #include <wtf/text/StringBuilder.h>
 
-#if ENABLE(VIDEO_TRACK)
-
-#include "HTMLMediaElement.h"
+#if ENABLE(VIDEO)
 
 namespace WebCore {
 
 static int s_uniqueId = 0;
 
-#if !RELEASE_LOG_DISABLED
-static const void* nextLogIdentifier()
-{
-    static uint64_t logIdentifier = cryptographicallyRandomNumber();
-    return reinterpret_cast<const void*>(++logIdentifier);
-}
+static bool isValidBCP47LanguageTag(const String&);
 
-static RefPtr<PAL::Logger>& nullLogger()
+#if !RELEASE_LOG_DISABLED
+static RefPtr<Logger>& nullLogger()
 {
-    static NeverDestroyed<RefPtr<PAL::Logger>> logger;
+    static NeverDestroyed<RefPtr<Logger>> logger;
     return logger;
 }
 #endif
 
-TrackBase::TrackBase(Type type, const AtomicString& id, const AtomicString& label, const AtomicString& language)
-    : m_uniqueId(++s_uniqueId)
+TrackBase::TrackBase(ScriptExecutionContext* context, Type type, const AtomString& id, const AtomString& label, const AtomString& language)
+    : ContextDestructionObserver(context)
+    , m_uniqueId(++s_uniqueId)
     , m_id(id)
     , m_label(label)
     , m_language(language)
-    , m_validBCP47Language(language)
 {
     ASSERT(type != BaseTrack);
+    if (isValidBCP47LanguageTag(language))
+        m_validBCP47Language = language;
+
     m_type = type;
 
 #if !RELEASE_LOG_DISABLED
     if (!nullLogger().get()) {
-        nullLogger() = PAL::Logger::create(this);
+        nullLogger() = Logger::create(this);
         nullLogger()->setEnabled(this, false);
     }
 
     m_logger = nullLogger().get();
-    m_logIdentifier = nextLogIdentifier();
 #endif
 }
 
-Element* TrackBase::element()
+void TrackBase::setTrackList(TrackListBase& trackList)
 {
-    return m_mediaElement;
+    m_trackList = trackList;
 }
 
-void TrackBase::setMediaElement(HTMLMediaElement* element)
+void TrackBase::clearTrackList()
 {
-    m_mediaElement = element;
+    m_trackList = nullptr;
+}
 
-#if !RELEASE_LOG_DISABLED
-    if (element) {
-        m_logger = &element->logger();
-        m_logIdentifier = element->logIdentifier();
-    }
-#endif
+TrackListBase* TrackBase::trackList() const
+{
+    return m_trackList.get();
+}
+
+WebCoreOpaqueRoot TrackBase::opaqueRoot()
+{
+    if (auto trackList = this->trackList())
+        return trackList->opaqueRoot();
+    return WebCoreOpaqueRoot { this };
 }
 
 // See: https://tools.ietf.org/html/bcp47#section-2.1
@@ -141,50 +144,53 @@ static bool isValidBCP47LanguageTag(const String& languageTag)
     return true;
 }
     
-void TrackBase::setLanguage(const AtomicString& language)
+void TrackBase::setLanguage(const AtomString& language)
 {
-    if (!language.isEmpty() && !isValidBCP47LanguageTag(language)) {
-        String message;
-        if (language.contains((UChar)'\0'))
-            message = WTF::ASCIILiteral("The language contains a null character and is not a valid BCP 47 language tag.");
-        else {
-            StringBuilder stringBuilder;
-            stringBuilder.appendLiteral("The language '");
-            stringBuilder.append(language);
-            stringBuilder.appendLiteral("' is not a valid BCP 47 language tag.");
-            message = stringBuilder.toString();
-        }
-        if (auto element = this->element())
-            element->document().addConsoleMessage(MessageSource::Rendering, MessageLevel::Warning, message);
-    } else
-        m_validBCP47Language = language;
-    
     m_language = language;
-}
+    if (language.isEmpty() || isValidBCP47LanguageTag(language)) {
+        m_validBCP47Language = language;
+        return;
+    }
 
-AtomicString TrackBase::validBCP47Language() const
-{
-    return m_validBCP47Language;
+    m_validBCP47Language = emptyAtom();
+
+    auto context = scriptExecutionContext();
+    if (!context)
+        return;
+
+    String message;
+    if (language.contains((UChar)'\0'))
+        message = "The language contains a null character and is not a valid BCP 47 language tag."_s;
+    else
+        message = makeString("The language '", language, "' is not a valid BCP 47 language tag.");
+
+    context->addConsoleMessage(MessageSource::Rendering, MessageLevel::Warning, message);
 }
 
 #if !RELEASE_LOG_DISABLED
+void TrackBase::setLogger(const Logger& logger, const void* logIdentifier)
+{
+    m_logger = &logger;
+    m_logIdentifier = childLogIdentifier(logIdentifier, m_uniqueId);
+}
+
 WTFLogChannel& TrackBase::logChannel() const
 {
     return LogMedia;
 }
 #endif
 
-MediaTrackBase::MediaTrackBase(Type type, const AtomicString& id, const AtomicString& label, const AtomicString& language)
-    : TrackBase(type, id, label, language)
+MediaTrackBase::MediaTrackBase(ScriptExecutionContext* context, Type type, const AtomString& id, const AtomString& label, const AtomString& language)
+    : TrackBase(context, type, id, label, language)
 {
 }
 
-void MediaTrackBase::setKind(const AtomicString& kind)
+void MediaTrackBase::setKind(const AtomString& kind)
 {
     setKindInternal(kind);
 }
 
-void MediaTrackBase::setKindInternal(const AtomicString& kind)
+void MediaTrackBase::setKindInternal(const AtomString& kind)
 {
     if (isValidKind(kind))
         m_kind = kind;

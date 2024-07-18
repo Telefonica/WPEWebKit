@@ -33,14 +33,14 @@
 #import "WebFrameInternal.h"
 #import <JavaScriptCore/JSLock.h>
 #import <JavaScriptCore/MemoryStatistics.h>
+#import <WebCore/BackForwardCache.h>
 #import <WebCore/CommonVM.h>
 #import <WebCore/FontCache.h>
 #import <WebCore/Frame.h>
 #import <WebCore/GCController.h>
 #import <WebCore/GlyphPage.h>
-#import <WebCore/GraphicsContext.h>
+#import <WebCore/GraphicsContextCG.h>
 #import <WebCore/JSDOMWindow.h>
-#import <WebCore/PageCache.h>
 #import <WebCore/PageConsoleClient.h>
 #import <WebCore/PrintContext.h>
 #import <WebCore/RenderTreeAsText.h>
@@ -80,34 +80,27 @@ using namespace WebCore;
     return commonVM().heap.protectedGlobalObjectCount();
 }
 
+static RetainPtr<NSCountedSet> createNSCountedSet(const HashCountedSet<const char*>& set)
+{
+    auto result = adoptNS([[NSCountedSet alloc] initWithCapacity:set.size()]);
+    for (auto& entry : set) {
+        auto key = [NSString stringWithUTF8String:entry.key];
+        for (unsigned i = 0; i < entry.value; ++i)
+            [result addObject:key];
+    }
+    return result;
+}
+
 + (NSCountedSet *)javaScriptProtectedObjectTypeCounts
 {
     JSLockHolder lock(commonVM());
-    
-    NSCountedSet *result = [NSCountedSet set];
-
-    std::unique_ptr<TypeCountSet> counts(commonVM().heap.protectedObjectTypeCounts());
-    HashCountedSet<const char*>::iterator end = counts->end();
-    for (HashCountedSet<const char*>::iterator it = counts->begin(); it != end; ++it)
-        for (unsigned i = 0; i < it->value; ++i)
-            [result addObject:[NSString stringWithUTF8String:it->key]];
-    
-    return result;
+    return createNSCountedSet(*commonVM().heap.protectedObjectTypeCounts()).autorelease();
 }
 
 + (NSCountedSet *)javaScriptObjectTypeCounts
 {
     JSLockHolder lock(commonVM());
-    
-    NSCountedSet *result = [NSCountedSet set];
-
-    std::unique_ptr<TypeCountSet> counts(commonVM().heap.objectTypeCounts());
-    HashCountedSet<const char*>::iterator end = counts->end();
-    for (HashCountedSet<const char*>::iterator it = counts->begin(); it != end; ++it)
-        for (unsigned i = 0; i < it->value; ++i)
-            [result addObject:[NSString stringWithUTF8String:it->key]];
-    
-    return result;
+    return createNSCountedSet(*commonVM().heap.objectTypeCounts()).autorelease();
 }
 
 + (void)garbageCollectJavaScriptObjects
@@ -147,17 +140,17 @@ using namespace WebCore;
 
 + (size_t)cachedFontDataCount
 {
-    return FontCache::singleton().fontCount();
+    return FontCache::forCurrentThread().fontCount();
 }
 
 + (size_t)cachedFontDataInactiveCount
 {
-    return FontCache::singleton().inactiveFontCount();
+    return FontCache::forCurrentThread().inactiveFontCount();
 }
 
 + (void)purgeInactiveFontData
 {
-    FontCache::singleton().purgeInactiveFontData();
+    FontCache::forCurrentThread().purgeInactiveFontData();
 }
 
 + (size_t)glyphPageCount
@@ -199,22 +192,20 @@ using namespace WebCore;
 
 + (NSDictionary *)memoryStatistics
 {
-    WTF::FastMallocStatistics fastMallocStatistics = WTF::fastMallocStatistics();
-    
+    auto fastMallocStatistics = WTF::fastMallocStatistics();
     JSLockHolder lock(commonVM());
     size_t heapSize = commonVM().heap.size();
     size_t heapFree = commonVM().heap.capacity() - heapSize;
-    GlobalMemoryStatistics globalMemoryStats = globalMemoryStatistics();
-    
-    return [NSDictionary dictionaryWithObjectsAndKeys:
-                [NSNumber numberWithInt:fastMallocStatistics.reservedVMBytes], @"FastMallocReservedVMBytes",
-                [NSNumber numberWithInt:fastMallocStatistics.committedVMBytes], @"FastMallocCommittedVMBytes",
-                [NSNumber numberWithInt:fastMallocStatistics.freeListBytes], @"FastMallocFreeListBytes",
-                [NSNumber numberWithInt:heapSize], @"JavaScriptHeapSize",
-                [NSNumber numberWithInt:heapFree], @"JavaScriptFreeSize",
-                [NSNumber numberWithUnsignedInt:(unsigned int)globalMemoryStats.stackBytes], @"JavaScriptStackSize",
-                [NSNumber numberWithUnsignedInt:(unsigned int)globalMemoryStats.JITBytes], @"JavaScriptJITSize",
-            nil];
+    auto globalMemoryStats = globalMemoryStatistics();
+    return @{
+        @"FastMallocReservedVMBytes": @(fastMallocStatistics.reservedVMBytes),
+        @"FastMallocCommittedVMBytes": @(fastMallocStatistics.committedVMBytes),
+        @"FastMallocFreeListBytes": @(fastMallocStatistics.freeListBytes),
+        @"JavaScriptHeapSize": @(heapSize),
+        @"JavaScriptFreeSize": @(heapFree),
+        @"JavaScriptStackSize": @(globalMemoryStats.stackBytes),
+        @"JavaScriptJITSize": @(globalMemoryStats.JITBytes),
+    };
 }
 
 + (void)returnFreeMemoryToSystem
@@ -224,12 +215,12 @@ using namespace WebCore;
 
 + (int)cachedPageCount
 {
-    return PageCache::singleton().pageCount();
+    return BackForwardCache::singleton().pageCount();
 }
 
 + (int)cachedFrameCount
 {
-    return PageCache::singleton().frameCount();
+    return BackForwardCache::singleton().frameCount();
 }
 
 // Deprecated
@@ -269,9 +260,34 @@ using namespace WebCore;
 
 @implementation WebFrame (WebKitDebug)
 
-- (NSString *)renderTreeAsExternalRepresentationForPrinting:(BOOL)forPrinting
+- (NSString *)renderTreeAsExternalRepresentationForPrinting
 {
-    return externalRepresentation(_private->coreFrame, forPrinting ? RenderAsTextPrintingMode : RenderAsTextBehaviorNormal);
+    return externalRepresentation(_private->coreFrame, { RenderAsTextFlag::PrintingMode });
+}
+
+static OptionSet<RenderAsTextFlag> toRenderAsTextFlags(WebRenderTreeAsTextOptions options)
+{
+    OptionSet<RenderAsTextFlag> flags;
+
+    if (options & WebRenderTreeAsTextShowAllLayers)
+        flags.add(RenderAsTextFlag::ShowAllLayers);
+    if (options & WebRenderTreeAsTextShowLayerNesting)
+        flags.add(RenderAsTextFlag::ShowLayerNesting);
+    if (options & WebRenderTreeAsTextShowCompositedLayers)
+        flags.add(RenderAsTextFlag::ShowCompositedLayers);
+    if (options & WebRenderTreeAsTextShowOverflow)
+        flags.add(RenderAsTextFlag::ShowOverflow);
+    if (options & WebRenderTreeAsTextShowSVGGeometry)
+        flags.add(RenderAsTextFlag::ShowSVGGeometry);
+    if (options & WebRenderTreeAsTextShowLayerFragments)
+        flags.add(RenderAsTextFlag::ShowLayerFragments);
+
+    return flags;
+}
+
+- (NSString *)renderTreeAsExternalRepresentationWithOptions:(WebRenderTreeAsTextOptions)options
+{
+    return externalRepresentation(_private->coreFrame, toRenderAsTextFlags(options));
 }
 
 - (int)numberOfPagesWithPageWidth:(float)pageWidthInPixels pageHeight:(float)pageHeightInPixels
@@ -289,7 +305,7 @@ using namespace WebCore;
     if (!coreFrame)
         return;
 
-    GraphicsContext graphicsContext(cgContext);
+    GraphicsContextCG graphicsContext(cgContext);
     PrintContext::spoolAllPagesWithBoundaries(*coreFrame, graphicsContext, FloatSize(pageWidthInPixels, pageHeightInPixels));
 }
 

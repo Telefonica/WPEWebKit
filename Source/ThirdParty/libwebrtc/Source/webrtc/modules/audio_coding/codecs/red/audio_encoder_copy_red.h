@@ -8,22 +8,31 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_RED_AUDIO_ENCODER_COPY_RED_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_RED_AUDIO_ENCODER_COPY_RED_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_RED_AUDIO_ENCODER_COPY_RED_H_
+#define MODULES_AUDIO_CODING_CODECS_RED_AUDIO_ENCODER_COPY_RED_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <list>
 #include <memory>
-#include <vector>
+#include <utility>
 
-#include "webrtc/api/audio_codecs/audio_encoder.h"
-#include "webrtc/base/buffer.h"
-#include "webrtc/base/constructormagic.h"
+#include "absl/types/optional.h"
+#include "api/array_view.h"
+#include "api/audio_codecs/audio_encoder.h"
+#include "api/field_trials_view.h"
+#include "api/units/time_delta.h"
+#include "rtc_base/buffer.h"
 
 namespace webrtc {
 
-// This class implements redundant audio coding. The class object will have an
-// underlying AudioEncoder object that performs the actual encodings. The
-// current class will gather the two latest encodings from the underlying codec
-// into one packet.
+// This class implements redundant audio coding as described in
+//   https://tools.ietf.org/html/rfc2198
+// The class object will have an underlying AudioEncoder object that performs
+// the actual encodings. The current class will gather the N latest encodings
+// from the underlying codec into one packet. Currently N is hard-coded to 2.
+
 class AudioEncoderCopyRed final : public AudioEncoder {
  public:
   struct Config {
@@ -34,9 +43,12 @@ class AudioEncoderCopyRed final : public AudioEncoder {
     std::unique_ptr<AudioEncoder> speech_encoder;
   };
 
-  explicit AudioEncoderCopyRed(Config&& config);
+  AudioEncoderCopyRed(Config&& config, const FieldTrialsView& field_trials);
 
   ~AudioEncoderCopyRed() override;
+
+  AudioEncoderCopyRed(const AudioEncoderCopyRed&) = delete;
+  AudioEncoderCopyRed& operator=(const AudioEncoderCopyRed&) = delete;
 
   int SampleRateHz() const override;
   size_t NumChannels() const override;
@@ -44,20 +56,33 @@ class AudioEncoderCopyRed final : public AudioEncoder {
   size_t Num10MsFramesInNextPacket() const override;
   size_t Max10MsFramesInAPacket() const override;
   int GetTargetBitrate() const override;
+
   void Reset() override;
   bool SetFec(bool enable) override;
+
   bool SetDtx(bool enable) override;
+  bool GetDtx() const override;
+
   bool SetApplication(Application application) override;
   void SetMaxPlaybackRate(int frequency_hz) override;
-  rtc::ArrayView<std::unique_ptr<AudioEncoder>> ReclaimContainedEncoders()
-      override;
+  bool EnableAudioNetworkAdaptor(const std::string& config_string,
+                                 RtcEventLog* event_log) override;
+  void DisableAudioNetworkAdaptor() override;
   void OnReceivedUplinkPacketLossFraction(
       float uplink_packet_loss_fraction) override;
-  void OnReceivedUplinkRecoverablePacketLossFraction(
-      float uplink_recoverable_packet_loss_fraction) override;
   void OnReceivedUplinkBandwidth(
       int target_audio_bitrate_bps,
-      rtc::Optional<int64_t> probing_interval_ms) override;
+      absl::optional<int64_t> bwe_period_ms) override;
+  void OnReceivedUplinkAllocation(BitrateAllocationUpdate update) override;
+  void OnReceivedRtt(int rtt_ms) override;
+  void OnReceivedOverhead(size_t overhead_bytes_per_packet) override;
+  void SetReceiverFrameLengthRange(int min_frame_length_ms,
+                                   int max_frame_length_ms) override;
+  ANAStats GetANAStats() const override;
+  absl::optional<std::pair<TimeDelta, TimeDelta>> GetFrameLengthRange()
+      const override;
+  rtc::ArrayView<std::unique_ptr<AudioEncoder>> ReclaimContainedEncoders()
+      override;
 
  protected:
   EncodedInfo EncodeImpl(uint32_t rtp_timestamp,
@@ -66,12 +91,12 @@ class AudioEncoderCopyRed final : public AudioEncoder {
 
  private:
   std::unique_ptr<AudioEncoder> speech_encoder_;
+  rtc::Buffer primary_encoded_;
+  size_t max_packet_length_;
   int red_payload_type_;
-  rtc::Buffer secondary_encoded_;
-  EncodedInfoLeaf secondary_info_;
-  RTC_DISALLOW_COPY_AND_ASSIGN(AudioEncoderCopyRed);
+  std::list<std::pair<EncodedInfo, rtc::Buffer>> redundant_encodings_;
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_CODECS_RED_AUDIO_ENCODER_COPY_RED_H_
+#endif  // MODULES_AUDIO_CODING_CODECS_RED_AUDIO_ENCODER_COPY_RED_H_

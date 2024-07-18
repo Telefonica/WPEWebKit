@@ -25,17 +25,18 @@
 
 #pragma once
 
-#if ENABLE(NETWORK_CACHE)
-
 #include "NetworkCacheBlobStorage.h"
 #include "NetworkCacheData.h"
 #include "NetworkCacheKey.h"
 #include <WebCore/Timer.h>
 #include <wtf/BloomFilter.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/Deque.h>
 #include <wtf/Function.h>
 #include <wtf/HashSet.h>
-#include <wtf/Optional.h>
+#include <wtf/MonotonicTime.h>
+#include <wtf/PriorityQueue.h>
+#include <wtf/WallTime.h>
 #include <wtf/WorkQueue.h>
 #include <wtf/text/WTFString.h>
 
@@ -44,30 +45,48 @@ namespace NetworkCache {
 
 class IOChannel;
 
-class Storage : public ThreadSafeRefCounted<Storage> {
+class Storage : public ThreadSafeRefCounted<Storage, WTF::DestructionThread::Main> {
 public:
-    enum class Mode { Normal, Testing };
-    static RefPtr<Storage> open(const String& cachePath, Mode);
+    enum class Mode { Normal, AvoidRandomness };
+    static RefPtr<Storage> open(const String& cachePath, Mode, size_t capacity);
 
     struct Record {
-        WTF_MAKE_FAST_ALLOCATED;
-    public:
         Key key;
-        std::chrono::system_clock::time_point timeStamp;
+        WallTime timeStamp;
         Data header;
         Data body;
         std::optional<SHA1::Digest> bodyHash;
+
+        WTF_MAKE_FAST_ALLOCATED;
     };
+
+    struct Timings {
+        MonotonicTime startTime;
+        MonotonicTime dispatchTime;
+        MonotonicTime recordIOStartTime;
+        MonotonicTime recordIOEndTime;
+        MonotonicTime blobIOStartTime;
+        MonotonicTime blobIOEndTime;
+        MonotonicTime completionTime;
+        size_t dispatchCountAtStart { 0 };
+        size_t dispatchCountAtDispatch { 0 };
+        bool synchronizationInProgressAtDispatch { false };
+        bool shrinkInProgressAtDispatch { false };
+        bool wasCanceled { false };
+
+        WTF_MAKE_FAST_ALLOCATED;
+    };
+
     // This may call completion handler synchronously on failure.
-    typedef Function<bool (std::unique_ptr<Record>)> RetrieveCompletionHandler;
+    using RetrieveCompletionHandler = CompletionHandler<bool(std::unique_ptr<Record>, const Timings&)>;
     void retrieve(const Key&, unsigned priority, RetrieveCompletionHandler&&);
 
-    typedef Function<void (const Data& mappedBody)> MappedBodyHandler;
-    void store(const Record&, MappedBodyHandler&&);
+    using MappedBodyHandler = Function<void (const Data& mappedBody)>;
+    void store(const Record&, MappedBodyHandler&&, CompletionHandler<void(int)>&& = { });
 
     void remove(const Key&);
-    void remove(const Vector<Key>&, Function<void ()>&&);
-    void clear(const String& type, std::chrono::system_clock::time_point modifiedSinceTime, Function<void ()>&& completionHandler);
+    void remove(const Vector<Key>&, CompletionHandler<void()>&&);
+    void clear(String&& type, WallTime modifiedSinceTime, CompletionHandler<void()>&&);
 
     struct RecordInfo {
         size_t bodySize;
@@ -79,35 +98,29 @@ public:
         ComputeWorth = 1 << 0,
         ShareCount = 1 << 1,
     };
-    typedef unsigned TraverseFlags;
-    typedef Function<void (const Record*, const RecordInfo&)> TraverseHandler;
+    using TraverseHandler = Function<void (const Record*, const RecordInfo&)>;
     // Null record signals end.
-    void traverse(const String& type, TraverseFlags, TraverseHandler&&);
+    void traverse(const String& type, OptionSet<TraverseFlag>, TraverseHandler&&);
 
     void setCapacity(size_t);
     size_t capacity() const { return m_capacity; }
     size_t approximateSize() const;
 
-    static const unsigned version = 11;
-#if PLATFORM(MAC)
-    /// Allow the last stable version of the cache to co-exist with the latest development one.
-    static const unsigned lastStableVersion = 11;
-#endif
+    // Incrementing this number will delete all existing cache content for everyone. Do you really need to do it?
+    static const unsigned version = 16;
 
-    String basePath() const;
+    String basePathIsolatedCopy() const;
     String versionPath() const;
-    String recordsPath() const;
+    String recordsPathIsolatedCopy() const;
 
     const Salt& salt() const { return m_salt; }
-
-    bool canUseSharedMemoryForBodyData() const { return m_canUseSharedMemoryForBodyData; }
 
     ~Storage();
 
     void writeWithoutWaiting() { m_initialWriteDelay = 0_s; };
 
 private:
-    Storage(const String& directoryPath, Mode, Salt);
+    Storage(const String& directoryPath, Mode, Salt, size_t capacity);
 
     String recordDirectoryPathForKey(const Key&) const;
     String recordPathForKey(const Key&) const;
@@ -127,17 +140,18 @@ private:
     struct WriteOperation;
     void dispatchWriteOperation(std::unique_ptr<WriteOperation>);
     void dispatchPendingWriteOperations();
-    void finishWriteOperation(WriteOperation&);
+    void finishWriteOperation(WriteOperation&, int error = 0);
 
+    bool shouldStoreBodyAsBlob(const Data& bodyData);
     std::optional<BlobStorage::Blob> storeBodyAsBlob(WriteOperation&);
     Data encodeRecord(const Record&, std::optional<BlobStorage::Blob>);
     void readRecord(ReadOperation&, const Data&);
 
-    void updateFileModificationTime(const String& path);
+    void updateFileModificationTime(String&& path);
     void removeFromPendingWriteOperations(const Key&);
 
-    WorkQueue& ioQueue() { return m_ioQueue.get(); }
-    WorkQueue& backgroundIOQueue() { return m_backgroundIOQueue.get(); }
+    ConcurrentWorkQueue& ioQueue() { return m_ioQueue.get(); }
+    ConcurrentWorkQueue& backgroundIOQueue() { return m_backgroundIOQueue.get(); }
     WorkQueue& serialBackgroundIOQueue() { return m_serialBackgroundIOQueue.get(); }
 
     bool mayContain(const Key&) const;
@@ -146,15 +160,20 @@ private:
     void addToRecordFilter(const Key&);
     void deleteFiles(const Key&);
 
+    static bool isHigherPriority(const std::unique_ptr<ReadOperation>&, const std::unique_ptr<ReadOperation>&);
+
+    size_t estimateRecordsSize(unsigned recordCount, unsigned blobCount) const;
+    uint32_t volumeBlockSize() const;
+
     const String m_basePath;
     const String m_recordsPath;
     
     const Mode m_mode;
     const Salt m_salt;
-    const bool m_canUseSharedMemoryForBodyData;
 
     size_t m_capacity { std::numeric_limits<size_t>::max() };
     size_t m_approximateRecordsSize { 0 };
+    mutable std::optional<uint32_t> m_volumeBlockSize;
 
     // 2^18 bit filter can support up to 26000 entries with false positive rate < 1%.
     using ContentsFilter = BloomFilter<18>;
@@ -163,12 +182,12 @@ private:
 
     bool m_synchronizationInProgress { false };
     bool m_shrinkInProgress { false };
+    size_t m_readOperationDispatchCount { 0 };
 
     Vector<Key::HashType> m_recordFilterHashesAddedDuringSynchronization;
     Vector<Key::HashType> m_blobFilterHashesAddedDuringSynchronization;
 
-    static const int maximumRetrievePriority = 4;
-    Deque<std::unique_ptr<ReadOperation>> m_pendingReadOperationsByPriority[maximumRetrievePriority + 1];
+    PriorityQueue<std::unique_ptr<ReadOperation>, &isHigherPriority> m_pendingReadOperations;
     HashSet<std::unique_ptr<ReadOperation>> m_activeReadOperations;
     WebCore::Timer m_readOperationTimeoutTimer;
 
@@ -179,8 +198,8 @@ private:
     struct TraverseOperation;
     HashSet<std::unique_ptr<TraverseOperation>> m_activeTraverseOperations;
 
-    Ref<WorkQueue> m_ioQueue;
-    Ref<WorkQueue> m_backgroundIOQueue;
+    Ref<ConcurrentWorkQueue> m_ioQueue;
+    Ref<ConcurrentWorkQueue> m_backgroundIOQueue;
     Ref<WorkQueue> m_serialBackgroundIOQueue;
 
     BlobStorage m_blobStorage;
@@ -190,10 +209,5 @@ private:
     Seconds m_initialWriteDelay { 1_s };
 };
 
-// FIXME: Remove, used by NetworkCacheStatistics only.
-using RecordFileTraverseFunction = Function<void (const String& fileName, const String& hashString, const String& type, bool isBlob, const String& recordDirectoryPath)>;
-void traverseRecordsFiles(const String& recordsPath, const String& type, const RecordFileTraverseFunction&);
-
 }
 }
-#endif

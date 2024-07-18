@@ -8,65 +8,82 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/aec3/erle_estimator.h"
+#include "modules/audio_processing/aec3/erle_estimator.h"
 
-#include <algorithm>
-
-#include "webrtc/base/safe_minmax.h"
+#include "modules/audio_processing/aec3/aec3_common.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
-namespace {
-
-constexpr float kMinErle = 1.f;
-constexpr float kMaxLfErle = 8.f;
-constexpr float kMaxHfErle = 1.5f;
-
-}  // namespace
-
-ErleEstimator::ErleEstimator() {
-  erle_.fill(kMinErle);
-  hold_counters_.fill(0);
+ErleEstimator::ErleEstimator(size_t startup_phase_length_blocks,
+                             const EchoCanceller3Config& config,
+                             size_t num_capture_channels)
+    : startup_phase_length_blocks_(startup_phase_length_blocks),
+      fullband_erle_estimator_(config.erle, num_capture_channels),
+      subband_erle_estimator_(config, num_capture_channels) {
+  if (config.erle.num_sections > 1) {
+    signal_dependent_erle_estimator_ =
+        std::make_unique<SignalDependentErleEstimator>(config,
+                                                       num_capture_channels);
+  }
+  Reset(true);
 }
 
 ErleEstimator::~ErleEstimator() = default;
 
+void ErleEstimator::Reset(bool delay_change) {
+  fullband_erle_estimator_.Reset();
+  subband_erle_estimator_.Reset();
+  if (signal_dependent_erle_estimator_) {
+    signal_dependent_erle_estimator_->Reset();
+  }
+  if (delay_change) {
+    blocks_since_reset_ = 0;
+  }
+}
+
 void ErleEstimator::Update(
-    const std::array<float, kFftLengthBy2Plus1>& render_spectrum,
-    const std::array<float, kFftLengthBy2Plus1>& capture_spectrum,
-    const std::array<float, kFftLengthBy2Plus1>& subtractor_spectrum) {
-  const auto& X2 = render_spectrum;
-  const auto& Y2 = capture_spectrum;
-  const auto& E2 = subtractor_spectrum;
+    const RenderBuffer& render_buffer,
+    rtc::ArrayView<const std::vector<std::array<float, kFftLengthBy2Plus1>>>
+        filter_frequency_responses,
+    rtc::ArrayView<const float, kFftLengthBy2Plus1>
+        avg_render_spectrum_with_reverb,
+    rtc::ArrayView<const std::array<float, kFftLengthBy2Plus1>> capture_spectra,
+    rtc::ArrayView<const std::array<float, kFftLengthBy2Plus1>>
+        subtractor_spectra,
+    const std::vector<bool>& converged_filters) {
+  RTC_DCHECK_EQ(subband_erle_estimator_.Erle(/*onset_compensated=*/true).size(),
+                capture_spectra.size());
+  RTC_DCHECK_EQ(subband_erle_estimator_.Erle(/*onset_compensated=*/true).size(),
+                subtractor_spectra.size());
+  const auto& X2_reverb = avg_render_spectrum_with_reverb;
+  const auto& Y2 = capture_spectra;
+  const auto& E2 = subtractor_spectra;
 
-  // Corresponds of WGN of power -46 dBFS.
-  constexpr float kX2Min = 44015068.0f;
+  if (++blocks_since_reset_ < startup_phase_length_blocks_) {
+    return;
+  }
 
-  // Update the estimates in a clamped minimum statistics manner.
-  auto erle_update = [&](size_t start, size_t stop, float max_erle) {
-    for (size_t k = start; k < stop; ++k) {
-      if (X2[k] > kX2Min && E2[k] > 0.f) {
-        const float new_erle = Y2[k] / E2[k];
-        if (new_erle > erle_[k]) {
-          hold_counters_[k - 1] = 100;
-          erle_[k] += 0.1f * (new_erle - erle_[k]);
-          erle_[k] = rtc::SafeClamp(erle_[k], kMinErle, max_erle);
-        }
-      }
-    }
-  };
-  erle_update(1, kFftLengthBy2 / 2, kMaxLfErle);
-  erle_update(kFftLengthBy2 / 2, kFftLengthBy2, kMaxHfErle);
+  subband_erle_estimator_.Update(X2_reverb, Y2, E2, converged_filters);
 
-  std::for_each(hold_counters_.begin(), hold_counters_.end(),
-                [](int& a) { --a; });
-  std::transform(hold_counters_.begin(), hold_counters_.end(),
-                 erle_.begin() + 1, erle_.begin() + 1, [](int a, float b) {
-                   return a > 0 ? b : std::max(kMinErle, 0.97f * b);
-                 });
+  if (signal_dependent_erle_estimator_) {
+    signal_dependent_erle_estimator_->Update(
+        render_buffer, filter_frequency_responses, X2_reverb, Y2, E2,
+        subband_erle_estimator_.Erle(/*onset_compensated=*/false),
+        subband_erle_estimator_.Erle(/*onset_compensated=*/true),
+        converged_filters);
+  }
 
-  erle_[0] = erle_[1];
-  erle_[kFftLengthBy2] = erle_[kFftLengthBy2 - 1];
+  fullband_erle_estimator_.Update(X2_reverb, Y2, E2, converged_filters);
+}
+
+void ErleEstimator::Dump(
+    const std::unique_ptr<ApmDataDumper>& data_dumper) const {
+  fullband_erle_estimator_.Dump(data_dumper);
+  subband_erle_estimator_.Dump(data_dumper);
+  if (signal_dependent_erle_estimator_) {
+    signal_dependent_erle_estimator_->Dump(data_dumper);
+  }
 }
 
 }  // namespace webrtc

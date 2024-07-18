@@ -25,11 +25,12 @@
 
 [
     Conditional=WEB_RTC,
-    EnabledAtRuntime=PeerConnection
+    EnabledBySetting=PeerConnectionEnabled
 ] enum RTCSignalingState {
     "stable",
     "have-local-offer",
     "have-remote-offer",
     "have-local-pranswer",
-    "have-remote-pranswer"
+    "have-remote-pranswer",
+    "closed"
 };

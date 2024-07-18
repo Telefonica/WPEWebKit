@@ -1,46 +1,79 @@
 //
-// Copyright (c) 2016 The ANGLE Project Authors. All rights reserved.
+// Copyright 2016 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 
 // AndroidWindow.cpp: Implementation of OSWindow for Android
 
-#include "android/AndroidWindow.h"
+#include "util/android/AndroidWindow.h"
 
 #include <pthread.h>
+#include <iostream>
 
-#include "android/third_party/android_native_app_glue.h"
 #include "common/debug.h"
+#include "util/android/third_party/android_native_app_glue.h"
 
 namespace
 {
-    struct android_app *sApp = nullptr;
-    pthread_mutex_t sInitWindowMutex;
-    pthread_cond_t sInitWindowCond;
-    bool sInitWindowDone = false;
+struct android_app *sApp = nullptr;
+pthread_mutex_t sInitWindowMutex;
+pthread_cond_t sInitWindowCond;
+bool sInitWindowDone = false;
+JNIEnv *gJni         = nullptr;
+
+// SCREEN_ORIENTATION_LANDSCAPE and SCREEN_ORIENTATION_PORTRAIT are
+// available from Android API level 1
+// https://developer.android.com/reference/android/app/Activity#setRequestedOrientation(int)
+const int kScreenOrientationLandscape = 0;
+const int kScreenOrientationPortrait  = 1;
+
+JNIEnv *GetJniEnv()
+{
+    if (gJni)
+        return gJni;
+
+    sApp->activity->vm->AttachCurrentThread(&gJni, NULL);
+    return gJni;
+}
+
+int SetScreenOrientation(struct android_app *app, int orientation)
+{
+    // Use reverse JNI to call the Java entry point that rotates the
+    // display to respect width and height
+    JNIEnv *jni = GetJniEnv();
+    if (!jni)
+    {
+        std::cerr << "Failed to get JNI env for screen rotation";
+        return JNI_ERR;
+    }
+
+    jclass clazz       = jni->GetObjectClass(app->activity->clazz);
+    jmethodID methodID = jni->GetMethodID(clazz, "setRequestedOrientation", "(I)V");
+    jni->CallVoidMethod(app->activity->clazz, methodID, orientation);
+
+    return 0;
+}
 }  // namespace
 
-AndroidWindow::AndroidWindow()
-{
-}
+AndroidWindow::AndroidWindow() {}
 
-AndroidWindow::~AndroidWindow()
-{
-}
+AndroidWindow::~AndroidWindow() {}
 
-bool AndroidWindow::initialize(const std::string &name, size_t width, size_t height)
+bool AndroidWindow::initializeImpl(const std::string &name, int width, int height)
 {
     return resize(width, height);
 }
-void AndroidWindow::destroy()
-{
-}
+void AndroidWindow::destroy() {}
+
+void AndroidWindow::disableErrorMessageDialog() {}
+
+void AndroidWindow::resetNativeWindow() {}
 
 EGLNativeWindowType AndroidWindow::getNativeWindow() const
 {
     // Return the entire Activity Surface for now
-    // sApp->window is valid only after sInitWindowDone, which is true after initialize()
+    // sApp->window is valid only after sInitWindowDone, which is true after initializeImpl()
     return sApp->window;
 }
 
@@ -60,6 +93,14 @@ void AndroidWindow::setMousePosition(int x, int y)
     UNIMPLEMENTED();
 }
 
+bool AndroidWindow::setOrientation(int width, int height)
+{
+    // Set tests to run in correct orientation
+    int32_t err = SetScreenOrientation(
+        sApp, (width > height) ? kScreenOrientationLandscape : kScreenOrientationPortrait);
+
+    return err == 0;
+}
 bool AndroidWindow::setPosition(int x, int y)
 {
     UNIMPLEMENTED();
@@ -68,7 +109,7 @@ bool AndroidWindow::setPosition(int x, int y)
 
 bool AndroidWindow::resize(int width, int height)
 {
-    mWidth = width;
+    mWidth  = width;
     mHeight = height;
 
     // sApp->window used below is valid only after Activity Surface is created
@@ -85,23 +126,11 @@ bool AndroidWindow::resize(int width, int height)
     return err == 0;
 }
 
-void AndroidWindow::setVisible(bool isVisible)
-{
-}
+void AndroidWindow::setVisible(bool isVisible) {}
 
 void AndroidWindow::signalTestEvent()
 {
     UNIMPLEMENTED();
-}
-
-OSWindow *CreateOSWindow()
-{
-    // There should be only one live instance of AndroidWindow at a time,
-    // as there is only one Activity Surface behind it.
-    // Creating a new AndroidWindow each time works for ANGLETest,
-    // as it destroys an old window before creating a new one.
-    // TODO: use GLSurfaceView to support multiple windows
-    return new AndroidWindow();
 }
 
 static void onAppCmd(struct android_app *app, int32_t cmd)
@@ -114,11 +143,19 @@ static void onAppCmd(struct android_app *app, int32_t cmd)
             pthread_cond_broadcast(&sInitWindowCond);
             pthread_mutex_unlock(&sInitWindowMutex);
             break;
-        // TODO: process other commands and pass them to AndroidWindow for handling
-        // TODO: figure out how to handle APP_CMD_PAUSE,
-        // which should immediately halt all the rendering,
-        // since Activity Surface is no longer available.
-        // Currently tests crash when paused, for example, due to device changing orientation
+        case APP_CMD_DESTROY:
+            if (gJni)
+            {
+                sApp->activity->vm->DetachCurrentThread();
+            }
+            gJni = nullptr;
+            break;
+
+            // TODO: process other commands and pass them to AndroidWindow for handling
+            // TODO: figure out how to handle APP_CMD_PAUSE,
+            // which should immediately halt all the rendering,
+            // since Activity Surface is no longer available.
+            // Currently tests crash when paused, for example, due to device changing orientation
     }
 }
 
@@ -138,12 +175,12 @@ void android_main(struct android_app *app)
     pthread_cond_init(&sInitWindowCond, nullptr);
 
     // Event handlers, invoked from source->process()
-    app->onAppCmd = onAppCmd;
+    app->onAppCmd     = onAppCmd;
     app->onInputEvent = onInputEvent;
 
     // Message loop, polling for events indefinitely (due to -1 timeout)
     // Must be here in order to handle APP_CMD_INIT_WINDOW event,
-    // which occurs after AndroidWindow::initialize(), but before AndroidWindow::messageLoop
+    // which occurs after AndroidWindow::initializeImpl(), but before AndroidWindow::messageLoop
     while (ALooper_pollAll(-1, nullptr, &events, reinterpret_cast<void **>(&source)) >= 0)
     {
         if (source != nullptr)
@@ -151,4 +188,149 @@ void android_main(struct android_app *app)
             source->process(app, source);
         }
     }
+}
+
+// static
+std::string AndroidWindow::GetExternalStorageDirectory()
+{
+    // Use reverse JNI.
+    JNIEnv *jni = GetJniEnv();
+    if (!jni)
+    {
+        std::cerr << "GetExternalStorageDirectory:: Failed to get JNI env";
+        return "";
+    }
+
+    jclass classEnvironment = jni->FindClass("android/os/Environment");
+    if (classEnvironment == 0)
+    {
+        std::cerr << "GetExternalStorageDirectory: Failed to find Environment";
+        return "";
+    }
+
+    // public static File getExternalStorageDirectory ()
+    jmethodID methodIDgetExternalStorageDirectory =
+        jni->GetStaticMethodID(classEnvironment, "getExternalStorageDirectory", "()Ljava/io/File;");
+    if (methodIDgetExternalStorageDirectory == 0)
+    {
+        std::cerr << "GetExternalStorageDirectory: Failed to get static method";
+        return "";
+    }
+
+    jobject objectFile =
+        jni->CallStaticObjectMethod(classEnvironment, methodIDgetExternalStorageDirectory);
+    jthrowable exception = jni->ExceptionOccurred();
+    if (exception != 0)
+    {
+        jni->ExceptionDescribe();
+        jni->ExceptionClear();
+        std::cerr << "GetExternalStorageDirectory: Failed because of exception";
+        return "";
+    }
+
+    // Call method on File object to retrieve String object.
+    jclass classFile = jni->GetObjectClass(objectFile);
+    if (classEnvironment == 0)
+    {
+        std::cerr << "GetExternalStorageDirectory: Failed to find object class";
+        return "";
+    }
+
+    jmethodID methodIDgetAbsolutePath =
+        jni->GetMethodID(classFile, "getAbsolutePath", "()Ljava/lang/String;");
+    if (methodIDgetAbsolutePath == 0)
+    {
+        std::cerr << "GetExternalStorageDirectory: Failed to get method ID";
+        return "";
+    }
+
+    jstring stringPath =
+        static_cast<jstring>(jni->CallObjectMethod(objectFile, methodIDgetAbsolutePath));
+
+    // TODO(jmadill): Find how to pass the root test directory to ANGLE. http://crbug.com/1097957
+
+    // // https://stackoverflow.com/questions/12841240/android-pass-parameter-to-native-activity
+    // jclass clazz = jni->GetObjectClass(sApp->activity->clazz);
+    // if (clazz == 0)
+    // {
+    //     std::cerr << "GetExternalStorageDirectory: Bad activity";
+    //     return "";
+    // }
+
+    // jmethodID giid = jni->GetMethodID(clazz, "getIntent", "()Landroid/content/Intent;");
+    // if (giid == 0)
+    // {
+    //     std::cerr << "GetExternalStorageDirectory: Could not find getIntent";
+    //     return "";
+    // }
+
+    // jobject intent = jni->CallObjectMethod(sApp->activity->clazz, giid);
+    // if (intent == 0)
+    // {
+    //     std::cerr << "GetExternalStorageDirectory: Error calling getIntent";
+    //     return "";
+    // }
+
+    // jclass icl = jni->GetObjectClass(intent);
+    // if (icl == 0)
+    // {
+    //     std::cerr << "GetExternalStorageDirectory: Error getting getIntent class";
+    //     return "";
+    // }
+
+    // jmethodID gseid =
+    //     jni->GetMethodID(icl, "getStringExtra", "(Ljava/lang/String;)Ljava/lang/String;");
+    // if (gseid == 0)
+    // {
+    //     std::cerr << "GetExternalStorageDirectory: Could not find getStringExtra";
+    //     return "";
+    // }
+
+    // jstring stringPath = static_cast<jstring>(jni->CallObjectMethod(
+    //     intent, gseid, jni->NewStringUTF("org.chromium.base.test.util.UrlUtils.RootDirectory")));
+    // if (stringPath != 0)
+    // {
+    //     const char *path = jni->GetStringUTFChars(stringPath, nullptr);
+    //     return std::string(path) + "/chromium_tests_root";
+    // }
+
+    // jclass environment = jni->FindClass("org/chromium/base/test/util/UrlUtils");
+    // if (environment == 0)
+    // {
+    //     std::cerr << "GetExternalStorageDirectory: Failed to find Environment";
+    //     return "";
+    // }
+
+    // jmethodID getDir =
+    //     jni->GetStaticMethodID(environment, "getIsolatedTestRoot", "()Ljava/lang/String;");
+    // if (getDir == 0)
+    // {
+    //     std::cerr << "GetExternalStorageDirectory: Failed to get static method";
+    //     return "";
+    // }
+
+    // stringPath = static_cast<jstring>(jni->CallStaticObjectMethod(environment, getDir));
+
+    exception = jni->ExceptionOccurred();
+    if (exception != 0)
+    {
+        jni->ExceptionDescribe();
+        jni->ExceptionClear();
+        std::cerr << "GetExternalStorageDirectory: Failed because of exception";
+        return "";
+    }
+
+    const char *path = jni->GetStringUTFChars(stringPath, nullptr);
+    return std::string(path) + "/chromium_tests_root";
+}
+
+// static
+OSWindow *OSWindow::New()
+{
+    // There should be only one live instance of AndroidWindow at a time,
+    // as there is only one Activity Surface behind it.
+    // Creating a new AndroidWindow each time works for ANGLETest,
+    // as it destroys an old window before creating a new one.
+    // TODO: use GLSurfaceView to support multiple windows
+    return new AndroidWindow();
 }

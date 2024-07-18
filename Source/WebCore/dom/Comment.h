@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2018 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -27,11 +27,12 @@
 namespace WebCore {
 
 class Comment final : public CharacterData {
+    WTF_MAKE_ISO_ALLOCATED(Comment);
 public:
-    static Ref<Comment> create(Document&, const String&);
+    static Ref<Comment> create(Document&, String&&);
 
 private:
-    Comment(Document&, const String&);
+    Comment(Document&, String&&);
 
     String nodeName() const override;
     NodeType nodeType() const override;

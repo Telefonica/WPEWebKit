@@ -33,7 +33,7 @@
 #import "DOMNodeInternal.h"
 #import "DOMTimeRangesInternal.h"
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
 #import <WebCore/TimeRanges.h>
 #import <WebCore/WebCoreObjCExtras.h>
@@ -80,12 +80,14 @@ DOMTimeRanges *kit(WebCore::TimeRanges* value)
     if (!value)
         return nil;
     if (DOMTimeRanges *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMTimeRanges *wrapper = [[DOMTimeRanges alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    auto wrapper = adoptNS([[DOMTimeRanges alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
 
 #endif // ENABLE(VIDEO)
+
+#undef IMPL

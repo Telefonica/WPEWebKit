@@ -27,13 +27,13 @@
 
 #include "CryptoAlgorithm.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 namespace WebCore {
 
 class CryptoAlgorithmSHA1 final : public CryptoAlgorithm {
 public:
-    static constexpr const char* s_name = "SHA-1";
+    static constexpr ASCIILiteral s_name = "SHA-1"_s;
     static constexpr CryptoAlgorithmIdentifier s_identifier = CryptoAlgorithmIdentifier::SHA_1;
     static Ref<CryptoAlgorithm> create();
 
@@ -45,4 +45,4 @@ private:
 
 } // namespace WebCore
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

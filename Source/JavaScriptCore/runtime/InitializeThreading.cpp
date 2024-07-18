@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,54 +29,113 @@
 #include "config.h"
 #include "InitializeThreading.h"
 
-#include "DisallowVMReentry.h"
+#include "AssemblyComments.h"
 #include "ExecutableAllocator.h"
-#include "Heap.h"
-#include "Identifier.h"
-#include "JSDateMath.h"
-#include "JSGlobalObject.h"
-#include "JSLock.h"
+#include "JITOperationList.h"
+#include "JSCConfig.h"
+#include "JSCPtrTag.h"
 #include "LLIntData.h"
 #include "Options.h"
-#include "StructureIDTable.h"
+#include "SigillCrashAnalyzer.h"
+#include "StructureAlignedMemoryAllocator.h"
 #include "SuperSampler.h"
+#include "VMTraps.h"
+#include "WasmCalleeRegistry.h"
+#include "WasmCapabilities.h"
+#include "WasmFaultSignalHandler.h"
 #include "WasmThunks.h"
-#include "WriteBarrier.h"
 #include <mutex>
-#include <wtf/MainThread.h>
+#include <wtf/GenerateProfiles.h>
 #include <wtf/Threading.h>
-#include <wtf/dtoa.h>
-#include <wtf/dtoa/cached-powers.h>
+#include <wtf/threads/Signals.h>
 
-using namespace WTF;
+#if !USE(SYSTEM_MALLOC)
+#include <bmalloc/BPlatform.h>
+#if BUSE(LIBPAS)
+#include <bmalloc/pas_scavenger.h>
+#endif
+#endif
 
 namespace JSC {
 
-void initializeThreading()
-{
-    static std::once_flag initializeThreadingOnceFlag;
+static_assert(sizeof(bool) == 1, "LLInt and JIT assume sizeof(bool) is always 1 when touching it directly from assembly code.");
 
-    std::call_once(initializeThreadingOnceFlag, []{
-        WTF::initializeThreading();
+enum class JSCProfileTag { };
+
+void initialize()
+{
+    static std::once_flag onceFlag;
+
+    std::call_once(onceFlag, [] {
+        WTF::initialize();
         Options::initialize();
+
+        initializePtrTagLookup();
+
 #if ENABLE(WRITE_BARRIER_PROFILING)
         WriteBarrierCounters::initialize();
 #endif
-#if ENABLE(ASSEMBLER)
-        ExecutableAllocator::initializeAllocator();
+        {
+            Options::AllowUnfinalizedAccessScope scope;
+            JITOperationList::initialize();
+            ExecutableAllocator::initialize();
+            VM::computeCanUseJIT();
+            if (!g_jscConfig.vm.canUseJIT) {
+                Options::useJIT() = false;
+                Options::recomputeDependentOptions();
+            } else {
+#if CPU(ARM64E) && ENABLE(JIT)
+                g_jscConfig.arm64eHashPins.initializeAtStartup();
 #endif
+            }
+            StructureAlignedMemoryAllocator::initializeStructureAddressSpace();
+        }
+        Options::finalize();
+
+#if !USE(SYSTEM_MALLOC)
+#if BUSE(LIBPAS)
+        if (Options::libpasScavengeContinuously())
+            pas_scavenger_disable_shut_down();
+#endif
+#endif
+
+        JITOperationList::populatePointersInJavaScriptCore();
+
+        if (Options::useSigillCrashAnalyzer())
+            enableSigillCrashAnalyzer();
+
+        AssemblyCommentRegistry::initialize();
         LLInt::initialize();
-#ifndef NDEBUG
         DisallowGC::initialize();
-        DisallowVMReentry::initialize();
-#endif
+
         initializeSuperSampler();
         Thread& thread = Thread::current();
         thread.setSavedLastStackTop(thread.stack().origin());
 
 #if ENABLE(WEBASSEMBLY)
-        Wasm::Thunks::initialize();
+        if (Wasm::isSupported()) {
+            Wasm::Thunks::initialize();
+            Wasm::CalleeRegistry::initialize();
+        }
 #endif
+
+        if (VM::isInMiniMode())
+            WTF::fastEnableMiniMode();
+
+#if HAVE(MACH_EXCEPTIONS)
+        // JSLock::lock() can call registerThreadForMachExceptionHandling() which crashes if this has not been called first.
+        WTF::startMachExceptionHandlerThread();
+#endif
+        VMTraps::initializeSignals();
+#if ENABLE(WEBASSEMBLY)
+        Wasm::prepareSignalingMemory();
+#endif
+
+        WTF::compilerFence();
+        RELEASE_ASSERT(!g_jscConfig.initializeHasBeenCalled);
+        g_jscConfig.initializeHasBeenCalled = true;
+
+        WTF::registerProfileGenerationCallback<JSCProfileTag>("JavaScriptCore");
     });
 }
 

@@ -23,26 +23,24 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "LegacyTileLayerPool.h"
+#import "config.h"
+#import "LegacyTileLayerPool.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
-#include "LegacyTileLayer.h"
-#include "LegacyTileGrid.h"
-#include "Logging.h"
-#include <wtf/CurrentTime.h>
-#include <wtf/MemoryPressureHandler.h>
-#include <wtf/NeverDestroyed.h>
+#import "LegacyTileGrid.h"
+#import "LegacyTileLayer.h"
+#import "Logging.h"
+#import <wtf/MemoryPressureHandler.h>
+#import <wtf/NeverDestroyed.h>
 
 namespace WebCore {
 
-static const double capacityDecayTime = 5;
+static const Seconds capacityDecayTime { 5_s };
 
 LegacyTileLayerPool::LegacyTileLayerPool()
     : m_totalBytes(0)
     , m_capacity(0)
-    , m_lastAddTime(0)
     , m_needsPrune(false)
 {
 }
@@ -55,7 +53,7 @@ LegacyTileLayerPool* LegacyTileLayerPool::sharedPool()
 
 unsigned LegacyTileLayerPool::bytesBackingLayerWithPixelSize(const IntSize& size)
 {
-    return (size.area() * 4).unsafeGet();
+    return size.area() * 4;
 }
 
 LegacyTileLayerPool::LayerList& LegacyTileLayerPool::listOfLayersWithSize(const IntSize& size, AccessType accessType)
@@ -74,8 +72,8 @@ LegacyTileLayerPool::LayerList& LegacyTileLayerPool::listOfLayersWithSize(const 
 
 void LegacyTileLayerPool::addLayer(const RetainPtr<LegacyTileLayer>& layer)
 {
-    IntSize layerSize([layer.get() frame].size);
-    layerSize.scale([layer.get() contentsScale]);
+    IntSize layerSize([layer frame].size);
+    layerSize.scale([layer contentsScale]);
     if (!canReuseLayerWithSize(layerSize))
         return;
 
@@ -84,11 +82,11 @@ void LegacyTileLayerPool::addLayer(const RetainPtr<LegacyTileLayer>& layer)
         return;
     }
 
-    LockHolder locker(m_layerPoolMutex);
+    Locker locker { m_layerPoolMutex };
     listOfLayersWithSize(layerSize).prepend(layer);
     m_totalBytes += bytesBackingLayerWithPixelSize(layerSize);
 
-    m_lastAddTime = currentTime();
+    m_lastAddTime = WallTime::now();
     schedulePrune();
 }
 
@@ -96,7 +94,7 @@ RetainPtr<LegacyTileLayer> LegacyTileLayerPool::takeLayerWithSize(const IntSize&
 {
     if (!canReuseLayerWithSize(size))
         return nil;
-    LockHolder locker(m_layerPoolMutex);
+    Locker locker { m_layerPoolMutex };
     LayerList& reuseList = listOfLayersWithSize(size, MarkAsUsed);
     if (reuseList.isEmpty())
         return nil;
@@ -106,7 +104,7 @@ RetainPtr<LegacyTileLayer> LegacyTileLayerPool::takeLayerWithSize(const IntSize&
 
 void LegacyTileLayerPool::setCapacity(unsigned capacity)
 {
-    LockHolder reuseLocker(m_layerPoolMutex);
+    Locker reuseLocker { m_layerPoolMutex };
     if (capacity < m_capacity)
         schedulePrune();
     m_capacity = capacity;
@@ -115,7 +113,7 @@ void LegacyTileLayerPool::setCapacity(unsigned capacity)
 unsigned LegacyTileLayerPool::decayedCapacity() const
 {
     // Decay to one quarter over capacityDecayTime
-    double timeSinceLastAdd = currentTime() - m_lastAddTime;
+    Seconds timeSinceLastAdd = WallTime::now() - m_lastAddTime;
     if (timeSinceLastAdd > capacityDecayTime)
         return m_capacity / 4;
     float decayProgess = float(timeSinceLastAdd / capacityDecayTime);
@@ -136,7 +134,7 @@ void LegacyTileLayerPool::schedulePrune()
 
 void LegacyTileLayerPool::prune()
 {
-    LockHolder locker(m_layerPoolMutex);
+    Locker locker { m_layerPoolMutex };
     ASSERT(m_needsPrune);
     m_needsPrune = false;
     unsigned shrinkTo = decayedCapacity();
@@ -157,13 +155,13 @@ void LegacyTileLayerPool::prune()
         // still have a backing store.
         oldestReuseList.removeLast();
     }
-    if (currentTime() - m_lastAddTime <= capacityDecayTime)
+    if (WallTime::now() - m_lastAddTime <= capacityDecayTime)
         schedulePrune();
 }
 
 void LegacyTileLayerPool::drain()
 {
-    LockHolder reuseLocker(m_layerPoolMutex);
+    Locker reuseLocker { m_layerPoolMutex };
     m_reuseLists.clear();
     m_sizesInPruneOrder.clear();
     m_totalBytes = 0;
@@ -171,4 +169,4 @@ void LegacyTileLayerPool::drain()
 
 } // namespace WebCore
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

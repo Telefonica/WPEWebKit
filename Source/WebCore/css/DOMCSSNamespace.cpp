@@ -32,7 +32,10 @@
 
 #include "CSSMarkup.h"
 #include "CSSParser.h"
+#include "CSSPropertyNames.h"
 #include "CSSPropertyParser.h"
+#include "Document.h"
+#include "HighlightRegister.h"
 #include "StyleProperties.h"
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
@@ -41,7 +44,7 @@ namespace WebCore {
 
 static String valueWithoutImportant(const String& value)
 {
-    if (!value.endsWith("important", false))
+    if (!value.endsWithIgnoringASCIICase("important"_s))
         return value;
 
     String newValue = value;
@@ -55,7 +58,21 @@ static String valueWithoutImportant(const String& value)
 
 bool DOMCSSNamespace::supports(Document& document, const String& property, const String& value)
 {
-    CSSPropertyID propertyID = cssPropertyID(property.stripWhiteSpace());
+    CSSParserContext parserContext(document);
+
+    auto propertyNameWithoutWhitespace = property.stripWhiteSpace();
+    CSSPropertyID propertyID = cssPropertyID(propertyNameWithoutWhitespace);
+    if (propertyID == CSSPropertyInvalid && isCustomPropertyName(propertyNameWithoutWhitespace)) {
+        auto dummyStyle = MutableStyleProperties::create();
+        constexpr bool importance = false;
+        return CSSParser::parseCustomPropertyValue(dummyStyle, AtomString { propertyNameWithoutWhitespace }, value, importance, parserContext) != CSSParser::ParseResult::Error;
+    }
+
+    if (!isCSSPropertyExposed(propertyID, &document.settings()))
+        return false;
+
+    if (CSSProperty::isDescriptorOnly(propertyID))
+        return false;
 
     if (propertyID == CSSPropertyInvalid)
         return false;
@@ -70,7 +87,7 @@ bool DOMCSSNamespace::supports(Document& document, const String& property, const
         return false;
 
     auto dummyStyle = MutableStyleProperties::create();
-    return CSSParser::parseValue(dummyStyle, propertyID, normalizedValue, false, document) != CSSParser::ParseResult::Error;
+    return CSSParser::parseValue(dummyStyle, propertyID, normalizedValue, false, parserContext) != CSSParser::ParseResult::Error;
 }
 
 bool DOMCSSNamespace::supports(Document& document, const String& conditionText)
@@ -85,6 +102,11 @@ String DOMCSSNamespace::escape(const String& ident)
     StringBuilder builder;
     serializeIdentifier(ident, builder);
     return builder.toString();
+}
+
+HighlightRegister& DOMCSSNamespace::highlights(Document& document)
+{
+    return document.highlightRegister();
 }
 
 }

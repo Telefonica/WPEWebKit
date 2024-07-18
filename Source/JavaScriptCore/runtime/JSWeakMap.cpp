@@ -27,15 +27,9 @@
 #include "JSWeakMap.h"
 
 #include "JSCInlines.h"
-#include "WeakMapBase.h"
 
 namespace JSC {
 
-const ClassInfo JSWeakMap::s_info = { "WeakMap", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSWeakMap) };
-
-String JSWeakMap::toStringName(const JSObject*, ExecState*)
-{
-    return ASCIILiteral("Object");
-}
+const ClassInfo JSWeakMap::s_info = { "WeakMap"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSWeakMap) };
 
 }

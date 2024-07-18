@@ -8,11 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_GEOMETRY_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_GEOMETRY_H_
+#ifndef MODULES_DESKTOP_CAPTURE_DESKTOP_GEOMETRY_H_
+#define MODULES_DESKTOP_CAPTURE_DESKTOP_GEOMETRY_H_
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/typedefs.h"
+#include <stdint.h>
+
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
@@ -42,6 +43,8 @@ class DesktopVector {
     return DesktopVector(x() - other.x(), y() - other.y());
   }
 
+  DesktopVector operator-() const { return DesktopVector(-x_, -y_); }
+
  private:
   int32_t x_;
   int32_t y_;
@@ -51,9 +54,7 @@ class DesktopVector {
 class DesktopSize {
  public:
   DesktopSize() : width_(0), height_(0) {}
-  DesktopSize(int32_t width, int32_t height)
-      : width_(width), height_(height) {
-  }
+  DesktopSize(int32_t width, int32_t height) : width_(width), height_(height) {}
 
   int32_t width() const { return width_; }
   int32_t height() const { return height_; }
@@ -75,7 +76,7 @@ class DesktopSize {
 };
 
 // Represents a rectangle on the screen.
-class DesktopRect {
+class RTC_EXPORT DesktopRect {
  public:
   static DesktopRect MakeSize(const DesktopSize& size) {
     return DesktopRect(0, 0, size.width(), size.height());
@@ -83,12 +84,16 @@ class DesktopRect {
   static DesktopRect MakeWH(int32_t width, int32_t height) {
     return DesktopRect(0, 0, width, height);
   }
-  static DesktopRect MakeXYWH(int32_t x, int32_t y,
-                              int32_t width, int32_t height) {
+  static DesktopRect MakeXYWH(int32_t x,
+                              int32_t y,
+                              int32_t width,
+                              int32_t height) {
     return DesktopRect(x, y, x + width, y + height);
   }
-  static DesktopRect MakeLTRB(int32_t left, int32_t top,
-                              int32_t right, int32_t bottom) {
+  static DesktopRect MakeLTRB(int32_t left,
+                              int32_t top,
+                              int32_t right,
+                              int32_t bottom) {
     return DesktopRect(left, top, right, bottom);
   }
   static DesktopRect MakeOriginSize(const DesktopVector& origin,
@@ -105,6 +110,9 @@ class DesktopRect {
   int32_t width() const { return right_ - left_; }
   int32_t height() const { return bottom_ - top_; }
 
+  void set_width(int32_t width) { right_ = left_ + width; }
+  void set_height(int32_t height) { bottom_ = top_ + height; }
+
   DesktopVector top_left() const { return DesktopVector(left_, top_); }
   DesktopSize size() const { return DesktopSize(width(), height()); }
 
@@ -112,40 +120,43 @@ class DesktopRect {
 
   bool equals(const DesktopRect& other) const {
     return left_ == other.left_ && top_ == other.top_ &&
-        right_ == other.right_ && bottom_ == other.bottom_;
+           right_ == other.right_ && bottom_ == other.bottom_;
   }
 
-  // Returns true if |point| lies within the rectangle boundaries.
+  // Returns true if `point` lies within the rectangle boundaries.
   bool Contains(const DesktopVector& point) const;
 
-  // Returns true if |rect| lies within the boundaries of this rectangle.
+  // Returns true if `rect` lies within the boundaries of this rectangle.
   bool ContainsRect(const DesktopRect& rect) const;
 
-  // Finds intersection with |rect|.
+  // Finds intersection with `rect`.
   void IntersectWith(const DesktopRect& rect);
 
-  // Extends the rectangle to cover |rect|. If |this| is empty, replaces |this|
-  // with |rect|; if |rect| is empty, this function takes no effect.
+  // Extends the rectangle to cover `rect`. If `this` is empty, replaces `this`
+  // with `rect`; if `rect` is empty, this function takes no effect.
   void UnionWith(const DesktopRect& rect);
 
   // Adds (dx, dy) to the position of the rectangle.
   void Translate(int32_t dx, int32_t dy);
-  void Translate(DesktopVector d) { Translate(d.x(), d.y()); };
+  void Translate(DesktopVector d) { Translate(d.x(), d.y()); }
 
-  // Enlarges current DesktopRect by subtracting |left_offset| and |top_offset|
-  // from |left_| and |top_|, and adding |right_offset| and |bottom_offset| to
-  // |right_| and |bottom_|. This function does not normalize the result, so
-  // |left_| and |top_| may be less than zero or larger than |right_| and
-  // |bottom_|.
+  // Enlarges current DesktopRect by subtracting `left_offset` and `top_offset`
+  // from `left_` and `top_`, and adding `right_offset` and `bottom_offset` to
+  // `right_` and `bottom_`. This function does not normalize the result, so
+  // `left_` and `top_` may be less than zero or larger than `right_` and
+  // `bottom_`.
   void Extend(int32_t left_offset,
               int32_t top_offset,
               int32_t right_offset,
               int32_t bottom_offset);
 
+  // Scales current DesktopRect. This function does not impact the `top_` and
+  // `left_`.
+  void Scale(double horizontal, double vertical);
+
  private:
   DesktopRect(int32_t left, int32_t top, int32_t right, int32_t bottom)
-      : left_(left), top_(top), right_(right), bottom_(bottom) {
-  }
+      : left_(left), top_(top), right_(right), bottom_(bottom) {}
 
   int32_t left_;
   int32_t top_;
@@ -155,5 +166,4 @@ class DesktopRect {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_GEOMETRY_H_
-
+#endif  // MODULES_DESKTOP_CAPTURE_DESKTOP_GEOMETRY_H_

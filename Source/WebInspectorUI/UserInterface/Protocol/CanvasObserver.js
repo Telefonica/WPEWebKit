@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WI.CanvasObserver = class CanvasObserver
+WI.CanvasObserver = class CanvasObserver extends InspectorBackend.Dispatcher
 {
     // Events defined by the "Canvas" domain.
 
@@ -42,9 +42,19 @@ WI.CanvasObserver = class CanvasObserver
         WI.canvasManager.canvasMemoryChanged(canvasId, memoryCost);
     }
 
-    cssCanvasClientNodesChanged(canvasId)
+    clientNodesChanged(canvasId)
     {
-        WI.canvasManager.cssCanvasClientNodesChanged(canvasId);
+        WI.canvasManager.clientNodesChanged(canvasId);
+    }
+
+    recordingStarted(canvasId, initiator)
+    {
+        WI.canvasManager.recordingStarted(canvasId, initiator);
+    }
+
+    recordingProgress(canvasId, frames, bufferUsed)
+    {
+        WI.canvasManager.recordingProgress(canvasId, frames, bufferUsed);
     }
 
     recordingFinished(canvasId, recording)
@@ -52,13 +62,31 @@ WI.CanvasObserver = class CanvasObserver
         WI.canvasManager.recordingFinished(canvasId, recording);
     }
 
-    programCreated(canvasId, programId)
+    extensionEnabled(canvasId, extension)
     {
-        WI.canvasManager.programCreated(canvasId, programId);
+        WI.canvasManager.extensionEnabled(canvasId, extension);
+    }
+
+    programCreated(shaderProgram)
+    {
+        // COMPATIBILITY (iOS 13.0): `shaderProgram` replaced `canvasId` and `programId`.
+        if (arguments.length === 2) {
+            shaderProgram = {
+                canvasId: arguments[0],
+                programId: arguments[1],
+            };
+        }
+        WI.canvasManager.programCreated(shaderProgram);
     }
 
     programDeleted(programId)
     {
         WI.canvasManager.programDeleted(programId);
+    }
+
+    // COMPATIBILITY (iOS 13): Canvas.events.cssCanvasClientNodesChanged was renamed to Canvas.events.clientNodesChanged.
+    cssCanvasClientNodesChanged(canvasId)
+    {
+        WI.canvasManager.clientNodesChanged(canvasId);
     }
 };

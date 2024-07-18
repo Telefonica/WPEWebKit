@@ -26,9 +26,8 @@
 #import "config.h"
 #import "WKNSDictionary.h"
 
-#if WK_API_ENABLED
-
 #import "WKNSArray.h"
+#import <WebCore/WebCoreObjCExtras.h>
 
 using namespace WebKit;
 
@@ -38,6 +37,9 @@ using namespace WebKit;
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKNSDictionary.class, self))
+        return;
+
     _dictionary->~Dictionary();
 
     [super dealloc];
@@ -89,5 +91,3 @@ using namespace WebKit;
 }
 
 @end
-
-#endif // WK_API_ENABLED

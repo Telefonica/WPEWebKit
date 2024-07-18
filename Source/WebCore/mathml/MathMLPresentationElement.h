@@ -34,12 +34,13 @@
 namespace WebCore {
 
 class MathMLPresentationElement : public MathMLElement {
+    WTF_MAKE_ISO_ALLOCATED(MathMLPresentationElement);
 public:
     static Ref<MathMLPresentationElement> create(const QualifiedName& tagName, Document&);
 
 protected:
     MathMLPresentationElement(const QualifiedName& tagName, Document&);
-    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    void parseAttribute(const QualifiedName&, const AtomString&) override;
 
     static bool isPhrasingContent(const Node&);
     static bool isFlowContent(const Node&);
@@ -50,22 +51,18 @@ protected:
     static Length parseMathMLLength(const String&);
     const Length& cachedMathMLLength(const QualifiedName&, std::optional<Length>&);
 
-    virtual bool acceptsDisplayStyleAttribute();
-    std::optional<bool> specifiedDisplayStyle() override;
-
     virtual bool acceptsMathVariantAttribute() { return false; }
     std::optional<MathVariant> specifiedMathVariant() final;
 
-    std::optional<BooleanValue> m_displayStyle;
     std::optional<MathVariant> m_mathVariant;
 
 private:
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) override;
     bool isPresentationMathML() const final { return true; }
 
-    static Length parseNumberAndUnit(const StringView&);
-    static Length parseNamedSpace(const StringView&);
-    static MathVariant parseMathVariantAttribute(const AtomicString& attributeValue);
+    static Length parseNumberAndUnit(StringView);
+    static Length parseNamedSpace(StringView);
+    static MathVariant parseMathVariantAttribute(const AtomString& attributeValue);
 };
 
 }

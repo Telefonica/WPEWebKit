@@ -24,13 +24,16 @@
  */
 
 #include "config.h"
-#include "Seconds.h"
+#include <wtf/Seconds.h>
 
-#include "CurrentTime.h"
-#include "MonotonicTime.h"
-#include "PrintStream.h"
-#include "TimeWithDynamicClockType.h"
-#include "WallTime.h"
+#include <wtf/ApproximateTime.h>
+#include <wtf/Condition.h>
+#include <wtf/Lock.h>
+#include <wtf/MonotonicTime.h>
+#include <wtf/PrintStream.h>
+#include <wtf/TimeWithDynamicClockType.h>
+#include <wtf/WallTime.h>
+#include <wtf/text/TextStream.h>
 
 namespace WTF {
 
@@ -40,6 +43,11 @@ WallTime Seconds::operator+(WallTime other) const
 }
 
 MonotonicTime Seconds::operator+(MonotonicTime other) const
+{
+    return other + *this;
+}
+
+ApproximateTime Seconds::operator+(ApproximateTime other) const
 {
     return other + *this;
 }
@@ -59,6 +67,11 @@ MonotonicTime Seconds::operator-(MonotonicTime other) const
     return MonotonicTime::fromRawSeconds(value() - other.secondsSinceEpoch().value());
 }
 
+ApproximateTime Seconds::operator-(ApproximateTime other) const
+{
+    return ApproximateTime::fromRawSeconds(value() - other.secondsSinceEpoch().value());
+}
+
 TimeWithDynamicClockType Seconds::operator-(const TimeWithDynamicClockType& other) const
 {
     return other.withSameClockAndRawSeconds(value() - other.secondsSinceEpoch().value());
@@ -69,9 +82,23 @@ void Seconds::dump(PrintStream& out) const
     out.print(m_value, " sec");
 }
 
+TextStream& operator<<(TextStream& ts, Seconds seconds)
+{
+    ts << seconds.value() << "s";
+    return ts;
+}
+
 void sleep(Seconds value)
 {
-    sleep(value.value());
+    // It's very challenging to find portable ways of sleeping for less than a second. On UNIX, you want to
+    // use usleep() but it's hard to #include it in a portable way (you'd think it's in unistd.h, but then
+    // you'd be wrong on some OSX SDKs). Also, usleep() won't save you on Windows. Hence, bottoming out in
+    // lock code, which already solves the sleeping problem, is probably for the best.
+
+    Lock fakeLock;
+    Condition fakeCondition;
+    Locker fakeLocker { fakeLock };
+    fakeCondition.waitFor(fakeLock, value);
 }
 
 } // namespace WTF

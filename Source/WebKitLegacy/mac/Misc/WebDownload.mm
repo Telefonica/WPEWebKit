@@ -28,67 +28,68 @@
 
 #import <WebKitLegacy/WebDownload.h>
 
+#import "NetworkStorageSessionMap.h"
 #import <Foundation/NSURLAuthenticationChallenge.h>
-#import <WebCore/AuthenticationCF.h>
 #import <WebCore/AuthenticationMac.h>
 #import <WebCore/Credential.h>
 #import <WebCore/CredentialStorage.h>
+#import <WebCore/NetworkStorageSession.h>
 #import <WebCore/ProtectionSpace.h>
+#import <WebCore/RuntimeApplicationChecks.h>
 #import <WebKitLegacy/WebPanelAuthenticationHandler.h>
 #import <pal/spi/cocoa/NSURLDownloadSPI.h>
 #import <wtf/Assertions.h>
+#import <wtf/MainThread.h>
+#import <wtf/WorkQueue.h>
+#import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
+#import <wtf/spi/darwin/dyldSPI.h>
 
-#import "WebTypesInternal.h"
-
-#if USE(CFURLCONNECTION)
-#import <CFNetwork/CFNetwork.h>
-#import <CFNetwork/CFURLConnection.h>
+static bool shouldCallOnNetworkThread()
+{
+#if PLATFORM(MAC)
+    static bool isOldEpsonSoftwareUpdater = WebCore::MacApplication::isEpsonSoftwareUpdater() && !linkedOnOrAfterSDKWithBehavior(SDKAlignedBehavior::DownloadDelegatesCalledOnTheMainThread);
+    return isOldEpsonSoftwareUpdater;
+#else
+    return false;
 #endif
+}
+
+static void callOnDelegateThread(Function<void()>&& function)
+{
+    if (shouldCallOnNetworkThread())
+        function();
+    callOnMainThread(WTFMove(function));
+}
+
+template<typename Callable>
+static void callOnDelegateThreadAndWait(Callable&& work)
+{
+    if (shouldCallOnNetworkThread() || isMainThread())
+        work();
+    else {
+        WorkQueue::main().dispatchSync([work = std::forward<Callable>(work)]() mutable {
+            work();
+        });
+    }
+}
 
 using namespace WebCore;
 
-@class NSURLConnectionDelegateProxy;
-
-// FIXME: The following are NSURLDownload SPI - it would be nice to not have to override them at 
-// some point in the future
-@interface NSURLDownload (WebDownloadCapability)
-- (id)_initWithLoadingConnection:(NSURLConnection *)connection
-                         request:(NSURLRequest *)request
-                        response:(NSURLResponse *)response
-                        delegate:(id)delegate
-                           proxy:(NSURLConnectionDelegateProxy *)proxy;
-- (id)_initWithRequest:(NSURLRequest *)request
-              delegate:(id)delegate
-             directory:(NSString *)directory;
-
-#if USE(CFURLCONNECTION)
-- (id)_initWithLoadingCFURLConnection:(CFURLConnectionRef)connection request:(CFURLRequestRef)request response:(CFURLResponseRef)response delegate:(id)delegate proxy:(NSURLConnectionDelegateProxy *)proxy;
-#endif
-
-@end
-
-@interface WebDownloadInternal : NSObject <NSURLDownloadDelegate>
-{
-@public
-    id realDelegate;
+@interface WebDownloadInternal : NSObject <NSURLDownloadDelegate> {
+    RetainPtr<id> realDelegate;
 }
-
-- (void)setRealDelegate:(id)rd;
-
+- (void)setRealDelegate:(id)realDelegate;
 @end
 
 @implementation WebDownloadInternal
 
 - (void)dealloc
 {
-    [realDelegate release];
     [super dealloc];
 }
 
 - (void)setRealDelegate:(id)rd
 {
-    [rd retain];
-    [realDelegate release];
     realDelegate = rd;
 }
 
@@ -111,20 +112,28 @@ using namespace WebCore;
 
 - (void)downloadDidBegin:(NSURLDownload *)download
 {
-    [realDelegate downloadDidBegin:download];
+    callOnDelegateThread([realDelegate = realDelegate, download = retainPtr(download)] {
+        [realDelegate downloadDidBegin:download.get()];
+    });
 }
 
 - (NSURLRequest *)download:(NSURLDownload *)download willSendRequest:(NSURLRequest *)request redirectResponse:(NSURLResponse *)redirectResponse
 {
-    return [realDelegate download:download willSendRequest:request redirectResponse:redirectResponse];
+    RetainPtr<NSURLRequest> returnValue;
+    auto work = [&] {
+        ASSERT(isMainThread());
+        returnValue = [realDelegate download:download willSendRequest:request redirectResponse:redirectResponse];
+    };
+    callOnDelegateThreadAndWait(WTFMove(work));
+    return returnValue.autorelease();
 }
 
 - (void)download:(NSURLDownload *)download didReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge
 {
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     // Try previously stored credential first.
     if (![challenge previousFailureCount]) {
-        NSURLCredential *credential = CredentialStorage::defaultCredentialStorage().get(emptyString(), ProtectionSpace([challenge protectionSpace])).nsCredential();
+        NSURLCredential *credential = NetworkStorageSessionMap::defaultStorageSession().credentialStorage().get(emptyString(), ProtectionSpace([challenge protectionSpace])).nsCredential();
         if (credential) {
             [[challenge sender] useCredential:credential forAuthenticationChallenge:challenge];
             return;
@@ -132,51 +141,71 @@ using namespace WebCore;
     }
 
     if ([realDelegate respondsToSelector:@selector(download:didReceiveAuthenticationChallenge:)]) {
-        [realDelegate download:download didReceiveAuthenticationChallenge:challenge];
+        callOnDelegateThread([realDelegate = realDelegate, download = retainPtr(download), challenge = retainPtr(challenge)] {
+            [realDelegate download:download.get() didReceiveAuthenticationChallenge:challenge.get()];
+        });
     } else {
-        NSWindow *window = nil;
-        if ([realDelegate respondsToSelector:@selector(downloadWindowForAuthenticationSheet:)]) {
-            window = [realDelegate downloadWindowForAuthenticationSheet:(WebDownload *)download];
-        }
+        callOnDelegateThread([realDelegate = realDelegate, download = retainPtr(download), challenge = retainPtr(challenge)] {
+            NSWindow *window = nil;
+            if ([realDelegate respondsToSelector:@selector(downloadWindowForAuthenticationSheet:)])
+                window = [realDelegate downloadWindowForAuthenticationSheet:(WebDownload *)download.get()];
 
-        [[WebPanelAuthenticationHandler sharedHandler] startAuthentication:challenge window:window];
+            [[WebPanelAuthenticationHandler sharedHandler] startAuthentication:challenge.get() window:window];
+        });
     }
 #endif
 }
 
 - (void)download:(NSURLDownload *)download didReceiveResponse:(NSURLResponse *)response
 {
-    [realDelegate download:download didReceiveResponse:response];
+    callOnDelegateThread([realDelegate = realDelegate, download = retainPtr(download), response = retainPtr(response)] {
+        [realDelegate download:download.get() didReceiveResponse:response.get()];
+    });
 }
 
 - (void)download:(NSURLDownload *)download didReceiveDataOfLength:(NSUInteger)length
 {
-    [realDelegate download:download didReceiveDataOfLength:length];
+    callOnDelegateThread([realDelegate = realDelegate, download = retainPtr(download), length] {
+        [realDelegate download:download.get() didReceiveDataOfLength:length];
+    });
 }
 
 - (BOOL)download:(NSURLDownload *)download shouldDecodeSourceDataOfMIMEType:(NSString *)encodingType
 {
-    return [realDelegate download:download shouldDecodeSourceDataOfMIMEType:encodingType];
+    BOOL returnValue = NO;
+    auto work = [&] {
+        returnValue = [realDelegate download:download shouldDecodeSourceDataOfMIMEType:encodingType];
+    };
+    callOnDelegateThreadAndWait(WTFMove(work));
+    return returnValue;
 }
 
 - (void)download:(NSURLDownload *)download decideDestinationWithSuggestedFilename:(NSString *)filename
 {
-    [realDelegate download:download decideDestinationWithSuggestedFilename:filename];
+    callOnDelegateThread([realDelegate = realDelegate, download = retainPtr(download), filename = retainPtr(filename)] {
+        [realDelegate download:download.get() decideDestinationWithSuggestedFilename:filename.get()];
+    });
 }
 
 - (void)download:(NSURLDownload *)download didCreateDestination:(NSString *)path
 {
-    [realDelegate download:download didCreateDestination:path];
+    callOnDelegateThread([realDelegate = realDelegate, download = retainPtr(download), path = retainPtr(path)] {
+        [realDelegate download:download.get() didCreateDestination:path.get()];
+    });
 }
 
 - (void)downloadDidFinish:(NSURLDownload *)download
 {
-    [realDelegate downloadDidFinish:download];
+    callOnDelegateThread([realDelegate = realDelegate, download = retainPtr(download)] {
+        [realDelegate downloadDidFinish:download.get()];
+    });
 }
 
 - (void)download:(NSURLDownload *)download didFailWithError:(NSError *)error
 {
-    [realDelegate download:download didFailWithError:error];
+    callOnDelegateThread([realDelegate = realDelegate, download = retainPtr(download), error = retainPtr(error)] {
+        [realDelegate download:download.get() didFailWithError:error.get()];
+    });
 }
 
 @end
@@ -211,33 +240,31 @@ using namespace WebCore;
     [super dealloc];
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (id)initWithRequest:(NSURLRequest *)request delegate:(id<NSURLDownloadDelegate>)delegate
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     [self _setRealDelegate:delegate];
     return [super initWithRequest:request delegate:_webInternal];
 }
 
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (id)_initWithLoadingConnection:(NSURLConnection *)connection
                          request:(NSURLRequest *)request
                         response:(NSURLResponse *)response
                         delegate:(id)delegate
                            proxy:(NSURLConnectionDelegateProxy *)proxy
+IGNORE_WARNINGS_END
 {
     [self _setRealDelegate:delegate];
     return [super _initWithLoadingConnection:connection request:request response:response delegate:_webInternal proxy:proxy];
 }
 
-#if USE(CFURLCONNECTION)
-- (id)_initWithLoadingCFURLConnection:(CFURLConnectionRef)connection request:(CFURLRequestRef)request response:(CFURLResponseRef)response delegate:(id)delegate proxy:(NSURLConnectionDelegateProxy *)proxy
-{
-    [self _setRealDelegate:delegate];
-    return [super _initWithLoadingCFURLConnection:connection request:request response:response delegate:_webInternal proxy:proxy];
-}
-#endif
-
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (id)_initWithRequest:(NSURLRequest *)request
               delegate:(id)delegate
              directory:(NSString *)directory
+IGNORE_WARNINGS_END
 {
     [self _setRealDelegate:delegate];
     return [super _initWithRequest:request delegate:_webInternal directory:directory];

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2013 Adobe Systems Incorporated. All rights reserved.
+ * Copyright (C) 2021 Apple Inc. All right reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,15 +28,14 @@
 #include "config.h"
 #include "CSSFilterImageValue.h"
 
+#include "CSSFilter.h"
 #include "CachedImage.h"
 #include "CachedResourceLoader.h"
-#include "FilterEffectRenderer.h"
-#include "GraphicsContext.h"
 #include "ImageBuffer.h"
+#include "NullGraphicsContext.h"
 #include "RenderElement.h"
+#include "StyleBuilderState.h"
 #include "StyleCachedImage.h"
-#include "StyleResolver.h"
-#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
@@ -47,28 +47,22 @@ CSSFilterImageValue::~CSSFilterImageValue()
 
 String CSSFilterImageValue::customCSSText() const
 {
-    StringBuilder result;
-    result.appendLiteral("filter(");
-    result.append(m_imageValue->cssText());
-    result.appendLiteral(", ");
-    result.append(m_filterValue->cssText());
-    result.append(')');
-    return result.toString();
+    return makeString("filter(", m_imageValue->cssText(), ", ", m_filterValue->cssText(), ')');
 }
 
-FloatSize CSSFilterImageValue::fixedSize(const RenderElement* renderer)
+FloatSize CSSFilterImageValue::fixedSize(const RenderElement& renderer)
 {
     // FIXME: Skip Content Security Policy check when filter is applied to an element in a user agent shadow tree.
     // See <https://bugs.webkit.org/show_bug.cgi?id=146663>.
     ResourceLoaderOptions options = CachedResourceLoader::defaultCachedResourceOptions();
 
-    CachedResourceLoader& cachedResourceLoader = renderer->document().cachedResourceLoader();
+    CachedResourceLoader& cachedResourceLoader = renderer.document().cachedResourceLoader();
     CachedImage* cachedImage = cachedImageForCSSValue(m_imageValue, cachedResourceLoader, options);
 
     if (!cachedImage)
         return FloatSize();
 
-    return cachedImage->imageForRenderer(renderer)->size();
+    return cachedImage->imageForRenderer(&renderer)->size();
 }
 
 bool CSSFilterImageValue::isPending() const
@@ -76,7 +70,7 @@ bool CSSFilterImageValue::isPending() const
     return CSSImageGeneratorValue::subimageIsPending(m_imageValue);
 }
 
-bool CSSFilterImageValue::knownToBeOpaque(const RenderElement*) const
+bool CSSFilterImageValue::knownToBeOpaque(const RenderElement&) const
 {
     return false;
 }
@@ -95,7 +89,7 @@ void CSSFilterImageValue::loadSubimages(CachedResourceLoader& cachedResourceLoad
     }
 
     for (auto& filterOperation : m_filterOperations.operations()) {
-        if (!is<ReferenceFilterOperation>(filterOperation.get()))
+        if (!is<ReferenceFilterOperation>(filterOperation))
             continue;
         auto& referenceFilterOperation = downcast<ReferenceFilterOperation>(*filterOperation);
         referenceFilterOperation.loadExternalDocumentIfNeeded(cachedResourceLoader, options);
@@ -104,42 +98,40 @@ void CSSFilterImageValue::loadSubimages(CachedResourceLoader& cachedResourceLoad
     m_filterSubimageObserver.setReady(true);
 }
 
-RefPtr<Image> CSSFilterImageValue::image(RenderElement* renderer, const FloatSize& size)
+RefPtr<Image> CSSFilterImageValue::image(RenderElement& renderer, const FloatSize& size)
 {
-    ASSERT(renderer);
-
     if (size.isEmpty())
         return nullptr;
 
     // FIXME: Skip Content Security Policy check when filter is applied to an element in a user agent shadow tree.
     // See <https://bugs.webkit.org/show_bug.cgi?id=146663>.
     ResourceLoaderOptions options = CachedResourceLoader::defaultCachedResourceOptions();
-    auto* cachedImage = cachedImageForCSSValue(m_imageValue, renderer->document().cachedResourceLoader(), options);
+    auto* cachedImage = cachedImageForCSSValue(m_imageValue, renderer.document().cachedResourceLoader(), options);
     if (!cachedImage)
         return &Image::nullImage();
 
-    auto* image = cachedImage->imageForRenderer(renderer);
+    auto* image = cachedImage->imageForRenderer(&renderer);
     if (!image)
         return &Image::nullImage();
 
-    // Transform Image into ImageBuffer.
-    // FIXME (149424): This buffer should not be unconditionally unaccelerated.
-    auto texture = ImageBuffer::create(size, Unaccelerated);
-    if (!texture)
+    auto renderingMode = renderer.page().acceleratedFiltersEnabled() ? RenderingMode::Accelerated : RenderingMode::Unaccelerated;
+    auto sourceImage = ImageBuffer::create(size, RenderingPurpose::DOM, 1, DestinationColorSpace::SRGB(), PixelFormat::BGRA8, bufferOptionsForRendingMode(renderingMode), { renderer.hostWindow() });
+    if (!sourceImage)
         return &Image::nullImage();
 
-    auto imageRect = FloatRect { { }, size };
-    texture->context().drawImage(*image, imageRect);
+    auto sourceImageRect = FloatRect { { }, size };
+    sourceImage->context().drawImage(*image, sourceImageRect);
 
-    auto filterRenderer = FilterEffectRenderer::create();
-    filterRenderer->setSourceImage(WTFMove(texture));
-    filterRenderer->setSourceImageRect(imageRect);
-    filterRenderer->setFilterRegion(imageRect);
-    if (!filterRenderer->build(*renderer, m_filterOperations, FilterFunction))
+    auto cssFilter = CSSFilter::create(renderer, m_filterOperations, renderingMode, FloatSize { 1, 1 }, Filter::ClipOperation::Intersect, sourceImageRect, NullGraphicsContext());
+    if (!cssFilter)
         return &Image::nullImage();
-    filterRenderer->apply();
 
-    return filterRenderer->output()->copyImage();
+    cssFilter->setFilterRegion(sourceImageRect);
+
+    if (auto image = sourceImage->filteredImage(*cssFilter))
+        return image;
+
+    return &Image::nullImage();
 }
 
 void CSSFilterImageValue::filterImageChanged(const IntRect&)
@@ -148,10 +140,10 @@ void CSSFilterImageValue::filterImageChanged(const IntRect&)
         client.key->imageChanged(static_cast<WrappedImagePtr>(this));
 }
 
-void CSSFilterImageValue::createFilterOperations(StyleResolver* resolver)
+void CSSFilterImageValue::createFilterOperations(Style::BuilderState& builderState)
 {
     m_filterOperations.clear();
-    resolver->createFilterOperations(m_filterValue, m_filterOperations);
+    builderState.createFilterOperations(m_filterValue, m_filterOperations);
 }
 
 void CSSFilterImageValue::FilterSubimageObserverProxy::imageChanged(CachedImage*, const IntRect* rect)
@@ -160,7 +152,7 @@ void CSSFilterImageValue::FilterSubimageObserverProxy::imageChanged(CachedImage*
         m_ownerValue->filterImageChanged(*rect);
 }
 
-bool CSSFilterImageValue::traverseSubresources(const WTF::Function<bool (const CachedResource&)>& handler) const
+bool CSSFilterImageValue::traverseSubresources(const Function<bool(const CachedResource&)>& handler) const
 {
     if (!m_cachedImage)
         return false;
@@ -175,6 +167,18 @@ bool CSSFilterImageValue::equals(const CSSFilterImageValue& other) const
 bool CSSFilterImageValue::equalInputImages(const CSSFilterImageValue& other) const
 {
     return compareCSSValue(m_imageValue, other.m_imageValue);
+}
+
+Ref<CSSFilterImageValue> CSSFilterImageValue::valueWithStylesResolved(Style::BuilderState& state)
+{
+    auto imageValue = state.resolveImageStyles(m_imageValue.get());
+    if (imageValue.ptr() == m_imageValue.ptr()) {
+        createFilterOperations(state);
+        return *this;
+    }
+    auto filterImageValue = create(WTFMove(imageValue), Ref { m_filterValue });
+    filterImageValue->createFilterOperations(state);
+    return filterImageValue;
 }
 
 } // namespace WebCore

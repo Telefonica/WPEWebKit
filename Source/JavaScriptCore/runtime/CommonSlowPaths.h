@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,10 +27,15 @@
 
 #include "CodeBlock.h"
 #include "CodeSpecializationKind.h"
+#include "DirectArguments.h"
 #include "ExceptionHelpers.h"
 #include "FunctionCodeBlock.h"
-#include "SlowPathReturnType.h"
+#include "JSImmutableButterfly.h"
+#include "JSPropertyNameEnumerator.h"
+#include "ScopedArguments.h"
+#include "SlowPathFunction.h"
 #include "StackAlignment.h"
+#include "TypeError.h"
 #include "VMInlines.h"
 #include <wtf/StdLibExtras.h>
 
@@ -45,11 +50,6 @@ namespace JSC {
 
 namespace CommonSlowPaths {
 
-struct ArityCheckData {
-    unsigned paddedStackSpace;
-    void* thunkToCall;
-};
-
 ALWAYS_INLINE int numberOfExtraSlots(int argumentCountIncludingThis)
 {
     int frameSize = argumentCountIncludingThis + CallFrame::headerSizeInRegisters;
@@ -59,7 +59,7 @@ ALWAYS_INLINE int numberOfExtraSlots(int argumentCountIncludingThis)
 
 ALWAYS_INLINE int numberOfStackPaddingSlots(CodeBlock* codeBlock, int argumentCountIncludingThis)
 {
-    if (argumentCountIncludingThis >= codeBlock->numParameters())
+    if (static_cast<unsigned>(argumentCountIncludingThis) >= codeBlock->numParameters())
         return 0;
     int alignedFrameSize = WTF::roundUpToMultipleOf(stackAlignmentRegisters(), argumentCountIncludingThis + CallFrame::headerSizeInRegisters);
     int alignedFrameSizeForParameters = WTF::roundUpToMultipleOf(stackAlignmentRegisters(), codeBlock->numParameters() + CallFrame::headerSizeInRegisters);
@@ -68,225 +68,306 @@ ALWAYS_INLINE int numberOfStackPaddingSlots(CodeBlock* codeBlock, int argumentCo
 
 ALWAYS_INLINE int numberOfStackPaddingSlotsWithExtraSlots(CodeBlock* codeBlock, int argumentCountIncludingThis)
 {
-    if (argumentCountIncludingThis >= codeBlock->numParameters())
+    if (static_cast<unsigned>(argumentCountIncludingThis) >= codeBlock->numParameters())
         return 0;
     return numberOfStackPaddingSlots(codeBlock, argumentCountIncludingThis) + numberOfExtraSlots(argumentCountIncludingThis);
 }
 
-ALWAYS_INLINE int arityCheckFor(ExecState* exec, VM& vm, CodeSpecializationKind kind)
+ALWAYS_INLINE CodeBlock* codeBlockFromCallFrameCallee(CallFrame* callFrame, CodeSpecializationKind kind)
 {
-    JSFunction* callee = jsCast<JSFunction*>(exec->jsCallee());
+    JSFunction* callee = jsCast<JSFunction*>(callFrame->jsCallee());
     ASSERT(!callee->isHostFunction());
-    CodeBlock* newCodeBlock = callee->jsExecutable()->codeBlockFor(kind);
-    ASSERT(exec->argumentCountIncludingThis() < static_cast<unsigned>(newCodeBlock->numParameters()));
-    int padding = numberOfStackPaddingSlotsWithExtraSlots(newCodeBlock, exec->argumentCountIncludingThis());
+    return callee->jsExecutable()->codeBlockFor(kind);
+}
+
+ALWAYS_INLINE int arityCheckFor(VM& vm, CallFrame* callFrame, CodeSpecializationKind kind)
+{
+    CodeBlock* newCodeBlock = codeBlockFromCallFrameCallee(callFrame, kind);
+    ASSERT(callFrame->argumentCountIncludingThis() < static_cast<unsigned>(newCodeBlock->numParameters()));
+    int padding = numberOfStackPaddingSlotsWithExtraSlots(newCodeBlock, callFrame->argumentCountIncludingThis());
     
-    Register* newStack = exec->registers() - WTF::roundUpToMultipleOf(stackAlignmentRegisters(), padding);
+    Register* newStack = callFrame->registers() - WTF::roundUpToMultipleOf(stackAlignmentRegisters(), padding);
 
     if (UNLIKELY(!vm.ensureStackCapacityFor(newStack)))
         return -1;
     return padding;
 }
 
-inline bool opIn(ExecState* exec, JSValue baseVal, JSValue propName, ArrayProfile* arrayProfile = nullptr)
+inline JSValue opEnumeratorGetByVal(JSGlobalObject* globalObject, JSValue baseValue, JSValue propertyNameValue, unsigned index, JSPropertyNameEnumerator::Flag mode, JSPropertyNameEnumerator* enumerator, ArrayProfile* arrayProfile = nullptr, uint8_t* enumeratorMetadata = nullptr)
 {
-    VM& vm = exec->vm();
+    VM& vm = getVM(globalObject);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    switch (mode) {
+    case JSPropertyNameEnumerator::IndexedMode: {
+        if (arrayProfile && LIKELY(baseValue.isCell()))
+            arrayProfile->observeStructureID(baseValue.asCell()->structureID());
+        RELEASE_AND_RETURN(scope, baseValue.get(globalObject, static_cast<unsigned>(index)));
+    }
+    case JSPropertyNameEnumerator::OwnStructureMode: {
+        if (LIKELY(baseValue.isCell()) && baseValue.asCell()->structureID() == enumerator->cachedStructureID()) {
+            // We'll only match the structure ID if the base is an object.
+            ASSERT(index < enumerator->endStructurePropertyIndex());
+            RELEASE_AND_RETURN(scope, baseValue.getObject()->getDirect(index < enumerator->cachedInlineCapacity() ? index : index - enumerator->cachedInlineCapacity() + firstOutOfLineOffset));
+        } else {
+            if (enumeratorMetadata)
+                *enumeratorMetadata |= static_cast<uint8_t>(JSPropertyNameEnumerator::HasSeenOwnStructureModeStructureMismatch);
+        }
+        FALLTHROUGH;
+    }
+
+    case JSPropertyNameEnumerator::GenericMode: {
+        if (arrayProfile && baseValue.isCell() && mode != JSPropertyNameEnumerator::OwnStructureMode)
+            arrayProfile->observeStructureID(baseValue.asCell()->structureID());
+        JSString* string = asString(propertyNameValue);
+        auto propertyName = string->toIdentifier(globalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        RELEASE_AND_RETURN(scope, baseValue.get(globalObject, propertyName));
+    }
+
+    default:
+        RELEASE_ASSERT_NOT_REACHED();
+        break;
+    };
+    RELEASE_ASSERT_NOT_REACHED();
+}
+
+inline bool opInByVal(JSGlobalObject* globalObject, JSValue baseVal, JSValue propName, ArrayProfile* arrayProfile = nullptr)
+{
+    VM& vm = getVM(globalObject);
     auto scope = DECLARE_THROW_SCOPE(vm);
     if (!baseVal.isObject()) {
-        throwException(exec, scope, createInvalidInParameterError(exec, baseVal));
+        throwException(globalObject, scope, createInvalidInParameterError(globalObject, baseVal));
         return false;
     }
 
     JSObject* baseObj = asObject(baseVal);
     if (arrayProfile)
-        arrayProfile->observeStructure(baseObj->structure(vm));
+        arrayProfile->observeStructure(baseObj->structure());
 
     uint32_t i;
     if (propName.getUInt32(i)) {
-        scope.release();
-        return baseObj->hasProperty(exec, i);
+        if (arrayProfile)
+            arrayProfile->observeIndexedRead(baseObj, i);
+        RELEASE_AND_RETURN(scope, baseObj->hasProperty(globalObject, i));
     }
 
-    auto property = propName.toPropertyKey(exec);
+    auto property = propName.toPropertyKey(globalObject);
     RETURN_IF_EXCEPTION(scope, false);
+    RELEASE_AND_RETURN(scope, baseObj->hasProperty(globalObject, property));
+}
+
+inline bool canAccessArgumentIndexQuickly(JSObject& object, uint32_t index)
+{
+    switch (object.type()) {
+    case DirectArgumentsType: {
+        DirectArguments* directArguments = jsCast<DirectArguments*>(&object);
+        if (directArguments->isMappedArgumentInDFG(index))
+            return true;
+        break;
+    }
+    case ScopedArgumentsType: {
+        ScopedArguments* scopedArguments = jsCast<ScopedArguments*>(&object);
+        if (scopedArguments->isMappedArgumentInDFG(index))
+            return true;
+        break;
+    }
+    default:
+        break;
+    }
+    return false;
+}
+
+ALWAYS_INLINE Structure* originalStructureBeforePut(JSCell* cell)
+{
+    if (cell->type() == PureForwardingProxyType)
+        return jsCast<JSProxy*>(cell)->target()->structure();
+    return cell->structure();
+}
+
+ALWAYS_INLINE Structure* originalStructureBeforePut(JSValue value)
+{
+    if (!value.isCell())
+        return nullptr;
+    return originalStructureBeforePut(value.asCell());
+}
+
+static ALWAYS_INLINE bool canPutDirectFast(VM& vm, Structure* structure, PropertyName propertyName, bool isJSFunction)
+{
+    if (!structure->isStructureExtensible())
+        return false;
+
+    unsigned currentAttributes = 0;
+    structure->get(vm, propertyName, currentAttributes);
+    if (currentAttributes & PropertyAttribute::DontDelete)
+        return false;
+
+    if (!isJSFunction) {
+        if (structure->hasNonReifiedStaticProperties())
+            return false;
+        if (structure->classInfoForCells()->methodTable.defineOwnProperty != &JSObject::defineOwnProperty)
+            return false;
+    }
+
+    return true;
+}
+
+static ALWAYS_INLINE void putDirectWithReify(VM& vm, JSGlobalObject* globalObject, JSObject* baseObject, PropertyName propertyName, JSValue value, PutPropertySlot& slot, Structure** result = nullptr)
+{
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    bool isJSFunction = baseObject->inherits<JSFunction>();
+    if (isJSFunction) {
+        jsCast<JSFunction*>(baseObject)->reifyLazyPropertyIfNeeded(vm, globalObject, propertyName);
+        RETURN_IF_EXCEPTION(scope, void());
+    }
+
+    Structure* structure = originalStructureBeforePut(baseObject);
+    if (result)
+        *result = structure;
+
+    if (LIKELY(canPutDirectFast(vm, structure, propertyName, isJSFunction))) {
+        bool success = baseObject->putDirect(vm, propertyName, value, 0, slot);
+        ASSERT_UNUSED(success, success);
+    } else {
+        slot.disableCaching();
+        scope.release();
+        PropertyDescriptor descriptor(value, 0);
+        baseObject->methodTable()->defineOwnProperty(baseObject, globalObject, propertyName, descriptor, slot.isStrictMode());
+    }
+}
+
+static ALWAYS_INLINE void putDirectAccessorWithReify(VM& vm, JSGlobalObject* globalObject, JSObject* baseObject, PropertyName propertyName, GetterSetter* accessor, unsigned attribute)
+{
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    bool isJSFunction = baseObject->inherits<JSFunction>();
+    if (isJSFunction) {
+        jsCast<JSFunction*>(baseObject)->reifyLazyPropertyIfNeeded(vm, globalObject, propertyName);
+        RETURN_IF_EXCEPTION(scope, void());
+    }
+
+    // baseObject is either JSFinalObject during object literal construction, or a userland JSFunction class
+    // constructor, both of which are guaranteed to be extensible and without non-configurable |propertyName|.
+    // Please also note that static "prototype" accessor in a `class` literal is a syntax error.
+    ASSERT(canPutDirectFast(vm, originalStructureBeforePut(baseObject), propertyName, isJSFunction));
     scope.release();
-    return baseObj->hasProperty(exec, property);
+    baseObject->putDirectAccessor(globalObject, propertyName, accessor, attribute);
 }
 
-inline void tryCachePutToScopeGlobal(
-    ExecState* exec, CodeBlock* codeBlock, Instruction* pc, JSObject* scope,
-    GetPutInfo getPutInfo, PutPropertySlot& slot, const Identifier& ident)
+inline JSArray* allocateNewArrayBuffer(VM& vm, Structure* structure, JSImmutableButterfly* immutableButterfly)
 {
-    // Covers implicit globals. Since they don't exist until they first execute, we didn't know how to cache them at compile time.
-    ResolveType resolveType = getPutInfo.resolveType();
-    if (resolveType != GlobalProperty && resolveType != GlobalPropertyWithVarInjectionChecks 
-        && resolveType != UnresolvedProperty && resolveType != UnresolvedPropertyWithVarInjectionChecks)
-        return;
+    JSGlobalObject* globalObject = structure->globalObject();
+    Structure* originalStructure = globalObject->originalArrayStructureForIndexingType(immutableButterfly->indexingMode());
+    ASSERT(originalStructure->indexingMode() == immutableButterfly->indexingMode());
+    ASSERT(isCopyOnWrite(immutableButterfly->indexingMode()));
+    ASSERT(!structure->outOfLineCapacity());
 
-    if (resolveType == UnresolvedProperty || resolveType == UnresolvedPropertyWithVarInjectionChecks) {
-        if (scope->isGlobalObject()) {
-            ResolveType newResolveType = resolveType == UnresolvedProperty ? GlobalProperty : GlobalPropertyWithVarInjectionChecks;
-            resolveType = newResolveType;
-            getPutInfo = GetPutInfo(getPutInfo.resolveMode(), newResolveType, getPutInfo.initializationMode());
-            ConcurrentJSLocker locker(codeBlock->m_lock);
-            pc[4].u.operand = getPutInfo.operand();
-        } else if (scope->isGlobalLexicalEnvironment()) {
-            JSGlobalLexicalEnvironment* globalLexicalEnvironment = jsCast<JSGlobalLexicalEnvironment*>(scope);
-            ResolveType newResolveType = resolveType == UnresolvedProperty ? GlobalLexicalVar : GlobalLexicalVarWithVarInjectionChecks;
-            pc[4].u.operand = GetPutInfo(getPutInfo.resolveMode(), newResolveType, getPutInfo.initializationMode()).operand();
-            SymbolTableEntry entry = globalLexicalEnvironment->symbolTable()->get(ident.impl());
-            ASSERT(!entry.isNull());
-            ConcurrentJSLocker locker(codeBlock->m_lock);
-            pc[5].u.watchpointSet = entry.watchpointSet();
-            pc[6].u.pointer = static_cast<void*>(globalLexicalEnvironment->variableAt(entry.scopeOffset()).slot());
-        }
-    }
-    
-    if (resolveType == GlobalProperty || resolveType == GlobalPropertyWithVarInjectionChecks) {
-        if (!slot.isCacheablePut()
-            || slot.base() != scope
-            || !scope->structure()->propertyAccessesAreCacheable())
-            return;
-        
-        if (slot.type() == PutPropertySlot::NewProperty) {
-            // Don't cache if we've done a transition. We want to detect the first replace so that we
-            // can invalidate the watchpoint.
-            return;
-        }
-        
-        VM& vm = exec->vm();
-        scope->structure()->didCachePropertyReplacement(vm, slot.cachedOffset());
+    JSArray* result = JSArray::createWithButterfly(vm, nullptr, originalStructure, immutableButterfly->toButterfly());
+    // FIXME: This works but it's slow. If we cared enough about the perf when having a bad time then we could fix it.
+    if (UNLIKELY(originalStructure != structure)) {
+        ASSERT(hasSlowPutArrayStorage(structure->indexingMode()));
+        ASSERT(globalObject->isHavingABadTime());
 
-        ConcurrentJSLocker locker(codeBlock->m_lock);
-        pc[5].u.structure.set(vm, codeBlock, scope->structure());
-        pc[6].u.operand = slot.cachedOffset();
-    }
-}
-
-inline void tryCacheGetFromScopeGlobal(
-    ExecState* exec, VM& vm, Instruction* pc, JSObject* scope, PropertySlot& slot, const Identifier& ident)
-{
-    GetPutInfo getPutInfo(pc[4].u.operand);
-    ResolveType resolveType = getPutInfo.resolveType();
-
-    if (resolveType == UnresolvedProperty || resolveType == UnresolvedPropertyWithVarInjectionChecks) {
-        if (scope->isGlobalObject()) {
-            ResolveType newResolveType = resolveType == UnresolvedProperty ? GlobalProperty : GlobalPropertyWithVarInjectionChecks;
-            resolveType = newResolveType; // Allow below caching mechanism to kick in.
-            ConcurrentJSLocker locker(exec->codeBlock()->m_lock);
-            pc[4].u.operand = GetPutInfo(getPutInfo.resolveMode(), newResolveType, getPutInfo.initializationMode()).operand();
-        } else if (scope->isGlobalLexicalEnvironment()) {
-            JSGlobalLexicalEnvironment* globalLexicalEnvironment = jsCast<JSGlobalLexicalEnvironment*>(scope);
-            ResolveType newResolveType = resolveType == UnresolvedProperty ? GlobalLexicalVar : GlobalLexicalVarWithVarInjectionChecks;
-            SymbolTableEntry entry = globalLexicalEnvironment->symbolTable()->get(ident.impl());
-            ASSERT(!entry.isNull());
-            ConcurrentJSLocker locker(exec->codeBlock()->m_lock);
-            pc[4].u.operand = GetPutInfo(getPutInfo.resolveMode(), newResolveType, getPutInfo.initializationMode()).operand();
-            pc[5].u.watchpointSet = entry.watchpointSet();
-            pc[6].u.pointer = static_cast<void*>(globalLexicalEnvironment->variableAt(entry.scopeOffset()).slot());
-        }
+        result->switchToSlowPutArrayStorage(vm);
+        ASSERT(result->butterfly() != immutableButterfly->toButterfly());
+        ASSERT(!result->butterfly()->arrayStorage()->m_sparseMap.get());
+        ASSERT(result->structureID() == structure->id());
     }
 
-    // Covers implicit globals. Since they don't exist until they first execute, we didn't know how to cache them at compile time.
-    if (slot.isCacheableValue() && slot.slotBase() == scope && scope->structure()->propertyAccessesAreCacheable()) {
-        if (resolveType == GlobalProperty || resolveType == GlobalPropertyWithVarInjectionChecks) {
-            CodeBlock* codeBlock = exec->codeBlock();
-            Structure* structure = scope->structure(vm);
-            {
-                ConcurrentJSLocker locker(codeBlock->m_lock);
-                pc[5].u.structure.set(vm, codeBlock, structure);
-                pc[6].u.operand = slot.cachedOffset();
-            }
-            structure->startWatchingPropertyForReplacements(vm, slot.cachedOffset());
-        }
-    }
+    return result;
 }
 
 } // namespace CommonSlowPaths
 
-class ExecState;
-struct Instruction;
+class CallFrame;
 
-#define SLOW_PATH
-    
-#define SLOW_PATH_DECL(name) \
-extern "C" SlowPathReturnType SLOW_PATH name(ExecState* exec, Instruction* pc)
-    
-#define SLOW_PATH_HIDDEN_DECL(name) \
-SLOW_PATH_DECL(name) WTF_INTERNAL
-    
-SLOW_PATH_HIDDEN_DECL(slow_path_call_arityCheck);
-SLOW_PATH_HIDDEN_DECL(slow_path_construct_arityCheck);
-SLOW_PATH_HIDDEN_DECL(slow_path_create_direct_arguments);
-SLOW_PATH_HIDDEN_DECL(slow_path_create_scoped_arguments);
-SLOW_PATH_HIDDEN_DECL(slow_path_create_cloned_arguments);
-SLOW_PATH_HIDDEN_DECL(slow_path_create_this);
-SLOW_PATH_HIDDEN_DECL(slow_path_enter);
-SLOW_PATH_HIDDEN_DECL(slow_path_get_callee);
-SLOW_PATH_HIDDEN_DECL(slow_path_to_this);
-SLOW_PATH_HIDDEN_DECL(slow_path_throw_tdz_error);
-SLOW_PATH_HIDDEN_DECL(slow_path_throw_strict_mode_readonly_property_write_error);
-SLOW_PATH_HIDDEN_DECL(slow_path_not);
-SLOW_PATH_HIDDEN_DECL(slow_path_eq);
-SLOW_PATH_HIDDEN_DECL(slow_path_neq);
-SLOW_PATH_HIDDEN_DECL(slow_path_stricteq);
-SLOW_PATH_HIDDEN_DECL(slow_path_nstricteq);
-SLOW_PATH_HIDDEN_DECL(slow_path_less);
-SLOW_PATH_HIDDEN_DECL(slow_path_lesseq);
-SLOW_PATH_HIDDEN_DECL(slow_path_greater);
-SLOW_PATH_HIDDEN_DECL(slow_path_greatereq);
-SLOW_PATH_HIDDEN_DECL(slow_path_inc);
-SLOW_PATH_HIDDEN_DECL(slow_path_dec);
-SLOW_PATH_HIDDEN_DECL(slow_path_to_number);
-SLOW_PATH_HIDDEN_DECL(slow_path_to_string);
-SLOW_PATH_HIDDEN_DECL(slow_path_negate);
-SLOW_PATH_HIDDEN_DECL(slow_path_add);
-SLOW_PATH_HIDDEN_DECL(slow_path_mul);
-SLOW_PATH_HIDDEN_DECL(slow_path_sub);
-SLOW_PATH_HIDDEN_DECL(slow_path_div);
-SLOW_PATH_HIDDEN_DECL(slow_path_mod);
-SLOW_PATH_HIDDEN_DECL(slow_path_pow);
-SLOW_PATH_HIDDEN_DECL(slow_path_lshift);
-SLOW_PATH_HIDDEN_DECL(slow_path_rshift);
-SLOW_PATH_HIDDEN_DECL(slow_path_urshift);
-SLOW_PATH_HIDDEN_DECL(slow_path_unsigned);
-SLOW_PATH_HIDDEN_DECL(slow_path_bitand);
-SLOW_PATH_HIDDEN_DECL(slow_path_bitor);
-SLOW_PATH_HIDDEN_DECL(slow_path_bitxor);
-SLOW_PATH_HIDDEN_DECL(slow_path_typeof);
-SLOW_PATH_HIDDEN_DECL(slow_path_is_object);
-SLOW_PATH_HIDDEN_DECL(slow_path_is_object_or_null);
-SLOW_PATH_HIDDEN_DECL(slow_path_is_function);
-SLOW_PATH_HIDDEN_DECL(slow_path_in);
-SLOW_PATH_HIDDEN_DECL(slow_path_del_by_val);
-SLOW_PATH_HIDDEN_DECL(slow_path_strcat);
-SLOW_PATH_HIDDEN_DECL(slow_path_to_primitive);
-SLOW_PATH_HIDDEN_DECL(slow_path_get_enumerable_length);
-SLOW_PATH_HIDDEN_DECL(slow_path_has_generic_property);
-SLOW_PATH_HIDDEN_DECL(slow_path_has_structure_property);
-SLOW_PATH_HIDDEN_DECL(slow_path_has_indexed_property);
-SLOW_PATH_HIDDEN_DECL(slow_path_get_direct_pname);
-SLOW_PATH_HIDDEN_DECL(slow_path_get_property_enumerator);
-SLOW_PATH_HIDDEN_DECL(slow_path_next_structure_enumerator_pname);
-SLOW_PATH_HIDDEN_DECL(slow_path_next_generic_enumerator_pname);
-SLOW_PATH_HIDDEN_DECL(slow_path_to_index_string);
-SLOW_PATH_HIDDEN_DECL(slow_path_profile_type_clear_log);
-SLOW_PATH_HIDDEN_DECL(slow_path_assert);
-SLOW_PATH_HIDDEN_DECL(slow_path_unreachable);
-SLOW_PATH_HIDDEN_DECL(slow_path_create_lexical_environment);
-SLOW_PATH_HIDDEN_DECL(slow_path_push_with_scope);
-SLOW_PATH_HIDDEN_DECL(slow_path_resolve_scope);
-SLOW_PATH_HIDDEN_DECL(slow_path_is_var_scope);
-SLOW_PATH_HIDDEN_DECL(slow_path_resolve_scope_for_hoisting_func_decl_in_eval);
-SLOW_PATH_HIDDEN_DECL(slow_path_create_rest);
-SLOW_PATH_HIDDEN_DECL(slow_path_get_by_id_with_this);
-SLOW_PATH_HIDDEN_DECL(slow_path_get_by_val_with_this);
-SLOW_PATH_HIDDEN_DECL(slow_path_put_by_id_with_this);
-SLOW_PATH_HIDDEN_DECL(slow_path_put_by_val_with_this);
-SLOW_PATH_HIDDEN_DECL(slow_path_define_data_property);
-SLOW_PATH_HIDDEN_DECL(slow_path_define_accessor_property);
-SLOW_PATH_HIDDEN_DECL(slow_path_throw_static_error);
-SLOW_PATH_HIDDEN_DECL(slow_path_new_array_with_spread);
-SLOW_PATH_HIDDEN_DECL(slow_path_spread);
+#define JSC_DECLARE_COMMON_SLOW_PATH(name) \
+    JSC_DECLARE_JIT_OPERATION(name, SlowPathReturnType, (CallFrame*, const JSInstruction*))
+
+#define JSC_DEFINE_COMMON_SLOW_PATH(name) \
+    JSC_DEFINE_JIT_OPERATION(name, SlowPathReturnType, (CallFrame* callFrame, const JSInstruction* pc))
+
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_call_arityCheck);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_construct_arityCheck);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_create_direct_arguments);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_create_scoped_arguments);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_create_cloned_arguments);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_create_arguments_butterfly);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_create_this);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_enter);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_to_this);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_check_tdz);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_throw_strict_mode_readonly_property_write_error);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_not);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_eq);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_neq);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_stricteq);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_nstricteq);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_less);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_lesseq);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_greater);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_greatereq);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_inc);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_dec);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_to_number);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_to_numeric);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_to_string);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_to_object);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_negate);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_add);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_mul);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_sub);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_div);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_mod);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_pow);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_lshift);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_rshift);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_urshift);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_unsigned);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_bitnot);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_bitand);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_bitor);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_bitxor);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_typeof);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_typeof_is_object);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_typeof_is_function);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_instanceof_custom);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_is_callable);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_is_constructor);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_strcat);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_to_primitive);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_to_property_key);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_get_property_enumerator);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_enumerator_next);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_enumerator_get_by_val);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_enumerator_in_by_val);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_enumerator_has_own_property);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_profile_type_clear_log);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_unreachable);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_create_lexical_environment);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_push_with_scope);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_resolve_scope);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_resolve_scope_for_hoisting_func_decl_in_eval);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_create_promise);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_create_generator);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_create_async_generator);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_create_rest);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_get_by_val_with_this);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_get_prototype_of);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_put_by_id_with_this);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_put_by_val_with_this);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_define_data_property);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_define_accessor_property);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_throw_static_error);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_new_promise);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_new_generator);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_new_array_with_spread);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_new_array_buffer);
+JSC_DECLARE_COMMON_SLOW_PATH(slow_path_spread);
+JSC_DECLARE_COMMON_SLOW_PATH(iterator_open_try_fast_narrow);
+JSC_DECLARE_COMMON_SLOW_PATH(iterator_open_try_fast_wide16);
+JSC_DECLARE_COMMON_SLOW_PATH(iterator_open_try_fast_wide32);
+JSC_DECLARE_COMMON_SLOW_PATH(iterator_next_try_fast_narrow);
+JSC_DECLARE_COMMON_SLOW_PATH(iterator_next_try_fast_wide16);
+JSC_DECLARE_COMMON_SLOW_PATH(iterator_next_try_fast_wide32);
 
 } // namespace JSC

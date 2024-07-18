@@ -26,9 +26,9 @@
 #import "config.h"
 #import "WKObject.h"
 
-#if WK_API_ENABLED
-
 #import "APIObject.h"
+#import <WebCore/WebCoreObjCExtras.h>
+#import <wtf/RetainPtr.h>
 
 @interface NSObject ()
 - (BOOL)isNSArray__;
@@ -47,13 +47,15 @@
 
 @implementation WKObject {
     BOOL _hasInitializedTarget;
-    NSObject *_target;
+    RetainPtr<NSObject> _target;
 }
 
 - (void)dealloc
 {
-    static_cast<API::Object*>(object_getIndexedIvars(self))->~Object();
-    [_target release];
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKObject.class, self))
+        return;
+
+    API::Object::fromWKObjectExtraSpace(self).~Object();
 
     [super dealloc];
 }
@@ -64,7 +66,7 @@ static inline void initializeTargetIfNeeded(WKObject *self)
         return;
 
     self->_hasInitializedTarget = YES;
-    self->_target = [self _web_createTarget];
+    self->_target = adoptNS([self _web_createTarget]);
 }
 
 - (BOOL)isEqual:(id)object
@@ -119,7 +121,7 @@ static inline void initializeTargetIfNeeded(WKObject *self)
 {
     initializeTargetIfNeeded(self);
 
-    return _target;
+    return _target.get();
 }
 
 - (NSString *)description
@@ -159,7 +161,7 @@ static inline void initializeTargetIfNeeded(WKObject *self)
 {
     initializeTargetIfNeeded(self);
 
-    [invocation invokeWithTarget:_target];
+    [invocation invokeWithTarget:_target.get()];
 }
 
 - (NSMethodSignature *)methodSignatureForSelector:(SEL)sel
@@ -257,9 +259,7 @@ static inline void initializeTargetIfNeeded(WKObject *self)
 
 - (API::Object&)_apiObject
 {
-    return *static_cast<API::Object*>(object_getIndexedIvars(self));
+    return API::Object::fromWKObjectExtraSpace(self);
 }
 
 @end
-
-#endif // WK_API_ENABLED

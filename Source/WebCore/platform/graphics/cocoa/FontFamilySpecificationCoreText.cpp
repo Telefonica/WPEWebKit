@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,9 +26,12 @@
 #include "config.h"
 #include "FontFamilySpecificationCoreText.h"
 
-#include <pal/spi/cocoa/CoreTextSPI.h>
 #include "FontCache.h"
+#include "FontFamilySpecificationCoreTextCache.h"
 #include "FontSelector.h"
+#include <pal/spi/cf/CoreTextSPI.h>
+#include <wtf/HashFunctions.h>
+#include <wtf/HashMap.h>
 
 #include <CoreText/CoreText.h>
 
@@ -39,30 +42,22 @@ FontFamilySpecificationCoreText::FontFamilySpecificationCoreText(CTFontDescripto
 {
 }
 
-FontFamilySpecificationCoreText::~FontFamilySpecificationCoreText()
-{
-}
+FontFamilySpecificationCoreText::~FontFamilySpecificationCoreText() = default;
 
 FontRanges FontFamilySpecificationCoreText::fontRanges(const FontDescription& fontDescription) const
 {
-    auto size = fontDescription.computedSize();
+    auto& fontPlatformData = FontFamilySpecificationCoreTextCache::forCurrentThread().ensure(FontFamilySpecificationKey(m_fontDescriptor.get(), fontDescription), [&] () {
+        auto size = fontDescription.computedSize();
 
-    auto font = adoptCF(CTFontCreateWithFontDescriptor(m_fontDescriptor.get(), size, nullptr));
+        auto font = adoptCF(CTFontCreateWithFontDescriptor(m_fontDescriptor.get(), size, nullptr));
 
-    auto fontForSynthesisComputation = font;
-#if USE_PLATFORM_SYSTEM_FALLBACK_LIST
-    if (auto physicalFont = adoptCF(CTFontCopyPhysicalFont(font.get())))
-        fontForSynthesisComputation = physicalFont;
-#endif
+        font = preparePlatformFont(font.get(), fontDescription, { });
 
-    font = preparePlatformFont(font.get(), fontDescription, nullptr, nullptr, { }, fontDescription.computedSize());
+        auto [syntheticBold, syntheticOblique] = computeNecessarySynthesis(font.get(), fontDescription, ShouldComputePhysicalTraits::Yes).boldObliquePair();
 
-    bool syntheticBold, syntheticOblique;
-    std::tie(syntheticBold, syntheticOblique) = computeNecessarySynthesis(fontForSynthesisComputation.get(), fontDescription).boldObliquePair();
-
-    FontPlatformData fontPlatformData(font.get(), size, syntheticBold, syntheticOblique, fontDescription.orientation(), fontDescription.widthVariant(), fontDescription.textRenderingMode());
-
-    return FontRanges(FontCache::singleton().fontForPlatformData(fontPlatformData));
+        return makeUnique<FontPlatformData>(font.get(), size, false, syntheticOblique, fontDescription.orientation(), fontDescription.widthVariant(), fontDescription.textRenderingMode());
+    });
+    return FontRanges(FontCache::forCurrentThread().fontForPlatformData(fontPlatformData));
 }
 
 }

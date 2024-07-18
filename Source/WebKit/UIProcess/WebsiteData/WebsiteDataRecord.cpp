@@ -29,6 +29,7 @@
 #include <WebCore/LocalizedStrings.h>
 #include <WebCore/PublicSuffix.h>
 #include <WebCore/SecurityOrigin.h>
+#include <wtf/CrossThreadCopier.h>
 
 #if PLATFORM(COCOA)
 #import <pal/spi/cf/CFNetworkSPI.h>
@@ -47,19 +48,13 @@ String WebsiteDataRecord::displayNameForCookieHostName(const String& hostName)
     if (hostName == String(kCFHTTPCookieLocalFileDomain))
         return displayNameForLocalFiles();
 #else
-    if (hostName == "localhost")
+    if (hostName == "localhost"_s)
         return hostName;
 #endif
-
-#if ENABLE(PUBLIC_SUFFIX_LIST)
-    return WebCore::topPrivatelyControlledDomain(hostName.startsWith('.') ? hostName.substring(1) : hostName);
-#endif
-
-    return String();
+    return displayNameForHostName(hostName);
 }
 
-#if ENABLE(NETSCAPE_PLUGIN_API)
-String WebsiteDataRecord::displayNameForPluginDataHostName(const String& hostName)
+String WebsiteDataRecord::displayNameForHostName(const String& hostName)
 {
 #if ENABLE(PUBLIC_SUFFIX_LIST)
     return WebCore::topPrivatelyControlledDomain(hostName);
@@ -67,17 +62,16 @@ String WebsiteDataRecord::displayNameForPluginDataHostName(const String& hostNam
 
     return String();
 }
-#endif
 
 String WebsiteDataRecord::displayNameForOrigin(const WebCore::SecurityOriginData& securityOrigin)
 {
     const auto& protocol = securityOrigin.protocol;
 
-    if (protocol == "file")
+    if (protocol == "file"_s)
         return displayNameForLocalFiles();
 
 #if ENABLE(PUBLIC_SUFFIX_LIST)
-    if (protocol == "http" || protocol == "https")
+    if (protocol == "http"_s || protocol == "https"_s)
         return WebCore::topPrivatelyControlledDomain(securityOrigin.host);
 #endif
 
@@ -86,24 +80,37 @@ String WebsiteDataRecord::displayNameForOrigin(const WebCore::SecurityOriginData
 
 void WebsiteDataRecord::add(WebsiteDataType type, const WebCore::SecurityOriginData& origin)
 {
-    types |= type;
-
+    types.add(type);
     origins.add(origin);
 }
 
 void WebsiteDataRecord::addCookieHostName(const String& hostName)
 {
-    types |= WebsiteDataType::Cookies;
-
+    types.add(WebsiteDataType::Cookies);
     cookieHostNames.add(hostName);
 }
 
-#if ENABLE(NETSCAPE_PLUGIN_API)
-void WebsiteDataRecord::addPluginDataHostName(const String& hostName)
+void WebsiteDataRecord::addHSTSCacheHostname(const String& hostName)
 {
-    types |= WebsiteDataType::PlugInData;
+    types.add(WebsiteDataType::HSTSCache);
+    HSTSCacheHostNames.add(hostName);
+}
 
-    pluginDataHostNames.add(hostName);
+void WebsiteDataRecord::addAlternativeServicesHostname(const String& hostName)
+{
+#if HAVE(CFNETWORK_ALTERNATIVE_SERVICE)
+    types.add(WebsiteDataType::AlternativeServices);
+    alternativeServicesHostNames.add(hostName);
+#else
+    UNUSED_PARAM(hostName);
+#endif
+}
+
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+void WebsiteDataRecord::addResourceLoadStatisticsRegistrableDomain(const WebCore::RegistrableDomain& domain)
+{
+    types.add(WebsiteDataType::ResourceLoadStatistics);
+    resourceLoadStatisticsRegistrableDomains.add(domain);
 }
 #endif
 
@@ -117,20 +124,20 @@ static inline bool hostIsInDomain(StringView host, StringView domain)
     return !suffixOffset || host[suffixOffset - 1] == '.';
 }
 
-bool WebsiteDataRecord::matchesTopPrivatelyControlledDomain(const String& topPrivatelyControlledDomain) const
+bool WebsiteDataRecord::matches(const WebCore::RegistrableDomain& domain) const
 {
-    if (topPrivatelyControlledDomain.isEmpty())
+    if (domain.isEmpty())
         return false;
 
     if (types.contains(WebsiteDataType::Cookies)) {
         for (const auto& hostName : cookieHostNames) {
-            if (hostIsInDomain(hostName, topPrivatelyControlledDomain))
+            if (hostIsInDomain(hostName, domain.string()))
                 return true;
         }
     }
 
     for (const auto& dataRecordOriginData : origins) {
-        if (hostIsInDomain(dataRecordOriginData.host, topPrivatelyControlledDomain))
+        if (hostIsInDomain(dataRecordOriginData.host, domain.string()))
             return true;
     }
 
@@ -145,22 +152,41 @@ String WebsiteDataRecord::topPrivatelyControlledDomain()
     
     if (!origins.isEmpty())
         return WebCore::topPrivatelyControlledDomain(origins.takeAny().securityOrigin().get().host());
-    
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    if (!pluginDataHostNames.isEmpty())
-        return WebCore::topPrivatelyControlledDomain(pluginDataHostNames.takeAny());
-#endif
-    
 #endif // ENABLE(PUBLIC_SUFFIX_LIST)
     
     return emptyString();
 }
 
-void WebsiteDataRecord::addOriginWithCredential(const String& origin)
+WebsiteDataRecord WebsiteDataRecord::isolatedCopy() const &
 {
-    types |= WebsiteDataType::Credentials;
+    return WebsiteDataRecord {
+        crossThreadCopy(displayName),
+        types,
+        size,
+        crossThreadCopy(origins),
+        crossThreadCopy(cookieHostNames),
+        crossThreadCopy(HSTSCacheHostNames),
+        crossThreadCopy(alternativeServicesHostNames),
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+        crossThreadCopy(resourceLoadStatisticsRegistrableDomains),
+#endif
+    };
+}
 
-    originsWithCredentials.add(origin);
+WebsiteDataRecord WebsiteDataRecord::isolatedCopy() &&
+{
+    return WebsiteDataRecord {
+        crossThreadCopy(WTFMove(displayName)),
+        types,
+        size,
+        crossThreadCopy(WTFMove(origins)),
+        crossThreadCopy(WTFMove(cookieHostNames)),
+        crossThreadCopy(WTFMove(HSTSCacheHostNames)),
+        crossThreadCopy(WTFMove(alternativeServicesHostNames)),
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+        crossThreadCopy(WTFMove(resourceLoadStatisticsRegistrableDomains)),
+#endif
+    };
 }
 
 }

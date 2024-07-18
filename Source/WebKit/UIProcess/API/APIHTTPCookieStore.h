@@ -26,41 +26,53 @@
 #pragma once
 
 #include "APIObject.h"
-#include "HTTPCookieAcceptPolicy.h"
 #include <WebCore/Cookie.h>
+#include <pal/SessionID.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
-#include <wtf/Function.h>
-#include <wtf/HashSet.h>
+#include <wtf/WeakHashSet.h>
+#include <wtf/WeakPtr.h>
+
+#if USE(SOUP)
+#include "SoupCookiePersistentStorageType.h"
+#endif
 
 namespace WebCore {
-class URL;
 struct Cookie;
+enum class HTTPCookieAcceptPolicy : uint8_t;
 }
 
 namespace WebKit {
-class WebCookieManagerProxy;
+class NetworkProcessProxy;
 class WebsiteDataStore;
 }
 
 namespace API {
 
-class APIWebCookieManagerProxyObserver;
-class WebsiteDataStore;
-
 class HTTPCookieStore final : public ObjectImpl<Object::Type::HTTPCookieStore> {
 public:
-    static Ref<HTTPCookieStore> create(WebsiteDataStore& websiteDataStore)
+    static Ref<HTTPCookieStore> create(WebKit::WebsiteDataStore& websiteDataStore)
     {
         return adoptRef(*new HTTPCookieStore(websiteDataStore));
     }
 
     virtual ~HTTPCookieStore();
 
-    void cookies(Function<void (const Vector<WebCore::Cookie>&)>&& completionHandler);
-    void setCookie(const WebCore::Cookie&, Function<void ()>&& completionHandler);
-    void deleteCookie(const WebCore::Cookie&, Function<void ()>&& completionHandler);
+    void cookies(CompletionHandler<void(const Vector<WebCore::Cookie>&)>&&);
+    void cookiesForURL(WTF::URL&&, CompletionHandler<void(Vector<WebCore::Cookie>&&)>&&);
+    void setCookies(Vector<WebCore::Cookie>&&, CompletionHandler<void()>&&);
+    void deleteCookie(const WebCore::Cookie&, CompletionHandler<void()>&&);
+    void deleteCookiesForHostnames(const Vector<WTF::String>&, CompletionHandler<void()>&&);
+    
+    void deleteAllCookies(CompletionHandler<void()>&&);
+    void setHTTPCookieAcceptPolicy(WebCore::HTTPCookieAcceptPolicy, CompletionHandler<void()>&&);
+    void getHTTPCookieAcceptPolicy(CompletionHandler<void(const WebCore::HTTPCookieAcceptPolicy&)>&&);
+    void flushCookies(CompletionHandler<void()>&&);
 
-    class Observer {
+    void setCookieJar(Vector<WebCore::Cookie>&&, CompletionHandler<void()>&&);
+    void getCookieJar(CompletionHandler<void(const Vector<WebCore::Cookie>&)>&&);
+
+    class Observer : public CanMakeWeakPtr<Observer> {
     public:
         virtual ~Observer() { }
         virtual void cookiesDidChange(HTTPCookieStore&) = 0;
@@ -70,22 +82,21 @@ public:
     void unregisterObserver(Observer&);
 
     void cookiesDidChange();
-    void cookieManagerDestroyed();
+
+    void filterAppBoundCookies(Vector<WebCore::Cookie>&&, CompletionHandler<void(Vector<WebCore::Cookie>&&)>&&);
+
+#if USE(SOUP)
+    void setCookiePersistentStorage(const WTF::String& storagePath, WebKit::SoupCookiePersistentStorageType);
+#endif
 
 private:
-    HTTPCookieStore(WebsiteDataStore&);
+    HTTPCookieStore(WebKit::WebsiteDataStore&);
+    WebKit::NetworkProcessProxy* networkProcessIfExists();
+    WebKit::NetworkProcessProxy* networkProcessLaunchingIfNecessary();
 
-    void registerForNewProcessPoolNotifications();
-    void unregisterForNewProcessPoolNotifications();
-
-    Ref<WebKit::WebsiteDataStore> m_owningDataStore;
-    HashSet<Observer*> m_observers;
-
-    WebKit::WebCookieManagerProxy* m_observedCookieManagerProxy { nullptr };
-    std::unique_ptr<APIWebCookieManagerProxyObserver> m_cookieManagerProxyObserver;
-    bool m_observingUIProcessCookies { false };
-
-    uint64_t m_processPoolCreationListenerIdentifier { 0 };
+    PAL::SessionID m_sessionID;
+    WeakPtr<WebKit::WebsiteDataStore> m_owningDataStore;
+    WeakHashSet<Observer> m_observers;
 };
 
 }

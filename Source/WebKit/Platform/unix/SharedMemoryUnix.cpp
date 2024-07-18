@@ -29,6 +29,7 @@
 #if USE(UNIX_DOMAIN_SOCKETS)
 #include "SharedMemory.h"
 
+#include "ArgumentCoders.h"
 #include "Decoder.h"
 #include "Encoder.h"
 #include <errno.h>
@@ -39,11 +40,21 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <wtf/Assertions.h>
-#include <wtf/CurrentTime.h>
 #include <wtf/RandomNumber.h>
+#include <wtf/SafeStrerror.h>
 #include <wtf/UniStdExtras.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/StringConcatenateNumbers.h>
 #include <wtf/text/WTFString.h>
+
+#if HAVE(LINUX_MEMFD_H)
+#include <linux/memfd.h>
+#include <sys/syscall.h>
+#endif
+
+#if PLATFORM(PLAYSTATION)
+#include "ArgumentCoders.h"
+#endif
 
 namespace WebKit {
 
@@ -55,6 +66,9 @@ SharedMemory::Handle::~Handle()
 {
 }
 
+SharedMemory::Handle::Handle(Handle&&) = default;
+SharedMemory::Handle& SharedMemory::Handle::operator=(Handle&& other) = default;
+
 void SharedMemory::Handle::clear()
 {
     m_attachment = IPC::Attachment();
@@ -62,7 +76,7 @@ void SharedMemory::Handle::clear()
 
 bool SharedMemory::Handle::isNull() const
 {
-    return m_attachment.fileDescriptor() == -1;
+    return m_attachment.isNull();
 }
 
 void SharedMemory::Handle::encode(IPC::Encoder& encoder) const
@@ -70,14 +84,13 @@ void SharedMemory::Handle::encode(IPC::Encoder& encoder) const
     encoder << releaseAttachment();
 }
 
-bool SharedMemory::Handle::decode(IPC::Decoder& decoder, Handle& handle)
+bool SharedMemory::Handle::decode(IPC::Decoder& decoder, SharedMemory::Handle& handle)
 {
     ASSERT_ARG(handle, handle.isNull());
-
     IPC::Attachment attachment;
     if (!decoder.decode(attachment))
         return false;
-
+    handle.m_size = attachment.size();
     handle.adoptAttachment(WTFMove(attachment));
     return true;
 }
@@ -107,40 +120,69 @@ static inline int accessModeMMap(SharedMemory::Protection protection)
     return PROT_READ | PROT_WRITE;
 }
 
-RefPtr<SharedMemory> SharedMemory::create(void* address, size_t size, Protection protection)
+static int createSharedMemory()
 {
-    CString tempName;
-
     int fileDescriptor = -1;
+
+#if HAVE(LINUX_MEMFD_H)
+    static bool isMemFdAvailable = true;
+    if (isMemFdAvailable) {
+        do {
+            fileDescriptor = syscall(__NR_memfd_create, "WebKitSharedMemory", MFD_CLOEXEC);
+        } while (fileDescriptor == -1 && errno == EINTR);
+
+        if (fileDescriptor != -1)
+            return fileDescriptor;
+
+        if (errno != ENOSYS)
+            return fileDescriptor;
+
+        isMemFdAvailable = false;
+    }
+#endif
+
+#if HAVE(SHM_ANON)
+    do {
+        fileDescriptor = shm_open(SHM_ANON, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+    } while (fileDescriptor == -1 && errno == EINTR);
+#else
+    CString tempName;
     for (int tries = 0; fileDescriptor == -1 && tries < 10; ++tries) {
-        String name = String("/WK2SharedMemory.") + String::number(static_cast<unsigned>(WTF::randomNumber() * (std::numeric_limits<unsigned>::max() + 1.0)));
+        auto name = makeString("/WK2SharedMemory.", static_cast<unsigned>(WTF::randomNumber() * (std::numeric_limits<unsigned>::max() + 1.0)));
         tempName = name.utf8();
 
         do {
             fileDescriptor = shm_open(tempName.data(), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
         } while (fileDescriptor == -1 && errno == EINTR);
     }
+
+    if (fileDescriptor != -1)
+        shm_unlink(tempName.data());
+#endif
+
+    return fileDescriptor;
+}
+
+RefPtr<SharedMemory> SharedMemory::allocate(size_t size)
+{
+    int fileDescriptor = createSharedMemory();
     if (fileDescriptor == -1) {
-        WTFLogAlways("Failed to create shared memory file %s: %s", tempName.data(), strerror(errno));
+        WTFLogAlways("Failed to create shared memory: %s", safeStrerror(errno).data());
         return nullptr;
     }
 
     while (ftruncate(fileDescriptor, size) == -1) {
         if (errno != EINTR) {
             closeWithRetry(fileDescriptor);
-            shm_unlink(tempName.data());
             return nullptr;
         }
     }
 
-    void* data = mmap(address, size, accessModeMMap(protection), MAP_SHARED, fileDescriptor, 0);
+    void* data = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fileDescriptor, 0);
     if (data == MAP_FAILED) {
         closeWithRetry(fileDescriptor);
-        shm_unlink(tempName.data());
         return nullptr;
     }
-
-    shm_unlink(tempName.data());
 
     RefPtr<SharedMemory> instance = adoptRef(new SharedMemory());
     instance->m_data = data;
@@ -149,18 +191,13 @@ RefPtr<SharedMemory> SharedMemory::create(void* address, size_t size, Protection
     return instance;
 }
 
-RefPtr<SharedMemory> SharedMemory::allocate(size_t size)
-{
-    return SharedMemory::create(nullptr, size, SharedMemory::Protection::ReadWrite);
-}
-
 RefPtr<SharedMemory> SharedMemory::map(const Handle& handle, Protection protection)
 {
     ASSERT(!handle.isNull());
 
-    int fd = handle.m_attachment.releaseFileDescriptor();
-    void* data = mmap(0, handle.m_attachment.size(), accessModeMMap(protection), MAP_SHARED, fd, 0);
-    closeWithRetry(fd);
+    UnixFileDescriptor fd = handle.m_attachment.release();
+    void* data = mmap(0, handle.m_attachment.size(), accessModeMMap(protection), MAP_SHARED, fd.value(), 0);
+    fd = { };
     if (data == MAP_FAILED)
         return nullptr;
 
@@ -198,23 +235,13 @@ bool SharedMemory::createHandle(Handle& handle, Protection)
     // FIXME: Handle the case where the passed Protection is ReadOnly.
     // See https://bugs.webkit.org/show_bug.cgi?id=131542.
 
-    int duplicatedHandle = dupCloseOnExec(m_fileDescriptor.value());
-    if (duplicatedHandle == -1) {
+    UnixFileDescriptor duplicate { m_fileDescriptor.value(), UnixFileDescriptor::Duplicate };
+    if (!duplicate) {
         ASSERT_NOT_REACHED();
         return false;
     }
-    handle.m_attachment = IPC::Attachment(duplicatedHandle, m_size);
+    handle.m_attachment = IPC::Attachment(WTFMove(duplicate), m_size);
     return true;
-}
-
-unsigned SharedMemory::systemPageSize()
-{
-    static unsigned pageSize = 0;
-
-    if (!pageSize)
-        pageSize = getpagesize();
-
-    return pageSize;
 }
 
 } // namespace WebKit

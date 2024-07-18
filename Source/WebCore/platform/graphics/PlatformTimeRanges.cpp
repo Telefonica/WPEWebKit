@@ -28,12 +28,18 @@
 
 #include <math.h>
 #include <wtf/PrintStream.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
     
 PlatformTimeRanges::PlatformTimeRanges(const MediaTime& start, const MediaTime& end)
 {
     add(start, end);
+}
+
+PlatformTimeRanges::PlatformTimeRanges(Vector<Range>&& ranges)
+    : m_ranges { WTFMove(ranges) }
+{
 }
 
 void PlatformTimeRanges::invert()
@@ -132,39 +138,22 @@ MediaTime PlatformTimeRanges::maximumBufferedTime() const
     return m_ranges[length() - 1].m_end;
 }
 
-// This function either returns the nearest index of smaller start value or returns zero
-size_t PlatformTimeRanges::getNearestSmallerStartOrZero(const MediaTime& start, const MediaTime& end) const
+MediaTime PlatformTimeRanges::minimumBufferedTime() const
 {
-    ASSERT(start <= end);
-    Range range(start, end);
-    size_t first, last, middle;
-    size_t index = 0;
+    if (!length())
+        return MediaTime::invalidTime();
 
-    // if the range size is <=2 then better return 0
-    if(m_ranges.size() <= 2) {
-        return index;
-    }
-
-    first = 0;
-    last = m_ranges.size() - 1;
-    middle = first + ((last - first)/2);
-
-    while (first < last && middle > 0) {
-        if ( m_ranges[middle].isBeforeRange(range) ) {
-            index = middle;
-            first = middle + 1;
-        } else {
-            last = middle - 1;
-        }
-
-        middle = first + ((last - first)/2);
-    }
-    return index;
+    return m_ranges[0].m_start;
 }
 
 void PlatformTimeRanges::add(const MediaTime& start, const MediaTime& end)
 {
+#if !PLATFORM(MAC) // https://bugs.webkit.org/show_bug.cgi?id=180253
+    ASSERT(start.isValid());
+    ASSERT(end.isValid());
+#endif
     ASSERT(start <= end);
+
     size_t overlappingArcIndex;
     Range addedRange(start, end);
 
@@ -172,11 +161,8 @@ void PlatformTimeRanges::add(const MediaTime& start, const MediaTime& end)
     // - merge with the added range, in case we are overlapping or contiguous
     // - Need to insert in place, we we are completely, not overlapping and not contiguous
     // in between two ranges.
-    //
-    // TODO: Given that we assume that ranges are correctly ordered, this could be optimized.
 
-    // Assigning overlappingArcIndex = getNearestSmallerStartOrZero() considering the range is ordered
-    for (overlappingArcIndex = getNearestSmallerStartOrZero(start, end); overlappingArcIndex < m_ranges.size(); overlappingArcIndex++) {
+    for (overlappingArcIndex = findLastRangeIndexBefore(start, end); overlappingArcIndex < m_ranges.size(); overlappingArcIndex++) {
         if (addedRange.isOverlappingRange(m_ranges[overlappingArcIndex]) || addedRange.isContiguousWithRange(m_ranges[overlappingArcIndex])) {
             // We need to merge the addedRange and that range.
             addedRange = addedRange.unionWithOverlappingOrContiguousRange(m_ranges[overlappingArcIndex]);
@@ -204,6 +190,11 @@ void PlatformTimeRanges::add(const MediaTime& start, const MediaTime& end)
     m_ranges.insert(overlappingArcIndex, addedRange);
 }
 
+void PlatformTimeRanges::clear()
+{
+    m_ranges.clear();
+}
+
 bool PlatformTimeRanges::contain(const MediaTime& time) const
 {
     return find(time) != notFound;
@@ -217,6 +208,33 @@ size_t PlatformTimeRanges::find(const MediaTime& time) const
             return n;
     }
     return notFound;
+}
+
+size_t PlatformTimeRanges::findWithEpsilon(const MediaTime& time, const MediaTime& epsilon)
+{
+    bool ignoreInvalid;
+    for (unsigned n = 0; n < length(); n++) {
+        if (time + epsilon >= start(n, ignoreInvalid) && time < end(n, ignoreInvalid))
+            return n;
+    }
+    return notFound;
+}
+
+PlatformTimeRanges PlatformTimeRanges::copyWithEpsilon(const MediaTime& epsilon) const
+{
+    if (length() <= 1)
+        return *this;
+    Vector<Range> ranges;
+    unsigned n1 = 0;
+    for (unsigned n2 = 1; n2 < length(); n2++) {
+        auto& previousRangeEnd = m_ranges[n2 - 1].m_end;
+        if (previousRangeEnd + epsilon < m_ranges[n2].m_start) {
+            ranges.append({ m_ranges[n1].m_start, previousRangeEnd });
+            n1 = n2;
+        }
+    }
+    ranges.append({ m_ranges[n1].m_start, m_ranges[length() - 1].m_end });
+    return ranges;
 }
 
 MediaTime PlatformTimeRanges::nearest(const MediaTime& time) const
@@ -268,4 +286,41 @@ void PlatformTimeRanges::dump(PrintStream& out) const
         out.print("[", start(i), "..", end(i), "] ");
 }
 
+String PlatformTimeRanges::toString() const
+{
+    StringBuilder result;
+
+    for (size_t i = 0; i < length(); ++i)
+        result.append("[", start(i).toString(), "..", end(i).toString(), "] ");
+
+    return result.toString();
+}
+
+size_t PlatformTimeRanges::findLastRangeIndexBefore(const MediaTime& start, const MediaTime& end) const
+{
+    ASSERT(start <= end);
+
+    if (m_ranges.isEmpty())
+        return 0;
+
+    const Range range(start, end);
+    size_t first, last, middle;
+    size_t index = 0;
+
+    first = 0;
+    last = m_ranges.size() - 1;
+    middle = first + ((last - first) / 2);
+
+    while (first < last && middle > 0) {
+        if (m_ranges[middle].isBeforeRange(range)) {
+            index = middle;
+            first = middle + 1;
+        } else
+            last = middle - 1;
+
+        middle = first + ((last - first) / 2);
+    }
+    return index;
+
+}
 }

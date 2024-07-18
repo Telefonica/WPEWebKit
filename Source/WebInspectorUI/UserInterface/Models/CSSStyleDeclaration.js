@@ -40,23 +40,35 @@ WI.CSSStyleDeclaration = class CSSStyleDeclaration extends WI.Object
         this._node = node || null;
         this._inherited = inherited || false;
 
+        this._initialState = null;
+        this._updatesInProgressCount = 0;
+        this._pendingPropertiesChanged = false;
+        this._locked = false;
         this._pendingProperties = [];
         this._propertyNameMap = {};
 
-        this._initialText = text;
-        this._hasModifiedInitialText = false;
+        this._properties = [];
+        this._enabledProperties = null;
+        this._visibleProperties = null;
 
-        this._allProperties = [];
-        this._allVisibleProperties = null;
-
-        this.update(text, properties, styleSheetTextRange, true);
+        this.update(text, properties, styleSheetTextRange, {dontFireEvents: true});
     }
 
     // Public
 
+    get initialState() { return this._initialState; }
+
     get id()
     {
         return this._id;
+    }
+
+    get stringId()
+    {
+        if (this._id)
+            return this._id.styleSheetId + "/" + this._id.ordinal;
+        else
+            return "";
     }
 
     get ownerStyleSheet()
@@ -88,32 +100,58 @@ WI.CSSStyleDeclaration = class CSSStyleDeclaration extends WI.Object
             return this._ownerRule && this._ownerRule.editable;
 
         if (this._type === WI.CSSStyleDeclaration.Type.Inline)
-            return !this._node.isInUserAgentShadowTree();
+            return !this._node.isInUserAgentShadowTree() || WI.DOMManager.supportsEditingUserAgentShadowTrees();
 
         return false;
     }
 
-    update(text, properties, styleSheetTextRange, dontFireEvents)
+    get selectorEditable()
     {
+        return this._ownerRule && this._ownerRule.editable && InspectorBackend.hasCommand("CSS.setRuleSelector");
+    }
+
+    get locked() { return this._locked; }
+    set locked(value) { this._locked = value; }
+
+    update(text, properties, styleSheetTextRange, options = {})
+    {
+        let dontFireEvents = options.dontFireEvents || false;
+
+        // When two consequent setText calls happen (A and B), only update when the last call (B) is finished.
+        //               Front-end:   A B
+        //                Back-end:       A B
+        // _updatesInProgressCount: 0 1 2 1 0
+        //                                  ^
+        //                                  update only happens here
+        if (this._updatesInProgressCount > 0 && !options.forceUpdate) {
+            if (WI.settings.debugEnableStyleEditingDebugMode.value && text !== this._text)
+                console.warn("Style modified while editing:", text);
+
+            return;
+        }
+
+        // Allow updates from the backend when text matches because `properties` may contain warnings that need to be shown.
+        if (this._locked && !options.forceUpdate && text !== this._text)
+            return;
+
         text = text || "";
         properties = properties || [];
 
-        var oldProperties = this._properties || [];
-        var oldText = this._text;
+        let oldProperties = this._properties || [];
+        let oldText = this._text;
 
         this._text = text;
-        this._properties = properties.filter((property) => property.enabled);
-        this._allProperties = properties;
+        this._properties = properties;
 
         this._styleSheetTextRange = styleSheetTextRange;
         this._propertyNameMap = {};
 
-        delete this._visibleProperties;
-        this._allVisibleProperties = null;
+        this._enabledProperties = null;
+        this._visibleProperties = null;
 
-        var editable = this.editable;
+        let editable = this.editable;
 
-        for (let property of this._allProperties) {
+        for (let property of this._properties) {
             property.ownerStyle = this;
 
             // Store the property in a map if we aren't editable. This
@@ -128,43 +166,32 @@ WI.CSSStyleDeclaration = class CSSStyleDeclaration extends WI.Object
             }
         }
 
-        var removedProperties = [];
-        for (var i = 0; i < oldProperties.length; ++i) {
-            var oldProperty = oldProperties[i];
+        for (let oldProperty of oldProperties) {
+            if (this.enabledProperties.includes(oldProperty))
+                continue;
 
-            if (!this._properties.includes(oldProperty)) {
-                // Clear the index, since it is no longer valid.
-                oldProperty.index = NaN;
+            // Clear the index, since it is no longer valid.
+            oldProperty.index = NaN;
 
-                removedProperties.push(oldProperty);
-
-                // Keep around old properties in pending in case they
-                // are needed again during editing.
-                if (editable)
-                    this._pendingProperties.push(oldProperty);
-            }
+            // Keep around old properties in pending in case they
+            // are needed again during editing.
+            if (editable)
+                this._pendingProperties.push(oldProperty);
         }
 
         if (dontFireEvents)
             return;
 
-        var addedProperties = [];
-        for (var i = 0; i < this._properties.length; ++i) {
-            if (!oldProperties.includes(this._properties[i]))
-                addedProperties.push(this._properties[i]);
-        }
+        // Don't fire the event if text hasn't changed. However, it should still fire for Computed style declarations
+        // because it never has text.
+        if (oldText === this._text && !this._pendingPropertiesChanged && this._type !== WI.CSSStyleDeclaration.Type.Computed)
+            return;
 
-        // Don't fire the event if there is text and it hasn't changed.
-        if (oldText && this._text && oldText === this._text) {
-            // We shouldn't have any added or removed properties in this case.
-            console.assert(!addedProperties.length && !removedProperties.length);
-            if (!addedProperties.length && !removedProperties.length)
-                return;
-        }
+        this._pendingPropertiesChanged = false;
 
         function delayed()
         {
-            this.dispatchEventToListeners(WI.CSSStyleDeclaration.Event.PropertiesChanged, {addedProperties, removedProperties});
+            this.dispatchEventToListeners(WI.CSSStyleDeclaration.Event.PropertiesChanged);
         }
 
         // Delay firing the PropertiesChanged event so DOMNodeStyles has a chance to mark overridden and associated properties.
@@ -191,30 +218,40 @@ WI.CSSStyleDeclaration = class CSSStyleDeclaration extends WI.Object
         if (this._text === text)
             return;
 
-        let trimmedText = WI.CSSStyleDeclarationTextEditor.PrefixWhitespace + text.trim();
+        let trimmedText = text.trim();
         if (this._text === trimmedText)
             return;
 
-        if (trimmedText === WI.CSSStyleDeclarationTextEditor.PrefixWhitespace || this._type === WI.CSSStyleDeclaration.Type.Inline)
+        if (!trimmedText.length || this._type === WI.CSSStyleDeclaration.Type.Inline)
             text = trimmedText;
 
-        let modified = text !== this._initialText;
-        if (modified !== this._hasModifiedInitialText) {
-            this._hasModifiedInitialText = modified;
-            this.dispatchEventToListeners(WI.CSSStyleDeclaration.Event.InitialTextModified);
-        }
+        this._text = text;
+        ++this._updatesInProgressCount;
 
-        this._nodeStyles.changeStyleText(this, text);
+        let timeoutId = setTimeout(() => {
+            console.error("Timed out when setting style text:", text);
+            styleTextDidChange();
+        }, 2000);
+
+        let styleTextDidChange = () => {
+            if (!timeoutId)
+                return;
+
+            clearTimeout(timeoutId);
+            timeoutId = null;
+            this._updatesInProgressCount = Math.max(0, this._updatesInProgressCount - 1);
+            this._pendingPropertiesChanged = true;
+        };
+
+        this._nodeStyles.changeStyleText(this, text, styleTextDidChange);
     }
 
-    resetText()
+    get enabledProperties()
     {
-        this.text = this._initialText;
-    }
+        if (!this._enabledProperties)
+            this._enabledProperties = this._properties.filter((property) => property.enabled);
 
-    get modified()
-    {
-        return this._hasModifiedInitialText;
+        return this._enabledProperties;
     }
 
     get properties()
@@ -222,14 +259,14 @@ WI.CSSStyleDeclaration = class CSSStyleDeclaration extends WI.Object
         return this._properties;
     }
 
-    get allProperties() { return this._allProperties; }
-
-    get allVisibleProperties()
+    set properties(properties)
     {
-        if (!this._allVisibleProperties)
-            this._allVisibleProperties = this._allProperties.filter((property) => !!property.styleDeclarationTextRange);
+        if (properties === this._properties)
+            return;
 
-        return this._allVisibleProperties;
+        this._properties = properties;
+        this._enabledProperties = null;
+        this._visibleProperties = null;
     }
 
     get visibleProperties()
@@ -250,10 +287,10 @@ WI.CSSStyleDeclaration = class CSSStyleDeclaration extends WI.Object
         return this._styleSheetTextRange;
     }
 
-    get mediaList()
+    get groupings()
     {
         if (this._ownerRule)
-            return this._ownerRule.mediaList;
+            return this._ownerRule.groupings;
         return [];
     }
 
@@ -264,7 +301,7 @@ WI.CSSStyleDeclaration = class CSSStyleDeclaration extends WI.Object
         return this._node.appropriateSelectorFor(true);
     }
 
-    propertyForName(name, dontCreateIfMissing)
+    propertyForName(name)
     {
         console.assert(name);
         if (!name)
@@ -276,80 +313,224 @@ WI.CSSStyleDeclaration = class CSSStyleDeclaration extends WI.Object
         // Editable styles don't use the map since they need to
         // account for overridden properties.
 
-        function findMatch(properties)
-        {
-            for (var i = 0; i < properties.length; ++i) {
-                var property = properties[i];
-                if (property.canonicalName !== name && property.name !== name)
-                    continue;
-                if (bestMatchProperty && !bestMatchProperty.overridden && property.overridden)
-                    continue;
-                bestMatchProperty = property;
-            }
+        let bestMatchProperty = null;
+        for (let property of this.enabledProperties) {
+            if (property.canonicalName !== name && property.name !== name)
+                continue;
+            if (bestMatchProperty && !bestMatchProperty.overridden && property.overridden)
+                continue;
+            bestMatchProperty = property;
         }
 
-        var bestMatchProperty = null;
-
-        findMatch(this._properties);
-
-        if (bestMatchProperty)
-            return bestMatchProperty;
-
-        if (dontCreateIfMissing || !this.editable)
-            return null;
-
-        findMatch(this._pendingProperties, true);
-
-        if (bestMatchProperty)
-            return bestMatchProperty;
-
-        var newProperty = new WI.CSSProperty(NaN, null, name);
-        newProperty.ownerStyle = this;
-
-        this._pendingProperties.push(newProperty);
-
-        return newProperty;
+        return bestMatchProperty;
     }
 
-    generateCSSRuleString()
+    resolveVariableValue(text)
+    {
+        const invalid = Symbol("invalid");
+
+        let checkTokens = (tokens) => {
+            let startIndex = NaN;
+            let openParenthesis = 0;
+            for (let i = 0; i < tokens.length; i++) {
+                let token = tokens[i];
+                if (token.value === "var" && token.type && token.type.includes("atom")) {
+                    if (isNaN(startIndex)) {
+                        startIndex = i;
+                        openParenthesis = 0;
+                    }
+                    continue;
+                }
+
+                if (isNaN(startIndex))
+                    continue;
+
+                if (token.value === "(") {
+                    ++openParenthesis;
+                    continue;
+                }
+
+                if (token.value === ")") {
+                    --openParenthesis;
+                    if (openParenthesis > 0)
+                        continue;
+
+                    let variableTokens = tokens.slice(startIndex, i + 1);
+                    startIndex = NaN;
+
+                    let variableNameIndex = variableTokens.findIndex((token) => WI.CSSProperty.isVariable(token.value) && /\bvariable-2\b/.test(token.type));
+                    if (variableNameIndex === -1)
+                        continue;
+
+                    let variableProperty = this.propertyForName(variableTokens[variableNameIndex].value);
+                    if (variableProperty)
+                        return variableProperty.value.trim();
+
+                    let fallbackStartIndex = variableTokens.findIndex((value, j) => j > variableNameIndex + 1 && /\bm-css\b/.test(value.type));
+                    if (fallbackStartIndex === -1)
+                        return invalid;
+
+                    let fallbackTokens = variableTokens.slice(fallbackStartIndex, i);
+                    return checkTokens(fallbackTokens) || fallbackTokens.reduce((accumulator, token) => accumulator + token.value, "").trim();
+                }
+            }
+            return null;
+        };
+
+        let resolved = checkTokens(WI.tokenizeCSSValue(text));
+        return resolved === invalid ? null : resolved;
+    }
+
+    newBlankProperty(propertyIndex)
+    {
+        let text, name, value, priority, overridden, implicit, anonymous;
+        let enabled = true;
+        let valid = false;
+        let styleSheetTextRange = this._rangeAfterPropertyAtIndex(propertyIndex - 1);
+
+        this.markModified();
+        let property = new WI.CSSProperty(propertyIndex, text, name, value, priority, enabled, overridden, implicit, anonymous, valid, styleSheetTextRange);
+        this.insertProperty(property, propertyIndex);
+        this.update(this._text, this._properties, this._styleSheetTextRange, {dontFireEvents: true, forceUpdate: true});
+
+        return property;
+    }
+
+    markModified()
+    {
+        if (!this._initialState) {
+            let visibleProperties = this.visibleProperties.map((property) => {
+                return property.clone();
+            });
+
+            this._initialState = new WI.CSSStyleDeclaration(
+                this._nodeStyles,
+                this._ownerStyleSheet,
+                this._id,
+                this._type,
+                this._node,
+                this._inherited,
+                this._text,
+                visibleProperties,
+                this._styleSheetTextRange);
+        }
+
+        WI.cssManager.addModifiedStyle(this);
+    }
+
+    insertProperty(cssProperty, propertyIndex)
+    {
+        this._properties.insertAtIndex(cssProperty, propertyIndex);
+        for (let index = propertyIndex + 1; index < this._properties.length; index++)
+            this._properties[index].index = index;
+
+        // Invalidate cached properties.
+        this._enabledProperties = null;
+        this._visibleProperties = null;
+    }
+
+    removeProperty(cssProperty)
+    {
+        // cssProperty.index could be set to NaN by WI.CSSStyleDeclaration.prototype.update.
+        let realIndex = this._properties.indexOf(cssProperty);
+        if (realIndex === -1)
+            return;
+
+        this._properties.splice(realIndex, 1);
+
+        // Invalidate cached properties.
+        this._enabledProperties = null;
+        this._visibleProperties = null;
+    }
+
+    updatePropertiesModifiedState()
+    {
+        if (!this._initialState)
+            return;
+
+        if (this._type === WI.CSSStyleDeclaration.Type.Computed)
+            return;
+
+        let initialCSSProperties = this._initialState.visibleProperties;
+        let cssProperties = this.visibleProperties;
+
+        let hasModified = false;
+
+        function onEach(cssProperty, action) {
+            if (action !== 0)
+                hasModified = true;
+
+            cssProperty.modified = action === 1;
+        }
+
+        function comparator(a, b) {
+            return a.equals(b);
+        }
+
+        Array.diffArrays(initialCSSProperties, cssProperties, onEach, comparator);
+
+        if (!hasModified)
+            WI.cssManager.removeModifiedStyle(this);
+    }
+
+    generateFormattedText(options = {})
     {
         let indentString = WI.indentString();
         let styleText = "";
-        let mediaList = this.mediaList;
-        let mediaQueriesCount = mediaList.length;
-        for (let i = mediaQueriesCount - 1; i >= 0; --i)
-            styleText += indentString.repeat(mediaQueriesCount - i - 1) + "@media " + mediaList[i].text + " {\n";
+        let groupings = this.groupings.filter((grouping) => !grouping.isMedia || grouping.text !== "all");
+        let groupingsCount = groupings.length;
 
-        styleText += indentString.repeat(mediaQueriesCount) + this.selectorText + " {\n";
+        if (options.includeGroupingsAndSelectors) {
+            for (let i = groupingsCount - 1; i >= 0; --i) {
+                if (options.multiline)
+                    styleText += indentString.repeat(groupingsCount - i - 1);
 
-        for (let property of this._properties) {
-            if (property.anonymous)
-                continue;
+                styleText += groupings[i].prefix;
+                if (groupings[i].text)
+                    styleText += " " + groupings[i].text;
+                styleText += " {";
 
-            styleText += indentString.repeat(mediaQueriesCount + 1) + property.text.trim();
+                if (options.multiline)
+                    styleText += "\n";
+            }
 
-            if (!styleText.endsWith(";"))
-                styleText += ";";
+            if (options.multiline)
+                styleText += indentString.repeat(groupingsCount);
 
-            styleText += "\n";
+            styleText += this.selectorText + " {";
         }
 
-        for (let i = mediaQueriesCount; i > 0; --i)
-            styleText += indentString.repeat(i) + "}\n";
+        let properties = this._styleSheetTextRange ? this.visibleProperties : this._properties;
+        if (properties.length) {
+            if (options.multiline) {
+                let propertyIndent = indentString.repeat(groupingsCount + 1);
+                for (let property of properties)
+                    styleText += "\n" + propertyIndent + property.formattedText;
 
-        styleText += "}";
+                styleText += "\n";
+                if (!options.includeGroupingsAndSelectors) {
+                    // Indent the closing "}" for nested rules.
+                    styleText += indentString.repeat(groupingsCount);
+                }
+            } else
+                styleText += properties.map((property) => property.formattedText).join(" ");
+        }
+
+        if (options.includeGroupingsAndSelectors) {
+            for (let i = groupingsCount; i > 0; --i) {
+                if (options.multiline)
+                    styleText += indentString.repeat(i);
+
+                styleText += "}";
+
+                if (options.multiline)
+                    styleText += "\n";
+            }
+
+            styleText += "}";
+        }
 
         return styleText;
-    }
-
-    isInspectorRule()
-    {
-        return this._ownerRule && this._ownerRule.type === WI.CSSStyleSheet.Type.Inspector;
-    }
-
-    hasProperties()
-    {
-        return !!this._properties.length;
     }
 
     // Protected
@@ -358,11 +539,24 @@ WI.CSSStyleDeclaration = class CSSStyleDeclaration extends WI.Object
     {
         return this._nodeStyles;
     }
+
+    // Private
+
+    _rangeAfterPropertyAtIndex(index)
+    {
+        if (index < 0)
+            return this._styleSheetTextRange.collapseToStart();
+
+        if (index >= this.visibleProperties.length)
+            return this._styleSheetTextRange.collapseToEnd();
+
+        let property = this.visibleProperties[index];
+        return property.styleSheetTextRange.collapseToEnd();
+    }
 };
 
 WI.CSSStyleDeclaration.Event = {
     PropertiesChanged: "css-style-declaration-properties-changed",
-    InitialTextModified: "css-style-declaration-initial-text-modified"
 };
 
 WI.CSSStyleDeclaration.Type = {

@@ -28,14 +28,11 @@
 
 #if USE(CFURLCONNECTION)
 
-#include "URL.h"
 #include <CoreFoundation/CFError.h>
 #include <CFNetwork/CFNetworkErrors.h>
+#include <pal/spi/win/CFNetworkSPIWin.h>
 #include <wtf/RetainPtr.h>
-
-#if PLATFORM(WIN)
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
-#endif
+#include <wtf/URL.h>
 
 namespace WebCore {
 
@@ -48,9 +45,8 @@ ResourceError::ResourceError(CFErrorRef cfError)
         setType((CFErrorGetCode(m_platformError.get()) == kCFURLErrorTimedOut) ? Type::Timeout : Type::General);
 }
 
-#if PLATFORM(WIN)
-ResourceError::ResourceError(const String& domain, int errorCode, const URL& failingURL, const String& localizedDescription, CFDataRef certificate)
-    : ResourceErrorBase(domain, errorCode, failingURL, localizedDescription, Type::General)
+ResourceError::ResourceError(const String& domain, int errorCode, const URL& failingURL, const String& localizedDescription, CFDataRef certificate, IsSanitized isSanitized)
+    : ResourceErrorBase(domain, errorCode, failingURL, localizedDescription, Type::General, isSanitized)
     , m_dataIsUpToDate(true)
     , m_certificate(certificate)
 {
@@ -68,10 +64,33 @@ void ResourceError::setCertificate(CFDataRef certificate)
 {
     m_certificate = certificate;
 }
-#endif // PLATFORM(WIN)
 
 const CFStringRef failingURLStringKey = CFSTR("NSErrorFailingURLStringKey");
 const CFStringRef failingURLKey = CFSTR("NSErrorFailingURLKey");
+
+static CFDataRef getSSLPeerCertificateData(CFDictionaryRef dict)
+{
+    if (!dict)
+        return nullptr;
+    return reinterpret_cast<CFDataRef>(CFDictionaryGetValue(dict, _kCFWindowsSSLPeerCert));
+}
+
+static void setSSLPeerCertificateData(CFMutableDictionaryRef dict, CFDataRef data)
+{
+    if (!dict)
+        return;
+    
+    if (!data)
+        CFDictionaryRemoveValue(dict, _kCFWindowsSSLPeerCert);
+    else
+        CFDictionarySetValue(dict, _kCFWindowsSSLPeerCert, data);
+}
+
+const void* ResourceError::getSSLPeerCertificateDataBytePtr(CFDictionaryRef dict)
+{
+    CFDataRef data = getSSLPeerCertificateData(dict);
+    return data ? reinterpret_cast<const void*>(CFDataGetBytePtr(data)) : nullptr;
+}
 
 void ResourceError::platformLazyInit()
 {
@@ -83,15 +102,15 @@ void ResourceError::platformLazyInit()
 
     CFStringRef domain = CFErrorGetDomain(m_platformError.get());
     if (domain == kCFErrorDomainMach || domain == kCFErrorDomainCocoa)
-        m_domain ="NSCustomErrorDomain";
+        m_domain ="NSCustomErrorDomain"_s;
     else if (domain == kCFErrorDomainCFNetwork)
-        m_domain = "CFURLErrorDomain";
+        m_domain = "CFURLErrorDomain"_s;
     else if (domain == kCFErrorDomainPOSIX)
-        m_domain = "NSPOSIXErrorDomain";
+        m_domain = "NSPOSIXErrorDomain"_s;
     else if (domain == kCFErrorDomainOSStatus)
-        m_domain = "NSOSStatusErrorDomain";
+        m_domain = "NSOSStatusErrorDomain"_s;
     else if (domain == kCFErrorDomainWinSock)
-        m_domain = "kCFErrorDomainWinSock";
+        m_domain = "kCFErrorDomainWinSock"_s;
     else
         m_domain = domain;
 
@@ -101,7 +120,7 @@ void ResourceError::platformLazyInit()
     if (userInfo.get()) {
         CFStringRef failingURLString = (CFStringRef) CFDictionaryGetValue(userInfo.get(), failingURLStringKey);
         if (failingURLString)
-            m_failingURL = URL(URL(), failingURLString);
+            m_failingURL = URL { failingURLString };
         else {
             CFURLRef failingURL = (CFURLRef) CFDictionaryGetValue(userInfo.get(), failingURLKey);
             if (failingURL) {
@@ -111,9 +130,7 @@ void ResourceError::platformLazyInit()
         }
         m_localizedDescription = (CFStringRef) CFDictionaryGetValue(userInfo.get(), kCFErrorLocalizedDescriptionKey);
         
-#if PLATFORM(WIN)
-        m_certificate = wkGetSSLPeerCertificateData(userInfo.get());
-#endif
+        m_certificate = getSSLPeerCertificateData(userInfo.get());
     }
 
     m_dataIsUpToDate = true;
@@ -122,11 +139,7 @@ void ResourceError::platformLazyInit()
 
 void ResourceError::doPlatformIsolatedCopy(const ResourceError& other)
 {
-#if PLATFORM(WIN)
     m_certificate = other.m_certificate;
-#else
-    UNUSED_PARAM(other);
-#endif
 }
 
 bool ResourceError::platformCompare(const ResourceError& a, const ResourceError& b)
@@ -154,10 +167,8 @@ CFErrorRef ResourceError::cfError() const
                 CFDictionarySetValue(userInfo.get(), failingURLKey, url.get());
         }
 
-#if PLATFORM(WIN)
         if (m_certificate)
-            wkSetSSLPeerCertificateData(userInfo.get(), m_certificate.get());
-#endif
+            setSSLPeerCertificateData(userInfo.get(), m_certificate.get());
         
         m_platformError = adoptCF(CFErrorCreate(0, m_domain.createCFString().get(), m_errorCode, userInfo.get()));
     }
@@ -179,13 +190,13 @@ ResourceError::ResourceError(CFStreamError error)
 
     switch(error.domain) {
     case kCFStreamErrorDomainCustom:
-        m_domain ="NSCustomErrorDomain";
+        m_domain ="NSCustomErrorDomain"_s;
         break;
     case kCFStreamErrorDomainPOSIX:
-        m_domain = "NSPOSIXErrorDomain";
+        m_domain = "NSPOSIXErrorDomain"_s;
         break;
     case kCFStreamErrorDomainMacOSStatus:
-        m_domain = "NSOSStatusErrorDomain";
+        m_domain = "NSOSStatusErrorDomain"_s;
         break;
     }
 }
@@ -197,11 +208,11 @@ CFStreamError ResourceError::cfStreamError() const
     CFStreamError result;
     result.error = m_errorCode;
 
-    if (m_domain == "NSCustomErrorDomain")
+    if (m_domain == "NSCustomErrorDomain"_s)
         result.domain = kCFStreamErrorDomainCustom;
-    else if (m_domain == "NSPOSIXErrorDomain")
+    else if (m_domain == "NSPOSIXErrorDomain"_s)
         result.domain = kCFStreamErrorDomainPOSIX;
-    else if (m_domain == "NSOSStatusErrorDomain")
+    else if (m_domain == "NSOSStatusErrorDomain"_s)
         result.domain = kCFStreamErrorDomainMacOSStatus;
     else {
         result.domain = kCFStreamErrorDomainCustom;

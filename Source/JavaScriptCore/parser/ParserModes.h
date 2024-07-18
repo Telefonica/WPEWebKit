@@ -26,6 +26,7 @@
 #pragma once
 
 #include "ConstructAbility.h"
+#include "ConstructorKind.h"
 #include "Identifier.h"
 
 namespace JSC {
@@ -33,60 +34,66 @@ namespace JSC {
 enum class JSParserStrictMode { NotStrict, Strict };
 enum class JSParserBuiltinMode { NotBuiltin, Builtin };
 enum class JSParserScriptMode { Classic, Module };
-enum class JSParserCodeType { Program, Function, Module };
 
-enum class ConstructorKind { None, Base, Extends };
 enum class SuperBinding { Needed, NotNeeded };
 
-enum DebuggerMode { DebuggerOff, DebuggerOn };
+enum class PrivateBrandRequirement { None, Needed };
+
+enum class CodeGenerationMode : uint8_t {
+    Debugger = 1 << 0,
+    TypeProfiler = 1 << 1,
+    ControlFlowProfiler = 1 << 2,
+};
 
 enum class FunctionMode { FunctionExpression, FunctionDeclaration, MethodDefinition };
 
-enum class SourceParseMode : uint32_t {
-    NormalFunctionMode                = 0b00000000000000000000000000000001,
-    GeneratorBodyMode                 = 0b00000000000000000000000000000010,
-    GeneratorWrapperFunctionMode      = 0b00000000000000000000000000000100,
-    GetterMode                        = 0b00000000000000000000000000001000,
-    SetterMode                        = 0b00000000000000000000000000010000,
-    MethodMode                        = 0b00000000000000000000000000100000,
-    ArrowFunctionMode                 = 0b00000000000000000000000001000000,
-    AsyncFunctionBodyMode             = 0b00000000000000000000000010000000,
-    AsyncArrowFunctionBodyMode        = 0b00000000000000000000000100000000,
-    AsyncFunctionMode                 = 0b00000000000000000000001000000000,
-    AsyncMethodMode                   = 0b00000000000000000000010000000000,
-    AsyncArrowFunctionMode            = 0b00000000000000000000100000000000,
-    ProgramMode                       = 0b00000000000000000001000000000000,
-    ModuleAnalyzeMode                 = 0b00000000000000000010000000000000,
-    ModuleEvaluateMode                = 0b00000000000000000100000000000000,
-    AsyncGeneratorBodyMode            = 0b00000000000000001000000000000000,
-    AsyncGeneratorWrapperFunctionMode = 0b00000000000000010000000000000000,
-    AsyncGeneratorWrapperMethodMode   = 0b00000000000000100000000000000000,
-    GeneratorWrapperMethodMode        = 0b00000000000001000000000000000000,
+// Keep it less than 32, it means this should be within 5 bits.
+enum class SourceParseMode : uint8_t {
+    NormalFunctionMode                = 0,
+    GeneratorBodyMode                 = 1,
+    GeneratorWrapperFunctionMode      = 2,
+    GetterMode                        = 3,
+    SetterMode                        = 4,
+    MethodMode                        = 5,
+    ArrowFunctionMode                 = 6,
+    AsyncFunctionBodyMode             = 7,
+    AsyncArrowFunctionBodyMode        = 8,
+    AsyncFunctionMode                 = 9,
+    AsyncMethodMode                   = 10,
+    AsyncArrowFunctionMode            = 11,
+    ProgramMode                       = 12,
+    ModuleAnalyzeMode                 = 13,
+    ModuleEvaluateMode                = 14,
+    AsyncGeneratorBodyMode            = 15,
+    AsyncGeneratorWrapperFunctionMode = 16,
+    AsyncGeneratorWrapperMethodMode   = 17,
+    GeneratorWrapperMethodMode        = 18,
+    ClassFieldInitializerMode         = 19,
 };
 
 class SourceParseModeSet { 
 public: 
     template<typename... Modes> 
-    SourceParseModeSet(Modes... args) 
+    constexpr SourceParseModeSet(Modes... args)
         : m_mask(mergeSourceParseModes(args...)) 
     { 
     } 
 
-    ALWAYS_INLINE bool contains(SourceParseMode mode) 
+    ALWAYS_INLINE constexpr bool contains(SourceParseMode mode)
     { 
-        return static_cast<unsigned>(mode) & m_mask; 
+        return (1U << static_cast<unsigned>(mode)) & m_mask;
     } 
 
 private: 
-    ALWAYS_INLINE static unsigned mergeSourceParseModes(SourceParseMode mode) 
+    ALWAYS_INLINE static constexpr unsigned mergeSourceParseModes(SourceParseMode mode)
     { 
-        return static_cast<unsigned>(mode); 
+        return (1U << static_cast<unsigned>(mode));
     } 
 
     template<typename... Rest> 
-    ALWAYS_INLINE static unsigned mergeSourceParseModes(SourceParseMode mode, Rest... rest) 
+    ALWAYS_INLINE static constexpr unsigned mergeSourceParseModes(SourceParseMode mode, Rest... rest)
     { 
-        return static_cast<unsigned>(mode) | mergeSourceParseModes(rest...); 
+        return (1U << static_cast<unsigned>(mode)) | mergeSourceParseModes(rest...);
     } 
 
     const unsigned m_mask; 
@@ -110,7 +117,8 @@ ALWAYS_INLINE bool isFunctionParseMode(SourceParseMode parseMode)
         SourceParseMode::AsyncArrowFunctionBodyMode,
         SourceParseMode::AsyncGeneratorBodyMode,
         SourceParseMode::AsyncGeneratorWrapperFunctionMode,
-        SourceParseMode::AsyncGeneratorWrapperMethodMode).contains(parseMode);
+        SourceParseMode::AsyncGeneratorWrapperMethodMode,
+        SourceParseMode::ClassFieldInitializerMode).contains(parseMode);
 } 
 
 ALWAYS_INLINE bool isAsyncFunctionParseMode(SourceParseMode parseMode) 
@@ -133,7 +141,15 @@ ALWAYS_INLINE bool isAsyncArrowFunctionParseMode(SourceParseMode parseMode)
         SourceParseMode::AsyncArrowFunctionBodyMode).contains(parseMode); 
 } 
 
-ALWAYS_INLINE bool isAsyncGeneratorFunctionParseMode(SourceParseMode parseMode)
+ALWAYS_INLINE bool isAsyncGeneratorParseMode(SourceParseMode parseMode)
+{
+    return SourceParseModeSet(
+        SourceParseMode::AsyncGeneratorWrapperFunctionMode,
+        SourceParseMode::AsyncGeneratorWrapperMethodMode,
+        SourceParseMode::AsyncGeneratorBodyMode).contains(parseMode);
+}
+
+ALWAYS_INLINE bool isAsyncGeneratorWrapperParseMode(SourceParseMode parseMode)
 {
     return SourceParseModeSet(
         SourceParseMode::AsyncGeneratorWrapperFunctionMode,
@@ -179,7 +195,7 @@ ALWAYS_INLINE bool isAsyncMethodParseMode(SourceParseMode parseMode)
     
 ALWAYS_INLINE bool isAsyncGeneratorMethodParseMode(SourceParseMode parseMode)
 {
-    return SourceParseModeSet(SourceParseMode::AsyncGeneratorWrapperFunctionMode).contains(parseMode);
+    return SourceParseModeSet(SourceParseMode::AsyncGeneratorWrapperMethodMode).contains(parseMode);
 }
 
 ALWAYS_INLINE bool isMethodParseMode(SourceParseMode parseMode)
@@ -290,23 +306,33 @@ inline bool functionNameScopeIsDynamic(bool usesEval, bool isStrictMode)
     return true;
 }
 
+typedef uint8_t LexicalScopeFeatures;
+
+const LexicalScopeFeatures NoLexicalFeatures                           = 0;
+const LexicalScopeFeatures StrictModeLexicalFeature               = 1 << 0;
+
+const LexicalScopeFeatures AllLexicalFeatures = NoLexicalFeatures | StrictModeLexicalFeature;
+static constexpr unsigned bitWidthOfLexicalScopeFeatures = 2;
+static_assert(AllLexicalFeatures <= (1 << bitWidthOfLexicalScopeFeatures) - 1, "LexicalScopeFeatures must be 2bits");
+
 typedef uint16_t CodeFeatures;
 
-const CodeFeatures NoFeatures =                       0;
-const CodeFeatures EvalFeature =                 1 << 0;
-const CodeFeatures ArgumentsFeature =            1 << 1;
-const CodeFeatures WithFeature =                 1 << 2;
-const CodeFeatures ThisFeature =                 1 << 3;
-const CodeFeatures StrictModeFeature =           1 << 4;
-const CodeFeatures ShadowsArgumentsFeature =     1 << 5;
-const CodeFeatures ArrowFunctionFeature =        1 << 6;
-const CodeFeatures ArrowFunctionContextFeature = 1 << 7;
-const CodeFeatures SuperCallFeature =            1 << 8;
-const CodeFeatures SuperPropertyFeature =        1 << 9;
-const CodeFeatures NewTargetFeature =            1 << 10;
+const CodeFeatures NoFeatures =                         0;
+const CodeFeatures EvalFeature =                   1 << 0;
+const CodeFeatures ArgumentsFeature =              1 << 1;
+const CodeFeatures WithFeature =                   1 << 2;
+const CodeFeatures ThisFeature =                   1 << 3;
+const CodeFeatures NonSimpleParameterListFeature = 1 << 4;
+const CodeFeatures ShadowsArgumentsFeature =       1 << 5;
+const CodeFeatures ArrowFunctionFeature =          1 << 6;
+const CodeFeatures AwaitFeature =                  1 << 7;
+const CodeFeatures SuperCallFeature =              1 << 8;
+const CodeFeatures SuperPropertyFeature =          1 << 9;
+const CodeFeatures NewTargetFeature =              1 << 10;
+const CodeFeatures NoEvalCacheFeature =            1 << 11;
 
-const CodeFeatures AllFeatures = EvalFeature | ArgumentsFeature | WithFeature | ThisFeature | StrictModeFeature | ShadowsArgumentsFeature | ArrowFunctionFeature | ArrowFunctionContextFeature |
-    SuperCallFeature | SuperPropertyFeature | NewTargetFeature;
+const CodeFeatures AllFeatures = EvalFeature | ArgumentsFeature | WithFeature | ThisFeature | NonSimpleParameterListFeature | ShadowsArgumentsFeature | ArrowFunctionFeature | AwaitFeature | SuperCallFeature | SuperPropertyFeature | NewTargetFeature | NoEvalCacheFeature;
+static_assert(AllFeatures < (1 << 14), "CodeFeatures must be 14bits");
 
 typedef uint8_t InnerArrowFunctionCodeFeatures;
     
@@ -319,4 +345,5 @@ const InnerArrowFunctionCodeFeatures SuperPropertyInnerArrowFunctionFeature = 1 
 const InnerArrowFunctionCodeFeatures NewTargetInnerArrowFunctionFeature =     1 << 5;
     
 const InnerArrowFunctionCodeFeatures AllInnerArrowFunctionCodeFeatures = EvalInnerArrowFunctionFeature | ArgumentsInnerArrowFunctionFeature | ThisInnerArrowFunctionFeature | SuperCallInnerArrowFunctionFeature | SuperPropertyInnerArrowFunctionFeature | NewTargetInnerArrowFunctionFeature;
+static_assert(AllInnerArrowFunctionCodeFeatures <= 0b111111, "InnerArrowFunctionCodeFeatures must be 6bits");
 } // namespace JSC

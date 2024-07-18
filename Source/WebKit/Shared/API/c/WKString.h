@@ -26,7 +26,6 @@
 #ifndef WKString_h
 #define WKString_h
 
-#include <JavaScriptCore/JSStringRef.h>
 #include <WebKit/WKBase.h>
 #include <stddef.h>
 
@@ -45,10 +44,9 @@ extern "C" {
     typedef wchar_t WKChar;
 #endif
 
-WK_EXPORT WKTypeID WKStringGetTypeID();
+WK_EXPORT WKTypeID WKStringGetTypeID(void);
 
 WK_EXPORT WKStringRef WKStringCreateWithUTF8CString(const char* string);
-WK_EXPORT WKStringRef WKStringCreateWithJSString(JSStringRef jsString);
 
 WK_EXPORT bool WKStringIsEmpty(WKStringRef string);
 

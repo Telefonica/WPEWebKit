@@ -32,6 +32,7 @@ WI.SidebarPanel = class SidebarPanel extends WI.View
         this._identifier = identifier;
         this._displayName = displayName;
         this._selected = false;
+        this._exclusive = false;
 
         this._savedScrollPosition = 0;
 
@@ -92,25 +93,46 @@ WI.SidebarPanel = class SidebarPanel extends WI.View
         return 0;
     }
 
-    shown()
+    get exclusive()
     {
-        this._contentView.element.scrollTop = this._savedScrollPosition;
-
-        // FIXME: remove once <https://webkit.org/b/150741> is fixed.
-        this.updateLayoutIfNeeded();
-
-        // Implemented by subclasses.
+        return this._exclusive;
     }
 
-    hidden()
+    set exclusive(exclusive)
     {
-        this._savedScrollPosition = this._contentView.element.scrollTop;
+        if (exclusive === this._exclusive)
+            return;
 
-        // Implemented by subclasses.
+        this._exclusive = !!exclusive;
+
+        this.element.classList.toggle("exclusive-presentation", this._exclusive);
     }
 
-    visibilityDidChange()
+    get allowExclusivePresentation()
     {
         // Implemented by subclasses.
+        return false;
+    }
+
+    attached()
+    {
+        super.attached();
+
+        this.scrollElement.scrollTop = this._savedScrollPosition;
+    }
+
+    detached()
+    {
+        this._savedScrollPosition = this.scrollElement.scrollTop;
+
+        super.detached();
+    }
+
+    // Protected
+
+    get scrollElement()
+    {
+        // Overridden by sub-classes if needed.
+        return this.contentView.element;
     }
 };

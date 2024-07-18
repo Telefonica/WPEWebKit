@@ -29,11 +29,11 @@
 #import "ExceptionHandlers.h"
 #import <WebCore/HTMLNames.h>
 #import <WebCore/HTMLQuoteElement.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::HTMLQuoteElement*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -42,7 +42,7 @@
 - (NSString *)cite
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getURLAttribute(WebCore::HTMLNames::citeAttr);
+    return IMPL->getURLAttribute(WebCore::HTMLNames::citeAttr).string();
 }
 
 - (void)setCite:(NSString *)newCite
@@ -52,3 +52,5 @@
 }
 
 @end
+
+#undef IMPL

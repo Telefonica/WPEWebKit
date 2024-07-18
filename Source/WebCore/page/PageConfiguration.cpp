@@ -26,34 +26,65 @@
 #include "config.h"
 #include "PageConfiguration.h"
 
+#include "AlternativeTextClient.h"
 #include "ApplicationCacheStorage.h"
+#include "AttachmentElementClient.h"
 #include "BackForwardClient.h"
+#include "BroadcastChannelRegistry.h"
 #include "CacheStorageProvider.h"
+#include "CookieJar.h"
 #include "DatabaseProvider.h"
 #include "DiagnosticLoggingClient.h"
+#include "DragClient.h"
 #include "EditorClient.h"
+#include "FrameLoaderClient.h"
 #include "LibWebRTCProvider.h"
+#include "MediaRecorderProvider.h"
+#include "ModelPlayerProvider.h"
 #include "PerformanceLoggingClient.h"
+#include "PermissionController.h"
 #include "PluginInfoProvider.h"
+#include "ProgressTrackerClient.h"
 #include "SocketProvider.h"
+#include "SpeechRecognitionProvider.h"
+#include "SpeechSynthesisClient.h"
 #include "StorageNamespaceProvider.h"
+#include "StorageProvider.h"
 #include "UserContentController.h"
+#include "UserContentURLPattern.h"
 #include "ValidationMessageClient.h"
 #include "VisitedLinkStore.h"
+#include "WebRTCProvider.h"
+#if ENABLE(WEBGL)
 #include "WebGLStateTracker.h"
+#endif
+#if ENABLE(WEB_AUTHN)
+#include "AuthenticatorCoordinatorClient.h"
+#endif
 
 namespace WebCore {
 
-PageConfiguration::PageConfiguration(UniqueRef<EditorClient>&& editorClient, Ref<SocketProvider>&& socketProvider, UniqueRef<LibWebRTCProvider>&& libWebRTCProvider, Ref<CacheStorageProvider>&& cacheStorageProvider)
-    : editorClient(WTFMove(editorClient))
+PageConfiguration::PageConfiguration(PAL::SessionID sessionID, UniqueRef<EditorClient>&& editorClient, Ref<SocketProvider>&& socketProvider, UniqueRef<WebRTCProvider>&& webRTCProvider, Ref<CacheStorageProvider>&& cacheStorageProvider, Ref<UserContentProvider>&& userContentProvider, Ref<BackForwardClient>&& backForwardClient, Ref<CookieJar>&& cookieJar, UniqueRef<ProgressTrackerClient>&& progressTrackerClient, UniqueRef<FrameLoaderClient>&& loaderClientForMainFrame, UniqueRef<SpeechRecognitionProvider>&& speechRecognitionProvider, UniqueRef<MediaRecorderProvider>&& mediaRecorderProvider, Ref<BroadcastChannelRegistry>&& broadcastChannelRegistry, Ref<PermissionController>&& permissionController, UniqueRef<StorageProvider>&& storageProvider, UniqueRef<ModelPlayerProvider>&& modelPlayerProvider)
+    : sessionID(sessionID)
+    , editorClient(WTFMove(editorClient))
     , socketProvider(WTFMove(socketProvider))
-    , libWebRTCProvider(WTFMove(libWebRTCProvider))
+    , webRTCProvider(WTFMove(webRTCProvider))
+    , progressTrackerClient(WTFMove(progressTrackerClient))
+    , backForwardClient(WTFMove(backForwardClient))
+    , cookieJar(WTFMove(cookieJar))
+    , loaderClientForMainFrame(WTFMove(loaderClientForMainFrame))
     , cacheStorageProvider(WTFMove(cacheStorageProvider))
+    , userContentProvider(WTFMove(userContentProvider))
+    , broadcastChannelRegistry(WTFMove(broadcastChannelRegistry))
+    , speechRecognitionProvider(WTFMove(speechRecognitionProvider))
+    , mediaRecorderProvider(WTFMove(mediaRecorderProvider))
+    , permissionController(WTFMove(permissionController))
+    , storageProvider(WTFMove(storageProvider))
+    , modelPlayerProvider(WTFMove(modelPlayerProvider))
 {
 }
 
-PageConfiguration::~PageConfiguration()
-{
-}
+PageConfiguration::~PageConfiguration() = default;
+PageConfiguration::PageConfiguration(PageConfiguration&&) = default;
 
 }

@@ -30,24 +30,23 @@
 
 #import "WebKitNSStringExtras.h"
 #import "WebNSURLExtras.h"
-#import <WebCore/FileSystem.h>
-#import <WebKitSystemInterface.h>
+#import <WebCore/LoaderNSURLExtras.h>
 #import <sys/stat.h>
 #import <wtf/Assertions.h>
-#import <wtf/ObjcRuntimeExtras.h>
+#import <wtf/FileSystem.h>
 
 @implementation NSFileManager (WebNSFileManagerExtras)
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 
 - (void)_webkit_setMetadataURL:(NSString *)URLString referrer:(NSString *)referrer atPath:(NSString *)path
 {
     ASSERT(URLString);
     ASSERT(path);
-    WebCore::setMetadataURL(path, URLString, referrer);
+    FileSystem::setMetadataURL(path, URLString, referrer);
 }
 
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)
 
 // -[NSFileManager fileExistsAtPath:] returns NO if there is a broken symlink at the path.
 // So we use this function instead, which returns YES if there is anything there, including
@@ -61,7 +60,7 @@ static BOOL fileExists(NSString *path)
 - (NSString *)_webkit_pathWithUniqueFilenameForPath:(NSString *)path
 {
     // "Fix" the filename of the path.
-    NSString *filename = [[path lastPathComponent] _webkit_filenameByFixingIllegalCharacters];
+    NSString *filename = filenameByFixingIllegalCharacters([path lastPathComponent]);
     path = [[path stringByDeletingLastPathComponent] stringByAppendingPathComponent:filename];
 
     if (fileExists(path)) {
@@ -90,10 +89,10 @@ static BOOL fileExists(NSString *path)
     return path;
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (NSString *)_webkit_createTemporaryDirectoryWithTemplatePrefix:(NSString *)prefix
 {
-    return WebCore::createTemporaryDirectory(prefix);
+    return FileSystem::createTemporaryDirectory(prefix);
 }
 #endif
 

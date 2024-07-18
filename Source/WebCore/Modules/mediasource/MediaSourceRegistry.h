@@ -32,13 +32,13 @@
 
 #if ENABLE(MEDIA_SOURCE)
 
+#include "ScriptExecutionContextIdentifier.h"
 #include "URLRegistry.h"
-#include <wtf/HashMap.h>
+#include <wtf/RobinHoodHashMap.h>
 #include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
-class URL;
 class MediaSource;
 
 class MediaSourceRegistry final : public URLRegistry {
@@ -48,13 +48,15 @@ public:
     static MediaSourceRegistry& registry();
 
     // Registers a blob URL referring to the specified media source.
-    void registerURL(SecurityOrigin*, const URL&, URLRegistrable&) override;
-    void unregisterURL(const URL&) override;
-    URLRegistrable* lookup(const String&) const override;
+    void registerURL(const ScriptExecutionContext&, const URL&, URLRegistrable&) final;
+    void unregisterURL(const URL&) final;
+    void unregisterURLsForContext(const ScriptExecutionContext&) final;
+    URLRegistrable* lookup(const String&) const final;
 
 private:
     MediaSourceRegistry();
-    HashMap<String, RefPtr<MediaSource>> m_mediaSources;
+    MemoryCompactRobinHoodHashMap<String, std::pair<RefPtr<MediaSource>, ScriptExecutionContextIdentifier>> m_mediaSources;
+    HashMap<ScriptExecutionContextIdentifier, HashSet<String>> m_urlsPerContext;
 };
 
 } // namespace WebCore

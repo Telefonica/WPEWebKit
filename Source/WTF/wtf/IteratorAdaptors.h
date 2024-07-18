@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WTF_IteratorAdaptors_h
-#define WTF_IteratorAdaptors_h
+#pragma once
 
 #include <type_traits>
 
@@ -32,6 +31,7 @@ namespace WTF {
 
 template<typename Predicate, typename Iterator>
 class FilterIterator {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     FilterIterator(Predicate pred, Iterator begin, Iterator end)
         : m_pred(WTFMove(pred))
@@ -59,8 +59,8 @@ public:
         return *m_iter;
     }
 
-    inline bool operator==(FilterIterator& other) const { return m_iter == other.m_iter; }
-    inline bool operator!=(FilterIterator& other) const { return m_iter != other.m_iter; }
+    inline bool operator==(const FilterIterator& other) const { return m_iter == other.m_iter; }
+    inline bool operator!=(const FilterIterator& other) const { return m_iter != other.m_iter; }
 
 private:
     const Predicate m_pred;
@@ -76,6 +76,7 @@ inline FilterIterator<Predicate, Iterator> makeFilterIterator(Predicate&& pred, 
 
 template<typename Transform, typename Iterator>
 class TransformIterator {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     TransformIterator(Transform&& transform, Iterator&& iter)
         : m_transform(WTFMove(transform))
@@ -94,8 +95,8 @@ public:
         return m_transform(*m_iter);
     }
 
-    inline bool operator==(TransformIterator& other) const { return m_iter == other.m_iter; }
-    inline bool operator!=(TransformIterator& other) const { return m_iter != other.m_iter; }
+    inline bool operator==(const TransformIterator& other) const { return m_iter == other.m_iter; }
+    inline bool operator!=(const TransformIterator& other) const { return m_iter != other.m_iter; }
 
 private:
     const Transform m_transform;
@@ -105,9 +106,7 @@ private:
 template<typename Transform, typename Iterator>
 inline TransformIterator<Transform, Iterator> makeTransformIterator(Transform&& transform, Iterator&& iter)
 {
-    return TransformIterator<Transform, Iterator>(WTFMove(transform), WTFMove(iter));
+    return TransformIterator<Transform, Iterator>(std::forward<Transform>(transform), std::forward<Iterator>(iter));
 }
 
 } // namespace WTF
-
-#endif // WTF_IteratorAdaptors_h

@@ -8,12 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_COMMON_AUDIO_SIGNAL_PROCESSING_DOT_PRODUCT_WITH_SCALE_H_
-#define WEBRTC_COMMON_AUDIO_SIGNAL_PROCESSING_DOT_PRODUCT_WITH_SCALE_H_
+#ifndef COMMON_AUDIO_SIGNAL_PROCESSING_DOT_PRODUCT_WITH_SCALE_H_
+#define COMMON_AUDIO_SIGNAL_PROCESSING_DOT_PRODUCT_WITH_SCALE_H_
 
+#include <stdint.h>
 #include <string.h>
-
-#include "webrtc/typedefs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,7 +26,7 @@ extern "C" {
 //      - vector_length : Number of samples used in the dot product
 //      - scaling       : The number of right bit shifts to apply on each term
 //                        during calculation to avoid overflow, i.e., the
-//                        output will be in Q(-|scaling|)
+//                        output will be in Q(-`scaling`)
 //
 // Return value         : The dot product in Q(-scaling)
 int32_t WebRtcSpl_DotProductWithScale(const int16_t* vector1,
@@ -38,4 +37,4 @@ int32_t WebRtcSpl_DotProductWithScale(const int16_t* vector1,
 #ifdef __cplusplus
 }
 #endif  // __cplusplus
-#endif  // WEBRTC_COMMON_AUDIO_SIGNAL_PROCESSING_DOT_PRODUCT_WITH_SCALE_H_
+#endif  // COMMON_AUDIO_SIGNAL_PROCESSING_DOT_PRODUCT_WITH_SCALE_H_

@@ -23,7 +23,8 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
+#ifndef WKURLRequest_h
+#define WKURLRequest_h
 
 #include <WebKit/WKBase.h>
 
@@ -31,7 +32,7 @@
 extern "C" {
 #endif
 
-WK_EXPORT WKTypeID WKURLRequestGetTypeID();
+WK_EXPORT WKTypeID WKURLRequestGetTypeID(void);
 
 WK_EXPORT WKURLRequestRef WKURLRequestCreateWithWKURL(WKURLRef);
 
@@ -45,8 +46,8 @@ WK_EXPORT WKURLRequestRef WKURLRequestCopySettingHTTPBody(WKURLRequestRef, WKDat
 
 WK_EXPORT void WKURLRequestSetDefaultTimeoutInterval(double);
 
-WK_EXPORT void WKURLRequestSetHTTPHeaderField(WKURLRequestRef, WKStringRef, WKStringRef);
-
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* WKURLRequest_h */

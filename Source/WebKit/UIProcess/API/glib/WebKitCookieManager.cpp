@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2012 Igalia S.L.
+ * Copyright (C) 2017 Endless Mobile, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,13 +21,16 @@
 #include "config.h"
 #include "WebKitCookieManager.h"
 
+#include "APIHTTPCookieStore.h"
+#include "NetworkProcessProxy.h"
 #include "SoupCookiePersistentStorageType.h"
-#include "WebCookieManagerProxy.h"
 #include "WebKitCookieManagerPrivate.h"
 #include "WebKitEnumTypes.h"
 #include "WebKitWebsiteDataManagerPrivate.h"
 #include "WebKitWebsiteDataPrivate.h"
 #include "WebsiteDataRecord.h"
+#include <WebCore/HTTPCookieAcceptPolicy.h>
+#include <glib/gi18n-lib.h>
 #include <pal/SessionID.h>
 #include <wtf/glib/GRefPtr.h>
 #include <wtf/glib/WTFGType.h>
@@ -35,9 +39,9 @@
 using namespace WebKit;
 
 /**
- * SECTION: WebKitCookieManager
- * @Short_description: Defines how to handle cookies in a #WebKitWebContext
- * @Title: WebKitCookieManager
+ * WebKitCookieManager:
+ *
+ * Defines how to handle cookies in a #WebKitWebContext.
  *
  * The WebKitCookieManager defines how to set up and handle cookies.
  * You can get it from a #WebKitWebsiteDataManager with
@@ -52,15 +56,41 @@ enum {
     LAST_SIGNAL
 };
 
+class CookieStoreObserver : public API::HTTPCookieStore::Observer {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    CookieStoreObserver(Function<void()>&& callback)
+        : m_callback(WTFMove(callback)) { }
+private:
+    void cookiesDidChange(API::HTTPCookieStore&) final
+    {
+        m_callback();
+    }
+
+    Function<void()> m_callback;
+};
+
 struct _WebKitCookieManagerPrivate {
+    API::HTTPCookieStore& cookieStore() const
+    {
+        ASSERT(dataManager);
+        return webkitWebsiteDataManagerGetDataStore(dataManager).cookieStore();
+    }
+
+    PAL::SessionID sessionID() const
+    {
+        ASSERT(dataManager);
+        return webkitWebsiteDataManagerGetDataStore(dataManager).sessionID();
+    }
+
     ~_WebKitCookieManagerPrivate()
     {
-        auto sessionID = webkitWebsiteDataManagerGetDataStore(dataManager).websiteDataStore().sessionID();
-        for (auto* processPool : webkitWebsiteDataManagerGetProcessPools(dataManager))
-            processPool->supplement<WebCookieManagerProxy>()->setCookieObserverCallback(sessionID, nullptr);
+        cookieStore().unregisterObserver(*m_observer);
     }
 
     WebKitWebsiteDataManager* dataManager;
+
+    std::unique_ptr<CookieStoreObserver> m_observer;
 };
 
 static guint signals[LAST_SIGNAL] = { 0, };
@@ -71,43 +101,41 @@ static inline SoupCookiePersistentStorageType toSoupCookiePersistentStorageType(
 {
     switch (kitStorage) {
     case WEBKIT_COOKIE_PERSISTENT_STORAGE_TEXT:
-        return SoupCookiePersistentStorageText;
+        return SoupCookiePersistentStorageType::Text;
     case WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE:
-        return SoupCookiePersistentStorageSQLite;
+        return SoupCookiePersistentStorageType::SQLite;
     default:
         ASSERT_NOT_REACHED();
-        return SoupCookiePersistentStorageText;
+        return SoupCookiePersistentStorageType::Text;
     }
 }
 
-static inline WebKitCookieAcceptPolicy toWebKitCookieAcceptPolicy(HTTPCookieAcceptPolicy httpPolicy)
+static inline WebKitCookieAcceptPolicy toWebKitCookieAcceptPolicy(WebCore::HTTPCookieAcceptPolicy httpPolicy)
 {
     switch (httpPolicy) {
-    case HTTPCookieAcceptPolicyAlways:
+    case WebCore::HTTPCookieAcceptPolicy::AlwaysAccept:
         return WEBKIT_COOKIE_POLICY_ACCEPT_ALWAYS;
-    case HTTPCookieAcceptPolicyNever:
+    case WebCore::HTTPCookieAcceptPolicy::Never:
         return WEBKIT_COOKIE_POLICY_ACCEPT_NEVER;
-    case HTTPCookieAcceptPolicyOnlyFromMainDocumentDomain:
+    case WebCore::HTTPCookieAcceptPolicy::ExclusivelyFromMainDocumentDomain:
         return WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY;
-    default:
-        ASSERT_NOT_REACHED();
-        return WEBKIT_COOKIE_POLICY_ACCEPT_ALWAYS;
+    case WebCore::HTTPCookieAcceptPolicy::OnlyFromMainDocumentDomain:
+        break;
     }
+    RELEASE_ASSERT_NOT_REACHED();
 }
 
-static inline HTTPCookieAcceptPolicy toHTTPCookieAcceptPolicy(WebKitCookieAcceptPolicy kitPolicy)
+static inline WebCore::HTTPCookieAcceptPolicy toHTTPCookieAcceptPolicy(WebKitCookieAcceptPolicy kitPolicy)
 {
     switch (kitPolicy) {
     case WEBKIT_COOKIE_POLICY_ACCEPT_ALWAYS:
-        return HTTPCookieAcceptPolicyAlways;
+        return WebCore::HTTPCookieAcceptPolicy::AlwaysAccept;
     case WEBKIT_COOKIE_POLICY_ACCEPT_NEVER:
-        return HTTPCookieAcceptPolicyNever;
+        return WebCore::HTTPCookieAcceptPolicy::Never;
     case WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY:
-        return HTTPCookieAcceptPolicyOnlyFromMainDocumentDomain;
-    default:
-        ASSERT_NOT_REACHED();
-        return HTTPCookieAcceptPolicyAlways;
+        return WebCore::HTTPCookieAcceptPolicy::ExclusivelyFromMainDocumentDomain;
     }
+    RELEASE_ASSERT_NOT_REACHED();
 }
 
 static void webkit_cookie_manager_class_init(WebKitCookieManagerClass* findClass)
@@ -133,12 +161,10 @@ WebKitCookieManager* webkitCookieManagerCreate(WebKitWebsiteDataManager* dataMan
 {
     WebKitCookieManager* manager = WEBKIT_COOKIE_MANAGER(g_object_new(WEBKIT_TYPE_COOKIE_MANAGER, nullptr));
     manager->priv->dataManager = dataManager;
-    auto sessionID = webkitWebsiteDataManagerGetDataStore(manager->priv->dataManager).websiteDataStore().sessionID();
-    for (auto* processPool : webkitWebsiteDataManagerGetProcessPools(manager->priv->dataManager)) {
-        processPool->supplement<WebCookieManagerProxy>()->setCookieObserverCallback(sessionID, [manager] {
-            g_signal_emit(manager, signals[CHANGED], 0);
-        });
-    }
+    manager->priv->m_observer = makeUnique<CookieStoreObserver>([manager] {
+        g_signal_emit(manager, signals[CHANGED], 0);
+    });
+    manager->priv->cookieStore().registerObserver(*manager->priv->m_observer);
     return manager;
 }
 
@@ -147,6 +173,8 @@ WebKitCookieManager* webkitCookieManagerCreate(WebKitWebsiteDataManager* dataMan
  * @cookie_manager: a #WebKitCookieManager
  * @filename: the filename to read to/write from
  * @storage: a #WebKitCookiePersistentStorage
+ *
+ * Set non-session cookies.
  *
  * Set the @filename where non-session cookies are stored persistently using
  * @storage as the format to read/write the cookies.
@@ -164,8 +192,12 @@ void webkit_cookie_manager_set_persistent_storage(WebKitCookieManager* manager, 
     g_return_if_fail(filename);
     g_return_if_fail(!webkit_website_data_manager_is_ephemeral(manager->priv->dataManager));
 
-    for (auto* processPool : webkitWebsiteDataManagerGetProcessPools(manager->priv->dataManager))
-        processPool->supplement<WebCookieManagerProxy>()->setCookiePersistentStorage(String::fromUTF8(filename), toSoupCookiePersistentStorageType(storage));
+    auto sessionID = manager->priv->sessionID();
+    if (sessionID.isEphemeral())
+        return;
+
+    auto& websiteDataStore = webkitWebsiteDataManagerGetDataStore(manager->priv->dataManager);
+    websiteDataStore.setCookiePersistentStorage(String::fromUTF8(filename), toSoupCookiePersistentStorageType(storage));
 }
 
 /**
@@ -174,13 +206,18 @@ void webkit_cookie_manager_set_persistent_storage(WebKitCookieManager* manager, 
  * @policy: a #WebKitCookieAcceptPolicy
  *
  * Set the cookie acceptance policy of @cookie_manager as @policy.
+ *
+ * Note that ITP has its own way to handle third-party cookies, so when it's enabled,
+ * and @policy is set to %WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY, %WEBKIT_COOKIE_POLICY_ACCEPT_ALWAYS
+ * will be used instead. Once disabled, the policy will be set back to %WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY.
+ * See also webkit_website_data_manager_set_itp_enabled().
  */
 void webkit_cookie_manager_set_accept_policy(WebKitCookieManager* manager, WebKitCookieAcceptPolicy policy)
 {
     g_return_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager));
 
-    for (auto* processPool : webkitWebsiteDataManagerGetProcessPools(manager->priv->dataManager))
-        processPool->supplement<WebCookieManagerProxy>()->setHTTPCookieAcceptPolicy(PAL::SessionID::defaultSessionID(), toHTTPCookieAcceptPolicy(policy), [](CallbackBase::Error){});
+    auto& websiteDataStore = webkitWebsiteDataManagerGetDataStore(manager->priv->dataManager);
+    websiteDataStore.setHTTPCookieAcceptPolicy(toHTTPCookieAcceptPolicy(policy));
 }
 
 /**
@@ -192,6 +229,10 @@ void webkit_cookie_manager_set_accept_policy(WebKitCookieManager* manager, WebKi
  *
  * Asynchronously get the cookie acceptance policy of @cookie_manager.
  *
+ * Note that when policy was set to %WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY and
+ * ITP is enabled, this will return %WEBKIT_COOKIE_POLICY_ACCEPT_ALWAYS.
+ * See also webkit_website_data_manager_set_itp_enabled().
+ *
  * When the operation is finished, @callback will be called. You can then call
  * webkit_cookie_manager_get_accept_policy_finish() to get the result of the operation.
  */
@@ -201,14 +242,7 @@ void webkit_cookie_manager_get_accept_policy(WebKitCookieManager* manager, GCanc
 
     GRefPtr<GTask> task = adoptGRef(g_task_new(manager, cancellable, callback, userData));
 
-    // The policy is the same in all process pools having the same session ID, so just ask any.
-    const auto& processPools = webkitWebsiteDataManagerGetProcessPools(manager->priv->dataManager);
-    if (processPools.isEmpty()) {
-        g_task_return_int(task.get(), WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY);
-        return;
-    }
-
-    processPools[0]->supplement<WebCookieManagerProxy>()->getHTTPCookieAcceptPolicy(PAL::SessionID::defaultSessionID(), [task = WTFMove(task)](HTTPCookieAcceptPolicy policy, CallbackBase::Error) {
+    manager->priv->cookieStore().getHTTPCookieAcceptPolicy([task = WTFMove(task)](WebCore::HTTPCookieAcceptPolicy policy) {
         g_task_return_int(task.get(), toWebKitCookieAcceptPolicy(policy));
     });
 }
@@ -232,6 +266,157 @@ WebKitCookieAcceptPolicy webkit_cookie_manager_get_accept_policy_finish(WebKitCo
     return returnValue == -1 ? WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY : static_cast<WebKitCookieAcceptPolicy>(returnValue);
 }
 
+/**
+ * webkit_cookie_manager_add_cookie:
+ * @cookie_manager: a #WebKitCookieManager
+ * @cookie: the #SoupCookie to be added
+ * @cancellable: (allow-none): a #GCancellable or %NULL to ignore
+ * @callback: (scope async): a #GAsyncReadyCallback to call when the request is satisfied
+ * @user_data: (closure): the data to pass to callback function
+ *
+ * Asynchronously add a #SoupCookie to the underlying storage.
+ *
+ * When the operation is finished, @callback will be called. You can then call
+ * webkit_cookie_manager_add_cookie_finish() to get the result of the operation.
+ *
+ * Since: 2.20
+ */
+void webkit_cookie_manager_add_cookie(WebKitCookieManager* manager, SoupCookie* cookie, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer userData)
+{
+    g_return_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager));
+    g_return_if_fail(cookie);
+
+    GRefPtr<GTask> task = adoptGRef(g_task_new(manager, cancellable, callback, userData));
+    manager->priv->cookieStore().setCookies({ WebCore::Cookie(cookie) }, [task = WTFMove(task)]() {
+        g_task_return_boolean(task.get(), TRUE);
+    });
+}
+
+/**
+ * webkit_cookie_manager_add_cookie_finish:
+ * @cookie_manager: a #WebKitCookieManager
+ * @result: a #GAsyncResult
+ * @error: return location for error or %NULL to ignore
+ *
+ * Finish an asynchronous operation started with webkit_cookie_manager_add_cookie().
+ *
+ * Returns: %TRUE if the cookie was added or %FALSE in case of error.
+ *
+ * Since: 2.20
+ */
+gboolean webkit_cookie_manager_add_cookie_finish(WebKitCookieManager* manager, GAsyncResult* result, GError** error)
+{
+    g_return_val_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager), FALSE);
+    g_return_val_if_fail(g_task_is_valid(result, manager), FALSE);
+
+    return g_task_propagate_boolean(G_TASK(result), error);
+}
+
+/**
+ * webkit_cookie_manager_get_cookies:
+ * @cookie_manager: a #WebKitCookieManager
+ * @uri: the URI associated to the cookies to be retrieved
+ * @cancellable: (allow-none): a #GCancellable or %NULL to ignore
+ * @callback: (scope async): a #GAsyncReadyCallback to call when the request is satisfied
+ * @user_data: (closure): the data to pass to callback function
+ *
+ * Asynchronously get a list of #SoupCookie from @cookie_manager.
+ *
+ * Asynchronously get a list of #SoupCookie from @cookie_manager associated with @uri, which
+ * must be either an HTTP or an HTTPS URL.
+ *
+ * When the operation is finished, @callback will be called. You can then call
+ * webkit_cookie_manager_get_cookies_finish() to get the result of the operation.
+ *
+ * Since: 2.20
+ */
+void webkit_cookie_manager_get_cookies(WebKitCookieManager* manager, const gchar* uri, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer userData)
+{
+    g_return_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager));
+    g_return_if_fail(uri);
+
+    GRefPtr<GTask> task = adoptGRef(g_task_new(manager, cancellable, callback, userData));
+    manager->priv->cookieStore().cookiesForURL(URL { String::fromUTF8(uri) }, [task = WTFMove(task)](const Vector<WebCore::Cookie>& cookies) {
+        GList* cookiesList = nullptr;
+        for (auto& cookie : cookies)
+            cookiesList = g_list_prepend(cookiesList, cookie.toSoupCookie());
+
+        g_task_return_pointer(task.get(), g_list_reverse(cookiesList), [](gpointer data) {
+            g_list_free_full(static_cast<GList*>(data), reinterpret_cast<GDestroyNotify>(soup_cookie_free));
+        });
+    });
+}
+
+/**
+ * webkit_cookie_manager_get_cookies_finish:
+ * @cookie_manager: a #WebKitCookieManager
+ * @result: a #GAsyncResult
+ * @error: return location for error or %NULL to ignore
+ *
+ * Finish an asynchronous operation started with webkit_cookie_manager_get_cookies().
+ *
+ * The return value is a #GSList of #SoupCookie instances which should be released
+ * with g_list_free_full() and soup_cookie_free().
+ *
+ * Returns: (element-type SoupCookie) (transfer full): A #GList of #SoupCookie instances.
+ *
+ * Since: 2.20
+ */
+GList* webkit_cookie_manager_get_cookies_finish(WebKitCookieManager* manager, GAsyncResult* result, GError** error)
+{
+    g_return_val_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager), nullptr);
+    g_return_val_if_fail(g_task_is_valid(result, manager), nullptr);
+
+    return reinterpret_cast<GList*>(g_task_propagate_pointer(G_TASK(result), error));
+}
+
+/**
+ * webkit_cookie_manager_delete_cookie:
+ * @cookie_manager: a #WebKitCookieManager
+ * @cookie: the #SoupCookie to be deleted
+ * @cancellable: (allow-none): a #GCancellable or %NULL to ignore
+ * @callback: (scope async): a #GAsyncReadyCallback to call when the request is satisfied
+ * @user_data: (closure): the data to pass to callback function
+ *
+ * Asynchronously delete a #SoupCookie from the current session.
+ *
+ * When the operation is finished, @callback will be called. You can then call
+ * webkit_cookie_manager_delete_cookie_finish() to get the result of the operation.
+ *
+ * Since: 2.20
+ */
+void webkit_cookie_manager_delete_cookie(WebKitCookieManager* manager, SoupCookie* cookie, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer userData)
+{
+    g_return_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager));
+    g_return_if_fail(cookie);
+
+    GRefPtr<GTask> task = adoptGRef(g_task_new(manager, cancellable, callback, userData));
+    manager->priv->cookieStore().deleteCookie(WebCore::Cookie(cookie), [task = WTFMove(task)]() {
+        g_task_return_boolean(task.get(), TRUE);
+    });
+}
+
+/**
+ * webkit_cookie_manager_delete_cookie_finish:
+ * @cookie_manager: a #WebKitCookieManager
+ * @result: a #GAsyncResult
+ * @error: return location for error or %NULL to ignore
+ *
+ * Finish an asynchronous operation started with webkit_cookie_manager_delete_cookie().
+ *
+ * Returns: %TRUE if the cookie was deleted or %FALSE in case of error.
+ *
+ * Since: 2.20
+ */
+gboolean webkit_cookie_manager_delete_cookie_finish(WebKitCookieManager* manager, GAsyncResult* result, GError** error)
+{
+    g_return_val_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager), FALSE);
+    g_return_val_if_fail(g_task_is_valid(result, manager), FALSE);
+
+    return g_task_propagate_boolean(G_TASK(result), error);
+}
+
+#if PLATFORM(GTK)
 /**
  * webkit_cookie_manager_get_domains_with_cookies:
  * @cookie_manager: a #WebKitCookieManager
@@ -278,6 +463,7 @@ void webkit_cookie_manager_get_domains_with_cookies(WebKitCookieManager* manager
  * @error: return location for error or %NULL to ignore
  *
  * Finish an asynchronous operation started with webkit_cookie_manager_get_domains_with_cookies().
+ *
  * The return value is a %NULL terminated list of strings which should
  * be released with g_strfreev().
  *
@@ -320,7 +506,7 @@ void webkit_cookie_manager_delete_cookies_for_domain(WebKitCookieManager* manage
  * webkit_cookie_manager_delete_all_cookies:
  * @cookie_manager: a #WebKitCookieManager
  *
- * Delete all cookies of @cookie_manager
+ * Delete all cookies of @cookie_manager.
  *
  * Deprecated: 2.16: Use webkit_website_data_manager_clear() instead.
  */
@@ -329,4 +515,52 @@ void webkit_cookie_manager_delete_all_cookies(WebKitCookieManager* manager)
     g_return_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager));
 
     webkit_website_data_manager_clear(manager->priv->dataManager, WEBKIT_WEBSITE_DATA_COOKIES, 0, nullptr, nullptr, nullptr);
+}
+#endif
+
+void webkit_cookie_manager_set_cookie_jar(WebKitCookieManager* manager, GList* cookies, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer userData)
+{
+    g_return_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager));
+
+    Vector<WebCore::Cookie> webCookies;
+    for (GList* it = cookies; it != NULL; it = g_list_next(it)) {
+        webCookies.append(WebCore::Cookie((SoupCookie*)it->data));
+    }
+
+    GRefPtr<GTask> task = adoptGRef(g_task_new(manager, cancellable, callback, userData));
+    manager->priv->cookieStore().setCookieJar(WTFMove(webCookies), [task = WTFMove(task)]() {
+        g_task_return_boolean(task.get(), TRUE);
+    });
+}
+
+gboolean webkit_cookie_manager_set_cookie_jar_finish(WebKitCookieManager* manager, GAsyncResult* result, GError** error)
+{
+    g_return_val_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager), FALSE);
+    g_return_val_if_fail(g_task_is_valid(result, manager), FALSE);
+
+    return g_task_propagate_boolean(G_TASK(result), error);
+}
+
+void webkit_cookie_manager_get_cookie_jar(WebKitCookieManager* manager, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer userData)
+{
+    g_return_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager));
+
+    GRefPtr<GTask> task = adoptGRef(g_task_new(manager, cancellable, callback, userData));
+    manager->priv->cookieStore().getCookieJar([task = WTFMove(task)](const Vector<WebCore::Cookie>& cookies) {
+        GList* cookiesList = nullptr;
+        for (auto& cookie : cookies)
+            cookiesList = g_list_prepend(cookiesList, cookie.toSoupCookie());
+
+        g_task_return_pointer(task.get(), g_list_reverse(cookiesList), [](gpointer data) {
+            g_list_free_full(static_cast<GList*>(data), reinterpret_cast<GDestroyNotify>(soup_cookie_free));
+        });
+    });
+}
+
+GList* webkit_cookie_manager_get_cookie_jar_finish(WebKitCookieManager* manager, GAsyncResult* result, GError** error)
+{
+    g_return_val_if_fail(WEBKIT_IS_COOKIE_MANAGER(manager), nullptr);
+    g_return_val_if_fail(g_task_is_valid(result, manager), nullptr);
+
+    return reinterpret_cast<GList*>(g_task_propagate_pointer(G_TASK(result), error));
 }

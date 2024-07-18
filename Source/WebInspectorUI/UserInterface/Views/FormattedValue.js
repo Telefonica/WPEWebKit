@@ -25,15 +25,26 @@
 
 WI.FormattedValue = {};
 
+WI.FormattedValue.MaxPreviewStringLength = 140;
+
+WI.FormattedValue.isSimpleString = function(string)
+{
+    return string.length <= WI.FormattedValue.MaxPreviewStringLength
+        && !string.slice(0, WI.FormattedValue.MaxPreviewStringLength).includes("\n");
+};
+
 WI.FormattedValue.hasSimpleDisplay = function(object)
 {
     switch (object.type) {
     case "boolean":
     case "number":
-    case "string":
     case "symbol":
+    case "bigint":
     case "undefined":
         return true;
+
+    case "string":
+        return WI.FormattedValue.isSimpleString(object.description);
 
     case "function":
         return false;
@@ -78,7 +89,7 @@ WI.FormattedValue.createElementForNode = function(object)
 
         var treeOutline = new WI.DOMTreeOutline;
         treeOutline.setVisible(true);
-        treeOutline.rootDOMNode = WI.domTreeManager.nodeForId(nodeId);
+        treeOutline.rootDOMNode = WI.domManager.nodeForId(nodeId);
         if (!treeOutline.children[0].hasChildren)
             treeOutline.element.classList.add("single-node");
         span.appendChild(treeOutline.element);
@@ -114,11 +125,43 @@ WI.FormattedValue.createElementForError = function(object)
     return span;
 };
 
-WI.FormattedValue.createElementForNodePreview = function(preview)
+WI.FormattedValue.createElementForNodePreview = function(preview, {remoteObjectAccessor} = {})
 {
     var value = preview.value || preview.description;
     var span = document.createElement("span");
     span.className = "formatted-node-preview syntax-highlighted";
+
+    if (remoteObjectAccessor) {
+        let domNode = null;
+
+        span.addEventListener("mouseenter", (event) => {
+            if (domNode) {
+                domNode.highlight();
+                return;
+            }
+
+            remoteObjectAccessor((remoteObject) => {
+                remoteObject.pushNodeToFrontend((nodeId) => {
+                    domNode = WI.domManager.nodeForId(nodeId);
+                    if (domNode)
+                        domNode.highlight();
+                });
+            });
+        });
+
+        span.addEventListener("mouseleave", (event) => {
+            WI.domManager.hideDOMNodeHighlight();
+        });
+
+        span.addEventListener("contextmenu", (event) => {
+            if (!domNode)
+                return;
+
+            let contextMenu = WI.ContextMenu.createFromEvent(event);
+
+            WI.appendContextMenuItemsForDOMNode(contextMenu, domNode);
+        });
+    }
 
     // Comment node preview.
     if (value.startsWith("<!--")) {
@@ -196,7 +239,7 @@ WI.FormattedValue.createElementForTypesAndValue = function(type, subtype, displa
 
     // String: quoted and replace newlines as nice unicode symbols.
     if (type === "string") {
-        displayString = displayString.truncate(WI.FormattedValue.MAX_PREVIEW_STRING_LENGTH);
+        displayString = displayString.truncate(WI.FormattedValue.MaxPreviewStringLength);
         span.textContent = doubleQuotedString(displayString.replace(/\n/g, "\u21B5"));
         return span;
     }
@@ -246,7 +289,8 @@ WI.FormattedValue.createObjectPreviewOrFormattedValueForObjectPreview = function
     if (objectPreview.type === "function")
         return WI.FormattedValue.createElementForFunctionWithName(objectPreview.description);
 
-    return new WI.ObjectPreviewView(objectPreview, previewViewMode).element;
+    const object = null;
+    return new WI.ObjectPreviewView(object, objectPreview, previewViewMode).element;
 };
 
 WI.FormattedValue.createObjectPreviewOrFormattedValueForRemoteObject = function(object, previewViewMode)
@@ -258,7 +302,7 @@ WI.FormattedValue.createObjectPreviewOrFormattedValueForRemoteObject = function(
         return WI.FormattedValue.createElementForError(object);
 
     if (object.preview)
-        return new WI.ObjectPreviewView(object.preview, previewViewMode);
+        return new WI.ObjectPreviewView(object, object.preview, previewViewMode);
 
     return WI.FormattedValue.createElementForRemoteObject(object);
 };
@@ -278,5 +322,3 @@ WI.FormattedValue.createObjectTreeOrFormattedValueForRemoteObject = function(obj
 
     return WI.FormattedValue.createElementForRemoteObject(object);
 };
-
-WI.FormattedValue.MAX_PREVIEW_STRING_LENGTH = 140;

@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebDefaultUIKitDelegate.h"
 
@@ -162,6 +162,16 @@ static WebDefaultUIKitDelegate *sharedDelegate = nil;
 {
 }
 
+- (BOOL)handleKeyTextCommandForCurrentEvent
+{
+    return NO;
+}
+
+- (BOOL)handleKeyAppCommandForCurrentEvent
+{
+    return NO;
+}
+
 - (void)addInputString:(NSString *)str withFlags:(NSUInteger)flags
 {
 }
@@ -242,6 +252,11 @@ static WebDefaultUIKitDelegate *sharedDelegate = nil;
     return CGPointZero;
 }
 
+- (BOOL)shouldRevealCurrentSelectionAfterInsertion
+{
+    return YES;
+}
+
 - (void)showPlaybackTargetPicker:(BOOL)hasVideo fromRect:(CGRect)elementRect
 {
 }
@@ -252,6 +267,11 @@ static WebDefaultUIKitDelegate *sharedDelegate = nil;
     return 0;
 }
 #endif
+
+- (BOOL)shouldSuppressPasswordEcho
+{
+    return NO;
+}
 
 - (BOOL)hasRichlyEditableSelection
 {
@@ -273,11 +293,6 @@ static WebDefaultUIKitDelegate *sharedDelegate = nil;
     return 0;
 }
 
-- (BOOL)isUnperturbedDictationResultMarker:(id)metadataForMarker
-{
-    return NO;
-}
-
 - (void)webView:(WebView *)webView willAddPlugInView:(id)plugInView
 {
 }
@@ -291,4 +306,4 @@ static WebDefaultUIKitDelegate *sharedDelegate = nil;
 }
 @end
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

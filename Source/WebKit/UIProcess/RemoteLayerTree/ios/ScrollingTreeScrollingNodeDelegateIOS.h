@@ -23,17 +23,17 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
+#if PLATFORM(IOS_FAMILY) && ENABLE(ASYNC_SCROLLING)
 
-#if PLATFORM(IOS) && ENABLE(ASYNC_SCROLLING)
+#import <UIKit/UIScrollView.h>
+#import <WebCore/ScrollingCoordinator.h>
+#import <WebCore/ScrollingTreeScrollingNode.h>
+#import <WebCore/ScrollingTreeScrollingNodeDelegate.h>
 
-#include <UIKit/UIScrollView.h>
-#include <WebCore/ScrollingCoordinator.h>
-#include <WebCore/ScrollingTreeScrollingNode.h>
-#include <WebCore/ScrollingTreeScrollingNodeDelegate.h>
-
-OBJC_CLASS CALayer;
-OBJC_CLASS WKScrollingNodeScrollViewDelegate;
+@class CALayer;
+@class UIScrollEvent;
+@class UIScrollView;
+@class WKScrollingNodeScrollViewDelegate;
 
 namespace WebCore {
 
@@ -46,30 +46,53 @@ class ScrollingTreeScrollingNode;
 
 namespace WebKit {
 
-class ScrollingTreeScrollingNodeDelegateIOS : public WebCore::ScrollingTreeScrollingNodeDelegate {
+class ScrollingTreeScrollingNodeDelegateIOS final : public WebCore::ScrollingTreeScrollingNodeDelegate {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
+    
+    enum class AllowOverscrollToPreventScrollPropagation : bool { Yes, No };
+    
     explicit ScrollingTreeScrollingNodeDelegateIOS(WebCore::ScrollingTreeScrollingNode&);
     ~ScrollingTreeScrollingNodeDelegateIOS() final;
 
     void scrollWillStart() const;
     void scrollDidEnd() const;
     void scrollViewWillStartPanGesture() const;
-    void scrollViewDidScroll(const WebCore::FloatPoint& scrollPosition, bool inUserInteraction) const;
-    void currentSnapPointIndicesDidChange(unsigned horizontal, unsigned vertical) const;
+    void scrollViewDidScroll(const WebCore::FloatPoint& scrollOffset, bool inUserInteraction);
+
+    void currentSnapPointIndicesDidChange(std::optional<unsigned> horizontal, std::optional<unsigned> vertical) const;
     CALayer *scrollLayer() const { return m_scrollLayer.get(); }
 
     void resetScrollViewDelegate();
     void commitStateBeforeChildren(const WebCore::ScrollingStateScrollingNode&);
     void commitStateAfterChildren(const WebCore::ScrollingStateScrollingNode&);
-    void updateLayersAfterAncestorChange(const WebCore::ScrollingTreeNode& changedNode, const WebCore::FloatRect& fixedPositionRect, const WebCore::FloatSize& cumulativeDelta);
-    WebCore::FloatPoint scrollPosition() const;
-    void setScrollLayerPosition(const WebCore::FloatPoint&);
-    void updateChildNodesAfterScroll(const WebCore::FloatPoint& scrollPosition);
+
+    void repositionScrollingLayers();
+
+#if HAVE(UISCROLLVIEW_ASYNCHRONOUS_SCROLL_EVENT_HANDLING)
+    void handleAsynchronousCancelableScrollEvent(UIScrollView *, UIScrollEvent *, void (^completion)(BOOL handled));
+#endif
+
+    OptionSet<WebCore::TouchAction> activeTouchActions() const { return m_activeTouchActions; }
+    void computeActiveTouchActionsForGestureRecognizer(UIGestureRecognizer*);
+    void clearActiveTouchActions() { m_activeTouchActions = { }; }
+    void cancelPointersForGestureRecognizer(UIGestureRecognizer*);
+
+    UIScrollView *findActingScrollParent(UIScrollView *);
+    UIScrollView *scrollView() const;
+
+    bool startAnimatedScrollToPosition(WebCore::FloatPoint) final;
+    void stopAnimatedScroll() final;
+
+    void serviceScrollAnimation(MonotonicTime) final { }
+    
+    static void updateScrollViewForOverscrollBehavior(UIScrollView *, const WebCore::OverscrollBehavior, const WebCore::OverscrollBehavior, AllowOverscrollToPreventScrollPropagation);
 
 private:
     RetainPtr<CALayer> m_scrollLayer;
     RetainPtr<CALayer> m_scrolledContentsLayer;
     RetainPtr<WKScrollingNodeScrollViewDelegate> m_scrollViewDelegate;
+    OptionSet<WebCore::TouchAction> m_activeTouchActions { };
     bool m_updatingFromStateNode { false };
 };
 
@@ -85,4 +108,4 @@ private:
 
 @end
 
-#endif // PLATFORM(IOS) && ENABLE(ASYNC_SCROLLING)
+#endif // PLATFORM(IOS_FAMILY) && ENABLE(ASYNC_SCROLLING)

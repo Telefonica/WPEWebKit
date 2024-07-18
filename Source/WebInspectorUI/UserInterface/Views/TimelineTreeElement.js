@@ -35,6 +35,7 @@ WI.TimelineTreeElement = class TimelineTreeElement extends WI.GeneralTreeElement
 
         this._placeholder = placeholder || false;
         this.editing = this._placeholder;
+        this.tooltipHandledSeparately = true;
     }
 
     // Public
@@ -74,9 +75,10 @@ WI.TimelineTreeElement = class TimelineTreeElement extends WI.GeneralTreeElement
     _showCloseButton()
     {
         let tooltip = WI.UIString("Close %s timeline view").format(this.mainTitle);
-        let button = new WI.TreeElementStatusButton(useSVGSymbol("Images/CloseLarge.svg", "close-button", tooltip));
-        button.addEventListener(WI.TreeElementStatusButton.Event.Clicked, () => { this.deselect(); });
-
+        let button = new WI.TreeElementStatusButton(WI.ImageUtilities.useSVGSymbol("Images/CloseLarge.svg", "close-button", tooltip));
+        button.addEventListener(WI.TreeElementStatusButton.Event.Clicked, function(event) {
+            this.deselect();
+        }, this);
         this.status = button.element;
     }
 

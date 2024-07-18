@@ -7,24 +7,22 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#ifndef WEBRTC_TEST_VCM_CAPTURER_H_
-#define WEBRTC_TEST_VCM_CAPTURER_H_
+#ifndef TEST_VCM_CAPTURER_H_
+#define TEST_VCM_CAPTURER_H_
 
 #include <memory>
+#include <vector>
 
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/scoped_ref_ptr.h"
-#include "webrtc/common_types.h"
-#include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
-#include "webrtc/modules/video_capture/video_capture.h"
-#include "webrtc/test/video_capturer.h"
+#include "api/scoped_refptr.h"
+#include "modules/video_capture/video_capture.h"
+#include "rtc_base/logging.h"
+#include "test/test_video_capturer.h"
 
 namespace webrtc {
 namespace test {
 
-class VcmCapturer
-    : public VideoCapturer,
-      public rtc::VideoSinkInterface<VideoFrame> {
+class VcmCapturer : public TestVideoCapturer,
+                    public rtc::VideoSinkInterface<VideoFrame> {
  public:
   static VcmCapturer* Create(size_t width,
                              size_t height,
@@ -32,13 +30,19 @@ class VcmCapturer
                              size_t capture_device_index);
   virtual ~VcmCapturer();
 
-  void Start() override;
-  void Stop() override;
-  void AddOrUpdateSink(rtc::VideoSinkInterface<VideoFrame>* sink,
-                       const rtc::VideoSinkWants& wants) override;
-  void RemoveSink(rtc::VideoSinkInterface<VideoFrame>* sink) override;
+  void Start() override {
+    RTC_LOG(LS_WARNING) << "Capturer doesn't support resume/pause and always "
+                           "produces the video";
+  }
+  void Stop() override {
+    RTC_LOG(LS_WARNING) << "Capturer doesn't support resume/pause and always "
+                           "produces the video";
+  }
 
   void OnFrame(const VideoFrame& frame) override;
+
+  int GetFrameWidth() const override { return static_cast<int>(width_); }
+  int GetFrameHeight() const override { return static_cast<int>(height_); }
 
  private:
   VcmCapturer();
@@ -48,14 +52,13 @@ class VcmCapturer
             size_t capture_device_index);
   void Destroy();
 
-  rtc::CriticalSection crit_;
-  bool started_ GUARDED_BY(crit_);
-  rtc::VideoSinkInterface<VideoFrame>* sink_ GUARDED_BY(crit_);
+  size_t width_;
+  size_t height_;
   rtc::scoped_refptr<VideoCaptureModule> vcm_;
   VideoCaptureCapability capability_;
 };
 
-}  // test
-}  // webrtc
+}  // namespace test
+}  // namespace webrtc
 
-#endif  // WEBRTC_TEST_VCM_CAPTURER_H_
+#endif  // TEST_VCM_CAPTURER_H_

@@ -25,22 +25,34 @@
 
 #pragma once
 
-#include "Function.h"
+#include <tuple>
+#include <utility>
+#include <wtf/Function.h>
+#include <wtf/MainThread.h>
 
 namespace WTF {
 
 template<typename> class CompletionHandler;
+enum class CompletionHandlerCallThread { MainThread, ConstructionThread };
 
-// Wraps a WTF::Function to make sure it is always called once and only once.
+// Wraps a Function to make sure it is always called once and only once.
 template <typename Out, typename... In>
 class CompletionHandler<Out(In...)> {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
+    using OutType = Out;
+    using InTypes = std::tuple<In...>;
+
     CompletionHandler() = default;
 
     template<typename CallableType, class = typename std::enable_if<std::is_rvalue_reference<CallableType&&>::value>::type>
-    CompletionHandler(CallableType&& callable)
-        : m_function(WTFMove(callable))
+    CompletionHandler(CallableType&& callable, CompletionHandlerCallThread callThread = CompletionHandlerCallThread::ConstructionThread)
+        : m_function(std::forward<CallableType>(callable))
+#if ASSERT_ENABLED
+        , m_shouldBeCalledOnMainThread(callThread == CompletionHandlerCallThread::MainThread || isMainThread())
+#endif
     {
+        UNUSED_PARAM(callThread);
     }
 
     CompletionHandler(CompletionHandler&&) = default;
@@ -55,15 +67,109 @@ public:
 
     Out operator()(In... in)
     {
+        ASSERT(m_shouldBeCalledOnMainThread == isMainThread());
         ASSERT_WITH_MESSAGE(m_function, "Completion handler should not be called more than once");
-        auto function = WTFMove(m_function);
-        return function(std::forward<In>(in)...);
+        return std::exchange(m_function, nullptr)(std::forward<In>(in)...);
     }
 
 private:
-    WTF::Function<Out(In...)> m_function;
+    Function<Out(In...)> m_function;
+#if ASSERT_ENABLED
+    bool m_shouldBeCalledOnMainThread;
+#endif
+};
+
+// Wraps a Function to make sure it is called at most once.
+// If the CompletionHandlerWithFinalizer is destroyed and the function hasn't yet been called,
+// the finalizer is invoked with the function as its argument.
+template<typename> class CompletionHandlerWithFinalizer;
+template <typename Out, typename... In>
+class CompletionHandlerWithFinalizer<Out(In...)> {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    using OutType = Out;
+    using InTypes = std::tuple<In...>;
+
+    template<typename CallableType, class = typename std::enable_if<std::is_rvalue_reference<CallableType&&>::value>::type>
+    CompletionHandlerWithFinalizer(CallableType&& callable, Function<void(Function<Out(In...)>&)>&& finalizer)
+        : m_function(std::forward<CallableType>(callable))
+        , m_finalizer(WTFMove(finalizer))
+    {
+    }
+
+    CompletionHandlerWithFinalizer(CompletionHandlerWithFinalizer&&) = default;
+    CompletionHandlerWithFinalizer& operator=(CompletionHandlerWithFinalizer&&) = default;
+
+    ~CompletionHandlerWithFinalizer()
+    {
+        if (!m_function)
+            return;
+
+        m_finalizer(m_function);
+    }
+
+    explicit operator bool() const { return !!m_function; }
+
+    Out operator()(In... in)
+    {
+        ASSERT(m_wasConstructedOnMainThread == isMainThread());
+        ASSERT_WITH_MESSAGE(m_function, "Completion handler should not be called more than once");
+        return std::exchange(m_function, nullptr)(std::forward<In>(in)...);
+    }
+
+private:
+    Function<Out(In...)> m_function;
+    Function<void(Function<Out(In...)>&)> m_finalizer;
+#if ASSERT_ENABLED
+    bool m_wasConstructedOnMainThread { isMainThread() };
+#endif
+};
+
+namespace Detail {
+
+template<typename Out, typename... In>
+class CallableWrapper<CompletionHandler<Out(In...)>, Out, In...> : public CallableWrapperBase<Out, In...> {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    explicit CallableWrapper(CompletionHandler<Out(In...)>&& completionHandler)
+        : m_completionHandler(WTFMove(completionHandler))
+    {
+        RELEASE_ASSERT(m_completionHandler);
+    }
+    Out call(In... in) final { return m_completionHandler(std::forward<In>(in)...); }
+private:
+    CompletionHandler<Out(In...)> m_completionHandler;
+};
+
+} // namespace Detail
+
+class CompletionHandlerCallingScope final {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    CompletionHandlerCallingScope() = default;
+
+    CompletionHandlerCallingScope(CompletionHandler<void()>&& completionHandler)
+        : m_completionHandler(WTFMove(completionHandler))
+    { }
+
+    ~CompletionHandlerCallingScope()
+    {
+        if (m_completionHandler)
+            m_completionHandler();
+    }
+
+    CompletionHandlerCallingScope(CompletionHandlerCallingScope&&) = default;
+    CompletionHandlerCallingScope& operator=(CompletionHandlerCallingScope&&) = default;
+
+    CompletionHandler<void()> release() { return WTFMove(m_completionHandler); }
+
+private:
+    CompletionHandler<void()> m_completionHandler;
 };
 
 } // namespace WTF
 
 using WTF::CompletionHandler;
+using WTF::CompletionHandlerCallThread;
+using WTF::CompletionHandlerCallingScope;
+using WTF::CompletionHandlerWithFinalizer;

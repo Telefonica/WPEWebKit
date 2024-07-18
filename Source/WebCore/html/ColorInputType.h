@@ -40,31 +40,43 @@
 namespace WebCore {
 
 class ColorInputType final : public BaseClickableWithKeyInputType, private ColorChooserClient {
+    template<typename DowncastedType> friend bool isInvalidInputType(const InputType&, const String&);
 public:
-    explicit ColorInputType(HTMLInputElement& element) : BaseClickableWithKeyInputType(element) { }
+    explicit ColorInputType(HTMLInputElement& element)
+        : BaseClickableWithKeyInputType(Type::Color, element)
+    {
+        ASSERT(needsShadowSubtree());
+    }
+
+    Vector<Color> suggestedColors() const;
+    Color valueAsColor() const;
+    void selectColor(StringView);
+
     virtual ~ColorInputType();
+    bool typeMismatchFor(const String&) const final;
+
+    void detach() final;
 
 private:
-    void didChooseColor(const Color&) override;
-    void didEndChooser() override;
-    IntRect elementRectRelativeToRootView() const override;
-    Color currentColor() override;
-    bool shouldShowSuggestions() const override;
-    Vector<Color> suggestions() const override;
-    bool isColorControl() const override;
-    const AtomicString& formControlType() const override;
-    bool supportsRequired() const override;
-    String fallbackValue() const override;
-    String sanitizeValue(const String&) const override;
-    void createShadowSubtree() override;
-    void setValue(const String&, bool valueChanged, TextFieldEventBehavior) override;
-    void handleDOMActivateEvent(Event&) override;
-    void detach() override;
-    bool shouldRespectListAttribute() override;
-    bool typeMismatchFor(const String&) const override;
-    bool shouldResetOnDocumentActivation() override;
-    Color valueAsColor() const override;
-    void selectColor(const Color&) override;
+    void didChooseColor(const Color&) final;
+    void didEndChooser() final;
+    IntRect elementRectRelativeToRootView() const final;
+    bool isMouseFocusable() const final;
+    bool isKeyboardFocusable(KeyboardEvent*) const final;
+    bool isPresentingAttachedView() const final;
+    const AtomString& formControlType() const final;
+    bool supportsRequired() const final;
+    String fallbackValue() const final;
+    String sanitizeValue(const String&) const final;
+    void createShadowSubtree() final;
+    void setValue(const String&, bool valueChanged, TextFieldEventBehavior, TextControlSetValueSelection) final;
+    void attributeChanged(const QualifiedName&) final;
+    void handleDOMActivateEvent(Event&) final;
+    void showPicker() final;
+    bool allowsShowPickerAcrossFrames() final;
+    void elementDidBlur() final;
+    bool shouldRespectListAttribute() final;
+    bool shouldResetOnDocumentActivation() final;
 
     void endColorChooser();
     void updateColorSwatch();
@@ -74,5 +86,7 @@ private:
 };
 
 } // namespace WebCore
+
+SPECIALIZE_TYPE_TRAITS_INPUT_TYPE(ColorInputType, Type::Color)
 
 #endif // ENABLE(INPUT_TYPE_COLOR)

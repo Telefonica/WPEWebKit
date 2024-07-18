@@ -23,9 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import "_WKUserContentFilter.h"
-
-#if WK_API_ENABLED
+#import <WebKit/_WKUserContentFilter.h>
 
 #import "APIContentRuleList.h"
 #import "WKObject.h"
@@ -37,5 +35,3 @@
     RetainPtr<WKContentRuleList> _contentRuleList;
 }
 @end
-
-#endif // WK_API_ENABLED

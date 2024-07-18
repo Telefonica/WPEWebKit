@@ -39,7 +39,7 @@ class DatabaseCallback;
 class DatabaseContext;
 class DatabaseDetails;
 class DatabaseThread;
-class ScriptExecutionContext;
+class Document;
 class SecurityOrigin;
 class SQLTransaction;
 class SQLTransactionBackend;
@@ -81,15 +81,16 @@ public:
 
     // Direct support for the DOM API
     String version() const;
-    void changeVersion(const String& oldVersion, const String& newVersion, RefPtr<SQLTransactionCallback>&&, RefPtr<SQLTransactionErrorCallback>&&, RefPtr<VoidCallback>&& successCallback);
+    void changeVersion(String&& oldVersion, String&& newVersion, RefPtr<SQLTransactionCallback>&&, RefPtr<SQLTransactionErrorCallback>&&, RefPtr<VoidCallback>&& successCallback);
     void transaction(RefPtr<SQLTransactionCallback>&&, RefPtr<SQLTransactionErrorCallback>&&, RefPtr<VoidCallback>&& successCallback);
     void readTransaction(RefPtr<SQLTransactionCallback>&&, RefPtr<SQLTransactionErrorCallback>&&, RefPtr<VoidCallback>&& successCallback);
 
     // Internal engine support
-    String stringIdentifier() const;
-    String displayName() const;
-    unsigned estimatedSize() const;
-    String fileName() const;
+    String stringIdentifierIsolatedCopy() const;
+    String displayNameIsolatedCopy() const;
+    String expectedVersionIsolatedCopy() const;
+    unsigned long long estimatedSize() const;
+    String fileNameIsolatedCopy() const;
     DatabaseDetails details() const;
     SQLiteDatabase& sqliteDatabase() { return m_sqliteDatabase; }
 
@@ -104,7 +105,7 @@ public:
 
     DatabaseContext& databaseContext() { return m_databaseContext; }
     DatabaseThread& databaseThread();
-    ScriptExecutionContext& scriptExecutionContext() { return m_scriptExecutionContext; }
+    Document& document() { return m_document; }
     void logErrorMessage(const String& message);
 
     Vector<String> tableNames();
@@ -126,19 +127,19 @@ public:
     void performClose();
 
 private:
-    Database(DatabaseContext&, const String& name, const String& expectedVersion, const String& displayName, unsigned estimatedSize);
+    Database(DatabaseContext&, const String& name, const String& expectedVersion, const String& displayName, unsigned long long estimatedSize);
 
     void closeDatabase();
 
     bool getVersionFromDatabase(String& version, bool shouldCacheVersion = true);
     bool setVersionInDatabase(const String& version, bool shouldCacheVersion = true);
     void setExpectedVersion(const String&);
-    const String& expectedVersion() const { return m_expectedVersion; }
     String getCachedVersion() const;
     void setCachedVersion(const String&);
     bool getActualVersionForTransaction(String& version);
+    void setEstimatedSize(unsigned long long);
 
-    void scheduleTransaction();
+    void scheduleTransaction() WTF_REQUIRES_LOCK(m_transactionInProgressLock);
 
     void runTransaction(RefPtr<SQLTransactionCallback>&&, RefPtr<SQLTransactionErrorCallback>&&, RefPtr<VoidCallback>&& successCallback, RefPtr<SQLTransactionWrapper>&&, bool readOnly);
 
@@ -146,7 +147,7 @@ private:
     String databaseDebugName() const;
 #endif
 
-    Ref<ScriptExecutionContext> m_scriptExecutionContext;
+    Ref<Document> m_document;
     Ref<SecurityOrigin> m_contextThreadSecurityOrigin;
     Ref<SecurityOrigin> m_databaseThreadSecurityOrigin;
     Ref<DatabaseContext> m_databaseContext;
@@ -157,7 +158,7 @@ private:
     String m_name;
     String m_expectedVersion;
     String m_displayName;
-    unsigned m_estimatedSize;
+    unsigned long long m_estimatedSize;
     String m_filename;
 
     DatabaseGUID m_guid;
@@ -168,10 +169,10 @@ private:
 
     Ref<DatabaseAuthorizer> m_databaseAuthorizer;
 
-    Deque<Ref<SQLTransaction>> m_transactionQueue;
-    Lock m_transactionInProgressMutex;
-    bool m_transactionInProgress { false };
-    bool m_isTransactionQueueEnabled { true };
+    Deque<Ref<SQLTransaction>> m_transactionQueue WTF_GUARDED_BY_LOCK(m_transactionInProgressLock);
+    Lock m_transactionInProgressLock;
+    bool m_transactionInProgress WTF_GUARDED_BY_LOCK(m_transactionInProgressLock) { false };
+    bool m_isTransactionQueueEnabled WTF_GUARDED_BY_LOCK(m_transactionInProgressLock) { true };
 
     friend class ChangeVersionWrapper;
     friend class DatabaseManager;

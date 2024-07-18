@@ -27,49 +27,58 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "WasmCodeBlock.h"
+#include "WasmCalleeGroup.h"
+#include "WasmEmbedder.h"
 #include "WasmMemory.h"
+#include "WasmOps.h"
 #include <wtf/Expected.h>
 #include <wtf/Lock.h>
 #include <wtf/SharedTask.h>
 #include <wtf/ThreadSafeRefCounted.h>
 
-namespace JSC { namespace Wasm {
+namespace JSC {
 
+class VM;
+
+namespace Wasm {
+
+class LLIntPlan;
 struct ModuleInformation;
-class Plan;
 
-using SignatureIndex = uint32_t;
-    
 class Module : public ThreadSafeRefCounted<Module> {
 public:
-    using ValidationResult = WTF::Expected<RefPtr<Module>, String>;
-    typedef void CallbackType(VM&, ValidationResult&&);
+    using ValidationResult = Expected<RefPtr<Module>, String>;
+    typedef void CallbackType(ValidationResult&&);
     using AsyncValidationCallback = RefPtr<SharedTask<CallbackType>>;
 
     static ValidationResult validateSync(VM&, Vector<uint8_t>&& source);
     static void validateAsync(VM&, Vector<uint8_t>&& source, Module::AsyncValidationCallback&&);
 
-    static Ref<Module> create(Ref<ModuleInformation>&& moduleInformation)
+    static Ref<Module> create(LLIntPlan& plan)
     {
-        return adoptRef(*new Module(WTFMove(moduleInformation)));
+        return adoptRef(*new Module(plan));
     }
 
-    Wasm::SignatureIndex signatureIndexFromFunctionIndexSpace(unsigned functionIndexSpace) const;
+    Wasm::TypeIndex typeIndexFromFunctionIndexSpace(unsigned functionIndexSpace) const;
     const Wasm::ModuleInformation& moduleInformation() const { return m_moduleInformation.get(); }
 
-    Ref<CodeBlock> compileSync(MemoryMode);
-    void compileAsync(VM&, MemoryMode, CodeBlock::AsyncCompilationCallback&&);
+    Ref<CalleeGroup> compileSync(VM&, MemoryMode);
+    void compileAsync(VM&, MemoryMode, CalleeGroup::AsyncCompilationCallback&&);
 
     JS_EXPORT_PRIVATE ~Module();
 
-    CodeBlock* codeBlockFor(MemoryMode mode) { return m_codeBlocks[static_cast<uint8_t>(mode)].get(); }
-private:
-    Ref<CodeBlock> getOrCreateCodeBlock(MemoryMode);
+    CalleeGroup* calleeGroupFor(MemoryMode mode) { return m_calleeGroups[static_cast<uint8_t>(mode)].get(); }
 
-    Module(Ref<ModuleInformation>&&);
+    void copyInitialCalleeGroupToAllMemoryModes(MemoryMode);
+
+private:
+    Ref<CalleeGroup> getOrCreateCalleeGroup(VM&, MemoryMode);
+
+    Module(LLIntPlan&);
     Ref<ModuleInformation> m_moduleInformation;
-    RefPtr<CodeBlock> m_codeBlocks[Wasm::NumberOfMemoryModes];
+    RefPtr<CalleeGroup> m_calleeGroups[Wasm::NumberOfMemoryModes];
+    Ref<LLIntCallees> m_llintCallees;
+    MacroAssemblerCodeRef<JITCompilationPtrTag> m_llintEntryThunks;
     Lock m_lock;
 };
 

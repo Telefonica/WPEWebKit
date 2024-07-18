@@ -26,10 +26,12 @@
 #import "config.h"
 #import "ThreadCheck.h"
 
-#import <wtf/HashSet.h>
+#if PLATFORM(MAC)
+
 #import <wtf/NeverDestroyed.h>
+#import <wtf/RobinHoodHashSet.h>
 #import <wtf/StdLibExtras.h>
-#include <wtf/text/StringHash.h>
+#import <wtf/text/StringHash.h>
 
 namespace WebCore {
 
@@ -99,12 +101,12 @@ void WebCoreReportThreadViolation(const char* function, WebCore::ThreadViolation
     if (round >= MaximumThreadViolationRound)
         return;
 
-    static NeverDestroyed<HashSet<String>> loggedFunctions;
+    static NeverDestroyed<MemoryCompactRobinHoodHashSet<String>> loggedFunctions;
     switch (threadViolationBehavior[round]) {
         case NoThreadCheck:
             break;
         case LogOnFirstThreadViolation:
-            if (loggedFunctions.get().add(function).isNewEntry) {
+            if (loggedFunctions.get().add(String::fromLatin1(function)).isNewEntry) {
                 NSLog(@"WebKit Threading Violation - %s called from secondary thread", function);
                 NSLog(@"Additional threading violations for this function will not be logged.");
             }
@@ -117,3 +119,5 @@ void WebCoreReportThreadViolation(const char* function, WebCore::ThreadViolation
             break;
     }
 }
+
+#endif // PLATFORM(MAC)

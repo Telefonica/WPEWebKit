@@ -21,16 +21,23 @@
 #include "WebKitNavigationAction.h"
 
 #include "WebKitNavigationActionPrivate.h"
-#include <wtf/glib/GRefPtr.h>
+#include "WebKitPrivate.h"
+#include "WebKitURIRequestPrivate.h"
 
 using namespace WebKit;
 
+/**
+ * WebKitNavigationAction:
+ *
+ * Provides details about interaction resulting in a resource load.
+ */
+
 G_DEFINE_BOXED_TYPE(WebKitNavigationAction, webkit_navigation_action, webkit_navigation_action_copy, webkit_navigation_action_free)
 
-WebKitNavigationAction* webkitNavigationActionCreate(WebKitURIRequest* request, const NavigationActionData& navigationActionData)
+WebKitNavigationAction* webkitNavigationActionCreate(Ref<API::NavigationAction>&& action)
 {
     WebKitNavigationAction* navigation = static_cast<WebKitNavigationAction*>(fastZeroedMalloc(sizeof(WebKitNavigationAction)));
-    new (navigation) WebKitNavigationAction(request, navigationActionData);
+    new (navigation) WebKitNavigationAction(WTFMove(action));
     return navigation;
 }
 
@@ -82,12 +89,14 @@ void webkit_navigation_action_free(WebKitNavigationAction* navigation)
 WebKitNavigationType webkit_navigation_action_get_navigation_type(WebKitNavigationAction* navigation)
 {
     g_return_val_if_fail(navigation, WEBKIT_NAVIGATION_TYPE_OTHER);
-    return navigation->type;
+    return toWebKitNavigationType(navigation->action->navigationType());
 }
 
 /**
  * webkit_navigation_action_get_mouse_button:
  * @navigation: a #WebKitNavigationAction
+ *
+ * Return the number of the mouse button that triggered the navigation.
  *
  * Return the number of the mouse button that triggered the navigation, or 0 if
  * the navigation was not started by a mouse event.
@@ -99,12 +108,14 @@ WebKitNavigationType webkit_navigation_action_get_navigation_type(WebKitNavigati
 unsigned webkit_navigation_action_get_mouse_button(WebKitNavigationAction* navigation)
 {
     g_return_val_if_fail(navigation, 0);
-    return navigation->mouseButton;
+    return toWebKitMouseButton(navigation->action->mouseButton());
 }
 
 /**
  * webkit_navigation_action_get_modifiers:
  * @navigation: a #WebKitNavigationAction
+ *
+ * Return the modifier keys.
  *
  * Return a bitmask of #GdkModifierType values describing the modifier keys that were in effect
  * when the navigation was requested
@@ -116,14 +127,20 @@ unsigned webkit_navigation_action_get_mouse_button(WebKitNavigationAction* navig
 unsigned webkit_navigation_action_get_modifiers(WebKitNavigationAction* navigation)
 {
     g_return_val_if_fail(navigation, 0);
-    return navigation->modifiers;
+    return toPlatformModifiers(navigation->action->modifiers());
 }
 
 /**
  * webkit_navigation_action_get_request:
  * @navigation: a #WebKitNavigationAction
  *
- * Return the navigation #WebKitURIRequest
+ * Return the #WebKitURIRequest associated with the navigation action.
+ *
+ * Modifications to the returned object are <emphasis>not</emphasis> taken
+ * into account when the request is sent over the network, and is intended
+ * only to aid in evaluating whether a navigation action should be taken or
+ * not. To modify requests before they are sent over the network the
+ * #WebKitPage::send-request signal can be used instead.
  *
  * Returns: (transfer none): a #WebKitURIRequest
  *
@@ -132,6 +149,8 @@ unsigned webkit_navigation_action_get_modifiers(WebKitNavigationAction* navigati
 WebKitURIRequest* webkit_navigation_action_get_request(WebKitNavigationAction* navigation)
 {
     g_return_val_if_fail(navigation, nullptr);
+    if (!navigation->request)
+        navigation->request = adoptGRef(webkitURIRequestCreateForResourceRequest(navigation->action->request()));
     return navigation->request.get();
 }
 
@@ -148,5 +167,21 @@ WebKitURIRequest* webkit_navigation_action_get_request(WebKitNavigationAction* n
 gboolean webkit_navigation_action_is_user_gesture(WebKitNavigationAction* navigation)
 {
     g_return_val_if_fail(navigation, FALSE);
-    return navigation->isUserGesture;
+    return navigation->action->isProcessingUserGesture();
+}
+
+/**
+ * webkit_navigation_action_is_redirect:
+ * @navigation: a #WebKitNavigationAction
+ *
+ * Returns whether the @navigation was redirected.
+ *
+ * Returns: %TRUE if the original navigation was redirected, %FALSE otherwise.
+ *
+ * Since: 2.20
+ */
+gboolean webkit_navigation_action_is_redirect(WebKitNavigationAction* navigation)
+{
+    g_return_val_if_fail(navigation, FALSE);
+    return navigation->action->isRedirect();
 }

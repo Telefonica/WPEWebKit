@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBIndexInfo.h"
 #include "IDBResourceIdentifier.h"
 #include <wtf/HashMap.h>
@@ -45,8 +43,8 @@ class ThreadSafeDataBuffer;
 struct IDBKeyRangeData;
 
 namespace IndexedDB {
-enum class GetAllType;
-enum class IndexRecordType;
+enum class GetAllType : uint8_t;
+enum class IndexRecordType : bool;
 }
 
 namespace IDBServer {
@@ -108,5 +106,3 @@ private:
 
 } // namespace IDBServer
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

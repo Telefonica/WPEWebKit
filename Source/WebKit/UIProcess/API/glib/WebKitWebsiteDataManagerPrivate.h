@@ -19,13 +19,6 @@
 
 #pragma once
 
-#include "APIWebsiteDataStore.h"
-#include "WebProcessPool.h"
 #include "WebsiteDataStore.h"
 
-WebKitWebsiteDataManager* webkitWebsiteDataManagerCreate(WebKit::WebsiteDataStore::Configuration&&);
-API::WebsiteDataStore& webkitWebsiteDataManagerGetDataStore(WebKitWebsiteDataManager*);
-void webkitWebsiteDataManagerAddProcessPool(WebKitWebsiteDataManager*, WebKit::WebProcessPool&);
-void webkitWebsiteDataManagerRemoveProcessPool(WebKitWebsiteDataManager*, WebKit::WebProcessPool&);
-const Vector<WebKit::WebProcessPool*>& webkitWebsiteDataManagerGetProcessPools(WebKitWebsiteDataManager*);
-
+WebKit::WebsiteDataStore& webkitWebsiteDataManagerGetDataStore(WebKitWebsiteDataManager*);

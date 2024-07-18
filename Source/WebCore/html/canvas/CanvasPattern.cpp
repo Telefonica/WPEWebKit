@@ -28,45 +28,43 @@
 
 #include "DOMMatrix2DInit.h"
 #include "DOMMatrixReadOnly.h"
-#include "Image.h"
+#include "NativeImage.h"
 #include "Pattern.h"
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-Ref<CanvasPattern> CanvasPattern::create(Ref<Image>&& image, bool repeatX, bool repeatY, bool originClean)
+Ref<CanvasPattern> CanvasPattern::create(SourceImage&& image, bool repeatX, bool repeatY, bool originClean)
 {
     return adoptRef(*new CanvasPattern(WTFMove(image), repeatX, repeatY, originClean));
 }
 
-CanvasPattern::CanvasPattern(Ref<Image>&& image, bool repeatX, bool repeatY, bool originClean)
-    : m_pattern(Pattern::create(WTFMove(image), repeatX, repeatY))
+CanvasPattern::CanvasPattern(SourceImage&& image, bool repeatX, bool repeatY, bool originClean)
+    : m_pattern(Pattern::create(WTFMove(image), { repeatX, repeatY }))
     , m_originClean(originClean)
 {
 }
 
-CanvasPattern::~CanvasPattern()
-{
-}
+CanvasPattern::~CanvasPattern() = default;
 
 bool CanvasPattern::parseRepetitionType(const String& type, bool& repeatX, bool& repeatY)
 {
-    if (type.isEmpty() || type == "repeat") {
+    if (type.isEmpty() || type == "repeat"_s) {
         repeatX = true;
         repeatY = true;
         return true;
     }
-    if (type == "no-repeat") {
+    if (type == "no-repeat"_s) {
         repeatX = false;
         repeatY = false;
         return true;
     }
-    if (type == "repeat-x") {
+    if (type == "repeat-x"_s) {
         repeatX = true;
         repeatY = false;
         return true;
     }
-    if (type == "repeat-y") {
+    if (type == "repeat-y"_s) {
         repeatX = false;
         repeatY = true;
         return true;

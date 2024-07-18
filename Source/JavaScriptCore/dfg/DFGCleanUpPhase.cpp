@@ -29,11 +29,8 @@
 #if ENABLE(DFG_JIT)
 
 #include "DFGGraph.h"
-#include "DFGInsertionSet.h"
 #include "DFGPhase.h"
-#include "DFGPredictionPropagationPhase.h"
-#include "DFGVariableAccessDataDump.h"
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
 
 namespace JSC { namespace DFG {
 
@@ -63,6 +60,12 @@ public:
                 case Check:
                     if (node->children.isEmpty())
                         kill = true;
+                    break;
+                case CheckVarargs:
+                    kill = true;
+                    m_graph.doToChildren(node, [&] (Edge edge) {
+                        kill &= !edge;
+                    });
                     break;
                 default:
                     break;

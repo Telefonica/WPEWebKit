@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,12 +26,11 @@
 #include "config.h"
 #include "CryptoKeyEC.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 #include "CryptoKeyPair.h"
 #include "GCryptUtilities.h"
 #include "JsonWebKey.h"
-#include <pal/crypto/gcrypt/Handle.h>
 #include <pal/crypto/gcrypt/Utilities.h>
 #include <pal/crypto/tasn1/Utilities.h>
 #include <wtf/text/Base64.h>
@@ -46,7 +45,7 @@ static const char* curveName(CryptoKeyEC::NamedCurve curve)
     case CryptoKeyEC::NamedCurve::P384:
         return "NIST P-384";
     case CryptoKeyEC::NamedCurve::P521:
-        break;
+        return "NIST P-521";
     }
 
     ASSERT_NOT_REACHED();
@@ -61,7 +60,7 @@ static const uint8_t* curveIdentifier(CryptoKeyEC::NamedCurve curve)
     case CryptoKeyEC::NamedCurve::P384:
         return CryptoConstants::s_secp384r1Identifier.data();
     case CryptoKeyEC::NamedCurve::P521:
-        break;
+        return CryptoConstants::s_secp521r1Identifier.data();
     }
 
     ASSERT_NOT_REACHED();
@@ -76,7 +75,7 @@ static size_t curveSize(CryptoKeyEC::NamedCurve curve)
     case CryptoKeyEC::NamedCurve::P384:
         return 384;
     case CryptoKeyEC::NamedCurve::P521:
-        break;
+        return 521;
     }
 
     ASSERT_NOT_REACHED();
@@ -91,7 +90,7 @@ static unsigned curveUncompressedFieldElementSize(CryptoKeyEC::NamedCurve curve)
     case CryptoKeyEC::NamedCurve::P384:
         return 48;
     case CryptoKeyEC::NamedCurve::P521:
-        break;
+        return 66;
     }
 
     ASSERT_NOT_REACHED();
@@ -103,22 +102,16 @@ static unsigned curveUncompressedPointSize(CryptoKeyEC::NamedCurve curve)
     return 2 * curveUncompressedFieldElementSize(curve) + 1;
 }
 
-CryptoKeyEC::~CryptoKeyEC()
-{
-    if (m_platformKey)
-        PAL::GCrypt::HandleDeleter<gcry_sexp_t>()(m_platformKey);
-}
-
 size_t CryptoKeyEC::keySizeInBits() const
 {
     size_t size = curveSize(m_curve);
-    ASSERT(size == gcry_pk_get_nbits(m_platformKey));
+    ASSERT(size == gcry_pk_get_nbits(m_platformKey.get()));
     return size;
 }
 
 bool CryptoKeyEC::platformSupportedCurve(NamedCurve curve)
 {
-    return curve == NamedCurve::P256 || curve == NamedCurve::P384;
+    return curve == NamedCurve::P256 || curve == NamedCurve::P384 || curve == NamedCurve::P521;
 }
 
 std::optional<CryptoKeyPair> CryptoKeyEC::platformGeneratePair(CryptoAlgorithmIdentifier identifier, NamedCurve curve, bool extractable, CryptoKeyUsageBitmap usages)
@@ -142,8 +135,8 @@ std::optional<CryptoKeyPair> CryptoKeyEC::platformGeneratePair(CryptoAlgorithmId
     if (!publicKeySexp || !privateKeySexp)
         return std::nullopt;
 
-    auto publicKey = CryptoKeyEC::create(identifier, curve, CryptoKeyType::Public, publicKeySexp.release(), true, usages);
-    auto privateKey = CryptoKeyEC::create(identifier, curve, CryptoKeyType::Private, privateKeySexp.release(), extractable, usages);
+    auto publicKey = CryptoKeyEC::create(identifier, curve, CryptoKeyType::Public, PlatformECKeyContainer(publicKeySexp.release()), true, usages);
+    auto privateKey = CryptoKeyEC::create(identifier, curve, CryptoKeyType::Private, PlatformECKeyContainer(privateKeySexp.release()), extractable, usages);
     return CryptoKeyPair { WTFMove(publicKey), WTFMove(privateKey) };
 }
 
@@ -160,7 +153,7 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportRaw(CryptoAlgorithmIdentifier ide
         return nullptr;
     }
 
-    return create(identifier, curve, CryptoKeyType::Public, platformKey.release(), extractable, usages);
+    return create(identifier, curve, CryptoKeyType::Public, PlatformECKeyContainer(platformKey.release()), extractable, usages);
 }
 
 RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportJWKPublic(CryptoAlgorithmIdentifier identifier, NamedCurve curve, Vector<uint8_t>&& x, Vector<uint8_t>&& y, bool extractable, CryptoKeyUsageBitmap usages)
@@ -184,7 +177,7 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportJWKPublic(CryptoAlgorithmIdentifi
         return nullptr;
     }
 
-    return create(identifier, curve, CryptoKeyType::Public, platformKey.release(), extractable, usages);
+    return create(identifier, curve, CryptoKeyType::Public, PlatformECKeyContainer(platformKey.release()), extractable, usages);
 }
 
 RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportJWKPrivate(CryptoAlgorithmIdentifier identifier, NamedCurve curve, Vector<uint8_t>&& x, Vector<uint8_t>&& y, Vector<uint8_t>&& d, bool extractable, CryptoKeyUsageBitmap usages)
@@ -208,7 +201,7 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportJWKPrivate(CryptoAlgorithmIdentif
         return nullptr;
     }
 
-    return create(identifier, curve, CryptoKeyType::Private, platformKey.release(), extractable, usages);
+    return create(identifier, curve, CryptoKeyType::Private, PlatformECKeyContainer(platformKey.release()), extractable, usages);
 }
 
 static bool supportedAlgorithmIdentifier(CryptoAlgorithmIdentifier keyIdentifier, const Vector<uint8_t>& identifier)
@@ -247,7 +240,7 @@ static std::optional<CryptoKeyEC::NamedCurve> curveForIdentifier(const Vector<ui
     if (CryptoConstants::matches(data, size, CryptoConstants::s_secp384r1Identifier))
         return CryptoKeyEC::NamedCurve::P384;
     if (CryptoConstants::matches(data, size, CryptoConstants::s_secp521r1Identifier))
-        return std::nullopt; // Not yet supported.
+        return CryptoKeyEC::NamedCurve::P521;
 
     return std::nullopt;
 }
@@ -345,7 +338,7 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportSpki(CryptoAlgorithmIdentifier id
     }
 
     // Finally create a new CryptoKeyEC object, transferring to it ownership of the `public-key` s-expression.
-    return create(identifier, curve, CryptoKeyType::Public, platformKey.release(), extractable, usages);
+    return create(identifier, curve, CryptoKeyType::Public, PlatformECKeyContainer(platformKey.release()), extractable, usages);
 }
 
 RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportPkcs8(CryptoAlgorithmIdentifier identifier, NamedCurve curve, Vector<uint8_t>&& keyData, bool extractable, CryptoKeyUsageBitmap usages)
@@ -449,8 +442,8 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportPkcs8(CryptoAlgorithmIdentifier i
         if (!privateKey)
             return nullptr;
 
-        // Validate the size of `privateKey`, making sure it fits the size of the specified EC curve.
-        if (privateKey->size() * 8 != curveSize(curve))
+        // Validate the size of `privateKey`, making sure it fits the byte-size of the specified EC curve.
+        if (privateKey->size() != (curveSize(curve) + 7) / 8)
             return nullptr;
 
         // Construct the `private-key` expression that will also be used for the EC context.
@@ -490,13 +483,13 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportPkcs8(CryptoAlgorithmIdentifier i
             return nullptr;
     }
 
-    return create(identifier, curve, CryptoKeyType::Private, platformKey.release(), extractable, usages);
+    return create(identifier, curve, CryptoKeyType::Private, PlatformECKeyContainer(platformKey.release()), extractable, usages);
 }
 
 Vector<uint8_t> CryptoKeyEC::platformExportRaw() const
 {
     PAL::GCrypt::Handle<gcry_ctx_t> context;
-    gcry_error_t error = gcry_mpi_ec_new(&context, m_platformKey, nullptr);
+    gcry_error_t error = gcry_mpi_ec_new(&context, m_platformKey.get(), nullptr);
     if (error != GPG_ERR_NO_ERROR) {
         PAL::GCrypt::logError(error);
         return { };
@@ -516,7 +509,7 @@ Vector<uint8_t> CryptoKeyEC::platformExportRaw() const
 bool CryptoKeyEC::platformAddFieldElements(JsonWebKey& jwk) const
 {
     PAL::GCrypt::Handle<gcry_ctx_t> context;
-    gcry_error_t error = gcry_mpi_ec_new(&context, m_platformKey, nullptr);
+    gcry_error_t error = gcry_mpi_ec_new(&context, m_platformKey.get(), nullptr);
     if (error != GPG_ERR_NO_ERROR) {
         PAL::GCrypt::logError(error);
         return false;
@@ -528,13 +521,8 @@ bool CryptoKeyEC::platformAddFieldElements(JsonWebKey& jwk) const
     if (qMPI) {
         auto q = mpiData(qMPI);
         if (q && q->size() == curveUncompressedPointSize(m_curve)) {
-            Vector<uint8_t> a;
-            a.append(q->data() + 1, uncompressedFieldElementSize);
-            jwk.x = base64URLEncode(a);
-
-            Vector<uint8_t> b;
-            b.append(q->data() + 1 + uncompressedFieldElementSize, uncompressedFieldElementSize);
-            jwk.y = base64URLEncode(b);
+            jwk.x = base64URLEncodeToString(Vector<uint8_t> { q->data() + 1, uncompressedFieldElementSize });
+            jwk.y = base64URLEncodeToString(Vector<uint8_t> { q->data() + 1 + uncompressedFieldElementSize, uncompressedFieldElementSize });
         }
     }
 
@@ -542,8 +530,16 @@ bool CryptoKeyEC::platformAddFieldElements(JsonWebKey& jwk) const
         PAL::GCrypt::Handle<gcry_mpi_t> dMPI(gcry_mpi_ec_get_mpi("d", context, 0));
         if (dMPI) {
             auto d = mpiData(dMPI);
-            if (d && d->size() == uncompressedFieldElementSize)
-                jwk.d = base64URLEncode(*d);
+            if (d && d->size() <= uncompressedFieldElementSize) {
+                // Zero-pad the private key data up to the field element size, if necessary.
+                if (d->size() < uncompressedFieldElementSize) {
+                    Vector<uint8_t> paddedData(uncompressedFieldElementSize - d->size(), 0);
+                    paddedData.appendVector(*d);
+                    *d = WTFMove(paddedData);
+                }
+
+                jwk.d = base64URLEncodeToString(*d);
+            }
         }
     }
 
@@ -587,7 +583,7 @@ Vector<uint8_t> CryptoKeyEC::platformExportSpki() const
         }
 
         // Retrieve the `q` s-expression, which should contain the public key data.
-        PAL::GCrypt::Handle<gcry_sexp_t> qSexp(gcry_sexp_find_token(m_platformKey, "q", 0));
+        PAL::GCrypt::Handle<gcry_sexp_t> qSexp(gcry_sexp_find_token(m_platformKey.get(), "q", 0));
         if (!qSexp)
             return { };
 
@@ -641,7 +637,7 @@ Vector<uint8_t> CryptoKeyEC::platformExportPkcs8() const
 
         // Construct the EC context that we'll use to retrieve private and public key data.
         PAL::GCrypt::Handle<gcry_ctx_t> context;
-        gcry_error_t error = gcry_mpi_ec_new(&context, m_platformKey, nullptr);
+        gcry_error_t error = gcry_mpi_ec_new(&context, m_platformKey.get(), nullptr);
         if (error != GPG_ERR_NO_ERROR)
             return { };
 
@@ -651,9 +647,22 @@ Vector<uint8_t> CryptoKeyEC::platformExportPkcs8() const
             if (!dMPI)
                 return { };
 
-            // Retrieve the MPI data and write it out under `privateKey`.
+            unsigned uncompressedFieldElementSize = curveUncompressedFieldElementSize(m_curve);
+
+            // Retrieve the `d` MPI data.
             auto data = mpiData(dMPI);
-            if (!data || !PAL::TASN1::writeElement(ecPrivateKey, "privateKey", data->data(), data->size()))
+            if (!data || data->size() > uncompressedFieldElementSize)
+                return { };
+
+            // Zero-pad the private key data up to the field element size, if necessary.
+            if (data->size() < uncompressedFieldElementSize) {
+                Vector<uint8_t> paddedData(uncompressedFieldElementSize - data->size(), 0);
+                paddedData.appendVector(*data);
+                *data = WTFMove(paddedData);
+            }
+
+            // Write out the data under `privateKey`.
+            if (!PAL::TASN1::writeElement(ecPrivateKey, "privateKey", data->data(), data->size()))
                 return { };
         }
 
@@ -720,4 +729,4 @@ Vector<uint8_t> CryptoKeyEC::platformExportPkcs8() const
 
 } // namespace WebCore
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

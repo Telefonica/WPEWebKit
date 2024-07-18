@@ -29,13 +29,10 @@
 
 #include "WebView.h"
 
-#include <WebCore/DefWndProcWindowClass.h>
 #include <WebCore/Document.h>
 #include <WebCore/Frame.h>
 #include <WebCore/FrameView.h>
 #include <WebCore/GraphicsLayerTextureMapper.h>
-#include <WebCore/HWndDC.h>
-#include <WebCore/MainFrame.h>
 #include <WebCore/Page.h>
 #include <WebCore/Settings.h>
 #include <WebCore/SystemInfo.h>
@@ -43,8 +40,7 @@
 #include <WebCore/TextureMapperGL.h>
 #include <WebCore/TextureMapperLayer.h>
 
-#if USE(OPENGL_ES_2)
-#define GL_GLEXT_PROTOTYPES 1
+#if USE(OPENGL_ES)
 #include <GLES2/gl2.h>
 #else
 #include <GL/gl.h>
@@ -54,9 +50,9 @@ using namespace WebCore;
 
 AcceleratedCompositingContext::AcceleratedCompositingContext(WebView& webView)
     : m_webView(webView)
-    , m_layerFlushTimer(*this)
     , m_context(nullptr)
     , m_window(0)
+    , m_layerFlushTimer(*this)
 {
 }
 
@@ -94,11 +90,11 @@ void AcceleratedCompositingContext::initialize()
         m_nonCompositedContentLayer->setAcceleratesDrawing(true);
 
 #ifndef NDEBUG
-    m_rootLayer->setName("Root layer");
-    m_nonCompositedContentLayer->setName("Non-composited content");
+    m_rootLayer->setName("Root layer"_s);
+    m_nonCompositedContentLayer->setName("Non-composited content"_s);
 #endif
 
-    m_rootLayer->addChild(m_nonCompositedContentLayer.get());
+    m_rootLayer->addChild(*m_nonCompositedContentLayer);
     m_nonCompositedContentLayer->setNeedsDisplay();
 
     // The creation of the TextureMapper needs an active OpenGL context.
@@ -111,7 +107,6 @@ void AcceleratedCompositingContext::initialize()
     m_context->makeContextCurrent();
 
     m_textureMapper = TextureMapperGL::create();
-    downcast<GraphicsLayerTextureMapper>(*m_rootLayer).layer().setTextureMapper(m_textureMapper.get());
 
     scheduleLayerFlush();
 }
@@ -187,7 +182,7 @@ void AcceleratedCompositingContext::compositeLayersToContext(CompositePurpose pu
     }
 
     m_textureMapper->beginPainting();
-    downcast<GraphicsLayerTextureMapper>(*m_rootLayer).layer().paint();
+    downcast<GraphicsLayerTextureMapper>(*m_rootLayer).layer().paint(*m_textureMapper);
     m_fpsCounter.updateFPSAndDisplay(*m_textureMapper);
     m_textureMapper->endPainting();
 
@@ -212,7 +207,7 @@ void AcceleratedCompositingContext::setRootCompositingLayer(GraphicsLayer* graph
         return;
 
     m_nonCompositedContentLayer->removeAllChildren();
-    m_nonCompositedContentLayer->addChild(graphicsLayer);
+    m_nonCompositedContentLayer->addChild(*graphicsLayer);
 
     stopAnyPendingLayerFlush();
 
@@ -267,81 +262,6 @@ void AcceleratedCompositingContext::scrollNonCompositedContents(const IntRect& s
     scheduleLayerFlush();
 }
 
-bool AcceleratedCompositingContext::acceleratedCompositingAvailable()
-{
-    const int width = 10;
-    const int height = 10;
-
-    // ANGLE requires Win7 or later.
-    if (windowsVersion() < Windows7)
-        return false;
-
-    // Create test window to render texture in.
-    HWND testWindow = ::CreateWindowEx(WS_EX_NOACTIVATE, defWndProcWindowClassName(), L"AcceleratedCompositingTesterWindow", WS_POPUP | WS_VISIBLE | WS_DISABLED, -width, -height, width, height, 0, 0, 0, 0);
-
-    if (!testWindow)
-        return false;
-
-    // Create GL context.
-    std::unique_ptr<WebCore::GLContext> context = GLContext::createContextForWindow(testWindow);
-
-    if (!context) {
-        ::DestroyWindow(testWindow);
-        return false;
-    }
-
-    context->makeContextCurrent();
-
-    std::unique_ptr<WebCore::TextureMapper> textureMapper = TextureMapperGL::create();
-
-    if (!textureMapper) {
-        ::DestroyWindow(testWindow);
-        return false;
-    }
-
-    // Create texture.
-    RefPtr<BitmapTexture> texture = textureMapper->createTexture();
-
-    if (!texture) {
-        ::DestroyWindow(testWindow);
-        return false;
-    }
-
-    texture->reset(IntSize(width, height));
-
-    // Copy bitmap data to texture.
-    const int bitmapSize = width * height;
-    int data[bitmapSize];
-    const COLORREF colorRed = RGB(255, 0, 0);
-    const COLORREF colorGreen = RGB(0, 255, 0);
-    for (int i = 0; i < bitmapSize; i++)
-        data[i] = colorGreen;
-    IntRect targetRect(0, 0, width, height);
-    IntPoint offset(0, 0);
-    int bytesPerLine = width * 4;
-    BitmapTexture::UpdateContentsFlag flags = BitmapTexture::UpdateCanModifyOriginalImageData;
-    texture->updateContents(data, targetRect, offset, bytesPerLine, flags);
-
-    // Render texture.
-    textureMapper->beginPainting();
-    FloatRect rect(0, 0, width, height);
-    textureMapper->drawTexture(*texture, rect);
-    textureMapper->endPainting();
-
-    // Set color of pixel (0, 0) to red, to make sure it is different from the bitmap color.
-    HWndDC hdc(testWindow);
-    ::SetPixel(hdc, 0, 0, colorRed);
-
-    context->swapBuffers();
-
-    // Check if pixel (0, 0) has expected color.
-    COLORREF pixelColor = ::GetPixel(hdc, 0, 0);
-
-    ::DestroyWindow(testWindow);
-
-    return pixelColor == colorGreen;
-}
-
 void AcceleratedCompositingContext::scheduleLayerFlush()
 {
     if (!enabled())
@@ -361,7 +281,7 @@ bool AcceleratedCompositingContext::flushPendingLayerChanges()
     if (!frameView->flushCompositingStateIncludingSubframes())
         return false;
 
-    downcast<GraphicsLayerTextureMapper>(*m_rootLayer).updateBackingStoreIncludingSubLayers();
+    downcast<GraphicsLayerTextureMapper>(*m_rootLayer).updateBackingStoreIncludingSubLayers(*m_textureMapper);
     return true;
 }
 
@@ -376,11 +296,7 @@ void AcceleratedCompositingContext::flushAndRenderLayers()
     if (!enabled())
         return;
 
-    Frame& frame = core(&m_webView)->mainFrame();
-    if (!frame.contentRenderer() || !frame.view())
-        return;
-
-    frame.view()->updateLayoutAndStyleIfNeededRecursive();
+    core(&m_webView)->isolatedUpdateRendering();
 
     if (!enabled())
         return;
@@ -403,7 +319,7 @@ void AcceleratedCompositingContext::layerFlushTimerFired()
         scheduleLayerFlush();
 }
 
-void AcceleratedCompositingContext::paintContents(const GraphicsLayer*, GraphicsContext& context, GraphicsLayerPaintingPhase, const FloatRect& rectToPaint, GraphicsLayerPaintBehavior)
+void AcceleratedCompositingContext::paintContents(const GraphicsLayer*, GraphicsContext& context, const FloatRect& rectToPaint, GraphicsLayerPaintBehavior)
 {
     context.save();
     context.clip(rectToPaint);
@@ -414,6 +330,14 @@ void AcceleratedCompositingContext::paintContents(const GraphicsLayer*, Graphics
 float AcceleratedCompositingContext::deviceScaleFactor() const
 {
     return m_webView.deviceScaleFactor();
+}
+
+String AcceleratedCompositingContext::layerTreeAsString() const
+{
+    if (!m_rootLayer)
+        return { };
+
+    return m_rootLayer->layerTreeAsText(AllLayerTreeAsTextOptions);
 }
 
 #endif // USE(TEXTURE_MAPPER_GL)

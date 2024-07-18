@@ -23,27 +23,59 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WI.DOMBreakpoint = class DOMBreakpoint extends WI.Object
+WI.DOMBreakpoint = class DOMBreakpoint extends WI.Breakpoint
 {
-    constructor(domNodeOrInfo, type, disabled)
+    constructor(domNodeOrInfo, type, {disabled, actions, condition, ignoreCount, autoContinue} = {})
     {
-        console.assert(domNodeOrInfo, "Missing DOMNode or info.");
+        console.assert(domNodeOrInfo instanceof WI.DOMNode || typeof domNodeOrInfo === "object", domNodeOrInfo);
+        console.assert(Object.values(WI.DOMBreakpoint.Type).includes(type), type);
 
-        super();
+        super({disabled, actions, condition, ignoreCount, autoContinue});
 
         if (domNodeOrInfo instanceof WI.DOMNode) {
-            this._domNodeIdentifier = domNodeOrInfo.id;
+            this._domNode = domNodeOrInfo;
             this._path = domNodeOrInfo.path();
-            console.assert(WI.frameResourceManager.mainFrame);
-            this._url = WI.frameResourceManager.mainFrame.url;
+            console.assert(WI.networkManager.mainFrame);
+            this._url = WI.networkManager.mainFrame.url;
         } else if (domNodeOrInfo && typeof domNodeOrInfo === "object") {
-            this._domNodeIdentifier = null;
+            this._domNode = null;
             this._path = domNodeOrInfo.path;
             this._url = domNodeOrInfo.url;
         }
 
         this._type = type;
-        this._disabled = disabled || false;
+    }
+
+    // Static
+
+    static displayNameForType(type)
+    {
+        console.assert(Object.values(WI.DOMBreakpoint.Type).includes(type), type);
+
+        switch (type) {
+        case WI.DOMBreakpoint.Type.SubtreeModified:
+            return WI.UIString("Subtree Modified", "Subtree Modified @ DOM Breakpoint", "A submenu item of 'Break On' that breaks (pauses) before child DOM node is modified");
+
+        case WI.DOMBreakpoint.Type.AttributeModified:
+            return WI.UIString("Attribute Modified", "Attribute Modified @ DOM Breakpoint", "A submenu item of 'Break On' that breaks (pauses) before DOM attribute is modified");
+
+        case WI.DOMBreakpoint.Type.NodeRemoved:
+            return WI.UIString("Node Removed", "Node Removed @ DOM Breakpoint", "A submenu item of 'Break On' that breaks (pauses) before DOM node is removed");
+        }
+
+        console.assert(false, "Unknown DOM breakpoint type", type);
+        return WI.UIString("DOM");
+    }
+
+    static fromJSON(json)
+    {
+        return new WI.DOMBreakpoint(json, json.type, {
+            disabled: json.disabled,
+            condition: json.condition,
+            actions: json.actions?.map((actionJSON) => WI.BreakpointAction.fromJSON(actionJSON)) || [],
+            ignoreCount: json.ignoreCount,
+            autoContinue: json.autoContinue,
+        });
     }
 
     // Public
@@ -52,60 +84,59 @@ WI.DOMBreakpoint = class DOMBreakpoint extends WI.Object
     get url() { return this._url; }
     get path() { return this._path; }
 
-    get disabled()
+    get displayName()
     {
-        return this._disabled;
+        return WI.DOMBreakpoint.displayNameForType(this._type);
     }
 
-    set disabled(disabled)
+    get editable()
     {
-        if (this._disabled === disabled)
+        // COMPATIBILITY (iOS 14): DOMDebugger.setDOMBreakpoint did not have an "options" parameter yet.
+        return InspectorBackend.hasCommand("DOMDebugger.setDOMBreakpoint", "options");
+    }
+
+    get domNode()
+    {
+        return this._domNode;
+    }
+
+    set domNode(domNode)
+    {
+        console.assert(!domNode || domNode instanceof WI.DOMNode, domNode);
+        console.assert(!domNode || xor(domNode, this._domNode), "domNode should not change once set", domNode, this._domNode);
+        if (!xor(domNode, this._domNode))
             return;
 
-        this._disabled = disabled;
-
-        this.dispatchEventToListeners(WI.DOMBreakpoint.Event.DisabledStateDidChange);
+        this.dispatchEventToListeners(WI.DOMBreakpoint.Event.DOMNodeWillChange);
+        this._domNode = domNode;
+        this.dispatchEventToListeners(WI.DOMBreakpoint.Event.DOMNodeDidChange);
     }
 
-    get domNodeIdentifier()
+    remove()
     {
-        return this._domNodeIdentifier;
-    }
+        super.remove();
 
-    set domNodeIdentifier(nodeIdentifier)
-    {
-        if (this._domNodeIdentifier === nodeIdentifier)
-            return;
-
-        let data = {};
-        if (!nodeIdentifier)
-            data.oldNodeIdentifier = this._domNodeIdentifier;
-
-        this._domNodeIdentifier = nodeIdentifier;
-
-        this.dispatchEventToListeners(WI.DOMBreakpoint.Event.ResolvedStateDidChange, data);
-    }
-
-    get serializableInfo()
-    {
-        let info = {url: this._url, path: this._path, type: this._type};
-        if (this._disabled)
-            info.disabled = true;
-
-        return info;
+        WI.domDebuggerManager.removeDOMBreakpoint(this);
     }
 
     saveIdentityToCookie(cookie)
     {
-        cookie[WI.DOMBreakpoint.DocumentURLCookieKey] = this.url;
-        cookie[WI.DOMBreakpoint.NodePathCookieKey] = this.path;
-        cookie[WI.DOMBreakpoint.TypeCookieKey] = this.type;
+        cookie["dom-breakpoint-url"] = this._url;
+        cookie["dom-breakpoint-path"] = this._path;
+        cookie["dom-breakpoint-type"] = this._type;
+    }
+
+    toJSON(key)
+    {
+        let json = super.toJSON(key);
+        json.url = this._url;
+        json.path = this._path;
+        json.type = this._type;
+        if (key === WI.ObjectStore.toJSONSymbol)
+            json[WI.objectStores.domBreakpoints.keyPath] = this._url + ":" + this._path + ":" + this._type;
+        return json;
     }
 };
-
-WI.DOMBreakpoint.DocumentURLCookieKey = "dom-breakpoint-document-url";
-WI.DOMBreakpoint.NodePathCookieKey = "dom-breakpoint-node-path";
-WI.DOMBreakpoint.TypeCookieKey = "dom-breakpoint-type";
 
 WI.DOMBreakpoint.Type = {
     SubtreeModified: "subtree-modified",
@@ -114,6 +145,8 @@ WI.DOMBreakpoint.Type = {
 };
 
 WI.DOMBreakpoint.Event = {
-    DisabledStateDidChange: "dom-breakpoint-disabled-state-did-change",
-    ResolvedStateDidChange: "dom-breakpoint-resolved-state-did-change",
+    DOMNodeDidChange: "dom-breakpoint-dom-node-did-change",
+    DOMNodeWillChange: "dom-breakpoint-dom-node-will-change",
 };
+
+WI.DOMBreakpoint.ReferencePage = WI.ReferencePage.DOMBreakpoints;

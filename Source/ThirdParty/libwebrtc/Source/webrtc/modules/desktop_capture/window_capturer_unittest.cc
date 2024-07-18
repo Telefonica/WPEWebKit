@@ -9,21 +9,25 @@
  */
 
 #include <memory>
+#include <string>
+#include <utility>
 
-#include "webrtc/modules/desktop_capture/desktop_capturer.h"
-#include "webrtc/modules/desktop_capture/desktop_capture_options.h"
-#include "webrtc/modules/desktop_capture/desktop_frame.h"
-#include "webrtc/modules/desktop_capture/desktop_region.h"
-#include "webrtc/test/gtest.h"
+#include "modules/desktop_capture/desktop_capture_options.h"
+#include "modules/desktop_capture/desktop_capturer.h"
+#include "modules/desktop_capture/desktop_frame.h"
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "rtc_base/checks.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
-class WindowCapturerTest : public testing::Test,
+class WindowCapturerTest : public ::testing::Test,
                            public DesktopCapturer::Callback {
  public:
   void SetUp() override {
     capturer_ = DesktopCapturer::CreateWindowCapturer(
         DesktopCaptureOptions::CreateDefault());
+    ASSERT_TRUE(capturer_);
   }
 
   void TearDown() override {}
@@ -40,7 +44,13 @@ class WindowCapturerTest : public testing::Test,
 };
 
 // Verify that we can enumerate windows.
-TEST_F(WindowCapturerTest, Enumerate) {
+// TODO(bugs.webrtc.org/12950): Re-enable when libc++ issue is fixed
+#if defined(WEBRTC_LINUX) && defined(MEMORY_SANITIZER)
+#define MAYBE_Enumerate DISABLED_Enumerate
+#else
+#define MAYBE_Enumerate Enumerate
+#endif
+TEST_F(WindowCapturerTest, MAYBE_Enumerate) {
   DesktopCapturer::SourceList sources;
   EXPECT_TRUE(capturer_->GetSourceList(&sources));
 
@@ -50,6 +60,13 @@ TEST_F(WindowCapturerTest, Enumerate) {
   }
 }
 
+// Flaky on Linux. See: crbug.com/webrtc/7830.
+// Failing on macOS 11: See bugs.webrtc.org/12801
+#if defined(WEBRTC_LINUX) || defined(WEBRTC_MAC)
+#define MAYBE_Capture DISABLED_Capture
+#else
+#define MAYBE_Capture Capture
+#endif
 // Verify we can capture a window.
 //
 // TODO(sergeyu): Currently this test just looks at the windows that already
@@ -57,7 +74,7 @@ TEST_F(WindowCapturerTest, Enumerate) {
 // is no easy cross-platform way to create new windows (potentially we could
 // have a python script showing Tk dialog, but launching code will differ
 // between platforms).
-TEST_F(WindowCapturerTest, Capture) {
+TEST_F(WindowCapturerTest, MAYBE_Capture) {
   DesktopCapturer::SourceList sources;
   capturer_->Start(this);
   EXPECT_TRUE(capturer_->GetSourceList(&sources));

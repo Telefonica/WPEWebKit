@@ -23,11 +23,21 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import <wtf/Platform.h>
+
 #if USE(APPKIT)
 
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
 
-@interface NSView () <CALayerDelegate>
+@interface NSView () <CALayerDelegate> {
+}
+
+- (NSView *)_findLastViewInKeyViewLoop;
+
+@end
+
+@interface NSView (SubviewsIvar)
+@property (assign, setter=_setSubviewsIvar:) NSMutableArray<__kindof NSView *> *_subviewsIvar;
 @end
 
 #endif // PLATFORM(MAC)

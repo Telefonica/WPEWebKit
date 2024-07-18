@@ -56,9 +56,9 @@ class GridTrackSize {
 public:
     GridTrackSize(const GridLength& length, GridTrackSizeType trackSizeType = LengthTrackSizing)
         : m_type(trackSizeType)
-        , m_minTrackBreadth(trackSizeType == FitContentTrackSizing ? Length(Auto) : length)
-        , m_maxTrackBreadth(trackSizeType == FitContentTrackSizing ? Length(Auto) : length)
-        , m_fitContentTrackBreadth(trackSizeType == FitContentTrackSizing ? length : GridLength(Length(Fixed)))
+        , m_minTrackBreadth(trackSizeType == FitContentTrackSizing ? Length(LengthType::Auto) : length)
+        , m_maxTrackBreadth(trackSizeType == FitContentTrackSizing ? Length(LengthType::Auto) : length)
+        , m_fitContentTrackBreadth(trackSizeType == FitContentTrackSizing ? length : GridLength(Length(LengthType::Fixed)))
     {
         ASSERT(trackSizeType == LengthTrackSizing || trackSizeType == FitContentTrackSizing);
         ASSERT(trackSizeType != FitContentTrackSizing || length.isLength());
@@ -69,7 +69,7 @@ public:
         : m_type(MinMaxTrackSizing)
         , m_minTrackBreadth(minTrackBreadth)
         , m_maxTrackBreadth(maxTrackBreadth)
-        , m_fitContentTrackBreadth(GridLength(Length(Fixed)))
+        , m_fitContentTrackBreadth(GridLength(Length(LengthType::Fixed)))
     {
         cacheMinMaxTrackBreadthTypes();
     }
@@ -102,6 +102,7 @@ public:
         m_maxTrackBreadthIsMaxContent = maxTrackBreadth().isLength() && maxTrackBreadth().length().isMaxContent();
         m_maxTrackBreadthIsMinContent = maxTrackBreadth().isLength() && maxTrackBreadth().length().isMinContent();
         m_maxTrackBreadthIsAuto = maxTrackBreadth().isLength() && maxTrackBreadth().length().isAuto();
+        m_maxTrackBreadthIsFixed = maxTrackBreadth().isLength() && maxTrackBreadth().length().isSpecified();
 
         // These values depend on the above ones so keep them here.
         m_minTrackBreadthIsIntrinsic = m_minTrackBreadthIsMaxContent || m_minTrackBreadthIsMinContent
@@ -123,6 +124,7 @@ public:
     bool hasMinContentMinTrackBreadth() const { return m_minTrackBreadthIsMinContent; }
     bool hasMaxContentMinTrackBreadthAndMaxContentMaxTrackBreadth() const { return m_minTrackBreadthIsMaxContent && m_maxTrackBreadthIsMaxContent; }
     bool hasAutoOrMinContentMinTrackBreadthAndIntrinsicMaxTrackBreadth() const { return (m_minTrackBreadthIsMinContent || m_minTrackBreadthIsAuto) && m_maxTrackBreadthIsIntrinsic; }
+    bool hasFixedMaxTrackBreadth() const { return m_maxTrackBreadthIsFixed; }
 
 private:
     GridTrackSizeType m_type;
@@ -138,6 +140,9 @@ private:
     bool m_maxTrackBreadthIsMinContent : 1;
     bool m_minTrackBreadthIsIntrinsic : 1;
     bool m_maxTrackBreadthIsIntrinsic : 1;
+    bool m_maxTrackBreadthIsFixed : 1;
 };
+
+WTF::TextStream& operator<<(WTF::TextStream&, const GridTrackSize&);
 
 } // namespace WebCore

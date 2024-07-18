@@ -31,13 +31,11 @@
 #include "AirSpecial.h"
 #include "AirStackSlot.h"
 #include "B3Value.h"
-#include "FPRInfo.h"
 #include "GPRInfo.h"
 
-#if COMPILER(GCC) && ASSERT_DISABLED
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wreturn-type"
-#endif // COMPILER(GCC) && ASSERT_DISABLED
+#if !ASSERT_ENABLED
+IGNORE_RETURN_TYPE_WARNINGS_BEGIN
+#endif
 
 namespace JSC { namespace B3 { namespace Air {
 
@@ -72,9 +70,14 @@ bool Arg::usesTmp(Air::Tmp tmp) const
     return uses;
 }
 
+bool Arg::canRepresent(Type type) const
+{
+    return isBank(bankForType(type));
+}
+
 bool Arg::canRepresent(Value* value) const
 {
-    return isBank(bankForType(value->type()));
+    return canRepresent(value->type());
 }
 
 bool Arg::isCompatibleBank(const Arg& other) const
@@ -99,6 +102,7 @@ unsigned Arg::jsHash() const
         break;
     case Imm:
     case BitImm:
+    case ZeroReg:
     case CallArg:
     case RelCond:
     case ResCond:
@@ -125,6 +129,11 @@ unsigned Arg::jsHash() const
         result += m_scale;
         result += m_base.internalValue();
         result += m_index.internalValue();
+        break;
+    case PreIndex:
+    case PostIndex:
+        result += m_offset;
+        result += m_base.internalValue();
         break;
     case Stack:
         result += static_cast<unsigned>(m_scale);
@@ -156,6 +165,9 @@ void Arg::dump(PrintStream& out) const
     case BitImm64:
         out.printf("$0x%llx", static_cast<long long unsigned>(m_offset));
         return;
+    case ZeroReg:
+        out.print("%xzr");
+        return;
     case SimpleAddr:
         out.print("(", base(), ")");
         return;
@@ -172,6 +184,12 @@ void Arg::dump(PrintStream& out) const
         if (scale() != 1)
             out.print(",", scale());
         out.print(")");
+        return;
+    case PreIndex:
+        out.print("(", base(), ",Pre($", offset(), "))");
+        return;
+    case PostIndex:
+        out.print("(", base(), ",Post($", offset(), "))");
         return;
     case Stack:
         if (offset())
@@ -233,6 +251,9 @@ void printInternal(PrintStream& out, Arg::Kind kind)
     case Arg::BitImm64:
         out.print("BitImm64");
         return;
+    case Arg::ZeroReg:
+        out.print("ZeroReg");
+        return;
     case Arg::SimpleAddr:
         out.print("SimpleAddr");
         return;
@@ -250,6 +271,12 @@ void printInternal(PrintStream& out, Arg::Kind kind)
         return;
     case Arg::Index:
         out.print("Index");
+        return;
+    case Arg::PreIndex:
+        out.print("PreIndex");
+        return;
+    case Arg::PostIndex:
+        out.print("PostIndex");
         return;
     case Arg::RelCond:
         out.print("RelCond");
@@ -379,8 +406,8 @@ void printInternal(PrintStream& out, Arg::Signedness signedness)
 
 } // namespace WTF
 
-#if COMPILER(GCC) && ASSERT_DISABLED
-#pragma GCC diagnostic pop
-#endif // COMPILER(GCC) && ASSERT_DISABLED
+#if !ASSERT_ENABLED
+IGNORE_RETURN_TYPE_WARNINGS_END
+#endif
 
 #endif // ENABLE(B3_JIT)

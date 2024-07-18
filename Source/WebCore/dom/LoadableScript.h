@@ -26,7 +26,8 @@
 #pragma once
 
 #include "ScriptElementCachedScriptFetcher.h"
-#include <runtime/ConsoleTypes.h>
+#include <JavaScriptCore/ConsoleTypes.h>
+#include <JavaScriptCore/JSCJSValue.h>
 #include <wtf/HashCountedSet.h>
 #include <wtf/text/WTFString.h>
 
@@ -40,6 +41,7 @@ public:
     enum class ErrorType {
         CachedScript,
         CrossOriginLoad,
+        MIMEType,
         Nosniff,
         FailedIntegrityCheck,
     };
@@ -53,9 +55,10 @@ public:
     struct Error {
         ErrorType type;
         std::optional<ConsoleMessage> consoleMessage;
+        std::optional<JSC::JSValue> errorValue;
     };
 
-    virtual ~LoadableScript() { }
+    virtual ~LoadableScript() = default;
 
     virtual bool isLoaded() const = 0;
     virtual std::optional<Error> error() const = 0;
@@ -67,8 +70,8 @@ public:
     void removeClient(LoadableScriptClient&);
 
 protected:
-    LoadableScript(const String& nonce, const String& crossOriginMode, const String& charset, const AtomicString& initiatorName, bool isInUserAgentShadowTree)
-        : ScriptElementCachedScriptFetcher(nonce, crossOriginMode, charset, initiatorName, isInUserAgentShadowTree)
+    LoadableScript(const AtomString& nonce, ReferrerPolicy policy, const AtomString& crossOriginMode, const String& charset, const AtomString& initiatorName, bool isInUserAgentShadowTree)
+        : ScriptElementCachedScriptFetcher(nonce, policy, crossOriginMode, charset, initiatorName, isInUserAgentShadowTree)
     {
     }
 

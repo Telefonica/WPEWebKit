@@ -15,8 +15,8 @@
 #include "common/angleutils.h"
 #include "common/platform.h"
 #include "libANGLE/renderer/Format.h"
-#include "libANGLE/renderer/renderer_utils.h"
 #include "libANGLE/renderer/d3d/formatutilsD3D.h"
+#include "libANGLE/renderer/renderer_utils.h"
 
 namespace rx
 {
@@ -30,18 +30,20 @@ namespace d3d11
 // on device capabilities.
 // This structure allows querying for the DXGI texture formats to use for textures, SRVs, RTVs and
 // DSVs given a GL internal format.
-struct Format final : angle::NonCopyable
+struct Format final : private angle::NonCopyable
 {
-    constexpr Format();
-    constexpr Format(GLenum internalFormat,
-                     angle::Format::ID formatID,
-                     DXGI_FORMAT texFormat,
-                     DXGI_FORMAT srvFormat,
-                     DXGI_FORMAT rtvFormat,
-                     DXGI_FORMAT dsvFormat,
-                     DXGI_FORMAT blitSRVFormat,
-                     GLenum swizzleFormat,
-                     InitializeTextureDataFunction internalFormatInitializer);
+    inline constexpr Format();
+    inline constexpr Format(GLenum internalFormat,
+                            angle::FormatID formatID,
+                            DXGI_FORMAT texFormat,
+                            DXGI_FORMAT srvFormat,
+                            DXGI_FORMAT uavFormat,
+                            DXGI_FORMAT rtvFormat,
+                            DXGI_FORMAT dsvFormat,
+                            DXGI_FORMAT blitSRVFormat,
+                            DXGI_FORMAT stencilSRVFormat,
+                            GLenum swizzleFormat,
+                            InitializeTextureDataFunction internalFormatInitializer);
 
     static const Format &Get(GLenum internalFormat, const Renderer11DeviceCaps &deviceCaps);
 
@@ -50,14 +52,16 @@ struct Format final : angle::NonCopyable
     const angle::Format &format() const;
 
     GLenum internalFormat;
-    angle::Format::ID formatID;
+    angle::FormatID formatID;
 
     DXGI_FORMAT texFormat;
     DXGI_FORMAT srvFormat;
+    DXGI_FORMAT uavFormat;
     DXGI_FORMAT rtvFormat;
     DXGI_FORMAT dsvFormat;
 
     DXGI_FORMAT blitSRVFormat;
+    DXGI_FORMAT stencilSRVFormat;
 
     GLenum swizzleFormat;
 
@@ -66,37 +70,41 @@ struct Format final : angle::NonCopyable
 
 constexpr Format::Format()
     : internalFormat(GL_NONE),
-      formatID(angle::Format::ID::NONE),
+      formatID(angle::FormatID::NONE),
       texFormat(DXGI_FORMAT_UNKNOWN),
       srvFormat(DXGI_FORMAT_UNKNOWN),
+      uavFormat(DXGI_FORMAT_UNKNOWN),
       rtvFormat(DXGI_FORMAT_UNKNOWN),
       dsvFormat(DXGI_FORMAT_UNKNOWN),
       blitSRVFormat(DXGI_FORMAT_UNKNOWN),
+      stencilSRVFormat(DXGI_FORMAT_UNKNOWN),
       swizzleFormat(GL_NONE),
       dataInitializerFunction(nullptr)
-{
-}
+{}
 
 constexpr Format::Format(GLenum internalFormat,
-                         angle::Format::ID formatID,
+                         angle::FormatID formatID,
                          DXGI_FORMAT texFormat,
                          DXGI_FORMAT srvFormat,
+                         DXGI_FORMAT uavFormat,
                          DXGI_FORMAT rtvFormat,
                          DXGI_FORMAT dsvFormat,
                          DXGI_FORMAT blitSRVFormat,
+                         DXGI_FORMAT stencilSRVFormat,
                          GLenum swizzleFormat,
                          InitializeTextureDataFunction internalFormatInitializer)
     : internalFormat(internalFormat),
       formatID(formatID),
       texFormat(texFormat),
       srvFormat(srvFormat),
+      uavFormat(uavFormat),
       rtvFormat(rtvFormat),
       dsvFormat(dsvFormat),
       blitSRVFormat(blitSRVFormat),
+      stencilSRVFormat(stencilSRVFormat),
       swizzleFormat(swizzleFormat),
       dataInitializerFunction(internalFormatInitializer)
-{
-}
+{}
 
 }  // namespace d3d11
 

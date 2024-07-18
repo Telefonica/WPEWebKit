@@ -26,154 +26,27 @@
 #import "config.h"
 #import "RemoteLayerTreeHost.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
+#import "RemoteLayerTreeDrawingAreaProxy.h"
+#import "RemoteLayerTreeViews.h"
 #import "UIKitSPI.h"
-#import "WebKitSystemInterface.h"
+#import "WebPageProxy.h"
 #import <UIKit/UIScrollView.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
 
-using namespace WebCore;
-
-@interface UIView (WKHitTesting)
-- (UIView *)_findDescendantViewAtPoint:(CGPoint)point withEvent:(UIEvent *)event;
-@end
-
-@implementation UIView (WKHitTesting)
-
-// UIView hit testing assumes that views should only hit test subviews that are entirely contained
-// in the view. This is not true of web content.
-// We only want to find UIScrollViews here. Other views are ignored.
-- (UIView *)_recursiveFindDescendantScrollViewAtPoint:(CGPoint)point withEvent:(UIEvent *)event
-{
-    if (self.clipsToBounds && ![self pointInside:point withEvent:event])
-        return nil;
-
-    __block UIView *foundView = nil;
-    [[self subviews] enumerateObjectsUsingBlock:^(UIView *view, NSUInteger idx, BOOL *stop) {
-        CGPoint subviewPoint = [view convertPoint:point fromView:self];
-
-        if ([view pointInside:subviewPoint withEvent:event] && [view isKindOfClass:[UIScrollView class]] && view.isUserInteractionEnabled)
-            foundView = view;
-
-        if (![view subviews])
-            return;
-
-        if (UIView *hitView = [view _recursiveFindDescendantScrollViewAtPoint:subviewPoint withEvent:event])
-            foundView = hitView;
-    }];
-
-    return foundView;
-}
-
-- (UIView *)_findDescendantViewAtPoint:(CGPoint)point withEvent:(UIEvent *)event
-{
-    return [self _recursiveFindDescendantScrollViewAtPoint:point withEvent:event];
-}
-
-@end
-
-@interface WKCompositingView : UIView
-@end
-
-@implementation WKCompositingView
-
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event
-{
-    return [self _findDescendantViewAtPoint:point withEvent:event];
-}
-
-- (NSString *)description
-{
-    NSString *viewDescription = [super description];
-    NSString *webKitDetails = [NSString stringWithFormat:@" layerID = %llu \"%@\"", WebKit::RemoteLayerTreeHost::layerID(self.layer), self.layer.name ? self.layer.name : @""];
-    return [viewDescription stringByAppendingString:webKitDetails];
-}
-
-@end
-
-@interface WKTransformView : WKCompositingView
-@end
-
-@implementation WKTransformView
-
-+ (Class)layerClass
-{
-    return [CATransformLayer self];
-}
-
-@end
-
-@interface WKSimpleBackdropView : WKCompositingView
-@end
-
-@implementation WKSimpleBackdropView
-
-+ (Class)layerClass
-{
-    return [CABackdropLayer self];
-}
-
-@end
-
-@interface WKShapeView : WKCompositingView
-@end
-
-@implementation WKShapeView
-
-+ (Class)layerClass
-{
-    return [CAShapeLayer self];
-}
-
-@end
-
-@interface WKRemoteView : WKCompositingView
-@end
-
-@implementation WKRemoteView
-
-- (instancetype)initWithFrame:(CGRect)frame contextID:(uint32_t)contextID
-{
-    if ((self = [super initWithFrame:frame]))
-        [(CALayerHost *)[self layer] setContextId:contextID];
-    
-    return self;
-}
-
-+ (Class)layerClass
-{
-    return NSClassFromString(@"CALayerHost");
-}
-
-@end
-
-@interface WKBackdropView : _UIBackdropView
-@end
-
-@implementation WKBackdropView
-
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event
-{
-    return [self _findDescendantViewAtPoint:point withEvent:event];
-}
-
-- (NSString *)description
-{
-    NSString *viewDescription = [super description];
-    NSString *webKitDetails = [NSString stringWithFormat:@" layerID = %llu \"%@\"", WebKit::RemoteLayerTreeHost::layerID(self.layer), self.layer.name ? self.layer.name : @""];
-    return [viewDescription stringByAppendingString:webKitDetails];
-}
-
-@end
+#if ENABLE(ARKIT_INLINE_PREVIEW_IOS)
+#import "WKModelView.h"
+#endif
 
 namespace WebKit {
+using namespace WebCore;
 
-LayerOrView *RemoteLayerTreeHost::createLayer(const RemoteLayerTreeTransaction::LayerCreationProperties& properties, const RemoteLayerTreeTransaction::LayerProperties* layerProperties)
+std::unique_ptr<RemoteLayerTreeNode> RemoteLayerTreeHost::makeNode(const RemoteLayerTreeTransaction::LayerCreationProperties& properties)
 {
-    RetainPtr<LayerOrView>& view = m_layers.add(properties.layerID, nullptr).iterator->value;
-
-    ASSERT(!view);
+    auto makeWithView = [&] (RetainPtr<UIView>&& view) {
+        return makeUnique<RemoteLayerTreeNode>(properties.layerID, WTFMove(view));
+    };
 
     switch (properties.type) {
     case PlatformCALayer::LayerTypeLayer:
@@ -182,56 +55,58 @@ LayerOrView *RemoteLayerTreeHost::createLayer(const RemoteLayerTreeTransaction::
     case PlatformCALayer::LayerTypeSimpleLayer:
     case PlatformCALayer::LayerTypeTiledBackingLayer:
     case PlatformCALayer::LayerTypePageTiledBackingLayer:
+    case PlatformCALayer::LayerTypeContentsProvidedLayer:
+        return makeWithView(adoptNS([[WKCompositingView alloc] init]));
+
     case PlatformCALayer::LayerTypeTiledBackingTileLayer:
-        view = adoptNS([[WKCompositingView alloc] init]);
-        break;
+        return RemoteLayerTreeNode::createWithPlainLayer(properties.layerID);
+
     case PlatformCALayer::LayerTypeBackdropLayer:
-        view = adoptNS([[WKSimpleBackdropView alloc] init]);
-        break;
-    case PlatformCALayer::LayerTypeLightSystemBackdropLayer:
-        view = adoptNS([[WKBackdropView alloc] initWithFrame:CGRectZero privateStyle:_UIBackdropViewStyle_Light]);
-        break;
-    case PlatformCALayer::LayerTypeDarkSystemBackdropLayer:
-        view = adoptNS([[WKBackdropView alloc] initWithFrame:CGRectZero privateStyle:_UIBackdropViewStyle_Dark]);
-        break;
+        return makeWithView(adoptNS([[WKBackdropView alloc] init]));
+
     case PlatformCALayer::LayerTypeTransformLayer:
-        view = adoptNS([[WKTransformView alloc] init]);
-        break;
+        return makeWithView(adoptNS([[WKTransformView alloc] init]));
+
     case PlatformCALayer::LayerTypeCustom:
     case PlatformCALayer::LayerTypeAVPlayerLayer:
-    case PlatformCALayer::LayerTypeContentsProvidedLayer:
         if (!m_isDebugLayerTreeHost) {
-            view = adoptNS([[WKRemoteView alloc] initWithFrame:CGRectZero contextID:properties.hostingContextID]);
+            auto view = adoptNS([[WKUIRemoteView alloc] initWithFrame:CGRectZero
+                pid:m_drawingArea->page().processIdentifier() contextID:properties.hostingContextID]);
             if (properties.type == PlatformCALayer::LayerTypeAVPlayerLayer) {
                 // Invert the scale transform added in the WebProcess to fix <rdar://problem/18316542>.
                 float inverseScale = 1 / properties.hostingDeviceScaleFactor;
                 [[view layer] setTransform:CATransform3DMakeScale(inverseScale, inverseScale, 1)];
             }
-        } else
-            view = adoptNS([[WKCompositingView alloc] init]);
-        break;
+            return makeWithView(WTFMove(view));
+        }
+        return makeWithView(adoptNS([[WKCompositingView alloc] init]));
+
     case PlatformCALayer::LayerTypeShapeLayer:
-        view = adoptNS([[WKShapeView alloc] init]);
-        break;
-    case PlatformCALayer::LayerTypeScrollingLayer:
-        if (!m_isDebugLayerTreeHost) {
-            auto scrollView = adoptNS([[UIScrollView alloc] init]);
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
-            [scrollView setContentInsetAdjustmentBehavior:UIScrollViewContentInsetAdjustmentNever];
+        return makeWithView(adoptNS([[WKShapeView alloc] init]));
+
+    case PlatformCALayer::LayerTypeScrollContainerLayer:
+        if (!m_isDebugLayerTreeHost)
+            return makeWithView(adoptNS([[WKChildScrollView alloc] init]));
+        // The debug indicator parents views under layers, which can cause crashes with UIScrollView.
+        return makeWithView(adoptNS([[UIView alloc] init]));
+
+#if ENABLE(MODEL_ELEMENT)
+    case PlatformCALayer::LayerTypeModelLayer:
+#if ENABLE(SEPARATED_MODEL)
+        return makeWithView(adoptNS([[WKSeparatedModelView alloc] initWithModel:*properties.model]));
+#elif ENABLE(ARKIT_INLINE_PREVIEW_IOS)
+        return makeWithView(adoptNS([[WKModelView alloc] initWithModel:*properties.model layerID:properties.layerID page:m_drawingArea->page()]));
+#else
+        return makeWithView(adoptNS([[WKCompositingView alloc] init]));
 #endif
-            view = scrollView;
-        } else // The debug indicator parents views under layers, which can cause crashes with UIScrollView.
-            view = adoptNS([[UIView alloc] init]);
-        break;
+#endif // ENABLE(MODEL_ELEMENT)
+
     default:
         ASSERT_NOT_REACHED();
+        return nullptr;
     }
-
-    setLayerID([view layer], properties.layerID);
-
-    return view.get();
 }
 
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

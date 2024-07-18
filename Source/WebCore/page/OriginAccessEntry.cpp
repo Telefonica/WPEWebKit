@@ -32,7 +32,6 @@
 #include "OriginAccessEntry.h"
 
 #include "SecurityOrigin.h"
-#include "URL.h"
 
 namespace WebCore {
     

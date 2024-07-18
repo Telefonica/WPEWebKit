@@ -32,13 +32,13 @@ public:
     {
     }
 
-    virtual ~CSSUnknownRule() { }
+    virtual ~CSSUnknownRule() = default;
 
     String cssText() const final { return String(); }
     void reattach(StyleRuleBase&) final { }
 
 private:
-    CSSRule::Type type() const final { return UNKNOWN_RULE; }
+    StyleRuleType styleRuleType() const final { return StyleRuleType::Unknown; }
 };
 
 } // namespace WebCore

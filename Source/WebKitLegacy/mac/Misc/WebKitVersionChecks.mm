@@ -29,13 +29,14 @@
 #import "WebKitVersionChecks.h"
 
 #import <mach-o/dyld.h>
+#import <mutex>
 
 static int WebKitLinkTimeVersion(void);
-static int overridenWebKitLinkTimeVersion;
+static int overriddenWebKitLinkTimeVersion;
 
 BOOL WebKitLinkedOnOrAfter(int version)
 {
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     return (WebKitLinkTimeVersion() >= version);
 #else
     int32_t linkTimeVersion = WebKitLinkTimeVersion();
@@ -51,24 +52,19 @@ BOOL WebKitLinkedOnOrAfter(int version)
 
 void setWebKitLinkTimeVersion(int version)
 {
-    overridenWebKitLinkTimeVersion = version;
+    overriddenWebKitLinkTimeVersion = version;
 }
 
 static int WebKitLinkTimeVersion(void)
 {
-    if (overridenWebKitLinkTimeVersion)
-        return overridenWebKitLinkTimeVersion;
+    if (overriddenWebKitLinkTimeVersion)
+        return overriddenWebKitLinkTimeVersion;
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     return NSVersionOfLinkTimeLibrary("WebKit");
 #else
     // <rdar://problem/6627758> Need to implement WebKitLinkedOnOrAfter
     // Third party applications do not link against WebKit, but rather against UIKit.
     return NSVersionOfLinkTimeLibrary("UIKit");
 #endif
-}
-
-bool linkedOnOrAfter(SDKVersion sdkVersion)
-{
-    return dyld_get_program_sdk_version() >= static_cast<uint32_t>(sdkVersion);
 }

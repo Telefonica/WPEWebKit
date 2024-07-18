@@ -8,16 +8,17 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_ACM2_ACM_SEND_TEST_H_
-#define WEBRTC_MODULES_AUDIO_CODING_ACM2_ACM_SEND_TEST_H_
+#ifndef MODULES_AUDIO_CODING_ACM2_ACM_SEND_TEST_H_
+#define MODULES_AUDIO_CODING_ACM2_ACM_SEND_TEST_H_
 
 #include <memory>
 #include <vector>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/audio_coding/include/audio_coding_module.h"
-#include "webrtc/modules/audio_coding/neteq/tools/packet_source.h"
-#include "webrtc/system_wrappers/include/clock.h"
+#include "absl/strings/string_view.h"
+#include "api/audio/audio_frame.h"
+#include "modules/audio_coding/include/audio_coding_module.h"
+#include "modules/audio_coding/neteq/tools/packet_source.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 class AudioEncoder;
@@ -34,26 +35,30 @@ class AcmSendTestOldApi : public AudioPacketizationCallback,
                     int test_duration_ms);
   ~AcmSendTestOldApi() override;
 
+  AcmSendTestOldApi(const AcmSendTestOldApi&) = delete;
+  AcmSendTestOldApi& operator=(const AcmSendTestOldApi&) = delete;
+
   // Registers the send codec. Returns true on success, false otherwise.
-  bool RegisterCodec(const char* payload_name,
+  bool RegisterCodec(absl::string_view payload_name,
                      int sampling_freq_hz,
                      int channels,
                      int payload_type,
                      int frame_size_samples);
 
-  // Registers an external send codec. Returns true on success, false otherwise.
-  bool RegisterExternalCodec(AudioEncoder* external_speech_encoder);
+  // Registers an external send codec.
+  void RegisterExternalCodec(
+      std::unique_ptr<AudioEncoder> external_speech_encoder);
 
   // Inherited from PacketSource.
   std::unique_ptr<Packet> NextPacket() override;
 
   // Inherited from AudioPacketizationCallback.
-  int32_t SendData(FrameType frame_type,
+  int32_t SendData(AudioFrameType frame_type,
                    uint8_t payload_type,
                    uint32_t timestamp,
                    const uint8_t* payload_data,
                    size_t payload_len_bytes,
-                   const RTPFragmentationHeader* fragmentation) override;
+                   int64_t absolute_capture_timestamp_ms) override;
 
   AudioCodingModule* acm() { return acm_.get(); }
 
@@ -73,16 +78,14 @@ class AcmSendTestOldApi : public AudioPacketizationCallback,
   bool codec_registered_;
   int test_duration_ms_;
   // The following member variables are set whenever SendData() is called.
-  FrameType frame_type_;
+  AudioFrameType frame_type_;
   int payload_type_;
   uint32_t timestamp_;
   uint16_t sequence_number_;
   std::vector<uint8_t> last_payload_vec_;
   bool data_to_send_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(AcmSendTestOldApi);
 };
 
 }  // namespace test
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_ACM2_ACM_SEND_TEST_H_
+#endif  // MODULES_AUDIO_CODING_ACM2_ACM_SEND_TEST_H_

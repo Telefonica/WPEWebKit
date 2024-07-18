@@ -40,10 +40,9 @@
 #include "config.h"
 #include "JPEGImageDecoder.h"
 
+#include "PlatformDisplay.h"
+
 extern "C" {
-#if USE(ICCJPEG)
-#include <iccjpeg.h>
-#endif
 #include <setjmp.h>
 }
 
@@ -57,10 +56,8 @@ extern "C" {
 #define TURBO_JPEG_RGB_SWIZZLE
 inline J_COLOR_SPACE rgbOutputColorSpace() { return JCS_EXT_BGRA; }
 inline bool turboSwizzled(J_COLOR_SPACE colorSpace) { return colorSpace == JCS_EXT_RGBA || colorSpace == JCS_EXT_BGRA; }
-inline bool colorSpaceHasAlpha(J_COLOR_SPACE colorSpace) { return turboSwizzled(colorSpace); }
 #else
 inline J_COLOR_SPACE rgbOutputColorSpace() { return JCS_RGB; }
-inline bool colorSpaceHasAlpha(J_COLOR_SPACE) { return false; }
 #endif
 
 #if USE(LOW_QUALITY_IMAGE_NO_JPEG_DITHERING)
@@ -77,7 +74,12 @@ inline bool doFancyUpsampling() { return false; }
 inline bool doFancyUpsampling() { return true; }
 #endif
 
-const int exifMarker = JPEG_APP0 + 1;
+static const int exifMarker = JPEG_APP0 + 1;
+
+#if USE(LCMS)
+static const int iccMarker = JPEG_APP0 + 2;
+static const unsigned iccHeaderSize = 14;
+#endif
 
 namespace WebCore {
 
@@ -193,8 +195,53 @@ static ImageOrientation readImageOrientation(jpeg_decompress_struct* info)
         }
     }
 
-    return ImageOrientation();
+    return ImageOrientation::None;
 }
+
+#if USE(LCMS)
+static bool isICCMarker(jpeg_saved_marker_ptr marker)
+{
+    return marker->marker == iccMarker
+        && marker->data_length >= iccHeaderSize
+        && marker->data[0] == 'I'
+        && marker->data[1] == 'C'
+        && marker->data[2] == 'C'
+        && marker->data[3] == '_'
+        && marker->data[4] == 'P'
+        && marker->data[5] == 'R'
+        && marker->data[6] == 'O'
+        && marker->data[7] == 'F'
+        && marker->data[8] == 'I'
+        && marker->data[9] == 'L'
+        && marker->data[10] == 'E'
+        && marker->data[11] == '\0';
+}
+
+static RefPtr<SharedBuffer> readICCProfile(jpeg_decompress_struct* info)
+{
+    SharedBufferBuilder buffer;
+    for (jpeg_saved_marker_ptr marker = info->marker_list; marker; marker = marker->next) {
+        if (!isICCMarker(marker))
+            continue;
+
+        unsigned sequenceNumber = marker->data[12];
+        if (!sequenceNumber)
+            return nullptr;
+
+        unsigned markerCount = marker->data[13];
+        if (sequenceNumber > markerCount)
+            return nullptr;
+
+        unsigned markerSize = marker->data_length - iccHeaderSize;
+        buffer.append(reinterpret_cast<const uint8_t*>(marker->data + iccHeaderSize), markerSize);
+    }
+
+    if (buffer.isEmpty())
+        return nullptr;
+
+    return buffer.takeAsContiguous();
+}
+#endif
 
 class JPEGImageReader {
     WTF_MAKE_FAST_ALLOCATED;
@@ -234,13 +281,15 @@ public:
         src->pub.term_source = term_source;
         src->decoder = this;
 
-#if USE(ICCJPEG)
-        // Retain ICC color profile markers for color management.
-        setup_read_icc_profile(&m_info);
-#endif
-
         // Keep APP1 blocks, for obtaining exif data.
         jpeg_save_markers(&m_info, exifMarker, 0xFFFF);
+
+#if USE(LCMS)
+        if (!m_decoder->ignoresGammaAndColorProfile()) {
+            // Keep APP2 blocks, for obtaining ICC profile data.
+            jpeg_save_markers(&m_info, iccMarker, 0xFFFF);
+        }
+#endif
     }
 
     ~JPEGImageReader()
@@ -300,14 +349,6 @@ public:
             case JCS_YCbCr:
                 // libjpeg can convert GRAYSCALE and YCbCr image pixels to RGB.
                 m_info.out_color_space = rgbOutputColorSpace();
-#if defined(TURBO_JPEG_RGB_SWIZZLE)
-                if (m_info.saw_JFIF_marker)
-                    break;
-                // FIXME: Swizzle decoding does not support Adobe transform=0
-                // images (yet), so revert to using JSC_RGB in that case.
-                if (m_info.saw_Adobe_marker && !m_info.Adobe_transform)
-                    m_info.out_color_space = JCS_RGB;
-#endif
                 break;
             case JCS_CMYK:
             case JCS_YCCK:
@@ -326,6 +367,10 @@ public:
                 return false;
 
             m_decoder->setOrientation(readImageOrientation(info()));
+#if USE(LCMS)
+            if (!m_decoder->ignoresGammaAndColorProfile() && m_info.out_color_space == rgbOutputColorSpace())
+                m_decoder->setICCProfile(readICCProfile(&m_info));
+#endif
 
             // Don't allocate a giant and superfluous memory buffer when the
             // image is a sequential JPEG.
@@ -348,7 +393,7 @@ public:
                 m_info.src->bytes_in_buffer = 0;
                 return true;
             }
-        // FALL THROUGH
+            FALLTHROUGH;
 
         case JPEG_START_DECOMPRESS:
             // Set parameters for decompression.
@@ -366,7 +411,7 @@ public:
 
             // If this is a progressive JPEG ...
             m_state = (m_info.buffered_image) ? JPEG_DECOMPRESS_PROGRESSIVE : JPEG_DECOMPRESS_SEQUENTIAL;
-        // FALL THROUGH
+            FALLTHROUGH;
 
         case JPEG_DECOMPRESS_SEQUENTIAL:
             if (m_state == JPEG_DECOMPRESS_SEQUENTIAL) {
@@ -378,7 +423,7 @@ public:
                 ASSERT(m_info.output_scanline == m_info.output_height);
                 m_state = JPEG_DONE;
             }
-        // FALL THROUGH
+            FALLTHROUGH;
 
         case JPEG_DECOMPRESS_PROGRESSIVE:
             if (m_state == JPEG_DECOMPRESS_PROGRESSIVE) {
@@ -432,7 +477,7 @@ public:
 
                 m_state = JPEG_DONE;
             }
-        // FALL THROUGH
+            FALLTHROUGH;
 
         case JPEG_DONE:
             // Finish decompression.
@@ -502,18 +547,10 @@ JPEGImageDecoder::JPEGImageDecoder(AlphaOption alphaOption, GammaAndColorProfile
 
 JPEGImageDecoder::~JPEGImageDecoder()
 {
+    clear();
 }
 
-bool JPEGImageDecoder::setSize(const IntSize& size)
-{
-    if (!ScalableImageDecoder::setSize(size))
-        return false;
-
-    prepareScaleDataIfNecessary();
-    return true;
-}
-
-ImageFrame* JPEGImageDecoder::frameBufferAtIndex(size_t index)
+ScalableImageDecoderFrame* JPEGImageDecoder::frameBufferAtIndex(size_t index)
 {
     if (index)
         return 0;
@@ -521,20 +558,28 @@ ImageFrame* JPEGImageDecoder::frameBufferAtIndex(size_t index)
     if (m_frameBufferCache.isEmpty())
         m_frameBufferCache.grow(1);
 
-    ImageFrame& frame = m_frameBufferCache[0];
+    auto& frame = m_frameBufferCache[0];
     if (!frame.isComplete())
         decode(false, isAllDataReceived());
     return &frame;
 }
 
-bool JPEGImageDecoder::setFailed()
+void JPEGImageDecoder::clear()
 {
     m_reader = nullptr;
+#if USE(LCMS)
+    m_iccTransform.reset();
+#endif
+}
+
+bool JPEGImageDecoder::setFailed()
+{
+    clear();
     return ScalableImageDecoder::setFailed();
 }
 
 template <J_COLOR_SPACE colorSpace>
-void setPixel(ImageFrame& buffer, RGBA32* currentAddress, JSAMPARRAY samples, int column)
+void setPixel(ScalableImageDecoderFrame& buffer, uint32_t* currentAddress, JSAMPARRAY samples, int column)
 {
     JSAMPLE* jsample = *samples + column * (colorSpace == JCS_RGB ? 3 : 4);
 
@@ -558,12 +603,12 @@ void setPixel(ImageFrame& buffer, RGBA32* currentAddress, JSAMPARRAY samples, in
     }
 }
 
-template <J_COLOR_SPACE colorSpace, bool isScaled>
-bool JPEGImageDecoder::outputScanlines(ImageFrame& buffer)
+template <J_COLOR_SPACE colorSpace>
+bool JPEGImageDecoder::outputScanlines(ScalableImageDecoderFrame& buffer)
 {
     JSAMPARRAY samples = m_reader->samples();
     jpeg_decompress_struct* info = m_reader->info();
-    int width = isScaled ? m_scaledColumns.size() : info->output_width;
+    int width = info->output_width;
 
     while (info->output_scanline < info->output_height) {
         // jpeg_read_scanlines will increase the scanline counter, so we
@@ -573,23 +618,19 @@ bool JPEGImageDecoder::outputScanlines(ImageFrame& buffer)
         if (jpeg_read_scanlines(info, samples, 1) != 1)
             return false;
 
-        int destY = scaledY(sourceY);
-        if (destY < 0)
-            continue;
-
-        RGBA32* currentAddress = buffer.backingStore()->pixelAt(0, destY);
+        auto* row = buffer.backingStore()->pixelAt(0, sourceY);
+        auto* currentAddress = row;
         for (int x = 0; x < width; ++x) {
-            setPixel<colorSpace>(buffer, currentAddress, samples, isScaled ? m_scaledColumns[x] : x);
+            setPixel<colorSpace>(buffer, currentAddress, samples, x);
             ++currentAddress;
         }
+
+#if USE(LCMS)
+        if (m_iccTransform)
+            cmsDoTransform(m_iccTransform.get(), row, row, info->output_width);
+#endif
     }
     return true;
-}
-
-template <J_COLOR_SPACE colorSpace>
-bool JPEGImageDecoder::outputScanlines(ImageFrame& buffer)
-{
-    return m_scaled ? outputScanlines<colorSpace, true>(buffer) : outputScanlines<colorSpace, false>(buffer);
 }
 
 bool JPEGImageDecoder::outputScanlines()
@@ -598,9 +639,9 @@ bool JPEGImageDecoder::outputScanlines()
         return false;
 
     // Initialize the framebuffer if needed.
-    ImageFrame& buffer = m_frameBufferCache[0];
+    auto& buffer = m_frameBufferCache[0];
     if (buffer.isInvalid()) {
-        if (!buffer.initialize(scaledSize(), m_premultiplyAlpha))
+        if (!buffer.initialize(size(), m_premultiplyAlpha))
             return setFailed();
         buffer.setDecodingStatus(DecodingStatus::Partial);
         // The buffer is transparent outside the decoded area while the image is
@@ -611,18 +652,23 @@ bool JPEGImageDecoder::outputScanlines()
     jpeg_decompress_struct* info = m_reader->info();
 
 #if defined(TURBO_JPEG_RGB_SWIZZLE)
-    if (!m_scaled && turboSwizzled(info->out_color_space)) {
+    if (turboSwizzled(info->out_color_space)) {
         while (info->output_scanline < info->output_height) {
             unsigned char* row = reinterpret_cast<unsigned char*>(buffer.backingStore()->pixelAt(0, info->output_scanline));
             if (jpeg_read_scanlines(info, &row, 1) != 1)
                 return false;
+
+#if USE(LCMS)
+            if (m_iccTransform)
+                cmsDoTransform(m_iccTransform.get(), row, row, info->output_width);
+#endif
          }
          return true;
      }
 #endif
 
     switch (info->out_color_space) {
-    // The code inside outputScanlines<int, bool> will be executed
+    // The code inside outputScanlines<int> will be executed
     // for each pixel, so we want to avoid any extra comparisons there.
     // That is why we use template and template specializations here so
     // the proper code will be generated at compile time.
@@ -644,7 +690,7 @@ void JPEGImageDecoder::jpegComplete()
 
     // Hand back an appropriately sized buffer, even if the image ended up being
     // empty.
-    ImageFrame& buffer = m_frameBufferCache[0];
+    auto& buffer = m_frameBufferCache[0];
     buffer.setHasAlpha(false);
     buffer.setDecodingStatus(DecodingStatus::Complete);
 }
@@ -654,8 +700,10 @@ void JPEGImageDecoder::decode(bool onlySize, bool allDataReceived)
     if (failed())
         return;
 
-    if (!m_reader)
-        m_reader = std::make_unique<JPEGImageReader>(this);
+    if (!m_reader) {
+        clear();
+        m_reader = makeUnique<JPEGImageReader>(this);
+    }
 
     // If we couldn't decode the image but we've received all the data, decoding
     // has failed.
@@ -664,7 +712,25 @@ void JPEGImageDecoder::decode(bool onlySize, bool allDataReceived)
     // If we're done decoding the image, we don't need the JPEGImageReader
     // anymore.  (If we failed, |m_reader| has already been cleared.)
     else if (!m_frameBufferCache.isEmpty() && (m_frameBufferCache[0].isComplete()))
-        m_reader = nullptr;
+        clear();
 }
+
+#if USE(LCMS)
+void JPEGImageDecoder::setICCProfile(RefPtr<SharedBuffer>&& buffer)
+{
+    if (!buffer)
+        return;
+
+    auto iccProfile = LCMSProfilePtr(cmsOpenProfileFromMem(buffer->data(), buffer->size()));
+    if (!iccProfile)
+        return;
+
+    auto* displayProfile = PlatformDisplay::sharedDisplay().colorProfile();
+    if (cmsGetColorSpace(iccProfile.get()) != cmsSigRgbData || cmsGetColorSpace(displayProfile) != cmsSigRgbData)
+        return;
+
+    m_iccTransform = LCMSTransformPtr(cmsCreateTransform(iccProfile.get(), TYPE_BGRA_8, displayProfile, TYPE_BGRA_8, INTENT_RELATIVE_COLORIMETRIC, 0));
+}
+#endif
 
 }

@@ -8,8 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_TEST_IOS_TEST_SUPPORT_H_
-#define WEBRTC_TEST_IOS_TEST_SUPPORT_H_
+#ifndef TEST_IOS_TEST_SUPPORT_H_
+#define TEST_IOS_TEST_SUPPORT_H_
+
+#include <string>
+#include <vector>
+
+#include "absl/types/optional.h"
 
 namespace rtc {
 namespace test {
@@ -17,9 +22,18 @@ namespace test {
 // This is necessary as iOS doesn't like processes without a gui
 // running for longer than a few seconds.
 void RunTestsFromIOSApp();
-void InitTestSuite(int (*test_suite)(void), int argc, char* argv[]);
+void InitTestSuite(int (*test_suite)(void),
+                   int argc,
+                   char* argv[],
+                   bool save_chartjson_result,
+                   bool export_perf_results_new_api,
+                   std::string webrtc_test_metrics_output_path,
+                   absl::optional<std::vector<std::string>> metrics_to_plot);
+
+// Returns true if unittests should be run by the XCTest runnner.
+bool ShouldRunIOSUnittestsWithXCTest();
 
 }  // namespace test
 }  // namespace rtc
 
-#endif  // WEBRTC_TEST_IOS_TEST_SUPPORT_H_
+#endif  // TEST_IOS_TEST_SUPPORT_H_

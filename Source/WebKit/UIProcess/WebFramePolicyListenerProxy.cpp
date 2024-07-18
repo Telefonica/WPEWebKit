@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,29 +26,67 @@
 #include "config.h"
 #include "WebFramePolicyListenerProxy.h"
 
+#include "APINavigation.h"
+#include "APIWebsitePolicies.h"
+#include "SafeBrowsingWarning.h"
 #include "WebFrameProxy.h"
-#include "WebsitePolicies.h"
+#include "WebsiteDataStore.h"
+#include "WebsitePoliciesData.h"
 
 namespace WebKit {
 
-WebFramePolicyListenerProxy::WebFramePolicyListenerProxy(WebFrameProxy* frame, uint64_t listenerID)
-    : WebFrameListenerProxy(frame, listenerID)
+WebFramePolicyListenerProxy::WebFramePolicyListenerProxy(Reply&& reply, ShouldExpectSafeBrowsingResult expectSafeBrowsingResult, ShouldExpectAppBoundDomainResult expectAppBoundDomainResult)
+    : m_reply(WTFMove(reply))
 {
+    if (expectSafeBrowsingResult == ShouldExpectSafeBrowsingResult::No)
+        didReceiveSafeBrowsingResults({ });
+    if (expectAppBoundDomainResult == ShouldExpectAppBoundDomainResult::No)
+        didReceiveAppBoundDomainResult({ });
 }
 
-void WebFramePolicyListenerProxy::use(const WebsitePolicies& websitePolicies)
+WebFramePolicyListenerProxy::~WebFramePolicyListenerProxy() = default;
+
+void WebFramePolicyListenerProxy::didReceiveAppBoundDomainResult(std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain)
 {
-    receivedPolicyDecision(WebCore::PolicyAction::Use, websitePolicies);
+    ASSERT(RunLoop::isMain());
+
+    if (m_policyResult && m_safeBrowsingWarning) {
+        if (m_reply)
+            m_reply(WebCore::PolicyAction::Use, m_policyResult->first.get(), m_policyResult->second, WTFMove(*m_safeBrowsingWarning), isNavigatingToAppBoundDomain);
+    } else
+        m_isNavigatingToAppBoundDomain = isNavigatingToAppBoundDomain;
+}
+
+void WebFramePolicyListenerProxy::didReceiveSafeBrowsingResults(RefPtr<SafeBrowsingWarning>&& safeBrowsingWarning)
+{
+    ASSERT(isMainRunLoop());
+    ASSERT(!m_safeBrowsingWarning);
+    if (m_policyResult && m_isNavigatingToAppBoundDomain) {
+        if (m_reply)
+            m_reply(WebCore::PolicyAction::Use, m_policyResult->first.get(), m_policyResult->second, WTFMove(safeBrowsingWarning), *m_isNavigatingToAppBoundDomain);
+    } else
+        m_safeBrowsingWarning = WTFMove(safeBrowsingWarning);
+}
+
+void WebFramePolicyListenerProxy::use(API::WebsitePolicies* policies, ProcessSwapRequestedByClient processSwapRequestedByClient)
+{
+    if (m_safeBrowsingWarning && m_isNavigatingToAppBoundDomain) {
+        if (m_reply)
+            m_reply(WebCore::PolicyAction::Use, policies, processSwapRequestedByClient, WTFMove(*m_safeBrowsingWarning), *m_isNavigatingToAppBoundDomain);
+    } else if (!m_policyResult)
+        m_policyResult = {{ policies, processSwapRequestedByClient }};
 }
 
 void WebFramePolicyListenerProxy::download()
 {
-    receivedPolicyDecision(WebCore::PolicyAction::Download, { });
+    if (m_reply)
+        m_reply(WebCore::PolicyAction::Download, nullptr, ProcessSwapRequestedByClient::No, { }, { });
 }
 
 void WebFramePolicyListenerProxy::ignore()
 {
-    receivedPolicyDecision(WebCore::PolicyAction::Ignore, { });
+    if (m_reply)
+        m_reply(WebCore::PolicyAction::Ignore, nullptr, ProcessSwapRequestedByClient::No, { }, { });
 }
 
 } // namespace WebKit

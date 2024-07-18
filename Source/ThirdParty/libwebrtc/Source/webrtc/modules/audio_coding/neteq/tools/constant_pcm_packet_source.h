@@ -8,15 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_NETEQ_TOOLS_CONSTANT_PCM_PACKET_SOURCE_H_
-#define WEBRTC_MODULES_AUDIO_CODING_NETEQ_TOOLS_CONSTANT_PCM_PACKET_SOURCE_H_
+#ifndef MODULES_AUDIO_CODING_NETEQ_TOOLS_CONSTANT_PCM_PACKET_SOURCE_H_
+#define MODULES_AUDIO_CODING_NETEQ_TOOLS_CONSTANT_PCM_PACKET_SOURCE_H_
 
 #include <stdio.h>
+
 #include <string>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/common_types.h"
-#include "webrtc/modules/audio_coding/neteq/tools/packet_source.h"
+#include "modules/audio_coding/neteq/tools/packet_source.h"
 
 namespace webrtc {
 namespace test {
@@ -30,6 +29,9 @@ class ConstantPcmPacketSource : public PacketSource {
                           int16_t sample_value,
                           int sample_rate_hz,
                           int payload_type);
+
+  ConstantPcmPacketSource(const ConstantPcmPacketSource&) = delete;
+  ConstantPcmPacketSource& operator=(const ConstantPcmPacketSource&) = delete;
 
   std::unique_ptr<Packet> NextPacket() override;
 
@@ -46,10 +48,8 @@ class ConstantPcmPacketSource : public PacketSource {
   uint16_t seq_number_;
   uint32_t timestamp_;
   const uint32_t payload_ssrc_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(ConstantPcmPacketSource);
 };
 
 }  // namespace test
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_TOOLS_CONSTANT_PCM_PACKET_SOURCE_H_
+#endif  // MODULES_AUDIO_CODING_NETEQ_TOOLS_CONSTANT_PCM_PACKET_SOURCE_H_

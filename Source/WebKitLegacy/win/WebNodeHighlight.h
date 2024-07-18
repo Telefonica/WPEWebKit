@@ -35,6 +35,7 @@
 class WebView;
 
 class WebNodeHighlight : WebCore::WindowMessageListener {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebNodeHighlight(WebView*);
     ~WebNodeHighlight();
@@ -66,7 +67,7 @@ private:
     HWND m_observedWindow;
     bool m_showsWhileWebViewIsVisible;
 
-    friend static LRESULT CALLBACK OverlayWndProc(HWND, UINT, WPARAM, LPARAM);
+    friend LRESULT CALLBACK OverlayWndProc(HWND, UINT, WPARAM, LPARAM);
 };
 
 #endif // !defined(WebNodeHighlight_h)

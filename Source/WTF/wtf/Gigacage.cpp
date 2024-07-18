@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,17 +24,13 @@
  */
 
 #include "config.h"
-#include "Gigacage.h"
+#include <wtf/Gigacage.h>
 
 #include <wtf/Atomics.h>
 #include <wtf/PageBlock.h>
+
+#if USE(SYSTEM_MALLOC)
 #include <wtf/OSAllocator.h>
-
-#if defined(USE_SYSTEM_MALLOC) && USE_SYSTEM_MALLOC
-
-extern "C" {
-void* g_gigacageBasePtr;
-}
 
 namespace Gigacage {
 
@@ -43,18 +39,32 @@ void* tryMalloc(Kind, size_t size)
     return FastMalloc::tryMalloc(size);
 }
 
-void* tryAllocateVirtualPages(Kind, size_t size)
+void* tryRealloc(Kind, void* pointer, size_t size)
 {
-    return OSAllocator::reserveUncommitted(size);
+    return FastMalloc::tryRealloc(pointer, size);
+}
+
+void* tryAllocateZeroedVirtualPages(Kind, size_t requestedSize)
+{
+    size_t size = roundUpToMultipleOf(WTF::pageSize(), requestedSize);
+    RELEASE_ASSERT(size >= requestedSize);
+    void* result = OSAllocator::reserveAndCommit(size);
+#if ASSERT_ENABLED
+    if (result) {
+        for (size_t i = 0; i < size / sizeof(uintptr_t); ++i)
+            ASSERT(static_cast<uintptr_t*>(result)[i] == 0);
+    }
+#endif
+    return result;
 }
 
 void freeVirtualPages(Kind, void* basePtr, size_t size)
 {
-    OSAllocator::releaseDecommitted(basePtr, size);
+    OSAllocator::decommitAndRelease(basePtr, size);
 }
 
 } // namespace Gigacage
-#else
+#else // USE(SYSTEM_MALLOC)
 #include <bmalloc/bmalloc.h>
 
 namespace Gigacage {
@@ -86,6 +96,13 @@ void* tryMalloc(Kind kind, size_t size)
     return result;
 }
 
+void* tryRealloc(Kind kind, void* pointer, size_t size)
+{
+    void* result = bmalloc::api::tryRealloc(pointer, size, bmalloc::heapKind(kind));
+    WTF::compilerFence();
+    return result;
+}
+
 void free(Kind kind, void* p)
 {
     if (!p)
@@ -95,19 +112,19 @@ void free(Kind kind, void* p)
     WTF::compilerFence();
 }
 
-void* tryAllocateVirtualPages(Kind kind, size_t size)
+void* tryAllocateZeroedVirtualPages(Kind kind, size_t size)
 {
-    void* result = bmalloc::api::tryLargeMemalignVirtual(WTF::pageSize(), size, bmalloc::heapKind(kind));
+    void* result = bmalloc::api::tryLargeZeroedMemalignVirtual(WTF::pageSize(), size, bmalloc::heapKind(kind));
     WTF::compilerFence();
     return result;
 }
 
-void freeVirtualPages(Kind kind, void* basePtr, size_t)
+void freeVirtualPages(Kind kind, void* basePtr, size_t size)
 {
     if (!basePtr)
         return;
     RELEASE_ASSERT(isCaged(kind, basePtr));
-    bmalloc::api::freeLargeVirtual(basePtr, bmalloc::heapKind(kind));
+    bmalloc::api::freeLargeVirtual(basePtr, size, bmalloc::heapKind(kind));
     WTF::compilerFence();
 }
 
@@ -118,11 +135,11 @@ namespace Gigacage {
 
 void* tryMallocArray(Kind kind, size_t numElements, size_t elementSize)
 {
-    Checked<size_t, RecordOverflow> checkedSize = elementSize;
+    CheckedSize checkedSize = elementSize;
     checkedSize *= numElements;
     if (checkedSize.hasOverflowed())
         return nullptr;
-    return tryMalloc(kind, checkedSize.unsafeGet());
+    return tryMalloc(kind, checkedSize);
 }
 
 void* malloc(Kind kind, size_t size)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,16 +27,20 @@
 #include "APIPageConfiguration.h"
 
 #include "APIProcessPoolConfiguration.h"
+#include "APIWebsitePolicies.h"
 #include "WebPageGroup.h"
 #include "WebPageProxy.h"
 #include "WebPreferences.h"
 #include "WebProcessPool.h"
+#include "WebURLSchemeHandler.h"
 #include "WebUserContentControllerProxy.h"
 
-using namespace WebCore;
-using namespace WebKit;
+#if ENABLE(APPLICATION_MANIFEST)
+#include "APIApplicationManifest.h"
+#endif
 
 namespace API {
+using namespace WebKit;
 
 Ref<PageConfiguration> PageConfiguration::create()
 {
@@ -47,9 +51,7 @@ PageConfiguration::PageConfiguration()
 {
 }
 
-PageConfiguration::~PageConfiguration()
-{
-}
+PageConfiguration::~PageConfiguration() = default;
 
 Ref<PageConfiguration> PageConfiguration::copy() const
 {
@@ -59,19 +61,50 @@ Ref<PageConfiguration> PageConfiguration::copy() const
     copy->m_userContentController = this->m_userContentController;
     copy->m_pageGroup = this->m_pageGroup;
     copy->m_preferences = this->m_preferences;
-    copy->m_preferenceValues = this->m_preferenceValues;
     copy->m_relatedPage = this->m_relatedPage;
     copy->m_visitedLinkStore = this->m_visitedLinkStore;
     copy->m_websiteDataStore = this->m_websiteDataStore;
-    copy->m_sessionID = this->m_sessionID;
-    copy->m_treatsSHA1SignedCertificatesAsInsecure = this->m_treatsSHA1SignedCertificatesAsInsecure;
-#if PLATFORM(IOS)
-    copy->m_alwaysRunsAtForegroundPriority = this->m_alwaysRunsAtForegroundPriority;
+#if PLATFORM(IOS_FAMILY)
+    copy->m_clientNavigationsRunAtForegroundPriority = this->m_clientNavigationsRunAtForegroundPriority;
+    copy->m_canShowWhileLocked = this->m_canShowWhileLocked;
+    copy->m_clickInteractionDriverForTesting = this->m_clickInteractionDriverForTesting;
 #endif
     copy->m_initialCapitalizationEnabled = this->m_initialCapitalizationEnabled;
-    copy->m_cpuLimit = this->m_cpuLimit;
+    copy->m_waitsForPaintAfterViewDidMoveToWindow = this->m_waitsForPaintAfterViewDidMoveToWindow;
+    copy->m_drawsBackground = this->m_drawsBackground;
     copy->m_controlledByAutomation = this->m_controlledByAutomation;
+    copy->m_cpuLimit = this->m_cpuLimit;
     copy->m_overrideContentSecurityPolicy = this->m_overrideContentSecurityPolicy;
+#if ENABLE(APPLICATION_MANIFEST)
+    copy->m_applicationManifest = this->m_applicationManifest;
+#endif
+    copy->m_shouldRelaxThirdPartyCookieBlocking = this->m_shouldRelaxThirdPartyCookieBlocking;
+    copy->m_attributedBundleIdentifier = this->m_attributedBundleIdentifier;
+    for (auto& pair : this->m_urlSchemeHandlers)
+        copy->m_urlSchemeHandlers.set(pair.key, pair.value.copyRef());
+    copy->m_corsDisablingPatterns = this->m_corsDisablingPatterns;
+    copy->m_maskedURLSchemes = this->m_maskedURLSchemes;
+    copy->m_crossOriginAccessControlCheckEnabled = this->m_crossOriginAccessControlCheckEnabled;
+    copy->m_userScriptsShouldWaitUntilNotification = this->m_userScriptsShouldWaitUntilNotification;
+
+    copy->m_processDisplayName = this->m_processDisplayName;
+    copy->m_loadsSubresources = this->m_loadsSubresources;
+    copy->m_allowedNetworkHosts = this->m_allowedNetworkHosts;
+#if ENABLE(APP_BOUND_DOMAINS)
+    copy->m_ignoresAppBoundDomains = this->m_ignoresAppBoundDomains;
+    copy->m_limitsNavigationsToAppBoundDomains = this->m_limitsNavigationsToAppBoundDomains;
+#endif
+
+    copy->m_mediaCaptureEnabled = this->m_mediaCaptureEnabled;
+    copy->m_httpsUpgradeEnabled = this->m_httpsUpgradeEnabled;
+#if PLATFORM(IOS_FAMILY)
+    copy->m_appInitiatedOverrideValueForTesting = this->m_appInitiatedOverrideValueForTesting;
+#endif
+#if HAVE(TOUCH_BAR)
+    copy->m_requiresUserActionForEditingControlsManager = this->m_requiresUserActionForEditingControlsManager;
+#endif
+
+    copy->m_contentSecurityPolicyModeForExtension = this->m_contentSecurityPolicyModeForExtension;
 
     return copy;
 }
@@ -117,7 +150,7 @@ void PageConfiguration::setPreferences(WebPreferences* preferences)
     m_preferences = preferences;
 }
 
-WebPageProxy* PageConfiguration::relatedPage()
+WebPageProxy* PageConfiguration::relatedPage() const
 {
     return m_relatedPage.get();
 }
@@ -127,42 +160,68 @@ void PageConfiguration::setRelatedPage(WebPageProxy* relatedPage)
     m_relatedPage = relatedPage;
 }
 
-
-VisitedLinkStore* PageConfiguration::visitedLinkStore()
+WebKit::VisitedLinkStore* PageConfiguration::visitedLinkStore()
 {
     return m_visitedLinkStore.get();
 }
 
-void PageConfiguration::setVisitedLinkStore(VisitedLinkStore* visitedLinkStore)
+void PageConfiguration::setVisitedLinkStore(WebKit::VisitedLinkStore* visitedLinkStore)
 {
     m_visitedLinkStore = visitedLinkStore;
 }
 
-API::WebsiteDataStore* PageConfiguration::websiteDataStore()
+WebKit::WebsiteDataStore* PageConfiguration::websiteDataStore()
 {
     return m_websiteDataStore.get();
 }
 
-void PageConfiguration::setWebsiteDataStore(API::WebsiteDataStore* websiteDataStore)
+void PageConfiguration::setWebsiteDataStore(WebKit::WebsiteDataStore* websiteDataStore)
 {
     m_websiteDataStore = websiteDataStore;
-
-    if (m_websiteDataStore)
-        m_sessionID = m_websiteDataStore->websiteDataStore().sessionID();
-    else
-        m_sessionID = PAL::SessionID();
 }
 
-PAL::SessionID PageConfiguration::sessionID()
+WebsitePolicies* PageConfiguration::defaultWebsitePolicies() const
 {
-    ASSERT(!m_websiteDataStore || m_websiteDataStore->websiteDataStore().sessionID() == m_sessionID || m_sessionID == PAL::SessionID::legacyPrivateSessionID());
-
-    return m_sessionID;
+    return m_defaultWebsitePolicies.get();
 }
 
-void PageConfiguration::setSessionID(PAL::SessionID sessionID)
+void PageConfiguration::setDefaultWebsitePolicies(WebsitePolicies* policies)
 {
-    m_sessionID = sessionID;
+    m_defaultWebsitePolicies = policies;
 }
+
+RefPtr<WebKit::WebURLSchemeHandler> PageConfiguration::urlSchemeHandlerForURLScheme(const WTF::String& scheme)
+{
+    return m_urlSchemeHandlers.get(scheme);
+}
+
+void PageConfiguration::setURLSchemeHandlerForURLScheme(Ref<WebKit::WebURLSchemeHandler>&& handler, const WTF::String& scheme)
+{
+    m_urlSchemeHandlers.set(scheme, WTFMove(handler));
+}
+
+bool PageConfiguration::captivePortalModeEnabled() const
+{
+    if (m_defaultWebsitePolicies)
+        return m_defaultWebsitePolicies->captivePortalModeEnabled();
+    return captivePortalModeEnabledBySystem();
+}
+
+bool PageConfiguration::isCaptivePortalModeExplicitlySet() const
+{
+    return m_defaultWebsitePolicies && m_defaultWebsitePolicies->isCaptivePortalModeExplicitlySet();
+}
+
+#if ENABLE(APPLICATION_MANIFEST)
+ApplicationManifest* PageConfiguration::applicationManifest() const
+{
+    return m_applicationManifest.get();
+}
+
+void PageConfiguration::setApplicationManifest(ApplicationManifest* applicationManifest)
+{
+    m_applicationManifest = applicationManifest;
+}
+#endif
 
 } // namespace API

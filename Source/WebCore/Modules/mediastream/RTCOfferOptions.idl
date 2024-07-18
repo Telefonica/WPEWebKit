@@ -25,7 +25,10 @@
 
 [
     Conditional=WEB_RTC,
-    EnabledAtRuntime=PeerConnection
+    EnabledBySetting=PeerConnectionEnabled
 ] dictionary RTCOfferOptions : RTCOfferAnswerOptions {
     boolean iceRestart = false;
+
+    boolean? offerToReceiveVideo;
+    boolean? offerToReceiveAudio;
 };

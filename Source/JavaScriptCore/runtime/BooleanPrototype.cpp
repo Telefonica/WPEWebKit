@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2003, 2008, 2011, 2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003-2020 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -21,17 +21,13 @@
 #include "config.h"
 #include "BooleanPrototype.h"
 
-#include "Error.h"
-#include "ExceptionHelpers.h"
-#include "JSFunction.h"
-#include "JSString.h"
-#include "ObjectPrototype.h"
+#include "IntegrityInlines.h"
 #include "JSCInlines.h"
 
 namespace JSC {
 
-static EncodedJSValue JSC_HOST_CALL booleanProtoFuncToString(ExecState*);
-static EncodedJSValue JSC_HOST_CALL booleanProtoFuncValueOf(ExecState*);
+static JSC_DECLARE_HOST_FUNCTION(booleanProtoFuncToString);
+static JSC_DECLARE_HOST_FUNCTION(booleanProtoFuncValueOf);
 
 }
 
@@ -39,7 +35,7 @@ static EncodedJSValue JSC_HOST_CALL booleanProtoFuncValueOf(ExecState*);
 
 namespace JSC {
 
-const ClassInfo BooleanPrototype::s_info = { "Boolean", &BooleanObject::s_info, &booleanPrototypeTable, nullptr, CREATE_METHOD_TABLE(BooleanPrototype) };
+const ClassInfo BooleanPrototype::s_info = { "Boolean"_s, &BooleanObject::s_info, &booleanPrototypeTable, nullptr, CREATE_METHOD_TABLE(BooleanPrototype) };
 
 /* Source for BooleanPrototype.lut.h
 @begin booleanPrototypeTable
@@ -60,44 +56,48 @@ void BooleanPrototype::finishCreation(VM& vm, JSGlobalObject*)
     Base::finishCreation(vm);
     setInternalValue(vm, jsBoolean(false));
 
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
 }
 
 // ------------------------------ Functions ---------------------------
 
-EncodedJSValue JSC_HOST_CALL booleanProtoFuncToString(ExecState* exec)
+JSC_DEFINE_HOST_FUNCTION(booleanProtoFuncToString, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    JSValue thisValue = exec->thisValue();
+    JSValue thisValue = callFrame->thisValue();
     if (thisValue == jsBoolean(false))
         return JSValue::encode(vm.smallStrings.falseString());
 
     if (thisValue == jsBoolean(true))
         return JSValue::encode(vm.smallStrings.trueString());
 
-    if (!thisValue.inherits(vm, BooleanObject::info()))
-        return throwVMTypeError(exec, scope);
+    auto* thisObject = jsDynamicCast<BooleanObject*>(thisValue);
+    if (UNLIKELY(!thisObject))
+        return throwVMTypeError(globalObject, scope);
 
-    if (asBooleanObject(thisValue)->internalValue() == jsBoolean(false))
+    Integrity::auditStructureID(thisObject->structureID());
+    if (thisObject->internalValue() == jsBoolean(false))
         return JSValue::encode(vm.smallStrings.falseString());
 
-    ASSERT(asBooleanObject(thisValue)->internalValue() == jsBoolean(true));
+    ASSERT(thisObject->internalValue() == jsBoolean(true));
     return JSValue::encode(vm.smallStrings.trueString());
 }
 
-EncodedJSValue JSC_HOST_CALL booleanProtoFuncValueOf(ExecState* exec)
+JSC_DEFINE_HOST_FUNCTION(booleanProtoFuncValueOf, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    JSValue thisValue = exec->thisValue();
+    JSValue thisValue = callFrame->thisValue();
     if (thisValue.isBoolean())
         return JSValue::encode(thisValue);
 
-    if (!thisValue.inherits(vm, BooleanObject::info()))
-        return throwVMTypeError(exec, scope);
+    auto* thisObject = jsDynamicCast<BooleanObject*>(thisValue);
+    if (UNLIKELY(!thisObject))
+        return throwVMTypeError(globalObject, scope);
 
-    return JSValue::encode(asBooleanObject(thisValue)->internalValue());
+    Integrity::auditStructureID(thisObject->structureID());
+    return JSValue::encode(thisObject->internalValue());
 }
 
 } // namespace JSC

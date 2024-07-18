@@ -27,6 +27,7 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <WebKitLegacy/WebKitAvailability.h>
 
 #if !TARGET_OS_IPHONE
 #import <AppKit/AppKit.h>
@@ -42,6 +43,7 @@
     @protocol WebDocumentView
     @discussion Protocol implemented by the document view of WebFrameView
 */
+WEBKIT_DEPRECATED_MAC(10_3, 10_14)
 @protocol WebDocumentView <NSObject>
 
 /*!
@@ -78,7 +80,11 @@
     @param hostWindow The host window for the document view.
     @abstract Called before the host window is set on the parent web view.
 */
+#if TARGET_OS_IPHONE
+- (void)viewWillMoveToHostWindow:(WAKWindow *)hostWindow;
+#else
 - (void)viewWillMoveToHostWindow:(NSWindow *)hostWindow;
+#endif
 
 /*!
     @method viewDidMoveToHostWindow
@@ -93,6 +99,7 @@
     @protocol WebDocumentSearching
     @discussion Optional protocol for searching document view of WebFrameView. 
 */
+WEBKIT_DEPRECATED_MAC(10_3, 10_14)
 @protocol WebDocumentSearching <NSObject>
 /*!
     @method searchFor:direction:caseSensitive:wrap:
@@ -111,6 +118,7 @@
     @protocol WebDocumentText
     @discussion Optional protocol for supporting text operations.
 */
+WEBKIT_DEPRECATED_MAC(10_3, 10_14)
 @protocol WebDocumentText <NSObject>
 
 /*!
@@ -167,6 +175,7 @@
     @protocol WebDocumentRepresentation
     @discussion Protocol implemented by the document representation of a data source.
 */
+WEBKIT_DEPRECATED_MAC(10_3, 10_14)
 @protocol WebDocumentRepresentation <NSObject>
 /*!
     @method setDataSource:

@@ -32,34 +32,80 @@
 #include "Blob.h"
 
 #include "BlobBuilder.h"
+#include "BlobLoader.h"
 #include "BlobPart.h"
 #include "BlobURL.h"
 #include "File.h"
+#include "JSDOMPromiseDeferred.h"
+#include "PolicyContainer.h"
+#include "ReadableStream.h"
+#include "ReadableStreamSource.h"
 #include "ScriptExecutionContext.h"
+#include "SharedBuffer.h"
 #include "ThreadableBlobRegistry.h"
+#include "WebCoreOpaqueRoot.h"
+#include <wtf/IsoMallocInlines.h>
+#include <wtf/Lock.h>
+#include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/text/CString.h>
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(Blob);
+
 class BlobURLRegistry final : public URLRegistry {
 public:
-    void registerURL(SecurityOrigin*, const URL&, URLRegistrable&) override;
-    void unregisterURL(const URL&) override;
+    void registerURL(const ScriptExecutionContext&, const URL&, URLRegistrable&) final;
+    void unregisterURL(const URL&) final;
+    void unregisterURLsForContext(const ScriptExecutionContext&) final;
 
     static URLRegistry& registry();
+
+    Lock m_urlsPerContextLock;
+    HashMap<ScriptExecutionContextIdentifier, HashSet<URL>> m_urlsPerContext WTF_GUARDED_BY_LOCK(m_urlsPerContextLock);
 };
 
-
-void BlobURLRegistry::registerURL(SecurityOrigin* origin, const URL& publicURL, URLRegistrable& blob)
+void BlobURLRegistry::registerURL(const ScriptExecutionContext& context, const URL& publicURL, URLRegistrable& blob)
 {
     ASSERT(&blob.registry() == this);
-    ThreadableBlobRegistry::registerBlobURL(origin, publicURL, static_cast<Blob&>(blob).url());
+    {
+        Locker locker { m_urlsPerContextLock };
+        m_urlsPerContext.add(context.identifier(), HashSet<URL>()).iterator->value.add(publicURL.isolatedCopy());
+    }
+    ThreadableBlobRegistry::registerBlobURL(context.securityOrigin(), context.policyContainer(), publicURL, static_cast<Blob&>(blob).url());
 }
 
 void BlobURLRegistry::unregisterURL(const URL& url)
 {
+    bool isURLRegistered = false;
+    {
+        Locker locker { m_urlsPerContextLock };
+        for (auto& [contextIdentifier, urls] : m_urlsPerContext) {
+            if (!urls.remove(url))
+                continue;
+            if (urls.isEmpty())
+                m_urlsPerContext.remove(contextIdentifier);
+            isURLRegistered = true;
+            break;
+        }
+    }
+    if (!isURLRegistered)
+        return;
+
     ThreadableBlobRegistry::unregisterBlobURL(url);
+}
+
+void BlobURLRegistry::unregisterURLsForContext(const ScriptExecutionContext& context)
+{
+    HashSet<URL> urlsForContext;
+    {
+        Locker locker { m_urlsPerContextLock };
+        urlsForContext = m_urlsPerContext.take(context.identifier());
+    }
+    for (auto& url : urlsForContext)
+        ThreadableBlobRegistry::unregisterBlobURL(url);
 }
 
 URLRegistry& BlobURLRegistry::registry()
@@ -68,21 +114,22 @@ URLRegistry& BlobURLRegistry::registry()
     return instance;
 }
 
-Blob::Blob(UninitializedContructor)
+Blob::Blob(UninitializedContructor, ScriptExecutionContext* context, URL&& url, String&& type)
+    : ActiveDOMObject(context)
+    , m_type(WTFMove(type))
+    , m_internalURL(WTFMove(url))
 {
 }
 
-Blob::Blob()
-    : m_size(0)
+Blob::Blob(ScriptExecutionContext* context)
+    : ActiveDOMObject(context)
+    , m_size(0)
+    , m_internalURL(BlobURL::createInternalURL())
 {
-    m_internalURL = BlobURL::createInternalURL();
-    ThreadableBlobRegistry::registerBlobURL(m_internalURL, { },  { });
+    ThreadableBlobRegistry::registerBlobURL(m_internalURL, { }, { });
 }
 
-Blob::Blob(Vector<BlobPartVariant>&& blobPartVariants, const BlobPropertyBag& propertyBag)
-    : m_internalURL(BlobURL::createInternalURL())
-    , m_type(normalizedContentType(propertyBag.type))
-    , m_size(-1)
+static Vector<BlobPart> buildBlobData(Vector<BlobPartVariant>&& blobPartVariants, const BlobPropertyBag& propertyBag)
 {
     BlobBuilder builder(propertyBag.endings);
     for (auto& blobPartVariant : blobPartVariants) {
@@ -92,62 +139,81 @@ Blob::Blob(Vector<BlobPartVariant>&& blobPartVariants, const BlobPropertyBag& pr
             }
         );
     }
-
-    ThreadableBlobRegistry::registerBlobURL(m_internalURL, builder.finalize(), m_type);
+    return builder.finalize();
 }
 
-Blob::Blob(Vector<uint8_t>&& data, const String& contentType)
-    : m_type(contentType)
-    , m_size(data.size())
+Blob::Blob(ScriptExecutionContext& context, Vector<BlobPartVariant>&& blobPartVariants, const BlobPropertyBag& propertyBag)
+    : ActiveDOMObject(&context)
+    , m_type(normalizedContentType(propertyBag.type))
+    , m_internalURL(BlobURL::createInternalURL())
 {
-    Vector<BlobPart> blobParts;
-    blobParts.append(BlobPart(WTFMove(data)));
-    m_internalURL = BlobURL::createInternalURL();
-    ThreadableBlobRegistry::registerBlobURL(m_internalURL, WTFMove(blobParts), contentType);
+    ThreadableBlobRegistry::registerBlobURL(m_internalURL, buildBlobData(WTFMove(blobPartVariants), propertyBag), m_type);
 }
 
-Blob::Blob(ReferencingExistingBlobConstructor, const Blob& blob)
-    : m_internalURL(BlobURL::createInternalURL())
+Blob::Blob(ScriptExecutionContext* context, Vector<uint8_t>&& data, const String& contentType)
+    : ActiveDOMObject(context)
+    , m_type(contentType)
+    , m_size(data.size())
+    , m_internalURL(BlobURL::createInternalURL())
+    , m_memoryCost(data.size())
+{
+    ThreadableBlobRegistry::registerBlobURL(m_internalURL, { BlobPart(WTFMove(data)) }, contentType);
+}
+
+Blob::Blob(ReferencingExistingBlobConstructor, ScriptExecutionContext* context, const Blob& blob)
+    : ActiveDOMObject(context)
     , m_type(blob.type())
     , m_size(blob.size())
+    , m_internalURL(BlobURL::createInternalURL())
 {
     ThreadableBlobRegistry::registerBlobURL(m_internalURL, { BlobPart(blob.url()) } , m_type);
 }
 
-Blob::Blob(DeserializationContructor, const URL& srcURL, const String& type, long long size, const String& fileBackedPath)
-    : m_type(normalizedContentType(type))
+Blob::Blob(DeserializationContructor, ScriptExecutionContext* context, const URL& srcURL, const String& type, std::optional<unsigned long long> size, const String& fileBackedPath)
+    : ActiveDOMObject(context)
+    , m_type(normalizedContentType(type))
     , m_size(size)
+    , m_internalURL(BlobURL::createInternalURL())
 {
-    m_internalURL = BlobURL::createInternalURL();
     if (fileBackedPath.isEmpty())
-        ThreadableBlobRegistry::registerBlobURL(nullptr, m_internalURL, srcURL);
+        ThreadableBlobRegistry::registerBlobURL(nullptr, { }, m_internalURL, srcURL);
     else
         ThreadableBlobRegistry::registerBlobURLOptionallyFileBacked(m_internalURL, srcURL, fileBackedPath, m_type);
 }
 
-Blob::Blob(const URL& srcURL, long long start, long long end, const String& type)
-    : m_type(normalizedContentType(type))
-    , m_size(-1) // size is not necessarily equal to end - start.
+Blob::Blob(ScriptExecutionContext* context, const URL& srcURL, long long start, long long end, const String& type)
+    : ActiveDOMObject(context)
+    , m_type(normalizedContentType(type))
+    , m_internalURL(BlobURL::createInternalURL())
+    // m_size is not necessarily equal to end - start so we do not initialize it here.
 {
-    m_internalURL = BlobURL::createInternalURL();
-    ThreadableBlobRegistry::registerBlobURLForSlice(m_internalURL, srcURL, start, end);
+    ThreadableBlobRegistry::registerBlobURLForSlice(m_internalURL, srcURL, start, end, m_type);
 }
 
 Blob::~Blob()
 {
     ThreadableBlobRegistry::unregisterBlobURL(m_internalURL);
+    while (!m_blobLoaders.isEmpty())
+        (*m_blobLoaders.begin())->cancel();
+}
+
+Ref<Blob> Blob::slice(long long start, long long end, const String& contentType) const
+{
+    auto blob = adoptRef(*new Blob(scriptExecutionContext(), m_internalURL, start, end, contentType));
+    blob->suspendIfNeeded();
+    return blob;
 }
 
 unsigned long long Blob::size() const
 {
-    if (m_size < 0) {
+    if (!m_size) {
         // FIXME: JavaScript cannot represent sizes as large as unsigned long long, we need to
         // come up with an exception to throw if file size is not representable.
         unsigned long long actualSize = ThreadableBlobRegistry::blobSize(m_internalURL);
-        m_size = WTF::isInBounds<long long>(actualSize) ? static_cast<long long>(actualSize) : 0;
+        m_size = isInBounds<long long>(actualSize) ? actualSize : 0;
     }
 
-    return static_cast<unsigned long long>(m_size);
+    return *m_size;
 }
 
 bool Blob::isValidContentType(const String& contentType)
@@ -168,7 +234,108 @@ String Blob::normalizedContentType(const String& contentType)
     return contentType.convertToASCIILowercase();
 }
 
-#if !ASSERT_DISABLED
+void Blob::loadBlob(FileReaderLoader::ReadType readType, CompletionHandler<void(BlobLoader&)>&& completionHandler)
+{
+    auto blobLoader = makeUnique<BlobLoader>([this, pendingActivity = makePendingActivity(*this), completionHandler = WTFMove(completionHandler)](BlobLoader& blobLoader) mutable {
+        completionHandler(blobLoader);
+        m_blobLoaders.take(&blobLoader);
+    });
+
+    blobLoader->start(*this, scriptExecutionContext(), readType);
+
+    if (blobLoader->isLoading())
+        m_blobLoaders.add(WTFMove(blobLoader));
+}
+
+void Blob::text(Ref<DeferredPromise>&& promise)
+{
+    loadBlob(FileReaderLoader::ReadAsText, [promise = WTFMove(promise)](BlobLoader& blobLoader) mutable {
+        if (auto optionalErrorCode = blobLoader.errorCode()) {
+            promise->reject(Exception { *optionalErrorCode });
+            return;
+        }
+        promise->resolve<IDLDOMString>(blobLoader.stringResult());
+    });
+}
+
+void Blob::arrayBuffer(Ref<DeferredPromise>&& promise)
+{
+    loadBlob(FileReaderLoader::ReadAsArrayBuffer, [promise = WTFMove(promise)](BlobLoader& blobLoader) mutable {
+        if (auto optionalErrorCode = blobLoader.errorCode()) {
+            promise->reject(Exception { *optionalErrorCode });
+            return;
+        }
+        auto arrayBuffer = blobLoader.arrayBufferResult();
+        if (!arrayBuffer) {
+            promise->reject(Exception { InvalidStateError });
+            return;
+        }
+        promise->resolve<IDLArrayBuffer>(*arrayBuffer);
+    });
+}
+
+ExceptionOr<Ref<ReadableStream>> Blob::stream()
+{
+    class BlobStreamSource : public FileReaderLoaderClient, public ReadableStreamSource {
+    public:
+        BlobStreamSource(ScriptExecutionContext& scriptExecutionContext, Blob& blob)
+            : m_loader(makeUniqueRef<FileReaderLoader>(FileReaderLoader::ReadType::ReadAsBinaryChunks, this))
+        {
+            m_loader->start(&scriptExecutionContext, blob);
+        }
+
+    private:
+        // ReadableStreamSource
+        void setActive() final { }
+        void setInactive() final { }
+        void doStart() final
+        {
+            m_isStarted = true;
+            if (m_exception)
+                controller().error(*m_exception);
+        }
+
+        void doPull() final { }
+        void doCancel() final
+        {
+            m_loader->cancel();
+        }
+
+        // FileReaderLoaderClient
+        void didStartLoading() final { }
+        void didReceiveData() final { }
+        void didReceiveBinaryChunk(const SharedBuffer& buffer) final
+        {
+            if (!controller().enqueue(buffer.tryCreateArrayBuffer()))
+                doCancel();
+        }
+        void didFinishLoading() final
+        {
+            controller().close();
+        }
+        void didFail(ExceptionCode code) final
+        {
+            Exception exception { code };
+            if (!m_isStarted) {
+                m_exception = WTFMove(exception);
+                return;
+            }
+            controller().error(exception);
+        }
+
+        UniqueRef<FileReaderLoader> m_loader;
+        bool m_isStarted { false };
+        std::optional<Exception> m_exception;
+    };
+
+    auto* context = scriptExecutionContext();
+    auto* globalObject = context ? context->globalObject() : nullptr;
+    if (!globalObject)
+        return Exception { InvalidStateError };
+    return ReadableStream::create(*globalObject, adoptRef(*new BlobStreamSource(*context, *this)));
+}
+
+#if ASSERT_ENABLED
 bool Blob::isNormalizedContentType(const String& contentType)
 {
     // FIXME: Do we really want to treat the empty string and null string as valid content types?
@@ -195,12 +362,31 @@ bool Blob::isNormalizedContentType(const CString& contentType)
     }
     return true;
 }
-#endif
+#endif // ASSERT_ENABLED
 
 URLRegistry& Blob::registry() const
 {
     return BlobURLRegistry::registry();
 }
 
+const char* Blob::activeDOMObjectName() const
+{
+    return "Blob";
+}
+
+BlobURLHandle Blob::handle() const
+{
+    return BlobURLHandle { m_internalURL };
+}
+
+WebCoreOpaqueRoot root(Blob* blob)
+{
+    return WebCoreOpaqueRoot { blob };
+}
+
+size_t Blob::memoryCost() const
+{
+    return m_memoryCost;
+}
 
 } // namespace WebCore

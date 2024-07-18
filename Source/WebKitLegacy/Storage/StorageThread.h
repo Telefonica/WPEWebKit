@@ -29,6 +29,7 @@
 #include <wtf/Function.h>
 #include <wtf/MessageQueue.h>
 #include <wtf/Threading.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -38,10 +39,11 @@ class StorageTask;
 class StorageThread {
     WTF_MAKE_NONCOPYABLE(StorageThread); WTF_MAKE_FAST_ALLOCATED;
 public:
-    StorageThread();
+    enum class Type { LocalStorage, IndexedDB };
+    StorageThread(Type = Type::LocalStorage);
     ~StorageThread();
 
-    bool start();
+    void start();
     void terminate();
 
     void dispatch(Function<void ()>&&);
@@ -55,6 +57,7 @@ private:
     void performTerminate();
 
     RefPtr<Thread> m_thread;
+    Type m_type;
     MessageQueue<Function<void ()>> m_queue;
 };
 

@@ -29,8 +29,19 @@
 
 namespace WebCore {
 
-ApplicationCacheResource::ApplicationCacheResource(const URL& url, const ResourceResponse& response, unsigned type, Ref<SharedBuffer>&& data, const String& path)
-    : SubstituteResource(url, response, WTFMove(data))
+Ref<ApplicationCacheResource> ApplicationCacheResource::create(const URL& url, const ResourceResponse& response, unsigned type, RefPtr<FragmentedSharedBuffer>&& buffer, const String& path)
+{
+    ASSERT(!url.hasFragmentIdentifier());
+    if (!buffer)
+        buffer = SharedBuffer::create();
+    auto resourceResponse = response;
+    resourceResponse.setSource(ResourceResponse::Source::ApplicationCache);
+
+    return adoptRef(*new ApplicationCacheResource(URL { url }, WTFMove(resourceResponse), type, buffer.releaseNonNull(), path));
+}
+
+ApplicationCacheResource::ApplicationCacheResource(URL&& url, ResourceResponse&& response, unsigned type, Ref<FragmentedSharedBuffer>&& data, const String& path)
+    : SubstituteResource(WTFMove(url), WTFMove(response), WTFMove(data))
     , m_type(type)
     , m_storageID(0)
     , m_estimatedSizeInStorage(0)
@@ -40,7 +51,10 @@ ApplicationCacheResource::ApplicationCacheResource(const URL& url, const Resourc
 
 void ApplicationCacheResource::deliver(ResourceLoader& loader)
 {
-    loader.deliverResponseAndData(response(), m_path.isEmpty() ? data().copy() : SharedBuffer::createWithContentsOfFile(m_path));
+    if (m_path.isEmpty())
+        loader.deliverResponseAndData(response(), RefPtr { &data() });
+    else
+        loader.deliverResponseAndData(response(), SharedBuffer::createWithContentsOfFile(m_path));
 }
 
 void ApplicationCacheResource::addType(unsigned type) 

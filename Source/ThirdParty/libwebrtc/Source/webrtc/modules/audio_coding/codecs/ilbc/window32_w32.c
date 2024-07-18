@@ -16,7 +16,9 @@
 
 ******************************************************************/
 
-#include "defines.h"
+#include "modules/audio_coding/codecs/ilbc/window32_w32.h"
+
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  *  window multiplication

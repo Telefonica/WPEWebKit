@@ -27,7 +27,8 @@
 
 #include "Decoder.h"
 #include "Encoder.h"
-#include <wtf/HashMap.h>
+#include <wtf/CrossThreadCopier.h>
+#include <wtf/RobinHoodHashMap.h>
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
 
@@ -36,8 +37,16 @@ namespace WebKit {
 struct WebPreferencesStore {
     WebPreferencesStore();
 
+    using Value = std::variant<String, bool, uint32_t, double>;
+    using ValueMap = MemoryCompactRobinHoodHashMap<String, Value>;
+    WebPreferencesStore(ValueMap&& values, ValueMap&& overriddenDefaults)
+        : m_values(WTFMove(values))
+        , m_overriddenDefaults(WTFMove(overriddenDefaults))
+    {
+    }
+
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, WebPreferencesStore&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, WebPreferencesStore&);
 
     // NOTE: The getters in this class have non-standard names to aid in the use of the preference macros.
 
@@ -58,127 +67,19 @@ struct WebPreferencesStore {
     void setOverrideDefaultsUInt32ValueForKey(const String& key, uint32_t value);
     void setOverrideDefaultsDoubleValueForKey(const String& key, double value);
 
+    void deleteKey(const String& key);
+
     // For WebKitTestRunner usage.
     static void overrideBoolValueForKey(const String& key, bool value);
     static void removeTestRunnerOverrides();
 
-    struct Value {
-        enum class Type {
-            None,
-            String,
-            Bool,
-            UInt32,
-            Double,
-        };
-
-        void encode(IPC::Encoder&) const;
-        static bool decode(IPC::Decoder&, Value&);
-
-        explicit Value() : m_type(Type::None) { }
-        explicit Value(const String& value) : m_type(Type::String), m_string(value) { }
-        explicit Value(bool value) : m_type(Type::Bool), m_bool(value) { }
-        explicit Value(uint32_t value) : m_type(Type::UInt32), m_uint32(value) { }
-        explicit Value(double value) : m_type(Type::Double), m_double(value) { }
-
-        Value(Value&& value)
-            : m_type(value.m_type)
-        {
-            switch (m_type) {
-            case Type::None:
-                break;
-            case Type::String:
-                new (&m_string) String(WTFMove(value.m_string));
-                break;
-            case Type::Bool:
-                m_bool = value.m_bool;
-                break;
-            case Type::UInt32:
-                m_uint32 = value.m_uint32;
-                break;
-            case Type::Double:
-                m_double = value.m_double;
-                break;
-            }
-        }
-
-        Value& operator=(const Value& other)
-        {
-            if (this == &other)
-                return *this;
-                
-            destroy();
-
-            m_type = other.m_type;
-            switch (m_type) {
-            case Type::None:
-                break;
-            case Type::String:
-                new (&m_string) String(other.m_string);
-                break;
-            case Type::Bool:
-                m_bool = other.m_bool;
-                break;
-            case Type::UInt32:
-                m_uint32 = other.m_uint32;
-                break;
-            case Type::Double:
-                m_double = other.m_double;
-                break;
-            }
-    
-            return *this;
-        }
-
-        ~Value()
-        {
-            destroy();
-        }
-
-        Type type() const { return m_type; }
-
-        String asString() const
-        {
-            ASSERT(m_type == Type::String);
-            return m_string;
-        }
-
-        bool asBool() const
-        {
-            ASSERT(m_type == Type::Bool);
-            return m_bool;
-        }
-
-        uint32_t asUInt32() const
-        {
-            ASSERT(m_type == Type::UInt32);
-            return m_uint32;
-        }
-
-        double asDouble() const
-        {
-            ASSERT(m_type == Type::Double);
-            return m_double;
-        }
-
-    private:
-        void destroy()
-        {
-            if (m_type == Type::String)
-                m_string.~String();
-        }
-
-        Type m_type;
-        union {
-            String m_string;
-            bool m_bool;
-            uint32_t m_uint32;
-            double m_double;
-        };
-    };
-
-    typedef HashMap<String, Value> ValueMap;
     ValueMap m_values;
-    ValueMap m_overridenDefaults;
+    ValueMap m_overriddenDefaults;
+
+    WebPreferencesStore isolatedCopy() const & { return { crossThreadCopy(m_values), crossThreadCopy(m_overriddenDefaults) }; }
+    WebPreferencesStore isolatedCopy() && { return { crossThreadCopy(WTFMove(m_values)), crossThreadCopy(WTFMove(m_overriddenDefaults)) }; }
+
+    static ValueMap& defaults();
 };
 
 } // namespace WebKit

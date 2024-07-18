@@ -35,6 +35,7 @@
 namespace WebCore {
 
 class RenderRubyText final : public RenderBlockFlow {
+    WTF_MAKE_ISO_ALLOCATED(RenderRubyText);
 public:
     RenderRubyText(Element&, RenderStyle&&);
     virtual ~RenderRubyText();
@@ -48,12 +49,12 @@ public:
     bool canBreakBefore(const LazyLineBreakIterator&) const;
    
 private:
-    const char* renderName() const override { return "RenderRubyText"; }
+    ASCIILiteral renderName() const override { return "RenderRubyText"_s; }
     bool isRubyText() const override { return true; }
 
     bool avoidsFloats() const override;
 
-    ETextAlign textAlignmentForLine(bool endsWithSoftBreak) const override;
+    std::optional<TextAlignMode> overrideTextAlignmentForLine(bool endsWithSoftBreak) const override;
     void adjustInlineDirectionLineBounds(int expansionOpportunityCount, float& logicalLeft, float& logicalWidth) const override;
 };
 

@@ -26,28 +26,34 @@
 #import "config.h"
 #import "VideoTrackPrivateAVFObjC.h"
 
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
 
 #import "AVTrackPrivateAVFObjCImpl.h"
 #import "MediaSelectionGroupAVFObjC.h"
+#import "PlatformVideoTrackConfiguration.h"
 
 namespace WebCore {
 
 VideoTrackPrivateAVFObjC::VideoTrackPrivateAVFObjC(AVPlayerItemTrack* track)
-    : m_impl(std::make_unique<AVTrackPrivateAVFObjCImpl>(track))
+    : VideoTrackPrivateAVFObjC(makeUnique<AVTrackPrivateAVFObjCImpl>(track))
 {
-    resetPropertiesFromTrack();
 }
 
 VideoTrackPrivateAVFObjC::VideoTrackPrivateAVFObjC(AVAssetTrack* track)
-    : m_impl(std::make_unique<AVTrackPrivateAVFObjCImpl>(track))
+    : VideoTrackPrivateAVFObjC(makeUnique<AVTrackPrivateAVFObjCImpl>(track))
 {
-    resetPropertiesFromTrack();
 }
 
 VideoTrackPrivateAVFObjC::VideoTrackPrivateAVFObjC(MediaSelectionOptionAVFObjC& option)
-    : m_impl(std::make_unique<AVTrackPrivateAVFObjCImpl>(option))
+    : VideoTrackPrivateAVFObjC(makeUnique<AVTrackPrivateAVFObjCImpl>(option))
 {
+}
+
+VideoTrackPrivateAVFObjC::VideoTrackPrivateAVFObjC(std::unique_ptr<AVTrackPrivateAVFObjCImpl>&& impl)
+    : m_impl(WTFMove(impl))
+    , m_videoTrackConfigurationObserver([this] { videoTrackConfigurationChanged(); })
+{
+    m_impl->setVideoTrackConfigurationObserver(m_videoTrackConfigurationObserver);
     resetPropertiesFromTrack();
 }
 
@@ -62,11 +68,17 @@ void VideoTrackPrivateAVFObjC::resetPropertiesFromTrack()
     setId(m_impl->id());
     setLabel(m_impl->label());
     setLanguage(m_impl->language());
+    setConfiguration(m_impl->videoTrackConfiguration());
+}
+
+void VideoTrackPrivateAVFObjC::videoTrackConfigurationChanged()
+{
+    setConfiguration(m_impl->videoTrackConfiguration());
 }
 
 void VideoTrackPrivateAVFObjC::setPlayerItemTrack(AVPlayerItemTrack *track)
 {
-    m_impl = std::make_unique<AVTrackPrivateAVFObjCImpl>(track);
+    m_impl = makeUnique<AVTrackPrivateAVFObjCImpl>(track);
     resetPropertiesFromTrack();
 }
 
@@ -77,7 +89,7 @@ AVPlayerItemTrack* VideoTrackPrivateAVFObjC::playerItemTrack()
 
 void VideoTrackPrivateAVFObjC::setAssetTrack(AVAssetTrack *track)
 {
-    m_impl = std::make_unique<AVTrackPrivateAVFObjCImpl>(track);
+    m_impl = makeUnique<AVTrackPrivateAVFObjCImpl>(track);
     resetPropertiesFromTrack();
 }
 
@@ -88,7 +100,7 @@ AVAssetTrack* VideoTrackPrivateAVFObjC::assetTrack()
 
 void VideoTrackPrivateAVFObjC::setMediaSelectonOption(MediaSelectionOptionAVFObjC& option)
 {
-    m_impl = std::make_unique<AVTrackPrivateAVFObjCImpl>(option);
+    m_impl = makeUnique<AVTrackPrivateAVFObjCImpl>(option);
     resetPropertiesFromTrack();
 }
 

@@ -30,13 +30,13 @@
 #import "DOMNodeInternal.h"
 #import <WebCore/Event.h>
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/Node.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL reinterpret_cast<WebCore::Event*>(_internal)
 
@@ -115,7 +115,7 @@
 - (id <DOMEventTarget>)srcElement
 {
     WebCore::JSMainThreadNullState state;
-    return kit(WTF::getPtr(IMPL->srcElement()));
+    return kit(WTF::getPtr(IMPL->target()));
 }
 
 - (BOOL)returnValue
@@ -188,12 +188,14 @@ DOMEvent *kit(WebCore::Event* value)
     if (!value)
         return nil;
     if (DOMEvent *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMEvent *wrapper = [[kitClass(value) alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    RetainPtr<DOMEvent> wrapper = adoptNS([[kitClass(value) alloc] _init]);
     if (!wrapper)
         return nil;
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
+
+#undef IMPL

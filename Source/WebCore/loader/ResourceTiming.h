@@ -25,51 +25,55 @@
 
 #pragma once
 
-#include "LoadTiming.h"
 #include "NetworkLoadMetrics.h"
-#include "URL.h"
+#include "ResourceLoadTiming.h"
+#include "ServerTiming.h"
+#include <wtf/URL.h>
 
 namespace WebCore {
 
 class CachedResource;
+class PerformanceServerTiming;
 class ResourceResponse;
+class ResourceLoadTiming;
 class SecurityOrigin;
 
 class ResourceTiming {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    static ResourceTiming fromCache(const URL&, const String& initiator, const LoadTiming&, const ResourceResponse&, const SecurityOrigin&);
-    static ResourceTiming fromLoad(CachedResource&, const String& initiator, const LoadTiming&, const NetworkLoadMetrics&, const SecurityOrigin&);
-    static ResourceTiming fromSynchronousLoad(const URL&, const String& initiator, const LoadTiming&, const NetworkLoadMetrics&, const ResourceResponse&, const SecurityOrigin&);
+    static ResourceTiming fromMemoryCache(const URL&, const String& initiator, const ResourceLoadTiming&, const ResourceResponse&, const NetworkLoadMetrics&, const SecurityOrigin&);
+    static ResourceTiming fromLoad(CachedResource&, const URL&, const String& initiator, const ResourceLoadTiming&, const NetworkLoadMetrics&, const SecurityOrigin&);
+    static ResourceTiming fromSynchronousLoad(const URL&, const String& initiator, const ResourceLoadTiming&, const NetworkLoadMetrics&, const ResourceResponse&, const SecurityOrigin&);
 
-    URL url() const { return m_url; }
-    String initiator() const { return m_initiator; }
-    LoadTiming loadTiming() const { return m_loadTiming; }
-    NetworkLoadMetrics networkLoadMetrics() const { return m_networkLoadMetrics; }
-    bool allowTimingDetails() const { return m_allowTimingDetails; }
-
-    ResourceTiming isolatedCopy() const;
+    const URL& url() const { return m_url; }
+    const String& initiator() const { return m_initiator; }
+    const ResourceLoadTiming& resourceLoadTiming() const { return m_resourceLoadTiming; }
+    const NetworkLoadMetrics& networkLoadMetrics() const { return m_networkLoadMetrics; }
+    NetworkLoadMetrics& networkLoadMetrics() { return m_networkLoadMetrics; }
+    Vector<Ref<PerformanceServerTiming>> populateServerTiming() const;
+    ResourceTiming isolatedCopy() const &;
+    ResourceTiming isolatedCopy() &&;
 
     void overrideInitiatorName(const String& name) { m_initiator = name; }
+    bool isLoadedFromServiceWorker() const { return m_isLoadedFromServiceWorker; }
 
 private:
-    ResourceTiming(CachedResource&, const String& initiator, const LoadTiming&, const NetworkLoadMetrics&, const SecurityOrigin&);
-    ResourceTiming(const URL&, const String& initiator, const LoadTiming&, const NetworkLoadMetrics&, const ResourceResponse&, const SecurityOrigin&);
-    ResourceTiming(const URL&, const String& initiator, const LoadTiming&, const ResourceResponse&, const SecurityOrigin&);
-    ResourceTiming(const URL& url, const String& initiator, const LoadTiming& loadTiming, const NetworkLoadMetrics& networkLoadMetrics, bool allowTimingDetails)
-        : m_url(url)
-        , m_initiator(initiator)
-        , m_loadTiming(loadTiming)
-        , m_networkLoadMetrics(networkLoadMetrics)
-        , m_allowTimingDetails(allowTimingDetails)
+    ResourceTiming(const URL&, const String& initiator, const ResourceLoadTiming&, const NetworkLoadMetrics&, const ResourceResponse&, const SecurityOrigin&);
+    ResourceTiming(URL&& url, String&& initiator, const ResourceLoadTiming& resourceLoadTiming, NetworkLoadMetrics&& networkLoadMetrics, Vector<ServerTiming>&& serverTiming)
+        : m_url(WTFMove(url))
+        , m_initiator(WTFMove(initiator))
+        , m_resourceLoadTiming(resourceLoadTiming)
+        , m_networkLoadMetrics(WTFMove(networkLoadMetrics))
+        , m_serverTiming(WTFMove(serverTiming))
     {
     }
 
     URL m_url;
     String m_initiator;
-    LoadTiming m_loadTiming;
+    ResourceLoadTiming m_resourceLoadTiming;
     NetworkLoadMetrics m_networkLoadMetrics;
-    bool m_allowTimingDetails { false };
+    Vector<ServerTiming> m_serverTiming;
+    bool m_isLoadedFromServiceWorker { false };
 };
 
 } // namespace WebCore

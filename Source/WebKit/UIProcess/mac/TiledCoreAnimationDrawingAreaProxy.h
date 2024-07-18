@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 
 #include "DrawingAreaProxy.h"
 
@@ -33,7 +33,7 @@ namespace WebKit {
 
 class TiledCoreAnimationDrawingAreaProxy : public DrawingAreaProxy {
 public:
-    explicit TiledCoreAnimationDrawingAreaProxy(WebPageProxy&);
+    TiledCoreAnimationDrawingAreaProxy(WebPageProxy&, WebProcessProxy&);
     virtual ~TiledCoreAnimationDrawingAreaProxy();
 
 private:
@@ -41,26 +41,26 @@ private:
     void deviceScaleFactorDidChange() override;
     void sizeDidChange() override;
     void colorSpaceDidChange() override;
-    void minimumLayoutSizeDidChange() override;
+    void minimumSizeForAutoLayoutDidChange() override;
+    void sizeToContentAutoSizeMaximumSizeDidChange() override;
 
     void enterAcceleratedCompositingMode(uint64_t backingStoreStateID, const LayerTreeContext&) override;
-    void exitAcceleratedCompositingMode(uint64_t backingStoreStateID, const UpdateInfo&) override;
     void updateAcceleratedCompositingMode(uint64_t backingStoreStateID, const LayerTreeContext&) override;
+    void didFirstLayerFlush(uint64_t /* backingStoreStateID */, const LayerTreeContext&) override;
 
     void adjustTransientZoom(double scale, WebCore::FloatPoint origin) override;
     void commitTransientZoom(double scale, WebCore::FloatPoint origin) override;
 
-    void waitForDidUpdateActivityState() override;
+    void waitForDidUpdateActivityState(ActivityStateChangeID) override;
     void dispatchAfterEnsuringDrawing(WTF::Function<void (CallbackBase::Error)>&&) override;
     void dispatchPresentationCallbacksAfterFlushingLayers(const Vector<CallbackID>&) final;
 
     void willSendUpdateGeometry() override;
 
-    WebCore::MachSendRight createFence() override;
+    WTF::MachSendRight createFence() override;
 
     // Message handlers.
     void didUpdateGeometry() override;
-    void intrinsicContentSizeDidChange(const WebCore::IntSize&) override;
 
     void sendUpdateGeometry();
 
@@ -71,13 +71,16 @@ private:
     WebCore::IntSize m_lastSentSize;
 
     // The last minimum layout size we sent to the web process.
-    WebCore::IntSize m_lastSentMinimumLayoutSize;
+    WebCore::IntSize m_lastSentMinimumSizeForAutoLayout;
+
+    // The last maxmium size for size-to-content auto-sizing we sent to the web process.
+    WebCore::IntSize m_lastSentSizeToContentAutoSizeMaximumSize;
 
     CallbackMap m_callbacks;
 };
 
 } // namespace WebKit
 
-SPECIALIZE_TYPE_TRAITS_DRAWING_AREA_PROXY(TiledCoreAnimationDrawingAreaProxy, DrawingAreaTypeTiledCoreAnimation)
+SPECIALIZE_TYPE_TRAITS_DRAWING_AREA_PROXY(TiledCoreAnimationDrawingAreaProxy, DrawingAreaType::TiledCoreAnimation)
 
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,14 +27,11 @@
 #include "JSArrayBuffer.h"
 
 #include "JSCInlines.h"
-#include "TypeError.h"
 #include "TypedArrayController.h"
-#include <wtf/Gigacage.h>
 
 namespace JSC {
 
-const ClassInfo JSArrayBuffer::s_info = {
-    "ArrayBuffer", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSArrayBuffer)};
+const ClassInfo JSArrayBuffer::s_info = { "ArrayBuffer"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSArrayBuffer) };
 
 JSArrayBuffer::JSArrayBuffer(VM& vm, Structure* structure, RefPtr<ArrayBuffer>&& arrayBuffer)
     : Base(vm, structure)
@@ -46,15 +43,15 @@ void JSArrayBuffer::finishCreation(VM& vm, JSGlobalObject* globalObject)
 {
     Base::finishCreation(vm);
     // This probably causes GCs in the various VMs to overcount the impact of the array buffer.
-    vm.heap.addReference(this, m_impl);
-    vm.m_typedArrayController->registerWrapper(globalObject, m_impl, this);
+    vm.heap.addReference(this, impl());
+    vm.m_typedArrayController->registerWrapper(globalObject, impl(), this);
 }
 
 JSArrayBuffer* JSArrayBuffer::create(
     VM& vm, Structure* structure, RefPtr<ArrayBuffer>&& buffer)
 {
     JSArrayBuffer* result =
-        new (NotNull, allocateCell<JSArrayBuffer>(vm.heap))
+        new (NotNull, allocateCell<JSArrayBuffer>(vm))
         JSArrayBuffer(vm, structure, WTFMove(buffer));
     result->finishCreation(vm, structure->globalObject());
     return result;
@@ -64,25 +61,25 @@ Structure* JSArrayBuffer::createStructure(
     VM& vm, JSGlobalObject* globalObject, JSValue prototype)
 {
     return Structure::create(
-        vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info(),
+        vm, globalObject, prototype, TypeInfo(ArrayBufferType, StructureFlags), info(),
         NonArray);
 }
 
 bool JSArrayBuffer::isShared() const
 {
-    return m_impl->isShared();
+    return impl()->isShared();
 }
 
 ArrayBufferSharingMode JSArrayBuffer::sharingMode() const
 {
-    return m_impl->sharingMode();
+    return impl()->sharingMode();
 }
 
-size_t JSArrayBuffer::estimatedSize(JSCell* cell)
+size_t JSArrayBuffer::estimatedSize(JSCell* cell, VM& vm)
 {
     JSArrayBuffer* thisObject = jsCast<JSArrayBuffer*>(cell);
     size_t bufferEstimatedSize = thisObject->impl()->gcSizeEstimateInBytes();
-    return Base::estimatedSize(cell) + bufferEstimatedSize;
+    return Base::estimatedSize(cell, vm) + bufferEstimatedSize;
 }
 
 } // namespace JSC

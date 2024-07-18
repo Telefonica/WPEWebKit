@@ -23,8 +23,15 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef KeyEventCodesIOS_h
-#define KeyEventCodesIOS_h
+#pragma once
+
+#if TARGET_OS_IPHONE
+
+#import <WebCore/WAKAppKitStubs.h>
+
+#if WAK_APPKIT_API_AVAILABLE_MACCATALYST
+#import <AppKit/NSEvent.h>
+#else
 
 // Unicodes we reserve for function keys on the keyboard,
 // OpenStep reserves the range 0xF700-0xF8FF for this purpose.
@@ -104,7 +111,11 @@ enum {
     NSHelpFunctionKey         = 0xF746,
     NSModeSwitchFunctionKey   = 0xF747
 };
+#endif // WAK_APPKIT_API_AVAILABLE_MACCATALYST
 
+#if WAK_APPKIT_API_AVAILABLE_MACCATALYST
+#import <AppKit/NSText.h>
+#else
 enum {
     NSParagraphSeparatorCharacter = 0x2029,
     NSLineSeparatorCharacter = 0x2028,
@@ -117,5 +128,6 @@ enum {
     NSBackTabCharacter = 0x0019,
     NSDeleteCharacter = 0x007f
 };
+#endif // WAK_APPKIT_API_AVAILABLE_MACCATALYST
 
-#endif // KeyEventCodesIOS_h
+#endif // TARGET_OS_IPHONE

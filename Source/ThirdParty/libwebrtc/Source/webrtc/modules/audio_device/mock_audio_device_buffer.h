@@ -8,27 +8,28 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_DEVICE_MOCK_AUDIO_DEVICE_BUFFER_H_
-#define WEBRTC_MODULES_AUDIO_DEVICE_MOCK_AUDIO_DEVICE_BUFFER_H_
+#ifndef MODULES_AUDIO_DEVICE_MOCK_AUDIO_DEVICE_BUFFER_H_
+#define MODULES_AUDIO_DEVICE_MOCK_AUDIO_DEVICE_BUFFER_H_
 
-#include "webrtc/modules/audio_device/audio_device_buffer.h"
-#include "webrtc/test/gmock.h"
+#include "modules/audio_device/audio_device_buffer.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
 class MockAudioDeviceBuffer : public AudioDeviceBuffer {
  public:
-  MockAudioDeviceBuffer() {}
+  using AudioDeviceBuffer::AudioDeviceBuffer;
   virtual ~MockAudioDeviceBuffer() {}
-  MOCK_METHOD1(RequestPlayoutData, int32_t(size_t nSamples));
-  MOCK_METHOD1(GetPlayoutData, int32_t(void* audioBuffer));
-  MOCK_METHOD2(SetRecordedBuffer,
-               int32_t(const void* audioBuffer, size_t nSamples));
-  MOCK_METHOD3(SetVQEData,
-               void(int playDelayMS, int recDelayMS, int clockDrift));
-  MOCK_METHOD0(DeliverRecordedData, int32_t());
+  MOCK_METHOD(int32_t, RequestPlayoutData, (size_t nSamples), (override));
+  MOCK_METHOD(int32_t, GetPlayoutData, (void* audioBuffer), (override));
+  MOCK_METHOD(int32_t,
+              SetRecordedBuffer,
+              (const void* audioBuffer, size_t nSamples),
+              (override));
+  MOCK_METHOD(void, SetVQEData, (int playDelayMS, int recDelayMS), (override));
+  MOCK_METHOD(int32_t, DeliverRecordedData, (), (override));
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_DEVICE_MOCK_AUDIO_DEVICE_BUFFER_H_
+#endif  // MODULES_AUDIO_DEVICE_MOCK_AUDIO_DEVICE_BUFFER_H_

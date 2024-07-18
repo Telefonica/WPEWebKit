@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,27 +32,23 @@
 #import "PlaybackSessionInterfaceMac.h"
 #import "PlaybackSessionModel.h"
 #import <wtf/SoftLinking.h>
+#import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/text/WTFString.h>
 
-using namespace WebCore;
+IGNORE_WARNINGS_BEGIN("nullability-completeness")
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wnullability-completeness"
 SOFT_LINK_FRAMEWORK(AVKit)
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
 SOFT_LINK_CLASS_OPTIONAL(AVKit, AVTouchBarMediaSelectionOption)
-#else
-SOFT_LINK_CLASS_OPTIONAL(AVKit, AVFunctionBarMediaSelectionOption)
-#endif // __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
+
+using WebCore::MediaSelectionOption;
+using WebCore::PlaybackSessionInterfaceMac;
 
 @implementation WebPlaybackControlsManager
 
-@synthesize contentDuration=_contentDuration;
-@synthesize seekToTime=_seekToTime;
-@synthesize hasEnabledAudio=_hasEnabledAudio;
-@synthesize hasEnabledVideo=_hasEnabledVideo;
-@synthesize rate=_rate;
-@synthesize canTogglePlayback=_canTogglePlayback;
+@synthesize seekToTime = _seekToTime;
+@synthesize hasEnabledAudio = _hasEnabledAudio;
+@synthesize hasEnabledVideo = _hasEnabledVideo;
+@synthesize canTogglePlayback = _canTogglePlayback;
 @synthesize allowsPictureInPicturePlayback;
 @synthesize pictureInPictureActive;
 @synthesize canTogglePictureInPicture;
@@ -62,6 +58,39 @@ SOFT_LINK_CLASS_OPTIONAL(AVKit, AVFunctionBarMediaSelectionOption)
     if (_playbackSessionInterfaceMac)
         _playbackSessionInterfaceMac->setPlayBackControlsManager(nullptr);
     [super dealloc];
+}
+
+- (BOOL)canSeek
+{
+    return _canSeek;
+}
+
+- (void)setCanSeek:(BOOL)canSeek
+{
+    _canSeek = canSeek;
+}
+
++ (NSSet<NSString *> *)keyPathsForValuesAffectingContentDuration
+{
+    return [NSSet setWithObject:@"seekableTimeRanges"];
+}
+
+- (NSTimeInterval)contentDuration
+{
+    return [_seekableTimeRanges count] ? _contentDuration : std::numeric_limits<double>::infinity();
+}
+
+- (void)setContentDuration:(NSTimeInterval)duration
+{
+    bool needCanSeekUpdate = std::isfinite(_contentDuration) != std::isfinite(duration);
+    _contentDuration = duration;
+    // Workaround rdar://82275552. We do so by toggling the canSeek property to force
+    // a content refresh that will make the scrubber appear/disappear accordingly.
+    if (needCanSeekUpdate) {
+        bool canSeek = _canSeek;
+        self.canSeek = !canSeek;
+        self.canSeek = canSeek;
+    }
 }
 
 - (AVValueTiming *)timing
@@ -82,6 +111,7 @@ SOFT_LINK_CLASS_OPTIONAL(AVKit, AVFunctionBarMediaSelectionOption)
 - (void)setSeekableTimeRanges:(NSArray *)timeRanges
 {
     _seekableTimeRanges = timeRanges;
+    self.canSeek = timeRanges.count;
 }
 
 - (BOOL)isSeeking
@@ -91,9 +121,11 @@ SOFT_LINK_CLASS_OPTIONAL(AVKit, AVFunctionBarMediaSelectionOption)
 
 - (void)seekToTime:(NSTimeInterval)time toleranceBefore:(NSTimeInterval)toleranceBefore toleranceAfter:(NSTimeInterval)toleranceAfter
 {
-    UNUSED_PARAM(toleranceBefore);
-    UNUSED_PARAM(toleranceAfter);
-    _playbackSessionInterfaceMac->playbackSessionModel()->seekToTime(time);
+    if (!_playbackSessionInterfaceMac)
+        return;
+
+    if (auto* model = _playbackSessionInterfaceMac->playbackSessionModel())
+        model->sendRemoteCommand(WebCore::PlatformMediaSession::RemoteControlCommandType::SeekToPlaybackPositionCommand, { time, toleranceBefore || toleranceAfter });
 }
 
 - (void)cancelThumbnailAndAudioAmplitudeSampleGeneration
@@ -114,56 +146,41 @@ SOFT_LINK_CLASS_OPTIONAL(AVKit, AVFunctionBarMediaSelectionOption)
     completionHandler(@[ ]);
 }
 
++ (NSSet<NSString *> *)keyPathsForValuesAffectingCanBeginTouchBarScrubbing
+{
+    return [NSSet setWithObjects:@"canSeek", @"contentDuration", nil];
+}
+
 - (BOOL)canBeginTouchBarScrubbing
 {
     // At this time, we return YES for all media that is not a live stream and media that is not Netflix. (A Netflix
     // quirk means we pretend Netflix is a live stream for Touch Bar.) It's not ideal to return YES all the time for
     // other media. The intent of the API is that we return NO when the media is being scrubbed via the on-screen scrubber.
     // But we can only possibly get the right answer for media that uses the default controls.
-    return std::isfinite(_contentDuration);;
+    return _canSeek && std::isfinite(_contentDuration);
 }
 
 - (void)beginTouchBarScrubbing
 {
-    _playbackSessionInterfaceMac->beginScrubbing();
+    if (!_playbackSessionInterfaceMac)
+        return;
+
+    auto* model = _playbackSessionInterfaceMac->playbackSessionModel();
+    if (!model)
+        return;
+        
+    _playbackSessionInterfaceMac->willBeginScrubbing();
+    model->sendRemoteCommand(WebCore::PlatformMediaSession::RemoteControlCommandType::BeginScrubbingCommand, { });
 }
 
 - (void)endTouchBarScrubbing
 {
-    _playbackSessionInterfaceMac->endScrubbing();
+    if (!_playbackSessionInterfaceMac)
+        return;
+
+    if (auto* model = _playbackSessionInterfaceMac->playbackSessionModel())
+        model->sendRemoteCommand(WebCore::PlatformMediaSession::RemoteControlCommandType::EndScrubbingCommand, { });
 }
-
-#if __MAC_OS_X_VERSION_MIN_REQUIRED < 101300
-
-- (void)generateFunctionBarThumbnailsForTimes:(NSArray<NSNumber *> *)thumbnailTimes size:(NSSize)size completionHandler:(void (^)(NSArray<AVThumbnail *> *thumbnails, NSError *error))completionHandler
-{
-    UNUSED_PARAM(thumbnailTimes);
-    UNUSED_PARAM(size);
-    completionHandler(@[ ], nil);
-}
-
-- (void)generateFunctionBarAudioAmplitudeSamples:(NSInteger)numberOfSamples completionHandler:(void (^)(NSArray<NSNumber *> *audioAmplitudeSamples,  NSError *error))completionHandler
-{
-    UNUSED_PARAM(numberOfSamples);
-    completionHandler(@[ ], nil);
-}
-
-- (BOOL)canBeginFunctionBarScrubbing
-{
-    return [self canBeginTouchBarScrubbing];
-}
-
-- (void)beginFunctionBarScrubbing
-{
-    [self beginTouchBarScrubbing];
-}
-
-- (void)endFunctionBarScrubbing
-{
-    [self endTouchBarScrubbing];
-}
-
-#endif
 
 - (NSArray<AVTouchBarMediaSelectionOption *> *)audioTouchBarMediaSelectionOptions
 {
@@ -192,7 +209,8 @@ SOFT_LINK_CLASS_OPTIONAL(AVKit, AVFunctionBarMediaSelectionOption)
     if (audioMediaSelectionOption && _audioTouchBarMediaSelectionOptions)
         index = [_audioTouchBarMediaSelectionOptions indexOfObject:audioMediaSelectionOption];
 
-    _playbackSessionInterfaceMac->playbackSessionModel()->selectAudioMediaOption(index != NSNotFound ? index : UINT64_MAX);
+    if (auto* model = _playbackSessionInterfaceMac->playbackSessionModel())
+        model->selectAudioMediaOption(index != NSNotFound ? index : UINT64_MAX);
 }
 
 - (NSArray<AVTouchBarMediaSelectionOption *> *)legibleTouchBarMediaSelectionOptions
@@ -222,43 +240,35 @@ SOFT_LINK_CLASS_OPTIONAL(AVKit, AVFunctionBarMediaSelectionOption)
     if (legibleMediaSelectionOption && _legibleTouchBarMediaSelectionOptions)
         index = [_legibleTouchBarMediaSelectionOptions indexOfObject:legibleMediaSelectionOption];
 
-    _playbackSessionInterfaceMac->playbackSessionModel()->selectLegibleMediaOption(index != NSNotFound ? index : UINT64_MAX);
+    if (auto* model = _playbackSessionInterfaceMac->playbackSessionModel())
+        model->selectLegibleMediaOption(index != NSNotFound ? index : UINT64_MAX);
 }
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
-static AVTouchBarMediaSelectionOptionType toAVTouchBarMediaSelectionOptionType(MediaSelectionOption::Type type)
+static AVTouchBarMediaSelectionOptionType toAVTouchBarMediaSelectionOptionType(MediaSelectionOption::LegibleType type)
 {
     switch (type) {
-    case MediaSelectionOption::Type::Regular:
+    case MediaSelectionOption::LegibleType::Regular:
         return AVTouchBarMediaSelectionOptionTypeRegular;
-    case MediaSelectionOption::Type::LegibleOff:
+    case MediaSelectionOption::LegibleType::LegibleOff:
         return AVTouchBarMediaSelectionOptionTypeLegibleOff;
-    case MediaSelectionOption::Type::LegibleAuto:
+    case MediaSelectionOption::LegibleType::LegibleAuto:
         return AVTouchBarMediaSelectionOptionTypeLegibleAuto;
     }
 
     ASSERT_NOT_REACHED();
     return AVTouchBarMediaSelectionOptionTypeRegular;
 }
-#endif
 
-static RetainPtr<NSMutableArray> mediaSelectionOptions(const Vector<MediaSelectionOption>& options)
+static RetainPtr<NSArray> mediaSelectionOptions(const Vector<MediaSelectionOption>& options)
 {
-    RetainPtr<NSMutableArray> webOptions = adoptNS([[NSMutableArray alloc] initWithCapacity:options.size()]);
-    for (auto& option : options) {
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
-        if (auto webOption = adoptNS([allocAVTouchBarMediaSelectionOptionInstance() initWithTitle:option.displayName type:toAVTouchBarMediaSelectionOptionType(option.type)]))
-#else
-        if (auto webOption = adoptNS([allocAVFunctionBarMediaSelectionOptionInstance() initWithTitle:option.displayName]))
-#endif // __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
-            [webOptions addObject:webOption.get()];
-    }
-    return webOptions;
+    return createNSArray(options, [] (auto& option) {
+        return adoptNS([allocAVTouchBarMediaSelectionOptionInstance() initWithTitle:option.displayName type:toAVTouchBarMediaSelectionOptionType(option.legibleType)]);
+    });
 }
 
 - (void)setAudioMediaSelectionOptions:(const Vector<MediaSelectionOption>&)options withSelectedIndex:(NSUInteger)selectedIndex
 {
-    RetainPtr<NSMutableArray> webOptions = mediaSelectionOptions(options);
+    auto webOptions = mediaSelectionOptions(options);
     [self setAudioTouchBarMediaSelectionOptions:webOptions.get()];
     if (selectedIndex < [webOptions count])
         [self setCurrentAudioTouchBarMediaSelectionOption:[webOptions objectAtIndex:selectedIndex]];
@@ -266,7 +276,7 @@ static RetainPtr<NSMutableArray> mediaSelectionOptions(const Vector<MediaSelecti
 
 - (void)setLegibleMediaSelectionOptions:(const Vector<MediaSelectionOption>&)options withSelectedIndex:(NSUInteger)selectedIndex
 {
-    RetainPtr<NSMutableArray> webOptions = mediaSelectionOptions(options);
+    auto webOptions = mediaSelectionOptions(options);
     [self setLegibleTouchBarMediaSelectionOptions:webOptions.get()];
     if (selectedIndex < [webOptions count])
         [self setCurrentLegibleTouchBarMediaSelectionOption:[webOptions objectAtIndex:selectedIndex]];
@@ -313,41 +323,109 @@ static RetainPtr<NSMutableArray> mediaSelectionOptions(const Vector<MediaSelecti
 
 - (void)togglePlayback
 {
-    if (_playbackSessionInterfaceMac && _playbackSessionInterfaceMac->playbackSessionModel())
-        _playbackSessionInterfaceMac->playbackSessionModel()->togglePlayState();
+    if (!_playbackSessionInterfaceMac)
+        return;
+
+    if (auto* model = _playbackSessionInterfaceMac->playbackSessionModel())
+        model->sendRemoteCommand(WebCore::PlatformMediaSession::RemoteControlCommandType::TogglePlayPauseCommand, { });
 }
 
 - (void)setPlaying:(BOOL)playing
 {
-    if (!_playbackSessionInterfaceMac || !_playbackSessionInterfaceMac->playbackSessionModel())
+    if (playing != _playing) {
+        [self willChangeValueForKey:@"playing"];
+        _playing = playing;
+        [self didChangeValueForKey:@"playing"];
+    }
+
+    if (!_playbackSessionInterfaceMac)
         return;
 
-    BOOL isCurrentlyPlaying = self.playing;
-    if (!isCurrentlyPlaying && playing)
-        _playbackSessionInterfaceMac->playbackSessionModel()->play();
-    else if (isCurrentlyPlaying && !playing)
-        _playbackSessionInterfaceMac->playbackSessionModel()->pause();
+    if (auto* model = _playbackSessionInterfaceMac->playbackSessionModel()) {
+        BOOL isCurrentlyPlaying = model->isPlaying();
+        if (!isCurrentlyPlaying && _playing)
+            model->sendRemoteCommand(WebCore::PlatformMediaSession::RemoteControlCommandType::PlayCommand, { });
+        else if (isCurrentlyPlaying && !_playing)
+            model->sendRemoteCommand(WebCore::PlatformMediaSession::RemoteControlCommandType::PauseCommand, { });
+    }
 }
 
 - (BOOL)isPlaying
 {
-    if (_playbackSessionInterfaceMac && _playbackSessionInterfaceMac->playbackSessionModel())
-        return _playbackSessionInterfaceMac->playbackSessionModel()->isPlaying();
-
-    return NO;
+    return _playing;
 }
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
+- (double)defaultPlaybackRate
+{
+    return _defaultPlaybackRate;
+}
+
+- (void)setDefaultPlaybackRate:(double)defaultPlaybackRate
+{
+    [self setDefaultPlaybackRate:defaultPlaybackRate fromJavaScript:NO];
+}
+
+- (void)setDefaultPlaybackRate:(double)defaultPlaybackRate fromJavaScript:(BOOL)fromJavaScript
+{
+    if (defaultPlaybackRate == _defaultPlaybackRate)
+        return;
+
+    _defaultPlaybackRate = defaultPlaybackRate;
+
+    if (!fromJavaScript && _playbackSessionInterfaceMac) {
+        if (auto* model = _playbackSessionInterfaceMac->playbackSessionModel(); model && model->defaultPlaybackRate() != _defaultPlaybackRate)
+            model->setDefaultPlaybackRate(_defaultPlaybackRate);
+    }
+
+    if ([self isPlaying])
+        [self setRate:_defaultPlaybackRate fromJavaScript:fromJavaScript];
+}
+
+- (float)rate
+{
+    return _rate;
+}
+
+- (void)setRate:(float)rate
+{
+    [self setRate:rate fromJavaScript:NO];
+}
+
+- (void)setRate:(double)rate fromJavaScript:(BOOL)fromJavaScript
+{
+    if (rate == _rate)
+        return;
+
+    _rate = rate;
+
+    // AVKit doesn't have a separate variable for "paused", instead representing it by a `rate` of
+    // `0`. Unfortunately, `HTMLMediaElement::play` doesn't call `HTMLMediaElement::setPlaybackRate`
+    // so if we propagate a `rate` of `0` along to the `HTMLMediaElement` then any attempt to
+    // `HTMLMediaElement::play` will effectively be a no-op since the `playbackRate` will be `0`.
+    if (!_rate)
+        return;
+
+    // In AVKit, the `defaultPlaybackRate` is used when playback starts, such as resuming after
+    // pausing. In WebKit, however, `defaultPlaybackRate` is only used when first loading and after
+    // ending scanning, with the `playbackRate` being used in all other cases, including when
+    // resuming after pausing. As such, WebKit should return the `playbackRate` instead of the
+    // `defaultPlaybackRate` in these cases when communicating with AVKit.
+    [self setDefaultPlaybackRate:_rate fromJavaScript:fromJavaScript];
+
+    if (!fromJavaScript && _playbackSessionInterfaceMac) {
+        if (auto* model = _playbackSessionInterfaceMac->playbackSessionModel(); model && model->playbackRate() != _rate)
+            model->setPlaybackRate(_rate);
+    }
+}
+
 - (void)togglePictureInPicture
 {
-    if (_playbackSessionInterfaceMac && _playbackSessionInterfaceMac->playbackSessionModel())
-        _playbackSessionInterfaceMac->playbackSessionModel()->togglePictureInPicture();
+    if (auto* model = _playbackSessionInterfaceMac->playbackSessionModel())
+        model->togglePictureInPicture();
 }
-#endif
 
-#pragma clang diagnostic pop
+IGNORE_WARNINGS_END
 
 @end
 
 #endif // PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE) && ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
-

@@ -24,7 +24,7 @@
  */
 
 #include "config.h"
-#include "ClockType.h"
+#include <wtf/ClockType.h>
 
 #include <wtf/PrintStream.h>
 
@@ -38,6 +38,9 @@ void printInternal(PrintStream& out, ClockType type)
         return;
     case ClockType::Monotonic:
         out.print("Monotonic");
+        return;
+    case ClockType::Approximate:
+        out.print("Approximate");
         return;
     }
     RELEASE_ASSERT_NOT_REACHED();

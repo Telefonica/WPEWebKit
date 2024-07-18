@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,38 +31,39 @@
 #include "ResourceLoader.h"
 #include <wtf/Function.h>
 #include <wtf/Forward.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
 class NetscapePlugInStreamLoader;
+class SharedBuffer;
 
-class NetscapePlugInStreamLoaderClient {
+class NetscapePlugInStreamLoaderClient : public CanMakeWeakPtr<NetscapePlugInStreamLoaderClient> {
 public:
-    virtual void willSendRequest(NetscapePlugInStreamLoader*, ResourceRequest&&, const ResourceResponse& redirectResponse, WTF::Function<void (ResourceRequest&&)>&&) = 0;
+    virtual void willSendRequest(NetscapePlugInStreamLoader*, ResourceRequest&&, const ResourceResponse& redirectResponse, CompletionHandler<void(ResourceRequest&&)>&&) = 0;
     virtual void didReceiveResponse(NetscapePlugInStreamLoader*, const ResourceResponse&) = 0;
-    virtual void didReceiveData(NetscapePlugInStreamLoader*, const char*, int) = 0;
+    virtual void didReceiveData(NetscapePlugInStreamLoader*, const SharedBuffer&) = 0;
     virtual void didFail(NetscapePlugInStreamLoader*, const ResourceError&) = 0;
     virtual void didFinishLoading(NetscapePlugInStreamLoader*) { }
     virtual bool wantsAllStreams() const { return false; }
 
 protected:
-    virtual ~NetscapePlugInStreamLoaderClient() { }
+    virtual ~NetscapePlugInStreamLoaderClient() = default;
 };
 
 class NetscapePlugInStreamLoader final : public ResourceLoader {
 public:
-    WEBCORE_EXPORT static RefPtr<NetscapePlugInStreamLoader> create(Frame&, NetscapePlugInStreamLoaderClient&, const ResourceRequest&);
+    WEBCORE_EXPORT static void create(Frame&, NetscapePlugInStreamLoaderClient&, ResourceRequest&&, CompletionHandler<void(RefPtr<NetscapePlugInStreamLoader>&&)>&&);
     virtual ~NetscapePlugInStreamLoader();
 
     WEBCORE_EXPORT bool isDone() const;
 
 private:
-    bool init(const ResourceRequest&) override;
+    void init(ResourceRequest&&, CompletionHandler<void(bool)>&&) override;
 
-    void willSendRequest(ResourceRequest&&, const ResourceResponse& redirectResponse, WTF::Function<void(ResourceRequest&&)>&& callback) override;
-    void didReceiveResponse(const ResourceResponse&) override;
-    void didReceiveData(const char*, unsigned, long long encodedDataLength, DataPayloadType) override;
-    void didReceiveBuffer(Ref<SharedBuffer>&&, long long encodedDataLength, DataPayloadType) override;
+    void willSendRequest(ResourceRequest&&, const ResourceResponse& redirectResponse, CompletionHandler<void(ResourceRequest&&)>&& callback) override;
+    void didReceiveResponse(const ResourceResponse&, CompletionHandler<void()>&& policyCompletionHandler) override;
+    void didReceiveData(const SharedBuffer&, long long encodedDataLength, DataPayloadType) override;
     void didFinishLoading(const NetworkLoadMetrics&) override;
     void didFail(const ResourceError&) override;
 
@@ -73,11 +74,9 @@ private:
     void willCancel(const ResourceError&) override;
     void didCancel(const ResourceError&) override;
 
-    void didReceiveDataOrBuffer(const char*, int, RefPtr<SharedBuffer>&&, long long encodedDataLength, DataPayloadType);
-
     void notifyDone();
 
-    NetscapePlugInStreamLoaderClient* m_client;
+    WeakPtr<NetscapePlugInStreamLoaderClient> m_client;
     bool m_isInitialized { false };
 };
 

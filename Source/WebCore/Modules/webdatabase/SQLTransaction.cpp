@@ -34,6 +34,7 @@
 #include "DatabaseContext.h"
 #include "DatabaseThread.h"
 #include "DatabaseTracker.h"
+#include "Document.h"
 #include "Logging.h"
 #include "OriginLock.h"
 #include "SQLError.h"
@@ -46,6 +47,7 @@
 #include "SQLTransactionErrorCallback.h"
 #include "SQLiteTransaction.h"
 #include "VoidCallback.h"
+#include "WindowEventLoop.h"
 #include <wtf/StdLibExtras.h>
 #include <wtf/Vector.h>
 
@@ -58,9 +60,9 @@ Ref<SQLTransaction> SQLTransaction::create(Ref<Database>&& database, RefPtr<SQLT
 
 SQLTransaction::SQLTransaction(Ref<Database>&& database, RefPtr<SQLTransactionCallback>&& callback, RefPtr<VoidCallback>&& successCallback, RefPtr<SQLTransactionErrorCallback>&& errorCallback, RefPtr<SQLTransactionWrapper>&& wrapper, bool readOnly)
     : m_database(WTFMove(database))
-    , m_callbackWrapper(WTFMove(callback), &m_database->scriptExecutionContext())
-    , m_successCallbackWrapper(WTFMove(successCallback), &m_database->scriptExecutionContext())
-    , m_errorCallbackWrapper(WTFMove(errorCallback), &m_database->scriptExecutionContext())
+    , m_callbackWrapper(WTFMove(callback), &m_database->document())
+    , m_successCallbackWrapper(WTFMove(successCallback), &m_database->document())
+    , m_errorCallbackWrapper(WTFMove(errorCallback), &m_database->document())
     , m_wrapper(WTFMove(wrapper))
     , m_nextStep(&SQLTransaction::acquireLock)
     , m_readOnly(readOnly)
@@ -68,9 +70,7 @@ SQLTransaction::SQLTransaction(Ref<Database>&& database, RefPtr<SQLTransactionCa
 {
 }
 
-SQLTransaction::~SQLTransaction()
-{
-}
+SQLTransaction::~SQLTransaction() = default;
 
 ExceptionOr<void> SQLTransaction::executeSql(const String& sqlStatement, std::optional<Vector<SQLValue>>&& arguments, RefPtr<SQLStatementCallback>&& callback, RefPtr<SQLStatementErrorCallback>&& callbackError)
 {
@@ -83,7 +83,7 @@ ExceptionOr<void> SQLTransaction::executeSql(const String& sqlStatement, std::op
     else if (m_readOnly)
         permissions |= DatabaseAuthorizer::ReadOnlyMask;
 
-    auto statement = std::make_unique<SQLStatement>(m_database, sqlStatement, arguments.value_or(Vector<SQLValue> { }), WTFMove(callback), WTFMove(callbackError), permissions);
+    auto statement = makeUnique<SQLStatement>(m_database, sqlStatement, valueOrDefault(arguments), WTFMove(callback), WTFMove(callbackError), permissions);
 
     if (m_database->deleted())
         statement->setDatabaseDeletedError();
@@ -109,6 +109,7 @@ void SQLTransaction::performNextStep()
 
 void SQLTransaction::performPendingCallback()
 {
+    ASSERT(isMainThread());
     LOG(StorageAPI, "Callback %s\n", debugStepName(m_nextStep));
 
     ASSERT(m_nextStep == &SQLTransaction::deliverTransactionCallback
@@ -128,9 +129,21 @@ void SQLTransaction::notifyDatabaseThreadIsShuttingDown()
     m_backend.notifyDatabaseThreadIsShuttingDown();
 }
 
+void SQLTransaction::callErrorCallbackDueToInterruption()
+{
+    ASSERT(isMainThread());
+    auto errorCallback = m_errorCallbackWrapper.unwrap();
+    if (!errorCallback)
+        return;
+
+    m_database->document().eventLoop().queueTask(TaskSource::Networking, [errorCallback = WTFMove(errorCallback)]() mutable {
+        errorCallback->handleEvent(SQLError::create(SQLError::DATABASE_ERR, "the database was closed"_s));
+    });
+}
+
 void SQLTransaction::enqueueStatement(std::unique_ptr<SQLStatement> statement)
 {
-    LockHolder locker(m_statementMutex);
+    Locker locker { m_statementLock };
     m_statementQueue.append(WTFMove(statement));
 }
 
@@ -176,9 +189,11 @@ void SQLTransaction::checkAndHandleClosedDatabase()
     // If the database was stopped, don't do anything and cancel queued work
     LOG(StorageAPI, "Database was stopped or interrupted - cancelling work for this transaction");
 
-    LockHolder locker(m_statementMutex);
+    Locker locker { m_statementLock };
     m_statementQueue.clear();
     m_nextStep = nullptr;
+
+    callErrorCallbackDueToInterruption();
 
     // Release the unneeded callbacks, to break reference cycles.
     m_callbackWrapper.clear();
@@ -186,7 +201,7 @@ void SQLTransaction::checkAndHandleClosedDatabase()
     m_errorCallbackWrapper.clear();
 
     // The next steps should be executed only if we're on the DB thread.
-    if (currentThread() != m_database->databaseThread().getThreadID())
+    if (m_database->databaseThread().getThread() != &Thread::current())
         return;
 
     // The current SQLite transaction should be stopped, as well
@@ -221,7 +236,7 @@ void SQLTransaction::openTransactionAndPreflight()
 
     // If the database was deleted, jump to the error callback
     if (m_database->deleted()) {
-        m_transactionError = SQLError::create(SQLError::UNKNOWN_ERR, "unable to open a transaction, because the user deleted the database");
+        m_transactionError = SQLError::create(SQLError::UNKNOWN_ERR, "unable to open a transaction, because the user deleted the database"_s);
 
         handleTransactionError();
         return;
@@ -234,7 +249,7 @@ void SQLTransaction::openTransactionAndPreflight()
     }
 
     ASSERT(!m_sqliteTransaction);
-    m_sqliteTransaction = std::make_unique<SQLiteTransaction>(m_database->sqliteDatabase(), m_readOnly);
+    m_sqliteTransaction = makeUnique<SQLiteTransaction>(m_database->sqliteDatabase(), m_readOnly);
 
     m_database->resetDeletes();
     m_database->disableAuthorizer();
@@ -265,7 +280,8 @@ void SQLTransaction::openTransactionAndPreflight()
         return;
     }
 
-    m_hasVersionMismatch = !m_database->expectedVersion().isEmpty() && (m_database->expectedVersion() != actualVersion);
+    auto expectedVersion = m_database->expectedVersionIsolatedCopy();
+    m_hasVersionMismatch = !expectedVersion.isEmpty() && expectedVersion != actualVersion;
 
     // Spec 4.3.2.3: Perform preflight steps, jumping to the error callback if they fail
     if (m_wrapper && !m_wrapper->performPreflight(*this)) {
@@ -274,7 +290,7 @@ void SQLTransaction::openTransactionAndPreflight()
         m_database->enableAuthorizer();
         m_transactionError = m_wrapper->sqlError();
         if (!m_transactionError)
-            m_transactionError = SQLError::create(SQLError::UNKNOWN_ERR, "unknown error occurred during transaction preflight");
+            m_transactionError = SQLError::create(SQLError::UNKNOWN_ERR, "unknown error occurred during transaction preflight"_s);
 
         handleTransactionError();
         return;
@@ -379,7 +395,7 @@ void SQLTransaction::deliverTransactionCallback()
 
     // Spec 4.3.2 5: If the transaction callback was null or raised an exception, jump to the error callback
     if (shouldDeliverErrorCallback) {
-        m_transactionError = SQLError::create(SQLError::UNKNOWN_ERR, "the SQLTransactionCallback was null or threw an exception");
+        m_transactionError = SQLError::create(SQLError::UNKNOWN_ERR, "the SQLTransactionCallback was null or threw an exception"_s);
         return deliverTransactionErrorCallback();
     }
 
@@ -393,8 +409,11 @@ void SQLTransaction::deliverTransactionErrorCallback()
     // Spec 4.3.2.10: If exists, invoke error callback with the last
     // error to have occurred in this transaction.
     RefPtr<SQLTransactionErrorCallback> errorCallback = m_errorCallbackWrapper.unwrap();
-    if (errorCallback)
-        errorCallback->handleEvent(*m_transactionError);
+    if (errorCallback) {
+        m_database->document().eventLoop().queueTask(TaskSource::Networking, [errorCallback = WTFMove(errorCallback), transactionError = m_transactionError]() mutable {
+            errorCallback->handleEvent(*transactionError);
+        });
+    }
 
     clearCallbackWrappers();
 
@@ -413,7 +432,7 @@ void SQLTransaction::deliverStatementCallback()
     m_executeSqlAllowed = false;
 
     if (result) {
-        m_transactionError = SQLError::create(SQLError::UNKNOWN_ERR, "the statement callback raised an exception or statement error callback did not return false");
+        m_transactionError = SQLError::create(SQLError::UNKNOWN_ERR, "the statement callback raised an exception or statement error callback did not return false"_s);
 
         if (m_errorCallbackWrapper.hasCallback())
             return deliverTransactionErrorCallback();
@@ -441,8 +460,11 @@ void SQLTransaction::deliverSuccessCallback()
 {
     // Spec 4.3.2.8: Deliver success callback.
     RefPtr<VoidCallback> successCallback = m_successCallbackWrapper.unwrap();
-    if (successCallback)
-        successCallback->handleEvent();
+    if (successCallback) {
+        m_database->document().eventLoop().queueTask(TaskSource::Networking, [successCallback = WTFMove(successCallback)]() mutable {
+            successCallback->handleEvent();
+        });
+    }
 
     clearCallbackWrappers();
 
@@ -474,7 +496,8 @@ void SQLTransaction::computeNextStateAndCleanupIfNeeded()
 
         LOG(StorageAPI, "Callback %s\n", nameForSQLTransactionState(m_nextState));
         return;
-    }
+    } else
+        callErrorCallbackDueToInterruption();
 
     clearCallbackWrappers();
     m_backend.requestTransitToState(SQLTransactionState::CleanupAndTerminate);
@@ -492,7 +515,7 @@ void SQLTransaction::getNextStatement()
 {
     m_currentStatement = nullptr;
 
-    LockHolder locker(m_statementMutex);
+    Locker locker { m_statementLock };
     if (!m_statementQueue.isEmpty())
         m_currentStatement = m_statementQueue.takeFirst();
 }
@@ -545,7 +568,7 @@ void SQLTransaction::handleCurrentStatementError()
 
     m_transactionError = m_currentStatement->sqlError();
     if (!m_transactionError)
-        m_transactionError = SQLError::create(SQLError::DATABASE_ERR, "the statement failed to execute");
+        m_transactionError = SQLError::create(SQLError::DATABASE_ERR, "the statement failed to execute"_s);
 
     handleTransactionError();
 }
@@ -571,7 +594,7 @@ void SQLTransaction::postflightAndCommit()
     if (m_wrapper && !m_wrapper->performPostflight(*this)) {
         m_transactionError = m_wrapper->sqlError();
         if (!m_transactionError)
-            m_transactionError = SQLError::create(SQLError::UNKNOWN_ERR, "unknown error occurred during transaction postflight");
+            m_transactionError = SQLError::create(SQLError::UNKNOWN_ERR, "unknown error occurred during transaction postflight"_s);
 
         handleTransactionError();
         return;

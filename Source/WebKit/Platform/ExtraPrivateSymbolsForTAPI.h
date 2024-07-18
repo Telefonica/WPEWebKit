@@ -30,10 +30,9 @@ extern "C" {
 #endif
 
 // FIXME: Remove these after <rdar://problem/30772033> is fixed.
-void DatabaseServiceInitializer();
 void NetworkServiceInitializer();
-void PluginServiceInitializer();
 void WebContentServiceInitializer();
+void GPUServiceInitializer();
 
 #ifdef __cplusplus
 }

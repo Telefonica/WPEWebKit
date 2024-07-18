@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "ContentWorldShared.h"
 #include <WebCore/UserScript.h>
 #include <WebCore/UserStyleSheet.h>
 
@@ -40,7 +41,7 @@ struct WebUserScriptData {
     static std::optional<WebUserScriptData> decode(IPC::Decoder&);
 
     uint64_t identifier;
-    uint64_t worldIdentifier;
+    ContentWorldIdentifier worldIdentifier;
     WebCore::UserScript userScript;
 };
 
@@ -49,7 +50,7 @@ struct WebUserStyleSheetData {
     static std::optional<WebUserStyleSheetData> decode(IPC::Decoder&);
 
     uint64_t identifier;
-    uint64_t worldIdentifier;
+    ContentWorldIdentifier worldIdentifier;
     WebCore::UserStyleSheet userStyleSheet;
 };
 
@@ -58,7 +59,7 @@ struct WebScriptMessageHandlerData {
     static std::optional<WebScriptMessageHandlerData> decode(IPC::Decoder&);
 
     uint64_t identifier;
-    uint64_t worldIdentifier;
+    ContentWorldIdentifier worldIdentifier;
     String name;
 };
 

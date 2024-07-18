@@ -28,33 +28,33 @@
 
 #if ENABLE(DFG_JIT)
 
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
 
 namespace JSC { namespace DFG {
 
-BasicBlock::BasicBlock(
-    unsigned bytecodeBegin, unsigned numArguments, unsigned numLocals, float executionCount)
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(BasicBlock);
+
+BasicBlock::BasicBlock(BytecodeIndex bytecodeBegin, unsigned numArguments, unsigned numLocals, unsigned numTmps, float executionCount)
     : bytecodeBegin(bytecodeBegin)
     , index(NoBlock)
-    , isOSRTarget(false)
-    , isCatchEntrypoint(false)
-    , cfaHasVisited(false)
-    , cfaShouldRevisit(false)
-    , cfaFoundConstants(false)
-    , cfaDidFinish(true)
     , cfaStructureClobberStateAtHead(StructuresAreWatched)
     , cfaStructureClobberStateAtTail(StructuresAreWatched)
     , cfaBranchDirection(InvalidBranchDirection)
-#if !ASSERT_DISABLED
+    , cfaHasVisited(false)
+    , cfaShouldRevisit(false)
+    , cfaDidFinish(true)
+    , intersectionOfCFAHasVisited(true)
+    , isOSRTarget(false)
+    , isCatchEntrypoint(false)
+#if ASSERT_ENABLED
     , isLinked(false)
 #endif
     , isReachable(false)
-    , variablesAtHead(numArguments, numLocals)
-    , variablesAtTail(numArguments, numLocals)
-    , valuesAtHead(numArguments, numLocals)
-    , valuesAtTail(numArguments, numLocals)
-    , intersectionOfPastValuesAtHead(numArguments, numLocals, AbstractValue::fullTop())
-    , intersectionOfCFAHasVisited(true)
+    , variablesAtHead(numArguments, numLocals, numTmps)
+    , variablesAtTail(numArguments, numLocals, numTmps)
+    , valuesAtHead(numArguments, numLocals, numTmps)
+    , valuesAtTail(numArguments, numLocals, numTmps)
+    , intersectionOfPastValuesAtHead(numArguments, numLocals, numTmps, AbstractValue::fullTop())
     , executionCount(executionCount)
 {
 }
@@ -72,14 +72,23 @@ void BasicBlock::ensureLocals(unsigned newNumLocals)
     intersectionOfPastValuesAtHead.ensureLocals(newNumLocals, AbstractValue::fullTop());
 }
 
-void BasicBlock::replaceTerminal(Node* node)
+void BasicBlock::ensureTmps(unsigned newNumTmps)
+{
+    variablesAtHead.ensureTmps(newNumTmps);
+    variablesAtTail.ensureTmps(newNumTmps);
+    valuesAtHead.ensureTmps(newNumTmps);
+    valuesAtTail.ensureTmps(newNumTmps);
+    intersectionOfPastValuesAtHead.ensureTmps(newNumTmps, AbstractValue::fullTop());
+}
+
+void BasicBlock::replaceTerminal(Graph& graph, Node* node)
 {
     NodeAndIndex result = findTerminal();
     if (!result)
         append(node);
     else {
         m_nodes.insert(result.index + 1, node);
-        result.node->remove();
+        result.node->remove(graph);
     }
     
     ASSERT(terminal());
@@ -140,6 +149,15 @@ BasicBlock::SSAData::SSAData(BasicBlock* block)
 BasicBlock::SSAData::~SSAData() { }
 
 } } // namespace JSC::DFG
+
+namespace WTF {
+
+void printInternal(PrintStream& out, JSC::DFG::BasicBlock* block)
+{
+    out.print(*block);
+}
+
+}
 
 #endif // ENABLE(DFG_JIT)
 

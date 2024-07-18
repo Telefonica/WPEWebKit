@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,18 +28,20 @@
 
 #include "JSBase.h"
 #include "JSDestructibleObject.h"
-#include "WeakReferenceHarvester.h"
 
-#if JSC_OBJC_API_ENABLED
+#if JSC_OBJC_API_ENABLED || defined(JSC_GLIB_API_ENABLED)
 
 namespace JSC {
     
-class JSAPIWrapperObject : public JSDestructibleObject {
+class JSAPIWrapperObject : public JSNonFinalObject {
 public:
-    typedef JSDestructibleObject Base;
+    using Base = JSNonFinalObject;
+
+    template<typename, SubspaceAccess>
+    static void subspaceFor(VM&) { RELEASE_ASSERT_NOT_REACHED(); }
     
     void finishCreation(VM&);
-    static void visitChildren(JSCell*, JSC::SlotVisitor&);
+    DECLARE_VISIT_CHILDREN_WITH_MODIFIER(JS_EXPORT_PRIVATE);
     
     void* wrappedObject() { return m_wrappedObject; }
     void setWrappedObject(void*);
@@ -48,11 +50,11 @@ protected:
     JSAPIWrapperObject(VM&, Structure*);
 
 private:
-    void* m_wrappedObject;
+    void* m_wrappedObject { nullptr };
 };
 
 } // namespace JSC
 
-#endif // JSC_OBJC_API_ENABLED
+#endif // JSC_OBJC_API_ENABLED || defined(JSC_GLIB_API_ENABLED)
 
 #endif // JSAPIWrapperObject_h

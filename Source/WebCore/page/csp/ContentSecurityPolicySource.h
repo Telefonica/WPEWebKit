@@ -31,14 +31,18 @@
 namespace WebCore {
 
 class ContentSecurityPolicy;
-class URL;
+struct SecurityOriginData;
+
+enum class IsSelfSource : bool { No, Yes };
 
 class ContentSecurityPolicySource {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    ContentSecurityPolicySource(const ContentSecurityPolicy&, const String& scheme, const String& host, std::optional<uint16_t> port, const String& path, bool hostHasWildcard, bool portHasWildcard);
+    ContentSecurityPolicySource(const ContentSecurityPolicy&, const String& scheme, const String& host, std::optional<uint16_t> port, const String& path, bool hostHasWildcard, bool portHasWildcard, IsSelfSource);
 
     bool matches(const URL&, bool didReceiveRedirectResponse = false) const;
+
+    operator SecurityOriginData() const;
 
 private:
     bool schemeMatches(const URL&) const;
@@ -50,11 +54,12 @@ private:
     const ContentSecurityPolicy& m_policy;
     String m_scheme;
     String m_host;
-    std::optional<uint16_t> m_port;
     String m_path;
+    std::optional<uint16_t> m_port;
 
     bool m_hostHasWildcard;
     bool m_portHasWildcard;
+    bool m_isSelfSource;
 };
 
 } // namespace WebCore

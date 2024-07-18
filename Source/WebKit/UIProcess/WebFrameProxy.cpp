@@ -26,24 +26,27 @@
 #include "config.h"
 #include "WebFrameProxy.h"
 
+#include "APINavigation.h"
+#include "ProvisionalPageProxy.h"
 #include "WebCertificateInfo.h"
 #include "WebFramePolicyListenerProxy.h"
 #include "WebPageMessages.h"
-#include "WebPageProxy.h"
 #include "WebPasteboardProxy.h"
 #include "WebProcessPool.h"
+#include "WebsiteDataStore.h"
+#include "WebsitePoliciesData.h"
 #include <WebCore/Image.h>
 #include <WebCore/MIMETypeRegistry.h>
 #include <stdio.h>
 #include <wtf/text/WTFString.h>
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
+class WebPageProxy;
 
-WebFrameProxy::WebFrameProxy(WebPageProxy* page, uint64_t frameID)
+WebFrameProxy::WebFrameProxy(WebPageProxy& page, FrameIdentifier frameID)
     : m_page(page)
-    , m_isFrameSet(false)
     , m_frameID(frameID)
 {
     WebProcessPool::statistics().wkFrameCount++;
@@ -55,6 +58,9 @@ WebFrameProxy::~WebFrameProxy()
 #if PLATFORM(GTK)
     WebPasteboardProxy::singleton().didDestroyFrame(this);
 #endif
+
+    if (m_navigateCallback)
+        m_navigateCallback({ });
 }
 
 void WebFrameProxy::webProcessWillShutDown()
@@ -62,9 +68,12 @@ void WebFrameProxy::webProcessWillShutDown()
     m_page = nullptr;
 
     if (m_activeListener) {
-        m_activeListener->invalidate();
+        m_activeListener->ignore();
         m_activeListener = nullptr;
     }
+
+    if (m_navigateCallback)
+        m_navigateCallback({ });
 }
 
 bool WebFrameProxy::isMainFrame() const
@@ -72,26 +81,70 @@ bool WebFrameProxy::isMainFrame() const
     if (!m_page)
         return false;
 
-    return this == m_page->mainFrame();
+    return this == m_page->mainFrame() || (m_page->provisionalPageProxy() && this == m_page->provisionalPageProxy()->mainFrame());
 }
 
-void WebFrameProxy::loadURL(const URL& url)
+std::optional<PageIdentifier> WebFrameProxy::pageIdentifier() const
+{
+    if (!m_page)
+        return { };
+    return m_page->webPageID();
+}
+
+void WebFrameProxy::navigateServiceWorkerClient(WebCore::ScriptExecutionContextIdentifier documentIdentifier, const URL& url, CompletionHandler<void(std::optional<PageIdentifier>)>&& callback)
+{
+    if (!m_page) {
+        callback({ });
+        return;
+    }
+
+    m_page->sendWithAsyncReply(Messages::WebPage::NavigateServiceWorkerClient { documentIdentifier, url }, [this, protectedThis = Ref { *this }, url, callback = WTFMove(callback)](bool result) mutable {
+        if (!result) {
+            callback({ });
+            return;
+        }
+
+        if (!m_activeListener) {
+            callback(pageIdentifier());
+            return;
+        }
+
+        if (m_navigateCallback)
+            m_navigateCallback({ });
+
+        m_navigateCallback = WTFMove(callback);
+    });
+}
+
+void WebFrameProxy::loadURL(const URL& url, const String& referrer)
 {
     if (!m_page)
         return;
 
-    m_page->process().send(Messages::WebPage::LoadURLInFrame(url, m_frameID), m_page->pageID());
+    m_page->send(Messages::WebPage::LoadURLInFrame(url, referrer, m_frameID));
 }
 
-void WebFrameProxy::stopLoading() const
+void WebFrameProxy::loadData(const IPC::DataReference& data, const String& MIMEType, const String& encodingName, const URL& baseURL)
+{
+    ASSERT(!isMainFrame());
+    if (!m_page)
+        return;
+
+    m_page->send(Messages::WebPage::LoadDataInFrame(data, MIMEType, encodingName, baseURL, m_frameID));
+}
+
+void WebFrameProxy::stopLoading()
 {
     if (!m_page)
         return;
 
-    if (!m_page->isValid())
+    if (!m_page->hasRunningProcess())
         return;
 
-    m_page->process().send(Messages::WebPage::StopLoadingFrame(m_frameID), m_page->pageID());
+    m_page->send(Messages::WebPage::StopLoadingFrame(m_frameID));
+
+    if (m_navigateCallback)
+        m_navigateCallback({ });
 }
     
 bool WebFrameProxy::canProvideSource() const
@@ -121,7 +174,7 @@ bool WebFrameProxy::isDisplayingMarkupDocument() const
 {
     // FIXME: This should be a call to a single MIMETypeRegistry function; adding a new one if needed.
     // FIXME: This is doing case sensitive comparisons on MIME types, should be using ASCII case insensitive instead.
-    return m_MIMEType == "text/html" || m_MIMEType == "image/svg+xml" || m_MIMEType == "application/x-webarchive" || MIMETypeRegistry::isXMLMIMEType(m_MIMEType);
+    return m_MIMEType == "text/html"_s || m_MIMEType == "image/svg+xml"_s || m_MIMEType == "application/x-webarchive"_s || MIMETypeRegistry::isXMLMIMEType(m_MIMEType);
 }
 
 bool WebFrameProxy::isDisplayingPDFDocument() const
@@ -134,6 +187,12 @@ void WebFrameProxy::didStartProvisionalLoad(const URL& url)
     m_frameLoadState.didStartProvisionalLoad(url);
 }
 
+void WebFrameProxy::didExplicitOpen(URL&& url, String&& mimeType)
+{
+    m_MIMEType = WTFMove(mimeType);
+    m_frameLoadState.didExplicitOpen(WTFMove(url));
+}
+
 void WebFrameProxy::didReceiveServerRedirectForProvisionalLoad(const URL& url)
 {
     m_frameLoadState.didReceiveServerRedirectForProvisionalLoad(url);
@@ -142,6 +201,9 @@ void WebFrameProxy::didReceiveServerRedirectForProvisionalLoad(const URL& url)
 void WebFrameProxy::didFailProvisionalLoad()
 {
     m_frameLoadState.didFailProvisionalLoad();
+
+    if (m_navigateCallback)
+        m_navigateCallback({ });
 }
 
 void WebFrameProxy::didCommitLoad(const String& contentType, WebCertificateInfo& certificateInfo, bool containsPluginDocument)
@@ -150,7 +212,6 @@ void WebFrameProxy::didCommitLoad(const String& contentType, WebCertificateInfo&
 
     m_title = String();
     m_MIMEType = contentType;
-    m_isFrameSet = false;
     m_certificateInfo = &certificateInfo;
     m_containsPluginDocument = containsPluginDocument;
 }
@@ -158,11 +219,17 @@ void WebFrameProxy::didCommitLoad(const String& contentType, WebCertificateInfo&
 void WebFrameProxy::didFinishLoad()
 {
     m_frameLoadState.didFinishLoad();
+
+    if (m_navigateCallback)
+        m_navigateCallback(pageIdentifier());
 }
 
 void WebFrameProxy::didFailLoad()
 {
     m_frameLoadState.didFailLoad();
+
+    if (m_navigateCallback)
+        m_navigateCallback({ });
 }
 
 void WebFrameProxy::didSameDocumentNavigation(const URL& url)
@@ -175,57 +242,55 @@ void WebFrameProxy::didChangeTitle(const String& title)
     m_title = title;
 }
 
-void WebFrameProxy::receivedPolicyDecision(PolicyAction action, uint64_t listenerID, API::Navigation* navigation, const WebsitePolicies& websitePolicies)
-{
-    if (!m_page)
-        return;
-
-    ASSERT(m_activeListener);
-    ASSERT(m_activeListener->listenerID() == listenerID);
-    m_page->receivedPolicyDecision(action, *this, listenerID, navigation, websitePolicies);
-}
-
-WebFramePolicyListenerProxy& WebFrameProxy::setUpPolicyListenerProxy(uint64_t listenerID)
+WebFramePolicyListenerProxy& WebFrameProxy::setUpPolicyListenerProxy(CompletionHandler<void(PolicyAction, API::WebsitePolicies*, ProcessSwapRequestedByClient, RefPtr<SafeBrowsingWarning>&&, std::optional<NavigatingToAppBoundDomain>)>&& completionHandler, ShouldExpectSafeBrowsingResult expectSafeBrowsingResult, ShouldExpectAppBoundDomainResult expectAppBoundDomainResult)
 {
     if (m_activeListener)
-        m_activeListener->invalidate();
-    m_activeListener = WebFramePolicyListenerProxy::create(this, listenerID);
-    return *static_cast<WebFramePolicyListenerProxy*>(m_activeListener.get());
+        m_activeListener->ignore();
+    m_activeListener = WebFramePolicyListenerProxy::create([this, protectedThis = Ref { *this }, completionHandler = WTFMove(completionHandler)] (PolicyAction action, API::WebsitePolicies* policies, ProcessSwapRequestedByClient processSwapRequestedByClient, RefPtr<SafeBrowsingWarning>&& safeBrowsingWarning, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain) mutable {
+        if (action != PolicyAction::Use && m_navigateCallback)
+            m_navigateCallback(pageIdentifier());
+
+        completionHandler(action, policies, processSwapRequestedByClient, WTFMove(safeBrowsingWarning), isNavigatingToAppBoundDomain);
+        m_activeListener = nullptr;
+    }, expectSafeBrowsingResult, expectAppBoundDomainResult);
+    return *m_activeListener;
 }
 
-void WebFrameProxy::getWebArchive(Function<void (API::Data*, CallbackBase::Error)>&& callbackFunction)
+void WebFrameProxy::getWebArchive(CompletionHandler<void(API::Data*)>&& callback)
 {
-    if (!m_page) {
-        callbackFunction(nullptr, CallbackBase::Error::Unknown);
-        return;
-    }
-
-    m_page->getWebArchiveOfFrame(this, WTFMove(callbackFunction));
+    if (!m_page)
+        return callback(nullptr);
+    m_page->getWebArchiveOfFrame(this, WTFMove(callback));
 }
 
-void WebFrameProxy::getMainResourceData(Function<void (API::Data*, CallbackBase::Error)>&& callbackFunction)
+void WebFrameProxy::getMainResourceData(CompletionHandler<void(API::Data*)>&& callback)
 {
-    if (!m_page) {
-        callbackFunction(nullptr, CallbackBase::Error::Unknown);
-        return;
-    }
-
-    m_page->getMainResourceDataOfFrame(this, WTFMove(callbackFunction));
+    if (!m_page)
+        return callback(nullptr);
+    m_page->getMainResourceDataOfFrame(this, WTFMove(callback));
 }
 
-void WebFrameProxy::getResourceData(API::URL* resourceURL, Function<void (API::Data*, CallbackBase::Error)>&& callbackFunction)
+void WebFrameProxy::getResourceData(API::URL* resourceURL, CompletionHandler<void(API::Data*)>&& callback)
 {
-    if (!m_page) {
-        callbackFunction(nullptr, CallbackBase::Error::Unknown);
-        return;
-    }
-
-    m_page->getResourceDataFromFrame(this, resourceURL, WTFMove(callbackFunction));
+    if (!m_page)
+        return callback(nullptr);
+    m_page->getResourceDataFromFrame(*this, resourceURL, WTFMove(callback));
 }
 
 void WebFrameProxy::setUnreachableURL(const URL& unreachableURL)
 {
     m_frameLoadState.setUnreachableURL(unreachableURL);
+}
+
+void WebFrameProxy::transferNavigationCallbackToFrame(WebFrameProxy& frame)
+{
+    frame.setNavigationCallback(WTFMove(m_navigateCallback));
+}
+
+void WebFrameProxy::setNavigationCallback(CompletionHandler<void(std::optional<WebCore::PageIdentifier>)>&& navigateCallback)
+{
+    ASSERT(!m_navigateCallback);
+    m_navigateCallback = WTFMove(navigateCallback);
 }
 
 #if ENABLE(CONTENT_FILTERING)
@@ -236,7 +301,7 @@ bool WebFrameProxy::didHandleContentFilterUnblockNavigation(const ResourceReques
         return false;
     }
 
-    RefPtr<WebPageProxy> page { m_page };
+    RefPtr<WebPageProxy> page { m_page.get() };
     ASSERT(page);
     m_contentFilterUnblockHandler.requestUnblockAsync([page](bool unblocked) {
         if (unblocked)
@@ -252,8 +317,10 @@ void WebFrameProxy::collapseSelection()
     if (!m_page)
         return;
 
-    m_page->process().send(Messages::WebPage::CollapseSelectionInFrame(m_frameID), m_page->pageID());
+    m_page->send(Messages::WebPage::CollapseSelectionInFrame(m_frameID));
 }
 #endif
 
 } // namespace WebKit
+
+#undef MESSAGE_CHECK

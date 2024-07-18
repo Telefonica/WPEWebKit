@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,13 +32,13 @@ namespace JSC {
 class SetPrototype;
 class GetterSetter;
 
-class SetConstructor : public InternalFunction {
+class SetConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
 
     static SetConstructor* create(VM& vm, Structure* structure, SetPrototype* setPrototype, GetterSetter* speciesSymbol)
     {
-        SetConstructor* constructor = new (NotNull, allocateCell<SetConstructor>(vm.heap)) SetConstructor(vm, structure);
+        SetConstructor* constructor = new (NotNull, allocateCell<SetConstructor>(vm)) SetConstructor(vm, structure);
         constructor->finishCreation(vm, setPrototype, speciesSymbol);
         return constructor;
     }
@@ -47,21 +47,17 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
 private:
-    SetConstructor(VM& vm, Structure* structure)
-        : Base(vm, structure)
-    {
-    }
+    SetConstructor(VM&, Structure*);
     void finishCreation(VM&, SetPrototype*, GetterSetter* speciesSymbol);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(SetConstructor, InternalFunction);
 
-EncodedJSValue JSC_HOST_CALL setPrivateFuncSetBucketHead(ExecState*);
-EncodedJSValue JSC_HOST_CALL setPrivateFuncSetBucketNext(ExecState*);
-EncodedJSValue JSC_HOST_CALL setPrivateFuncSetBucketKey(ExecState*);
+JSC_DECLARE_HOST_FUNCTION(setPrivateFuncSetBucketHead);
+JSC_DECLARE_HOST_FUNCTION(setPrivateFuncSetBucketNext);
+JSC_DECLARE_HOST_FUNCTION(setPrivateFuncSetBucketKey);
 
 } // namespace JSC

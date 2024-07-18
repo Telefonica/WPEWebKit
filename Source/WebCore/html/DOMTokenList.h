@@ -26,54 +26,56 @@
 #pragma once
 
 #include "Element.h"
+#include <wtf/FixedVector.h>
 
 namespace WebCore {
 
 class DOMTokenList {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    DOMTokenList(Element&, const QualifiedName& attributeName, WTF::Function<bool(StringView)>&& isSupportedToken = { });
+    using IsSupportedTokenFunction = Function<bool(Document&, StringView)>;
+    DOMTokenList(Element&, const QualifiedName& attributeName, IsSupportedTokenFunction&& isSupportedToken = { });
 
-    void associatedAttributeValueChanged(const AtomicString&);
+    void associatedAttributeValueChanged(const AtomString&);
 
     void ref() { m_element.ref(); }
     void deref() { m_element.deref(); }
 
     unsigned length() const;
-    const AtomicString& item(unsigned index) const;
+    const AtomString& item(unsigned index) const;
 
-    WEBCORE_EXPORT bool contains(const AtomicString&) const;
-    ExceptionOr<void> add(const Vector<String>&);
-    ExceptionOr<void> add(const AtomicString&);
-    ExceptionOr<void> remove(const Vector<String>&);
-    ExceptionOr<void> remove(const AtomicString&);
-    WEBCORE_EXPORT ExceptionOr<bool> toggle(const AtomicString&, std::optional<bool> force);
-    ExceptionOr<void> replace(const AtomicString& token, const AtomicString& newToken);
+    WEBCORE_EXPORT bool contains(const AtomString&) const;
+    ExceptionOr<void> add(const FixedVector<AtomString>&);
+    ExceptionOr<void> add(const AtomString&);
+    ExceptionOr<void> remove(const FixedVector<AtomString>&);
+    ExceptionOr<void> remove(const AtomString&);
+    WEBCORE_EXPORT ExceptionOr<bool> toggle(const AtomString&, std::optional<bool> force);
+    ExceptionOr<bool> replace(const AtomString& token, const AtomString& newToken);
     ExceptionOr<bool> supports(StringView token);
 
     Element& element() const { return m_element; }
 
-    WEBCORE_EXPORT void setValue(const String&);
-    WEBCORE_EXPORT const AtomicString& value() const;
+    WEBCORE_EXPORT void setValue(const AtomString&);
+    WEBCORE_EXPORT const AtomString& value() const;
 
 private:
-    void updateTokensFromAttributeValue(const String&);
+    void updateTokensFromAttributeValue(StringView);
     void updateAssociatedAttributeFromTokens();
 
-    WEBCORE_EXPORT Vector<AtomicString>& tokens();
-    const Vector<AtomicString>& tokens() const { return const_cast<DOMTokenList&>(*this).tokens(); }
+    WEBCORE_EXPORT Vector<AtomString>& tokens();
+    const Vector<AtomString>& tokens() const { return const_cast<DOMTokenList&>(*this).tokens(); }
 
-    static ExceptionOr<void> validateToken(const String&);
-    static ExceptionOr<void> validateTokens(const String* tokens, size_t length);
-    ExceptionOr<void> addInternal(const String* tokens, size_t length);
-    ExceptionOr<void> removeInternal(const String* tokens, size_t length);
+    static ExceptionOr<void> validateToken(StringView);
+    static ExceptionOr<void> validateTokens(const AtomString* tokens, size_t length);
+    ExceptionOr<void> addInternal(const AtomString* tokens, size_t length);
+    ExceptionOr<void> removeInternal(const AtomString* tokens, size_t length);
 
     Element& m_element;
     const WebCore::QualifiedName& m_attributeName;
     bool m_inUpdateAssociatedAttributeFromTokens { false };
     bool m_tokensNeedUpdating { true };
-    Vector<AtomicString> m_tokens;
-    WTF::Function<bool(StringView)> m_isSupportedToken;
+    Vector<AtomString> m_tokens;
+    IsSupportedTokenFunction m_isSupportedToken;
 };
 
 inline unsigned DOMTokenList::length() const
@@ -81,7 +83,7 @@ inline unsigned DOMTokenList::length() const
     return tokens().size();
 }
 
-inline const AtomicString& DOMTokenList::item(unsigned index) const
+inline const AtomString& DOMTokenList::item(unsigned index) const
 {
     auto& tokens = this->tokens();
     return index < tokens.size() ? tokens[index] : nullAtom();

@@ -20,42 +20,67 @@
 #include "config.h"
 #include "WebEditorClient.h"
 
-#include "PlatformKeyboardEvent.h"
 #include <WebCore/Document.h>
 #include <WebCore/Editor.h>
 #include <WebCore/EventNames.h>
 #include <WebCore/Frame.h>
 #include <WebCore/KeyboardEvent.h>
+#include <WebCore/PagePasteboardContext.h>
 #include <WebCore/Pasteboard.h>
+#include <WebCore/PlatformKeyboardEvent.h>
+#include <WebCore/TextIterator.h>
 #include <WebCore/markup.h>
+#include <WebPage.h>
+#include <variant>
 #include <wtf/glib/GRefPtr.h>
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
-
-bool WebEditorClient::executePendingEditorCommands(Frame* frame, const Vector<WTF::String>& pendingEditorCommands, bool allowTextInsertion)
+bool WebEditorClient::handleGtkEditorCommand(Frame& frame, const String& command, bool allowTextInsertion)
 {
-    Vector<Editor::Command> commands;
-    for (auto& commandString : pendingEditorCommands) {
-        Editor::Command command = frame->editor().command(commandString);
-        if (command.isTextInsertion() && !allowTextInsertion)
+    if (command == "GtkInsertEmoji"_s) {
+        if (!allowTextInsertion)
             return false;
-
-        commands.append(WTFMove(command));
+        m_page->showEmojiPicker(frame);
+        return true;
     }
 
-    for (auto& command : commands) {
-        if (!command.execute())
-            return false;
+    return false;
+}
+
+bool WebEditorClient::executePendingEditorCommands(Frame& frame, const Vector<WTF::String>& pendingEditorCommands, bool allowTextInsertion)
+{
+    Vector<std::variant<Editor::Command, String>> commands;
+    for (auto& commandString : pendingEditorCommands) {
+        if (commandString.startsWith("Gtk"_s))
+            commands.append(commandString);
+        else {
+            Editor::Command command = frame.editor().command(commandString);
+            if (command.isTextInsertion() && !allowTextInsertion)
+                return false;
+
+            commands.append(WTFMove(command));
+        }
+    }
+
+    for (auto& commandVariant : commands) {
+        if (std::holds_alternative<String>(commandVariant)) {
+            if (!handleGtkEditorCommand(frame, std::get<String>(commandVariant), allowTextInsertion))
+                return false;
+        } else {
+            auto& command = std::get<Editor::Command>(commandVariant);
+            if (!command.execute())
+                return false;
+        }
     }
 
     return true;
 }
 
-void WebEditorClient::handleKeyboardEvent(KeyboardEvent* event)
+void WebEditorClient::handleKeyboardEvent(KeyboardEvent& event)
 {
-    const PlatformKeyboardEvent* platformEvent = event->keyEvent();
+    auto* platformEvent = event.underlyingPlatformEvent();
     if (!platformEvent)
         return;
 
@@ -63,9 +88,8 @@ void WebEditorClient::handleKeyboardEvent(KeyboardEvent* event)
     if (platformEvent->handledByInputMethod())
         return;
 
-    Node* node = event->target()->toNode();
-    ASSERT(node);
-    Frame* frame = node->document().frame();
+    ASSERT(event.target());
+    auto* frame = downcast<Node>(event.target())->document().frame();
     ASSERT(frame);
 
     const Vector<String> pendingEditorCommands = platformEvent->commands();
@@ -75,15 +99,15 @@ void WebEditorClient::handleKeyboardEvent(KeyboardEvent* event)
         // the insertion until the keypress event. We want keydown to bubble up
         // through the DOM first.
         if (platformEvent->type() == PlatformEvent::RawKeyDown) {
-            if (executePendingEditorCommands(frame, pendingEditorCommands, false))
-                event->setDefaultHandled();
+            if (executePendingEditorCommands(*frame, pendingEditorCommands, false))
+                event.setDefaultHandled();
 
             return;
         }
 
         // Only allow text insertion commands if the current node is editable.
-        if (executePendingEditorCommands(frame, pendingEditorCommands, frame->editor().canEdit())) {
-            event->setDefaultHandled();
+        if (executePendingEditorCommands(*frame, pendingEditorCommands, frame->editor().canEdit())) {
+            event.setDefaultHandled();
             return;
         }
     }
@@ -95,41 +119,34 @@ void WebEditorClient::handleKeyboardEvent(KeyboardEvent* event)
     // This is just a normal text insertion, so wait to execute the insertion
     // until a keypress event happens. This will ensure that the insertion will not
     // be reflected in the contents of the field until the keyup DOM event.
-    if (event->type() != eventNames().keypressEvent)
+    if (event.type() != eventNames().keypressEvent)
         return;
 
     // Don't insert null or control characters as they can result in unexpected behaviour
-    if (event->charCode() < ' ')
+    if (event.charCode() < ' ')
         return;
 
     // Don't insert anything if a modifier is pressed
-    if (platformEvent->ctrlKey() || platformEvent->altKey())
+    if (platformEvent->controlKey() || platformEvent->altKey())
         return;
 
-    if (frame->editor().insertText(platformEvent->text(), event))
-        event->setDefaultHandled();
-}
-
-void WebEditorClient::handleInputMethodKeydown(KeyboardEvent* event)
-{
-    const PlatformKeyboardEvent* platformEvent = event->keyEvent();
-    if (platformEvent && platformEvent->handledByInputMethod())
-        event->setDefaultHandled();
+    if (frame->editor().insertText(platformEvent->text(), &event))
+        event.setDefaultHandled();
 }
 
 void WebEditorClient::updateGlobalSelection(Frame* frame)
 {
     if (!frame->selection().isRange())
         return;
-    RefPtr<Range> range = frame->selection().toNormalizedRange();
+    auto range = frame->selection().selection().toNormalizedRange();
     if (!range)
         return;
 
     PasteboardWebContent pasteboardContent;
     pasteboardContent.canSmartCopyOrDelete = false;
-    pasteboardContent.text = range->text();
-    pasteboardContent.markup = createMarkup(*range, nullptr, AnnotateForInterchange, false, ResolveNonLocalURLs);
-    Pasteboard::createForGlobalSelection()->write(pasteboardContent);
+    pasteboardContent.text = plainText(*range);
+    pasteboardContent.markup = serializePreservingVisualAppearance(frame->selection().selection(), ResolveURLs::YesExcludingURLsForPrivacy);
+    Pasteboard::createForGlobalSelection(PagePasteboardContext::create(frame->pageID()))->write(pasteboardContent);
 }
 
 bool WebEditorClient::shouldShowUnicodeMenu()

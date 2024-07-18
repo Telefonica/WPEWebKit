@@ -27,7 +27,7 @@
 #pragma once
 
 #include "Image.h"
-#include "URL.h"
+#include <wtf/URL.h>
 
 namespace WebCore {
 
@@ -48,7 +48,7 @@ public:
     FrameView* frameView() const;
 
     bool isSVGImage() const final { return true; }
-    FloatSize size() const final { return m_intrinsicSize; }
+    FloatSize size(ImageOrientation = ImageOrientation::FromImage) const final { return m_intrinsicSize; }
 
     bool hasSingleSecurityOrigin() const final;
 
@@ -60,12 +60,9 @@ public:
     void resetAnimation() final;
     bool isAnimating() const final;
 
-#if USE(CAIRO)
-    NativeImagePtr nativeImageForCurrentFrame(const GraphicsContext* = nullptr) final;
-#endif
-#if USE(DIRECT2D)
-    NativeImagePtr nativeImage(const GraphicsContext* = nullptr) final;
-#endif
+    void scheduleStartAnimation();
+
+    Page* internalPage() { return m_page.get(); }
 
 private:
     friend class SVGImageChromeClient;
@@ -89,17 +86,22 @@ private:
     // FIXME: Implement this to be less conservative.
     bool currentFrameKnownToBeOpaque() const final { return false; }
 
-    explicit SVGImage(ImageObserver&);
-    ImageDrawResult draw(GraphicsContext&, const FloatRect& fromRect, const FloatRect& toRect, CompositeOperator, BlendMode, DecodingMode, ImageOrientationDescription) final;
-    ImageDrawResult drawForContainer(GraphicsContext&, const FloatSize containerSize, float containerZoom, const URL& initialFragmentURL, const FloatRect& dstRect, const FloatRect& srcRect, CompositeOperator, BlendMode);
-    void drawPatternForContainer(GraphicsContext&, const FloatSize& containerSize, float containerZoom, const URL& initialFragmentURL, const FloatRect& srcRect, const AffineTransform&, const FloatPoint& phase, const FloatSize& spacing,
-        CompositeOperator, const FloatRect&, BlendMode);
+    RefPtr<NativeImage> nativeImage(const DestinationColorSpace& = DestinationColorSpace::SRGB()) final;
 
-    SVGSVGElement* rootElement() const;
+    void startAnimationTimerFired();
+
+    WEBCORE_EXPORT explicit SVGImage(ImageObserver&);
+    ImageDrawResult draw(GraphicsContext&, const FloatRect& destination, const FloatRect& source, const ImagePaintingOptions& = { }) final;
+    ImageDrawResult drawForContainer(GraphicsContext&, const FloatSize containerSize, float containerZoom, const URL& initialFragmentURL, const FloatRect& dstRect, const FloatRect& srcRect, const ImagePaintingOptions& = { });
+    void drawPatternForContainer(GraphicsContext&, const FloatSize& containerSize, float containerZoom, const URL& initialFragmentURL, const FloatRect& srcRect, const AffineTransform&, const FloatPoint& phase, const FloatSize& spacing, const FloatRect&, const ImagePaintingOptions& = { });
+
+    RefPtr<SVGSVGElement> rootElement() const;
 
     std::unique_ptr<SVGImageChromeClient> m_chromeClient;
     std::unique_ptr<Page> m_page;
     FloatSize m_intrinsicSize;
+
+    Timer m_startAnimationTimer;
 };
 
 bool isInSVGImage(const Element*);

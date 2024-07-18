@@ -31,6 +31,5 @@
 #endif
 
 typedef const struct OpaqueWKView* WKViewRef;
-typedef const struct OpaqueWKWebAutomationSession* WKWebAutomationSessionRef;
 
 #endif /* WKBaseWPE_h */

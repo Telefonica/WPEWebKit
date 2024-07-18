@@ -21,118 +21,623 @@
 #include "config.h"
 #include "JSTestGlobalObject.h"
 
+#include "ActiveDOMObject.h"
+#include "DOMPromiseProxy.h"
 #include "DOMWrapperWorld.h"
+#include "DeprecatedGlobalSettings.h"
+#include "ExtendedDOMClientIsoSubspaces.h"
+#include "ExtendedDOMIsoSubspaces.h"
+#include "IDLTypes.h"
 #include "JSDOMAttribute.h"
 #include "JSDOMBinding.h"
 #include "JSDOMConstructorNotConstructable.h"
+#include "JSDOMConvertBase.h"
 #include "JSDOMConvertBoolean.h"
 #include "JSDOMConvertNumbers.h"
+#include "JSDOMConvertPromise.h"
 #include "JSDOMConvertStrings.h"
 #include "JSDOMExceptionHandling.h"
+#include "JSDOMGlobalObject.h"
+#include "JSDOMGlobalObjectInlines.h"
 #include "JSDOMOperation.h"
 #include "JSDOMOperationReturningPromise.h"
 #include "JSDOMWrapperCache.h"
-#include "RuntimeEnabledFeatures.h"
+#include "JSTestCEReactions.h"
+#include "JSTestCEReactionsStringifier.h"
+#include "JSTestCallTracer.h"
+#include "JSTestClassWithJSBuiltinConstructor.h"
+#include "JSTestDOMJIT.h"
+#include "JSTestDefaultToJSONIndirectInheritance.h"
+#include "JSTestDefaultToJSONInherit.h"
+#include "JSTestDefaultToJSONInheritFinal.h"
+#include "JSTestDelegateToSharedSyntheticAttribute.h"
+#include "JSTestDomainSecurity.h"
+#include "JSTestEventConstructor.h"
+#include "JSTestEventTarget.h"
+#include "JSTestException.h"
+#include "JSTestGenerateAddOpaqueRoot.h"
+#include "JSTestGenerateIsReachable.h"
+#include "JSTestGlobalObject.h"
+#include "JSTestIndexedSetterNoIdentifier.h"
+#include "JSTestIndexedSetterThrowingException.h"
+#include "JSTestIndexedSetterWithIdentifier.h"
+#include "JSTestInterfaceLeadingUnderscore.h"
+#include "JSTestIterable.h"
+#include "JSTestJSBuiltinConstructor.h"
+#include "JSTestLegacyOverrideBuiltIns.h"
+#include "JSTestMapLike.h"
+#include "JSTestMapLikeWithOverriddenOperations.h"
+#include "JSTestNamedAndIndexedSetterNoIdentifier.h"
+#include "JSTestNamedAndIndexedSetterThrowingException.h"
+#include "JSTestNamedAndIndexedSetterWithIdentifier.h"
+#include "JSTestNamedDeleterNoIdentifier.h"
+#include "JSTestNamedDeleterThrowingException.h"
+#include "JSTestNamedDeleterWithIdentifier.h"
+#include "JSTestNamedDeleterWithIndexedGetter.h"
+#include "JSTestNamedGetterCallWith.h"
+#include "JSTestNamedGetterNoIdentifier.h"
+#include "JSTestNamedGetterWithIdentifier.h"
+#include "JSTestNamedSetterNoIdentifier.h"
+#include "JSTestNamedSetterThrowingException.h"
+#include "JSTestNamedSetterWithIdentifier.h"
+#include "JSTestNamedSetterWithIndexedGetter.h"
+#include "JSTestNamedSetterWithIndexedGetterAndSetter.h"
+#include "JSTestNamedSetterWithLegacyOverrideBuiltIns.h"
+#include "JSTestNamedSetterWithLegacyUnforgeableProperties.h"
+#include "JSTestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltIns.h"
+#include "JSTestNamespaceConst.h"
+#include "JSTestNamespaceObject.h"
+#include "JSTestOverloadedConstructorsWithSequence.h"
+#include "JSTestPluginInterface.h"
+#include "JSTestReadOnlyMapLike.h"
+#include "JSTestReadOnlySetLike.h"
+#include "JSTestReportExtraMemoryCost.h"
+#include "JSTestSetLike.h"
+#include "JSTestSetLikeWithOverriddenOperations.h"
+#include "JSTestStringifier.h"
+#include "JSTestStringifierAnonymousOperation.h"
+#include "JSTestStringifierNamedOperation.h"
+#include "JSTestStringifierOperationImplementedAs.h"
+#include "JSTestStringifierOperationNamedToString.h"
+#include "JSTestStringifierReadOnlyAttribute.h"
+#include "JSTestStringifierReadWriteAttribute.h"
+#include "JSTestTaggedWrapper.h"
+#include "JSTestTypedefs.h"
 #include "ScriptExecutionContext.h"
 #include "WebCoreJSClientData.h"
-#include <runtime/FunctionPrototype.h>
-#include <runtime/JSCInlines.h>
+#include <JavaScriptCore/FunctionPrototype.h>
+#include <JavaScriptCore/HeapAnalyzer.h>
+#include <JavaScriptCore/JSCInlines.h>
+#include <JavaScriptCore/JSDestructibleObjectHeapCellType.h>
+#include <JavaScriptCore/SlotVisitorMacros.h>
+#include <JavaScriptCore/SubspaceInlines.h>
 #include <wtf/GetPtr.h>
+#include <wtf/PointerPreparations.h>
+#include <wtf/URL.h>
+
+#if ENABLE(Condition1) || ENABLE(Condition2)
+#include "JSTestSerializedScriptValueInterface.h"
+#endif
+
+#if ENABLE(ConditionDerived)
+#include "JSTestOperationConditional.h"
+#endif
+
+#if ENABLE(TEST_CONDITIONAL)
+#include "JSTestCallbackInterface.h"
+#endif
 
 #if ENABLE(TEST_FEATURE)
 #include "TestGlobalObjectBuiltins.h"
 #endif
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 // Functions
 
-JSC::EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionRegularOperation(JSC::ExecState*);
+static JSC_DECLARE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_regularOperation);
 #if ENABLE(TEST_FEATURE)
-JSC::EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionEnabledAtRuntimeOperation(JSC::ExecState*);
+static JSC_DECLARE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_enabledAtRuntimeOperation);
 #endif
-JSC::EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorld(JSC::ExecState*);
-JSC::EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldWhenRuntimeFeatureEnabled(JSC::ExecState*);
-JSC::EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldWhenRuntimeFeaturesEnabled(JSC::ExecState*);
 #if ENABLE(TEST_FEATURE)
-JSC::EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionTestPrivateFunction(JSC::ExecState*);
+static JSC_DECLARE_HOST_FUNCTION(jsTestGlobalObjectConstructorFunction_enabledAtRuntimeOperationStatic);
 #endif
-JSC::EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionCalculateSecretResult(JSC::ExecState*);
-JSC::EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionGetSecretBoolean(JSC::ExecState*);
+static JSC_DECLARE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_enabledInSpecificWorld);
+static JSC_DECLARE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldWhenRuntimeFeatureEnabled);
+static JSC_DECLARE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldWhenRuntimeFeaturesEnabled);
 #if ENABLE(TEST_FEATURE)
-JSC::EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionTestFeatureGetSecretBoolean(JSC::ExecState*);
+static JSC_DECLARE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_testPrivateFunction);
+#endif
+static JSC_DECLARE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_calculateSecretResult);
+static JSC_DECLARE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_getSecretBoolean);
+#if ENABLE(TEST_FEATURE)
+static JSC_DECLARE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_testFeatureGetSecretBoolean);
 #endif
 
 // Attributes
 
-JSC::EncodedJSValue jsTestGlobalObjectConstructor(JSC::ExecState*, JSC::EncodedJSValue, JSC::PropertyName);
-bool setJSTestGlobalObjectConstructor(JSC::ExecState*, JSC::EncodedJSValue, JSC::EncodedJSValue);
-JSC::EncodedJSValue jsTestGlobalObjectRegularAttribute(JSC::ExecState*, JSC::EncodedJSValue, JSC::PropertyName);
-bool setJSTestGlobalObjectRegularAttribute(JSC::ExecState*, JSC::EncodedJSValue, JSC::EncodedJSValue);
-JSC::EncodedJSValue jsTestGlobalObjectPublicAndPrivateAttribute(JSC::ExecState*, JSC::EncodedJSValue, JSC::PropertyName);
-bool setJSTestGlobalObjectPublicAndPrivateAttribute(JSC::ExecState*, JSC::EncodedJSValue, JSC::EncodedJSValue);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObjectConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_regularAttribute);
+static JSC_DECLARE_CUSTOM_SETTER(setJSTestGlobalObject_regularAttribute);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_publicAndPrivateAttribute);
+static JSC_DECLARE_CUSTOM_SETTER(setJSTestGlobalObject_publicAndPrivateAttribute);
 #if ENABLE(TEST_FEATURE)
-JSC::EncodedJSValue jsTestGlobalObjectPublicAndPrivateConditionalAttribute(JSC::ExecState*, JSC::EncodedJSValue, JSC::PropertyName);
-bool setJSTestGlobalObjectPublicAndPrivateConditionalAttribute(JSC::ExecState*, JSC::EncodedJSValue, JSC::EncodedJSValue);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_publicAndPrivateConditionalAttribute);
+static JSC_DECLARE_CUSTOM_SETTER(setJSTestGlobalObject_publicAndPrivateConditionalAttribute);
 #endif
 #if ENABLE(TEST_FEATURE)
-JSC::EncodedJSValue jsTestGlobalObjectEnabledAtRuntimeAttribute(JSC::ExecState*, JSC::EncodedJSValue, JSC::PropertyName);
-bool setJSTestGlobalObjectEnabledAtRuntimeAttribute(JSC::ExecState*, JSC::EncodedJSValue, JSC::EncodedJSValue);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_enabledAtRuntimeAttribute);
+static JSC_DECLARE_CUSTOM_SETTER(setJSTestGlobalObject_enabledAtRuntimeAttribute);
 #endif
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestCEReactionsConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestCEReactionsStringifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestCallTracerConstructor);
+#if ENABLE(TEST_CONDITIONAL)
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestCallbackInterfaceConstructor);
+#endif
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestClassWithJSBuiltinConstructorConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestDOMJITConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestDefaultToJSONIndirectInheritanceConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestDefaultToJSONInheritConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestDefaultToJSONInheritFinalConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestDelegateToSharedSyntheticAttributeConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestDomainSecurityConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestEventConstructorConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestEventTargetConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestExceptionConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestGenerateAddOpaqueRootConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestGenerateIsReachableConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestGlobalObjectConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestIndexedSetterNoIdentifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestIndexedSetterThrowingExceptionConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestIndexedSetterWithIdentifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestInterfaceLeadingUnderscoreConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestIterableConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestJSBuiltinConstructorConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestLegacyFactoryFunctionConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_AudioConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestLegacyOverrideBuiltInsConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestMapLikeConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestMapLikeWithOverriddenOperationsConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedAndIndexedSetterNoIdentifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedAndIndexedSetterThrowingExceptionConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedAndIndexedSetterWithIdentifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedDeleterNoIdentifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedDeleterThrowingExceptionConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedDeleterWithIdentifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedDeleterWithIndexedGetterConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedGetterCallWithConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedGetterNoIdentifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedGetterWithIdentifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterNoIdentifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterThrowingExceptionConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithIdentifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithIndexedGetterConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithIndexedGetterAndSetterConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithLegacyOverrideBuiltInsConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithLegacyUnforgeablePropertiesConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltInsConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestNamespaceConstConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestInterfaceNameConstructor);
+#if ENABLE(ConditionDerived)
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestOperationConditionalConstructor);
+#endif
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestOverloadedConstructorsWithSequenceConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestPluginInterfaceConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestReadOnlyMapLikeConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestReadOnlySetLikeConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestReportExtraMemoryCostConstructor);
+#if ENABLE(Condition1) || ENABLE(Condition2)
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestSerializedScriptValueInterfaceConstructor);
+#endif
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestSetLikeConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestSetLikeWithOverriddenOperationsConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierAnonymousOperationConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierNamedOperationConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierOperationImplementedAsConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierOperationNamedToStringConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierReadOnlyAttributeConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierReadWriteAttributeConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestTaggedWrapperConstructor);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestGlobalObject_TestTypedefsConstructor);
 
-using JSTestGlobalObjectConstructor = JSDOMConstructorNotConstructable<JSTestGlobalObject>;
+using JSTestGlobalObjectDOMConstructor = JSDOMConstructorNotConstructable<JSTestGlobalObject>;
 
 /* Hash table */
 
-static const struct CompactHashIndex JSTestGlobalObjectTableIndex[16] = {
+static const struct CompactHashIndex JSTestGlobalObjectTableIndex[268] = {
     { -1, -1 },
+    { 41, -1 },
+    { -1, -1 },
+    { 0, -1 },
+    { 4, -1 },
+    { 45, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 55, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 64, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 35, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 68, -1 },
+    { 13, 261 },
+    { -1, -1 },
+    { -1, -1 },
+    { 49, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 39, -1 },
+    { 20, 258 },
+    { 6, -1 },
+    { -1, -1 },
+    { 46, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 37, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 22, 266 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 5, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 30, -1 },
+    { 57, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 9, 257 },
+    { -1, -1 },
+    { 59, -1 },
+    { 19, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 18, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 36, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 24, -1 },
     { -1, -1 },
     { 2, -1 },
-    { 0, -1 },
+    { 38, -1 },
     { -1, -1 },
     { -1, -1 },
+    { -1, -1 },
+    { 21, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 28, -1 },
+    { -1, -1 },
+    { 43, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 54, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 48, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 10, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 65, -1 },
+    { -1, -1 },
+    { 66, -1 },
+    { -1, -1 },
+    { 27, -1 },
+    { 32, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 15, 260 },
+    { -1, -1 },
+    { 60, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 34, 267 },
+    { -1, -1 },
+    { 16, 256 },
+    { -1, -1 },
+    { 63, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 12, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 47, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 11, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 58, -1 },
+    { -1, -1 },
+    { 1, -1 },
+    { -1, -1 },
+    { 8, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 50, 264 },
+    { 7, 263 },
+    { -1, -1 },
+    { 61, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 14, -1 },
+    { -1, -1 },
+    { 25, -1 },
+    { -1, -1 },
+    { -1, -1 },
+    { 31, -1 },
     { -1, -1 },
     { -1, -1 },
     { -1, -1 },
     { 3, -1 },
+    { 52, -1 },
+    { -1, -1 },
+    { 53, -1 },
     { -1, -1 },
     { -1, -1 },
     { -1, -1 },
     { -1, -1 },
-    { 1, -1 },
-    { -1, -1 },
+    { 17, -1 },
+    { 23, 259 },
+    { 26, 265 },
+    { 29, 262 },
+    { 33, -1 },
+    { 40, -1 },
+    { 42, -1 },
+    { 44, -1 },
+    { 51, -1 },
+    { 56, -1 },
+    { 62, -1 },
+    { 67, -1 },
 };
 
 
 static const HashTableValue JSTestGlobalObjectTableValues[] =
 {
-    { "regularAttribute", static_cast<unsigned>(JSC::PropertyAttribute::CustomAccessor | JSC::PropertyAttribute::DOMAttribute), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObjectRegularAttribute), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(setJSTestGlobalObjectRegularAttribute) } },
-    { "publicAndPrivateAttribute", static_cast<unsigned>(JSC::PropertyAttribute::CustomAccessor), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObjectPublicAndPrivateAttribute), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(setJSTestGlobalObjectPublicAndPrivateAttribute) } },
+    { "regularAttribute"_s, static_cast<unsigned>(JSC::PropertyAttribute::CustomAccessor), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_regularAttribute), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(setJSTestGlobalObject_regularAttribute) } },
+    { "publicAndPrivateAttribute"_s, static_cast<unsigned>(JSC::PropertyAttribute::CustomAccessor), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_publicAndPrivateAttribute), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(setJSTestGlobalObject_publicAndPrivateAttribute) } },
 #if ENABLE(TEST_FEATURE)
-    { "publicAndPrivateConditionalAttribute", static_cast<unsigned>(JSC::PropertyAttribute::CustomAccessor), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObjectPublicAndPrivateConditionalAttribute), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(setJSTestGlobalObjectPublicAndPrivateConditionalAttribute) } },
+    { "publicAndPrivateConditionalAttribute"_s, static_cast<unsigned>(JSC::PropertyAttribute::CustomAccessor), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_publicAndPrivateConditionalAttribute), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(setJSTestGlobalObject_publicAndPrivateConditionalAttribute) } },
 #else
-    { 0, 0, NoIntrinsic, { 0, 0 } },
+    { { }, 0, NoIntrinsic, { 0, 0 } },
 #endif
-    { "regularOperation", static_cast<unsigned>(JSC::PropertyAttribute::Function), NoIntrinsic, { (intptr_t)static_cast<NativeFunction>(jsTestGlobalObjectInstanceFunctionRegularOperation), (intptr_t) (1) } },
+    { "TestCEReactions"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestCEReactionsConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestCEReactionsStringifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestCEReactionsStringifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestCallTracer"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestCallTracerConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+#if ENABLE(TEST_CONDITIONAL)
+    { "TestCallbackInterface"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestCallbackInterfaceConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+#else
+    { { }, 0, NoIntrinsic, { 0, 0 } },
+#endif
+    { "TestClassWithJSBuiltinConstructor"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestClassWithJSBuiltinConstructorConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestDOMJIT"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestDOMJITConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestDefaultToJSONIndirectInheritance"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestDefaultToJSONIndirectInheritanceConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestDefaultToJSONInherit"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestDefaultToJSONInheritConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestDefaultToJSONInheritFinal"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestDefaultToJSONInheritFinalConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestDelegateToSharedSyntheticAttribute"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestDelegateToSharedSyntheticAttributeConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestDomainSecurity"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestDomainSecurityConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestEventConstructor"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestEventConstructorConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestEventTarget"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestEventTargetConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestException"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestExceptionConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestGenerateAddOpaqueRoot"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestGenerateAddOpaqueRootConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestGenerateIsReachable"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestGenerateIsReachableConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestGlobalObject"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestGlobalObjectConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestIndexedSetterNoIdentifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestIndexedSetterNoIdentifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestIndexedSetterThrowingException"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestIndexedSetterThrowingExceptionConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestIndexedSetterWithIdentifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestIndexedSetterWithIdentifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestInterfaceLeadingUnderscore"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestInterfaceLeadingUnderscoreConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestIterable"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestIterableConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestJSBuiltinConstructor"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestJSBuiltinConstructorConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestLegacyFactoryFunction"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestLegacyFactoryFunctionConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "Audio"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_AudioConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestLegacyOverrideBuiltIns"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestLegacyOverrideBuiltInsConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestMapLike"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestMapLikeConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestMapLikeWithOverriddenOperations"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestMapLikeWithOverriddenOperationsConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedAndIndexedSetterNoIdentifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedAndIndexedSetterNoIdentifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedAndIndexedSetterThrowingException"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedAndIndexedSetterThrowingExceptionConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedAndIndexedSetterWithIdentifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedAndIndexedSetterWithIdentifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedDeleterNoIdentifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedDeleterNoIdentifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedDeleterThrowingException"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedDeleterThrowingExceptionConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedDeleterWithIdentifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedDeleterWithIdentifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedDeleterWithIndexedGetter"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedDeleterWithIndexedGetterConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedGetterCallWith"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedGetterCallWithConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedGetterNoIdentifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedGetterNoIdentifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedGetterWithIdentifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedGetterWithIdentifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedSetterNoIdentifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedSetterNoIdentifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedSetterThrowingException"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedSetterThrowingExceptionConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedSetterWithIdentifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedSetterWithIdentifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedSetterWithIndexedGetter"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedSetterWithIndexedGetterConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedSetterWithIndexedGetterAndSetter"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedSetterWithIndexedGetterAndSetterConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedSetterWithLegacyOverrideBuiltIns"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedSetterWithLegacyOverrideBuiltInsConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedSetterWithLegacyUnforgeableProperties"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedSetterWithLegacyUnforgeablePropertiesConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltIns"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltInsConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestNamespaceConst"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestNamespaceConstConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+#if ENABLE(ConditionDerived)
+    { "TestOperationConditional"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestOperationConditionalConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+#else
+    { { }, 0, NoIntrinsic, { 0, 0 } },
+#endif
+    { "TestOverloadedConstructorsWithSequence"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestOverloadedConstructorsWithSequenceConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestPluginInterface"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestPluginInterfaceConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestReadOnlyMapLike"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestReadOnlyMapLikeConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestReadOnlySetLike"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestReadOnlySetLikeConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestReportExtraMemoryCost"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestReportExtraMemoryCostConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+#if ENABLE(Condition1) || ENABLE(Condition2)
+    { "TestSerializedScriptValueInterface"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestSerializedScriptValueInterfaceConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+#else
+    { { }, 0, NoIntrinsic, { 0, 0 } },
+#endif
+    { "TestSetLike"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestSetLikeConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestSetLikeWithOverriddenOperations"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestSetLikeWithOverriddenOperationsConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestStringifier"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestStringifierConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestStringifierAnonymousOperation"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestStringifierAnonymousOperationConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestStringifierNamedOperation"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestStringifierNamedOperationConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestStringifierOperationImplementedAs"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestStringifierOperationImplementedAsConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestStringifierOperationNamedToString"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestStringifierOperationNamedToStringConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestStringifierReadOnlyAttribute"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestStringifierReadOnlyAttributeConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestStringifierReadWriteAttribute"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestStringifierReadWriteAttributeConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestTaggedWrapper"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestTaggedWrapperConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "TestTypedefs"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObject_TestTypedefsConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
+    { "regularOperation"_s, static_cast<unsigned>(JSC::PropertyAttribute::Function), NoIntrinsic, { (intptr_t)static_cast<RawNativeFunction>(jsTestGlobalObjectInstanceFunction_regularOperation), (intptr_t) (1) } },
 };
 
-static const HashTable JSTestGlobalObjectTable = { 4, 15, true, JSTestGlobalObject::info(), JSTestGlobalObjectTableValues, JSTestGlobalObjectTableIndex };
-template<> JSValue JSTestGlobalObjectConstructor::prototypeForStructure(JSC::VM& vm, const JSDOMGlobalObject& globalObject)
+static const HashTable JSTestGlobalObjectTable = { 69, 255, true, JSTestGlobalObject::info(), JSTestGlobalObjectTableValues, JSTestGlobalObjectTableIndex };
+/* Hash table for constructor */
+
+static const HashTableValue JSTestGlobalObjectConstructorTableValues[] =
+{
+#if ENABLE(TEST_FEATURE)
+    { "enabledAtRuntimeOperationStatic"_s, static_cast<unsigned>(JSC::PropertyAttribute::Function), NoIntrinsic, { (intptr_t)static_cast<RawNativeFunction>(jsTestGlobalObjectConstructorFunction_enabledAtRuntimeOperationStatic), (intptr_t) (1) } },
+#else
+    { { }, 0, NoIntrinsic, { 0, 0 } },
+#endif
+};
+
+template<> const ClassInfo JSTestGlobalObjectDOMConstructor::s_info = { "TestGlobalObject"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSTestGlobalObjectDOMConstructor) };
+
+template<> JSValue JSTestGlobalObjectDOMConstructor::prototypeForStructure(JSC::VM& vm, const JSDOMGlobalObject& globalObject)
 {
     UNUSED_PARAM(vm);
     return globalObject.functionPrototype();
 }
 
-template<> void JSTestGlobalObjectConstructor::initializeProperties(VM& vm, JSDOMGlobalObject& globalObject)
+template<> void JSTestGlobalObjectDOMConstructor::initializeProperties(VM& vm, JSDOMGlobalObject& globalObject)
 {
-    putDirect(vm, vm.propertyNames->prototype, globalObject.getPrototypeDirect(), JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
-    putDirect(vm, vm.propertyNames->name, jsNontrivialString(&vm, String(ASCIILiteral("TestGlobalObject"))), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
     putDirect(vm, vm.propertyNames->length, jsNumber(0), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
+    JSString* nameString = jsNontrivialString(vm, "TestGlobalObject"_s);
+    m_originalName.set(vm, this, nameString);
+    putDirect(vm, vm.propertyNames->name, nameString, JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
+    putDirect(vm, vm.propertyNames->prototype, globalObject.getPrototypeDirect(), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum | JSC::PropertyAttribute::DontDelete);
+    reifyStaticProperties(vm, JSTestGlobalObject::info(), JSTestGlobalObjectConstructorTableValues, *this);
 }
-
-template<> const ClassInfo JSTestGlobalObjectConstructor::s_info = { "TestGlobalObject", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSTestGlobalObjectConstructor) };
 
 /* Hash table for prototype */
 
@@ -144,13 +649,19 @@ static const struct CompactHashIndex JSTestGlobalObjectPrototypeTableIndex[2] = 
 
 static const HashTableValue JSTestGlobalObjectPrototypeTableValues[] =
 {
-    { "constructor", static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObjectConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(setJSTestGlobalObjectConstructor) } },
+    { "constructor"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestGlobalObjectConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
 };
 
 static const HashTable JSTestGlobalObjectPrototypeTable = { 1, 1, true, JSTestGlobalObject::info(), JSTestGlobalObjectPrototypeTableValues, JSTestGlobalObjectPrototypeTableIndex };
-const ClassInfo JSTestGlobalObjectPrototype::s_info = { "TestGlobalObjectPrototype", &Base::s_info, &JSTestGlobalObjectPrototypeTable, nullptr, CREATE_METHOD_TABLE(JSTestGlobalObjectPrototype) };
+const ClassInfo JSTestGlobalObjectPrototype::s_info = { "TestGlobalObject"_s, &Base::s_info, &JSTestGlobalObjectPrototypeTable, nullptr, CREATE_METHOD_TABLE(JSTestGlobalObjectPrototype) };
 
-const ClassInfo JSTestGlobalObject::s_info = { "TestGlobalObject", &Base::s_info, &JSTestGlobalObjectTable, nullptr, CREATE_METHOD_TABLE(JSTestGlobalObject) };
+void JSTestGlobalObjectPrototype::finishCreation(VM& vm)
+{
+    Base::finishCreation(vm);
+    JSC_TO_STRING_TAG_WITHOUT_TRANSITION();
+}
+
+const ClassInfo JSTestGlobalObject::s_info = { "TestGlobalObject"_s, &Base::s_info, &JSTestGlobalObjectTable, nullptr, CREATE_METHOD_TABLE(JSTestGlobalObject) };
 
 JSTestGlobalObject::JSTestGlobalObject(Structure* structure, JSDOMGlobalObject& globalObject, Ref<TestGlobalObject>&& impl)
     : JSDOMWrapper<TestGlobalObject>(structure, globalObject, WTFMove(impl))
@@ -160,47 +671,55 @@ JSTestGlobalObject::JSTestGlobalObject(Structure* structure, JSDOMGlobalObject& 
 void JSTestGlobalObject::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
+
+    static_assert(!std::is_base_of<ActiveDOMObject, TestGlobalObject>::value, "Interface is not marked as [ActiveDOMObject] even though implementation class subclasses ActiveDOMObject.");
 
 #if ENABLE(TEST_FEATURE)
-    if (RuntimeEnabledFeatures::sharedFeatures().testFeatureEnabled())
-        putDirectCustomAccessor(vm, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().enabledAtRuntimeAttributePublicName(), CustomGetterSetter::create(vm, jsTestGlobalObjectEnabledAtRuntimeAttribute, setJSTestGlobalObjectEnabledAtRuntimeAttribute), attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::CustomAccessor)));
-#endif
-    putDirectCustomAccessor(vm, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().publicAndPrivateAttributePrivateName(), CustomGetterSetter::create(vm, jsTestGlobalObjectPublicAndPrivateAttribute, nullptr), attributesForStructure(JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly));
-#if ENABLE(TEST_FEATURE)
-    putDirectCustomAccessor(vm, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().publicAndPrivateConditionalAttributePrivateName(), CustomGetterSetter::create(vm, jsTestGlobalObjectPublicAndPrivateConditionalAttribute, nullptr), attributesForStructure(JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly));
-#endif
-#if ENABLE(TEST_FEATURE)
-    if (RuntimeEnabledFeatures::sharedFeatures().testFeatureEnabled())
-        putDirectNativeFunction(vm, this, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().enabledAtRuntimeOperationPublicName(), 1, jsTestGlobalObjectInstanceFunctionEnabledAtRuntimeOperation, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
-#endif
-    if (worldForDOMObject(this).specificWorld())
-        putDirectNativeFunction(vm, this, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().enabledInSpecificWorldPublicName(), 1, jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorld, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
-    if ((worldForDOMObject(this).specificWorld() && RuntimeEnabledFeatures::sharedFeatures().testFeatureEnabled()))
-        putDirectNativeFunction(vm, this, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().enabledInSpecificWorldWhenRuntimeFeatureEnabledPublicName(), 1, jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldWhenRuntimeFeatureEnabled, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
-    if ((worldForDOMObject(this).specificWorld() && RuntimeEnabledFeatures::sharedFeatures().testFeatureEnabled() && RuntimeEnabledFeatures::sharedFeatures().testFeature1Enabled()))
-        putDirectNativeFunction(vm, this, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().enabledInSpecificWorldWhenRuntimeFeaturesEnabledPublicName(), 1, jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldWhenRuntimeFeaturesEnabled, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
-#if ENABLE(TEST_FEATURE)
-    if (RuntimeEnabledFeatures::sharedFeatures().testFeatureEnabled())
-        putDirectNativeFunction(vm, this, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().testPrivateFunctionPrivateName(), 0, jsTestGlobalObjectInstanceFunctionTestPrivateFunction, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
-#endif
-#if ENABLE(TEST_FEATURE)
-    if (RuntimeEnabledFeatures::sharedFeatures().testFeatureEnabled())
-        putDirectBuiltinFunction(vm, this, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().testJSBuiltinFunctionPublicName(), testGlobalObjectTestJSBuiltinFunctionCodeGenerator(vm), attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Builtin)));
+    if (DeprecatedGlobalSettings::testFeatureEnabled())
+        putDirectCustomAccessor(vm, builtinNames(vm).enabledAtRuntimeAttributePublicName(), CustomGetterSetter::create(vm, jsTestGlobalObject_enabledAtRuntimeAttribute, setJSTestGlobalObject_enabledAtRuntimeAttribute), attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::CustomAccessor)));
 #endif
     if (jsCast<JSDOMGlobalObject*>(globalObject())->scriptExecutionContext()->isSecureContext())
-        putDirectNativeFunction(vm, this, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().calculateSecretResultPublicName(), 0, jsTestGlobalObjectInstanceFunctionCalculateSecretResult, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
-    if (jsCast<JSDOMGlobalObject*>(globalObject())->scriptExecutionContext()->isSecureContext())
-        putDirectNativeFunction(vm, this, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().getSecretBooleanPublicName(), 0, jsTestGlobalObjectInstanceFunctionGetSecretBoolean, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
+        putDirectCustomAccessor(vm, builtinNames(vm).TestInterfaceNamePublicName(), CustomGetterSetter::create(vm, jsTestGlobalObject_TestInterfaceNameConstructor, nullptr), attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::DontEnum)));
+    putDirectCustomAccessor(vm, builtinNames(vm).publicAndPrivateAttributePrivateName(), CustomGetterSetter::create(vm, jsTestGlobalObject_publicAndPrivateAttribute, nullptr), attributesForStructure(JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly));
 #if ENABLE(TEST_FEATURE)
-    if ((jsCast<JSDOMGlobalObject*>(globalObject())->scriptExecutionContext()->isSecureContext() && RuntimeEnabledFeatures::sharedFeatures().testFeatureEnabled()))
-        putDirectNativeFunction(vm, this, static_cast<JSVMClientData*>(vm.clientData)->builtinNames().testFeatureGetSecretBooleanPublicName(), 0, jsTestGlobalObjectInstanceFunctionTestFeatureGetSecretBoolean, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
+    putDirectCustomAccessor(vm, builtinNames(vm).publicAndPrivateConditionalAttributePrivateName(), CustomGetterSetter::create(vm, jsTestGlobalObject_publicAndPrivateConditionalAttribute, nullptr), attributesForStructure(JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly));
+#endif
+#if ENABLE(TEST_FEATURE)
+    if (DeprecatedGlobalSettings::testFeatureEnabled())
+        putDirectNativeFunction(vm, this, builtinNames(vm).enabledAtRuntimeOperationPublicName(), 1, jsTestGlobalObjectInstanceFunction_enabledAtRuntimeOperation, ImplementationVisibility::Public, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
+#endif
+#if ENABLE(TEST_FEATURE)
+    if (DeprecatedGlobalSettings::testFeatureEnabled())
+        putDirectNativeFunction(vm, this, builtinNames(vm).enabledAtRuntimeOperationStaticPublicName(), 1, jsTestGlobalObjectConstructorFunction_enabledAtRuntimeOperationStatic, ImplementationVisibility::Public, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
+#endif
+    if (worldForDOMObject(*this).specificWorld())
+        putDirectNativeFunction(vm, this, builtinNames(vm).enabledInSpecificWorldPublicName(), 1, jsTestGlobalObjectInstanceFunction_enabledInSpecificWorld, ImplementationVisibility::Public, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
+    if ((worldForDOMObject(*this).specificWorld() && DeprecatedGlobalSettings::testFeatureEnabled()))
+        putDirectNativeFunction(vm, this, builtinNames(vm).enabledInSpecificWorldWhenRuntimeFeatureEnabledPublicName(), 1, jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldWhenRuntimeFeatureEnabled, ImplementationVisibility::Public, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
+    if ((worldForDOMObject(*this).specificWorld() && DeprecatedGlobalSettings::testFeatureEnabled() && DeprecatedGlobalSettings::testFeature1Enabled()))
+        putDirectNativeFunction(vm, this, builtinNames(vm).enabledInSpecificWorldWhenRuntimeFeaturesEnabledPublicName(), 1, jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldWhenRuntimeFeaturesEnabled, ImplementationVisibility::Public, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
+#if ENABLE(TEST_FEATURE)
+    if (DeprecatedGlobalSettings::testFeatureEnabled())
+        putDirectNativeFunction(vm, this, builtinNames(vm).testPrivateFunctionPrivateName(), 0, jsTestGlobalObjectInstanceFunction_testPrivateFunction, ImplementationVisibility::Public, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
+#endif
+#if ENABLE(TEST_FEATURE)
+    if (DeprecatedGlobalSettings::testFeatureEnabled())
+        putDirectBuiltinFunction(vm, this, builtinNames(vm).testJSBuiltinFunctionPublicName(), testGlobalObjectTestJSBuiltinFunctionCodeGenerator(vm), attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Builtin)));
+#endif
+    if (jsCast<JSDOMGlobalObject*>(globalObject())->scriptExecutionContext()->isSecureContext())
+        putDirectNativeFunction(vm, this, builtinNames(vm).calculateSecretResultPublicName(), 0, jsTestGlobalObjectInstanceFunction_calculateSecretResult, ImplementationVisibility::Public, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
+    if (jsCast<JSDOMGlobalObject*>(globalObject())->scriptExecutionContext()->isSecureContext())
+        putDirectNativeFunction(vm, this, builtinNames(vm).getSecretBooleanPublicName(), 0, jsTestGlobalObjectInstanceFunction_getSecretBoolean, ImplementationVisibility::Public, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
+#if ENABLE(TEST_FEATURE)
+    if ((jsCast<JSDOMGlobalObject*>(globalObject())->scriptExecutionContext()->isSecureContext() && DeprecatedGlobalSettings::testFeatureEnabled()))
+        putDirectNativeFunction(vm, this, builtinNames(vm).testFeatureGetSecretBooleanPublicName(), 0, jsTestGlobalObjectInstanceFunction_testFeatureGetSecretBoolean, ImplementationVisibility::Public, NoIntrinsic, attributesForStructure(static_cast<unsigned>(JSC::PropertyAttribute::Function)));
 #endif
 }
 
 JSValue JSTestGlobalObject::getConstructor(VM& vm, const JSGlobalObject* globalObject)
 {
-    return getDOMConstructor<JSTestGlobalObjectConstructor>(vm, *jsCast<const JSDOMGlobalObject*>(globalObject));
+    return getDOMConstructor<JSTestGlobalObjectDOMConstructor, DOMConstructorID::TestGlobalObject>(vm, *jsCast<const JSDOMGlobalObject*>(globalObject));
 }
 
 void JSTestGlobalObject::destroy(JSC::JSCell* cell)
@@ -209,368 +728,1141 @@ void JSTestGlobalObject::destroy(JSC::JSCell* cell)
     thisObject->JSTestGlobalObject::~JSTestGlobalObject();
 }
 
-template<> inline JSTestGlobalObject* IDLAttribute<JSTestGlobalObject>::cast(ExecState& state, EncodedJSValue thisValue)
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObjectConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName))
 {
-    return jsDynamicDowncast<JSTestGlobalObject*>(state.vm(), JSValue::decode(thisValue));
-}
-
-template<> inline JSTestGlobalObject* IDLOperation<JSTestGlobalObject>::cast(ExecState& state)
-{
-    return jsDynamicDowncast<JSTestGlobalObject*>(state.vm(), state.thisValue());
-}
-
-EncodedJSValue jsTestGlobalObjectConstructor(ExecState* state, EncodedJSValue thisValue, PropertyName)
-{
-    VM& vm = state->vm();
+    VM& vm = JSC::getVM(lexicalGlobalObject);
     auto throwScope = DECLARE_THROW_SCOPE(vm);
-    auto* prototype = jsDynamicDowncast<JSTestGlobalObjectPrototype*>(vm, JSValue::decode(thisValue));
+    auto* prototype = jsDynamicCast<JSTestGlobalObjectPrototype*>(JSValue::decode(thisValue));
     if (UNLIKELY(!prototype))
-        return throwVMTypeError(state, throwScope);
-    return JSValue::encode(JSTestGlobalObject::getConstructor(state->vm(), prototype->globalObject()));
+        return throwVMTypeError(lexicalGlobalObject, throwScope);
+    return JSValue::encode(JSTestGlobalObject::getConstructor(JSC::getVM(lexicalGlobalObject), prototype->globalObject()));
 }
 
-bool setJSTestGlobalObjectConstructor(ExecState* state, EncodedJSValue thisValue, EncodedJSValue encodedValue)
+static inline JSValue jsTestGlobalObject_regularAttributeGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
 {
-    VM& vm = state->vm();
+    auto& vm = JSC::getVM(&lexicalGlobalObject);
     auto throwScope = DECLARE_THROW_SCOPE(vm);
-    auto* prototype = jsDynamicDowncast<JSTestGlobalObjectPrototype*>(vm, JSValue::decode(thisValue));
-    if (UNLIKELY(!prototype)) {
-        throwVMTypeError(state, throwScope);
-        return false;
-    }
-    // Shadowing a built-in constructor
-    return prototype->putDirect(vm, vm.propertyNames->constructor, JSValue::decode(encodedValue));
-}
-
-static inline JSValue jsTestGlobalObjectRegularAttributeGetter(ExecState& state, JSTestGlobalObject& thisObject, ThrowScope& throwScope)
-{
-    UNUSED_PARAM(throwScope);
-    UNUSED_PARAM(state);
     auto& impl = thisObject.wrapped();
-    JSValue result = toJS<IDLDOMString>(state, throwScope, impl.regularAttribute());
-    return result;
+    RELEASE_AND_RETURN(throwScope, (toJS<IDLDOMString>(lexicalGlobalObject, throwScope, impl.regularAttribute())));
 }
 
-EncodedJSValue jsTestGlobalObjectRegularAttribute(ExecState* state, EncodedJSValue thisValue, PropertyName)
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_regularAttribute, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
-    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObjectRegularAttributeGetter, CastedThisErrorBehavior::Assert>(*state, thisValue, "regularAttribute");
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_regularAttributeGetter>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
-static inline bool setJSTestGlobalObjectRegularAttributeSetter(ExecState& state, JSTestGlobalObject& thisObject, JSValue value, ThrowScope& throwScope)
+static inline bool setJSTestGlobalObject_regularAttributeSetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject, JSValue value)
 {
-    UNUSED_PARAM(throwScope);
+    auto& vm = JSC::getVM(&lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     auto& impl = thisObject.wrapped();
-    auto nativeValue = convert<IDLDOMString>(state, value);
+    auto nativeValue = convert<IDLDOMString>(lexicalGlobalObject, value);
     RETURN_IF_EXCEPTION(throwScope, false);
-    AttributeSetter::call(state, throwScope, [&] {
+    invokeFunctorPropagatingExceptionIfNecessary(lexicalGlobalObject, throwScope, [&] {
         return impl.setRegularAttribute(WTFMove(nativeValue));
     });
     return true;
 }
 
-bool setJSTestGlobalObjectRegularAttribute(ExecState* state, EncodedJSValue thisValue, EncodedJSValue encodedValue)
+JSC_DEFINE_CUSTOM_SETTER(setJSTestGlobalObject_regularAttribute, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, EncodedJSValue encodedValue, PropertyName attributeName))
 {
-    return IDLAttribute<JSTestGlobalObject>::set<setJSTestGlobalObjectRegularAttributeSetter>(*state, thisValue, encodedValue, "regularAttribute");
+    return IDLAttribute<JSTestGlobalObject>::set<setJSTestGlobalObject_regularAttributeSetter>(*lexicalGlobalObject, thisValue, encodedValue, attributeName);
 }
 
-static inline JSValue jsTestGlobalObjectPublicAndPrivateAttributeGetter(ExecState& state, JSTestGlobalObject& thisObject, ThrowScope& throwScope)
+static inline JSValue jsTestGlobalObject_publicAndPrivateAttributeGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
 {
-    UNUSED_PARAM(throwScope);
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(&lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     auto& impl = thisObject.wrapped();
-    JSValue result = toJS<IDLDOMString>(state, throwScope, impl.publicAndPrivateAttribute());
-    return result;
+    RELEASE_AND_RETURN(throwScope, (toJS<IDLDOMString>(lexicalGlobalObject, throwScope, impl.publicAndPrivateAttribute())));
 }
 
-EncodedJSValue jsTestGlobalObjectPublicAndPrivateAttribute(ExecState* state, EncodedJSValue thisValue, PropertyName)
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_publicAndPrivateAttribute, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
-    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObjectPublicAndPrivateAttributeGetter>(*state, thisValue, "publicAndPrivateAttribute");
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_publicAndPrivateAttributeGetter>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
-static inline bool setJSTestGlobalObjectPublicAndPrivateAttributeSetter(ExecState& state, JSTestGlobalObject& thisObject, JSValue value, ThrowScope& throwScope)
+static inline bool setJSTestGlobalObject_publicAndPrivateAttributeSetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject, JSValue value)
 {
-    UNUSED_PARAM(throwScope);
+    auto& vm = JSC::getVM(&lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     auto& impl = thisObject.wrapped();
-    auto nativeValue = convert<IDLDOMString>(state, value);
+    auto nativeValue = convert<IDLDOMString>(lexicalGlobalObject, value);
     RETURN_IF_EXCEPTION(throwScope, false);
-    AttributeSetter::call(state, throwScope, [&] {
+    invokeFunctorPropagatingExceptionIfNecessary(lexicalGlobalObject, throwScope, [&] {
         return impl.setPublicAndPrivateAttribute(WTFMove(nativeValue));
     });
     return true;
 }
 
-bool setJSTestGlobalObjectPublicAndPrivateAttribute(ExecState* state, EncodedJSValue thisValue, EncodedJSValue encodedValue)
+JSC_DEFINE_CUSTOM_SETTER(setJSTestGlobalObject_publicAndPrivateAttribute, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, EncodedJSValue encodedValue, PropertyName attributeName))
 {
-    return IDLAttribute<JSTestGlobalObject>::set<setJSTestGlobalObjectPublicAndPrivateAttributeSetter>(*state, thisValue, encodedValue, "publicAndPrivateAttribute");
+    return IDLAttribute<JSTestGlobalObject>::set<setJSTestGlobalObject_publicAndPrivateAttributeSetter>(*lexicalGlobalObject, thisValue, encodedValue, attributeName);
 }
 
 #if ENABLE(TEST_FEATURE)
-static inline JSValue jsTestGlobalObjectPublicAndPrivateConditionalAttributeGetter(ExecState& state, JSTestGlobalObject& thisObject, ThrowScope& throwScope)
+static inline JSValue jsTestGlobalObject_publicAndPrivateConditionalAttributeGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
 {
-    UNUSED_PARAM(throwScope);
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(&lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     auto& impl = thisObject.wrapped();
-    JSValue result = toJS<IDLDOMString>(state, throwScope, impl.publicAndPrivateConditionalAttribute());
-    return result;
+    RELEASE_AND_RETURN(throwScope, (toJS<IDLDOMString>(lexicalGlobalObject, throwScope, impl.publicAndPrivateConditionalAttribute())));
 }
 
-EncodedJSValue jsTestGlobalObjectPublicAndPrivateConditionalAttribute(ExecState* state, EncodedJSValue thisValue, PropertyName)
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_publicAndPrivateConditionalAttribute, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
-    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObjectPublicAndPrivateConditionalAttributeGetter>(*state, thisValue, "publicAndPrivateConditionalAttribute");
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_publicAndPrivateConditionalAttributeGetter>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
 #endif
 
 #if ENABLE(TEST_FEATURE)
-static inline bool setJSTestGlobalObjectPublicAndPrivateConditionalAttributeSetter(ExecState& state, JSTestGlobalObject& thisObject, JSValue value, ThrowScope& throwScope)
+static inline bool setJSTestGlobalObject_publicAndPrivateConditionalAttributeSetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject, JSValue value)
 {
-    UNUSED_PARAM(throwScope);
+    auto& vm = JSC::getVM(&lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     auto& impl = thisObject.wrapped();
-    auto nativeValue = convert<IDLDOMString>(state, value);
+    auto nativeValue = convert<IDLDOMString>(lexicalGlobalObject, value);
     RETURN_IF_EXCEPTION(throwScope, false);
-    AttributeSetter::call(state, throwScope, [&] {
+    invokeFunctorPropagatingExceptionIfNecessary(lexicalGlobalObject, throwScope, [&] {
         return impl.setPublicAndPrivateConditionalAttribute(WTFMove(nativeValue));
     });
     return true;
 }
 
-bool setJSTestGlobalObjectPublicAndPrivateConditionalAttribute(ExecState* state, EncodedJSValue thisValue, EncodedJSValue encodedValue)
+JSC_DEFINE_CUSTOM_SETTER(setJSTestGlobalObject_publicAndPrivateConditionalAttribute, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, EncodedJSValue encodedValue, PropertyName attributeName))
 {
-    return IDLAttribute<JSTestGlobalObject>::set<setJSTestGlobalObjectPublicAndPrivateConditionalAttributeSetter>(*state, thisValue, encodedValue, "publicAndPrivateConditionalAttribute");
+    return IDLAttribute<JSTestGlobalObject>::set<setJSTestGlobalObject_publicAndPrivateConditionalAttributeSetter>(*lexicalGlobalObject, thisValue, encodedValue, attributeName);
 }
 
 #endif
 
 #if ENABLE(TEST_FEATURE)
-static inline JSValue jsTestGlobalObjectEnabledAtRuntimeAttributeGetter(ExecState& state, JSTestGlobalObject& thisObject, ThrowScope& throwScope)
+static inline JSValue jsTestGlobalObject_enabledAtRuntimeAttributeGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
 {
-    UNUSED_PARAM(throwScope);
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(&lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     auto& impl = thisObject.wrapped();
-    JSValue result = toJS<IDLDOMString>(state, throwScope, impl.enabledAtRuntimeAttribute());
-    return result;
+    RELEASE_AND_RETURN(throwScope, (toJS<IDLDOMString>(lexicalGlobalObject, throwScope, impl.enabledAtRuntimeAttribute())));
 }
 
-EncodedJSValue jsTestGlobalObjectEnabledAtRuntimeAttribute(ExecState* state, EncodedJSValue thisValue, PropertyName)
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_enabledAtRuntimeAttribute, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
-    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObjectEnabledAtRuntimeAttributeGetter>(*state, thisValue, "enabledAtRuntimeAttribute");
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_enabledAtRuntimeAttributeGetter>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
 #endif
 
 #if ENABLE(TEST_FEATURE)
-static inline bool setJSTestGlobalObjectEnabledAtRuntimeAttributeSetter(ExecState& state, JSTestGlobalObject& thisObject, JSValue value, ThrowScope& throwScope)
+static inline bool setJSTestGlobalObject_enabledAtRuntimeAttributeSetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject, JSValue value)
 {
-    UNUSED_PARAM(throwScope);
+    auto& vm = JSC::getVM(&lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     auto& impl = thisObject.wrapped();
-    auto nativeValue = convert<IDLDOMString>(state, value);
+    auto nativeValue = convert<IDLDOMString>(lexicalGlobalObject, value);
     RETURN_IF_EXCEPTION(throwScope, false);
-    AttributeSetter::call(state, throwScope, [&] {
+    invokeFunctorPropagatingExceptionIfNecessary(lexicalGlobalObject, throwScope, [&] {
         return impl.setEnabledAtRuntimeAttribute(WTFMove(nativeValue));
     });
     return true;
 }
 
-bool setJSTestGlobalObjectEnabledAtRuntimeAttribute(ExecState* state, EncodedJSValue thisValue, EncodedJSValue encodedValue)
+JSC_DEFINE_CUSTOM_SETTER(setJSTestGlobalObject_enabledAtRuntimeAttribute, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, EncodedJSValue encodedValue, PropertyName attributeName))
 {
-    return IDLAttribute<JSTestGlobalObject>::set<setJSTestGlobalObjectEnabledAtRuntimeAttributeSetter>(*state, thisValue, encodedValue, "enabledAtRuntimeAttribute");
+    return IDLAttribute<JSTestGlobalObject>::set<setJSTestGlobalObject_enabledAtRuntimeAttributeSetter>(*lexicalGlobalObject, thisValue, encodedValue, attributeName);
 }
 
 #endif
 
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionRegularOperationBody(JSC::ExecState* state, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis, JSC::ThrowScope& throwScope)
+static inline JSValue jsTestGlobalObject_TestCEReactionsConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
 {
-    UNUSED_PARAM(state);
-    UNUSED_PARAM(throwScope);
-    auto& impl = castedThis->wrapped();
-    if (UNLIKELY(state->argumentCount() < 1))
-        return throwVMError(state, throwScope, createNotEnoughArgumentsError(state));
-    auto testParam = convert<IDLDOMString>(*state, state->uncheckedArgument(0));
-    RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
-    impl.regularOperation(WTFMove(testParam));
-    return JSValue::encode(jsUndefined());
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestCEReactions::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
 }
 
-EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionRegularOperation(ExecState* state)
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestCEReactionsConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
-    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunctionRegularOperationBody>(*state, "regularOperation");
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestCEReactionsConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestCEReactionsStringifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestCEReactionsStringifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestCEReactionsStringifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestCEReactionsStringifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestCallTracerConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestCallTracer::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestCallTracerConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestCallTracerConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+#if ENABLE(TEST_CONDITIONAL)
+static inline JSValue jsTestGlobalObject_TestCallbackInterfaceConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestCallbackInterface::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestCallbackInterfaceConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestCallbackInterfaceConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+#endif
+
+static inline JSValue jsTestGlobalObject_TestClassWithJSBuiltinConstructorConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestClassWithJSBuiltinConstructor::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestClassWithJSBuiltinConstructorConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestClassWithJSBuiltinConstructorConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestDOMJITConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestDOMJIT::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestDOMJITConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestDOMJITConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestDefaultToJSONIndirectInheritanceConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestDefaultToJSONIndirectInheritance::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestDefaultToJSONIndirectInheritanceConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestDefaultToJSONIndirectInheritanceConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestDefaultToJSONInheritConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestDefaultToJSONInherit::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestDefaultToJSONInheritConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestDefaultToJSONInheritConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestDefaultToJSONInheritFinalConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestDefaultToJSONInheritFinal::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestDefaultToJSONInheritFinalConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestDefaultToJSONInheritFinalConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestDelegateToSharedSyntheticAttributeConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestDelegateToSharedSyntheticAttribute::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestDelegateToSharedSyntheticAttributeConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestDelegateToSharedSyntheticAttributeConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestDomainSecurityConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestDomainSecurity::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestDomainSecurityConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestDomainSecurityConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestEventConstructorConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestEventConstructor::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestEventConstructorConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestEventConstructorConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestEventTargetConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestEventTarget::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestEventTargetConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestEventTargetConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestExceptionConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestException::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestExceptionConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestExceptionConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestGenerateAddOpaqueRootConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestGenerateAddOpaqueRoot::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestGenerateAddOpaqueRootConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestGenerateAddOpaqueRootConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestGenerateIsReachableConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestGenerateIsReachable::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestGenerateIsReachableConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestGenerateIsReachableConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestGlobalObjectConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestGlobalObject::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestGlobalObjectConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestGlobalObjectConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestIndexedSetterNoIdentifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestIndexedSetterNoIdentifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestIndexedSetterNoIdentifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestIndexedSetterNoIdentifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestIndexedSetterThrowingExceptionConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestIndexedSetterThrowingException::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestIndexedSetterThrowingExceptionConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestIndexedSetterThrowingExceptionConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestIndexedSetterWithIdentifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestIndexedSetterWithIdentifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestIndexedSetterWithIdentifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestIndexedSetterWithIdentifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestInterfaceLeadingUnderscoreConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestInterfaceLeadingUnderscore::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestInterfaceLeadingUnderscoreConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestInterfaceLeadingUnderscoreConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestIterableConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestIterable::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestIterableConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestIterableConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestJSBuiltinConstructorConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestJSBuiltinConstructor::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestJSBuiltinConstructorConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestJSBuiltinConstructorConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestLegacyFactoryFunctionConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTest::getLegacyFactoryFunction(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestLegacyFactoryFunctionConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestLegacyFactoryFunctionConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_AudioConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestLegacyFactoryFunction::getLegacyFactoryFunction(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_AudioConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_AudioConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestLegacyOverrideBuiltInsConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestLegacyOverrideBuiltIns::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestLegacyOverrideBuiltInsConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestLegacyOverrideBuiltInsConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestMapLikeConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestMapLike::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestMapLikeConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestMapLikeConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestMapLikeWithOverriddenOperationsConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestMapLikeWithOverriddenOperations::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestMapLikeWithOverriddenOperationsConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestMapLikeWithOverriddenOperationsConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedAndIndexedSetterNoIdentifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedAndIndexedSetterNoIdentifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedAndIndexedSetterNoIdentifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedAndIndexedSetterNoIdentifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedAndIndexedSetterThrowingExceptionConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedAndIndexedSetterThrowingException::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedAndIndexedSetterThrowingExceptionConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedAndIndexedSetterThrowingExceptionConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedAndIndexedSetterWithIdentifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedAndIndexedSetterWithIdentifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedAndIndexedSetterWithIdentifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedAndIndexedSetterWithIdentifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedDeleterNoIdentifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedDeleterNoIdentifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedDeleterNoIdentifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedDeleterNoIdentifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedDeleterThrowingExceptionConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedDeleterThrowingException::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedDeleterThrowingExceptionConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedDeleterThrowingExceptionConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedDeleterWithIdentifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedDeleterWithIdentifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedDeleterWithIdentifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedDeleterWithIdentifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedDeleterWithIndexedGetterConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedDeleterWithIndexedGetter::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedDeleterWithIndexedGetterConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedDeleterWithIndexedGetterConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedGetterCallWithConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedGetterCallWith::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedGetterCallWithConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedGetterCallWithConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedGetterNoIdentifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedGetterNoIdentifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedGetterNoIdentifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedGetterNoIdentifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedGetterWithIdentifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedGetterWithIdentifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedGetterWithIdentifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedGetterWithIdentifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedSetterNoIdentifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedSetterNoIdentifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterNoIdentifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedSetterNoIdentifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedSetterThrowingExceptionConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedSetterThrowingException::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterThrowingExceptionConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedSetterThrowingExceptionConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedSetterWithIdentifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedSetterWithIdentifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithIdentifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedSetterWithIdentifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedSetterWithIndexedGetterConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedSetterWithIndexedGetter::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithIndexedGetterConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedSetterWithIndexedGetterConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedSetterWithIndexedGetterAndSetterConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedSetterWithIndexedGetterAndSetter::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithIndexedGetterAndSetterConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedSetterWithIndexedGetterAndSetterConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedSetterWithLegacyOverrideBuiltInsConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedSetterWithLegacyOverrideBuiltIns::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithLegacyOverrideBuiltInsConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedSetterWithLegacyOverrideBuiltInsConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedSetterWithLegacyUnforgeablePropertiesConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedSetterWithLegacyUnforgeableProperties::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithLegacyUnforgeablePropertiesConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedSetterWithLegacyUnforgeablePropertiesConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltInsConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltIns::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltInsConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltInsConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestNamespaceConstConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamespaceConst::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestNamespaceConstConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestNamespaceConstConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestInterfaceNameConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestNamespaceObject::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestInterfaceNameConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestInterfaceNameConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+#if ENABLE(ConditionDerived)
+static inline JSValue jsTestGlobalObject_TestOperationConditionalConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestOperationConditional::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestOperationConditionalConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestOperationConditionalConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+#endif
+
+static inline JSValue jsTestGlobalObject_TestOverloadedConstructorsWithSequenceConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestOverloadedConstructorsWithSequence::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestOverloadedConstructorsWithSequenceConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestOverloadedConstructorsWithSequenceConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestPluginInterfaceConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestPluginInterface::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestPluginInterfaceConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestPluginInterfaceConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestReadOnlyMapLikeConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestReadOnlyMapLike::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestReadOnlyMapLikeConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestReadOnlyMapLikeConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestReadOnlySetLikeConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestReadOnlySetLike::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestReadOnlySetLikeConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestReadOnlySetLikeConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestReportExtraMemoryCostConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestReportExtraMemoryCost::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestReportExtraMemoryCostConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestReportExtraMemoryCostConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+#if ENABLE(Condition1) || ENABLE(Condition2)
+static inline JSValue jsTestGlobalObject_TestSerializedScriptValueInterfaceConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestSerializedScriptValueInterface::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestSerializedScriptValueInterfaceConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestSerializedScriptValueInterfaceConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+#endif
+
+static inline JSValue jsTestGlobalObject_TestSetLikeConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestSetLike::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestSetLikeConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestSetLikeConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestSetLikeWithOverriddenOperationsConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestSetLikeWithOverriddenOperations::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestSetLikeWithOverriddenOperationsConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestSetLikeWithOverriddenOperationsConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestStringifierConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestStringifier::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestStringifierConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestStringifierAnonymousOperationConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestStringifierAnonymousOperation::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierAnonymousOperationConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestStringifierAnonymousOperationConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestStringifierNamedOperationConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestStringifierNamedOperation::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierNamedOperationConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestStringifierNamedOperationConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestStringifierOperationImplementedAsConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestStringifierOperationImplementedAs::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierOperationImplementedAsConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestStringifierOperationImplementedAsConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestStringifierOperationNamedToStringConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestStringifierOperationNamedToString::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierOperationNamedToStringConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestStringifierOperationNamedToStringConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestStringifierReadOnlyAttributeConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestStringifierReadOnlyAttribute::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierReadOnlyAttributeConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestStringifierReadOnlyAttributeConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestStringifierReadWriteAttributeConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestStringifierReadWriteAttribute::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestStringifierReadWriteAttributeConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestStringifierReadWriteAttributeConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestTaggedWrapperConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestTaggedWrapper::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestTaggedWrapperConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestTaggedWrapperConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSValue jsTestGlobalObject_TestTypedefsConstructorGetter(JSGlobalObject& lexicalGlobalObject, JSTestGlobalObject& thisObject)
+{
+    UNUSED_PARAM(lexicalGlobalObject);
+    return JSTestTypedefs::getConstructor(JSC::getVM(&lexicalGlobalObject), &thisObject);
+}
+
+JSC_DEFINE_CUSTOM_GETTER(jsTestGlobalObject_TestTypedefsConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
+{
+    return IDLAttribute<JSTestGlobalObject>::get<jsTestGlobalObject_TestTypedefsConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
+}
+
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_regularOperationBody(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis)
+{
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
+    UNUSED_PARAM(throwScope);
+    UNUSED_PARAM(callFrame);
+    auto& impl = castedThis->wrapped();
+    if (UNLIKELY(callFrame->argumentCount() < 1))
+        return throwVMError(lexicalGlobalObject, throwScope, createNotEnoughArgumentsError(lexicalGlobalObject));
+    EnsureStillAliveScope argument0 = callFrame->uncheckedArgument(0);
+    auto testParam = convert<IDLDOMString>(*lexicalGlobalObject, argument0.value());
+    RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLUndefined>(*lexicalGlobalObject, throwScope, [&]() -> decltype(auto) { return impl.regularOperation(WTFMove(testParam)); })));
+}
+
+JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_regularOperation, (JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame))
+{
+    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunction_regularOperationBody>(*lexicalGlobalObject, *callFrame, "regularOperation");
 }
 
 #if ENABLE(TEST_FEATURE)
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionEnabledAtRuntimeOperation1Body(JSC::ExecState* state, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis, JSC::ThrowScope& throwScope)
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_enabledAtRuntimeOperation1Body(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis)
 {
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     UNUSED_PARAM(throwScope);
+    UNUSED_PARAM(callFrame);
     auto& impl = castedThis->wrapped();
-    auto testParam = convert<IDLDOMString>(*state, state->uncheckedArgument(0));
+    EnsureStillAliveScope argument0 = callFrame->uncheckedArgument(0);
+    auto testParam = convert<IDLDOMString>(*lexicalGlobalObject, argument0.value());
     RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
-    impl.enabledAtRuntimeOperation(WTFMove(testParam));
-    return JSValue::encode(jsUndefined());
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLUndefined>(*lexicalGlobalObject, throwScope, [&]() -> decltype(auto) { return impl.enabledAtRuntimeOperation(WTFMove(testParam)); })));
 }
 
 #endif
 
 #if ENABLE(TEST_FEATURE)
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionEnabledAtRuntimeOperation2Body(JSC::ExecState* state, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis, JSC::ThrowScope& throwScope)
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_enabledAtRuntimeOperation2Body(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis)
 {
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     UNUSED_PARAM(throwScope);
+    UNUSED_PARAM(callFrame);
     auto& impl = castedThis->wrapped();
-    auto testParam = convert<IDLLong>(*state, state->uncheckedArgument(0));
+    EnsureStillAliveScope argument0 = callFrame->uncheckedArgument(0);
+    auto testParam = convert<IDLLong>(*lexicalGlobalObject, argument0.value());
     RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
-    impl.enabledAtRuntimeOperation(WTFMove(testParam));
-    return JSValue::encode(jsUndefined());
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLUndefined>(*lexicalGlobalObject, throwScope, [&]() -> decltype(auto) { return impl.enabledAtRuntimeOperation(WTFMove(testParam)); })));
 }
 
 #endif
 
 #if ENABLE(TEST_FEATURE)
 
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionEnabledAtRuntimeOperationOverloadDispatcher(JSC::ExecState* state, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis, JSC::ThrowScope& throwScope)
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_enabledAtRuntimeOperationOverloadDispatcher(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis)
 {
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     UNUSED_PARAM(throwScope);
-    VM& vm = state->vm();
-    UNUSED_PARAM(vm);
-    size_t argsCount = std::min<size_t>(1, state->argumentCount());
+    UNUSED_PARAM(callFrame);
+    size_t argsCount = std::min<size_t>(1, callFrame->argumentCount());
     if (argsCount == 1) {
-        JSValue distinguishingArg = state->uncheckedArgument(0);
+        JSValue distinguishingArg = callFrame->uncheckedArgument(0);
 #if ENABLE(TEST_FEATURE)
         if (distinguishingArg.isNumber())
-            return jsTestGlobalObjectInstanceFunctionEnabledAtRuntimeOperation2Body(state, castedThis, throwScope);
+            RELEASE_AND_RETURN(throwScope, (jsTestGlobalObjectInstanceFunction_enabledAtRuntimeOperation2Body(lexicalGlobalObject, callFrame, castedThis)));
 #endif
 #if ENABLE(TEST_FEATURE)
-        return jsTestGlobalObjectInstanceFunctionEnabledAtRuntimeOperation1Body(state, castedThis, throwScope);
+        RELEASE_AND_RETURN(throwScope, (jsTestGlobalObjectInstanceFunction_enabledAtRuntimeOperation1Body(lexicalGlobalObject, callFrame, castedThis)));
 #endif
     }
-    return argsCount < 1 ? throwVMError(state, throwScope, createNotEnoughArgumentsError(state)) : throwVMTypeError(state, throwScope);
+    return argsCount < 1 ? throwVMError(lexicalGlobalObject, throwScope, createNotEnoughArgumentsError(lexicalGlobalObject)) : throwVMTypeError(lexicalGlobalObject, throwScope);
 }
 
-EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionEnabledAtRuntimeOperation(ExecState* state)
+JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_enabledAtRuntimeOperation, (JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame))
 {
-    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunctionEnabledAtRuntimeOperationOverloadDispatcher>(*state, "enabledAtRuntimeOperation");
+    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunction_enabledAtRuntimeOperationOverloadDispatcher>(*lexicalGlobalObject, *callFrame, "enabledAtRuntimeOperation");
 }
 
 #endif
 
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldBody(JSC::ExecState* state, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis, JSC::ThrowScope& throwScope)
+#if ENABLE(TEST_FEATURE)
+static inline JSC::EncodedJSValue jsTestGlobalObjectConstructorFunction_enabledAtRuntimeOperationStaticBody(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame)
 {
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     UNUSED_PARAM(throwScope);
-    auto& impl = castedThis->wrapped();
-    if (UNLIKELY(state->argumentCount() < 1))
-        return throwVMError(state, throwScope, createNotEnoughArgumentsError(state));
-    auto testParam = convert<IDLLong>(*state, state->uncheckedArgument(0));
+    UNUSED_PARAM(callFrame);
+    if (UNLIKELY(callFrame->argumentCount() < 1))
+        return throwVMError(lexicalGlobalObject, throwScope, createNotEnoughArgumentsError(lexicalGlobalObject));
+    EnsureStillAliveScope argument0 = callFrame->uncheckedArgument(0);
+    auto testParam = convert<IDLLong>(*lexicalGlobalObject, argument0.value());
     RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
-    impl.enabledInSpecificWorld(WTFMove(testParam));
-    return JSValue::encode(jsUndefined());
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLUndefined>(*lexicalGlobalObject, throwScope, [&]() -> decltype(auto) { return TestGlobalObject::enabledAtRuntimeOperationStatic(WTFMove(testParam)); })));
 }
 
-EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorld(ExecState* state)
+JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectConstructorFunction_enabledAtRuntimeOperationStatic, (JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame))
 {
-    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldBody>(*state, "enabledInSpecificWorld");
+    return IDLOperation<JSTestGlobalObject>::callStatic<jsTestGlobalObjectConstructorFunction_enabledAtRuntimeOperationStaticBody>(*lexicalGlobalObject, *callFrame, "enabledAtRuntimeOperationStatic");
 }
 
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldWhenRuntimeFeatureEnabledBody(JSC::ExecState* state, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis, JSC::ThrowScope& throwScope)
+#endif
+
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldBody(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis)
 {
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     UNUSED_PARAM(throwScope);
+    UNUSED_PARAM(callFrame);
     auto& impl = castedThis->wrapped();
-    if (UNLIKELY(state->argumentCount() < 1))
-        return throwVMError(state, throwScope, createNotEnoughArgumentsError(state));
-    auto testParam = convert<IDLLong>(*state, state->uncheckedArgument(0));
+    if (UNLIKELY(callFrame->argumentCount() < 1))
+        return throwVMError(lexicalGlobalObject, throwScope, createNotEnoughArgumentsError(lexicalGlobalObject));
+    EnsureStillAliveScope argument0 = callFrame->uncheckedArgument(0);
+    auto testParam = convert<IDLLong>(*lexicalGlobalObject, argument0.value());
     RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
-    impl.enabledInSpecificWorldWhenRuntimeFeatureEnabled(WTFMove(testParam));
-    return JSValue::encode(jsUndefined());
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLUndefined>(*lexicalGlobalObject, throwScope, [&]() -> decltype(auto) { return impl.enabledInSpecificWorld(WTFMove(testParam)); })));
 }
 
-EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldWhenRuntimeFeatureEnabled(ExecState* state)
+JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_enabledInSpecificWorld, (JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame))
 {
-    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldWhenRuntimeFeatureEnabledBody>(*state, "enabledInSpecificWorldWhenRuntimeFeatureEnabled");
+    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldBody>(*lexicalGlobalObject, *callFrame, "enabledInSpecificWorld");
 }
 
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldWhenRuntimeFeaturesEnabledBody(JSC::ExecState* state, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis, JSC::ThrowScope& throwScope)
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldWhenRuntimeFeatureEnabledBody(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis)
 {
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     UNUSED_PARAM(throwScope);
+    UNUSED_PARAM(callFrame);
     auto& impl = castedThis->wrapped();
-    if (UNLIKELY(state->argumentCount() < 1))
-        return throwVMError(state, throwScope, createNotEnoughArgumentsError(state));
-    auto testParam = convert<IDLLong>(*state, state->uncheckedArgument(0));
+    if (UNLIKELY(callFrame->argumentCount() < 1))
+        return throwVMError(lexicalGlobalObject, throwScope, createNotEnoughArgumentsError(lexicalGlobalObject));
+    EnsureStillAliveScope argument0 = callFrame->uncheckedArgument(0);
+    auto testParam = convert<IDLLong>(*lexicalGlobalObject, argument0.value());
     RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
-    impl.enabledInSpecificWorldWhenRuntimeFeaturesEnabled(WTFMove(testParam));
-    return JSValue::encode(jsUndefined());
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLUndefined>(*lexicalGlobalObject, throwScope, [&]() -> decltype(auto) { return impl.enabledInSpecificWorldWhenRuntimeFeatureEnabled(WTFMove(testParam)); })));
 }
 
-EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldWhenRuntimeFeaturesEnabled(ExecState* state)
+JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldWhenRuntimeFeatureEnabled, (JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame))
 {
-    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunctionEnabledInSpecificWorldWhenRuntimeFeaturesEnabledBody>(*state, "enabledInSpecificWorldWhenRuntimeFeaturesEnabled");
+    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldWhenRuntimeFeatureEnabledBody>(*lexicalGlobalObject, *callFrame, "enabledInSpecificWorldWhenRuntimeFeatureEnabled");
+}
+
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldWhenRuntimeFeaturesEnabledBody(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis)
+{
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
+    UNUSED_PARAM(throwScope);
+    UNUSED_PARAM(callFrame);
+    auto& impl = castedThis->wrapped();
+    if (UNLIKELY(callFrame->argumentCount() < 1))
+        return throwVMError(lexicalGlobalObject, throwScope, createNotEnoughArgumentsError(lexicalGlobalObject));
+    EnsureStillAliveScope argument0 = callFrame->uncheckedArgument(0);
+    auto testParam = convert<IDLLong>(*lexicalGlobalObject, argument0.value());
+    RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLUndefined>(*lexicalGlobalObject, throwScope, [&]() -> decltype(auto) { return impl.enabledInSpecificWorldWhenRuntimeFeaturesEnabled(WTFMove(testParam)); })));
+}
+
+JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldWhenRuntimeFeaturesEnabled, (JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame))
+{
+    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunction_enabledInSpecificWorldWhenRuntimeFeaturesEnabledBody>(*lexicalGlobalObject, *callFrame, "enabledInSpecificWorldWhenRuntimeFeaturesEnabled");
 }
 
 #if ENABLE(TEST_FEATURE)
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionTestPrivateFunctionBody(JSC::ExecState* state, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis, JSC::ThrowScope& throwScope)
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_testPrivateFunctionBody(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis)
 {
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     UNUSED_PARAM(throwScope);
+    UNUSED_PARAM(callFrame);
     auto& impl = castedThis->wrapped();
-    impl.testPrivateFunction();
-    return JSValue::encode(jsUndefined());
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLUndefined>(*lexicalGlobalObject, throwScope, [&]() -> decltype(auto) { return impl.testPrivateFunction(); })));
 }
 
-EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionTestPrivateFunction(ExecState* state)
+JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_testPrivateFunction, (JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame))
 {
-    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunctionTestPrivateFunctionBody, CastedThisErrorBehavior::Assert>(*state, "testPrivateFunction");
+    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunction_testPrivateFunctionBody, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, *callFrame, "testPrivateFunction");
 }
 
 #endif
 
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionCalculateSecretResultBody(JSC::ExecState* state, typename IDLOperationReturningPromise<JSTestGlobalObject>::ClassParameter castedThis, Ref<DeferredPromise>&& promise, JSC::ThrowScope& throwScope)
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_calculateSecretResultBody(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperationReturningPromise<JSTestGlobalObject>::ClassParameter castedThis, Ref<DeferredPromise>&& promise)
 {
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     UNUSED_PARAM(throwScope);
+    UNUSED_PARAM(callFrame);
     auto& impl = castedThis->wrapped();
-    impl.calculateSecretResult(WTFMove(promise));
-    return JSValue::encode(jsUndefined());
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLPromise<IDLDouble>>(*lexicalGlobalObject, *castedThis->globalObject(), throwScope, [&]() -> decltype(auto) { return impl.calculateSecretResult(WTFMove(promise)); })));
 }
 
-EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionCalculateSecretResult(ExecState* state)
+JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_calculateSecretResult, (JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame))
 {
-    return IDLOperationReturningPromise<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunctionCalculateSecretResultBody, PromiseExecutionScope::WindowOnly>(*state, "calculateSecretResult");
+    return IDLOperationReturningPromise<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunction_calculateSecretResultBody>(*lexicalGlobalObject, *callFrame, "calculateSecretResult");
 }
 
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionGetSecretBooleanBody(JSC::ExecState* state, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis, JSC::ThrowScope& throwScope)
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_getSecretBooleanBody(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis)
 {
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     UNUSED_PARAM(throwScope);
+    UNUSED_PARAM(callFrame);
     auto& impl = castedThis->wrapped();
-    return JSValue::encode(toJS<IDLBoolean>(impl.getSecretBoolean()));
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLBoolean>(*lexicalGlobalObject, throwScope, impl.getSecretBoolean())));
 }
 
-EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionGetSecretBoolean(ExecState* state)
+JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_getSecretBoolean, (JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame))
 {
-    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunctionGetSecretBooleanBody>(*state, "getSecretBoolean");
+    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunction_getSecretBooleanBody>(*lexicalGlobalObject, *callFrame, "getSecretBoolean");
 }
 
 #if ENABLE(TEST_FEATURE)
-static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunctionTestFeatureGetSecretBooleanBody(JSC::ExecState* state, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis, JSC::ThrowScope& throwScope)
+static inline JSC::EncodedJSValue jsTestGlobalObjectInstanceFunction_testFeatureGetSecretBooleanBody(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestGlobalObject>::ClassParameter castedThis)
 {
-    UNUSED_PARAM(state);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     UNUSED_PARAM(throwScope);
+    UNUSED_PARAM(callFrame);
     auto& impl = castedThis->wrapped();
-    return JSValue::encode(toJS<IDLBoolean>(impl.testFeatureGetSecretBoolean()));
+    RELEASE_AND_RETURN(throwScope, JSValue::encode(toJS<IDLBoolean>(*lexicalGlobalObject, throwScope, impl.testFeatureGetSecretBoolean())));
 }
 
-EncodedJSValue JSC_HOST_CALL jsTestGlobalObjectInstanceFunctionTestFeatureGetSecretBoolean(ExecState* state)
+JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_testFeatureGetSecretBoolean, (JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame))
 {
-    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunctionTestFeatureGetSecretBooleanBody>(*state, "testFeatureGetSecretBoolean");
+    return IDLOperation<JSTestGlobalObject>::call<jsTestGlobalObjectInstanceFunction_testFeatureGetSecretBooleanBody>(*lexicalGlobalObject, *callFrame, "testFeatureGetSecretBoolean");
 }
 
 #endif
 
-bool JSTestGlobalObjectOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor)
+JSC::GCClient::IsoSubspace* JSTestGlobalObject::subspaceForImpl(JSC::VM& vm)
+{
+    return WebCore::subspaceForImpl<JSTestGlobalObject, UseCustomHeapCellType::Yes>(vm,
+        [] (auto& spaces) { return spaces.m_clientSubspaceForTestGlobalObject.get(); },
+        [] (auto& spaces, auto&& space) { spaces.m_clientSubspaceForTestGlobalObject = WTFMove(space); },
+        [] (auto& spaces) { return spaces.m_subspaceForTestGlobalObject.get(); },
+        [] (auto& spaces, auto&& space) { spaces.m_subspaceForTestGlobalObject = WTFMove(space); },
+        [] (auto& server) -> JSC::HeapCellType& { return server.m_heapCellTypeForJSTestGlobalObject; }
+    );
+}
+
+void JSTestGlobalObject::analyzeHeap(JSCell* cell, HeapAnalyzer& analyzer)
+{
+    auto* thisObject = jsCast<JSTestGlobalObject*>(cell);
+    analyzer.setWrappedObjectForCell(cell, &thisObject->wrapped());
+    if (thisObject->scriptExecutionContext())
+        analyzer.setLabelForCell(cell, "url " + thisObject->scriptExecutionContext()->url().string());
+    Base::analyzeHeap(cell, analyzer);
+}
+
+bool JSTestGlobalObjectOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, AbstractSlotVisitor& visitor, const char** reason)
 {
     UNUSED_PARAM(handle);
     UNUSED_PARAM(visitor);
+    UNUSED_PARAM(reason);
     return false;
 }
 
@@ -581,47 +1873,9 @@ void JSTestGlobalObjectOwner::finalize(JSC::Handle<JSC::Unknown> handle, void* c
     uncacheWrapper(world, &jsTestGlobalObject->wrapped(), jsTestGlobalObject);
 }
 
-#if ENABLE(BINDING_INTEGRITY)
-#if PLATFORM(WIN)
-#pragma warning(disable: 4483)
-extern "C" { extern void (*const __identifier("??_7TestGlobalObject@WebCore@@6B@")[])(); }
-#else
-extern "C" { extern void* _ZTVN7WebCore16TestGlobalObjectE[]; }
-#endif
-#endif
-
-JSC::JSValue toJSNewlyCreated(JSC::ExecState*, JSDOMGlobalObject* globalObject, Ref<TestGlobalObject>&& impl)
+TestGlobalObject* JSTestGlobalObject::toWrapped(JSC::VM&, JSC::JSValue value)
 {
-
-#if ENABLE(BINDING_INTEGRITY)
-    void* actualVTablePointer = *(reinterpret_cast<void**>(impl.ptr()));
-#if PLATFORM(WIN)
-    void* expectedVTablePointer = reinterpret_cast<void*>(__identifier("??_7TestGlobalObject@WebCore@@6B@"));
-#else
-    void* expectedVTablePointer = &_ZTVN7WebCore16TestGlobalObjectE[2];
-#endif
-
-    // If this fails TestGlobalObject does not have a vtable, so you need to add the
-    // ImplementationLacksVTable attribute to the interface definition
-    static_assert(std::is_polymorphic<TestGlobalObject>::value, "TestGlobalObject is not polymorphic");
-
-    // If you hit this assertion you either have a use after free bug, or
-    // TestGlobalObject has subclasses. If TestGlobalObject has subclasses that get passed
-    // to toJS() we currently require TestGlobalObject you to opt out of binding hardening
-    // by adding the SkipVTableValidation attribute to the interface IDL definition
-    RELEASE_ASSERT(actualVTablePointer == expectedVTablePointer);
-#endif
-    return createWrapper<TestGlobalObject>(globalObject, WTFMove(impl));
-}
-
-JSC::JSValue toJS(JSC::ExecState* state, JSDOMGlobalObject* globalObject, TestGlobalObject& impl)
-{
-    return wrap(state, globalObject, impl);
-}
-
-TestGlobalObject* JSTestGlobalObject::toWrapped(JSC::VM& vm, JSC::JSValue value)
-{
-    if (auto* wrapper = jsDynamicDowncast<JSTestGlobalObject*>(vm, value))
+    if (auto* wrapper = jsDynamicCast<JSTestGlobalObject*>(value))
         return &wrapper->wrapped();
     return nullptr;
 }

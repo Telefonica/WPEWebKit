@@ -27,6 +27,7 @@
 namespace WebCore {
 
 class RenderTextControlMultiLine final : public RenderTextControl {
+    WTF_MAKE_ISO_ALLOCATED(RenderTextControlMultiLine);
 public:
     RenderTextControlMultiLine(HTMLTextAreaElement&, RenderStyle&&);
     virtual ~RenderTextControlMultiLine();
@@ -44,7 +45,7 @@ private:
     float getAverageCharWidth() override;
     LayoutUnit preferredContentLogicalWidth(float charWidth) const override;
     LayoutUnit computeControlLogicalHeight(LayoutUnit lineHeight, LayoutUnit nonContentHeight) const override;
-    int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const override;
+    LayoutUnit baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const override;
 
     void layoutExcludedChildren(bool relayoutChildren) override;
 };

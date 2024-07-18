@@ -29,16 +29,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WebColorPickerMac_h
-#define WebColorPickerMac_h
-
-#if ENABLE(INPUT_TYPE_COLOR)
-
-#if USE(APPKIT)
+#if ENABLE(INPUT_TYPE_COLOR) && USE(APPKIT)
 
 #import "WebColorPicker.h"
 #import <WebCore/IntRect.h>
-#include <wtf/RetainPtr.h>
+#import <wtf/RetainPtr.h>
+#import <wtf/Vector.h>
 
 namespace WebCore {
 class Color;
@@ -49,7 +45,7 @@ class WebColorPickerMac;
 }
 
 @protocol WKColorPickerUIMac <NSObject>
-- (void)setAndShowPicker:(WebKit::WebColorPickerMac*)picker withColor:(NSColor *)color;
+- (void)setAndShowPicker:(WebKit::WebColorPickerMac*)picker withColor:(NSColor *)color suggestions:(Vector<WebCore::Color>&&)suggestions;
 - (void)invalidate;
 - (void)setColor:(NSColor *)color;
 - (void)didChooseColor:(id)sender;
@@ -57,26 +53,23 @@ class WebColorPickerMac;
 
 namespace WebKit {
     
-class WebColorPickerMac : public WebColorPicker {
+class WebColorPickerMac final : public WebColorPicker {
 public:        
-    static Ref<WebColorPickerMac> create(WebColorPicker::Client*, const WebCore::Color&, const WebCore::IntRect&, NSView*);
-    ~WebColorPickerMac();
+    static Ref<WebColorPickerMac> create(WebColorPicker::Client*, const WebCore::Color&, const WebCore::IntRect&, Vector<WebCore::Color>&&, NSView *);
+    virtual ~WebColorPickerMac();
 
-    void endPicker() override;
-    void setSelectedColor(const WebCore::Color&) override;
-    void showColorPicker(const WebCore::Color&) override;
+    void endPicker() final;
+    void setSelectedColor(const WebCore::Color&) final;
+    void showColorPicker(const WebCore::Color&) final;
     
     void didChooseColor(const WebCore::Color&);
 
 private:
-    WebColorPickerMac(WebColorPicker::Client*, const WebCore::Color&, const WebCore::IntRect&, NSView*);
+    WebColorPickerMac(WebColorPicker::Client*, const WebCore::Color&, const WebCore::IntRect&, Vector<WebCore::Color>&&, NSView *);
     RetainPtr<NSObject<WKColorPickerUIMac> > m_colorPickerUI;
+    Vector<WebCore::Color> m_suggestions;
 };
 
 } // namespace WebKit
 
-#endif // ENABLE(INPUT_TYPE_COLOR)
-
-#endif // USE(APPKIT)
-
-#endif // WebContextMenuProxyMac_h
+#endif // ENABLE(INPUT_TYPE_COLOR) && USE(APPKIT)

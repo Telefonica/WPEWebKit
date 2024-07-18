@@ -7,7 +7,6 @@ true		TRUETOKEN
 false		FALSETOKEN
 
 # Keywords.
-async       ASYNC
 await       AWAIT
 break		BREAK
 case		CASE
@@ -44,7 +43,7 @@ yield	YIELD
 
 # Reserved for future use.
 enum            RESERVED
-export          EXPORT
+export          EXPORT_
 import          IMPORT
 
 # Reserved for future use in strict code.

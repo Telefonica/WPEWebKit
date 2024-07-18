@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2009, 2015-2016 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2021 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,6 +40,7 @@
     macro(undefined) \
     macro(string) \
     macro(symbol) \
+    macro(bigint) \
     macro(true)
 
 namespace WTF {
@@ -50,10 +51,8 @@ namespace JSC {
 
 class VM;
 class JSString;
-class SmallStringsStorage;
-class SlotVisitor;
 
-static const unsigned maxSingleCharacterString = 0xFF;
+static constexpr unsigned maxSingleCharacterString = 0xFF;
 
 class SmallStrings {
     WTF_MAKE_NONCOPYABLE(SmallStrings);
@@ -71,12 +70,14 @@ public:
         return m_singleCharacterStrings[character];
     }
 
-    JS_EXPORT_PRIVATE WTF::StringImpl& singleCharacterStringRep(unsigned char character);
+    JS_EXPORT_PRIVATE Ref<AtomStringImpl> singleCharacterStringRep(unsigned char character);
+
+    void setIsInitialized(bool isInitialized) { m_isInitialized = isInitialized; }
 
     JSString** singleCharacterStrings() { return &m_singleCharacterStrings[0]; }
 
     void initializeCommonStrings(VM&);
-    void visitStrongReferences(SlotVisitor&);
+    template<typename Visitor> void visitStrongReferences(Visitor&);
 
 #define JSC_COMMON_STRINGS_ACCESSOR_DEFINITION(name) \
     JSString* name##String() const                   \
@@ -103,6 +104,8 @@ public:
             return objectString();
         case TypeofType::Function:
             return functionString();
+        case TypeofType::BigInt:
+            return bigintString();
         }
         
         RELEASE_ASSERT_NOT_REACHED();
@@ -112,6 +115,11 @@ public:
     JSString* objectStringStart() const { return m_objectStringStart; }
     JSString* nullObjectString() const { return m_nullObjectString; }
     JSString* undefinedObjectString() const { return m_undefinedObjectString; }
+    JSString* boundPrefixString() const { return m_boundPrefixString; }
+    JSString* notEqualString() const { return m_notEqualString; }
+    JSString* timedOutString() const { return m_timedOutString; }
+    JSString* okString() const { return m_okString; }
+    JSString* sentinelString() const { return m_sentinelString; }
 
     bool needsToBeVisited(CollectionScope scope) const
     {
@@ -121,23 +129,25 @@ public:
     }
 
 private:
-    static const unsigned singleCharacterStringCount = maxSingleCharacterString + 1;
+    static constexpr unsigned singleCharacterStringCount = maxSingleCharacterString + 1;
 
-    void createEmptyString(VM*);
-    void createSingleCharacterString(VM*, unsigned char);
+    void initialize(VM*, JSString*&, ASCIILiteral value);
 
-    void initialize(VM*, JSString*&, const char* value);
-
-    JSString* m_emptyString;
-#define JSC_COMMON_STRINGS_ATTRIBUTE_DECLARATION(name) JSString* m_##name;
+    JSString* m_emptyString { nullptr };
+#define JSC_COMMON_STRINGS_ATTRIBUTE_DECLARATION(name) JSString* m_##name { nullptr };
     JSC_COMMON_STRINGS_EACH_NAME(JSC_COMMON_STRINGS_ATTRIBUTE_DECLARATION)
 #undef JSC_COMMON_STRINGS_ATTRIBUTE_DECLARATION
-    JSString* m_objectStringStart;
-    JSString* m_nullObjectString;
-    JSString* m_undefinedObjectString;
-    JSString* m_singleCharacterStrings[singleCharacterStringCount];
-    std::unique_ptr<SmallStringsStorage> m_storage;
-    bool m_needsToBeVisited;
+    JSString* m_objectStringStart { nullptr };
+    JSString* m_nullObjectString { nullptr };
+    JSString* m_undefinedObjectString { nullptr };
+    JSString* m_boundPrefixString { nullptr };
+    JSString* m_notEqualString { nullptr };
+    JSString* m_timedOutString { nullptr };
+    JSString* m_okString { nullptr };
+    JSString* m_sentinelString { nullptr };
+    JSString* m_singleCharacterStrings[singleCharacterStringCount] { nullptr };
+    bool m_needsToBeVisited { true };
+    bool m_isInitialized { false };
 };
 
 } // namespace JSC

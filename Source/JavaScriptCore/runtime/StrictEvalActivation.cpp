@@ -26,25 +26,20 @@
 #include "config.h"
 #include "StrictEvalActivation.h"
 
-#include "JSGlobalObject.h"
 #include "JSCInlines.h"
 
 namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(StrictEvalActivation);
 
-const ClassInfo StrictEvalActivation::s_info = { "Object", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(StrictEvalActivation) };
+const ClassInfo StrictEvalActivation::s_info = { "Object"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(StrictEvalActivation) };
 
-StrictEvalActivation::StrictEvalActivation(ExecState* exec, JSScope* currentScope)
-    : Base(
-        exec->vm(),
-        exec->lexicalGlobalObject()->strictEvalActivationStructure(),
-        currentScope
-    )
+StrictEvalActivation::StrictEvalActivation(VM& vm, Structure* structure, JSScope* currentScope)
+    : Base(vm, structure, currentScope)
 {
 }
 
-bool StrictEvalActivation::deleteProperty(JSCell*, ExecState*, PropertyName)
+bool StrictEvalActivation::deleteProperty(JSCell*, JSGlobalObject*, PropertyName, DeletePropertySlot&)
 {
     return false;
 }

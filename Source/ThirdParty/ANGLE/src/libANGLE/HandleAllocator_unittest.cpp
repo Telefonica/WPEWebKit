@@ -135,4 +135,83 @@ TEST(HandleAllocatorTest, SortedOrderHandle)
     EXPECT_EQ(6u, allocatedList[4]);
 }
 
+// Tests the reset method.
+TEST(HandleAllocatorTest, Reset)
+{
+    gl::HandleAllocator allocator;
+
+    for (int iteration = 0; iteration < 1; ++iteration)
+    {
+        allocator.reserve(3);
+        EXPECT_EQ(1u, allocator.allocate());
+        EXPECT_EQ(2u, allocator.allocate());
+        EXPECT_EQ(4u, allocator.allocate());
+        allocator.reset();
+    }
 }
+
+// Covers a particular bug with reserving and allocating sub ranges.
+TEST(HandleAllocatorTest, ReserveAndAllocateIterated)
+{
+    gl::HandleAllocator allocator;
+
+    for (int iteration = 0; iteration < 3; ++iteration)
+    {
+        allocator.reserve(5);
+        allocator.reserve(6);
+        GLuint a = allocator.allocate();
+        GLuint b = allocator.allocate();
+        GLuint c = allocator.allocate();
+        allocator.release(c);
+        allocator.release(a);
+        allocator.release(b);
+        allocator.release(5);
+        allocator.release(6);
+    }
+}
+
+// This test reproduces invalid heap bug when reserve resources after release.
+TEST(HandleAllocatorTest, ReserveAfterReleaseBug)
+{
+    gl::HandleAllocator allocator;
+
+    for (int iteration = 1; iteration <= 16; ++iteration)
+    {
+        allocator.allocate();
+    }
+
+    allocator.release(15);
+    allocator.release(16);
+
+    for (int iteration = 1; iteration <= 14; ++iteration)
+    {
+        allocator.release(iteration);
+    }
+
+    allocator.reserve(1);
+
+    allocator.allocate();
+}
+
+// This test is to verify that we consolidate handle ranges when releasing a handle.
+TEST(HandleAllocatorTest, ConsolidateRangeDuringRelease)
+{
+    gl::HandleAllocator allocator;
+
+    // Reserve GLuint(-1)
+    allocator.reserve(static_cast<GLuint>(-1));
+    // Allocate a few others
+    allocator.allocate();
+    allocator.allocate();
+
+    // Release GLuint(-1)
+    allocator.release(static_cast<GLuint>(-1));
+
+    // Allocate one more handle.
+    // Since we consolidate handle ranges during a release we do not expect to get back a
+    // handle value of GLuint(-1).
+    GLuint handle = allocator.allocate();
+    EXPECT_NE(handle, static_cast<GLuint>(-1));
+}
+
+}  // anonymous namespace

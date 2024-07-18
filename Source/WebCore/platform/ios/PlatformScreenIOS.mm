@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2014 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006-2021 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,9 @@
 #import "config.h"
 #import "PlatformScreen.h"
 
+#if PLATFORM(IOS_FAMILY)
+
+#import "DeprecatedGlobalSettings.h"
 #import "Device.h"
 #import "FloatRect.h"
 #import "FloatSize.h"
@@ -33,18 +36,13 @@
 #import "GraphicsContextCG.h"
 #import "HostWindow.h"
 #import "IntRect.h"
+#import "ScreenProperties.h"
 #import "WAKWindow.h"
-#import "WebCoreSystemInterface.h"
 #import "Widget.h"
+#import <pal/cocoa/MediaToolboxSoftLink.h>
+#import <pal/ios/UIKitSoftLink.h>
 #import <pal/spi/ios/MobileGestaltSPI.h>
 #import <pal/spi/ios/UIKitSPI.h>
-#import <wtf/SoftLinking.h>
-
-SOFT_LINK_FRAMEWORK_FOR_SOURCE(WebCore, UIKit)
-SOFT_LINK_CLASS_FOR_SOURCE(WebCore, UIKit, UIApplication)
-SOFT_LINK_CLASS_FOR_SOURCE(WebCore, UIKit, UIScreen)
-SOFT_LINK_FUNCTION_FOR_SOURCE(WebCore, UIKit, UIAccessibilityIsGrayscaleEnabled, BOOL, (void), ())
-SOFT_LINK_FUNCTION_FOR_SOURCE(WebCore, UIKit, UIAccessibilityIsInvertColorsEnabled, BOOL, (void), ())
 
 namespace WebCore {
 
@@ -62,22 +60,37 @@ int screenDepthPerComponent(Widget*)
 
 bool screenIsMonochrome(Widget*)
 {
-    return softLinkUIKitUIAccessibilityIsGrayscaleEnabled();
+    return PAL::softLinkUIKitUIAccessibilityIsGrayscaleEnabled();
 }
 
 bool screenHasInvertedColors()
 {
-    return softLinkUIKitUIAccessibilityIsInvertColorsEnabled();
+    if (auto data = screenData(primaryScreenDisplayID()))
+        return data->screenHasInvertedColors;
+    
+    return PAL::softLinkUIKitUIAccessibilityIsInvertColorsEnabled();
 }
 
 bool screenSupportsExtendedColor(Widget*)
 {
+    if (auto data = screenData(primaryScreenDisplayID()))
+        return data->screenSupportsExtendedColor;
+
     return MGGetBoolAnswer(kMGQHasExtendedColorDisplay);
 }
 
-CGColorSpaceRef screenColorSpace(Widget* widget)
+bool screenSupportsHighDynamicRange(Widget*)
 {
-    return screenSupportsExtendedColor(widget) ? extendedSRGBColorSpaceRef() : sRGBColorSpaceRef();
+#if USE(MEDIATOOLBOX)
+    if (PAL::isMediaToolboxFrameworkAvailable() && PAL::canLoad_MediaToolbox_MTShouldPlayHDRVideo())
+        return PAL::softLink_MediaToolbox_MTShouldPlayHDRVideo(nullptr);
+#endif
+    return false;
+}
+
+DestinationColorSpace screenColorSpace(Widget* widget)
+{
+    return screenSupportsExtendedColor(widget) ? DestinationColorSpace { extendedSRGBColorSpaceRef() } : DestinationColorSpace::SRGB();
 }
 
 // These functions scale between screen and page coordinates because JavaScript/DOM operations
@@ -95,7 +108,7 @@ FloatRect screenRect(Widget* widget)
         CGRect screenRect = { CGPointZero, [window screenSize] };
         return enclosingIntRect(screenRect);
     }
-    return enclosingIntRect(FloatRect(FloatPoint(), widget->root()->hostWindow()->screenSize()));
+    return enclosingIntRect(FloatRect(FloatPoint(), widget->root()->hostWindow()->overrideScreenSize()));
 }
 
 FloatRect screenAvailableRect(Widget* widget)
@@ -133,24 +146,69 @@ float screenPPIFactor()
 
 FloatSize screenSize()
 {
-    if (deviceHasIPadCapability() && [[get_UIKit_UIApplicationClass() sharedApplication] _isClassic])
+    if (deviceHasIPadCapability() && [[PAL::getUIApplicationClass() sharedApplication] _isClassic])
         return { 320, 480 };
-    return FloatSize([[get_UIKit_UIScreenClass() mainScreen] _referenceBounds].size);
+
+    if (auto data = screenData(primaryScreenDisplayID()))
+        return data->screenRect.size();
+
+    return FloatSize([[PAL::getUIScreenClass() mainScreen] _referenceBounds].size);
 }
 
 FloatSize availableScreenSize()
 {
-    if (deviceHasIPadCapability() && [[get_UIKit_UIApplicationClass() sharedApplication] _isClassic])
+    if (deviceHasIPadCapability() && [[PAL::getUIApplicationClass() sharedApplication] _isClassic])
         return { 320, 480 };
-    return FloatSize([get_UIKit_UIScreenClass() mainScreen].bounds.size);
+
+    if (auto data = screenData(primaryScreenDisplayID()))
+        return data->screenAvailableRect.size();
+
+    return FloatSize([PAL::getUIScreenClass() mainScreen].bounds.size);
 }
+
+#if USE(APPLE_INTERNAL_SDK) && __has_include(<WebKitAdditions/PlatformScreenIOS.mm>)
+#import <WebKitAdditions/PlatformScreenIOS.mm>
+#else
+FloatSize overrideScreenSize()
+{
+    return screenSize();
+}
+#endif
 
 float screenScaleFactor(UIScreen *screen)
 {
     if (!screen)
-        screen = [get_UIKit_UIScreenClass() mainScreen];
+        screen = [PAL::getUIScreenClass() mainScreen];
 
     return screen.scale;
 }
 
+ScreenProperties collectScreenProperties()
+{
+    ScreenProperties screenProperties;
+
+    PlatformDisplayID displayID = 0;
+
+    for (UIScreen *screen in [PAL::getUIScreenClass() screens]) {
+        FloatRect screenAvailableRect = screen.bounds;
+        screenAvailableRect.setY(NSMaxY(screen.bounds) - (screenAvailableRect.y() + screenAvailableRect.height())); // flip
+        FloatRect screenRect = screen._referenceBounds;
+        DestinationColorSpace colorSpace { screenColorSpace(nullptr) };
+        int screenDepth = WebCore::screenDepth(nullptr);
+        int screenDepthPerComponent = WebCore::screenDepthPerComponent(nullptr);
+        bool screenSupportsExtendedColor = WebCore::screenSupportsExtendedColor(nullptr);
+        bool screenHasInvertedColors = WebCore::screenHasInvertedColors();
+        float scaleFactor = WebCore::screenPPIFactor();
+
+        screenProperties.screenDataMap.set(++displayID, ScreenData { screenAvailableRect, screenRect, WTFMove(colorSpace), screenDepth, screenDepthPerComponent, screenSupportsExtendedColor, screenHasInvertedColors, false, scaleFactor });
+        
+        if (screen == [PAL::getUIScreenClass() mainScreen])
+            screenProperties.primaryDisplayID = displayID;
+    }
+    
+    return screenProperties;
+}
+
 } // namespace WebCore
+
+#endif // PLATFORM(IOS_FAMILY)

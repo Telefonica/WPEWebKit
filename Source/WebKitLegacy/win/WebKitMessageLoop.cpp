@@ -23,7 +23,6 @@
 * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "config.h"
 #include "WebKitMessageLoop.h"
 
 #include "WebKitDLL.h"
@@ -35,13 +34,13 @@
 WebKitMessageLoop::WebKitMessageLoop()
 {
     gClassCount++;
-    gClassNameCount().add("WebKitMessageLoop");
+    gClassNameCount().add("WebKitMessageLoop"_s);
 }
 
 WebKitMessageLoop::~WebKitMessageLoop()
 {
     gClassCount--;
-    gClassNameCount().remove("WebKitMessageLoop");
+    gClassNameCount().remove("WebKitMessageLoop"_s);
 }
 
 WebKitMessageLoop* WebKitMessageLoop::createInstance()
@@ -85,7 +84,7 @@ ULONG WebKitMessageLoop::Release()
 
 HRESULT WebKitMessageLoop::run(_In_ HACCEL hAccelTable)
 {
-    MSG msg = { 0 };
+    MSG msg { };
 
     while (GetMessage(&msg, 0, 0, 0)) {
         performMessageLoopTasks();

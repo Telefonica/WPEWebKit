@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2019 Apple Inc. All rights reserved.
  * Copyright (C) 2006 James G. Speth (speth@end.com)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
  *
@@ -42,6 +42,7 @@
 #import <WebCore/FocusController.h>
 #import <WebCore/FontCascade.h>
 #import <WebCore/Frame.h>
+#import <WebCore/GeometryUtilities.h>
 #import <WebCore/HTMLLinkElement.h>
 #import <WebCore/HTMLNames.h>
 #import <WebCore/HTMLParserIdioms.h>
@@ -58,12 +59,14 @@
 #import <WebCore/RenderImage.h>
 #import <WebCore/RenderView.h>
 #import <WebCore/ScriptController.h>
+#import <WebCore/SimpleRange.h>
 #import <WebCore/TextIndicator.h>
 #import <WebCore/Touch.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/HashMap.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import <WebCore/WAKAppKitStubs.h>
 #import <WebCore/WAKWindow.h>
 #import <WebCore/WebCoreThreadMessage.h>
@@ -71,9 +74,6 @@
 
 using namespace JSC;
 using namespace WebCore;
-
-// FIXME: These methods should move into the implementation files of the DOM classes
-// and this file should be eliminated.
 
 //------------------------------------------------------------------------------------------
 // DOMNode
@@ -179,16 +179,7 @@ static Class elementClass(const QualifiedName& tag, Class defaultClass)
     return objcClass;
 }
 
-static NSArray *kit(const Vector<IntRect>& rects)
-{
-    size_t size = rects.size();
-    NSMutableArray *array = [NSMutableArray arrayWithCapacity:size];
-    for (size_t i = 0; i < size; ++i)
-        [array addObject:[NSValue valueWithRect:rects[i]]];
-    return array;
-}
-
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 static WKQuad wkQuadFromFloatQuad(const FloatQuad& inQuad)
 {
@@ -197,13 +188,9 @@ static WKQuad wkQuadFromFloatQuad(const FloatQuad& inQuad)
 
 static NSArray *kit(const Vector<FloatQuad>& quads)
 {
-    NSMutableArray *array = [NSMutableArray arrayWithCapacity:quads.size()];
-    for (auto& quad : quads) {
-        WKQuadObject *quadObject = [[WKQuadObject alloc] initWithQuad:wkQuadFromFloatQuad(quad)];
-        [array addObject:quadObject];
-        [quadObject release];
-    }
-    return array;
+    return createNSArray(quads, [] (auto& quad) {
+        return adoptNS([[WKQuadObject alloc] initWithQuad:wkQuadFromFloatQuad(quad)]);
+    }).autorelease();
 }
 
 static inline WKQuad zeroQuad()
@@ -244,8 +231,7 @@ static inline WKQuad zeroQuad()
 
 @implementation DOMNode (WebCoreInternal)
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
+IGNORE_WARNINGS_BEGIN("objc-protocol-method-implementation")
 
 - (NSString *)description
 {
@@ -259,7 +245,7 @@ static inline WKQuad zeroQuad()
     return [NSString stringWithFormat:@"<%@ [%@]: %p>", [[self class] description], [self nodeName], _internal];
 }
 
-#pragma clang diagnostic pop
+IGNORE_WARNINGS_END
 
 - (Bindings::RootObject*)_rootObject
 {
@@ -301,22 +287,15 @@ Class kitClass(Node* impl)
     return nil;
 }
 
-id <DOMEventTarget> kit(EventTarget* eventTarget)
+id <DOMEventTarget> kit(EventTarget* target)
 {
-    if (!eventTarget)
-        return nil;
-
-    if (auto* node = eventTarget->toNode())
-        return kit(node);
-
-    // We don't have an ObjC binding for XMLHttpRequest.
-
-    return nil;
+    // We don't have Objective-C bindings for XMLHttpRequest, DOMWindow, and other non-Node targets.
+    return is<Node>(target) ? kit(downcast<Node>(target)) : nil;
 }
 
 @implementation DOMNode (DOMNodeExtensions)
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (CGRect)boundingBox
 #else
 - (NSRect)boundingBox
@@ -326,7 +305,7 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
     node.document().updateLayoutIgnorePendingStylesheets();
     auto* renderer = node.renderer();
     if (!renderer)
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
         return CGRectZero;
 #else
         return NSZeroRect;
@@ -339,7 +318,7 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
     return [self textRects];
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 // quad in page coordinates, taking transforms into account. c.f. - (NSRect)boundingBox;
 - (WKQuad)absoluteQuad
@@ -366,14 +345,9 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
 
     if (quads.size() == 0)
         return zeroQuad();
-
     if (quads.size() == 1)
         return wkQuadFromFloatQuad(quads[0]);
-
-    auto boundingRect = quads[0].boundingBox();
-    for (size_t i = 1; i < quads.size(); ++i)
-        boundingRect.unite(quads[i].boundingBox());
-    return wkQuadFromFloatQuad(boundingRect);
+    return wkQuadFromFloatQuad(unitedBoundingBoxes(quads));
 }
 
 // this method is like - (CGRect)boundingBox, but it accounts for for transforms
@@ -500,7 +474,7 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
     return kit(page->focusController().previousFocusableElement(*core(self)));
 }
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)
 
 @end
 
@@ -525,9 +499,7 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
     node.document().updateLayoutIgnorePendingStylesheets();
     if (!node.renderer())
         return nil;
-    Vector<WebCore::IntRect> rects;
-    node.textRects(rects);
-    return kit(rects);
+    return createNSArray(RenderObject::absoluteTextRects(makeRangeSelectingNodeContents(node))).autorelease();
 }
 
 @end
@@ -537,7 +509,7 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
 + (id)_nodeFromJSWrapper:(JSObjectRef)jsWrapper
 {
     JSObject* object = toJS(jsWrapper);
-    if (!object->inherits(*object->vm(), JSNode::info()))
+    if (!object->inherits<JSNode>())
         return nil;
     return kit(&jsCast<JSNode*>(object)->wrapped());
 }
@@ -552,22 +524,22 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
 
     auto& node = *core(self);
 
-    Ref<Range> range = rangeOfContents(node);
-
+    constexpr OptionSet<TextIndicatorOption> options {
+        TextIndicatorOption::TightlyFitContent,
+        TextIndicatorOption::RespectTextColor,
+        TextIndicatorOption::PaintBackgrounds,
+        TextIndicatorOption::UseBoundingRectAndPaintAllContentForComplexRanges,
+        TextIndicatorOption::IncludeMarginIfRangeMatchesSelection
+    };
     const float margin = 4 / node.document().page()->pageScaleFactor();
-    RefPtr<TextIndicator> textIndicator = TextIndicator::createWithRange(range, TextIndicatorOptionTightlyFitContent |
-        TextIndicatorOptionRespectTextColor |
-        TextIndicatorOptionPaintBackgrounds |
-        TextIndicatorOptionUseBoundingRectAndPaintAllContentForComplexRanges |
-        TextIndicatorOptionIncludeMarginIfRangeMatchesSelection,
-        TextIndicatorPresentationTransition::None, FloatSize(margin, margin));
+    auto textIndicator = TextIndicator::createWithRange(makeRangeSelectingNodeContents(node), options, TextIndicatorPresentationTransition::None, FloatSize(margin, margin));
 
     if (textIndicator) {
-        if (Image* image = textIndicator->contentImage())
-            *cgImage = image->nativeImage().autorelease();
+        if (Image* image = textIndicator->contentImage()) {
+            auto contentImage = image->nativeImage()->platformImage();
+            *cgImage = contentImage.autorelease();
+        }
     }
-
-    RetainPtr<NSMutableArray> rectArray = adoptNS([[NSMutableArray alloc] init]);
 
     if (!*cgImage) {
         if (auto* renderer = node.renderer()) {
@@ -576,43 +548,33 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
                 boundingBox = downcast<RenderImage>(*renderer).absoluteContentQuad().enclosingBoundingBox();
             else
                 boundingBox = renderer->absoluteBoundingBoxRect();
-
             boundingBox.inflate(margin);
-
-            CGRect cgRect = node.document().frame()->view()->contentsToWindow(enclosingIntRect(boundingBox));
-            [rectArray addObject:[NSValue value:&cgRect withObjCType:@encode(CGRect)]];
-
-            *rects = rectArray.autorelease();
+            *rects = @[makeNSArrayElement(node.document().frame()->view()->contentsToWindow(enclosingIntRect(boundingBox)))];
         }
         return;
     }
 
     FloatPoint origin = textIndicator->textBoundingRectInRootViewCoordinates().location();
-    for (const FloatRect& rect : textIndicator->textRectsInBoundingRectCoordinates()) {
-        CGRect cgRect = rect;
-        cgRect.origin.x += origin.x();
-        cgRect.origin.y += origin.y();
-        cgRect = node.document().frame()->view()->contentsToWindow(enclosingIntRect(cgRect));
-        [rectArray addObject:[NSValue value:&cgRect withObjCType:@encode(CGRect)]];
-    }
-
-    *rects = rectArray.autorelease();
+    *rects = createNSArray(textIndicator->textRectsInBoundingRectCoordinates(), [&] (CGRect rect) {
+        rect.origin.x += origin.x();
+        rect.origin.y += origin.y();
+        return makeNSArrayElement(node.document().frame()->view()->contentsToWindow(enclosingIntRect(rect)));
+    }).autorelease();
 }
 
 @end
 
 @implementation DOMRange (DOMRangeExtensions)
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 - (CGRect)boundingBox
 #else
 - (NSRect)boundingBox
 #endif
 {
-    // FIXME: The call to updateLayoutIgnorePendingStylesheets should be moved into WebCore::Range.
-    auto& range = *core(self);
-    range.ownerDocument().updateLayoutIgnorePendingStylesheets();
-    return range.absoluteBoundingBox();
+    auto range = makeSimpleRange(*core(self));
+    range.start.document().updateLayoutIgnorePendingStylesheets();
+    return unionRect(RenderObject::absoluteTextRects(range));
 }
 
 #if PLATFORM(MAC)
@@ -621,33 +583,28 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
 - (CGImageRef)renderedImageForcingBlackText:(BOOL)forceBlackText
 #endif
 {
-    auto& range = *core(self);
-    auto* frame = range.ownerDocument().frame();
+    auto range = makeSimpleRange(*core(self));
+    RefPtr frame = range.start.document().frame();
     if (!frame)
         return nil;
 
-    // iOS uses CGImageRef for drag images, which doesn't support separate logical/physical sizes.
-#if PLATFORM(MAC)
-    RetainPtr<NSImage> renderedImage = createDragImageForRange(*frame, range, forceBlackText);
+    auto renderedImage = createDragImageForRange(*frame, range, forceBlackText);
 
+#if PLATFORM(MAC)
+    // iOS uses CGImageRef for drag images, which doesn't support separate logical/physical sizes.
     IntSize size([renderedImage size]);
     size.scale(1 / frame->page()->deviceScaleFactor());
     [renderedImage setSize:size];
+#endif
 
     return renderedImage.autorelease();
-#else
-    return createDragImageForRange(*frame, range, forceBlackText).autorelease();
-#endif
 }
 
 - (NSArray *)textRects
 {
-    // FIXME: The call to updateLayoutIgnorePendingStylesheets should be moved into WebCore::Range.
-    auto& range = *core(self);
-    Vector<WebCore::IntRect> rects;
-    range.ownerDocument().updateLayoutIgnorePendingStylesheets();
-    range.absoluteTextRects(rects);
-    return kit(rects);
+    auto range = makeSimpleRange(*core(self));
+    range.start.document().updateLayoutIgnorePendingStylesheets();
+    return createNSArray(RenderObject::absoluteTextRects(range)).autorelease();
 }
 
 - (NSArray *)lineBoxRects
@@ -701,7 +658,7 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
     auto* cachedImage = downcast<RenderImage>(*renderer).cachedImage();
     if (!cachedImage || cachedImage->errorOccurred())
         return nil;
-    return (NSData *)cachedImage->imageForRenderer(renderer)->tiffRepresentation();
+    return (__bridge NSData *)cachedImage->imageForRenderer(renderer)->tiffRepresentation();
 }
 
 #endif
@@ -720,7 +677,7 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
 
 @end
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 @implementation DOMHTMLLinkElement (WebPrivate)
 
@@ -758,8 +715,8 @@ id <DOMEventTarget> kit(EventTarget* eventTarget)
         return true;
 
     Document& document = link.document();
-    auto mediaQuerySet = MediaQuerySet::create(media);
-    return MediaQueryEvaluator { "screen", document, document.renderView() ? &document.renderView()->style() : nullptr }.evaluate(mediaQuerySet.get());
+    auto mediaQuerySet = MediaQuerySet::create(media, MediaQueryParserContext(document));
+    return MediaQueryEvaluator { "screen"_s, document, document.renderView() ? &document.renderView()->style() : nullptr }.evaluate(mediaQuerySet.get());
 }
 
 @end
@@ -827,13 +784,13 @@ DOMNodeFilter *kit(WebCore::NodeFilter* impl)
         return nil;
     
     if (DOMNodeFilter *wrapper = getDOMWrapper(impl))
-        return [[wrapper retain] autorelease];
+        return retainPtr(wrapper).autorelease();
     
-    DOMNodeFilter *wrapper = [[DOMNodeFilter alloc] _init];
+    auto wrapper = adoptNS([[DOMNodeFilter alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(impl);
     impl->ref();
-    addDOMWrapper(wrapper, impl);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), impl);
+    return wrapper.autorelease();
 }
 
 WebCore::NodeFilter* core(DOMNodeFilter *wrapper)
@@ -848,13 +805,6 @@ WebCore::NodeFilter* core(DOMNodeFilter *wrapper)
     if (_internal)
         reinterpret_cast<WebCore::NodeFilter*>(_internal)->deref();
     [super dealloc];
-}
-
-- (void)finalize
-{
-    if (_internal)
-        reinterpret_cast<WebCore::NodeFilter*>(_internal)->deref();
-    [super finalize];
 }
 
 - (short)acceptNode:(DOMNode *)node

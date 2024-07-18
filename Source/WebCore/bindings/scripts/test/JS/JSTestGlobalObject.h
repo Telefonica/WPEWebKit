@@ -33,12 +33,10 @@ public:
     using Base = JSDOMWrapper<TestGlobalObject>;
     static JSTestGlobalObject* create(JSC::Structure* structure, JSDOMGlobalObject* globalObject, Ref<TestGlobalObject>&& impl)
     {
-        JSTestGlobalObject* ptr = new (NotNull, JSC::allocateCell<JSTestGlobalObject>(globalObject->vm().heap)) JSTestGlobalObject(structure, *globalObject, WTFMove(impl));
+        JSTestGlobalObject* ptr = new (NotNull, JSC::allocateCell<JSTestGlobalObject>(globalObject->vm())) JSTestGlobalObject(structure, *globalObject, WTFMove(impl));
         ptr->finishCreation(globalObject->vm());
         return ptr;
     }
-
-    static const bool needsDestruction = false;
 
     static TestGlobalObject* toWrapped(JSC::VM&, JSC::JSValue);
     static void destroy(JSC::JSCell*);
@@ -47,22 +45,30 @@ public:
 
     static JSC::Structure* createStructure(JSC::VM& vm, JSC::JSGlobalObject* globalObject, JSC::JSValue prototype)
     {
-        return JSC::Structure::create(vm, globalObject, prototype, JSC::TypeInfo(JSC::GlobalObjectType, StructureFlags), info());
+        return JSC::Structure::create(vm, globalObject, prototype, JSC::TypeInfo(JSC::GlobalObjectType, StructureFlags), info(), JSC::NonArray);
     }
 
     static JSC::JSValue getConstructor(JSC::VM&, const JSC::JSGlobalObject*);
+    template<typename, JSC::SubspaceAccess mode> static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    {
+        if constexpr (mode == JSC::SubspaceAccess::Concurrently)
+            return nullptr;
+        return subspaceForImpl(vm);
+    }
+    static JSC::GCClient::IsoSubspace* subspaceForImpl(JSC::VM& vm);
+    static void analyzeHeap(JSCell*, JSC::HeapAnalyzer&);
 public:
-    static const unsigned StructureFlags = JSC::HasStaticPropertyTable | Base::StructureFlags;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | JSC::HasStaticPropertyTable;
 protected:
     JSTestGlobalObject(JSC::Structure*, JSDOMGlobalObject&, Ref<TestGlobalObject>&&);
 
     void finishCreation(JSC::VM&);
 };
 
-class JSTestGlobalObjectOwner : public JSC::WeakHandleOwner {
+class JSTestGlobalObjectOwner final : public JSC::WeakHandleOwner {
 public:
-    virtual bool isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, JSC::SlotVisitor&);
-    virtual void finalize(JSC::Handle<JSC::Unknown>, void* context);
+    bool isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, JSC::AbstractSlotVisitor&, const char**) final;
+    void finalize(JSC::Handle<JSC::Unknown>, void* context) final;
 };
 
 inline JSC::WeakHandleOwner* wrapperOwner(DOMWrapperWorld&, TestGlobalObject*)
@@ -76,22 +82,24 @@ inline void* wrapperKey(TestGlobalObject* wrappableObject)
     return wrappableObject;
 }
 
-JSC::JSValue toJS(JSC::ExecState*, JSDOMGlobalObject*, TestGlobalObject&);
-inline JSC::JSValue toJS(JSC::ExecState* state, JSDOMGlobalObject* globalObject, TestGlobalObject* impl) { return impl ? toJS(state, globalObject, *impl) : JSC::jsNull(); }
-JSC::JSValue toJSNewlyCreated(JSC::ExecState*, JSDOMGlobalObject*, Ref<TestGlobalObject>&&);
-inline JSC::JSValue toJSNewlyCreated(JSC::ExecState* state, JSDOMGlobalObject* globalObject, RefPtr<TestGlobalObject>&& impl) { return impl ? toJSNewlyCreated(state, globalObject, impl.releaseNonNull()) : JSC::jsNull(); }
 
-class JSTestGlobalObjectPrototype : public JSC::JSNonFinalObject {
+class JSTestGlobalObjectPrototype final : public JSC::JSNonFinalObject {
 public:
     using Base = JSC::JSNonFinalObject;
     static JSTestGlobalObjectPrototype* create(JSC::VM& vm, JSDOMGlobalObject* globalObject, JSC::Structure* structure)
     {
-        JSTestGlobalObjectPrototype* ptr = new (NotNull, JSC::allocateCell<JSTestGlobalObjectPrototype>(vm.heap)) JSTestGlobalObjectPrototype(vm, globalObject, structure);
+        JSTestGlobalObjectPrototype* ptr = new (NotNull, JSC::allocateCell<JSTestGlobalObjectPrototype>(vm)) JSTestGlobalObjectPrototype(vm, globalObject, structure);
         ptr->finishCreation(vm);
         return ptr;
     }
 
     DECLARE_INFO;
+    template<typename CellType, JSC::SubspaceAccess>
+    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    {
+        STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestGlobalObjectPrototype, Base);
+        return &vm.plainObjectSpace();
+    }
     static JSC::Structure* createStructure(JSC::VM& vm, JSC::JSGlobalObject* globalObject, JSC::JSValue prototype)
     {
         return JSC::Structure::create(vm, globalObject, prototype, JSC::TypeInfo(JSC::ObjectType, StructureFlags), info());
@@ -102,9 +110,12 @@ private:
         : JSC::JSNonFinalObject(vm, structure)
     {
     }
+
+    void finishCreation(JSC::VM&);
 public:
-    static const unsigned StructureFlags = JSC::HasStaticPropertyTable | Base::StructureFlags;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | JSC::HasStaticPropertyTable;
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestGlobalObjectPrototype, JSTestGlobalObjectPrototype::Base);
 
 template<> struct JSDOMWrapperConverterTraits<TestGlobalObject> {
     using WrapperClass = JSTestGlobalObject;

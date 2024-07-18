@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,18 +29,16 @@
 #if ENABLE(B3_JIT)
 
 #include "B3Generate.h"
-#include "B3OpaqueByproducts.h"
 #include "B3Procedure.h"
-#include "B3TimingScope.h"
 #include "CCallHelpers.h"
-#include "JSCInlines.h"
+#include "CompilerTimingScope.h"
 #include "LinkBuffer.h"
 
 namespace JSC { namespace B3 {
 
 Compilation compile(Procedure& proc)
 {
-    TimingScope timingScope("Compilation");
+    CompilerTimingScope timingScope("Total B3+Air", "compile");
     
     prepareForGeneration(proc);
     
@@ -48,7 +46,7 @@ Compilation compile(Procedure& proc)
     generate(proc, jit);
     LinkBuffer linkBuffer(jit, nullptr);
 
-    return Compilation(FINALIZE_CODE(linkBuffer, ("B3::Compilation")), proc.releaseByproducts());
+    return Compilation(FINALIZE_CODE(linkBuffer, JITCompilationPtrTag, "Compilation"), proc.releaseByproducts());
 }
 
 } } // namespace JSC::B3

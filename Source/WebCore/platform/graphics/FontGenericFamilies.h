@@ -23,46 +23,52 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef FontGenericFamilies_h
-#define FontGenericFamilies_h
+#pragma once
 
+#include "WebKitFontFamilyNames.h"
 #include <unicode/uscript.h>
 #include <wtf/HashMap.h>
-#include <wtf/text/AtomicString.h>
+#include <wtf/text/AtomString.h>
+#include <wtf/text/AtomStringHash.h>
 
 namespace WebCore {
 
 // UScriptCode uses -1 and 0 for UScriptInvalidCode and UScriptCommon.
 // We need to use -2 and -3 for empty value and deleted value.
-struct UScriptCodeHashTraits : WTF::GenericHashTraits<int> {
+struct UScriptCodeHashTraits : HashTraits<int> {
     static const bool emptyValueIsZero = false;
     static int emptyValue() { return -2; }
     static void constructDeletedValue(int& slot) { slot = -3; }
     static bool isDeletedValue(int value) { return value == -3; }
 };
 
-typedef HashMap<int, AtomicString, DefaultHash<int>::Hash, UScriptCodeHashTraits> ScriptFontFamilyMap;
+typedef HashMap<int, String, DefaultHash<int>, UScriptCodeHashTraits> ScriptFontFamilyMap;
 
 class FontGenericFamilies {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     FontGenericFamilies();
 
-    const AtomicString& standardFontFamily(UScriptCode = USCRIPT_COMMON) const;
-    const AtomicString& fixedFontFamily(UScriptCode = USCRIPT_COMMON) const;
-    const AtomicString& serifFontFamily(UScriptCode = USCRIPT_COMMON) const;
-    const AtomicString& sansSerifFontFamily(UScriptCode = USCRIPT_COMMON) const;
-    const AtomicString& cursiveFontFamily(UScriptCode = USCRIPT_COMMON) const;
-    const AtomicString& fantasyFontFamily(UScriptCode = USCRIPT_COMMON) const;
-    const AtomicString& pictographFontFamily(UScriptCode = USCRIPT_COMMON) const;
+    FontGenericFamilies isolatedCopy() const &;
+    FontGenericFamilies isolatedCopy() &&;
 
-    bool setStandardFontFamily(const AtomicString&, UScriptCode);
-    bool setFixedFontFamily(const AtomicString&, UScriptCode);
-    bool setSerifFontFamily(const AtomicString&, UScriptCode);
-    bool setSansSerifFontFamily(const AtomicString&, UScriptCode);
-    bool setCursiveFontFamily(const AtomicString&, UScriptCode);
-    bool setFantasyFontFamily(const AtomicString&, UScriptCode);
-    bool setPictographFontFamily(const AtomicString&, UScriptCode);
+    const String& standardFontFamily(UScriptCode = USCRIPT_COMMON) const;
+    const String& fixedFontFamily(UScriptCode = USCRIPT_COMMON) const;
+    const String& serifFontFamily(UScriptCode = USCRIPT_COMMON) const;
+    const String& sansSerifFontFamily(UScriptCode = USCRIPT_COMMON) const;
+    const String& cursiveFontFamily(UScriptCode = USCRIPT_COMMON) const;
+    const String& fantasyFontFamily(UScriptCode = USCRIPT_COMMON) const;
+    const String& pictographFontFamily(UScriptCode = USCRIPT_COMMON) const;
+
+    const String* fontFamily(WebKitFontFamilyNames::FamilyNamesIndex, UScriptCode = USCRIPT_COMMON) const;
+
+    bool setStandardFontFamily(const String&, UScriptCode);
+    bool setFixedFontFamily(const String&, UScriptCode);
+    bool setSerifFontFamily(const String&, UScriptCode);
+    bool setSansSerifFontFamily(const String&, UScriptCode);
+    bool setCursiveFontFamily(const String&, UScriptCode);
+    bool setFantasyFontFamily(const String&, UScriptCode);
+    bool setPictographFontFamily(const String&, UScriptCode);
 
 private:
     ScriptFontFamilyMap m_standardFontFamilyMap;
@@ -75,5 +81,3 @@ private:
 };
 
 }
-
-#endif

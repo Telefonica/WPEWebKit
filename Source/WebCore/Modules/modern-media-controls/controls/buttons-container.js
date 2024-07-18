@@ -26,53 +26,62 @@
 class ButtonsContainer extends LayoutNode
 {
 
-    constructor({ buttons = [], leftMargin = 16, rightMargin = 16, buttonMargin = 16, cssClassName = "" } = {})
+    constructor({ children, leftMargin, rightMargin, buttonMargin, cssClassName } = {})
     {
-        super(`<div class="buttons-container ${cssClassName}"></div>`);
+        super(`<div class="buttons-container ${cssClassName ?? ""}"></div>`);
 
-        this.buttons = buttons;
-        this.leftMargin = leftMargin;
-        this.rightMargin = rightMargin;
-        this.buttonMargin = buttonMargin;
+        this.leftMargin = leftMargin ?? ButtonsContainer.Defaults.LeftMargin;
+        this.rightMargin = rightMargin ?? ButtonsContainer.Defaults.RightMargin;
+        this.buttonMargin = buttonMargin ?? ButtonsContainer.Defaults.ButtonMargin;
+        this.children = children ?? [];
     }
+
+    // Static
+
+    static Defaults = {
+        LeftMargin: 16,
+        RightMargin: 16,
+        ButtonMargin: 16,
+    };
 
     // Public
 
-    get buttons()
+    willRemoveChild(child)
     {
-        return this._buttons;
+        super.willRemoveChild(child);
+
+        // We reset properties that we may have overridden during layout to their default values.
+        child.visible = true;
+        child.x = 0;
     }
 
-    set buttons(buttons)
+    didChangeChildren()
     {
-        if (!Array.isArray(buttons))
-            return;
-
-        this._buttons = buttons;
-        this.needsLayout = true;
+        super.didChangeChildren();
+        this.layout();
     }
 
     layout()
     {
         super.layout();
 
-        const children = [];
         let x = this.leftMargin;
+        let numberOfVisibleButtons = 0;
 
-        this._buttons.forEach(button => {
-            if (!button.enabled || button.dropped)
+        this._children.forEach(button => {
+            button.visible = button.enabled && !button.dropped;
+            if (!button.visible)
                 return;
+
             button.x = x;
             x += button.width + this.buttonMargin;
-            children.push(button);
+            numberOfVisibleButtons++;
         });
 
-        if (children.length)
+        if (numberOfVisibleButtons)
             this.width = x - this.buttonMargin + this.rightMargin;
         else
             this.width = this.buttonMargin + this.rightMargin;
-
-        this.children = children;
     }
 
 }

@@ -25,10 +25,17 @@
 
 #pragma once
 
+#include "RectEdges.h"
+#include "ScrollAlignment.h"
 #include "ScrollSnapOffsetsInfo.h"
+#include "ScrollTypes.h"
 #include "Scrollbar.h"
 #include <wtf/Forward.h>
 #include <wtf/WeakPtr.h>
+
+namespace WTF {
+class TextStream;
+}
 
 namespace WebCore {
 
@@ -39,18 +46,33 @@ class LayoutSize;
 class PlatformTouchEvent;
 class PlatformWheelEvent;
 class ScrollAnimator;
+class ScrollbarsController;
 class GraphicsLayer;
 class TiledBacking;
 
-// scrollPosition is in content coordinates (0,0 is at scrollOrigin), so may have negative components.
-typedef IntPoint ScrollPosition;
-// scrollOffset() is the value used by scrollbars (min is 0,0), and should never have negative components.
-typedef IntPoint ScrollOffset;
+enum class WheelScrollGestureState : uint8_t;
 
-class ScrollableArea {
+inline int offsetForOrientation(ScrollOffset offset, ScrollbarOrientation orientation)
+{
+    switch (orientation) {
+    case ScrollbarOrientation::Horizontal: return offset.x();
+    case ScrollbarOrientation::Vertical: return offset.y();
+    }
+    ASSERT_NOT_REACHED();
+    return 0;
+}
+
+class ScrollableArea : public CanMakeWeakPtr<ScrollableArea> {
 public:
-    WEBCORE_EXPORT bool scroll(ScrollDirection, ScrollGranularity, float multiplier = 1);
-    WEBCORE_EXPORT void scrollToOffsetWithoutAnimation(const FloatPoint&);
+    virtual bool isScrollView() const { return false; }
+    virtual bool isRenderLayer() const { return false; }
+    virtual bool isListBox() const { return false; }
+
+    WEBCORE_EXPORT bool scroll(ScrollDirection, ScrollGranularity, unsigned stepCount = 1);
+    WEBCORE_EXPORT void scrollToPositionWithAnimation(const FloatPoint&, ScrollClamping = ScrollClamping::Clamped);
+    WEBCORE_EXPORT void scrollToPositionWithoutAnimation(const FloatPoint&, ScrollClamping = ScrollClamping::Clamped);
+
+    WEBCORE_EXPORT void scrollToOffsetWithoutAnimation(const FloatPoint&, ScrollClamping = ScrollClamping::Clamped);
     void scrollToOffsetWithoutAnimation(ScrollbarOrientation, float offset);
 
     // Should be called when the scroll position changes externally, for example if the scroll layer position
@@ -60,55 +82,63 @@ public:
     // Allows subclasses to handle scroll position updates themselves. If this member function
     // returns true, the scrollable area won't actually update the scroll position and instead
     // expect it to happen sometime in the future.
-    virtual bool requestScrollPositionUpdate(const ScrollPosition&) { return false; }
+    virtual bool requestScrollPositionUpdate(const ScrollPosition&, ScrollType = ScrollType::User, ScrollClamping = ScrollClamping::Clamped) { return false; }
+    virtual bool requestAnimatedScrollToPosition(const ScrollPosition&, ScrollClamping = ScrollClamping::Clamped) { return false; }
+    virtual void stopAsyncAnimatedScroll() { }
 
-    WEBCORE_EXPORT bool handleWheelEvent(const PlatformWheelEvent&);
+    WEBCORE_EXPORT virtual bool handleWheelEventForScrolling(const PlatformWheelEvent&, std::optional<WheelScrollGestureState>);
 
-    WeakPtr<ScrollableArea> createWeakPtr() { return m_weakPtrFactory.createWeakPtr(*this); }
-
-#if ENABLE(CSS_SCROLL_SNAP)
-    WEBCORE_EXPORT const Vector<LayoutUnit>* horizontalSnapOffsets() const;
-    WEBCORE_EXPORT const Vector<LayoutUnit>* verticalSnapOffsets() const;
-    WEBCORE_EXPORT const Vector<ScrollOffsetRange<LayoutUnit>>* horizontalSnapOffsetRanges() const;
-    WEBCORE_EXPORT const Vector<ScrollOffsetRange<LayoutUnit>>* verticalSnapOffsetRanges() const;
     virtual void updateSnapOffsets() { };
-    void setHorizontalSnapOffsets(const Vector<LayoutUnit>&);
-    void setVerticalSnapOffsets(const Vector<LayoutUnit>&);
-    void setHorizontalSnapOffsetRanges(const Vector<ScrollOffsetRange<LayoutUnit>>&);
-    void setVerticalSnapOffsetRanges(const Vector<ScrollOffsetRange<LayoutUnit>>&);
-    void clearHorizontalSnapOffsets();
-    void clearVerticalSnapOffsets();
-    unsigned currentHorizontalSnapPointIndex() const { return m_currentHorizontalSnapPointIndex; }
-    void setCurrentHorizontalSnapPointIndex(unsigned index) { m_currentHorizontalSnapPointIndex = index; }
-    unsigned currentVerticalSnapPointIndex() const { return m_currentVerticalSnapPointIndex; }
-    void setCurrentVerticalSnapPointIndex(unsigned index) { m_currentVerticalSnapPointIndex = index; }
-    IntPoint nearestActiveSnapPoint(const IntPoint&);
-#endif
+    WEBCORE_EXPORT const LayoutScrollSnapOffsetsInfo* snapOffsetsInfo() const;
+    void setScrollSnapOffsetInfo(const LayoutScrollSnapOffsetsInfo&);
+    void clearSnapOffsets();
+    WEBCORE_EXPORT std::optional<unsigned> currentHorizontalSnapPointIndex() const;
+    WEBCORE_EXPORT std::optional<unsigned> currentVerticalSnapPointIndex() const;
+    WEBCORE_EXPORT void setCurrentHorizontalSnapPointIndex(std::optional<unsigned>);
+    WEBCORE_EXPORT void setCurrentVerticalSnapPointIndex(std::optional<unsigned>);
 
-    void updateScrollSnapState();
+    void resnapAfterLayout();
+    void doPostThumbMoveSnapping(ScrollbarOrientation);
+
+    void stopKeyboardScrollAnimation();
 
 #if ENABLE(TOUCH_EVENTS)
-    virtual bool isTouchScrollable() const { return false; }
     virtual bool handleTouchEvent(const PlatformTouchEvent&);
 #endif
 
-#if PLATFORM(IOS)
-    virtual bool isOverflowScroll() const { return false; }
+#if PLATFORM(IOS_FAMILY)
     virtual void didStartScroll() { }
     virtual void didEndScroll() { }
     virtual void didUpdateScroll() { }
 #endif
-    virtual void setIsUserScroll(bool) { }
+    
+    // "Stepped scrolling" is used by RenderListBox; it implies that scrollbar->pixelStep() is not 1 and never has rubberbanding.
+    virtual bool hasSteppedScrolling() const { return false; }
 
-    // Functions for controlling if you can scroll past the end of the document.
-    bool constrainsScrollingToContentEdge() const { return m_constrainsScrollingToContentEdge; }
-    void setConstrainsScrollingToContentEdge(bool constrainsScrollingToContentEdge) { m_constrainsScrollingToContentEdge = constrainsScrollingToContentEdge; }
+    ScrollClamping scrollClamping() const { return m_scrollClamping; }
+    void setScrollClamping(ScrollClamping clamping) { m_scrollClamping = clamping; }
 
     void setVerticalScrollElasticity(ScrollElasticity scrollElasticity) { m_verticalScrollElasticity = scrollElasticity; }
-    ScrollElasticity verticalScrollElasticity() const { return static_cast<ScrollElasticity>(m_verticalScrollElasticity); }
+    ScrollElasticity verticalScrollElasticity() const { return m_verticalScrollElasticity; }
 
     void setHorizontalScrollElasticity(ScrollElasticity scrollElasticity) { m_horizontalScrollElasticity = scrollElasticity; }
-    ScrollElasticity horizontalScrollElasticity() const { return static_cast<ScrollElasticity>(m_horizontalScrollElasticity); }
+    ScrollElasticity horizontalScrollElasticity() const { return m_horizontalScrollElasticity; }
+
+    virtual ScrollbarMode horizontalScrollbarMode() const { return ScrollbarMode::Auto; }
+    virtual ScrollbarMode verticalScrollbarMode() const { return ScrollbarMode::Auto; }
+    bool canHaveScrollbars() const { return horizontalScrollbarMode() != ScrollbarMode::AlwaysOff || verticalScrollbarMode() != ScrollbarMode::AlwaysOff; }
+
+    virtual bool horizontalScrollbarHiddenByStyle() const { return false; }
+    virtual bool verticalScrollbarHiddenByStyle() const { return false; }
+    
+    virtual OverscrollBehavior horizontalOverscrollBehavior() const { return OverscrollBehavior::Auto; }
+    virtual OverscrollBehavior verticalOverscrollBehavior() const { return OverscrollBehavior::Auto; }
+
+    bool allowsHorizontalScrolling() const;
+    bool allowsVerticalScrolling() const;
+
+    WEBCORE_EXPORT String horizontalScrollbarStateForTesting() const;
+    WEBCORE_EXPORT String verticalScrollbarStateForTesting() const;
 
     bool inLiveResize() const { return m_inLiveResize; }
     WEBCORE_EXPORT virtual void willStartLiveResize();
@@ -141,19 +171,25 @@ public:
     };
     WEBCORE_EXPORT virtual void availableContentSizeChanged(AvailableSizeChangeReason);
 
+    // This returns information about existing scrollbars, not scrollbars that may be created in future.
     bool hasOverlayScrollbars() const;
+
+    // Returns true if any scrollbars that might be created would be non-overlay scrollbars.
+    WEBCORE_EXPORT virtual bool canShowNonOverlayScrollbars() const;
+
     WEBCORE_EXPORT virtual void setScrollbarOverlayStyle(ScrollbarOverlayStyle);
-    ScrollbarOverlayStyle scrollbarOverlayStyle() const { return static_cast<ScrollbarOverlayStyle>(m_scrollbarOverlayStyle); }
+    ScrollbarOverlayStyle scrollbarOverlayStyle() const { return m_scrollbarOverlayStyle; }
+    void invalidateScrollbars();
+    bool useDarkAppearanceForScrollbars() const;
 
-    // This getter will create a ScrollAnimator if it doesn't already exist.
+    virtual ScrollingNodeID scrollingNodeID() const { return 0; }
+
     WEBCORE_EXPORT ScrollAnimator& scrollAnimator() const;
-
-    // This getter will return null if the ScrollAnimator hasn't been created yet.
     ScrollAnimator* existingScrollAnimator() const { return m_scrollAnimator.get(); }
 
+    WEBCORE_EXPORT ScrollbarsController& scrollbarsController() const;
+
     virtual bool isActive() const = 0;
-    virtual int scrollSize(ScrollbarOrientation) const = 0;
-    virtual int scrollOffset(ScrollbarOrientation) const = 0;
     WEBCORE_EXPORT virtual void invalidateScrollbar(Scrollbar&, const IntRect&);
     virtual bool isScrollCornerVisible() const = 0;
     virtual IntRect scrollCornerRect() const = 0;
@@ -188,18 +224,34 @@ public:
     virtual Scrollbar* horizontalScrollbar() const { return nullptr; }
     virtual Scrollbar* verticalScrollbar() const { return nullptr; }
 
+    Scrollbar* scrollbarForDirection(ScrollDirection direction) const
+    {
+        switch (direction) {
+        case ScrollUp:
+        case ScrollDown:
+            return verticalScrollbar();
+        case ScrollLeft:
+        case ScrollRight:
+            return horizontalScrollbar();
+        }
+        return nullptr;
+    }
+
     const IntPoint& scrollOrigin() const { return m_scrollOrigin; }
     bool scrollOriginChanged() const { return m_scrollOriginChanged; }
 
-    virtual ScrollPosition scrollPosition() const;
+    virtual ScrollPosition scrollPosition() const = 0;
     virtual ScrollPosition minimumScrollPosition() const;
     virtual ScrollPosition maximumScrollPosition() const;
 
-    ScrollPosition constrainScrollPosition(const ScrollPosition& position) const
+    ScrollPosition constrainedScrollPosition(const ScrollPosition& position) const
     {
         return position.constrainedBetween(minimumScrollPosition(), maximumScrollPosition());
     }
 
+    WEBCORE_EXPORT ScrollOffset scrollOffset() const;
+
+    ScrollOffset minimumScrollOffset() const { return { }; }
     ScrollOffset maximumScrollOffset() const;
 
     WEBCORE_EXPORT ScrollPosition scrollPositionFromOffset(ScrollOffset) const;
@@ -222,19 +274,29 @@ public:
     WEBCORE_EXPORT virtual bool scrolledToLeft() const;
     WEBCORE_EXPORT virtual bool scrolledToRight() const;
 
-    bool isScrolledProgrammatically() const { return m_scrolledProgrammatically; }
-    void setScrolledProgrammatically(bool state) { m_scrolledProgrammatically = state; }
+    ScrollType currentScrollType() const { return m_currentScrollType; }
+    void setCurrentScrollType(ScrollType scrollType) { m_currentScrollType = scrollType; }
+
+    // This reflects animated scrolls triggered by CSS OM View "smooth" scrolls.
+    ScrollAnimationStatus scrollAnimationStatus() { return m_scrollAnimationStatus; }
+    void setScrollAnimationStatus(ScrollAnimationStatus status) { m_scrollAnimationStatus = status; }
+    virtual void animatedScrollDidEnd() { };
+
+    bool scrollShouldClearLatchedState() const { return m_scrollShouldClearLatchedState; }
+    void setScrollShouldClearLatchedState(bool shouldClear) { m_scrollShouldClearLatchedState = shouldClear; }
 
     enum VisibleContentRectIncludesScrollbars { ExcludeScrollbars, IncludeScrollbars };
     enum VisibleContentRectBehavior {
         ContentsVisibleRect,
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
         LegacyIOSDocumentViewRect,
         LegacyIOSDocumentVisibleRect = LegacyIOSDocumentViewRect
 #else
         LegacyIOSDocumentVisibleRect = ContentsVisibleRect
 #endif
     };
+    
+    virtual bool isVisibleToHitTesting() const { return false; };
 
     WEBCORE_EXPORT IntRect visibleContentRect(VisibleContentRectBehavior = ContentsVisibleRect) const;
     WEBCORE_EXPORT IntRect visibleContentRectIncludingScrollbars(VisibleContentRectBehavior = ContentsVisibleRect) const;
@@ -245,7 +307,7 @@ public:
 
     virtual IntSize contentsSize() const = 0;
     virtual IntSize overhangAmount() const { return IntSize(); }
-    virtual IntPoint lastKnownMousePosition() const { return IntPoint(); }
+    virtual IntPoint lastKnownMousePositionInView() const { return IntPoint(); }
     virtual bool isHandlingWheelEvent() const { return false; }
 
     virtual int headerHeight() const { return 0; }
@@ -253,6 +315,9 @@ public:
 
     // The totalContentsSize() is equivalent to the contentsSize() plus the header and footer heights.
     WEBCORE_EXPORT IntSize totalContentsSize() const;
+    WEBCORE_EXPORT virtual IntSize reachableTotalContentsSize() const;
+
+    virtual bool useDarkAppearance() const { return false; }
 
     virtual bool shouldSuspendScrollAnimations() const { return true; }
     WEBCORE_EXPORT virtual void scrollbarStyleChanged(ScrollbarStyle /*newStyle*/, bool /*forceUpdate*/);
@@ -267,6 +332,7 @@ public:
     // Returns the bounding box of this scrollable area, in the coordinate system of the enclosing scroll view.
     virtual IntRect scrollableAreaBoundingBox(bool* = nullptr) const = 0;
 
+    virtual bool isUserScrollInProgress() const { return false; }
     virtual bool isRubberBandInProgress() const { return false; }
     virtual bool isScrollSnapInProgress() const { return false; }
 
@@ -280,25 +346,13 @@ public:
 
     // Computes the double value for the scrollbar's current position and the current overhang amount.
     // This function is static so that it can be called from the main thread or the scrolling thread.
-    static void computeScrollbarValueAndOverhang(float currentPosition, float totalSize, float visibleSize, float& doubleValue, float& overhangAmount);
+    WEBCORE_EXPORT static void computeScrollbarValueAndOverhang(float currentPosition, float totalSize, float visibleSize, float& doubleValue, float& overhangAmount);
 
-    // Let subclasses provide a way of asking for and servicing scroll
-    // animations.
-    virtual bool scheduleAnimation() { return false; }
-    void serviceScrollAnimations();
+    static std::optional<BoxSide> targetSideForScrollDelta(FloatSize, ScrollEventAxis);
 
-#if PLATFORM(IOS)
-    bool isHorizontalScrollerPinnedToMinimumPosition() const { return !horizontalScrollbar() || scrollOffset(HorizontalScrollbar) <= 0; }
-    bool isHorizontalScrollerPinnedToMaximumPosition() const { return !horizontalScrollbar() || scrollOffset(HorizontalScrollbar) >= maximumScrollOffset().x(); }
-    bool isVerticalScrollerPinnedToMinimumPosition() const { return !verticalScrollbar() || scrollOffset(VerticalScrollbar) <= 0; }
-    bool isVerticalScrollerPinnedToMaximumPosition() const { return !verticalScrollbar() || scrollOffset(VerticalScrollbar) >= maximumScrollOffset().y(); }
-
-    bool isPinnedInBothDirections(const IntSize&) const; 
-    bool isPinnedHorizontallyInDirection(int horizontalScrollDelta) const; 
-    bool isPinnedVerticallyInDirection(int verticalScrollDelta) const;
-#endif
-
-    virtual TiledBacking* tiledBacking() const { return nullptr; }
+    // "Pinned" means scrolled at or beyond the edge.
+    bool isPinnedOnSide(BoxSide) const;
+    WEBCORE_EXPORT RectEdges<bool> edgePinnedState() const;
 
     // True if scrolling happens by moving compositing layers.
     virtual bool usesCompositedScrolling() const { return false; }
@@ -314,10 +368,26 @@ public:
     void verticalScrollbarLayerDidChange();
     void horizontalScrollbarLayerDidChange();
 
-    virtual bool usesMockScrollAnimator() const { return false; }
-    virtual void logMockScrollAnimatorMessage(const String&) const { };
+    virtual bool mockScrollbarsControllerEnabled() const { return false; }
+    virtual void logMockScrollbarsControllerMessage(const String&) const { };
 
-    virtual bool shouldPlaceBlockDirectionScrollbarOnLeft() const = 0;
+    virtual bool shouldPlaceVerticalScrollbarOnLeft() const = 0;
+    
+    virtual String debugDescription() const = 0;
+
+    virtual float pageScaleFactor() const
+    {
+        return 1.0f;
+    }
+
+    virtual void didStartScrollAnimation() { }
+    
+    bool horizontalOverscrollBehaviorPreventsPropagation() const { return horizontalOverscrollBehavior() != OverscrollBehavior::Auto; }
+    bool verticalOverscrollBehaviorPreventsPropagation() const { return verticalOverscrollBehavior() != OverscrollBehavior::Auto; }
+    bool overscrollBehaviorAllowsRubberBand() const { return horizontalOverscrollBehavior() != OverscrollBehavior::None || verticalOverscrollBehavior() != OverscrollBehavior::None; }
+    bool shouldBlockScrollPropagation(const FloatSize&) const;
+    FloatSize deltaForPropagation(const FloatSize&) const;
+    virtual bool needsAnimatedScroll() const { return false; }
 
 protected:
     WEBCORE_EXPORT ScrollableArea();
@@ -326,18 +396,19 @@ protected:
     void setScrollOrigin(const IntPoint&);
     void resetScrollOriginChanged() { m_scrollOriginChanged = false; }
 
-    WEBCORE_EXPORT virtual float adjustScrollStepForFixedContent(float step, ScrollbarOrientation, ScrollGranularity);
+    WEBCORE_EXPORT virtual float adjustVerticalPageScrollStepForFixedContent(float step);
     virtual void invalidateScrollbarRect(Scrollbar&, const IntRect&) = 0;
     virtual void invalidateScrollCornerRect(const IntRect&) = 0;
 
     friend class ScrollingCoordinator;
-    virtual GraphicsLayer* layerForScrolling() const { return nullptr; }
     virtual GraphicsLayer* layerForScrollCorner() const { return nullptr; }
-#if ENABLE(RUBBER_BANDING)
+#if HAVE(RUBBER_BANDING)
     virtual GraphicsLayer* layerForOverhangAreas() const { return nullptr; }
 #endif
 
     bool hasLayerForScrollCorner() const;
+
+    LayoutRect getRectToExposeForScrollIntoView(const LayoutRect& visibleRect, const LayoutRect& exposeRect, const ScrollAlignment& alignX, const ScrollAlignment& alignY) const;
 
 private:
     WEBCORE_EXPORT virtual IntRect visibleContentRectInternal(VisibleContentRectIncludesScrollbars, VisibleContentRectBehavior) const;
@@ -345,22 +416,14 @@ private:
     
     // NOTE: Only called from the ScrollAnimator.
     friend class ScrollAnimator;
-    void setScrollOffsetFromAnimation(const ScrollOffset&);
+    void setScrollPositionFromAnimation(const ScrollPosition&);
 
-    // This function should be overriden by subclasses to perform the actual
+    // This function should be overridden by subclasses to perform the actual
     // scroll of the content.
     virtual void setScrollOffset(const ScrollOffset&) = 0;
-    ScrollSnapOffsetsInfo<LayoutUnit>& ensureSnapOffsetsInfo();
 
     mutable std::unique_ptr<ScrollAnimator> m_scrollAnimator;
-
-    WeakPtrFactory<ScrollableArea> m_weakPtrFactory;
-
-#if ENABLE(CSS_SCROLL_SNAP)
-    std::unique_ptr<ScrollSnapOffsetsInfo<LayoutUnit>> m_snapOffsetsInfo;
-    unsigned m_currentHorizontalSnapPointIndex { 0 };
-    unsigned m_currentVerticalSnapPointIndex { 0 };
-#endif
+    mutable std::unique_ptr<ScrollbarsController> m_scrollbarsController;
 
     // There are 8 possible combinations of writing mode and direction. Scroll origin will be non-zero in the x or y axis
     // if there is any reversed direction or writing-mode. The combinations are:
@@ -375,18 +438,22 @@ private:
     // vertical-rl / rtl            YES                     YES
     IntPoint m_scrollOrigin;
 
-    unsigned m_constrainsScrollingToContentEdge : 1;
+    ScrollClamping m_scrollClamping { ScrollClamping::Clamped };
 
-    unsigned m_inLiveResize : 1;
+    ScrollElasticity m_verticalScrollElasticity { ScrollElasticity::None };
+    ScrollElasticity m_horizontalScrollElasticity { ScrollElasticity::None };
 
-    unsigned m_verticalScrollElasticity : 2; // ScrollElasticity
-    unsigned m_horizontalScrollElasticity : 2; // ScrollElasticity
+    ScrollbarOverlayStyle m_scrollbarOverlayStyle { ScrollbarOverlayStyle::ScrollbarOverlayStyleDefault };
 
-    unsigned m_scrollbarOverlayStyle : 2; // ScrollbarOverlayStyle
+    ScrollType m_currentScrollType { ScrollType::User };
+    ScrollAnimationStatus m_scrollAnimationStatus { ScrollAnimationStatus::NotAnimating };
 
-    unsigned m_scrollOriginChanged : 1;
-    unsigned m_scrolledProgrammatically : 1;
+    bool m_inLiveResize { false };
+    bool m_scrollOriginChanged { false };
+    bool m_scrollShouldClearLatchedState { false };
+    bool m_hasActiveScrollAnimation { false };
 };
 
-} // namespace WebCore
+WTF::TextStream& operator<<(WTF::TextStream&, const ScrollableArea&);
 
+} // namespace WebCore

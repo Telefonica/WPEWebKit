@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2019 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Google Inc. All rights reserved.
  * Copyright (C) 2007-2009 Torch Mobile, Inc.
  * Copyright (C) 2008 Cameron Zwarich <cwzwarich@uwaterloo.ca>
@@ -32,10 +32,10 @@
  */
 
 #include "config.h"
-#include "CurrentTime.h"
+#include <wtf/ApproximateTime.h>
+#include <wtf/MonotonicTime.h>
 
-#include "Condition.h"
-#include "Lock.h"
+#include <wtf/WallTime.h>
 
 #if OS(DARWIN)
 #include <mach/mach.h>
@@ -54,6 +54,11 @@
 #include <time.h>
 #else
 #include <sys/time.h>
+#include <time.h>
+#endif
+
+#if OS(FUCHSIA)
+#include <zircon/syscalls.h>
 #endif
 
 #if USE(GLIB)
@@ -65,8 +70,8 @@ namespace WTF {
 #if OS(WINDOWS)
 
 // Number of 100 nanosecond between January 1, 1601 and January 1, 1970.
-static const ULONGLONG epochBias = 116444736000000000ULL;
-static const double hundredsOfNanosecondsPerMillisecond = 10000;
+static constexpr ULONGLONG epochBias = 116444736000000000ULL;
+static constexpr double hundredsOfNanosecondsPerMillisecond = 10000;
 
 static double lowResUTCTime()
 {
@@ -84,8 +89,6 @@ static double lowResUTCTime()
     // Windows file times are in 100s of nanoseconds.
     return (dateTime.QuadPart - epochBias) / hundredsOfNanosecondsPerMillisecond;
 }
-
-#if USE(QUERY_PERFORMANCE_COUNTER)
 
 static LARGE_INTEGER qpcFrequency;
 static bool syncedTime;
@@ -150,7 +153,7 @@ static bool qpcAvailable()
     return available;
 }
 
-double currentTime()
+static inline double currentTime()
 {
     // Use a combination of ftime and QueryPerformanceCounter.
     // ftime returns the information we want, but doesn't have sufficient resolution.
@@ -193,66 +196,36 @@ double currentTime()
     return utc / 1000.0;
 }
 
-#else
-
-double currentTime()
+Int128 currentTimeInNanoseconds()
 {
-    static bool init = false;
-    static double lastTime;
-    static DWORD lastTickCount;
-    if (!init) {
-        lastTime = lowResUTCTime();
-        lastTickCount = GetTickCount();
-        init = true;
-        return lastTime;
-    }
-
-    DWORD tickCountNow = GetTickCount();
-    DWORD elapsed = tickCountNow - lastTickCount;
-    double timeNow = lastTime + (double)elapsed / 1000.;
-    if (elapsed >= 0x7FFFFFFF) {
-        lastTime = timeNow;
-        lastTickCount = tickCountNow;
-    }
-    return timeNow;
-}
-
-#endif // USE(QUERY_PERFORMANCE_COUNTER)
-
-#elif USE(GLIB)
-
-// Note: GTK on Windows will pick up the PLATFORM(WIN) implementation above which provides
-// better accuracy compared with Windows implementation of g_get_current_time:
-// (http://www.google.com/codesearch/p?hl=en#HHnNRjks1t0/glib-2.5.2/glib/gmain.c&q=g_get_current_time).
-// Non-Windows GTK builds could use gettimeofday() directly but for the sake of consistency lets use GTK function.
-double currentTime()
-{
-    GTimeVal now;
-    g_get_current_time(&now);
-    return static_cast<double>(now.tv_sec) + static_cast<double>(now.tv_usec / 1000000.0);
+    return static_cast<Int128>(currentTime() * 1'000'000'000);
 }
 
 #else
 
-double currentTime()
+Int128 currentTimeInNanoseconds()
 {
-    struct timeval now;
-    gettimeofday(&now, 0);
-    return now.tv_sec + now.tv_usec / 1000000.0;
+    struct timespec ts { };
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (static_cast<Int128>(ts.tv_sec) * 1'000'000'000) + ts.tv_nsec;
+}
+
+static inline double currentTime()
+{
+    struct timespec ts { };
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1'000'000'000.0;
 }
 
 #endif
 
-#if USE(GLIB)
-
-double monotonicallyIncreasingTime()
+WallTime WallTime::now()
 {
-    return static_cast<double>(g_get_monotonic_time() / 1000000.0);
+    return fromRawSeconds(currentTime());
 }
 
-#elif OS(DARWIN)
-
-double monotonicallyIncreasingTime()
+#if OS(DARWIN)
+static mach_timebase_info_data_t& machTimebaseInfo()
 {
     // Based on listing #2 from Apple QA 1398, but modified to be thread-safe.
     static mach_timebase_info_data_t timebaseInfo;
@@ -262,68 +235,71 @@ double monotonicallyIncreasingTime()
         ASSERT_UNUSED(kr, kr == KERN_SUCCESS);
         ASSERT(timebaseInfo.denom);
     });
-
-    return (mach_absolute_time() * timebaseInfo.numer) / (1.0e9 * timebaseInfo.denom);
+    return timebaseInfo;
 }
 
-#else
-
-double monotonicallyIncreasingTime()
+MonotonicTime MonotonicTime::fromMachAbsoluteTime(uint64_t machAbsoluteTime)
 {
+    auto& info = machTimebaseInfo();
+    return fromRawSeconds((machAbsoluteTime * info.numer) / (1.0e9 * info.denom));
+}
+
+uint64_t MonotonicTime::toMachAbsoluteTime() const
+{
+    auto& info = machTimebaseInfo();
+    return static_cast<uint64_t>((m_value * 1.0e9 * info.denom) / info.numer);
+}
+
+ApproximateTime ApproximateTime::fromMachApproximateTime(uint64_t machApproximateTime)
+{
+    auto& info = machTimebaseInfo();
+    return fromRawSeconds((machApproximateTime * info.numer) / (1.0e9 * info.denom));
+}
+
+uint64_t ApproximateTime::toMachApproximateTime() const
+{
+    auto& info = machTimebaseInfo();
+    return static_cast<uint64_t>((m_value * 1.0e9 * info.denom) / info.numer);
+}
+#endif
+
+MonotonicTime MonotonicTime::now()
+{
+#if USE(GLIB)
+    return fromRawSeconds(static_cast<double>(g_get_monotonic_time() / 1000000.0));
+#elif OS(DARWIN)
+    return fromMachAbsoluteTime(mach_absolute_time());
+#elif OS(FUCHSIA)
+    return fromRawSeconds(zx_clock_get_monotonic() / static_cast<double>(ZX_SEC(1)));
+#elif OS(LINUX) || OS(FREEBSD) || OS(OPENBSD) || OS(NETBSD)
+    struct timespec ts { };
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return fromRawSeconds(static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1.0e9);
+#else
     static double lastTime = 0;
     double currentTimeNow = currentTime();
     if (currentTimeNow < lastTime)
         return lastTime;
     lastTime = currentTimeNow;
-    return currentTimeNow;
+    return fromRawSeconds(currentTimeNow);
+#endif
 }
 
-#endif
-
-std::chrono::microseconds currentCPUTime()
+ApproximateTime ApproximateTime::now()
 {
 #if OS(DARWIN)
-    mach_msg_type_number_t infoCount = THREAD_BASIC_INFO_COUNT;
-    thread_basic_info_data_t info;
-
-    // Get thread information
-    mach_port_t threadPort = mach_thread_self();
-    thread_info(threadPort, THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &infoCount);
-    mach_port_deallocate(mach_task_self(), threadPort);
-
-    return std::chrono::seconds(info.user_time.seconds + info.system_time.seconds) + std::chrono::microseconds(info.user_time.microseconds + info.system_time.microseconds);
-#elif OS(WINDOWS)
-    union {
-        FILETIME fileTime;
-        unsigned long long fileTimeAsLong;
-    } userTime, kernelTime;
-    
-    // GetThreadTimes won't accept null arguments so we pass these even though
-    // they're not used.
-    FILETIME creationTime, exitTime;
-    
-    GetThreadTimes(GetCurrentThread(), &creationTime, &exitTime, &kernelTime.fileTime, &userTime.fileTime);
-
-    return std::chrono::microseconds((userTime.fileTimeAsLong + kernelTime.fileTimeAsLong) / 10);
+    return fromMachApproximateTime(mach_approximate_time());
+#elif OS(LINUX)
+    struct timespec ts { };
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+    return fromRawSeconds(static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1.0e9);
+#elif OS(FREEBSD)
+    struct timespec ts { };
+    clock_gettime(CLOCK_MONOTONIC_FAST, &ts);
+    return fromRawSeconds(static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1.0e9);
 #else
-    // FIXME: We should return the time the current thread has spent executing.
-
-    static auto firstTime = std::chrono::steady_clock::now();
-    return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - firstTime);
+    return ApproximateTime::fromRawSeconds(MonotonicTime::now().secondsSinceEpoch().value());
 #endif
-}
-
-void sleep(double value)
-{
-    // It's very challenging to find portable ways of sleeping for less than a second. On UNIX, you want to
-    // use usleep() but it's hard to #include it in a portable way (you'd think it's in unistd.h, but then
-    // you'd be wrong on some OSX SDKs). Also, usleep() won't save you on Windows. Hence, bottoming out in
-    // lock code, which already solves the sleeping problem, is probably for the best.
-    
-    Lock fakeLock;
-    Condition fakeCondition;
-    LockHolder fakeLocker(fakeLock);
-    fakeCondition.waitFor(fakeLock, Seconds(value));
 }
 
 } // namespace WTF

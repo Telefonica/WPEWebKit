@@ -32,8 +32,8 @@
 #include <WebCore/BString.h>
 #include <WebCore/COMPtr.h>
 #include <WebCore/HistoryItem.h>
-#include <WebCore/URL.h>
 #include <wtf/RetainPtr.h>
+#include <wtf/URL.h>
 #include <wtf/text/CString.h>
 
 using namespace WebCore;
@@ -53,7 +53,7 @@ WebHistoryItem::WebHistoryItem(RefPtr<HistoryItem>&& historyItem)
     historyItemWrappers().set(m_historyItem.get(), this);
 
     gClassCount++;
-    gClassNameCount().add("WebHistoryItem");
+    gClassNameCount().add("WebHistoryItem"_s);
 }
 
 WebHistoryItem::~WebHistoryItem()
@@ -62,7 +62,7 @@ WebHistoryItem::~WebHistoryItem()
     historyItemWrappers().remove(m_historyItem.get());
 
     gClassCount--;
-    gClassNameCount().remove("WebHistoryItem");
+    gClassNameCount().remove("WebHistoryItem"_s);
 }
 
 WebHistoryItem* WebHistoryItem::createInstance()
@@ -87,13 +87,16 @@ WebHistoryItem* WebHistoryItem::createInstance(RefPtr<HistoryItem>&& historyItem
 
 // IWebHistoryItemPrivate -----------------------------------------------------
 
+#if USE(CF)
 static CFStringRef urlKey = CFSTR("");
 static CFStringRef titleKey = CFSTR("title");
 static CFStringRef lastVisitWasFailureKey = CFSTR("lastVisitWasFailure");
 static CFStringRef redirectURLsKey = CFSTR("redirectURLs");
+#endif
 
 HRESULT WebHistoryItem::initFromDictionaryRepresentation(_In_opt_ void* dictionary)
 {
+#if USE(CF)
     CFDictionaryRef dictionaryRef = (CFDictionaryRef) dictionary;
 
     CFStringRef urlStringRef = (CFStringRef) CFDictionaryGetValue(dictionaryRef, urlKey);
@@ -112,7 +115,7 @@ HRESULT WebHistoryItem::initFromDictionaryRepresentation(_In_opt_ void* dictiona
     std::unique_ptr<Vector<String>> redirectURLsVector;
     if (CFArrayRef redirectURLsRef = static_cast<CFArrayRef>(CFDictionaryGetValue(dictionaryRef, redirectURLsKey))) {
         CFIndex size = CFArrayGetCount(redirectURLsRef);
-        redirectURLsVector = std::make_unique<Vector<String>>(size);
+        redirectURLsVector = makeUnique<Vector<String>>(size);
         for (CFIndex i = 0; i < size; ++i)
             (*redirectURLsVector)[i] = String(static_cast<CFStringRef>(CFArrayGetValueAtIndex(redirectURLsRef, i)));
     }
@@ -125,10 +128,14 @@ HRESULT WebHistoryItem::initFromDictionaryRepresentation(_In_opt_ void* dictiona
         m_historyItem->setLastVisitWasFailure(true);
 
     return S_OK;
+#else
+    return E_NOTIMPL;
+#endif
 }
 
 HRESULT WebHistoryItem::dictionaryRepresentation(__deref_out_opt void** dictionary)
 {
+#if USE(CF)
     CFDictionaryRef* dictionaryRef = (CFDictionaryRef*) dictionary;
 
     size_t keyCount = 0;
@@ -159,6 +166,9 @@ HRESULT WebHistoryItem::dictionaryRepresentation(__deref_out_opt void** dictiona
         CFRelease(values[i]);
 
     return S_OK;
+#else
+    return E_NOTIMPL;
+#endif
 }
 
 HRESULT WebHistoryItem::hasURLString(_Out_ BOOL* hasURL)

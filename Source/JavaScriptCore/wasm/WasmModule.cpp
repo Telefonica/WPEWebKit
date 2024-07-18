@@ -28,82 +28,102 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "WasmBBQPlanInlines.h"
+#include "WasmLLIntPlan.h"
 #include "WasmModuleInformation.h"
 #include "WasmWorklist.h"
 
 namespace JSC { namespace Wasm {
 
-Module::Module(Ref<ModuleInformation>&& moduleInformation)
-    : m_moduleInformation(WTFMove(moduleInformation))
+Module::Module(LLIntPlan& plan)
+    : m_moduleInformation(plan.takeModuleInformation())
+    , m_llintCallees(LLIntCallees::createFromVector(plan.takeCallees()))
+    , m_llintEntryThunks(plan.takeEntryThunks())
 {
 }
 
 Module::~Module() { }
 
-Wasm::SignatureIndex Module::signatureIndexFromFunctionIndexSpace(unsigned functionIndexSpace) const
+Wasm::TypeIndex Module::typeIndexFromFunctionIndexSpace(unsigned functionIndexSpace) const
 {
-    return m_moduleInformation->signatureIndexFromFunctionIndexSpace(functionIndexSpace);
+    return m_moduleInformation->typeIndexFromFunctionIndexSpace(functionIndexSpace);
 }
 
-static Module::ValidationResult makeValidationResult(BBQPlan& plan)
+static Module::ValidationResult makeValidationResult(LLIntPlan& plan)
 {
     ASSERT(!plan.hasWork());
     if (plan.failed())
-        return UnexpectedType<String>(plan.errorMessage());
-    return Module::ValidationResult(Module::create(plan.takeModuleInformation()));
+        return Unexpected<String>(plan.errorMessage());
+    return Module::ValidationResult(Module::create(plan));
 }
 
 static Plan::CompletionTask makeValidationCallback(Module::AsyncValidationCallback&& callback)
 {
-    return createSharedTask<Plan::CallbackType>([callback = WTFMove(callback)] (VM* vm, Plan& plan) {
+    return createSharedTask<Plan::CallbackType>([callback = WTFMove(callback)] (Plan& plan) {
         ASSERT(!plan.hasWork());
-        ASSERT(vm);
-        callback->run(*vm, makeValidationResult(static_cast<BBQPlan&>(plan)));
+        callback->run(makeValidationResult(static_cast<LLIntPlan&>(plan)));
     });
 }
 
 Module::ValidationResult Module::validateSync(VM& vm, Vector<uint8_t>&& source)
 {
-    Ref<BBQPlan> plan = adoptRef(*new BBQPlan(&vm, WTFMove(source), BBQPlan::Validation, Plan::dontFinalize()));
-    plan->parseAndValidateModule();
+    Ref<LLIntPlan> plan = adoptRef(*new LLIntPlan(vm, WTFMove(source), CompilerMode::Validation, Plan::dontFinalize()));
+    Wasm::ensureWorklist().enqueue(plan.get());
+    plan->waitForCompletion();
     return makeValidationResult(plan.get());
 }
 
 void Module::validateAsync(VM& vm, Vector<uint8_t>&& source, Module::AsyncValidationCallback&& callback)
 {
-    Ref<Plan> plan = adoptRef(*new BBQPlan(&vm, WTFMove(source), BBQPlan::Validation, makeValidationCallback(WTFMove(callback))));
+    Ref<Plan> plan = adoptRef(*new LLIntPlan(vm, WTFMove(source), CompilerMode::Validation, makeValidationCallback(WTFMove(callback))));
     Wasm::ensureWorklist().enqueue(WTFMove(plan));
 }
 
-Ref<CodeBlock> Module::getOrCreateCodeBlock(MemoryMode mode)
+Ref<CalleeGroup> Module::getOrCreateCalleeGroup(VM& vm, MemoryMode mode)
 {
-    RefPtr<CodeBlock> codeBlock;
-    auto locker = holdLock(m_lock);
-    codeBlock = m_codeBlocks[static_cast<uint8_t>(mode)];
+    RefPtr<CalleeGroup> calleeGroup;
+    Locker locker { m_lock };
+    calleeGroup = m_calleeGroups[static_cast<uint8_t>(mode)];
     // If a previous attempt at a compile errored out, let's try again.
     // Compilations from valid modules can fail because OOM and cancellation.
     // It's worth retrying.
     // FIXME: We might want to back off retrying at some point:
     // https://bugs.webkit.org/show_bug.cgi?id=170607
-    if (!codeBlock || (codeBlock->compilationFinished() && !codeBlock->runnable())) {
-        codeBlock = CodeBlock::create(mode, const_cast<ModuleInformation&>(moduleInformation()));
-        m_codeBlocks[static_cast<uint8_t>(mode)] = codeBlock;
+    if (!calleeGroup || (calleeGroup->compilationFinished() && !calleeGroup->runnable())) {
+        RefPtr<LLIntCallees> llintCallees = nullptr;
+        if (Options::useWasmLLInt())
+            llintCallees = m_llintCallees.copyRef();
+        calleeGroup = CalleeGroup::create(vm, mode, const_cast<ModuleInformation&>(moduleInformation()), WTFMove(llintCallees));
+        m_calleeGroups[static_cast<uint8_t>(mode)] = calleeGroup;
     }
-    return codeBlock.releaseNonNull();
+    return calleeGroup.releaseNonNull();
 }
 
-Ref<CodeBlock> Module::compileSync(MemoryMode mode)
+Ref<CalleeGroup> Module::compileSync(VM& vm, MemoryMode mode)
 {
-    Ref<CodeBlock> codeBlock = getOrCreateCodeBlock(mode);
-    codeBlock->waitUntilFinished();
-    return codeBlock;
+    Ref<CalleeGroup> calleeGroup = getOrCreateCalleeGroup(vm, mode);
+    calleeGroup->waitUntilFinished();
+    return calleeGroup;
 }
 
-void Module::compileAsync(VM& vm, MemoryMode mode, CodeBlock::AsyncCompilationCallback&& task)
+void Module::compileAsync(VM& vm, MemoryMode mode, CalleeGroup::AsyncCompilationCallback&& task)
 {
-    Ref<CodeBlock> codeBlock = getOrCreateCodeBlock(mode);
-    codeBlock->compileAsync(vm, WTFMove(task));
+    Ref<CalleeGroup> calleeGroup = getOrCreateCalleeGroup(vm, mode);
+    calleeGroup->compileAsync(vm, WTFMove(task));
+}
+
+void Module::copyInitialCalleeGroupToAllMemoryModes(MemoryMode initialMode)
+{
+    Locker locker { m_lock };
+    ASSERT(m_calleeGroups[static_cast<uint8_t>(initialMode)]);
+    const CalleeGroup& initialBlock = *m_calleeGroups[static_cast<uint8_t>(initialMode)];
+    for (unsigned i = 0; i < Wasm::NumberOfMemoryModes; i++) {
+        if (i == static_cast<uint8_t>(initialMode))
+            continue;
+        // We should only try to copy the group here if it hasn't already been created.
+        // If it exists but is not runnable, it should get compiled during module evaluation.
+        if (auto& group = m_calleeGroups[i]; !group)
+            group = CalleeGroup::createFromExisting(static_cast<MemoryMode>(i), initialBlock);
+    }
 }
 
 } } // namespace JSC::Wasm

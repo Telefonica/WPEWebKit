@@ -25,17 +25,21 @@
 
 WI.SearchSidebarPanel = class SearchSidebarPanel extends WI.NavigationSidebarPanel
 {
-    constructor(contentBrowser)
+    constructor()
     {
         super("search", WI.UIString("Search"), true, true);
 
-        this.contentBrowser = contentBrowser;
+        this._searchInputSettings = WI.SearchUtilities.createSettings("search-sidebar");
+        for (let setting of Object.values(this._searchInputSettings)) {
+            setting.addEventListener(WI.Setting.Event.Changed, function(event) {
+                this.focusSearchField(true);
+            }, this);
+        }
 
-        var searchElement = document.createElement("div");
-        searchElement.classList.add("search-bar");
-        this.element.appendChild(searchElement);
+        this._inputContainer = this.element.appendChild(document.createElement("div"));
+        this._inputContainer.classList.add("search-bar");
 
-        this._inputElement = document.createElement("input");
+        this._inputElement = this._inputContainer.appendChild(document.createElement("input"));
         this._inputElement.type = "search";
         this._inputElement.spellcheck = false;
         this._inputElement.addEventListener("search", this._searchFieldChanged.bind(this));
@@ -43,23 +47,42 @@ WI.SearchSidebarPanel = class SearchSidebarPanel extends WI.NavigationSidebarPan
         this._inputElement.setAttribute("results", 5);
         this._inputElement.setAttribute("autosave", "inspector-search-autosave");
         this._inputElement.setAttribute("placeholder", WI.UIString("Search Resource Content"));
-        searchElement.appendChild(this._inputElement);
+
+        this._inputContainer.appendChild(WI.SearchUtilities.createSettingsButton(this._searchInputSettings));
 
         this._searchQuerySetting = new WI.Setting("search-sidebar-query", "");
         this._inputElement.value = this._searchQuerySetting.value;
 
         WI.Frame.addEventListener(WI.Frame.Event.MainResourceDidChange, this._mainResourceDidChange, this);
 
+        const treeItemHeight = 20;
+        this.contentTreeOutline.registerScrollVirtualizer(this.contentView.element, treeItemHeight);
         this.contentTreeOutline.addEventListener(WI.TreeOutline.Event.SelectionDidChange, this._treeSelectionDidChange, this);
     }
 
     // Public
 
+    showDefaultContentView()
+    {
+        let contentView = new WI.ContentView;
+
+        let contentPlaceholder = WI.createMessageTextView(this._searchQuerySetting.value ? WI.UIString("No search results") : WI.UIString("No search string"));
+        contentView.element.appendChild(contentPlaceholder);
+
+        let searchNavigationItem = new WI.ButtonNavigationItem("search", WI.UIString("Search Resource Content"), "Images/Search.svg", 15, 15);
+        searchNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._handleDefaultContentViewSearchNavigationItemClicked, this);
+
+        let importHelpElement = WI.createNavigationItemHelp(WI.UIString("Press %s to see recent searches."), searchNavigationItem);
+        contentPlaceholder.appendChild(importHelpElement);
+
+        this.contentBrowser.showContentView(contentView);
+    }
+
     closed()
     {
         super.closed();
 
-        WI.Frame.removeEventListener(null, null, this);
+        WI.Frame.removeEventListener(WI.Frame.Event.MainResourceDidChange, this._mainResourceDidChange, this);
     }
 
     focusSearchField(performSearch)
@@ -73,33 +96,81 @@ WI.SearchSidebarPanel = class SearchSidebarPanel extends WI.NavigationSidebarPan
         this._inputElement.select();
 
         if (performSearch)
-            this.performSearch(this._inputElement.value);
+            this.performSearch(this._inputElement.value, {omitFocus: true});
     }
 
-    performSearch(searchQuery)
+    performSearch(searchQuery, {omitFocus} = {})
     {
-        // Before performing a new search, clear the old search.
-        this.contentTreeOutline.removeChildren();
-        this.contentBrowser.contentViewContainer.closeAllContentViews();
-
         this._inputElement.value = searchQuery;
         this._searchQuerySetting.value = searchQuery;
-
-        this.hideEmptyContentPlaceholder();
 
         this.element.classList.remove("changed");
         if (this._changedBanner)
             this._changedBanner.remove();
 
-        searchQuery = searchQuery.trim();
-        if (!searchQuery.length)
+        if (!searchQuery.length) {
+            this._inputContainer.classList.remove("invalid");
+            this.hideEmptyContentPlaceholder();
+            this.showDefaultContentView();
+            return;
+        }
+
+        let isCaseSensitive = !!this._searchInputSettings.caseSensitive.value;
+        let isRegex = !!this._searchInputSettings.regularExpression.value;
+        let searchRegex = WI.SearchUtilities.searchRegExpForString(searchQuery, {
+            caseSensitive: isCaseSensitive,
+            regularExpression: isRegex,
+        });
+        this._inputContainer.classList.toggle("invalid", !searchRegex);
+        if (!searchRegex)
             return;
 
-        // FIXME: Provide UI to toggle regex and case sensitive searches.
-        var isCaseSensitive = false;
-        var isRegex = false;
+        this.hideEmptyContentPlaceholder();
 
-        var updateEmptyContentPlaceholderTimeout = null;
+        // Before performing a new search, clear the old search.
+        this.contentTreeOutline.removeChildren();
+        this.contentBrowser.contentViewContainer.closeAllContentViews();
+
+        let createSearchingPlaceholder = () => {
+            let searchingPlaceholder = WI.createMessageTextView("");
+            String.format(WI.UIString("Searching %s"), [(new WI.IndeterminateProgressSpinner).element], String.standardFormatters, searchingPlaceholder, (a, b) => {
+                a.append(b);
+                return a;
+            });
+            this.updateEmptyContentPlaceholder(searchingPlaceholder);
+        };
+
+        if (!WI.targetsAvailable() && WI.sharedApp.isWebDebuggable()) {
+            createSearchingPlaceholder();
+            WI.whenTargetsAvailable().then(() => {
+                if (this._searchQuerySetting.value === searchQuery)
+                    this.performSearch(searchQuery, {omitFocus});
+            });
+            return;
+        }
+
+        let target = WI.assumingMainTarget();
+
+        let promiseCount = 0;
+        let countPromise = async (promise, callback) => {
+            ++promiseCount;
+            if (promiseCount === 1)
+                createSearchingPlaceholder();
+
+            let value = await promise;
+
+            if (callback)
+                callback(value);
+
+            --promiseCount;
+            console.assert(promiseCount >= 0);
+            if (promiseCount === 0) {
+                this.updateEmptyContentPlaceholder(WI.UIString("No Search Results"));
+
+                if (!this.contentTreeOutline.children.length)
+                    this.showDefaultContentView();
+            }
+        };
 
         function createTreeElementForMatchObject(matchObject, parentTreeElement)
         {
@@ -108,141 +179,110 @@ WI.SearchSidebarPanel = class SearchSidebarPanel extends WI.NavigationSidebarPan
 
             parentTreeElement.appendChild(matchTreeElement);
 
-            if (!this.contentTreeOutline.selectedTreeElement)
-                matchTreeElement.revealAndSelect(false, true);
-        }
-
-        function updateEmptyContentPlaceholderSoon()
-        {
-            if (updateEmptyContentPlaceholderTimeout)
-                return;
-            updateEmptyContentPlaceholderTimeout = setTimeout(updateEmptyContentPlaceholder.bind(this), 100);
-        }
-
-        function updateEmptyContentPlaceholder()
-        {
-            if (updateEmptyContentPlaceholderTimeout) {
-                clearTimeout(updateEmptyContentPlaceholderTimeout);
-                updateEmptyContentPlaceholderTimeout = null;
+            if (!this.contentTreeOutline.selectedTreeElement) {
+                const selectedByUser = true;
+                matchTreeElement.revealAndSelect(omitFocus ?? false, selectedByUser);
             }
-
-            this.updateEmptyContentPlaceholder(WI.UIString("No Search Results"));
         }
 
-        function forEachMatch(searchQuery, lineContent, callback)
+        function forEachMatch(lineContent, callback)
         {
             var lineMatch;
-            var searchRegex = new RegExp(searchQuery.escapeForRegExp(), "gi");
             while ((searchRegex.lastIndex < lineContent.length) && (lineMatch = searchRegex.exec(lineContent)))
                 callback(lineMatch, searchRegex.lastIndex);
         }
 
-        function resourcesCallback(error, result)
-        {
-            updateEmptyContentPlaceholderSoon.call(this);
-
-            if (error)
+        let resourceCallback = (frameId, url, {result}) => {
+            if (!result || !result.length)
                 return;
 
-            function resourceCallback(frameId, url, error, resourceMatches)
-            {
-                updateEmptyContentPlaceholderSoon.call(this);
+            var frame = WI.networkManager.frameForIdentifier(frameId);
+            if (!frame)
+                return;
 
-                if (error || !resourceMatches || !resourceMatches.length)
-                    return;
+            let resource = frame.url === url ? frame.mainResource : frame.resourcesForURL(url).firstValue;
+            if (!resource)
+                return;
 
-                var frame = WI.frameResourceManager.frameForIdentifier(frameId);
-                if (!frame)
-                    return;
-
-                var resource = frame.url === url ? frame.mainResource : frame.resourceForURL(url);
-                if (!resource)
-                    return;
-
-                var resourceTreeElement = this._searchTreeElementForResource(resource);
-
-                for (var i = 0; i < resourceMatches.length; ++i) {
-                    var match = resourceMatches[i];
-                    forEachMatch(searchQuery, match.lineContent, (lineMatch, lastIndex) => {
-                        var matchObject = new WI.SourceCodeSearchMatchObject(resource, match.lineContent, searchQuery, new WI.TextRange(match.lineNumber, lineMatch.index, match.lineNumber, lastIndex));
-                        createTreeElementForMatchObject.call(this, matchObject, resourceTreeElement);
-                    });
-                }
-
-                updateEmptyContentPlaceholder.call(this);
-            }
+            var resourceTreeElement = this._searchTreeElementForResource(resource);
 
             for (var i = 0; i < result.length; ++i) {
-                var searchResult = result[i];
+                var match = result[i];
+                forEachMatch(match.lineContent, (lineMatch, lastIndex) => {
+                    var matchObject = new WI.SourceCodeSearchMatchObject(resource, match.lineContent, searchQuery, new WI.TextRange(match.lineNumber, lineMatch.index, match.lineNumber, lastIndex));
+                    createTreeElementForMatchObject.call(this, matchObject, resourceTreeElement);
+                });
+            }
+
+            if (!resourceTreeElement.children.length)
+                this.contentTreeOutline.removeChild(resourceTreeElement);
+        };
+
+        let resourcesCallback = ({result}) => {
+            let preventDuplicates = new Set;
+
+            for (let searchResult of result) {
                 if (!searchResult.url || !searchResult.frameId)
                     continue;
 
-                // COMPATIBILITY (iOS 9): Page.searchInResources did not have the optional requestId parameter.
-                PageAgent.searchInResource(searchResult.frameId, searchResult.url, searchQuery, isCaseSensitive, isRegex, searchResult.requestId, resourceCallback.bind(this, searchResult.frameId, searchResult.url));
+                // FIXME: Backend sometimes searches files twice.
+                // <https://webkit.org/b/188287> Web Inspector: [Backend] Page.searchInResources sometimes returns duplicate results for a resource
+                // Note we will still want this to fix legacy backends.
+                let key = searchResult.frameId + ":" + searchResult.url;
+                if (preventDuplicates.has(key))
+                    continue;
+                preventDuplicates.add(key);
+
+                countPromise(target.PageAgent.searchInResource(searchResult.frameId, searchResult.url, searchQuery, isCaseSensitive, isRegex, searchResult.requestId), resourceCallback.bind(this, searchResult.frameId, searchResult.url));
             }
 
             let promises = [
-                WI.Frame.awaitEvent(WI.Frame.Event.ResourceWasAdded),
-                WI.Target.awaitEvent(WI.Target.Event.ResourceAdded)
+                WI.Frame.awaitEvent(WI.Frame.Event.ResourceWasAdded, this),
+                WI.Target.awaitEvent(WI.Target.Event.ResourceAdded, this),
             ];
             Promise.race(promises).then(this._contentChanged.bind(this));
-        }
+        };
 
-        function searchScripts(scriptsToSearch)
-        {
-            updateEmptyContentPlaceholderSoon.call(this);
+        let scriptCallback = (script, {result}) => {
+            if (!result || !result.length)
+                return;
 
+            var scriptTreeElement = this._searchTreeElementForScript(script);
+
+            for (let match of result) {
+                forEachMatch(match.lineContent, (lineMatch, lastIndex) => {
+                    var matchObject = new WI.SourceCodeSearchMatchObject(script, match.lineContent, searchQuery, new WI.TextRange(match.lineNumber, lineMatch.index, match.lineNumber, lastIndex));
+                    createTreeElementForMatchObject.call(this, matchObject, scriptTreeElement);
+                });
+            }
+
+            if (!scriptTreeElement.children.length)
+                this.contentTreeOutline.removeChild(scriptTreeElement);
+        };
+
+        let searchScripts = (scriptsToSearch) => {
             if (!scriptsToSearch.length)
                 return;
 
-            function scriptCallback(script, error, scriptMatches)
-            {
-                updateEmptyContentPlaceholderSoon.call(this);
-
-                if (error || !scriptMatches || !scriptMatches.length)
-                    return;
-
-                var scriptTreeElement = this._searchTreeElementForScript(script);
-
-                for (var i = 0; i < scriptMatches.length; ++i) {
-                    var match = scriptMatches[i];
-                    forEachMatch(searchQuery, match.lineContent, (lineMatch, lastIndex) => {
-                        var matchObject = new WI.SourceCodeSearchMatchObject(script, match.lineContent, searchQuery, new WI.TextRange(match.lineNumber, lineMatch.index, match.lineNumber, lastIndex));
-                        createTreeElementForMatchObject.call(this, matchObject, scriptTreeElement);
-                    });
-                }
-
-                updateEmptyContentPlaceholder.call(this);
-            }
-
             for (let script of scriptsToSearch)
-                script.target.DebuggerAgent.searchInContent(script.id, searchQuery, isCaseSensitive, isRegex, scriptCallback.bind(this, script));
-        }
+                countPromise(script.target.DebuggerAgent.searchInContent(script.id, searchQuery, isCaseSensitive, isRegex), scriptCallback.bind(this, script));
+        };
 
-        function domCallback(error, searchId, resultsCount)
-        {
-            updateEmptyContentPlaceholderSoon.call(this);
-
-            if (error || !resultsCount)
+        let domCallback = ({searchId, resultCount}) => {
+            if (!resultCount)
                 return;
 
             console.assert(searchId);
 
             this._domSearchIdentifier = searchId;
 
-            function domSearchResults(error, nodeIds)
-            {
-                updateEmptyContentPlaceholderSoon.call(this);
-
-                if (error)
+            let domSearchResults = ({nodeIds}) => {
+                // If someone started a new search, then return early and stop showing search results from the old query.
+                if (this._domSearchIdentifier !== searchId)
                     return;
 
-                for (var i = 0; i < nodeIds.length; ++i) {
-                    // If someone started a new search, then return early and stop showing seach results from the old query.
-                    if (this._domSearchIdentifier !== searchId)
-                        return;
-
-                    var domNode = WI.domTreeManager.nodeForId(nodeIds[i]);
+                for (let nodeId of nodeIds) {
+                    let domNode = WI.domManager.nodeForId(nodeId);
                     if (!domNode || !domNode.ownerDocument)
                         continue;
 
@@ -251,7 +291,7 @@ WI.SearchSidebarPanel = class SearchSidebarPanel extends WI.NavigationSidebarPan
                         continue;
 
                     // FIXME: This should use a frame to do resourceForURL, but DOMAgent does not provide a frameId.
-                    var resource = WI.frameResourceManager.resourceForURL(domNode.ownerDocument.documentURL);
+                    let resource = WI.networkManager.resourcesForURL(domNode.ownerDocument.documentURL).firstValue;
                     if (!resource)
                         continue;
 
@@ -260,7 +300,7 @@ WI.SearchSidebarPanel = class SearchSidebarPanel extends WI.NavigationSidebarPan
 
                     // Textual matches.
                     var didFindTextualMatch = false;
-                    forEachMatch(searchQuery, domNodeTitle, (lineMatch, lastIndex) => {
+                    forEachMatch(domNodeTitle, (lineMatch, lastIndex) => {
                         var matchObject = new WI.DOMSearchMatchObject(resource, domNode, domNodeTitle, searchQuery, new WI.TextRange(0, lineMatch.index, 0, lastIndex));
                         createTreeElementForMatchObject.call(this, matchObject, resourceTreeElement);
                         didFindTextualMatch = true;
@@ -272,34 +312,39 @@ WI.SearchSidebarPanel = class SearchSidebarPanel extends WI.NavigationSidebarPan
                         createTreeElementForMatchObject.call(this, matchObject, resourceTreeElement);
                     }
 
-                    updateEmptyContentPlaceholder.call(this);
+                    if (!resourceTreeElement.children.length)
+                        this.contentTreeOutline.removeChild(resourceTreeElement);
+
                 }
-            }
+            };
 
-            DOMAgent.getSearchResults(searchId, 0, resultsCount, domSearchResults.bind(this));
-        }
+            countPromise(target.DOMAgent.getSearchResults(searchId, 0, resultCount), domSearchResults);
+        };
 
-        if (window.DOMAgent)
-            WI.domTreeManager.ensureDocument();
+        WI.domManager.ensureDocument();
 
-        if (window.PageAgent)
-            PageAgent.searchInResources(searchQuery, isCaseSensitive, isRegex, resourcesCallback.bind(this));
+        if (target.hasCommand("Page.searchInResources"))
+            countPromise(target.PageAgent.searchInResources(searchQuery, isCaseSensitive, isRegex), resourcesCallback);
 
         setTimeout(searchScripts.bind(this, WI.debuggerManager.searchableScripts), 0);
 
-        if (window.DOMAgent) {
+        if (target.hasDomain("DOM")) {
             if (this._domSearchIdentifier) {
-                DOMAgent.discardSearchResults(this._domSearchIdentifier);
+                target.DOMAgent.discardSearchResults(this._domSearchIdentifier);
                 this._domSearchIdentifier = undefined;
             }
 
-            DOMAgent.performSearch(searchQuery, domCallback.bind(this));
+            let commandArguments = {
+                query: searchQuery,
+                caseSensitive: isCaseSensitive,
+            };
+            countPromise(target.DOMAgent.performSearch.invoke(commandArguments), domCallback);
         }
+
+        // FIXME: Resource search should work with Local Overrides if enabled.
 
         // FIXME: Resource search should work in JSContext inspection.
         // <https://webkit.org/b/131252> Web Inspector: JSContext inspection Resource search does not work
-        if (!window.DOMAgent && !window.PageAgent)
-            updateEmptyContentPlaceholderSoon.call(this);
     }
 
     // Private
@@ -365,10 +410,10 @@ WI.SearchSidebarPanel = class SearchSidebarPanel extends WI.NavigationSidebarPan
 
     _treeSelectionDidChange(event)
     {
-        if (!this.visible)
+        if (!this.selected)
             return;
 
-        let treeElement = event.data.selectedElement;
+        let treeElement = this.contentTreeOutline.selectedTreeElement;
         if (!treeElement || treeElement instanceof WI.FolderTreeElement)
             return;
 
@@ -428,5 +473,10 @@ WI.SearchSidebarPanel = class SearchSidebarPanel extends WI.NavigationSidebarPan
         }
 
         this.element.appendChild(this._changedBanner);
+    }
+
+    _handleDefaultContentViewSearchNavigationItemClicked(event)
+    {
+        this.focusSearchField();
     }
 };

@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_EXAMPLES_PEERCONNECTION_SERVER_DATA_SOCKET_H_
-#define WEBRTC_EXAMPLES_PEERCONNECTION_SERVER_DATA_SOCKET_H_
+#ifndef EXAMPLES_PEERCONNECTION_SERVER_DATA_SOCKET_H_
+#define EXAMPLES_PEERCONNECTION_SERVER_DATA_SOCKET_H_
 
 #ifdef WIN32
 #include <winsock2.h>
@@ -27,7 +27,7 @@ typedef int NativeSocket;
 #endif
 
 #ifndef INVALID_SOCKET
-#define INVALID_SOCKET  static_cast<NativeSocket>(-1)
+#define INVALID_SOCKET static_cast<NativeSocket>(-1)
 #endif
 #endif
 
@@ -35,8 +35,10 @@ typedef int NativeSocket;
 
 class SocketBase {
  public:
-  SocketBase() : socket_(INVALID_SOCKET) { }
-  explicit SocketBase(NativeSocket socket) : socket_(socket) { }
+  SocketBase() : socket_(INVALID_SOCKET) {}
+  explicit SocketBase(NativeSocket socket) : socket_(socket) {}
+  SocketBase(SocketBase& other) = delete;
+  SocketBase& operator=(const SocketBase& other) = delete;
   ~SocketBase() { Close(); }
 
   NativeSocket socket() const { return socket_; }
@@ -60,13 +62,9 @@ class DataSocket : public SocketBase {
   };
 
   explicit DataSocket(NativeSocket socket)
-      : SocketBase(socket),
-        method_(INVALID),
-        content_length_(0) {
-  }
+      : SocketBase(socket), method_(INVALID), content_length_(0) {}
 
-  ~DataSocket() {
-  }
+  ~DataSocket() {}
 
   static const char kCrossOriginAllowHeaders[];
 
@@ -101,18 +99,20 @@ class DataSocket : public SocketBase {
   // Send a raw buffer of bytes.
   bool Send(const std::string& data) const;
 
-  // Send an HTTP response.  The |status| should start with a valid HTTP
+  // Send an HTTP response.  The `status` should start with a valid HTTP
   // response code, followed by a string.  E.g. "200 OK".
-  // If |connection_close| is set to true, an extra "Connection: close" HTTP
-  // header will be included.  |content_type| is the mime content type, not
+  // If `connection_close` is set to true, an extra "Connection: close" HTTP
+  // header will be included.  `content_type` is the mime content type, not
   // including the "Content-Type: " string.
-  // |extra_headers| should be either empty or a list of headers where each
+  // `extra_headers` should be either empty or a list of headers where each
   // header terminates with "\r\n".
-  // |data| is the body of the message.  It's length will be specified via
+  // `data` is the body of the message.  It's length will be specified via
   // a "Content-Length" header.
-  bool Send(const std::string& status, bool connection_close,
+  bool Send(const std::string& status,
+            bool connection_close,
             const std::string& content_type,
-            const std::string& extra_headers, const std::string& data) const;
+            const std::string& extra_headers,
+            const std::string& data) const;
 
   // Clears all held state and prepares the socket for receiving a new request.
   void Clear();
@@ -149,4 +149,4 @@ class ListeningSocket : public SocketBase {
   DataSocket* Accept() const;
 };
 
-#endif  // WEBRTC_EXAMPLES_PEERCONNECTION_SERVER_DATA_SOCKET_H_
+#endif  // EXAMPLES_PEERCONNECTION_SERVER_DATA_SOCKET_H_

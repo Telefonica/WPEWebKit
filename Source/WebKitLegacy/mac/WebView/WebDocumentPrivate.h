@@ -27,7 +27,11 @@
  */
 
 #import <WebKitLegacy/WebDocument.h>
+#import <WebKitLegacy/WebFrame.h>
 #import <WebKitLegacy/WebHTMLView.h>
+#if TARGET_OS_IPHONE
+#import <WebKitLegacy/WAKView.h>
+#endif
 
 @class DOMDocument;
 @class PDFDocument;
@@ -70,7 +74,11 @@
 
 // View that draws the selection and can be made first responder. Often this is self but it could be
 // a nested view, as for example in the case of WebPDFView.
+#if TARGET_OS_IPHONE
+- (WAKView *)selectionView;
+#else
 - (NSView *)selectionView;
+#endif
 @end
 
 @protocol WebDocumentPDF <WebDocumentText>
@@ -102,6 +110,7 @@
     @result Array of strings representing the supported MIME types.
 */
 + (NSArray *)supportedMIMETypes;
++ (Class)_representationClassForWebFrame:(WebFrame *)webFrame;
 @end
 
 @protocol WebPDFDocumentView <WebDocumentView>

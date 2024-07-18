@@ -22,44 +22,71 @@
 #include "config.h"
 #include "ShadowData.h"
 
-#include "LayoutRect.h"
 #include <wtf/PointerComparison.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
 ShadowData::ShadowData(const ShadowData& o)
-    : m_location(o.m_location)
-    , m_radius(o.m_radius)
+    : m_location(o.m_location.x(), o.m_location.y())
     , m_spread(o.m_spread)
+    , m_radius(o.m_radius)
     , m_color(o.m_color)
     , m_style(o.m_style)
     , m_isWebkitBoxShadow(o.m_isWebkitBoxShadow)
-    , m_next(o.m_next ? std::make_unique<ShadowData>(*o.m_next) : nullptr)
+    , m_next(o.m_next ? makeUnique<ShadowData>(*o.m_next) : nullptr)
 {
+}
+
+void ShadowData::deleteNextLinkedListWithoutRecursion()
+{
+    // Avoid recursion errors when the linked list is too long.
+    for (auto next = std::exchange(m_next, nullptr); (next = std::exchange(next->m_next, nullptr));) { }
+}
+
+std::optional<ShadowData> ShadowData::clone(const ShadowData* data)
+{
+    if (!data)
+        return std::nullopt;
+    return *data;
 }
 
 bool ShadowData::operator==(const ShadowData& o) const
 {
-    if (!arePointingToEqualData(m_next, o.m_next))
+    auto comparison = [](const auto& a, const auto& b) {
+        return a.m_location == b.m_location
+            && a.m_radius == b.m_radius
+            && a.m_spread == b.m_spread
+            && a.m_style == b.m_style
+            && a.m_color == b.m_color
+            && a.m_isWebkitBoxShadow == b.m_isWebkitBoxShadow;
+    };
+
+    if (!comparison(*this, o))
         return false;
-    
-    return m_location == o.m_location
-        && m_radius == o.m_radius
-        && m_spread == o.m_spread
-        && m_style == o.m_style
-        && m_color == o.m_color
-        && m_isWebkitBoxShadow == o.m_isWebkitBoxShadow;
+
+    // Avoid relying on recursion in case the linked list is very long.
+    auto* next = m_next.get();
+    auto* oNext = o.m_next.get();
+    while (next || oNext) {
+        if (!next || !oNext || !comparison(*next, *oNext))
+            return false;
+        next = next->m_next.get();
+        oNext = oNext->m_next.get();
+    }
+
+    return true;
 }
 
-static inline void calculateShadowExtent(const ShadowData* shadow, int additionalOutlineSize, int& shadowLeft, int& shadowRight, int& shadowTop, int& shadowBottom)
+static inline void calculateShadowExtent(const ShadowData* shadow, LayoutUnit additionalOutlineSize, LayoutUnit& shadowLeft, LayoutUnit& shadowRight, LayoutUnit& shadowTop, LayoutUnit& shadowBottom)
 {
     do {
-        int extentAndSpread = shadow->paintingExtent() + shadow->spread() + additionalOutlineSize;
-        if (shadow->style() == Normal) {
-            shadowLeft = std::min(shadow->x() - extentAndSpread, shadowLeft);
-            shadowRight = std::max(shadow->x() + extentAndSpread, shadowRight);
-            shadowTop = std::min(shadow->y() - extentAndSpread, shadowTop);
-            shadowBottom = std::max(shadow->y() + extentAndSpread, shadowBottom);
+        LayoutUnit extentAndSpread = shadow->paintingExtent() + LayoutUnit(shadow->spread().value()) + additionalOutlineSize;
+        if (shadow->style() == ShadowStyle::Normal) {
+            shadowLeft = std::min(LayoutUnit(shadow->x().value()) - extentAndSpread, shadowLeft);
+            shadowRight = std::max(LayoutUnit(shadow->x().value()) + extentAndSpread, shadowRight);
+            shadowTop = std::min(LayoutUnit(shadow->y().value()) - extentAndSpread, shadowTop);
+            shadowBottom = std::max(LayoutUnit(shadow->y().value()) + extentAndSpread, shadowBottom);
         }
 
         shadow = shadow->next();
@@ -68,10 +95,10 @@ static inline void calculateShadowExtent(const ShadowData* shadow, int additiona
 
 void ShadowData::adjustRectForShadow(LayoutRect& rect, int additionalOutlineSize) const
 {
-    int shadowLeft = 0;
-    int shadowRight = 0;
-    int shadowTop = 0;
-    int shadowBottom = 0;
+    LayoutUnit shadowLeft;
+    LayoutUnit shadowRight;
+    LayoutUnit shadowTop;
+    LayoutUnit shadowBottom;
     calculateShadowExtent(this, additionalOutlineSize, shadowLeft, shadowRight, shadowTop, shadowBottom);
 
     rect.move(shadowLeft, shadowTop);
@@ -81,15 +108,25 @@ void ShadowData::adjustRectForShadow(LayoutRect& rect, int additionalOutlineSize
 
 void ShadowData::adjustRectForShadow(FloatRect& rect, int additionalOutlineSize) const
 {
-    int shadowLeft = 0;
-    int shadowRight = 0;
-    int shadowTop = 0;
-    int shadowBottom = 0;
+    LayoutUnit shadowLeft = 0;
+    LayoutUnit shadowRight = 0;
+    LayoutUnit shadowTop = 0;
+    LayoutUnit shadowBottom = 0;
     calculateShadowExtent(this, additionalOutlineSize, shadowLeft, shadowRight, shadowTop, shadowBottom);
 
     rect.move(shadowLeft, shadowTop);
     rect.setWidth(rect.width() - shadowLeft + shadowRight);
     rect.setHeight(rect.height() - shadowTop + shadowBottom);
+}
+
+TextStream& operator<<(TextStream& ts, const ShadowData& data)
+{
+    ts.dumpProperty("location", data.location());
+    ts.dumpProperty("radius", data.radius());
+    ts.dumpProperty("spread", data.spread());
+    ts.dumpProperty("color", data.color());
+
+    return ts;
 }
 
 } // namespace WebCore

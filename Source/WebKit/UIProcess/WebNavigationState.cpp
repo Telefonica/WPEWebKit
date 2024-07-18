@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #include <WebCore/ResourceRequest.h>
 
 namespace WebKit {
+using namespace WebCore;
 
 WebNavigationState::WebNavigationState()
 {
@@ -40,54 +41,65 @@ WebNavigationState::~WebNavigationState()
 {
 }
 
-Ref<API::Navigation> WebNavigationState::createLoadRequestNavigation(WebCore::ResourceRequest&& request)
+Ref<API::Navigation> WebNavigationState::createLoadRequestNavigation(ResourceRequest&& request, WebBackForwardListItem* currentItem)
 {
-    auto navigation = API::Navigation::create(*this, WTFMove(request));
+    auto navigation = API::Navigation::create(*this, WTFMove(request), currentItem);
 
     m_navigations.set(navigation->navigationID(), navigation.ptr());
 
     return navigation;
 }
 
-Ref<API::Navigation> WebNavigationState::createBackForwardNavigation()
+Ref<API::Navigation> WebNavigationState::createBackForwardNavigation(WebBackForwardListItem& targetItem, WebBackForwardListItem* currentItem, FrameLoadType frameLoadType)
 {
-    auto navigation = API::Navigation::create(*this);
+    auto navigation = API::Navigation::create(*this, targetItem, currentItem, frameLoadType);
 
     m_navigations.set(navigation->navigationID(), navigation.ptr());
 
     return navigation;
 }
 
-Ref<API::Navigation> WebNavigationState::createReloadNavigation()
+Ref<API::Navigation> WebNavigationState::createReloadNavigation(WebBackForwardListItem* currentAndTargetItem)
 {
-    auto navigation = API::Navigation::create(*this);
+    auto navigation = API::Navigation::create(*this, currentAndTargetItem);
 
     m_navigations.set(navigation->navigationID(), navigation.ptr());
 
     return navigation;
 }
 
-Ref<API::Navigation> WebNavigationState::createLoadDataNavigation()
+Ref<API::Navigation> WebNavigationState::createLoadDataNavigation(std::unique_ptr<API::SubstituteData>&& substituteData)
 {
-    auto navigation = API::Navigation::create(*this);
+    auto navigation = API::Navigation::create(*this, WTFMove(substituteData));
 
     m_navigations.set(navigation->navigationID(), navigation.ptr());
 
     return navigation;
 }
 
-API::Navigation& WebNavigationState::navigation(uint64_t navigationID)
+Ref<API::Navigation> WebNavigationState::createSimulatedLoadWithDataNavigation(WebCore::ResourceRequest&& request, std::unique_ptr<API::SubstituteData>&& substituteData, WebBackForwardListItem* currentItem)
+{
+    auto navigation = API::Navigation::create(*this, WTFMove(request), WTFMove(substituteData), currentItem);
+
+    m_navigations.set(navigation->navigationID(), navigation.ptr());
+
+    return navigation;
+}
+
+API::Navigation* WebNavigationState::navigation(uint64_t navigationID)
 {
     ASSERT(navigationID);
-    
-    return *m_navigations.get(navigationID);
+    ASSERT(m_navigations.contains(navigationID));
+
+    return m_navigations.get(navigationID);
 }
 
-Ref<API::Navigation> WebNavigationState::takeNavigation(uint64_t navigationID)
+RefPtr<API::Navigation> WebNavigationState::takeNavigation(uint64_t navigationID)
 {
     ASSERT(navigationID);
+    ASSERT(m_navigations.contains(navigationID));
     
-    return m_navigations.take(navigationID).releaseNonNull();
+    return m_navigations.take(navigationID);
 }
 
 void WebNavigationState::didDestroyNavigation(uint64_t navigationID)

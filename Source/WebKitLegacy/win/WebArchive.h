@@ -34,16 +34,12 @@ namespace WebCore {
     class LegacyWebArchive;
 }
 
-class WebArchive : public IWebArchive
+class WebArchive final : public IWebArchive
 {
 public:
     static WebArchive* createInstance();
     static WebArchive* createInstance(RefPtr<WebCore::LegacyWebArchive>&&);
-protected:
-    WebArchive(RefPtr<WebCore::LegacyWebArchive>&&);
-    ~WebArchive();
 
-public:
     // IUnknown
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppvObject);
     virtual ULONG STDMETHODCALLTYPE AddRef();
@@ -60,9 +56,14 @@ public:
     virtual HRESULT STDMETHODCALLTYPE  subframeArchives(_COM_Outptr_opt_ IEnumVARIANT**);
     virtual HRESULT STDMETHODCALLTYPE  data(_COM_Outptr_opt_ IStream**);
 
-protected:
+private:
+    WebArchive(RefPtr<WebCore::LegacyWebArchive>&&);
+    ~WebArchive();
+
     ULONG m_refCount { 0 };
+#if USE(CF)
     RefPtr<WebCore::LegacyWebArchive> m_archive;
+#endif
 };
 
 #endif // WebArchive_h

@@ -33,6 +33,7 @@
 namespace WebCore {
 
 class RenderMedia : public RenderImage {
+    WTF_MAKE_ISO_ALLOCATED(RenderMedia);
 public:
     RenderMedia(HTMLMediaElement&, RenderStyle&&);
     RenderMedia(HTMLMediaElement&, RenderStyle&&, const IntSize& intrinsicSize);
@@ -40,20 +41,23 @@ public:
 
     HTMLMediaElement& mediaElement() const { return downcast<HTMLMediaElement>(nodeForNonAnonymous()); }
 
+    bool shouldDisplayBrokenImageIcon() const final { return false; }
+
 protected:
     void layout() override;
+
+    void visibleInViewportStateChanged() override { }
 
 private:
     void element() const = delete;
 
     bool canHaveChildren() const final { return true; }
 
-    const char* renderName() const override { return "RenderMedia"; }
+    ASCIILiteral renderName() const override { return "RenderMedia"_s; }
     bool isMedia() const final { return true; }
     bool isImage() const final { return false; }
     void paintReplaced(PaintInfo&, const LayoutPoint&) override;
 
-    bool shadowControlsNeedCustomLayoutMetrics() const override { return true; }
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle) final;
 };
 

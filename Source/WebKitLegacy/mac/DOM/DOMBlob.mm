@@ -29,12 +29,12 @@
 #import "DOMInternal.h"
 #import "DOMNodeInternal.h"
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL reinterpret_cast<WebCore::Blob*>(_internal)
 
@@ -70,10 +70,12 @@ DOMBlob *kit(WebCore::Blob* value)
     if (!value)
         return nil;
     if (DOMBlob *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMBlob *wrapper = [[DOMBlob alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    auto wrapper = adoptNS([[DOMBlob alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
+
+#undef IMPL

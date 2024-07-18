@@ -32,6 +32,7 @@
 #import "WebFrameInternal.h"
 #import "WebScriptDebugDelegate.h"
 #import "WebViewInternal.h"
+#import <JavaScriptCore/Breakpoint.h>
 #import <JavaScriptCore/DebuggerCallFrame.h>
 #import <JavaScriptCore/JSGlobalObject.h>
 #import <JavaScriptCore/SourceProvider.h>
@@ -39,17 +40,14 @@
 #import <WebCore/DOMWindow.h>
 #import <WebCore/Frame.h>
 #import <WebCore/JSDOMWindow.h>
-#import <WebCore/URL.h>
 #import <WebCore/ScriptController.h>
+#import <wtf/URL.h>
 
-using namespace JSC;
-using namespace WebCore;
-
-@interface WebScriptCallFrame (WebScriptDebugDelegateInternal)
+@interface WebScriptCallFrame (WebScriptDebugDelegateInternalForDebugger)
 - (WebScriptCallFrame *)_initWithGlobalObject:(WebScriptObject *)globalObj functionName:(String)functionName exceptionValue:(JSC::JSValue)exceptionValue;
 @end
 
-static NSString *toNSString(SourceProvider* sourceProvider)
+static NSString *toNSString(JSC::SourceProvider* sourceProvider)
 {
     const String& sourceString = sourceProvider->source().toString();
     if (sourceString.isEmpty())
@@ -57,32 +55,24 @@ static NSString *toNSString(SourceProvider* sourceProvider)
     return sourceString;
 }
 
-// Convert String to NSURL.
-static NSURL *toNSURL(const String& s)
+static WebFrame *toWebFrame(JSC::JSGlobalObject* globalObject)
 {
-    if (s.isEmpty())
-        return nil;
-    return URL(ParsedURLString, s);
-}
-
-static WebFrame *toWebFrame(JSGlobalObject* globalObject)
-{
-    JSDOMWindow* window = static_cast<JSDOMWindow*>(globalObject);
+    WebCore::JSDOMWindow* window = static_cast<WebCore::JSDOMWindow*>(globalObject);
     return kit(window->wrapped().frame());
 }
 
-WebScriptDebugger::WebScriptDebugger(JSGlobalObject* globalObject)
+WebScriptDebugger::WebScriptDebugger(JSC::JSGlobalObject* globalObject)
     : Debugger(globalObject->vm())
     , m_callingDelegate(false)
     , m_globalObject(globalObject->vm(), globalObject)
 {
-    setPauseOnExceptionsState(PauseOnAllExceptions);
+    setPauseOnAllExceptionsBreakpoint(JSC::Breakpoint::create(JSC::noBreakpointID));
     deactivateBreakpoints();
     attach(globalObject);
 }
 
 // callbacks - relay to delegate
-void WebScriptDebugger::sourceParsed(ExecState* exec, SourceProvider* sourceProvider, int errorLine, const String& errorMsg)
+void WebScriptDebugger::sourceParsed(JSC::JSGlobalObject* lexicalGlobalObject, JSC::SourceProvider* sourceProvider, int errorLine, const String& errorMsg)
 {
     if (m_callingDelegate)
         return;
@@ -90,10 +80,11 @@ void WebScriptDebugger::sourceParsed(ExecState* exec, SourceProvider* sourceProv
     m_callingDelegate = true;
 
     NSString *nsSource = toNSString(sourceProvider);
-    NSURL *nsURL = toNSURL(sourceProvider->url());
+    NSURL *nsURL = sourceProvider->sourceOrigin().url();
     int firstLine = sourceProvider->startPosition().m_line.oneBasedInt();
 
-    WebFrame *webFrame = toWebFrame(exec->vmEntryGlobalObject());
+    JSC::VM& vm = lexicalGlobalObject->vm();
+    WebFrame *webFrame = toWebFrame(vm.deprecatedVMEntryGlobalObject(lexicalGlobalObject));
     WebView *webView = [webFrame webView];
     WebScriptDebugDelegateImplementationCache* implementations = WebViewGetScriptDebugDelegateImplementations(webView);
 
@@ -105,21 +96,27 @@ void WebScriptDebugger::sourceParsed(ExecState* exec, SourceProvider* sourceProv
                 CallScriptDebugDelegate(implementations->didParseSourceFunc, webView, @selector(webView:didParseSource:fromURL:sourceId:forWebFrame:), nsSource, [nsURL absoluteString], sourceProvider->asID(), webFrame);
         }
     } else {
-        NSString* nsErrorMessage = nsStringNilIfEmpty(errorMsg);
-        NSDictionary *info = [[NSDictionary alloc] initWithObjectsAndKeys:nsErrorMessage, WebScriptErrorDescriptionKey, [NSNumber numberWithUnsignedInt:errorLine], WebScriptErrorLineNumberKey, nil];
-        NSError *error = [[NSError alloc] initWithDomain:WebScriptErrorDomain code:WebScriptGeneralErrorCode userInfo:info];
+        NSDictionary *info;
+        if (errorMsg.isEmpty()) {
+            info = @{
+                WebScriptErrorLineNumberKey: @(errorLine),
+            };
+        } else {
+            info = @{
+                WebScriptErrorDescriptionKey: (NSString *)errorMsg,
+                WebScriptErrorLineNumberKey: @(errorLine),
+            };
+        }
+        auto error = adoptNS([[NSError alloc] initWithDomain:WebScriptErrorDomain code:WebScriptGeneralErrorCode userInfo:info]);
 
         if (implementations->failedToParseSourceFunc)
-            CallScriptDebugDelegate(implementations->failedToParseSourceFunc, webView, @selector(webView:failedToParseSource:baseLineNumber:fromURL:withError:forWebFrame:), nsSource, firstLine, nsURL, error, webFrame);
-
-        [error release];
-        [info release];
+            CallScriptDebugDelegate(implementations->failedToParseSourceFunc, webView, @selector(webView:failedToParseSource:baseLineNumber:fromURL:withError:forWebFrame:), nsSource, firstLine, nsURL, error.get(), webFrame);
     }
 
     m_callingDelegate = false;
 }
 
-void WebScriptDebugger::handlePause(JSGlobalObject* globalObject, Debugger::ReasonForPause reason)
+void WebScriptDebugger::handlePause(JSC::JSGlobalObject* globalObject, Debugger::ReasonForPause reason)
 {
     if (m_callingDelegate)
         return;
@@ -129,11 +126,12 @@ void WebScriptDebugger::handlePause(JSGlobalObject* globalObject, Debugger::Reas
 
     m_callingDelegate = true;
 
+    JSC::VM& vm = globalObject->vm();
     WebFrame *webFrame = toWebFrame(globalObject);
     WebView *webView = [webFrame webView];
-    DebuggerCallFrame& debuggerCallFrame = currentDebuggerCallFrame();
-    JSValue exceptionValue = currentException();
-    String functionName = debuggerCallFrame.functionName();
+    JSC::DebuggerCallFrame& debuggerCallFrame = currentDebuggerCallFrame();
+    JSC::JSValue exceptionValue = currentException();
+    String functionName = debuggerCallFrame.functionName(vm);
     RetainPtr<WebScriptCallFrame> webCallFrame = adoptNS([[WebScriptCallFrame alloc] _initWithGlobalObject:core(webFrame)->script().windowScriptObject() functionName:functionName exceptionValue:exceptionValue]);
 
     WebScriptDebugDelegateImplementationCache* cache = WebViewGetScriptDebugDelegateImplementations(webView);

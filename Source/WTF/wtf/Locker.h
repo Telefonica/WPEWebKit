@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,11 +25,16 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef Locker_h
-#define Locker_h
 
+#pragma once
+
+#include <mutex>
 #include <wtf/Assertions.h>
+#include <wtf/Atomics.h>
+#include <wtf/Compiler.h>
+#include <wtf/ForbidHeapAllocation.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/ThreadSanitizerSupport.h>
 
 namespace WTF {
 
@@ -48,10 +53,17 @@ protected:
     }
 };
 
-template <typename T> class Locker : public AbstractLocker {
+template<typename T> class DropLockForScope;
+
+using AdoptLockTag = std::adopt_lock_t;
+constexpr AdoptLockTag AdoptLock;
+
+template<typename T>
+class Locker : public AbstractLocker {
 public:
     explicit Locker(T& lockable) : m_lockable(&lockable) { lock(); }
     explicit Locker(T* lockable) : m_lockable(lockable) { lock(); }
+    explicit Locker(AdoptLockTag, T& lockable) : m_lockable(&lockable) { }
 
     // You should be wary of using this constructor. It's only applicable
     // in places where there is a locking protocol for a particular object
@@ -60,12 +72,11 @@ public:
     // be accessed concurrently.
     Locker(NoLockingNecessaryTag) : m_lockable(nullptr) { }
     
-    Locker(int) = delete;
+    Locker(std::underlying_type_t<NoLockingNecessaryTag>) = delete;
 
     ~Locker()
     {
-        if (m_lockable)
-            m_lockable->unlock();
+        unlock();
     }
     
     static Locker tryLock(T& lockable)
@@ -77,13 +88,15 @@ public:
         }
         return result;
     }
+
+    T* lockable() { return m_lockable; }
     
     explicit operator bool() const { return !!m_lockable; }
     
     void unlockEarly()
     {
-        m_lockable->unlock();
-        m_lockable = 0;
+        unlock();
+        m_lockable = nullptr;
     }
     
     // It's great to be able to pass lockers around. It enables custom locking adaptors like
@@ -91,48 +104,128 @@ public:
     Locker(Locker&& other)
         : m_lockable(other.m_lockable)
     {
+        ASSERT(&other != this);
         other.m_lockable = nullptr;
     }
     
     Locker& operator=(Locker&& other)
     {
-        if (m_lockable)
-            m_lockable->unlock();
+        ASSERT(&other != this);
         m_lockable = other.m_lockable;
         other.m_lockable = nullptr;
         return *this;
     }
     
 private:
+    template<typename>
+    friend class DropLockForScope;
+
+    void unlock()
+    {
+        compilerFence();
+        if (m_lockable) {
+            TSAN_ANNOTATE_HAPPENS_BEFORE(m_lockable);
+            m_lockable->unlock();
+        }
+    }
+
     void lock()
     {
-        if (m_lockable)
+        if (m_lockable) {
             m_lockable->lock();
+            TSAN_ANNOTATE_HAPPENS_AFTER(m_lockable);
+        }
+        compilerFence();
     }
     
     T* m_lockable;
 };
 
-// Use this lock scope like so:
-// auto locker = holdLock(lock);
 template<typename LockType>
-Locker<LockType> holdLock(LockType& lock)
-{
-    return Locker<LockType>(lock);
-}
+class DropLockForScope : private AbstractLocker {
+    WTF_FORBID_HEAP_ALLOCATION(DropLockForScope);
+public:
+    DropLockForScope(Locker<LockType>& lock)
+        : m_lock(lock)
+    {
+        m_lock.unlock();
+    }
 
-template<typename LockType>
-Locker<LockType> tryHoldLock(LockType& lock)
-{
-    return Locker<LockType>::tryLock(lock);
-}
+    ~DropLockForScope()
+    {
+        m_lock.lock();
+    }
+
+private:
+    Locker<LockType>& m_lock;
+};
+
+// This is a close replica of Locker, but for generic lock/unlock functions.
+template<typename T, void (lockFunction)(T*), void (*unlockFunction)(T*)>
+class ExternalLocker: public WTF::AbstractLocker {
+public:
+    explicit ExternalLocker(T* lockable)
+        : m_lockable(lockable)
+    {
+        ASSERT(lockable);
+        lock();
+    }
+
+    ~ExternalLocker()
+    {
+        unlock();
+    }
+
+    T* lockable() { return m_lockable; }
+
+    explicit operator bool() const { return !!m_lockable; }
+
+    void unlockEarly()
+    {
+        unlock();
+        m_lockable = nullptr;
+    }
+
+    ExternalLocker(ExternalLocker&& other)
+        : m_lockable(other.m_lockable)
+    {
+        ASSERT(&other != this);
+        other.m_lockable = nullptr;
+    }
+
+    ExternalLocker& operator=(ExternalLocker&& other)
+    {
+        ASSERT(&other != this);
+        m_lockable = other.m_lockable;
+        other.m_lockable = nullptr;
+        return *this;
+    }
+
+private:
+    template<typename>
+    friend class DropLockForScope;
+
+    void unlock()
+    {
+        if (m_lockable)
+            unlockFunction(m_lockable);
+    }
+
+    void lock()
+    {
+        if (m_lockable)
+            lockFunction(m_lockable);
+    }
+
+    T* m_lockable;
+};
 
 }
 
 using WTF::AbstractLocker;
+using WTF::AdoptLock;
 using WTF::Locker;
 using WTF::NoLockingNecessaryTag;
 using WTF::NoLockingNecessary;
-using WTF::holdLock;
-
-#endif
+using WTF::DropLockForScope;
+using WTF::ExternalLocker;

@@ -8,12 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_MOUSE_CURSOR_MONITOR_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_MOUSE_CURSOR_MONITOR_H_
+#ifndef MODULES_DESKTOP_CAPTURE_MOUSE_CURSOR_MONITOR_H_
+#define MODULES_DESKTOP_CAPTURE_MOUSE_CURSOR_MONITOR_H_
 
-#include "webrtc/modules/desktop_capture/desktop_capture_types.h"
-#include "webrtc/modules/desktop_capture/desktop_geometry.h"
-#include "webrtc/typedefs.h"
+#include <memory>
+
+#include "modules/desktop_capture/desktop_capture_types.h"
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
@@ -24,6 +26,7 @@ class MouseCursor;
 // Captures mouse shape and position.
 class MouseCursorMonitor {
  public:
+  // Deprecated: CursorState will not be provided.
   enum CursorState {
     // Cursor on top of the window including window decorations.
     INSIDE,
@@ -44,13 +47,24 @@ class MouseCursorMonitor {
   class Callback {
    public:
     // Called in response to Capture() when the cursor shape has changed. Must
-    // take ownership of |cursor|.
+    // take ownership of `cursor`.
     virtual void OnMouseCursor(MouseCursor* cursor) = 0;
 
-    // Called in response to Capture(). |position| indicates cursor position
-    // relative to the |window| specified in the constructor.
+    // Called in response to Capture(). `position` indicates cursor position
+    // relative to the `window` specified in the constructor.
+    // Deprecated: use the following overload instead.
     virtual void OnMouseCursorPosition(CursorState state,
-                                       const DesktopVector& position) = 0;
+                                       const DesktopVector& position) {}
+
+    // Called in response to Capture(). `position` indicates cursor absolute
+    // position on the system in fullscreen coordinate, i.e. the top-left
+    // monitor always starts from (0, 0).
+    // The coordinates of the position is controlled by OS, but it's always
+    // consistent with DesktopFrame.rect().top_left().
+    // TODO(zijiehe): Ensure all implementations return the absolute position.
+    // TODO(zijiehe): Current this overload works correctly only when capturing
+    // mouse cursor against fullscreen.
+    virtual void OnMouseCursorPosition(const DesktopVector& position) {}
 
    protected:
     virtual ~Callback() {}
@@ -60,23 +74,31 @@ class MouseCursorMonitor {
 
   // Creates a capturer that notifies of mouse cursor events while the cursor is
   // over the specified window.
+  //
+  // Deprecated: use Create() function.
   static MouseCursorMonitor* CreateForWindow(
       const DesktopCaptureOptions& options,
       WindowId window);
 
-  // Creates a capturer that monitors the mouse cursor shape and position across
-  // the entire desktop.
+  // Creates a capturer that monitors the mouse cursor shape and position over
+  // the specified screen.
   //
-  // TODO(sergeyu): Provide a way to select a specific screen.
-  static MouseCursorMonitor* CreateForScreen(
+  // Deprecated: use Create() function.
+  static RTC_EXPORT MouseCursorMonitor* CreateForScreen(
       const DesktopCaptureOptions& options,
       ScreenId screen);
 
-  // Initializes the monitor with the |callback|, which must remain valid until
+  // Creates a capturer that monitors the mouse cursor shape and position across
+  // the entire desktop. The capturer ensures that the top-left monitor starts
+  // from (0, 0).
+  static RTC_EXPORT std::unique_ptr<MouseCursorMonitor> Create(
+      const DesktopCaptureOptions& options);
+
+  // Initializes the monitor with the `callback`, which must remain valid until
   // capturer is destroyed.
   virtual void Init(Callback* callback, Mode mode) = 0;
 
-  // Captures current cursor shape and position (depending on the |mode| passed
+  // Captures current cursor shape and position (depending on the `mode` passed
   // to Init()). Calls Callback::OnMouseCursor() if cursor shape has
   // changed since the last call (or when Capture() is called for the first
   // time) and then Callback::OnMouseCursorPosition() if mode is set to
@@ -86,5 +108,4 @@ class MouseCursorMonitor {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_MOUSE_CURSOR_MONITOR_H_
-
+#endif  // MODULES_DESKTOP_CAPTURE_MOUSE_CURSOR_MONITOR_H_

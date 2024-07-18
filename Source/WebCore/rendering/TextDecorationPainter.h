@@ -1,7 +1,7 @@
 /*
  * (C) 1999 Lars Knoll (knoll@kde.org)
  * (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,14 +24,17 @@
 
 #include "Color.h"
 #include "FloatPoint.h"
+#include "InlineIteratorTextBox.h"
 #include "RenderStyleConstants.h"
+#include <wtf/OptionSet.h>
 
 namespace WebCore {
 
+class FilterOperations;
 class FontCascade;
 class FloatRect;
 class GraphicsContext;
-class InlineTextBox;
+class LegacyInlineTextBox;
 class RenderObject;
 class RenderStyle;
 class RenderText;
@@ -40,18 +43,16 @@ class TextRun;
     
 class TextDecorationPainter {
 public:
-    TextDecorationPainter(GraphicsContext&, TextDecoration, const RenderText&, bool isFirstLine);
-    
-    void setInlineTextBox(const InlineTextBox* inlineTextBox) { m_inlineTextBox = inlineTextBox; }
-    void setFont(const FontCascade& font) { m_font = &font; }
-    void setIsHorizontal(bool isHorizontal) { m_isHorizontal = isHorizontal; }
-    void setWidth(float width) { m_width = width; }
-    void setBaseline(float baseline) { m_baseline = baseline; }
-    void addTextShadow(const ShadowData* textShadow) { m_shadow = textShadow; }
+    struct Styles;
+    TextDecorationPainter(GraphicsContext&, OptionSet<TextDecorationLine> decorations, const RenderText&, bool isFirstLine, const FontCascade&, InlineIterator::TextBoxIterator, float width, const ShadowData*, const FilterOperations*, std::optional<Styles> = std::nullopt);
 
-    void paintTextDecoration(const TextRun&, const FloatPoint& textOrigin, const FloatPoint& boxOrigin);
+    void paintBackgroundDecorations(const TextRun&, const FloatPoint& textOrigin, const FloatPoint& boxOrigin);
+    void paintForegroundDecorations(const FloatPoint& boxOrigin);
 
     struct Styles {
+        bool operator==(const Styles&) const;
+        bool operator!=(const Styles& other) const { return !(*this == other); }
+
         Color underlineColor;
         Color overlineColor;
         Color linethroughColor;
@@ -59,21 +60,25 @@ public:
         TextDecorationStyle overlineStyle;
         TextDecorationStyle linethroughStyle;
     };
-    static Styles stylesForRenderer(const RenderObject&, unsigned requestedDecorations, bool firstLineStyle = false);
-        
+    static Color decorationColor(const RenderStyle&);
+    static OptionSet<TextDecorationLine> textDecorationsInEffectForStyle(const Styles&);
+    static Styles stylesForRenderer(const RenderObject&, OptionSet<TextDecorationLine> requestedDecorations, bool firstLineStyle = false, PseudoId = PseudoId::None);
+
 private:
+    void paintLineThrough(const Color&, float thickness, const FloatPoint& localOrigin);
+
     GraphicsContext& m_context;
-    TextDecoration m_decoration;
-    int m_wavyOffset { 0 };
-    bool m_isPrinting { false };
+    OptionSet<TextDecorationLine> m_decorations;
+    float m_wavyOffset;
     float m_width { 0 };
-    float m_baseline { 0 };
     FloatPoint m_boxOrigin;
+    bool m_isPrinting;
     bool m_isHorizontal { true };
     const ShadowData* m_shadow { nullptr };
-    const InlineTextBox* m_inlineTextBox { nullptr };
-    const FontCascade* m_font { nullptr };
-    
+    const FilterOperations* m_shadowColorFilter { nullptr };
+    InlineIterator::TextBoxIterator m_textBox;
+    const FontCascade& m_font;
+
     Styles m_styles;
     const RenderStyle& m_lineStyle;
 };

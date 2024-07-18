@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,19 +27,27 @@
  */
 
 #include "config.h"
-#include "MediaTime.h"
+#include <wtf/MediaTime.h>
 
 #include <algorithm>
 #include <cstdlib>
+#include <wtf/Assertions.h>
 #include <wtf/CheckedArithmetic.h>
+#include <wtf/Int128.h>
+#include <wtf/JSONValues.h>
 #include <wtf/MathExtras.h>
 #include <wtf/PrintStream.h>
-#include <wtf/text/StringBuilder.h>
+#include <wtf/text/TextStream.h>
 
 namespace WTF {
 
+static_assert(std::is_trivially_destructible_v<MediaTime>, "MediaTime should be trivially destructible.");
+
 static uint32_t greatestCommonDivisor(uint32_t a, uint32_t b)
 {
+    ASSERT(a);
+    ASSERT(b);
+
     // Euclid's Algorithm
     uint32_t temp = 0;
     while (b) {
@@ -47,6 +55,8 @@ static uint32_t greatestCommonDivisor(uint32_t a, uint32_t b)
         b = a % b;
         a = temp;
     }
+
+    ASSERT(a);
     return a;
 }
 
@@ -60,25 +70,7 @@ static int64_t signum(int64_t val)
     return (0 < val) - (val < 0);
 }
 
-const uint32_t MediaTime::MaximumTimeScale = 0x7fffffffL;
-
-MediaTime::MediaTime()
-    : m_timeValue(0)
-    , m_timeScale(DefaultTimeScale)
-    , m_timeFlags(Valid)
-{
-}
-
-MediaTime::MediaTime(int64_t value, uint32_t scale, uint8_t flags)
-    : m_timeValue(value)
-    , m_timeScale(scale)
-    , m_timeFlags(flags)
-{
-}
-
-MediaTime::~MediaTime()
-{
-}
+const uint32_t MediaTime::MaximumTimeScale = 1000000000;
 
 MediaTime::MediaTime(const MediaTime& rhs)
 {
@@ -103,12 +95,14 @@ MediaTime MediaTime::createWithFloat(float floatTime, uint32_t timeScale)
         return invalidTime();
     if (std::isinf(floatTime))
         return std::signbit(floatTime) ? negativeInfiniteTime() : positiveInfiniteTime();
-    if (floatTime > std::numeric_limits<int64_t>::max())
+    if (floatTime >= maxPlusOne<int64_t>)
         return positiveInfiniteTime();
     if (floatTime < std::numeric_limits<int64_t>::min())
         return negativeInfiniteTime();
+    if (!timeScale)
+        return std::signbit(floatTime) ? negativeInfiniteTime() : positiveInfiniteTime();
 
-    while (floatTime * timeScale > std::numeric_limits<int64_t>::max())
+    while (floatTime * timeScale >= maxPlusOne<int64_t>)
         timeScale /= 2;
     return MediaTime(static_cast<int64_t>(floatTime * timeScale), timeScale, Valid);
 }
@@ -131,12 +125,14 @@ MediaTime MediaTime::createWithDouble(double doubleTime, uint32_t timeScale)
         return invalidTime();
     if (std::isinf(doubleTime))
         return std::signbit(doubleTime) ? negativeInfiniteTime() : positiveInfiniteTime();
-    if (doubleTime > std::numeric_limits<int64_t>::max())
+    if (doubleTime >= maxPlusOne<int64_t>)
         return positiveInfiniteTime();
     if (doubleTime < std::numeric_limits<int64_t>::min())
         return negativeInfiniteTime();
+    if (!timeScale)
+        return std::signbit(doubleTime) ? negativeInfiniteTime() : positiveInfiniteTime();
 
-    while (doubleTime * timeScale > std::numeric_limits<int64_t>::max())
+    while (doubleTime * timeScale >= maxPlusOne<int64_t>)
         timeScale /= 2;
     return MediaTime(static_cast<int64_t>(std::round(doubleTime * timeScale)), timeScale, Valid);
 }
@@ -308,13 +304,10 @@ MediaTime MediaTime::operator*(int32_t rhs) const
         return positiveInfiniteTime();
     }
 
+    if (hasDoubleValue())
+        return MediaTime::createWithDouble(m_timeValueAsDouble * rhs);
+
     MediaTime a = *this;
-
-    if (a.hasDoubleValue()) {
-        a.m_timeValueAsDouble *= rhs;
-        return a;
-    }
-
     while (!safeMultiply(a.m_timeValue, rhs, a.m_timeValue)) {
         if (a.m_timeScale == 1)
             return signum(a.m_timeValue) == signum(rhs) ? positiveInfiniteTime() : negativeInfiniteTime();
@@ -327,13 +320,15 @@ MediaTime MediaTime::operator*(int32_t rhs) const
 bool MediaTime::operator!() const
 {
     return (m_timeFlags == Valid && !m_timeValue)
-        || (m_timeFlags == (Valid | DoubleValue) && !m_timeValueAsDouble);
+        || (m_timeFlags == (Valid | DoubleValue) && !m_timeValueAsDouble)
+        || isInvalid();
 }
 
 MediaTime::operator bool() const
 {
     return !(m_timeFlags == Valid && !m_timeValue)
-        && !(m_timeFlags == (Valid | DoubleValue) && !m_timeValueAsDouble);
+        && !(m_timeFlags == (Valid | DoubleValue) && !m_timeValueAsDouble)
+        && !isInvalid();
 }
 
 MediaTime::ComparisonFlags MediaTime::compare(const MediaTime& rhs) const
@@ -390,11 +385,19 @@ MediaTime::ComparisonFlags MediaTime::compare(const MediaTime& rhs) const
     if (m_timeValue == rhs.m_timeValue)
         return m_timeScale < rhs.m_timeScale ? GreaterThan : LessThan;
 
-    if (m_timeValue < rhs.m_timeValue && m_timeScale > rhs.m_timeScale)
-        return LessThan;
+    if (m_timeValue >= 0) {
+        if (m_timeValue < rhs.m_timeValue && m_timeScale > rhs.m_timeScale)
+            return LessThan;
 
-    if (m_timeValue > rhs.m_timeValue && m_timeScale < rhs.m_timeScale)
-        return GreaterThan;
+        if (m_timeValue > rhs.m_timeValue && m_timeScale < rhs.m_timeScale)
+            return GreaterThan;
+    } else {
+        if (m_timeValue < rhs.m_timeValue && m_timeScale < rhs.m_timeScale)
+            return LessThan;
+
+        if (m_timeValue > rhs.m_timeValue && m_timeScale > rhs.m_timeScale)
+            return GreaterThan;
+    }
 
     int64_t lhsFactor;
     int64_t rhsFactor;
@@ -431,32 +434,32 @@ bool MediaTime::isBetween(const MediaTime& a, const MediaTime& b) const
 
 const MediaTime& MediaTime::zeroTime()
 {
-    static const MediaTime* time = new MediaTime(0, 1, Valid);
-    return *time;
+    static const MediaTime time(0, 1, Valid);
+    return time;
 }
 
 const MediaTime& MediaTime::invalidTime()
 {
-    static const MediaTime* time = new MediaTime(-1, 1, 0);
-    return *time;
+    static const MediaTime time(-1, 1, 0);
+    return time;
 }
 
 const MediaTime& MediaTime::positiveInfiniteTime()
 {
-    static const MediaTime* time = new MediaTime(0, 1, PositiveInfinite | Valid);
-    return *time;
+    static const MediaTime time(0, 1, PositiveInfinite | Valid);
+    return time;
 }
 
 const MediaTime& MediaTime::negativeInfiniteTime()
 {
-    static const MediaTime* time = new MediaTime(-1, 1, NegativeInfinite | Valid);
-    return *time;
+    static const MediaTime time(-1, 1, NegativeInfinite | Valid);
+    return time;
 }
 
 const MediaTime& MediaTime::indefiniteTime()
 {
-    static const MediaTime* time = new MediaTime(0, 1, Indefinite | Valid);
-    return *time;
+    static const MediaTime time(0, 1, Indefinite | Valid);
+    return time;
 }
 
 MediaTime MediaTime::toTimeScale(uint32_t timeScale, RoundingFlags flags) const
@@ -473,14 +476,18 @@ void MediaTime::setTimeScale(uint32_t timeScale, RoundingFlags flags)
         return;
     }
 
+    if (!timeScale) {
+        *this = m_timeValue < 0 ? negativeInfiniteTime() : positiveInfiniteTime();
+        return;
+    }
+
     if (timeScale == m_timeScale)
         return;
 
     timeScale = std::min(MaximumTimeScale, timeScale);
 
-#if HAVE(INT128_T)
-    __int128_t newValue = static_cast<__int128_t>(m_timeValue) * timeScale;
-    int64_t remainder = newValue % m_timeScale;
+    Int128 newValue = static_cast<Int128>(m_timeValue) * timeScale;
+    int64_t remainder = static_cast<int64_t>(newValue % m_timeScale);
     newValue = newValue / m_timeScale;
 
     if (newValue < std::numeric_limits<int64_t>::min()) {
@@ -492,19 +499,8 @@ void MediaTime::setTimeScale(uint32_t timeScale, RoundingFlags flags)
         *this = positiveInfiniteTime();
         return;
     }
-#else
-    int64_t newValue = m_timeValue / m_timeScale;
-    int64_t partialRemainder = (m_timeValue % m_timeScale) * timeScale;
-    int64_t remainder = partialRemainder % m_timeScale;
 
-    if (!safeMultiply<int64_t>(newValue, static_cast<int64_t>(timeScale), newValue)
-        || !safeAdd(newValue, partialRemainder / m_timeScale, newValue)) {
-        *this = newValue < 0 ? negativeInfiniteTime() : positiveInfiniteTime();
-        return;
-    }
-#endif
-
-    m_timeValue = newValue;
+    m_timeValue = static_cast<int64_t>(newValue);
     std::swap(m_timeScale, timeScale);
 
     if (!remainder)
@@ -554,18 +550,42 @@ void MediaTime::dump(PrintStream& out) const
 
 String MediaTime::toString() const
 {
-    StringBuilder builder;
+    const char* invalid = isInvalid() ? ", invalid" : "";
+    if (hasDoubleValue())
+        return makeString('{', toDouble(), invalid, '}');
+    return makeString('{', m_timeValue, '/', m_timeScale, " = ", toDouble(), invalid, '}');
+}
 
-    builder.append('{');
-    if (!hasDoubleValue()) {
-        builder.appendNumber(m_timeValue);
-        builder.append('/');
-        builder.appendNumber(m_timeScale);
-        builder.appendLiteral(" = ");
+Ref<JSON::Object> MediaTime::toJSONObject() const
+{
+    auto object = JSON::Object::create();
+
+    if (hasDoubleValue()) {
+        object->setDouble("value"_s, toDouble());
+        return object;
     }
-    builder.appendNumber(toDouble());
-    builder.append('}');
-    return builder.toString();
+
+    if (isInvalid())
+        object->setBoolean("invalid"_s, true);
+    else if (isIndefinite())
+        object->setString("value"_s, "NaN"_s);
+    else if (isPositiveInfinite())
+        object->setString("value"_s, "POSITIVE_INFINITY"_s);
+    else if (isNegativeInfinite())
+        object->setString("value"_s, "NEGATIVE_INFINITY"_s);
+    else
+        object->setDouble("value"_s, toDouble());
+
+    object->setDouble("numerator"_s, static_cast<double>(m_timeValue));
+    object->setInteger("denominator"_s, m_timeScale);
+    object->setInteger("flags"_s, m_timeFlags);
+
+    return object;
+}
+
+String MediaTime::toJSONString() const
+{
+    return toJSONObject()->toJSONString();
 }
 
 MediaTime abs(const MediaTime& rhs)
@@ -582,5 +602,19 @@ MediaTime abs(const MediaTime& rhs)
     return val;
 }
 
+String MediaTimeRange::toJSONString() const
+{
+    auto object = JSON::Object::create();
+
+    object->setObject("start"_s, start.toJSONObject());
+    object->setObject("end"_s, end.toJSONObject());
+
+    return object->toJSONString();
 }
 
+TextStream& operator<<(TextStream& stream, const MediaTime& time)
+{
+    return stream << time.toJSONString();
+}
+
+}

@@ -36,12 +36,27 @@
     padding: 15px;
 }
 
+.content-view.canvas {
+    display: flex;
+    flex-direction: column;
+}
+
 .content-view.canvas > .preview > img {
     max-width: 100%;
     max-height: 100%;
 }
 
+.content-view.canvas > :is(header, footer) {
+    display: none;
+}
+
 .navigation-bar > .item.canvas-record.disabled {
     filter: grayscale();
     opacity: 0.5;
+}
+
+@media (prefers-color-scheme: dark) {
+    .content-view.canvas {
+        background-color: unset;
+    }
 }

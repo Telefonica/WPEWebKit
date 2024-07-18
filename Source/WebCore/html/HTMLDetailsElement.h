@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010, 2011 Nokia Corporation and/or its subsidiary(-ies)
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -26,34 +27,31 @@ namespace WebCore {
 
 class HTMLSlotElement;
 
-template<typename T> class EventSender;
-typedef EventSender<HTMLDetailsElement> DetailEventSender;
-
 class HTMLDetailsElement final : public HTMLElement {
+    WTF_MAKE_ISO_ALLOCATED(HTMLDetailsElement);
 public:
     static Ref<HTMLDetailsElement> create(const QualifiedName& tagName, Document&);
-    ~HTMLDetailsElement();
 
     void toggleOpen();
 
     bool isOpen() const { return m_isOpen; }
     bool isActiveSummary(const HTMLSummaryElement&) const;
 
-    void dispatchPendingEvent(DetailEventSender*);
-    
 private:
     HTMLDetailsElement(const QualifiedName&, Document&);
 
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) final;
-    void parseAttribute(const QualifiedName&, const AtomicString&) final;
+    void parseAttribute(const QualifiedName&, const AtomString&) final;
 
-    void didAddUserAgentShadowRoot(ShadowRoot*) final;
+    void didAddUserAgentShadowRoot(ShadowRoot&) final;
     bool hasCustomFocusLogic() const final { return true; }
+    bool isInteractiveContent() const final { return true; }
 
     bool m_isOpen { false };
-    HTMLSlotElement* m_summarySlot { nullptr };
-    HTMLSummaryElement* m_defaultSummary { nullptr };
+    WeakPtr<HTMLSlotElement> m_summarySlot;
+    WeakPtr<HTMLSummaryElement> m_defaultSummary;
     RefPtr<HTMLSlotElement> m_defaultSlot;
+    bool m_isToggleEventTaskQueued { false };
 };
 
 } // namespace WebCore

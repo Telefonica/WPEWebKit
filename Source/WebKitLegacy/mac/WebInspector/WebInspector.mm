@@ -32,12 +32,10 @@
 #import "WebInspectorPrivate.h"
 #import "WebInspectorFrontend.h"
 
-#include <WebCore/Document.h>
-#include <WebCore/Frame.h>
-#include <WebCore/InspectorController.h>
-#include <WebCore/Page.h>
-
-using namespace WebCore;
+#import <WebCore/Document.h>
+#import <WebCore/Frame.h>
+#import <WebCore/InspectorController.h>
+#import <WebCore/Page.h>
 
 NSString *WebInspectorDidStartSearchingForNode = @"WebInspectorDidStartSearchingForNode";
 NSString *WebInspectorDidStopSearchingForNode = @"WebInspectorDidStopSearchingForNode";
@@ -66,7 +64,7 @@ NSString *WebInspectorDidStopSearchingForNode = @"WebInspectorDidStopSearchingFo
 
 - (void)showWindow
 {
-    if (Page* inspectedPage = core(_inspectedWebView))
+    if (auto* inspectedPage = core(_inspectedWebView))
         inspectedPage->inspectorController().show();
 }
 
@@ -173,7 +171,7 @@ NSString *WebInspectorDidStopSearchingForNode = @"WebInspectorDidStopSearchingFo
 
 - (void)evaluateInFrontend:(id)sender script:(NSString *)script
 {
-    if (Page* inspectedPage = core(_inspectedWebView))
+    if (auto* inspectedPage = core(_inspectedWebView))
         inspectedPage->inspectorController().evaluateForTestInFrontend(script);
 }
 

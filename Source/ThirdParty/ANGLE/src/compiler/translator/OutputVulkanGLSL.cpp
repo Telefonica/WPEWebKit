@@ -1,91 +1,178 @@
 //
-// Copyright (c) 2016 The ANGLE Project Authors. All rights reserved.
+// Copyright 2016 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 // OutputVulkanGLSL:
-//   Code that outputs shaders that fit GL_KHR_vulkan_glsl.
-//   The shaders are then fed into glslang to spit out SPIR-V (libANGLE-side).
+//   Code that outputs shaders that fit GL_KHR_vulkan_glsl, to be fed to glslang to generate
+//   SPIR-V.
 //   See: https://www.khronos.org/registry/vulkan/specs/misc/GL_KHR_vulkan_glsl.txt
 //
 
 #include "compiler/translator/OutputVulkanGLSL.h"
 
+#include "compiler/translator/BaseTypes.h"
+#include "compiler/translator/Symbol.h"
+#include "compiler/translator/ValidateVaryingLocations.h"
+#include "compiler/translator/util.h"
+
 namespace sh
 {
 
-TOutputVulkanGLSL::TOutputVulkanGLSL(TInfoSinkBase &objSink,
-                                     ShArrayIndexClampingStrategy clampingStrategy,
-                                     ShHashFunction64 hashFunction,
-                                     NameMap &nameMap,
-                                     TSymbolTable &symbolTable,
-                                     sh::GLenum shaderType,
-                                     int shaderVersion,
-                                     ShShaderOutput output,
+TOutputVulkanGLSL::TOutputVulkanGLSL(TCompiler *compiler,
+                                     TInfoSinkBase &objSink,
+                                     bool enablePrecision,
                                      ShCompileOptions compileOptions)
-    : TOutputGLSLBase(objSink,
-                      clampingStrategy,
-                      hashFunction,
-                      nameMap,
-                      symbolTable,
-                      shaderType,
-                      shaderVersion,
-                      output,
-                      compileOptions)
-{
-}
+    : TOutputGLSL(compiler, objSink, compileOptions),
+      mNextUnusedBinding(0),
+      mNextUnusedInputLocation(0),
+      mNextUnusedOutputLocation(0),
+      mEnablePrecision(enablePrecision)
+{}
 
-// TODO(jmadill): This is not complete.
-void TOutputVulkanGLSL::writeLayoutQualifier(const TType &type)
+void TOutputVulkanGLSL::writeLayoutQualifier(TIntermSymbol *symbol)
 {
-    TInfoSinkBase &out                      = objSink();
-    const TLayoutQualifier &layoutQualifier = type.getLayoutQualifier();
-    out << "layout(";
+    const TType &type = symbol->getType();
 
-    if (type.getQualifier() == EvqAttribute || type.getQualifier() == EvqFragmentOut ||
-        type.getQualifier() == EvqVertexIn)
+    bool needsSetBinding = IsSampler(type.getBasicType()) ||
+                           (type.isInterfaceBlock() && (type.getQualifier() == EvqUniform ||
+                                                        type.getQualifier() == EvqBuffer)) ||
+                           IsImage(type.getBasicType()) || IsSubpassInputType(type.getBasicType());
+    bool needsLocation = type.getQualifier() == EvqAttribute ||
+                         type.getQualifier() == EvqVertexIn ||
+                         type.getQualifier() == EvqFragmentOut || IsVarying(type.getQualifier());
+    bool needsInputAttachmentIndex = IsSubpassInputType(type.getBasicType());
+    bool needsSpecConstId          = type.getQualifier() == EvqSpecConst;
+
+    if (!NeedsToWriteLayoutQualifier(type) && !needsSetBinding && !needsLocation &&
+        !needsInputAttachmentIndex && !needsSpecConstId)
     {
-        // TODO(jmadill): Multiple output locations.
-        out << "location = "
-            << "0";
+        return;
     }
 
-    if (IsImage(type.getBasicType()) && layoutQualifier.imageInternalFormat != EiifUnspecified)
+    TInfoSinkBase &out                      = objSink();
+    const TLayoutQualifier &layoutQualifier = type.getLayoutQualifier();
+
+    // This isn't super clean, but it gets the job done.
+    // See corresponding code in glslang_wrapper_utils.cpp.
+    const char *blockStorage  = nullptr;
+    const char *matrixPacking = nullptr;
+
+    if (type.isInterfaceBlock())
     {
-        ASSERT(type.getQualifier() == EvqTemporary || type.getQualifier() == EvqUniform);
-        out << getImageInternalFormatString(layoutQualifier.imageInternalFormat);
+        const TInterfaceBlock *interfaceBlock = type.getInterfaceBlock();
+        TLayoutBlockStorage storage           = interfaceBlock->blockStorage();
+
+        // Make sure block storage format is specified.
+        if (storage != EbsStd430)
+        {
+            // Change interface block layout qualifiers to std140 for any layout that is not
+            // explicitly set to std430.  This is to comply with GL_KHR_vulkan_glsl where shared and
+            // packed are not allowed (and std140 could be used instead) and unspecified layouts can
+            // assume either std140 or std430 (and we choose std140 as std430 is not yet universally
+            // supported).
+            storage = EbsStd140;
+        }
+
+        if (interfaceBlock->blockStorage() != EbsUnspecified)
+        {
+            blockStorage = getBlockStorageString(storage);
+        }
+    }
+
+    // Specify matrix packing if necessary.
+    if (layoutQualifier.matrixPacking != EmpUnspecified)
+    {
+        matrixPacking = getMatrixPackingString(layoutQualifier.matrixPacking);
+    }
+    const char *kCommaSeparator = ", ";
+    const char *separator       = "";
+    out << "layout(";
+
+    // If the resource declaration is about input attachment, need to specify input_attachment_index
+    if (needsInputAttachmentIndex)
+    {
+        out << "input_attachment_index=" << layoutQualifier.inputAttachmentIndex;
+        separator = kCommaSeparator;
+    }
+
+    // If it's a specialization constant, add that constant_id qualifier.
+    if (needsSpecConstId)
+    {
+        out << separator << "constant_id=" << layoutQualifier.location;
+    }
+
+    // If the resource declaration requires set & binding layout qualifiers, specify arbitrary
+    // ones.
+    if (needsSetBinding)
+    {
+        out << separator << "set=0, binding=" << nextUnusedBinding();
+        separator = kCommaSeparator;
+    }
+
+    if (needsLocation)
+    {
+        uint32_t location = 0;
+        if (layoutQualifier.index <= 0)
+        {
+            // Note: for index == 1 (dual source blending), don't count locations as they are
+            // expected to alias the color output locations.  Only one dual-source output is
+            // supported, so location will be always 0.
+            const unsigned int locationCount =
+                CalculateVaryingLocationCount(symbol->getType(), getShaderType());
+            location = IsShaderIn(type.getQualifier()) ? nextUnusedInputLocation(locationCount)
+                                                       : nextUnusedOutputLocation(locationCount);
+        }
+
+        out << separator << "location=" << location;
+        separator = kCommaSeparator;
+    }
+
+    // Output the list of qualifiers already known at this stage, i.e. everything other than
+    // `location` and `set`/`binding`.
+    std::string otherQualifiers = getCommonLayoutQualifiers(symbol);
+
+    if (blockStorage)
+    {
+        out << separator << blockStorage;
+        separator = kCommaSeparator;
+    }
+    if (matrixPacking)
+    {
+        out << separator << matrixPacking;
+        separator = kCommaSeparator;
+    }
+    if (!otherQualifiers.empty())
+    {
+        out << separator << otherQualifiers;
     }
 
     out << ") ";
 }
 
+void TOutputVulkanGLSL::writeVariableType(const TType &type,
+                                          const TSymbol *symbol,
+                                          bool isFunctionArgument)
+{
+    TType overrideType(type);
+
+    // External textures are treated as 2D textures in the vulkan back-end
+    if (type.getBasicType() == EbtSamplerExternalOES)
+    {
+        overrideType.setBasicType(EbtSampler2D);
+    }
+
+    TOutputGLSL::writeVariableType(overrideType, symbol, isFunctionArgument);
+}
+
 bool TOutputVulkanGLSL::writeVariablePrecision(TPrecision precision)
 {
-    if (precision == EbpUndefined)
+    if ((precision == EbpUndefined) || !mEnablePrecision)
         return false;
 
     TInfoSinkBase &out = objSink();
     out << getPrecisionString(precision);
     return true;
-}
-
-void TOutputVulkanGLSL::visitSymbol(TIntermSymbol *node)
-{
-    TInfoSinkBase &out = objSink();
-
-    const TString &symbol = node->getSymbol();
-    if (symbol == "gl_FragColor")
-    {
-        out << "webgl_FragColor";
-    }
-    else if (symbol == "gl_FragData")
-    {
-        out << "webgl_FragData";
-    }
-    else
-    {
-        TOutputGLSLBase::visitSymbol(node);
-    }
 }
 
 }  // namespace sh

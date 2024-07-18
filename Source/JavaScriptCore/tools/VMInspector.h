@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,54 +25,76 @@
 
 #pragma once
 
+#include "CallFrame.h"
 #include "VM.h"
 #include <wtf/DoublyLinkedList.h>
 #include <wtf/Expected.h>
+#include <wtf/IterationStatus.h>
 #include <wtf/Lock.h>
 
 namespace JSC {
 
 class VMInspector {
+    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(VMInspector);
+    VMInspector() = default;
 public:
     enum class Error {
         None,
         TimedOut
     };
 
-    typedef WTF::Locker<Lock> Locker;
-
     static VMInspector& instance();
 
     void add(VM*);
     void remove(VM*);
-
-    Lock& getLock() { return m_lock; }
-
-    enum class FunctorStatus {
-        Continue,
-        Done
-    };
-
-    template <typename Functor>
-    void iterate(const Locker&, const Functor& functor) { iterate(functor); }
-
-    Expected<Locker, Error> lock(Seconds timeout = Seconds::infinity());
-
-    Expected<bool, Error> isValidExecutableMemory(const Locker&, void*);
-    Expected<CodeBlock*, Error> codeBlockForMachinePC(const Locker&, void*);
-
-private:
-    template <typename Functor> void iterate(const Functor& functor)
+    ALWAYS_INLINE static bool isValidVM(VM* vm)
     {
-        for (VM* vm = m_list.head(); vm; vm = vm->next()) {
-            FunctorStatus status = functor(*vm);
-            if (status == FunctorStatus::Done)
+        return vm == m_recentVM ? true : isValidVMSlow(vm);
+    }
+
+    Lock& getLock() WTF_RETURNS_LOCK(m_lock) { return m_lock; }
+
+    template <typename Functor> void iterate(const Functor& functor) WTF_REQUIRES_LOCK(m_lock)
+    {
+        for (VM* vm = m_vmList.head(); vm; vm = vm->next()) {
+            IterationStatus status = functor(*vm);
+            if (status == IterationStatus::Done)
                 return;
         }
     }
 
+    JS_EXPORT_PRIVATE static void forEachVM(Function<IterationStatus(VM&)>&&);
+    JS_EXPORT_PRIVATE static void dumpVMs();
+
+    Expected<bool, Error> isValidExecutableMemory(void*) WTF_REQUIRES_LOCK(m_lock);
+    Expected<CodeBlock*, Error> codeBlockForMachinePC(void*) WTF_REQUIRES_LOCK(m_lock);
+
+    JS_EXPORT_PRIVATE static bool currentThreadOwnsJSLock(VM*);
+    JS_EXPORT_PRIVATE static void gc(VM*);
+    JS_EXPORT_PRIVATE static void edenGC(VM*);
+    JS_EXPORT_PRIVATE static bool isInHeap(Heap*, void*);
+    JS_EXPORT_PRIVATE static bool isValidCell(Heap*, JSCell*);
+    JS_EXPORT_PRIVATE static bool isValidCodeBlock(VM*, CodeBlock*);
+    JS_EXPORT_PRIVATE static CodeBlock* codeBlockForFrame(VM*, CallFrame* topCallFrame, unsigned frameNumber);
+    JS_EXPORT_PRIVATE static void dumpCallFrame(VM*, CallFrame*, unsigned framesToSkip = 0);
+    JS_EXPORT_PRIVATE static void dumpRegisters(CallFrame*);
+    JS_EXPORT_PRIVATE static void dumpStack(VM*, CallFrame* topCallFrame, unsigned framesToSkip = 0);
+    JS_EXPORT_PRIVATE static void dumpValue(JSValue);
+    JS_EXPORT_PRIVATE static void dumpCellMemory(JSCell*);
+    JS_EXPORT_PRIVATE static void dumpCellMemoryToStream(JSCell*, PrintStream&);
+    JS_EXPORT_PRIVATE static void dumpSubspaceHashes(VM*);
+
+#if USE(JSVALUE64)
+    static bool verifyCell(VM&, JSCell*);
+#endif
+
+private:
+    JS_EXPORT_PRIVATE static bool isValidVMSlow(VM*);
+
     Lock m_lock;
-    DoublyLinkedList<VM> m_list;
+    DoublyLinkedList<VM> m_vmList WTF_GUARDED_BY_LOCK(m_lock);
+    JS_EXPORT_PRIVATE static VM* m_recentVM;
 };
 
 } // namespace JSC

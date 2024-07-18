@@ -31,12 +31,8 @@
 
 namespace WebKit {
 
-SecItemResponseData::SecItemResponseData()
-{
-}
-
-SecItemResponseData::SecItemResponseData(OSStatus resultCode, CFTypeRef resultObject)
-    : m_resultObject(resultObject)
+SecItemResponseData::SecItemResponseData(OSStatus resultCode, RetainPtr<CFTypeRef>&& resultObject)
+    : m_resultObject(WTFMove(resultObject))
     , m_resultCode(resultCode)
 {
 }
@@ -44,27 +40,26 @@ SecItemResponseData::SecItemResponseData(OSStatus resultCode, CFTypeRef resultOb
 void SecItemResponseData::encode(IPC::Encoder& encoder) const
 {
     encoder << static_cast<int64_t>(m_resultCode);
-    encoder << static_cast<bool>(m_resultObject.get());
+    encoder << static_cast<bool>(m_resultObject);
     if (m_resultObject)
-        IPC::encode(encoder, m_resultObject.get());
+        encoder << m_resultObject;
 }
 
-bool SecItemResponseData::decode(IPC::Decoder& decoder, SecItemResponseData& secItemResponseData)
+std::optional<SecItemResponseData> SecItemResponseData::decode(IPC::Decoder& decoder)
 {
     int64_t resultCode;
     if (!decoder.decode(resultCode))
-        return false;
-    secItemResponseData.m_resultCode = (OSStatus)resultCode;
-    secItemResponseData.m_resultObject = 0;
+        return std::nullopt;
 
     bool expectResultObject;
     if (!decoder.decode(expectResultObject))
-        return false;
+        return std::nullopt;
 
-    if (expectResultObject && !IPC::decode(decoder, secItemResponseData.m_resultObject))
-        return false;
+    RetainPtr<CFTypeRef> result;
+    if (expectResultObject && !decoder.decode(result))
+        return std::nullopt;
 
-    return true;
+    return {{ static_cast<OSStatus>(resultCode), WTFMove(result) }};
 }
 
 } // namespace WebKit

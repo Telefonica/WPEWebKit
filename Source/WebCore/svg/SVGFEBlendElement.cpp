@@ -2,6 +2,7 @@
  * Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005, 2006 Rob Buis <buis@kde.org>
  * Copyright (C) 2014 Adobe Systems Incorporated. All rights reserved.
+ * Copyright (C) 2018-2022 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,64 +24,58 @@
 #include "SVGFEBlendElement.h"
 
 #include "FEBlend.h"
-#include "FilterEffect.h"
-#include "SVGFilterBuilder.h"
 #include "SVGNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-// Animated property definitions
-DEFINE_ANIMATED_STRING(SVGFEBlendElement, SVGNames::inAttr, In1, in1)
-DEFINE_ANIMATED_STRING(SVGFEBlendElement, SVGNames::in2Attr, In2, in2)
-DEFINE_ANIMATED_ENUMERATION(SVGFEBlendElement, SVGNames::modeAttr, Mode, mode, BlendMode)
-
-BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGFEBlendElement)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(in1)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(in2)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(mode)
-    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGFilterPrimitiveStandardAttributes)
-END_REGISTER_ANIMATED_PROPERTIES
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFEBlendElement);
 
 inline SVGFEBlendElement::SVGFEBlendElement(const QualifiedName& tagName, Document& document)
     : SVGFilterPrimitiveStandardAttributes(tagName, document)
-    , m_mode(BlendModeNormal)
 {
     ASSERT(hasTagName(SVGNames::feBlendTag));
-    registerAnimatedPropertiesForSVGFEBlendElement();
+    
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        PropertyRegistry::registerProperty<SVGNames::modeAttr, BlendMode, &SVGFEBlendElement::m_mode>();
+        PropertyRegistry::registerProperty<SVGNames::inAttr, &SVGFEBlendElement::m_in1>();
+        PropertyRegistry::registerProperty<SVGNames::in2Attr, &SVGFEBlendElement::m_in2>();
+    });
 }
 
 Ref<SVGFEBlendElement> SVGFEBlendElement::create(const QualifiedName& tagName, Document& document)
 {
     return adoptRef(*new SVGFEBlendElement(tagName, document));
 }
-
-void SVGFEBlendElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+    
+void SVGFEBlendElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == SVGNames::modeAttr) {
-        BlendMode mode = BlendModeNormal;
+        BlendMode mode = BlendMode::Normal;
         if (parseBlendMode(value, mode))
-            setModeBaseValue(mode);
+            m_mode->setBaseValInternal<BlendMode>(mode);
         return;
     }
 
     if (name == SVGNames::inAttr) {
-        setIn1BaseValue(value);
+        m_in1->setBaseValInternal(value);
         return;
     }
 
     if (name == SVGNames::in2Attr) {
-        setIn2BaseValue(value);
+        m_in2->setBaseValInternal(value);
         return;
     }
 
     SVGFilterPrimitiveStandardAttributes::parseAttribute(name, value);
 }
 
-bool SVGFEBlendElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)
+bool SVGFEBlendElement::setFilterEffectAttribute(FilterEffect& effect, const QualifiedName& attrName)
 {
-    FEBlend* blend = static_cast<FEBlend*>(effect);
+    auto& feBlend = downcast<FEBlend>(effect);
     if (attrName == SVGNames::modeAttr)
-        return blend->setBlendMode(mode());
+        return feBlend.setBlendMode(mode());
 
     ASSERT_NOT_REACHED();
     return false;
@@ -88,35 +83,23 @@ bool SVGFEBlendElement::setFilterEffectAttribute(FilterEffect* effect, const Qua
 
 void SVGFEBlendElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (attrName == SVGNames::modeAttr) {
+    if (PropertyRegistry::isKnownAttribute(attrName)) {
         InstanceInvalidationGuard guard(*this);
-        primitiveAttributeChanged(attrName);
-        return;
-    }
-
-    if (attrName == SVGNames::inAttr || attrName == SVGNames::in2Attr) {
-        InstanceInvalidationGuard guard(*this);
-        invalidate();
+        if (attrName == SVGNames::modeAttr)
+            primitiveAttributeChanged(attrName);
+        else {
+            ASSERT(attrName == SVGNames::inAttr || attrName == SVGNames::in2Attr);
+            updateSVGRendererForElementChange();
+        }
         return;
     }
 
     SVGFilterPrimitiveStandardAttributes::svgAttributeChanged(attrName);
 }
 
-RefPtr<FilterEffect> SVGFEBlendElement::build(SVGFilterBuilder* filterBuilder, Filter& filter)
+RefPtr<FilterEffect> SVGFEBlendElement::createFilterEffect(const FilterEffectVector&, const GraphicsContext&) const
 {
-    FilterEffect* input1 = filterBuilder->getEffectById(in1());
-    FilterEffect* input2 = filterBuilder->getEffectById(in2());
-
-    if (!input1 || !input2)
-        return nullptr;
-
-    RefPtr<FilterEffect> effect = FEBlend::create(filter, mode());
-    FilterEffectVector& inputEffects = effect->inputEffects();
-    inputEffects.reserveCapacity(2);
-    inputEffects.append(input1);
-    inputEffects.append(input2);    
-    return effect;
+    return FEBlend::create(mode());
 }
 
-}
+} // namespace WebCore

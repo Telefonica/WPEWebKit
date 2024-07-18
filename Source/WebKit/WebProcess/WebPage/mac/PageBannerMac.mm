@@ -23,18 +23,17 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "PageBanner.h"
+#import "config.h"
+#import "PageBanner.h"
 
 #if PLATFORM(MAC)
 
-#include "WebPage.h"
-#include <WebCore/FrameView.h>
-#include <WebCore/GraphicsLayer.h>
-
-using namespace WebCore;
+#import "WebPage.h"
+#import <WebCore/FrameView.h>
+#import <WebCore/GraphicsLayer.h>
 
 namespace WebKit {
+using namespace WebCore;
 
 Ref<PageBanner> PageBanner::create(CALayer *layer, int height, Client* client)
 {
@@ -58,10 +57,10 @@ void PageBanner::addToPage(Type type, WebPage* webPage)
 
     switch (m_type) {
     case Header:
-        m_webPage->corePage()->addHeaderWithHeight(m_height);
+        m_webPage->corePage()->setHeaderHeight(m_height);
         break;
     case Footer:
-        m_webPage->corePage()->addFooterWithHeight(m_height);
+        m_webPage->corePage()->setFooterHeight(m_height);
         break;
     case NotSet:
         ASSERT_NOT_REACHED();
@@ -87,9 +86,9 @@ void PageBanner::detachFromPage()
     if (m_webPage->corePage()) {
         // We can hide the banner by removing the parent layer that hosts it.
         if (m_type == Header)
-            m_webPage->corePage()->addHeaderWithHeight(0);
+            m_webPage->corePage()->setHeaderHeight(0);
         else if (m_type == Footer)
-            m_webPage->corePage()->addFooterWithHeight(0);
+            m_webPage->corePage()->setFooterHeight(0);
     }
 
     m_type = NotSet;
@@ -100,9 +99,9 @@ void PageBanner::hide()
 {
     // We can hide the banner by removing the parent layer that hosts it.
     if (m_type == Header)
-        m_webPage->corePage()->addHeaderWithHeight(0);
+        m_webPage->corePage()->setHeaderHeight(0);
     else if (m_type == Footer)
-        m_webPage->corePage()->addFooterWithHeight(0);
+        m_webPage->corePage()->setFooterHeight(0);
 
     m_isHidden = true;
 }

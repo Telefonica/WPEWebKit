@@ -10,13 +10,14 @@
 
 #import <Foundation/Foundation.h>
 
-@class RTCIceServer;
+#import "sdk/objc/base/RTCMacros.h"
+
+@class RTC_OBJC_TYPE(RTCIceServer);
 
 @protocol ARDTURNClient <NSObject>
 
 // Returns TURN server urls if successful.
-- (void)requestServersWithCompletionHandler:
-    (void (^)(NSArray *turnServers,
-              NSError *error))completionHandler;
+- (void)requestServersWithCompletionHandler:(void (^)(NSArray *turnServers,
+                                                      NSError *error))completionHandler;
 
 @end

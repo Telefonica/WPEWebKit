@@ -353,11 +353,11 @@ SQLTransactionBackend::~SQLTransactionBackend()
 
 void SQLTransactionBackend::doCleanup()
 {
-    ASSERT(currentThread() == m_frontend.database().databaseThread().getThreadID());
+    ASSERT(m_frontend.database().databaseThread().getThread() == &Thread::current());
 
     m_frontend.releaseOriginLockIfNeeded();
 
-    LockHolder locker(m_frontend.m_statementMutex);
+    Locker locker { m_frontend.m_statementLock };
     m_frontend.m_statementQueue.clear();
 
     if (m_frontend.m_sqliteTransaction) {
@@ -465,7 +465,7 @@ void SQLTransactionBackend::computeNextStateAndCleanupIfNeeded()
 
 void SQLTransactionBackend::notifyDatabaseThreadIsShuttingDown()
 {
-    ASSERT(currentThread() == m_frontend.database().databaseThread().getThreadID());
+    ASSERT(m_frontend.database().databaseThread().getThread() == &Thread::current());
 
     // If the transaction is in progress, we should roll it back here, since this
     // is our last opportunity to do something related to this transaction on the

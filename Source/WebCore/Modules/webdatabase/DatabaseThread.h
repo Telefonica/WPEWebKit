@@ -30,6 +30,7 @@
 
 #include <memory>
 #include <wtf/HashSet.h>
+#include <wtf/Lock.h>
 #include <wtf/MessageQueue.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Threading.h>
@@ -47,7 +48,7 @@ public:
     static Ref<DatabaseThread> create() { return adoptRef(*new DatabaseThread); }
     ~DatabaseThread();
 
-    bool start();
+    void start();
     void requestTermination(DatabaseTaskSynchronizer* cleanupSync);
     bool terminationRequested(DatabaseTaskSynchronizer* = nullptr) const;
 
@@ -58,7 +59,7 @@ public:
 
     void recordDatabaseOpen(Database&);
     void recordDatabaseClosed(Database&);
-    ThreadIdentifier getThreadID() { return m_thread ? m_thread->id() : 0; }
+    Thread* getThread() { return m_thread.get(); }
 
     SQLTransactionCoordinator* transactionCoordinator() { return m_transactionCoordinator.get(); }
 
@@ -75,8 +76,8 @@ private:
 
     // This set keeps track of the open databases that have been used on this thread.
     using DatabaseSet = HashSet<RefPtr<Database>>;
-    mutable Lock m_openDatabaseSetMutex;
-    DatabaseSet m_openDatabaseSet;
+    mutable Lock m_openDatabaseSetLock;
+    DatabaseSet m_openDatabaseSet WTF_GUARDED_BY_LOCK(m_openDatabaseSetLock);
 
     std::unique_ptr<SQLTransactionCoordinator> m_transactionCoordinator;
     DatabaseTaskSynchronizer* m_cleanupSync { nullptr };

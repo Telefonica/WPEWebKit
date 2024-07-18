@@ -1,10 +1,11 @@
 //
-// Copyright (c) 2002-2010 The ANGLE Project Authors. All rights reserved.
+// Copyright 2002 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 
-// debug.h: Debugging utilities.
+// debug.h: Debugging utilities. A lot of the logging code is adapted from Chromium's
+// base/logging.h.
 
 #ifndef COMMON_DEBUG_H_
 #define COMMON_DEBUG_H_
@@ -12,35 +13,55 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include <ios>
 #include <iomanip>
+#include <ios>
+#include <mutex>
 #include <sstream>
 #include <string>
 
 #include "common/angleutils.h"
+#include "common/entry_points_enum_autogen.h"
+#include "common/platform.h"
+
+#if defined(ANGLE_PLATFORM_WINDOWS)
+#    include <sal.h>
+typedef unsigned long DWORD;
+typedef _Return_type_success_(return >= 0) long HRESULT;
+#endif
 
 #if !defined(TRACE_OUTPUT_FILE)
-#define TRACE_OUTPUT_FILE "angle_debug.txt"
+#    define TRACE_OUTPUT_FILE "angle_debug.txt"
 #endif
 
 namespace gl
 {
+class Context;
 
-// Pairs a D3D begin event with an end event.
-class ScopedPerfEventHelper : angle::NonCopyable
+// Pairs a begin event with an end event.
+class [[nodiscard]] ScopedPerfEventHelper : angle::NonCopyable
 {
   public:
-    ScopedPerfEventHelper(const char* format, ...);
+    ScopedPerfEventHelper(Context *context, angle::EntryPoint entryPoint);
     ~ScopedPerfEventHelper();
+    ANGLE_FORMAT_PRINTF(2, 3)
+    void begin(const char *format, ...);
+
+  private:
+    gl::Context *mContext;
+    const angle::EntryPoint mEntryPoint;
+    const char *mFunctionName;
+    bool mCalledBeginEvent;
 };
 
 using LogSeverity = int;
 // Note: the log severities are used to index into the array of names,
 // see g_logSeverityNames.
 constexpr LogSeverity LOG_EVENT          = 0;
-constexpr LogSeverity LOG_WARN           = 1;
-constexpr LogSeverity LOG_ERR            = 2;
-constexpr LogSeverity LOG_NUM_SEVERITIES = 3;
+constexpr LogSeverity LOG_INFO           = 1;
+constexpr LogSeverity LOG_WARN           = 2;
+constexpr LogSeverity LOG_ERR            = 3;
+constexpr LogSeverity LOG_FATAL          = 4;
+constexpr LogSeverity LOG_NUM_SEVERITIES = 5;
 
 void Trace(LogSeverity severity, const char *message);
 
@@ -55,7 +76,7 @@ class LogMessage : angle::NonCopyable
 {
   public:
     // Used for ANGLE_LOG(severity).
-    LogMessage(const char *function, int line, LogSeverity severity);
+    LogMessage(const char *file, const char *function, int line, LogSeverity severity);
     ~LogMessage();
     std::ostream &stream() { return mStream; }
 
@@ -63,6 +84,7 @@ class LogMessage : angle::NonCopyable
     std::string getMessage() const;
 
   private:
+    const char *mFile;
     const char *mFunction;
     const int mLine;
     const LogSeverity mSeverity;
@@ -70,27 +92,37 @@ class LogMessage : angle::NonCopyable
     std::ostringstream mStream;
 };
 
-// Wraps the D3D9/D3D11 debug annotation functions.
+// Wraps the API/Platform-specific debug annotation functions.
 // Also handles redirecting logging destination.
 class DebugAnnotator : angle::NonCopyable
 {
   public:
-    DebugAnnotator(){};
-    virtual ~DebugAnnotator() { };
-    virtual void beginEvent(const wchar_t *eventName) = 0;
-    virtual void endEvent() = 0;
-    virtual void setMarker(const wchar_t *markerName) = 0;
-    virtual bool getStatus() = 0;
+    DebugAnnotator() {}
+    virtual ~DebugAnnotator() {}
+    virtual void beginEvent(gl::Context *context,
+                            angle::EntryPoint entryPoint,
+                            const char *eventName,
+                            const char *eventMessage)   = 0;
+    virtual void endEvent(gl::Context *context,
+                          const char *eventName,
+                          angle::EntryPoint entryPoint) = 0;
+    virtual void setMarker(const char *markerName)      = 0;
+    virtual bool getStatus()                            = 0;
     // Log Message Handler that gets passed every log message,
     // when debug annotations are initialized,
     // replacing default handling by LogMessage.
     virtual void logMessage(const LogMessage &msg) const = 0;
 };
 
+bool ShouldBeginScopedEvent();
 void InitializeDebugAnnotations(DebugAnnotator *debugAnnotator);
 void UninitializeDebugAnnotations();
 bool DebugAnnotationsActive();
 bool DebugAnnotationsInitialized();
+
+void InitializeDebugMutexIfNeeded();
+
+std::mutex &GetDebugMutex();
 
 namespace priv
 {
@@ -104,64 +136,106 @@ class LogMessageVoidify
     void operator&(std::ostream &) {}
 };
 
+extern std::ostream *gSwallowStream;
+
 // Used by ANGLE_LOG_IS_ON to lazy-evaluate stream arguments.
 bool ShouldCreatePlatformLogMessage(LogSeverity severity);
 
-template <int N, typename T>
-std::ostream &FmtHex(std::ostream &os, T value)
+// N is the width of the output to the stream. The output is padded with zeros
+// if value is less than N characters.
+// S is the stream type, either ostream for ANSI or wostream for wide character.
+// T is the type of the value to output to the stream.
+// C is the type of characters - either char for ANSI or wchar_t for wide char.
+template <int N, typename S, typename T, typename C>
+S &FmtHex(S &stream, T value, const C *zeroX, C zero)
 {
-    os << "0x";
+    stream << zeroX;
 
-    std::ios_base::fmtflags oldFlags = os.flags();
-    std::streamsize oldWidth         = os.width();
-    std::ostream::char_type oldFill  = os.fill();
+    std::ios_base::fmtflags oldFlags = stream.flags();
+    std::streamsize oldWidth         = stream.width();
+    typename S::char_type oldFill    = stream.fill();
 
-    os << std::hex << std::uppercase << std::setw(N) << std::setfill('0') << value;
+    stream << std::hex << std::uppercase << std::setw(N) << std::setfill(zero) << value;
 
-    os.flags(oldFlags);
-    os.width(oldWidth);
-    os.fill(oldFill);
+    stream.flags(oldFlags);
+    stream.width(oldWidth);
+    stream.fill(oldFill);
 
-    return os;
+    return stream;
 }
-}  // namespace priv
 
-#if defined(ANGLE_PLATFORM_WINDOWS)
-class FmtHR
+template <typename S, typename T, typename C>
+S &FmtHexAutoSized(S &stream, T value, const C *prefix, const C *zeroX, C zero)
+{
+    if (prefix)
+    {
+        stream << prefix;
+    }
+
+    constexpr int N = sizeof(T) * 2;
+    return priv::FmtHex<N>(stream, value, zeroX, zero);
+}
+
+template <typename T, typename C>
+class FmtHexHelper
 {
   public:
-    explicit FmtHR(HRESULT hresult) : mHR(hresult) {}
+    FmtHexHelper(const C *prefix, T value) : mPrefix(prefix), mValue(value) {}
+    explicit FmtHexHelper(T value) : mPrefix(nullptr), mValue(value) {}
+
   private:
-    HRESULT mHR;
-    friend std::ostream &operator<<(std::ostream &os, const FmtHR &fmt);
+    const C *mPrefix;
+    T mValue;
+
+    friend std::ostream &operator<<(std::ostream &os, const FmtHexHelper &fmt)
+    {
+        return FmtHexAutoSized(os, fmt.mValue, fmt.mPrefix, "0x", '0');
+    }
+
+    friend std::wostream &operator<<(std::wostream &wos, const FmtHexHelper &fmt)
+    {
+        return FmtHexAutoSized(wos, fmt.mValue, fmt.mPrefix, L"0x", L'0');
+    }
 };
+
+}  // namespace priv
+
+template <typename T, typename C = char>
+priv::FmtHexHelper<T, C> FmtHex(T value)
+{
+    return priv::FmtHexHelper<T, C>(value);
+}
+
+#if defined(ANGLE_PLATFORM_WINDOWS)
+priv::FmtHexHelper<HRESULT, char> FmtHR(HRESULT value);
+priv::FmtHexHelper<DWORD, char> FmtErr(DWORD value);
 #endif  // defined(ANGLE_PLATFORM_WINDOWS)
 
 template <typename T>
-std::ostream &FmtHexShort(std::ostream &os, T value)
+std::ostream &FmtHex(std::ostream &os, T value)
 {
-    return priv::FmtHex<4>(os, value);
-}
-
-template <typename T>
-std::ostream &FmtHexInt(std::ostream &os, T value)
-{
-    return priv::FmtHex<8>(os, value);
+    return priv::FmtHexAutoSized(os, value, "", "0x", '0');
 }
 
 // A few definitions of macros that don't generate much code. These are used
 // by ANGLE_LOG(). Since these are used all over our code, it's
 // better to have compact code for these operations.
 #define COMPACT_ANGLE_LOG_EX_EVENT(ClassName, ...) \
-    ::gl::ClassName(__FUNCTION__, __LINE__, ::gl::LOG_EVENT, ##__VA_ARGS__)
+    ::gl::ClassName(__FILE__, __FUNCTION__, __LINE__, ::gl::LOG_EVENT, ##__VA_ARGS__)
+#define COMPACT_ANGLE_LOG_EX_INFO(ClassName, ...) \
+    ::gl::ClassName(__FILE__, __FUNCTION__, __LINE__, ::gl::LOG_INFO, ##__VA_ARGS__)
 #define COMPACT_ANGLE_LOG_EX_WARN(ClassName, ...) \
-    ::gl::ClassName(__FUNCTION__, __LINE__, ::gl::LOG_WARN, ##__VA_ARGS__)
+    ::gl::ClassName(__FILE__, __FUNCTION__, __LINE__, ::gl::LOG_WARN, ##__VA_ARGS__)
 #define COMPACT_ANGLE_LOG_EX_ERR(ClassName, ...) \
-    ::gl::ClassName(__FUNCTION__, __LINE__, ::gl::LOG_ERR, ##__VA_ARGS__)
+    ::gl::ClassName(__FILE__, __FUNCTION__, __LINE__, ::gl::LOG_ERR, ##__VA_ARGS__)
+#define COMPACT_ANGLE_LOG_EX_FATAL(ClassName, ...) \
+    ::gl::ClassName(__FILE__, __FUNCTION__, __LINE__, ::gl::LOG_FATAL, ##__VA_ARGS__)
 
 #define COMPACT_ANGLE_LOG_EVENT COMPACT_ANGLE_LOG_EX_EVENT(LogMessage)
+#define COMPACT_ANGLE_LOG_INFO COMPACT_ANGLE_LOG_EX_INFO(LogMessage)
 #define COMPACT_ANGLE_LOG_WARN COMPACT_ANGLE_LOG_EX_WARN(LogMessage)
 #define COMPACT_ANGLE_LOG_ERR COMPACT_ANGLE_LOG_EX_ERR(LogMessage)
+#define COMPACT_ANGLE_LOG_FATAL COMPACT_ANGLE_LOG_EX_FATAL(LogMessage)
 
 #define ANGLE_LOG_IS_ON(severity) (::gl::priv::ShouldCreatePlatformLogMessage(::gl::LOG_##severity))
 
@@ -185,90 +259,210 @@ std::ostream &FmtHexInt(std::ostream &os, T value)
 }  // namespace gl
 
 #if defined(ANGLE_ENABLE_DEBUG_TRACE) || defined(ANGLE_ENABLE_DEBUG_ANNOTATIONS)
-#define ANGLE_TRACE_ENABLED
+#    define ANGLE_TRACE_ENABLED
 #endif
 
-#define ANGLE_EMPTY_STATEMENT for (;;) break
-#if !defined(NDEBUG) || defined(ANGLE_ENABLE_RELEASE_ASSERTS)
-#define ANGLE_ENABLE_ASSERTS
+#if !defined(NDEBUG) || defined(ANGLE_ASSERT_ALWAYS_ON)
+#    define ANGLE_ENABLE_ASSERTS
 #endif
 
+#define INFO() ANGLE_LOG(INFO)
 #define WARN() ANGLE_LOG(WARN)
 #define ERR() ANGLE_LOG(ERR)
+#define FATAL() ANGLE_LOG(FATAL)
 
 // A macro to log a performance event around a scope.
 #if defined(ANGLE_TRACE_ENABLED)
-#if defined(_MSC_VER)
-#define EVENT(message, ...) gl::ScopedPerfEventHelper scopedPerfEventHelper ## __LINE__("%s" message "\n", __FUNCTION__, __VA_ARGS__);
+#    if defined(_MSC_VER)
+#        define EVENT(context, entryPoint, message, ...)                                     \
+            gl::ScopedPerfEventHelper scopedPerfEventHelper##__LINE__(                       \
+                context, angle::EntryPoint::entryPoint);                                     \
+            do                                                                               \
+            {                                                                                \
+                if (gl::ShouldBeginScopedEvent())                                            \
+                {                                                                            \
+                    scopedPerfEventHelper##__LINE__.begin(                                   \
+                        "%s(" message ")", GetEntryPointName(angle::EntryPoint::entryPoint), \
+                        __VA_ARGS__);                                                        \
+                }                                                                            \
+            } while (0)
+#    else
+#        define EVENT(context, entryPoint, message, ...)                                          \
+            gl::ScopedPerfEventHelper scopedPerfEventHelper(context,                              \
+                                                            angle::EntryPoint::entryPoint);       \
+            do                                                                                    \
+            {                                                                                     \
+                if (gl::ShouldBeginScopedEvent())                                                 \
+                {                                                                                 \
+                    scopedPerfEventHelper.begin("%s(" message ")",                                \
+                                                GetEntryPointName(angle::EntryPoint::entryPoint), \
+                                                ##__VA_ARGS__);                                   \
+                }                                                                                 \
+            } while (0)
+#    endif  // _MSC_VER
 #else
-#define EVENT(message, ...) gl::ScopedPerfEventHelper scopedPerfEventHelper("%s" message "\n", __FUNCTION__, ##__VA_ARGS__);
-#endif // _MSC_VER
-#else
-#define EVENT(message, ...) (void(0))
+#    define EVENT(message, ...) (void(0))
 #endif
 
-#if defined(COMPILER_GCC) || defined(__clang__)
-#define ANGLE_CRASH() __builtin_trap()
+// The state tracked by ANGLE will be validated with the driver state before each call
+#if defined(ANGLE_ENABLE_DEBUG_TRACE)
+#    define ANGLE_STATE_VALIDATION_ENABLED
+#endif
+
+#if defined(__GNUC__)
+#    define ANGLE_CRASH() __builtin_trap()
 #else
-#define ANGLE_CRASH() ((void)(*(volatile char *)0 = 0))
+#    define ANGLE_CRASH() ((void)(*(volatile char *)0 = 0)), __assume(0)
 #endif
 
 #if !defined(NDEBUG)
-#define ANGLE_ASSERT_IMPL(expression) assert(expression)
+#    define ANGLE_ASSERT_IMPL(expression) assert(expression)
 #else
 // TODO(jmadill): Detect if debugger is attached and break.
-#define ANGLE_ASSERT_IMPL(expression) ANGLE_CRASH()
+#    define ANGLE_ASSERT_IMPL(expression) ANGLE_CRASH()
 #endif  // !defined(NDEBUG)
+
+// Note that gSwallowStream is used instead of an arbitrary LOG() stream to avoid the creation of an
+// object with a non-trivial destructor (LogMessage). On MSVC x86 (checked on 2015 Update 3), this
+// causes a few additional pointless instructions to be emitted even at full optimization level,
+// even though the : arm of the ternary operator is clearly never executed. Using a simpler object
+// to be &'d with Voidify() avoids these extra instructions. Using a simpler POD object with a
+// templated operator<< also works to avoid these instructions. However, this causes warnings on
+// statically defined implementations of operator<<(std::ostream, ...) in some .cpp files, because
+// they become defined-but-unreferenced functions. A reinterpret_cast of 0 to an ostream* also is
+// not suitable, because some compilers warn of undefined behavior.
+#define ANGLE_EAT_STREAM_PARAMETERS \
+    true ? static_cast<void>(0) : ::gl::priv::LogMessageVoidify() & (*::gl::priv::gSwallowStream)
 
 // A macro asserting a condition and outputting failures to the debug log
 #if defined(ANGLE_ENABLE_ASSERTS)
-#define ASSERT(expression)                                                                         \
-    (expression ? static_cast<void>(0) : ((ERR() << "\t! Assert failed in " << __FUNCTION__ << "(" \
-                                                 << __LINE__ << "): " << #expression),             \
-                                          ANGLE_ASSERT_IMPL(expression)))
+#    define ASSERT(expression)                                                                \
+        (expression ? static_cast<void>(0)                                                    \
+                    : (FATAL() << "\t! Assert failed in " << __FUNCTION__ << " (" << __FILE__ \
+                               << ":" << __LINE__ << "): " << #expression))
 #else
-// These are just dummy values.
-#define COMPACT_ANGLE_LOG_EX_ASSERT(ClassName, ...) \
-    COMPACT_ANGLE_LOG_EX_EVENT(ClassName, ##__VA_ARGS__)
-#define COMPACT_ANGLE_LOG_ASSERT COMPACT_ANGLE_LOG_EVENT
-namespace gl
-{
-constexpr LogSeverity LOG_ASSERT = LOG_EVENT;
-}  // namespace gl
-
-#define ASSERT(condition)                                                     \
-    ANGLE_LAZY_STREAM(ANGLE_LOG_STREAM(ASSERT), false ? !(condition) : false) \
-        << "Check failed: " #condition ". "
+#    define ASSERT(condition) ANGLE_EAT_STREAM_PARAMETERS << !(condition)
 #endif  // defined(ANGLE_ENABLE_ASSERTS)
 
-#define UNUSED_VARIABLE(variable) ((void)variable)
+#define ANGLE_UNUSED_VARIABLE(variable) (static_cast<void>(variable))
 
 // A macro to indicate unimplemented functionality
 #ifndef NOASSERT_UNIMPLEMENTED
-#define NOASSERT_UNIMPLEMENTED 1
+#    define NOASSERT_UNIMPLEMENTED 1
 #endif
 
 #if defined(ANGLE_TRACE_ENABLED) || defined(ANGLE_ENABLE_ASSERTS)
-#define UNIMPLEMENTED()                                                           \
-    {                                                                             \
-        ERR() << "\t! Unimplemented: " << __FUNCTION__ << "(" << __LINE__ << ")"; \
-        ASSERT(NOASSERT_UNIMPLEMENTED);                                           \
-    }                                                                             \
-    ANGLE_EMPTY_STATEMENT
+#    define UNIMPLEMENTED()                                                                       \
+        do                                                                                        \
+        {                                                                                         \
+            WARN() << "\t! Unimplemented: " << __FUNCTION__ << "(" << __FILE__ << ":" << __LINE__ \
+                   << ")";                                                                        \
+            ASSERT(NOASSERT_UNIMPLEMENTED);                                                       \
+        } while (0)
 
 // A macro for code which is not expected to be reached under valid assumptions
-#define UNREACHABLE()                                                                  \
-    ((ERR() << "\t! Unreachable reached: " << __FUNCTION__ << "(" << __LINE__ << ")"), \
-     ASSERT(false))
+#    define UNREACHABLE()                                                                    \
+        do                                                                                   \
+        {                                                                                    \
+            FATAL() << "\t! Unreachable reached: " << __FUNCTION__ << "(" << __FILE__ << ":" \
+                    << __LINE__ << ")";                                                      \
+        } while (0)
 #else
-#define UNIMPLEMENTED()                 \
-    {                                   \
-        ASSERT(NOASSERT_UNIMPLEMENTED); \
-    }                                   \
-    ANGLE_EMPTY_STATEMENT
+#    define UNIMPLEMENTED()                 \
+        do                                  \
+        {                                   \
+            ASSERT(NOASSERT_UNIMPLEMENTED); \
+        } while (0)
 
 // A macro for code which is not expected to be reached under valid assumptions
-#define UNREACHABLE() ASSERT(false)
+#    define UNREACHABLE()  \
+        do                 \
+        {                  \
+            ASSERT(false); \
+        } while (0)
 #endif  // defined(ANGLE_TRACE_ENABLED) || defined(ANGLE_ENABLE_ASSERTS)
 
-#endif   // COMMON_DEBUG_H_
+#if defined(ANGLE_PLATFORM_WINDOWS)
+#    define ANGLE_FUNCTION __FUNCTION__
+#else
+#    define ANGLE_FUNCTION __func__
+#endif
+
+// Defining ANGLE_ENABLE_STRUCT_PADDING_WARNINGS will enable warnings when members are added to
+// structs to enforce packing. This is helpful for diagnosing unexpected struct sizes when making
+// fast cache variables.
+#if defined(__clang__)
+#    define ANGLE_ENABLE_STRUCT_PADDING_WARNINGS \
+        _Pragma("clang diagnostic push") _Pragma("clang diagnostic error \"-Wpadded\"")
+#    define ANGLE_DISABLE_STRUCT_PADDING_WARNINGS _Pragma("clang diagnostic pop")
+#elif defined(__GNUC__)
+#    define ANGLE_ENABLE_STRUCT_PADDING_WARNINGS \
+        _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic error \"-Wpadded\"")
+#    define ANGLE_DISABLE_STRUCT_PADDING_WARNINGS _Pragma("GCC diagnostic pop")
+#elif defined(_MSC_VER)
+#    define ANGLE_ENABLE_STRUCT_PADDING_WARNINGS \
+        __pragma(warning(push)) __pragma(warning(error : 4820))
+#    define ANGLE_DISABLE_STRUCT_PADDING_WARNINGS __pragma(warning(pop))
+#else
+#    define ANGLE_ENABLE_STRUCT_PADDING_WARNINGS
+#    define ANGLE_DISABLE_STRUCT_PADDING_WARNINGS
+#endif
+
+#if defined(__clang__)
+#    define ANGLE_DISABLE_SUGGEST_OVERRIDE_WARNINGS                               \
+        _Pragma("clang diagnostic push")                                          \
+            _Pragma("clang diagnostic ignored \"-Wsuggest-destructor-override\"") \
+                _Pragma("clang diagnostic ignored \"-Wsuggest-override\"")
+#    define ANGLE_REENABLE_SUGGEST_OVERRIDE_WARNINGS _Pragma("clang diagnostic pop")
+#else
+#    define ANGLE_DISABLE_SUGGEST_OVERRIDE_WARNINGS
+#    define ANGLE_REENABLE_SUGGEST_OVERRIDE_WARNINGS
+#endif
+
+#if defined(__clang__)
+#    define ANGLE_DISABLE_EXTRA_SEMI_WARNING \
+        _Pragma("clang diagnostic push") _Pragma("clang diagnostic ignored \"-Wextra-semi\"")
+#    define ANGLE_REENABLE_EXTRA_SEMI_WARNING _Pragma("clang diagnostic pop")
+#else
+#    define ANGLE_DISABLE_EXTRA_SEMI_WARNING
+#    define ANGLE_REENABLE_EXTRA_SEMI_WARNING
+#endif
+
+#if defined(__clang__)
+#    define ANGLE_DISABLE_EXTRA_SEMI_STMT_WARNING \
+        _Pragma("clang diagnostic push") _Pragma("clang diagnostic ignored \"-Wextra-semi-stmt\"")
+#    define ANGLE_REENABLE_EXTRA_SEMI_STMT_WARNING _Pragma("clang diagnostic pop")
+#else
+#    define ANGLE_DISABLE_EXTRA_SEMI_STMT_WARNING
+#    define ANGLE_REENABLE_EXTRA_SEMI_STMT_WARNING
+#endif
+
+#if defined(__clang__)
+#    define ANGLE_DISABLE_SHADOWING_WARNING \
+        _Pragma("clang diagnostic push") _Pragma("clang diagnostic ignored \"-Wshadow-field\"")
+#    define ANGLE_REENABLE_SHADOWING_WARNING _Pragma("clang diagnostic pop")
+#else
+#    define ANGLE_DISABLE_SHADOWING_WARNING
+#    define ANGLE_REENABLE_SHADOWING_WARNING
+#endif
+
+#if defined(__clang__)
+#    define ANGLE_DISABLE_DESTRUCTOR_OVERRIDE_WARNING \
+        _Pragma("clang diagnostic push")              \
+            _Pragma("clang diagnostic ignored \"-Winconsistent-missing-destructor-override\"")
+#    define ANGLE_REENABLE_DESTRUCTOR_OVERRIDE_WARNING _Pragma("clang diagnostic pop")
+#else
+#    define ANGLE_DISABLE_DESTRUCTOR_OVERRIDE_WARNING
+#    define ANGLE_REENABLE_DESTRUCTOR_OVERRIDE_WARNING
+#endif
+
+#if defined(__clang__)
+#    define ANGLE_DISABLE_UNUSED_FUNCTION_WARNING \
+        _Pragma("clang diagnostic push") _Pragma("clang diagnostic ignored \"-Wunused-function\"")
+#    define ANGLE_REENABLE_UNUSED_FUNCTION_WARNING _Pragma("clang diagnostic pop")
+#else
+#    define ANGLE_DISABLE_UNUSED_FUNCTION_WARNING
+#    define ANGLE_REENABLE_UNUSED_FUNCTION_WARNING
+#endif
+
+#endif  // COMMON_DEBUG_H_

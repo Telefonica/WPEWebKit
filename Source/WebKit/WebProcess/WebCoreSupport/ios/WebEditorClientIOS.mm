@@ -26,26 +26,26 @@
 #import "config.h"
 #import "WebEditorClient.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WebPage.h"
 #import <WebCore/DocumentFragment.h>
 #import <WebCore/KeyboardEvent.h>
 #import <WebCore/NotImplemented.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
     
-void WebEditorClient::handleKeyboardEvent(KeyboardEvent* event)
+void WebEditorClient::handleKeyboardEvent(KeyboardEvent& event)
 {
     if (m_page->handleEditingKeyboardEvent(event))
-        event->setDefaultHandled();
+        event.setDefaultHandled();
 }
 
-void WebEditorClient::handleInputMethodKeydown(KeyboardEvent* event)
+void WebEditorClient::handleInputMethodKeydown(KeyboardEvent& event)
 {
-    notImplemented();
+    if (event.handledByInputMethod())
+        event.setDefaultHandled();
 }
 
 void WebEditorClient::setInsertionPasteboard(const String&)
@@ -87,11 +87,36 @@ bool WebEditorClient::performsTwoStepPaste(WebCore::DocumentFragment*)
     return false;
 }
 
+void WebEditorClient::updateStringForFind(const String& findString)
+{
+    m_page->updateStringForFind(findString);
+}
+
 void WebEditorClient::overflowScrollPositionChanged()
 {
-    m_page->didChangeSelection();
+    m_page->didScrollSelection();
+}
+
+void WebEditorClient::subFrameScrollPositionChanged()
+{
+    m_page->didScrollSelection();
+}
+
+bool WebEditorClient::shouldAllowSingleClickToChangeSelection(WebCore::Node& targetNode, const WebCore::VisibleSelection& newSelection) const
+{
+    return m_page->shouldAllowSingleClickToChangeSelection(targetNode, newSelection);
+}
+
+bool WebEditorClient::shouldRevealCurrentSelectionAfterInsertion() const
+{
+    return m_page->shouldRevealCurrentSelectionAfterInsertion();
+}
+
+bool WebEditorClient::shouldSuppressPasswordEcho() const
+{
+    return m_page->screenIsBeingCaptured() || m_page->hardwareKeyboardIsAttached();
 }
 
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

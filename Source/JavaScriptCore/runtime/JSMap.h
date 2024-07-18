@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,46 +36,37 @@ public:
 
     DECLARE_EXPORT_INFO;
 
+    template<typename CellType, SubspaceAccess mode>
+    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    {
+        return vm.mapSpace<mode>();
+    }
+
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
         return Structure::create(vm, globalObject, prototype, TypeInfo(JSMapType, StructureFlags), info());
     }
 
-    static JSMap* create(ExecState* exec, VM& vm, Structure* structure)
+    static JSMap* create(VM& vm, Structure* structure)
     {
-        JSMap* instance = new (NotNull, allocateCell<JSMap>(vm.heap)) JSMap(vm, structure);
-        instance->finishCreation(exec, vm);
+        JSMap* instance = new (NotNull, allocateCell<JSMap>(vm)) JSMap(vm, structure);
+        instance->finishCreation(vm);
         return instance;
     }
 
-    ALWAYS_INLINE void set(ExecState* exec, JSValue key, JSValue value)
-    {
-        add(exec, key, value);
-    }
+    ALWAYS_INLINE void set(JSGlobalObject*, JSValue key, JSValue);
 
+    static bool isSetFastAndNonObservable(Structure*);
     bool isIteratorProtocolFastAndNonObservable();
-    bool canCloneFastAndNonObservable(Structure*);
-    JSMap* clone(ExecState*, VM&, Structure*);
+    JSMap* clone(JSGlobalObject*, VM&, Structure*);
 
 private:
     JSMap(VM& vm, Structure* structure)
         : Base(vm, structure)
     {
     }
-
-    static String toStringName(const JSObject*, ExecState*);
 };
 
-inline bool isJSMap(JSCell* from)
-{
-    static_assert(std::is_final<JSMap>::value, "");
-    return from->type() == JSMapType;
-}
-
-inline bool isJSMap(JSValue from)
-{
-    static_assert(std::is_final<JSMap>::value, "");
-    return from.isCell() && from.asCell()->type() == JSMapType;
-}
+static_assert(std::is_final<JSMap>::value, "Required for JSType based casting");
 
 } // namespace JSC

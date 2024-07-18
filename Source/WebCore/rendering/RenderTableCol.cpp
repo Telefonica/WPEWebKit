@@ -33,10 +33,13 @@
 #include "RenderTable.h"
 #include "RenderTableCaption.h"
 #include "RenderTableCell.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderTableCol);
 
 RenderTableCol::RenderTableCol(Element& element, RenderStyle&& style)
     : RenderBox(element, WTFMove(style), 0)
@@ -46,6 +49,12 @@ RenderTableCol::RenderTableCol(Element& element, RenderStyle&& style)
     updateFromElement();
 }
 
+RenderTableCol::RenderTableCol(Document& document, RenderStyle&& style)
+    : RenderBox(document, WTFMove(style), 0)
+{
+    setInline(true);
+}
+
 void RenderTableCol::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
 {
     RenderBox::styleDidChange(diff, oldStyle);
@@ -53,9 +62,13 @@ void RenderTableCol::styleDidChange(StyleDifference diff, const RenderStyle* old
     if (!table)
         return;
     // If border was changed, notify table.
-    if (oldStyle && oldStyle->border() != style().border())
+    if (!oldStyle)
+        return;
+    if (oldStyle->border() != style().border()) {
         table->invalidateCollapsedBorders();
-    else if (oldStyle->width() != style().width()) {
+        return;
+    }
+    if (oldStyle->width() != style().width()) {
         table->recalcSectionsIfNeeded();
         for (auto& section : childrenOfType<RenderTableSection>(*table)) {
             unsigned nEffCols = table->numEffCols();
@@ -74,32 +87,33 @@ void RenderTableCol::styleDidChange(StyleDifference diff, const RenderStyle* old
 
 void RenderTableCol::updateFromElement()
 {
+    ASSERT(element());
     unsigned oldSpan = m_span;
-    if (element().hasTagName(colTag) || element().hasTagName(colgroupTag)) {
-        HTMLTableColElement& tc = static_cast<HTMLTableColElement&>(element());
+    if (element()->hasTagName(colTag) || element()->hasTagName(colgroupTag)) {
+        HTMLTableColElement& tc = static_cast<HTMLTableColElement&>(*element());
         m_span = tc.span();
     } else
-        m_span = !(hasInitializedStyle() && style().display() == TABLE_COLUMN_GROUP);
+        m_span = 1;
     if (m_span != oldSpan && hasInitializedStyle() && parent())
         setNeedsLayoutAndPrefWidthsRecalc();
 }
 
-void RenderTableCol::insertedIntoTree()
+void RenderTableCol::insertedIntoTree(IsInternalMove isInternalMove)
 {
-    RenderBox::insertedIntoTree();
+    RenderBox::insertedIntoTree(isInternalMove);
     table()->addColumn(this);
 }
 
-void RenderTableCol::willBeRemovedFromTree()
+void RenderTableCol::willBeRemovedFromTree(IsInternalMove isInternalMove)
 {
-    RenderBox::willBeRemovedFromTree();
+    RenderBox::willBeRemovedFromTree(isInternalMove);
     table()->removeColumn(this);
 }
 
 bool RenderTableCol::isChildAllowed(const RenderObject& child, const RenderStyle& style) const
 {
     // We cannot use isTableColumn here as style() may return 0.
-    return style.display() == TABLE_COLUMN && child.isRenderTableCol();
+    return style.display() == DisplayType::TableColumn && child.isRenderTableCol();
 }
 
 bool RenderTableCol::canHaveChildren() const
@@ -109,7 +123,7 @@ bool RenderTableCol::canHaveChildren() const
     return isTableColumnGroup();
 }
 
-LayoutRect RenderTableCol::clippedOverflowRectForRepaint(const RenderLayerModelObject* repaintContainer) const
+LayoutRect RenderTableCol::clippedOverflowRect(const RenderLayerModelObject* repaintContainer, VisibleRectContext context) const
 {
     // For now, just repaint the whole table.
     // FIXME: Find a better way to do this, e.g., need to repaint all the cells that we
@@ -119,7 +133,7 @@ LayoutRect RenderTableCol::clippedOverflowRectForRepaint(const RenderLayerModelO
     RenderTable* parentTable = table();
     if (!parentTable)
         return LayoutRect();
-    return parentTable->clippedOverflowRectForRepaint(repaintContainer);
+    return parentTable->clippedOverflowRect(repaintContainer, context);
 }
 
 void RenderTableCol::imageChanged(WrappedImagePtr, const IntRect*)
@@ -141,7 +155,7 @@ RenderTable* RenderTableCol::table() const
     auto table = parent();
     if (table && !is<RenderTable>(*table))
         table = table->parent();
-    return is<RenderTable>(table) ? downcast<RenderTable>(table) : nullptr;
+    return dynamicDowncast<RenderTable>(table);
 }
 
 RenderTableCol* RenderTableCol::enclosingColumnGroup() const
@@ -168,13 +182,7 @@ RenderTableCol* RenderTableCol::nextColumn() const
     if (!next && is<RenderTableCol>(*parent()))
         next = parent()->nextSibling();
 
-    for (; next && !is<RenderTableCol>(*next); next = next->nextSibling()) {
-        // We allow captions mixed with columns and column-groups.
-        if (is<RenderTableCaption>(*next))
-            continue;
-
-        return nullptr;
-    }
+    for (; next && !is<RenderTableCol>(*next); next = next->nextSibling()) { }
 
     return downcast<RenderTableCol>(next);
 }

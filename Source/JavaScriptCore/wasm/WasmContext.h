@@ -27,37 +27,36 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "JSWebAssemblyInstance.h"
-#include "Options.h"
+#include <wtf/Lock.h>
+#include <wtf/UniqueArray.h>
+#include <wtf/Vector.h>
 
-namespace JSC {
+namespace JSC { namespace Wasm {
 
-class VM;
+class Instance;
 
-namespace Wasm {
+struct Context {
+    Instance* load() const;
+    void store(Instance*, void* softStackLimit);
 
-// FIXME: We might want this to be something else at some point:
-// https://bugs.webkit.org/show_bug.cgi?id=170260
-using Context = JSWebAssemblyInstance;
+    static bool useFastTLS();
 
-inline bool useFastTLS()
-{
-#if ENABLE(FAST_TLS_JIT)
-    return Options::useWebAssemblyFastTLS();
-#else
-    return false;
-#endif
-}
+    Instance** pointerToInstance()
+    {
+        ASSERT(!useFastTLS());
+        return &instance;
+    }
 
-inline bool useFastTLSForContext()
-{
-    if (useFastTLS())
-        return Options::useFastTLSForWasmContext();
-    return false;
-}
+    static Instance* tryLoadInstanceFromTLS();
 
-Context* loadContext(VM&);
-void storeContext(VM&, Context*);
+    uint64_t* scratchBufferForSize(size_t numberOfSlots);
+
+private:
+    Instance* instance { nullptr };
+    Vector<UniqueArray<uint64_t>> m_scratchBuffers;
+    size_t m_sizeOfLastScratchBuffer { 0 };
+    Lock m_scratchBufferLock;
+};
 
 } } // namespace JSC::Wasm
 

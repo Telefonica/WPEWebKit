@@ -29,6 +29,8 @@
 #if ENABLE(SPEECH_SYNTHESIS)
 
 #include "PlatformSpeechSynthesisVoice.h"
+#include "SpeechSynthesisErrorCode.h"
+#include <optional>
 #include <wtf/Vector.h>
 
 #if PLATFORM(COCOA)
@@ -38,7 +40,7 @@ OBJC_CLASS WebSpeechSynthesisWrapper;
 
 namespace WebCore {
 
-enum SpeechBoundary {
+enum class SpeechBoundary : uint8_t {
     SpeechWordBoundary,
     SpeechSentenceBoundary
 };
@@ -51,14 +53,15 @@ public:
     virtual void didFinishSpeaking(PlatformSpeechSynthesisUtterance&) = 0;
     virtual void didPauseSpeaking(PlatformSpeechSynthesisUtterance&) = 0;
     virtual void didResumeSpeaking(PlatformSpeechSynthesisUtterance&) = 0;
-    virtual void speakingErrorOccurred(PlatformSpeechSynthesisUtterance&) = 0;
-    virtual void boundaryEventOccurred(PlatformSpeechSynthesisUtterance&, SpeechBoundary, unsigned charIndex) = 0;
+    virtual void speakingErrorOccurred(PlatformSpeechSynthesisUtterance&, std::optional<SpeechSynthesisErrorCode>) = 0;
+    virtual void boundaryEventOccurred(PlatformSpeechSynthesisUtterance&, SpeechBoundary, unsigned charIndex, unsigned charLength) = 0;
     virtual void voicesDidChange() = 0;
 protected:
-    virtual ~PlatformSpeechSynthesizerClient() { }
+    virtual ~PlatformSpeechSynthesizerClient() = default;
 };
 
 class WEBCORE_EXPORT PlatformSpeechSynthesizer {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WEBCORE_EXPORT explicit PlatformSpeechSynthesizer(PlatformSpeechSynthesizerClient*);
 
@@ -71,6 +74,7 @@ public:
     virtual void pause();
     virtual void resume();
     virtual void cancel();
+    virtual void resetState();
 
     PlatformSpeechSynthesizerClient* client() const { return m_speechSynthesizerClient; }
 

@@ -10,18 +10,17 @@
 
 // Unit tests for RedPayloadSplitter class.
 
-#include "webrtc/modules/audio_coding/neteq/red_payload_splitter.h"
-
-#include <assert.h>
+#include "modules/audio_coding/neteq/red_payload_splitter.h"
 
 #include <memory>
 #include <utility>  // pair
 
-#include "webrtc/api/audio_codecs/builtin_audio_decoder_factory.h"
-#include "webrtc/modules/audio_coding/neteq/mock/mock_decoder_database.h"
-#include "webrtc/modules/audio_coding/neteq/packet.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/mock_audio_decoder_factory.h"
+#include "api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "modules/audio_coding/neteq/decoder_database.h"
+#include "modules/audio_coding/neteq/packet.h"
+#include "rtc_base/numerics/safe_conversions.h"
+#include "test/gtest.h"
+#include "test/mock_audio_decoder_factory.h"
 
 using ::testing::Return;
 using ::testing::ReturnNull;
@@ -30,7 +29,6 @@ namespace webrtc {
 
 static const int kRedPayloadType = 100;
 static const size_t kPayloadLength = 10;
-static const size_t kRedHeaderLength = 4;  // 4 bytes RED header.
 static const uint16_t kSequenceNumber = 0;
 static const uint32_t kBaseTimestamp = 0x12345678;
 
@@ -71,9 +69,9 @@ void CreateOpusFecPayload(uint8_t* payload,
 //   |0|   Block PT  |
 //   +-+-+-+-+-+-+-+-+
 
-// Creates a RED packet, with |num_payloads| payloads, with payload types given
-// by the values in array |payload_types| (which must be of length
-// |num_payloads|). Each redundant payload is |timestamp_offset| samples
+// Creates a RED packet, with `num_payloads` payloads, with payload types given
+// by the values in array `payload_types` (which must be of length
+// `num_payloads`). Each redundant payload is `timestamp_offset` samples
 // "behind" the the previous payload.
 Packet CreateRedPayload(size_t num_payloads,
                         uint8_t* payload_types,
@@ -99,17 +97,18 @@ Packet CreateRedPayload(size_t num_payloads,
     // Not the last block; set F = 1.
     *payload_ptr |= 0x80;
     ++payload_ptr;
-    int this_offset = (num_payloads - i - 1) * timestamp_offset;
+    int this_offset =
+        rtc::checked_cast<int>((num_payloads - i - 1) * timestamp_offset);
     *payload_ptr = this_offset >> 6;
     ++payload_ptr;
-    assert(kPayloadLength <= 1023);  // Max length described by 10 bits.
+    RTC_DCHECK_LE(kPayloadLength, 1023);  // Max length described by 10 bits.
     *payload_ptr = ((this_offset & 0x3F) << 2) | (kPayloadLength >> 8);
     ++payload_ptr;
     *payload_ptr = kPayloadLength & 0xFF;
     ++payload_ptr;
   }
   for (size_t i = 0; i < num_payloads; ++i) {
-    // Write |i| to all bytes in each payload.
+    // Write `i` to all bytes in each payload.
     if (embed_opus_fec) {
       CreateOpusFecPayload(payload_ptr, kPayloadLength,
                            static_cast<uint8_t>(i));
@@ -121,7 +120,7 @@ Packet CreateRedPayload(size_t num_payloads,
   return packet;
 }
 
-// Create a packet with all payload bytes set to |payload_value|.
+// Create a packet with all payload bytes set to `payload_value`.
 Packet CreatePacket(uint8_t payload_type,
                     size_t payload_length,
                     uint8_t payload_value,
@@ -140,7 +139,7 @@ Packet CreatePacket(uint8_t payload_type,
   return packet;
 }
 
-// Checks that |packet| has the attributes given in the remaining parameters.
+// Checks that `packet` has the attributes given in the remaining parameters.
 void VerifyPacket(const Packet& packet,
                   size_t payload_length,
                   uint8_t payload_type,
@@ -289,7 +288,7 @@ TEST(RedPayloadSplitter, TwoPacketsThreePayloads) {
 TEST(RedPayloadSplitter, CheckRedPayloads) {
   PacketList packet_list;
   for (uint8_t i = 0; i <= 3; ++i) {
-    // Create packet with payload type |i|, payload length 10 bytes, all 0.
+    // Create packet with payload type `i`, payload length 10 bytes, all 0.
     packet_list.push_back(CreatePacket(i, 10, 0));
   }
 
@@ -297,11 +296,12 @@ TEST(RedPayloadSplitter, CheckRedPayloads) {
   // easier to just register the payload types and let the actual implementation
   // do its job.
   DecoderDatabase decoder_database(
-      new rtc::RefCountedObject<MockAudioDecoderFactory>);
-  decoder_database.RegisterPayload(0, NetEqDecoder::kDecoderCNGnb, "cng-nb");
-  decoder_database.RegisterPayload(1, NetEqDecoder::kDecoderPCMu, "pcmu");
-  decoder_database.RegisterPayload(2, NetEqDecoder::kDecoderAVT, "avt");
-  decoder_database.RegisterPayload(3, NetEqDecoder::kDecoderILBC, "ilbc");
+      rtc::make_ref_counted<MockAudioDecoderFactory>(), absl::nullopt);
+  decoder_database.RegisterPayload(0, SdpAudioFormat("cn", 8000, 1));
+  decoder_database.RegisterPayload(1, SdpAudioFormat("pcmu", 8000, 1));
+  decoder_database.RegisterPayload(2,
+                                   SdpAudioFormat("telephone-event", 8000, 1));
+  decoder_database.RegisterPayload(3, SdpAudioFormat("ilbc", 8000, 1));
 
   RedPayloadSplitter splitter;
   splitter.CheckRedPayloads(&packet_list, decoder_database);
@@ -315,6 +315,30 @@ TEST(RedPayloadSplitter, CheckRedPayloads) {
     packet_list.pop_front();
   }
   EXPECT_TRUE(packet_list.empty());
+}
+
+// This test creates a RED packet where the payloads also have the payload type
+// for RED. That is, some kind of weird nested RED packet. This is not supported
+// and the splitter should discard all packets.
+TEST(RedPayloadSplitter, CheckRedPayloadsRecursiveRed) {
+  PacketList packet_list;
+  for (uint8_t i = 0; i <= 3; ++i) {
+    // Create packet with RED payload type, payload length 10 bytes, all 0.
+    packet_list.push_back(CreatePacket(kRedPayloadType, 10, 0));
+  }
+
+  // Use a real DecoderDatabase object here instead of a mock, since it is
+  // easier to just register the payload types and let the actual implementation
+  // do its job.
+  DecoderDatabase decoder_database(
+      rtc::make_ref_counted<MockAudioDecoderFactory>(), absl::nullopt);
+  decoder_database.RegisterPayload(kRedPayloadType,
+                                   SdpAudioFormat("red", 8000, 1));
+
+  RedPayloadSplitter splitter;
+  splitter.CheckRedPayloads(&packet_list, decoder_database);
+
+  EXPECT_TRUE(packet_list.empty());  // Should have dropped all packets.
 }
 
 // Packet A is split into A1, A2 and A3. But the length parameter is off, so
@@ -339,6 +363,27 @@ TEST(RedPayloadSplitter, WrongPayloadLength) {
                kSequenceNumber, kBaseTimestamp - 2 * kTimestampOffset, 0,
                {0, 2});
   packet_list.pop_front();
+}
+
+// Test that we reject packets too short to contain a RED header.
+TEST(RedPayloadSplitter, RejectsIncompleteHeaders) {
+  RedPayloadSplitter splitter;
+
+  uint8_t payload_types[] = {0, 0};
+  const int kTimestampOffset = 160;
+
+  PacketList packet_list;
+
+  // Truncate the packet such that the first block can not be parsed.
+  packet_list.push_back(CreateRedPayload(2, payload_types, kTimestampOffset));
+  packet_list.front().payload.SetSize(4);
+  EXPECT_FALSE(splitter.SplitRed(&packet_list));
+  EXPECT_FALSE(packet_list.empty());
+
+  // Truncate the packet such that the first block can not be parsed.
+  packet_list.front().payload.SetSize(3);
+  EXPECT_FALSE(splitter.SplitRed(&packet_list));
+  EXPECT_FALSE(packet_list.empty());
 }
 
 }  // namespace webrtc

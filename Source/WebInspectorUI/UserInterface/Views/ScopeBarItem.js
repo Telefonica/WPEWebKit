@@ -25,7 +25,7 @@
 
 WI.ScopeBarItem = class ScopeBarItem extends WI.Object
 {
-    constructor(id, label, exclusive, className)
+    constructor(id, label, {className, exclusive, independent, hidden} = {})
     {
         super();
 
@@ -34,18 +34,27 @@ WI.ScopeBarItem = class ScopeBarItem extends WI.Object
         if (className)
             this._element.classList.add(className);
         this._element.textContent = label;
+
         this._element.addEventListener("mousedown", this._handleMouseDown.bind(this));
+        this._element.addEventListener("keydown", this._handleKeyDown.bind(this));
 
         this._id = id;
         this._label = label;
-        this._exclusive = exclusive;
+        this._exclusive = !!exclusive;
+        this._independent = !!independent;
+        this._hidden = !!hidden;
+        this._scopeBar = null;
 
         this._selectedSetting = new WI.Setting("scopebaritem-" + id, false);
+        this._updateSelected(this._selectedSetting.value);
 
-        this._element.classList.toggle("selected", this._selectedSetting.value);
+        this._element.classList.toggle("hidden", this._hidden);
     }
 
     // Public
+
+    get scopeBar() { return this._scopeBar; }
+    set scopeBar(scopeBar) { this._scopeBar = scopeBar; }
 
     get element()
     {
@@ -74,21 +83,48 @@ WI.ScopeBarItem = class ScopeBarItem extends WI.Object
 
     set selected(selected)
     {
-        this.setSelected(selected, false);
+        this.toggle(selected, {
+            extendSelection: this._independent || (WI.modifierKeys.metaKey && !WI.modifierKeys.ctrlKey && !WI.modifierKeys.altKey && !WI.modifierKeys.shiftKey),
+        });
     }
 
-    setSelected(selected, withModifier)
+    get hidden()
+    {
+        return this._hidden;
+    }
+
+    set hidden(flag)
+    {
+        if (this._hidden === flag)
+            return;
+
+        this._hidden = flag;
+
+        this._element.classList.toggle("hidden", flag);
+
+        this.dispatchEventToListeners(WI.ScopeBarItem.Event.HiddenChanged);
+    }
+
+    toggle(selected, {extendSelection} = {})
     {
         if (this._selectedSetting.value === selected)
             return;
 
-        this._element.classList.toggle("selected", selected);
+        this._updateSelected(selected);
         this._selectedSetting.value = selected;
 
-        this.dispatchEventToListeners(WI.ScopeBarItem.Event.SelectionChanged, {withModifier});
+        this.dispatchEventToListeners(WI.ScopeBarItem.Event.SelectionChanged, {extendSelection});
     }
 
     // Private
+
+    _updateSelected(selected)
+    {
+        selected = !!selected;
+        this._element.classList.toggle("selected", selected);
+        this._element.ariaPressed = selected;
+        this._element.tabIndex = selected ? 0 : -1;
+    }
 
     _handleMouseDown(event)
     {
@@ -96,10 +132,23 @@ WI.ScopeBarItem = class ScopeBarItem extends WI.Object
         if (event.button !== 0)
             return;
 
-        this.setSelected(!this.selected, event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey);
+        this.selected = !this.selected;
+
+        // Move the focus to the clicked element only when the focus is already inside the scope bar element.
+        if (!this._scopeBar?.element.contains(document.activeElement))
+            event.preventDefault();
+    }
+
+    _handleKeyDown(event)
+    {
+        if (event.code === "Space" || event.code === "Enter") {
+            event.stop();
+            this.selected = !this.selected;
+        }
     }
 };
 
 WI.ScopeBarItem.Event = {
-    SelectionChanged: "scope-bar-item-selection-did-change"
+    SelectionChanged: "scope-bar-item-selection-changed",
+    HiddenChanged: "scope-bar-item-hidden-changed",
 };

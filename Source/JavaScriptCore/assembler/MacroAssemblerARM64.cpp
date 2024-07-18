@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,22 +28,50 @@
 #if ENABLE(ASSEMBLER) && CPU(ARM64)
 #include "MacroAssembler.h"
 
+#include "JSCPtrTag.h"
 #include "ProbeContext.h"
 #include <wtf/InlineASM.h>
 
+#if OS(LINUX)
+#include <asm/hwcap.h>
+#if __has_include(<sys/auxv.h>)
+#include <sys/auxv.h>
+#else
+#include <linux/auxvec.h>
+// Provide an implementation for C libraries which do not ship one.
+static unsigned long getauxval(unsigned long type)
+{
+    char** env = environ;
+    while (*env++) { /* no-op */ }
+
+    for (auto* auxv = reinterpret_cast<unsigned long*>(env); *auxv != AT_NULL; auxv += 2) {
+        if (*auxv == type)
+            return auxv[1];
+    }
+
+    errno = ENOENT;
+    return 0;
+}
+#endif
+#endif
+
 namespace JSC {
 
-#if ENABLE(MASM_PROBE)
-
-extern "C" void ctiMasmProbeTrampoline();
+JSC_DECLARE_JIT_OPERATION(ctiMasmProbeTrampoline, void, ());
+JSC_ANNOTATE_JIT_OPERATION_PROBE(ctiMasmProbeTrampoline);
 
 using namespace ARM64Registers;
 
-#if COMPILER(GCC_OR_CLANG)
+#if COMPILER(GCC_COMPATIBLE)
 
 // The following are offsets for Probe::State fields accessed
 // by the ctiMasmProbeTrampoline stub.
+#if CPU(ADDRESS64)
 #define PTR_SIZE 8
+#else
+#define PTR_SIZE 4
+#endif
+
 #define PROBE_PROBE_FUNCTION_OFFSET (0 * PTR_SIZE)
 #define PROBE_ARG_OFFSET (1 * PTR_SIZE)
 #define PROBE_INIT_STACK_FUNCTION_OFFSET (2 * PTR_SIZE)
@@ -126,8 +154,8 @@ using namespace ARM64Registers;
 #define PROBE_CPU_Q31_OFFSET (PROBE_FIRST_FPREG_OFFSET + (31 * FPREG_SIZE))
 #define PROBE_SIZE (PROBE_FIRST_FPREG_OFFSET + (32 * FPREG_SIZE))
 
-#define SAVED_PROBE_RETURN_PC_OFFSET        (PROBE_SIZE + (0 * PTR_SIZE))
-#define PROBE_SIZE_PLUS_EXTRAS              (PROBE_SIZE + (3 * PTR_SIZE))
+#define SAVED_PROBE_RETURN_PC_OFFSET        (PROBE_SIZE + (0 * GPREG_SIZE))
+#define PROBE_SIZE_PLUS_EXTRAS              (PROBE_SIZE + (3 * GPREG_SIZE))
 
 // These ASSERTs remind you that if you change the layout of Probe::State,
 // you need to change ctiMasmProbeTrampoline offsets above to match.
@@ -216,7 +244,7 @@ static_assert(PROBE_OFFSETOF(cpu.fprs[ARM64Registers::q31]) == PROBE_CPU_Q31_OFF
 static_assert(sizeof(Probe::State) == PROBE_SIZE, "Probe::State's size matches ctiMasmProbeTrampoline");
 
 // Conditions for using ldp and stp.
-static_assert(PROBE_CPU_PC_OFFSET == PROBE_CPU_SP_OFFSET + PTR_SIZE, "PROBE_CPU_SP_OFFSET and PROBE_CPU_PC_OFFSET must be adjacent");
+static_assert(PROBE_CPU_PC_OFFSET == PROBE_CPU_SP_OFFSET + GPREG_SIZE, "PROBE_CPU_SP_OFFSET and PROBE_CPU_PC_OFFSET must be adjacent");
 static_assert(!(PROBE_SIZE_PLUS_EXTRAS & 0xf), "PROBE_SIZE_PLUS_EXTRAS should be 16 byte aligned"); // the Probe::State copying code relies on this.
 
 #undef PROBE_OFFSETOF
@@ -224,47 +252,46 @@ static_assert(!(PROBE_SIZE_PLUS_EXTRAS & 0xf), "PROBE_SIZE_PLUS_EXTRAS should be
 #define FPR_OFFSET(fpr) (PROBE_CPU_##fpr##_OFFSET - PROBE_CPU_Q0_OFFSET)
 
 struct IncomingProbeRecord {
-    uintptr_t x24;
-    uintptr_t x25;
-    uintptr_t x26;
-    uintptr_t x27;
-    uintptr_t x28;
-    uintptr_t x30; // lr
+    UCPURegister x24;
+    UCPURegister x25;
+    UCPURegister x26;
+    UCPURegister x30; // lr
+    UCPURegister x27; // Saved in trampoline to use as scratch.
+    UCPURegister unusedForAlignment;
 };
 
-#define IN_X24_OFFSET (0 * PTR_SIZE)
-#define IN_X25_OFFSET (1 * PTR_SIZE)
-#define IN_X26_OFFSET (2 * PTR_SIZE)
-#define IN_X27_OFFSET (3 * PTR_SIZE)
-#define IN_X28_OFFSET (4 * PTR_SIZE)
-#define IN_X30_OFFSET (5 * PTR_SIZE)
-#define IN_SIZE       (6 * PTR_SIZE)
+#define IN_X24_OFFSET (0 * GPREG_SIZE)
+#define IN_X25_OFFSET (1 * GPREG_SIZE)
+#define IN_X26_OFFSET (2 * GPREG_SIZE)
+#define IN_X30_OFFSET (3 * GPREG_SIZE)
+#define IN_X27_OFFSET (4 * GPREG_SIZE)
+// The 5th slot is unused. It's only there for alignment.
+#define IN_SIZE       (6 * GPREG_SIZE)
 
 static_assert(IN_X24_OFFSET == offsetof(IncomingProbeRecord, x24), "IN_X24_OFFSET is incorrect");
 static_assert(IN_X25_OFFSET == offsetof(IncomingProbeRecord, x25), "IN_X25_OFFSET is incorrect");
 static_assert(IN_X26_OFFSET == offsetof(IncomingProbeRecord, x26), "IN_X26_OFFSET is incorrect");
-static_assert(IN_X27_OFFSET == offsetof(IncomingProbeRecord, x27), "IN_X27_OFFSET is incorrect");
-static_assert(IN_X28_OFFSET == offsetof(IncomingProbeRecord, x28), "IN_X22_OFFSET is incorrect");
 static_assert(IN_X30_OFFSET == offsetof(IncomingProbeRecord, x30), "IN_X23_OFFSET is incorrect");
+static_assert(IN_X27_OFFSET == offsetof(IncomingProbeRecord, x27), "IN_X27_OFFSET is incorrect");
 static_assert(IN_SIZE == sizeof(IncomingProbeRecord), "IN_SIZE is incorrect");
 static_assert(!(sizeof(IncomingProbeRecord) & 0xf), "IncomingProbeStack must be 16-byte aligned");
 
 struct OutgoingProbeRecord {
-    uintptr_t nzcv;
-    uintptr_t fpsr;
-    uintptr_t x27;
-    uintptr_t x28;
-    uintptr_t fp;
-    uintptr_t lr;
+    UCPURegister nzcv;
+    UCPURegister fpsr;
+    UCPURegister x27;
+    UCPURegister x28;
+    UCPURegister fp;
+    UCPURegister lr;
 };
 
-#define OUT_NZCV_OFFSET (0 * PTR_SIZE)
-#define OUT_FPSR_OFFSET (1 * PTR_SIZE)
-#define OUT_X27_OFFSET  (2 * PTR_SIZE)
-#define OUT_X28_OFFSET  (3 * PTR_SIZE)
-#define OUT_FP_OFFSET   (4 * PTR_SIZE)
-#define OUT_LR_OFFSET   (5 * PTR_SIZE)
-#define OUT_SIZE        (6 * PTR_SIZE)
+#define OUT_NZCV_OFFSET (0 * GPREG_SIZE)
+#define OUT_FPSR_OFFSET (1 * GPREG_SIZE)
+#define OUT_X27_OFFSET  (2 * GPREG_SIZE)
+#define OUT_X28_OFFSET  (3 * GPREG_SIZE)
+#define OUT_FP_OFFSET   (4 * GPREG_SIZE)
+#define OUT_LR_OFFSET   (5 * GPREG_SIZE)
+#define OUT_SIZE        (6 * GPREG_SIZE)
 
 static_assert(OUT_NZCV_OFFSET == offsetof(OutgoingProbeRecord, nzcv), "OUT_NZCV_OFFSET is incorrect");
 static_assert(OUT_FPSR_OFFSET == offsetof(OutgoingProbeRecord, fpsr), "OUT_FPSR_OFFSET is incorrect");
@@ -276,16 +303,23 @@ static_assert(OUT_SIZE == sizeof(OutgoingProbeRecord), "OUT_SIZE is incorrect");
 static_assert(!(sizeof(OutgoingProbeRecord) & 0xf), "OutgoingProbeStack must be 16-byte aligned");
 
 struct LRRestorationRecord {
-    uintptr_t lr;
-    uintptr_t unusedDummyToEnsureSizeIs16ByteAligned;
+    UCPURegister lr;
+    UCPURegister unusedDummyToEnsureSizeIs16ByteAligned;
 };
 
-#define LR_RESTORATION_LR_OFFSET (0 * PTR_SIZE)
-#define LR_RESTORATION_SIZE      (2 * PTR_SIZE)
+#define LR_RESTORATION_LR_OFFSET (0 * GPREG_SIZE)
+#define LR_RESTORATION_SIZE      (2 * GPREG_SIZE)
 
 static_assert(LR_RESTORATION_LR_OFFSET == offsetof(LRRestorationRecord, lr), "LR_RESTORATION_LR_OFFSET is incorrect");
 static_assert(LR_RESTORATION_SIZE == sizeof(LRRestorationRecord), "LR_RESTORATION_SIZE is incorrect");
 static_assert(!(sizeof(LRRestorationRecord) & 0xf), "LRRestorationRecord must be 16-byte aligned");
+
+#if CPU(ARM64E)
+#define JIT_PROBE_PC_PTR_TAG 0xeeac
+#define JIT_PROBE_STACK_INITIALIZATION_FUNCTION_PTR_TAG 0x315c
+static_assert(JIT_PROBE_PC_PTR_TAG == JITProbePCPtrTag);
+static_assert(JIT_PROBE_STACK_INITIALIZATION_FUNCTION_PTR_TAG == JITProbeStackInitializationFunctionPtrTag);
+#endif
 
 // We use x29 and x30 instead of fp and lr because GCC's inline assembler does not recognize fp and lr.
 // See https://bugs.webkit.org/show_bug.cgi?id=175512 for details.
@@ -303,16 +337,12 @@ asm (
     //     x24: probe function
     //     x25: probe arg
     //     x26: scratch, was ctiMasmProbeTrampoline
-    //     x27: scratch
-    //     x28: Probe::executeProbe
     //     x30: return address
 
+    "str       x27, [sp, #" STRINGIZE_VALUE_OF(IN_X27_OFFSET) "]" "\n"
     "mov       x26, sp" "\n"
-    "mov       x27, sp" "\n"
-
-    "sub       x27, x27, #" STRINGIZE_VALUE_OF(PROBE_SIZE_PLUS_EXTRAS + OUT_SIZE) "\n"
-    "bic       x27, x27, #0xf" "\n" // The ARM EABI specifies that the stack needs to be 16 byte aligned.
-    "mov       sp, x27" "\n" // Set the sp to protect the Probe::State from interrupts before we initialize it.
+    "sub       x27, sp, #" STRINGIZE_VALUE_OF(PROBE_SIZE_PLUS_EXTRAS + OUT_SIZE) "\n"
+    "bic       sp, x27, #0xf" "\n" // The ARM EABI specifies that the stack needs to be 16 byte aligned.
 
     "stp       x24, x25, [sp, #" STRINGIZE_VALUE_OF(PROBE_PROBE_FUNCTION_OFFSET) "]" "\n" // Store the probe handler function and arg (preloaded into x24 and x25
 
@@ -325,8 +355,9 @@ asm (
     "stp       x8, x9, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X8_OFFSET) "]" "\n"
 
     "ldp       x2, x3, [x26, #" STRINGIZE_VALUE_OF(IN_X24_OFFSET) "]" "\n" // Preload saved x24 and x25.
-    "ldp       x4, x5, [x26, #" STRINGIZE_VALUE_OF(IN_X26_OFFSET) "]" "\n" // Preload saved x26 and x27.
-    "ldp       x6, x7, [x26, #" STRINGIZE_VALUE_OF(IN_X28_OFFSET) "]" "\n" // Preload saved x28 and lr.
+    "ldp       x4, x5, [x26, #" STRINGIZE_VALUE_OF(IN_X26_OFFSET) "]" "\n" // Preload saved x26 and lr.
+    "ldr       x27, [x26, #" STRINGIZE_VALUE_OF(IN_X27_OFFSET) "]" "\n"
+
     "add       x26, x26, #" STRINGIZE_VALUE_OF(IN_SIZE) "\n" // Compute the sp before the probe.
 
     "stp       x10, x11, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X10_OFFSET) "]" "\n"
@@ -336,14 +367,17 @@ asm (
     "stp       x18, x19, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X18_OFFSET) "]" "\n"
     "stp       x20, x21, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X20_OFFSET) "]" "\n"
     "stp       x22, x23, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X22_OFFSET) "]" "\n"
-    "stp       x2, x3, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X24_OFFSET) "]" "\n" // Store saved r24 and r25 (preloaded into x2 and x3 above).
-    "stp       x4, x5, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X26_OFFSET) "]" "\n" // Store saved r26 and r27 (preloaded into x4 and x5 above).
-    "stp       x6, x29, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X28_OFFSET) "]" "\n"
-    "stp       x7, x26, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_LR_OFFSET) "]" "\n" // Save values lr and sp (original sp value computed into x26 above).
+    "stp       x2,  x3,  [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X24_OFFSET) "]" "\n" // Store saved r24 and r25 (preloaded into x2 and x3 above).
+    "stp       x4,  x27, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X26_OFFSET) "]" "\n" // Store saved r26 (preloaded into x4) and r27.
+    "stp       x28, x29, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X28_OFFSET) "]" "\n"
+    "stp       x5,  x26, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_LR_OFFSET) "]" "\n" // Save values lr and sp (original sp value computed into x26 above).
 
+    "add       x30, x30, #" STRINGIZE_VALUE_OF(2 * GPREG_SIZE) "\n" // The PC after the probe is at 2 instructions past the return point.
+#if CPU(ARM64E)
+    "movz      x27, #" STRINGIZE_VALUE_OF(JIT_PROBE_PC_PTR_TAG) "\n"
+    "pacib     x30, x27" "\n"
+#endif
     "str       x30, [sp, #" STRINGIZE_VALUE_OF(SAVED_PROBE_RETURN_PC_OFFSET) "]" "\n" // Save a duplicate copy of return pc (in lr).
-
-    "add       x30, x30, #" STRINGIZE_VALUE_OF(2 * PTR_SIZE) "\n" // The PC after the probe is at 2 instructions past the return point.
     "str       x30, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_PC_OFFSET) "]" "\n"
 
     "stp       x0, x1, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_NZCV_OFFSET) "]" "\n" // Store nzcv and fpsr (preloaded into x0 and x1 above).
@@ -371,7 +405,7 @@ asm (
     // Note: we haven't changed the value of fp. Hence, it is still pointing to the frame of
     // the caller of the probe (which is what we want in order to play nice with debuggers e.g. lldb).
     "mov       x0, sp" "\n" // Set the Probe::State* arg.
-    "blr       x28" "\n" // Call the probe handler.
+    "bl      " SYMBOL_STRING(executeJSCJITProbe) "\n"
 
     // Make sure the Probe::State is entirely below the result stack pointer so
     // that register values are still preserved when we call the initializeStack
@@ -407,7 +441,12 @@ asm (
     "cbz       x2, " LOCAL_LABEL_STRING(ctiMasmProbeTrampolineRestoreRegisters) "\n"
 
     "mov       x0, x27" "\n" // Set the Probe::State* arg.
+#if CPU(ARM64E)
+    "movz      lr, #" STRINGIZE_VALUE_OF(JIT_PROBE_STACK_INITIALIZATION_FUNCTION_PTR_TAG) "\n"
+    "blrab     x2, lr" "\n" // Call the initializeStackFunction (loaded into x2 above).all the probe handler.
+#else
     "blr       x2" "\n" // Call the initializeStackFunction (loaded into x2 above).
+#endif
 
     LOCAL_LABEL_STRING(ctiMasmProbeTrampolineRestoreRegisters) ":" "\n"
 
@@ -461,13 +500,12 @@ asm (
     // returns. So, the ARM64 probe implementation will allow the probe handler to
     // either modify lr or pc, but not both in the same probe invocation. The probe
     // mechanism ensures that we never try to modify both lr and pc with a RELEASE_ASSERT
-    // in Probe::executeProbe().
+    // in Probe::executeJSCJITProbe().
 
     // Determine if the probe handler changed the pc.
     "ldr       x30, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_SP_OFFSET) "]" "\n" // preload the target sp.
     "ldr       x27, [sp, #" STRINGIZE_VALUE_OF(SAVED_PROBE_RETURN_PC_OFFSET) "]" "\n"
     "ldr       x28, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_PC_OFFSET) "]" "\n"
-    "add       x27, x27, #" STRINGIZE_VALUE_OF(2 * PTR_SIZE) "\n"
     "cmp       x27, x28" "\n"
     "bne     " LOCAL_LABEL_STRING(ctiMasmProbeTrampolineEnd) "\n"
 
@@ -480,6 +518,21 @@ asm (
     "str       x27, [x30, #" STRINGIZE_VALUE_OF(LR_RESTORATION_LR_OFFSET) "]" "\n"
      // 3. Force the return ramp to return to the probe return site.
     "ldr       x27, [sp, #" STRINGIZE_VALUE_OF(SAVED_PROBE_RETURN_PC_OFFSET) "]" "\n"
+#if CPU(ARM64E)
+    "movz      x28, #" STRINGIZE_VALUE_OF(JIT_PROBE_PC_PTR_TAG) "\n"
+    "autib     x27, x28" "\n"
+    "mov       x28, x27" "\n"
+    "xpaci     x28" "\n"
+    "cmp       x28, x27" "\n"
+    "beq     " LOCAL_LABEL_STRING(ctiMasmProbeTrampolinePCAuthDone) "\n"
+    "brk       #0xc471" "\n"
+    LOCAL_LABEL_STRING(ctiMasmProbeTrampolinePCAuthDone) ":" "\n"
+#endif
+    "sub       x27, x27, #" STRINGIZE_VALUE_OF(2 * GPREG_SIZE) "\n" // The return point PC is at 2 instructions before the end of the probe.
+#if CPU(ARM64E)
+    "movz      x28, #" STRINGIZE_VALUE_OF(JIT_PROBE_PC_PTR_TAG) "\n"
+    "pacib     x27, x28" "\n"
+#endif
     "str       x27, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_PC_OFFSET) "]" "\n"
 
     LOCAL_LABEL_STRING(ctiMasmProbeTrampolineEnd) ":" "\n"
@@ -491,42 +544,87 @@ asm (
     "stp       x27, x28, [x30, #" STRINGIZE_VALUE_OF(OUT_NZCV_OFFSET) "]" "\n"
     "ldp       x27, x28, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_X27_OFFSET) "]" "\n"
     "stp       x27, x28, [x30, #" STRINGIZE_VALUE_OF(OUT_X27_OFFSET) "]" "\n"
-    "ldr       x27, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_FP_OFFSET) "]" "\n"
     "ldr       x28, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_PC_OFFSET) "]" "\n" // Set up the outgoing record so that we'll jump to the new PC.
+#if CPU(ARM64E)
+    "movz      x27, #" STRINGIZE_VALUE_OF(JIT_PROBE_PC_PTR_TAG) "\n"
+    "autib     x28, x27" "\n"
+    "mov       x27, x28" "\n"
+    "xpaci     x27" "\n"
+    "cmp       x27, x28" "\n"
+    "beq     " LOCAL_LABEL_STRING(ctiMasmProbeTrampolinePCAuthDone2) "\n"
+    "brk       #0xc471" "\n"
+    LOCAL_LABEL_STRING(ctiMasmProbeTrampolinePCAuthDone2) ":" "\n"
+    "add       x27, x30, #48" "\n" // Compute sp at return point.
+    "pacib     x28, x27" "\n"
+#endif
+    "ldr       x27, [sp, #" STRINGIZE_VALUE_OF(PROBE_CPU_FP_OFFSET) "]" "\n"
     "stp       x27, x28, [x30, #" STRINGIZE_VALUE_OF(OUT_FP_OFFSET) "]" "\n"
     "mov       sp, x30" "\n"
 
     // Restore the remaining registers and pop the OutgoingProbeRecord.
-    "ldp       x27, x28, [sp], #" STRINGIZE_VALUE_OF(2 * PTR_SIZE) "\n"
+    "ldp       x27, x28, [sp], #" STRINGIZE_VALUE_OF(2 * GPREG_SIZE) "\n"
     "msr       nzcv, x27" "\n"
     "msr       fpsr, x28" "\n"
-    "ldp       x27, x28, [sp], #" STRINGIZE_VALUE_OF(2 * PTR_SIZE) "\n"
-    "ldp       x29, x30, [sp], #" STRINGIZE_VALUE_OF(2 * PTR_SIZE) "\n"
+    "ldp       x27, x28, [sp], #" STRINGIZE_VALUE_OF(2 * GPREG_SIZE) "\n"
+    "ldp       x29, x30, [sp], #" STRINGIZE_VALUE_OF(2 * GPREG_SIZE) "\n"
+#if CPU(ARM64E)
+    "retab" "\n"
+#else
     "ret" "\n"
+#endif
+    ".previous" "\n"
 );
-#endif // COMPILER(GCC_OR_CLANG)
+#endif // COMPILER(GCC_COMPATIBLE)
 
 void MacroAssembler::probe(Probe::Function function, void* arg)
 {
     sub64(TrustedImm32(sizeof(IncomingProbeRecord)), sp);
 
     storePair64(x24, x25, sp, TrustedImm32(offsetof(IncomingProbeRecord, x24)));
-    storePair64(x26, x27, sp, TrustedImm32(offsetof(IncomingProbeRecord, x26)));
-    storePair64(x28, x30, sp, TrustedImm32(offsetof(IncomingProbeRecord, x28))); // Note: x30 is lr.
-    move(TrustedImmPtr(reinterpret_cast<void*>(ctiMasmProbeTrampoline)), x26);
-    move(TrustedImmPtr(reinterpret_cast<void*>(Probe::executeProbe)), x28);
+    storePair64(x26, x30, sp, TrustedImm32(offsetof(IncomingProbeRecord, x26))); // Note: x30 is lr.
+    move(TrustedImmPtr(tagCFunction<OperationPtrTag>(ctiMasmProbeTrampoline)), x26);
+#if CPU(ARM64E)
+    assertIsTaggedWith<JITProbePtrTag>(function);
+#endif
     move(TrustedImmPtr(reinterpret_cast<void*>(function)), x24);
     move(TrustedImmPtr(arg), x25);
-    m_assembler.blr(x26);
+    call(x26, OperationPtrTag);
 
     // ctiMasmProbeTrampoline should have restored every register except for lr and the sp.
     load64(Address(sp, offsetof(LRRestorationRecord, lr)), lr);
     add64(TrustedImm32(sizeof(LRRestorationRecord)), sp);
 }
 
-#endif // ENABLE(MASM_PROBE)
+void MacroAssemblerARM64::collectCPUFeatures()
+{
+#if OS(LINUX)
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [] {
+        // A register for describing ARM64 CPU features are only accessible in kernel mode.
+        // Thus, some kernel support is necessary to collect CPU features. In Linux, the
+        // kernel passes CPU feature flags in AT_HWCAP auxiliary vector which is passed
+        // when the process starts. While this may pose a bit conservative information
+        // (for example, the Linux kernel may add a flag for a feature after the feature
+        // is shipped and implemented in some CPUs. In that case, even if the CPU has
+        // that feature, the kernel does not tell it to users.), it is a stable approach.
+        // https://www.kernel.org/doc/Documentation/arm64/elf_hwcaps.txt
+        uint64_t hwcaps = getauxval(AT_HWCAP);
+
+#if !defined(HWCAP_JSCVT)
+#define HWCAP_JSCVT (1 << 13)
+#endif
+
+        s_jscvtCheckState = (hwcaps & HWCAP_JSCVT) ? CPUIDCheckState::Set : CPUIDCheckState::Clear;
+    });
+#elif HAVE(FJCVTZS_INSTRUCTION)
+    s_jscvtCheckState = CPUIDCheckState::Set;
+#else
+    s_jscvtCheckState = CPUIDCheckState::Clear;
+#endif
+}
+
+MacroAssemblerARM64::CPUIDCheckState MacroAssemblerARM64::s_jscvtCheckState = CPUIDCheckState::NotChecked;
 
 } // namespace JSC
 
 #endif // ENABLE(ASSEMBLER) && CPU(ARM64)
-

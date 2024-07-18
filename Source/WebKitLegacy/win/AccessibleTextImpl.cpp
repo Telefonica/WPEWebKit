@@ -33,9 +33,11 @@
 #include <WebCore/Editor.h>
 #include <WebCore/Frame.h>
 #include <WebCore/FrameSelection.h>
+#include <WebCore/GeometryUtilities.h>
 #include <WebCore/HTMLTextFormControlElement.h>
 #include <WebCore/Node.h>
 #include <WebCore/Position.h>
+#include <WebCore/Range.h>
 #include <WebCore/RenderTextControl.h>
 #include <WebCore/VisibleSelection.h>
 #include <WebCore/VisibleUnits.h>
@@ -98,7 +100,10 @@ HRESULT AccessibleText::get_characterExtents(long offset, enum IA2CoordinateType
     if (!node)
         return E_POINTER;
 
-    IntRect boundingRect = m_object->boundsForVisiblePositionRange(VisiblePositionRange(VisiblePosition(Position(node, offset, Position::PositionIsOffsetInAnchor)), VisiblePosition(Position(node, offset+1, Position::PositionIsOffsetInAnchor))));
+    IntRect boundingRect = m_object->boundsForVisiblePositionRange({
+        VisiblePosition(Position(node, offset, Position::PositionIsOffsetInAnchor)),
+        VisiblePosition(Position(node, offset + 1, Position::PositionIsOffsetInAnchor))
+    });
     *width = boundingRect.width();
     *height = boundingRect.height();
     switch (coordType) {
@@ -457,11 +462,11 @@ HRESULT AccessibleText::scrollSubstringTo(long startIndex, long endIndex, enum I
     startIndex = convertSpecialOffset(startIndex);
     endIndex = convertSpecialOffset(endIndex);
 
-    VisiblePositionRange textRange = m_object->visiblePositionRangeForRange(PlainTextRange(startIndex, endIndex-startIndex));
-    if (textRange.start.isNull() || textRange.end.isNull())
+    auto textRange = makeSimpleRange(m_object->visiblePositionRangeForRange(PlainTextRange(startIndex, endIndex-startIndex)));
+    if (!textRange)
         return S_FALSE;
 
-    IntRect boundingBox = makeRange(textRange.start, textRange.end)->absoluteBoundingBox();
+    IntRect boundingBox = unionRect(RenderObject::absoluteTextRects(*textRange));
     switch (scrollType) {
     case IA2_SCROLL_TYPE_TOP_LEFT:
         m_object->scrollToGlobalPoint(boundingBox.minXMinYCorner());
@@ -656,7 +661,7 @@ HRESULT AccessibleText::replaceText(long startOffset, long endOffset, BSTR* text
 
     addSelection(startOffset, endOffset);
 
-    frame->editor().replaceSelectionWithText(*text, true, false);
+    frame->editor().replaceSelectionWithText(*text, Editor::SelectReplacement::Yes, Editor::SmartReplace::No);
     return S_OK;
 }
 
@@ -671,7 +676,7 @@ HRESULT AccessibleText::setAttributes(long startOffset, long endOffset, BSTR* at
 // IAccessible2
 HRESULT AccessibleText::get_attributes(BSTR* attributes)
 {
-    WTF::String text("text-model:a1");
+    WTF::String text("text-model:a1"_s);
     *attributes = BString(text).release();
     return S_OK;
 }
@@ -750,7 +755,6 @@ HRESULT AccessibleText::initialCheck()
 
 bool AccessibleText::isInRange(VisiblePosition& current, VisiblePositionRange& wordRange)
 {
-    ASSERT(wordRange.start.isNotNull());
-    ASSERT(wordRange.end.isNotNull());
-    return comparePositions(current.deepEquivalent(), wordRange.start) >= 0 && comparePositions(current.deepEquivalent(), wordRange.end) <= 0;
+    auto range = makeSimpleRange(wordRange);
+    return range && contains<ComposedTree>(*range, makeBoundaryPoint(current));
 }

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2014 Igalia S.L.
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -17,16 +17,15 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#ifndef UserMediaPermissionRequestManager_h
-#define UserMediaPermissionRequestManager_h
+#pragma once
 
 #if ENABLE(MEDIA_STREAM)
 
-#include "MediaDeviceSandboxExtensions.h"
+#include "IdentifierTypes.h"
 #include "SandboxExtension.h"
 #include <WebCore/MediaCanStartListener.h>
 #include <WebCore/MediaConstraints.h>
-#include <WebCore/MediaDevicesEnumerationRequest.h>
+#include <WebCore/RealtimeMediaSourceCenter.h>
 #include <WebCore/UserMediaClient.h>
 #include <WebCore/UserMediaRequest.h>
 #include <wtf/HashMap.h>
@@ -37,47 +36,62 @@ namespace WebKit {
 
 class WebPage;
 
-class UserMediaPermissionRequestManager
-    : private WebCore::MediaCanStartListener {
+class UserMediaPermissionRequestManager : public WebCore::MediaCanStartListener
+#if USE(GSTREAMER)
+                                        , public WebCore::RealtimeMediaSourceCenter::Observer
+#endif
+{
+    WTF_MAKE_FAST_ALLOCATED;
 public:
+    using WebCore::MediaCanStartListener::weakPtrFactory;
+    using WeakValueType = WebCore::MediaCanStartListener::WeakValueType;
+
     explicit UserMediaPermissionRequestManager(WebPage&);
-    ~UserMediaPermissionRequestManager();
+    ~UserMediaPermissionRequestManager() = default;
 
     void startUserMediaRequest(WebCore::UserMediaRequest&);
     void cancelUserMediaRequest(WebCore::UserMediaRequest&);
-    void userMediaAccessWasGranted(uint64_t, String&& audioDeviceUID, String&& videoDeviceUID, String&& deviceIdentifierHashSalt);
-    void userMediaAccessWasDenied(uint64_t, WebCore::UserMediaRequest::MediaAccessDenialReason, String&&);
+    void userMediaAccessWasGranted(WebCore::UserMediaRequestIdentifier, WebCore::CaptureDevice&& audioDevice, WebCore::CaptureDevice&& videoDevice, String&& deviceIdentifierHashSalt, CompletionHandler<void()>&&);
+    void userMediaAccessWasDenied(WebCore::UserMediaRequestIdentifier, WebCore::UserMediaRequest::MediaAccessDenialReason, String&&);
 
-    void enumerateMediaDevices(WebCore::MediaDevicesEnumerationRequest&);
-    void cancelMediaDevicesEnumeration(WebCore::MediaDevicesEnumerationRequest&);
-    void didCompleteMediaDeviceEnumeration(uint64_t, const Vector<WebCore::CaptureDevice>& deviceList, String&& deviceIdentifierHashSalt, bool originHasPersistentAccess);
+    void enumerateMediaDevices(WebCore::Document&, CompletionHandler<void(const Vector<WebCore::CaptureDevice>&, const String&)>&&);
 
-    void grantUserMediaDeviceSandboxExtensions(const MediaDeviceSandboxExtensions&);
-    void revokeUserMediaDeviceSandboxExtensions(const Vector<String>&);
+    WebCore::UserMediaClient::DeviceChangeObserverToken addDeviceChangeObserver(WTF::Function<void()>&&);
+    void removeDeviceChangeObserver(WebCore::UserMediaClient::DeviceChangeObserverToken);
+
+    void captureDevicesChanged();
 
 private:
+#if USE(GSTREAMER)
+    // WebCore::RealtimeMediaSourceCenter::Observer
+    void devicesChanged() final;
+#endif
+
     void sendUserMediaRequest(WebCore::UserMediaRequest&);
 
     // WebCore::MediaCanStartListener
-    void mediaCanStart(WebCore::Document&) override;
-
-    void removeMediaRequestFromMaps(WebCore::UserMediaRequest&);
+    void mediaCanStart(WebCore::Document&) final;
 
     WebPage& m_page;
 
-    HashMap<uint64_t, RefPtr<WebCore::UserMediaRequest>> m_idToUserMediaRequestMap;
-    HashMap<RefPtr<WebCore::UserMediaRequest>, uint64_t> m_userMediaRequestToIDMap;
+    HashMap<WebCore::UserMediaRequestIdentifier, Ref<WebCore::UserMediaRequest>> m_ongoingUserMediaRequests;
+    HashMap<RefPtr<WebCore::Document>, Vector<Ref<WebCore::UserMediaRequest>>> m_pendingUserMediaRequests;
 
-    HashMap<uint64_t, RefPtr<WebCore::MediaDevicesEnumerationRequest>> m_idToMediaDevicesEnumerationRequestMap;
-    HashMap<RefPtr<WebCore::MediaDevicesEnumerationRequest>, uint64_t> m_mediaDevicesEnumerationRequestToIDMap;
+    HashMap<WebCore::UserMediaClient::DeviceChangeObserverToken, Function<void()>> m_deviceChangeObserverMap;
+    bool m_monitoringDeviceChange { false };
 
-    HashMap<String, RefPtr<SandboxExtension>> m_userMediaDeviceSandboxExtensions;
+#if USE(GSTREAMER)
+    enum class ShouldNotify : bool { No, Yes };
+    void updateCaptureDevices(ShouldNotify);
 
-    HashMap<RefPtr<WebCore::Document>, Vector<RefPtr<WebCore::UserMediaRequest>>> m_blockedRequests;
+    Vector<WebCore::CaptureDevice> m_captureDevices;
+#endif
 };
 
 } // namespace WebKit
 
-#endif // ENABLE(MEDIA_STREAM)
+namespace WTF {
 
-#endif // UserMediaPermissionRequestManager_h
+} // namespace WTF
+
+#endif // ENABLE(MEDIA_STREAM)

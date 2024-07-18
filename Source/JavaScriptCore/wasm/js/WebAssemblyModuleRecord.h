@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include "AbstractModuleRecord.h"
+#include "WasmCreationMode.h"
 #include "WasmModuleInformation.h"
 
 namespace JSC {
@@ -38,29 +39,43 @@ class WebAssemblyFunction;
 
 // Based on the WebAssembly.Instance specification
 // https://github.com/WebAssembly/design/blob/master/JS.md#webassemblyinstance-constructor
-class WebAssemblyModuleRecord : public AbstractModuleRecord {
+class WebAssemblyModuleRecord final : public AbstractModuleRecord {
     friend class LLIntOffsetsExtractor;
 public:
-    typedef AbstractModuleRecord Base;
+    using Base = AbstractModuleRecord;
+
+    static constexpr bool needsDestruction = true;
+    static void destroy(JSCell*);
+
+    template<typename CellType, SubspaceAccess mode>
+    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    {
+        return vm.webAssemblyModuleRecordSpace<mode>();
+    }
 
     DECLARE_EXPORT_INFO;
 
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
-    static WebAssemblyModuleRecord* create(ExecState*, VM&, Structure*, const Identifier&, const Wasm::ModuleInformation&);
+    static WebAssemblyModuleRecord* create(JSGlobalObject*, VM&, Structure*, const Identifier&, const Wasm::ModuleInformation&);
 
-    void link(ExecState*, JSWebAssemblyModule*, JSWebAssemblyInstance*);
-    JS_EXPORT_PRIVATE JSValue evaluate(ExecState*);
+    void prepareLink(VM&, JSWebAssemblyInstance*);
+    Synchronousness link(JSGlobalObject*, JSValue scriptFetcher);
+    void initializeImports(JSGlobalObject*, JSObject* importObject, Wasm::CreationMode);
+    void initializeExports(JSGlobalObject*);
+    JS_EXPORT_PRIVATE JSValue evaluate(JSGlobalObject*);
+
+    JSObject* exportsObject() const { return m_exportsObject.get(); }
 
 private:
     WebAssemblyModuleRecord(VM&, Structure*, const Identifier&);
 
-    void finishCreation(ExecState*, VM&, const Wasm::ModuleInformation&);
-    static void destroy(JSCell*);
+    void finishCreation(JSGlobalObject*, VM&, const Wasm::ModuleInformation&);
 
-    static void visitChildren(JSCell*, SlotVisitor&);
+    DECLARE_VISIT_CHILDREN;
 
     WriteBarrier<JSWebAssemblyInstance> m_instance;
     WriteBarrier<JSObject> m_startFunction;
+    WriteBarrier<JSObject> m_exportsObject;
 };
 
 } // namespace JSC

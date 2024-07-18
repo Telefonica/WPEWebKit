@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,9 +27,9 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "JSDestructibleObject.h"
 #include "JSObject.h"
 #include "WasmMemory.h"
+#include <wtf/Ref.h>
 #include <wtf/RefPtr.h>
 
 namespace JSC {
@@ -37,37 +37,36 @@ namespace JSC {
 class ArrayBuffer;
 class JSArrayBuffer;
 
-class JSWebAssemblyMemory : public JSDestructibleObject {
+class JSWebAssemblyMemory final : public JSNonFinalObject {
 public:
-    typedef JSDestructibleObject Base;
+    using Base = JSNonFinalObject;
+    static constexpr bool needsDestruction = true;
+    static void destroy(JSCell*);
 
-    template<typename CellType>
-    static Subspace* subspaceFor(VM& vm)
+    template<typename CellType, SubspaceAccess mode>
+    static GCClient::IsoSubspace* subspaceFor(VM& vm)
     {
-        // We hold onto a lot of memory, so it makes a lot of sense to be swept eagerly.
-        return &vm.eagerlySweptDestructibleObjectSpace;
+        return vm.webAssemblyMemorySpace<mode>();
     }
 
-    static JSWebAssemblyMemory* create(ExecState*, VM&, Structure*, Ref<Wasm::Memory>&&);
+    JS_EXPORT_PRIVATE static JSWebAssemblyMemory* tryCreate(JSGlobalObject*, VM&, Structure*);
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     DECLARE_EXPORT_INFO;
 
+    JS_EXPORT_PRIVATE void adopt(Ref<Wasm::Memory>&&);
     Wasm::Memory& memory() { return m_memory.get(); }
-    JSArrayBuffer* buffer(VM& vm, JSGlobalObject*);
-    Wasm::PageCount grow(VM&, ExecState*, uint32_t delta, bool shouldThrowExceptionsOnFailure);
+    JSArrayBuffer* buffer(JSGlobalObject*);
+    Wasm::PageCount grow(VM&, JSGlobalObject*, uint32_t delta);
+    JS_EXPORT_PRIVATE void growSuccessCallback(VM&, Wasm::PageCount oldPageCount, Wasm::PageCount newPageCount);
 
-    static ptrdiff_t offsetOfMemory() { return OBJECT_OFFSETOF(JSWebAssemblyMemory, m_memoryBase); }
-    static ptrdiff_t offsetOfSize() { return OBJECT_OFFSETOF(JSWebAssemblyMemory, m_memorySize); }
+    JSObject* type(JSGlobalObject*);
 
 private:
-    JSWebAssemblyMemory(VM&, Structure*, Ref<Wasm::Memory>&&);
+    JSWebAssemblyMemory(VM&, Structure*);
     void finishCreation(VM&);
-    static void destroy(JSCell*);
-    static void visitChildren(JSCell*, SlotVisitor&);
+    DECLARE_VISIT_CHILDREN;
 
-    void* m_memoryBase;
-    size_t m_memorySize;
     Ref<Wasm::Memory> m_memory;
     WriteBarrier<JSArrayBuffer> m_bufferWrapper;
     RefPtr<ArrayBuffer> m_buffer;

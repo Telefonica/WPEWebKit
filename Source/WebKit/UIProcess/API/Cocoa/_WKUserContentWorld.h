@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,11 +25,9 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 NS_ASSUME_NONNULL_BEGIN
 
-WK_CLASS_AVAILABLE(macosx(10.12), ios(10.0))
+WK_CLASS_DEPRECATED_WITH_REPLACEMENT("WKContentWorld", macos(10.12, 11.0), ios(10.0, 14.0))
 @interface _WKUserContentWorld : NSObject
 
 + (_WKUserContentWorld *)worldWithName:(NSString *)name;
@@ -40,5 +38,3 @@ WK_CLASS_AVAILABLE(macosx(10.12), ios(10.0))
 @end
 
 NS_ASSUME_NONNULL_END
-
-#endif // WK_API_ENABLED

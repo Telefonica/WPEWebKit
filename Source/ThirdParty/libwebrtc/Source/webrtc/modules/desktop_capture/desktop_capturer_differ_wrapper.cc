@@ -8,24 +8,25 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/desktop_capture/desktop_capturer_differ_wrapper.h"
+#include "modules/desktop_capture/desktop_capturer_differ_wrapper.h"
 
+#include <stdint.h>
 #include <string.h>
 
-#include <algorithm>
 #include <utility>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/timeutils.h"
-#include "webrtc/modules/desktop_capture/desktop_geometry.h"
-#include "webrtc/modules/desktop_capture/differ_block.h"
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/desktop_region.h"
+#include "modules/desktop_capture/differ_block.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/time_utils.h"
 
 namespace webrtc {
 
 namespace {
 
-// Returns true if (0, 0) - (|width|, |height|) vector in |old_buffer| and
-// |new_buffer| are equal. |width| should be less than 32
+// Returns true if (0, 0) - (`width`, `height`) vector in `old_buffer` and
+// `new_buffer` are equal. `width` should be less than 32
 // (defined by kBlockSize), otherwise BlockDifference() should be used.
 bool PartialBlockDifference(const uint8_t* old_buffer,
                             const uint8_t* new_buffer,
@@ -44,9 +45,9 @@ bool PartialBlockDifference(const uint8_t* old_buffer,
   return false;
 }
 
-// Compares columns in the range of [|left|, |right|), in a row in the
-// range of [|top|, |top| + |height|), starts from |old_buffer| and
-// |new_buffer|, and outputs updated regions into |output|. |stride| is the
+// Compares columns in the range of [`left`, `right`), in a row in the
+// range of [`top`, `top` + `height`), starts from `old_buffer` and
+// `new_buffer`, and outputs updated regions into `output`. `stride` is the
 // DesktopFrame::stride().
 void CompareRow(const uint8_t* old_buffer,
                 const uint8_t* new_buffer,
@@ -61,12 +62,13 @@ void CompareRow(const uint8_t* old_buffer,
   const int height = bottom - top;
   const int block_count = (width - 1) / kBlockSize;
   const int last_block_width = width - block_count * kBlockSize;
-  RTC_DCHECK(last_block_width <= kBlockSize && last_block_width > 0);
+  RTC_DCHECK_GT(last_block_width, 0);
+  RTC_DCHECK_LE(last_block_width, kBlockSize);
 
   // The first block-column in a continuous dirty area in current block-row.
   int first_dirty_x_block = -1;
 
-  // We always need to add dirty area into |output| in the last block, so handle
+  // We always need to add dirty area into `output` in the last block, so handle
   // it separatedly.
   for (int x = 0; x < block_count; x++) {
     if (BlockDifference(old_buffer, new_buffer, height, stride)) {
@@ -107,8 +109,8 @@ void CompareRow(const uint8_t* old_buffer,
   }
 }
 
-// Compares |rect| area in |old_frame| and |new_frame|, and outputs dirty
-// regions into |output|.
+// Compares `rect` area in `old_frame` and `new_frame`, and outputs dirty
+// regions into `output`.
 void CompareFrames(const DesktopFrame& old_frame,
                    const DesktopFrame& new_frame,
                    DesktopRect rect,
@@ -180,6 +182,16 @@ bool DesktopCapturerDifferWrapper::FocusOnSelectedSource() {
   return base_capturer_->FocusOnSelectedSource();
 }
 
+bool DesktopCapturerDifferWrapper::IsOccluded(const DesktopVector& pos) {
+  return base_capturer_->IsOccluded(pos);
+}
+
+#if defined(WEBRTC_USE_GIO)
+DesktopCaptureMetadata DesktopCapturerDifferWrapper::GetMetadata() {
+  return base_capturer_->GetMetadata();
+}
+#endif  // defined(WEBRTC_USE_GIO)
+
 void DesktopCapturerDifferWrapper::OnCaptureResult(
     Result result,
     std::unique_ptr<DesktopFrame> input_frame) {
@@ -200,7 +212,7 @@ void DesktopCapturerDifferWrapper::OnCaptureResult(
 
   if (last_frame_) {
     DesktopRegion hints;
-    hints.Swap(frame->GetUnderlyingFrame()->mutable_updated_region());
+    hints.Swap(frame->mutable_updated_region());
     for (DesktopRegion::Iterator it(hints); !it.IsAtEnd(); it.Advance()) {
       CompareFrames(*last_frame_, *frame, it.rect(),
                     frame->mutable_updated_region());
@@ -211,10 +223,9 @@ void DesktopCapturerDifferWrapper::OnCaptureResult(
   }
   last_frame_ = frame->Share();
 
-  frame->set_capture_time_ms(frame->GetUnderlyingFrame()->capture_time_ms() +
+  frame->set_capture_time_ms(frame->capture_time_ms() +
                              (rtc::TimeNanos() - start_time_nanos) /
                                  rtc::kNumNanosecsPerMillisec);
-  frame->set_capturer_id(frame->GetUnderlyingFrame()->capturer_id());
   callback_->OnCaptureResult(result, std::move(frame));
 }
 

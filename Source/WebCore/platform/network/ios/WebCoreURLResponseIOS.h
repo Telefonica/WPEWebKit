@@ -26,29 +26,27 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WebCoreURLResponseIOS_h
-#define WebCoreURLResponseIOS_h
+#pragma once
 
-#ifdef __OBJC__
-#include "WebCoreURLResponse.h"
-#endif
+#if PLATFORM(IOS_FAMILY)
 
 #include "MIMETypeRegistry.h"
+#include "WebCoreURLResponse.h"
 #include <wtf/text/WTFString.h>
-
-namespace WebCore {
 
 #if USE(QUICK_LOOK)
     
-inline bool shouldUseQuickLookForMIMEType(const WTF::String& mimeType)
+namespace WebCore {
+
+inline bool shouldUseQuickLookForMIMEType(const String& mimeType)
 {
-    if ((!MIMETypeRegistry::isSupportedNonImageMIMEType(mimeType)       // ignore supported non-image MIME types
-         && !MIMETypeRegistry::isSupportedImageMIMEType(mimeType)       // ignore supported image MIME types
-         && mimeType != "text/css"                                      // ignore css
-         && mimeType != "application/pdf"                               // ignore pdf
+    if ((!MIMETypeRegistry::isSupportedNonImageMIMEType(mimeType)         // ignore supported non-image MIME types
+         && !MIMETypeRegistry::isSupportedImageMIMEType(mimeType)         // ignore supported image MIME types
+         && mimeType != "text/css"_s                                      // ignore css
+         && mimeType != "application/pdf"_s                               // ignore pdf
          )
-        || mimeType == "text/plain"                                     // but keep text/plain which is too generic and can hide something
-        || (mimeType == "text/xml" || mimeType == "application/xml"))   // and keep XML types for .mobileconfig files
+        || mimeType == "text/plain"_s                                       // but keep text/plain which is too generic and can hide something
+        || (mimeType == "text/xml"_s || mimeType == "application/xml"_s))   // and keep XML types for .mobileconfig files
     {
         return true;
     }
@@ -56,8 +54,8 @@ inline bool shouldUseQuickLookForMIMEType(const WTF::String& mimeType)
     return false;
 }
 
-#endif // USE(QUICK_LOOK)
-
 } // namespace WebCore
 
-#endif // WebCoreURLResponseIOS_h
+#endif // USE(QUICK_LOOK)
+
+#endif // PLATFORM(IOS_FAMILY)

@@ -8,26 +8,23 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_API_VIDEO_CODECS_VIDEO_DECODER_H_
-#define WEBRTC_API_VIDEO_CODECS_VIDEO_DECODER_H_
+#ifndef API_VIDEO_CODECS_VIDEO_DECODER_H_
+#define API_VIDEO_CODECS_VIDEO_DECODER_H_
 
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "webrtc/api/video/video_frame.h"
-#include "webrtc/common_types.h"
-#include "webrtc/common_video/include/video_frame.h"
-#include "webrtc/typedefs.h"
+#include "absl/types/optional.h"
+#include "api/video/encoded_image.h"
+#include "api/video/render_resolution.h"
+#include "api/video/video_codec_type.h"
+#include "api/video/video_frame.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
-class RTPFragmentationHeader;
-// TODO(pbos): Expose these through a public (root) header or change these APIs.
-struct CodecSpecificInfo;
-class VideoCodec;
-
-class DecodedImageCallback {
+class RTC_EXPORT DecodedImageCallback {
  public:
   virtual ~DecodedImageCallback() {}
 
@@ -36,52 +33,115 @@ class DecodedImageCallback {
   // decode time excluding waiting time for any previous pending frame to
   // return. This is necessary for breaking positive feedback in the delay
   // estimation when the decoder has a single output buffer.
-  virtual int32_t Decoded(VideoFrame& decodedImage, int64_t /* decode_time_ms */) {
-    // The default implementation ignores custom decode time value.
-    return Decoded(decodedImage);
-  }
+  virtual int32_t Decoded(VideoFrame& decodedImage, int64_t decode_time_ms);
+
   // TODO(sakal): Remove other implementations when upstream projects have been
   // updated.
   virtual void Decoded(VideoFrame& decodedImage,
-                       rtc::Optional<int32_t> decode_time_ms,
-                       rtc::Optional<uint8_t> /* qp */) {
-    Decoded(decodedImage,
-            decode_time_ms ? static_cast<int32_t>(*decode_time_ms) : -1);
-  }
-
-  virtual int32_t ReceivedDecodedReferenceFrame(const uint64_t /* pictureId */) {
-    return -1;
-  }
-
-  virtual int32_t ReceivedDecodedFrame(const uint64_t /* pictureId */) { return -1; }
+                       absl::optional<int32_t> decode_time_ms,
+                       absl::optional<uint8_t> qp);
 };
 
-class VideoDecoder {
+class RTC_EXPORT VideoDecoder {
  public:
-  virtual ~VideoDecoder() {}
+  struct DecoderInfo {
+    // Descriptive name of the decoder implementation.
+    std::string implementation_name;
 
-  virtual int32_t InitDecode(const VideoCodec* codec_settings,
-                             int32_t number_of_cores) = 0;
+    // True if the decoder is backed by hardware acceleration.
+    bool is_hardware_accelerated = false;
 
+    std::string ToString() const;
+    bool operator==(const DecoderInfo& rhs) const;
+    bool operator!=(const DecoderInfo& rhs) const { return !(*this == rhs); }
+  };
+
+  class Settings {
+   public:
+    Settings() = default;
+    Settings(const Settings&) = default;
+    Settings& operator=(const Settings&) = default;
+    ~Settings() = default;
+
+    // The size of pool which is used to store video frame buffers inside
+    // decoder. If value isn't present some codec-default value will be used. If
+    // value is present and decoder doesn't have buffer pool the value will be
+    // ignored.
+    absl::optional<int> buffer_pool_size() const;
+    void set_buffer_pool_size(absl::optional<int> value);
+
+    // When valid, user of the VideoDecoder interface shouldn't `Decode`
+    // encoded images with render resolution larger than width and height
+    // specified here.
+    RenderResolution max_render_resolution() const;
+    void set_max_render_resolution(RenderResolution value);
+
+    // Maximum number of cpu cores the decoder is allowed to use in parallel.
+    // Must be positive.
+    int number_of_cores() const { return number_of_cores_; }
+    void set_number_of_cores(int value);
+
+    // Codec of encoded images user of the VideoDecoder interface will `Decode`.
+    VideoCodecType codec_type() const { return codec_type_; }
+    void set_codec_type(VideoCodecType value) { codec_type_ = value; }
+
+   private:
+    absl::optional<int> buffer_pool_size_;
+    RenderResolution max_resolution_;
+    int number_of_cores_ = 1;
+    VideoCodecType codec_type_ = kVideoCodecGeneric;
+  };
+
+  virtual ~VideoDecoder() = default;
+
+  // Prepares decoder to handle incoming encoded frames. Can be called multiple
+  // times, in such case only latest `settings` are in effect.
+  virtual bool Configure(const Settings& settings) = 0;
+
+  // TODO(bugs.webrtc.org/15444): Make pure virtual once all subclasses have
+  // migrated to implementing this class.
+  virtual int32_t Decode(const EncodedImage& input_image,
+                         int64_t render_time_ms) {
+    return Decode(input_image, /*missing_frame=*/false, render_time_ms);
+  }
+
+  // TODO(bugs.webrtc.org/15444): Migrate all subclasses to Decode() without
+  // missing_frame and delete this.
   virtual int32_t Decode(const EncodedImage& input_image,
                          bool missing_frames,
-                         const RTPFragmentationHeader* fragmentation,
-                         const CodecSpecificInfo* codec_specific_info = NULL,
-                         int64_t render_time_ms = -1) = 0;
+                         int64_t render_time_ms) {
+    return Decode(input_image, render_time_ms);
+  }
 
   virtual int32_t RegisterDecodeCompleteCallback(
       DecodedImageCallback* callback) = 0;
 
   virtual int32_t Release() = 0;
 
-  // Returns true if the decoder prefer to decode frames late.
-  // That is, it can not decode infinite number of frames before the decoded
-  // frame is consumed.
-  virtual bool PrefersLateDecoding() const { return true; }
+  virtual DecoderInfo GetDecoderInfo() const;
 
-  virtual const char* ImplementationName() const { return "unknown"; }
+  // Deprecated, use GetDecoderInfo().implementation_name instead.
+  virtual const char* ImplementationName() const;
 };
+
+inline absl::optional<int> VideoDecoder::Settings::buffer_pool_size() const {
+  return buffer_pool_size_;
+}
+
+inline void VideoDecoder::Settings::set_buffer_pool_size(
+    absl::optional<int> value) {
+  buffer_pool_size_ = value;
+}
+
+inline RenderResolution VideoDecoder::Settings::max_render_resolution() const {
+  return max_resolution_;
+}
+
+inline void VideoDecoder::Settings::set_max_render_resolution(
+    RenderResolution value) {
+  max_resolution_ = value;
+}
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_VIDEO_CODECS_VIDEO_DECODER_H_
+#endif  // API_VIDEO_CODECS_VIDEO_DECODER_H_

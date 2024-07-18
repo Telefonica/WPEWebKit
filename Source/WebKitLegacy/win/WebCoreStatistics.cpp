@@ -29,13 +29,13 @@
 #include "COMPropertyBag.h"
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/MemoryStatistics.h>
+#include <WebCore/BackForwardCache.h>
 #include <WebCore/CommonVM.h>
 #include <WebCore/DOMWindow.h>
 #include <WebCore/FontCache.h>
 #include <WebCore/GCController.h>
 #include <WebCore/GlyphPage.h>
 #include <WebCore/JSDOMWindow.h>
-#include <WebCore/PageCache.h>
 #include <WebCore/PageConsoleClient.h>
 #include <WebCore/RenderView.h>
 #include <WebCore/SharedBuffer.h>
@@ -48,13 +48,13 @@ using namespace WebCore;
 WebCoreStatistics::WebCoreStatistics()
 {
     gClassCount++;
-    gClassNameCount().add("WebCoreStatistics");
+    gClassNameCount().add("WebCoreStatistics"_s);
 }
 
 WebCoreStatistics::~WebCoreStatistics()
 {
     gClassCount--;
-    gClassNameCount().remove("WebCoreStatistics");
+    gClassNameCount().remove("WebCoreStatistics"_s);
 }
 
 WebCoreStatistics* WebCoreStatistics::createInstance()
@@ -149,7 +149,7 @@ HRESULT WebCoreStatistics::javaScriptProtectedObjectTypeCounts(_COM_Outptr_opt_ 
     Iterator end = jsObjectTypeNames->end();
     HashMap<String, int> typeCountMap;
     for (Iterator current = jsObjectTypeNames->begin(); current != end; ++current)
-        typeCountMap.set(current->key, current->value);
+        typeCountMap.set(String::fromLatin1(current->key), current->value);
 
     COMPtr<IPropertyBag2> results(AdoptCOM, COMPropertyBag<int>::createInstance(typeCountMap));
     results.copyRefTo(typeNamesAndCounts);
@@ -167,7 +167,7 @@ HRESULT WebCoreStatistics::javaScriptObjectTypeCounts(_COM_Outptr_opt_ IProperty
     Iterator end = jsObjectTypeNames->end();
     HashMap<String, int> typeCountMap;
     for (Iterator current = jsObjectTypeNames->begin(); current != end; ++current)
-        typeCountMap.set(current->key, current->value);
+        typeCountMap.set(String::fromLatin1(current->key), current->value);
 
     COMPtr<IPropertyBag2> results(AdoptCOM, COMPropertyBag<int>::createInstance(typeCountMap));
     results.copyRefTo(typeNamesAndCounts);
@@ -210,7 +210,7 @@ HRESULT WebCoreStatistics::cachedFontDataCount(_Out_ UINT *count)
 {
     if (!count)
         return E_POINTER;
-    *count = (UINT) FontCache::singleton().fontCount();
+    *count = (UINT) FontCache::forCurrentThread().fontCount();
     return S_OK;
 }
 
@@ -218,13 +218,13 @@ HRESULT WebCoreStatistics::cachedFontDataInactiveCount(_Out_ UINT *count)
 {
     if (!count)
         return E_POINTER;
-    *count = (UINT) FontCache::singleton().inactiveFontCount();
+    *count = (UINT) FontCache::forCurrentThread().inactiveFontCount();
     return S_OK;
 }
 
 HRESULT WebCoreStatistics::purgeInactiveFontData(void)
 {
-    FontCache::singleton().purgeInactiveFontData();
+    FontCache::forCurrentThread().purgeInactiveFontData();
     return S_OK;
 }
 
@@ -296,13 +296,13 @@ HRESULT WebCoreStatistics::memoryStatistics(_COM_Outptr_opt_ IPropertyBag** stat
     GlobalMemoryStatistics globalMemoryStats = globalMemoryStatistics();
 
     HashMap<String, unsigned long long, ASCIICaseInsensitiveHash> fields;
-    fields.add("FastMallocReservedVMBytes", static_cast<unsigned long long>(fastMallocStatistics.reservedVMBytes));
-    fields.add("FastMallocCommittedVMBytes", static_cast<unsigned long long>(fastMallocStatistics.committedVMBytes));
-    fields.add("FastMallocFreeListBytes", static_cast<unsigned long long>(fastMallocStatistics.freeListBytes));
-    fields.add("JavaScriptHeapSize", heapSize);
-    fields.add("JavaScriptFreeSize", heapFree);
-    fields.add("JavaScriptStackSize", static_cast<unsigned long long>(globalMemoryStats.stackBytes));
-    fields.add("JavaScriptJITSize", static_cast<unsigned long long>(globalMemoryStats.JITBytes));
+    fields.add("FastMallocReservedVMBytes"_s, static_cast<unsigned long long>(fastMallocStatistics.reservedVMBytes));
+    fields.add("FastMallocCommittedVMBytes"_s, static_cast<unsigned long long>(fastMallocStatistics.committedVMBytes));
+    fields.add("FastMallocFreeListBytes"_s, static_cast<unsigned long long>(fastMallocStatistics.freeListBytes));
+    fields.add("JavaScriptHeapSize"_s, heapSize);
+    fields.add("JavaScriptFreeSize"_s, heapFree);
+    fields.add("JavaScriptStackSize"_s, static_cast<unsigned long long>(globalMemoryStats.stackBytes));
+    fields.add("JavaScriptJITSize"_s, static_cast<unsigned long long>(globalMemoryStats.JITBytes));
 
     *statistics = COMPropertyBag<unsigned long long, String, ASCIICaseInsensitiveHash>::adopt(fields);
 
@@ -320,7 +320,7 @@ HRESULT WebCoreStatistics::cachedPageCount(_Out_ INT* count)
     if (!count)
         return E_POINTER;
 
-    *count = PageCache::singleton().pageCount();
+    *count = BackForwardCache::singleton().pageCount();
     return S_OK;
 }
 
@@ -329,6 +329,6 @@ HRESULT WebCoreStatistics::cachedFrameCount(_Out_ INT* count)
     if (!count)
         return E_POINTER;
 
-    *count = PageCache::singleton().frameCount();
+    *count = BackForwardCache::singleton().frameCount();
     return S_OK;
 }

@@ -2,6 +2,7 @@
  * Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005 Rob Buis <buis@kde.org>
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
+ * Copyright (C) 2021-2022 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,27 +20,48 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef FEMerge_h
-#define FEMerge_h
+#pragma once
 
 #include "FilterEffect.h"
-#include "Filter.h"
 
 namespace WebCore {
 
 class FEMerge : public FilterEffect {
 public:
-    static Ref<FEMerge> create(Filter&);
+    WEBCORE_EXPORT static Ref<FEMerge> create(unsigned numberOfEffectInputs);
 
-    void platformApplySoftware() override;
-    void dump() override;
+    unsigned numberOfEffectInputs() const override { return m_numberOfEffectInputs; }
 
-    WTF::TextStream& externalRepresentation(WTF::TextStream&, int indention) const override;
+    template<class Encoder> void encode(Encoder&) const;
+    template<class Decoder> static std::optional<Ref<FEMerge>> decode(Decoder&);
 
 private:
-    FEMerge(Filter&);
+    FEMerge(unsigned numberOfEffectInputs);
+
+    std::unique_ptr<FilterEffectApplier> createSoftwareApplier() const override;
+
+    WTF::TextStream& externalRepresentation(WTF::TextStream&, FilterRepresentation) const override;
+
+    unsigned m_numberOfEffectInputs { 0 };
 };
+
+template<class Encoder>
+void FEMerge::encode(Encoder& encoder) const
+{
+    encoder << m_numberOfEffectInputs;
+}
+
+template<class Decoder>
+std::optional<Ref<FEMerge>> FEMerge::decode(Decoder& decoder)
+{
+    std::optional<unsigned> numberOfEffectInputs;
+    decoder >> numberOfEffectInputs;
+    if (!numberOfEffectInputs)
+        return std::nullopt;
+
+    return FEMerge::create(*numberOfEffectInputs);
+}
 
 } // namespace WebCore
 
-#endif // FEMerge_h
+SPECIALIZE_TYPE_TRAITS_FILTER_EFFECT(FEMerge)

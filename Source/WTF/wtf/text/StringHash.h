@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2008, 2012-2013, 2016 Apple Inc. All rights reserved
+ * Copyright (C) 2006-2019 Apple Inc. All rights reserved
  * Copyright (C) Research In Motion Limited 2009. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -19,12 +19,12 @@
  *
  */
 
-#ifndef StringHash_h
-#define StringHash_h
+#pragma once
 
-#include <wtf/text/AtomicString.h>
+#include <wtf/CompactPtr.h>
 #include <wtf/HashTraits.h>
-#include <wtf/Hasher.h>
+#include <wtf/text/AtomString.h>
+#include <wtf/text/StringHasher.h>
 
 namespace WTF {
 
@@ -57,6 +57,8 @@ namespace WTF {
         }
 
         static unsigned hash(const RefPtr<StringImpl>& key) { return key->hash(); }
+        static unsigned hash(const PackedPtr<StringImpl>& key) { return key->hash(); }
+        static unsigned hash(const CompactPtr<StringImpl>& key) { return key->hash(); }
         static bool equal(const RefPtr<StringImpl>& a, const RefPtr<StringImpl>& b)
         {
             return equal(a.get(), b.get());
@@ -70,24 +72,54 @@ namespace WTF {
             return equal(a, b.get());
         }
 
+        static bool equal(const PackedPtr<StringImpl>& a, const PackedPtr<StringImpl>& b)
+        {
+            return equal(a.get(), b.get());
+        }
+        static bool equal(const PackedPtr<StringImpl>& a, const StringImpl* b)
+        {
+            return equal(a.get(), b);
+        }
+        static bool equal(const StringImpl* a, const PackedPtr<StringImpl>& b)
+        {
+            return equal(a, b.get());
+        }
+
+        static bool equal(const CompactPtr<StringImpl>& a, const CompactPtr<StringImpl>& b)
+        {
+            return equal(a.get(), b.get());
+        }
+        static bool equal(const CompactPtr<StringImpl>& a, const StringImpl* b)
+        {
+            return equal(a.get(), b);
+        }
+        static bool equal(const StringImpl* a, const CompactPtr<StringImpl>& b)
+        {
+            return equal(a, b.get());
+        }
+
         static unsigned hash(const String& key) { return key.impl()->hash(); }
         static bool equal(const String& a, const String& b)
         {
             return equal(a.impl(), b.impl());
         }
 
-        static const bool safeToCompareToEmptyOrDeleted = false;
+        static constexpr bool safeToCompareToEmptyOrDeleted = false;
+        static constexpr bool hasHashInValue = true;
     };
 
     struct ASCIICaseInsensitiveHash {
-        template<typename T> static inline UChar foldCase(T character)
-        {
-            return toASCIILower(character);
-        }
+        template<typename T>
+        struct FoldCase {
+            static inline UChar convert(T character)
+            {
+                return toASCIILower(character);
+            }
+        };
 
         static unsigned hash(const UChar* data, unsigned length)
         {
-            return StringHasher::computeHashAndMaskTop8Bits<UChar, foldCase<UChar>>(data, length);
+            return StringHasher::computeHashAndMaskTop8Bits<UChar, FoldCase<UChar>>(data, length);
         }
 
         static unsigned hash(StringImpl& string)
@@ -104,7 +136,7 @@ namespace WTF {
 
         static unsigned hash(const LChar* data, unsigned length)
         {
-            return StringHasher::computeHashAndMaskTop8Bits<LChar, foldCase<LChar>>(data, length);
+            return StringHasher::computeHashAndMaskTop8Bits<LChar, FoldCase<LChar>>(data, length);
         }
 
         static inline unsigned hash(const char* data, unsigned length)
@@ -133,11 +165,31 @@ namespace WTF {
             return equal(a.get(), b.get());
         }
 
+        static unsigned hash(const PackedPtr<StringImpl>& key) 
+        {
+            return hash(key.get());
+        }
+
+        static bool equal(const PackedPtr<StringImpl>& a, const PackedPtr<StringImpl>& b)
+        {
+            return equal(a.get(), b.get());
+        }
+
+        static unsigned hash(const CompactPtr<StringImpl>& key)
+        {
+            return hash(key.get());
+        }
+
+        static bool equal(const CompactPtr<StringImpl>& a, const CompactPtr<StringImpl>& b)
+        {
+            return equal(a.get(), b.get());
+        }
+
         static unsigned hash(const String& key)
         {
             return hash(key.impl());
         }
-        static unsigned hash(const AtomicString& key)
+        static unsigned hash(const AtomString& key)
         {
             return hash(key.impl());
         }
@@ -145,14 +197,14 @@ namespace WTF {
         {
             return equal(a.impl(), b.impl());
         }
-        static bool equal(const AtomicString& a, const AtomicString& b)
+        static bool equal(const AtomString& a, const AtomString& b)
         {
             // FIXME: Is the "a == b" here a helpful optimization?
             // It makes all cases where the strings are not identical slightly slower.
             return a == b || equal(a.impl(), b.impl());
         }
 
-        static const bool safeToCompareToEmptyOrDeleted = false;
+        static constexpr bool safeToCompareToEmptyOrDeleted = false;
     };
 
     // This hash can be used in cases where the key is a hash of a string, but we don't
@@ -175,6 +227,18 @@ namespace WTF {
         }
     };
 
+    struct StringViewHashTranslator {
+        static unsigned hash(StringView key)
+        {
+            return key.hash();
+        }
+
+        static bool equal(const String& a, StringView b)
+        {
+            return a == b;
+        }
+    };
+
     // FIXME: Find a way to incorporate this functionality into ASCIICaseInsensitiveHash and allow
     // a HashMap whose keys are type String to perform operations when given a key of type StringView.
     struct ASCIICaseInsensitiveStringViewHashTranslator {
@@ -191,11 +255,15 @@ namespace WTF {
         }
     };
 
+    template<> struct DefaultHash<StringImpl*> : StringHash { };
+    template<> struct DefaultHash<RefPtr<StringImpl>> : StringHash { };
+    template<> struct DefaultHash<PackedPtr<StringImpl>> : StringHash { };
+    template<> struct DefaultHash<CompactPtr<StringImpl>> : StringHash { };
+    template<> struct DefaultHash<String> : StringHash { };
 }
 
 using WTF::ASCIICaseInsensitiveHash;
 using WTF::ASCIICaseInsensitiveStringViewHashTranslator;
 using WTF::AlreadyHashed;
 using WTF::StringHash;
-
-#endif
+using WTF::StringViewHashTranslator;

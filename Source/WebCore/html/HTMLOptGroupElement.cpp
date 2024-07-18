@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2020 Apple Inc. All rights reserved.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
@@ -27,14 +27,20 @@
 
 #include "Document.h"
 #include "ElementAncestorIterator.h"
+#include "ElementIterator.h"
 #include "HTMLNames.h"
+#include "HTMLOptionElement.h"
 #include "HTMLSelectElement.h"
+#include "PseudoClassChangeInvalidation.h"
 #include "RenderMenuList.h"
 #include "NodeRenderStyle.h"
 #include "StyleResolver.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/StdLibExtras.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLOptGroupElement);
 
 using namespace HTMLNames;
 
@@ -51,7 +57,7 @@ Ref<HTMLOptGroupElement> HTMLOptGroupElement::create(const QualifiedName& tagNam
 
 bool HTMLOptGroupElement::isDisabledFormControl() const
 {
-    return hasAttributeWithoutSynchronization(disabledAttr);
+    return m_isDisabled;
 }
 
 bool HTMLOptGroupElement::isFocusable() const
@@ -60,33 +66,52 @@ bool HTMLOptGroupElement::isFocusable() const
         return false;
     // Optgroup elements do not have a renderer.
     auto* style = const_cast<HTMLOptGroupElement&>(*this).computedStyle();
-    return style && style->display() != NONE;
+    return style && style->display() != DisplayType::None;
 }
 
-const AtomicString& HTMLOptGroupElement::formControlType() const
+const AtomString& HTMLOptGroupElement::formControlType() const
 {
-    static NeverDestroyed<const AtomicString> optgroup("optgroup", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> optgroup("optgroup"_s);
     return optgroup;
 }
 
 void HTMLOptGroupElement::childrenChanged(const ChildChange& change)
 {
+    bool isRelevant = change.affectsElements();
+    RefPtr select = isRelevant ? ownerSelectElement() : nullptr;
+    if (!isRelevant || !select) {
+        HTMLElement::childrenChanged(change);
+        return;
+    }
+
+    auto selectOptionIfNecessaryScope = select->optionToSelectFromChildChangeScope(change, this);
+
     recalcSelectOptions();
     HTMLElement::childrenChanged(change);
 }
 
-void HTMLOptGroupElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLOptGroupElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     HTMLElement::parseAttribute(name, value);
     recalcSelectOptions();
 
-    if (name == disabledAttr)
-        invalidateStyleForSubtree();
+    if (name == disabledAttr) {
+        bool newDisabled = !value.isNull();
+        if (m_isDisabled != newDisabled) {
+            Style::PseudoClassChangeInvalidation disabledInvalidation(*this, { { CSSSelector::PseudoClassDisabled, newDisabled }, { CSSSelector::PseudoClassEnabled, !newDisabled } });
+
+            Vector<Style::PseudoClassChangeInvalidation> optionInvalidation;
+            for (auto& descendant : descendantsOfType<HTMLOptionElement>(*this))
+                optionInvalidation.append({ descendant, { { CSSSelector::PseudoClassDisabled, newDisabled }, { CSSSelector::PseudoClassEnabled, !newDisabled } } });
+
+            m_isDisabled = newDisabled;
+        }
+    }
 }
 
 void HTMLOptGroupElement::recalcSelectOptions()
 {
-    if (auto* selectElement = ancestorsOfType<HTMLSelectElement>(*this).first()) {
+    if (RefPtr selectElement = ownerSelectElement()) {
         selectElement->setRecalcListItems();
         selectElement->updateValidity();
     }
@@ -106,22 +131,16 @@ String HTMLOptGroupElement::groupLabelText() const
     
 HTMLSelectElement* HTMLOptGroupElement::ownerSelectElement() const
 {
-    ContainerNode* select = parentNode();
-    while (select && !is<HTMLSelectElement>(*select))
-        select = select->parentNode();
-    
-    if (!select)
-        return nullptr;
-    
-    return downcast<HTMLSelectElement>(select);
+    return dynamicDowncast<HTMLSelectElement>(parentNode());
 }
 
-void HTMLOptGroupElement::accessKeyAction(bool)
+bool HTMLOptGroupElement::accessKeyAction(bool)
 {
-    HTMLSelectElement* select = ownerSelectElement();
+    RefPtr select = ownerSelectElement();
     // send to the parent to bring focus to the list box
     if (select && !select->focused())
-        select->accessKeyAction(false);
+        return select->accessKeyAction(false);
+    return false;
 }
 
 } // namespace

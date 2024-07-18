@@ -23,13 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WI.HeapObserver = class HeapObserver
+WI.HeapObserver = class HeapObserver extends InspectorBackend.Dispatcher
 {
     // Events defined by the "Heap" domain.
 
     garbageCollected(collection)
     {
-        WI.heapManager.garbageCollected(this.target, collection);
+        WI.heapManager.garbageCollected(this._target, collection);
     }
 
     trackingStart(timestamp, snapshotStringData)
@@ -37,6 +37,7 @@ WI.HeapObserver = class HeapObserver
         let workerProxy = WI.HeapSnapshotWorkerProxy.singleton();
         workerProxy.createSnapshot(snapshotStringData, ({objectId, snapshot: serializedSnapshot}) => {
             let snapshot = WI.HeapSnapshotProxy.deserialize(objectId, serializedSnapshot);
+            snapshot.snapshotStringData = snapshotStringData;
             WI.timelineManager.heapTrackingStarted(timestamp, snapshot);
         });
     }
@@ -46,6 +47,7 @@ WI.HeapObserver = class HeapObserver
         let workerProxy = WI.HeapSnapshotWorkerProxy.singleton();
         workerProxy.createSnapshot(snapshotStringData, ({objectId, snapshot: serializedSnapshot}) => {
             let snapshot = WI.HeapSnapshotProxy.deserialize(objectId, serializedSnapshot);
+            snapshot.snapshotStringData = snapshotStringData;
             WI.timelineManager.heapTrackingCompleted(timestamp, snapshot);
         });
     }

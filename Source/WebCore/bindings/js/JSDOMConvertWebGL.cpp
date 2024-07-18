@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,11 +31,20 @@
 #include "JSANGLEInstancedArrays.h"
 #include "JSDOMConvertBufferSource.h"
 #include "JSEXTBlendMinMax.h"
+#include "JSEXTColorBufferFloat.h"
+#include "JSEXTColorBufferHalfFloat.h"
+#include "JSEXTFloatBlend.h"
 #include "JSEXTFragDepth.h"
 #include "JSEXTShaderTextureLOD.h"
+#include "JSEXTTextureCompressionBPTC.h"
+#include "JSEXTTextureCompressionRGTC.h"
 #include "JSEXTTextureFilterAnisotropic.h"
+#include "JSEXTTextureNorm16.h"
 #include "JSEXTsRGB.h"
+#include "JSKHRParallelShaderCompile.h"
+#include "JSOESDrawBuffersIndexed.h"
 #include "JSOESElementIndexUint.h"
+#include "JSOESFBORenderMipmap.h"
 #include "JSOESStandardDerivatives.h"
 #include "JSOESTextureFloat.h"
 #include "JSOESTextureFloatLinear.h"
@@ -43,146 +52,161 @@
 #include "JSOESTextureHalfFloatLinear.h"
 #include "JSOESVertexArrayObject.h"
 #include "JSWebGLBuffer.h"
+#include "JSWebGLColorBufferFloat.h"
+#include "JSWebGLCompressedTextureASTC.h"
 #include "JSWebGLCompressedTextureATC.h"
+#include "JSWebGLCompressedTextureETC.h"
+#include "JSWebGLCompressedTextureETC1.h"
 #include "JSWebGLCompressedTexturePVRTC.h"
 #include "JSWebGLCompressedTextureS3TC.h"
+#include "JSWebGLCompressedTextureS3TCsRGB.h"
 #include "JSWebGLDebugRendererInfo.h"
 #include "JSWebGLDebugShaders.h"
 #include "JSWebGLDepthTexture.h"
 #include "JSWebGLDrawBuffers.h"
+#include "JSWebGLDrawInstancedBaseVertexBaseInstance.h"
 #include "JSWebGLFramebuffer.h"
 #include "JSWebGLLoseContext.h"
+#include "JSWebGLMultiDraw.h"
+#include "JSWebGLMultiDrawInstancedBaseVertexBaseInstance.h"
 #include "JSWebGLProgram.h"
 #include "JSWebGLRenderbuffer.h"
+#include "JSWebGLSampler.h"
 #include "JSWebGLTexture.h"
+#include "JSWebGLTransformFeedback.h"
 #include "JSWebGLVertexArrayObject.h"
 #include "JSWebGLVertexArrayObjectOES.h"
-
-using namespace JSC;
+#include <JavaScriptCore/JSCInlines.h>
 
 namespace WebCore {
+using namespace JSC;
 
 // FIXME: This should use the IDLUnion JSConverter.
-JSValue convertToJSValue(ExecState& state, JSDOMGlobalObject& globalObject, const WebGLAny& any)
+JSValue convertToJSValue(JSGlobalObject& lexicalGlobalObject, JSDOMGlobalObject& globalObject, const WebGLAny& any)
 {
     return WTF::switchOn(any,
-        [] (std::nullptr_t) {
+        [] (std::nullptr_t) -> JSValue {
             return jsNull();
-        },
-        [] (bool value) {
+        }, [] (bool value) -> JSValue {
             return jsBoolean(value);
-        },
-        [] (int value) {
+        }, [] (int value) -> JSValue {
             return jsNumber(value);
-        },
-        [] (unsigned value) {
+        }, [] (unsigned value) -> JSValue {
             return jsNumber(value);
-        },
-        [] (long long value) {
+        }, [] (long long value) -> JSValue {
             return jsNumber(value);
-        },
-        [] (float value) {
-            return jsNumber(value);
-        },
-        [&] (const String& value) {
-            return jsStringWithCache(&state, value);
-        },
-        [&] (const Vector<bool>& values) {
+        }, [] (float value) -> JSValue {
+            return jsNumber(purifyNaN(value));
+        }, [&] (const String& value) -> JSValue {
+            return jsStringWithCache(lexicalGlobalObject.vm(), value);
+        }, [&] (const Vector<bool>& values) -> JSValue {
             MarkedArgumentBuffer list;
             for (auto& value : values)
                 list.append(jsBoolean(value));
-            return constructArray(&state, 0, &globalObject, list);
-        },
-        [&] (const Vector<int>& values) {
+            RELEASE_ASSERT(!list.hasOverflowed());
+            return constructArray(&globalObject, static_cast<JSC::ArrayAllocationProfile*>(nullptr), list);
+        }, [&] (const Vector<int>& values) -> JSValue {
             MarkedArgumentBuffer list;
             for (auto& value : values)
                 list.append(jsNumber(value));
-            return constructArray(&state, 0, &globalObject, list);
-        },
-        [&] (const RefPtr<Float32Array>& array) {
-            return toJS(&state, &globalObject, array.get());
+            RELEASE_ASSERT(!list.hasOverflowed());
+            return constructArray(&globalObject, static_cast<JSC::ArrayAllocationProfile*>(nullptr), list);
+        }, [&] (const Vector<unsigned>& values) -> JSValue {
+            MarkedArgumentBuffer list;
+            for (auto& value : values)
+                list.append(jsNumber(value));
+            RELEASE_ASSERT(!list.hasOverflowed());
+            return constructArray(&globalObject, static_cast<JSC::ArrayAllocationProfile*>(nullptr), list);
+        }, [&] (const RefPtr<Float32Array>& array) {
+            return toJS(&lexicalGlobalObject, &globalObject, array.get());
         },
         [&] (const RefPtr<Int32Array>& array) {
-            return toJS(&state, &globalObject, array.get());
+            return toJS(&lexicalGlobalObject, &globalObject, array.get());
         },
         [&] (const RefPtr<Uint8Array>& array) {
-            return toJS(&state, &globalObject, array.get());
+            return toJS(&lexicalGlobalObject, &globalObject, array.get());
         },
         [&] (const RefPtr<Uint32Array>& array) {
-            return toJS(&state, &globalObject, array.get());
+            return toJS(&lexicalGlobalObject, &globalObject, array.get());
         },
         [&] (const RefPtr<WebGLBuffer>& buffer) {
-            return toJS(&state, &globalObject, buffer.get());
+            return toJS(&lexicalGlobalObject, &globalObject, buffer.get());
         },
         [&] (const RefPtr<WebGLFramebuffer>& buffer) {
-            return toJS(&state, &globalObject, buffer.get());
+            return toJS(&lexicalGlobalObject, &globalObject, buffer.get());
         },
         [&] (const RefPtr<WebGLProgram>& program) {
-            return toJS(&state, &globalObject, program.get());
+            return toJS(&lexicalGlobalObject, &globalObject, program.get());
         },
         [&] (const RefPtr<WebGLRenderbuffer>& buffer) {
-            return toJS(&state, &globalObject, buffer.get());
+            return toJS(&lexicalGlobalObject, &globalObject, buffer.get());
         },
         [&] (const RefPtr<WebGLTexture>& texture) {
-            return toJS(&state, &globalObject, texture.get());
+            return toJS(&lexicalGlobalObject, &globalObject, texture.get());
         },
         [&] (const RefPtr<WebGLVertexArrayObjectOES>& array) {
-            return toJS(&state, &globalObject, array.get());
+            return toJS(&lexicalGlobalObject, &globalObject, array.get());
         }
 #if ENABLE(WEBGL2)
         ,
+        [&] (const RefPtr<WebGLSampler>& sampler) {
+            return toJS(&lexicalGlobalObject, &globalObject, sampler.get());
+        },
+        [&] (const RefPtr<WebGLTransformFeedback>& transformFeedback) {
+            return toJS(&lexicalGlobalObject, &globalObject, transformFeedback.get());
+        },
         [&] (const RefPtr<WebGLVertexArrayObject>& array) {
-            return toJS(&state, &globalObject, array.get());
+            return toJS(&lexicalGlobalObject, &globalObject, array.get());
         }
 #endif
     );
 }
 
-JSValue convertToJSValue(ExecState& state, JSDOMGlobalObject& globalObject, WebGLExtension& extension)
+JSValue convertToJSValue(JSGlobalObject& lexicalGlobalObject, JSDOMGlobalObject& globalObject, WebGLExtension& extension)
 {
+#define TO_JS(EXT) \
+    case WebGLExtension::EXT ## Name: \
+        return toJS(&lexicalGlobalObject, &globalObject, static_cast<EXT&>(extension));
+
     switch (extension.getName()) {
-    case WebGLExtension::WebGLLoseContextName:
-        return toJS(&state, &globalObject, static_cast<WebGLLoseContext&>(extension));
-    case WebGLExtension::EXTShaderTextureLODName:
-        return toJS(&state, &globalObject, static_cast<EXTShaderTextureLOD&>(extension));
-    case WebGLExtension::EXTTextureFilterAnisotropicName:
-        return toJS(&state, &globalObject, static_cast<EXTTextureFilterAnisotropic&>(extension));
-    case WebGLExtension::EXTsRGBName:
-        return toJS(&state, &globalObject, static_cast<EXTsRGB&>(extension));
-    case WebGLExtension::EXTFragDepthName:
-        return toJS(&state, &globalObject, static_cast<EXTFragDepth&>(extension));
-    case WebGLExtension::EXTBlendMinMaxName:
-        return toJS(&state, &globalObject, static_cast<EXTBlendMinMax&>(extension));
-    case WebGLExtension::OESStandardDerivativesName:
-        return toJS(&state, &globalObject, static_cast<OESStandardDerivatives&>(extension));
-    case WebGLExtension::OESTextureFloatName:
-        return toJS(&state, &globalObject, static_cast<OESTextureFloat&>(extension));
-    case WebGLExtension::OESTextureFloatLinearName:
-        return toJS(&state, &globalObject, static_cast<OESTextureFloatLinear&>(extension));
-    case WebGLExtension::OESTextureHalfFloatName:
-        return toJS(&state, &globalObject, static_cast<OESTextureHalfFloat&>(extension));
-    case WebGLExtension::OESTextureHalfFloatLinearName:
-        return toJS(&state, &globalObject, static_cast<OESTextureHalfFloatLinear&>(extension));
-    case WebGLExtension::OESVertexArrayObjectName:
-        return toJS(&state, &globalObject, static_cast<OESVertexArrayObject&>(extension));
-    case WebGLExtension::OESElementIndexUintName:
-        return toJS(&state, &globalObject, static_cast<OESElementIndexUint&>(extension));
-    case WebGLExtension::WebGLDebugRendererInfoName:
-        return toJS(&state, &globalObject, static_cast<WebGLDebugRendererInfo&>(extension));
-    case WebGLExtension::WebGLDebugShadersName:
-        return toJS(&state, &globalObject, static_cast<WebGLDebugShaders&>(extension));
-    case WebGLExtension::WebGLCompressedTextureATCName:
-        return toJS(&state, &globalObject, static_cast<WebGLCompressedTextureATC&>(extension));
-    case WebGLExtension::WebGLCompressedTexturePVRTCName:
-        return toJS(&state, &globalObject, static_cast<WebGLCompressedTexturePVRTC&>(extension));
-    case WebGLExtension::WebGLCompressedTextureS3TCName:
-        return toJS(&state, &globalObject, static_cast<WebGLCompressedTextureS3TC&>(extension));
-    case WebGLExtension::WebGLDepthTextureName:
-        return toJS(&state, &globalObject, static_cast<WebGLDepthTexture&>(extension));
-    case WebGLExtension::WebGLDrawBuffersName:
-        return toJS(&state, &globalObject, static_cast<WebGLDrawBuffers&>(extension));
-    case WebGLExtension::ANGLEInstancedArraysName:
-        return toJS(&state, &globalObject, static_cast<ANGLEInstancedArrays&>(extension));
+        TO_JS(ANGLEInstancedArrays)
+        TO_JS(EXTBlendMinMax)
+        TO_JS(EXTColorBufferFloat)
+        TO_JS(EXTColorBufferHalfFloat)
+        TO_JS(EXTFloatBlend)
+        TO_JS(EXTFragDepth)
+        TO_JS(EXTShaderTextureLOD)
+        TO_JS(EXTTextureCompressionBPTC)
+        TO_JS(EXTTextureCompressionRGTC)
+        TO_JS(EXTTextureFilterAnisotropic)
+        TO_JS(EXTTextureNorm16)
+        TO_JS(EXTsRGB)
+        TO_JS(KHRParallelShaderCompile)
+        TO_JS(OESDrawBuffersIndexed)
+        TO_JS(OESElementIndexUint)
+        TO_JS(OESFBORenderMipmap)
+        TO_JS(OESStandardDerivatives)
+        TO_JS(OESTextureFloat)
+        TO_JS(OESTextureFloatLinear)
+        TO_JS(OESTextureHalfFloat)
+        TO_JS(OESTextureHalfFloatLinear)
+        TO_JS(OESVertexArrayObject)
+        TO_JS(WebGLColorBufferFloat)
+        TO_JS(WebGLCompressedTextureASTC)
+        TO_JS(WebGLCompressedTextureATC)
+        TO_JS(WebGLCompressedTextureETC)
+        TO_JS(WebGLCompressedTextureETC1)
+        TO_JS(WebGLCompressedTexturePVRTC)
+        TO_JS(WebGLCompressedTextureS3TC)
+        TO_JS(WebGLCompressedTextureS3TCsRGB)
+        TO_JS(WebGLDebugRendererInfo)
+        TO_JS(WebGLDebugShaders)
+        TO_JS(WebGLDepthTexture)
+        TO_JS(WebGLDrawBuffers)
+        TO_JS(WebGLDrawInstancedBaseVertexBaseInstance)
+        TO_JS(WebGLLoseContext)
+        TO_JS(WebGLMultiDraw)
+        TO_JS(WebGLMultiDrawInstancedBaseVertexBaseInstance)
     }
     ASSERT_NOT_REACHED();
     return jsNull();

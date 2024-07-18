@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,73 +29,62 @@
 #include "CallFrame.h"
 #include "CatchScope.h"
 #include "CodeBlock.h"
-#include "Disassembler.h"
 #include "Interpreter.h"
-#include "JSCInlines.h"
-#include "JSCJSValue.h"
+#include "JSCJSValueInlines.h"
 #include "LLIntData.h"
-#include "LLIntOpcode.h"
-#include "LLIntThunks.h"
+#include "LLIntExceptions.h"
 #include "Opcode.h"
 #include "ShadowChicken.h"
-#include "VM.h"
+#include "VMInlines.h"
 
 namespace JSC {
 
-void genericUnwind(VM* vm, ExecState* callFrame, UnwindStart unwindStart)
+void genericUnwind(VM& vm, CallFrame* callFrame)
 {
-    auto scope = DECLARE_CATCH_SCOPE(*vm);
-    if (Options::breakOnThrow()) {
-        CodeBlock* codeBlock = callFrame->codeBlock();
-        if (codeBlock)
-            dataLog("In call frame ", RawPointer(callFrame), " for code block ", *codeBlock, "\n");
-        else
-            dataLog("In call frame ", RawPointer(callFrame), " with null CodeBlock\n");
-        CRASH();
+    auto scope = DECLARE_CATCH_SCOPE(vm);
+    CallFrame* topJSCallFrame = vm.topJSCallFrame();
+    if (UNLIKELY(Options::breakOnThrow())) {
+        CodeBlock* codeBlock = topJSCallFrame->codeBlock();
+        dataLog("In call frame ", RawPointer(topJSCallFrame), " for code block ", codeBlock, "\n");
+        WTFBreakpointTrap();
     }
     
-    ExecState* shadowChickenTopFrame = callFrame;
-    if (unwindStart == UnwindFromCallerFrame) {
-        VMEntryFrame* topVMEntryFrame = vm->topVMEntryFrame;
-        shadowChickenTopFrame = callFrame->callerFrame(topVMEntryFrame);
-    }
-    vm->shadowChicken().log(*vm, shadowChickenTopFrame, ShadowChicken::Packet::throwPacket());
-    
+    if (auto* shadowChicken = vm.shadowChicken())
+        shadowChicken->log(vm, topJSCallFrame, ShadowChicken::Packet::throwPacket());
+
     Exception* exception = scope.exception();
     RELEASE_ASSERT(exception);
-    HandlerInfo* handler = vm->interpreter->unwind(*vm, callFrame, exception, unwindStart); // This may update callFrame.
+    CatchInfo handler = vm.interpreter.unwind(vm, callFrame, exception); // This may update callFrame.
 
     void* catchRoutine;
-    Instruction* catchPCForInterpreter = 0;
-    if (handler) {
-        // handler->target is meaningless for getting a code offset when catching
-        // the exception in a DFG/FTL frame. This bytecode target offset could be
-        // something that's in an inlined frame, which means an array access
-        // with this bytecode offset in the machine frame is utterly meaningless
-        // and can cause an overflow. OSR exit properly exits to handler->target
-        // in the proper frame.
-        if (!JITCode::isOptimizingJIT(callFrame->codeBlock()->jitType()))
-            catchPCForInterpreter = &callFrame->codeBlock()->instructions()[handler->target];
+    JSOrWasmInstruction catchPCForInterpreter = { static_cast<JSInstruction*>(nullptr) };
+    if (handler.m_valid) {
+        catchPCForInterpreter = handler.m_catchPCForInterpreter;
 #if ENABLE(JIT)
-        catchRoutine = handler->nativeCode.executableAddress();
+        catchRoutine = handler.m_nativeCode.executableAddress();
 #else
-        catchRoutine = catchPCForInterpreter->u.pointer;
+#if ENABLE(WEBASSEMBLY)
+#error WASM requires the JIT, so this section assumes we are in JS
+#endif
+        const auto* pc = std::get<const JSInstruction*>(catchPCForInterpreter);
+        if (pc->isWide32())
+            catchRoutine = LLInt::getWide32CodePtr(pc->opcodeID());
+        else if (pc->isWide16())
+            catchRoutine = LLInt::getWide16CodePtr(pc->opcodeID());
+        else
+            catchRoutine = LLInt::getCodePtr(pc->opcodeID());
 #endif
     } else
-        catchRoutine = LLInt::getCodePtr(handleUncaughtException);
-    
-    ASSERT(bitwise_cast<uintptr_t>(callFrame) < bitwise_cast<uintptr_t>(vm->topVMEntryFrame));
+        catchRoutine = LLInt::handleUncaughtException(vm).code().executableAddress();
 
-    vm->callFrameForCatch = callFrame;
-    vm->targetMachinePCForThrow = catchRoutine;
-    vm->targetInterpreterPCForThrow = catchPCForInterpreter;
+    ASSERT(bitwise_cast<uintptr_t>(callFrame) < bitwise_cast<uintptr_t>(vm.topEntryFrame));
+
+    assertIsTaggedWith<ExceptionHandlerPtrTag>(catchRoutine);
+    vm.callFrameForCatch = callFrame;
+    vm.targetMachinePCForThrow = catchRoutine;
+    vm.targetInterpreterPCForThrow = catchPCForInterpreter;
     
     RELEASE_ASSERT(catchRoutine);
-}
-
-void genericUnwind(VM* vm, ExecState* callFrame)
-{
-    genericUnwind(vm, callFrame, UnwindFromCurrentFrame);
 }
 
 } // namespace JSC

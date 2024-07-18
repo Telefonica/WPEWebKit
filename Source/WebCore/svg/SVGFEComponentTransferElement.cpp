@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005 Rob Buis <buis@kde.org>
+ * Copyright (C) 2018-2022 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,29 +23,28 @@
 #include "SVGFEComponentTransferElement.h"
 
 #include "ElementIterator.h"
-#include "FilterEffect.h"
+#include "FEComponentTransfer.h"
+#include "SVGElementTypeHelpers.h"
 #include "SVGFEFuncAElement.h"
 #include "SVGFEFuncBElement.h"
 #include "SVGFEFuncGElement.h"
 #include "SVGFEFuncRElement.h"
-#include "SVGFilterBuilder.h"
 #include "SVGNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-// Animated property definitions
-DEFINE_ANIMATED_STRING(SVGFEComponentTransferElement, SVGNames::inAttr, In1, in1)
-
-BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGFEComponentTransferElement)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(in1)
-    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGFilterPrimitiveStandardAttributes)
-END_REGISTER_ANIMATED_PROPERTIES
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFEComponentTransferElement);
 
 inline SVGFEComponentTransferElement::SVGFEComponentTransferElement(const QualifiedName& tagName, Document& document)
     : SVGFilterPrimitiveStandardAttributes(tagName, document)
 {
     ASSERT(hasTagName(SVGNames::feComponentTransferTag));
-    registerAnimatedPropertiesForSVGFEComponentTransferElement();
+
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        PropertyRegistry::registerProperty<SVGNames::inAttr, &SVGFEComponentTransferElement::m_in1>();
+    });
 }
 
 Ref<SVGFEComponentTransferElement> SVGFEComponentTransferElement::create(const QualifiedName& tagName, Document& document)
@@ -52,23 +52,29 @@ Ref<SVGFEComponentTransferElement> SVGFEComponentTransferElement::create(const Q
     return adoptRef(*new SVGFEComponentTransferElement(tagName, document));
 }
 
-void SVGFEComponentTransferElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void SVGFEComponentTransferElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == SVGNames::inAttr) {
-        setIn1BaseValue(value);
+        m_in1->setBaseValInternal(value);
         return;
     }
 
     SVGFilterPrimitiveStandardAttributes::parseAttribute(name, value);
 }
 
-RefPtr<FilterEffect> SVGFEComponentTransferElement::build(SVGFilterBuilder* filterBuilder, Filter& filter)
+void SVGFEComponentTransferElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    FilterEffect* input1 = filterBuilder->getEffectById(in1());
-    
-    if (!input1)
-        return nullptr;
+    if (attrName == SVGNames::inAttr) {
+        InstanceInvalidationGuard guard(*this);
+        updateSVGRendererForElementChange();
+        return;
+    }
 
+    SVGFilterPrimitiveStandardAttributes::svgAttributeChanged(attrName);
+}
+
+RefPtr<FilterEffect> SVGFEComponentTransferElement::createFilterEffect(const FilterEffectVector&, const GraphicsContext&) const
+{
     ComponentTransferFunction red;
     ComponentTransferFunction green;
     ComponentTransferFunction blue;
@@ -84,10 +90,8 @@ RefPtr<FilterEffect> SVGFEComponentTransferElement::build(SVGFilterBuilder* filt
         else if (is<SVGFEFuncAElement>(child))
             alpha = downcast<SVGFEFuncAElement>(child).transferFunction();
     }
-    
-    RefPtr<FilterEffect> effect = FEComponentTransfer::create(filter, red, green, blue, alpha);
-    effect->inputEffects().append(input1);
-    return effect;
+
+    return FEComponentTransfer::create(red, green, blue, alpha);
 }
 
-}
+} // namespace WebCore

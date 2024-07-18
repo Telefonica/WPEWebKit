@@ -27,12 +27,12 @@
 #include "WebKitDLL.h"
 #include "BackForwardList.h"
 
+#include <WebCore/BackForwardCache.h>
 #include <WebCore/Frame.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/FrameLoaderClient.h>
 #include <WebCore/HistoryItem.h>
 #include <WebCore/Logging.h>
-#include <WebCore/PageCache.h>
 #include <WebCore/SerializedScriptValue.h>
 
 static const unsigned DefaultCapacity = 100;
@@ -64,7 +64,7 @@ void BackForwardList::addItem(Ref<HistoryItem>&& newItem)
         while (m_entries.size() > targetSize) {
             Ref<HistoryItem> item = m_entries.takeLast();
             m_entryHash.remove(item.ptr());
-            PageCache::singleton().remove(item);
+            BackForwardCache::singleton().remove(item);
         }
     }
 
@@ -74,7 +74,7 @@ void BackForwardList::addItem(Ref<HistoryItem>&& newItem)
         Ref<HistoryItem> item = WTFMove(m_entries[0]);
         m_entries.remove(0);
         m_entryHash.remove(item.ptr());
-        PageCache::singleton().remove(item);
+        BackForwardCache::singleton().remove(item);
         --m_current;
     }
 
@@ -99,38 +99,38 @@ void BackForwardList::goForward()
     }
 }
 
-void BackForwardList::goToItem(HistoryItem* item)
+void BackForwardList::goToItem(HistoryItem& item)
 {
-    if (!m_entries.size() || !item)
+    if (!m_entries.size())
         return;
-        
+
     unsigned int index = 0;
     for (; index < m_entries.size(); ++index)
-        if (m_entries[index].ptr() == item)
+        if (m_entries[index].ptr() == &item)
             break;
     if (index < m_entries.size()) {
         m_current = index;
     }
 }
 
-HistoryItem* BackForwardList::backItem()
+RefPtr<HistoryItem> BackForwardList::backItem()
 {
     if (m_current && m_current != NoCurrentItemIndex)
-        return m_entries[m_current - 1].ptr();
+        return m_entries[m_current - 1].copyRef();
     return nullptr;
 }
 
-HistoryItem* BackForwardList::currentItem()
+RefPtr<HistoryItem> BackForwardList::currentItem()
 {
     if (m_current != NoCurrentItemIndex)
-        return m_entries[m_current].ptr();
+        return m_entries[m_current].copyRef();
     return nullptr;
 }
 
-HistoryItem* BackForwardList::forwardItem()
+RefPtr<HistoryItem> BackForwardList::forwardItem()
 {
     if (m_entries.size() && m_current < m_entries.size() - 1)
-        return m_entries[m_current + 1].ptr();
+        return m_entries[m_current + 1].copyRef();
     return nullptr;
 }
 
@@ -170,7 +170,7 @@ void BackForwardList::setCapacity(int size)
     while (size < static_cast<int>(m_entries.size())) {
         Ref<HistoryItem> item = m_entries.takeLast();
         m_entryHash.remove(item.ptr());
-        PageCache::singleton().remove(item);
+        BackForwardCache::singleton().remove(item);
     }
 
     if (!size)
@@ -196,26 +196,26 @@ void BackForwardList::setEnabled(bool enabled)
     }
 }
 
-int BackForwardList::backListCount()
+unsigned BackForwardList::backListCount() const
 {
     return m_current == NoCurrentItemIndex ? 0 : m_current;
 }
 
-int BackForwardList::forwardListCount()
+unsigned BackForwardList::forwardListCount() const
 {
-    return m_current == NoCurrentItemIndex ? 0 : (int)m_entries.size() - (m_current + 1);
+    return m_current == NoCurrentItemIndex ? 0 : m_entries.size() - m_current - 1;
 }
 
-HistoryItem* BackForwardList::itemAtIndex(int index)
+RefPtr<HistoryItem> BackForwardList::itemAtIndex(int index)
 {
     // Do range checks without doing math on index to avoid overflow.
     if (index < -static_cast<int>(m_current))
         return nullptr;
     
-    if (index > forwardListCount())
+    if (index > static_cast<int>(forwardListCount()))
         return nullptr;
-        
-    return m_entries[index + m_current].ptr();
+
+    return m_entries[index + m_current].copyRef();
 }
 
 Vector<Ref<HistoryItem>>& BackForwardList::entries()
@@ -258,7 +258,7 @@ void BackForwardList::removeItem(HistoryItem* item)
     }
 }
 
-bool BackForwardList::containsItem(HistoryItem* entry)
+bool BackForwardList::containsItem(const HistoryItem& entry) const
 {
-    return m_entryHash.contains(entry);
+    return m_entryHash.contains(const_cast<HistoryItem*>(&entry));
 }

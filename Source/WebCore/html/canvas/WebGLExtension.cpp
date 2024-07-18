@@ -29,15 +29,27 @@
 
 #include "WebGLExtension.h"
 
+#include <wtf/IsoMallocInlines.h>
+
 namespace WebCore {
 
-WebGLExtension::WebGLExtension(WebGLRenderingContextBase& context)
-    : m_context(context)
+WebGLExtensionScopedContext::WebGLExtensionScopedContext(WebGLExtension* extension)
+    : m_context(extension->context())
 {
 }
 
-WebGLExtension::~WebGLExtension()
+WTF_MAKE_ISO_ALLOCATED_IMPL(WebGLExtension);
+
+WebGLExtension::WebGLExtension(WebGLRenderingContextBase& context)
+    : m_context(&context)
 {
+}
+
+WebGLExtension::~WebGLExtension() = default;
+
+void WebGLExtension::loseParentContext(WebGLRenderingContextBase::LostContextMode)
+{
+    m_context = nullptr;
 }
 
 } // namespace WebCore

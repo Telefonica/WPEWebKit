@@ -26,36 +26,38 @@
 #import "config.h"
 #import "WebChromeClient.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "DrawingArea.h"
+#import "InteractionInformationAtPosition.h"
+#import "InteractionInformationRequest.h"
 #import "UIKitSPI.h"
 #import "WebCoreArgumentCoders.h"
 #import "WebFrame.h"
 #import "WebIconUtilities.h"
 #import "WebPage.h"
 #import "WebPageProxyMessages.h"
+#import <WebCore/AudioSession.h>
+#import <WebCore/ContentChangeObserver.h>
 #import <WebCore/Icon.h>
+#import <WebCore/MouseEvent.h>
 #import <WebCore/NotImplemented.h>
+#import <WebCore/PlatformMouseEvent.h>
 #import <wtf/RefPtr.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 #if ENABLE(IOS_TOUCH_EVENTS)
 
 void WebChromeClient::didPreventDefaultForEvent()
 {
-    notImplemented();
+    if (!m_page.mainFrame())
+        return;
+    ContentChangeObserver::didPreventDefaultForEvent(*m_page.mainFrame());
 }
 
 #endif
-
-void WebChromeClient::elementDidRefocus(WebCore::Element& element)
-{
-    elementDidFocus(element);
-}
 
 void WebChromeClient::didReceiveMobileDocType(bool isMobileDoctype)
 {
@@ -67,19 +69,14 @@ void WebChromeClient::setNeedsScrollNotifications(WebCore::Frame&, bool)
     notImplemented();
 }
 
-void WebChromeClient::observedContentChange(WebCore::Frame&)
+void WebChromeClient::didFinishContentChangeObserving(WebCore::Frame&, WKContentChange observedContentChange)
 {
-    m_page.completePendingSyntheticClickForContentChangeObserver();
-}
-
-void WebChromeClient::clearContentChangeObservers(WebCore::Frame&)
-{
-    notImplemented();
+    m_page.didFinishContentChangeObserving(observedContentChange);
 }
 
 void WebChromeClient::notifyRevealedSelectionByScrollingFrame(WebCore::Frame&)
 {
-    m_page.didChangeSelection();
+    m_page.didScrollSelection();
 }
 
 bool WebChromeClient::isStopping()
@@ -91,17 +88,19 @@ bool WebChromeClient::isStopping()
 void WebChromeClient::didLayout(LayoutType type)
 {
     if (type == Scroll)
-        m_page.didChangeSelection();
+        m_page.didScrollSelection();
 }
 
 void WebChromeClient::didStartOverflowScroll()
 {
-    m_page.send(Messages::WebPageProxy::OverflowScrollWillStartScroll());
+    // FIXME: This is only relevant for legacy touch-driven overflow in the web process (see ScrollAnimatorIOS::handleTouchEvent), and should be removed.
+    m_page.send(Messages::WebPageProxy::ScrollingNodeScrollWillStartScroll(0));
 }
 
 void WebChromeClient::didEndOverflowScroll()
 {
-    m_page.send(Messages::WebPageProxy::OverflowScrollDidEndScroll());
+    // FIXME: This is only relevant for legacy touch-driven overflow in the web process (see ScrollAnimatorIOS::handleTouchEvent), and should be removed.
+    m_page.send(Messages::WebPageProxy::ScrollingNodeScrollDidEndScroll(0));
 }
 
 bool WebChromeClient::hasStablePageScaleFactor() const
@@ -134,9 +133,9 @@ void WebChromeClient::webAppOrientationsUpdated()
     notImplemented();
 }
 
-void WebChromeClient::showPlaybackTargetPicker(bool hasVideo)
+void WebChromeClient::showPlaybackTargetPicker(bool hasVideo, WebCore::RouteSharingPolicy policy, const String& routingContextUID)
 {
-    m_page.send(Messages::WebPageProxy::ShowPlaybackTargetPicker(hasVideo, m_page.rectForElementAtInteractionLocation()));
+    m_page.send(Messages::WebPageProxy::ShowPlaybackTargetPicker(hasVideo, m_page.rectForElementAtInteractionLocation(), policy, routingContextUID));
 }
 
 Seconds WebChromeClient::eventThrottlingDelay()
@@ -156,9 +155,38 @@ RefPtr<Icon> WebChromeClient::createIconForFiles(const Vector<String>& filenames
 
     // FIXME: We should generate an icon showing multiple files here, if applicable. Currently, if there are multiple
     // files, we only use the first URL to generate an icon.
-    return Icon::createIconForImage(iconForFile([NSURL fileURLWithPath:filenames[0]]).CGImage);
+    NSURL *url = [NSURL fileURLWithPath:filenames[0] isDirectory:NO];
+    if (!url)
+        return nullptr;
+
+    return Icon::createIconForImage(iconForFile(url).get().CGImage);
+}
+
+bool WebChromeClient::shouldUseMouseEventForSelection(const WebCore::PlatformMouseEvent& event)
+{
+    // In iPadOS and macCatalyst, despite getting mouse events, we still want UITextInteraction and friends to own selection gestures.
+    // However, we need to allow single-clicks to set the selection, because that is how UITextInteraction is activated.
+#if HAVE(UIKIT_WITH_MOUSE_SUPPORT)
+    return event.clickCount() <= 1;
+#else
+    return true;
+#endif
+}
+
+bool WebChromeClient::showDataDetectorsUIForElement(const Element& element, const Event& event)
+{
+    if (!event.isMouseEvent())
+        return false;
+
+    // FIXME: Ideally, we would be able to generate InteractionInformationAtPosition without re-hit-testing the element.
+    auto& mouseEvent = downcast<MouseEvent>(event);
+    auto request = InteractionInformationRequest { roundedIntPoint(mouseEvent.locationInRootViewCoordinates()) };
+    request.includeLinkIndicator = true;
+    auto positionInformation = m_page.positionInformation(request);
+    m_page.send(Messages::WebPageProxy::ShowDataDetectorsUIForPositionInformation(positionInformation));
+    return true;
 }
 
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

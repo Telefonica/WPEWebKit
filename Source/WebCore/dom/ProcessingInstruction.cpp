@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2000 Peter Kelly (pmk@post.com)
- * Copyright (C) 2006-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2018 Apple Inc. All rights reserved.
  * Copyright (C) 2013 Samsung Electronics. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -27,27 +27,32 @@
 #include "CachedResourceLoader.h"
 #include "CachedResourceRequest.h"
 #include "CachedXSLStyleSheet.h"
-#include "Document.h"
+#include "CommonAtomStrings.h"
+#include "DocumentInlines.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "MediaList.h"
+#include "MediaQueryParser.h"
 #include "StyleScope.h"
 #include "StyleSheetContents.h"
 #include "XMLDocumentParser.h"
 #include "XSLStyleSheet.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/SetForScope.h>
 
 namespace WebCore {
 
-inline ProcessingInstruction::ProcessingInstruction(Document& document, const String& target, const String& data)
-    : CharacterData(document, data, CreateOther)
-    , m_target(target)
+WTF_MAKE_ISO_ALLOCATED_IMPL(ProcessingInstruction);
+
+inline ProcessingInstruction::ProcessingInstruction(Document& document, String&& target, String&& data)
+    : CharacterData(document, WTFMove(data))
+    , m_target(WTFMove(target))
 {
 }
 
-Ref<ProcessingInstruction> ProcessingInstruction::create(Document& document, const String& target, const String& data)
+Ref<ProcessingInstruction> ProcessingInstruction::create(Document& document, String&& target, String&& data)
 {
-    return adoptRef(*new ProcessingInstruction(document, target, data));
+    return adoptRef(*new ProcessingInstruction(document, WTFMove(target), WTFMove(data)));
 }
 
 ProcessingInstruction::~ProcessingInstruction()
@@ -76,43 +81,34 @@ Ref<Node> ProcessingInstruction::cloneNodeInternal(Document& targetDocument, Clo
 {
     // FIXME: Is it a problem that this does not copy m_localHref?
     // What about other data members?
-    return create(targetDocument, m_target, data());
+    return create(targetDocument, String { m_target }, String { data() });
 }
 
 void ProcessingInstruction::checkStyleSheet()
 {
-    // Prevent recursive loading of stylesheet.
-    if (m_isHandlingBeforeLoad)
-        return;
-
-    if (m_target == "xml-stylesheet" && document().frame() && parentNode() == &document()) {
+    if (m_target == "xml-stylesheet"_s && document().frame() && parentNode() == &document()) {
         // see http://www.w3.org/TR/xml-stylesheet/
         // ### support stylesheet included in a fragment of this (or another) document
         // ### make sure this gets called when adding from javascript
-        bool attrsOk;
-        const HashMap<String, String> attrs = parseAttributes(data(), attrsOk);
-        if (!attrsOk)
+        auto attributes = parseAttributes(data());
+        if (!attributes)
             return;
-        HashMap<String, String>::const_iterator i = attrs.find("type");
-        String type;
-        if (i != attrs.end())
-            type = i->value;
+        String type = attributes->get<HashTranslatorASCIILiteral>("type"_s);
 
-        m_isCSS = type.isEmpty() || type == "text/css";
+        m_isCSS = type.isEmpty() || type == cssContentTypeAtom();
 #if ENABLE(XSLT)
-        m_isXSL = (type == "text/xml" || type == "text/xsl" || type == "application/xml" ||
-                   type == "application/xhtml+xml" || type == "application/rss+xml" || type == "application/atom+xml");
+        m_isXSL = type == "text/xml"_s || type == "text/xsl"_s || type == "application/xml"_s || type == "application/xhtml+xml"_s || type == "application/rss+xml"_s || type == "application/atom+xml"_s;
         if (!m_isCSS && !m_isXSL)
 #else
         if (!m_isCSS)
 #endif
             return;
 
-        String href = attrs.get("href");
-        String alternate = attrs.get("alternate");
-        m_alternate = alternate == "yes";
-        m_title = attrs.get("title");
-        m_media = attrs.get("media");
+        String href = attributes->get<HashTranslatorASCIILiteral>("href"_s);
+        String alternate = attributes->get<HashTranslatorASCIILiteral>("alternate"_s);
+        m_alternate = alternate == "yes"_s;
+        m_title = attributes->get<HashTranslatorASCIILiteral>("title"_s);
+        m_media = attributes->get<HashTranslatorASCIILiteral>("media"_s);
 
         if (m_alternate && m_title.isEmpty())
             return;
@@ -123,9 +119,10 @@ void ProcessingInstruction::checkStyleSheet()
             // We need to make a synthetic XSLStyleSheet that is embedded.  It needs to be able
             // to kick off import/include loads that can hang off some parent sheet.
             if (m_isXSL) {
-                URL finalURL(ParsedURLString, m_localHref);
+                URL finalURL({ }, m_localHref);
                 m_sheet = XSLStyleSheet::createEmbedded(this, finalURL);
                 m_loading = false;
+                document().scheduleToApplyXSLTransforms();
             }
 #endif
         } else {
@@ -143,12 +140,6 @@ void ProcessingInstruction::checkStyleSheet()
 
             String url = document().completeURL(href).string();
 
-            {
-            SetForScope<bool> change(m_isHandlingBeforeLoad, true);
-            if (!dispatchBeforeLoadEvent(url))
-                return;
-            }
-
             bool didEventListenerDisconnectThisElement = !isConnected() || &document() != originalDocument.ptr();
             if (didEventListenerDisconnectThisElement)
                 return;
@@ -162,14 +153,14 @@ void ProcessingInstruction::checkStyleSheet()
             if (m_isXSL) {
                 auto options = CachedResourceLoader::defaultCachedResourceOptions();
                 options.mode = FetchOptions::Mode::SameOrigin;
-                m_cachedSheet = document().cachedResourceLoader().requestXSLStyleSheet({ResourceRequest(document().completeURL(href)), options}).valueOr(nullptr);
+                m_cachedSheet = document().cachedResourceLoader().requestXSLStyleSheet({ResourceRequest(document().completeURL(href)), options}).value_or(nullptr);
             } else
 #endif
             {
-                String charset = attrs.get("charset");
+                String charset = attributes->get<HashTranslatorASCIILiteral>("charset"_s);
                 CachedResourceRequest request(document().completeURL(href), CachedResourceLoader::defaultCachedResourceOptions(), std::nullopt, charset.isEmpty() ? document().charset() : WTFMove(charset));
 
-                m_cachedSheet = document().cachedResourceLoader().requestCSSStyleSheet(WTFMove(request)).valueOr(nullptr);
+                m_cachedSheet = document().cachedResourceLoader().requestCSSStyleSheet(WTFMove(request)).value_or(nullptr);
             }
             if (m_cachedSheet)
                 m_cachedSheet->addClient(*this);
@@ -179,7 +170,7 @@ void ProcessingInstruction::checkStyleSheet()
                 document().styleScope().removePendingSheet(*this);
 #if ENABLE(XSLT)
                 if (m_isXSL)
-                    document().styleScope().flushPendingUpdate();
+                    document().scheduleToApplyXSLTransforms();
 #endif
             }
         }
@@ -202,7 +193,7 @@ bool ProcessingInstruction::sheetLoaded()
             document().styleScope().removePendingSheet(*this);
 #if ENABLE(XSLT)
         if (m_isXSL)
-            document().styleScope().flushPendingUpdate();
+            document().scheduleToApplyXSLTransforms();
 #endif
         return true;
     }
@@ -222,7 +213,7 @@ void ProcessingInstruction::setCSSStyleSheet(const String& href, const URL& base
     auto cssSheet = CSSStyleSheet::create(StyleSheetContents::create(href, parserContext), *this);
     cssSheet.get().setDisabled(m_alternate);
     cssSheet.get().setTitle(m_title);
-    cssSheet.get().setMediaQueries(MediaQuerySet::create(m_media));
+    cssSheet.get().setMediaQueries(MediaQuerySet::create(m_media, MediaQueryParserContext(document())));
 
     m_sheet = WTFMove(cssSheet);
 
@@ -274,20 +265,24 @@ void ProcessingInstruction::addSubresourceAttributeURLs(ListHashSet<URL>& urls) 
     addSubresourceURL(urls, sheet()->baseURL());
 }
 
-Node::InsertionNotificationRequest ProcessingInstruction::insertedInto(ContainerNode& insertionPoint)
+Node::InsertedIntoAncestorResult ProcessingInstruction::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    CharacterData::insertedInto(insertionPoint);
-    if (!insertionPoint.isConnected())
-        return InsertionDone;
+    CharacterData::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    if (!insertionType.connectedToDocument)
+        return InsertedIntoAncestorResult::Done;
     document().styleScope().addStyleSheetCandidateNode(*this, m_createdByParser);
-    checkStyleSheet();
-    return InsertionDone;
+    return InsertedIntoAncestorResult::NeedsPostInsertionCallback;
 }
 
-void ProcessingInstruction::removedFrom(ContainerNode& insertionPoint)
+void ProcessingInstruction::didFinishInsertingNode()
 {
-    CharacterData::removedFrom(insertionPoint);
-    if (!insertionPoint.isConnected())
+    checkStyleSheet();
+}
+
+void ProcessingInstruction::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
+{
+    CharacterData::removedFromAncestor(removalType, oldParentOfRemovedTree);
+    if (!removalType.disconnectedFromDocument)
         return;
     
     document().styleScope().removeStyleSheetCandidateNode(*this);

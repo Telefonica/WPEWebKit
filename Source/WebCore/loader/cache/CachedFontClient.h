@@ -33,10 +33,12 @@ class CachedFont;
 
 class CachedFontClient : public CachedResourceClient {
 public:
-    virtual ~CachedFontClient() { }
+    virtual ~CachedFontClient() = default;
     static CachedResourceClientType expectedType() { return FontType; }
     CachedResourceClientType resourceClientType() const override { return expectedType(); }
     virtual void fontLoaded(CachedFont&) { }
 };
 
 } // namespace WebCore
+
+SPECIALIZE_TYPE_TRAITS_CACHED_RESOURCE_CLIENT(CachedFontClient, FontType);

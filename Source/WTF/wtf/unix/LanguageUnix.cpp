@@ -19,7 +19,7 @@
  */
 
 #include "config.h"
-#include "Language.h"
+#include <wtf/Language.h>
 
 #include <locale.h>
 #include <wtf/Vector.h>
@@ -32,17 +32,15 @@ namespace WTF {
 // always the same value.
 static String platformLanguage()
 {
-    String localeDefault(setlocale(LC_CTYPE, nullptr));
-    if (localeDefault.isEmpty() || equalIgnoringASCIICase(localeDefault, "C") || equalIgnoringASCIICase(localeDefault, "POSIX"))
-        return ASCIILiteral("en-US");
+    auto localeDefault = String::fromLatin1(setlocale(LC_CTYPE, nullptr));
+    if (localeDefault.isEmpty() || equalIgnoringASCIICase(localeDefault, "C"_s) || equalIgnoringASCIICase(localeDefault, "POSIX"_s))
+        return "en-US"_s;
 
-    String normalizedDefault = localeDefault;
-    normalizedDefault.replace('_', '-');
-    normalizedDefault.truncate(normalizedDefault.find('.'));
-    return normalizedDefault;
+    auto normalizedDefault = makeStringByReplacingAll(localeDefault, '_', '-');
+    return normalizedDefault.left(normalizedDefault.find('.'));
 }
 
-Vector<String> platformUserPreferredLanguages()
+Vector<String> platformUserPreferredLanguages(ShouldMinimizeLanguages)
 {
     return { platformLanguage() };
 }

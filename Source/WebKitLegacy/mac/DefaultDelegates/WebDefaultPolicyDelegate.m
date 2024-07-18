@@ -81,7 +81,7 @@ static WebDefaultPolicyDelegate *sharedDelegate = nil;
                                                          frame:(WebFrame *)frame
                                               decisionListener:(id <WebPolicyDecisionListener>)listener
 {
-    WebNavigationType navType = [[actionInformation objectForKey:WebActionNavigationTypeKey] intValue];
+    WebNavigationType navType = (WebNavigationType)[[actionInformation objectForKey:WebActionNavigationTypeKey] intValue];
 
     if ([WebView _canHandleRequest:request forMainFrame:frame == [wv mainFrame]]) {
         [listener use];
@@ -91,7 +91,7 @@ static WebDefaultPolicyDelegate *sharedDelegate = nil;
         // A file URL shouldn't fall through to here, but if it did,
         // it would be a security risk to open it.
         if (![[request URL] isFileURL]) {
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
             [[NSWorkspace sharedWorkspace] openURL:[request URL]];
 #endif
         }

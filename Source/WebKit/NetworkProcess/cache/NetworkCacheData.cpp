@@ -26,91 +26,66 @@
 #include "config.h"
 #include "NetworkCacheData.h"
 
-#if ENABLE(NETWORK_CACHE)
-
-#include <WebCore/FileSystem.h>
 #include <fcntl.h>
+#include <wtf/CryptographicallyRandomNumber.h>
+#include <wtf/FileSystem.h>
+
+#if !OS(WINDOWS)
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <wtf/CryptographicallyRandomNumber.h>
+#include <unistd.h>
+#endif
 
 namespace WebKit {
 namespace NetworkCache {
 
-Data Data::mapToFile(const char* path) const
+Data Data::mapToFile(const String& path) const
 {
-    int fd = open(path, O_CREAT | O_EXCL | O_RDWR , S_IRUSR | S_IWUSR);
-    if (fd < 0)
+    FileSystem::PlatformFileHandle handle;
+    auto applyData = [&](const Function<bool(Span<const uint8_t>)>& applier) {
+        apply(applier);
+    };
+    auto mappedFile = FileSystem::mapToFile(path, size(), WTFMove(applyData), &handle);
+    if (!mappedFile)
         return { };
-
-    if (ftruncate(fd, m_size) < 0) {
-        close(fd);
-        return { };
-    }
-
-    void* map = mmap(nullptr, m_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (map == MAP_FAILED) {
-        close(fd);
-        return { };
-    }
-
-    uint8_t* mapData = static_cast<uint8_t*>(map);
-    apply([&mapData](const uint8_t* bytes, size_t bytesSize) {
-        memcpy(mapData, bytes, bytesSize);
-        mapData += bytesSize;
-        return true;
-    });
-
-    // Drop the write permission.
-    mprotect(map, m_size, PROT_READ);
-
-    // Flush (asynchronously) to file, turning this into clean memory.
-    msync(map, m_size, MS_ASYNC);
-
-    return Data::adoptMap(map, m_size, fd);
+    return Data::adoptMap(WTFMove(mappedFile), handle);
 }
 
-Data mapFile(const char* path)
+Data mapFile(const String& path)
 {
-    int fd = open(path, O_RDONLY, 0);
-    if (fd < 0)
+    auto file = FileSystem::openFile(path, FileSystem::FileOpenMode::Read);
+    if (!FileSystem::isHandleValid(file))
         return { };
-    struct stat stat;
-    if (fstat(fd, &stat) < 0) {
-        close(fd);
-        return { };
-    }
-    size_t size = stat.st_size;
+    auto size = FileSystem::fileSize(file);
     if (!size) {
-        close(fd);
-        return Data::empty();
+        FileSystem::closeFile(file);
+        return { };
     }
-
-    return adoptAndMapFile(fd, 0, size);
+    return adoptAndMapFile(file, 0, *size);
 }
 
-Data adoptAndMapFile(int fd, size_t offset, size_t size)
+Data adoptAndMapFile(FileSystem::PlatformFileHandle handle, size_t offset, size_t size)
 {
     if (!size) {
-        close(fd);
+        FileSystem::closeFile(handle);
         return Data::empty();
     }
-
-    void* map = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, offset);
-    if (map == MAP_FAILED) {
-        close(fd);
+    bool success;
+    FileSystem::MappedFileData mappedFile(handle, FileSystem::FileOpenMode::Read, FileSystem::MappedFileMode::Private, success);
+    if (!success) {
+        FileSystem::closeFile(handle);
         return { };
     }
 
-    return Data::adoptMap(map, size, fd);
+    return Data::adoptMap(WTFMove(mappedFile), handle);
 }
 
 SHA1::Digest computeSHA1(const Data& data, const Salt& salt)
 {
     SHA1 sha1;
     sha1.addBytes(salt.data(), salt.size());
-    data.apply([&sha1](const uint8_t* data, size_t size) {
-        sha1.addBytes(data, size);
+    data.apply([&sha1](Span<const uint8_t> span) {
+        sha1.addBytes(span.data(), span.size());
         return true;
     });
 
@@ -128,36 +103,5 @@ bool bytesEqual(const Data& a, const Data& b)
     return !memcmp(a.data(), b.data(), a.size());
 }
 
-static Salt makeSalt()
-{
-    Salt salt;
-    static_assert(salt.size() == 8, "Salt size");
-    *reinterpret_cast<uint32_t*>(&salt[0]) = cryptographicallyRandomNumber();
-    *reinterpret_cast<uint32_t*>(&salt[4]) = cryptographicallyRandomNumber();
-    return salt;
-}
-
-std::optional<Salt> readOrMakeSalt(const String& path)
-{
-    auto cpath = WebCore::fileSystemRepresentation(path);
-    auto fd = open(cpath.data(), O_RDONLY, 0);
-    Salt salt;
-    auto bytesRead = read(fd, salt.data(), salt.size());
-    close(fd);
-    if (bytesRead != salt.size()) {
-        salt = makeSalt();
-
-        unlink(cpath.data());
-        fd = open(cpath.data(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-        bool success = write(fd, salt.data(), salt.size()) == salt.size();
-        close(fd);
-        if (!success)
-            return { };
-    }
-    return salt;
-}
-
 } // namespace NetworkCache
 } // namespace WebKit
-
-#endif // #if ENABLE(NETWORK_CACHE)

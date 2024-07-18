@@ -9,12 +9,13 @@
  *
  */
 
-#ifndef WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_DLRR_H_
-#define WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_DLRR_H_
+#ifndef MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_DLRR_H_
+#define MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_DLRR_H_
+
+#include <stddef.h>
+#include <stdint.h>
 
 #include <vector>
-
-#include "webrtc/base/basictypes.h"
 
 namespace webrtc {
 namespace rtcp {
@@ -23,10 +24,20 @@ struct ReceiveTimeInfo {
   ReceiveTimeInfo() : ssrc(0), last_rr(0), delay_since_last_rr(0) {}
   ReceiveTimeInfo(uint32_t ssrc, uint32_t last_rr, uint32_t delay)
       : ssrc(ssrc), last_rr(last_rr), delay_since_last_rr(delay) {}
+
   uint32_t ssrc;
   uint32_t last_rr;
   uint32_t delay_since_last_rr;
 };
+
+inline bool operator==(const ReceiveTimeInfo& lhs, const ReceiveTimeInfo& rhs) {
+  return lhs.ssrc == rhs.ssrc && lhs.last_rr == rhs.last_rr &&
+         lhs.delay_since_last_rr == rhs.delay_since_last_rr;
+}
+
+inline bool operator!=(const ReceiveTimeInfo& lhs, const ReceiveTimeInfo& rhs) {
+  return !(lhs == rhs);
+}
 
 // DLRR Report Block: Delay since the Last Receiver Report (RFC 3611).
 class Dlrr {
@@ -66,4 +77,4 @@ class Dlrr {
 };
 }  // namespace rtcp
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_DLRR_H_
+#endif  // MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_DLRR_H_

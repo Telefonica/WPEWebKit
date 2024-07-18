@@ -32,9 +32,6 @@ WI.FilterBar = class FilterBar extends WI.Object
         this._element = element || document.createElement("div");
         this._element.classList.add("filter-bar");
 
-        this._filtersNavigationBar = new WI.NavigationBar;
-        this._element.appendChild(this._filtersNavigationBar.element);
-
         this._filterFunctionsMap = new Map;
 
         this._inputField = document.createElement("input");
@@ -42,10 +39,16 @@ WI.FilterBar = class FilterBar extends WI.Object
         this._inputField.placeholder = WI.UIString("Filter");
         this._inputField.spellcheck = false;
         this._inputField.incremental = true;
-        this._inputField.addEventListener("search", this._handleFilterChanged.bind(this), false);
+        this._inputField.addEventListener("search", this._handleFilterChanged.bind(this));
+        this._inputField.addEventListener("input", this._handleFilterInputEvent.bind(this));
         this._element.appendChild(this._inputField);
 
+        this._filtersNavigationBar = new WI.NavigationBar;
+        this._element.appendChild(this._filtersNavigationBar.element);
+
         this._lastFilterValue = this.filters;
+
+        this._invalid = false;
     }
 
     // Public
@@ -55,19 +58,40 @@ WI.FilterBar = class FilterBar extends WI.Object
         return this._element;
     }
 
+    get inputField()
+    {
+        return this._inputField;
+    }
+
     get placeholder()
     {
-        return this._inputField.getAttribute("placeholder");
+        return this._inputField.placeholder;
     }
 
     set placeholder(text)
     {
-        this._inputField.setAttribute("placeholder", text);
+        this._inputField.placeholder = text;
     }
 
-    get inputField()
+    get incremental()
     {
-        return this._inputField;
+        return this._inputField.incremental;
+    }
+
+    set incremental(incremental)
+    {
+        this._inputField.incremental = incremental;
+    }
+
+    get invalid()
+    {
+        return this._invalid;
+    }
+
+    set invalid(invalid)
+    {
+        this._invalid = !!invalid;
+        this._element.classList.toggle("invalid", this._invalid);
     }
 
     get filters()
@@ -85,12 +109,44 @@ WI.FilterBar = class FilterBar extends WI.Object
             this._handleFilterChanged();
     }
 
+    focus()
+    {
+        // FIXME: Workaround for: <https://webkit.org/b/149504> Caret missing from <input> after clearing text and calling select()
+        if (!this._inputField.value.length)
+            this._inputField.focus();
+        else
+            this._inputField.select();
+    }
+
+    clear()
+    {
+        this._filterFunctionsMap.clear();
+        this.filters = null;
+
+        // Only toggle the `WI.FilterBarButton`s after clearing the function map, as otherwise each
+        // toggle will fire another WI.FilterBar.Event.FilterDidChange event.
+        for (let navigationItem of this._filtersNavigationBar.navigationItems) {
+            if (navigationItem instanceof WI.FilterBarButton)
+                navigationItem.toggle(false);
+        }
+
+        this._inputField.value = null; // Get the placeholder to show again.
+
+        this.invalid = false;
+    }
+
+    addFilterNavigationItem(navigationItem)
+    {
+        console.assert(navigationItem instanceof WI.NavigationItem);
+        this._filtersNavigationBar.addNavigationItem(navigationItem);
+    }
+
     addFilterBarButton(identifier, filterFunction, activatedByDefault, defaultToolTip, activatedToolTip, image, imageWidth, imageHeight)
     {
         var filterBarButton = new WI.FilterBarButton(identifier, filterFunction, activatedByDefault, defaultToolTip, activatedToolTip, image, imageWidth, imageHeight);
         filterBarButton.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._handleFilterBarButtonClicked, this);
         filterBarButton.addEventListener(WI.FilterBarButton.Event.ActivatedStateToggled, this._handleFilterButtonToggled, this);
-        this._filtersNavigationBar.addNavigationItem(filterBarButton);
+        this.addFilterNavigationItem(filterBarButton);
         if (filterBarButton.activated) {
             this._filterFunctionsMap.set(filterBarButton.identifier, filterBarButton.filterFunction);
             this._handleFilterChanged();
@@ -140,7 +196,19 @@ WI.FilterBar = class FilterBar extends WI.Object
         if (this.hasFilterChanged()) {
             this._lastFilterValue = this.filters;
             this.dispatchEventToListeners(WI.FilterBar.Event.FilterDidChange);
-        }
+        } else if (!this._inputField.value)
+            this._inputField.blur();
+    }
+
+    _handleFilterInputEvent(event)
+    {
+        // When not incremental we still want to detect if the field becomes empty.
+
+        if (this.incremental)
+            return;
+
+        if (!this._inputField.value)
+            this._handleFilterChanged();
     }
 };
 

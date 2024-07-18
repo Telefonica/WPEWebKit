@@ -142,11 +142,16 @@ class LayoutNode
                 return;
         }
 
+        this._updatingChildren = true;
+
         while (this._children.length)
             this.removeChild(this._children[0]);
 
         for (let child of children)
             this.addChild(child);
+
+        delete this._updatingChildren;
+        this.didChangeChildren();
     }
 
     parentOfType(type)
@@ -168,6 +173,9 @@ class LayoutNode
 
         this._children.splice(index, 0, child);
         child._parent = this;
+
+        if (!this._updatingChildren)
+            this.didChangeChildren();
 
         child._markNodeManipulation(LayoutNode.DOMManipulation.Addition);
 
@@ -194,8 +202,12 @@ class LayoutNode
         if (index === -1)
             return;
 
+        this.willRemoveChild(child);
         this._children.splice(index, 1);
         child._parent = null;
+
+        if (!this._updatingChildren)
+            this.didChangeChildren();
 
         child._markNodeManipulation(LayoutNode.DOMManipulation.Removal);
 
@@ -215,6 +227,21 @@ class LayoutNode
 
         if (!hadProperty)
             this._updateDirtyState();
+    }
+
+    computedValueForStyleProperty(propertyName)
+    {
+        return window.getComputedStyle(this.element).getPropertyValue(propertyName);
+    }
+
+    computedValueForStylePropertyInPx(propertyName)
+    {
+        const value = this.computedValueForStyleProperty(propertyName);
+        if (!value)
+            return 0;
+        if (!value.endsWith("px"))
+            return 0;
+        return parseFloat(value);
     }
 
     // Protected
@@ -265,6 +292,16 @@ class LayoutNode
                 style.display = "none";
             break;
         }
+    }
+
+    willRemoveChild(child)
+    {
+        // Implemented by subclasses.
+    }
+
+    didChangeChildren()
+    {
+        // Implemented by subclasses.
     }
 
     // Private

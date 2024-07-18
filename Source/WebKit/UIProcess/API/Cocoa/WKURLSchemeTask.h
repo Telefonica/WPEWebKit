@@ -25,13 +25,11 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-WK_API_AVAILABLE(macosx(10.13), ios(11.0))
+WK_API_AVAILABLE(macos(10.13), ios(11.0))
 @protocol WKURLSchemeTask <NSObject>
 
 /*! @abstract The request to load for this task.
@@ -41,6 +39,7 @@ WK_API_AVAILABLE(macosx(10.13), ios(11.0))
 /*! @abstract Set the current response object for the task.
  @param response The response to use.
  @discussion This method must be called at least once for each URL scheme handler task.
+ Cross-origin requests require CORS header fields.
  An exception will be thrown if you try to send a new response object after the task has already been completed.
  An exception will be thrown if your app has been told to stop loading this task via the registered WKURLSchemeHandler object.
  */
@@ -74,5 +73,3 @@ WK_API_AVAILABLE(macosx(10.13), ios(11.0))
 @end
 
 NS_ASSUME_NONNULL_END
-
-#endif

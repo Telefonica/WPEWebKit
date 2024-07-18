@@ -19,30 +19,32 @@
 #include "config.h"
 #include "SharedBuffer.h"
 
-#include "FileSystem.h"
 #include <wtf/glib/GUniquePtr.h>
 #include <wtf/text/CString.h>
 
 #include <glib.h>
 
-
 namespace WebCore {
 
-RefPtr<SharedBuffer> SharedBuffer::createFromReadingFile(const String& filePath)
+FragmentedSharedBuffer::FragmentedSharedBuffer(GBytes* bytes)
 {
-    if (filePath.isEmpty())
-        return nullptr;
+    ASSERT(bytes);
+    m_size = g_bytes_get_size(bytes);
+    m_segments.append({ 0, DataSegment::create(GRefPtr<GBytes>(bytes)) });
+}
 
-    CString filename = fileSystemRepresentation(filePath);
-    GUniqueOutPtr<gchar> contents;
-    gsize size;
-    GUniqueOutPtr<GError> error;
-    if (!g_file_get_contents(filename.data(), &contents.outPtr(), &size, &error.outPtr())) {
-        LOG_ERROR("Failed to fully read contents of file %s - %s", filenameForDisplay(filePath).utf8().data(), error->message);
-        return nullptr;
-    }
+Ref<FragmentedSharedBuffer> FragmentedSharedBuffer::create(GBytes* bytes)
+{
+    return adoptRef(*new FragmentedSharedBuffer(bytes));
+}
 
-    return SharedBuffer::create(contents.get(), size);
+GRefPtr<GBytes> SharedBuffer::createGBytes() const
+{
+    ref();
+    GRefPtr<GBytes> bytes = adoptGRef(g_bytes_new_with_free_func(data(), size(), [](gpointer data) {
+        static_cast<SharedBuffer*>(data)->deref();
+    }, const_cast<SharedBuffer*>(this)));
+    return bytes;
 }
 
 } // namespace WebCore

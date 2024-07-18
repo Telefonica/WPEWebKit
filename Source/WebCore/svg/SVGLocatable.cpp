@@ -24,6 +24,7 @@
 #include "SVGLocatable.h"
 
 #include "RenderElement.h"
+#include "SVGElementTypeHelpers.h"
 #include "SVGGraphicsElement.h"
 #include "SVGImageElement.h"
 #include "SVGMatrix.h"
@@ -106,7 +107,7 @@ ExceptionOr<Ref<SVGMatrix>> SVGLocatable::getTransformToElement(SVGElement* targ
         if (auto inverse = targetCTM.inverse())
             ctm = inverse.value() * ctm;
         else
-            return Exception { InvalidStateError, ASCIILiteral("Matrix is not invertible") };
+            return Exception { InvalidStateError, "Matrix is not invertible"_s };
     }
 
     return SVGMatrix::create(ctm);

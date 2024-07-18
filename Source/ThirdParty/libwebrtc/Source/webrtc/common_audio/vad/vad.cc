@@ -8,11 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/common_audio/vad/include/vad.h"
+#include "common_audio/vad/include/vad.h"
 
 #include <memory>
 
-#include "webrtc/base/checks.h"
+#include "common_audio/vad/include/webrtc_vad.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -37,7 +38,7 @@ class VadImpl final : public Vad {
       case 1:
         return kActive;
       default:
-        RTC_NOTREACHED() << "WebRtcVad_Process returned an error.";
+        RTC_DCHECK_NOTREACHED() << "WebRtcVad_Process returned an error.";
         return kError;
     }
   }

@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_GENERATOR_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_GENERATOR_H_
+#ifndef MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_GENERATOR_H_
+#define MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_GENERATOR_H_
 
 #include <memory>
 
-#include "webrtc/modules/desktop_capture/desktop_frame.h"
-#include "webrtc/modules/desktop_capture/desktop_geometry.h"
-#include "webrtc/modules/desktop_capture/desktop_region.h"
-#include "webrtc/modules/desktop_capture/shared_memory.h"
+#include "modules/desktop_capture/desktop_frame.h"
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/desktop_region.h"
+#include "modules/desktop_capture/shared_memory.h"
 
 namespace webrtc {
 
@@ -71,9 +71,9 @@ class PainterDesktopFrameGenerator final : public DesktopFrameGenerator {
   // regions' return from OS APIs.
   void set_enlarge_updated_region(bool enlarge_updated_region);
 
-  // The range to enlarge a updated region if |enlarge_updated_region_| is true.
+  // The range to enlarge a updated region if `enlarge_updated_region_` is true.
   // If this field is less than zero, it will be treated as zero, and
-  // |enlarge_updated_region_| will be ignored.
+  // `enlarge_updated_region_` will be ignored.
   void set_enlarge_range(int enlarge_range);
 
   // Decides whether BaseDesktopFrameGenerator randomly add some updated regions
@@ -81,10 +81,10 @@ class PainterDesktopFrameGenerator final : public DesktopFrameGenerator {
   // updated regions' return from OS APIs.
   void set_add_random_updated_region(bool add_random_updated_region);
 
-  // Sets the painter object to do the real painting work, if no |painter_| has
+  // Sets the painter object to do the real painting work, if no `painter_` has
   // been set to this instance, the DesktopFrame returned by GetNextFrame()
   // function will keep in an undefined but valid state.
-  // PainterDesktopFrameGenerator does not take ownership of the |painter|.
+  // PainterDesktopFrameGenerator does not take ownership of the `painter`.
   void set_desktop_frame_painter(DesktopFramePainter* painter);
 
  private:
@@ -118,4 +118,4 @@ class BlackWhiteDesktopFramePainter final : public DesktopFramePainter {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_GENERATOR_H_
+#endif  // MODULES_DESKTOP_CAPTURE_DESKTOP_FRAME_GENERATOR_H_

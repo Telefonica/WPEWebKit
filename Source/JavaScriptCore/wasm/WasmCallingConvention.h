@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,178 +28,219 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include "AllowMacroScratchRegisterUsage.h"
-#include "B3ArgumentRegValue.h"
-#include "B3BasicBlock.h"
-#include "B3Const64Value.h"
-#include "B3ConstrainedValue.h"
-#include "B3MemoryValue.h"
-#include "B3PatchpointValue.h"
-#include "B3Procedure.h"
-#include "B3StackmapGenerationParams.h"
 #include "CallFrame.h"
 #include "LinkBuffer.h"
+#include "RegisterAtOffsetList.h"
 #include "RegisterSet.h"
 #include "WasmFormat.h"
-#include "WasmSignature.h"
+#include "WasmTypeDefinition.h"
+#include "WasmValueLocation.h"
 
 namespace JSC { namespace Wasm {
 
-typedef unsigned (*NextOffset)(unsigned currentOffset, B3::Type type);
+constexpr unsigned numberOfLLIntCalleeSaveRegisters = 2;
 
-template<unsigned headerSize, NextOffset updateOffset>
-class CallingConvention {
-public:
-    CallingConvention(Vector<Reg>&& gprArgs, Vector<Reg>&& fprArgs, RegisterSet&& calleeSaveRegisters)
-        : m_gprArgs(gprArgs)
-        , m_fprArgs(fprArgs)
-        , m_calleeSaveRegisters(calleeSaveRegisters)
+using ArgumentLocation = ValueLocation;
+enum class CallRole : uint8_t {
+    Caller,
+    Callee,
+};
+
+struct CallInformation {
+    CallInformation(Vector<ArgumentLocation>&& parameters, Vector<ArgumentLocation, 1>&& returnValues, size_t stackOffset)
+        : params(WTFMove(parameters))
+        , results(WTFMove(returnValues))
+        , headerAndArgumentStackSizeInBytes(stackOffset)
+    { }
+
+    RegisterAtOffsetList computeResultsOffsetList()
     {
+        RegisterSet usedResultRegisters;
+        for (ValueLocation loc : results) {
+            if (loc.isGPR()) {
+                usedResultRegisters.set(loc.jsr().payloadGPR());
+#if USE(JSVALUE32_64)
+                usedResultRegisters.set(loc.jsr().tagGPR());
+#endif
+            } else if (loc.isFPR())
+                usedResultRegisters.set(loc.fpr());
+        }
+
+        RegisterAtOffsetList savedRegs(usedResultRegisters, RegisterAtOffsetList::ZeroBased);
+        return savedRegs;
     }
 
+    bool argumentsIncludeI64 { false };
+    bool resultsIncludeI64 { false };
+    Vector<ArgumentLocation> params;
+    Vector<ArgumentLocation, 1> results;
+    // As a callee this includes CallerFrameAndPC as a caller it does not.
+    size_t headerAndArgumentStackSizeInBytes;
+};
+
+class WasmCallingConvention {
+public:
+    static constexpr unsigned headerSizeInBytes = CallFrame::headerSizeInRegisters * sizeof(Register);
+
+    WasmCallingConvention(Vector<JSValueRegs>&& jsrs, Vector<FPRReg>&& fprs, Vector<GPRReg>&& scratches, RegisterSet&& calleeSaves, RegisterSet&& callerSaves)
+        : jsrArgs(WTFMove(jsrs))
+        , fprArgs(WTFMove(fprs))
+        , prologueScratchGPRs(WTFMove(scratches))
+        , calleeSaveRegisters(WTFMove(calleeSaves))
+        , callerSaveRegisters(WTFMove(callerSaves))
+    { }
+
+    WTF_MAKE_NONCOPYABLE(WasmCallingConvention);
+
 private:
-    B3::ValueRep marshallArgumentImpl(Vector<Reg> regArgs, B3::Type type, size_t& count, size_t& stackOffset) const
+    template<typename RegType>
+    ArgumentLocation marshallLocationImpl(CallRole role, const Vector<RegType>& regArgs, size_t& count, size_t& stackOffset) const
     {
         if (count < regArgs.size())
-            return B3::ValueRep::reg(regArgs[count++]);
+            return ArgumentLocation { regArgs[count++] };
 
         count++;
-        B3::ValueRep result = B3::ValueRep::stackArgument(stackOffset);
-        stackOffset = updateOffset(stackOffset, type);
+        ArgumentLocation result = role == CallRole::Caller ? ArgumentLocation::stackArgument(stackOffset) : ArgumentLocation::stack(stackOffset);
+        stackOffset += sizeof(Register);
         return result;
     }
 
-    B3::ValueRep marshallArgument(B3::Type type, size_t& gpArgumentCount, size_t& fpArgumentCount, size_t& stackOffset) const
+    ArgumentLocation marshallLocation(CallRole role, Type valueType, size_t& gpArgumentCount, size_t& fpArgumentCount, size_t& stackOffset) const
     {
-        switch (type) {
-        case B3::Int32:
-        case B3::Int64:
-            return marshallArgumentImpl(m_gprArgs, type, gpArgumentCount, stackOffset);
-        case B3::Float:
-        case B3::Double:
-            return marshallArgumentImpl(m_fprArgs, type, fpArgumentCount, stackOffset);
-        case B3::Void:
+        ASSERT(isValueType(valueType));
+        switch (valueType.kind) {
+        case TypeKind::I32:
+        case TypeKind::I64:
+        case TypeKind::Funcref:
+        case TypeKind::Externref:
+        case TypeKind::Ref:
+        case TypeKind::RefNull:
+            return marshallLocationImpl(role, jsrArgs, gpArgumentCount, stackOffset);
+        case TypeKind::F32:
+        case TypeKind::F64:
+            return marshallLocationImpl(role, fprArgs, fpArgumentCount, stackOffset);
+        default:
             break;
         }
         RELEASE_ASSERT_NOT_REACHED();
     }
 
 public:
-    static unsigned headerSizeInBytes() { return headerSize; }
-    void setupFrameInPrologue(CodeLocationDataLabelPtr* calleeMoveLocation, B3::Procedure& proc, B3::Origin origin, B3::BasicBlock* block) const
+    CallInformation callInformationFor(const TypeDefinition& type, CallRole role = CallRole::Caller) const
     {
-        static_assert(CallFrameSlot::callee * sizeof(Register) < headerSize, "We rely on this here for now.");
-        static_assert(CallFrameSlot::codeBlock * sizeof(Register) < headerSize, "We rely on this here for now.");
-
-        B3::PatchpointValue* getCalleePatchpoint = block->appendNew<B3::PatchpointValue>(proc, B3::Int64, origin);
-        getCalleePatchpoint->resultConstraint = B3::ValueRep::SomeRegister;
-        getCalleePatchpoint->effects = B3::Effects::none();
-        getCalleePatchpoint->setGenerator(
-            [=] (CCallHelpers& jit, const B3::StackmapGenerationParams& params) {
-                GPRReg result = params[0].gpr();
-                MacroAssembler::DataLabelPtr moveLocation = jit.moveWithPatch(MacroAssembler::TrustedImmPtr(nullptr), result);
-                jit.addLinkTask([calleeMoveLocation, moveLocation] (LinkBuffer& linkBuffer) {
-                    *calleeMoveLocation = linkBuffer.locationOf(moveLocation);
-                });
-            });
-
-        B3::Value* framePointer = block->appendNew<B3::Value>(proc, B3::FramePointer, origin);
-        B3::Value* offsetOfCallee = block->appendNew<B3::Const64Value>(proc, origin, CallFrameSlot::callee * sizeof(Register));
-        block->appendNew<B3::MemoryValue>(proc, B3::Store, origin,
-            getCalleePatchpoint,
-            block->appendNew<B3::Value>(proc, B3::Add, origin, framePointer, offsetOfCallee));
-
-        // FIXME: We shouldn't have to store zero into the CodeBlock* spot in the call frame,
-        // but there are places that interpret non-null CodeBlock slot to mean a valid CodeBlock.
-        // When doing unwinding, we'll need to verify that the entire runtime is OK with a non-null
-        // CodeBlock not implying that the CodeBlock is valid.
-        // https://bugs.webkit.org/show_bug.cgi?id=165321
-        B3::Value* offsetOfCodeBlock = block->appendNew<B3::Const64Value>(proc, origin, CallFrameSlot::codeBlock * sizeof(Register));
-        block->appendNew<B3::MemoryValue>(proc, B3::Store, origin,
-            block->appendNew<B3::Const64Value>(proc, origin, 0),
-            block->appendNew<B3::Value>(proc, B3::Add, origin, framePointer, offsetOfCodeBlock));
-    }
-
-    template<typename Functor>
-    void loadArguments(const Signature& signature, B3::Procedure& proc, B3::BasicBlock* block, B3::Origin origin, const Functor& functor) const
-    {
-        B3::Value* framePointer = block->appendNew<B3::Value>(proc, B3::FramePointer, origin);
-
+        const auto& signature = *type.as<FunctionSignature>();
+        bool argumentsIncludeI64 = false;
+        bool resultsIncludeI64 = false;
         size_t gpArgumentCount = 0;
         size_t fpArgumentCount = 0;
-        size_t stackOffset = headerSize;
+        size_t argStackOffset = headerSizeInBytes + sizeof(Register);
+        if (role == CallRole::Caller)
+            argStackOffset -= sizeof(CallerFrameAndPC);
 
+        Vector<ArgumentLocation> params(signature.argumentCount());
         for (size_t i = 0; i < signature.argumentCount(); ++i) {
-            B3::Type type = toB3Type(signature.argument(i));
-            B3::Value* argument;
-            B3::ValueRep rep = marshallArgument(type, gpArgumentCount, fpArgumentCount, stackOffset);
-            if (rep.isReg()) {
-                argument = block->appendNew<B3::ArgumentRegValue>(proc, origin, rep.reg());
-                if (type == B3::Int32 || type == B3::Float)
-                    argument = block->appendNew<B3::Value>(proc, B3::Trunc, origin, argument);
-            } else {
-                ASSERT(rep.isStackArgument());
-                B3::Value* address = block->appendNew<B3::Value>(proc, B3::Add, origin, framePointer,
-                    block->appendNew<B3::Const64Value>(proc, origin, rep.offsetFromSP()));
-                argument = block->appendNew<B3::MemoryValue>(proc, B3::Load, type, origin, address);
-            }
-            functor(argument, i);
+            argumentsIncludeI64 |= signature.argumentType(i).isI64();
+            params[i] = marshallLocation(role, signature.argumentType(i), gpArgumentCount, fpArgumentCount, argStackOffset);
         }
+        gpArgumentCount = 0;
+        fpArgumentCount = 0;
+        size_t resultStackOffset = headerSizeInBytes + sizeof(Register);
+        if (role == CallRole::Caller)
+            resultStackOffset -= sizeof(CallerFrameAndPC);
+
+        Vector<ArgumentLocation, 1> results(signature.returnCount());
+        for (size_t i = 0; i < signature.returnCount(); ++i) {
+            resultsIncludeI64 |= signature.returnType(i).isI64();
+            results[i] = marshallLocation(role, signature.returnType(i), gpArgumentCount, fpArgumentCount, resultStackOffset);
+        }
+
+        CallInformation result(WTFMove(params), WTFMove(results), std::max(argStackOffset, resultStackOffset));
+        result.argumentsIncludeI64 = argumentsIncludeI64;
+        result.resultsIncludeI64 = resultsIncludeI64;
+        return result;
     }
 
-    // It's expected that the pachpointFunctor sets the generator for the call operation.
-    template<typename Functor>
-    B3::Value* setupCall(B3::Procedure& proc, B3::BasicBlock* block, B3::Origin origin, const Vector<B3::Value*>& arguments, B3::Type returnType, const Functor& patchpointFunctor) const
-    {
-        size_t gpArgumentCount = 0;
-        size_t fpArgumentCount = 0;
-        size_t stackOffset = headerSize - sizeof(CallerFrameAndPC);
-
-        Vector<B3::ConstrainedValue> constrainedArguments;
-        for (B3::Value* argument : arguments) {
-            B3::ValueRep rep = marshallArgument(argument->type(), gpArgumentCount, fpArgumentCount, stackOffset);
-            constrainedArguments.append(B3::ConstrainedValue(argument, rep));
-        }
-
-        proc.requestCallArgAreaSizeInBytes(WTF::roundUpToMultipleOf(stackAlignmentBytes(), stackOffset));
-
-        B3::PatchpointValue* patchpoint = block->appendNew<B3::PatchpointValue>(proc, returnType, origin);
-        patchpoint->clobberEarly(RegisterSet::macroScratchRegisters());
-        patchpoint->clobberLate(RegisterSet::volatileRegistersForJSCall());
-        patchpointFunctor(patchpoint);
-        patchpoint->appendVector(constrainedArguments);
-
-        switch (returnType) {
-        case B3::Void:
-            return nullptr;
-        case B3::Float:
-        case B3::Double:
-            patchpoint->resultConstraint = B3::ValueRep::reg(FPRInfo::returnValueFPR);
-            break;
-        case B3::Int32:
-        case B3::Int64:
-            patchpoint->resultConstraint = B3::ValueRep::reg(GPRInfo::returnValueGPR);
-            break;
-        }
-        return patchpoint;
-    }
-
-    const Vector<Reg> m_gprArgs;
-    const Vector<Reg> m_fprArgs;
-    const RegisterSet m_calleeSaveRegisters;
-    const RegisterSet m_callerSaveRegisters;
+    const Vector<JSValueRegs> jsrArgs;
+    const Vector<FPRReg> fprArgs;
+    const Vector<GPRReg> prologueScratchGPRs;
+    const RegisterSet calleeSaveRegisters;
+    const RegisterSet callerSaveRegisters;
 };
 
-inline unsigned nextJSCOffset(unsigned currentOffset, B3::Type)
-{
-    return currentOffset + sizeof(Register);
-}
+class JSCallingConvention {
+public:
+    static constexpr unsigned headerSizeInBytes = CallFrame::headerSizeInRegisters * sizeof(Register);
 
-constexpr unsigned jscHeaderSize = ExecState::headerSizeInRegisters * sizeof(Register);
-typedef CallingConvention<jscHeaderSize, nextJSCOffset> JSCCallingConvention;
+    // vmEntryToWasm passes the JSWebAssemblyInstance corresponding to Wasm::Context*'s
+    // instance as the first JS argument when we're not using fast TLS to hold the
+    // Wasm::Context*'s instance.
+    static constexpr ptrdiff_t instanceStackOffset = CallFrameSlot::thisArgument * sizeof(EncodedJSValue);
 
-typedef JSCCallingConvention WasmCallingConvention;
+    JSCallingConvention(Vector<JSValueRegs>&& gprs, Vector<FPRReg>&& fprs, RegisterSet&& calleeSaves, RegisterSet&& callerSaves)
+        : jsrArgs(WTFMove(gprs))
+        , fprArgs(WTFMove(fprs))
+        , calleeSaveRegisters(WTFMove(calleeSaves))
+        , callerSaveRegisters(WTFMove(callerSaves))
+    { }
 
-const JSCCallingConvention& jscCallingConvention();
+    WTF_MAKE_NONCOPYABLE(JSCallingConvention);
+private:
+    template <typename RegType>
+    ArgumentLocation marshallLocationImpl(CallRole role, const Vector<RegType>& regArgs, size_t& count, size_t& stackOffset) const
+    {
+        if (count < regArgs.size())
+            return ArgumentLocation { regArgs[count++] };
+
+        count++;
+        ArgumentLocation result = role == CallRole::Caller ? ArgumentLocation::stackArgument(stackOffset) : ArgumentLocation::stack(stackOffset);
+        stackOffset += sizeof(Register);
+        return result;
+    }
+
+    ArgumentLocation marshallLocation(CallRole role, Type valueType, size_t& gpArgumentCount, size_t& fpArgumentCount, size_t& stackOffset) const
+    {
+        ASSERT(isValueType(valueType));
+        switch (valueType.kind) {
+        case TypeKind::I32:
+        case TypeKind::I64:
+        case TypeKind::Funcref:
+        case TypeKind::Externref:
+        case TypeKind::Ref:
+        case TypeKind::RefNull:
+            return marshallLocationImpl(role, jsrArgs, gpArgumentCount, stackOffset);
+        case TypeKind::F32:
+        case TypeKind::F64:
+            return marshallLocationImpl(role, fprArgs, fpArgumentCount, stackOffset);
+        default:
+            break;
+        }
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+
+public:
+    CallInformation callInformationFor(const TypeDefinition& signature, CallRole role = CallRole::Callee) const
+    {
+        size_t gpArgumentCount = 0;
+        size_t fpArgumentCount = 0;
+        size_t stackOffset = headerSizeInBytes + sizeof(Register); // Skip the this value since wasm doesn't use it and we sometimes put the context there.
+        if (role == CallRole::Caller)
+            stackOffset -= sizeof(CallerFrameAndPC);
+
+        Vector<ArgumentLocation> params;
+        for (size_t i = 0; i < signature.as<FunctionSignature>()->argumentCount(); ++i)
+            params.append(marshallLocation(role, signature.as<FunctionSignature>()->argumentType(i), gpArgumentCount, fpArgumentCount, stackOffset));
+
+        Vector<ArgumentLocation, 1> results { ArgumentLocation { JSRInfo::returnValueJSR } };
+        return CallInformation(WTFMove(params), WTFMove(results), stackOffset);
+    }
+
+    const Vector<JSValueRegs> jsrArgs;
+    const Vector<FPRReg> fprArgs;
+    const RegisterSet calleeSaveRegisters;
+    const RegisterSet callerSaveRegisters;
+};
+
+const JSCallingConvention& jsCallingConvention();
 const WasmCallingConvention& wasmCallingConvention();
 
 } } // namespace JSC::Wasm

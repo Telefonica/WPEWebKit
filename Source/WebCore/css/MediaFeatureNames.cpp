@@ -21,10 +21,12 @@
 #include "config.h"
 #include "MediaFeatureNames.h"
 
+#include "CommonAtomStrings.h"
+
 namespace WebCore {
 namespace MediaFeatureNames {
 
-#define DEFINE_MEDIAFEATURE_GLOBAL(name, string) LazyNeverDestroyed<const AtomicString> name;
+#define DEFINE_MEDIAFEATURE_GLOBAL(name, string) LazyNeverDestroyed<const AtomString> name;
 CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE(DEFINE_MEDIAFEATURE_GLOBAL)
 #undef DEFINE_MEDIAFEATURE_GLOBAL
 
@@ -32,8 +34,8 @@ void init()
 {
     static bool initialized;
     if (!initialized) {
-        AtomicString::init();
-#define INITIALIZE_GLOBAL(name, string) name.construct(string, AtomicString::ConstructFromLiteral);
+        initializeCommonAtomStrings();
+#define INITIALIZE_GLOBAL(name, string) name.construct(string ## _s);
         CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE(INITIALIZE_GLOBAL)
 #undef INITIALIZE_GLOBAL
         initialized = true;

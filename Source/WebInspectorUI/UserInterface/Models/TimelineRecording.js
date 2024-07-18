@@ -34,7 +34,22 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
         this._displayName = displayName;
         this._capturing = false;
         this._readonly = false;
+        this._imported = false;
         this._instruments = instruments || [];
+
+        this._startTime = NaN;
+        this._endTime = NaN;
+
+        this._discontinuityStartTime = NaN;
+        this._discontinuities = null;
+        this._firstRecordOfTypeAfterDiscontinuity = new Set;
+
+        this._exportDataRecords = null;
+        this._exportDataMarkers = null;
+        this._exportDataMemoryPressureEvents = null;
+        this._exportDataSampleStackTraces = null;
+        this._exportDataSampleDurations = null;
+
         this._topDownCallingContextTree = new WI.CallingContextTree(WI.CallingContextTree.Type.TopDown);
         this._bottomUpCallingContextTree = new WI.CallingContextTree(WI.CallingContextTree.Type.BottomUp);
         this._topFunctionsTopDownCallingContextTree = new WI.CallingContextTree(WI.CallingContextTree.Type.TopFunctionsTopDown);
@@ -46,9 +61,6 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
             timeline.addEventListener(WI.Timeline.Event.TimesUpdated, this._timelineTimesUpdated, this);
         }
 
-        // For legacy backends, we compute the elapsed time of records relative to this timestamp.
-        this._legacyFirstRecordedTimestamp = NaN;
-
         this.reset(true);
     }
 
@@ -56,7 +68,78 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
 
     static sourceCodeTimelinesSupported()
     {
-        return WI.sharedApp.debuggableType === WI.DebuggableType.Web;
+        // FIXME: Support Network Timeline in ServiceWorker.
+        return WI.sharedApp.isWebDebuggable();
+    }
+
+    // Import / Export
+
+    static async import(identifier, json, displayName)
+    {
+        let {startTime, endTime, discontinuities, instrumentTypes, records, markers, memoryPressureEvents, sampleStackTraces, sampleDurations} = json;
+        let importedDisplayName = WI.UIString("Imported - %s").format(displayName);
+        let instruments = instrumentTypes.map((type) => WI.Instrument.createForTimelineType(type));
+        let recording = new WI.TimelineRecording(identifier, importedDisplayName, instruments);
+
+        recording._readonly = true;
+        recording._imported = true;
+        recording._startTime = startTime;
+        recording._endTime = endTime;
+        recording._discontinuities = discontinuities;
+
+        recording.initializeCallingContextTrees(sampleStackTraces, sampleDurations);
+
+        for (let recordJSON of records) {
+            let record = await WI.TimelineRecord.fromJSON(recordJSON);
+            if (record) {
+                recording.addRecord(record);
+
+                if (record instanceof WI.ScriptTimelineRecord)
+                    record.profilePayload = recording._topDownCallingContextTree.toCPUProfilePayload(record.startTime, record.endTime);
+            }
+        }
+
+        for (let memoryPressureJSON of memoryPressureEvents) {
+            let memoryPressureEvent = WI.MemoryPressureEvent.fromJSON(memoryPressureJSON);
+            if (memoryPressureEvent)
+                recording.addMemoryPressureEvent(memoryPressureEvent);
+        }
+
+        // Add markers once we've transitioned the active recording.
+        setTimeout(() => {
+            recording.__importing = true;
+
+            for (let markerJSON of markers) {
+                let marker = WI.TimelineMarker.fromJSON(markerJSON);
+                if (marker)
+                    recording.addEventMarker(marker);
+            }
+
+            recording.__importing = false;
+        });
+
+        return recording;
+    }
+
+    exportData()
+    {
+        console.assert(this.canExport(), "Attempted to export a recording which should not be exportable.");
+
+        // FIXME: Overview data (sourceCodeTimelinesMap).
+        // FIXME: Record hierarchy (parent / child relationship) is lost.
+
+        return {
+            displayName: this._displayName,
+            startTime: this._startTime,
+            endTime: this._endTime,
+            discontinuities: this._discontinuities,
+            instrumentTypes: this._instruments.map((instrument) => instrument.timelineRecordType),
+            records: this._exportDataRecords,
+            markers: this._exportDataMarkers,
+            memoryPressureEvents: this._exportDataMemoryPressureEvents,
+            sampleStackTraces: this._exportDataSampleStackTraces,
+            sampleDurations: this._exportDataSampleDurations,
+        };
     }
 
     // Public
@@ -65,7 +148,9 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
     get identifier() { return this._identifier; }
     get timelines() { return this._timelines; }
     get instruments() { return this._instruments; }
+    get capturing() { return this._capturing; }
     get readonly() { return this._readonly; }
+    get imported() { return this._imported; }
     get startTime() { return this._startTime; }
     get endTime() { return this._endTime; }
 
@@ -83,6 +168,11 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
 
         for (let instrument of this._instruments)
             instrument.startInstrumentation(initiatedByBackend);
+
+        if (!isNaN(this._discontinuityStartTime)) {
+            for (let instrument of this._instruments)
+                this._firstRecordOfTypeAfterDiscontinuity.add(instrument.timelineRecordType);
+        }
     }
 
     stop(initiatedByBackend)
@@ -94,6 +184,25 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
 
         for (let instrument of this._instruments)
             instrument.stopInstrumentation(initiatedByBackend);
+    }
+
+    capturingStarted(startTime)
+    {
+        // A discontinuity occurs when the recording is stopped and resumed at
+        // a future time. Capturing started signals the end of the current
+        // discontinuity, if one exists.
+        if (!isNaN(this._discontinuityStartTime)) {
+            this._discontinuities.push({
+                startTime: this._discontinuityStartTime,
+                endTime: startTime,
+            });
+            this._discontinuityStartTime = NaN;
+        }
+    }
+
+    capturingStopped(endTime)
+    {
+        this._discontinuityStartTime = endTime;
     }
 
     saveIdentityToCookie()
@@ -112,9 +221,9 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
         return true;
     }
 
-    unloaded()
+    unloaded(importing)
     {
-        console.assert(!this.isEmpty(), "Shouldn't unload an empty recording; it should be reused instead.");
+        console.assert(importing || !this.isEmpty(), "Shouldn't unload an empty recording; it should be reused instead.");
 
         this._readonly = true;
 
@@ -126,10 +235,19 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
         console.assert(!this._readonly, "Can't reset a read-only recording.");
 
         this._sourceCodeTimelinesMap = new Map;
-        this._eventMarkers = [];
+
         this._startTime = NaN;
         this._endTime = NaN;
+
+        this._discontinuityStartTime = NaN;
         this._discontinuities = [];
+        this._firstRecordOfTypeAfterDiscontinuity.clear();
+
+        this._exportDataRecords = [];
+        this._exportDataMarkers = [];
+        this._exportDataMemoryPressureEvents = [];
+        this._exportDataSampleStackTraces = [];
+        this._exportDataSampleDurations = [];
 
         this._topDownCallingContextTree.reset();
         this._bottomUpCallingContextTree.reset();
@@ -147,12 +265,12 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
         }
     }
 
-    sourceCodeTimelinesForSourceCode(sourceCode)
+    get sourceCodeTimelines()
     {
-        var timelines = this._sourceCodeTimelinesMap.get(sourceCode);
-        if (!timelines)
-            return [];
-        return [...timelines.values()];
+        let timelines = [];
+        for (let timelinesForSourceCode of this._sourceCodeTimelinesMap.values())
+            timelines.pushAll(timelinesForSourceCode.values());
+        return timelines;
     }
 
     timelineForInstrument(instrument)
@@ -192,37 +310,52 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
 
     addEventMarker(marker)
     {
-        if (!this._capturing)
-            return;
+        this._exportDataMarkers.push(marker);
 
-        this._eventMarkers.push(marker);
+        if (!this._capturing && !this.__importing)
+            return;
 
         this.dispatchEventToListeners(WI.TimelineRecording.Event.MarkerAdded, {marker});
     }
 
     addRecord(record)
     {
-        var timeline = this._timelines.get(record.type);
+        this._exportDataRecords.push(record);
+
+        let timeline = this._timelines.get(record.type);
         console.assert(timeline, record, this._timelines);
         if (!timeline)
             return;
 
+        let discontinuity = null;
+        if (this._firstRecordOfTypeAfterDiscontinuity.take(record.type))
+            discontinuity = this._discontinuities.lastValue;
+
         // Add the record to the global timeline by type.
-        timeline.addRecord(record);
+        timeline.addRecord(record, {discontinuity});
 
         // Some records don't have source code timelines.
         if (record.type === WI.TimelineRecord.Type.Network
             || record.type === WI.TimelineRecord.Type.RenderingFrame
+            || record.type === WI.TimelineRecord.Type.CPU
             || record.type === WI.TimelineRecord.Type.Memory
-            || record.type === WI.TimelineRecord.Type.HeapAllocations)
+            || record.type === WI.TimelineRecord.Type.HeapAllocations
+            || record.type === WI.TimelineRecord.Type.Screenshots)
             return;
 
         if (!WI.TimelineRecording.sourceCodeTimelinesSupported())
             return;
 
         // Add the record to the source code timelines.
-        var activeMainResource = WI.frameResourceManager.mainFrame.provisionalMainResource || WI.frameResourceManager.mainFrame.mainResource;
-        var sourceCode = record.sourceCodeLocation ? record.sourceCodeLocation.sourceCode : activeMainResource;
+        let sourceCode = null;
+        if (record.sourceCodeLocation)
+            sourceCode = record.sourceCodeLocation.sourceCode;
+        else if (record.type === WI.TimelineRecord.Type.Media) {
+            if (record.domNode && record.domNode.frame)
+                sourceCode = record.domNode.frame.mainResource;
+        }
+        if (!sourceCode)
+            sourceCode = WI.networkManager.mainFrame.provisionalMainResource || WI.networkManager.mainFrame.mainResource;
 
         var sourceCodeTimelines = this._sourceCodeTimelinesMap.get(sourceCode);
         if (!sourceCodeTimelines) {
@@ -247,6 +380,8 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
 
     addMemoryPressureEvent(memoryPressureEvent)
     {
+        this._exportDataMemoryPressureEvents.push(memoryPressureEvent);
+
         let memoryTimeline = this._timelines.get(WI.TimelineRecord.Type.Memory);
         console.assert(memoryTimeline, this._timelines);
         if (!memoryTimeline)
@@ -255,14 +390,9 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
         memoryTimeline.addMemoryPressureEvent(memoryPressureEvent);
     }
 
-    addDiscontinuity(startTime, endTime)
-    {
-        this._discontinuities.push({startTime, endTime});
-    }
-
     discontinuitiesInTimeRange(startTime, endTime)
     {
-        return this._discontinuities.filter((item) => item.startTime < endTime && item.endTime > startTime);
+        return this._discontinuities.filter((item) => item.startTime <= endTime && item.endTime >= startTime);
     }
 
     addScriptInstrumentForProgrammaticCapture()
@@ -282,36 +412,7 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
     {
         if (!timestamp || isNaN(timestamp))
             return NaN;
-
-        // COMPATIBILITY (iOS 8): old backends send timestamps (seconds or milliseconds since the epoch),
-        // rather than seconds elapsed since timeline capturing started. We approximate the latter by
-        // subtracting the start timestamp, as old versions did not use monotonic times.
-        if (WI.TimelineRecording.isLegacy === undefined)
-            WI.TimelineRecording.isLegacy = timestamp > WI.TimelineRecording.TimestampThresholdForLegacyRecordConversion;
-
-        if (!WI.TimelineRecording.isLegacy)
-            return timestamp;
-
-        // If the record's start time is large, but not really large, then it is seconds since epoch
-        // not millseconds since epoch, so convert it to milliseconds.
-        if (timestamp < WI.TimelineRecording.TimestampThresholdForLegacyAssumedMilliseconds)
-            timestamp *= 1000;
-
-        if (isNaN(this._legacyFirstRecordedTimestamp))
-            this._legacyFirstRecordedTimestamp = timestamp;
-
-        // Return seconds since the first recorded value.
-        return (timestamp - this._legacyFirstRecordedTimestamp) / 1000.0;
-    }
-
-    setLegacyBaseTimestamp(timestamp)
-    {
-        console.assert(isNaN(this._legacyFirstRecordedTimestamp));
-
-        if (timestamp < WI.TimelineRecording.TimestampThresholdForLegacyAssumedMilliseconds)
-            timestamp *= 1000;
-
-        this._legacyFirstRecordedTimestamp = timestamp;
+        return timestamp;
     }
 
     initializeTimeBoundsIfNecessary(timestamp)
@@ -326,6 +427,38 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
         }
     }
 
+    initializeCallingContextTrees(stackTraces, sampleDurations)
+    {
+        this._exportDataSampleStackTraces.pushAll(stackTraces);
+        this._exportDataSampleDurations.pushAll(sampleDurations);
+
+        for (let i = 0; i < stackTraces.length; i++) {
+            this._topDownCallingContextTree.updateTreeWithStackTrace(stackTraces[i], sampleDurations[i]);
+            this._bottomUpCallingContextTree.updateTreeWithStackTrace(stackTraces[i], sampleDurations[i]);
+            this._topFunctionsTopDownCallingContextTree.updateTreeWithStackTrace(stackTraces[i], sampleDurations[i]);
+            this._topFunctionsBottomUpCallingContextTree.updateTreeWithStackTrace(stackTraces[i], sampleDurations[i]);
+        }
+    }
+
+    get exportMode()
+    {
+        return WI.FileUtilities.SaveMode.SingleFile;
+    }
+
+    canExport()
+    {
+        if (!WI.FileUtilities.canSave(this.exportMode))
+            return false;
+
+        if (this._capturing)
+            return false;
+
+        if (isNaN(this._startTime))
+            return false;
+
+        return true;
+    }
+
     // Private
 
     _keyForRecord(record)
@@ -335,6 +468,14 @@ WI.TimelineRecording = class TimelineRecording extends WI.Object
             key += ":" + record.eventType;
         if (record instanceof WI.ScriptTimelineRecord && record.eventType === WI.ScriptTimelineRecord.EventType.EventDispatched)
             key += ":" + record.details;
+        if (record instanceof WI.MediaTimelineRecord) {
+            key += ":" + record.eventType;
+            if (record.eventType === WI.MediaTimelineRecord.EventType.DOMEvent) {
+                if (record.domEvent && record.domEvent.eventName)
+                    key += ":" + record.domEvent.eventName;
+            } else if (record.eventType === WI.MediaTimelineRecord.EventType.PowerEfficientPlaybackStateChanged)
+                key += ":" + (record.isPowerEfficient ? "enabled" : "disabled");
+        }
         if (record.sourceCodeLocation)
             key += ":" + record.sourceCodeLocation.lineNumber + ":" + record.sourceCodeLocation.columnNumber;
         return key;
@@ -370,6 +511,4 @@ WI.TimelineRecording.Event = {
     MarkerAdded: "timeline-recording-marker-added",
 };
 
-WI.TimelineRecording.isLegacy = undefined;
-WI.TimelineRecording.TimestampThresholdForLegacyRecordConversion = 10000000; // Some value not near zero.
-WI.TimelineRecording.TimestampThresholdForLegacyAssumedMilliseconds = 1420099200000; // Date.parse("Jan 1, 2015"). Milliseconds since epoch.
+WI.TimelineRecording.SerializationVersion = 1;

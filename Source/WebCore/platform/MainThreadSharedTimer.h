@@ -29,18 +29,18 @@
 #include "SharedTimer.h"
 #include <wtf/Forward.h>
 
-#if PLATFORM(GTK) || PLATFORM(WPE)
+#if !USE(CF) && !OS(WINDOWS)
 #include <wtf/RunLoop.h>
 #endif
 
 namespace WebCore {
 
 class MainThreadSharedTimer final : public SharedTimer {
-    friend class WTF::NeverDestroyed<MainThreadSharedTimer>;
+    friend class NeverDestroyed<MainThreadSharedTimer>;
 public:
     static MainThreadSharedTimer& singleton();
 
-    void setFiredFunction(WTF::Function<void()>&&) override;
+    void setFiredFunction(Function<void()>&&) override;
     void setFireInterval(Seconds) override;
     void stop() override;
     void invalidate() override;
@@ -49,11 +49,14 @@ public:
     // need to call this from non-member functions at the moment.
     void fired();
 
+    WEBCORE_EXPORT static bool& shouldSetupPowerObserver();
+    WEBCORE_EXPORT static void restartSharedTimer();
+
 private:
     MainThreadSharedTimer();
 
-    WTF::Function<void()> m_firedFunction;
-#if PLATFORM(GTK) || PLATFORM(WPE)
+    Function<void()> m_firedFunction;
+#if !USE(CF) && !OS(WINDOWS)
     RunLoop::Timer<MainThreadSharedTimer> m_timer;
 #endif
 };

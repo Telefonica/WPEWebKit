@@ -41,22 +41,23 @@ using SMILEventSender = EventSender<SVGSMILElement>;
 
 // This class implements SMIL interval timing model as needed for SVG animation.
 class SVGSMILElement : public SVGElement {
+    WTF_MAKE_ISO_ALLOCATED(SVGSMILElement);
 public:
     SVGSMILElement(const QualifiedName&, Document&);
     virtual ~SVGSMILElement();
 
-    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    void parseAttribute(const QualifiedName&, const AtomString&) override;
     void svgAttributeChanged(const QualifiedName&) override;
-    InsertionNotificationRequest insertedInto(ContainerNode&) override;
-    void removedFrom(ContainerNode&) override;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) override;
+    void removedFromAncestor(RemovalType, ContainerNode&) override;
     
-    virtual bool hasValidAttributeType() = 0;
-    virtual bool hasValidAttributeName();
+    virtual bool hasValidAttributeType() const = 0;
+    virtual bool hasValidAttributeName() const;
     virtual void animationAttributeChanged() = 0;
 
     SMILTimeContainer* timeContainer() { return m_timeContainer.get(); }
 
-    SVGElement* targetElement() const { return m_targetElement; }
+    SVGElement* targetElement() const { return m_targetElement.get(); }
     const QualifiedName& attributeName() const { return m_attributeName; }
 
     void beginByLinkActivation();
@@ -81,13 +82,13 @@ public:
     SMILTime simpleDuration() const;
 
     void seekToIntervalCorrespondingToTime(SMILTime elapsed);
-    bool progress(SMILTime elapsed, SVGSMILElement* resultsElement, bool seekToTime);
+    bool progress(SMILTime elapsed, SVGSMILElement& firstAnimation, bool seekToTime);
     SMILTime nextProgressTime() const;
 
     void reset();
 
-    static SMILTime parseClockValue(const String&);
-    static SMILTime parseOffsetValue(const String&);
+    static SMILTime parseClockValue(StringView);
+    static SMILTime parseOffsetValue(StringView);
 
     bool isContributing(SMILTime elapsed) const;
     bool isInactive() const;
@@ -97,8 +98,8 @@ public:
     void setDocumentOrderIndex(unsigned index) { m_documentOrderIndex = index; }
 
     virtual bool isAdditive() const = 0;
-    virtual void resetAnimatedType() = 0;
-    virtual void clearAnimatedType(SVGElement* targetElement) = 0;
+    virtual void startAnimation() = 0;
+    virtual void stopAnimation(SVGElement* targetElement) = 0;
     virtual void applyResultsToTarget() = 0;
 
     void connectConditions();
@@ -118,7 +119,7 @@ protected:
     virtual void setTargetElement(SVGElement*);
     virtual void setAttributeName(const QualifiedName&);
 
-    void finishedInsertingSubtree() override;
+    void didFinishInsertingNode() override;
 
 private:
     void buildPendingResource() override;
@@ -128,7 +129,7 @@ private:
 
     virtual void startedActiveInterval() = 0;
     void endedActiveInterval();
-    virtual void updateAnimation(float percent, unsigned repeat, SVGSMILElement* resultElement) = 0;
+    virtual void updateAnimation(float percent, unsigned repeat) = 0;
 
     static bool isSupportedAttribute(const QualifiedName&);
     QualifiedName constructAttributeName() const;
@@ -149,18 +150,18 @@ private:
     // for example <animate begin="otherElement.begin + 8s; button.click" ... />
     struct Condition {
         enum Type { EventBase, Syncbase, AccessKey };
-        Condition(Type, BeginOrEnd, const String& baseID, const String& name, SMILTime offset, int repeats = -1);
+        Condition(Type, BeginOrEnd, const String& baseID, const AtomString& name, SMILTime offset, int repeats = -1);
         Type m_type;
         BeginOrEnd m_beginOrEnd;
         String m_baseID;
-        String m_name;
+        AtomString m_name;
         SMILTime m_offset;
         int m_repeats { -1 };
         RefPtr<Element> m_syncbase;
         RefPtr<ConditionEventListener> m_eventListener;
     };
-    bool parseCondition(const String&, BeginOrEnd beginOrEnd);
-    void parseBeginOrEnd(const String&, BeginOrEnd beginOrEnd);
+    bool parseCondition(StringView, BeginOrEnd);
+    void parseBeginOrEnd(StringView, BeginOrEnd);
     Element* eventBaseFor(const Condition&);
 
     void disconnectConditions();
@@ -184,7 +185,7 @@ private:
 
     QualifiedName m_attributeName;
 
-    SVGElement* m_targetElement;
+    WeakPtr<SVGElement> m_targetElement;
 
     Vector<Condition> m_conditions;
     bool m_conditionsConnected;
@@ -192,7 +193,7 @@ private:
 
     bool m_isWaitingForFirstInterval;
 
-    HashSet<SVGSMILElement*> m_timeDependents;
+    WeakHashSet<SVGSMILElement> m_timeDependents;
 
     // Instance time lists
     Vector<SMILTimeWithOrigin> m_beginTimes;

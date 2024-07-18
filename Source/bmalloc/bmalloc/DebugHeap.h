@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,8 +25,10 @@
 
 #pragma once
 
-#include "AllocationKind.h"
-#include "StaticMutex.h"
+#include "Environment.h"
+#include "FailureAction.h"
+#include "Mutex.h"
+#include "StaticPerProcess.h"
 #include <mutex>
 #include <unordered_map>
 
@@ -36,27 +38,59 @@
 
 namespace bmalloc {
     
-class DebugHeap {
+class DebugHeap : private StaticPerProcess<DebugHeap> {
 public:
-    DebugHeap(std::lock_guard<StaticMutex>&);
+    DebugHeap(const LockHolder&);
     
-    void* malloc(size_t);
-    void* memalign(size_t alignment, size_t, bool crashOnFailure);
-    void* realloc(void*, size_t);
+    void* malloc(size_t, FailureAction);
+    void* memalign(size_t alignment, size_t, FailureAction);
+    void* realloc(void*, size_t, FailureAction);
     void free(void*);
     
-    void* memalignLarge(size_t alignment, size_t, AllocationKind);
-    void freeLarge(void* base, AllocationKind);
+    void* memalignLarge(size_t alignment, size_t);
+    void freeLarge(void* base);
+
+    void scavenge();
+    void dump();
+
+    static DebugHeap* tryGet();
+    static DebugHeap* getExisting();
 
 private:
+    static DebugHeap* tryGetSlow();
+    
 #if BOS(DARWIN)
     malloc_zone_t* m_zone;
 #endif
     
     // This is the debug heap. We can use whatever data structures we like. It doesn't matter.
-    size_t m_pageSize;
-    std::mutex m_lock;
+    size_t m_pageSize { 0 };
     std::unordered_map<void*, size_t> m_sizeMap;
 };
+DECLARE_STATIC_PER_PROCESS_STORAGE(DebugHeap);
+
+extern BEXPORT DebugHeap* debugHeapCache;
+
+BINLINE DebugHeap* debugHeapDisabled()
+{
+    return reinterpret_cast<DebugHeap*>(static_cast<uintptr_t>(1));
+}
+
+BINLINE DebugHeap* DebugHeap::tryGet()
+{
+    DebugHeap* result = debugHeapCache;
+    if (result == debugHeapDisabled())
+        return nullptr;
+    if (result)
+        return result;
+    return tryGetSlow();
+}
+
+BINLINE DebugHeap* DebugHeap::getExisting()
+{
+    DebugHeap* result = tryGet();
+    RELEASE_BASSERT(result);
+    return result;
+}
 
 } // namespace bmalloc

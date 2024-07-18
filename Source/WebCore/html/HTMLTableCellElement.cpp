@@ -27,12 +27,16 @@
 
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
+#include "ElementInlines.h"
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
 #include "HTMLTableElement.h"
 #include "RenderTableCell.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLTableCellElement);
 
 using namespace HTMLNames;
 
@@ -54,7 +58,7 @@ Ref<HTMLTableCellElement> HTMLTableCellElement::create(const QualifiedName& tagN
 HTMLTableCellElement::HTMLTableCellElement(const QualifiedName& tagName, Document& document)
     : HTMLTablePartElement(tagName, document)
 {
-    ASSERT(tagName == thTag || tagName == tdTag);
+    ASSERT(hasLocalName(thTag->localName()) || hasLocalName(tdTag->localName()));
 }
 
 unsigned HTMLTableCellElement::colSpan() const
@@ -87,34 +91,28 @@ int HTMLTableCellElement::cellIndex() const
     return index;
 }
 
-bool HTMLTableCellElement::isPresentationAttribute(const QualifiedName& name) const
+bool HTMLTableCellElement::hasPresentationalHintsForAttribute(const QualifiedName& name) const
 {
     if (name == nowrapAttr || name == widthAttr || name == heightAttr)
         return true;
-    return HTMLTablePartElement::isPresentationAttribute(name);
+    return HTMLTablePartElement::hasPresentationalHintsForAttribute(name);
 }
 
-void HTMLTableCellElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStyleProperties& style)
+void HTMLTableCellElement::collectPresentationalHintsForAttribute(const QualifiedName& name, const AtomString& value, MutableStyleProperties& style)
 {
     if (name == nowrapAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyWhiteSpace, CSSValueWebkitNowrap);
+        addPropertyToPresentationalHintStyle(style, CSSPropertyWhiteSpace, CSSValueWebkitNowrap);
     else if (name == widthAttr) {
-        if (!value.isEmpty()) {
-            int widthInt = value.toInt();
-            if (widthInt > 0) // width="0" is ignored for compatibility with WinIE.
-                addHTMLLengthToStyle(style, CSSPropertyWidth, value);
-        }
+        // width="0" is not allowed for compatibility with WinIE.
+        addHTMLLengthToStyle(style, CSSPropertyWidth, value, AllowZeroValue::No);
     } else if (name == heightAttr) {
-        if (!value.isEmpty()) {
-            int heightInt = value.toInt();
-            if (heightInt > 0) // height="0" is ignored for compatibility with WinIE.
-                addHTMLLengthToStyle(style, CSSPropertyHeight, value);
-        }
+        // width="0" is not allowed for compatibility with WinIE.
+        addHTMLLengthToStyle(style, CSSPropertyHeight, value, AllowZeroValue::No);
     } else
-        HTMLTablePartElement::collectStyleForPresentationAttribute(name, value, style);
+        HTMLTablePartElement::collectPresentationalHintsForAttribute(name, value, style);
 }
 
-void HTMLTableCellElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLTableCellElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == rowspanAttr) {
         if (is<RenderTableCell>(renderer()))
@@ -126,11 +124,11 @@ void HTMLTableCellElement::parseAttribute(const QualifiedName& name, const Atomi
         HTMLTablePartElement::parseAttribute(name, value);
 }
 
-const StyleProperties* HTMLTableCellElement::additionalPresentationAttributeStyle() const
+const StyleProperties* HTMLTableCellElement::additionalPresentationalHintStyle() const
 {
-    if (HTMLTableElement* table = findParentTable())
+    if (auto table = findParentTable())
         return table->additionalCellStyle();
-    return 0;
+    return nullptr;
 }
 
 bool HTMLTableCellElement::isURLAttribute(const Attribute& attribute) const
@@ -150,7 +148,7 @@ String HTMLTableCellElement::axis() const
 
 void HTMLTableCellElement::setColSpan(unsigned n)
 {
-    setAttributeWithoutSynchronization(colspanAttr, AtomicString::number(limitToOnlyHTMLNonNegative(n, 1)));
+    setAttributeWithoutSynchronization(colspanAttr, AtomString::number(limitToOnlyHTMLNonNegative(n, 1)));
 }
 
 String HTMLTableCellElement::headers() const
@@ -160,18 +158,18 @@ String HTMLTableCellElement::headers() const
 
 void HTMLTableCellElement::setRowSpanForBindings(unsigned n)
 {
-    setAttributeWithoutSynchronization(rowspanAttr, AtomicString::number(limitToOnlyHTMLNonNegative(n, 1)));
+    setAttributeWithoutSynchronization(rowspanAttr, AtomString::number(limitToOnlyHTMLNonNegative(n, 1)));
 }
 
-const AtomicString& HTMLTableCellElement::scope() const
+const AtomString& HTMLTableCellElement::scope() const
 {
     // https://html.spec.whatwg.org/multipage/tables.html#attr-th-scope
-    static NeverDestroyed<const AtomicString> row("row", AtomicString::ConstructFromLiteral);
-    static NeverDestroyed<const AtomicString> col("col", AtomicString::ConstructFromLiteral);
-    static NeverDestroyed<const AtomicString> rowgroup("rowgroup", AtomicString::ConstructFromLiteral);
-    static NeverDestroyed<const AtomicString> colgroup("colgroup", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> row("row"_s);
+    static MainThreadNeverDestroyed<const AtomString> col("col"_s);
+    static MainThreadNeverDestroyed<const AtomString> rowgroup("rowgroup"_s);
+    static MainThreadNeverDestroyed<const AtomString> colgroup("colgroup"_s);
 
-    const AtomicString& value = attributeWithoutSynchronization(HTMLNames::scopeAttr);
+    const AtomString& value = attributeWithoutSynchronization(HTMLNames::scopeAttr);
 
     if (equalIgnoringASCIICase(value, row))
         return row;
@@ -184,7 +182,7 @@ const AtomicString& HTMLTableCellElement::scope() const
     return emptyAtom();
 }
 
-void HTMLTableCellElement::setScope(const AtomicString& scope)
+void HTMLTableCellElement::setScope(const AtomString& scope)
 {
     setAttributeWithoutSynchronization(scopeAttr, scope);
 }

@@ -30,66 +30,75 @@
 
 namespace WebCore {
 
+class OutlineValue;
+
 class BorderData {
 friend class RenderStyle;
 public:
     BorderData()
-        : m_topLeft { { 0, Fixed }, { 0, Fixed } }
-        , m_topRight { { 0, Fixed }, { 0, Fixed } }
-        , m_bottomLeft { { 0, Fixed }, { 0, Fixed } }
-        , m_bottomRight { { 0, Fixed }, { 0, Fixed } }
+        : m_topLeftRadius { { 0, LengthType::Fixed }, { 0, LengthType::Fixed } }
+        , m_topRightRadius { { 0, LengthType::Fixed }, { 0, LengthType::Fixed } }
+        , m_bottomLeftRadius { { 0, LengthType::Fixed }, { 0, LengthType::Fixed } }
+        , m_bottomRightRadius { { 0, LengthType::Fixed }, { 0, LengthType::Fixed } }
     {
-    }
-    bool hasBorder() const
-    {
-        bool haveImage = m_image.hasImage();
-        return m_left.nonZero(!haveImage) || m_right.nonZero(!haveImage) || m_top.nonZero(!haveImage) || m_bottom.nonZero(!haveImage);
-    }
-    
-    bool hasVisibleBorder() const
-    {
-        bool haveImage = m_image.hasImage();
-        return m_left.isVisible(!haveImage) || m_right.isVisible(!haveImage) || m_top.isVisible(!haveImage) || m_bottom.isVisible(!haveImage);
     }
 
-    bool hasFill() const
+    bool hasBorder() const
     {
-        return m_image.hasImage() && m_image.fill();
+        return m_left.nonZero() || m_right.nonZero() || m_top.nonZero() || m_bottom.nonZero();
     }
-    
+
+    bool hasVisibleBorder() const
+    {
+        return m_left.isVisible() || m_right.isVisible() || m_top.isVisible() || m_bottom.isVisible();
+    }
+
+    bool hasBorderImage() const
+    {
+        return m_image.hasImage();
+    }
+
     bool hasBorderRadius() const
     {
-        return !m_topLeft.width.isZero()
-            || !m_topRight.width.isZero()
-            || !m_bottomLeft.width.isZero()
-            || !m_bottomRight.width.isZero();
+        return !m_topLeftRadius.width.isZero()
+            || !m_topRightRadius.width.isZero()
+            || !m_bottomLeftRadius.width.isZero()
+            || !m_bottomRightRadius.width.isZero();
     }
-    
+
     float borderLeftWidth() const
     {
-        if (!m_image.hasImage() && (m_left.style() == BNONE || m_left.style() == BHIDDEN))
-            return 0; 
+        if (m_left.style() == BorderStyle::None || m_left.style() == BorderStyle::Hidden)
+            return 0;
+        if (m_image.overridesBorderWidths() && m_image.borderSlices().left().isFixed())
+            return m_image.borderSlices().left().value();
         return m_left.width();
     }
-    
+
     float borderRightWidth() const
     {
-        if (!m_image.hasImage() && (m_right.style() == BNONE || m_right.style() == BHIDDEN))
+        if (m_right.style() == BorderStyle::None || m_right.style() == BorderStyle::Hidden)
             return 0;
+        if (m_image.overridesBorderWidths() && m_image.borderSlices().right().isFixed())
+            return m_image.borderSlices().right().value();
         return m_right.width();
     }
-    
+
     float borderTopWidth() const
     {
-        if (!m_image.hasImage() && (m_top.style() == BNONE || m_top.style() == BHIDDEN))
+        if (m_top.style() == BorderStyle::None || m_top.style() == BorderStyle::Hidden)
             return 0;
+        if (m_image.overridesBorderWidths() && m_image.borderSlices().top().isFixed())
+            return m_image.borderSlices().top().value();
         return m_top.width();
     }
-    
+
     float borderBottomWidth() const
     {
-        if (!m_image.hasImage() && (m_bottom.style() == BNONE || m_bottom.style() == BHIDDEN))
+        if (m_bottom.style() == BorderStyle::None || m_bottom.style() == BorderStyle::Hidden)
             return 0;
+        if (m_image.overridesBorderWidths() && m_image.borderSlices().bottom().isFixed())
+            return m_image.borderSlices().bottom().value();
         return m_bottom.width();
     }
 
@@ -97,29 +106,33 @@ public:
     {
         return FloatBoxExtent(borderTopWidth(), borderRightWidth(), borderBottomWidth(), borderLeftWidth());
     }
-    
+
+    bool isEquivalentForPainting(const BorderData& other, bool currentColorDiffers) const;
+
     bool operator==(const BorderData& o) const
     {
         return m_left == o.m_left && m_right == o.m_right && m_top == o.m_top && m_bottom == o.m_bottom && m_image == o.m_image
-               && m_topLeft == o.m_topLeft && m_topRight == o.m_topRight && m_bottomLeft == o.m_bottomLeft && m_bottomRight == o.m_bottomRight;
+            && m_topLeftRadius == o.m_topLeftRadius && m_topRightRadius == o.m_topRightRadius && m_bottomLeftRadius == o.m_bottomLeftRadius && m_bottomRightRadius == o.m_bottomRightRadius;
     }
-    
+
     bool operator!=(const BorderData& o) const
     {
         return !(*this == o);
     }
-    
+
     const BorderValue& left() const { return m_left; }
     const BorderValue& right() const { return m_right; }
     const BorderValue& top() const { return m_top; }
     const BorderValue& bottom() const { return m_bottom; }
-    
+
     const NinePieceImage& image() const { return m_image; }
-    
-    const LengthSize& topLeft() const { return m_topLeft; }
-    const LengthSize& topRight() const { return m_topRight; }
-    const LengthSize& bottomLeft() const { return m_bottomLeft; }
-    const LengthSize& bottomRight() const { return m_bottomRight; }
+
+    const LengthSize& topLeftRadius() const { return m_topLeftRadius; }
+    const LengthSize& topRightRadius() const { return m_topRightRadius; }
+    const LengthSize& bottomLeftRadius() const { return m_bottomLeftRadius; }
+    const LengthSize& bottomRightRadius() const { return m_bottomRightRadius; }
+
+    void dump(TextStream&, DumpStyleValues = DumpStyleValues::All) const;
 
 private:
     BorderValue m_left;
@@ -129,10 +142,14 @@ private:
 
     NinePieceImage m_image;
 
-    LengthSize m_topLeft;
-    LengthSize m_topRight;
-    LengthSize m_bottomLeft;
-    LengthSize m_bottomRight;
+    LengthSize m_topLeftRadius;
+    LengthSize m_topRightRadius;
+    LengthSize m_bottomLeftRadius;
+    LengthSize m_bottomRightRadius;
 };
+
+WTF::TextStream& operator<<(WTF::TextStream&, const BorderValue&);
+WTF::TextStream& operator<<(WTF::TextStream&, const OutlineValue&);
+WTF::TextStream& operator<<(WTF::TextStream&, const BorderData&);
 
 } // namespace WebCore

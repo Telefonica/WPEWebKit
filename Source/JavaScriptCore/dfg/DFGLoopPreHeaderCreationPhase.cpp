@@ -34,8 +34,7 @@
 #include "DFGGraph.h"
 #include "DFGNaturalLoops.h"
 #include "DFGPhase.h"
-#include "JSCInlines.h"
-#include <wtf/HashMap.h>
+#include "JSCJSValueInlines.h"
 
 namespace JSC { namespace DFG {
 
@@ -163,7 +162,7 @@ public:
             // some predecessor other than the pre-header. We must have broken critical edges
             // because that is the DFG SSA convention. Therefore, each predecessor of the loop
             // header must have only one successor.
-            DFG_ASSERT(m_graph, nullptr, existingPreHeader->terminal()->op() == Jump);
+            DFG_ASSERT(m_graph, nullptr, existingPreHeader->terminal()->op() == Jump, existingPreHeader->terminal()->op());
 
             // A pre-header is most useful if it's possible to exit from its terminal. Hence
             // if the terminal of the existing pre-header doesn't allow for exit, but the first

@@ -3,279 +3,131 @@ include(platform/FreeType.cmake)
 include(platform/GCrypt.cmake)
 include(platform/GStreamer.cmake)
 include(platform/ImageDecoders.cmake)
+include(platform/Soup.cmake)
+include(platform/TextureMapper.cmake)
+include(PlatformGLib.cmake)
 
-if (USE_TEXTURE_MAPPER)
-    include(platform/TextureMapper.cmake)
-endif ()
+list(APPEND WebCore_UNIFIED_SOURCE_LIST_FILES
+    "SourcesGTK.txt"
 
-set(WebCore_OUTPUT_NAME WebCoreGTK)
+    "platform/SourcesGLib.txt"
+)
 
-list(APPEND WebCore_INCLUDE_DIRECTORIES
-    "${THIRDPARTY_DIR}/ANGLE/"
-    "${THIRDPARTY_DIR}/ANGLE/include/KHR"
-    "${WEBCORE_DIR}/accessibility/atk"
-    "${WEBCORE_DIR}/editing/atk"
+list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
+    "${WEBCORE_DIR}/accessibility/atspi"
     "${WEBCORE_DIR}/page/gtk"
-    "${WEBCORE_DIR}/platform/geoclue"
+    "${WEBCORE_DIR}/platform/adwaita"
+    "${WEBCORE_DIR}/platform/audio/glib"
+    "${WEBCORE_DIR}/platform/generic"
+    "${WEBCORE_DIR}/platform/glib"
     "${WEBCORE_DIR}/platform/gtk"
     "${WEBCORE_DIR}/platform/graphics/egl"
     "${WEBCORE_DIR}/platform/graphics/glx"
+    "${WEBCORE_DIR}/platform/graphics/gbm"
+    "${WEBCORE_DIR}/platform/graphics/gstreamer"
     "${WEBCORE_DIR}/platform/graphics/gtk"
     "${WEBCORE_DIR}/platform/graphics/opengl"
     "${WEBCORE_DIR}/platform/graphics/opentype"
     "${WEBCORE_DIR}/platform/graphics/wayland"
     "${WEBCORE_DIR}/platform/graphics/x11"
+    "${WEBCORE_DIR}/platform/mediacapabilities"
     "${WEBCORE_DIR}/platform/mediastream/gtk"
+    "${WEBCORE_DIR}/platform/mediastream/gstreamer"
     "${WEBCORE_DIR}/platform/mock/mediasource"
-    "${WEBCORE_DIR}/platform/network/gtk"
-    "${WEBCORE_DIR}/platform/network/soup"
+    "${WEBCORE_DIR}/platform/network/glib"
     "${WEBCORE_DIR}/platform/text/gtk"
 )
 
-list(APPEND WebCore_SOURCES
-    accessibility/atk/AXObjectCacheAtk.cpp
-    accessibility/atk/AccessibilityObjectAtk.cpp
-    accessibility/atk/WebKitAccessibleHyperlink.cpp
-    accessibility/atk/WebKitAccessibleInterfaceAction.cpp
-    accessibility/atk/WebKitAccessibleInterfaceComponent.cpp
-    accessibility/atk/WebKitAccessibleInterfaceDocument.cpp
-    accessibility/atk/WebKitAccessibleInterfaceEditableText.cpp
-    accessibility/atk/WebKitAccessibleInterfaceHyperlinkImpl.cpp
-    accessibility/atk/WebKitAccessibleInterfaceHypertext.cpp
-    accessibility/atk/WebKitAccessibleInterfaceImage.cpp
-    accessibility/atk/WebKitAccessibleInterfaceSelection.cpp
-    accessibility/atk/WebKitAccessibleInterfaceTable.cpp
-    accessibility/atk/WebKitAccessibleInterfaceTableCell.cpp
-    accessibility/atk/WebKitAccessibleInterfaceText.cpp
-    accessibility/atk/WebKitAccessibleInterfaceValue.cpp
-    accessibility/atk/WebKitAccessibleUtil.cpp
-    accessibility/atk/WebKitAccessibleWrapperAtk.cpp
-
-    editing/atk/FrameSelectionAtk.cpp
-
-    loader/soup/CachedRawResourceSoup.cpp
-    loader/soup/SubresourceLoaderSoup.cpp
-
-    page/linux/ResourceUsageOverlayLinux.cpp
-    page/linux/ResourceUsageThreadLinux.cpp
-
-    platform/ScrollAnimationKinetic.cpp
-    platform/StaticPasteboard.cpp
-    platform/UserAgentQuirks.cpp
-
-    platform/audio/glib/AudioBusGLib.cpp
-
-    platform/geoclue/GeolocationProviderGeoclue.cpp
-
-    platform/glib/EventLoopGlib.cpp
-    platform/glib/FileSystemGlib.cpp
-    platform/glib/KeyedDecoderGlib.cpp
-    platform/glib/KeyedEncoderGlib.cpp
-    platform/glib/MainThreadSharedTimerGLib.cpp
-    platform/glib/SSLKeyGeneratorGLib.cpp
-    platform/glib/SharedBufferGlib.cpp
-    platform/glib/UserAgentGLib.cpp
-
-    platform/graphics/GLContext.cpp
-    platform/graphics/GraphicsContext3DPrivate.cpp
-
-    platform/graphics/cairo/BackingStoreBackendCairoX11.cpp
-
-    platform/graphics/egl/GLContextEGL.cpp
-    platform/graphics/egl/GLContextEGLWayland.cpp
-    platform/graphics/egl/GLContextEGLX11.cpp
-
-    platform/graphics/glx/GLContextGLX.cpp
-
-    platform/graphics/gstreamer/ImageGStreamerCairo.cpp
-
-    platform/graphics/opengl/Extensions3DOpenGLCommon.cpp
-    platform/graphics/opengl/GraphicsContext3DOpenGLCommon.cpp
-    platform/graphics/opengl/TemporaryOpenGLSetting.cpp
-
-    platform/graphics/opentype/OpenTypeVerticalData.cpp
-
-    platform/graphics/wayland/PlatformDisplayWayland.cpp
-
-    platform/graphics/x11/PlatformDisplayX11.cpp
-    platform/graphics/x11/XErrorTrapper.cpp
-    platform/graphics/x11/XUniqueResource.cpp
-
-    platform/gtk/DragDataGtk.cpp
-    platform/gtk/LocalizedStringsGtk.cpp
-    platform/gtk/PasteboardGtk.cpp
-    platform/gtk/ScrollAnimatorGtk.cpp
-    platform/gtk/SelectionData.cpp
-
-    platform/network/soup/AuthenticationChallengeSoup.cpp
-    platform/network/soup/CertificateInfo.cpp
-    platform/network/soup/CookieJarSoup.cpp
-    platform/network/soup/CookieStorageSoup.cpp
-    platform/network/soup/CredentialStorageSoup.cpp
-    platform/network/soup/DNSSoup.cpp
-    platform/network/soup/GRefPtrSoup.cpp
-    platform/network/soup/NetworkStorageSessionSoup.cpp
-    platform/network/soup/ProxyServerSoup.cpp
-    platform/network/soup/ResourceErrorSoup.cpp
-    platform/network/soup/ResourceHandleSoup.cpp
-    platform/network/soup/ResourceRequestSoup.cpp
-    platform/network/soup/ResourceResponseSoup.cpp
-    platform/network/soup/SocketStreamHandleImplSoup.cpp
-    platform/network/soup/SoupNetworkSession.cpp
-    platform/network/soup/SynchronousLoaderClientSoup.cpp
-    platform/network/soup/WebKitSoupRequestGeneric.cpp
-
-    platform/soup/PublicSuffixSoup.cpp
-    platform/soup/SharedBufferSoup.cpp
-    platform/soup/URLSoup.cpp
-
-    platform/text/Hyphenation.cpp
-    platform/text/LocaleICU.cpp
-
-    platform/text/enchant/TextCheckerEnchant.cpp
-
-    platform/text/hyphen/HyphenationLibHyphen.cpp
-
-    platform/unix/LoggingUnix.cpp
-
-    platform/xdg/MIMETypeRegistryXdg.cpp
-)
-
-list(APPEND WebCorePlatformGTK_SOURCES
-    editing/gtk/EditorGtk.cpp
-
-    page/gtk/DragControllerGtk.cpp
-
-    platform/glib/EventHandlerGLib.cpp
-
-    platform/graphics/PlatformDisplay.cpp
-
-    platform/graphics/gtk/ColorGtk.cpp
-    platform/graphics/gtk/GdkCairoUtilities.cpp
-    platform/graphics/gtk/IconGtk.cpp
-    platform/graphics/gtk/ImageBufferGtk.cpp
-    platform/graphics/gtk/ImageGtk.cpp
-
-    platform/gtk/CursorGtk.cpp
-    platform/gtk/DragImageGtk.cpp
-    platform/gtk/GRefPtrGtk.cpp
-    platform/gtk/GtkUtilities.cpp
-    platform/gtk/GtkVersioning.c
-    platform/gtk/PasteboardHelper.cpp
-    platform/gtk/PlatformKeyboardEventGtk.cpp
-    platform/gtk/PlatformMouseEventGtk.cpp
-    platform/gtk/PlatformPasteboardGtk.cpp
-    platform/gtk/PlatformScreenGtk.cpp
-    platform/gtk/PlatformWheelEventGtk.cpp
-    platform/gtk/RenderThemeGadget.cpp
-    platform/gtk/RenderThemeWidget.cpp
-    platform/gtk/ScrollbarThemeGtk.cpp
-    platform/gtk/WidgetGtk.cpp
-
-    rendering/RenderThemeGtk.cpp
-)
-
-if (ENABLE_GEOLOCATION)
-    list(APPEND WebCore_DERIVED_SOURCES
-        ${DERIVED_SOURCES_WEBCORE_DIR}/Geoclue2Interface.c
+if (USE_WPE_RENDERER)
+    list(APPEND WebCore_INCLUDE_DIRECTORIES
+        "${WEBCORE_DIR}/platform/graphics/libwpe"
     )
-    execute_process(COMMAND pkg-config --variable dbus_interface geoclue-2.0 OUTPUT_VARIABLE GEOCLUE_DBUS_INTERFACE)
-    add_custom_command(
-         OUTPUT ${DERIVED_SOURCES_WEBCORE_DIR}/Geoclue2Interface.c ${DERIVED_SOURCES_WEBCORE_DIR}/Geoclue2Interface.h
-         COMMAND gdbus-codegen --interface-prefix org.freedesktop.GeoClue2. --c-namespace Geoclue --generate-c-code ${DERIVED_SOURCES_WEBCORE_DIR}/Geoclue2Interface ${GEOCLUE_DBUS_INTERFACE}
-    )
-    set_source_files_properties(${DERIVED_SOURCES_WEBCORE_DIR}/Geoclue2Interface.c PROPERTIES COMPILE_FLAGS -Wno-unused-parameter)
 endif ()
 
+list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+    accessibility/atspi/AccessibilityAtspi.h
+    accessibility/atspi/AccessibilityAtspiEnums.h
+    accessibility/atspi/AccessibilityObjectAtspi.h
+    accessibility/atspi/AccessibilityRootAtspi.h
+
+    platform/adwaita/ScrollbarThemeAdwaita.h
+
+    platform/glib/ApplicationGLib.h
+
+    platform/graphics/x11/PlatformDisplayX11.h
+    platform/graphics/x11/XErrorTrapper.h
+    platform/graphics/x11/XUniquePtr.h
+    platform/graphics/x11/XUniqueResource.h
+
+    platform/gtk/GRefPtrGtk.h
+    platform/gtk/GUniquePtrGtk.h
+    platform/gtk/GtkUtilities.h
+    platform/gtk/GtkVersioning.h
+    platform/gtk/ScrollbarThemeGtk.h
+    platform/gtk/SelectionData.h
+
+    platform/text/enchant/TextCheckerEnchant.h
+
+    rendering/RenderThemeAdwaita.h
+)
+
+set(CSS_VALUE_PLATFORM_DEFINES "HAVE_OS_DARK_MODE_SUPPORT=1")
+
 list(APPEND WebCore_USER_AGENT_STYLE_SHEETS
-    ${WEBCORE_DIR}/css/mediaControlsGtk.css
+    ${WEBCORE_DIR}/css/themeAdwaita.css
+    ${WebCore_DERIVED_SOURCES_DIR}/ModernMediaControls.css
 )
 
 set(WebCore_USER_AGENT_SCRIPTS
-    ${WEBCORE_DIR}/English.lproj/mediaControlsLocalizedStrings.js
-    ${WEBCORE_DIR}/Modules/mediacontrols/mediaControlsBase.js
-    ${WEBCORE_DIR}/Modules/mediacontrols/mediaControlsGtk.js
+    ${WebCore_DERIVED_SOURCES_DIR}/ModernMediaControls.js
 )
 
-set(WebCore_USER_AGENT_SCRIPTS_DEPENDENCIES ${WEBCORE_DIR}/platform/gtk/RenderThemeGtk.cpp)
+set(WebCore_USER_AGENT_SCRIPTS_DEPENDENCIES ${WEBCORE_DIR}/rendering/RenderThemeAdwaita.cpp)
 
 list(APPEND WebCore_LIBRARIES
-    ${ATK_LIBRARIES}
-    ${CAIRO_LIBRARIES}
     ${ENCHANT_LIBRARIES}
     ${GLIB_GIO_LIBRARIES}
     ${GLIB_GMODULE_LIBRARIES}
     ${GLIB_GOBJECT_LIBRARIES}
     ${GLIB_LIBRARIES}
     ${LIBSECRET_LIBRARIES}
-    ${LIBSOUP_LIBRARIES}
     ${LIBTASN1_LIBRARIES}
     ${HYPHEN_LIBRARIES}
+    ${UPOWERGLIB_LIBRARIES}
     ${X11_X11_LIB}
     ${X11_Xcomposite_LIB}
     ${X11_Xdamage_LIB}
     ${X11_Xrender_LIB}
     ${X11_Xt_LIB}
-    ${ZLIB_LIBRARIES}
-    WTF
+    GTK::GTK
 )
 
-list(APPEND WebCoreTestSupport_LIBRARIES WTF)
+if (USE_WPE_RENDERER)
+    list(APPEND WebCore_LIBRARIES
+        WPE::libwpe
+    )
+endif ()
 
 list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES
-    ${ATK_INCLUDE_DIRS}
-    ${CAIRO_INCLUDE_DIRS}
     ${ENCHANT_INCLUDE_DIRS}
     ${GIO_UNIX_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
     ${LIBSECRET_INCLUDE_DIRS}
-    ${LIBSOUP_INCLUDE_DIRS}
     ${LIBTASN1_INCLUDE_DIRS}
-    ${ZLIB_INCLUDE_DIRS}
+    ${UPOWERGLIB_INCLUDE_DIRS}
 )
-
-if (USE_OPENGL_ES_2)
-    list(APPEND WebCore_SOURCES
-        platform/graphics/opengl/Extensions3DOpenGLES.cpp
-        platform/graphics/opengl/GraphicsContext3DOpenGLES.cpp
-    )
-endif ()
 
 if (USE_OPENGL)
     list(APPEND WebCore_SOURCES
         platform/graphics/OpenGLShims.cpp
-
-        platform/graphics/opengl/Extensions3DOpenGL.cpp
-        platform/graphics/opengl/GraphicsContext3DOpenGL.cpp
-    )
-endif ()
-
-if (ENABLE_PLUGIN_PROCESS_GTK2)
-    # WebKitPluginProcess2 needs a version of WebCore compiled against GTK+2, so we've isolated all the GTK+
-    # dependent files into a separate library which can be used to construct a GTK+2 WebCore
-    # for the plugin process.
-    add_library(WebCorePlatformGTK2 ${WebCore_LIBRARY_TYPE} ${WebCorePlatformGTK_SOURCES})
-    add_dependencies(WebCorePlatformGTK2 WebCore)
-    set_property(TARGET WebCorePlatformGTK2
-        APPEND
-        PROPERTY COMPILE_DEFINITIONS GTK_API_VERSION_2=1
-    )
-    target_include_directories(WebCorePlatformGTK2 PRIVATE
-        ${WebCore_INCLUDE_DIRECTORIES}
-        ${GTK2_INCLUDE_DIRS}
-        ${GDK2_INCLUDE_DIRS}
-    )
-    target_include_directories(WebCorePlatformGTK2 SYSTEM PRIVATE
-        ${WebCore_SYSTEM_INCLUDE_DIRECTORIES}
-    )
-    target_link_libraries(WebCorePlatformGTK2
-         ${WebCore_LIBRARIES}
-         ${GTK2_LIBRARIES}
-         ${GDK2_LIBRARIES}
     )
 endif ()
 
 if (ENABLE_WAYLAND_TARGET)
+    list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+        platform/graphics/wayland/PlatformDisplayWayland.h
+        platform/graphics/wayland/WlUniquePtr.h
+    )
     list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES
         ${WAYLAND_INCLUDE_DIRS}
     )
@@ -284,35 +136,78 @@ if (ENABLE_WAYLAND_TARGET)
     )
 endif ()
 
-add_library(WebCorePlatformGTK ${WebCore_LIBRARY_TYPE} ${WebCorePlatformGTK_SOURCES})
-add_dependencies(WebCorePlatformGTK WebCore)
-target_include_directories(WebCorePlatformGTK PRIVATE
-    ${WebCore_INCLUDE_DIRECTORIES}
-)
-target_include_directories(WebCorePlatformGTK SYSTEM PRIVATE
-    ${WebCore_SYSTEM_INCLUDE_DIRECTORIES}
-    ${GTK_INCLUDE_DIRS}
-    ${GDK_INCLUDE_DIRS}
-)
-target_link_libraries(WebCorePlatformGTK
-    ${WebCore_LIBRARIES}
-    ${GTK_LIBRARIES}
-    ${GDK_LIBRARIES}
-)
+if (ENABLE_GAMEPAD)
+    list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+        platform/gamepad/manette/ManetteGamepadProvider.h
+    )
+    list(APPEND WebCore_LIBRARIES
+        Manette::Manette
+    )
+endif ()
 
-include_directories(
-    ${WebCore_INCLUDE_DIRECTORIES}
-    "${WEBCORE_DIR}/bindings/gobject/"
-)
+if (ENABLE_BUBBLEWRAP_SANDBOX)
+    list(APPEND WebCore_LIBRARIES Libseccomp::Libseccomp)
+endif ()
 
 include_directories(SYSTEM
     ${WebCore_SYSTEM_INCLUDE_DIRECTORIES}
 )
+
+list(APPEND WebCoreTestSupport_LIBRARIES PRIVATE GTK::GTK)
 
 add_definitions(-DBUILDING_WEBKIT)
 
 if (ENABLE_SMOOTH_SCROLLING)
     list(APPEND WebCore_SOURCES
         platform/ScrollAnimationSmooth.cpp
+    )
+endif ()
+
+if (USE_ATSPI)
+    set(WebCore_AtspiInterfaceFiles
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Accessible.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Action.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Application.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Cache.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Collection.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Component.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/DeviceEventController.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/DeviceEventListener.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Document.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/EditableText.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Event.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Hyperlink.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Hypertext.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Image.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Registry.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Selection.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Socket.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/TableCell.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Table.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Text.xml
+        ${WEBCORE_DIR}/accessibility/atspi/xml/Value.xml
+    )
+
+    add_custom_command(
+        OUTPUT ${WebCore_DERIVED_SOURCES_DIR}/AccessibilityAtspiInterfaces.h ${WebCore_DERIVED_SOURCES_DIR}/AccessibilityAtspiInterfaces.c
+        DEPENDS ${WebCore_AtspiInterfaceFiles}
+        COMMAND gdbus-codegen --interface-prefix=org.a11y.atspi --c-namespace=webkit --pragma-once --interface-info-header --output=${WebCore_DERIVED_SOURCES_DIR}/AccessibilityAtspiInterfaces.h ${WebCore_AtspiInterfaceFiles}
+        COMMAND gdbus-codegen --interface-prefix=org.a11y.atspi --c-namespace=webkit --interface-info-body --output=${WebCore_DERIVED_SOURCES_DIR}/AccessibilityAtspiInterfaces.c ${WebCore_AtspiInterfaceFiles}
+        VERBATIM
+    )
+
+    list(APPEND WebCore_SOURCES
+        ${WebCore_DERIVED_SOURCES_DIR}/AccessibilityAtspiInterfaces.c
+    )
+endif ()
+
+if (USE_LIBGBM)
+    list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES
+        ${GBM_INCLUDE_DIR}
+        ${LIBDRM_INCLUDE_DIR}
+    )
+    list(APPEND WebCore_LIBRARIES
+        ${GBM_LIBRARIES}
+        ${LIBDRM_LIBRARIES}
     )
 endif ()

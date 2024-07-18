@@ -26,22 +26,16 @@
 #include "config.h"
 #include "NetworkProcessPlatformStrategies.h"
 
-#include <WebCore/BlobRegistryImpl.h>
+#include <WebCore/BlobRegistry.h>
 #include <wtf/NeverDestroyed.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 void NetworkProcessPlatformStrategies::initialize()
 {
     static NeverDestroyed<NetworkProcessPlatformStrategies> platformStrategies;
     setPlatformStrategies(&platformStrategies.get());
-}
-
-CookiesStrategy* NetworkProcessPlatformStrategies::createCookiesStrategy()
-{
-    return nullptr;
 }
 
 LoaderStrategy* NetworkProcessPlatformStrategies::createLoaderStrategy()
@@ -54,9 +48,28 @@ PasteboardStrategy* NetworkProcessPlatformStrategies::createPasteboardStrategy()
     return nullptr;
 }
 
+MediaStrategy* NetworkProcessPlatformStrategies::createMediaStrategy()
+{
+    return nullptr;
+}
+
 BlobRegistry* NetworkProcessPlatformStrategies::createBlobRegistry()
 {
-    return new BlobRegistryImpl;
+    using namespace WebCore;
+    class EmptyBlobRegistry : public WebCore::BlobRegistry {
+        void registerFileBlobURL(const URL&, Ref<BlobDataFileReference>&&, const String& path, const String& contentType) final { ASSERT_NOT_REACHED(); }
+        void registerBlobURL(const URL&, Vector<BlobPart>&&, const String& contentType) final { ASSERT_NOT_REACHED(); }
+        void registerBlobURL(const URL&, const URL& srcURL, const PolicyContainer&) final { ASSERT_NOT_REACHED(); }
+        void registerBlobURLOptionallyFileBacked(const URL&, const URL& srcURL, RefPtr<BlobDataFileReference>&&, const String& contentType) final { ASSERT_NOT_REACHED(); }
+        void registerBlobURLForSlice(const URL&, const URL& srcURL, long long start, long long end, const String& contentType) final { ASSERT_NOT_REACHED(); }
+        void unregisterBlobURL(const URL&) final { ASSERT_NOT_REACHED(); }
+        unsigned long long blobSize(const URL&) final { ASSERT_NOT_REACHED(); return 0; }
+        void writeBlobsToTemporaryFilesForIndexedDB(const Vector<String>& blobURLs, CompletionHandler<void(Vector<String>&& filePaths)>&&) final { ASSERT_NOT_REACHED(); }
+        void registerBlobURLHandle(const URL&) final { ASSERT_NOT_REACHED(); }
+        void unregisterBlobURLHandle(const URL&) final { ASSERT_NOT_REACHED(); }
+    };
+    static NeverDestroyed<EmptyBlobRegistry> blobRegistry;
+    return &blobRegistry.get();
 }
 
 }

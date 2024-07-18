@@ -28,14 +28,11 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef HTTPParsers_h
-#define HTTPParsers_h
+#pragma once
 
-#include <wtf/Forward.h>
 #include <wtf/HashSet.h>
-#include <wtf/Optional.h>
+#include <wtf/WallTime.h>
 #include <wtf/text/StringHash.h>
-#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -50,55 +47,70 @@ enum class XSSProtectionDisposition {
     BlockEnabled,
 };
 
-enum ContentTypeOptionsDisposition {
-    ContentTypeOptionsNone,
-    ContentTypeOptionsNosniff
+enum class ContentTypeOptionsDisposition : bool {
+    None,
+    Nosniff
 };
 
-enum XFrameOptionsDisposition {
-    XFrameOptionsNone,
-    XFrameOptionsDeny,
-    XFrameOptionsSameOrigin,
-    XFrameOptionsAllowAll,
-    XFrameOptionsInvalid,
-    XFrameOptionsConflict
+enum class XFrameOptionsDisposition : uint8_t {
+    None,
+    Deny,
+    SameOrigin,
+    AllowAll,
+    Invalid,
+    Conflict
+};
+
+enum class CrossOriginResourcePolicy : uint8_t {
+    None,
+    CrossOrigin,
+    SameOrigin,
+    SameSite,
+    Invalid
 };
 
 bool isValidReasonPhrase(const String&);
 bool isValidHTTPHeaderValue(const String&);
 bool isValidAcceptHeaderValue(const String&);
 bool isValidLanguageHeaderValue(const String&);
+#if USE(GLIB)
+WEBCORE_EXPORT bool isValidUserAgentHeaderValue(const String&);
+#endif
 bool isValidHTTPToken(const String&);
-bool parseHTTPRefresh(const String& refresh, double& delay, String& url);
-std::optional<std::chrono::system_clock::time_point> parseHTTPDate(const String&);
-String filenameFromHTTPContentDisposition(const String&);
-String extractMIMETypeFromMediaType(const String&);
-String extractCharsetFromMediaType(const String&);
-void findCharsetInMediaType(const String& mediaType, unsigned int& charsetPos, unsigned int& charsetLen, unsigned int start = 0);
+bool isValidHTTPToken(StringView);
+std::optional<WallTime> parseHTTPDate(const String&);
+StringView filenameFromHTTPContentDisposition(StringView);
+WEBCORE_EXPORT String extractMIMETypeFromMediaType(const String&);
+StringView extractCharsetFromMediaType(StringView);
 XSSProtectionDisposition parseXSSProtectionHeader(const String& header, String& failureReason, unsigned& failurePosition, String& reportURL);
-AtomicString extractReasonPhraseFromHTTPStatusLine(const String&);
-XFrameOptionsDisposition parseXFrameOptionsHeader(const String&);
+AtomString extractReasonPhraseFromHTTPStatusLine(const String&);
+WEBCORE_EXPORT XFrameOptionsDisposition parseXFrameOptionsHeader(StringView);
+std::optional<std::pair<StringView, HashMap<String, String>>> parseStructuredFieldValue(StringView header);
 
 // -1 could be set to one of the return parameters to indicate the value is not specified.
-WEBCORE_EXPORT bool parseRange(const String&, long long& rangeOffset, long long& rangeEnd, long long& rangeSuffixLength);
+WEBCORE_EXPORT bool parseRange(StringView, long long& rangeOffset, long long& rangeEnd, long long& rangeSuffixLength);
 
-ContentTypeOptionsDisposition parseContentTypeOptionsHeader(const String& header);
+ContentTypeOptionsDisposition parseContentTypeOptionsHeader(StringView header);
 
 // Parsing Complete HTTP Messages.
-enum HTTPVersion { Unknown, HTTP_1_0, HTTP_1_1 };
-size_t parseHTTPRequestLine(const char* data, size_t length, String& failureReason, String& method, String& url, HTTPVersion&);
-size_t parseHTTPHeader(const char* data, size_t length, String& failureReason, StringView& nameStr, String& valueStr, bool strict = true);
-size_t parseHTTPRequestBody(const char* data, size_t length, Vector<unsigned char>& body);
-
-void parseAccessControlExposeHeadersAllowList(const String& headerValue, HTTPHeaderSet&);
+size_t parseHTTPHeader(const uint8_t* data, size_t length, String& failureReason, StringView& nameStr, String& valueStr, bool strict = true);
+size_t parseHTTPRequestBody(const uint8_t* data, size_t length, Vector<uint8_t>& body);
 
 // HTTP Header routine as per https://fetch.spec.whatwg.org/#terminology-headers
 bool isForbiddenHeaderName(const String&);
+bool isNoCORSSafelistedRequestHeaderName(const String&);
+bool isPriviledgedNoCORSRequestHeaderName(const String&);
 bool isForbiddenResponseHeaderName(const String&);
+bool isForbiddenMethod(const String&);
 bool isSimpleHeader(const String& name, const String& value);
 bool isCrossOriginSafeHeader(HTTPHeaderName, const HTTPHeaderSet&);
 bool isCrossOriginSafeHeader(const String&, const HTTPHeaderSet&);
 bool isCrossOriginSafeRequestHeader(HTTPHeaderName, const String&);
+
+String normalizeHTTPMethod(const String&);
+bool isSafeMethod(const String&);
+
+WEBCORE_EXPORT CrossOriginResourcePolicy parseCrossOriginResourcePolicyHeader(StringView);
 
 inline bool isHTTPSpace(UChar character)
 {
@@ -108,7 +120,7 @@ inline bool isHTTPSpace(UChar character)
 // Strip leading and trailing whitespace as defined in https://fetch.spec.whatwg.org/#concept-header-value-normalize.
 inline String stripLeadingAndTrailingHTTPSpaces(const String& string)
 {
-    return string.stripWhiteSpace(isHTTPSpace);
+    return string.stripLeadingAndTrailingCharacters(isHTTPSpace);
 }
 
 inline StringView stripLeadingAndTrailingHTTPSpaces(StringView string)
@@ -116,6 +128,51 @@ inline StringView stripLeadingAndTrailingHTTPSpaces(StringView string)
     return string.stripLeadingAndTrailingMatchedCharacters(isHTTPSpace);
 }
 
+template<class HashType>
+bool addToAccessControlAllowList(const String& string, unsigned start, unsigned end, HashSet<String, HashType>& set)
+{
+    StringImpl* stringImpl = string.impl();
+    if (!stringImpl)
+        return true;
+
+    // Skip white space from start.
+    while (start <= end && isHTTPSpace((*stringImpl)[start]))
+        ++start;
+
+    // only white space
+    if (start > end)
+        return true;
+
+    // Skip white space from end.
+    while (end && isHTTPSpace((*stringImpl)[end]))
+        --end;
+
+    auto token = string.substring(start, end - start + 1);
+    if (!isValidHTTPToken(token))
+        return false;
+
+    set.add(WTFMove(token));
+    return true;
 }
 
-#endif
+template<class HashType = DefaultHash<String>>
+std::optional<HashSet<String, HashType>> parseAccessControlAllowList(const String& string)
+{
+    HashSet<String, HashType> set;
+    unsigned start = 0;
+    size_t end;
+    while ((end = string.find(',', start)) != notFound) {
+        if (start != end) {
+            if (!addToAccessControlAllowList(string, start, end - 1, set))
+                return { };
+        }
+        start = end + 1;
+    }
+    if (start != string.length()) {
+        if (!addToAccessControlAllowList(string, start, string.length() - 1, set))
+            return { };
+    }
+    return set;
+}
+
+}

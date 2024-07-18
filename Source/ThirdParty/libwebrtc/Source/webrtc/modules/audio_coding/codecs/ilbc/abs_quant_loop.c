@@ -16,9 +16,11 @@
 
 ******************************************************************/
 
-#include "defines.h"
-#include "constants.h"
-#include "sort_sq.h"
+#include "modules/audio_coding/codecs/ilbc/abs_quant_loop.h"
+
+#include "modules/audio_coding/codecs/ilbc/constants.h"
+#include "modules/audio_coding/codecs/ilbc/defines.h"
+#include "modules/audio_coding/codecs/ilbc/sort_sq.h"
 
 void WebRtcIlbcfix_AbsQuantLoop(int16_t *syntOutIN, int16_t *in_weightedIN,
                                 int16_t *weightDenumIN, size_t *quantLenIN,

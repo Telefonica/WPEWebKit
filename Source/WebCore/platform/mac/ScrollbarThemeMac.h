@@ -23,10 +23,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef ScrollbarThemeMac_h
-#define ScrollbarThemeMac_h
+#pragma once
 
 #include "ScrollbarThemeComposite.h"
+
+#if PLATFORM(MAC)
+
+OBJC_CLASS CALayer;
 
 namespace WebCore {
 
@@ -35,29 +38,30 @@ public:
     ScrollbarThemeMac();
     virtual ~ScrollbarThemeMac();
 
-    void preferencesChanged();
+    WEBCORE_EXPORT void preferencesChanged();
 
     void updateEnabledState(Scrollbar&) override;
 
     bool paint(Scrollbar&, GraphicsContext&, const IntRect& damageRect) override;
+    void paintScrollCorner(ScrollableArea&, GraphicsContext&, const IntRect& cornerRect) override;
 
-    int scrollbarThickness(ScrollbarControlSize = RegularScrollbar, ScrollbarExpansionState = ScrollbarExpansionState::Expanded) override;
+    int scrollbarThickness(ScrollbarControlSize = ScrollbarControlSize::Regular, ScrollbarExpansionState = ScrollbarExpansionState::Expanded) override;
     
     bool supportsControlTints() const override { return true; }
     bool usesOverlayScrollbars() const  override;
     void usesOverlayScrollbarsChanged() override;
     void updateScrollbarOverlayStyle(Scrollbar&)  override;
 
-    Seconds initialAutoscrollTimerDelay() override;
-    Seconds autoscrollTimerDelay() override;
+    Seconds initialAutoscrollTimerDelay() override { return 500_ms; }
+    Seconds autoscrollTimerDelay() override { return 50_ms; }
 
     ScrollbarButtonsPlacement buttonsPlacement() const override;
 
     void registerScrollbar(Scrollbar&) override;
     void unregisterScrollbar(Scrollbar&) override;
 
-    void setNewPainterForScrollbar(Scrollbar&, NSScrollerImp *);
-    NSScrollerImp *painterForScrollbar(Scrollbar&);
+    void setNewPainterForScrollbar(Scrollbar&, RetainPtr<NSScrollerImp>&&);
+    static NSScrollerImp *painterForScrollbar(Scrollbar&);
 
     void setPaintCharacteristicsForScrollbar(Scrollbar&);
 
@@ -67,7 +71,7 @@ public:
     void didCreateScrollerImp(Scrollbar&);
     bool isLayoutDirectionRTL(Scrollbar&);
 
-#if ENABLE(RUBBER_BANDING)
+#if HAVE(RUBBER_BANDING)
     WEBCORE_EXPORT static void setUpOverhangAreaBackground(CALayer *, const Color& customBackgroundColor = Color());
     WEBCORE_EXPORT static void removeOverhangAreaBackground(CALayer *);
 
@@ -91,7 +95,7 @@ protected:
     bool shouldDragDocumentInsteadOfThumb(Scrollbar&, const PlatformMouseEvent&) override;
     int scrollbarPartToHIPressedState(ScrollbarPart);
 
-#if ENABLE(RUBBER_BANDING)
+#if HAVE(RUBBER_BANDING)
     void setUpOverhangAreasLayerContents(GraphicsLayer*, const Color&) override;
     void setUpContentShadowLayer(GraphicsLayer*) override;
 #endif
@@ -99,4 +103,4 @@ protected:
 
 }
 
-#endif
+#endif // PLATFORM(MAC)

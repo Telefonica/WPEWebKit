@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,16 +37,18 @@ namespace JSC {
 
 class MacroAssemblerX86_64 : public MacroAssemblerX86Common {
 public:
-    static const unsigned numGPRs = 16;
-    static const unsigned numFPRs = 16;
+    static constexpr unsigned numGPRs = 16;
+    static constexpr unsigned numFPRs = 16;
     
-    static const Scale ScalePtr = TimesEight;
+    static constexpr RegisterID InvalidGPRReg = X86Registers::InvalidGPRReg;
 
     using MacroAssemblerX86Common::add32;
     using MacroAssemblerX86Common::and32;
     using MacroAssemblerX86Common::branch32;
     using MacroAssemblerX86Common::branchAdd32;
     using MacroAssemblerX86Common::or32;
+    using MacroAssemblerX86Common::or16;
+    using MacroAssemblerX86Common::or8;
     using MacroAssemblerX86Common::sub32;
     using MacroAssemblerX86Common::load8;
     using MacroAssemblerX86Common::load32;
@@ -54,6 +56,7 @@ public:
     using MacroAssemblerX86Common::store8;
     using MacroAssemblerX86Common::call;
     using MacroAssemblerX86Common::jump;
+    using MacroAssemblerX86Common::farJump;
     using MacroAssemblerX86Common::addDouble;
     using MacroAssemblerX86Common::loadDouble;
     using MacroAssemblerX86Common::convertInt32ToDouble;
@@ -88,6 +91,12 @@ public:
         or32(reg, Address(scratchRegister()));
     }
 
+    void or16(TrustedImm32 imm, AbsoluteAddress address)
+    {
+        move(TrustedImmPtr(address.m_ptr), scratchRegister());
+        or16(imm, Address(scratchRegister()));
+    }
+
     void sub32(TrustedImm32 imm, AbsoluteAddress address)
     {
         move(TrustedImmPtr(address.m_ptr), scratchRegister());
@@ -97,7 +106,24 @@ public:
     void load8(const void* address, RegisterID dest)
     {
         move(TrustedImmPtr(address), dest);
-        load8(dest, dest);
+        load8(Address(dest), dest);
+    }
+
+    void load16(ExtendedAddress address, RegisterID dest)
+    {
+        TrustedImmPtr addr(reinterpret_cast<void*>(address.offset));
+        MacroAssemblerX86Common::move(addr, scratchRegister());
+        MacroAssemblerX86Common::load16(BaseIndex(scratchRegister(), address.base, TimesTwo), dest);
+    }
+
+    void load16(BaseIndex address, RegisterID dest)
+    {
+        MacroAssemblerX86Common::load16(address, dest);
+    }
+
+    void load16(Address address, RegisterID dest)
+    {
+        MacroAssemblerX86Common::load16(address, dest);
     }
 
     void load32(const void* address, RegisterID dest)
@@ -106,7 +132,7 @@ public:
             m_assembler.movl_mEAX(address);
         else {
             move(TrustedImmPtr(address), dest);
-            load32(dest, dest);
+            load32(Address(dest), dest);
         }
     }
 
@@ -125,7 +151,7 @@ public:
     void store32(TrustedImm32 imm, void* address)
     {
         move(TrustedImmPtr(address), scratchRegister());
-        store32(imm, scratchRegister());
+        store32(imm, Address(scratchRegister()));
     }
 
     void store32(RegisterID source, void* address)
@@ -134,7 +160,7 @@ public:
             m_assembler.movl_EAXm(address);
         else {
             move(TrustedImmPtr(address), scratchRegister());
-            store32(source, scratchRegister());
+            store32(source, Address(scratchRegister()));
         }
     }
     
@@ -152,7 +178,7 @@ public:
     }
 
 #if OS(WINDOWS)
-    Call callWithSlowPathReturnType()
+    Call callWithSlowPathReturnType(PtrTag)
     {
         // On Win64, when the return type is larger than 8 bytes, we need to allocate space on the stack for the return value.
         // On entry, rcx should contain a pointer to this stack space. The other parameters are shifted to the right,
@@ -176,7 +202,7 @@ public:
         move(X86Registers::esp, X86Registers::ecx);
         add64(TrustedImm32(4 * sizeof(int64_t)), X86Registers::ecx);
 
-        DataLabelPtr label = moveWithPatch(TrustedImmPtr(0), scratchRegister());
+        DataLabelPtr label = moveWithPatch(TrustedImmPtr(nullptr), scratchRegister());
         Call result = Call(m_assembler.call(scratchRegister()), Call::Linkable);
 
         add64(TrustedImm32(8 * sizeof(int64_t)), X86Registers::esp);
@@ -190,7 +216,7 @@ public:
     }
 #endif
 
-    Call call()
+    Call call(PtrTag)
     {
 #if OS(WINDOWS)
         // JIT relies on the CallerFrame (frame pointer) being put on the stack,
@@ -214,7 +240,7 @@ public:
         // In addition, we need to allocate 16 bytes for two more parameters, since the call can have up to 6 parameters.
         sub64(TrustedImm32(8 * sizeof(int64_t)), X86Registers::esp);
 #endif
-        DataLabelPtr label = moveWithPatch(TrustedImmPtr(0), scratchRegister());
+        DataLabelPtr label = moveWithPatch(TrustedImmPtr(nullptr), scratchRegister());
         Call result = Call(m_assembler.call(scratchRegister()), Call::Linkable);
 #if OS(WINDOWS)
         add64(TrustedImm32(8 * sizeof(int64_t)), X86Registers::esp);
@@ -223,32 +249,26 @@ public:
         return result;
     }
 
+    void callOperation(const FunctionPtr<OperationPtrTag> operation)
+    {
+        move(TrustedImmPtr(operation.executableAddress()), scratchRegister());
+        m_assembler.call(scratchRegister());
+    }
+
+    ALWAYS_INLINE Call call(RegisterID callTag) { return UNUSED_PARAM(callTag), call(NoPtrTag); }
+
     // Address is a memory location containing the address to jump to
-    void jump(AbsoluteAddress address)
+    void farJump(AbsoluteAddress address, PtrTag tag)
     {
         move(TrustedImmPtr(address.m_ptr), scratchRegister());
-        jump(Address(scratchRegister()));
+        farJump(Address(scratchRegister()), tag);
     }
 
-    Call tailRecursiveCall()
-    {
-        DataLabelPtr label = moveWithPatch(TrustedImmPtr(0), scratchRegister());
-        Jump newJump = Jump(m_assembler.jmp_r(scratchRegister()));
-        ASSERT_UNUSED(label, differenceBetween(label, newJump) == REPATCH_OFFSET_CALL_R11);
-        return Call::fromTailJump(newJump);
-    }
-
-    Call makeTailRecursiveCall(Jump oldJump)
-    {
-        oldJump.link(this);
-        DataLabelPtr label = moveWithPatch(TrustedImmPtr(0), scratchRegister());
-        Jump newJump = Jump(m_assembler.jmp_r(scratchRegister()));
-        ASSERT_UNUSED(label, differenceBetween(label, newJump) == REPATCH_OFFSET_CALL_R11);
-        return Call::fromTailJump(newJump);
-    }
+    ALWAYS_INLINE void farJump(AbsoluteAddress address, RegisterID jumpTag) { UNUSED_PARAM(jumpTag), farJump(address, NoPtrTag); }
 
     Call threadSafePatchableNearCall()
     {
+        padBeforePatch();
         const size_t nearCallOpcodeSize = 1;
         const size_t nearCallRelativeLocationSize = sizeof(int32_t);
         // We want to make sure the 32-bit near call immediate is 32-bit aligned.
@@ -364,7 +384,7 @@ public:
         m_assembler.leaq_mr(index.offset, index.base, index.index, index.scale, dest);
     }
 
-    void getEffectiveAddress64(BaseIndex address, RegisterID dest)
+    void getEffectiveAddress(BaseIndex address, RegisterID dest)
     {
         return x86Lea64(address, dest);
     }
@@ -416,7 +436,13 @@ public:
 
     void and64(TrustedImmPtr imm, RegisterID srcDest)
     {
-        intptr_t intValue = imm.asIntptr();
+        static_assert(sizeof(void*) == sizeof(int64_t));
+        and64(TrustedImm64(bitwise_cast<int64_t>(imm.m_value)), srcDest);
+    }
+
+    void and64(TrustedImm64 imm, RegisterID srcDest)
+    {
+        int64_t intValue = imm.m_value;
         if (intValue <= std::numeric_limits<int32_t>::max()
             && intValue >= std::numeric_limits<int32_t>::min()) {
             and64(TrustedImm32(static_cast<int32_t>(intValue)), srcDest);
@@ -468,6 +494,56 @@ public:
         ctzAfterBsf<64>(dst);
     }
 
+    void countTrailingZeros64WithoutNullCheck(RegisterID src, RegisterID dst)
+    {
+#if ASSERT_ENABLED
+        Jump notZero = branchTest64(NonZero, src);
+        abortWithReason(MacroAssemblerOops, __LINE__);
+        notZero.link(this);
+#endif
+        if (supportsBMI1()) {
+            m_assembler.tzcntq_rr(src, dst);
+            return;
+        }
+        m_assembler.bsfq_rr(src, dst);
+    }
+
+    void clearBit64(RegisterID bitToClear, RegisterID dst, RegisterID = InvalidGPRReg)
+    {
+        m_assembler.btrq_rr(dst, bitToClear);
+    }
+
+    enum class ClearBitsAttributes {
+        OKToClobberMask,
+        MustPreserveMask
+    };
+
+    void clearBits64WithMask(RegisterID mask, RegisterID dest, ClearBitsAttributes maskPreservation = ClearBitsAttributes::OKToClobberMask)
+    {
+        not64(mask);
+        m_assembler.andq_rr(mask, dest);
+        if (maskPreservation == ClearBitsAttributes::MustPreserveMask)
+            not64(mask);
+    }
+
+    void clearBits64WithMask(RegisterID src, RegisterID mask, RegisterID dest, ClearBitsAttributes maskPreservation = ClearBitsAttributes::OKToClobberMask)
+    {
+        move(src, dest);
+        clearBits64WithMask(mask, dest, maskPreservation);
+    }
+
+    void countPopulation64(RegisterID src, RegisterID dst)
+    {
+        ASSERT(supportsCountPopulation());
+        m_assembler.popcntq_rr(src, dst);
+    }
+
+    void countPopulation64(Address src, RegisterID dst)
+    {
+        ASSERT(supportsCountPopulation());
+        m_assembler.popcntq_mr(src.offset, src.base, dst);
+    }
+
     void lshift64(TrustedImm32 imm, RegisterID dest)
     {
         m_assembler.shlq_i8r(imm.m_value, dest);
@@ -504,6 +580,12 @@ public:
             m_assembler.sarq_CLr(dest == X86Registers::ecx ? src : dest);
             swap(src, X86Registers::ecx);
         }
+    }
+
+    void rshift64(RegisterID src, TrustedImm32 imm, RegisterID dest)
+    {
+        move(src, dest);
+        rshift64(imm, dest);
     }
 
     void urshift64(TrustedImm32 imm, RegisterID dest)
@@ -619,6 +701,12 @@ public:
         m_assembler.negq_r(dest);
     }
 
+    void neg64(RegisterID src, RegisterID dest)
+    {
+        move(src, dest);
+        m_assembler.negq_r(dest);
+    }
+
     void neg64(Address dest)
     {
         m_assembler.negq_m(dest.offset, dest.base);
@@ -703,6 +791,13 @@ public:
         m_assembler.subq_rr(src, dest);
     }
     
+    void sub64(RegisterID a, RegisterID b, RegisterID dest)
+    {
+        ASSERT(b != dest);
+        move(a, dest);
+        sub64(b, dest);
+    }
+
     void sub64(TrustedImm32 imm, RegisterID dest)
     {
         if (imm.m_value == 1)
@@ -710,7 +805,13 @@ public:
         else
             m_assembler.subq_ir(imm.m_value, dest);
     }
-    
+
+    void sub64(RegisterID a, TrustedImm32 imm, RegisterID dest)
+    {
+        move(a, dest);
+        sub64(imm, dest);
+    }
+
     void sub64(TrustedImm64 imm, RegisterID dest)
     {
         if (imm.m_value == 1)
@@ -803,6 +904,18 @@ public:
         m_assembler.xorq_ir(imm.m_value, srcDest);
     }
 
+    void xor64(TrustedImm32 imm, RegisterID src, RegisterID dest)
+    {
+        move(src, dest);
+        xor64(imm, dest);
+    }
+
+    void xor64(TrustedImm64 imm, RegisterID srcDest)
+    {
+        move(imm, scratchRegister());
+        xor64(scratchRegister(), srcDest);
+    }
+
     void not64(RegisterID srcDest)
     {
         m_assembler.notq_r(srcDest);
@@ -818,7 +931,7 @@ public:
         m_assembler.notq_m(dest.offset, dest.base, dest.index, dest.scale);
     }
 
-    void load64(ImplicitAddress address, RegisterID dest)
+    void load64(Address address, RegisterID dest)
     {
         m_assembler.movq_mr(address.offset, address.base, dest);
     }
@@ -834,7 +947,7 @@ public:
             m_assembler.movq_mEAX(address);
         else {
             move(TrustedImmPtr(address), dest);
-            load64(dest, dest);
+            load64(Address(dest), dest);
         }
     }
 
@@ -852,7 +965,7 @@ public:
         return DataLabelCompact(this);
     }
 
-    void store64(RegisterID src, ImplicitAddress address)
+    void store64(RegisterID src, Address address)
     {
         m_assembler.movq_rm(src, address.offset, address.base);
     }
@@ -868,11 +981,11 @@ public:
             m_assembler.movq_EAXm(address);
         else {
             move(TrustedImmPtr(address), scratchRegister());
-            store64(src, scratchRegister());
+            store64(src, Address(scratchRegister()));
         }
     }
 
-    void store64(TrustedImm32 imm, ImplicitAddress address)
+    void store64(TrustedImm32 imm, Address address)
     {
         m_assembler.movq_i32m(imm.m_value, address.offset, address.base);
     }
@@ -882,7 +995,23 @@ public:
         m_assembler.movq_i32m(imm.m_value, address.offset, address.base, address.index, address.scale);
     }
 
-    void store64(TrustedImm64 imm, ImplicitAddress address)
+    void store64(TrustedImm64 imm, void* address)
+    {
+        if (CAN_SIGN_EXTEND_32_64(imm.m_value)) {
+            auto addressReg = scratchRegister();
+            move(TrustedImmPtr(address), addressReg);
+            store64(TrustedImm32(static_cast<int32_t>(imm.m_value)), Address(addressReg));
+            return;
+        }
+
+        auto src = scratchRegister();
+        move(imm, src);
+        swap(src, X86Registers::eax);
+        m_assembler.movq_EAXm(address);
+        swap(src, X86Registers::eax);
+    }
+
+    void store64(TrustedImm64 imm, Address address)
     {
         if (CAN_SIGN_EXTEND_32_64(imm.m_value)) {
             store64(TrustedImm32(static_cast<int32_t>(imm.m_value)), address);
@@ -893,22 +1022,29 @@ public:
         store64(scratchRegister(), address);
     }
 
+    void store64(TrustedImmPtr imm, Address address)
+    {
+        move(imm, scratchRegister());
+        store64(scratchRegister(), address);
+    }
+
     void store64(TrustedImm64 imm, BaseIndex address)
     {
         move(imm, scratchRegister());
         m_assembler.movq_rm(scratchRegister(), address.offset, address.base, address.index, address.scale);
     }
-    
-    void storeZero64(ImplicitAddress address)
+
+    void transfer64(Address src, Address dest)
     {
-        store64(TrustedImm32(0), address);
+        load64(src, scratchRegister());
+        store64(scratchRegister(), dest);
     }
-    
-    void storeZero64(BaseIndex address)
+
+    void transferPtr(Address src, Address dest)
     {
-        store64(TrustedImm32(0), address);
+        transfer64(src, dest);
     }
-    
+
     DataLabel32 store64WithAddressOffsetPatch(RegisterID src, Address address)
     {
         padBeforePatch();
@@ -953,40 +1089,6 @@ public:
     {
         m_assembler.cmpq_rr(right, left);
         set32(x86Condition(cond), dest);
-    }
-
-    void compareDouble(DoubleCondition cond, FPRegisterID left, FPRegisterID right, RegisterID dest)
-    {
-        if (cond & DoubleConditionBitInvert)
-            m_assembler.ucomisd_rr(left, right);
-        else
-            m_assembler.ucomisd_rr(right, left);
-
-        if (cond == DoubleEqual) {
-            if (left == right) {
-                m_assembler.setnp_r(dest);
-                return;
-            }
-
-            Jump isUnordered(m_assembler.jp());
-            m_assembler.sete_r(dest);
-            isUnordered.link(this);
-            return;
-        }
-
-        if (cond == DoubleNotEqualOrUnordered) {
-            if (left == right) {
-                m_assembler.setp_r(dest);
-                return;
-            }
-
-            m_assembler.setp_r(dest);
-            m_assembler.setne_r(dest);
-            return;
-        }
-
-        ASSERT(!(cond & DoubleConditionBitSpecial));
-        m_assembler.setCC_r(static_cast<X86Assembler::Condition>(cond & ~DoubleConditionBits), dest);
     }
 
     Jump branch64(RelationalCondition cond, RegisterID left, RegisterID right)
@@ -1050,6 +1152,12 @@ public:
         m_assembler.cmpq_rm(right, address.offset, address.base, address.index, address.scale);
         return Jump(m_assembler.jCC(x86Condition(cond)));
     }
+
+    Jump branch64(RelationalCondition cond, Address left, Address right)
+    {
+        load64(right, scratchRegister());
+        return branch64(cond, left, scratchRegister());
+    }
     
     Jump branch32(RelationalCondition cond, AbsoluteAddress left, RegisterID right)
     {
@@ -1066,6 +1174,11 @@ public:
     {
         move(right, scratchRegister());
         return branchPtr(cond, left, scratchRegister());
+    }
+
+    Jump branchPtr(RelationalCondition cond, Address left, Address right)
+    {
+        return branch64(cond, left, right);
     }
 
     Jump branchTest64(ResultCondition cond, RegisterID reg, RegisterID mask)
@@ -1090,6 +1203,36 @@ public:
     {
         move(mask, scratchRegister());
         return branchTest64(cond, reg, scratchRegister());
+    }
+
+    Jump branchTestBit64(ResultCondition cond, RegisterID testValue, TrustedImm32 bit)
+    {
+        m_assembler.btw_ir(static_cast<unsigned>(bit.m_value) % 64, testValue);
+        if (cond == NonZero)
+            return Jump(m_assembler.jb());
+        if (cond == Zero)
+            return Jump(m_assembler.jae());
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+
+    Jump branchTestBit64(ResultCondition cond, Address testValue, TrustedImm32 bit)
+    {
+        m_assembler.btw_im(static_cast<unsigned>(bit.m_value) % 64, testValue.offset, testValue.base);
+        if (cond == NonZero)
+            return Jump(m_assembler.jb());
+        if (cond == Zero)
+            return Jump(m_assembler.jae());
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+
+    Jump branchTestBit64(ResultCondition cond, RegisterID reg, RegisterID bit)
+    {
+        m_assembler.btw_ir(bit, reg);
+        if (cond == NonZero)
+            return Jump(m_assembler.jb());
+        if (cond == Zero)
+            return Jump(m_assembler.jae());
+        RELEASE_ASSERT_NOT_REACHED();
     }
 
     void test64(ResultCondition cond, RegisterID reg, TrustedImm32 mask, RegisterID dest)
@@ -1402,13 +1545,13 @@ public:
         return DataLabelPtr(this);
     }
 
-    Jump branchPtrWithPatch(RelationalCondition cond, RegisterID left, DataLabelPtr& dataLabel, TrustedImmPtr initialRightValue = TrustedImmPtr(0))
+    Jump branchPtrWithPatch(RelationalCondition cond, RegisterID left, DataLabelPtr& dataLabel, TrustedImmPtr initialRightValue = TrustedImmPtr(nullptr))
     {
         dataLabel = moveWithPatch(initialRightValue, scratchRegister());
         return branch64(cond, left, scratchRegister());
     }
 
-    Jump branchPtrWithPatch(RelationalCondition cond, Address left, DataLabelPtr& dataLabel, TrustedImmPtr initialRightValue = TrustedImmPtr(0))
+    Jump branchPtrWithPatch(RelationalCondition cond, Address left, DataLabelPtr& dataLabel, TrustedImmPtr initialRightValue = TrustedImmPtr(nullptr))
     {
         dataLabel = moveWithPatch(initialRightValue, scratchRegister());
         return branch64(cond, left, scratchRegister());
@@ -1422,7 +1565,7 @@ public:
         return branch32(cond, left, scratchRegister());
     }
 
-    DataLabelPtr storePtrWithPatch(TrustedImmPtr initialValue, ImplicitAddress address)
+    DataLabelPtr storePtrWithPatch(TrustedImmPtr initialValue, Address address)
     {
         DataLabelPtr label = moveWithPatch(initialValue, scratchRegister());
         store64(scratchRegister(), address);
@@ -1431,11 +1574,13 @@ public:
 
     PatchableJump patchableBranch64(RelationalCondition cond, RegisterID reg, TrustedImm64 imm)
     {
+        padBeforePatch();
         return PatchableJump(branch64(cond, reg, imm));
     }
 
     PatchableJump patchableBranch64(RelationalCondition cond, RegisterID left, RegisterID right)
     {
+        padBeforePatch();
         return PatchableJump(branch64(cond, left, right));
     }
     
@@ -1461,7 +1606,23 @@ public:
         MacroAssemblerX86Common::move(TrustedImmPtr(address.m_ptr), scratchRegister());
         return MacroAssemblerX86Common::branchTest8(cond, Address(scratchRegister()), mask8);
     }
-    
+
+    using MacroAssemblerX86Common::branchTest16;
+    Jump branchTest16(ResultCondition cond, ExtendedAddress address, TrustedImm32 mask = TrustedImm32(-1))
+    {
+        TrustedImm32 mask16(static_cast<int16_t>(mask.m_value));
+        TrustedImmPtr addr(reinterpret_cast<void*>(address.offset));
+        MacroAssemblerX86Common::move(addr, scratchRegister());
+        return MacroAssemblerX86Common::branchTest16(cond, BaseIndex(scratchRegister(), address.base, TimesOne), mask16);
+    }
+
+    Jump branchTest16(ResultCondition cond, AbsoluteAddress address, TrustedImm32 mask = TrustedImm32(-1))
+    {
+        TrustedImm32 mask16(static_cast<int16_t>(mask.m_value));
+        MacroAssemblerX86Common::move(TrustedImmPtr(address.m_ptr), scratchRegister());
+        return MacroAssemblerX86Common::branchTest16(cond, Address(scratchRegister()), mask16);
+    }
+
     void xchg64(RegisterID reg, Address address)
     {
         m_assembler.xchgq_rm(reg, address.offset, address.base);
@@ -1745,7 +1906,7 @@ public:
         // instructions are the same. Otherwise, we need to: subtract int64_t::min(); truncate double to
         // uint64_t; then add back int64_t::min() in the destination gpr.
 
-        Jump large = branchDouble(DoubleGreaterThanOrEqual, src, int64Min);
+        Jump large = branchDouble(DoubleGreaterThanOrEqualAndOrdered, src, int64Min);
         m_assembler.cvttsd2siq_rr(src, dest);
         Jump done = jump();
         large.link(this);
@@ -1778,7 +1939,7 @@ public:
         // instructions are the same. Otherwise, we need to: subtract int64_t::min(); truncate double to
         // uint64_t; then add back int64_t::min() in the destination gpr.
 
-        Jump large = branchFloat(DoubleGreaterThanOrEqual, src, int64Min);
+        Jump large = branchFloat(DoubleGreaterThanOrEqualAndOrdered, src, int64Min);
         m_assembler.cvttss2siq_rr(src, dest);
         Jump done = jump();
         large.link(this);
@@ -1856,9 +2017,10 @@ public:
     static bool supportsFloatingPointSqrt() { return true; }
     static bool supportsFloatingPointAbs() { return true; }
     
-    static FunctionPtr readCallTarget(CodeLocationCall call)
+    template<PtrTag resultTag, PtrTag locationTag>
+    static FunctionPtr<resultTag> readCallTarget(CodeLocationCall<locationTag> call)
     {
-        return FunctionPtr(X86Assembler::readPointer(call.dataLabelPtrAtOffset(-REPATCH_OFFSET_CALL_R11).dataLocation()));
+        return FunctionPtr<resultTag>(X86Assembler::readPointer(call.dataLabelPtrAtOffset(-REPATCH_OFFSET_CALL_R11).dataLocation()));
     }
 
     bool haveScratchRegisterForBlinding() { return m_allowScratchRegister; }
@@ -1866,8 +2028,9 @@ public:
 
     static bool canJumpReplacePatchableBranchPtrWithPatch() { return true; }
     static bool canJumpReplacePatchableBranch32WithPatch() { return true; }
-    
-    static CodeLocationLabel startOfBranchPtrWithPatchOnRegister(CodeLocationDataLabelPtr label)
+
+    template<PtrTag tag>
+    static CodeLocationLabel<tag> startOfBranchPtrWithPatchOnRegister(CodeLocationDataLabelPtr<tag> label)
     {
         const int rexBytes = 1;
         const int opcodeBytes = 1;
@@ -1876,8 +2039,9 @@ public:
         ASSERT(totalBytes >= maxJumpReplacementSize());
         return label.labelAtOffset(-totalBytes);
     }
-    
-    static CodeLocationLabel startOfBranch32WithPatchOnRegister(CodeLocationDataLabel32 label)
+
+    template<PtrTag tag>
+    static CodeLocationLabel<tag> startOfBranch32WithPatchOnRegister(CodeLocationDataLabel32<tag> label)
     {
         const int rexBytes = 1;
         const int opcodeBytes = 1;
@@ -1886,38 +2050,45 @@ public:
         ASSERT(totalBytes >= maxJumpReplacementSize());
         return label.labelAtOffset(-totalBytes);
     }
-    
-    static CodeLocationLabel startOfPatchableBranchPtrWithPatchOnAddress(CodeLocationDataLabelPtr label)
+
+    template<PtrTag tag>
+    static CodeLocationLabel<tag> startOfPatchableBranchPtrWithPatchOnAddress(CodeLocationDataLabelPtr<tag> label)
     {
         return startOfBranchPtrWithPatchOnRegister(label);
     }
 
-    static CodeLocationLabel startOfPatchableBranch32WithPatchOnAddress(CodeLocationDataLabel32 label)
+    template<PtrTag tag>
+    static CodeLocationLabel<tag> startOfPatchableBranch32WithPatchOnAddress(CodeLocationDataLabel32<tag> label)
     {
         return startOfBranch32WithPatchOnRegister(label);
     }
-    
-    static void revertJumpReplacementToPatchableBranchPtrWithPatch(CodeLocationLabel instructionStart, Address, void* initialValue)
+
+    template<PtrTag tag>
+    static void revertJumpReplacementToPatchableBranchPtrWithPatch(CodeLocationLabel<tag> instructionStart, Address, void* initialValue)
     {
         X86Assembler::revertJumpTo_movq_i64r(instructionStart.executableAddress(), reinterpret_cast<intptr_t>(initialValue), s_scratchRegister);
     }
 
-    static void revertJumpReplacementToPatchableBranch32WithPatch(CodeLocationLabel instructionStart, Address, int32_t initialValue)
+    template<PtrTag tag>
+    static void revertJumpReplacementToPatchableBranch32WithPatch(CodeLocationLabel<tag> instructionStart, Address, int32_t initialValue)
     {
         X86Assembler::revertJumpTo_movl_i32r(instructionStart.executableAddress(), initialValue, s_scratchRegister);
     }
 
-    static void revertJumpReplacementToBranchPtrWithPatch(CodeLocationLabel instructionStart, RegisterID, void* initialValue)
+    template<PtrTag tag>
+    static void revertJumpReplacementToBranchPtrWithPatch(CodeLocationLabel<tag> instructionStart, RegisterID, void* initialValue)
     {
         X86Assembler::revertJumpTo_movq_i64r(instructionStart.executableAddress(), reinterpret_cast<intptr_t>(initialValue), s_scratchRegister);
     }
 
-    static void repatchCall(CodeLocationCall call, CodeLocationLabel destination)
+    template<PtrTag callTag, PtrTag destTag>
+    static void repatchCall(CodeLocationCall<callTag> call, CodeLocationLabel<destTag> destination)
     {
         X86Assembler::repatchPointer(call.dataLabelPtrAtOffset(-REPATCH_OFFSET_CALL_R11).dataLocation(), destination.executableAddress());
     }
 
-    static void repatchCall(CodeLocationCall call, FunctionPtr destination)
+    template<PtrTag callTag, PtrTag destTag>
+    static void repatchCall(CodeLocationCall<callTag> call, FunctionPtr<destTag> destination)
     {
         X86Assembler::repatchPointer(call.dataLabelPtrAtOffset(-REPATCH_OFFSET_CALL_R11).dataLocation(), destination.executableAddress());
     }
@@ -1938,14 +2109,15 @@ private:
 
     friend class LinkBuffer;
 
-    static void linkCall(void* code, Call call, FunctionPtr function)
+    template<PtrTag tag>
+    static void linkCall(void* code, Call call, FunctionPtr<tag> function)
     {
         if (!call.isFlagSet(Call::Near))
-            X86Assembler::linkPointer(code, call.m_label.labelAtOffset(-REPATCH_OFFSET_CALL_R11), function.value());
+            X86Assembler::linkPointer(code, call.m_label.labelAtOffset(-REPATCH_OFFSET_CALL_R11), function.executableAddress());
         else if (call.isFlagSet(Call::Tail))
-            X86Assembler::linkJump(code, call.m_label, function.value());
+            X86Assembler::linkJump(code, call.m_label, function.executableAddress());
         else
-            X86Assembler::linkCall(code, call.m_label, function.value());
+            X86Assembler::linkCall(code, call.m_label, function.executableAddress());
     }
 };
 

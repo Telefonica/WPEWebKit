@@ -33,33 +33,24 @@ namespace WebCore {
 
 class Exception {
 public:
-    explicit Exception(ExceptionCode, String&& = { });
+    explicit Exception(ExceptionCode, String = { });
 
     ExceptionCode code() const { return m_code; }
     const String& message() const { return m_message; }
     String&& releaseMessage() { return WTFMove(m_message); }
 
-    Exception isolatedCopy() const
-    {
-        return Exception { m_code, m_message.isolatedCopy() };
-    }
+    Exception isolatedCopy() const & { return Exception { m_code, m_message.isolatedCopy() }; }
+    Exception isolatedCopy() && { return Exception { m_code, WTFMove(m_message).isolatedCopy() }; }
 
 private:
     ExceptionCode m_code;
     String m_message;
 };
 
-Exception isolatedCopy(Exception&&);
-
-inline Exception::Exception(ExceptionCode code, String&& message)
-    : m_code(code)
-    , m_message(WTFMove(message))
+inline Exception::Exception(ExceptionCode code, String message)
+    : m_code { code }
+    , m_message { WTFMove(message) }
 {
 }
 
-inline Exception isolatedCopy(Exception&& value)
-{
-    return Exception { value.code(), value.releaseMessage().isolatedCopy() };
-}
-
-}
+} // namespace WebCore

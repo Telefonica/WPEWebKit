@@ -26,7 +26,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 
 #import "WebDefaultContextMenuDelegate.h"
 
@@ -35,7 +35,7 @@
 #import "WebDefaultUIDelegate.h"
 #import "WebFrameInternal.h"
 #import "WebFrameView.h"
-#import "WebHTMLViewPrivate.h"
+#import "WebHTMLViewInternal.h"
 #import "WebLocalizableStringsInternal.h"
 #import "WebNSPasteboardExtras.h"
 #import "WebNSURLRequestExtras.h"
@@ -50,7 +50,6 @@
 #import <WebCore/FrameLoader.h>
 #import <WebKitLegacy/DOM.h>
 #import <WebKitLegacy/DOMPrivate.h>
-#import <WebKitSystemInterface.h>
 #import <pal/system/mac/DefaultSearchProvider.h>
 #import <wtf/Assertions.h>
 
@@ -58,7 +57,7 @@
 
 - (NSMenuItem *)menuItemWithTag:(int)tag target:(id)target representedObject:(id)representedObject
 {
-    NSMenuItem *menuItem = [[[NSMenuItem alloc] init] autorelease];
+    auto menuItem = adoptNS([[NSMenuItem alloc] init]);
     [menuItem setTag:tag];
     [menuItem setTarget:target]; // can be nil
     [menuItem setRepresentedObject:representedObject];
@@ -115,7 +114,7 @@
 
     [menuItem setAction:action];
     
-    return menuItem;
+    return menuItem.autorelease();
 }
 
 - (void)appendDefaultItems:(NSArray *)defaultItems toArray:(NSMutableArray *)menuItems
@@ -190,4 +189,4 @@
 
 @end
 
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)

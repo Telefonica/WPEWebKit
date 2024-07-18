@@ -48,7 +48,7 @@ public interface CameraVideoCapturer extends VideoCapturer {
    * The callback may be called on an arbitrary thread.
    */
   public interface CameraSwitchHandler {
-    // Invoked on success. |isFrontCamera| is true if the new camera is front facing.
+    // Invoked on success. `isFrontCamera` is true if the new camera is front facing.
     void onCameraSwitchDone(boolean isFrontCamera);
 
     // Invoked on failure, e.g. camera is stopped or only one camera available.
@@ -62,10 +62,17 @@ public interface CameraVideoCapturer extends VideoCapturer {
   void switchCamera(CameraSwitchHandler switchEventsHandler);
 
   /**
+   * Switch camera to the specified camera id. This can only be called while the camera is running.
+   * This function can be called from any thread.
+   */
+  void switchCamera(CameraSwitchHandler switchEventsHandler, String cameraName);
+
+  /**
    * MediaRecorder add/remove handler - one of these functions are invoked with the result of
    * addMediaRecorderToCamera() or removeMediaRecorderFromCamera calls.
    * The callback may be called on an arbitrary thread.
    */
+  @Deprecated
   public interface MediaRecorderHandler {
     // Invoked on success.
     void onMediaRecorderSuccess();
@@ -79,13 +86,20 @@ public interface CameraVideoCapturer extends VideoCapturer {
    * Once MediaRecorder is added to camera pipeline camera switch is not allowed.
    * This function can be called from any thread.
    */
-  void addMediaRecorderToCamera(MediaRecorder mediaRecorder, MediaRecorderHandler resultHandler);
+  @Deprecated
+  default void addMediaRecorderToCamera(
+      MediaRecorder mediaRecorder, MediaRecorderHandler resultHandler) {
+    throw new UnsupportedOperationException("Deprecated and not implemented.");
+  }
 
   /**
    * Remove MediaRecorder from camera pipeline. This can only be called while the camera is running.
    * This function can be called from any thread.
    */
-  void removeMediaRecorderFromCamera(MediaRecorderHandler resultHandler);
+  @Deprecated
+  default void removeMediaRecorderFromCamera(MediaRecorderHandler resultHandler) {
+    throw new UnsupportedOperationException("Deprecated and not implemented.");
+  }
 
   /**
    * Helper class to log framerate and detect if the camera freezes. It will run periodic callbacks

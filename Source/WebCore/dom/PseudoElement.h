@@ -32,11 +32,9 @@
 namespace WebCore {
 
 class PseudoElement final : public Element {
+    WTF_MAKE_ISO_ALLOCATED(PseudoElement);
 public:
-    static Ref<PseudoElement> create(Element& host, PseudoId pseudoId)
-    {
-        return adoptRef(*new PseudoElement(host, pseudoId));
-    }
+    static Ref<PseudoElement> create(Element& host, PseudoId);
     virtual ~PseudoElement();
 
     Element* hostElement() const { return m_hostElement; }
@@ -46,8 +44,6 @@ public:
 
     bool canStartSelection() const override { return false; }
     bool canContainRangeEndPoint() const override { return false; }
-
-    static String pseudoElementNameForEvents(PseudoId);
 
 private:
     PseudoElement(Element&, PseudoId);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,16 +31,12 @@
 #include "DFGGraph.h"
 #include "DFGInsertionSet.h"
 #include "DFGPhase.h"
-#include "DFGPredictionPropagationPhase.h"
-#include "DFGVariableAccessDataDump.h"
-#include "JSCInlines.h"
-#include <unordered_map>
-#include <wtf/HashMethod.h>
+#include "JSCJSValueInlines.h"
 
 namespace JSC { namespace DFG {
 
 namespace DFGIntegerCheckCombiningPhaseInternal {
-static const bool verbose = false;
+static constexpr bool verbose = false;
 }
 
 class IntegerCheckCombiningPhase : public Phase {
@@ -56,12 +52,18 @@ public:
     };
 
     struct RangeKey {
+        struct Hash {
+            static unsigned hash(const RangeKey& key) { return key.hash(); }
+            static bool equal(const RangeKey& a, const RangeKey& b) { return a == b; }
+            static constexpr bool safeToCompareToEmptyOrDeleted = false;
+        };
+
         static RangeKey addition(Edge edge)
         {
             RangeKey result;
             result.m_kind = Addition;
             result.m_source = edge.sanitized();
-            result.m_key = 0;
+            result.m_key = nullptr;
             return result;
         }
         
@@ -145,11 +147,12 @@ public:
         }
         
         int32_t m_minBound { 0 };
-        CodeOrigin m_minOrigin;
         int32_t m_maxBound { 0 };
+        CodeOrigin m_minOrigin;
         CodeOrigin m_maxOrigin;
         unsigned m_count { 0 }; // If this is zero then the bounds won't necessarily make sense.
         bool m_hoisted { false };
+        Node* m_dependency { nullptr };
     };
 
     IntegerCheckCombiningPhase(Graph& graph)
@@ -188,8 +191,8 @@ private:
                 dataLog("For ", node, ": ", data, "\n");
             if (!data)
                 continue;
-            
-            Range& range = m_map[data.m_key];
+
+            Range& range = m_map.add(data.m_key, Range { }).iterator->value;
             if (DFGIntegerCheckCombiningPhaseInternal::verbose)
                 dataLog("    Range: ", range, "\n");
             if (range.m_count) {
@@ -216,7 +219,7 @@ private:
             RangeKeyAndAddend data = rangeKeyAndAddend(node);
             if (!data)
                 continue;
-            Range range = m_map[data.m_key];
+            Range range = m_map.get(data.m_key);
             if (!isValid(data.m_key, range))
                 continue;
             
@@ -257,14 +260,15 @@ private:
                             Arith::Unchecked);
                     }
                     
+                    Node* minCheck = nullptr;
                     if (minNode) {
-                        m_insertionSet.insertNode(
+                        minCheck = m_insertionSet.insertNode(
                             nodeIndex, SpecNone, CheckInBounds, node->origin,
                             Edge(minNode, Int32Use), Edge(data.m_key.m_key, Int32Use));
                     }
-                    m_insertionSet.insertNode(
+                    m_map.find(data.m_key)->value.m_dependency = m_insertionSet.insertNode(
                         nodeIndex, SpecNone, CheckInBounds, node->origin,
-                        Edge(maxNode, Int32Use), Edge(data.m_key.m_key, Int32Use));
+                        Edge(maxNode, Int32Use), Edge(data.m_key.m_key, Int32Use), Edge(minCheck, UntypedUse));
                     break;
                 }
                 
@@ -273,7 +277,7 @@ private:
                 }
                 
                 m_changed = true;
-                m_map[data.m_key].m_hoisted = true;
+                m_map.find(data.m_key)->value.m_hoisted = true;
             }
             
             // Do the elimination.
@@ -284,7 +288,10 @@ private:
                 break;
                 
             case ArrayBounds:
-                node->remove();
+                ASSERT(node->op() == CheckInBounds);
+                if (UNLIKELY(Options::validateBoundsCheckElimination()))
+                    m_insertionSet.insertNode(nodeIndex, SpecNone, AssertInBounds, node->origin, node->child1(), node->child2());
+                node->convertToIdentityOn(m_map.get(data.m_key).m_dependency);
                 m_changed = true;
                 break;
                 
@@ -377,7 +384,7 @@ private:
                 nodeIndex, origin, jsNumber(addend), source.useKind()));
     }
     
-    using RangeMap = std::unordered_map<RangeKey, Range, HashMethod<RangeKey>, std::equal_to<RangeKey>, FastAllocator<std::pair<const RangeKey, Range>>>;
+    using RangeMap = HashMap<GenericHashKey<RangeKey, RangeKey::Hash>, Range>;
     RangeMap m_map;
     
     InsertionSet m_insertionSet;

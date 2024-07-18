@@ -41,14 +41,16 @@ public:
     static bool shouldAddResourceTiming(CachedResource&);
 
     void addResourceTiming(CachedResource&, Document&, ResourceTiming&&);
-    void storeResourceTimingInitiatorInformation(const CachedResourceHandle<CachedResource>&, const AtomicString&, Frame*);
+    void removeResourceTiming(CachedResource&);
+    void storeResourceTimingInitiatorInformation(const CachedResourceHandle<CachedResource>&, const AtomString&, Frame*);
 
 private:
     enum AlreadyAdded { NotYetAdded, Added };
     struct InitiatorInfo {
-        AtomicString name;
+        AtomString name;
         AlreadyAdded added;
     };
+    // FIXME: This shoudn't use raw pointer as identifier (though it is not dereferenced).
     HashMap<CachedResource*, InitiatorInfo> m_initiatorMap;
 };
 

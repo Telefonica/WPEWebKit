@@ -30,33 +30,30 @@
 
 namespace WebCore {
 
-class Color;
-class FloatRect;
-class FloatSize;
-class Node;
-class RenderImage;
+class LegacyRenderSVGContainer;
+class LegacyRenderSVGRoot;
+class LegacyRenderSVGShape;
+class RenderElement;
 class RenderObject;
-class RenderSVGContainer;
 class RenderSVGGradientStop;
 class RenderSVGImage;
 class RenderSVGInlineText;
 class RenderSVGResourceContainer;
-class RenderSVGShape;
-class RenderSVGRoot;
 class RenderSVGText;
-class AffineTransform;
-class SVGUnitTypes;
+class SVGGraphicsElement;
 
 // functions used by the main RenderTreeAsText code
-void write(WTF::TextStream&, const RenderSVGShape&, int indent, RenderAsTextBehavior);
-void write(WTF::TextStream&, const RenderSVGRoot&, int indent, RenderAsTextBehavior);
-void writeSVGGradientStop(WTF::TextStream&, const RenderSVGGradientStop&, int indent, RenderAsTextBehavior);
-void writeSVGResourceContainer(WTF::TextStream&, const RenderSVGResourceContainer&, int indent, RenderAsTextBehavior);
-void writeSVGContainer(WTF::TextStream&, const RenderSVGContainer&, int indent, RenderAsTextBehavior);
-void writeSVGImage(WTF::TextStream&, const RenderSVGImage&, int indent, RenderAsTextBehavior);
-void writeSVGInlineText(WTF::TextStream&, const RenderSVGInlineText&, int indent, RenderAsTextBehavior);
-void writeSVGText(WTF::TextStream&, const RenderSVGText&, int indent, RenderAsTextBehavior);
-void writeResources(WTF::TextStream&, const RenderObject&, int indent, RenderAsTextBehavior);
+void write(WTF::TextStream&, const LegacyRenderSVGRoot&, OptionSet<RenderAsTextFlag>);
+void write(WTF::TextStream&, const LegacyRenderSVGShape&, OptionSet<RenderAsTextFlag>);
+void writeSVGGradientStop(WTF::TextStream&, const RenderSVGGradientStop&, OptionSet<RenderAsTextFlag>);
+void writeSVGResourceContainer(WTF::TextStream&, const RenderSVGResourceContainer&, OptionSet<RenderAsTextFlag>);
+void writeSVGContainer(WTF::TextStream&, const LegacyRenderSVGContainer&, OptionSet<RenderAsTextFlag>);
+void writeSVGGraphicsElement(WTF::TextStream&, const SVGGraphicsElement&);
+void writeSVGImage(WTF::TextStream&, const RenderSVGImage&, OptionSet<RenderAsTextFlag>);
+void writeSVGInlineText(WTF::TextStream&, const RenderSVGInlineText&, OptionSet<RenderAsTextFlag>);
+void writeSVGPaintingFeatures(TextStream&, const RenderElement&, OptionSet<RenderAsTextFlag>);
+void writeSVGText(WTF::TextStream&, const RenderSVGText&, OptionSet<RenderAsTextFlag>);
+void writeResources(WTF::TextStream&, const RenderObject&, OptionSet<RenderAsTextFlag>);
 
 // helper operators specific to dumping the render tree. these are used in various classes to dump the render tree
 // these could be defined in separate namespace to avoid matching these generic signatures unintentionally.
@@ -73,13 +70,6 @@ WTF::TextStream& operator<<(WTF::TextStream& ts, const Vector<Item*>& v)
     }
 
     ts << "]";
-    return ts;
-}
-
-template<typename Pointer>
-WTF::TextStream& operator<<(WTF::TextStream& ts, Pointer* t)
-{
-    ts << reinterpret_cast<intptr_t>(t);
     return ts;
 }
 

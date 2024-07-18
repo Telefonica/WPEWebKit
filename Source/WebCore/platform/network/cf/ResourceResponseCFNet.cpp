@@ -28,15 +28,11 @@
 
 #if USE(CFURLCONNECTION)
 
-#include <pal/spi/cf/CFNetworkSPI.h>
+#include <pal/spi/win/CFNetworkSPIWin.h>
 
 #include "HTTPParsers.h"
 #include "MIMETypeRegistry.h"
 #include <wtf/RetainPtr.h>
-
-#if PLATFORM(COCOA)
-#include "WebCoreSystemInterface.h"
-#endif
 
 namespace WebCore {
 
@@ -47,13 +43,9 @@ static CFStringRef const commonHeaderFields[] = {
 CFURLResponseRef ResourceResponse::cfURLResponse() const
 {
     if (!m_cfResponse && !m_isNull) {
-#if PLATFORM(COCOA)
-        nsURLResponse();
-#else
         RetainPtr<CFURLRef> url = m_url.createCFURL();
         // FIXME: This creates a very incomplete CFURLResponse, which does not even have a status code.
         m_cfResponse = adoptCF(CFURLResponseCreate(0, url.get(), m_mimeType.string().createCFString().get(), m_expectedContentLength, m_textEncodingName.string().createCFString().get(), kCFURLCacheStorageAllowed));
-#endif
     }
 
     return m_cfResponse.get();
@@ -82,7 +74,7 @@ void ResourceResponse::platformLazyInit(InitLevel initLevel)
         // Workaround for <rdar://problem/8757088>, can be removed once that is fixed.
         unsigned textEncodingNameLength = m_textEncodingName.length();
         if (textEncodingNameLength >= 2 && m_textEncodingName[0U] == '"' && m_textEncodingName[textEncodingNameLength - 1] == '"')
-            m_textEncodingName = m_textEncodingName.string().substring(1, textEncodingNameLength - 2);
+            m_textEncodingName = StringView { m_textEncodingName }.substring(1, textEncodingNameLength - 2).toAtomString();
 
         CFHTTPMessageRef httpResponse = CFURLResponseGetHTTPResponse(m_cfResponse.get());
         if (httpResponse) {
@@ -103,7 +95,7 @@ void ResourceResponse::platformLazyInit(InitLevel initLevel)
     if (m_initLevel < AllFields && initLevel == AllFields) {
         CFHTTPMessageRef httpResponse = CFURLResponseGetHTTPResponse(m_cfResponse.get());
         if (httpResponse) {
-            m_httpVersion = String(adoptCF(CFHTTPMessageCopyVersion(httpResponse)).get()).convertToASCIIUppercase();
+            m_httpVersion = AtomString { String(adoptCF(CFHTTPMessageCopyVersion(httpResponse)).get()).convertToASCIIUppercase() };
 
             RetainPtr<CFStringRef> statusLine = adoptCF(CFHTTPMessageCopyResponseStatusLine(httpResponse));
             m_httpStatusText = extractReasonPhraseFromHTTPStatusLine(statusLine.get());
@@ -116,12 +108,10 @@ void ResourceResponse::platformLazyInit(InitLevel initLevel)
     m_initLevel = initLevel;
 }
 
-#if !PLATFORM(COCOA)
-CertificateInfo ResourceResponse::platformCertificateInfo() const
+CertificateInfo ResourceResponse::platformCertificateInfo(Span<const std::byte>) const
 {
     return { };
 }
-#endif
 
 String ResourceResponse::platformSuggestedFilename() const
 {

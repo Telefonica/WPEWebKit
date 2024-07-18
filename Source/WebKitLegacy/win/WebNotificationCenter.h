@@ -30,15 +30,11 @@
 
 struct WebNotificationCenterPrivate;
 
-class WebNotificationCenter : public IWebNotificationCenter {
+class WebNotificationCenter final : public IWebNotificationCenter {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     static WebNotificationCenter* createInstance();
 
-protected:
-    WebNotificationCenter();
-    ~WebNotificationCenter();
-
-public:
     // IUnknown
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppvObject);
     virtual ULONG STDMETHODCALLTYPE AddRef();
@@ -55,7 +51,10 @@ public:
     static IWebNotificationCenter* defaultCenterInternal();
     void postNotificationInternal(IWebNotification* notification, BSTR notificationName, IUnknown* anObject);
 
-protected:
+private:
+    WebNotificationCenter();
+    ~WebNotificationCenter();
+
     ULONG m_refCount { 0 };
     std::unique_ptr<WebNotificationCenterPrivate> d;
     static IWebNotificationCenter* m_defaultCenter;

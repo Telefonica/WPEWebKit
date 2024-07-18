@@ -25,9 +25,8 @@
 
 #pragma once
 
-#if ENABLE(INDEXED_DATABASE)
-
-#include <wtf/text/StringHash.h>
+#include "ProcessIdentifier.h"
+#include <wtf/Hasher.h>
 
 namespace WebCore {
 
@@ -41,36 +40,31 @@ namespace IDBServer {
 class IDBConnectionToClient;
 }
 
+using IDBConnectionIdentifier = ProcessIdentifier;
+
 class IDBResourceIdentifier {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit IDBResourceIdentifier(const IDBClient::IDBConnectionProxy&);
     IDBResourceIdentifier(const IDBClient::IDBConnectionProxy&, const IDBRequest&);
     explicit IDBResourceIdentifier(const IDBServer::IDBConnectionToClient&);
 
-    static IDBResourceIdentifier deletedValue();
-    WEBCORE_EXPORT bool isHashTableDeletedValue() const;
-
-    static IDBResourceIdentifier emptyValue();
+    WEBCORE_EXPORT static IDBResourceIdentifier emptyValue();
     bool isEmpty() const
     {
         return !m_resourceNumber && !m_idbConnectionIdentifier;
     }
 
-    unsigned hash() const
-    {
-        uint64_t hashCodes[2] = { m_idbConnectionIdentifier, m_resourceNumber };
-        return StringHasher::hashMemory<sizeof(hashCodes)>(hashCodes);
-    }
-    
+    bool operator!=(const IDBResourceIdentifier& other) const { return !(*this == other); }
     bool operator==(const IDBResourceIdentifier& other) const
     {
         return m_idbConnectionIdentifier == other.m_idbConnectionIdentifier
             && m_resourceNumber == other.m_resourceNumber;
     }
     
-    uint64_t connectionIdentifier() const { return m_idbConnectionIdentifier; }
+    IDBConnectionIdentifier connectionIdentifier() const { return m_idbConnectionIdentifier; }
 
-    IDBResourceIdentifier isolatedCopy() const;
+    WEBCORE_EXPORT IDBResourceIdentifier isolatedCopy() const;
 
 #if !LOG_DISABLED
     String loggingString() const;
@@ -79,16 +73,24 @@ public:
     WEBCORE_EXPORT IDBResourceIdentifier();
 
     template<class Encoder> void encode(Encoder&) const;
-    template<class Decoder> static bool decode(Decoder&, IDBResourceIdentifier&);
+    template<class Decoder> static WARN_UNUSED_RETURN bool decode(Decoder&, IDBResourceIdentifier&);
 
 private:
-    IDBResourceIdentifier(uint64_t connectionIdentifier, uint64_t resourceIdentifier);
-    uint64_t m_idbConnectionIdentifier { 0 };
+    friend struct IDBResourceIdentifierHashTraits;
+    friend void add(Hasher&, const IDBResourceIdentifier&);
+
+    IDBResourceIdentifier(IDBConnectionIdentifier, uint64_t resourceIdentifier);
+    IDBConnectionIdentifier m_idbConnectionIdentifier;
     uint64_t m_resourceNumber { 0 };
 };
 
+inline void add(Hasher& hasher, const IDBResourceIdentifier& identifier)
+{
+    add(hasher, identifier.m_idbConnectionIdentifier, identifier.m_resourceNumber);
+}
+
 struct IDBResourceIdentifierHash {
-    static unsigned hash(const IDBResourceIdentifier& a) { return a.hash(); }
+    static unsigned hash(const IDBResourceIdentifier& a) { return computeHash(a); }
     static bool equal(const IDBResourceIdentifier& a, const IDBResourceIdentifier& b) { return a == b; }
     static const bool safeToCompareToEmptyOrDeleted = false;
 };
@@ -109,12 +111,12 @@ struct IDBResourceIdentifierHashTraits : WTF::CustomHashTraits<IDBResourceIdenti
 
     static void constructDeletedValue(IDBResourceIdentifier& identifier)
     {
-        identifier = IDBResourceIdentifier::deletedValue();
+        new (NotNull, &identifier.m_idbConnectionIdentifier) IDBConnectionIdentifier(WTF::HashTableDeletedValue);
     }
 
     static bool isDeletedValue(const IDBResourceIdentifier& identifier)
     {
-        return identifier.isHashTableDeletedValue();
+        return identifier.m_idbConnectionIdentifier.isHashTableDeletedValue();
     }
 };
 
@@ -141,10 +143,11 @@ bool IDBResourceIdentifier::decode(Decoder& decoder, IDBResourceIdentifier& iden
 namespace WTF {
 
 template<> struct HashTraits<WebCore::IDBResourceIdentifier> : WebCore::IDBResourceIdentifierHashTraits { };
-template<> struct DefaultHash<WebCore::IDBResourceIdentifier> {
-    typedef WebCore::IDBResourceIdentifierHash Hash;
-};
+template<> struct DefaultHash<WebCore::IDBResourceIdentifier> : WebCore::IDBResourceIdentifierHash { };
+
+inline WebCore::IDBConnectionIdentifier crossThreadCopy(WebCore::IDBConnectionIdentifier identifier)
+{
+    return identifier;
+}
 
 } // namespace WTF
-
-#endif // ENABLE(INDEXED_DATABASE)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,53 +23,29 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if ENABLE(CONTEXT_MENUS)
-
 #include "config.h"
 #include "WebContextMenuListenerProxy.h"
 
-#include "APIArray.h"
-#include "WKAPICast.h"
-#include "WKArray.h"
-#include "WebContextMenuItem.h"
-#include "WebContextMenuItemData.h"
+#if ENABLE(CONTEXT_MENUS)
 
-using namespace WebCore;
+#include "WebContextMenuItem.h"
 
 namespace WebKit {
+using namespace WebCore;
 
-WebContextMenuListenerProxy::WebContextMenuListenerProxy(WebContextMenuProxy* contextMenuMac)
-    : m_contextMenuMac(contextMenuMac)
+WebContextMenuListenerProxy::WebContextMenuListenerProxy(WebContextMenuListenerProxy::Client& client)
+    : m_client(client)
 {
 }
 
-WebContextMenuListenerProxy::~WebContextMenuListenerProxy()
-{
-}
+WebContextMenuListenerProxy::~WebContextMenuListenerProxy() = default;
 
-void WebContextMenuListenerProxy::useContextMenuItems(WKArrayRef items)
+void WebContextMenuListenerProxy::useContextMenuItems(Vector<Ref<WebContextMenuItem>>&& items)
 {
-    if (!m_contextMenuMac)
+    if (!m_client)
         return;
 
-    RefPtr<API::Array> array = toImpl(items);
-    Vector<WebContextMenuItemData> dataItems;
-
-    size_t newSize = array ? array->size() : 0;
-    for (size_t i = 0; i < newSize; ++i) {
-        WebContextMenuItem* item = array->at<WebContextMenuItem>(i);
-        if (!item)
-            continue;
-
-        dataItems.append(item->data());
-    }
-
-    m_contextMenuMac->showContextMenuWithItems(dataItems);
-}
-
-void WebContextMenuListenerProxy::invalidate()
-{
-    m_contextMenuMac = nullptr;
+    m_client->useContextMenuItems(WTFMove(items));
 }
 
 } // namespace WebKit

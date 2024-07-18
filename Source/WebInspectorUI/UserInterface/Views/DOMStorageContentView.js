@@ -41,18 +41,39 @@ WI.DOMStorageContentView = class DOMStorageContentView extends WI.ContentView
         columns.key = {title: WI.UIString("Key"), sortable: true};
         columns.value = {title: WI.UIString("Value"), sortable: true};
 
-        this._dataGrid = new WI.DataGrid(columns, this._editingCallback.bind(this), this._deleteCallback.bind(this));
+        this._dataGrid = new WI.DataGrid(columns, {
+            editCallback: this._editingCallback.bind(this),
+            copyCallback: this._dataGridCopy.bind(this),
+            deleteCallback: this._deleteCallback.bind(this),
+        });
         this._dataGrid.sortOrder = WI.DataGrid.SortOrder.Ascending;
         this._dataGrid.sortColumnIdentifier = "key";
+        this._dataGrid.allowsMultipleSelection = true;
         this._dataGrid.createSettings("dom-storage-content-view");
         this._dataGrid.addEventListener(WI.DataGrid.Event.SortChanged, this._sortDataGrid, this);
-
         this.addSubview(this._dataGrid);
+
+        this._filterBarNavigationItem = new WI.FilterBarNavigationItem;
+        this._filterBarNavigationItem.filterBar.addEventListener(WI.FilterBar.Event.FilterDidChange, this._handleFilterBarFilterDidChange, this);
+
+        let clearButtonLabel = representedObject.isLocalStorage() ? WI.UIString("Clear Local Storage") : WI.UIString("Clear Session Storage");
+        this._clearButtonNavigationItem = new WI.ButtonNavigationItem("dom-storage-clear", clearButtonLabel, "Images/NavigationItemTrash.svg", 15, 15);
+        this._clearButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
+        this._clearButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._handleClearNavigationItemClicked, this);
 
         this._populate();
     }
 
     // Public
+
+    get navigationItems()
+    {
+        return [
+            this._filterBarNavigationItem,
+            new WI.DividerNavigationItem,
+            this._clearButtonNavigationItem,
+        ];
+    }
 
     saveToCookie(cookie)
     {
@@ -64,6 +85,16 @@ WI.DOMStorageContentView = class DOMStorageContentView extends WI.ContentView
     get scrollableElements()
     {
         return [this._dataGrid.scrollContainer];
+    }
+
+    get canFocusFilterBar()
+    {
+        return true;
+    }
+
+    focusFilterBar()
+    {
+        this._filterBarNavigationItem.filterBar.focus();
     }
 
     itemsCleared(event)
@@ -85,6 +116,7 @@ WI.DOMStorageContentView = class DOMStorageContentView extends WI.ContentView
     itemAdded(event)
     {
         let {key, value} = event.data;
+        let originalValue = value;
         value = this._truncateValue(value);
 
         // Enforce key uniqueness.
@@ -93,13 +125,14 @@ WI.DOMStorageContentView = class DOMStorageContentView extends WI.ContentView
                 return;
         }
 
-        this._dataGrid.appendChild(new WI.DataGridNode({key, value}, false));
+        this._dataGrid.appendChild(new WI.DataGridNode({key, value, originalValue}));
         this._sortDataGrid();
     }
 
     itemUpdated(event)
     {
-        let {key, value} = event.data;
+        let {key, newValue: value} = event.data;
+        let originalValue = value;
         value = this._truncateValue(value);
 
         let keyFound = false;
@@ -113,6 +146,7 @@ WI.DOMStorageContentView = class DOMStorageContentView extends WI.ContentView
 
                 keyFound = true;
                 childNode.data.value = value;
+                childNode.data.originalValue = originalValue;
                 childNode.refresh();
             }
         }
@@ -136,8 +170,9 @@ WI.DOMStorageContentView = class DOMStorageContentView extends WI.ContentView
                 if (!key || !value)
                     continue;
 
+                let originalValue = value;
                 value = this._truncateValue(value);
-                let node = new WI.DataGridNode({key, value}, false);
+                let node = new WI.DataGridNode({key, value, originalValue});
                 this._dataGrid.appendChild(node);
             }
 
@@ -159,13 +194,14 @@ WI.DOMStorageContentView = class DOMStorageContentView extends WI.ContentView
         this._dataGrid.sortNodesImmediately(comparator);
     }
 
-    _deleteCallback(node)
+    _deleteCallback()
     {
-        if (!node || node.isPlaceholderNode)
-            return;
-
-        this._dataGrid.removeChild(node);
-        this.representedObject.removeItem(node.data["key"]);
+        for (let dataGridNode of this._dataGrid.selectedDataGridNodes) {
+            if (dataGridNode.isPlaceholderNode)
+                continue;
+            this._dataGrid.removeChild(dataGridNode);
+            this.representedObject.removeItem(dataGridNode.data["key"]);
+        }
     }
 
     _editingCallback(editingNode, columnIdentifier, oldText, newText, moveDirection)
@@ -252,6 +288,23 @@ WI.DOMStorageContentView = class DOMStorageContentView extends WI.ContentView
             this._dataGrid.addPlaceholderNode();
         cleanup();
         domStorage.setItem(key, value);
+    }
+
+    _dataGridCopy(node, columnIdentifier, text)
+    {
+        if (columnIdentifier === "value" && node.data.originalValue)
+            return node.data.originalValue;
+        return text;
+    }
+
+    _handleFilterBarFilterDidChange(event)
+    {
+        this._dataGrid.filterText = this._filterBarNavigationItem.filterBar.filters.text || "";
+    }
+
+    _handleClearNavigationItemClicked(event)
+    {
+        this.representedObject.clear();
     }
 };
 

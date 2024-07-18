@@ -30,38 +30,38 @@
 //    Requires: Node is a concrete class with:
 //        Node(SentinelTag);
 //        void setPrev(Node*);
-//        Node* prev();
+//        Node* prev() const;
 //        void setNext(Node*);
-//        Node* next();
+//        Node* next() const;
 
-#ifndef SentinelLinkedList_h
-#define SentinelLinkedList_h
+#pragma once
+
+#include <iterator>
+#include <wtf/Noncopyable.h>
+#include <wtf/Nonmovable.h>
+#include <wtf/Packed.h>
 
 namespace WTF {
 
 enum SentinelTag { Sentinel };
 
-template<typename T>
+template<typename T, typename PassedPtrTraits = RawPtrTraits<T>>
 class BasicRawSentinelNode {
     WTF_MAKE_FAST_ALLOCATED;
 public:
+    using PtrTraits = typename PassedPtrTraits::template RebindTraits<BasicRawSentinelNode>;
+
     BasicRawSentinelNode(SentinelTag)
-        : m_next(0)
-        , m_prev(0)
     {
     }
     
-    BasicRawSentinelNode()
-        : m_next(0)
-        , m_prev(0)
-    {
-    }
+    BasicRawSentinelNode() = default;
     
     void setPrev(BasicRawSentinelNode* prev) { m_prev = prev; }
     void setNext(BasicRawSentinelNode* next) { m_next = next; }
     
-    T* prev() { return static_cast<T*>(m_prev); }
-    T* next() { return static_cast<T*>(m_next); }
+    T* prev() const { return static_cast<T*>(PtrTraits::unwrap(m_prev)); }
+    T* next() const { return static_cast<T*>(PtrTraits::unwrap(m_next)); }
     
     bool isOnList() const
     {
@@ -75,15 +75,61 @@ public:
     void append(BasicRawSentinelNode*);
     
 private:
-    BasicRawSentinelNode* m_next;
-    BasicRawSentinelNode* m_prev;
+    typename PtrTraits::StorageType m_next { nullptr };
+    typename PtrTraits::StorageType m_prev { nullptr };
 };
 
 template <typename T, typename RawNode = T> class SentinelLinkedList {
+    WTF_MAKE_NONCOPYABLE(SentinelLinkedList);
+    WTF_MAKE_NONMOVABLE(SentinelLinkedList);
 public:
-    typedef T* iterator;
+    template<typename RawNodeType, typename NodeType> class BaseIterator {
+        WTF_MAKE_FAST_ALLOCATED;
+    public:
+        explicit BaseIterator(RawNodeType* node)
+            : m_node(node)
+        {
+        }
+        
+        auto& operator*() const { return static_cast<NodeType&>(*m_node); }
 
-    SentinelLinkedList();
+        auto* operator->() const { return static_cast<NodeType*>(m_node); }
+
+        BaseIterator& operator++()
+        {
+            m_node = m_node->next();
+            return *this;
+        }
+        
+        BaseIterator& operator--()
+        {
+            m_node = m_node->prev();
+            return *this;
+        }
+        
+        bool operator==(const BaseIterator& other) const
+        {
+            return m_node == other.m_node;
+        }
+
+        bool operator!=(const BaseIterator& other) const
+        {
+            return !(*this == other);
+        }
+
+    private:
+        RawNodeType* m_node;
+    };
+
+    using iterator = BaseIterator<RawNode, T>;
+    using const_iterator = BaseIterator<const RawNode, const T>;
+
+    SentinelLinkedList()
+        : m_sentinel(Sentinel)
+    {
+        m_sentinel.setPrev(&m_sentinel);
+        m_sentinel.setNext(&m_sentinel);
+    }
 
     // Pushes to the front of the list. It's totally backwards from what you'd expect.
     void push(T*);
@@ -99,6 +145,8 @@ public:
 
     iterator begin();
     iterator end();
+    const_iterator begin() const;
+    const_iterator end() const;
     
     bool isEmpty() { return begin() == end(); }
     
@@ -106,8 +154,9 @@ public:
     void forEach(const Func& func)
     {
         for (iterator iter = begin(); iter != end();) {
-            iterator next = iter->next();
-            func(iter);
+            iterator next = iter;
+            ++next;
+            func(&*iter);
             iter = next;
         }
     }
@@ -115,46 +164,44 @@ public:
     void takeFrom(SentinelLinkedList<T, RawNode>&);
     
 private:
-    RawNode m_headSentinel;
-    RawNode m_tailSentinel;
+    RawNode m_sentinel;
 };
 
-template <typename T> void BasicRawSentinelNode<T>::remove()
+template <typename T, typename PtrTraits> void BasicRawSentinelNode<T, PtrTraits>::remove()
 {
-    SentinelLinkedList<T, BasicRawSentinelNode<T>>::remove(static_cast<T*>(this));
+    SentinelLinkedList<T, BasicRawSentinelNode>::remove(static_cast<T*>(this));
 }
 
-template <typename T> void BasicRawSentinelNode<T>::prepend(BasicRawSentinelNode* node)
+template <typename T, typename PtrTraits> void BasicRawSentinelNode<T, PtrTraits>::prepend(BasicRawSentinelNode* node)
 {
-    SentinelLinkedList<T, BasicRawSentinelNode<T>>::prepend(
+    SentinelLinkedList<T, BasicRawSentinelNode>::prepend(
         static_cast<T*>(this), static_cast<T*>(node));
 }
 
-template <typename T> void BasicRawSentinelNode<T>::append(BasicRawSentinelNode* node)
+template <typename T, typename PtrTraits> void BasicRawSentinelNode<T, PtrTraits>::append(BasicRawSentinelNode* node)
 {
-    SentinelLinkedList<T, BasicRawSentinelNode<T>>::append(
+    SentinelLinkedList<T, BasicRawSentinelNode>::append(
         static_cast<T*>(this), static_cast<T*>(node));
-}
-
-template <typename T, typename RawNode> inline SentinelLinkedList<T, RawNode>::SentinelLinkedList()
-    : m_headSentinel(Sentinel)
-    , m_tailSentinel(Sentinel)
-{
-    m_headSentinel.setNext(&m_tailSentinel);
-    m_headSentinel.setPrev(0);
-
-    m_tailSentinel.setPrev(&m_headSentinel);
-    m_tailSentinel.setNext(0);
 }
 
 template <typename T, typename RawNode> inline typename SentinelLinkedList<T, RawNode>::iterator SentinelLinkedList<T, RawNode>::begin()
 {
-    return static_cast<T*>(m_headSentinel.next());
+    return iterator { m_sentinel.next() };
 }
 
 template <typename T, typename RawNode> inline typename SentinelLinkedList<T, RawNode>::iterator SentinelLinkedList<T, RawNode>::end()
 {
-    return static_cast<T*>(&m_tailSentinel);
+    return iterator { &m_sentinel };
+}
+
+template <typename T, typename RawNode> inline typename SentinelLinkedList<T, RawNode>::const_iterator SentinelLinkedList<T, RawNode>::begin() const
+{
+    return const_iterator { m_sentinel.next() };
+}
+
+template <typename T, typename RawNode> inline typename SentinelLinkedList<T, RawNode>::const_iterator SentinelLinkedList<T, RawNode>::end() const
+{
+    return const_iterator { &m_sentinel };
 }
 
 template <typename T, typename RawNode> inline void SentinelLinkedList<T, RawNode>::push(T* node)
@@ -163,8 +210,8 @@ template <typename T, typename RawNode> inline void SentinelLinkedList<T, RawNod
     ASSERT(!node->prev());
     ASSERT(!node->next());
     
-    RawNode* prev = &m_headSentinel;
-    RawNode* next = m_headSentinel.next();
+    RawNode* prev = &m_sentinel;
+    RawNode* next = m_sentinel.next();
 
     node->setPrev(prev);
     node->setNext(next);
@@ -179,8 +226,8 @@ template <typename T, typename RawNode> inline void SentinelLinkedList<T, RawNod
     ASSERT(!node->prev());
     ASSERT(!node->next());
     
-    RawNode* prev = m_tailSentinel.prev();
-    RawNode* next = &m_tailSentinel;
+    RawNode* prev = m_sentinel.prev();
+    RawNode* next = &m_sentinel;
 
     node->setPrev(prev);
     node->setNext(next);
@@ -201,8 +248,8 @@ template <typename T, typename RawNode> inline void SentinelLinkedList<T, RawNod
     prev->setNext(next);
     next->setPrev(prev);
     
-    node->setPrev(0);
-    node->setNext(0);
+    node->setPrev(nullptr);
+    node->setNext(nullptr);
 }
 
 template <typename T, typename RawNode>
@@ -261,21 +308,22 @@ inline void SentinelLinkedList<T, RawNode>::takeFrom(SentinelLinkedList<T, RawNo
 {
     if (other.isEmpty())
         return;
-    
-    m_tailSentinel.prev()->setNext(other.m_headSentinel.next());
-    other.m_headSentinel.next()->setPrev(m_tailSentinel.prev());
-    
-    m_tailSentinel.setPrev(other.m_tailSentinel.prev());
-    m_tailSentinel.prev()->setNext(&m_tailSentinel);
 
-    other.m_headSentinel.setNext(&other.m_tailSentinel);
-    other.m_tailSentinel.setPrev(&other.m_headSentinel);
+    m_sentinel.prev()->setNext(other.m_sentinel.next());
+    other.m_sentinel.next()->setPrev(m_sentinel.prev());
+
+    m_sentinel.setPrev(other.m_sentinel.prev());
+    m_sentinel.prev()->setNext(&m_sentinel);
+
+    other.m_sentinel.setNext(&other.m_sentinel);
+    other.m_sentinel.setPrev(&other.m_sentinel);
 }
+
+template<typename T>
+using PackedRawSentinelNode = BasicRawSentinelNode<T, PackedPtrTraits<T>>;
 
 }
 
 using WTF::BasicRawSentinelNode;
+using WTF::PackedRawSentinelNode;
 using WTF::SentinelLinkedList;
-
-#endif
-

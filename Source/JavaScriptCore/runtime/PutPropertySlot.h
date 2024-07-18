@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,20 +36,21 @@ class JSFunction;
     
 class PutPropertySlot {
 public:
-    enum Type { Uncachable, ExistingProperty, NewProperty, SetterProperty, CustomValue, CustomAccessor };
-    enum Context { UnknownContext, PutById, PutByIdEval };
-    typedef bool (*PutValueFunc)(ExecState*, EncodedJSValue thisObject, EncodedJSValue value);
+    enum Type : uint8_t { Uncachable, ExistingProperty, NewProperty, SetterProperty, CustomValue, CustomAccessor };
+    enum Context : uint8_t { UnknownContext, PutById, PutByIdEval, ReflectSet };
+    using PutValueFunc = JSC::PutValueFunc;
+    using PutValueFuncWithPtr = JSC::PutValueFuncWithPtr;
 
     PutPropertySlot(JSValue thisValue, bool isStrictMode = false, Context context = UnknownContext, bool isInitialization = false)
-        : m_type(Uncachable)
-        , m_base(0)
+        : m_base(nullptr)
         , m_thisValue(thisValue)
         , m_offset(invalidOffset)
         , m_isStrictMode(isStrictMode)
         , m_isInitialization(isInitialization)
+        , m_isTaintedByOpaqueObject(false)
+        , m_type(Uncachable)
         , m_context(context)
         , m_cacheability(CachingAllowed)
-        , m_putFunction(nullptr)
     {
     }
 
@@ -98,24 +99,25 @@ public:
         m_isStrictMode = value;
     }
 
-    PutValueFunc customSetter() const
+    FunctionPtr<CustomAccessorPtrTag> customSetter() const
     {
         ASSERT(isCacheableCustom());
         return m_putFunction;
     }
 
-    Context context() const { return static_cast<Context>(m_context); }
-
     Type type() const { return m_type; }
+    Context context() const { return m_context; }
     JSObject* base() const { return m_base; }
     JSValue thisValue() const { return m_thisValue; }
 
     bool isStrictMode() const { return m_isStrictMode; }
     bool isCacheablePut() const { return isCacheable() && (m_type == NewProperty || m_type == ExistingProperty); }
     bool isCacheableSetter() const { return isCacheable() && m_type == SetterProperty; }
-    bool isCacheableCustom() const { return isCacheable() && (m_type == CustomValue || m_type == CustomAccessor); }
+    bool isCacheableCustom() const { return isCacheable() && (m_type == CustomValue || m_type == CustomAccessor) && !!m_putFunction; }
     bool isCustomAccessor() const { return isCacheable() && m_type == CustomAccessor; }
     bool isInitialization() const { return m_isInitialization; }
+    bool isTaintedByOpaqueObject() const { return m_isTaintedByOpaqueObject; }
+    void setIsTaintedByOpaqueObject() { m_isTaintedByOpaqueObject = true; }
 
     PropertyOffset cachedOffset() const
     {
@@ -130,15 +132,16 @@ public:
 private:
     bool isCacheable() const { return m_cacheability == CachingAllowed; }
 
-    Type m_type;
     JSObject* m_base;
     JSValue m_thisValue;
     PropertyOffset m_offset;
-    bool m_isStrictMode;
-    bool m_isInitialization;
-    uint8_t m_context;
+    bool m_isStrictMode : 1;
+    bool m_isInitialization : 1;
+    bool m_isTaintedByOpaqueObject : 1;
+    Type m_type;
+    Context m_context;
     CacheabilityType m_cacheability;
-    PutValueFunc m_putFunction;
+    FunctionPtr<CustomAccessorPtrTag> m_putFunction;
 };
 
 } // namespace JSC

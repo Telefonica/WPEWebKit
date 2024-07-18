@@ -1,5 +1,5 @@
 //
-// Copyright(c) 2016 The ANGLE Project Authors. All rights reserved.
+// Copyright 2016 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -9,23 +9,86 @@
 #include "libANGLE/Thread.h"
 
 #include "libANGLE/Context.h"
+#include "libANGLE/Debug.h"
+#include "libANGLE/Display.h"
 #include "libANGLE/Error.h"
+
+namespace angle
+{
+bool gUseAndroidOpenGLTlsSlot;
+std::atomic_int gProcessCleanupRefCount(0);
+
+void ProcessCleanupCallback(void *ptr)
+{
+    egl::Thread *thread = static_cast<egl::Thread *>(ptr);
+    ASSERT(thread);
+
+    ASSERT(gProcessCleanupRefCount > 0);
+    if (--gProcessCleanupRefCount == 0)
+    {
+        egl::Display::EglDisplaySet displays = egl::Display::GetEglDisplaySet();
+        for (egl::Display *display : displays)
+        {
+            ASSERT(display);
+            (void)display->terminate(thread, egl::Display::TerminateReason::ProcessExit);
+        }
+    }
+}
+}  // namespace angle
 
 namespace egl
 {
-Thread::Thread()
-    : mError(EGL_SUCCESS),
-      mAPI(EGL_OPENGL_ES_API),
-      mDisplay(static_cast<egl::Display *>(EGL_NO_DISPLAY)),
-      mDrawSurface(static_cast<egl::Surface *>(EGL_NO_SURFACE)),
-      mReadSurface(static_cast<egl::Surface *>(EGL_NO_SURFACE)),
-      mContext(static_cast<gl::Context *>(EGL_NO_CONTEXT))
+namespace
 {
+Debug *sDebug = nullptr;
+}  // namespace
+
+Thread::Thread()
+    : mLabel(nullptr),
+      mError(EGL_SUCCESS),
+      mAPI(EGL_OPENGL_ES_API),
+      mContext(static_cast<gl::Context *>(EGL_NO_CONTEXT))
+{}
+
+void Thread::setLabel(EGLLabelKHR label)
+{
+    mLabel = label;
 }
 
-void Thread::setError(const Error &error)
+EGLLabelKHR Thread::getLabel() const
+{
+    return mLabel;
+}
+
+void Thread::setSuccess()
+{
+    mError = EGL_SUCCESS;
+}
+
+void Thread::setError(EGLint error,
+                      const char *command,
+                      const LabeledObject *object,
+                      const char *message)
+{
+    mError = error;
+    if (error != EGL_SUCCESS && message)
+    {
+        EnsureDebugAllocated();
+        sDebug->insertMessage(error, command, ErrorCodeToMessageType(error), getLabel(),
+                              object ? object->getLabel() : nullptr, message);
+    }
+}
+
+void Thread::setError(const Error &error, const char *command, const LabeledObject *object)
 {
     mError = error.getCode();
+    if (error.isError() && !error.getMessage().empty())
+    {
+        EnsureDebugAllocated();
+        sDebug->insertMessage(error.getCode(), command, ErrorCodeToMessageType(error.getCode()),
+                              getLabel(), object ? object->getLabel() : nullptr,
+                              error.getMessage());
+    }
 }
 
 EGLint Thread::getError() const
@@ -43,30 +106,27 @@ EGLenum Thread::getAPI() const
     return mAPI;
 }
 
-void Thread::setCurrent(Display *display,
-                        Surface *drawSurface,
-                        Surface *readSurface,
-                        gl::Context *context)
+void Thread::setCurrent(gl::Context *context)
 {
-    mDisplay     = display;
-    mDrawSurface = drawSurface;
-    mReadSurface = readSurface;
-    mContext     = context;
+    mContext = context;
 }
 
-Display *Thread::getDisplay() const
+Surface *Thread::getCurrentDrawSurface() const
 {
-    return mDisplay;
+    if (mContext)
+    {
+        return mContext->getCurrentDrawSurface();
+    }
+    return nullptr;
 }
 
-Surface *Thread::getDrawSurface() const
+Surface *Thread::getCurrentReadSurface() const
 {
-    return mDrawSurface;
-}
-
-Surface *Thread::getReadSurface() const
-{
-    return mReadSurface;
+    if (mContext)
+    {
+        return mContext->getCurrentReadSurface();
+    }
+    return nullptr;
 }
 
 gl::Context *Thread::getContext() const
@@ -74,15 +134,32 @@ gl::Context *Thread::getContext() const
     return mContext;
 }
 
-gl::Context *Thread::getValidContext() const
+Display *Thread::getDisplay() const
 {
-    if (mContext && mContext->isContextLost())
+    if (mContext)
     {
-        mContext->handleError(gl::Error(GL_OUT_OF_MEMORY, "Context has been lost."));
-        return nullptr;
+        return mContext->getDisplay();
     }
-
-    return mContext;
+    return nullptr;
 }
 
+void EnsureDebugAllocated()
+{
+    // All EGL calls use a global lock, this is thread safe
+    if (sDebug == nullptr)
+    {
+        sDebug = new Debug();
+    }
+}
+
+void DeallocateDebug()
+{
+    SafeDelete(sDebug);
+}
+
+Debug *GetDebug()
+{
+    EnsureDebugAllocated();
+    return sDebug;
+}
 }  // namespace egl

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,15 +29,16 @@
 #if ENABLE(SEC_ITEM_SHIM)
 
 #include "BlockingResponseMap.h"
-#include "ChildProcess.h"
+#include "NetworkProcess.h"
 #include "SecItemRequestData.h"
 #include "SecItemResponseData.h"
-#include "SecItemShimLibrary.h"
 #include "SecItemShimProxyMessages.h"
 #include <Security/Security.h>
 #include <atomic>
 #include <dlfcn.h>
 #include <mutex>
+#include <wtf/ProcessPrivilege.h>
+#include <wtf/threads/BinarySemaphore.h>
 
 #if USE(APPLE_INTERNAL_SDK)
 #include <CFNetwork/CFURLConnectionPriv.h>
@@ -56,34 +57,39 @@ extern "C" void _CFURLConnectionSetFrameworkStubs(const struct _CFNFrameworksStu
 
 namespace WebKit {
 
-static ChildProcess* sharedProcess;
-
-static WorkQueue& workQueue()
+static WeakPtr<NetworkProcess>& globalNetworkProcess()
 {
-    static WorkQueue* workQueue;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        workQueue = &WorkQueue::create("com.apple.WebKit.SecItemShim").leakRef();
-
-    });
-
-    return *workQueue;
+    static NeverDestroyed<WeakPtr<NetworkProcess>> networkProcess;
+    return networkProcess.get();
 }
 
 static std::optional<SecItemResponseData> sendSecItemRequest(SecItemRequestData::Type requestType, CFDictionaryRef query, CFDictionaryRef attributesToMatch = 0)
 {
     std::optional<SecItemResponseData> response;
 
-    auto semaphore = adoptOSObject(dispatch_semaphore_create(0));
+    if (RunLoop::isMain()) {
+        if (!globalNetworkProcess()->parentProcessConnection()->sendSync(Messages::SecItemShimProxy::SecItemRequestSync(SecItemRequestData(requestType, query, attributesToMatch)), Messages::SecItemShimProxy::SecItemRequestSync::Reply(response), 0))
+            return std::nullopt;
+        return response;
+    }
 
-    sharedProcess->parentProcessConnection()->sendWithReply(Messages::SecItemShimProxy::SecItemRequest(SecItemRequestData(requestType, query, attributesToMatch)), 0, workQueue(), [&response, &semaphore](auto reply) {
-        if (reply)
-            response = WTFMove(std::get<0>(*reply));
+    BinarySemaphore semaphore;
 
-        dispatch_semaphore_signal(semaphore.get());
+    RunLoop::main().dispatch([&] {
+        if (!globalNetworkProcess()) {
+            semaphore.signal();
+            return;
+        }
+
+        globalNetworkProcess()->parentProcessConnection()->sendWithAsyncReply(Messages::SecItemShimProxy::SecItemRequest(SecItemRequestData(requestType, query, attributesToMatch)), [&](auto reply) {
+            if (reply)
+                response = WTFMove(*reply);
+
+            semaphore.signal();
+        });
     });
 
-    dispatch_semaphore_wait(semaphore.get(), DISPATCH_TIME_FOREVER);
+    semaphore.wait();
 
     return response;
 }
@@ -98,14 +104,19 @@ static OSStatus webSecItemCopyMatching(CFDictionaryRef query, CFTypeRef* result)
     return response->resultCode();
 }
 
-static OSStatus webSecItemAdd(CFDictionaryRef query, CFTypeRef* result)
+static OSStatus webSecItemAdd(CFDictionaryRef query, CFTypeRef* unusedResult)
 {
+    // Return value of SecItemAdd should be ignored for WebKit use cases. WebKit can't serialize SecKeychainItemRef, so we do not use it.
+    // If someone passes a result value to be populated, the API contract is being violated so we should assert.
+    if (unusedResult) {
+        ASSERT_NOT_REACHED();
+        return errSecParam;
+    }
+
     auto response = sendSecItemRequest(SecItemRequestData::Add, query);
     if (!response)
         return errSecInteractionNotAllowed;
 
-    if (result)
-        *result = response->resultObject().leakRef();
     return response->resultCode();
 }
 
@@ -127,11 +138,10 @@ static OSStatus webSecItemDelete(CFDictionaryRef query)
     return response->resultCode();
 }
 
-void initializeSecItemShim(ChildProcess& process)
+void initializeSecItemShim(NetworkProcess& process)
 {
-    sharedProcess = &process;
+    globalNetworkProcess() = process;
 
-#if PLATFORM(IOS)
     struct _CFNFrameworksStubs stubs = {
         .version = 0,
         .SecItem_stub_CopyMatching = webSecItemCopyMatching,
@@ -141,19 +151,6 @@ void initializeSecItemShim(ChildProcess& process)
     };
 
     _CFURLConnectionSetFrameworkStubs(&stubs);
-#endif
-
-#if PLATFORM(MAC)
-    const SecItemShimCallbacks callbacks = {
-        webSecItemCopyMatching,
-        webSecItemAdd,
-        webSecItemUpdate,
-        webSecItemDelete
-    };
-    
-    SecItemShimInitializeFunc func = reinterpret_cast<SecItemShimInitializeFunc>(dlsym(RTLD_DEFAULT, "WebKitSecItemShimInitialize"));
-    func(callbacks);
-#endif
 }
 
 } // namespace WebKit

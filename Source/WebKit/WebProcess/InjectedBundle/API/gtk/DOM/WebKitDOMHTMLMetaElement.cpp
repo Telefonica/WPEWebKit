@@ -24,9 +24,10 @@
 #include "DOMObjectCache.h"
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
-#include "GObjectEventListener.h"
+#include <WebCore/ElementInlines.h>
 #include <WebCore/HTMLNames.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
+#include "GObjectEventListener.h"
 #include "WebKitDOMEventPrivate.h"
 #include "WebKitDOMEventTarget.h"
 #include "WebKitDOMHTMLMetaElementPrivate.h"
@@ -35,6 +36,8 @@
 #include "ConvertToUTF8String.h"
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 namespace WebKit {
 
@@ -84,21 +87,21 @@ static gboolean webkit_dom_html_meta_element_remove_event_listener(WebKitDOMEven
     return WebKit::GObjectEventListener::removeEventListener(G_OBJECT(target), coreTarget, eventName, handler, useCapture);
 }
 
-static void webkit_dom_event_target_init(WebKitDOMEventTargetIface* iface)
+static void webkit_dom_html_meta_element_dom_event_target_init(WebKitDOMEventTargetIface* iface)
 {
     iface->dispatch_event = webkit_dom_html_meta_element_dispatch_event;
     iface->add_event_listener = webkit_dom_html_meta_element_add_event_listener;
     iface->remove_event_listener = webkit_dom_html_meta_element_remove_event_listener;
 }
 
-G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLMetaElement, webkit_dom_html_meta_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_event_target_init))
+G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLMetaElement, webkit_dom_html_meta_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_html_meta_element_dom_event_target_init))
 
 enum {
-    PROP_0,
-    PROP_CONTENT,
-    PROP_HTTP_EQUIV,
-    PROP_NAME,
-    PROP_SCHEME,
+    DOM_HTML_META_ELEMENT_PROP_0,
+    DOM_HTML_META_ELEMENT_PROP_CONTENT,
+    DOM_HTML_META_ELEMENT_PROP_HTTP_EQUIV,
+    DOM_HTML_META_ELEMENT_PROP_NAME,
+    DOM_HTML_META_ELEMENT_PROP_SCHEME,
 };
 
 static void webkit_dom_html_meta_element_set_property(GObject* object, guint propertyId, const GValue* value, GParamSpec* pspec)
@@ -106,16 +109,16 @@ static void webkit_dom_html_meta_element_set_property(GObject* object, guint pro
     WebKitDOMHTMLMetaElement* self = WEBKIT_DOM_HTML_META_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_CONTENT:
+    case DOM_HTML_META_ELEMENT_PROP_CONTENT:
         webkit_dom_html_meta_element_set_content(self, g_value_get_string(value));
         break;
-    case PROP_HTTP_EQUIV:
+    case DOM_HTML_META_ELEMENT_PROP_HTTP_EQUIV:
         webkit_dom_html_meta_element_set_http_equiv(self, g_value_get_string(value));
         break;
-    case PROP_NAME:
+    case DOM_HTML_META_ELEMENT_PROP_NAME:
         webkit_dom_html_meta_element_set_name(self, g_value_get_string(value));
         break;
-    case PROP_SCHEME:
+    case DOM_HTML_META_ELEMENT_PROP_SCHEME:
         webkit_dom_html_meta_element_set_scheme(self, g_value_get_string(value));
         break;
     default:
@@ -129,16 +132,16 @@ static void webkit_dom_html_meta_element_get_property(GObject* object, guint pro
     WebKitDOMHTMLMetaElement* self = WEBKIT_DOM_HTML_META_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_CONTENT:
+    case DOM_HTML_META_ELEMENT_PROP_CONTENT:
         g_value_take_string(value, webkit_dom_html_meta_element_get_content(self));
         break;
-    case PROP_HTTP_EQUIV:
+    case DOM_HTML_META_ELEMENT_PROP_HTTP_EQUIV:
         g_value_take_string(value, webkit_dom_html_meta_element_get_http_equiv(self));
         break;
-    case PROP_NAME:
+    case DOM_HTML_META_ELEMENT_PROP_NAME:
         g_value_take_string(value, webkit_dom_html_meta_element_get_name(self));
         break;
-    case PROP_SCHEME:
+    case DOM_HTML_META_ELEMENT_PROP_SCHEME:
         g_value_take_string(value, webkit_dom_html_meta_element_get_scheme(self));
         break;
     default:
@@ -155,7 +158,7 @@ static void webkit_dom_html_meta_element_class_init(WebKitDOMHTMLMetaElementClas
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_CONTENT,
+        DOM_HTML_META_ELEMENT_PROP_CONTENT,
         g_param_spec_string(
             "content",
             "HTMLMetaElement:content",
@@ -165,7 +168,7 @@ static void webkit_dom_html_meta_element_class_init(WebKitDOMHTMLMetaElementClas
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_HTTP_EQUIV,
+        DOM_HTML_META_ELEMENT_PROP_HTTP_EQUIV,
         g_param_spec_string(
             "http-equiv",
             "HTMLMetaElement:http-equiv",
@@ -175,7 +178,7 @@ static void webkit_dom_html_meta_element_class_init(WebKitDOMHTMLMetaElementClas
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_NAME,
+        DOM_HTML_META_ELEMENT_PROP_NAME,
         g_param_spec_string(
             "name",
             "HTMLMetaElement:name",
@@ -185,7 +188,7 @@ static void webkit_dom_html_meta_element_class_init(WebKitDOMHTMLMetaElementClas
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_SCHEME,
+        DOM_HTML_META_ELEMENT_PROP_SCHEME,
         g_param_spec_string(
             "scheme",
             "HTMLMetaElement:scheme",
@@ -215,8 +218,7 @@ void webkit_dom_html_meta_element_set_content(WebKitDOMHTMLMetaElement* self, co
     g_return_if_fail(WEBKIT_DOM_IS_HTML_META_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLMetaElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::contentAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::contentAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_meta_element_get_http_equiv(WebKitDOMHTMLMetaElement* self)
@@ -234,8 +236,7 @@ void webkit_dom_html_meta_element_set_http_equiv(WebKitDOMHTMLMetaElement* self,
     g_return_if_fail(WEBKIT_DOM_IS_HTML_META_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLMetaElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::http_equivAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::http_equivAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_meta_element_get_name(WebKitDOMHTMLMetaElement* self)
@@ -253,8 +254,7 @@ void webkit_dom_html_meta_element_set_name(WebKitDOMHTMLMetaElement* self, const
     g_return_if_fail(WEBKIT_DOM_IS_HTML_META_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLMetaElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_meta_element_get_scheme(WebKitDOMHTMLMetaElement* self)
@@ -272,7 +272,7 @@ void webkit_dom_html_meta_element_set_scheme(WebKitDOMHTMLMetaElement* self, con
     g_return_if_fail(WEBKIT_DOM_IS_HTML_META_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLMetaElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::schemeAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::schemeAttr, WTF::AtomString::fromUTF8(value));
 }
 
+G_GNUC_END_IGNORE_DEPRECATIONS;

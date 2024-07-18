@@ -1,12 +1,12 @@
 //
-// Copyright (c) 2002-2015 The ANGLE Project Authors. All rights reserved.
+// Copyright 2002 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 
 #include "compiler/translator/ValidateGlobalInitializer.h"
 
-#include "compiler/translator/ParseContext.h"
+#include "compiler/translator/tree_util/IntermTraverse.h"
 
 namespace sh
 {
@@ -14,68 +14,94 @@ namespace sh
 namespace
 {
 
+const int kMaxAllowedTraversalDepth = 256;
+
 class ValidateGlobalInitializerTraverser : public TIntermTraverser
 {
   public:
-    ValidateGlobalInitializerTraverser(const TParseContext *context);
+    ValidateGlobalInitializerTraverser(int shaderVersion,
+                                       bool isWebGL,
+                                       bool hasExtNonConstGlobalInitializers);
 
     void visitSymbol(TIntermSymbol *node) override;
+    void visitConstantUnion(TIntermConstantUnion *node) override;
     bool visitAggregate(Visit visit, TIntermAggregate *node) override;
     bool visitBinary(Visit visit, TIntermBinary *node) override;
     bool visitUnary(Visit visit, TIntermUnary *node) override;
 
-    bool isValid() const { return mIsValid; }
+    bool isValid() const { return mIsValid && mMaxDepth < mMaxAllowedDepth; }
     bool issueWarning() const { return mIssueWarning; }
 
   private:
-    const TParseContext *mContext;
+    ANGLE_INLINE void onNonConstInitializerVisit(bool accept)
+    {
+        if (accept)
+        {
+            if (!mExtNonConstGlobalInitializers)
+            {
+                mIssueWarning = true;
+            }
+        }
+        else
+        {
+            mIsValid = false;
+        }
+    }
+
+    int mShaderVersion;
+    bool mIsWebGL;
+    bool mExtNonConstGlobalInitializers;
     bool mIsValid;
     bool mIssueWarning;
 };
 
 void ValidateGlobalInitializerTraverser::visitSymbol(TIntermSymbol *node)
 {
-    const TSymbol *sym =
-        mContext->symbolTable.find(node->getSymbol(), mContext->getShaderVersion());
-    if (sym->isVariable())
+    // ESSL 1.00 section 4.3 (or ESSL 3.00 section 4.3):
+    // Global initializers must be constant expressions.
+    switch (node->getType().getQualifier())
     {
-        // ESSL 1.00 section 4.3 (or ESSL 3.00 section 4.3):
-        // Global initializers must be constant expressions.
-        const TVariable *var = static_cast<const TVariable *>(sym);
-        switch (var->getType().getQualifier())
-        {
-            case EvqConst:
-                break;
-            case EvqGlobal:
-            case EvqTemporary:
-            case EvqUniform:
-                // We allow these cases to be compatible with legacy ESSL 1.00 content.
-                // Implement stricter rules for ESSL 3.00 since there's no legacy content to deal
-                // with.
-                if (mContext->getShaderVersion() >= 300)
-                {
-                    mIsValid = false;
-                }
-                else
-                {
-                    mIssueWarning = true;
-                }
-                break;
-            default:
-                mIsValid = false;
-        }
+        case EvqConst:
+            break;
+        case EvqGlobal:
+        case EvqTemporary:
+        case EvqUniform:
+            // We allow these cases to be compatible with legacy ESSL 1.00 content.
+            // Implement stricter rules for ESSL 3.00 since there's no legacy content to deal
+            // with.
+            onNonConstInitializerVisit(mExtNonConstGlobalInitializers ||
+                                       ((mShaderVersion < 300) && mIsWebGL));
+            break;
+        default:
+            mIsValid = false;
+    }
+}
+
+void ValidateGlobalInitializerTraverser::visitConstantUnion(TIntermConstantUnion *node)
+{
+    // Constant unions that are not constant expressions may result from folding a ternary
+    // expression.
+    switch (node->getType().getQualifier())
+    {
+        case EvqConst:
+            break;
+        case EvqTemporary:
+            onNonConstInitializerVisit(mExtNonConstGlobalInitializers ||
+                                       ((mShaderVersion < 300) && mIsWebGL));
+            break;
+        default:
+            UNREACHABLE();
     }
 }
 
 bool ValidateGlobalInitializerTraverser::visitAggregate(Visit visit, TIntermAggregate *node)
 {
     // Disallow calls to user-defined functions and texture lookup functions in global variable
-    // initializers.
-    // This is done simply by disabling all function calls - built-in math functions don't use
-    // the function call ops.
-    if (node->isFunctionCall())
+    // initializers.  For simplicity, all non-math built-in calls are disallowed.
+    if (node->isFunctionCall() ||
+        (BuiltInGroup::IsBuiltIn(node->getOp()) && !BuiltInGroup::IsMath(node->getOp())))
     {
-        mIsValid = false;
+        onNonConstInitializerVisit(mExtNonConstGlobalInitializers);
     }
     return true;
 }
@@ -84,7 +110,7 @@ bool ValidateGlobalInitializerTraverser::visitBinary(Visit visit, TIntermBinary 
 {
     if (node->isAssignment())
     {
-        mIsValid = false;
+        onNonConstInitializerVisit(mExtNonConstGlobalInitializers);
     }
     return true;
 }
@@ -93,23 +119,35 @@ bool ValidateGlobalInitializerTraverser::visitUnary(Visit visit, TIntermUnary *n
 {
     if (node->isAssignment())
     {
-        mIsValid = false;
+        onNonConstInitializerVisit(mExtNonConstGlobalInitializers);
     }
     return true;
 }
 
-ValidateGlobalInitializerTraverser::ValidateGlobalInitializerTraverser(const TParseContext *context)
-    : TIntermTraverser(true, false, false), mContext(context), mIsValid(true), mIssueWarning(false)
+ValidateGlobalInitializerTraverser::ValidateGlobalInitializerTraverser(
+    int shaderVersion,
+    bool isWebGL,
+    bool hasExtNonConstGlobalInitializers)
+    : TIntermTraverser(true, false, false, nullptr),
+      mShaderVersion(shaderVersion),
+      mIsWebGL(isWebGL),
+      mExtNonConstGlobalInitializers(hasExtNonConstGlobalInitializers),
+      mIsValid(true),
+      mIssueWarning(false)
 {
+    setMaxAllowedDepth(kMaxAllowedTraversalDepth);
 }
 
 }  // namespace
 
 bool ValidateGlobalInitializer(TIntermTyped *initializer,
-                               const TParseContext *context,
+                               int shaderVersion,
+                               bool isWebGL,
+                               bool hasExtNonConstGlobalInitializers,
                                bool *warning)
 {
-    ValidateGlobalInitializerTraverser validate(context);
+    ValidateGlobalInitializerTraverser validate(shaderVersion, isWebGL,
+                                                hasExtNonConstGlobalInitializers);
     initializer->traverse(&validate);
     ASSERT(warning != nullptr);
     *warning = validate.issueWarning();

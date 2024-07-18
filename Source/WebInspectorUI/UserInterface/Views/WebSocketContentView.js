@@ -31,22 +31,30 @@ WI.WebSocketContentView = class WebSocketContentView extends WI.ContentView
 
         super(resource);
 
+        this._updateFramesDebouncer = new Debouncer(() => {
+            this._updateFrames();
+        });
+
         this._resource = resource;
         this._framesRendered = 0;
         this._lastRenderedReadyState = null;
 
         // COMPATIBILITY (iOS 10.3): `walltime` did not exist in 10.3 and earlier.
-        this._showTimeColumn = NetworkAgent.hasEventParameter("webSocketWillSendHandshakeRequest", "walltime");
+        this._showTimeColumn = InspectorBackend.hasEvent("Network.webSocketWillSendHandshakeRequest", "walltime");
 
         this.element.classList.add("web-socket", "resource");
 
         let columns = {data: {}};
+
         columns.data.title = WI.UIString("Data");
         columns.data.sortable = false;
         columns.data.width = "85%";
 
-        if (this._showTimeColumn)
-            columns.time = {title: WI.UIString("Time"), sortable: true};
+        if (this._showTimeColumn) {
+            columns.time = {};
+            columns.time.title = WI.UIString("Time");
+            columns.time.sortable = true;
+        }
 
         this._dataGrid = new WI.DataGrid(columns);
         this._dataGrid.variableHeightRows = true;
@@ -79,24 +87,28 @@ WI.WebSocketContentView = class WebSocketContentView extends WI.ContentView
 
     // Public
 
-    shown()
+    attached()
     {
-        this._updateFrames();
+        super.attached();
+
+        this._updateFramesDebouncer.force();
         this._resource.addEventListener(WI.WebSocketResource.Event.FrameAdded, this._updateFramesSoon, this);
         this._resource.addEventListener(WI.WebSocketResource.Event.ReadyStateChanged, this._updateFramesSoon, this);
     }
 
-    hidden()
+    detached()
     {
         this._resource.removeEventListener(WI.WebSocketResource.Event.FrameAdded, this._updateFramesSoon, this);
         this._resource.removeEventListener(WI.WebSocketResource.Event.ReadyStateChanged, this._updateFramesSoon, this);
+
+        super.detached();
     }
 
     // Private
 
     _updateFramesSoon()
     {
-        this.onNextFrame._updateFrames();
+        this._updateFramesDebouncer.delayForFrame();
     }
 
     _updateFrames()
@@ -119,8 +131,15 @@ WI.WebSocketContentView = class WebSocketContentView extends WI.ContentView
             this._lastRenderedReadyState = this._resource.readyState;
         }
 
-        if (shouldScrollToBottom)
-            this._dataGrid.onNextFrame.scrollToLastRow();
+        if (shouldScrollToBottom) {
+            if (!this._scrollToLastRowDebouncer) {
+                this._scrollToLastRowDebouncer = new Debouncer(() => {
+                    this._dataGrid.scrollToLastRow();
+                });
+            }
+
+            this._scrollToLastRowDebouncer.delayForFrame();
+        }
     }
 
     _addFrame(data, isOutgoing, opcode, time)
@@ -139,9 +158,9 @@ WI.WebSocketContentView = class WebSocketContentView extends WI.ContentView
     {
         let node;
         if (this._showTimeColumn)
-            node = new WI.WebSocketDataGridNode(Object.shallowMerge({data, time}, attributes));
+            node = new WI.WebSocketDataGridNode({...attributes, data, time});
         else
-            node = new WI.WebSocketDataGridNode(Object.shallowMerge({data}, attributes));
+            node = new WI.WebSocketDataGridNode({...attributes, data});
 
         this._dataGrid.appendChild(node);
 

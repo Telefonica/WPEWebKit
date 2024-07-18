@@ -25,41 +25,27 @@
 
 #pragma once
 
+#include "SlowPathReturnType.h"
 #include <wtf/NotFound.h>
 #include <wtf/PrintStream.h>
 
 namespace JSC {
 
-typedef uint64_t EncodedMatchResult;
-
 struct MatchResult {
-    MatchResult()
-        : start(WTF::notFound)
-        , end(0)
-    {
-    }
-    
+    constexpr MatchResult() = default;
+
     ALWAYS_INLINE MatchResult(size_t start, size_t end)
         : start(start)
         , end(end)
     {
     }
 
-    explicit ALWAYS_INLINE MatchResult(EncodedMatchResult encoded)
+    ALWAYS_INLINE MatchResult(SlowPathReturnType match)
     {
-        union u {
-            uint64_t encoded;
-            struct s {
-                size_t start;
-                size_t end;
-            } split;
-        } value;
-        value.encoded = encoded;
-        start = value.split.start;
-        end = value.split.end;
+        decodeResult(match, start, end);
     }
 
-    ALWAYS_INLINE static MatchResult failed()
+    ALWAYS_INLINE static constexpr MatchResult failed()
     {
         return MatchResult();
     }
@@ -76,8 +62,13 @@ struct MatchResult {
     
     void dump(PrintStream&) const;
 
-    size_t start;
-    size_t end;
+    size_t start { WTF::notFound };
+    size_t end { 0 };
 };
+
+#if ENABLE(JIT)
+static_assert(sizeof(SlowPathReturnType) == 2 * sizeof(size_t), "https://bugs.webkit.org/show_bug.cgi?id=198518#c11");
+static_assert(sizeof(MatchResult) == sizeof(SlowPathReturnType), "Match result and SlowPathReturnType should be the same size");
+#endif
 
 } // namespace JSC

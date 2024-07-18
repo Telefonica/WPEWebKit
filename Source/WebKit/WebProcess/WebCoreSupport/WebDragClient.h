@@ -35,6 +35,7 @@ namespace WebKit {
 class WebPage;
 
 class WebDragClient : public WebCore::DragClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebDragClient(WebPage* page)
         : m_page(page)
@@ -44,19 +45,14 @@ public:
 private:
     void willPerformDragDestinationAction(WebCore::DragDestinationAction, const WebCore::DragData&) override;
     void willPerformDragSourceAction(WebCore::DragSourceAction, const WebCore::IntPoint&, WebCore::DataTransfer&) override;
-    WebCore::DragSourceAction dragSourceActionMaskForPoint(const WebCore::IntPoint& windowPoint) override;
+    OptionSet<WebCore::DragSourceAction> dragSourceActionMaskForPoint(const WebCore::IntPoint& windowPoint) override;
 
     void startDrag(WebCore::DragItem, WebCore::DataTransfer&, WebCore::Frame&) override;
     void didConcludeEditDrag() override;
 
 #if PLATFORM(COCOA)
-    void declareAndWriteDragImage(const String& pasteboardName, WebCore::Element&, const WebCore::URL&, const String&, WebCore::Frame*) override;
-#if ENABLE(ATTACHMENT_ELEMENT)
-    void declareAndWriteAttachment(const String& pasteboardName, WebCore::Element&, const WebCore::URL&, const String& path, WebCore::Frame*) override;
+    void declareAndWriteDragImage(const String& pasteboardName, WebCore::Element&, const URL&, const String&, WebCore::Frame*) override;
 #endif
-#endif
-
-    void dragControllerDestroyed() override;
 
     WebPage* m_page;
 };

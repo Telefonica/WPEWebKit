@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_REMOTE_BITRATE_ESTIMATOR_UNITTEST_HELPER_H_
-#define WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_REMOTE_BITRATE_ESTIMATOR_UNITTEST_HELPER_H_
+#ifndef MODULES_REMOTE_BITRATE_ESTIMATOR_REMOTE_BITRATE_ESTIMATOR_UNITTEST_HELPER_H_
+#define MODULES_REMOTE_BITRATE_ESTIMATOR_REMOTE_BITRATE_ESTIMATOR_UNITTEST_HELPER_H_
 
 #include <list>
 #include <map>
@@ -17,10 +17,9 @@
 #include <utility>
 #include <vector>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/remote_bitrate_estimator/include/remote_bitrate_estimator.h"
-#include "webrtc/system_wrappers/include/clock.h"
-#include "webrtc/test/gtest.h"
+#include "modules/remote_bitrate_estimator/include/remote_bitrate_estimator.h"
+#include "system_wrappers/include/clock.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 namespace testing {
@@ -71,6 +70,10 @@ class RtpStream {
             uint32_t frequency,
             uint32_t timestamp_offset,
             int64_t rtcp_receive_time);
+
+  RtpStream(const RtpStream&) = delete;
+  RtpStream& operator=(const RtpStream&) = delete;
+
   void set_rtp_timestamp_offset(uint32_t offset);
 
   // Generates a new frame for this stream. If called too soon after the
@@ -104,8 +107,6 @@ class RtpStream {
   int64_t next_rtcp_time_;
   uint32_t rtp_timestamp_offset_;
   const double kNtpFracPerMs;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(RtpStream);
 };
 
 class StreamGenerator {
@@ -116,17 +117,20 @@ class StreamGenerator {
 
   ~StreamGenerator();
 
+  StreamGenerator(const StreamGenerator&) = delete;
+  StreamGenerator& operator=(const StreamGenerator&) = delete;
+
   // Add a new stream.
   void AddStream(RtpStream* stream);
 
   // Set the link capacity.
   void set_capacity_bps(int capacity_bps);
 
-  // Divides |bitrate_bps| among all streams. The allocated bitrate per stream
+  // Divides `bitrate_bps` among all streams. The allocated bitrate per stream
   // is decided by the initial allocation ratios.
   void SetBitrateBps(int bitrate_bps);
 
-  // Set the RTP timestamp offset for the stream identified by |ssrc|.
+  // Set the RTP timestamp offset for the stream identified by `ssrc`.
   void set_rtp_timestamp_offset(uint32_t ssrc, uint32_t offset);
 
   // TODO(holmer): Break out the channel simulation part from this class to make
@@ -142,8 +146,6 @@ class StreamGenerator {
   int64_t prev_arrival_time_us_;
   // All streams being transmitted on this simulated channel.
   StreamMap streams_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(StreamGenerator);
 };
 }  // namespace testing
 
@@ -152,21 +154,25 @@ class RemoteBitrateEstimatorTest : public ::testing::Test {
   RemoteBitrateEstimatorTest();
   virtual ~RemoteBitrateEstimatorTest();
 
+  RemoteBitrateEstimatorTest(const RemoteBitrateEstimatorTest&) = delete;
+  RemoteBitrateEstimatorTest& operator=(const RemoteBitrateEstimatorTest&) =
+      delete;
+
  protected:
   virtual void SetUp() = 0;
 
   void AddDefaultStream();
 
   // Helper to convert some time format to resolution used in absolute send time
-  // header extension, rounded upwards. |t| is the time to convert, in some
-  // resolution. |denom| is the value to divide |t| by to get whole seconds,
-  // e.g. |denom| = 1000 if |t| is in milliseconds.
+  // header extension, rounded upwards. `t` is the time to convert, in some
+  // resolution. `denom` is the value to divide `t` by to get whole seconds,
+  // e.g. `denom` = 1000 if `t` is in milliseconds.
   static uint32_t AbsSendTime(int64_t t, int64_t denom);
 
   // Helper to add two absolute send time values and keep it less than 1<<24.
   static uint32_t AddAbsSendTime(uint32_t t1, uint32_t t2);
 
-  // Helper to create a WebRtcRTPHeader containing the relevant data for the
+  // Helper to create an RTPHeader containing the relevant data for the
   // estimator (all other fields are cleared) and call IncomingPacket on the
   // estimator.
   void IncomingPacket(uint32_t ssrc,
@@ -183,8 +189,8 @@ class RemoteBitrateEstimatorTest : public ::testing::Test {
   // target bitrate after the call to this function.
   bool GenerateAndProcessFrame(uint32_t ssrc, uint32_t bitrate_bps);
 
-  // Run the bandwidth estimator with a stream of |number_of_frames| frames, or
-  // until it reaches |target_bitrate|.
+  // Run the bandwidth estimator with a stream of `number_of_frames` frames, or
+  // until it reaches `target_bitrate`.
   // Can for instance be used to run the estimator for some time to get it
   // into a steady state.
   uint32_t SteadyStateRun(uint32_t ssrc,
@@ -213,9 +219,7 @@ class RemoteBitrateEstimatorTest : public ::testing::Test {
   std::unique_ptr<RemoteBitrateEstimator> bitrate_estimator_;
   std::unique_ptr<testing::StreamGenerator> stream_generator_;
   int64_t arrival_time_offset_ms_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(RemoteBitrateEstimatorTest);
 };
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_REMOTE_BITRATE_ESTIMATOR_UNITTEST_HELPER_H_
+#endif  // MODULES_REMOTE_BITRATE_ESTIMATOR_REMOTE_BITRATE_ESTIMATOR_UNITTEST_HELPER_H_

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,34 +31,25 @@
 #include "ConcurrentJSLock.h"
 #include "SpeculatedType.h"
 #include "Structure.h"
+#include "VirtualRegister.h"
 #include <wtf/PrintStream.h>
 #include <wtf/StringPrintStream.h>
 
 namespace JSC {
 
+class UnlinkedValueProfile;
+
 template<unsigned numberOfBucketsArgument>
 struct ValueProfileBase {
-    static const unsigned numberOfBuckets = numberOfBucketsArgument;
-    static const unsigned numberOfSpecFailBuckets = 1;
-    static const unsigned bucketIndexMask = numberOfBuckets - 1;
-    static const unsigned totalNumberOfBuckets = numberOfBuckets + numberOfSpecFailBuckets;
+    friend class UnlinkedValueProfile;
+
+    static constexpr unsigned numberOfBuckets = numberOfBucketsArgument;
+    static constexpr unsigned numberOfSpecFailBuckets = 1;
+    static constexpr unsigned totalNumberOfBuckets = numberOfBuckets + numberOfSpecFailBuckets;
     
     ValueProfileBase()
-        : m_bytecodeOffset(-1)
-        , m_prediction(SpecNone)
-        , m_numberOfSamplesInPrediction(0)
     {
-        for (unsigned i = 0; i < totalNumberOfBuckets; ++i)
-            m_buckets[i] = JSValue::encode(JSValue());
-    }
-    
-    ValueProfileBase(int bytecodeOffset)
-        : m_bytecodeOffset(bytecodeOffset)
-        , m_prediction(SpecNone)
-        , m_numberOfSamplesInPrediction(0)
-    {
-        for (unsigned i = 0; i < totalNumberOfBuckets; ++i)
-            m_buckets[i] = JSValue::encode(JSValue());
+        clearBuckets();
     }
     
     EncodedJSValue* specFailBucket(unsigned i)
@@ -66,16 +57,22 @@ struct ValueProfileBase {
         ASSERT(numberOfBuckets + i < totalNumberOfBuckets);
         return m_buckets + numberOfBuckets + i;
     }
+
+    void clearBuckets()
+    {
+        for (unsigned i = 0; i < totalNumberOfBuckets; ++i)
+            m_buckets[i] = JSValue::encode(JSValue());
+    }
     
     const ClassInfo* classInfo(unsigned bucket) const
     {
         JSValue value = JSValue::decode(m_buckets[bucket]);
         if (!!value) {
             if (!value.isCell())
-                return 0;
-            return value.asCell()->structure()->classInfo();
+                return nullptr;
+            return value.asCell()->classInfo();
         }
-        return 0;
+        return nullptr;
     }
     
     unsigned numberOfSamples() const
@@ -90,8 +87,10 @@ struct ValueProfileBase {
     
     unsigned totalNumberOfSamples() const
     {
-        return numberOfSamples() + m_numberOfSamplesInPrediction;
+        return numberOfSamples() + isSampledBefore();
     }
+
+    bool isSampledBefore() const { return m_prediction != SpecNone; }
     
     bool isLive() const
     {
@@ -113,7 +112,7 @@ struct ValueProfileBase {
     
     void dump(PrintStream& out)
     {
-        out.print("samples = ", totalNumberOfSamples(), " prediction = ", SpeculationDump(m_prediction));
+        out.print("sampled before = ", isSampledBefore(), " live samples = ", numberOfSamples(), " prediction = ", SpeculationDump(m_prediction));
         bool first = true;
         for (unsigned i = 0; i < totalNumberOfBuckets; ++i) {
             JSValue value = JSValue::decode(m_buckets[i]);
@@ -128,8 +127,6 @@ struct ValueProfileBase {
         }
     }
     
-    // Updates the prediction and returns the new one. Never call this from any thread
-    // that isn't executing the code.
     SpeculatedType computeUpdatedPrediction(const ConcurrentJSLocker&)
     {
         for (unsigned i = 0; i < totalNumberOfBuckets; ++i) {
@@ -137,7 +134,6 @@ struct ValueProfileBase {
             if (!value)
                 continue;
             
-            m_numberOfSamplesInPrediction++;
             mergeSpeculation(m_prediction, speculationFromValue(value));
             
             m_buckets[i] = JSValue::encode(JSValue());
@@ -145,95 +141,99 @@ struct ValueProfileBase {
         
         return m_prediction;
     }
-    
-    int m_bytecodeOffset; // -1 for prologue
-    
-    SpeculatedType m_prediction;
-    unsigned m_numberOfSamplesInPrediction;
-    
+
     EncodedJSValue m_buckets[totalNumberOfBuckets];
+
+    SpeculatedType m_prediction { SpecNone };
 };
 
 struct MinimalValueProfile : public ValueProfileBase<0> {
     MinimalValueProfile(): ValueProfileBase<0>() { }
-    MinimalValueProfile(int bytecodeOffset): ValueProfileBase<0>(bytecodeOffset) { }
 };
 
 template<unsigned logNumberOfBucketsArgument>
 struct ValueProfileWithLogNumberOfBuckets : public ValueProfileBase<1 << logNumberOfBucketsArgument> {
-    static const unsigned logNumberOfBuckets = logNumberOfBucketsArgument;
+    static constexpr unsigned logNumberOfBuckets = logNumberOfBucketsArgument;
     
     ValueProfileWithLogNumberOfBuckets()
         : ValueProfileBase<1 << logNumberOfBucketsArgument>()
-    {
-    }
-    ValueProfileWithLogNumberOfBuckets(int bytecodeOffset)
-        : ValueProfileBase<1 << logNumberOfBucketsArgument>(bytecodeOffset)
     {
     }
 };
 
 struct ValueProfile : public ValueProfileWithLogNumberOfBuckets<0> {
     ValueProfile() : ValueProfileWithLogNumberOfBuckets<0>() { }
-    ValueProfile(int bytecodeOffset) : ValueProfileWithLogNumberOfBuckets<0>(bytecodeOffset) { }
+    static ptrdiff_t offsetOfFirstBucket() { return OBJECT_OFFSETOF(ValueProfile, m_buckets[0]); }
 };
 
-template<typename T>
-inline int getValueProfileBytecodeOffset(T* valueProfile)
-{
-    return valueProfile->m_bytecodeOffset;
-}
+struct ValueProfileAndVirtualRegister : public ValueProfile {
+    VirtualRegister m_operand;
+};
 
-// This is a mini value profile to catch pathologies. It is a counter that gets
-// incremented when we take the slow path on any instruction.
-struct RareCaseProfile {
-    RareCaseProfile(int bytecodeOffset)
-        : m_bytecodeOffset(bytecodeOffset)
-        , m_counter(0)
+static_assert(sizeof(ValueProfileAndVirtualRegister) >= sizeof(unsigned));
+class alignas(ValueProfileAndVirtualRegister) ValueProfileAndVirtualRegisterBuffer final {
+    WTF_MAKE_NONCOPYABLE(ValueProfileAndVirtualRegisterBuffer);
+public:
+
+    static ValueProfileAndVirtualRegisterBuffer* create(unsigned size)
     {
-    }
-    
-    int m_bytecodeOffset;
-    uint32_t m_counter;
-};
-
-inline int getRareCaseProfileBytecodeOffset(RareCaseProfile* rareCaseProfile)
-{
-    return rareCaseProfile->m_bytecodeOffset;
-}
-
-struct ValueProfileAndOperand {
-    ValueProfile m_profile;
-    int m_operand;
-};
-
-struct ValueProfileAndOperandBuffer {
-    ValueProfileAndOperandBuffer(unsigned size)
-        : m_size(size)
-    {
-        // FIXME: ValueProfile has more stuff than we need. We could optimize these value profiles
-        // to be more space efficient.
-        // https://bugs.webkit.org/show_bug.cgi?id=175413
-        m_buffer = MallocPtr<ValueProfileAndOperand>::malloc(m_size * sizeof(ValueProfileAndOperand));
-        for (unsigned i = 0; i < m_size; ++i)
-            new (&m_buffer.get()[i]) ValueProfileAndOperand();
+        void* buffer = VMMalloc::malloc(sizeof(ValueProfileAndVirtualRegisterBuffer) + size * sizeof(ValueProfileAndVirtualRegister));
+        return new (buffer) ValueProfileAndVirtualRegisterBuffer(size);
     }
 
-    ~ValueProfileAndOperandBuffer()
+    static void destroy(ValueProfileAndVirtualRegisterBuffer* buffer)
     {
-        for (unsigned i = 0; i < m_size; ++i)
-            m_buffer.get()[i].~ValueProfileAndOperand();
+        buffer->~ValueProfileAndVirtualRegisterBuffer();
+        VMMalloc::free(buffer);
     }
 
     template <typename Function>
     void forEach(Function function)
     {
         for (unsigned i = 0; i < m_size; ++i)
-            function(m_buffer.get()[i]);
+            function(data()[i]);
+    }
+
+    unsigned size() const { return m_size; }
+    ValueProfileAndVirtualRegister* data() const
+    {
+        return bitwise_cast<ValueProfileAndVirtualRegister*>(this + 1);
+    }
+
+private:
+
+    ValueProfileAndVirtualRegisterBuffer(unsigned size)
+        : m_size(size)
+    {
+        // FIXME: ValueProfile has more stuff than we need. We could optimize these value profiles
+        // to be more space efficient.
+        // https://bugs.webkit.org/show_bug.cgi?id=175413
+        for (unsigned i = 0; i < m_size; ++i)
+            new (&data()[i]) ValueProfileAndVirtualRegister();
+    }
+
+    ~ValueProfileAndVirtualRegisterBuffer()
+    {
+        for (unsigned i = 0; i < m_size; ++i)
+            data()[i].~ValueProfileAndVirtualRegister();
     }
 
     unsigned m_size;
-    MallocPtr<ValueProfileAndOperand> m_buffer;
+};
+
+class UnlinkedValueProfile {
+public:
+    UnlinkedValueProfile() = default;
+
+    void update(ValueProfile& profile)
+    {
+        SpeculatedType newType = profile.m_prediction | m_prediction;
+        profile.m_prediction = newType;
+        m_prediction = newType;
+    }
+
+private:
+    SpeculatedType m_prediction { SpecNone };
 };
 
 } // namespace JSC

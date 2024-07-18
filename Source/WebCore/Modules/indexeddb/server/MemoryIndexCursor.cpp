@@ -26,8 +26,6 @@
 #include "config.h"
 #include "MemoryIndexCursor.h"
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBCursorInfo.h"
 #include "IDBGetResult.h"
 #include "IndexValueStore.h"
@@ -62,9 +60,7 @@ MemoryIndexCursor::MemoryIndexCursor(MemoryIndex& index, const IDBCursorInfo& in
         m_currentIterator.invalidate();
 }
 
-MemoryIndexCursor::~MemoryIndexCursor()
-{
-}
+MemoryIndexCursor::~MemoryIndexCursor() = default;
 
 void MemoryIndexCursor::currentData(IDBGetResult& getResult)
 {
@@ -77,7 +73,7 @@ void MemoryIndexCursor::currentData(IDBGetResult& getResult)
         getResult = { m_currentKey, m_currentPrimaryKey };
     else {
         IDBValue value = { m_index.objectStore().valueForKey(m_currentPrimaryKey), { }, { } };
-        getResult = { m_currentKey, m_currentPrimaryKey, WTFMove(value) };
+        getResult = { m_currentKey, m_currentPrimaryKey, WTFMove(value), m_index.objectStore().info().keyPath() };
     }
 }
 
@@ -224,5 +220,3 @@ void MemoryIndexCursor::indexValueChanged(const IDBKeyData& key, const IDBKeyDat
 
 } // namespace IDBServer
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

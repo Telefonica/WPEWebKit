@@ -168,9 +168,6 @@
     <None Include="..\UserInterface\CodeMirrorDragToAlterNumberController.js">
       <Filter>UserInterface</Filter>
     </None>
-    <None Include="..\UserInterface\CodeMirrorFormatters.js">
-      <Filter>UserInterface</Filter>
-    </None>
     <None Include="..\UserInterface\CodeMirrorOverrides.css">
       <Filter>UserInterface</Filter>
     </None>
@@ -199,6 +196,9 @@
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\ConsoleGroup.js">
+      <Filter>UserInterface</Filter>
+    </None>
+    <None Include="..\UserInterface\ConsoleManager.js">
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\LegacyConsoleMessage.js">
@@ -270,6 +270,9 @@
     <None Include="..\UserInterface\CSSKeywordCompletions.js">
       <Filter>UserInterface</Filter>
     </None>
+    <None Include="..\UserInterface\CSSManager.js">
+      <Filter>UserInterface</Filter>
+    </None>
     <None Include="..\UserInterface\CSSMedia.js">
       <Filter>UserInterface</Filter>
     </None>
@@ -285,31 +288,7 @@
     <None Include="..\UserInterface\CSSStyleDeclaration.js">
       <Filter>UserInterface</Filter>
     </None>
-    <None Include="..\UserInterface\CSSStyleDeclarationSection.css">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\CSSStyleDeclarationSection.js">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\CSSStyleDeclarationTextEditor.css">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\CSSStyleDeclarationTextEditor.js">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\CSSStyleDetailsSidebarPanel.css">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\CSSStyleDetailsSidebarPanel.js">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\CSSStyleManager.js">
-      <Filter>UserInterface</Filter>
-    </None>
     <None Include="..\UserInterface\CSSStyleSheet.js">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\DashboardManager.js">
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\DashboardView.css">
@@ -366,12 +345,6 @@
     <None Include="..\UserInterface\DebuggerObserver.js">
       <Filter>UserInterface</Filter>
     </None>
-    <None Include="..\UserInterface\DebuggerSidebarPanel.css">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\DebuggerSidebarPanel.js">
-      <Filter>UserInterface</Filter>
-    </None>
     <None Include="..\UserInterface\DetailsSection.css">
       <Filter>UserInterface</Filter>
     </None>
@@ -405,6 +378,9 @@
     <None Include="..\UserInterface\DOMDetailsSidebarPanel.js">
       <Filter>UserInterface</Filter>
     </None>
+    <None Include="..\UserInterface\DOMManager.js">
+      <Filter>UserInterface</Filter>
+    </None>
     <None Include="..\UserInterface\DOMNode.js">
       <Filter>UserInterface</Filter>
     </None>
@@ -429,6 +405,9 @@
     <None Include="..\UserInterface\DOMStorageIcons.css">
       <Filter>UserInterface</Filter>
     </None>
+    <None Include="..\UserInterface\DOMStorageManager.js">
+      <Filter>UserInterface</Filter>
+    </None>
     <None Include="..\UserInterface\DOMStorageObject.js">
       <Filter>UserInterface</Filter>
     </None>
@@ -451,9 +430,6 @@
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\DOMTreeElementPathComponent.js">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\DOMTreeManager.js">
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\DOMTreeOutline.css">
@@ -525,9 +501,6 @@
     <None Include="..\UserInterface\FontResourceContentView.js">
       <Filter>UserInterface</Filter>
     </None>
-    <None Include="..\UserInterface\Formatter.js">
-      <Filter>UserInterface</Filter>
-    </None>
     <None Include="..\UserInterface\FormatterContentBuilder.js">
       <Filter>UserInterface</Filter>
     </None>
@@ -538,9 +511,6 @@
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\FrameContentView.js">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\FrameResourceManager.js">
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\FrameTreeElement.js">
@@ -598,9 +568,6 @@
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\InstrumentSidebarPanel.js">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\IssueManager.js">
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\IssueMessage.js">
@@ -666,9 +633,6 @@
     <None Include="..\UserInterface\LogIcon.css">
       <Filter>UserInterface</Filter>
     </None>
-    <None Include="..\UserInterface\LogManager.js">
-      <Filter>UserInterface</Filter>
-    </None>
     <None Include="..\UserInterface\LogObject.js">
       <Filter>UserInterface</Filter>
     </None>
@@ -712,6 +676,9 @@
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\NetworkGraphCalculator.js">
+      <Filter>UserInterface</Filter>
+    </None>
+    <None Include="..\UserInterface\NetworkManager.js">
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\NetworkObserver.js">
@@ -816,12 +783,6 @@
     <None Include="..\UserInterface\ResourceIcons.css">
       <Filter>UserInterface</Filter>
     </None>
-    <None Include="..\UserInterface\ResourceSidebarPanel.css">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\ResourceSidebarPanel.js">
-      <Filter>UserInterface</Filter>
-    </None>
     <None Include="..\UserInterface\ResourceTimelineDataGridNode.js">
       <Filter>UserInterface</Filter>
     </None>
@@ -838,12 +799,6 @@
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\Revision.js">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\RulesStyleDetailsPanel.css">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\RulesStyleDetailsPanel.js">
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\RuntimeObserver.js">
@@ -948,25 +903,16 @@
     <None Include="..\UserInterface\SourceMap.js">
       <Filter>UserInterface</Filter>
     </None>
-    <None Include="..\UserInterface\SourceMapManager.js">
-      <Filter>UserInterface</Filter>
-    </None>
     <None Include="..\UserInterface\SourceMapResource.js">
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\SourceMapResourceTreeElement.js">
       <Filter>UserInterface</Filter>
     </None>
-    <None Include="..\UserInterface\StorageManager.js">
-      <Filter>UserInterface</Filter>
-    </None>
     <None Include="..\UserInterface\StorageTreeElement.js">
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\StyleDetailsPanel.js">
-      <Filter>UserInterface</Filter>
-    </None>
-    <None Include="..\UserInterface\StyleRuleIcons.css">
       <Filter>UserInterface</Filter>
     </None>
     <None Include="..\UserInterface\SyntaxHighlightingDefaultTheme.css">
@@ -1678,24 +1624,6 @@
       <Filter>Images</Filter>
     </None>
     <None Include="..\UserInterface\Images\Stopwatch%402x.png">
-      <Filter>Images</Filter>
-    </None>
-    <None Include="..\UserInterface\Images\StyleRuleAuthor.svg">
-      <Filter>Images</Filter>
-    </None>
-    <None Include="..\UserInterface\Images\StyleRuleInherited.svg">
-      <Filter>Images</Filter>
-    </None>
-    <None Include="..\UserInterface\Images\StyleRuleInheritedElement.svg">
-      <Filter>Images</Filter>
-    </None>
-    <None Include="..\UserInterface\Images\StyleRuleInspector.svg">
-      <Filter>Images</Filter>
-    </None>
-    <None Include="..\UserInterface\Images\StyleRuleUser.svg">
-      <Filter>Images</Filter>
-    </None>
-    <None Include="..\UserInterface\Images\StyleRuleUserAgent.svg">
       <Filter>Images</Filter>
     </None>
     <None Include="..\UserInterface\Images\Time.svg">

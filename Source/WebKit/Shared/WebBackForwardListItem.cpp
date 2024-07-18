@@ -26,33 +26,66 @@
 #include "config.h"
 #include "WebBackForwardListItem.h"
 
-#include <WebCore/URL.h>
+#include "SuspendedPageProxy.h"
+#include "WebBackForwardCache.h"
+#include "WebBackForwardCacheEntry.h"
+#include "WebProcessPool.h"
+#include "WebProcessProxy.h"
+#include <wtf/DebugUtilities.h>
+#include <wtf/URL.h>
 
 namespace WebKit {
+using namespace WebCore;
 
-static uint64_t highestItemID = 0;
-
-Ref<WebBackForwardListItem> WebBackForwardListItem::create(BackForwardListItemState&& backForwardListItemState, uint64_t pageID)
+Ref<WebBackForwardListItem> WebBackForwardListItem::create(BackForwardListItemState&& backForwardListItemState, WebPageProxyIdentifier pageID)
 {
+    RELEASE_ASSERT(RunLoop::isMain());
     return adoptRef(*new WebBackForwardListItem(WTFMove(backForwardListItemState), pageID));
 }
 
-WebBackForwardListItem::WebBackForwardListItem(BackForwardListItemState&& backForwardListItemState, uint64_t pageID)
+WebBackForwardListItem::WebBackForwardListItem(BackForwardListItemState&& backForwardListItemState, WebPageProxyIdentifier pageID)
     : m_itemState(WTFMove(backForwardListItemState))
     , m_pageID(pageID)
+    , m_lastProcessIdentifier(m_itemState.identifier.processIdentifier)
 {
-    if (m_itemState.identifier > highestItemID)
-        highestItemID = m_itemState.identifier;
+    auto result = allItems().add(m_itemState.identifier, this);
+    ASSERT_UNUSED(result, result.isNewEntry);
 }
 
 WebBackForwardListItem::~WebBackForwardListItem()
 {
+    RELEASE_ASSERT(RunLoop::isMain());
+    ASSERT(allItems().get(m_itemState.identifier) == this);
+    allItems().remove(m_itemState.identifier);
+    removeFromBackForwardCache();
+}
+
+HashMap<BackForwardItemIdentifier, WebBackForwardListItem*>& WebBackForwardListItem::allItems()
+{
+    RELEASE_ASSERT(RunLoop::isMain());
+    static NeverDestroyed<HashMap<BackForwardItemIdentifier, WebBackForwardListItem*>> items;
+    return items;
+}
+
+WebBackForwardListItem* WebBackForwardListItem::itemForID(const BackForwardItemIdentifier& identifier)
+{
+    return allItems().get(identifier);
 }
 
 static const FrameState* childItemWithDocumentSequenceNumber(const FrameState& frameState, int64_t number)
 {
     for (const auto& child : frameState.children) {
         if (child.documentSequenceNumber == number)
+            return &child;
+    }
+
+    return nullptr;
+}
+
+static const FrameState* childItemWithTarget(const FrameState& frameState, const String& target)
+{
+    for (const auto& child : frameState.children) {
+        if (child.target == target)
             return &child;
     }
 
@@ -81,7 +114,7 @@ bool WebBackForwardListItem::itemIsInSameDocument(const WebBackForwardListItem& 
     if (m_pageID != other.m_pageID)
         return false;
 
-    // The following logic must be kept in sync with WebCore::HistoryItem::shouldDoSameDocumentNavigationTo.
+    // The following logic must be kept in sync with WebCore::HistoryItem::shouldDoSameDocumentNavigationTo().
 
     const FrameState& mainFrameState = m_itemState.pageState.mainFrameState;
     const FrameState& otherMainFrameState = other.m_itemState.pageState.mainFrameState;
@@ -89,8 +122,8 @@ bool WebBackForwardListItem::itemIsInSameDocument(const WebBackForwardListItem& 
     if (mainFrameState.stateObjectData || otherMainFrameState.stateObjectData)
         return mainFrameState.documentSequenceNumber == otherMainFrameState.documentSequenceNumber;
 
-    WebCore::URL url = WebCore::URL(WebCore::ParsedURLString, mainFrameState.urlString);
-    WebCore::URL otherURL = WebCore::URL(WebCore::ParsedURLString, otherMainFrameState.urlString);
+    URL url = URL({ }, mainFrameState.urlString);
+    URL otherURL = URL({ }, otherMainFrameState.urlString);
 
     if ((url.hasFragmentIdentifier() || otherURL.hasFragmentIdentifier()) && equalIgnoringFragmentIdentifier(url, otherURL))
         return mainFrameState.documentSequenceNumber == otherMainFrameState.documentSequenceNumber;
@@ -98,9 +131,65 @@ bool WebBackForwardListItem::itemIsInSameDocument(const WebBackForwardListItem& 
     return documentTreesAreEqual(mainFrameState, otherMainFrameState);
 }
 
-uint64_t WebBackForwardListItem::highestUsedItemID()
+static bool hasSameFrames(const FrameState& a, const FrameState& b)
 {
-    return highestItemID;
+    if (a.target != b.target)
+        return false;
+
+    if (a.children.size() != b.children.size())
+        return false;
+
+    for (const auto& child : a.children) {
+        if (!childItemWithTarget(b, child.target))
+            return false;
+    }
+
+    return true;
 }
+
+bool WebBackForwardListItem::itemIsClone(const WebBackForwardListItem& other)
+{
+    // The following logic must be kept in sync with WebCore::HistoryItem::itemsAreClones().
+
+    if (this == &other)
+        return false;
+
+    const FrameState& mainFrameState = m_itemState.pageState.mainFrameState;
+    const FrameState& otherMainFrameState = other.m_itemState.pageState.mainFrameState;
+
+    if (mainFrameState.itemSequenceNumber != otherMainFrameState.itemSequenceNumber)
+        return false;
+
+    return hasSameFrames(mainFrameState, otherMainFrameState);
+}
+
+void WebBackForwardListItem::wasRemovedFromBackForwardList()
+{
+    removeFromBackForwardCache();
+}
+
+void WebBackForwardListItem::removeFromBackForwardCache()
+{
+    if (m_backForwardCacheEntry)
+        m_backForwardCacheEntry->backForwardCache().removeEntry(*this);
+    ASSERT(!m_backForwardCacheEntry);
+}
+
+void WebBackForwardListItem::setBackForwardCacheEntry(std::unique_ptr<WebBackForwardCacheEntry>&& backForwardCacheEntry)
+{
+    m_backForwardCacheEntry = WTFMove(backForwardCacheEntry);
+}
+
+SuspendedPageProxy* WebBackForwardListItem::suspendedPage() const
+{
+    return m_backForwardCacheEntry ? m_backForwardCacheEntry->suspendedPage() : nullptr;
+}
+
+#if !LOG_DISABLED
+const char* WebBackForwardListItem::loggingString()
+{
+    return debugString("Back/forward item ID ", itemID().logString(), ", original URL ", originalURL(), ", current URL ", url(), m_backForwardCacheEntry ? "(has a back/forward cache entry)" : "");
+}
+#endif // !LOG_DISABLED
 
 } // namespace WebKit

@@ -8,8 +8,9 @@
 #ifndef COMMON_VECTOR_UTILS_H_
 #define COMMON_VECTOR_UTILS_H_
 
-#include <cstddef>
 #include <cmath>
+#include <cstddef>
+#include <ostream>
 #include <type_traits>
 
 namespace angle
@@ -44,7 +45,7 @@ class VectorBase
     VectorBase(const VectorBase<Dimension, Type2> &other);
 
     template <typename Arg1, typename Arg2, typename... Args>
-    VectorBase(const Arg1 &arg1, const Arg2 &arg2, const Args &... args);
+    VectorBase(const Arg1 &arg1, const Arg2 &arg2, const Args &...args);
 
     // Access the vector backing storage directly
     const Type *data() const { return mData; }
@@ -79,8 +80,8 @@ class VectorBase
     VectorN &operator/=(Type other);
 
     // Comparison operators
-    bool operator==(const VectorN &other) const;
-    bool operator!=(const VectorN &other) const;
+    bool operator==(const VectorBase<Dimension, Type> &other) const;
+    bool operator!=(const VectorBase<Dimension, Type> &other) const;
 
     // Other arithmetic operations
     Type length() const;
@@ -90,7 +91,7 @@ class VectorBase
 
   protected:
     template <size_t CurrentIndex, size_t OtherDimension, typename OtherType, typename... Args>
-    void initWithList(const Vector<OtherDimension, OtherType> &arg1, const Args &... args);
+    void initWithList(const Vector<OtherDimension, OtherType> &arg1, const Args &...args);
 
     // Some old compilers consider this function an alternative for initWithList(Vector)
     // when the variant above is more precise. Use SFINAE on the return value to hide
@@ -98,7 +99,7 @@ class VectorBase
     template <size_t CurrentIndex, typename OtherType, typename... Args>
     typename std::enable_if<std::is_arithmetic<OtherType>::value>::type initWithList(
         OtherType arg1,
-        const Args &... args);
+        const Args &...args);
 
     template <size_t CurrentIndex>
     void initWithList() const;
@@ -108,6 +109,9 @@ class VectorBase
 
     Type mData[Dimension];
 };
+
+template <size_t Dimension, typename Type>
+std::ostream &operator<<(std::ostream &ostream, const VectorBase<Dimension, Type> &vector);
 
 template <typename Type>
 class Vector<2, Type> : public VectorBase<2, Type>
@@ -123,6 +127,9 @@ class Vector<2, Type> : public VectorBase<2, Type>
     const Type &x() const { return this->mData[0]; }
     const Type &y() const { return this->mData[1]; }
 };
+
+template <typename Type>
+std::ostream &operator<<(std::ostream &ostream, const Vector<2, Type> &vector);
 
 template <typename Type>
 class Vector<3, Type> : public VectorBase<3, Type>
@@ -145,6 +152,9 @@ class Vector<3, Type> : public VectorBase<3, Type>
 };
 
 template <typename Type>
+std::ostream &operator<<(std::ostream &ostream, const Vector<3, Type> &vector);
+
+template <typename Type>
 class Vector<4, Type> : public VectorBase<4, Type>
 {
   public:
@@ -162,6 +172,9 @@ class Vector<4, Type> : public VectorBase<4, Type>
     const Type &z() const { return this->mData[2]; }
     const Type &w() const { return this->mData[3]; }
 };
+
+template <typename Type>
+std::ostream &operator<<(std::ostream &ostream, const Vector<4, Type> &vector);
 
 // Implementation of constructors and misc operations
 
@@ -196,7 +209,7 @@ VectorBase<Dimension, Type>::VectorBase(const VectorBase<Dimension, Type2> &othe
 //  - the compound constructor for two or more arguments, hence the arg1, and arg2 here.
 template <size_t Dimension, typename Type>
 template <typename Arg1, typename Arg2, typename... Args>
-VectorBase<Dimension, Type>::VectorBase(const Arg1 &arg1, const Arg2 &arg2, const Args &... args)
+VectorBase<Dimension, Type>::VectorBase(const Arg1 &arg1, const Arg2 &arg2, const Args &...args)
 {
     initWithList<0>(arg1, arg2, args...);
 }
@@ -204,7 +217,7 @@ VectorBase<Dimension, Type>::VectorBase(const Arg1 &arg1, const Arg2 &arg2, cons
 template <size_t Dimension, typename Type>
 template <size_t CurrentIndex, size_t OtherDimension, typename OtherType, typename... Args>
 void VectorBase<Dimension, Type>::initWithList(const Vector<OtherDimension, OtherType> &arg1,
-                                               const Args &... args)
+                                               const Args &...args)
 {
     static_assert(CurrentIndex + OtherDimension <= Dimension,
                   "Too much data in the vector constructor.");
@@ -218,7 +231,7 @@ void VectorBase<Dimension, Type>::initWithList(const Vector<OtherDimension, Othe
 template <size_t Dimension, typename Type>
 template <size_t CurrentIndex, typename OtherType, typename... Args>
 typename std::enable_if<std::is_arithmetic<OtherType>::value>::type
-VectorBase<Dimension, Type>::initWithList(OtherType arg1, const Args &... args)
+VectorBase<Dimension, Type>::initWithList(OtherType arg1, const Args &...args)
 {
     static_assert(CurrentIndex + 1 <= Dimension, "Too much data in the vector constructor.");
     mData[CurrentIndex] = static_cast<Type>(arg1);
@@ -354,7 +367,7 @@ Vector<Dimension, Type> &VectorBase<Dimension, Type>::operator+=(
     {
         mData[i] += other.mData[i];
     }
-    return *reinterpret_cast<Vector<Dimension, Type> *>(this);
+    return *static_cast<Vector<Dimension, Type> *>(this);
 }
 
 template <size_t Dimension, typename Type>
@@ -365,7 +378,7 @@ Vector<Dimension, Type> &VectorBase<Dimension, Type>::operator-=(
     {
         mData[i] -= other.mData[i];
     }
-    return *reinterpret_cast<Vector<Dimension, Type> *>(this);
+    return *static_cast<Vector<Dimension, Type> *>(this);
 }
 
 template <size_t Dimension, typename Type>
@@ -376,7 +389,7 @@ Vector<Dimension, Type> &VectorBase<Dimension, Type>::operator*=(
     {
         mData[i] *= other.mData[i];
     }
-    return *reinterpret_cast<Vector<Dimension, Type> *>(this);
+    return *static_cast<Vector<Dimension, Type> *>(this);
 }
 
 template <size_t Dimension, typename Type>
@@ -387,7 +400,7 @@ Vector<Dimension, Type> &VectorBase<Dimension, Type>::operator/=(
     {
         mData[i] /= other.mData[i];
     }
-    return *reinterpret_cast<Vector<Dimension, Type> *>(this);
+    return *static_cast<Vector<Dimension, Type> *>(this);
 }
 
 template <size_t Dimension, typename Type>
@@ -397,7 +410,7 @@ Vector<Dimension, Type> &VectorBase<Dimension, Type>::operator*=(Type other)
     {
         mData[i] *= other;
     }
-    return *reinterpret_cast<Vector<Dimension, Type> *>(this);
+    return *static_cast<Vector<Dimension, Type> *>(this);
 }
 
 template <size_t Dimension, typename Type>
@@ -407,12 +420,12 @@ Vector<Dimension, Type> &VectorBase<Dimension, Type>::operator/=(Type other)
     {
         mData[i] /= other;
     }
-    return *reinterpret_cast<Vector<Dimension, Type> *>(this);
+    return *static_cast<Vector<Dimension, Type> *>(this);
 }
 
 // Implementation of comparison operators
 template <size_t Dimension, typename Type>
-bool VectorBase<Dimension, Type>::operator==(const Vector<Dimension, Type> &other) const
+bool VectorBase<Dimension, Type>::operator==(const VectorBase<Dimension, Type> &other) const
 {
     for (size_t i = 0; i < Dimension; ++i)
     {
@@ -425,7 +438,7 @@ bool VectorBase<Dimension, Type>::operator==(const Vector<Dimension, Type> &othe
 }
 
 template <size_t Dimension, typename Type>
-bool VectorBase<Dimension, Type>::operator!=(const Vector<Dimension, Type> &other) const
+bool VectorBase<Dimension, Type>::operator!=(const VectorBase<Dimension, Type> &other) const
 {
     return !(*this == other);
 }
@@ -457,6 +470,22 @@ Type VectorBase<Dimension, Type>::dot(const VectorBase<Dimension, Type> &other) 
 }
 
 template <size_t Dimension, typename Type>
+std::ostream &operator<<(std::ostream &ostream, const VectorBase<Dimension, Type> &vector)
+{
+    ostream << "[ ";
+    for (size_t elementIdx = 0; elementIdx < Dimension; elementIdx++)
+    {
+        if (elementIdx > 0)
+        {
+            ostream << ", ";
+        }
+        ostream << vector.data()[elementIdx];
+    }
+    ostream << " ]";
+    return ostream;
+}
+
+template <size_t Dimension, typename Type>
 Vector<Dimension, Type> VectorBase<Dimension, Type>::normalized() const
 {
     static_assert(std::is_floating_point<Type>::value,
@@ -465,10 +494,28 @@ Vector<Dimension, Type> VectorBase<Dimension, Type>::normalized() const
 }
 
 template <typename Type>
+std::ostream &operator<<(std::ostream &ostream, const Vector<2, Type> &vector)
+{
+    return ostream << static_cast<const VectorBase<2, Type> &>(vector);
+}
+
+template <typename Type>
 Vector<3, Type> Vector<3, Type>::cross(const Vector<3, Type> &other) const
 {
     return Vector<3, Type>(y() * other.z() - z() * other.y(), z() * other.x() - x() * other.z(),
                            x() * other.y() - y() * other.x());
+}
+
+template <typename Type>
+std::ostream &operator<<(std::ostream &ostream, const Vector<3, Type> &vector)
+{
+    return ostream << static_cast<const VectorBase<3, Type> &>(vector);
+}
+
+template <typename Type>
+std::ostream &operator<<(std::ostream &ostream, const Vector<4, Type> &vector)
+{
+    return ostream << static_cast<const VectorBase<4, Type> &>(vector);
 }
 
 }  // namespace angle

@@ -2,6 +2,7 @@
  * Copyright (C) 2010 Apple Inc. All rights reserved.
  * Portions Copyright (c) 2010 Motorola Mobility, Inc.  All rights reserved.
  * Copyright (C) 2011, 2012 Igalia S.L
+ * Copyright (C) 2018 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,60 +26,70 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef NativeWebKeyboardEvent_h
-#define NativeWebKeyboardEvent_h
+#pragma once
 
-#include "WebEvent.h"
+#include "WebKeyboardEvent.h"
 
 #if USE(APPKIT)
 #include <wtf/RetainPtr.h>
 OBJC_CLASS NSView;
-
-namespace WebCore {
-struct KeypressCommand;
-}
 #endif
 
 #if PLATFORM(GTK)
-#include "InputMethodFilter.h"
-#include <WebCore/CompositionResults.h>
 #include <WebCore/GUniquePtrGtk.h>
+#if USE(GTK4)
+typedef struct _GdkEvent GdkEvent;
+#else
 typedef union _GdkEvent GdkEvent;
 #endif
+#endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #include <wtf/RetainPtr.h>
 OBJC_CLASS WebEvent;
 #endif
 
-#if PLATFORM(WPE)
+#if USE(LIBWPE)
 struct wpe_input_keyboard_event;
 #endif
 
+#if PLATFORM(WIN)
+#include <windows.h>
+#endif
+
 namespace WebKit {
+struct EditingRange;
 
 class NativeWebKeyboardEvent : public WebKeyboardEvent {
 public:
 #if USE(APPKIT)
+    // FIXME: Share iOS's HandledByInputMethod enum here instead of passing a boolean.
     NativeWebKeyboardEvent(NSEvent *, bool handledByInputMethod, bool replacesSoftSpace, const Vector<WebCore::KeypressCommand>&);
 #elif PLATFORM(GTK)
     NativeWebKeyboardEvent(const NativeWebKeyboardEvent&);
-    NativeWebKeyboardEvent(GdkEvent*, const WebCore::CompositionResults&, InputMethodFilter::EventFakedForComposition, Vector<String>&& commands);
-#elif PLATFORM(IOS)
-    NativeWebKeyboardEvent(::WebEvent *);
-#elif PLATFORM(WPE)
-    NativeWebKeyboardEvent(struct wpe_input_keyboard_event*);
+    NativeWebKeyboardEvent(GdkEvent*, const String&, Vector<String>&& commands);
+    NativeWebKeyboardEvent(const String&, std::optional<Vector<WebCore::CompositionUnderline>>&&, std::optional<EditingRange>&&);
+    NativeWebKeyboardEvent(Type, const String& text, const String& key, const String& code, const String& keyIdentifier, int windowsVirtualKeyCode, int nativeVirtualKeyCode, Vector<String>&& commands, bool isKeypad, OptionSet<Modifier>);
+#elif PLATFORM(IOS_FAMILY)
+    enum class HandledByInputMethod : bool { No, Yes };
+    NativeWebKeyboardEvent(::WebEvent *, HandledByInputMethod);
+#elif USE(LIBWPE)
+    enum class HandledByInputMethod : bool { No, Yes };
+    NativeWebKeyboardEvent(struct wpe_input_keyboard_event*, const String&, HandledByInputMethod, std::optional<Vector<WebCore::CompositionUnderline>>&&, std::optional<EditingRange>&&);
+#elif PLATFORM(WIN)
+    NativeWebKeyboardEvent(HWND, UINT message, WPARAM, LPARAM, Vector<MSG>&& pendingCharEvents);
 #endif
 
 #if USE(APPKIT)
     NSEvent *nativeEvent() const { return m_nativeEvent.get(); }
 #elif PLATFORM(GTK)
     GdkEvent* nativeEvent() const { return m_nativeEvent.get(); }
-    const WebCore::CompositionResults& compositionResults() const  { return m_compositionResults; }
-    bool isFakeEventForComposition() const { return m_fakeEventForComposition; }
-#elif PLATFORM(IOS)
+#elif PLATFORM(IOS_FAMILY)
     ::WebEvent* nativeEvent() const { return m_nativeEvent.get(); }
-#elif PLATFORM(WPE)
+#elif PLATFORM(WIN)
+    const MSG* nativeEvent() const { return &m_nativeEvent; }
+    const Vector<MSG>& pendingCharEvents() const { return m_pendingCharEvents; }
+#else
     const void* nativeEvent() const { return nullptr; }
 #endif
 
@@ -87,13 +98,12 @@ private:
     RetainPtr<NSEvent> m_nativeEvent;
 #elif PLATFORM(GTK)
     GUniquePtr<GdkEvent> m_nativeEvent;
-    WebCore::CompositionResults m_compositionResults;
-    bool m_fakeEventForComposition;
-#elif PLATFORM(IOS)
+#elif PLATFORM(IOS_FAMILY)
     RetainPtr<::WebEvent> m_nativeEvent;
+#elif PLATFORM(WIN)
+    MSG m_nativeEvent;
+    Vector<MSG> m_pendingCharEvents;
 #endif
 };
 
 } // namespace WebKit
-
-#endif // NativeWebKeyboardEvent_h

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,37 +32,43 @@
 #include "WebProcessProxy.h"
 
 #if PLATFORM(COCOA)
-#include <WebCore/MachSendRight.h>
+#include <wtf/MachSendRight.h>
 #endif
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
-
-DrawingAreaProxy::DrawingAreaProxy(DrawingAreaType type, WebPageProxy& webPageProxy)
+DrawingAreaProxy::DrawingAreaProxy(DrawingAreaType type, WebPageProxy& webPageProxy, WebProcessProxy& process)
     : m_type(type)
+    , m_identifier(DrawingAreaIdentifier::generate())
     , m_webPageProxy(webPageProxy)
+    , m_process(process)
     , m_size(webPageProxy.viewSize())
 #if PLATFORM(MAC)
     , m_viewExposedRectChangedTimer(RunLoop::main(), this, &DrawingAreaProxy::viewExposedRectChangedTimerFired)
 #endif
 {
-    m_webPageProxy.process().addMessageReceiver(Messages::DrawingAreaProxy::messageReceiverName(), m_webPageProxy.pageID(), *this);
 }
 
 DrawingAreaProxy::~DrawingAreaProxy()
 {
-    m_webPageProxy.process().removeMessageReceiver(Messages::DrawingAreaProxy::messageReceiverName(), m_webPageProxy.pageID());
+    if (m_startedReceivingMessages)
+        process().removeMessageReceiver(Messages::DrawingAreaProxy::messageReceiverName(), m_identifier);
 }
 
-bool DrawingAreaProxy::setSize(const IntSize& size, const IntSize& layerPosition, const IntSize& scrollOffset)
+void DrawingAreaProxy::startReceivingMessages()
+{
+    m_startedReceivingMessages = true;
+    process().addMessageReceiver(Messages::DrawingAreaProxy::messageReceiverName(), m_identifier, *this);
+}
+
+bool DrawingAreaProxy::setSize(const IntSize& size, const IntSize& scrollDelta)
 { 
-    if (m_size == size && m_layerPosition == layerPosition && scrollOffset.isZero())
+    if (m_size == size && scrollDelta.isZero())
         return false;
 
     m_size = size;
-    m_layerPosition = layerPosition;
-    m_scrollOffset += scrollOffset;
+    m_scrollOffset += scrollDelta;
     sizeDidChange();
     return true;
 }
@@ -74,13 +80,21 @@ MachSendRight DrawingAreaProxy::createFence()
 }
 #endif
 
-#if PLATFORM(MAC)
-void DrawingAreaProxy::setViewExposedRect(std::optional<WebCore::FloatRect> viewExposedRect)
+IPC::Connection* DrawingAreaProxy::messageSenderConnection() const
 {
-    if (!m_webPageProxy.isValid())
-        return;
+    return process().connection();
+}
 
-    m_viewExposedRect = viewExposedRect;
+bool DrawingAreaProxy::sendMessage(UniqueRef<IPC::Encoder>&& encoder, OptionSet<IPC::SendOption> sendOptions, std::optional<std::pair<CompletionHandler<void(IPC::Decoder*)>, uint64_t>>&& asyncReplyInfo)
+{
+    return process().sendMessage(WTFMove(encoder), sendOptions, WTFMove(asyncReplyInfo));
+}
+
+#if PLATFORM(MAC)
+void DrawingAreaProxy::didChangeViewExposedRect()
+{
+    if (!m_webPageProxy.hasRunningProcess())
+        return;
 
     if (!m_viewExposedRectChangedTimer.isActive())
         m_viewExposedRectChangedTimer.startOneShot(0_s);
@@ -88,14 +102,15 @@ void DrawingAreaProxy::setViewExposedRect(std::optional<WebCore::FloatRect> view
 
 void DrawingAreaProxy::viewExposedRectChangedTimerFired()
 {
-    if (!m_webPageProxy.isValid())
+    if (!m_webPageProxy.hasRunningProcess())
         return;
 
-    if (m_viewExposedRect == m_lastSentViewExposedRect)
+    auto viewExposedRect = m_webPageProxy.viewExposedRect();
+    if (viewExposedRect == m_lastSentViewExposedRect)
         return;
 
-    m_webPageProxy.process().send(Messages::DrawingArea::SetViewExposedRect(m_viewExposedRect), m_webPageProxy.pageID());
-    m_lastSentViewExposedRect = m_viewExposedRect;
+    send(Messages::DrawingArea::SetViewExposedRect(viewExposedRect));
+    m_lastSentViewExposedRect = viewExposedRect;
 }
 #endif // PLATFORM(MAC)
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,11 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#pragma once
+
 #include "WKPageRenderingProgressEvents.h"
 
-#include <WebCore/LayoutMilestones.h>
+#include <WebCore/LayoutMilestone.h>
 
-static inline WKPageRenderingProgressEvents pageRenderingProgressEvents(WebCore::LayoutMilestones milestones)
+static inline WKPageRenderingProgressEvents pageRenderingProgressEvents(OptionSet<WebCore::LayoutMilestone> milestones)
 {
     WKPageRenderingProgressEvents events = 0;
     
@@ -43,5 +45,14 @@ static inline WKPageRenderingProgressEvents pageRenderingProgressEvents(WebCore:
     if (milestones & WebCore::ReachedSessionRestorationRenderTreeSizeThreshold)
         events |= WKPageRenderingProgressEventReachedSessionRestorationRenderTreeSizeThreshold;
     
+    if (milestones & WebCore::DidFirstLayoutAfterSuppressedIncrementalRendering)
+        events |= WKPageRenderingProgressEventFirstLayoutAfterSuppressedIncrementalRendering;
+
+    if (milestones & WebCore::DidFirstPaintAfterSuppressedIncrementalRendering)
+        events |= WKPageRenderingProgressEventFirstPaintAfterSuppressedIncrementalRendering;
+
+    if (milestones & WebCore::DidFirstMeaningfulPaint)
+        events |= WKPageRenderingProgressEventFirstMeaningfulPaint;
+
     return events;
 }

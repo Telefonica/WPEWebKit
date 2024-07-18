@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017 Oleksandr Skachkov <gskachkov@gmail.com>.
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,13 +30,13 @@
 
 namespace JSC {
 
-class JSAsyncGeneratorFunction : public JSFunction {
+class JSAsyncGeneratorFunction final : public JSFunction {
     friend class JIT;
     friend class VM;
 public:
     using Base = JSFunction;
 
-    const static unsigned StructureFlags = Base::StructureFlags;
+    static constexpr unsigned StructureFlags = Base::StructureFlags;
 
     DECLARE_EXPORT_INFO;
 
@@ -55,23 +56,11 @@ public:
         return Structure::create(vm, globalObject, prototype, TypeInfo(JSFunctionType, StructureFlags), info());
     }
 
-    enum class AsyncGeneratorState : int32_t {
-        Completed = -1,
-        Executing = -2,
-        SuspendedStart = -3,
-        SuspendedYield = -4,
-        AwaitingReturn = -5
-    };
-    
-    enum class AsyncGeneratorSuspendReason : int32_t {
-        None = 0,
-        Yield = -1,
-        Await = -2
-    };
 private:
     JSAsyncGeneratorFunction(VM&, FunctionExecutable*, JSScope*, Structure*);
 
     static JSAsyncGeneratorFunction* createImpl(VM&, FunctionExecutable*, JSScope*, Structure*);
 };
+static_assert(sizeof(JSAsyncGeneratorFunction) == sizeof(JSFunction), "Some subclasses of JSFunction should be the same size to share IsoSubspace");
 
 } // namespace JSC

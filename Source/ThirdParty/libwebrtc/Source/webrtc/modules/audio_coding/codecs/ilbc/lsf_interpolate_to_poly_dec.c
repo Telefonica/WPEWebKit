@@ -16,9 +16,11 @@
 
 ******************************************************************/
 
-#include "interpolate.h"
-#include "lsf_to_poly.h"
-#include "defines.h"
+#include "modules/audio_coding/codecs/ilbc/lsf_interpolate_to_poly_dec.h"
+
+#include "modules/audio_coding/codecs/ilbc/defines.h"
+#include "modules/audio_coding/codecs/ilbc/interpolate.h"
+#include "modules/audio_coding/codecs/ilbc/lsf_to_poly.h"
 
 /*----------------------------------------------------------------*
  *  interpolation of lsf coefficients for the decoder

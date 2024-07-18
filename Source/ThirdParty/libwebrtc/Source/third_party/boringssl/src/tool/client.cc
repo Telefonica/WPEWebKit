@@ -48,6 +48,11 @@ static const struct argument kArguments[] = {
         "An OpenSSL-style ECDH curves list that configures the offered curves",
     },
     {
+        "-sigalgs", kOptionalArgument,
+        "An OpenSSL-style signature algorithms list that configures the "
+        "signature algorithm preferences",
+    },
+    {
         "-max-version", kOptionalArgument,
         "The maximum acceptable protocol version",
     },
@@ -117,14 +122,31 @@ static const struct argument kArguments[] = {
     },
     {
         "-root-certs", kOptionalArgument,
-        "A filename containing one of more PEM root certificates. Implies that "
+        "A filename containing one or more PEM root certificates. Implies that "
         "verification is required.",
     },
     {
-        "-early-data", kBooleanArgument, "Allow early data",
+        "-root-cert-dir", kOptionalArgument,
+        "A directory containing one or more root certificate PEM files in "
+        "OpenSSL's hashed-directory format. Implies that verification is "
+        "required.",
     },
     {
-        "-ed25519", kBooleanArgument, "Advertise Ed25519 support",
+        "-early-data", kOptionalArgument, "Enable early data. The argument to "
+        "this flag is the early data to send or if it starts with '@', the "
+        "file to read from for early data.",
+    },
+    {
+        "-http-tunnel", kOptionalArgument,
+        "An HTTP proxy server to tunnel the TCP connection through",
+    },
+    {
+        "-renegotiate-freely", kBooleanArgument,
+        "Allow renegotiations from the peer.",
+    },
+    {
+        "-debug", kBooleanArgument,
+        "Print debug information about the handshake",
     },
     {
         "", kOptionalArgument, "",
@@ -163,7 +185,7 @@ static int NewSessionCallback(SSL *ssl, SSL_SESSION *session) {
     if (!PEM_write_bio_SSL_SESSION(session_out.get(), session) ||
         BIO_flush(session_out.get()) <= 0) {
       fprintf(stderr, "Error while saving session:\n");
-      ERR_print_errors_cb(PrintErrorCallback, stderr);
+      ERR_print_errors_fp(stderr);
       return 0;
     }
   }
@@ -180,7 +202,15 @@ static bool WaitForSession(SSL *ssl, int sock) {
   }
 
   while (!resume_session) {
+#if defined(OPENSSL_WINDOWS)
+    // Windows sockets are really of type SOCKET, not int, but everything here
+    // casts them to ints. Clang gets unhappy about signed values as a result.
+    //
+    // TODO(davidben): Keep everything as the appropriate platform type.
+    FD_SET(static_cast<SOCKET>(sock), &read_fds);
+#else
     FD_SET(sock, &read_fds);
+#endif
     int ret = select(sock + 1, &read_fds, NULL, NULL, NULL);
     if (ret <= 0) {
       perror("select");
@@ -195,8 +225,7 @@ static bool WaitForSession(SSL *ssl, int sock) {
       if (ssl_err == SSL_ERROR_WANT_READ) {
         continue;
       }
-      fprintf(stderr, "Error while reading: %d\n", ssl_err);
-      ERR_print_errors_cb(PrintErrorCallback, stderr);
+      PrintSSLError(stderr, "Error while reading", ssl_err, ssl_ret);
       return false;
     }
   }
@@ -208,7 +237,12 @@ static bool DoConnection(SSL_CTX *ctx,
                          std::map<std::string, std::string> args_map,
                          bool (*cb)(SSL *ssl, int sock)) {
   int sock = -1;
-  if (!Connect(&sock, args_map["-connect"])) {
+  if (args_map.count("-http-tunnel") != 0) {
+    if (!Connect(&sock, args_map["-http-tunnel"]) ||
+        !DoHTTPTunnel(sock, args_map["-connect"])) {
+      return false;
+    }
+  } else if (!Connect(&sock, args_map["-connect"])) {
     return false;
   }
 
@@ -236,17 +270,21 @@ static bool DoConnection(SSL_CTX *ctx,
                                          "rb"));
     if (!in) {
       fprintf(stderr, "Error reading session\n");
-      ERR_print_errors_cb(PrintErrorCallback, stderr);
+      ERR_print_errors_fp(stderr);
       return false;
     }
     bssl::UniquePtr<SSL_SESSION> session(PEM_read_bio_SSL_SESSION(in.get(),
                                          nullptr, nullptr, nullptr));
     if (!session) {
       fprintf(stderr, "Error reading session\n");
-      ERR_print_errors_cb(PrintErrorCallback, stderr);
+      ERR_print_errors_fp(stderr);
       return false;
     }
     SSL_set_session(ssl.get(), session.get());
+  }
+
+  if (args_map.count("-renegotiate-freely") != 0) {
+    SSL_set_renegotiate_mode(ssl.get(), ssl_renegotiate_freely);
   }
 
   if (resume_session) {
@@ -259,15 +297,53 @@ static bool DoConnection(SSL_CTX *ctx,
   int ret = SSL_connect(ssl.get());
   if (ret != 1) {
     int ssl_err = SSL_get_error(ssl.get(), ret);
-    fprintf(stderr, "Error while connecting: %d\n", ssl_err);
-    ERR_print_errors_cb(PrintErrorCallback, stderr);
+    PrintSSLError(stderr, "Error while connecting", ssl_err, ret);
     return false;
   }
 
+  if (args_map.count("-early-data") != 0 && SSL_in_early_data(ssl.get())) {
+    std::string early_data = args_map["-early-data"];
+    if (early_data.size() > 0 && early_data[0] == '@') {
+      const char *filename = early_data.c_str() + 1;
+      std::vector<uint8_t> data;
+      ScopedFILE f(fopen(filename, "rb"));
+      if (f == nullptr || !ReadAll(&data, f.get())) {
+        fprintf(stderr, "Error reading %s.\n", filename);
+        return false;
+      }
+      early_data = std::string(data.begin(), data.end());
+    }
+    int ed_size = early_data.size();
+    int ssl_ret = SSL_write(ssl.get(), early_data.data(), ed_size);
+    if (ssl_ret <= 0) {
+      int ssl_err = SSL_get_error(ssl.get(), ssl_ret);
+      PrintSSLError(stderr, "Error while writing", ssl_err, ssl_ret);
+      return false;
+    } else if (ssl_ret != ed_size) {
+      fprintf(stderr, "Short write from SSL_write.\n");
+      return false;
+    }
+  }
+
   fprintf(stderr, "Connected.\n");
-  PrintConnectionInfo(ssl.get());
+  bssl::UniquePtr<BIO> bio_stderr(BIO_new_fp(stderr, BIO_NOCLOSE));
+  PrintConnectionInfo(bio_stderr.get(), ssl.get());
 
   return cb(ssl.get(), sock);
+}
+
+static void InfoCallback(const SSL *ssl, int type, int value) {
+  switch (type) {
+    case SSL_CB_HANDSHAKE_START:
+      fprintf(stderr, "Handshake started.\n");
+      break;
+    case SSL_CB_HANDSHAKE_DONE:
+      fprintf(stderr, "Handshake done.\n");
+      break;
+    case SSL_CB_CONNECT_LOOP:
+      fprintf(stderr, "Handshake progress: %s\n", SSL_state_string_long(ssl));
+      break;
+  }
 }
 
 bool Client(const std::vector<std::string> &args) {
@@ -282,7 +358,7 @@ bool Client(const std::vector<std::string> &args) {
     return false;
   }
 
-  bssl::UniquePtr<SSL_CTX> ctx(SSL_CTX_new(SSLv23_client_method()));
+  bssl::UniquePtr<SSL_CTX> ctx(SSL_CTX_new(TLS_method()));
 
   const char *keylog_file = getenv("SSLKEYLOGFILE");
   if (keylog_file) {
@@ -303,6 +379,12 @@ bool Client(const std::vector<std::string> &args) {
   if (args_map.count("-curves") != 0 &&
       !SSL_CTX_set1_curves_list(ctx.get(), args_map["-curves"].c_str())) {
     fprintf(stderr, "Failed setting curves list\n");
+    return false;
+  }
+
+  if (args_map.count("-sigalgs") != 0 &&
+      !SSL_CTX_set1_sigalgs_list(ctx.get(), args_map["-sigalgs"].c_str())) {
+    fprintf(stderr, "Failed setting signature algorithms list\n");
     return false;
   }
 
@@ -413,7 +495,7 @@ bool Client(const std::vector<std::string> &args) {
     if (!session_out) {
       fprintf(stderr, "Error while opening %s:\n",
               args_map["-session-out"].c_str());
-      ERR_print_errors_cb(PrintErrorCallback, stderr);
+      ERR_print_errors_fp(stderr);
       return false;
     }
   }
@@ -426,7 +508,17 @@ bool Client(const std::vector<std::string> &args) {
     if (!SSL_CTX_load_verify_locations(
             ctx.get(), args_map["-root-certs"].c_str(), nullptr)) {
       fprintf(stderr, "Failed to load root certificates.\n");
-      ERR_print_errors_cb(PrintErrorCallback, stderr);
+      ERR_print_errors_fp(stderr);
+      return false;
+    }
+    SSL_CTX_set_verify(ctx.get(), SSL_VERIFY_PEER, nullptr);
+  }
+
+  if (args_map.count("-root-cert-dir") != 0) {
+    if (!SSL_CTX_load_verify_locations(
+            ctx.get(), nullptr, args_map["-root-cert-dir"].c_str())) {
+      fprintf(stderr, "Failed to load root certificates.\n");
+      ERR_print_errors_fp(stderr);
       return false;
     }
     SSL_CTX_set_verify(ctx.get(), SSL_VERIFY_PEER, nullptr);
@@ -436,8 +528,8 @@ bool Client(const std::vector<std::string> &args) {
     SSL_CTX_set_early_data_enabled(ctx.get(), 1);
   }
 
-  if (args_map.count("-ed25519") != 0) {
-    SSL_CTX_set_ed25519_enabled(ctx.get(), 1);
+  if (args_map.count("-debug") != 0) {
+    SSL_CTX_set_info_callback(ctx.get(), InfoCallback);
   }
 
   if (args_map.count("-test-resumption") != 0) {

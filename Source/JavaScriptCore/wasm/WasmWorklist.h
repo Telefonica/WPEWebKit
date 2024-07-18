@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,17 +27,16 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "VM.h"
-
 #include <queue>
 
 #include <wtf/AutomaticThread.h>
+#include <wtf/PrintStream.h>
 #include <wtf/PriorityQueue.h>
 #include <wtf/Vector.h>
 
 namespace JSC {
 
-class JSPromiseDeferred;
+class VM;
 
 namespace Wasm {
 
@@ -50,12 +49,9 @@ public:
     ~Worklist();
 
     JS_EXPORT_PRIVATE void enqueue(Ref<Plan>);
-    void stopAllPlansForVM(VM&);
+    void stopAllPlansForContext(VM&);
 
     JS_EXPORT_PRIVATE void completePlanSynchronously(Plan&);
-
-    void activatePlan(JSPromiseDeferred*, Plan*);
-    void deactivePlan(JSPromiseDeferred*, Plan*);
 
     enum class Priority {
         Shutdown,
@@ -64,6 +60,8 @@ public:
         Preparation
     };
     const char* priorityString(Priority);
+
+    void dump(PrintStream&) const;
 
 private:
     class Thread;
@@ -88,7 +86,7 @@ private:
     }
 
     Box<Lock> m_lock;
-    RefPtr<AutomaticThreadCondition> m_planEnqueued;
+    Ref<AutomaticThreadCondition> m_planEnqueued;
     // Technically, this could overflow but that's unlikely. Even if it did, we will just compile things of the same
     // Priority it the wrong order, which isn't wrong, just suboptimal.
     Ticket m_lastGrantedTicket { 0 };

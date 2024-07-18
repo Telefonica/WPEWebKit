@@ -23,19 +23,22 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef PageLoadStateObserver_h
-#define PageLoadStateObserver_h
-
 #import "PageLoadState.h"
 
 namespace WebKit {
 
 class PageLoadStateObserver : public PageLoadState::Observer {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     PageLoadStateObserver(id object, NSString *activeURLKey = @"activeURL")
         : m_object(object)
         , m_activeURLKey(adoptNS([activeURLKey copy]))
     {
+    }
+
+    void clearObject()
+    {
+        m_object = nil;
     }
 
 private:
@@ -97,6 +100,7 @@ private:
     void didChangeNetworkRequestsInProgress() override { }
     void willChangeCertificateInfo() override { }
     void didChangeCertificateInfo() override { }
+    void didSwapWebProcesses() override { }
 
     void willChangeWebProcessIsResponsive() override
     {
@@ -113,5 +117,3 @@ private:
 };
 
 }
-
-#endif // PageLoadStateObserver_h

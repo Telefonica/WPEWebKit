@@ -22,13 +22,16 @@
 
 #if ENABLE(VIDEO) && USE(GSTREAMER) && ENABLE(MEDIA_SOURCE)
 
+#include "AbortableTaskQueue.h"
 #include "GStreamerCommon.h"
 #include "MediaPlayerPrivateGStreamerMSE.h"
-#include "MediaSourceClientGStreamerMSE.h"
 #include "SourceBufferPrivateGStreamer.h"
 
+#include <atomic>
 #include <gst/gst.h>
+#include <mutex>
 #include <wtf/Condition.h>
+#include <wtf/Threading.h>
 
 namespace WebCore {
 
@@ -40,132 +43,136 @@ struct PadProbeInformation {
 };
 #endif
 
-class AppendPipeline : public ThreadSafeRefCounted<AppendPipeline> {
+class AppendPipeline {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    enum class AppendState { Invalid, NotStarted, Ongoing, DataStarve, Sampling, LastSample, Aborting };
-
-    AppendPipeline(Ref<MediaSourceClientGStreamerMSE>, Ref<SourceBufferPrivateGStreamer>, MediaPlayerPrivateGStreamerMSE&);
+    AppendPipeline(SourceBufferPrivateGStreamer&, MediaPlayerPrivateGStreamerMSE&);
     virtual ~AppendPipeline();
 
+    void pushNewBuffer(GRefPtr<GstBuffer>&&);
+    void resetParserState();
+    void stopParser();
+    SourceBufferPrivateGStreamer& sourceBufferPrivate() { return m_sourceBufferPrivate; }
+    MediaPlayerPrivateGStreamerMSE* playerPrivate() { return m_playerPrivate; }
+
+private:
+    // Similar to TrackPrivateBaseGStreamer::TrackType, but with a new value (Invalid) for when the codec is
+    // not supported on this system, which should result in ParsingFailed error being thrown in SourceBuffer.
+    enum StreamType { Audio, Video, Text, Unknown, Invalid };
+#ifndef GST_DISABLE_GST_DEBUG
+    static const char * streamTypeToString(StreamType);
+#endif
+
+    struct Track {
+        // Track objects are created on pad-added for the first initialization segment, and destroyed after
+        // the pipeline state has been set to GST_STATE_NULL.
+        WTF_MAKE_NONCOPYABLE(Track);
+        WTF_MAKE_FAST_ALLOCATED;
+    public:
+
+        Track(const AtomString& trackId, StreamType streamType, const GRefPtr<GstCaps>& caps, const FloatSize& presentationSize)
+            : trackId(trackId)
+            , streamType(streamType)
+            , caps(caps)
+            , presentationSize(presentationSize)
+        { }
+
+        AtomString trackId;
+        StreamType streamType;
+        GRefPtr<GstCaps> caps;
+        FloatSize presentationSize;
+
+        // Needed by some formats. To simplify the code, parser can be a GstIdentity when not needed.
+        GRefPtr<GstElement> parser;
+        GRefPtr<GstElement> appsink;
+        GRefPtr<GstPad> entryPad; // Sink pad of the parser/GstIdentity.
+        GRefPtr<GstPad> appsinkPad;
+
+        RefPtr<WebCore::TrackPrivateBase> webKitTrack;
+
+#if !LOG_DISABLED
+        struct PadProbeInformation appsinkDataEnteringPadProbeInformation;
+#endif
+#if ENABLE(ENCRYPTED_MEDIA)
+        struct PadProbeInformation appsinkPadEventProbeInformation;
+#endif
+
+        void emplaceOptionalParserForFormat(GstBin*, const GRefPtr<GstCaps>&);
+        void initializeElements(AppendPipeline*, GstBin*);
+        bool isLinked() const { return gst_pad_is_linked(entryPad.get()); }
+    };
+
+    void handleErrorSyncMessage(GstMessage*);
     void handleNeedContextSyncMessage(GstMessage*);
-    void handleApplicationMessage(GstMessage*);
+    // For debug purposes only:
     void handleStateChangeMessage(GstMessage*);
 
-    gint id();
-    AppendState appendState() { return m_appendState; }
-    void setAppendState(AppendState);
+    void handleAppsinkNewSampleFromStreamingThread(GstElement*);
+    void handleErrorCondition();
+    void handleErrorConditionFromStreamingThread();
 
-    GstFlowReturn handleNewAppsinkSample(GstElement*);
-    GstFlowReturn pushNewBuffer(GstBuffer*);
-
-    // Takes ownership of caps.
-    void parseDemuxerSrcPadCaps(GstCaps*);
-    void appsinkCapsChanged();
-    void appsinkNewSample(GstSample*);
-    void appsinkEOS();
+    void hookTrackEvents(Track&);
+    static std::tuple<GRefPtr<GstCaps>, AppendPipeline::StreamType, FloatSize> parseDemuxerSrcPadCaps(GstCaps*);
+    Ref<WebCore::TrackPrivateBase> makeWebKitTrack(int trackIndex);
+    void appsinkCapsChanged(Track&);
+    void appsinkNewSample(const Track&, GRefPtr<GstSample>&&);
+    void handleEndOfAppend();
     void didReceiveInitializationSegment();
-    AtomicString trackId();
-    void abort();
 
-    void clearPlayerPrivate();
-    Ref<SourceBufferPrivateGStreamer> sourceBufferPrivate() { return m_sourceBufferPrivate.get(); }
     GstBus* bus() { return m_bus.get(); }
     GstElement* pipeline() { return m_pipeline.get(); }
     GstElement* appsrc() { return m_appsrc.get(); }
-    GstElement* appsink() { return m_appsink.get(); }
-    GstCaps* demuxerSrcPadCaps() { return m_demuxerSrcPadCaps.get(); }
-    GstCaps* appsinkCaps() { return m_appsinkCaps.get(); }
-    RefPtr<WebCore::TrackPrivateBase> track() { return m_track; }
-    WebCore::MediaSourceStreamTypeGStreamer streamType() { return m_streamType; }
 
-    void disconnectDemuxerSrcPadFromAppsinkFromAnyThread(GstPad*);
-    void appendPipelineDemuxerNoMorePadsFromAnyThread();
-    void connectDemuxerSrcPadToAppsinkFromAnyThread(GstPad*);
-    void connectDemuxerSrcPadToAppsink(GstPad*);
+    static AtomString generateTrackId(StreamType, int padIndex);
+    enum class CreateTrackResult { TrackCreated, TrackIgnored, AppendParsingFailed };
+    std::pair<CreateTrackResult, AppendPipeline::Track*> tryCreateTrackFromPad(GstPad* demuxerSrcPad, int padIndex);
 
-    void transitionTo(AppendState, bool isAlreadyLocked);
+    bool recycleTrackForPad(GstPad*);
+    void linkPadWithTrack(GstPad* demuxerSrcPad, Track&);
 
-    void reportAppsrcAtLeastABufferLeft();
-    void reportAppsrcNeedDataReceived();
+    void consumeAppsinksAvailableSamples();
 
-#if ENABLE(ENCRYPTED_MEDIA)
-    void demuxerIsDoneSendingProtectionEvents(const GstStructure*);
-    void cacheProtectionEvent(GstEvent*);
-    void handleProtectedBufferProbeInformation(GstPadProbeInfo*);
-#endif
+    GstPadProbeReturn appsrcEndOfAppendCheckerProbe(GstPadProbeInfo*);
 
-private:
-    void resetPipeline();
-    void checkEndOfAppend();
-    void handleAppsrcAtLeastABufferLeft();
-    void handleAppsrcNeedDataReceived();
-    void removeAppsrcDataLeavingProbe();
-    void setAppsrcDataLeavingProbe();
-    void demuxerNoMorePads();
-    void consumeAppSinkAvailableSamples();
+    static void staticInitialization();
 
-    Ref<MediaSourceClientGStreamerMSE> m_mediaSourceClient;
-    Ref<SourceBufferPrivateGStreamer> m_sourceBufferPrivate;
+    static std::once_flag s_staticInitializationFlag;
+    static GType s_endOfAppendMetaType;
+    static const GstMetaInfo* s_webKitEndOfAppendMetaInfo;
+
+    // Used only for asserting that there is only one streaming thread.
+    // Only the pointers are compared.
+    Thread* m_streamingThread;
+
+    bool m_hasReceivedFirstInitializationSegment { false };
+    // Used only for asserting EOS events are only caused by demuxing errors.
+    bool m_errorReceived { false };
+
+    SourceBufferPrivateGStreamer& m_sourceBufferPrivate;
     MediaPlayerPrivateGStreamerMSE* m_playerPrivate;
 
-    // (m_mediaType, m_id) is unique.
-    gint m_id;
-
     MediaTime m_initialDuration;
-
     GRefPtr<GstElement> m_pipeline;
     GRefPtr<GstBus> m_bus;
     GRefPtr<GstElement> m_appsrc;
+    // To simplify the code, mtypefind and m_demux can be a GstIdentity when not needed.
+    GRefPtr<GstElement> m_typefind;
     GRefPtr<GstElement> m_demux;
-    GRefPtr<GstElement> m_parser; // Optional.
-    // The demuxer has one src stream only, so only one appsink is needed and linked to it.
-    GRefPtr<GstElement> m_appsink;
+
+    Vector<std::unique_ptr<Track>> m_tracks;
 
     // Used to avoid unnecessary notifications per sample.
-    // It is read and write from the streaming thread and wrote from the main thread.
+    // It is read and written from the streaming thread and written from the main thread.
     // The main thread must set it to false before actually pulling samples.
     // This strategy ensures that at any time, there are at most two notifications in the bus
     // queue, instead of it growing unbounded.
-    // Used intentionally without locks.
-    bool m_busAlreadyNotifiedOfAvailablesamples;
+    std::atomic_flag m_wasBusAlreadyNotifiedOfAvailableSamples;
 
-    Lock m_padAddRemoveLock;
-    Condition m_padAddRemoveCondition;
-    Lock m_appendStateTransitionLock;
-    Condition m_appendStateTransitionCondition;
-
-    GRefPtr<GstCaps> m_appsinkCaps;
-    GRefPtr<GstCaps> m_demuxerSrcPadCaps;
-    FloatSize m_presentationSize;
-
-    bool m_appsrcAtLeastABufferLeft;
-    bool m_appsrcNeedDataReceived;
-    bool m_firstTrackDetected;
-
-    gulong m_appsrcDataLeavingProbeId;
 #if !LOG_DISABLED
     struct PadProbeInformation m_demuxerDataEnteringPadProbeInformation;
-    struct PadProbeInformation m_appsinkDataEnteringPadProbeInformation;
 #endif
 
-#if ENABLE(ENCRYPTED_MEDIA)
-    struct PadProbeInformation m_appsinkPadProtectionProbeInformation;
-    GValue m_cachedProtectionEvents;
-    bool m_isProcessingProtectionEvents { false };
-#endif
-    // Keeps track of the states of append processing, to avoid performing actions inappropriate for the current state
-    // (eg: processing more samples when the last one has been detected, etc.). See setAppendState() for valid
-    // transitions.
-    AppendState m_appendState;
-
-    // Aborts can only be completed when the normal sample detection has finished. Meanwhile, the willing to abort is
-    // expressed in this field.
-    bool m_abortPending;
-
-    WebCore::MediaSourceStreamTypeGStreamer m_streamType;
-    RefPtr<WebCore::TrackPrivateBase> m_track;
-
-    GRefPtr<GstBuffer> m_pendingBuffer;
+    AbortableTaskQueue m_taskQueue;
 };
 
 } // namespace WebCore.

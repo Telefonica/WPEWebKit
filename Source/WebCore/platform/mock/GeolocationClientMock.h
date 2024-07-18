@@ -32,6 +32,7 @@
 #pragma once
 
 #include "GeolocationClient.h"
+#include "GeolocationPositionData.h"
 #include "Timer.h"
 #include <wtf/HashSet.h>
 #include <wtf/RefPtr.h>
@@ -40,7 +41,6 @@
 namespace WebCore {
 
 class GeolocationController;
-class GeolocationPosition;
 
 // FIXME: this should not be in WebCore. It should be moved to WebKit.
 // Provides a mock object for the geolocation client.
@@ -52,17 +52,17 @@ public:
     void reset();
     void setController(GeolocationController*);
 
-    void setPosition(RefPtr<GeolocationPosition>&&);
+    void setPosition(GeolocationPositionData&&);
     void setPositionUnavailableError(const String& errorMessage);
     void setPermission(bool allowed);
     int numberOfPendingPermissionRequests() const;
 
     // GeolocationClient
     void geolocationDestroyed() override;
-    void startUpdating() override;
+    void startUpdating(const String& authorizationToken, bool enableHighAccuracy) override;
     void stopUpdating() override;
     void setEnableHighAccuracy(bool) override;
-    GeolocationPosition* lastPosition() override;
+    std::optional<GeolocationPositionData> lastPosition() override;
     void requestPermission(Geolocation&) override;
     void cancelPermissionRequest(Geolocation&) override;
 
@@ -76,7 +76,7 @@ private:
     void clearError();
 
     GeolocationController* m_controller;
-    RefPtr<GeolocationPosition> m_lastPosition;
+    std::optional<GeolocationPositionData> m_lastPosition;
     bool m_hasError;
     String m_errorMessage;
     Timer m_controllerTimer;
@@ -88,7 +88,7 @@ private:
         PermissionStateAllowed,
         PermissionStateDenied,
     } m_permissionState;
-    typedef WTF::HashSet<RefPtr<Geolocation> > GeolocationSet;
+    typedef HashSet<RefPtr<Geolocation>> GeolocationSet;
     GeolocationSet m_pendingPermission;
 };
 

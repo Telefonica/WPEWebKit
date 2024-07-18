@@ -24,14 +24,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef CurlCacheEntry_h
-#define CurlCacheEntry_h
+#pragma once
 
-#include "FileSystem.h"
 #include "HTTPHeaderMap.h"
 #include "ResourceHandle.h"
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
+#include <wtf/FileSystem.h>
 #include <wtf/Forward.h>
 #include <wtf/HashMap.h>
 #include <wtf/ListHashSet.h>
@@ -41,7 +40,7 @@
 namespace WebCore {
 
 class CurlCacheEntry {
-
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     CurlCacheEntry(const String& url, ResourceHandle* job, const String& cacheDir);
     ~CurlCacheEntry();
@@ -51,7 +50,7 @@ public:
     size_t entrySize();
     HTTPHeaderMap& requestHeaders() { return m_requestHeaders; }
 
-    bool saveCachedData(const char* data, size_t);
+    bool saveCachedData(const uint8_t* data, size_t);
     bool readCachedData(ResourceHandle*);
 
     bool saveResponseHeaders(const ResourceResponse&);
@@ -76,10 +75,10 @@ private:
     String m_headerFilename;
     String m_contentFilename;
 
-    PlatformFileHandle m_contentFile;
+    FileSystem::PlatformFileHandle m_contentFile;
 
     size_t m_entrySize;
-    double m_expireDate;
+    WallTime m_expireDate;
     bool m_headerParsed;
     bool m_isLoading;
     ListHashSet<ResourceHandle*> m_clients;
@@ -90,13 +89,10 @@ private:
     ResourceHandle* m_job;
 
     void generateBaseFilename(const CString& url);
-    bool loadFileToBuffer(const String& filepath, Vector<char>& buffer);
     bool loadResponseHeaders();
 
     bool openContentFile();
     bool closeContentFile();
 };
 
-}
-
-#endif // CurlCacheEntry_h
+} // namespace WebCore

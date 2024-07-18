@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -62,7 +62,23 @@ unsigned ObjectPropertyConditionSet::numberOfConditionsWithKind(PropertyConditio
 
 bool ObjectPropertyConditionSet::hasOneSlotBaseCondition() const
 {
-    return (numberOfConditionsWithKind(PropertyCondition::Presence) == 1) != (numberOfConditionsWithKind(PropertyCondition::Equivalence) == 1);
+    bool sawBase = false;
+    for (const ObjectPropertyCondition& condition : *this) {
+        switch (condition.kind()) {
+        case PropertyCondition::Presence:
+        case PropertyCondition::Replacement:
+        case PropertyCondition::Equivalence:
+        case PropertyCondition::HasStaticProperty:
+            if (sawBase)
+                return false;
+            sawBase = true;
+            break;
+        default:
+            break;
+        }
+    }
+
+    return sawBase;
 }
 
 ObjectPropertyCondition ObjectPropertyConditionSet::slotBaseCondition() const
@@ -71,7 +87,9 @@ ObjectPropertyCondition ObjectPropertyConditionSet::slotBaseCondition() const
     unsigned numFound = 0;
     for (const ObjectPropertyCondition& condition : *this) {
         if (condition.kind() == PropertyCondition::Presence
-            || condition.kind() == PropertyCondition::Equivalence) {
+            || condition.kind() == PropertyCondition::Replacement
+            || condition.kind() == PropertyCondition::Equivalence
+            || condition.kind() == PropertyCondition::HasStaticProperty) {
             result = condition;
             numFound++;
         }
@@ -86,10 +104,10 @@ ObjectPropertyConditionSet ObjectPropertyConditionSet::mergedWith(
     if (!isValid() || !other.isValid())
         return invalid();
 
-    Vector<ObjectPropertyCondition> result;
+    Vector<ObjectPropertyCondition, 16> result;
     
     if (!isEmpty())
-        result.appendVector(m_data->vector);
+        result.append(m_data->begin(), m_data->size());
     
     for (const ObjectPropertyCondition& newCondition : other) {
         bool foundMatch = false;
@@ -105,7 +123,7 @@ ObjectPropertyConditionSet ObjectPropertyConditionSet::mergedWith(
             result.append(newCondition);
     }
 
-    return create(result);
+    return ObjectPropertyConditionSet::create(WTFMove(result));
 }
 
 bool ObjectPropertyConditionSet::structuresEnsureValidity() const
@@ -114,19 +132,7 @@ bool ObjectPropertyConditionSet::structuresEnsureValidity() const
         return false;
     
     for (const ObjectPropertyCondition& condition : *this) {
-        if (!condition.structureEnsuresValidity())
-            return false;
-    }
-    return true;
-}
-
-bool ObjectPropertyConditionSet::structuresEnsureValidityAssumingImpurePropertyWatchpoint() const
-{
-    if (!isValid())
-        return false;
-    
-    for (const ObjectPropertyCondition& condition : *this) {
-        if (!condition.structureEnsuresValidityAssumingImpurePropertyWatchpoint())
+        if (!condition.structureEnsuresValidity(Concurrency::ConcurrentThread))
             return false;
     }
     return true;
@@ -141,13 +147,13 @@ bool ObjectPropertyConditionSet::needImpurePropertyWatchpoint() const
     return false;
 }
 
-bool ObjectPropertyConditionSet::areStillLive() const
+bool ObjectPropertyConditionSet::areStillLive(VM& vm) const
 {
-    for (const ObjectPropertyCondition& condition : *this) {
-        if (!condition.isStillLive())
-            return false;
-    }
-    return true;
+    bool stillLive = true;
+    forEachDependentCell([&](JSCell* cell) {
+        stillLive &= vm.heap.isMarked(cell);
+    });
+    return stillLive;
 }
 
 void ObjectPropertyConditionSet::dumpInContext(PrintStream& out, DumpContext* context) const
@@ -159,7 +165,7 @@ void ObjectPropertyConditionSet::dumpInContext(PrintStream& out, DumpContext* co
     
     out.print("[");
     if (m_data)
-        out.print(listDumpInContext(m_data->vector, context));
+        out.print(listDumpInContext(*m_data, context));
     out.print("]");
 }
 
@@ -168,28 +174,16 @@ void ObjectPropertyConditionSet::dump(PrintStream& out) const
     dumpInContext(out, nullptr);
 }
 
-bool ObjectPropertyConditionSet::isValidAndWatchable() const
-{
-    if (!isValid())
-        return false;
-
-    for (ObjectPropertyCondition condition : m_data->vector) {
-        if (!condition.isWatchable())
-            return false;
-    }
-    return true;
-}
-
 namespace {
 
 namespace ObjectPropertyConditionSetInternal {
-static const bool verbose = false;
+static constexpr bool verbose = false;
 }
 
 ObjectPropertyCondition generateCondition(
-    VM& vm, JSCell* owner, JSObject* object, UniquedStringImpl* uid, PropertyCondition::Kind conditionKind)
+    VM& vm, JSCell* owner, JSObject* object, Structure* structure, UniquedStringImpl* uid, PropertyCondition::Kind conditionKind, Concurrency concurrency)
 {
-    Structure* structure = object->structure();
+    // The structure of object might change by the time we get here, so we need to make sure that our conditions are built against the structure that is passed in.
     if (ObjectPropertyConditionSetInternal::verbose)
         dataLog("Creating condition ", conditionKind, " for ", pointerDump(structure), "\n");
 
@@ -197,29 +191,60 @@ ObjectPropertyCondition generateCondition(
     switch (conditionKind) {
     case PropertyCondition::Presence: {
         unsigned attributes;
-        PropertyOffset offset = structure->getConcurrently(uid, attributes);
+        PropertyOffset offset = structure->get(vm, concurrency, uid, attributes);
         if (offset == invalidOffset)
             return ObjectPropertyCondition();
         result = ObjectPropertyCondition::presence(vm, owner, object, uid, offset, attributes);
         break;
     }
+    case PropertyCondition::Replacement: {
+        unsigned attributes;
+        PropertyOffset offset = structure->get(vm, concurrency, uid, attributes);
+        if (offset == invalidOffset || !!(attributes & PropertyAttribute::ReadOnly))
+            return ObjectPropertyCondition();
+        result = ObjectPropertyCondition::replacement(vm, owner, object, uid, offset, attributes);
+        break;
+    }
     case PropertyCondition::Absence: {
+        if (structure->hasPolyProto())
+            return ObjectPropertyCondition();
         result = ObjectPropertyCondition::absence(
-            vm, owner, object, uid, object->structure()->storedPrototypeObject());
+            vm, owner, object, uid, structure->storedPrototypeObject());
         break;
     }
     case PropertyCondition::AbsenceOfSetEffect: {
+        if (structure->hasPolyProto())
+            return ObjectPropertyCondition();
         result = ObjectPropertyCondition::absenceOfSetEffect(
-            vm, owner, object, uid, object->structure()->storedPrototypeObject());
+            vm, owner, object, uid, structure->storedPrototypeObject());
+        break;
+    }
+    case PropertyCondition::AbsenceOfIndexedProperties: {
+        if (structure->hasPolyProto())
+            return ObjectPropertyCondition();
+        if (hasIndexedProperties(structure->indexingType()))
+            return ObjectPropertyCondition();
+        if (structure->mayInterceptIndexedAccesses() || structure->typeInfo().interceptsGetOwnPropertySlotByIndexEvenWhenLengthIsNotZero())
+            return ObjectPropertyCondition();
+        result = ObjectPropertyCondition::absenceOfIndexedProperties(vm, owner, object, structure->storedPrototypeObject());
         break;
     }
     case PropertyCondition::Equivalence: {
         unsigned attributes;
-        PropertyOffset offset = structure->getConcurrently(uid, attributes);
+        PropertyOffset offset = structure->get(vm, concurrency, uid, attributes);
         if (offset == invalidOffset)
             return ObjectPropertyCondition();
-        JSValue value = object->getDirect(offset);
+        JSValue value = object->getDirect(concurrency, structure, offset);
+        if (!value)
+            return ObjectPropertyCondition();
         result = ObjectPropertyCondition::equivalence(vm, owner, object, uid, value);
+        break;
+    }
+    case PropertyCondition::HasStaticProperty: {
+        auto entry = object->findPropertyHashEntry(uid);
+        if (!entry)
+            return ObjectPropertyCondition();
+        result = ObjectPropertyCondition::hasStaticProperty(vm, owner, object, uid);
         break;
     }
     default:
@@ -227,7 +252,7 @@ ObjectPropertyCondition generateCondition(
         return ObjectPropertyCondition();
     }
 
-    if (!result.isStillValidAssumingImpurePropertyWatchpoint()) {
+    if (!result.isStillValidAssumingImpurePropertyWatchpoint(concurrency)) {
         if (ObjectPropertyConditionSetInternal::verbose)
             dataLog("Failed to create condition: ", result, "\n");
         return ObjectPropertyCondition();
@@ -238,16 +263,10 @@ ObjectPropertyCondition generateCondition(
     return result;
 }
 
-enum Concurrency {
-    MainThread,
-    Concurrent
-};
 template<typename Functor>
-ObjectPropertyConditionSet generateConditions(
-    VM& vm, JSGlobalObject* globalObject, Structure* structure, JSObject* prototype, const Functor& functor,
-    Concurrency concurrency = MainThread)
+ObjectPropertyConditionSet generateConditions(JSGlobalObject* globalObject, Structure* structure, JSObject* prototype, const Functor& functor)
 {
-    Vector<ObjectPropertyCondition> conditions;
+    Vector<ObjectPropertyCondition, 8> conditions;
     
     for (;;) {
         if (ObjectPropertyConditionSetInternal::verbose)
@@ -256,6 +275,15 @@ ObjectPropertyConditionSet generateConditions(
         if (structure->isProxy()) {
             if (ObjectPropertyConditionSetInternal::verbose)
                 dataLog("It's a proxy, so invalid.\n");
+            return ObjectPropertyConditionSet::invalid();
+        }
+
+        if (structure->hasPolyProto()) {
+            // FIXME: Integrate this with PolyProtoAccessChain:
+            // https://bugs.webkit.org/show_bug.cgi?id=177339
+            // Or at least allow OPC set generation when the
+            // base is not poly proto:
+            // https://bugs.webkit.org/show_bug.cgi?id=177721
             return ObjectPropertyConditionSet::invalid();
         }
         
@@ -273,27 +301,15 @@ ObjectPropertyConditionSet generateConditions(
         }
         
         JSObject* object = jsCast<JSObject*>(value);
-        structure = object->structure(vm);
+        structure = object->structure();
         
         if (structure->isDictionary()) {
-            if (concurrency == MainThread) {
-                if (structure->hasBeenFlattenedBefore()) {
-                    if (ObjectPropertyConditionSetInternal::verbose)
-                        dataLog("Dictionary has been flattened before, so invalid.\n");
-                    return ObjectPropertyConditionSet::invalid();
-                }
-
-                if (ObjectPropertyConditionSetInternal::verbose)
-                    dataLog("Flattening ", pointerDump(structure));
-                structure->flattenDictionaryStructure(vm, object);
-            } else {
-                if (ObjectPropertyConditionSetInternal::verbose)
-                    dataLog("Cannot flatten dictionary when not on main thread, so invalid.\n");
-                return ObjectPropertyConditionSet::invalid();
-            }
+            if (ObjectPropertyConditionSetInternal::verbose)
+                dataLog("Cannot cache dictionary.\n");
+            return ObjectPropertyConditionSet::invalid();
         }
 
-        if (!functor(conditions, object)) {
+        if (!functor(conditions, object, structure)) {
             if (ObjectPropertyConditionSetInternal::verbose)
                 dataLog("Functor failed, invalid.\n");
             return ObjectPropertyConditionSet::invalid();
@@ -308,19 +324,19 @@ ObjectPropertyConditionSet generateConditions(
 
     if (ObjectPropertyConditionSetInternal::verbose)
         dataLog("Returning conditions: ", listDump(conditions), "\n");
-    return ObjectPropertyConditionSet::create(conditions);
+    return ObjectPropertyConditionSet::create(WTFMove(conditions));
 }
 
 } // anonymous namespace
 
 ObjectPropertyConditionSet generateConditionsForPropertyMiss(
-    VM& vm, JSCell* owner, ExecState* exec, Structure* headStructure, UniquedStringImpl* uid)
+    VM& vm, JSCell* owner, JSGlobalObject* globalObject, Structure* headStructure, UniquedStringImpl* uid)
 {
     return generateConditions(
-        vm, exec->lexicalGlobalObject(), headStructure, nullptr,
-        [&] (Vector<ObjectPropertyCondition>& conditions, JSObject* object) -> bool {
+        globalObject, headStructure, nullptr,
+        [&](auto& conditions, JSObject* object, Structure* structure) -> bool {
             ObjectPropertyCondition result =
-                generateCondition(vm, owner, object, uid, PropertyCondition::Absence);
+                generateCondition(vm, owner, object, structure, uid, PropertyCondition::Absence, Concurrency::MainThread);
             if (!result)
                 return false;
             conditions.append(result);
@@ -329,13 +345,27 @@ ObjectPropertyConditionSet generateConditionsForPropertyMiss(
 }
 
 ObjectPropertyConditionSet generateConditionsForPropertySetterMiss(
-    VM& vm, JSCell* owner, ExecState* exec, Structure* headStructure, UniquedStringImpl* uid)
+    VM& vm, JSCell* owner, JSGlobalObject* globalObject, Structure* headStructure, UniquedStringImpl* uid)
 {
     return generateConditions(
-        vm, exec->lexicalGlobalObject(), headStructure, nullptr,
-        [&] (Vector<ObjectPropertyCondition>& conditions, JSObject* object) -> bool {
+        globalObject, headStructure, nullptr,
+        [&](auto& conditions, JSObject* object, Structure* structure) -> bool {
             ObjectPropertyCondition result =
-                generateCondition(vm, owner, object, uid, PropertyCondition::AbsenceOfSetEffect);
+                generateCondition(vm, owner, object, structure, uid, PropertyCondition::AbsenceOfSetEffect, Concurrency::MainThread);
+            if (!result)
+                return false;
+            conditions.append(result);
+            return true;
+        });
+}
+
+ObjectPropertyConditionSet generateConditionsForIndexedMiss(VM& vm, JSCell* owner, JSGlobalObject* globalObject, Structure* headStructure)
+{
+    return generateConditions(
+        globalObject, headStructure, nullptr,
+        [&](auto& conditions, JSObject* object, Structure* structure) -> bool {
+            ObjectPropertyCondition result =
+                generateCondition(vm, owner, object, structure, nullptr, PropertyCondition::AbsenceOfIndexedProperties, Concurrency::MainThread);
             if (!result)
                 return false;
             conditions.append(result);
@@ -344,16 +374,16 @@ ObjectPropertyConditionSet generateConditionsForPropertySetterMiss(
 }
 
 ObjectPropertyConditionSet generateConditionsForPrototypePropertyHit(
-    VM& vm, JSCell* owner, ExecState* exec, Structure* headStructure, JSObject* prototype,
+    VM& vm, JSCell* owner, JSGlobalObject* globalObject, Structure* headStructure, JSObject* prototype,
     UniquedStringImpl* uid)
 {
     return generateConditions(
-        vm, exec->lexicalGlobalObject(), headStructure, prototype,
-        [&] (Vector<ObjectPropertyCondition>& conditions, JSObject* object) -> bool {
+        globalObject, headStructure, prototype,
+        [&](auto& conditions, JSObject* object, Structure* structure) -> bool {
             PropertyCondition::Kind kind =
                 object == prototype ? PropertyCondition::Presence : PropertyCondition::Absence;
             ObjectPropertyCondition result =
-                generateCondition(vm, owner, object, uid, kind);
+                generateCondition(vm, owner, object, structure, uid, kind, Concurrency::MainThread);
             if (!result)
                 return false;
             conditions.append(result);
@@ -362,16 +392,45 @@ ObjectPropertyConditionSet generateConditionsForPrototypePropertyHit(
 }
 
 ObjectPropertyConditionSet generateConditionsForPrototypePropertyHitCustom(
-    VM& vm, JSCell* owner, ExecState* exec, Structure* headStructure, JSObject* prototype,
-    UniquedStringImpl* uid)
+    VM& vm, JSCell* owner, JSGlobalObject* globalObject, Structure* headStructure, JSObject* prototype,
+    UniquedStringImpl* uid, unsigned attributes)
 {
     return generateConditions(
-        vm, exec->lexicalGlobalObject(), headStructure, prototype,
-        [&] (Vector<ObjectPropertyCondition>& conditions, JSObject* object) -> bool {
-            if (object == prototype)
-                return true;
-            ObjectPropertyCondition result =
-                generateCondition(vm, owner, object, uid, PropertyCondition::Absence);
+        globalObject, headStructure, prototype,
+        [&](auto& conditions, JSObject* object, Structure* structure) -> bool {
+            auto kind = PropertyCondition::Absence;
+            if (object == prototype) {
+                PropertyOffset offset = structure->get(vm, uid);
+                if (isValidOffset(offset)) {
+                    // When we reify custom accessors, we wrap them in a JSFunction that we shove
+                    // inside a GetterSetter. So, once we've reified a custom accessor, we will
+                    // no longer see it as a "custom" accessor/value. Hence, if our property access actually
+                    // notices a custom, it must be a CustomGetterSetterType cell or something
+                    // in the static property table. Custom values get reified into CustomGetterSetters.
+                    JSValue value = object->getDirect(offset);
+
+                    if (!value.isCell() || value.asCell()->type() != CustomGetterSetterType) {
+                        // The value could have just got changed to some other type, so check if it's still
+                        // a custom getter setter.
+                        return false;
+                    }
+
+                    kind = PropertyCondition::Equivalence;
+                } else if (structure->findPropertyHashEntry(uid))
+                    kind = PropertyCondition::HasStaticProperty;
+                else if (attributes & PropertyAttribute::DontDelete) {
+                    // This can't change, so we can blindly cache it.
+                    return true;
+                } else {
+                    // This means we materialized a custom out of thin air and it's not DontDelete (i.e, it can be
+                    // redefined). This is curious. We don't actually need to crash here. We could blindly cache
+                    // the function. Or we could blindly not cache it. However, we don't actually do this in WebKit
+                    // right now, so it's reasonable to decide what to do later (or to warn people of forgetting DoneDelete.)
+                    ASSERT_NOT_REACHED();
+                    return false;
+                }
+            }
+            ObjectPropertyCondition result = generateCondition(vm, owner, object, structure, uid, kind, Concurrency::MainThread);
             if (!result)
                 return false;
             conditions.append(result);
@@ -379,54 +438,166 @@ ObjectPropertyConditionSet generateConditionsForPrototypePropertyHitCustom(
         });
 }
 
+ObjectPropertyConditionSet generateConditionsForInstanceOf(
+    VM& vm, JSCell* owner, JSGlobalObject* globalObject, Structure* headStructure, JSObject* prototype,
+    bool shouldHit)
+{
+    bool didHit = false;
+    if (ObjectPropertyConditionSetInternal::verbose)
+        dataLog("Searching for prototype ", JSValue(prototype), " starting with structure ", RawPointer(headStructure), " with shouldHit = ", shouldHit, "\n");
+    ObjectPropertyConditionSet result = generateConditions(
+        globalObject, headStructure, shouldHit ? prototype : nullptr,
+        [&](auto& conditions, JSObject* object, Structure* structure) -> bool {
+            if (ObjectPropertyConditionSetInternal::verbose)
+                dataLog("Encountered object: ", RawPointer(object), "\n");
+            if (object == prototype) {
+                RELEASE_ASSERT(shouldHit);
+                didHit = true;
+                return true;
+            }
+
+            if (structure->hasPolyProto())
+                return false;
+            conditions.append(
+                ObjectPropertyCondition::hasPrototype(
+                    vm, owner, object, structure->storedPrototypeObject()));
+            return true;
+        });
+    if (result.isValid()) {
+        if (ObjectPropertyConditionSetInternal::verbose)
+            dataLog("didHit = ", didHit, ", shouldHit = ", shouldHit, "\n");
+        RELEASE_ASSERT(didHit == shouldHit);
+    }
+    return result;
+}
+
 ObjectPropertyConditionSet generateConditionsForPrototypeEquivalenceConcurrently(
     VM& vm, JSGlobalObject* globalObject, Structure* headStructure, JSObject* prototype, UniquedStringImpl* uid)
 {
-    return generateConditions(vm, globalObject, headStructure, prototype,
-        [&] (Vector<ObjectPropertyCondition>& conditions, JSObject* object) -> bool {
+    return generateConditions(globalObject, headStructure, prototype,
+        [&](auto& conditions, JSObject* object, Structure* structure) -> bool {
             PropertyCondition::Kind kind =
                 object == prototype ? PropertyCondition::Equivalence : PropertyCondition::Absence;
-            ObjectPropertyCondition result = generateCondition(vm, nullptr, object, uid, kind);
+            ObjectPropertyCondition result = generateCondition(vm, nullptr, object, structure, uid, kind, Concurrency::ConcurrentThread);
             if (!result)
                 return false;
             conditions.append(result);
             return true;
-        }, Concurrent);
+        });
 }
 
 ObjectPropertyConditionSet generateConditionsForPropertyMissConcurrently(
     VM& vm, JSGlobalObject* globalObject, Structure* headStructure, UniquedStringImpl* uid)
 {
     return generateConditions(
-        vm, globalObject, headStructure, nullptr,
-        [&] (Vector<ObjectPropertyCondition>& conditions, JSObject* object) -> bool {
-            ObjectPropertyCondition result = generateCondition(vm, nullptr, object, uid, PropertyCondition::Absence);
+        globalObject, headStructure, nullptr,
+        [&](auto& conditions, JSObject* object, Structure* structure) -> bool {
+            ObjectPropertyCondition result = generateCondition(vm, nullptr, object, structure, uid, PropertyCondition::Absence, Concurrency::ConcurrentThread);
             if (!result)
                 return false;
             conditions.append(result);
             return true;
-        }, Concurrent);
+        });
 }
 
 ObjectPropertyConditionSet generateConditionsForPropertySetterMissConcurrently(
     VM& vm, JSGlobalObject* globalObject, Structure* headStructure, UniquedStringImpl* uid)
 {
     return generateConditions(
-        vm, globalObject, headStructure, nullptr,
-        [&] (Vector<ObjectPropertyCondition>& conditions, JSObject* object) -> bool {
+        globalObject, headStructure, nullptr,
+        [&](auto& conditions, JSObject* object, Structure* structure) -> bool {
             ObjectPropertyCondition result =
-                generateCondition(vm, nullptr, object, uid, PropertyCondition::AbsenceOfSetEffect);
+                generateCondition(vm, nullptr, object, structure, uid, PropertyCondition::AbsenceOfSetEffect, Concurrency::ConcurrentThread);
             if (!result)
                 return false;
             conditions.append(result);
             return true;
-        }, Concurrent);
+        });
 }
 
 ObjectPropertyCondition generateConditionForSelfEquivalence(
     VM& vm, JSCell* owner, JSObject* object, UniquedStringImpl* uid)
 {
-    return generateCondition(vm, owner, object, uid, PropertyCondition::Equivalence);
+    return generateCondition(vm, owner, object, object->structure(), uid, PropertyCondition::Equivalence, Concurrency::MainThread);
+}
+
+// Current might be null. Structure can't be null.
+static std::optional<PrototypeChainCachingStatus> prepareChainForCaching(JSGlobalObject* globalObject, JSCell* current, Structure* structure, JSObject* target)
+{
+    ASSERT(structure);
+    VM& vm = globalObject->vm();
+
+    bool found = false;
+    bool usesPolyProto = false;
+    bool flattenedDictionary = false;
+
+    while (true) {
+        if (structure->isDictionary()) {
+            if (!current)
+                return std::nullopt;
+
+            ASSERT(structure->isObject());
+            if (structure->hasBeenFlattenedBefore())
+                return std::nullopt;
+
+            structure->flattenDictionaryStructure(vm, asObject(current));
+            flattenedDictionary = true;
+        }
+
+        if (!structure->propertyAccessesAreCacheable())
+            return std::nullopt;
+
+        if (structure->isProxy())
+            return std::nullopt;
+
+        if (current && current == target) {
+            found = true;
+            break;
+        }
+
+        // We only have poly proto if we need to access our prototype via
+        // the poly proto protocol. If the slot base is the only poly proto
+        // thing in the chain, and we have a cache hit on it, then we're not
+        // poly proto.
+        JSValue prototype;
+        if (structure->hasPolyProto()) {
+            if (!current)
+                return std::nullopt;
+            usesPolyProto = true;
+            prototype = structure->prototypeForLookup(globalObject, current);
+        } else
+            prototype = structure->prototypeForLookup(globalObject);
+
+        if (prototype.isNull())
+            break;
+        current = asObject(prototype);
+        structure = current->structure();
+    }
+
+    if (!found && !!target)
+        return std::nullopt;
+
+    PrototypeChainCachingStatus result;
+    result.usesPolyProto = usesPolyProto;
+    result.flattenedDictionary = flattenedDictionary;
+
+    return result;
+}
+
+std::optional<PrototypeChainCachingStatus> prepareChainForCaching(JSGlobalObject* globalObject, JSCell* base, JSObject* target)
+{
+    return prepareChainForCaching(globalObject, base, base->structure(), target);
+}
+
+std::optional<PrototypeChainCachingStatus> prepareChainForCaching(JSGlobalObject* globalObject, JSCell* base, const PropertySlot& slot)
+{
+    JSObject* target = slot.isUnset() ? nullptr : slot.slotBase();
+    return prepareChainForCaching(globalObject, base, target);
+}
+
+std::optional<PrototypeChainCachingStatus> prepareChainForCaching(JSGlobalObject* globalObject, Structure* baseStructure, JSObject* target)
+{
+    return prepareChainForCaching(globalObject, nullptr, baseStructure, target);
 }
 
 } // namespace JSC

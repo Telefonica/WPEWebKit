@@ -8,21 +8,26 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_SHARED_DESKTOP_FRAME_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_SHARED_DESKTOP_FRAME_H_
+#ifndef MODULES_DESKTOP_CAPTURE_SHARED_DESKTOP_FRAME_H_
+#define MODULES_DESKTOP_CAPTURE_SHARED_DESKTOP_FRAME_H_
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/refcount.h"
-#include "webrtc/base/scoped_ref_ptr.h"
-#include "webrtc/modules/desktop_capture/desktop_frame.h"
+#include <memory>
+
+#include "api/scoped_refptr.h"
+#include "modules/desktop_capture/desktop_frame.h"
+#include "rtc_base/ref_counted_object.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
 // SharedDesktopFrame is a DesktopFrame that may have multiple instances all
 // sharing the same buffer.
-class SharedDesktopFrame : public DesktopFrame {
+class RTC_EXPORT SharedDesktopFrame final : public DesktopFrame {
  public:
   ~SharedDesktopFrame() override;
+
+  SharedDesktopFrame(const SharedDesktopFrame&) = delete;
+  SharedDesktopFrame& operator=(const SharedDesktopFrame&) = delete;
 
   static std::unique_ptr<SharedDesktopFrame> Wrap(
       std::unique_ptr<DesktopFrame> desktop_frame);
@@ -31,8 +36,14 @@ class SharedDesktopFrame : public DesktopFrame {
   // TODO(sergeyu): remove this method.
   static SharedDesktopFrame* Wrap(DesktopFrame* desktop_frame);
 
+  // Deprecated. Clients do not need to know the underlying DesktopFrame
+  // instance.
+  // TODO(zijiehe): Remove this method.
   // Returns the underlying instance of DesktopFrame.
   DesktopFrame* GetUnderlyingFrame();
+
+  // Returns whether `this` and `other` share the underlying DesktopFrame.
+  bool ShareFrameWith(const SharedDesktopFrame& other) const;
 
   // Creates a clone of this object.
   std::unique_ptr<SharedDesktopFrame> Share();
@@ -42,15 +53,13 @@ class SharedDesktopFrame : public DesktopFrame {
   bool IsShared();
 
  private:
-  typedef rtc::RefCountedObject<std::unique_ptr<DesktopFrame>> Core;
+  typedef rtc::FinalRefCountedObject<std::unique_ptr<DesktopFrame>> Core;
 
   SharedDesktopFrame(rtc::scoped_refptr<Core> core);
 
-  rtc::scoped_refptr<Core> core_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(SharedDesktopFrame);
+  const rtc::scoped_refptr<Core> core_;
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_SHARED_DESKTOP_FRAME_H_
+#endif  // MODULES_DESKTOP_CAPTURE_SHARED_DESKTOP_FRAME_H_

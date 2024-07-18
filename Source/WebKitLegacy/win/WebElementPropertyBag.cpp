@@ -36,23 +36,23 @@
 #include <WebCore/HitTestResult.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/Image.h>
-#include <WebCore/URL.h>
 #include <WebCore/RenderObject.h>
+#include <wtf/URL.h>
 
 using namespace WebCore;
 
 // WebElementPropertyBag -----------------------------------------------
 WebElementPropertyBag::WebElementPropertyBag(const HitTestResult& result)
-    : m_result(std::make_unique<HitTestResult>(result))
+    : m_result(makeUnique<HitTestResult>(result))
 {
     gClassCount++;
-    gClassNameCount().add("WebElementPropertyBag");
+    gClassNameCount().add("WebElementPropertyBag"_s);
 }
 
 WebElementPropertyBag::~WebElementPropertyBag()
 {
     gClassCount--;
-    gClassNameCount().remove("WebElementPropertyBag");
+    gClassNameCount().remove("WebElementPropertyBag"_s);
 }
 
 WebElementPropertyBag* WebElementPropertyBag::createInstance(const HitTestResult& result)

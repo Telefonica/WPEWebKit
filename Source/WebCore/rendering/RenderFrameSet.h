@@ -53,6 +53,7 @@ private:
 };
 
 class RenderFrameSet final : public RenderBox {
+    WTF_MAKE_ISO_ALLOCATED(RenderFrameSet);
 public:
     RenderFrameSet(HTMLFrameSetElement&, RenderStyle&&);
     virtual ~RenderFrameSet();
@@ -90,7 +91,7 @@ private:
         int m_splitResizeOffset;
     };
 
-    const char* renderName() const override { return "RenderFrameSet"; }
+    ASCIILiteral renderName() const override { return "RenderFrameSet"_s; }
     bool isFrameSet() const override { return true; }
 
     void layout() override;

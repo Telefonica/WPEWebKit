@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,55 +28,76 @@
 #if ENABLE(APPLE_PAY)
 
 #include "ApplePaySessionPaymentRequest.h"
+#include <wtf/Expected.h>
 #include <wtf/Function.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
-class ApplePaySession;
+class ApplePaySetupFeature;
+class Document;
 class Payment;
 class PaymentCoordinatorClient;
 class PaymentContact;
 class PaymentMerchantSession;
 class PaymentMethod;
-class URL;
-enum class PaymentAuthorizationStatus;
-struct PaymentAuthorizationResult;
-struct PaymentMethodUpdate;
-struct ShippingContactUpdate;
-struct ShippingMethodUpdate;
+class PaymentSession;
+class PaymentSessionError;
+struct ApplePayCouponCodeUpdate;
+struct ApplePayPaymentAuthorizationResult;
+struct ApplePayPaymentMethodUpdate;
+struct ApplePaySetupConfiguration;
+struct ApplePayShippingContactUpdate;
+struct ApplePayShippingMethod;
+struct ApplePayShippingMethodUpdate;
+struct ExceptionDetails;
 
-class PaymentCoordinator {
+class PaymentCoordinator : public CanMakeWeakPtr<PaymentCoordinator> {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    explicit PaymentCoordinator(PaymentCoordinatorClient&);
-    ~PaymentCoordinator();
+    WEBCORE_EXPORT explicit PaymentCoordinator(PaymentCoordinatorClient&);
+    WEBCORE_EXPORT ~PaymentCoordinator();
 
-    bool supportsVersion(unsigned version);
+    PaymentCoordinatorClient& client() { return m_client; }
+
+    bool supportsVersion(Document&, unsigned version) const;
     bool canMakePayments();
-    void canMakePaymentsWithActiveCard(const String& merchantIdentifier, const String& domainName, WTF::Function<void (bool)>&& completionHandler);
-    void openPaymentSetup(const String& merchantIdentifier, const String& domainName, WTF::Function<void (bool)>&& completionHandler);
+    void canMakePaymentsWithActiveCard(Document&, const String& merchantIdentifier, Function<void(bool)>&& completionHandler);
+    void openPaymentSetup(Document&, const String& merchantIdentifier, Function<void(bool)>&& completionHandler);
 
     bool hasActiveSession() const { return m_activeSession; }
 
-    bool beginPaymentSession(ApplePaySession&, const URL& originatingURL, const Vector<URL>& linkIconURLs, const ApplePaySessionPaymentRequest&);
+    bool beginPaymentSession(Document&, PaymentSession&, const ApplePaySessionPaymentRequest&);
     void completeMerchantValidation(const PaymentMerchantSession&);
-    void completeShippingMethodSelection(std::optional<ShippingMethodUpdate>&&);
-    void completeShippingContactSelection(std::optional<ShippingContactUpdate>&&);
-    void completePaymentMethodSelection(std::optional<PaymentMethodUpdate>&&);
-    void completePaymentSession(std::optional<PaymentAuthorizationResult>&&);
+    void completeShippingMethodSelection(std::optional<ApplePayShippingMethodUpdate>&&);
+    void completeShippingContactSelection(std::optional<ApplePayShippingContactUpdate>&&);
+    void completePaymentMethodSelection(std::optional<ApplePayPaymentMethodUpdate>&&);
+#if ENABLE(APPLE_PAY_COUPON_CODE)
+    void completeCouponCodeChange(std::optional<ApplePayCouponCodeUpdate>&&);
+#endif
+    void completePaymentSession(ApplePayPaymentAuthorizationResult&&);
     void abortPaymentSession();
     void cancelPaymentSession();
 
-    WEBCORE_EXPORT void validateMerchant(const URL& validationURL);
+    WEBCORE_EXPORT void validateMerchant(URL&& validationURL);
     WEBCORE_EXPORT void didAuthorizePayment(const Payment&);
     WEBCORE_EXPORT void didSelectPaymentMethod(const PaymentMethod&);
-    WEBCORE_EXPORT void didSelectShippingMethod(const ApplePaySessionPaymentRequest::ShippingMethod&);
+    WEBCORE_EXPORT void didSelectShippingMethod(const ApplePayShippingMethod&);
     WEBCORE_EXPORT void didSelectShippingContact(const PaymentContact&);
-    WEBCORE_EXPORT void didCancelPaymentSession();
+#if ENABLE(APPLE_PAY_COUPON_CODE)
+    WEBCORE_EXPORT void didChangeCouponCode(String&& couponCode);
+#endif
+    WEBCORE_EXPORT void didCancelPaymentSession(PaymentSessionError&&);
+
+    std::optional<String> validatedPaymentNetwork(Document&, unsigned version, const String&) const;
+
+    void getSetupFeatures(const ApplePaySetupConfiguration&, const URL&, CompletionHandler<void(Vector<Ref<ApplePaySetupFeature>>&&)>&&);
+    void beginApplePaySetup(const ApplePaySetupConfiguration&, const URL&, Vector<RefPtr<ApplePaySetupFeature>>&&, CompletionHandler<void(bool)>&&);
+    void endApplePaySetup();
 
 private:
     PaymentCoordinatorClient& m_client;
-
-    RefPtr<ApplePaySession> m_activeSession;
+    RefPtr<PaymentSession> m_activeSession;
 };
 
 }

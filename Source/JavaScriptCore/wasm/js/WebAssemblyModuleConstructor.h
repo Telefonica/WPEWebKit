@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,30 +30,30 @@
 #include "InternalFunction.h"
 #include "JSObject.h"
 
+#include <wtf/Vector.h>
+
 namespace JSC {
 
+class JSWebAssemblyModule;
 class WebAssemblyModulePrototype;
 
-class WebAssemblyModuleConstructor : public InternalFunction {
+class WebAssemblyModuleConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
-    static const unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
 
     static WebAssemblyModuleConstructor* create(VM&, Structure*, WebAssemblyModulePrototype*);
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     DECLARE_INFO;
 
-    static JSValue createModule(ExecState*, JSValue buffer, Structure*);
-
-protected:
-    void finishCreation(VM&, WebAssemblyModulePrototype*);
+    static JSWebAssemblyModule* createModule(JSGlobalObject*, CallFrame*, Vector<uint8_t>&& buffer);
 
 private:
     WebAssemblyModuleConstructor(VM&, Structure*);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
+    void finishCreation(VM&, WebAssemblyModulePrototype*);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(WebAssemblyModuleConstructor, InternalFunction);
 
 } // namespace JSC
 

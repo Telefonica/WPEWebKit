@@ -31,15 +31,7 @@
 #include "FormDataStreamCFNet.h"
 #include "NetworkingContext.h"
 #include "ResourceHandle.h"
-#include <pal/spi/cf/CFNetworkSPI.h>
-
-#if PLATFORM(COCOA)
-#include "WebCoreSystemInterface.h"
-#endif
-
-#if PLATFORM(WIN)
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
-#endif
+#include <pal/spi/win/CFNetworkSPIWin.h>
 
 namespace WebCore {
 
@@ -48,9 +40,7 @@ ResourceHandleCFURLConnectionDelegate::ResourceHandleCFURLConnectionDelegate(Res
 {
 }
 
-ResourceHandleCFURLConnectionDelegate::~ResourceHandleCFURLConnectionDelegate()
-{
-}
+ResourceHandleCFURLConnectionDelegate::~ResourceHandleCFURLConnectionDelegate() = default;
 
 void ResourceHandleCFURLConnectionDelegate::releaseHandle()
 {
@@ -70,7 +60,7 @@ void ResourceHandleCFURLConnectionDelegate::release(const void* clientInfo)
 
 CFURLRequestRef ResourceHandleCFURLConnectionDelegate::willSendRequestCallback(CFURLConnectionRef, CFURLRequestRef cfRequest, CFURLResponseRef originalRedirectResponse, const void* clientInfo)
 {
-    return static_cast<ResourceHandleCFURLConnectionDelegate*>(const_cast<void*>(clientInfo))->willSendRequest(cfRequest, originalRedirectResponse);
+    return static_cast<ResourceHandleCFURLConnectionDelegate*>(const_cast<void*>(clientInfo))->willSendRequest(cfRequest, originalRedirectResponse).leakRef();
 }
 
 void ResourceHandleCFURLConnectionDelegate::didReceiveResponseCallback(CFURLConnectionRef connection, CFURLResponseRef cfResponse, const void* clientInfo)
@@ -148,7 +138,7 @@ ResourceRequest ResourceHandleCFURLConnectionDelegate::createResourceRequest(CFU
 {
     ResourceRequest request;
     CFHTTPMessageRef httpMessage = CFURLResponseGetHTTPResponse(redirectResponse);
-    if (httpMessage && CFHTTPMessageGetResponseStatusCode(httpMessage) == 307) {
+    if (httpMessage && (CFHTTPMessageGetResponseStatusCode(httpMessage) == 307 || CFHTTPMessageGetResponseStatusCode(httpMessage) == 308)) {
         RetainPtr<CFStringRef> lastHTTPMethod = m_handle->lastHTTPMethod().createCFString();
         RetainPtr<CFStringRef> newMethod = adoptCF(CFURLRequestCopyHTTPRequestMethod(cfRequest));
         if (CFStringCompareWithOptions(lastHTTPMethod.get(), newMethod.get(), CFRangeMake(0, CFStringGetLength(lastHTTPMethod.get())), kCFCompareCaseInsensitive)) {
@@ -158,7 +148,7 @@ ResourceRequest ResourceHandleCFURLConnectionDelegate::createResourceRequest(CFU
             CFURLRequestSetHTTPRequestMethod(mutableRequest.get(), lastHTTPMethod.get());
 
             FormData* body = m_handle->firstRequest().httpBody();
-            if (!equalLettersIgnoringASCIICase(m_handle->firstRequest().httpMethod(), "get") && body && !body->isEmpty())
+            if (!equalLettersIgnoringASCIICase(m_handle->firstRequest().httpMethod(), "get"_s) && body && !body->isEmpty())
                 WebCore::setHTTPBody(mutableRequest.get(), body);
 
             String originalContentType = m_handle->firstRequest().httpContentType();
@@ -172,7 +162,7 @@ ResourceRequest ResourceHandleCFURLConnectionDelegate::createResourceRequest(CFU
     if (request.isNull())
         request = cfRequest;
 
-    if (!request.url().protocolIs("https") && protocolIs(request.httpReferrer(), "https") && m_handle->context()->shouldClearReferrerOnHTTPSToHTTPRedirect())
+    if (!request.url().protocolIs("https"_s) && protocolIs(request.httpReferrer(), "https"_s) && m_handle->context()->shouldClearReferrerOnHTTPSToHTTPRedirect())
         request.clearHTTPReferrer();
     return request;
 }

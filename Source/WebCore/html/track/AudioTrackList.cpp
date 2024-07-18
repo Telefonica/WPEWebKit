@@ -25,22 +25,20 @@
 
 #include "config.h"
 
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
 
 #include "AudioTrackList.h"
 
 #include "AudioTrack.h"
 
-using namespace WebCore;
+namespace WebCore {
 
-AudioTrackList::AudioTrackList(HTMLMediaElement* element, ScriptExecutionContext* context)
-    : TrackListBase(element, context)
+AudioTrackList::AudioTrackList(ScriptExecutionContext* context)
+    : TrackListBase(context, TrackListBase::VideoTrackList)
 {
 }
 
-AudioTrackList::~AudioTrackList()
-{
-}
+AudioTrackList::~AudioTrackList() = default;
 
 void AudioTrackList::append(Ref<AudioTrack>&& track)
 {
@@ -54,11 +52,19 @@ void AudioTrackList::append(Ref<AudioTrack>&& track)
     }
     m_inbandTracks.insert(insertionIndex, track.ptr());
 
-
-    ASSERT(!track->mediaElement() || track->mediaElement() == mediaElement());
-    track->setMediaElement(mediaElement());
+    if (!track->trackList())
+        track->setTrackList(*this);
 
     scheduleAddTrackEvent(WTFMove(track));
+}
+
+void AudioTrackList::remove(TrackBase& track, bool scheduleEvent)
+{
+    auto& audioTrack = downcast<AudioTrack>(track);
+    if (audioTrack.trackList() == this)
+        audioTrack.clearTrackList();
+
+    TrackListBase::remove(track, scheduleEvent);
 }
 
 AudioTrack* AudioTrackList::item(unsigned index) const
@@ -68,7 +74,7 @@ AudioTrack* AudioTrackList::item(unsigned index) const
     return nullptr;
 }
 
-AudioTrack* AudioTrackList::getTrackById(const AtomicString& id) const
+AudioTrack* AudioTrackList::getTrackById(const AtomString& id) const
 {
     for (auto& inbandTrack : m_inbandTracks) {
         auto& track = downcast<AudioTrack>(*inbandTrack);
@@ -83,4 +89,10 @@ EventTargetInterface AudioTrackList::eventTargetInterface() const
     return AudioTrackListEventTargetInterfaceType;
 }
 
+const char* AudioTrackList::activeDOMObjectName() const
+{
+    return "AudioTrackList";
+}
+
+} // namespace WebCore
 #endif

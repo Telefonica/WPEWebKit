@@ -22,6 +22,7 @@
 
 #import "WebDelegateImplementationCaching.h"
 #import "WebFrameInternal.h"
+#import "WebUIDelegatePrivate.h"
 #import <WebCore/IntRect.h>
 #import <WebCore/AXObjectCache.h>
 #import <WebCore/Chrome.h>
@@ -32,7 +33,7 @@
 #import <WebCore/FrameView.h>
 #import <WebCore/Page.h>
 #import <WebCore/PopupMenuClient.h>
-#import <WebKitSystemInterface.h>
+#import <pal/spi/mac/NSCellSPI.h>
 #import <pal/system/mac/PopupMenu.h>
 #import <wtf/BlockObjCExceptions.h>
 
@@ -68,7 +69,7 @@ void PopupMenuMac::populate()
         [m_popup addItemWithTitle:@""];
 
     TextDirection menuTextDirection = m_client->menuStyle().textDirection();
-    [m_popup setUserInterfaceLayoutDirection:menuTextDirection == LTR ? NSUserInterfaceLayoutDirectionLeftToRight : NSUserInterfaceLayoutDirectionRightToLeft];
+    [m_popup setUserInterfaceLayoutDirection:menuTextDirection == TextDirection::LTR ? NSUserInterfaceLayoutDirectionLeftToRight : NSUserInterfaceLayoutDirectionRightToLeft];
 
     ASSERT(m_client);
     int size = m_client->listSize();
@@ -91,8 +92,8 @@ void PopupMenuMac::populate()
         }
 
         RetainPtr<NSMutableParagraphStyle> paragraphStyle = adoptNS([[NSParagraphStyle defaultParagraphStyle] mutableCopy]);
-        [paragraphStyle setAlignment:menuTextDirection == LTR ? NSTextAlignmentLeft : NSTextAlignmentRight];
-        NSWritingDirection writingDirection = style.textDirection() == LTR ? NSWritingDirectionLeftToRight : NSWritingDirectionRightToLeft;
+        [paragraphStyle setAlignment:menuTextDirection == TextDirection::LTR ? NSTextAlignmentLeft : NSTextAlignmentRight];
+        NSWritingDirection writingDirection = style.textDirection() == TextDirection::LTR ? NSWritingDirectionLeftToRight : NSWritingDirectionRightToLeft;
         [paragraphStyle setBaseWritingDirection:writingDirection];
         if (style.hasTextDirectionOverride()) {
             RetainPtr<NSNumber> writingDirectionValue = adoptNS([[NSNumber alloc] initWithInteger:writingDirection + NSWritingDirectionOverride]);
@@ -114,19 +115,18 @@ void PopupMenuMac::populate()
         [menuItem setEnabled:m_client->itemIsEnabled(i)];
         [menuItem setToolTip:m_client->itemToolTip(i)];
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        // Allow the accessible text of the item to be overriden if necessary.
+        ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+        // Allow the accessible text of the item to be overridden if necessary.
         if (AXObjectCache::accessibilityEnabled()) {
             NSString *accessibilityOverride = m_client->itemAccessibilityText(i);
             if ([accessibilityOverride length])
                 [menuItem accessibilitySetOverrideValue:accessibilityOverride forAttribute:NSAccessibilityDescriptionAttribute];
         }
-#pragma clang diagnostic pop
+        ALLOW_DEPRECATED_DECLARATIONS_END
     }
 }
 
-void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
+void PopupMenuMac::show(const IntRect& r, FrameView* v, int selectedIndex)
 {
     populate();
     int numItems = [m_popup numberOfItems];
@@ -135,22 +135,22 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
             m_client->popupDidHide();
         return;
     }
-    ASSERT(numItems > index);
+    ASSERT(numItems > selectedIndex);
 
-    // Workaround for crazy bug where a selected index of -1 for a menu with only 1 item will cause a blank menu.
-    if (index == -1 && numItems == 2 && !m_client->shouldPopOver() && ![[m_popup itemAtIndex:1] isEnabled])
-        index = 0;
+    // Workaround for crazy bug where a selectedIndex of -1 for a menu with only 1 item will cause a blank menu.
+    if (selectedIndex == -1 && numItems == 2 && !m_client->shouldPopOver() && ![[m_popup itemAtIndex:1] isEnabled])
+        selectedIndex = 0;
 
     NSView* view = v->documentView();
 
     TextDirection textDirection = m_client->menuStyle().textDirection();
 
     [m_popup attachPopUpWithFrame:r inView:view];
-    [m_popup selectItemAtIndex:index];
-    [m_popup setUserInterfaceLayoutDirection:textDirection == LTR ? NSUserInterfaceLayoutDirectionLeftToRight : NSUserInterfaceLayoutDirectionRightToLeft];
+    [m_popup selectItemAtIndex:selectedIndex];
+    [m_popup setUserInterfaceLayoutDirection:textDirection == TextDirection::LTR ? NSUserInterfaceLayoutDirectionLeftToRight : NSUserInterfaceLayoutDirectionRightToLeft];
 
     NSMenu *menu = [m_popup menu];
-    [menu setUserInterfaceLayoutDirection:textDirection == LTR ? NSUserInterfaceLayoutDirectionLeftToRight : NSUserInterfaceLayoutDirectionRightToLeft];
+    [menu setUserInterfaceLayoutDirection:textDirection == TextDirection::LTR ? NSUserInterfaceLayoutDirectionLeftToRight : NSUserInterfaceLayoutDirectionRightToLeft];
 
     NSPoint location;
     CTFontRef font = m_client->menuStyle().font().primaryFont().getCTFont();
@@ -168,23 +168,15 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
         auto defaultFont = adoptCF(CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, CTFontGetSize(font), nil));
         vertOffset += CTFontGetDescent(font) - CTFontGetDescent(defaultFont.get());
         vertOffset = fminf(NSHeight(r), vertOffset);
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
-        if (textDirection == LTR)
+        if (textDirection == TextDirection::LTR)
             location = NSMakePoint(NSMinX(r) + popOverHorizontalAdjust, NSMaxY(r) - vertOffset);
         else
             location = NSMakePoint(NSMaxX(r) - popOverHorizontalAdjust, NSMaxY(r) - vertOffset);
-#else
-        location = NSMakePoint(NSMinX(r) + popOverHorizontalAdjust, NSMaxY(r) - vertOffset);
-#endif
     } else {
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
-        if (textDirection == LTR)
+        if (textDirection == TextDirection::LTR)
             location = NSMakePoint(NSMinX(r) + popUnderHorizontalAdjust, NSMaxY(r) + popUnderVerticalAdjust);
         else
             location = NSMakePoint(NSMaxX(r) - popUnderHorizontalAdjust, NSMaxY(r) + popUnderVerticalAdjust);
-#else
-        location = NSMakePoint(NSMinX(r) + popUnderHorizontalAdjust, NSMaxY(r) + popUnderVerticalAdjust);
-#endif
     }
     // Save the current event that triggered the popup, so we can clean up our event
     // state after the NSMenu goes away.
@@ -194,15 +186,15 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
     Ref<PopupMenuMac> protector(*this);
 
     RetainPtr<NSView> dummyView = adoptNS([[NSView alloc] initWithFrame:r]);
-    [dummyView.get() setUserInterfaceLayoutDirection:textDirection == LTR ? NSUserInterfaceLayoutDirectionLeftToRight : NSUserInterfaceLayoutDirectionRightToLeft];
+    [dummyView.get() setUserInterfaceLayoutDirection:textDirection == TextDirection::LTR ? NSUserInterfaceLayoutDirectionLeftToRight : NSUserInterfaceLayoutDirectionRightToLeft];
     [view addSubview:dummyView.get()];
     location = [dummyView convertPoint:location fromView:view];
     
     if (Page* page = frame->page()) {
         WebView* webView = kit(page);
-        BEGIN_BLOCK_OBJC_EXCEPTIONS;
+        BEGIN_BLOCK_OBJC_EXCEPTIONS
         CallUIDelegate(webView, @selector(webView:willPopupMenu:), menu);
-        END_BLOCK_OBJC_EXCEPTIONS;
+        END_BLOCK_OBJC_EXCEPTIONS
     }
 
     NSControlSize controlSize;
@@ -216,9 +208,14 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
     case PopupMenuStyle::PopupMenuSizeMini:
         controlSize = NSControlSizeMini;
         break;
+#if HAVE(LARGE_CONTROL_SIZE)
+    case PopupMenuStyle::PopupMenuSizeLarge:
+        controlSize = NSControlSizeLarge;
+        break;
+#endif
     }
 
-    PAL::popUpMenu(menu, location, roundf(NSWidth(r)), dummyView.get(), index, toNSFont(font), controlSize, !m_client->menuStyle().hasDefaultAppearance());
+    PAL::popUpMenu(menu, location, roundf(NSWidth(r)), dummyView.get(), selectedIndex, toNSFont(font), controlSize, !m_client->menuStyle().hasDefaultAppearance());
 
     [m_popup dismissPopUp];
     [dummyView removeFromSuperview];
@@ -233,7 +230,7 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
     if (!m_client->shouldPopOver())
         newIndex--;
 
-    if (index != newIndex && newIndex >= 0)
+    if (selectedIndex != newIndex && newIndex >= 0)
         m_client->valueChanged(newIndex);
 
     // Give the frame a chance to fix up its event state, since the popup eats all the
@@ -243,9 +240,11 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
 
 void PopupMenuMac::hide()
 {
-    [m_popup dismissPopUp];
+    [[m_popup menu] cancelTracking];
+    if (m_client)
+        m_client->popupDidHide();
 }
-    
+
 void PopupMenuMac::updateFromElement()
 {
 }

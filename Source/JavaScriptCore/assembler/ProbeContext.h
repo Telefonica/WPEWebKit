@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,7 +28,7 @@
 #include "MacroAssembler.h"
 #include "ProbeStack.h"
 
-#if ENABLE(MASM_PROBE)
+#if ENABLE(ASSEMBLER)
 
 namespace JSC {
 namespace Probe {
@@ -41,8 +41,8 @@ struct CPUState {
     static inline const char* gprName(RegisterID id) { return MacroAssembler::gprName(id); }
     static inline const char* sprName(SPRegisterID id) { return MacroAssembler::sprName(id); }
     static inline const char* fprName(FPRegisterID id) { return MacroAssembler::fprName(id); }
-    inline uintptr_t& gpr(RegisterID);
-    inline uintptr_t& spr(SPRegisterID);
+    inline UCPURegister& gpr(RegisterID);
+    inline UCPURegister& spr(SPRegisterID);
     inline double& fpr(FPRegisterID);
 
     template<typename T> T gpr(RegisterID) const;
@@ -56,18 +56,18 @@ struct CPUState {
     template<typename T> T fp() const;
     template<typename T> T sp() const;
 
-    uintptr_t gprs[MacroAssembler::numberOfRegisters()];
-    uintptr_t sprs[MacroAssembler::numberOfSPRegisters()];
+    UCPURegister gprs[MacroAssembler::numberOfRegisters()];
+    UCPURegister sprs[MacroAssembler::numberOfSPRegisters()];
     double fprs[MacroAssembler::numberOfFPRegisters()];
 };
 
-inline uintptr_t& CPUState::gpr(RegisterID id)
+inline UCPURegister& CPUState::gpr(RegisterID id)
 {
     ASSERT(id >= MacroAssembler::firstRegister() && id <= MacroAssembler::lastRegister());
     return gprs[id];
 }
 
-inline uintptr_t& CPUState::spr(SPRegisterID id)
+inline UCPURegister& CPUState::spr(SPRegisterID id)
 {
     ASSERT(id >= MacroAssembler::firstSPRegister() && id <= MacroAssembler::lastSPRegister());
     return sprs[id];
@@ -85,7 +85,7 @@ T CPUState::gpr(RegisterID id) const
     CPUState* cpu = const_cast<CPUState*>(this);
     auto& from = cpu->gpr(id);
     typename std::remove_const<T>::type to { };
-    std::memcpy(&to, &from, sizeof(to)); // Use std::memcpy to avoid strict aliasing issues.
+    std::memcpy(static_cast<void*>(&to), &from, sizeof(to)); // Use std::memcpy to avoid strict aliasing issues.
     return to;
 }
 
@@ -95,7 +95,7 @@ T CPUState::spr(SPRegisterID id) const
     CPUState* cpu = const_cast<CPUState*>(this);
     auto& from = cpu->spr(id);
     typename std::remove_const<T>::type to { };
-    std::memcpy(&to, &from, sizeof(to)); // Use std::memcpy to avoid strict aliasing issues.
+    std::memcpy(static_cast<void*>(&to), &from, sizeof(to)); // Use std::memcpy to avoid strict aliasing issues.
     return to;
 }
 
@@ -112,10 +112,12 @@ inline void*& CPUState::pc()
     return *reinterpret_cast<void**>(&spr(X86Registers::eip));
 #elif CPU(ARM64)
     return *reinterpret_cast<void**>(&spr(ARM64Registers::pc));
-#elif CPU(ARM_THUMB2) || CPU(ARM_TRADITIONAL)
+#elif CPU(ARM_THUMB2)
     return *reinterpret_cast<void**>(&gpr(ARMRegisters::pc));
 #elif CPU(MIPS)
     return *reinterpret_cast<void**>(&spr(MIPSRegisters::pc));
+#elif CPU(RISCV64)
+    return *reinterpret_cast<void**>(&spr(RISCV64Registers::pc));
 #else
 #error "Unsupported CPU"
 #endif
@@ -127,10 +129,12 @@ inline void*& CPUState::fp()
     return *reinterpret_cast<void**>(&gpr(X86Registers::ebp));
 #elif CPU(ARM64)
     return *reinterpret_cast<void**>(&gpr(ARM64Registers::fp));
-#elif CPU(ARM_THUMB2) || CPU(ARM_TRADITIONAL)
+#elif CPU(ARM_THUMB2)
     return *reinterpret_cast<void**>(&gpr(ARMRegisters::fp));
 #elif CPU(MIPS)
     return *reinterpret_cast<void**>(&gpr(MIPSRegisters::fp));
+#elif CPU(RISCV64)
+    return *reinterpret_cast<void**>(&gpr(RISCV64Registers::fp));
 #else
 #error "Unsupported CPU"
 #endif
@@ -142,10 +146,12 @@ inline void*& CPUState::sp()
     return *reinterpret_cast<void**>(&gpr(X86Registers::esp));
 #elif CPU(ARM64)
     return *reinterpret_cast<void**>(&gpr(ARM64Registers::sp));
-#elif CPU(ARM_THUMB2) || CPU(ARM_TRADITIONAL)
+#elif CPU(ARM_THUMB2)
     return *reinterpret_cast<void**>(&gpr(ARMRegisters::sp));
 #elif CPU(MIPS)
     return *reinterpret_cast<void**>(&gpr(MIPSRegisters::sp));
+#elif CPU(RISCV64)
+    return *reinterpret_cast<void**>(&gpr(RISCV64Registers::sp));
 #else
 #error "Unsupported CPU"
 #endif
@@ -175,10 +181,18 @@ T CPUState::sp() const
 struct State;
 typedef void (*StackInitializationFunction)(State*);
 
+#if CPU(ARM64E)
+#define PROBE_FUNCTION_PTRAUTH __ptrauth(ptrauth_key_process_dependent_code, 0, JITProbePtrTag)
+#define PROBE_STACK_INITIALIZATION_FUNCTION_PTRAUTH __ptrauth(ptrauth_key_process_dependent_code, 0, JITProbeStackInitializationFunctionPtrTag)
+#else
+#define PROBE_FUNCTION_PTRAUTH
+#define PROBE_STACK_INITIALIZATION_FUNCTION_PTRAUTH
+#endif
+
 struct State {
-    Probe::Function probeFunction;
+    Probe::Function PROBE_FUNCTION_PTRAUTH probeFunction;
     void* arg;
-    StackInitializationFunction initializeStackFunction;
+    StackInitializationFunction PROBE_STACK_INITIALIZATION_FUNCTION_PTRAUTH initializeStackFunction;
     void* initializeStackArg;
     CPUState cpu;
 };
@@ -191,13 +205,15 @@ public:
     using FPRegisterID = MacroAssembler::FPRegisterID;
 
     Context(State* state)
-        : m_state(state)
-        , arg(state->arg)
-        , cpu(state->cpu)
+        : cpu(state->cpu)
+        , m_state(state)
     { }
 
-    uintptr_t& gpr(RegisterID id) { return cpu.gpr(id); }
-    uintptr_t& spr(SPRegisterID id) { return cpu.spr(id); }
+    template<typename T>
+    T arg() { return reinterpret_cast<T>(m_state->arg); }
+
+    UCPURegister& gpr(RegisterID id) { return cpu.gpr(id); }
+    UCPURegister& spr(SPRegisterID id) { return cpu.spr(id); }
     double& fpr(FPRegisterID id) { return cpu.fpr(id); }
     const char* gprName(RegisterID id) { return cpu.gprName(id); }
     const char* sprName(SPRegisterID id) { return cpu.sprName(id); }
@@ -224,21 +240,18 @@ public:
     bool hasWritesToFlush() { return m_stack.hasWritesToFlush(); }
     Stack* releaseStack() { return new Stack(WTFMove(m_stack)); }
 
-private:
-    State* m_state;
-public:
-    void* arg;
     CPUState& cpu;
 
 private:
+    State* m_state;
     Stack m_stack;
 
     friend JS_EXPORT_PRIVATE void* probeStateForContext(Context&); // Not for general use. This should only be for writing tests.
 };
 
-void executeProbe(State*);
+extern "C" void executeJSCJITProbe(State*) REFERENCED_FROM_ASM WTF_INTERNAL;
 
 } // namespace Probe
 } // namespace JSC
 
-#endif // ENABLE(MASM_PROBE)
+#endif // ENABLE(ASSEMBLER)

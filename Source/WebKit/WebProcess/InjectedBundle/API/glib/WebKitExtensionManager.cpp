@@ -23,8 +23,8 @@
 #include "APIString.h"
 #include "InjectedBundle.h"
 #include "WebKitWebExtensionPrivate.h"
-#include <WebCore/FileSystem.h>
 #include <memory>
+#include <wtf/FileSystem.h>
 #include <wtf/text/CString.h>
 
 namespace WebKit {
@@ -41,10 +41,14 @@ WebKitExtensionManager::WebKitExtensionManager()
 
 void WebKitExtensionManager::scanModules(const String& webExtensionsDirectory, Vector<String>& modules)
 {
-    Vector<String> modulePaths = WebCore::listDirectory(webExtensionsDirectory, String("*.so"));
-    for (size_t i = 0; i < modulePaths.size(); ++i) {
-        if (WebCore::fileExists(modulePaths[i]))
-            modules.append(modulePaths[i]);
+    auto moduleNames = FileSystem::listDirectory(webExtensionsDirectory);
+    for (auto& moduleName : moduleNames) {
+        if (!moduleName.endsWith(".so"_s))
+            continue;
+
+        auto modulePath = FileSystem::pathByAppendingComponent(webExtensionsDirectory, moduleName);
+        if (FileSystem::fileExists(modulePath))
+            modules.append(modulePath);
     }
 }
 
@@ -63,7 +67,7 @@ static void parseUserData(API::Object* userData, String& webExtensionsDirectory,
     GVariant* data = nullptr;
     g_variant_get(variant.get(), "(m&smv)", &directory, &data);
 
-    webExtensionsDirectory = WebCore::stringFromFileSystemRepresentation(directory);
+    webExtensionsDirectory = FileSystem::stringFromFileSystemRepresentation(directory);
     initializationUserData = adoptGRef(data);
 }
 
@@ -103,7 +107,7 @@ void WebKitExtensionManager::initialize(InjectedBundle* bundle, API::Object* use
     scanModules(webExtensionsDirectory, modulePaths);
 
     for (size_t i = 0; i < modulePaths.size(); ++i) {
-        auto module = std::make_unique<Module>(modulePaths[i]);
+        auto module = makeUnique<Module>(modulePaths[i]);
         if (!module->load())
             continue;
         if (initializeWebExtension(module.get(), userData.get()))

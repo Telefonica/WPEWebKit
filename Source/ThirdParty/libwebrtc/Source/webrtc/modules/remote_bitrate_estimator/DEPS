@@ -1,11 +1,6 @@
 include_rules = [
-  "+webrtc/base",
-  "+webrtc/logging/rtc_event_log",
-  "+webrtc/system_wrappers",
+  "+logging/rtc_event_log",
+  "+system_wrappers",
+  # Avoid directly using field_trial. Instead use FieldTrialsView.
+  "-system_wrappers/include/field_trial.h",
 ]
-
-specific_include_rules = {
-  "nada\.h": [
-    "+webrtc/voice_engine",
-  ],
-}

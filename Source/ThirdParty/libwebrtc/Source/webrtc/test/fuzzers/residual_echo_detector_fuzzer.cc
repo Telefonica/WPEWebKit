@@ -15,8 +15,8 @@
 #include <bitset>
 #include <vector>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/audio_processing/residual_echo_detector.h"
+#include "api/audio/echo_detector_creator.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -42,10 +42,10 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
   read_idx += 2;
   std::bitset<16> call_order(call_order_int);
 
-  ResidualEchoDetector echo_detector;
+  rtc::scoped_refptr<EchoDetector> echo_detector = CreateEchoDetector();
   std::vector<float> input(1);
   // Call AnalyzeCaptureAudio once to prevent the flushing of the buffer.
-  echo_detector.AnalyzeCaptureAudio(input);
+  echo_detector->AnalyzeCaptureAudio(input);
   for (size_t i = 0; i < 2 * kNrOfUpdates; ++i) {
     // Convert 4 input bytes to a float.
     RTC_DCHECK_LE(read_idx + sizeof(float), size);
@@ -56,9 +56,9 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
       continue;
     }
     if (call_order[i]) {
-      echo_detector.AnalyzeRenderAudio(input);
+      echo_detector->AnalyzeRenderAudio(input);
     } else {
-      echo_detector.AnalyzeCaptureAudio(input);
+      echo_detector->AnalyzeCaptureAudio(input);
     }
   }
 }

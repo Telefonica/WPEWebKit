@@ -1,601 +1,870 @@
-diff --git a/include/EGL/egl.h b/include/EGL/egl.h
-index 9f9e021..8ada051 100644
---- a/include/EGL/egl.h
-+++ b/include/EGL/egl.h
-@@ -38,6 +38,12 @@ extern "C" {
+diff --git a/src/common/utilities.cpp b/src/common/utilities.cpp
+index 274d8029521aa8e6d6fdae039a21931f00125fe6..5314733998768cdbda34126ed61d4247ef952541 100644
+--- a/src/common/utilities.cpp
++++ b/src/common/utilities.cpp
+@@ -6,6 +6,12 @@
  
- #include <EGL/eglplatform.h>
+ // utilities.cpp: Conversion functions and other utility routines.
  
-+#if defined(_MSC_VER) && !defined(ANGLE_WEBKIT_WIN)
-+#define EGL_SOFT_LINKING 1
-+#else
-+#define EGL_SOFT_LINKING 0
++// Older clang versions have a false positive on this warning here.
++// TODO(dino): Is this still necessary?
++#if defined(__clang__)
++#    pragma clang diagnostic ignored "-Wglobal-constructors"
 +#endif
 +
- /* Generated on date 20150623 */
+ #include "common/utilities.h"
+ #include "GLES3/gl3.h"
+ #include "common/mathutil.h"
+diff --git a/src/compiler/preprocessor/preprocessor_tab_autogen.cpp b/src/compiler/preprocessor/preprocessor_tab_autogen.cpp
+index 50822f2007292801b41be16ad956ae0bf06e7e88..3ece2105bcdaea98917001b33d1c6834de022d5e 100644
+--- a/src/compiler/preprocessor/preprocessor_tab_autogen.cpp
++++ b/src/compiler/preprocessor/preprocessor_tab_autogen.cpp
+@@ -1,5 +1,8 @@
+ /* A Bison parser, made by GNU Bison 3.3.2.  */
  
- /* Generated C header for:
-@@ -118,6 +124,7 @@ typedef void (*__eglMustCastToProperFunctionPointerType)(void);
- #define EGL_VERSION                       0x3054
- #define EGL_WIDTH                         0x3057
- #define EGL_WINDOW_BIT                    0x0004
-+#if !EGL_SOFT_LINKING
- EGLAPI EGLBoolean EGLAPIENTRY eglChooseConfig (EGLDisplay dpy, const EGLint *attrib_list, EGLConfig *configs, EGLint config_size, EGLint *num_config);
- EGLAPI EGLBoolean EGLAPIENTRY eglCopyBuffers (EGLDisplay dpy, EGLSurface surface, EGLNativePixmapType target);
- EGLAPI EGLContext EGLAPIENTRY eglCreateContext (EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list);
-@@ -142,6 +149,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapBuffers (EGLDisplay dpy, EGLSurface surface
- EGLAPI EGLBoolean EGLAPIENTRY eglTerminate (EGLDisplay dpy);
- EGLAPI EGLBoolean EGLAPIENTRY eglWaitGL (void);
- EGLAPI EGLBoolean EGLAPIENTRY eglWaitNative (EGLint engine);
-+#endif
- #endif /* EGL_VERSION_1_0 */
- 
- #ifndef EGL_VERSION_1_1
-@@ -160,10 +168,12 @@ EGLAPI EGLBoolean EGLAPIENTRY eglWaitNative (EGLint engine);
- #define EGL_TEXTURE_RGB                   0x305D
- #define EGL_TEXTURE_RGBA                  0x305E
- #define EGL_TEXTURE_TARGET                0x3081
-+#if !EGL_SOFT_LINKING
- EGLAPI EGLBoolean EGLAPIENTRY eglBindTexImage (EGLDisplay dpy, EGLSurface surface, EGLint buffer);
- EGLAPI EGLBoolean EGLAPIENTRY eglReleaseTexImage (EGLDisplay dpy, EGLSurface surface, EGLint buffer);
- EGLAPI EGLBoolean EGLAPIENTRY eglSurfaceAttrib (EGLDisplay dpy, EGLSurface surface, EGLint attribute, EGLint value);
- EGLAPI EGLBoolean EGLAPIENTRY eglSwapInterval (EGLDisplay dpy, EGLint interval);
-+#endif
- #endif /* EGL_VERSION_1_1 */
- 
- #ifndef EGL_VERSION_1_2
-@@ -199,11 +209,13 @@ typedef void *EGLClientBuffer;
- #define EGL_SWAP_BEHAVIOR                 0x3093
- #define EGL_UNKNOWN                       ((EGLint)-1)
- #define EGL_VERTICAL_RESOLUTION           0x3091
-+#if !EGL_SOFT_LINKING
- EGLAPI EGLBoolean EGLAPIENTRY eglBindAPI (EGLenum api);
- EGLAPI EGLenum EGLAPIENTRY eglQueryAPI (void);
- EGLAPI EGLSurface EGLAPIENTRY eglCreatePbufferFromClientBuffer (EGLDisplay dpy, EGLenum buftype, EGLClientBuffer buffer, EGLConfig config, const EGLint *attrib_list);
- EGLAPI EGLBoolean EGLAPIENTRY eglReleaseThread (void);
- EGLAPI EGLBoolean EGLAPIENTRY eglWaitClient (void);
-+#endif
- #endif /* EGL_VERSION_1_2 */
- 
- #ifndef EGL_VERSION_1_3
-@@ -232,7 +244,9 @@ EGLAPI EGLBoolean EGLAPIENTRY eglWaitClient (void);
- #define EGL_OPENGL_API                    0x30A2
- #define EGL_OPENGL_BIT                    0x0008
- #define EGL_SWAP_BEHAVIOR_PRESERVED_BIT   0x0400
-+#if !EGL_SOFT_LINKING
- EGLAPI EGLContext EGLAPIENTRY eglGetCurrentContext (void);
-+#endif
- #endif /* EGL_VERSION_1_4 */
- 
- #ifndef EGL_VERSION_1_5
-@@ -284,6 +298,7 @@ typedef void *EGLImage;
- #define EGL_GL_TEXTURE_CUBE_MAP_NEGATIVE_Z 0x30B8
- #define EGL_IMAGE_PRESERVED               0x30D2
- #define EGL_NO_IMAGE                      ((EGLImage)0)
-+#if !EGL_SOFT_LINKING
- EGLAPI EGLSync EGLAPIENTRY eglCreateSync (EGLDisplay dpy, EGLenum type, const EGLAttrib *attrib_list);
- EGLAPI EGLBoolean EGLAPIENTRY eglDestroySync (EGLDisplay dpy, EGLSync sync);
- EGLAPI EGLint EGLAPIENTRY eglClientWaitSync (EGLDisplay dpy, EGLSync sync, EGLint flags, EGLTime timeout);
-@@ -294,8 +309,13 @@ EGLAPI EGLDisplay EGLAPIENTRY eglGetPlatformDisplay (EGLenum platform, void *nat
- EGLAPI EGLSurface EGLAPIENTRY eglCreatePlatformWindowSurface (EGLDisplay dpy, EGLConfig config, void *native_window, const EGLAttrib *attrib_list);
- EGLAPI EGLSurface EGLAPIENTRY eglCreatePlatformPixmapSurface (EGLDisplay dpy, EGLConfig config, void *native_pixmap, const EGLAttrib *attrib_list);
- EGLAPI EGLBoolean EGLAPIENTRY eglWaitSync (EGLDisplay dpy, EGLSync sync, EGLint flags);
-+#endif
- #endif /* EGL_VERSION_1_5 */
- 
-+#if EGL_SOFT_LINKING
-+#include <EGL/eglsoftlinking.h>
-+#endif
-+
- #ifdef __cplusplus
- }
- #endif
-diff --git a/include/GLES2/gl2.h b/include/GLES2/gl2.h
-index 027e1f7..4d710c2 100644
---- a/include/GLES2/gl2.h
-+++ b/include/GLES2/gl2.h
-@@ -520,6 +520,11 @@ typedef void (GL_APIENTRYP PFNGLVERTEXATTRIB4FPROC) (GLuint index, GLfloat x, GL
- typedef void (GL_APIENTRYP PFNGLVERTEXATTRIB4FVPROC) (GLuint index, const GLfloat *v);
- typedef void (GL_APIENTRYP PFNGLVERTEXATTRIBPOINTERPROC) (GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer);
- typedef void (GL_APIENTRYP PFNGLVIEWPORTPROC) (GLint x, GLint y, GLsizei width, GLsizei height);
-+
-+#if defined(_MSC_VER) && !defined(ANGLE_WEBKIT_WIN)
-+#include <GLES2/gl2softlinking.h>
-+#else
-+
- #ifdef GL_GLEXT_PROTOTYPES
- GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture);
- GL_APICALL void GL_APIENTRY glAttachShader (GLuint program, GLuint shader);
-@@ -664,6 +669,7 @@ GL_APICALL void GL_APIENTRY glVertexAttrib4fv (GLuint index, const GLfloat *v);
- GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer);
- GL_APICALL void GL_APIENTRY glViewport (GLint x, GLint y, GLsizei width, GLsizei height);
- #endif
-+#endif
- #endif /* GL_ES_VERSION_2_0 */
- 
- #ifdef __cplusplus
-diff --git a/include/GLSLANG/ShaderLang.h b/include/GLSLANG/ShaderLang.h
-index 965f7ab..f7b0ef7 100644
---- a/include/GLSLANG/ShaderLang.h
-+++ b/include/GLSLANG/ShaderLang.h
-@@ -25,7 +25,7 @@
- 
- #include <stddef.h>
- 
--#include "KHR/khrplatform.h"
-+#include "khrplatform.h"
- 
- #include <array>
- #include <map>
-diff --git a/src/common/angleutils.cpp b/src/common/angleutils.cpp
-index 7099c21..4641928 100644
---- a/src/common/angleutils.cpp
-+++ b/src/common/angleutils.cpp
-@@ -36,7 +36,10 @@ size_t FormatStringIntoVector(const char *fmt, va_list vararg, std::vector<char>
- 
- std::string FormatString(const char *fmt, va_list vararg)
- {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static std::vector<char> buffer(512);
-+#pragma clang diagnostic pop
- 
-     size_t len = FormatStringIntoVector(fmt, vararg, buffer);
-     return std::string(&buffer[0], len);
-diff --git a/src/common/angleutils.h b/src/common/angleutils.h
-index f5ef7bd..4cb556c 100644
---- a/src/common/angleutils.h
-+++ b/src/common/angleutils.h
-@@ -116,7 +116,10 @@ inline bool IsMaskFlagSet(T mask, T flag)
- 
- inline const char* MakeStaticString(const std::string &str)
- {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static std::set<std::string> strings;
-+#pragma clang diagnostic pop
-     std::set<std::string>::iterator it = strings.find(str);
-     if (it != strings.end())
-     {
-diff --git a/src/common/debug.cpp b/src/common/debug.cpp
-index 746da5e..47e1565 100644
---- a/src/common/debug.cpp
-+++ b/src/common/debug.cpp
-@@ -69,7 +69,10 @@ void output(bool traceInDebugOnly, MessageType messageType, DebugTraceOutputType
- {
-     if (DebugAnnotationsActive())
-     {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-         static std::vector<char> buffer(512);
-+#pragma clang diagnostic pop
-         size_t len = FormatStringIntoVector(format, vararg, buffer);
-         std::wstring formattedWideMessage(buffer.begin(), buffer.begin() + len);
- 
-diff --git a/src/common/mathutil.cpp b/src/common/mathutil.cpp
-index acbcbdf..ba6da52 100644
---- a/src/common/mathutil.cpp
-+++ b/src/common/mathutil.cpp
-@@ -31,9 +31,12 @@ static const int g_sharedexp_mantissabits = 9;
- // Emax is the maximum allowed biased exponent value (31)
- static const int g_sharedexp_maxexponent = 31;
- 
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wglobal-constructors"
- static const float g_sharedexp_max = ((pow(2.0f, g_sharedexp_mantissabits) - 1) /
-                                        pow(2.0f, g_sharedexp_mantissabits)) *
-                                      pow(2.0f, g_sharedexp_maxexponent - g_sharedexp_bias);
-+#pragma clang diagnostic pop
- 
- unsigned int convertRGBFloatsTo999E5(float red, float green, float blue)
- {
-diff --git a/src/common/version.h b/src/common/version.h
-index e7ffa7c..b653ae3 100644
---- a/src/common/version.h
-+++ b/src/common/version.h
-@@ -7,7 +7,7 @@
- #ifndef COMMON_VERSION_H_
- #define COMMON_VERSION_H_
- 
--#include "id/commit.h"
-+#include "commit.h"
- 
- #define ANGLE_MAJOR_VERSION 2
- #define ANGLE_MINOR_VERSION 1
-diff --git a/src/compiler/preprocessor/ExpressionParser.cpp b/src/compiler/preprocessor/ExpressionParser.cpp
-index f737a2e..a8df235 100644
---- a/src/compiler/preprocessor/ExpressionParser.cpp
-+++ b/src/compiler/preprocessor/ExpressionParser.cpp
-@@ -1,5 +1,7 @@
- /* A Bison parser, made by GNU Bison 3.0.4.  */
- 
-+/* Apple Note: For the avoidance of doubt, Apple elects to distribute this file under the terms of the BSD license. */
++/* Apple Note: For the avoidance of doubt, Apple elects to distribute this file under the terms of
++ * the BSD license. */
 +
  /* Bison implementation for Yacc-like parsers in C
  
-    Copyright (C) 1984, 1989-1990, 2000-2015 Free Software Foundation, Inc.
-diff --git a/src/compiler/preprocessor/Tokenizer.cpp b/src/compiler/preprocessor/Tokenizer.cpp
-index 40e910e..fee20c6 100644
---- a/src/compiler/preprocessor/Tokenizer.cpp
-+++ b/src/compiler/preprocessor/Tokenizer.cpp
-@@ -969,7 +969,7 @@ static void yy_flex_strncpy (char *,yyconst char *,int ,yyscan_t yyscanner);
- static int yy_flex_strlen (yyconst char * ,yyscan_t yyscanner);
- #endif
+    Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2019 Free Software Foundation,
+diff --git a/src/compiler/translator/CodeGen.cpp b/src/compiler/translator/CodeGen.cpp
+index 497ef881e2d9cf0efb669ca8c7c4f2669633baba..47213c90497c8c9d8f76baf0653fdbc3c7a2e19d 100644
+--- a/src/compiler/translator/CodeGen.cpp
++++ b/src/compiler/translator/CodeGen.cpp
+@@ -23,6 +23,9 @@
+ #ifdef ANGLE_ENABLE_METAL
+ #    include "compiler/translator/TranslatorMetalDirect.h"
+ #endif  // ANGLE_ENABLE_METAL
++#ifdef ANGLE_ENABLE_METAL_SPIRV
++#    include "compiler/translator/TranslatorMetal.h"
++#endif  // ANGLE_ENABLE_METAL_SPIRV
  
--#ifndef YY_NO_INPUT
-+#if 0
- 
- #ifdef __cplusplus
- static int yyinput (yyscan_t yyscanner );
-@@ -1858,7 +1858,7 @@ static int yy_get_next_buffer (yyscan_t yyscanner)
- 
- #endif
- 
--#ifndef YY_NO_INPUT
-+#if 0
- #ifdef __cplusplus
-     static int yyinput (yyscan_t yyscanner)
- #else
-@@ -1883,7 +1883,7 @@ static int yy_get_next_buffer (yyscan_t yyscanner)
- 
- 		else
- 			{ /* need more input */
--			int offset = yyg->yy_c_buf_p - yyg->yytext_ptr;
-+			auto offset = yyg->yy_c_buf_p - yyg->yytext_ptr;
- 			++yyg->yy_c_buf_p;
- 
- 			switch ( yy_get_next_buffer( yyscanner ) )
-@@ -2014,7 +2014,7 @@ static void pp_load_buffer_state  (yyscan_t yyscanner)
- 	if ( ! b )
- 		YY_FATAL_ERROR( "out of dynamic memory in pp_create_buffer()" );
- 
--	b->yy_buf_size = (yy_size_t)size;
-+	b->yy_buf_size = size;
- 
- 	/* yy_ch_buf has to be 2 characters longer than the size given because
- 	 * we need to put in 2 end-of-buffer characters.
-diff --git a/src/compiler/translator/Operator.cpp b/src/compiler/translator/Operator.cpp
-index 57878b9..0b693e2 100644
---- a/src/compiler/translator/Operator.cpp
-+++ b/src/compiler/translator/Operator.cpp
-@@ -224,4 +224,4 @@ bool IsAssignment(TOperator op)
-         default:
-             return false;
-     }
--}
-\ No newline at end of file
-+}
-diff --git a/src/compiler/translator/OutputHLSL.h b/src/compiler/translator/OutputHLSL.h
-index db78859..f296dd9 100644
---- a/src/compiler/translator/OutputHLSL.h
-+++ b/src/compiler/translator/OutputHLSL.h
-@@ -56,21 +56,21 @@ class OutputHLSL : public TIntermTraverser
-     void header(TInfoSinkBase &out, const BuiltInFunctionEmulator *builtInFunctionEmulator);
- 
-     // Visit AST nodes and output their code to the body stream
--    void visitSymbol(TIntermSymbol*);
--    void visitRaw(TIntermRaw*);
--    void visitConstantUnion(TIntermConstantUnion*);
-+    void visitSymbol(TIntermSymbol*) override;
-+    void visitRaw(TIntermRaw*) override;
-+    void visitConstantUnion(TIntermConstantUnion*) override;
-     bool visitSwizzle(Visit visit, TIntermSwizzle *node) override;
--    bool visitBinary(Visit visit, TIntermBinary*);
--    bool visitUnary(Visit visit, TIntermUnary*);
--    bool visitTernary(Visit visit, TIntermTernary *);
--    bool visitIfElse(Visit visit, TIntermIfElse *);
--    bool visitSwitch(Visit visit, TIntermSwitch *);
--    bool visitCase(Visit visit, TIntermCase *);
-+    bool visitBinary(Visit visit, TIntermBinary*) override;
-+    bool visitUnary(Visit visit, TIntermUnary*) override;
-+    bool visitTernary(Visit visit, TIntermTernary *) override;
-+    bool visitIfElse(Visit visit, TIntermIfElse *) override;
-+    bool visitSwitch(Visit visit, TIntermSwitch *) override;
-+    bool visitCase(Visit visit, TIntermCase *) override;
-     bool visitFunctionDefinition(Visit visit, TIntermFunctionDefinition *node) override;
--    bool visitAggregate(Visit visit, TIntermAggregate*);
--    bool visitBlock(Visit visit, TIntermBlock *node);
--    bool visitLoop(Visit visit, TIntermLoop*);
--    bool visitBranch(Visit visit, TIntermBranch*);
-+    bool visitAggregate(Visit visit, TIntermAggregate*) override;
-+    bool visitBlock(Visit visit, TIntermBlock *node) override;
-+    bool visitLoop(Visit visit, TIntermLoop*) override;
-+    bool visitBranch(Visit visit, TIntermBranch*) override;
- 
-     bool isSingleStatement(TIntermNode *node);
-     bool handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node);
-diff --git a/src/compiler/translator/RewriteTexelFetchOffset.cpp b/src/compiler/translator/RewriteTexelFetchOffset.cpp
-index 487c909..6d0c866 100644
---- a/src/compiler/translator/RewriteTexelFetchOffset.cpp
-+++ b/src/compiler/translator/RewriteTexelFetchOffset.cpp
-@@ -167,4 +167,4 @@ void RewriteTexelFetchOffset(TIntermNode *root,
-     Traverser::Apply(root, symbolTable, shaderVersion);
+ #ifdef ANGLE_ENABLE_METAL_SPIRV
+ #    include "compiler/translator/TranslatorMetal.h"
+diff --git a/src/compiler/translator/IntermNode.cpp b/src/compiler/translator/IntermNode.cpp
+index 11cb0f04409902a33f2c3677ac280d3d9b3f373c..791dd6dc4e3ea5bbb6289245ded8acffe27568c7 100644
+--- a/src/compiler/translator/IntermNode.cpp
++++ b/src/compiler/translator/IntermNode.cpp
+@@ -279,7 +279,7 @@ bool TIntermLoop::replaceChildNode(TIntermNode *original, TIntermNode *replaceme
  }
  
--}  // namespace sh
-\ No newline at end of file
-+}  // namespace sh
-diff --git a/src/compiler/translator/RewriteTexelFetchOffset.h b/src/compiler/translator/RewriteTexelFetchOffset.h
-index 4218f0b..c6db664 100644
---- a/src/compiler/translator/RewriteTexelFetchOffset.h
-+++ b/src/compiler/translator/RewriteTexelFetchOffset.h
-@@ -27,4 +27,4 @@ void RewriteTexelFetchOffset(TIntermNode *root,
+ TIntermBranch::TIntermBranch(const TIntermBranch &node)
+-    : TIntermBranch(node.mFlowOp, node.mExpression->deepCopy())
++    : TIntermBranch(node.mFlowOp, node.mExpression ? node.mExpression->deepCopy() : nullptr)
+ {}
  
- }  // namespace sh
+ size_t TIntermBranch::getChildCount() const
+@@ -1602,10 +1602,10 @@ TIntermLoop::TIntermLoop(TLoopType type,
  
--#endif  // COMPILER_TRANSLATOR_REWRITE_TEXELFETCHOFFSET_H_
-\ No newline at end of file
-+#endif  // COMPILER_TRANSLATOR_REWRITE_TEXELFETCHOFFSET_H_
-diff --git a/src/compiler/translator/RewriteUnaryMinusOperatorInt.cpp b/src/compiler/translator/RewriteUnaryMinusOperatorInt.cpp
-index ef708cb..d205805 100644
---- a/src/compiler/translator/RewriteUnaryMinusOperatorInt.cpp
-+++ b/src/compiler/translator/RewriteUnaryMinusOperatorInt.cpp
-@@ -109,4 +109,4 @@ void RewriteUnaryMinusOperatorInt(TIntermNode *root)
-     Traverser::Apply(root);
- }
+ TIntermLoop::TIntermLoop(const TIntermLoop &node)
+     : TIntermLoop(node.mType,
+-                  node.mInit->deepCopy(),
+-                  node.mCond->deepCopy(),
+-                  node.mExpr->deepCopy(),
+-                  node.mBody->deepCopy())
++                  node.mInit ? node.mInit->deepCopy() : nullptr,
++                  node.mCond ? node.mCond->deepCopy() : nullptr,
++                  node.mExpr ? node.mExpr->deepCopy() : nullptr,
++                  node.mBody ? node.mBody->deepCopy() : nullptr)
+ {}
  
--}  // namespace sh
-\ No newline at end of file
-+}  // namespace sh
-diff --git a/src/compiler/translator/RewriteUnaryMinusOperatorInt.h b/src/compiler/translator/RewriteUnaryMinusOperatorInt.h
-index 50f0c44..802ed57 100644
---- a/src/compiler/translator/RewriteUnaryMinusOperatorInt.h
-+++ b/src/compiler/translator/RewriteUnaryMinusOperatorInt.h
-@@ -17,4 +17,4 @@ void RewriteUnaryMinusOperatorInt(TIntermNode *root);
+ TIntermIfElse::TIntermIfElse(TIntermTyped *cond, TIntermBlock *trueB, TIntermBlock *falseB)
+diff --git a/src/compiler/translator/glslang_tab_autogen.cpp b/src/compiler/translator/glslang_tab_autogen.cpp
+index daa1c614f71f0788bc8b1ea1d0e4d8709f6c7b0a..e3a3ddba082f4629478be45068cc7c560276e7e6 100644
+--- a/src/compiler/translator/glslang_tab_autogen.cpp
++++ b/src/compiler/translator/glslang_tab_autogen.cpp
+@@ -1,5 +1,8 @@
+ /* A Bison parser, made by GNU Bison 3.3.2.  */
  
- }  // namespace sh
- 
--#endif  // COMPILER_TRANSLATOR_REWRITEUNARYMINUSOPERATORINT_H_
-\ No newline at end of file
-+#endif  // COMPILER_TRANSLATOR_REWRITEUNARYMINUSOPERATORINT_H_
-diff --git a/src/compiler/translator/TranslatorHLSL.h b/src/compiler/translator/TranslatorHLSL.h
-index 213d860..d2add14 100644
---- a/src/compiler/translator/TranslatorHLSL.h
-+++ b/src/compiler/translator/TranslatorHLSL.h
-@@ -13,7 +13,9 @@ class TranslatorHLSL : public TCompiler
- {
-   public:
-     TranslatorHLSL(sh::GLenum type, ShShaderSpec spec, ShShaderOutput output);
-+#ifdef ANGLE_ENABLE_HLSL
-     TranslatorHLSL *getAsTranslatorHLSL() override { return this; }
-+#endif // ANGLE_ENABLE_HLSL
- 
-     bool hasInterfaceBlock(const std::string &interfaceBlockName) const;
-     unsigned int getInterfaceBlockRegister(const std::string &interfaceBlockName) const;
-diff --git a/src/compiler/translator/glslang_tab.cpp b/src/compiler/translator/glslang_tab.cpp
-index d9b8ada..3e50fbc 100644
---- a/src/compiler/translator/glslang_tab.cpp
-+++ b/src/compiler/translator/glslang_tab.cpp
-@@ -1,5 +1,7 @@
- /* A Bison parser, made by GNU Bison 3.0.4.  */
- 
-+/* Apple Note: For the avoidance of doubt, Apple elects to distribute this file under the terms of the BSD license. */
++/* Apple Note: For the avoidance of doubt, Apple elects to distribute this file under the terms of
++ * the BSD license. */
 +
  /* Bison implementation for Yacc-like parsers in C
  
-    Copyright (C) 1984, 1989-1990, 2000-2015 Free Software Foundation, Inc.
-diff --git a/src/compiler/translator/glslang_tab.h b/src/compiler/translator/glslang_tab.h
-index d0e691d..74a56da 100644
---- a/src/compiler/translator/glslang_tab.h
-+++ b/src/compiler/translator/glslang_tab.h
-@@ -1,5 +1,7 @@
- /* A Bison parser, made by GNU Bison 3.0.4.  */
+    Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2019 Free Software Foundation,
+diff --git a/src/compiler/translator/glslang_tab_autogen.h b/src/compiler/translator/glslang_tab_autogen.h
+index d2eab0b7bc55675eb9ad5e210fb4d0cb869f35d1..2ec2d2c4495c1ed97a55173e49ea329d82d3f155 100644
+--- a/src/compiler/translator/glslang_tab_autogen.h
++++ b/src/compiler/translator/glslang_tab_autogen.h
+@@ -1,5 +1,8 @@
+ /* A Bison parser, made by GNU Bison 3.3.2.  */
  
-+/* Apple Note: For the avoidance of doubt, Apple elects to distribute this file under the terms of the BSD license. */
++/* Apple Note: For the avoidance of doubt, Apple elects to distribute this file under the terms of
++ * the BSD license. */
 +
  /* Bison interface for Yacc-like parsers in C
  
-    Copyright (C) 1984, 1989-1990, 2000-2015 Free Software Foundation, Inc.
-diff --git a/src/libANGLE/Caps.cpp b/src/libANGLE/Caps.cpp
-index 47e1cf0..0f4d69d 100644
---- a/src/libANGLE/Caps.cpp
-+++ b/src/libANGLE/Caps.cpp
-@@ -77,7 +77,10 @@ void TextureCapsMap::clear()
+    Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2019 Free Software Foundation,
+diff --git a/src/compiler/translator/glslang_wrapper.cpp b/src/compiler/translator/glslang_wrapper.cpp
+index 6925023e202ea9954ed19a3bda6835f1502f7a78..7ec8685896a68733c8d29679688b4ee627b09e7c 100644
+--- a/src/compiler/translator/glslang_wrapper.cpp
++++ b/src/compiler/translator/glslang_wrapper.cpp
+@@ -10,6 +10,7 @@
+ //   This file is separated as glslang's header contains conflicting macro definitions with ANGLE's.
+ //
  
- const TextureCaps &TextureCapsMap::get(GLenum internalFormat) const
++#include "common/spirv/spirv_types.h"
+ #include "compiler/translator/glslang_wrapper.h"
+ 
+ // glslang has issues with some specific warnings.
+diff --git a/src/compiler/translator/tree_ops/apple/UnfoldShortCircuitAST.cpp b/src/compiler/translator/tree_ops/apple/UnfoldShortCircuitAST.cpp
+index 55e2f8b9717ec73d2d52607d400352f5f4c0c191..4237558526274ea3e643d45ccf574b6b10eac785 100644
+--- a/src/compiler/translator/tree_ops/apple/UnfoldShortCircuitAST.cpp
++++ b/src/compiler/translator/tree_ops/apple/UnfoldShortCircuitAST.cpp
+@@ -10,6 +10,7 @@
+ #include "compiler/translator/tree_util/IntermNode_util.h"
+ #include "compiler/translator/tree_util/IntermTraverse.h"
+ 
++#if defined(ANGLE_ENABLE_GLSL) && defined(ANGLE_ENABLE_APPLE_WORKAROUNDS)
+ namespace sh
  {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static TextureCaps defaultUnsupportedTexture;
-+#pragma clang diagnostic pop
-     InternalFormatToCapsMap::const_iterator iter = mCapsMap.find(internalFormat);
-     return (iter != mCapsMap.end()) ? iter->second : defaultUnsupportedTexture;
- }
-@@ -594,7 +597,10 @@ const ExtensionInfoMap &GetExtensionInfoMap()
-         return map;
-     };
  
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static const ExtensionInfoMap extensionInfo = buildExtensionInfoMap();
-+#pragma clang diagnostic pop
-     return extensionInfo;
+@@ -70,5 +71,5 @@ bool UnfoldShortCircuitAST(TCompiler *compiler, TIntermBlock *root)
+     root->traverse(&traverser);
+     return traverser.updateTree(compiler, root);
  }
+-
++#endif
+ }  // namespace sh
+diff --git a/src/compiler/translator/tree_ops/apple/UnfoldShortCircuitAST.h b/src/compiler/translator/tree_ops/apple/UnfoldShortCircuitAST.h
+index 648c7190a9382f0ce020839322fae56acfbe40db..9ddc681d320550b171a2916cac8e9a4b1c3b7fab 100644
+--- a/src/compiler/translator/tree_ops/apple/UnfoldShortCircuitAST.h
++++ b/src/compiler/translator/tree_ops/apple/UnfoldShortCircuitAST.h
+@@ -11,7 +11,7 @@
+ #define COMPILER_TRANSLATOR_TREEOPS_APPLE_UNFOLDSHORTCIRCUITAST_H_
  
-diff --git a/src/libANGLE/Device.cpp b/src/libANGLE/Device.cpp
-index eb30b20..a94d500 100644
---- a/src/libANGLE/Device.cpp
-+++ b/src/libANGLE/Device.cpp
-@@ -38,7 +38,10 @@ static std::string GenerateExtensionsString(const T &extensions)
- typedef std::set<egl::Device *> DeviceSet;
- static DeviceSet *GetDeviceSet()
+ #include "common/angleutils.h"
+-
++#include "common/debug.h"
+ namespace sh
  {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static DeviceSet devices;
-+#pragma clang diagnostic pop
-     return &devices;
+ 
+diff --git a/src/libANGLE/State.cpp b/src/libANGLE/State.cpp
+index 53c6b7ca6771e01c11c5d50ce328bb4d64c94dd8..903c42c43021784fe584f2847fe7c45bf41ced7f 100644
+--- a/src/libANGLE/State.cpp
++++ b/src/libANGLE/State.cpp
+@@ -6,6 +6,9 @@
+ 
+ // State.cpp: Implements the State class, encapsulating raw GL state.
+ 
++// Older clang versions have a false positive on this warning here.
++#pragma clang diagnostic ignored "-Wglobal-constructors"
++
+ #include "libANGLE/State.h"
+ 
+ #include <string.h>
+diff --git a/src/libANGLE/renderer/ShaderInterfaceVariableInfoMap.cpp b/src/libANGLE/renderer/ShaderInterfaceVariableInfoMap.cpp
+index ae040dfc19960b7cc686d0c2136454eb246ca80d..9e69e2fa308675249c48aee6b44b09cd4a5d2dfa 100644
+--- a/src/libANGLE/renderer/ShaderInterfaceVariableInfoMap.cpp
++++ b/src/libANGLE/renderer/ShaderInterfaceVariableInfoMap.cpp
+@@ -114,12 +114,14 @@ const ShaderInterfaceVariableInfo &ShaderInterfaceVariableInfoMap::getVariableBy
+     return mData[shaderType][typeAndIndex.variableType][typeAndIndex.index];
  }
  
-diff --git a/src/libANGLE/Display.cpp b/src/libANGLE/Display.cpp
-index 92d7dda..5711117 100644
---- a/src/libANGLE/Display.cpp
-+++ b/src/libANGLE/Display.cpp
-@@ -90,21 +90,30 @@ typedef std::map<EGLNativeWindowType, Surface*> WindowSurfaceMap;
- // associated with it.
- static WindowSurfaceMap *GetWindowSurfaces()
++#if ANGLE_ENABLE_METAL_SPIRV
+ bool ShaderInterfaceVariableInfoMap::hasTransformFeedbackInfo(gl::ShaderType shaderType,
+                                                               uint32_t bufferIndex) const
  {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static WindowSurfaceMap windowSurfaces;
-+#pragma clang diagnostic pop
-     return &windowSurfaces;
+     std::string bufferName = rx::GetXfbBufferName(bufferIndex);
+     return hasVariable(shaderType, bufferName);
  }
++#endif
  
- typedef std::map<EGLNativeDisplayType, Display *> ANGLEPlatformDisplayMap;
- static ANGLEPlatformDisplayMap *GetANGLEPlatformDisplayMap()
- {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static ANGLEPlatformDisplayMap displays;
-+#pragma clang diagnostic pop
-     return &displays;
- }
+ void ShaderInterfaceVariableInfoMap::mapIndexedResourceByName(gl::ShaderType shaderType,
+                                                               ShaderVariableType variableType,
+diff --git a/src/libANGLE/renderer/ShaderInterfaceVariableInfoMap.h b/src/libANGLE/renderer/ShaderInterfaceVariableInfoMap.h
+index ce9c26e401ffd4fa59eb8308a5210998970bec8c..dcaa142fc2a5e0d45ddf7e8fcaac14bb7f30ff2d 100644
+--- a/src/libANGLE/renderer/ShaderInterfaceVariableInfoMap.h
++++ b/src/libANGLE/renderer/ShaderInterfaceVariableInfoMap.h
+@@ -89,7 +89,9 @@ class ShaderInterfaceVariableInfoMap final : angle::NonCopyable
+     bool hasAtomicCounterInfo(gl::ShaderType shaderType) const;
+     const ShaderInterfaceVariableInfo &getAtomicCounterInfo(gl::ShaderType shaderType) const;
+     const ShaderInterfaceVariableInfo &getFramebufferFetchInfo(gl::ShaderType shaderType) const;
++#if ANGLE_ENABLE_METAL_SPIRV
+     bool hasTransformFeedbackInfo(gl::ShaderType shaderType, uint32_t bufferIndex) const;
++#endif
+     const ShaderInterfaceVariableInfo &getTransformFeedbackInfo(gl::ShaderType shaderType,
+                                                                 uint32_t bufferIndex) const;
  
- typedef std::map<Device *, Display *> DevicePlatformDisplayMap;
- static DevicePlatformDisplayMap *GetDevicePlatformDisplayMap()
- {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static DevicePlatformDisplayMap displays;
-+#pragma clang diagnostic pop
-     return &displays;
- }
- 
-@@ -921,7 +930,10 @@ const ClientExtensions &Display::getClientExtensions()
- 
- const std::string &Display::getClientExtensionString()
- {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static const std::string clientExtensionsString = GenerateExtensionsString(getClientExtensions());
-+#pragma clang diagnostic pop
-     return clientExtensionsString;
- }
- 
-diff --git a/src/libANGLE/HandleRangeAllocator.cpp b/src/libANGLE/HandleRangeAllocator.cpp
-index f219f95..3831aca 100644
---- a/src/libANGLE/HandleRangeAllocator.cpp
-+++ b/src/libANGLE/HandleRangeAllocator.cpp
-@@ -223,4 +223,4 @@ bool HandleRangeAllocator::isUsed(GLuint handle) const
-     return current->second >= handle;
- }
- 
--}  // namespace gl
-\ No newline at end of file
-+}  // namespace gl
-diff --git a/src/libANGLE/HandleRangeAllocator.h b/src/libANGLE/HandleRangeAllocator.h
-index 20f9a11..1023a84 100644
---- a/src/libANGLE/HandleRangeAllocator.h
-+++ b/src/libANGLE/HandleRangeAllocator.h
-@@ -56,4 +56,4 @@ class HandleRangeAllocator final : angle::NonCopyable
- 
- }  // namespace gl
- 
--#endif  // LIBANGLE_HANDLERANGEALLOCATOR_H_
-\ No newline at end of file
-+#endif  // LIBANGLE_HANDLERANGEALLOCATOR_H_
-diff --git a/src/libANGLE/Path.h b/src/libANGLE/Path.h
-index b103c84..85f49c1 100644
---- a/src/libANGLE/Path.h
-+++ b/src/libANGLE/Path.h
-@@ -68,4 +68,4 @@ class Path final : angle::NonCopyable
- 
- }  // namespace gl
- 
--#endif  // LIBANGLE_PATH_H_
-\ No newline at end of file
-+#endif  // LIBANGLE_PATH_H_
-diff --git a/src/libANGLE/formatutils.cpp b/src/libANGLE/formatutils.cpp
-index ff285dd..55a5fc8 100644
---- a/src/libANGLE/formatutils.cpp
-+++ b/src/libANGLE/formatutils.cpp
-@@ -615,7 +615,10 @@ static InternalFormatInfoMap BuildInternalFormatInfoMap()
- 
- static const InternalFormatInfoMap &GetInternalFormatMap()
- {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static const InternalFormatInfoMap formatMap = BuildInternalFormatInfoMap();
-+#pragma clang diagnostic pop
-     return formatMap;
- }
- 
-@@ -859,7 +862,10 @@ GLenum GetSizedInternalFormat(GLenum internalFormat, GLenum type)
- 
- const FormatSet &GetAllSizedInternalFormats()
- {
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static FormatSet formatSet = BuildAllSizedInternalFormatSet();
-+#pragma clang diagnostic pop
-     return formatSet;
- }
- 
-diff --git a/src/libANGLE/renderer/PathImpl.h b/src/libANGLE/renderer/PathImpl.h
-index 3607f69..cb03ed6 100644
---- a/src/libANGLE/renderer/PathImpl.h
-+++ b/src/libANGLE/renderer/PathImpl.h
-@@ -33,4 +33,4 @@ class PathImpl : angle::NonCopyable
+diff --git a/src/libANGLE/renderer/glslang_wrapper_utils.h b/src/libANGLE/renderer/glslang_wrapper_utils.h
+index 84d33356a92be7ce3b0d6a425caa69afacfe0fac..96bc31841d748bc2190ea4a3030c4f6e16ec9e87 100644
+--- a/src/libANGLE/renderer/glslang_wrapper_utils.h
++++ b/src/libANGLE/renderer/glslang_wrapper_utils.h
+@@ -155,7 +155,7 @@ void GlslangAssignTransformFeedbackLocations(gl::ShaderType shaderType,
+                                              bool isTransformFeedbackStage,
+                                              GlslangProgramInterfaceInfo *programInterfaceInfo,
+                                              ShaderInterfaceVariableInfoMap *variableInfoMapOut);
+-
++#if ANGLE_ENABLE_METAL_SPIRV
+ // Retrieves the compiled SPIR-V code for each shader stage, and calls |GlslangAssignLocations|.
+ void GlslangGetShaderSpirvCode(const GlslangSourceOptions &options,
+                                const gl::ProgramState &programState,
+@@ -168,6 +168,7 @@ angle::Result GlslangTransformSpirvCode(const GlslangSpirvOptions &options,
+                                         const ShaderInterfaceVariableInfoMap &variableInfoMap,
+                                         const angle::spirv::Blob &initialSpirvBlob,
+                                         angle::spirv::Blob *spirvBlobOut);
++#endif
  
  }  // namespace rx
  
--#endif  // LIBANGLE_RENDERER_PATHIMPL_H_
-\ No newline at end of file
-+#endif  // LIBANGLE_RENDERER_PATHIMPL_H_
-diff --git a/src/libANGLE/validationES3.cpp b/src/libANGLE/validationES3.cpp
-index 2f93651..49aa604 100644
---- a/src/libANGLE/validationES3.cpp
-+++ b/src/libANGLE/validationES3.cpp
-@@ -524,7 +524,10 @@ static bool IsValidES3CopyTexImageCombination(const Format &textureFormat,
-     const auto &textureFormatInfo     = *textureFormat.info;
-     const auto &framebufferFormatInfo = *framebufferFormat.info;
- 
-+#pragma clang diagnostic push
-+#pragma clang diagnostic ignored "-Wexit-time-destructors"
-     static const CopyConversionSet conversionSet = BuildValidES3CopyTexImageCombinations();
-+#pragma clang diagnostic pop
-     if (conversionSet.find(CopyConversion(textureFormatInfo.format,
-                                           framebufferFormatInfo.format)) != conversionSet.end())
+diff --git a/src/libANGLE/renderer/metal/BufferMtl.mm b/src/libANGLE/renderer/metal/BufferMtl.mm
+index c8769efa38736be06a1c7fc12a4f21ef578c5f01..1766256930914b030119724f01d2adb2f54269a2 100644
+--- a/src/libANGLE/renderer/metal/BufferMtl.mm
++++ b/src/libANGLE/renderer/metal/BufferMtl.mm
+@@ -365,7 +365,7 @@ ConversionBufferMtl *BufferMtl::getUniformConversionBuffer(ContextMtl *context,
      {
-diff --git a/include/EGL/eglplatform.h b/include/EGL/eglplatform.h
-index 9bb75910ac0..ccaf7e6f343 100644
---- a/include/EGL/eglplatform.h
-+++ b/include/EGL/eglplatform.h
-@@ -89,6 +89,12 @@ typedef int   EGLNativeDisplayType;
- typedef void *EGLNativeWindowType;
- typedef void *EGLNativePixmapType;
+         if (buffer.offset == offset)
+         {
+-            return &buffer;
++            return static_cast<ConversionBufferMtl *>(&buffer);
+         }
+     }
  
-+#elif defined(WL_EGL_PLATFORM)
-+
-+typedef struct wl_display    *EGLNativeDisplayType;
-+typedef struct wl_egl_pixmap *EGLNativePixmapType;
-+typedef struct wl_egl_window *EGLNativeWindowType;
-+
- #elif defined(__ANDROID__) || defined(ANDROID)
+@@ -520,7 +520,7 @@ angle::Result BufferMtl::setDataImpl(const gl::Context *context,
+         default:
+             // dynamic buffer, allow up to 10 update per frame/encoding without
+             // waiting for GPU.
+-            if (adjustedSize <= mtl::kSharedMemBufferMaxBufSizeHint)
++            if (adjustedSize <= kConvertedElementArrayBufferInitialSize)
+             {
+                 maxBuffers = 10;
+                 mBufferPool.setAlwaysUseSharedMem();
+diff --git a/src/libANGLE/renderer/metal/DisplayMtl.mm b/src/libANGLE/renderer/metal/DisplayMtl.mm
+index ade92ae2dbfa4d27cfe40442f5811e94a84ca6ec..648613409c9da7800f5645db0d1ccf24dbb42fb4 100644
+--- a/src/libANGLE/renderer/metal/DisplayMtl.mm
++++ b/src/libANGLE/renderer/metal/DisplayMtl.mm
+@@ -1242,8 +1242,7 @@ bool DisplayMtl::supportsEitherGPUFamily(uint8_t iOSFamily, uint8_t macFamily) c
+ bool DisplayMtl::supports32BitFloatFiltering() const
+ {
+ #if (defined(__MAC_11_0) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_11_0) ||        \
+-    (defined(__IPHONE_14_0) && __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_14_0) || \
+-    (defined(__TVOS_14_0) && __TV_OS_VERSION_MIN_REQUIRED >= __TVOS_14_0)
++    (defined(__IPHONE_14_0) && __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_14_0)
+     if (@available(ios 14.0, macOS 11.0, *))
+     {
+         return [mMetalDevice supports32BitFloatFiltering];
+diff --git a/src/libANGLE/renderer/metal/mtl_buffer_pool.h b/src/libANGLE/renderer/metal/mtl_buffer_pool.h
+index c3be11f78156c7fab4ee8a90733de2f3b049de7e..204ebb949873112c010242b2b16b0860cd40c00a 100644
+--- a/src/libANGLE/renderer/metal/mtl_buffer_pool.h
++++ b/src/libANGLE/renderer/metal/mtl_buffer_pool.h
+@@ -126,7 +126,7 @@ class BufferPool
  
- #include <android/native_window.h>
-@@ -107,6 +113,8 @@ typedef intptr_t EGLNativePixmapType;
+     size_t mBuffersAllocated;
+     size_t mMaxBuffers;
+-    BufferPoolMemPolicy mMemPolicy;
++    BufferPoolMemPolicy mMemPolicy = BufferPoolMemPolicy::Auto;
+     bool mAlwaysAllocateNewBuffer;
+ };
  
- #elif defined(__unix__)
+diff --git a/src/libANGLE/renderer/metal/mtl_render_utils.h b/src/libANGLE/renderer/metal/mtl_render_utils.h
+index 6be9690e159f3c5573ea76419522eaa99e4cf459..7b6c8c059e21f96689f3fcb7bfd86899b91a81da 100644
+--- a/src/libANGLE/renderer/metal/mtl_render_utils.h
++++ b/src/libANGLE/renderer/metal/mtl_render_utils.h
+@@ -146,6 +146,7 @@ struct IndexGenerationParams
+     BufferRef dstBuffer;
+     uint32_t dstOffset;
+     bool primitiveRestartEnabled = false;
++    GLsizei maxIndexCount = std::numeric_limits<GLsizei>::max();
+ };
  
-+#if defined(ANGLE_USE_X11) && !defined(MESA_EGL_NO_X11_HEADERS)
-+
- /* X11 (tentative)  */
- #include <X11/Xlib.h>
- #include <X11/Xutil.h>
-@@ -116,6 +124,14 @@ typedef Pixmap   EGLNativePixmapType;
- typedef Window   EGLNativeWindowType;
+ struct CopyPixelsCommonParams
+@@ -388,6 +389,7 @@ class IndexGeneratorUtils final : angle::NonCopyable
+         ContextMtl *contextMtl,
+         gl::DrawElementsType srcType,
+         uint32_t indexCount,
++        uint32_t maxIndexCount,
+         const BufferRef &srcBuffer,
+         uint32_t srcOffset,
+         const BufferRef &dstBuffer,
+diff --git a/src/libANGLE/renderer/metal/mtl_render_utils.mm b/src/libANGLE/renderer/metal/mtl_render_utils.mm
+index 4b854d589c5c7042ba8ab2e32960425c4070eb2a..2446882e26d29aacccf8c8670bb59a757b3e5945 100644
+--- a/src/libANGLE/renderer/metal/mtl_render_utils.mm
++++ b/src/libANGLE/renderer/metal/mtl_render_utils.mm
+@@ -87,8 +87,9 @@ struct IndexConversionUniform
+ {
+     uint32_t srcOffset;
+     uint32_t indexCount;
++    uint32_t maxIndex;
+     uint8_t primitiveRestartEnabled;
+-    uint8_t padding[7];
++    uint8_t padding[3];
+ };
  
- #else
+ // See libANGLE/renderer/metal/shaders/visibility.metal
+@@ -222,9 +223,15 @@ void GetBlitTexCoords(const NormalizedCoords &normalizedCoords,
+     }
+ }
+ 
++template <typename T>
++inline T accessBounded(const T * array, GLsizei idx, GLsizei maxIdx)
++{
++    return idx < maxIdx ? array[idx] : 0;
++}
+ template <typename T>
+ angle::Result GenTriFanFromClientElements(ContextMtl *contextMtl,
+                                           GLsizei count,
++                                          GLsizei maxIndex,
+                                           bool primitiveRestartEnabled,
+                                           const T *indices,
+                                           const BufferRef &dstBuffer,
+@@ -236,8 +243,8 @@ angle::Result GenTriFanFromClientElements(ContextMtl *contextMtl,
+     GLsizei dstTriangle                   = 0;
+     uint32_t *dstPtr = reinterpret_cast<uint32_t *>(dstBuffer->map(contextMtl) + dstOffset);
+     T triFirstIdx, srcPrevIdx;
+-    memcpy(&triFirstIdx, indices, sizeof(triFirstIdx));
+-    memcpy(&srcPrevIdx, indices + 1, sizeof(srcPrevIdx));
++    triFirstIdx = accessBounded(indices, 0, maxIndex);
++    srcPrevIdx =  accessBounded(indices, 1, maxIndex);
+     
+     if (primitiveRestartEnabled)
+     {
+@@ -245,14 +252,14 @@ angle::Result GenTriFanFromClientElements(ContextMtl *contextMtl,
+         while (triFirstIdx == kSrcPrimitiveRestartIndex)
+         {
+             ++triFirstIdxLoc;
+-            memcpy(&triFirstIdx, indices + triFirstIdxLoc, sizeof(triFirstIdx));
++            triFirstIdx = accessBounded(indices, triFirstIdxLoc, maxIndex);
+         }
+ 
+         for (GLsizei i = triFirstIdxLoc + 2; i < count; ++i)
+         {
+             uint32_t triIndices[3];
+             T srcIdx;
+-            memcpy(&srcIdx, indices + i, sizeof(srcIdx));
++            srcIdx = accessBounded(indices, i, maxIndex);
+             bool completeTriangle = true;
+             if (srcPrevIdx == kSrcPrimitiveRestartIndex || srcIdx == kSrcPrimitiveRestartIndex)
+             {
+@@ -285,8 +292,7 @@ angle::Result GenTriFanFromClientElements(ContextMtl *contextMtl,
+         for (GLsizei i = 2; i < count; ++i)
+         {
+             T srcIdx;
+-            memcpy(&srcIdx, indices + i, sizeof(srcIdx));
+-
++            srcIdx = accessBounded(indices,i,maxIndex);
+             uint32_t triIndices[3];
+             triIndices[0] = triFirstIdx;
+             triIndices[1] = srcPrevIdx;
+@@ -2089,11 +2095,14 @@ angle::Result IndexGeneratorUtils::generateTriFanBufferFromElementsArray(
+         size_t srcOffset            = reinterpret_cast<size_t>(params.indices);
+         ANGLE_CHECK(contextMtl, srcOffset <= std::numeric_limits<uint32_t>::max(),
+                     "Index offset is too large", GL_INVALID_VALUE);
++        IndexGenerationParams limitedParams = params;
++        limitedParams.maxIndexCount = std::min<GLsizei>(params.indexCount, (GLsizei)(elementBufferMtl->size() - srcOffset) / (GLsizei)GetDrawElementsTypeSize(params.srcType));
++                
+         if (params.primitiveRestartEnabled ||
+             (!contextMtl->getDisplay()->getFeatures().hasCheapRenderPass.enabled &&
+              contextMtl->getRenderCommandEncoder()))
+         {
+-            IndexGenerationParams cpuPathParams = params;
++            IndexGenerationParams cpuPathParams = limitedParams;
+             cpuPathParams.indices =
+                 elementBufferMtl->getClientShadowCopyData(contextMtl) + srcOffset;
+             return generateTriFanBufferFromElementsArrayCPU(contextMtl, cpuPathParams,
+@@ -2102,7 +2111,7 @@ angle::Result IndexGeneratorUtils::generateTriFanBufferFromElementsArray(
+         else
+         {
+             return generateTriFanBufferFromElementsArrayGPU(
+-                contextMtl, params.srcType, params.indexCount, elementBufferMtl->getCurrentBuffer(),
++                contextMtl, params.srcType, params.indexCount, limitedParams.maxIndexCount, elementBufferMtl->getCurrentBuffer(),
+                 static_cast<uint32_t>(srcOffset), params.dstBuffer, params.dstOffset);
+         }
+     }
+@@ -2116,6 +2125,7 @@ angle::Result IndexGeneratorUtils::generateTriFanBufferFromElementsArrayGPU(
+     ContextMtl *contextMtl,
+     gl::DrawElementsType srcType,
+     uint32_t indexCount,
++    uint32_t maxIndexCount,
+     const BufferRef &srcBuffer,
+     uint32_t srcOffset,
+     const BufferRef &dstBuffer,
+@@ -2140,7 +2150,7 @@ angle::Result IndexGeneratorUtils::generateTriFanBufferFromElementsArrayGPU(
+     IndexConversionUniform uniform;
+     uniform.srcOffset  = srcOffset;
+     uniform.indexCount = indexCount - 2;  // Only start from the 3rd element.
+-
++    uniform.maxIndex   = maxIndexCount;
+     cmdEncoder->setData(uniform, 0);
+     cmdEncoder->setBuffer(srcBuffer, 0, 1);
+     cmdEncoder->setBufferForWrite(dstBuffer, dstOffset, 2);
+@@ -2158,17 +2168,17 @@ angle::Result IndexGeneratorUtils::generateTriFanBufferFromElementsArrayCPU(
+     switch (params.srcType)
+     {
+         case gl::DrawElementsType::UnsignedByte:
+-            return GenTriFanFromClientElements(contextMtl, params.indexCount,
++            return GenTriFanFromClientElements(contextMtl, params.indexCount, params.maxIndexCount,
+                                                params.primitiveRestartEnabled,
+                                                static_cast<const uint8_t *>(params.indices),
+                                                params.dstBuffer, params.dstOffset, genIndices);
+         case gl::DrawElementsType::UnsignedShort:
+-            return GenTriFanFromClientElements(contextMtl, params.indexCount,
++            return GenTriFanFromClientElements(contextMtl, params.indexCount, params.maxIndexCount,
+                                                params.primitiveRestartEnabled,
+                                                static_cast<const uint16_t *>(params.indices),
+                                                params.dstBuffer, params.dstOffset, genIndices);
+         case gl::DrawElementsType::UnsignedInt:
+-            return GenTriFanFromClientElements(contextMtl, params.indexCount,
++            return GenTriFanFromClientElements(contextMtl, params.indexCount, params.maxIndexCount,
+                                                params.primitiveRestartEnabled,
+                                                static_cast<const uint32_t *>(params.indices),
+                                                params.dstBuffer, params.dstOffset, genIndices);
+@@ -2540,45 +2550,13 @@ angle::Result MipmapUtils::generateMipmapCS(ContextMtl *contextMtl,
+                                             bool sRGBMipmap,
+                                             NativeTexLevelArray *mipmapOutputViews)
+ {
+-    // Only support 3D texture for now.
+-    ASSERT(srcTexture->textureType() == MTLTextureType3D);
+-
+     MTLSize threadGroupSize;
+     uint32_t slices                             = 1;
+     id<MTLComputePipelineState> computePipeline = nil;
+-
+-    ensure3DMipGeneratorPipelineInitialized(contextMtl);
+-    computePipeline = m3DMipGeneratorPipeline;
+-    threadGroupSize =
+-        MTLSizeMake(kGenerateMipThreadGroupSizePerDim, kGenerateMipThreadGroupSizePerDim,
+-                    kGenerateMipThreadGroupSizePerDim);
+-
+     // The compute shader supports up to 4 mipmaps generated per pass.
+     // See shaders/gen_mipmap.metal
+     uint32_t maxMipsPerBatch = 4;
+ 
+-    if (threadGroupSize.width * threadGroupSize.height * threadGroupSize.depth >
+-            computePipeline.maxTotalThreadsPerThreadgroup ||
+-        ANGLE_UNLIKELY(
+-            !contextMtl->getDisplay()->getFeatures().allowGenMultipleMipsPerPass.enabled))
+-    {
+-        // Multiple mipmaps generation is not supported due to hardware's thread group size limits.
+-        // Fallback to generate one mip per pass and reduce thread group size.
+-        if (ANGLE_UNLIKELY(threadGroupSize.width * threadGroupSize.height >
+-                           computePipeline.maxTotalThreadsPerThreadgroup))
+-        {
+-            // Even with reduced thread group size, we cannot proceed.
+-            // HACK: use blit command encoder to generate mipmaps if it is not possible
+-            // to use compute shader due to hardware limits.
+-            BlitCommandEncoder *blitEncoder = contextMtl->getBlitCommandEncoder();
+-            blitEncoder->generateMipmapsForTexture(srcTexture);
+-            return angle::Result::Continue;
+-        }
+-
+-        threadGroupSize.depth = 1;
+-        maxMipsPerBatch       = 1;
+-    }
+-
+     ComputeCommandEncoder *cmdEncoder = contextMtl->getComputeCommandEncoder();
+     ASSERT(cmdEncoder);
+ 
+@@ -2615,8 +2593,29 @@ angle::Result MipmapUtils::generateMipmapCS(ContextMtl *contextMtl,
+             UNREACHABLE();
+     }
+ 
+-    Generate3DMipmapUniform options;
++    if (threadGroupSize.width * threadGroupSize.height * threadGroupSize.depth >
++            computePipeline.maxTotalThreadsPerThreadgroup ||
++        ANGLE_UNLIKELY(
++            !contextMtl->getDisplay()->getFeatures().allowGenMultipleMipsPerPass.enabled))
++    {
++        // Multiple mipmaps generation is not supported due to hardware's thread group size limits.
++        // Fallback to generate one mip per pass and reduce thread group size.
++        if (ANGLE_UNLIKELY(threadGroupSize.width * threadGroupSize.height >
++                           computePipeline.maxTotalThreadsPerThreadgroup))
++        {
++            // Even with reduced thread group size, we cannot proceed.
++            // HACK: use blit command encoder to generate mipmaps if it is not possible
++            // to use compute shader due to hardware limits.
++            BlitCommandEncoder *blitEncoder = contextMtl->getBlitCommandEncoder();
++            blitEncoder->generateMipmapsForTexture(srcTexture);
++            return angle::Result::Continue;
++        }
+ 
++        threadGroupSize.depth = 1;
++        maxMipsPerBatch       = 1;
++    }
 +
-+typedef void             *EGLNativeDisplayType;
-+typedef khronos_uintptr_t EGLNativePixmapType;
-+typedef khronos_uintptr_t EGLNativeWindowType;
++    Generate3DMipmapUniform options;
+     uint32_t remainMips             = srcTexture->mipmapLevels() - 1;
+     MipmapNativeLevel batchSrcLevel = kZeroNativeMipLevel;
+     options.srcLevel                = batchSrcLevel.get();
+diff --git a/src/libANGLE/renderer/metal/mtl_resource_spi.h b/src/libANGLE/renderer/metal/mtl_resource_spi.h
+index 3eaa9a64e79af26faa786102ece3f0bdea84d090..2ecf7b40bd5a2edc3fd9d69841e266b6c3cee685 100644
+--- a/src/libANGLE/renderer/metal/mtl_resource_spi.h
++++ b/src/libANGLE/renderer/metal/mtl_resource_spi.h
+@@ -1,9 +1,63 @@
+-//
+-// Copyright 2021 The ANGLE Project Authors. All rights reserved.
+-// Use of this source code is governed by a BSD-style license that can be
+-// found in the LICENSE file.
++/*
++ * Copyright (C) 2021 Apple Inc. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
++ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
 +
-+#endif /* ANGLE_USE_X11 && !MESA_EGL_NO_X11_HEADERS */
+ //
+ // mtl_resource_spi.h:
+-//    Used to set Metal resource ownership identity with SPI.
+-//    Purposefully empty header file. Actual implementation will be hosted in WebKit.
++//    Used to set Metal resource ownership identity with SPI
+ //
 +
-+#else
- #error "Platform not recognized"
- #endif
++#ifndef LIBANGLE_RENDERER_METAL_RESOURCE_SPI_H_
++#define LIBANGLE_RENDERER_METAL_RESOURCE_SPI_H_
++
++#import "common/apple/apple_platform.h"
++
++#if ANGLE_USE_METAL_OWNERSHIP_IDENTITY
++
++#    import <Metal/MTLResource_Private.h>
++#    import <Metal/Metal.h>
++#    import <mach/mach_types.h>
++
++namespace rx
++{
++namespace mtl
++{
++inline void setOwnerWithIdentity(id<MTLResource> resource, task_id_token_t identityToken)
++{
++    if (identityToken != TASK_ID_TOKEN_NULL)
++    {
++        kern_return_t kr = [(id<MTLResourceSPI>)resource setOwnerWithIdentity:identityToken];
++        if (ANGLE_UNLIKELY(kr != KERN_SUCCESS))
++        {
++            ERR() << "setOwnerWithIdentity failed with: %s (%x)" << mach_error_string(kr) << kr;
++            ASSERT(false);
++        }
++    }
++    return;
++}
++}
++}
++#endif
++
++#endif /* LIBANGLE_RENDERER_METAL_RESOURCE_SPI_H_ */
+diff --git a/src/libANGLE/renderer/metal/mtl_resources.h b/src/libANGLE/renderer/metal/mtl_resources.h
+index afbc985eb92dfbd5af964bd8ac207ac1db6ac97e..9805aa705a259a97e92418387f12385171b2fa59 100644
+--- a/src/libANGLE/renderer/metal/mtl_resources.h
++++ b/src/libANGLE/renderer/metal/mtl_resources.h
+@@ -339,7 +339,9 @@ class Texture final : public Resource,
+     size_t mEstimatedByteSize = 0;
+ };
+ 
+-class Buffer final : public Resource, public WrappedObject<id<MTLBuffer>>
++class Buffer final : public Resource,
++                     public WrappedObject<id<MTLBuffer>>,
++                     public std::enable_shared_from_this<Buffer>
+ {
+   public:
+     static angle::Result MakeBuffer(ContextMtl *context,
+diff --git a/src/libANGLE/renderer/metal/mtl_resources.mm b/src/libANGLE/renderer/metal/mtl_resources.mm
+index 6bcb9cd8d3e2087dd269b4c5fb8b8214c33e2f0e..414a3d9dbb7ab125172ee99aa9df636383c3d4f5 100644
+--- a/src/libANGLE/renderer/metal/mtl_resources.mm
++++ b/src/libANGLE/renderer/metal/mtl_resources.mm
+@@ -35,12 +35,14 @@ inline NSUInteger GetMipSize(NSUInteger baseSize, const MipmapNativeLevel level)
+ // Asynchronously synchronize the content of a resource between GPU memory and its CPU cache.
+ // NOTE: This operation doesn't finish immediately upon function's return.
+ template <class T>
+-void InvokeCPUMemSync(ContextMtl *context, mtl::BlitCommandEncoder *blitEncoder, T *resource)
++void InvokeCPUMemSync(ContextMtl *context,
++                      mtl::BlitCommandEncoder *blitEncoder,
++                      const std::shared_ptr<T> &resource)
+ {
+ #if TARGET_OS_OSX || TARGET_OS_MACCATALYST
+     if (blitEncoder)
+     {
+-        blitEncoder->synchronizeResource(resource);
++        blitEncoder->synchronizeResource(resource.get());
+ 
+         resource->resetCPUReadMemNeedSync();
+         resource->setCPUReadMemSyncPending(true);
+@@ -49,7 +51,7 @@ void InvokeCPUMemSync(ContextMtl *context, mtl::BlitCommandEncoder *blitEncoder,
+ }
+ 
+ template <class T>
+-void EnsureCPUMemWillBeSynced(ContextMtl *context, T *resource)
++void EnsureCPUMemWillBeSynced(ContextMtl *context, const std::shared_ptr<T> &resource)
+ {
+ #if TARGET_OS_OSX || TARGET_OS_MACCATALYST
+     // Make sure GPU & CPU contents are synchronized.
+@@ -271,11 +273,10 @@ angle::Result Texture::MakeTexture(ContextMtl *context,
+     {
+         return angle::Result::Stop;
+     }
+-    refOut->reset(new Texture(context, desc, mips, renderTargetOnly, allowFormatView, memoryLess));
+-    if (!refOut || !refOut->get())
+-    {
+-        ANGLE_MTL_CHECK(context, false, GL_OUT_OF_MEMORY);
+-    }
++    ASSERT(refOut);
++    Texture *newTexture = new Texture(context, desc, mips, renderTargetOnly, allowFormatView, memoryLess);
++    ANGLE_MTL_CHECK(context, newTexture->valid(), GL_OUT_OF_MEMORY);
++    refOut->reset(newTexture);
+     if (!mtlFormat.hasDepthAndStencilBits())
+     {
+         refOut->get()->setColorWritableMask(GetEmulatedColorWriteMask(mtlFormat));
+@@ -299,13 +300,10 @@ angle::Result Texture::MakeTexture(ContextMtl *context,
+                                    bool renderTargetOnly,
+                                    TextureRef *refOut)
+ {
+-
+-    refOut->reset(new Texture(context, desc, surfaceRef, slice, renderTargetOnly));
+-
+-    if (!(*refOut) || !(*refOut)->get())
+-    {
+-        ANGLE_MTL_CHECK(context, false, GL_OUT_OF_MEMORY);
+-    }
++    ASSERT(refOut);
++    Texture *newTexture = new Texture(context, desc, surfaceRef, slice, renderTargetOnly);
++    ANGLE_MTL_CHECK(context, newTexture->valid(), GL_OUT_OF_MEMORY);
++    refOut->reset(newTexture);
+     if (!mtlFormat.hasDepthAndStencilBits())
+     {
+         refOut->get()->setColorWritableMask(GetEmulatedColorWriteMask(mtlFormat));
+@@ -504,12 +502,12 @@ Texture::Texture(Texture *original, const TextureSwizzleChannels &swizzle)
+ 
+ void Texture::syncContent(ContextMtl *context, mtl::BlitCommandEncoder *blitEncoder)
+ {
+-    InvokeCPUMemSync(context, blitEncoder, this);
++    InvokeCPUMemSync(context, blitEncoder, shared_from_this());
+ }
+ 
+ void Texture::syncContentIfNeeded(ContextMtl *context)
+ {
+-    EnsureCPUMemWillBeSynced(context, this);
++    EnsureCPUMemWillBeSynced(context, shared_from_this());
+ }
+ 
+ bool Texture::isCPUAccessible() const
+@@ -988,7 +986,7 @@ angle::Result Buffer::resetWithResOpt(ContextMtl *context,
+ 
+ void Buffer::syncContent(ContextMtl *context, mtl::BlitCommandEncoder *blitEncoder)
+ {
+-    InvokeCPUMemSync(context, blitEncoder, this);
++    InvokeCPUMemSync(context, blitEncoder, shared_from_this());
+ }
+ 
+ const uint8_t *Buffer::mapReadOnly(ContextMtl *context)
+@@ -1009,7 +1007,7 @@ uint8_t *Buffer::mapWithOpt(ContextMtl *context, bool readonly, bool noSync)
+     {
+         CommandQueue &cmdQueue = context->cmdQueue();
+ 
+-        EnsureCPUMemWillBeSynced(context, this);
++        EnsureCPUMemWillBeSynced(context, shared_from_this());
+ 
+         if (this->isBeingUsedByGPU(context))
+         {
+diff --git a/src/libANGLE/renderer/metal/mtl_state_cache.mm b/src/libANGLE/renderer/metal/mtl_state_cache.mm
+index c525add3369e3c5a9af865ce5a1e91b3248a1940..abd36e8aecb66fea297137cd53ce687a4a915257 100644
+--- a/src/libANGLE/renderer/metal/mtl_state_cache.mm
++++ b/src/libANGLE/renderer/metal/mtl_state_cache.mm
+@@ -948,6 +948,62 @@ AutoObjCPtr<id<MTLRenderPipelineState>> RenderPipelineCache::insertRenderPipelin
+     return re.first->second;
+ }
+ 
++static bool ValidateRenderPipelineState(const MTLRenderPipelineDescriptor *descriptor,
++                                        ContextMtl *context,
++                                        const mtl::ContextDevice &device)
++{
++    // Ensure there is at least one valid render target.
++    bool hasValidRenderTarget = false;
++
++    const NSUInteger maxColorRenderTargets = GetMaxNumberOfRenderTargetsForDevice(device);
++    for (NSUInteger i = 0; i < maxColorRenderTargets; ++i)
++    {
++        auto colorAttachment = descriptor.colorAttachments[i];
++        if (colorAttachment && colorAttachment.pixelFormat != MTLPixelFormatInvalid)
++        {
++            hasValidRenderTarget = true;
++            break;
++        }
++    }
++
++    if (!hasValidRenderTarget && descriptor.depthAttachmentPixelFormat != MTLPixelFormatInvalid)
++    {
++        hasValidRenderTarget = true;
++    }
++
++    if (!hasValidRenderTarget && descriptor.stencilAttachmentPixelFormat != MTLPixelFormatInvalid)
++    {
++        hasValidRenderTarget = true;
++    }
++
++    if (!hasValidRenderTarget)
++    {
++        UNREACHABLE();
++        ANGLE_MTL_HANDLE_ERROR(context, "Render pipeline requires at least one render target.",
++                               GL_INVALID_OPERATION);
++        return false;
++    }
++
++    // Ensure the device can support the storage requirement for render targets.
++    if (DeviceHasMaximumRenderTargetSize(device))
++    {
++        // TODO: Is the use of NSUInteger in 32 bit systems ok without any overflow checking?
++        NSUInteger maxSize = GetMaxRenderTargetSizeForDeviceInBytes(device);
++        NSUInteger renderTargetSize =
++            ComputeTotalSizeUsedForMTLRenderPipelineDescriptor(descriptor, context, device);
++        if (renderTargetSize > maxSize)
++        {
++            std::stringstream errorStream;
++            errorStream << "This set of render targets requires " << renderTargetSize
++                        << " bytes of pixel storage. This device supports " << maxSize << " bytes.";
++            ANGLE_MTL_HANDLE_ERROR(context, errorStream.str().c_str(), GL_INVALID_OPERATION);
++            return false;
++        }
++    }
++
++    return true;
++}
++
+ AutoObjCPtr<id<MTLRenderPipelineState>> RenderPipelineCache::createRenderPipelineState(
+     ContextMtl *context,
+     const RenderPipelineDesc &originalDesc,
+@@ -1009,23 +1065,10 @@ AutoObjCPtr<id<MTLRenderPipelineState>> RenderPipelineCache::createRenderPipelin
+ 
+         auto objCDesc = CreateMTLRenderPipelineDescriptor(vertShader, fragShader, desc);
+ 
+-        // Validate Render Pipeline State:
+-        if (DeviceHasMaximumRenderTargetSize(metalDevice))
+-        {
+-            // TODO: Is the use of NSUInteger in 32 bit systems ok without any overflow checking?
+-            NSUInteger maxSize = GetMaxRenderTargetSizeForDeviceInBytes(metalDevice);
+-            NSUInteger renderTargetSize =
+-                ComputeTotalSizeUsedForMTLRenderPipelineDescriptor(objCDesc, context, metalDevice);
+-            if (renderTargetSize > maxSize)
++        if (!ValidateRenderPipelineState(objCDesc, context, metalDevice))
+         {
+-                std::stringstream errorStream;
+-                errorStream << "This set of render targets requires " << renderTargetSize
+-                            << " bytes of pixel storage. This device supports " << maxSize
+-                            << " bytes.";
+-                ANGLE_MTL_HANDLE_ERROR(context, errorStream.str().c_str(), GL_INVALID_OPERATION);
+             return nil;
+         }
+-        }
+ 
+         // Special attribute slot for default attribute
+         if (insertDefaultAttribLayout)
+diff --git a/src/libANGLE/renderer/metal/mtl_utils.h b/src/libANGLE/renderer/metal/mtl_utils.h
+index d218c13ed14be57f514cbf3c9dbeedefcdd49621..b236d92655d0307bb0b61ce51bf6406e9e934e96 100644
+--- a/src/libANGLE/renderer/metal/mtl_utils.h
++++ b/src/libANGLE/renderer/metal/mtl_utils.h
+@@ -105,11 +105,9 @@ AutoObjCPtr<id<MTLLibrary>> CreateShaderLibrary(
+     bool enableFastMath,
+     AutoObjCPtr<NSError *> *error);
+ 
+-AutoObjCPtr<id<MTLLibrary>> CreateShaderLibraryFromBinary(
+-    id<MTLDevice> metalDevice,
++AutoObjCPtr<id<MTLLibrary>> CreateShaderLibraryFromBinary(id<MTLDevice> metalDevice,
+                                                           const uint8_t *binarySource,
+                                                           size_t binarySourceLen,
+-    NSDictionary<NSString *, NSObject *> *substitutionDictionary,
+                                                           AutoObjCPtr<NSError *> *error);
+ 
+ bool SupportsAppleGPUFamily(id<MTLDevice> device, uint8_t appleFamily);
+diff --git a/src/libANGLE/renderer/metal/shaders/format_autogen.h b/src/libANGLE/renderer/metal/shaders/format_autogen.h
+index abf6a745be335ccaac15089b851f0fe4dfd1381d..2e5aae3ca67a135980bb3176e446f25e7a778ea2 100644
+--- a/src/libANGLE/renderer/metal/shaders/format_autogen.h
++++ b/src/libANGLE/renderer/metal/shaders/format_autogen.h
+@@ -249,5 +249,5 @@ enum
+ 
+ }
+ 
+-}  // namespace mtl_shader
+-}  // namespace rx
++}
++}
+diff --git a/src/libANGLE/renderer/metal/shaders/gen_indices.metal b/src/libANGLE/renderer/metal/shaders/gen_indices.metal
+index ecea885af32065ad1cb92f6588caab5c2e8dd847..e25156a5ca7d14d7855c8de57b6193885e17b22c 100644
+--- a/src/libANGLE/renderer/metal/shaders/gen_indices.metal
++++ b/src/libANGLE/renderer/metal/shaders/gen_indices.metal
+@@ -22,6 +22,7 @@ struct IndexConversionParams
+ {
+     uint32_t srcOffset;  // offset in bytes
+     uint32_t indexCount;
++    uint32_t maxIndex;
+     bool primitiveRestartEnabled;
+ };
+ 
+@@ -188,9 +189,9 @@ kernel void genTriFanIndicesFromElements(uint idx [[thread_position_in_grid]],
+ 
+     uint elemIdx = 2 + idx;
+     
+-    output[3 * idx]     = getIndexU32(options.srcOffset, 0, inputU8, inputU16, inputU32);
+-    output[3 * idx + 1] = getIndexU32(options.srcOffset, elemIdx - 1, inputU8, inputU16, inputU32);
+-    output[3 * idx + 2] = getIndexU32(options.srcOffset, elemIdx, inputU8, inputU16, inputU32);
++    output[3 * idx]     = (options.maxIndex > 0)           ? getIndexU32(options.srcOffset, 0, inputU8, inputU16, inputU32) : 0;
++    output[3 * idx + 1] = (elemIdx - 1 < options.maxIndex) ? getIndexU32(options.srcOffset, elemIdx - 1, inputU8, inputU16, inputU32) : 0;
++    output[3 * idx + 2] = (elemIdx - 1 < options.maxIndex) ? getIndexU32(options.srcOffset, elemIdx, inputU8, inputU16, inputU32) : 0;
+ }
+ 
+ // Generate line loop indices for glDrawArray()
+diff --git a/src/libANGLE/renderer/metal/shaders/mtl_default_shaders_src_autogen.inc b/src/libANGLE/renderer/metal/shaders/mtl_default_shaders_src_autogen.inc
+index a97e0e26a5d2c04227ef06ee4789366d1a80650f..3347d85836bb033c51d453b3d5a92f1010521c1e 100644
+--- a/src/libANGLE/renderer/metal/shaders/mtl_default_shaders_src_autogen.inc
++++ b/src/libANGLE/renderer/metal/shaders/mtl_default_shaders_src_autogen.inc
+@@ -736,6 +736,7 @@ struct IndexConversionParams
+ {
+     uint32_t srcOffset;
+     uint32_t indexCount;
++    uint32_t maxIndex;
+     bool primitiveRestartEnabled;
+ };
+ 
+@@ -902,9 +903,9 @@ kernel void genTriFanIndicesFromElements(uint idx [[thread_position_in_grid]],
+ 
+     uint elemIdx = 2 + idx;
+ 
+-    output[3 * idx] = getIndexU32(options.srcOffset, 0, inputU8, inputU16, inputU32);
+-    output[3 * idx + 1] = getIndexU32(options.srcOffset, elemIdx - 1, inputU8, inputU16, inputU32);
+-    output[3 * idx + 2] = getIndexU32(options.srcOffset, elemIdx, inputU8, inputU16, inputU32);
++    output[3 * idx] = (options.maxIndex > 0) ? getIndexU32(options.srcOffset, 0, inputU8, inputU16, inputU32) : 0;
++    output[3 * idx + 1] = (elemIdx - 1 < options.maxIndex) ? getIndexU32(options.srcOffset, elemIdx - 1, inputU8, inputU16, inputU32) : 0;
++    output[3 * idx + 2] = (elemIdx - 1 < options.maxIndex) ? getIndexU32(options.srcOffset, elemIdx, inputU8, inputU16, inputU32) : 0;
+ }
+ 
+ 
+diff --git a/src/libANGLE/renderer/metal/shaders/mtl_default_shaders_src_autogen.metal b/src/libANGLE/renderer/metal/shaders/mtl_default_shaders_src_autogen.metal
+index 08efb0da60496d9bd3d2a14aec6a389348e3f496..63f4196a072ded6e4cd08bc388acf67342df1bcb 100644
+--- a/src/libANGLE/renderer/metal/shaders/mtl_default_shaders_src_autogen.metal
++++ b/src/libANGLE/renderer/metal/shaders/mtl_default_shaders_src_autogen.metal
+@@ -733,6 +733,7 @@ struct IndexConversionParams
+ {
+     uint32_t srcOffset;
+     uint32_t indexCount;
++    uint32_t maxIndex;
+     bool primitiveRestartEnabled;
+ };
+ 
+@@ -899,9 +900,9 @@ kernel void genTriFanIndicesFromElements(uint idx [[thread_position_in_grid]],
+ 
+     uint elemIdx = 2 + idx;
+ 
+-    output[3 * idx] = getIndexU32(options.srcOffset, 0, inputU8, inputU16, inputU32);
+-    output[3 * idx + 1] = getIndexU32(options.srcOffset, elemIdx - 1, inputU8, inputU16, inputU32);
+-    output[3 * idx + 2] = getIndexU32(options.srcOffset, elemIdx, inputU8, inputU16, inputU32);
++    output[3 * idx] = (options.maxIndex > 0) ? getIndexU32(options.srcOffset, 0, inputU8, inputU16, inputU32) : 0;
++    output[3 * idx + 1] = (elemIdx - 1 < options.maxIndex) ? getIndexU32(options.srcOffset, elemIdx - 1, inputU8, inputU16, inputU32) : 0;
++    output[3 * idx + 2] = (elemIdx - 1 < options.maxIndex) ? getIndexU32(options.srcOffset, elemIdx, inputU8, inputU16, inputU32) : 0;
+ }
+ 
  

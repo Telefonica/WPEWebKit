@@ -24,40 +24,12 @@
  */
 
 #import "config.h"
-#import "WKWebProcessPlugInPageGroupInternal.h"
+#import "WKWebProcessPlugInPageGroup.h"
 
-#if WK_API_ENABLED
+// FIXME: Remove this file once the staging code for rdar://77775952 is removed.
 
-#import "WKBundlePageGroup.h"
-#import "WKAPICast.h"
-#import "WKNSString.h"
-#import "WKRetainPtr.h"
-#import "WebPageGroupProxy.h"
-
-using namespace WebKit;
-
-@implementation WKWebProcessPlugInPageGroup {
-    API::ObjectStorage<WebPageGroupProxy> _bundlePageGroup;
-}
-
-- (NSString *)identifier
-{
-    return _bundlePageGroup->identifier();
-}
-
-- (void)dealloc
-{
-    _bundlePageGroup->~WebPageGroupProxy();
-    [super dealloc];
-}
-
-#pragma mark WKObject protocol implementation
-
-- (API::Object&)_apiObject
-{
-    return *_bundlePageGroup;
-}
+ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
+@implementation WKWebProcessPlugInPageGroup
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 @end
-
-#endif // WK_API_ENABLED

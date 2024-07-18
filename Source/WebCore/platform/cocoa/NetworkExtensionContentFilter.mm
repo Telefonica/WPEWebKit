@@ -26,7 +26,7 @@
 #import "config.h"
 #import "NetworkExtensionContentFilter.h"
 
-#if HAVE(NETWORK_EXTENSION)
+#if ENABLE(CONTENT_FILTERING)
 
 #import "ContentFilterUnblockHandler.h"
 #import "Logging.h"
@@ -34,18 +34,11 @@
 #import "ResourceResponse.h"
 #import "RuntimeApplicationChecks.h"
 #import "SharedBuffer.h"
-#import "URL.h"
 #import <objc/runtime.h>
 #import <pal/spi/cocoa/NEFilterSourceSPI.h>
 #import <wtf/SoftLinking.h>
-
-SOFT_LINK_FRAMEWORK_OPTIONAL(NetworkExtension);
-SOFT_LINK_CLASS_OPTIONAL(NetworkExtension, NEFilterSource);
-
-// FIXME: Remove this once -setSourceAppPid: is declared in an SDK used by the builders
-@interface NEFilterSource ()
-- (void)setSourceAppPid:(pid_t)sourceAppPid;
-@end
+#import <wtf/URL.h>
+#import <wtf/threads/BinarySemaphore.h>
 
 static inline NSData *replacementDataFromDecisionInfo(NSDictionary *decisionInfo)
 {
@@ -55,33 +48,46 @@ static inline NSData *replacementDataFromDecisionInfo(NSDictionary *decisionInfo
 
 namespace WebCore {
 
+#if !ENABLE(CONTENT_FILTERING_IN_NETWORKING_PROCESS)
+NetworkExtensionContentFilter::SandboxExtensionsState NetworkExtensionContentFilter::m_sandboxExtensionsState = SandboxExtensionsState::NotSet;
+#endif
+
 bool NetworkExtensionContentFilter::enabled()
 {
-    bool enabled = [getNEFilterSourceClass() filterRequired];
+#if ENABLE(CONTENT_FILTERING_IN_NETWORKING_PROCESS)
+    return isRequired();
+#else
+    bool enabled = false;
+    switch (m_sandboxExtensionsState) {
+    case SandboxExtensionsState::Consumed:
+        enabled = true;
+        break;
+    case SandboxExtensionsState::NotConsumed:
+        enabled = false;
+        break;
+    case SandboxExtensionsState::NotSet:
+        enabled = isRequired();
+        break;
+    }
     LOG(ContentFiltering, "NetworkExtensionContentFilter is %s.\n", enabled ? "enabled" : "not enabled");
     return enabled;
+#endif
 }
 
-std::unique_ptr<NetworkExtensionContentFilter> NetworkExtensionContentFilter::create()
+UniqueRef<NetworkExtensionContentFilter> NetworkExtensionContentFilter::create()
 {
-    return std::make_unique<NetworkExtensionContentFilter>();
+    return makeUniqueRef<NetworkExtensionContentFilter>();
 }
 
 void NetworkExtensionContentFilter::initialize(const URL* url)
 {
     ASSERT(!m_queue);
-    ASSERT(!m_semaphore);
     ASSERT(!m_neFilterSource);
     m_queue = adoptOSObject(dispatch_queue_create("WebKit NetworkExtension Filtering", DISPATCH_QUEUE_SERIAL));
-    m_semaphore = adoptOSObject(dispatch_semaphore_create(0));
     ASSERT_UNUSED(url, !url);
-    m_neFilterSource = adoptNS([allocNEFilterSourceInstance() initWithDecisionQueue:m_queue.get()]);
-#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300) || (PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000)
+    m_neFilterSource = adoptNS([[NEFilterSource alloc] initWithDecisionQueue:m_queue.get()]);
     [m_neFilterSource setSourceAppIdentifier:applicationBundleIdentifier()];
-    // FIXME: Remove the -respondsToSelector: check once -setSourceAppPid: is defined in an SDK used by the builders.
-    if ([m_neFilterSource respondsToSelector:@selector(setSourceAppPid:)])
-        [m_neFilterSource setSourceAppPid:presentingApplicationPID()];
-#endif
+    [m_neFilterSource setSourceAppPid:presentingApplicationPID()];
 }
 
 void NetworkExtensionContentFilter::willSendRequest(ResourceRequest& request, const ResourceResponse& redirectResponse)
@@ -100,24 +106,26 @@ void NetworkExtensionContentFilter::willSendRequest(ResourceRequest& request, co
             return;
     }
 
+    BinarySemaphore semaphore;
     RetainPtr<NSString> modifiedRequestURLString;
-    [m_neFilterSource willSendRequest:request.nsURLRequest(DoNotUpdateHTTPBody) decisionHandler:[this, &modifiedRequestURLString](NEFilterSourceStatus status, NSDictionary *decisionInfo) {
+    [m_neFilterSource willSendRequest:request.nsURLRequest(DoNotUpdateHTTPBody) decisionHandler:[this, &modifiedRequestURLString, &semaphore](NEFilterSourceStatus status, NSDictionary *decisionInfo) {
         modifiedRequestURLString = decisionInfo[NEFilterSourceOptionsRedirectURL];
         ASSERT(!modifiedRequestURLString || [modifiedRequestURLString isKindOfClass:[NSString class]]);
         handleDecision(status, replacementDataFromDecisionInfo(decisionInfo));
+        semaphore.signal();
     }];
 
     // FIXME: We have to block here since DocumentLoader expects to have a
     // blocked/not blocked answer from the filter immediately after calling
     // addData(). We should find a way to make this asynchronous.
-    dispatch_semaphore_wait(m_semaphore.get(), DISPATCH_TIME_FOREVER);
+    semaphore.wait();
 
     if (!modifiedRequestURLString)
         return;
 
-    URL modifiedRequestURL { URL(), modifiedRequestURLString.get() };
+    URL modifiedRequestURL { modifiedRequestURLString.get() };
     if (!modifiedRequestURL.isValid()) {
-        LOG(ContentFiltering, "NetworkExtensionContentFilter failed to convert modified URL string %@ to a WebCore::URL.\n", modifiedRequestURLString.get());
+        LOG(ContentFiltering, "NetworkExtensionContentFilter failed to convert modified URL string %@ to a  URL.\n", modifiedRequestURLString.get());
         return;
     }
 
@@ -131,56 +139,61 @@ void NetworkExtensionContentFilter::responseReceived(const ResourceResponse& res
         return;
     }
 
-    [m_neFilterSource receivedResponse:response.nsURLResponse() decisionHandler:[this](NEFilterSourceStatus status, NSDictionary *decisionInfo) {
+    BinarySemaphore semaphore;
+    [m_neFilterSource receivedResponse:response.nsURLResponse() decisionHandler:[this, &semaphore](NEFilterSourceStatus status, NSDictionary *decisionInfo) {
         handleDecision(status, replacementDataFromDecisionInfo(decisionInfo));
+        semaphore.signal();
     }];
 
     // FIXME: We have to block here since DocumentLoader expects to have a
     // blocked/not blocked answer from the filter immediately after calling
     // addData(). We should find a way to make this asynchronous.
-    dispatch_semaphore_wait(m_semaphore.get(), DISPATCH_TIME_FOREVER);
+    semaphore.wait();
 }
 
-void NetworkExtensionContentFilter::addData(const char* data, int length)
+void NetworkExtensionContentFilter::addData(const SharedBuffer& data)
 {
-    RetainPtr<NSData> copiedData { [NSData dataWithBytes:(void*)data length:length] };
+    auto nsData = data.createNSData();
 
-    [m_neFilterSource receivedData:copiedData.get() decisionHandler:[this](NEFilterSourceStatus status, NSDictionary *decisionInfo) {
+    BinarySemaphore semaphore;
+    [m_neFilterSource receivedData:nsData.get() decisionHandler:[this, &semaphore](NEFilterSourceStatus status, NSDictionary *decisionInfo) {
         handleDecision(status, replacementDataFromDecisionInfo(decisionInfo));
+        semaphore.signal();
     }];
 
     // FIXME: We have to block here since DocumentLoader expects to have a
     // blocked/not blocked answer from the filter immediately after calling
     // addData(). We should find a way to make this asynchronous.
-    dispatch_semaphore_wait(m_semaphore.get(), DISPATCH_TIME_FOREVER);
+    semaphore.wait();
 }
 
 void NetworkExtensionContentFilter::finishedAddingData()
 {
-    [m_neFilterSource finishedLoadingWithDecisionHandler:[this](NEFilterSourceStatus status, NSDictionary *decisionInfo) {
+    BinarySemaphore semaphore;
+    [m_neFilterSource finishedLoadingWithDecisionHandler:[this, &semaphore](NEFilterSourceStatus status, NSDictionary *decisionInfo) {
         handleDecision(status, replacementDataFromDecisionInfo(decisionInfo));
+        semaphore.signal();
     }];
 
     // FIXME: We have to block here since DocumentLoader expects to have a
     // blocked/not blocked answer from the filter immediately after calling
     // finishedAddingData(). We should find a way to make this asynchronous.
-    dispatch_semaphore_wait(m_semaphore.get(), DISPATCH_TIME_FOREVER);
+    semaphore.wait();
 }
 
-Ref<SharedBuffer> NetworkExtensionContentFilter::replacementData() const
+Ref<FragmentedSharedBuffer> NetworkExtensionContentFilter::replacementData() const
 {
     ASSERT(didBlockData());
     return SharedBuffer::create(m_replacementData.get());
 }
 
-#if ENABLE(CONTENT_FILTERING)
 ContentFilterUnblockHandler NetworkExtensionContentFilter::unblockHandler() const
 {
     using DecisionHandlerFunction = ContentFilterUnblockHandler::DecisionHandlerFunction;
 
     RetainPtr<NEFilterSource> neFilterSource { m_neFilterSource };
     return ContentFilterUnblockHandler {
-        ASCIILiteral("nefilter-unblock"), [neFilterSource](DecisionHandlerFunction decisionHandler) {
+        "nefilter-unblock"_s, [neFilterSource](DecisionHandlerFunction decisionHandler) {
             [neFilterSource remediateWithDecisionHandler:[decisionHandler](NEFilterSourceStatus status, NSDictionary *) {
                 LOG(ContentFiltering, "NEFilterSource %s the unblock request.\n", status == NEFilterSourceStatusPass ? "allowed" : "did not allow");
                 decisionHandler(status == NEFilterSourceStatusPass);
@@ -188,7 +201,6 @@ ContentFilterUnblockHandler NetworkExtensionContentFilter::unblockHandler() cons
         }
     };
 }
-#endif
 
 void NetworkExtensionContentFilter::handleDecision(NEFilterSourceStatus status, NSData *replacementData)
 {
@@ -215,9 +227,23 @@ void NetworkExtensionContentFilter::handleDecision(NEFilterSourceStatus status, 
     if (!needsMoreData())
         LOG(ContentFiltering, "NetworkExtensionContentFilter stopped buffering with status %zd and replacement data length %zu.\n", status, replacementData.length);
 #endif
-    dispatch_semaphore_signal(m_semaphore.get());
 }
+
+bool NetworkExtensionContentFilter::isRequired()
+{
+    return [NEFilterSource filterRequired];
+}
+
+#if !ENABLE(CONTENT_FILTERING_IN_NETWORKING_PROCESS)
+void NetworkExtensionContentFilter::setHasConsumedSandboxExtensions(bool hasConsumedSandboxExtensions)
+{
+    if (m_sandboxExtensionsState == SandboxExtensionsState::Consumed)
+        return;
+
+    m_sandboxExtensionsState = (hasConsumedSandboxExtensions ? SandboxExtensionsState::Consumed : SandboxExtensionsState::NotConsumed);
+}
+#endif
 
 } // namespace WebCore
 
-#endif // HAVE(NETWORK_EXTENSION)
+#endif // ENABLE(CONTENT_FILTERING)

@@ -55,14 +55,12 @@ private:
 #endif
 };
 
-std::unique_ptr<Locale> Locale::create(const AtomicString&)
+std::unique_ptr<Locale> Locale::create(const AtomString&)
 {
-    return std::make_unique<LocaleNone>();
+    return makeUnique<LocaleNone>();
 }
 
-LocaleNone::~LocaleNone()
-{
-}
+LocaleNone::~LocaleNone() = default;
 
 void LocaleNone::initializeLocaleData()
 {
@@ -75,52 +73,52 @@ const Vector<String>& LocaleNone::monthLabels()
         return m_monthLabels;
     m_monthLabels.reserveCapacity(WTF_ARRAY_LENGTH(WTF::monthFullName));
     for (unsigned i = 0; i < WTF_ARRAY_LENGTH(WTF::monthFullName); ++i)
-        m_monthLabels.append(WTF::monthFullName[i]);
+        m_monthLabels.uncheckedAppend(WTF::monthFullName[i]);
     return m_monthLabels;
 }
 
 String LocaleNone::dateFormat()
 {
-    return ASCIILiteral("yyyy-MM-dd");
+    return "yyyy-MM-dd"_s;
 }
 
 String LocaleNone::monthFormat()
 {
-    return ASCIILiteral("yyyy-MM");
+    return "yyyy-MM"_s;
 }
 
 String LocaleNone::shortMonthFormat()
 {
-    return ASCIILiteral("yyyy-MM");
+    return "yyyy-MM"_s;
 }
 
 String LocaleNone::timeFormat()
 {
-    return ASCIILiteral("HH:mm:ss");
+    return "HH:mm:ss"_s;
 }
 
 String LocaleNone::shortTimeFormat()
 {
-    return ASCIILiteral("HH:mm");
+    return "HH:mm"_s;
 }
 
 String LocaleNone::dateTimeFormatWithSeconds()
 {
-    return ASCIILiteral("yyyy-MM-dd'T'HH:mm:ss");
+    return "yyyy-MM-dd'T'HH:mm:ss"_s;
 }
 
 String LocaleNone::dateTimeFormatWithoutSeconds()
 {
-    return ASCIILiteral("yyyy-MM-dd'T'HH:mm");
+    return "yyyy-MM-dd'T'HH:mm"_s;
 }
 
 const Vector<String>& LocaleNone::shortMonthLabels()
 {
     if (!m_shortMonthLabels.isEmpty())
         return m_shortMonthLabels;
-    m_shortMonthLabels.reserveCapacity(WTF_ARRAY_LENGTH(WTF::monthName));
-    for (unsigned i = 0; i < WTF_ARRAY_LENGTH(WTF::monthName); ++i)
-        m_shortMonthLabels.append(WTF::monthName[i]);
+    m_shortMonthLabels.reserveCapacity(std::size(WTF::monthName));
+    for (auto* monthName : WTF::monthName)
+        m_shortMonthLabels.uncheckedAppend(monthName);
     return m_shortMonthLabels;
 }
 
@@ -139,8 +137,8 @@ const Vector<String>& LocaleNone::timeAMPMLabels()
     if (!m_timeAMPMLabels.isEmpty())
         return m_timeAMPMLabels;
     m_timeAMPMLabels.reserveCapacity(2);
-    m_timeAMPMLabels.append("AM");
-    m_timeAMPMLabels.append("PM");
+    m_timeAMPMLabels.uncheckedAppend("AM");
+    m_timeAMPMLabels.uncheckedAppend("PM");
     return m_timeAMPMLabels;
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,18 +27,11 @@
 #define WKPreferencesPrivate_h
 
 #include <WebKit/WKBase.h>
+#include <WebKit/WKDeprecated.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-enum WKFontSmoothingLevel {
-    kWKFontSmoothingLevelNoSubpixelAntiAliasing = 0,
-    kWKFontSmoothingLevelLight = 1,
-    kWKFontSmoothingLevelMedium = 2,
-    kWKFontSmoothingLevelStrong = 3,
-};
-typedef enum WKFontSmoothingLevel WKFontSmoothingLevel;
 
 enum WKEditableLinkBehavior {
     kWKEditableLinkBehaviorDefault,
@@ -57,11 +50,24 @@ typedef unsigned WKJavaScriptRuntimeFlagSet;
 // Creates a copy with no identifier.
 WK_EXPORT WKPreferencesRef WKPreferencesCreateCopy(WKPreferencesRef);
 
-WK_EXPORT void WKPreferencesEnableAllExperimentalFeatures(WKPreferencesRef);
+WK_EXPORT void WKPreferencesStartBatchingUpdates(WKPreferencesRef);
+WK_EXPORT void WKPreferencesEndBatchingUpdates(WKPreferencesRef);
 
-// Defaults to kWKFontSmoothingLevelMedium.
-WK_EXPORT void WKPreferencesSetFontSmoothingLevel(WKPreferencesRef, WKFontSmoothingLevel);
-WK_EXPORT WKFontSmoothingLevel WKPreferencesGetFontSmoothingLevel(WKPreferencesRef);
+WK_EXPORT WKArrayRef WKPreferencesCopyExperimentalFeatures(WKPreferencesRef);
+WK_EXPORT void WKPreferencesEnableAllExperimentalFeatures(WKPreferencesRef);
+WK_EXPORT void WKPreferencesSetExperimentalFeatureForKey(WKPreferencesRef, bool, WKStringRef);
+WK_EXPORT WKArrayRef WKPreferencesCopyInternalDebugFeatures(WKPreferencesRef);
+WK_EXPORT void WKPreferencesResetAllInternalDebugFeatures(WKPreferencesRef);
+WK_EXPORT void WKPreferencesSetInternalDebugFeatureForKey(WKPreferencesRef, bool, WKStringRef);
+
+// The following generic setter functions are only intended for use by testing infrastructure.
+WK_EXPORT void WKPreferencesSetBoolValueForKeyForTesting(WKPreferencesRef preferencesRef, bool value, WKStringRef key);
+WK_EXPORT void WKPreferencesSetDoubleValueForKeyForTesting(WKPreferencesRef preferencesRef, double value, WKStringRef key);
+WK_EXPORT void WKPreferencesSetUInt32ValueForKeyForTesting(WKPreferencesRef preferencesRef, uint32_t value, WKStringRef key);
+WK_EXPORT void WKPreferencesSetStringValueForKeyForTesting(WKPreferencesRef preferencesRef, WKStringRef value, WKStringRef key);
+
+// For Test Runner Use only.
+WK_EXPORT void WKPreferencesResetTestRunnerOverrides(WKPreferencesRef preferencesRef);
 
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetSubpixelAntialiasedLayerTextEnabled(WKPreferencesRef, bool);
@@ -69,7 +75,7 @@ WK_EXPORT bool WKPreferencesGetSubpixelAntialiasedLayerTextEnabled(WKPreferences
 
 // Defaults to EditableLinkNeverLive.
 WK_EXPORT void WKPreferencesSetEditableLinkBehavior(WKPreferencesRef preferencesRef, WKEditableLinkBehavior);
-WK_EXPORT WKEditableLinkBehavior WKPreferencesGetEditableLinkBehavior(WKPreferencesRef preferencesRef);   
+WK_EXPORT WKEditableLinkBehavior WKPreferencesGetEditableLinkBehavior(WKPreferencesRef preferencesRef);
     
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetAcceleratedDrawingEnabled(WKPreferencesRef, bool);
@@ -84,10 +90,6 @@ WK_EXPORT void WKPreferencesSetAcceleratedCompositingEnabled(WKPreferencesRef, b
 WK_EXPORT bool WKPreferencesGetAcceleratedCompositingEnabled(WKPreferencesRef);
 
 // Defaults to false.
-WK_EXPORT void WKPreferencesSetAcceleratedCompositingForOverflowScrollEnabled(WKPreferencesRef, bool);
-WK_EXPORT bool WKPreferencesGetAcceleratedCompositingForOverflowScrollEnabled(WKPreferencesRef);
-
-// Defaults to false.
 WK_EXPORT void WKPreferencesSetCompositingBordersVisible(WKPreferencesRef, bool);
 WK_EXPORT bool WKPreferencesGetCompositingBordersVisible(WKPreferencesRef);
 
@@ -99,21 +101,13 @@ WK_EXPORT bool WKPreferencesGetCompositingRepaintCountersVisible(WKPreferencesRe
 WK_EXPORT void WKPreferencesSetTiledScrollingIndicatorVisible(WKPreferencesRef, bool);
 WK_EXPORT bool WKPreferencesGetTiledScrollingIndicatorVisible(WKPreferencesRef);
 
-// Defaults to false.
-WK_EXPORT void WKPreferencesSetForceSoftwareWebGLRendering(WKPreferencesRef, bool);
-WK_EXPORT bool WKPreferencesGetForceSoftwareWebGLRendering(WKPreferencesRef);
+// Defaults to true.
+WK_EXPORT void WKPreferencesSetWebGLEnabled(WKPreferencesRef, bool);
+WK_EXPORT bool WKPreferencesGetWebGLEnabled(WKPreferencesRef);
 
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetAccelerated2DCanvasEnabled(WKPreferencesRef, bool);
 WK_EXPORT bool WKPreferencesGetAccelerated2DCanvasEnabled(WKPreferencesRef);
-
-// Defaults to true
-WK_EXPORT void WKPreferencesSetCSSAnimationTriggersEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetCSSAnimationTriggersEnabled(WKPreferencesRef);
-
-// Defaults to false
-WK_EXPORT void WKPreferencesSetWebAnimationsEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetWebAnimationsEnabled(WKPreferencesRef);
 
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetNeedsSiteSpecificQuirks(WKPreferencesRef, bool);
@@ -132,8 +126,8 @@ WK_EXPORT void WKPreferencesSetDOMTimersThrottlingEnabled(WKPreferencesRef prefe
 WK_EXPORT bool WKPreferencesGetDOMTimersThrottlingEnabled(WKPreferencesRef preferences);
 
 // Defaults to false.
-WK_EXPORT void WKPreferencesSetWebArchiveDebugModeEnabled(WKPreferencesRef preferences, bool enabled);
-WK_EXPORT bool WKPreferencesGetWebArchiveDebugModeEnabled(WKPreferencesRef preferences);
+WK_EXPORT void WKPreferencesSetWebArchiveTestingModeEnabled(WKPreferencesRef preferences, bool enabled);
+WK_EXPORT bool WKPreferencesGetWebArchiveTestingModeEnabled(WKPreferencesRef preferences);
 
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetLocalFileContentSniffingEnabled(WKPreferencesRef preferences, bool enabled);
@@ -155,6 +149,10 @@ WK_EXPORT bool WKPreferencesGetPaginateDuringLayoutEnabled(WKPreferencesRef pref
 WK_EXPORT void WKPreferencesSetDOMPasteAllowed(WKPreferencesRef preferences, bool enabled);
 WK_EXPORT bool WKPreferencesGetDOMPasteAllowed(WKPreferencesRef preferences);
 
+// Defaults to true.
+WK_EXPORT void WKPreferencesSetWebSecurityEnabled(WKPreferencesRef preferences, bool enabled);
+WK_EXPORT bool WKPreferencesGetWebSecurityEnabled(WKPreferencesRef preferences);
+
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetUniversalAccessFromFileURLsAllowed(WKPreferencesRef preferences, bool allowed);
 WK_EXPORT bool WKPreferencesGetUniversalAccessFromFileURLsAllowed(WKPreferencesRef preferences);
@@ -163,13 +161,13 @@ WK_EXPORT bool WKPreferencesGetUniversalAccessFromFileURLsAllowed(WKPreferencesR
 WK_EXPORT void WKPreferencesSetFileAccessFromFileURLsAllowed(WKPreferencesRef preferences, bool allowed);
 WK_EXPORT bool WKPreferencesGetFileAccessFromFileURLsAllowed(WKPreferencesRef preferences);
 
+// Defaults to false.
+WK_EXPORT void WKPreferencesSetTopNavigationToDataURLsAllowed(WKPreferencesRef preferences, bool allowed);
+WK_EXPORT bool WKPreferencesGetTopNavigationToDataURLsAllowed(WKPreferencesRef preferences);
+
 // Defaults to true
 WK_EXPORT void WKPreferencesSetNeedsStorageAccessFromFileURLsQuirk(WKPreferencesRef preferences, bool needsQuirk);
 WK_EXPORT bool WKPreferencesGetNeedsStorageAccessFromFileURLsQuirk(WKPreferencesRef preferences);
-
-// Defaults to true.
-WK_EXPORT void WKPreferencesSetHixie76WebSocketProtocolEnabled(WKPreferencesRef preferencesRef, bool enabled);
-WK_EXPORT bool WKPreferencesGetHixie76WebSocketProtocolEnabled(WKPreferencesRef preferencesRef);
 
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetMediaPlaybackRequiresUserGesture(WKPreferencesRef preferencesRef, bool flag);
@@ -208,32 +206,12 @@ WK_EXPORT void WKPreferencesSetMediaControlsScaleWithPageZoom(WKPreferencesRef p
 WK_EXPORT bool WKPreferencesGetMediaControlsScaleWithPageZoom(WKPreferencesRef preferencesRef);
 
 // Defaults to false.
-WK_EXPORT void WKPreferencesSetModernMediaControlsEnabled(WKPreferencesRef preferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetModernMediaControlsEnabled(WKPreferencesRef preferencesRef);
-
-// Defaults to false.
 WK_EXPORT void WKPreferencesSetShowsToolTipOverTruncatedText(WKPreferencesRef preferencesRef, bool flag);
 WK_EXPORT bool WKPreferencesGetShowsToolTipOverTruncatedText(WKPreferencesRef preferencesRef);
 
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetMockScrollbarsEnabled(WKPreferencesRef preferencesRef, bool flag);
 WK_EXPORT bool WKPreferencesGetMockScrollbarsEnabled(WKPreferencesRef preferencesRef);
-
-// Deprecated. Always returns false.
-WK_EXPORT void WKPreferencesSetApplicationChromeModeEnabled(WKPreferencesRef preferencesRef, bool enabled);
-WK_EXPORT bool WKPreferencesGetApplicationChromeModeEnabled(WKPreferencesRef preferencesRef);
-
-// Deprecated. Always returns false.
-WK_EXPORT void WKPreferencesSetInspectorUsesWebKitUserInterface(WKPreferencesRef preferencesRef, bool enabled);
-WK_EXPORT bool WKPreferencesGetInspectorUsesWebKitUserInterface(WKPreferencesRef preferencesRef);
-
-// Defaults to true.
-WK_EXPORT void WKPreferencesSetJavaEnabledForLocalFiles(WKPreferencesRef preferences, bool javaEnabled);
-WK_EXPORT bool WKPreferencesGetJavaEnabledForLocalFiles(WKPreferencesRef preferences);
-
-// Defaults to true.
-WK_EXPORT void WKPreferencesSetRequestAnimationFrameEnabled(WKPreferencesRef, bool);
-WK_EXPORT bool WKPreferencesGetRequestAnimationFrameEnabled(WKPreferencesRef);
 
 // Defaults to false
 WK_EXPORT void WKPreferencesSetDiagnosticLoggingEnabled(WKPreferencesRef preferencesRef, bool enabled);
@@ -248,12 +226,12 @@ WK_EXPORT void WKPreferencesSetAsynchronousPluginInitializationEnabledForAllPlug
 WK_EXPORT bool WKPreferencesGetAsynchronousPluginInitializationEnabledForAllPlugins(WKPreferencesRef preferencesRef);
 
 // Defaults to false
-WK_EXPORT void WKPreferencesSetArtificialPluginInitializationDelayEnabled(WKPreferencesRef preferencesRef, bool enabled);
-WK_EXPORT bool WKPreferencesGetArtificialPluginInitializationDelayEnabled(WKPreferencesRef preferencesRef);
+WK_EXPORT void WKPreferencesSetPluginSandboxProfilesEnabledForAllPlugins(WKPreferencesRef preferencesRef, bool enabled);
+WK_EXPORT bool WKPreferencesGetPluginSandboxProfilesEnabledForAllPlugins(WKPreferencesRef preferencesRef);
 
 // Defaults to false
-WK_EXPORT void WKPreferencesSetTabToLinksEnabled(WKPreferencesRef preferencesRef, bool enabled);
-WK_EXPORT bool WKPreferencesGetTabToLinksEnabled(WKPreferencesRef preferencesRef);
+WK_EXPORT void WKPreferencesSetArtificialPluginInitializationDelayEnabled(WKPreferencesRef preferencesRef, bool enabled);
+WK_EXPORT bool WKPreferencesGetArtificialPluginInitializationDelayEnabled(WKPreferencesRef preferencesRef);
 
 // Defaults to true
 WK_EXPORT void WKPreferencesSetInteractiveFormValidationEnabled(WKPreferencesRef preferencesRef, bool enabled);
@@ -263,6 +241,10 @@ WK_EXPORT bool WKPreferencesGetInteractiveFormValidationEnabled(WKPreferencesRef
 WK_EXPORT void WKPreferencesSetScrollingPerformanceLoggingEnabled(WKPreferencesRef preferencesRef, bool enabled);
 WK_EXPORT bool WKPreferencesGetScrollingPerformanceLoggingEnabled(WKPreferencesRef preferencesRef);
 
+// Defaults to true
+WK_EXPORT void WKPreferencesSetCookieEnabled(WKPreferencesRef preferences, bool enabled);
+WK_EXPORT bool WKPreferencesGetCookieEnabled(WKPreferencesRef preferences);
+
 // Defaults to true on Mac, false elsewhere
 WK_EXPORT void WKPreferencesSetPDFPluginEnabled(WKPreferencesRef preferences, bool enabled);
 WK_EXPORT bool WKPreferencesGetPDFPluginEnabled(WKPreferencesRef preferences);
@@ -270,6 +252,10 @@ WK_EXPORT bool WKPreferencesGetPDFPluginEnabled(WKPreferencesRef preferences);
 // Defaults to false
 WK_EXPORT void WKPreferencesSetAggressiveTileRetentionEnabled(WKPreferencesRef preferences, bool enabled);
 WK_EXPORT bool WKPreferencesGetAggressiveTileRetentionEnabled(WKPreferencesRef preferences);
+
+// Defaults to false
+WK_EXPORT void WKPreferencesSetLogsPageMessagesToSystemConsoleEnabled(WKPreferencesRef preferences, bool enabled);
+WK_EXPORT bool WKPreferencesGetLogsPageMessagesToSystemConsoleEnabled(WKPreferencesRef preferences);
 
 // Defaults to true
 WK_EXPORT void WKPreferencesSetPageVisibilityBasedProcessSuppressionEnabled(WKPreferencesRef preferences, bool enabled);
@@ -319,31 +305,16 @@ WK_EXPORT bool WKPreferencesGetThreadedScrollingEnabled(WKPreferencesRef prefere
 WK_EXPORT void WKPreferencesSetIncrementalRenderingSuppressionTimeout(WKPreferencesRef preferencesRef, double timeout);
 WK_EXPORT double WKPreferencesGetIncrementalRenderingSuppressionTimeout(WKPreferencesRef preferencesRef);
 
-// Defaults to true.
-WK_EXPORT void WKPreferencesSetSimpleLineLayoutEnabled(WKPreferencesRef, bool);
-WK_EXPORT bool WKPreferencesGetSimpleLineLayoutEnabled(WKPreferencesRef);
-
 // Defaults to false.
-WK_EXPORT void WKPreferencesSetSimpleLineLayoutDebugBordersEnabled(WKPreferencesRef, bool);
-WK_EXPORT bool WKPreferencesGetSimpleLineLayoutDebugBordersEnabled(WKPreferencesRef);
+WK_EXPORT void WKPreferencesSetLegacyLineLayoutVisualCoverageEnabled(WKPreferencesRef, bool);
+WK_EXPORT bool WKPreferencesGetLegacyLineLayoutVisualCoverageEnabled(WKPreferencesRef);
 
-// Defaults to false.
-WK_EXPORT void WKPreferencesSetNewBlockInsideInlineModelEnabled(WKPreferencesRef, bool);
-WK_EXPORT bool WKPreferencesGetNewBlockInsideInlineModelEnabled(WKPreferencesRef);
-
-// Defaults to false.
-WK_EXPORT void WKPreferencesSetDeferredCSSParserEnabled(WKPreferencesRef, bool);
-WK_EXPORT bool WKPreferencesGetDeferredCSSParserEnabled(WKPreferencesRef);
-
-// Defaults to false.
-WK_EXPORT void WKPreferencesSetSubpixelCSSOMElementMetricsEnabled(WKPreferencesRef, bool);
-WK_EXPORT bool WKPreferencesGetSubpixelCSSOMElementMetricsEnabled(WKPreferencesRef);
+WK_EXPORT void WKPreferencesSetContentChangeObserverEnabled(WKPreferencesRef, bool);
+WK_EXPORT bool WKPreferencesGetContentChangeObserverEnabled(WKPreferencesRef);
 
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetUseGiantTiles(WKPreferencesRef, bool);
 WK_EXPORT bool WKPreferencesGetUseGiantTiles(WKPreferencesRef);
-
-WK_EXPORT void WKPreferencesResetTestRunnerOverrides(WKPreferencesRef preferencesRef);
 
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetUseLegacyTextAlignPositionedElementBehavior(WKPreferencesRef preferencesRef, bool enabled);
@@ -352,6 +323,10 @@ WK_EXPORT bool WKPreferencesUseLegacyTextAlignPositionedElementBehavior(WKPrefer
 // Defaults to true.
 WK_EXPORT void WKPreferencesSetMediaSourceEnabled(WKPreferencesRef preferencesRef, bool enabled);
 WK_EXPORT bool WKPreferencesGetMediaSourceEnabled(WKPreferencesRef preferencesRef);
+
+// Defaults to true;
+WK_EXPORT void WKPreferencesSetSourceBufferChangeTypeEnabled(WKPreferencesRef preferencesRef, bool enabled);
+WK_EXPORT bool WKPreferencesGetSourceBufferChangeTypeEnabled(WKPreferencesRef preferencesRef);
 
 // Default to false.
 WK_EXPORT void WKPreferencesSetViewGestureDebuggingEnabled(WKPreferencesRef preferencesRef, bool enabled);
@@ -377,17 +352,17 @@ WK_EXPORT bool WKPreferencesGetServiceControlsEnabled(WKPreferencesRef preferenc
 WK_EXPORT void WKPreferencesSetImageControlsEnabled(WKPreferencesRef preferencesRef, bool enabled);
 WK_EXPORT bool WKPreferencesGetImageControlsEnabled(WKPreferencesRef preferencesRef);
 
-// Not implemented, should be deleted once there are no callers.
-WK_EXPORT void WKPreferencesSetLongMousePressEnabled(WKPreferencesRef preferencesRef, bool enabled);
-WK_EXPORT bool WKPreferencesGetLongMousePressEnabled(WKPreferencesRef preferencesRef);
+// Default to false.
+WK_EXPORT void WKPreferencesSetGamepadsEnabled(WKPreferencesRef preferencesRef, bool enabled);
+WK_EXPORT bool WKPreferencesGetGamepadsEnabled(WKPreferencesRef preferencesRef);
+
+// Default to false.
+WK_EXPORT void WKPreferencesSetHighlightAPIEnabled(WKPreferencesRef preferencesRef, bool enabled);
+WK_EXPORT bool WKPreferencesGetHighlightAPIEnabled(WKPreferencesRef preferencesRef);
 
 // Defaults to 0. Setting this to 0 disables font autosizing on iOS.
 WK_EXPORT void WKPreferencesSetMinimumZoomFontSize(WKPreferencesRef preferencesRef, double);
 WK_EXPORT double WKPreferencesGetMinimumZoomFontSize(WKPreferencesRef preferencesRef);
-
-// Not implemented, should be deleted once Safari no longer uses this function.
-WK_EXPORT void WKPreferencesSetAntialiasedFontDilationEnabled(WKPreferencesRef preferences, bool enabled);
-WK_EXPORT bool WKPreferencesGetAntialiasedFontDilationEnabled(WKPreferencesRef preferences);
 
 // Defaults to 0.
 WK_EXPORT void WKPreferencesSetJavaScriptRuntimeFlags(WKPreferencesRef preferences, WKJavaScriptRuntimeFlagSet javascriptRuntimeFlagSet);
@@ -410,6 +385,10 @@ WK_EXPORT void WKPreferencesSetMockCaptureDevicesEnabled(WKPreferencesRef, bool)
 WK_EXPORT bool WKPreferencesGetMockCaptureDevicesEnabled(WKPreferencesRef);
 
 // Defaults to true.
+WK_EXPORT void WKPreferencesSetGetUserMediaRequiresFocus(WKPreferencesRef, bool);
+WK_EXPORT bool WKPreferencesGetGetUserMediaRequiresFocus(WKPreferencesRef);
+
+// Defaults to true.
 WK_EXPORT void WKPreferencesSetICECandidateFilteringEnabled(WKPreferencesRef, bool);
 WK_EXPORT bool WKPreferencesGetICECandidateFilteringEnabled(WKPreferencesRef);
 
@@ -421,17 +400,13 @@ WK_EXPORT bool WKPreferencesGetEnumeratingAllNetworkInterfacesEnabled(WKPreferen
 WK_EXPORT void WKPreferencesSetMediaCaptureRequiresSecureConnection(WKPreferencesRef, bool);
 WK_EXPORT bool WKPreferencesGetMediaCaptureRequiresSecureConnection(WKPreferencesRef);
 
-// Defaults to false
-WK_EXPORT void WKPreferencesSetFetchAPIEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetFetchAPIEnabled(WKPreferencesRef);
+// Defaults to 1 minute on iOS, 10 minutes elsewhere
+WK_EXPORT void WKPreferencesSetInactiveMediaCaptureSteamRepromptIntervalInMinutes(WKPreferencesRef, double);
+WK_EXPORT double WKPreferencesGetInactiveMediaCaptureSteamRepromptIntervalInMinutes(WKPreferencesRef);
 
 // Defaults to false
 WK_EXPORT void WKPreferencesSetDownloadAttributeEnabled(WKPreferencesRef, bool flag);
 WK_EXPORT bool WKPreferencesGetDownloadAttributeEnabled(WKPreferencesRef);
-
-// Defaults to false
-WK_EXPORT void WKPreferencesSetSelectionPaintingWithoutSelectionGapsEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetSelectionPaintingWithoutSelectionGapsEnabled(WKPreferencesRef);
 
 // Defaults to false.
 WK_EXPORT void WKPreferencesSetAllowsPictureInPictureMediaPlayback(WKPreferencesRef, bool flag);
@@ -446,20 +421,40 @@ WK_EXPORT void WKPreferencesSetIntersectionObserverEnabled(WKPreferencesRef, boo
 WK_EXPORT bool WKPreferencesGetIntersectionObserverEnabled(WKPreferencesRef);
 
 // Defaults to false
-WK_EXPORT void WKPreferencesSetDisplayContentsEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetDisplayContentsEnabled(WKPreferencesRef);
-    
+WK_EXPORT void WKPreferencesSetMenuItemElementEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetMenuItemElementEnabled(WKPreferencesRef);
+        
 // Defaults to false
 WK_EXPORT void WKPreferencesSetDataTransferItemsEnabled(WKPreferencesRef, bool flag);
 WK_EXPORT bool WKPreferencesGetDataTransferItemsEnabled(WKPreferencesRef);
 
 // Defaults to false
-WK_EXPORT void WKPreferencesSetUserTimingEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetUserTimingEnabled(WKPreferencesRef);
+WK_EXPORT void WKPreferencesSetCustomPasteboardDataEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetCustomPasteboardDataEnabled(WKPreferencesRef);
+
+// Defaults to false, true for iOS
+WK_EXPORT void WKPreferencesSetWebShareEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetWebShareEnabled(WKPreferencesRef);
 
 // Defaults to false
-WK_EXPORT void WKPreferencesSetResourceTimingEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetResourceTimingEnabled(WKPreferencesRef);
+WK_EXPORT void WKPreferencesSetPaintTimingEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetPaintTimingEnabled(WKPreferencesRef);
+
+// Defaults to false
+WK_EXPORT void WKPreferencesSetFetchAPIKeepAliveEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetFetchAPIKeepAliveEnabled(WKPreferencesRef);
+
+// Defaults to false
+WK_EXPORT void WKPreferencesSetIsNSURLSessionWebSocketEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetIsNSURLSessionWebSocketEnabled(WKPreferencesRef);
+
+// Defaults to false
+WK_EXPORT void WKPreferencesSetWebRTCPlatformCodecsInGPUProcessEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetWebRTCPlatformCodecsInGPUProcessEnabled(WKPreferencesRef);
+
+// Defaults to false
+WK_EXPORT void WKPreferencesSetIsAccessibilityIsolatedTreeEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetIsAccessibilityIsolatedTreeEnabled(WKPreferencesRef);
 
 // Defaults to true.
 WK_EXPORT void WKPreferencesSetLargeImageAsyncDecodingEnabled(WKPreferencesRef preferencesRef, bool flag);
@@ -482,8 +477,12 @@ WK_EXPORT void WKPreferencesSetMediaPreloadingEnabled(WKPreferencesRef, bool fla
 WK_EXPORT bool WKPreferencesGetMediaPreloadingEnabled(WKPreferencesRef);
 
 // Defaults to false
-WK_EXPORT void WKPreferencesSetCredentialManagementEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetCredentialManagementEnabled(WKPreferencesRef);
+WK_EXPORT void WKPreferencesSetExposeSpeakersEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetExposeSpeakersEnabled(WKPreferencesRef);
+
+// Defaults to false
+WK_EXPORT void WKPreferencesSetWebAuthenticationEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetWebAuthenticationEnabled(WKPreferencesRef);
 
 // Defaults to true.
 WK_EXPORT void WKPreferencesSetInvisibleMediaAutoplayPermitted(WKPreferencesRef, bool flag);
@@ -498,21 +497,77 @@ WK_EXPORT void WKPreferencesSetMediaContentTypesRequiringHardwareSupport(WKPrefe
 WK_EXPORT WKStringRef WKPreferencesCopyMediaContentTypesRequiringHardwareSupport(WKPreferencesRef);
 
 // Defaults to false.
-WK_EXPORT void WKPreferencesSetIsSecureContextAttributeEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetIsSecureContextAttributeEnabled(WKPreferencesRef);
-
-// Defaults to false.
-WK_EXPORT void WKPreferencesSetInspectorAdditionsEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetInspectorAdditionsEnabled(WKPreferencesRef);
-
-// Defaults to false.
-WK_EXPORT void WKPreferencesSetPaymentRequestEnabled(WKPreferencesRef, bool flag);
-WK_EXPORT bool WKPreferencesGetPaymentRequestEnabled(WKPreferencesRef);
-
-// Defaults to false.
 WK_EXPORT void WKPreferencesSetStorageAccessAPIEnabled(WKPreferencesRef, bool flag);
 WK_EXPORT bool WKPreferencesGetStorageAccessAPIEnabled(WKPreferencesRef);
+
+// Defaults to false
+WK_EXPORT void WKPreferencesSetAccessibilityObjectModelEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetAccessibilityObjectModelEnabled(WKPreferencesRef);
+
+// Defaults to true.
+WK_EXPORT void WKPreferencesSetSyntheticEditingCommandsEnabled(WKPreferencesRef, bool);
+WK_EXPORT bool WKPreferencesGetSyntheticEditingCommandsEnabled(WKPreferencesRef);
     
+// Defaults to false.
+WK_EXPORT void WKPreferencesSetCSSOMViewScrollingAPIEnabled(WKPreferencesRef, bool);
+WK_EXPORT bool WKPreferencesGetCSSOMViewScrollingAPIEnabled(WKPreferencesRef);
+
+// Defaults to true.
+WK_EXPORT void WKPreferencesSetShouldAllowUserInstalledFonts(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetShouldAllowUserInstalledFonts(WKPreferencesRef);
+
+// Defaults to false.
+WK_EXPORT void WKPreferencesSetAllowCrossOriginSubresourcesToAskForCredentials(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetAllowCrossOriginSubresourcesToAskForCredentials(WKPreferencesRef);
+
+// Defaults to false.
+WK_EXPORT void WKPreferencesSetServerTimingEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetServerTimingEnabled(WKPreferencesRef);
+
+// Defaults to false.
+WK_EXPORT void WKPreferencesSetColorFilterEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetColorFilterEnabled(WKPreferencesRef);
+
+// Defaults to false.
+WK_EXPORT void WKPreferencesSetPunchOutWhiteBackgroundsInDarkMode(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetPunchOutWhiteBackgroundsInDarkMode(WKPreferencesRef);
+
+// Defaults to false
+WK_EXPORT void WKPreferencesSetReferrerPolicyAttributeEnabled(WKPreferencesRef, bool flag);
+WK_EXPORT bool WKPreferencesGetReferrerPolicyAttributeEnabled(WKPreferencesRef);
+
+
+// The following are all deprecated and do nothing. They should be removed when possible.
+
+WK_EXPORT void WKPreferencesSetRequestAnimationFrameEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetRequestAnimationFrameEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetNewBlockInsideInlineModelEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetNewBlockInsideInlineModelEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetKeygenElementEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetKeygenElementEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetLongMousePressEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetLongMousePressEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetAntialiasedFontDilationEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetAntialiasedFontDilationEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetApplicationChromeModeEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetApplicationChromeModeEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetInspectorUsesWebKitUserInterface(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetInspectorUsesWebKitUserInterface(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetHixie76WebSocketProtocolEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetHixie76WebSocketProtocolEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetFetchAPIEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetFetchAPIEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetIsSecureContextAttributeEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetIsSecureContextAttributeEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetUserTimingEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetUserTimingEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetResourceTimingEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetResourceTimingEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetSubpixelCSSOMElementMetricsEnabled(WKPreferencesRef, bool) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetSubpixelCSSOMElementMetricsEnabled(WKPreferencesRef) WK_C_API_DEPRECATED;
+WK_EXPORT void WKPreferencesSetWebArchiveDebugModeEnabled(WKPreferencesRef preferences, bool enabled) WK_C_API_DEPRECATED;
+WK_EXPORT bool WKPreferencesGetWebArchiveDebugModeEnabled(WKPreferencesRef preferences) WK_C_API_DEPRECATED;
+
 #ifdef __cplusplus
 }
 #endif

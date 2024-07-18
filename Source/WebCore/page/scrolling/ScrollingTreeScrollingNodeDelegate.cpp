@@ -23,12 +23,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import "config.h"
-#import "ScrollingTreeScrollingNodeDelegate.h"
+#include "config.h"
+#include "ScrollingTreeScrollingNodeDelegate.h"
 
-#if PLATFORM(IOS) && ENABLE(ASYNC_SCROLLING)
+#if ENABLE(ASYNC_SCROLLING)
 
-#import "ScrollingTreeScrollingNode.h"
+#include "ScrollingTreeScrollingNode.h"
 
 namespace WebCore {
 
@@ -37,9 +37,7 @@ ScrollingTreeScrollingNodeDelegate::ScrollingTreeScrollingNodeDelegate(Scrolling
 {
 }
 
-ScrollingTreeScrollingNodeDelegate::~ScrollingTreeScrollingNodeDelegate()
-{
-}
+ScrollingTreeScrollingNodeDelegate::~ScrollingTreeScrollingNodeDelegate() = default;
 
 ScrollingTree& ScrollingTreeScrollingNodeDelegate::scrollingTree() const
 {
@@ -68,4 +66,4 @@ const IntPoint& ScrollingTreeScrollingNodeDelegate::scrollOrigin() const
 
 } // namespace WebCore
 
-#endif // PLATFORM(IOS) && ENABLE(ASYNC_SCROLLING)
+#endif // ENABLE(ASYNC_SCROLLING)

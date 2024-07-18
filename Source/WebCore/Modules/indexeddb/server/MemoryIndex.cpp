@@ -26,8 +26,6 @@
 #include "config.h"
 #include "MemoryIndex.h"
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBError.h"
 #include "IDBGetAllResult.h"
 #include "IDBGetResult.h"
@@ -53,9 +51,7 @@ MemoryIndex::MemoryIndex(const IDBIndexInfo& info, MemoryObjectStore& objectStor
 {
 }
 
-MemoryIndex::~MemoryIndex()
-{
-}
+MemoryIndex::~MemoryIndex() = default;
 
 void MemoryIndex::cursorDidBecomeClean(MemoryIndexCursor& cursor)
 {
@@ -79,17 +75,13 @@ void MemoryIndex::objectStoreCleared()
 
 void MemoryIndex::notifyCursorsOfValueChange(const IDBKeyData& indexKey, const IDBKeyData& primaryKey)
 {
-    Vector<MemoryIndexCursor*> cursors;
-    copyToVector(m_cleanCursors, cursors);
-    for (auto* cursor : cursors)
+    for (auto* cursor : copyToVector(m_cleanCursors))
         cursor->indexValueChanged(indexKey, primaryKey);
 }
 
 void MemoryIndex::notifyCursorsOfAllRecordsChanged()
 {
-    Vector<MemoryIndexCursor*> cursors;
-    copyToVector(m_cleanCursors, cursors);
-    for (auto* cursor : cursors)
+    for (auto* cursor : copyToVector(m_cleanCursors))
         cursor->indexRecordsAllChanged();
 
     ASSERT(m_cleanCursors.isEmpty());
@@ -132,7 +124,7 @@ IDBGetResult MemoryIndex::getResultForKeyRange(IndexedDB::IndexRecordType type, 
     if (!keyValue)
         return { };
 
-    return type == IndexedDB::IndexRecordType::Key ? IDBGetResult(*keyValue) : IDBGetResult(m_objectStore.valueForKeyRange(*keyValue));
+    return type == IndexedDB::IndexRecordType::Key ? IDBGetResult(*keyValue) : IDBGetResult(*keyValue, m_objectStore.valueForKeyRange(*keyValue), m_objectStore.info().keyPath());
 }
 
 uint64_t MemoryIndex::countForKeyRange(const IDBKeyRangeData& inRange)
@@ -162,7 +154,7 @@ void MemoryIndex::getAllRecords(const IDBKeyRangeData& keyRangeData, std::option
 {
     LOG(IndexedDB, "MemoryIndex::getAllRecords");
 
-    result = { type };
+    result = { type, m_objectStore.info().keyPath() };
 
     if (!m_records)
         return;
@@ -185,10 +177,8 @@ void MemoryIndex::getAllRecords(const IDBKeyRangeData& keyRangeData, std::option
 
         auto allValues = m_records->allValuesForKey(key, targetCount - currentCount);
         for (auto& keyValue : allValues) {
-            if (type == IndexedDB::GetAllType::Keys) {
-                IDBKeyData keyCopy { keyValue };
-                result.addKey(WTFMove(keyCopy));
-            } else
+            result.addKey(IDBKeyData(keyValue));
+            if (type == IndexedDB::GetAllType::Values)
                 result.addValue(m_objectStore.valueForKeyRange(keyValue));
         }
 
@@ -202,7 +192,7 @@ IDBError MemoryIndex::putIndexKey(const IDBKeyData& valueKey, const IndexKey& in
     LOG(IndexedDB, "MemoryIndex::provisionalPutIndexKey");
 
     if (!m_records) {
-        m_records = std::make_unique<IndexValueStore>(m_info.unique());
+        m_records = makeUnique<IndexValueStore>(m_info.unique());
         notifyCursorsOfAllRecordsChanged();
     }
 
@@ -267,11 +257,9 @@ MemoryIndexCursor* MemoryIndex::maybeOpenCursor(const IDBCursorInfo& info)
     if (!result.isNewEntry)
         return nullptr;
 
-    result.iterator->value = std::make_unique<MemoryIndexCursor>(*this, info);
+    result.iterator->value = makeUnique<MemoryIndexCursor>(*this, info);
     return result.iterator->value.get();
 }
 
 } // namespace IDBServer
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

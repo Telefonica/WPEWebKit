@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,25 +29,50 @@
 
 #include "ContextMenuContextData.h"
 #include "UserData.h"
+#include "WebContextMenuListenerProxy.h"
 #include <wtf/RefCounted.h>
+#include <wtf/WeakPtr.h>
+
+OBJC_CLASS NSArray;
+OBJC_CLASS NSMenu;
 
 namespace WebKit {
 
 class WebContextMenuItem;
+class WebPageProxy;
 
-class WebContextMenuProxy : public RefCounted<WebContextMenuProxy> {
+class WebContextMenuProxy : public RefCounted<WebContextMenuProxy>, public WebContextMenuListenerProxy::Client {
 public:
     virtual ~WebContextMenuProxy();
 
-    virtual void show() = 0;
+    virtual void show();
 
-    virtual void showContextMenuWithItems(const Vector<WebContextMenuItemData>& items) = 0;
+    WebPageProxy* page() const { return m_page.get(); }
+
+#if PLATFORM(COCOA)
+    virtual NSMenu *platformMenu() const = 0;
+    virtual NSArray *platformData() const = 0;
+#endif // PLATFORM(COCOA)
+
+#if ENABLE(IMAGE_ANALYSIS_ENHANCEMENTS)
+    virtual CGImageRef copySubjectResult() const { return nullptr; }
+#endif
 
 protected:
-    WebContextMenuProxy(const ContextMenuContextData&, const UserData&);
+    WebContextMenuProxy(WebPageProxy&, ContextMenuContextData&&, const UserData&);
+
+    // WebContextMenuListenerProxy::Client
+    void useContextMenuItems(Vector<Ref<WebContextMenuItem>>&&) override;
 
     const ContextMenuContextData m_context;
     const UserData m_userData;
+
+private:
+    virtual Vector<Ref<WebContextMenuItem>> proposedItems() const;
+    virtual void showContextMenuWithItems(Vector<Ref<WebContextMenuItem>>&&) = 0;
+
+    RefPtr<WebContextMenuListenerProxy> m_contextMenuListener;
+    WeakPtr<WebPageProxy> m_page;
 };
 
 } // namespace WebKit

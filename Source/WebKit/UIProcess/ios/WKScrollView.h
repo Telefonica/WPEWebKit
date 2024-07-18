@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "UIKitSPI.h"
 
@@ -33,13 +33,24 @@
 
 @property (nonatomic, assign) WKWebView <UIScrollViewDelegate> *internalDelegate;
 
+- (void)_setBackgroundColorInternal:(UIColor *)backgroundColor;
+- (void)_setIndicatorStyleInternal:(UIScrollViewIndicatorStyle)indicatorStyle;
 - (void)_setContentSizePreservingContentOffsetDuringRubberband:(CGSize)contentSize;
+- (void)_setScrollEnabledInternal:(BOOL)enabled;
+- (void)_setZoomEnabledInternal:(BOOL)enabled;
+- (BOOL)_setContentScrollInsetInternal:(UIEdgeInsets)insets;
+- (void)_setDecelerationRateInternal:(UIScrollViewDecelerationRate)rate;
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000
+// FIXME: Likely we can remove this special case for watchOS and tvOS.
+#if !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)
 @property (nonatomic, assign, readonly) BOOL _contentInsetAdjustmentBehaviorWasExternallyOverridden;
 - (void)_setContentInsetAdjustmentBehaviorInternal:(UIScrollViewContentInsetAdjustmentBehavior)insetAdjustmentBehavior;
 #endif
 
+#if ENABLE(OVERLAY_REGIONS_IN_EVENT_REGION)
+- (bool)_updateOverlayRegions:(const Vector<CGRect> &)overlayRegions;
+#endif // ENABLE(OVERLAY_REGIONS_IN_EVENT_REGION)
+
 @end
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

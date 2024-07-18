@@ -23,14 +23,28 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+typedef unsigned long GLenum;
+typedef long GLint;
+typedef long GLsizei;
+
+#ifdef ENABLE_VIDEO
+typedef (ImageBitmap or ImageData or HTMLImageElement or HTMLCanvasElement or HTMLVideoElement) TexImageSource;
+#else
+typedef (ImageBitmap or ImageData or HTMLImageElement or HTMLCanvasElement) TexImageSource;
+#endif
+
 [
+    ActiveDOMObject,
     Conditional=WEBGL,
+    EnabledBySetting=WebGLEnabled,
+    GenerateIsReachable=ImplCanvasBase,
     JSCustomMarkFunction,
     JSGenerateToJSObject,
     DoNotCheckConstants,
     ExportMacro=WEBCORE_EXPORT,
-    CallTracingCallback=recordCanvasAction,
+    Exposed=(Window,Worker),
+    CallTracer=InspectorCanvasCallTracer,
 ] interface WebGLRenderingContext {
 };
 
-WebGLRenderingContext implements WebGLRenderingContextBase;
+WebGLRenderingContext includes WebGLRenderingContextBase;

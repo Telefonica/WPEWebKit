@@ -27,6 +27,7 @@
 #include "config.h"
 #include "XPathValue.h"
 
+#include "CommonAtomStrings.h"
 #include "XPathExpressionNode.h"
 #include "XPathUtil.h"
 #include <limits>
@@ -121,14 +122,14 @@ String Value::toString() const
             return m_data->string;
         case NumberValue:
             if (std::isnan(m_number))
-                return ASCIILiteral("NaN");
+                return "NaN"_s;
             if (m_number == 0)
-                return ASCIILiteral("0");
+                return "0"_s;
             if (std::isinf(m_number))
-                return ASCIILiteral(std::signbit(m_number) ? "-Infinity" : "Infinity");
+                return std::signbit(m_number) ? "-Infinity"_s : "Infinity"_s;
             return String::number(m_number);
         case BooleanValue:
-            return ASCIILiteral(m_bool ? "true" : "false");
+            return m_bool ? trueAtom() : falseAtom();
     }
 
     ASSERT_NOT_REACHED();

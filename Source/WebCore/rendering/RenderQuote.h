@@ -27,22 +27,23 @@
 namespace WebCore {
 
 class RenderQuote final : public RenderInline {
+    WTF_MAKE_ISO_ALLOCATED(RenderQuote);
 public:
     RenderQuote(Document&, RenderStyle&&, QuoteType);
     virtual ~RenderQuote();
 
-    void updateRenderer(RenderQuote* previousQuote);
+    void updateRenderer(RenderTreeBuilder&, RenderQuote* previousQuote);
 
 private:
-    const char* renderName() const override { return "RenderQuote"; }
+    ASCIILiteral renderName() const override { return "RenderQuote"_s; }
     bool isQuote() const override { return true; }
     bool isOpen() const;
     void styleDidChange(StyleDifference, const RenderStyle*) override;
-    void insertedIntoTree() override;
-    void willBeRemovedFromTree() override;
+    void insertedIntoTree(IsInternalMove) override;
+    void willBeRemovedFromTree(IsInternalMove) override;
 
     String computeText() const;
-    void updateTextRenderer();
+    void updateTextRenderer(RenderTreeBuilder&);
 
     const QuoteType m_type;
     int m_depth { -1 };

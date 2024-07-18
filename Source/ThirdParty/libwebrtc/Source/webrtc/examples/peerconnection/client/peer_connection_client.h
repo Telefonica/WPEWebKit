@@ -8,17 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_EXAMPLES_PEERCONNECTION_CLIENT_PEER_CONNECTION_CLIENT_H_
-#define WEBRTC_EXAMPLES_PEERCONNECTION_CLIENT_PEER_CONNECTION_CLIENT_H_
+#ifndef EXAMPLES_PEERCONNECTION_CLIENT_PEER_CONNECTION_CLIENT_H_
+#define EXAMPLES_PEERCONNECTION_CLIENT_PEER_CONNECTION_CLIENT_H_
 
 #include <map>
 #include <memory>
 #include <string>
 
-#include "webrtc/base/nethelpers.h"
-#include "webrtc/base/physicalsocketserver.h"
-#include "webrtc/base/signalthread.h"
-#include "webrtc/base/sigslot.h"
+#include "api/async_dns_resolver.h"
+#include "api/task_queue/pending_task_safety_flag.h"
+#include "rtc_base/net_helpers.h"
+#include "rtc_base/physical_socket_server.h"
+#include "rtc_base/third_party/sigslot/sigslot.h"
 
 typedef std::map<int, std::string> Peers;
 
@@ -35,8 +36,7 @@ struct PeerConnectionClientObserver {
   virtual ~PeerConnectionClientObserver() {}
 };
 
-class PeerConnectionClient : public sigslot::has_slots<>,
-                             public rtc::MessageHandler {
+class PeerConnectionClient : public sigslot::has_slots<> {
  public:
   enum State {
     NOT_CONNECTED,
@@ -56,7 +56,8 @@ class PeerConnectionClient : public sigslot::has_slots<>,
 
   void RegisterObserver(PeerConnectionClientObserver* callback);
 
-  void Connect(const std::string& server, int port,
+  void Connect(const std::string& server,
+               int port,
                const std::string& client_name);
 
   bool SendToPeer(int peer_id, const std::string& message);
@@ -65,51 +66,57 @@ class PeerConnectionClient : public sigslot::has_slots<>,
 
   bool SignOut();
 
-  // implements the MessageHandler interface
-  void OnMessage(rtc::Message* msg);
-
  protected:
   void DoConnect();
   void Close();
   void InitSocketSignals();
   bool ConnectControlSocket();
-  void OnConnect(rtc::AsyncSocket* socket);
-  void OnHangingGetConnect(rtc::AsyncSocket* socket);
+  void OnConnect(rtc::Socket* socket);
+  void OnHangingGetConnect(rtc::Socket* socket);
   void OnMessageFromPeer(int peer_id, const std::string& message);
 
   // Quick and dirty support for parsing HTTP header values.
-  bool GetHeaderValue(const std::string& data, size_t eoh,
-                      const char* header_pattern, size_t* value);
+  bool GetHeaderValue(const std::string& data,
+                      size_t eoh,
+                      const char* header_pattern,
+                      size_t* value);
 
-  bool GetHeaderValue(const std::string& data, size_t eoh,
-                      const char* header_pattern, std::string* value);
+  bool GetHeaderValue(const std::string& data,
+                      size_t eoh,
+                      const char* header_pattern,
+                      std::string* value);
 
   // Returns true if the whole response has been read.
-  bool ReadIntoBuffer(rtc::AsyncSocket* socket, std::string* data,
+  bool ReadIntoBuffer(rtc::Socket* socket,
+                      std::string* data,
                       size_t* content_length);
 
-  void OnRead(rtc::AsyncSocket* socket);
+  void OnRead(rtc::Socket* socket);
 
-  void OnHangingGetRead(rtc::AsyncSocket* socket);
+  void OnHangingGetRead(rtc::Socket* socket);
 
   // Parses a single line entry in the form "<name>,<id>,<connected>"
-  bool ParseEntry(const std::string& entry, std::string* name, int* id,
+  bool ParseEntry(const std::string& entry,
+                  std::string* name,
+                  int* id,
                   bool* connected);
 
   int GetResponseStatus(const std::string& response);
 
-  bool ParseServerResponse(const std::string& response, size_t content_length,
-                           size_t* peer_id, size_t* eoh);
+  bool ParseServerResponse(const std::string& response,
+                           size_t content_length,
+                           size_t* peer_id,
+                           size_t* eoh);
 
-  void OnClose(rtc::AsyncSocket* socket, int err);
+  void OnClose(rtc::Socket* socket, int err);
 
-  void OnResolveResult(rtc::AsyncResolverInterface* resolver);
+  void OnResolveResult(const webrtc::AsyncDnsResolverResult& result);
 
   PeerConnectionClientObserver* callback_;
   rtc::SocketAddress server_address_;
-  rtc::AsyncResolver* resolver_;
-  std::unique_ptr<rtc::AsyncSocket> control_socket_;
-  std::unique_ptr<rtc::AsyncSocket> hanging_get_;
+  std::unique_ptr<webrtc::AsyncDnsResolverInterface> resolver_;
+  std::unique_ptr<rtc::Socket> control_socket_;
+  std::unique_ptr<rtc::Socket> hanging_get_;
   std::string onconnect_data_;
   std::string control_data_;
   std::string notification_data_;
@@ -117,6 +124,7 @@ class PeerConnectionClient : public sigslot::has_slots<>,
   Peers peers_;
   State state_;
   int my_id_;
+  webrtc::ScopedTaskSafety safety_;
 };
 
-#endif  // WEBRTC_EXAMPLES_PEERCONNECTION_CLIENT_PEER_CONNECTION_CLIENT_H_
+#endif  // EXAMPLES_PEERCONNECTION_CLIENT_PEER_CONNECTION_CLIENT_H_

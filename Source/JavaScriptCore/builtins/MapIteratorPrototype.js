@@ -24,35 +24,34 @@
  */
 
 // We keep this function small very carefully to encourage inlining.
-@globalPrivate
+@linkTimeConstant
 function mapIteratorNext(bucket, kind)
 {
     "use strict";
     var value;
 
     bucket = @mapBucketNext(bucket);
-    this.@mapBucket = bucket;
+    @putMapIteratorInternalField(this, @mapIteratorFieldMapBucket, bucket);
     var done = bucket === @sentinelMapBucket;
     if (!done) {
         var key = @mapBucketKey(bucket);
         value = @mapBucketValue(bucket);
-        if (kind === @iterationKindKeyValue)
+        if (kind === @iterationKindEntries)
             value = [ key, value ]
         else if (kind === @iterationKindKey)
             value = key;
     }
-    return { done, value };
+    return { value, done };
 }
 
 function next()
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("%MapIteratorPrototype%.next requires that |this| not be null or undefined");
+    if (!@isMapIterator(this))
+        @throwTypeError("%MapIteratorPrototype%.next requires that |this| be an Map Iterator instance");
 
-    var bucket = this.@mapBucket;
-    if (bucket === @undefined)
-        @throwTypeError("%MapIteratorPrototype%.next requires that |this| be a Map Iterator instance");
-    return @mapIteratorNext.@call(this, bucket, this.@mapIteratorKind);
+    var bucket = @getMapIteratorInternalField(this, @mapIteratorFieldMapBucket);
+    var kind = @getMapIteratorInternalField(this, @mapIteratorFieldKind);
+    return @mapIteratorNext.@call(this, bucket, kind);
 }

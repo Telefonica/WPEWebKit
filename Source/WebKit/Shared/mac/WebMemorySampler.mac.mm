@@ -26,22 +26,18 @@
 #import "config.h"
 #import "WebMemorySampler.h"
 
-#if ENABLE(MEMORY_SAMPLER)  
+#if ENABLE(MEMORY_SAMPLER)
 
+#import <JavaScriptCore/JSLock.h>
 #import <JavaScriptCore/MemoryStatistics.h>
 #import <JavaScriptCore/VM.h>
+#import <WebCore/CommonVM.h>
 #import <mach/mach.h>
-#import <mach/task.h>
 #import <mach/mach_types.h>
+#import <mach/task.h>
 #import <malloc/malloc.h>
 #import <notify.h>
-#import <runtime/JSLock.h>
-#import <WebCore/CommonVM.h>
-#import <wtf/CurrentTime.h>
-
-using namespace WebCore;
-using namespace JSC;
-using namespace WTF;
+#import <wtf/WallTime.h>
 
 namespace WebKit {
     
@@ -111,19 +107,19 @@ WebMemoryStatistics WebMemorySampler::sampleWebKit() const
     
     WebMemoryStatistics webKitMemoryStats;
     
-    FastMallocStatistics fastMallocStatistics = WTF::fastMallocStatistics();
+    auto fastMallocStatistics = WTF::fastMallocStatistics();
     size_t fastMallocBytesInUse = fastMallocStatistics.committedVMBytes - fastMallocStatistics.freeListBytes;
     size_t fastMallocBytesCommitted = fastMallocStatistics.committedVMBytes;
     totalBytesInUse += fastMallocBytesInUse;
     totalBytesCommitted += fastMallocBytesCommitted;
     
-    JSLockHolder lock(commonVM());
-    size_t jscHeapBytesInUse = commonVM().heap.size();
-    size_t jscHeapBytesCommitted = commonVM().heap.capacity();
+    JSC::JSLockHolder lock(WebCore::commonVM());
+    size_t jscHeapBytesInUse = WebCore::commonVM().heap.size();
+    size_t jscHeapBytesCommitted = WebCore::commonVM().heap.capacity();
     totalBytesInUse += jscHeapBytesInUse;
     totalBytesCommitted += jscHeapBytesCommitted;
     
-    GlobalMemoryStatistics globalMemoryStats = globalMemoryStatistics();
+    JSC::GlobalMemoryStatistics globalMemoryStats = JSC::globalMemoryStatistics();
     totalBytesInUse += globalMemoryStats.stackBytes + globalMemoryStats.JITBytes;
     totalBytesCommitted += globalMemoryStats.stackBytes + globalMemoryStats.JITBytes;
     
@@ -140,39 +136,39 @@ WebMemoryStatistics WebMemorySampler::sampleWebKit() const
     
     size_t residentSize = sampleProcessCommittedBytes();
 
-    double now = currentTime();
+    WallTime now = WallTime::now();
         
-    webKitMemoryStats.keys.append(String("Timestamp"));
-    webKitMemoryStats.values.append(now);
-    webKitMemoryStats.keys.append(String("Total Bytes of Memory In Use"));
+    webKitMemoryStats.keys.append("Timestamp"_s);
+    webKitMemoryStats.values.append(now.secondsSinceEpoch().seconds());
+    webKitMemoryStats.keys.append("Total Bytes of Memory In Use"_s);
     webKitMemoryStats.values.append(totalBytesInUse);
-    webKitMemoryStats.keys.append(String("Fast Malloc Zone Bytes"));
+    webKitMemoryStats.keys.append("Fast Malloc Zone Bytes"_s);
     webKitMemoryStats.values.append(fastMallocBytesInUse);
-    webKitMemoryStats.keys.append(String("Default Malloc Zone Bytes"));
+    webKitMemoryStats.keys.append("Default Malloc Zone Bytes"_s);
     webKitMemoryStats.values.append(defaultMallocZoneBytesInUse);
-    webKitMemoryStats.keys.append(String("Dispatch Continuation Malloc Zone Bytes"));
+    webKitMemoryStats.keys.append("Dispatch Continuation Malloc Zone Bytes"_s);
     webKitMemoryStats.values.append(dispatchContinuationMallocZoneBytesInUse);
-    webKitMemoryStats.keys.append(String("Purgeable Malloc Zone Bytes"));
+    webKitMemoryStats.keys.append("Purgeable Malloc Zone Bytes"_s);
     webKitMemoryStats.values.append(purgeableMallocZoneBytesInUse);
-    webKitMemoryStats.keys.append(String("JavaScript Heap Bytes"));
+    webKitMemoryStats.keys.append("JavaScript Heap Bytes"_s);
     webKitMemoryStats.values.append(jscHeapBytesInUse);
-    webKitMemoryStats.keys.append(String("Total Bytes of Committed Memory"));
+    webKitMemoryStats.keys.append("Total Bytes of Committed Memory"_s);
     webKitMemoryStats.values.append(totalBytesCommitted);
-    webKitMemoryStats.keys.append(String("Fast Malloc Zone Bytes"));
+    webKitMemoryStats.keys.append("Fast Malloc Zone Bytes"_s);
     webKitMemoryStats.values.append(fastMallocBytesCommitted);
-    webKitMemoryStats.keys.append(String("Default Malloc Zone Bytes"));
+    webKitMemoryStats.keys.append("Default Malloc Zone Bytes"_s);
     webKitMemoryStats.values.append(defaultMallocZoneBytesCommitted);
-    webKitMemoryStats.keys.append(String("Dispatch Continuation Malloc Zone Bytes"));
+    webKitMemoryStats.keys.append("Dispatch Continuation Malloc Zone Bytes"_s);
     webKitMemoryStats.values.append(dispatchContinuationMallocZoneBytesCommitted);
-    webKitMemoryStats.keys.append(String("Purgeable Malloc Zone Bytes"));
+    webKitMemoryStats.keys.append("Purgeable Malloc Zone Bytes"_s);
     webKitMemoryStats.values.append(purgeableMallocZoneBytesCommitted);
-    webKitMemoryStats.keys.append(String("JavaScript Heap Bytes"));
+    webKitMemoryStats.keys.append("JavaScript Heap Bytes"_s);
     webKitMemoryStats.values.append(jscHeapBytesCommitted);
-    webKitMemoryStats.keys.append(String("JavaScript Stack Bytes"));
+    webKitMemoryStats.keys.append("JavaScript Stack Bytes"_s);
     webKitMemoryStats.values.append(globalMemoryStats.stackBytes);
-    webKitMemoryStats.keys.append(String("JavaScript JIT Bytes"));
+    webKitMemoryStats.keys.append("JavaScript JIT Bytes"_s);
     webKitMemoryStats.values.append(globalMemoryStats.JITBytes);
-    webKitMemoryStats.keys.append(String("Resident Size"));
+    webKitMemoryStats.keys.append("Resident Size"_s);
     webKitMemoryStats.values.append(residentSize);
     
     return webKitMemoryStats;

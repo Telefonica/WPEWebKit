@@ -29,63 +29,93 @@
 #include "ActiveDOMObject.h"
 #include "ContentSecurityPolicyResponseHeaders.h"
 #include "EventTarget.h"
+#include "FetchRequestCredentials.h"
 #include "MessagePort.h"
+#include "WorkerOptions.h"
 #include "WorkerScriptLoaderClient.h"
-#include <runtime/RuntimeFlags.h>
+#include "WorkerType.h"
+#include <JavaScriptCore/RuntimeFlags.h>
+#include <wtf/Deque.h>
 #include <wtf/MonotonicTime.h>
-#include <wtf/Optional.h>
-#include <wtf/text/AtomicStringHash.h>
+#include <wtf/text/AtomStringHash.h>
 
 namespace JSC {
-class ExecState;
+class CallFrame;
 class JSObject;
 class JSValue;
 }
 
 namespace WebCore {
 
+class RTCRtpScriptTransform;
+class RTCRtpScriptTransformer;
 class ScriptExecutionContext;
 class WorkerGlobalScopeProxy;
 class WorkerScriptLoader;
 
+struct StructuredSerializeOptions;
+struct WorkerOptions;
+
 class Worker final : public AbstractWorker, public ActiveDOMObject, private WorkerScriptLoaderClient {
+    WTF_MAKE_ISO_ALLOCATED(Worker);
 public:
-    static ExceptionOr<Ref<Worker>> create(ScriptExecutionContext&, JSC::RuntimeFlags, const String& url);
+    static ExceptionOr<Ref<Worker>> create(ScriptExecutionContext&, JSC::RuntimeFlags, const String& url, WorkerOptions&&);
     virtual ~Worker();
 
-    ExceptionOr<void> postMessage(JSC::ExecState&, JSC::JSValue message, Vector<JSC::Strong<JSC::JSObject>>&&);
+    ExceptionOr<void> postMessage(JSC::JSGlobalObject&, JSC::JSValue message, StructuredSerializeOptions&&);
 
     void terminate();
-
-    bool hasPendingActivity() const final;
+    bool wasTerminated() const { return m_wasTerminated; }
 
     String identifier() const { return m_identifier; }
+    const String& name() const { return m_options.name; }
 
     ScriptExecutionContext* scriptExecutionContext() const final { return ActiveDOMObject::scriptExecutionContext(); }
 
+    void dispatchEvent(Event&) final;
+
+#if ENABLE(WEB_RTC)
+    void createRTCRtpScriptTransformer(RTCRtpScriptTransform&, MessageWithMessagePorts&&);
+#endif
+
+    WorkerType type() const { return m_options.type; }
+
+    void postTaskToWorkerGlobalScope(Function<void(ScriptExecutionContext&)>&&);
+
+    static void forEachWorker(const Function<Function<void(ScriptExecutionContext&)>()>&);
+    static Worker* byIdentifier(ScriptExecutionContextIdentifier);
+
 private:
-    explicit Worker(ScriptExecutionContext&, JSC::RuntimeFlags);
+    Worker(ScriptExecutionContext&, JSC::RuntimeFlags, WorkerOptions&&);
 
     EventTargetInterface eventTargetInterface() const final { return WorkerEventTargetInterfaceType; }
 
     void notifyNetworkStateChange(bool isOnline);
 
-    void didReceiveResponse(unsigned long identifier, const ResourceResponse&) final;
+    void didReceiveResponse(ResourceLoaderIdentifier, const ResourceResponse&) final;
     void notifyFinished() final;
 
-    bool canSuspendForDocumentSuspension() const final;
+    // ActiveDOMObject.
     void stop() final;
+    void suspend(ReasonForSuspension) final;
+    void resume() final;
     const char* activeDOMObjectName() const final;
+    bool virtualHasPendingActivity() const final;
 
     static void networkStateChanged(bool isOnLine);
 
     RefPtr<WorkerScriptLoader> m_scriptLoader;
+    const WorkerOptions m_options;
     String m_identifier;
     WorkerGlobalScopeProxy& m_contextProxy; // The proxy outlives the worker to perform thread shutdown.
     std::optional<ContentSecurityPolicyResponseHeaders> m_contentSecurityPolicyResponseHeaders;
     MonotonicTime m_workerCreationTime;
     bool m_shouldBypassMainWorldContentSecurityPolicy { false };
+    bool m_isSuspendedForBackForwardCache { false };
     JSC::RuntimeFlags m_runtimeFlags;
+    Deque<RefPtr<Event>> m_pendingEvents;
+    bool m_wasTerminated { false };
+    ScriptExecutionContextIdentifier m_clientIdentifier;
 };
 
 } // namespace WebCore

@@ -50,7 +50,9 @@ WI.HeapAllocationsTimelineOverviewGraph = class HeapAllocationsTimelineOverviewG
 
     layout()
     {
-        if (!this.visible)
+        super.layout();
+
+        if (this.hidden)
             return;
 
         this.element.removeChildren();
@@ -73,6 +75,9 @@ WI.HeapAllocationsTimelineOverviewGraph = class HeapAllocationsTimelineOverviewG
         }
 
         for (let record of visibleRecords) {
+            if (isNaN(record.timestamp))
+                continue;
+
             const halfImageWidth = 8;
             let x = xScale(record.timestamp) - halfImageWidth;
             if (x <= 1)
@@ -82,9 +87,13 @@ WI.HeapAllocationsTimelineOverviewGraph = class HeapAllocationsTimelineOverviewG
             if (!imageElement) {
                 imageElement = record[WI.HeapAllocationsTimelineOverviewGraph.RecordElementAssociationSymbol] = document.createElement("img");
                 imageElement.classList.add("snapshot");
-                imageElement.addEventListener("click", () => {
+                imageElement.addEventListener("click", (event) => {
                     if (record.heapSnapshot.invalid)
                         return;
+
+                    // Ensure that the container "click" listener added by `WI.TimelineOverview` isn't called.
+                    event.__timelineRecordClickEventHandled = true;
+
                     this.selectedRecord = record;
                 });
             }

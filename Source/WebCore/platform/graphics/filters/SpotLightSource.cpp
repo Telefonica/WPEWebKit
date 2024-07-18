@@ -6,6 +6,7 @@
  * Copyright (C) 2010 Zoltan Herczeg <zherczeg@webkit.org>
  * Copyright (C) 2011 University of Szeged
  * Copyright (C) 2011 Renata Hodovan <reni@webkit.org>
+ * Copyright (C) 2021-2022 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,25 +33,48 @@
 #include "config.h"
 #include "SpotLightSource.h"
 
+#include "Filter.h"
+#include "FilterImage.h"
 #include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
 // spot-light edge darkening depends on an absolute treshold
 // according to the SVG 1.1 SE light regression tests
-static const float antiAliasTreshold = 0.016f;
+static const float antialiasThreshold = 0.016f;
 
-void SpotLightSource::initPaintingData(PaintingData& paintingData)
+Ref<SpotLightSource> SpotLightSource::create(const FloatPoint3D& position, const FloatPoint3D& direction, float specularExponent, float limitingConeAngle)
 {
-    paintingData.privateColorVector = paintingData.colorVector;
-    paintingData.directionVector.setX(m_direction.x() - m_position.x());
-    paintingData.directionVector.setY(m_direction.y() - m_position.y());
-    paintingData.directionVector.setZ(m_direction.z() - m_position.z());
+    return adoptRef(*new SpotLightSource(position, direction, specularExponent, limitingConeAngle));
+}
+
+SpotLightSource::SpotLightSource(const FloatPoint3D& position, const FloatPoint3D& pointsAt, float specularExponent, float limitingConeAngle)
+    : LightSource(LS_SPOT)
+    , m_position(position)
+    , m_pointsAt(pointsAt)
+    , m_specularExponent(specularExponent)
+    , m_limitingConeAngle(limitingConeAngle)
+{
+}
+
+void SpotLightSource::initPaintingData(const Filter& filter, const FilterImage& result, PaintingData& paintingData) const
+{
+    auto position = filter.resolvedPoint3D(m_position);
+    auto pointsAt = filter.resolvedPoint3D(m_pointsAt);
+
+    auto absolutePosition = filter.scaledByFilterScale(position.xy());
+    m_bufferPosition.setXY(result.mappedAbsolutePoint(absolutePosition));
+
+    // To scale Z, map a point offset from position in the x direction by z.
+    auto absoluteMappedZ = filter.scaledByFilterScale(FloatPoint { position.x() + position.z(), position.y() });
+    m_bufferPosition.setZ(result.mappedAbsolutePoint(absoluteMappedZ).x() - m_bufferPosition.x());
+    
+    paintingData.directionVector = pointsAt - position;
     paintingData.directionVector.normalize();
 
     if (!m_limitingConeAngle) {
         paintingData.coneCutOffLimit = 0.0f;
-        paintingData.coneFullLight = -antiAliasTreshold;
+        paintingData.coneFullLight = -antialiasThreshold;
     } else {
         float limitingConeAngle = m_limitingConeAngle;
         if (limitingConeAngle < 0.0f)
@@ -58,7 +82,7 @@ void SpotLightSource::initPaintingData(PaintingData& paintingData)
         if (limitingConeAngle > 90.0f)
             limitingConeAngle = 90.0f;
         paintingData.coneCutOffLimit = cosf(deg2rad(180.0f - limitingConeAngle));
-        paintingData.coneFullLight = paintingData.coneCutOffLimit - antiAliasTreshold;
+        paintingData.coneFullLight = paintingData.coneCutOffLimit - antialiasThreshold;
     }
 
     // Optimization for common specularExponent values
@@ -70,20 +94,19 @@ void SpotLightSource::initPaintingData(PaintingData& paintingData)
         paintingData.specularExponent = 2;
 }
 
-void SpotLightSource::updatePaintingData(PaintingData& paintingData, int x, int y, float z)
+LightSource::ComputedLightingData SpotLightSource::computePixelLightingData(const PaintingData& paintingData, int x, int y, float z) const
 {
-    paintingData.lightVector.setX(m_position.x() - x);
-    paintingData.lightVector.setY(m_position.y() - y);
-    paintingData.lightVector.setZ(m_position.z() - z);
-    paintingData.lightVectorLength = paintingData.lightVector.length();
+    FloatPoint3D lightVector = {
+        m_bufferPosition.x() - x,
+        m_bufferPosition.y() - y,
+        m_bufferPosition.z() - z
+    };
+    float lightVectorLength = lightVector.length();
 
-    float cosineOfAngle = (paintingData.lightVector * paintingData.directionVector) / paintingData.lightVectorLength;
+    float cosineOfAngle = (lightVector * paintingData.directionVector) / lightVectorLength;
     if (cosineOfAngle > paintingData.coneCutOffLimit) {
         // No light is produced, scanlines are not updated
-        paintingData.colorVector.setX(0.0f);
-        paintingData.colorVector.setY(0.0f);
-        paintingData.colorVector.setZ(0.0f);
-        return;
+        return { lightVector, { }, lightVectorLength };
     }
 
     // Set the color of the pixel
@@ -106,9 +129,11 @@ void SpotLightSource::updatePaintingData(PaintingData& paintingData, int x, int 
     if (lightStrength > 1.0f)
         lightStrength = 1.0f;
 
-    paintingData.colorVector.setX(paintingData.privateColorVector.x() * lightStrength);
-    paintingData.colorVector.setY(paintingData.privateColorVector.y() * lightStrength);
-    paintingData.colorVector.setZ(paintingData.privateColorVector.z() * lightStrength);
+    return {
+        lightVector,
+        paintingData.initialLightingData.colorVector * lightStrength,
+        lightVectorLength
+    };
 }
 
 bool SpotLightSource::setX(float x)
@@ -137,25 +162,25 @@ bool SpotLightSource::setZ(float z)
 
 bool SpotLightSource::setPointsAtX(float pointsAtX)
 {
-    if (m_direction.x() == pointsAtX)
+    if (m_pointsAt.x() == pointsAtX)
         return false;
-    m_direction.setX(pointsAtX);
+    m_pointsAt.setX(pointsAtX);
     return true;
 }
 
 bool SpotLightSource::setPointsAtY(float pointsAtY)
 {
-    if (m_direction.y() == pointsAtY)
+    if (m_pointsAt.y() == pointsAtY)
         return false;
-    m_direction.setY(pointsAtY);
+    m_pointsAt.setY(pointsAtY);
     return true;
 }
 
 bool SpotLightSource::setPointsAtZ(float pointsAtZ)
 {
-    if (m_direction.z() == pointsAtZ)
+    if (m_pointsAt.z() == pointsAtZ)
         return false;
-    m_direction.setZ(pointsAtZ);
+    m_pointsAt.setZ(pointsAtZ);
     return true;
 }
 

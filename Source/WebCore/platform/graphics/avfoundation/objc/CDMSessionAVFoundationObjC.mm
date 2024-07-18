@@ -30,34 +30,36 @@
 
 #import "LegacyCDM.h"
 #import "LegacyCDMSession.h"
+#import "Logging.h"
 #import "MediaPlayer.h"
 #import "MediaPlayerPrivateAVFoundationObjC.h"
 #import "WebCoreNSErrorExtras.h"
 #import <AVFoundation/AVAsset.h>
 #import <AVFoundation/AVAssetResourceLoader.h>
+#import <JavaScriptCore/TypedArrayInlines.h>
 #import <objc/objc-runtime.h>
-#import <runtime/TypedArrayInlines.h>
+#import <wtf/LoggerHelper.h>
 #import <wtf/MainThread.h>
 #import <wtf/SoftLinking.h>
 #import <wtf/UUID.h>
 
-SOFT_LINK_FRAMEWORK_OPTIONAL(AVFoundation)
-SOFT_LINK_CLASS(AVFoundation, AVURLAsset)
-SOFT_LINK_CLASS(AVFoundation, AVAssetResourceLoadingRequest)
-#define AVURLAsset getAVURLAssetClass()
-#define AVAssetResourceLoadingRequest getAVAssetResourceLoadingRequest()
-
 namespace WebCore {
 
-CDMSessionAVFoundationObjC::CDMSessionAVFoundationObjC(MediaPlayerPrivateAVFoundationObjC* parent, CDMSessionClient* client)
-    : m_parent(parent->createWeakPtr())
+CDMSessionAVFoundationObjC::CDMSessionAVFoundationObjC(MediaPlayerPrivateAVFoundationObjC* parent, LegacyCDMSessionClient& client)
+    : m_parent(*parent)
     , m_client(client)
-    , m_sessionId(createCanonicalUUIDString())
+    , m_sessionId(createVersion4UUIDString())
+#if !RELEASE_LOG_DISABLED
+    , m_logger(client.logger())
+    , m_logIdentifier(client.logIdentifier())
+#endif
 {
+    ALWAYS_LOG(LOGIDENTIFIER);
 }
 
 CDMSessionAVFoundationObjC::~CDMSessionAVFoundationObjC()
 {
+    ALWAYS_LOG(LOGIDENTIFIER);
 }
 
 RefPtr<Uint8Array> CDMSessionAVFoundationObjC::generateKeyRequest(const String& mimeType, Uint8Array* initData, String& destinationURL, unsigned short& errorCode, uint32_t& systemCode)
@@ -65,7 +67,8 @@ RefPtr<Uint8Array> CDMSessionAVFoundationObjC::generateKeyRequest(const String& 
     UNUSED_PARAM(mimeType);
 
     if (!m_parent) {
-        errorCode = CDM::UnknownError;
+        ERROR_LOG(LOGIDENTIFIER, "error: !parent");
+        errorCode = LegacyCDM::UnknownError;
         return nullptr;
     }
 
@@ -73,13 +76,15 @@ RefPtr<Uint8Array> CDMSessionAVFoundationObjC::generateKeyRequest(const String& 
     String keyID;
     RefPtr<Uint8Array> certificate;
     if (!MediaPlayerPrivateAVFoundationObjC::extractKeyURIKeyIDAndCertificateFromInitData(initData, keyURI, keyID, certificate)) {
-        errorCode = CDM::UnknownError;
+        ERROR_LOG(LOGIDENTIFIER, "error: could not extract key info");
+        errorCode = LegacyCDM::UnknownError;
         return nullptr;
     }
 
     m_request = m_parent->takeRequestForKeyURI(keyURI);
     if (!m_request) {
-        errorCode = CDM::UnknownError;
+        ERROR_LOG(LOGIDENTIFIER, "error: could not find request for key URI");
+        errorCode = LegacyCDM::UnknownError;
         return nullptr;
     }
 
@@ -90,7 +95,8 @@ RefPtr<Uint8Array> CDMSessionAVFoundationObjC::generateKeyRequest(const String& 
     RetainPtr<NSData> keyRequest = [m_request streamingContentKeyRequestDataForApp:certificateData.get() contentIdentifier:assetID.get() options:nil error:&nsError];
 
     if (!keyRequest) {
-        errorCode = CDM::DomainError;
+        ERROR_LOG(LOGIDENTIFIER, "failed to generate key request with error: ", String(nsError.localizedDescription));
+        errorCode = LegacyCDM::DomainError;
         systemCode = mediaKeyErrorSystemCode(nsError);
         return nullptr;
     }
@@ -99,9 +105,11 @@ RefPtr<Uint8Array> CDMSessionAVFoundationObjC::generateKeyRequest(const String& 
     systemCode = 0;
     destinationURL = String();
 
-    RefPtr<ArrayBuffer> keyRequestBuffer = ArrayBuffer::create([keyRequest.get() bytes], [keyRequest.get() length]);
+    ALWAYS_LOG(LOGIDENTIFIER);
+
+    auto keyRequestBuffer = ArrayBuffer::create([keyRequest bytes], [keyRequest length]);
     unsigned byteLength = keyRequestBuffer->byteLength();
-    return Uint8Array::create(WTFMove(keyRequestBuffer), 0, byteLength);
+    return Uint8Array::tryCreate(WTFMove(keyRequestBuffer), 0, byteLength);
 }
 
 void CDMSessionAVFoundationObjC::releaseKeys()
@@ -117,7 +125,14 @@ bool CDMSessionAVFoundationObjC::update(Uint8Array* key, RefPtr<Uint8Array>& nex
     systemCode = 0;
     nextMessage = nullptr;
 
+    ALWAYS_LOG(LOGIDENTIFIER);
+
     return true;
+}
+
+RefPtr<ArrayBuffer> CDMSessionAVFoundationObjC::cachedKeyForKeyID(const String&) const
+{
+    return nullptr;
 }
 
 void CDMSessionAVFoundationObjC::playerDidReceiveError(NSError *error)
@@ -125,9 +140,18 @@ void CDMSessionAVFoundationObjC::playerDidReceiveError(NSError *error)
     if (!m_client)
         return;
 
+    ERROR_LOG(LOGIDENTIFIER, String(error.localizedDescription));
+
     unsigned long code = mediaKeyErrorSystemCode(error);
-    m_client->sendError(CDMSessionClient::MediaKeyErrorDomain, code);
+    m_client->sendError(LegacyCDMSessionClient::MediaKeyErrorDomain, code);
 }
+
+#if !RELEASE_LOG_DISABLED
+WTFLogChannel& CDMSessionAVFoundationObjC::logChannel() const
+{
+    return LogEME;
+}
+#endif
 
 }
 

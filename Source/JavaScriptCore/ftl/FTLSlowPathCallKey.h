@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 
 #if ENABLE(FTL_JIT)
 
+#include "MacroAssemblerCodeRef.h"
 #include "RegisterSet.h"
 
 namespace JSC { namespace FTL {
@@ -43,30 +44,62 @@ namespace JSC { namespace FTL {
 
 class SlowPathCallKey {
 public:
-    SlowPathCallKey()
-        : m_callTarget(0)
-        , m_offset(0)
-    {
-    }
+    // Keep it within 2 bits.
+    enum class Type : uint8_t {
+        // For HashTables.
+        Empty,
+        Deleted,
+
+        Direct,
+        Indirect,
+    };
+
+    SlowPathCallKey() = default;
     
-    SlowPathCallKey(
-        const RegisterSet& set, void* callTarget, const RegisterSet& argumentRegisters,
-        ptrdiff_t offset)
-        : m_usedRegisters(set)
-        , m_callTarget(callTarget)
-        , m_argumentRegisters(argumentRegisters)
+    SlowPathCallKey(const RegisterSet& set, FunctionPtr<CFunctionPtrTag> callTarget, uint8_t numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled, size_t offset, int32_t indirectOffset)
+        : m_numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled(numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled)
         , m_offset(offset)
+        , m_usedRegisters(set)
     {
+        if (callTarget) {
+            m_type = static_cast<unsigned>(Type::Direct);
+            ASSERT(Type::Direct == this->type());
+            m_callTarget = callTarget.retagged<OperationPtrTag>();
+            ASSERT(!indirectOffset);
+        } else {
+            m_type = static_cast<unsigned>(Type::Indirect);
+            ASSERT(Type::Indirect == this->type());
+            m_indirectOffset = indirectOffset;
+        }
+        ASSERT(offset == m_offset);
     }
     
-    const RegisterSet& usedRegisters() const { return m_usedRegisters; }
-    void* callTarget() const { return m_callTarget; }
-    const RegisterSet& argumentRegisters() const { return m_argumentRegisters; }
-    ptrdiff_t offset() const { return m_offset; }
-    
-    SlowPathCallKey withCallTarget(void* callTarget)
+    FunctionPtr<OperationPtrTag> callTarget() const
     {
-        return SlowPathCallKey(usedRegisters(), callTarget, argumentRegisters(), offset());
+        if (type() == Type::Direct)
+            return m_callTarget;
+        return nullptr;
+    }
+    size_t offset() const { return m_offset; }
+    const RegisterSet& usedRegisters() const { return m_usedRegisters; }
+    RegisterSet argumentRegistersIfClobberingCheckIsEnabled() const
+    {
+        RELEASE_ASSERT(Options::clobberAllRegsInFTLICSlowPath());
+        RegisterSet argumentRegisters;
+        for (uint8_t i = 0; i < numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled(); ++i)
+            argumentRegisters.set(GPRInfo::toArgumentRegister(i));
+        return argumentRegisters;
+    }
+    int32_t indirectOffset() const
+    {
+        if (type() == Type::Indirect)
+            return m_indirectOffset;
+        return 0;
+    }
+    
+    SlowPathCallKey withCallTarget(FunctionPtr<CFunctionPtrTag> callTarget)
+    {
+        return SlowPathCallKey(usedRegisters(), callTarget, numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled(), offset(), indirectOffset());
     }
     
     void dump(PrintStream&) const;
@@ -75,44 +108,57 @@ public:
     enum DeletedValueTag { DeletedValue };
     
     SlowPathCallKey(EmptyValueTag)
-        : m_usedRegisters(RegisterSet::EmptyValue)
-        , m_callTarget(0)
-        , m_offset(0)
+        : m_type(static_cast<unsigned>(Type::Empty))
     {
+        ASSERT(Type::Empty == this->type());
     }
     
     SlowPathCallKey(DeletedValueTag)
-        : m_usedRegisters(RegisterSet::DeletedValue)
-        , m_callTarget(0)
-        , m_offset(0)
+        : m_type(static_cast<unsigned>(Type::Deleted))
     {
+        ASSERT(Type::Deleted == this->type());
     }
     
-    bool isEmptyValue() const { return m_usedRegisters.isEmptyValue(); }
-    bool isDeletedValue() const { return m_usedRegisters.isDeletedValue(); }
+    bool isEmptyValue() const { return type() == Type::Empty; }
+    bool isDeletedValue() const { return type() == Type::Deleted; }
     
     bool operator==(const SlowPathCallKey& other) const
     {
-        return m_usedRegisters == other.m_usedRegisters
-            && m_callTarget == other.m_callTarget
-            && m_offset == other.m_offset;
+        return m_offset == other.m_offset
+            && m_usedRegisters == other.m_usedRegisters
+            && numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled() == other.numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled()
+            && type() == other.type()
+            && callTarget() == other.callTarget()
+            && indirectOffset() == other.indirectOffset();
     }
     unsigned hash() const
     {
-        return m_usedRegisters.hash() + PtrHash<void*>::hash(m_callTarget) + m_offset;
+        // m_numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled is intentionally not included because it will always be 0
+        // unless Options::clobberAllRegsInFTLICSlowPath() is set, and Options::clobberAllRegsInFTLICSlowPath() is only set in debugging use cases.
+        return PtrHash<void*>::hash(callTarget().executableAddress()) + m_offset + m_usedRegisters.hash() + indirectOffset() + static_cast<unsigned>(type());
     }
 
 private:
+    static_assert(NUMBER_OF_ARGUMENT_REGISTERS <= std::numeric_limits<uint8_t>::max());
+
+    uint8_t numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled() const { return m_numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled; }
+    Type type() const { return static_cast<Type>(m_type); }
+
+    union {
+        FunctionPtr<OperationPtrTag> m_callTarget { };
+        int32_t m_indirectOffset;
+    };
+    size_t m_numberOfUsedArgumentRegistersIfClobberingCheckIsEnabled : 8 { 0 };
+    size_t m_type : 2 { static_cast<size_t>(Type::Empty) };
+    size_t m_offset : 54 { 0 };
     RegisterSet m_usedRegisters;
-    void* m_callTarget;
-    RegisterSet m_argumentRegisters;
-    ptrdiff_t m_offset;
 };
+
 
 struct SlowPathCallKeyHash {
     static unsigned hash(const SlowPathCallKey& key) { return key.hash(); }
     static bool equal(const SlowPathCallKey& a, const SlowPathCallKey& b) { return a == b; }
-    static const bool safeToCompareToEmptyOrDeleted = false;
+    static constexpr bool safeToCompareToEmptyOrDeleted = false;
 };
 
 } } // namespace JSC::FTL
@@ -120,9 +166,7 @@ struct SlowPathCallKeyHash {
 namespace WTF {
 
 template<typename T> struct DefaultHash;
-template<> struct DefaultHash<JSC::FTL::SlowPathCallKey> {
-    typedef JSC::FTL::SlowPathCallKeyHash Hash;
-};
+template<> struct DefaultHash<JSC::FTL::SlowPathCallKey> : JSC::FTL::SlowPathCallKeyHash { };
 
 template<typename T> struct HashTraits;
 template<> struct HashTraits<JSC::FTL::SlowPathCallKey> : public CustomHashTraits<JSC::FTL::SlowPathCallKey> { };

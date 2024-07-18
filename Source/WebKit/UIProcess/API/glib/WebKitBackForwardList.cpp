@@ -26,10 +26,10 @@
 #include <wtf/glib/WTFGType.h>
 
 /**
- * SECTION: WebKitBackForwardList
- * @Short_description: List of visited pages
- * @Title: WebKitBackForwardList
+ * WebKitBackForwardList:
  * @See_also: #WebKitWebView, #WebKitBackForwardListItem
+ *
+ * List of visited pages.
  *
  * WebKitBackForwardList maintains a list of visited pages used to
  * navigate to recent pages. Items are inserted in the list in the
@@ -128,7 +128,7 @@ WebKitBackForwardList* webkitBackForwardListCreate(WebBackForwardList* backForwa
     return list;
 }
 
-void webkitBackForwardListChanged(WebKitBackForwardList* backForwardList, WebBackForwardListItem* webAddedItem, const Vector<RefPtr<WebBackForwardListItem>>& webRemovedItems)
+void webkitBackForwardListChanged(WebKitBackForwardList* backForwardList, WebBackForwardListItem* webAddedItem, const Vector<Ref<WebBackForwardListItem>>& webRemovedItems)
 {
     WebKitBackForwardListItem* addedItem = webkitBackForwardListGetOrCreateItem(backForwardList, webAddedItem);
     GList* removedItems = nullptr;
@@ -138,12 +138,12 @@ void webkitBackForwardListChanged(WebKitBackForwardList* backForwardList, WebBac
         // After a session restore, we still don't have wrappers for the newly added items, so it would be possible that
         // the removed items are not in the map. In that case we create a wrapper now to pass it the changed signal, but
         // without adding it to the item map. See https://bugs.webkit.org/show_bug.cgi?id=153233.
-        GRefPtr<WebKitBackForwardListItem> removedItem = priv->itemsMap.get(webItem.get());
+        GRefPtr<WebKitBackForwardListItem> removedItem = priv->itemsMap.get(webItem.ptr());
         if (removedItem) {
             removedItems = g_list_prepend(removedItems, g_object_ref(removedItem.get()));
-            priv->itemsMap.remove(webItem.get());
+            priv->itemsMap.remove(webItem.ptr());
         } else
-            removedItems = g_list_prepend(removedItems, webkitBackForwardListItemGetOrCreate(webItem.get()));
+            removedItems = g_list_prepend(removedItems, webkitBackForwardListItemGetOrCreate(webItem.ptr()));
     }
 
     g_signal_emit(backForwardList, signals[CHANGED], 0, addedItem, removedItems, nullptr);
@@ -156,7 +156,7 @@ void webkitBackForwardListChanged(WebKitBackForwardList* backForwardList, WebBac
  *
  * Returns the current item in @back_forward_list.
  *
- * Returns: (transfer none): a #WebKitBackForwardListItem
+ * Returns: (nullable) (transfer none): a #WebKitBackForwardListItem
  *    or %NULL if @back_forward_list is empty.
  */
 WebKitBackForwardListItem* webkit_back_forward_list_get_current_item(WebKitBackForwardList* backForwardList)
@@ -172,7 +172,7 @@ WebKitBackForwardListItem* webkit_back_forward_list_get_current_item(WebKitBackF
  *
  * Returns the item that precedes the current item.
  *
- * Returns: (transfer none): the #WebKitBackForwardListItem
+ * Returns: (nullable) (transfer none): the #WebKitBackForwardListItem
  *    preceding the current item or %NULL.
  */
 WebKitBackForwardListItem* webkit_back_forward_list_get_back_item(WebKitBackForwardList* backForwardList)
@@ -188,7 +188,7 @@ WebKitBackForwardListItem* webkit_back_forward_list_get_back_item(WebKitBackForw
  *
  * Returns the item that follows the current item.
  *
- * Returns: (transfer none): the #WebKitBackForwardListItem
+ * Returns: (nullable) (transfer none): the #WebKitBackForwardListItem
  *    following the current item or %NULL.
  */
 WebKitBackForwardListItem* webkit_back_forward_list_get_forward_item(WebKitBackForwardList* backForwardList)
@@ -205,8 +205,8 @@ WebKitBackForwardListItem* webkit_back_forward_list_get_forward_item(WebKitBackF
  *
  * Returns the item at a given index relative to the current item.
  *
- * Returns: (transfer none): the #WebKitBackForwardListItem
- *    located at the specified index relative to the current item.
+ * Returns: (nullable) (transfer none): the #WebKitBackForwardListItem
+ *    located at the specified index relative to the current item or %NULL.
  */
 WebKitBackForwardListItem* webkit_back_forward_list_get_nth_item(WebKitBackForwardList* backForwardList, gint index)
 {
@@ -218,6 +218,8 @@ WebKitBackForwardListItem* webkit_back_forward_list_get_nth_item(WebKitBackForwa
 /**
  * webkit_back_forward_list_get_length:
  * @back_forward_list: a #WebKitBackForwardList
+ *
+ * Obtain the amount of items in the list.
  *
  * Returns: the length of @back_forward_list.
  */
@@ -234,7 +236,9 @@ guint webkit_back_forward_list_get_length(WebKitBackForwardList* backForwardList
  * webkit_back_forward_list_get_back_list:
  * @back_forward_list: a #WebKitBackForwardList
  *
- * Returns: (element-type WebKit2.BackForwardListItem) (transfer container): a #GList of
+ * Obtain the list of items preceding the current one.
+ *
+ * Returns: (element-type WebKitBackForwardListItem) (transfer container): a #GList of
  *    items preceding the current item.
  */
 GList* webkit_back_forward_list_get_back_list(WebKitBackForwardList* backForwardList)
@@ -249,7 +253,9 @@ GList* webkit_back_forward_list_get_back_list(WebKitBackForwardList* backForward
  * @back_forward_list: a #WebKitBackForwardList
  * @limit: the number of items to retrieve
  *
- * Returns: (element-type WebKit2.BackForwardListItem) (transfer container): a #GList of
+ * Obtain a list up to some number of items preceding the current one.
+ *
+ * Returns: (element-type WebKitBackForwardListItem) (transfer container): a #GList of
  *    items preceding the current item limited by @limit.
  */
 GList* webkit_back_forward_list_get_back_list_with_limit(WebKitBackForwardList* backForwardList, guint limit)
@@ -265,7 +271,9 @@ GList* webkit_back_forward_list_get_back_list_with_limit(WebKitBackForwardList* 
  * webkit_back_forward_list_get_forward_list:
  * @back_forward_list: a #WebKitBackForwardList
  *
- * Returns: (element-type WebKit2.BackForwardListItem) (transfer container): a #GList of
+ * Obtain the list of items following the current one.
+ *
+ * Returns: (element-type WebKitBackForwardListItem) (transfer container): a #GList of
  *    items following the current item.
  */
 GList* webkit_back_forward_list_get_forward_list(WebKitBackForwardList* backForwardList)
@@ -280,7 +288,9 @@ GList* webkit_back_forward_list_get_forward_list(WebKitBackForwardList* backForw
  * @back_forward_list: a #WebKitBackForwardList
  * @limit: the number of items to retrieve
  *
- * Returns: (element-type WebKit2.BackForwardListItem) (transfer container): a #GList of
+ * Obtain a list up to some number of items following the current one.
+ *
+ * Returns: (element-type WebKitBackForwardListItem) (transfer container): a #GList of
  *    items following the current item limited by @limit.
  */
 GList* webkit_back_forward_list_get_forward_list_with_limit(WebKitBackForwardList* backForwardList, guint limit)

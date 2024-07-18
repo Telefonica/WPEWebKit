@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,9 +37,18 @@ WI.ContentView = class ContentView extends WI.View
         this.element.classList.add("content-view");
 
         this._parentContainer = null;
+        this._isClosed = false;
+        this._visible = false;
     }
 
     // Static
+
+    static shouldNotRemoveFromDOMWhenHidden()
+    {
+        // Implemented by subclasses.
+        // Returns true if the content view should *not* be detached from the DOM when hidden.
+        return false;
+    }
 
     static createFromRepresentedObject(representedObject, extraArguments)
     {
@@ -80,16 +89,31 @@ WI.ContentView = class ContentView extends WI.View
             if (timelineType === WI.TimelineRecord.Type.RenderingFrame)
                 return new WI.RenderingFrameTimelineView(representedObject, extraArguments);
 
+            if (timelineType === WI.TimelineRecord.Type.CPU)
+                return new WI.CPUTimelineView(representedObject, extraArguments);
+
             if (timelineType === WI.TimelineRecord.Type.Memory)
                 return new WI.MemoryTimelineView(representedObject, extraArguments);
 
             if (timelineType === WI.TimelineRecord.Type.HeapAllocations)
                 return new WI.HeapAllocationsTimelineView(representedObject, extraArguments);
+
+            if (timelineType === WI.TimelineRecord.Type.Media)
+                return new WI.MediaTimelineView(representedObject, extraArguments);
+            
+            if (timelineType === WI.TimelineRecord.Type.Screenshots)
+                return new WI.ScreenshotsTimelineView(representedObject, extraArguments);
         }
 
-        if (representedObject instanceof WI.Breakpoint || representedObject instanceof WI.IssueMessage) {
+        if (representedObject instanceof WI.JavaScriptBreakpoint || representedObject instanceof WI.IssueMessage) {
             if (representedObject.sourceCodeLocation)
                 return WI.ContentView.createFromRepresentedObject(representedObject.sourceCodeLocation.displaySourceCode, extraArguments);
+        }
+
+        if (representedObject instanceof WI.LocalResourceOverride) {
+            if (representedObject.type === WI.LocalResourceOverride.InterceptType.Block || representedObject.type === WI.LocalResourceOverride.InterceptType.Request)
+                return new WI.LocalResourceOverrideRequestContentView(representedObject);
+            return WI.ContentView.createFromRepresentedObject(representedObject.localResource);
         }
 
         if (representedObject instanceof WI.DOMStorageObject)
@@ -120,7 +144,7 @@ WI.ContentView = class ContentView extends WI.View
             return new WI.FrameDOMTreeContentView(representedObject, extraArguments);
 
         if (representedObject instanceof WI.DOMSearchMatchObject) {
-            var resultView = new WI.FrameDOMTreeContentView(WI.frameResourceManager.mainFrame.domTree, extraArguments);
+            var resultView = new WI.FrameDOMTreeContentView(WI.networkManager.mainFrame.domTree, extraArguments);
             resultView.restoreFromCookie({nodeToSelect: representedObject.domNode});
             return resultView;
         }
@@ -161,6 +185,18 @@ WI.ContentView = class ContentView extends WI.View
         if (representedObject instanceof WI.Recording)
             return new WI.RecordingContentView(representedObject, extraArguments);
 
+        if (representedObject instanceof WI.ResourceCollection)
+            return new WI.ResourceCollectionContentView(representedObject, extraArguments);
+
+        if (representedObject instanceof WI.AuditTestCase || representedObject instanceof WI.AuditTestCaseResult)
+            return new WI.AuditTestCaseContentView(representedObject, extraArguments);
+
+        if (representedObject instanceof WI.AuditTestGroup || representedObject instanceof WI.AuditTestGroupResult)
+            return new WI.AuditTestGroupContentView(representedObject, extraArguments);
+
+        if (representedObject instanceof WI.Animation)
+            return new WI.AnimationContentView(representedObject, extraArguments);
+
         if (representedObject instanceof WI.Collection)
             return new WI.CollectionContentView(representedObject, extraArguments);
 
@@ -196,14 +232,16 @@ WI.ContentView = class ContentView extends WI.View
             return null;
 
         console.assert(newContentView.representedObject === resolvedRepresentedObject, "createFromRepresentedObject and resolvedRepresentedObjectForRepresentedObject are out of sync for type", representedObject.constructor.name);
-        newContentView.representedObject[WI.ContentView.ContentViewForRepresentedObjectSymbol] = newContentView;
+        if (typeof resolvedRepresentedObject === "object")
+            newContentView.representedObject[WI.ContentView.ContentViewForRepresentedObjectSymbol] = newContentView;
         return newContentView;
     }
 
     static closedContentViewForRepresentedObject(representedObject)
     {
         let resolvedRepresentedObject = WI.ContentView.resolvedRepresentedObjectForRepresentedObject(representedObject);
-        resolvedRepresentedObject[WI.ContentView.ContentViewForRepresentedObjectSymbol] = null;
+        if (typeof resolvedRepresentedObject === "object")
+            resolvedRepresentedObject[WI.ContentView.ContentViewForRepresentedObjectSymbol] = null;
     }
 
     static resolvedRepresentedObjectForRepresentedObject(representedObject)
@@ -211,26 +249,35 @@ WI.ContentView = class ContentView extends WI.View
         if (representedObject instanceof WI.Frame)
             return representedObject.mainResource;
 
-        if (representedObject instanceof WI.Breakpoint || representedObject instanceof WI.IssueMessage) {
+        if (representedObject instanceof WI.JavaScriptBreakpoint || representedObject instanceof WI.IssueMessage) {
             if (representedObject.sourceCodeLocation)
                 return representedObject.sourceCodeLocation.displaySourceCode;
+            return representedObject;
         }
 
         if (representedObject instanceof WI.DOMBreakpoint) {
             if (representedObject.domNode)
                 return WI.ContentView.resolvedRepresentedObjectForRepresentedObject(representedObject.domNode);
+            return representedObject;
         }
 
         if (representedObject instanceof WI.DOMNode) {
             if (representedObject.frame)
                 return WI.ContentView.resolvedRepresentedObjectForRepresentedObject(representedObject.frame);
+            return representedObject;
         }
 
         if (representedObject instanceof WI.DOMSearchMatchObject)
-            return WI.frameResourceManager.mainFrame.domTree;
+            return WI.networkManager.mainFrame.domTree;
 
         if (representedObject instanceof WI.SourceCodeSearchMatchObject)
             return representedObject.sourceCode;
+
+        if (representedObject instanceof WI.LocalResourceOverride) {
+            if (representedObject.type === WI.LocalResourceOverride.InterceptType.Response || representedObject.type === WI.LocalResourceOverride.InterceptType.ResponseSkippingNetwork)
+                return representedObject.localResource;
+            return representedObject;
+        }
 
         return representedObject;
     }
@@ -253,8 +300,10 @@ WI.ContentView = class ContentView extends WI.View
             return true;
         if (representedObject instanceof WI.Timeline)
             return true;
-        if (representedObject instanceof WI.Breakpoint || representedObject instanceof WI.IssueMessage)
+        if (representedObject instanceof WI.JavaScriptBreakpoint || representedObject instanceof WI.IssueMessage)
             return representedObject.sourceCodeLocation;
+        if (representedObject instanceof WI.LocalResourceOverride)
+            return true;
         if (representedObject instanceof WI.DOMStorageObject)
             return true;
         if (representedObject instanceof WI.CookieStorageObject)
@@ -285,14 +334,34 @@ WI.ContentView = class ContentView extends WI.View
             return true;
         if (representedObject instanceof WI.Recording)
             return true;
+        if (representedObject instanceof WI.AuditTestCase || representedObject instanceof WI.AuditTestGroup
+            || representedObject instanceof WI.AuditTestCaseResult || representedObject instanceof WI.AuditTestGroupResult)
+            return true;
+        if (representedObject instanceof WI.Animation)
+            return true;
         if (representedObject instanceof WI.Collection)
             return true;
         if (typeof representedObject === "string" || representedObject instanceof String)
+            return true;
+        if (representedObject[WI.ContentView.isViewableSymbol])
             return true;
         return false;
     }
 
     // Public
+
+    get isClosed() { return this._isClosed; }
+
+    get visible()
+    {
+        return !this.isClosed && this._visible;
+    }
+
+    set visible(value)
+    {
+        this._visible = !!value;
+        this.element.classList.toggle("not-visible", !this._visible);
+    }
 
     get representedObject()
     {
@@ -311,16 +380,6 @@ WI.ContentView = class ContentView extends WI.View
         return this._parentContainer;
     }
 
-    get visible()
-    {
-        return this._visible;
-    }
-
-    set visible(flag)
-    {
-        this._visible = flag;
-    }
-
     get scrollableElements()
     {
         // Implemented by subclasses.
@@ -330,6 +389,11 @@ WI.ContentView = class ContentView extends WI.View
     get shouldKeepElementsScrolledToBottom()
     {
         // Implemented by subclasses.
+        return false;
+    }
+
+    get shouldSaveStateWhenHidden()
+    {
         return false;
     }
 
@@ -351,19 +415,10 @@ WI.ContentView = class ContentView extends WI.View
         return WI.dockedConfigurationSupportsSplitContentBrowser();
     }
 
-    shown()
-    {
-        // Implemented by subclasses.
-    }
-
-    hidden()
-    {
-        // Implemented by subclasses.
-    }
-
     closed()
     {
         // Implemented by subclasses.
+        this._isClosed = true;
     }
 
     saveToCookie(cookie)
@@ -437,6 +492,11 @@ WI.ContentView = class ContentView extends WI.View
         // Implemented by subclasses.
     }
 
+    searchHidden()
+    {
+        // Implemented by subclasses.
+    }
+
     searchCleared()
     {
         // Implemented by subclasses.
@@ -469,4 +529,5 @@ WI.ContentView.Event = {
     NavigationItemsDidChange: "content-view-navigation-items-did-change"
 };
 
+WI.ContentView.isViewableSymbol = Symbol("is-viewable");
 WI.ContentView.ContentViewForRepresentedObjectSymbol = Symbol("content-view-for-represented-object");

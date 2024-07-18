@@ -8,22 +8,23 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_RED_PAYLOAD_SPLITTER_H_
-#define WEBRTC_MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_RED_PAYLOAD_SPLITTER_H_
+#ifndef MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_RED_PAYLOAD_SPLITTER_H_
+#define MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_RED_PAYLOAD_SPLITTER_H_
 
-#include "webrtc/modules/audio_coding/neteq/red_payload_splitter.h"
-
-#include "webrtc/test/gmock.h"
+#include "modules/audio_coding/neteq/red_payload_splitter.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
 class MockRedPayloadSplitter : public RedPayloadSplitter {
  public:
-  MOCK_METHOD1(SplitRed, bool(PacketList* packet_list));
-  MOCK_METHOD2(CheckRedPayloads,
-               int(PacketList* packet_list,
-                   const DecoderDatabase& decoder_database));
+  MOCK_METHOD(bool, SplitRed, (PacketList * packet_list), (override));
+  MOCK_METHOD(void,
+              CheckRedPayloads,
+              (PacketList * packet_list,
+               const DecoderDatabase& decoder_database),
+              (override));
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_RED_PAYLOAD_SPLITTER_H_
+#endif  // MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_RED_PAYLOAD_SPLITTER_H_

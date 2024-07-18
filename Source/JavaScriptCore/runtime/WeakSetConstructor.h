@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple, Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,13 +32,13 @@ namespace JSC {
 class WeakSetPrototype;
 class GetterSetter;
 
-class WeakSetConstructor : public InternalFunction {
+class WeakSetConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
 
     static WeakSetConstructor* create(VM& vm, Structure* structure, WeakSetPrototype* prototype, GetterSetter*)
     {
-        WeakSetConstructor* constructor = new (NotNull, allocateCell<WeakSetConstructor>(vm.heap)) WeakSetConstructor(vm, structure);
+        WeakSetConstructor* constructor = new (NotNull, allocateCell<WeakSetConstructor>(vm)) WeakSetConstructor(vm, structure);
         constructor->finishCreation(vm, prototype);
         return constructor;
     }
@@ -47,17 +47,13 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
 private:
-    WeakSetConstructor(VM& vm, Structure* structure)
-        : Base(vm, structure)
-    {
-    }
+    WeakSetConstructor(VM&, Structure*);
     void finishCreation(VM&, WeakSetPrototype*);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(WeakSetConstructor, InternalFunction);
 
 } // namespace JSC

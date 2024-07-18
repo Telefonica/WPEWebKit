@@ -28,13 +28,10 @@
 
 #if ENABLE(B3_JIT)
 
-#include "AirArgInlines.h"
 #include "AirCode.h"
 #include "AirInsertionSet.h"
 #include "AirInstInlines.h"
 #include "AirPhaseScope.h"
-#include "StackAlignment.h"
-#include <wtf/ListDump.h>
 
 namespace JSC { namespace B3 { namespace Air {
 
@@ -71,9 +68,48 @@ void lowerStackArgs(Code& code)
         for (unsigned instIndex = 0; instIndex < block->size(); ++instIndex) {
             Inst& inst = block->at(instIndex);
 
+            if (isARM64() && (inst.kind.opcode == Lea32 || inst.kind.opcode == Lea64)) {
+                // On ARM64, Lea is just an add. We can't handle this below because
+                // taking into account the Width to see if we can compute the immediate
+                // is wrong.
+                auto lowerArmLea = [&] (Value::OffsetType offset, Tmp base) {
+                    ASSERT(inst.args[1].isTmp());
+
+                    if (Arg::isValidImmForm(offset))
+                        inst = Inst(inst.kind.opcode == Lea32 ? Add32 : Add64, inst.origin, Arg::imm(offset), base, inst.args[1]);
+                    else {
+                        Air::Tmp tmp = Air::Tmp(extendedOffsetAddrRegister());
+                        Arg offsetArg = Arg::bigImm(offset);
+                        insertionSet.insert(instIndex, Move, inst.origin, offsetArg, tmp);
+                        inst = Inst(inst.kind.opcode == Lea32 ? Add32 : Add64, inst.origin, tmp, base, inst.args[1]);
+                    }
+                };
+
+                switch (inst.args[0].kind()) {
+                case Arg::Stack: {
+                    StackSlot* slot = inst.args[0].stackSlot();
+                    lowerArmLea(inst.args[0].offset() + slot->offsetFromFP(), Tmp(GPRInfo::callFrameRegister));
+                    break;
+                }
+                case Arg::CallArg:
+                    lowerArmLea(inst.args[0].offset() - code.frameSize(), Tmp(GPRInfo::callFrameRegister));
+                    break;
+                case Arg::Addr:
+                    lowerArmLea(inst.args[0].offset(), inst.args[0].base());
+                    break;
+                case Arg::ExtendedOffsetAddr:
+                    ASSERT_NOT_REACHED();
+                    break;
+                default:
+                    break;
+                }
+
+                continue;
+            }
+
             inst.forEachArg(
                 [&] (Arg& arg, Arg::Role role, Bank, Width width) {
-                    auto stackAddr = [&] (Value::OffsetType offsetFromFP) -> Arg {
+                    auto stackAddr = [&] (unsigned instIndex, Value::OffsetType offsetFromFP) -> Arg {
                         int32_t offsetFromSP = offsetFromFP + code.frameSize();
 
                         if (inst.admitsExtendedOffsetAddr(arg)) {
@@ -90,9 +126,8 @@ void lowerStackArgs(Code& code)
                         result = Arg::addr(Air::Tmp(MacroAssembler::stackPointerRegister), offsetFromSP);
                         if (result.isValidForm(width))
                             return result;
-#if CPU(ARM64)
-                        ASSERT(pinnedExtendedOffsetAddrRegister());
-                        Air::Tmp tmp = Air::Tmp(*pinnedExtendedOffsetAddrRegister());
+#if CPU(ARM64) || CPU(RISCV64)
+                        Air::Tmp tmp = Air::Tmp(extendedOffsetAddrRegister());
 
                         Arg largeOffset = Arg::isValidImmForm(offsetFromSP) ? Arg::imm(offsetFromSP) : Arg::bigImm(offsetFromSP);
                         insertionSet.insert(instIndex, Move, inst.origin, largeOffset, tmp);
@@ -100,6 +135,7 @@ void lowerStackArgs(Code& code)
                         result = Arg::addr(tmp, 0);
                         return result;
 #elif CPU(X86_64)
+                        UNUSED_PARAM(instIndex);
                         // Can't happen on x86: immediates are always big enough for frame size.
                         RELEASE_ASSERT_NOT_REACHED();
 #else
@@ -120,16 +156,27 @@ void lowerStackArgs(Code& code)
                             RELEASE_ASSERT(slot->byteSize() == 8);
                             RELEASE_ASSERT(width == Width32);
 
-                            RELEASE_ASSERT(isValidForm(StoreZero32, Arg::Stack));
+#if CPU(ARM64) || CPU(RISCV64)
+                            Air::Opcode storeOpcode = Store32;
+                            Air::Arg::Kind operandKind = Arg::ZeroReg;
+                            Air::Arg operand = Arg::zeroReg();
+#elif CPU(X86_64)
+                            Air::Opcode storeOpcode = Move32;
+                            Air::Arg::Kind operandKind = Arg::Imm;
+                            Air::Arg operand = Arg::imm(0);
+#else
+#error Unhandled architecture.
+#endif
+                            RELEASE_ASSERT(isValidForm(storeOpcode, operandKind, Arg::Stack));
                             insertionSet.insert(
-                                instIndex + 1, StoreZero32, inst.origin,
-                                stackAddr(arg.offset() + 4 + slot->offsetFromFP()));
+                                instIndex + 1, storeOpcode, inst.origin, operand,
+                                stackAddr(instIndex + 1, arg.offset() + 4 + slot->offsetFromFP()));
                         }
-                        arg = stackAddr(arg.offset() + slot->offsetFromFP());
+                        arg = stackAddr(instIndex, arg.offset() + slot->offsetFromFP());
                         break;
                     }
                     case Arg::CallArg:
-                        arg = stackAddr(arg.offset() - code.frameSize());
+                        arg = stackAddr(instIndex, arg.offset() - code.frameSize());
                         break;
                     default:
                         break;

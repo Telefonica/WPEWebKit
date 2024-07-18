@@ -43,7 +43,7 @@ DatabaseAuthorizer::DatabaseAuthorizer(const String& databaseInfoTableName)
     , m_databaseInfoTableName(databaseInfoTableName)
 {
     reset();
-    addWhitelistedFunctions();
+    addAllowedFunctions();
 }
 
 void DatabaseAuthorizer::reset()
@@ -58,68 +58,68 @@ void DatabaseAuthorizer::resetDeletes()
     m_hadDeletes = false;
 }
 
-void DatabaseAuthorizer::addWhitelistedFunctions()
+void DatabaseAuthorizer::addAllowedFunctions()
 {
     // SQLite functions used to help implement some operations
     // ALTER TABLE helpers
-    m_whitelistedFunctions.add("sqlite_rename_table");
-    m_whitelistedFunctions.add("sqlite_rename_trigger");
+    m_allowedFunctions.add("sqlite_rename_table"_s);
+    m_allowedFunctions.add("sqlite_rename_trigger"_s);
     // GLOB helpers
-    m_whitelistedFunctions.add("glob");
+    m_allowedFunctions.add("glob"_s);
 
     // SQLite core functions
-    m_whitelistedFunctions.add("abs");
-    m_whitelistedFunctions.add("changes");
-    m_whitelistedFunctions.add("coalesce");
-    m_whitelistedFunctions.add("glob");
-    m_whitelistedFunctions.add("ifnull");
-    m_whitelistedFunctions.add("hex");
-    m_whitelistedFunctions.add("last_insert_rowid");
-    m_whitelistedFunctions.add("length");
-    m_whitelistedFunctions.add("like");
-    m_whitelistedFunctions.add("lower");
-    m_whitelistedFunctions.add("ltrim");
-    m_whitelistedFunctions.add("max");
-    m_whitelistedFunctions.add("min");
-    m_whitelistedFunctions.add("nullif");
-    m_whitelistedFunctions.add("quote");
-    m_whitelistedFunctions.add("replace");
-    m_whitelistedFunctions.add("round");
-    m_whitelistedFunctions.add("rtrim");
-    m_whitelistedFunctions.add("soundex");
-    m_whitelistedFunctions.add("sqlite_source_id");
-    m_whitelistedFunctions.add("sqlite_version");
-    m_whitelistedFunctions.add("substr");
-    m_whitelistedFunctions.add("total_changes");
-    m_whitelistedFunctions.add("trim");
-    m_whitelistedFunctions.add("typeof");
-    m_whitelistedFunctions.add("upper");
-    m_whitelistedFunctions.add("zeroblob");
+    m_allowedFunctions.add("abs"_s);
+    m_allowedFunctions.add("changes"_s);
+    m_allowedFunctions.add("coalesce"_s);
+    m_allowedFunctions.add("glob"_s);
+    m_allowedFunctions.add("ifnull"_s);
+    m_allowedFunctions.add("hex"_s);
+    m_allowedFunctions.add("last_insert_rowid"_s);
+    m_allowedFunctions.add("length"_s);
+    m_allowedFunctions.add("like"_s);
+    m_allowedFunctions.add("lower"_s);
+    m_allowedFunctions.add("ltrim"_s);
+    m_allowedFunctions.add("max"_s);
+    m_allowedFunctions.add("min"_s);
+    m_allowedFunctions.add("nullif"_s);
+    m_allowedFunctions.add("quote"_s);
+    m_allowedFunctions.add("replace"_s);
+    m_allowedFunctions.add("round"_s);
+    m_allowedFunctions.add("rtrim"_s);
+    m_allowedFunctions.add("soundex"_s);
+    m_allowedFunctions.add("sqlite_source_id"_s);
+    m_allowedFunctions.add("sqlite_version"_s);
+    m_allowedFunctions.add("substr"_s);
+    m_allowedFunctions.add("total_changes"_s);
+    m_allowedFunctions.add("trim"_s);
+    m_allowedFunctions.add("typeof"_s);
+    m_allowedFunctions.add("upper"_s);
+    m_allowedFunctions.add("zeroblob"_s);
 
     // SQLite date and time functions
-    m_whitelistedFunctions.add("date");
-    m_whitelistedFunctions.add("time");
-    m_whitelistedFunctions.add("datetime");
-    m_whitelistedFunctions.add("julianday");
-    m_whitelistedFunctions.add("strftime");
+    m_allowedFunctions.add("date"_s);
+    m_allowedFunctions.add("time"_s);
+    m_allowedFunctions.add("datetime"_s);
+    m_allowedFunctions.add("julianday"_s);
+    m_allowedFunctions.add("strftime"_s);
 
     // SQLite aggregate functions
     // max() and min() are already in the list
-    m_whitelistedFunctions.add("avg");
-    m_whitelistedFunctions.add("count");
-    m_whitelistedFunctions.add("group_concat");
-    m_whitelistedFunctions.add("sum");
-    m_whitelistedFunctions.add("total");
+    m_allowedFunctions.add("avg"_s);
+    m_allowedFunctions.add("count"_s);
+    m_allowedFunctions.add("group_concat"_s);
+    m_allowedFunctions.add("sum"_s);
+    m_allowedFunctions.add("total"_s);
 
     // SQLite FTS functions
-    m_whitelistedFunctions.add("match");
-    m_whitelistedFunctions.add("snippet");
-    m_whitelistedFunctions.add("offsets");
-    m_whitelistedFunctions.add("optimize");
+    m_allowedFunctions.add("match"_s);
+    m_allowedFunctions.add("snippet"_s);
+    m_allowedFunctions.add("offsets"_s);
+    m_allowedFunctions.add("optimize"_s);
 
     // SQLite ICU functions
     // like(), lower() and upper() are already in the list
-    m_whitelistedFunctions.add("regexp");
+    m_allowedFunctions.add("regexp"_s);
 }
 
 int DatabaseAuthorizer::createTable(const String& tableName)
@@ -359,7 +359,7 @@ int DatabaseAuthorizer::allowDetach(const String&)
 
 int DatabaseAuthorizer::allowFunction(const String& functionName)
 {
-    if (m_securityEnabled && !m_whitelistedFunctions.contains(functionName))
+    if (m_securityEnabled && !m_allowedFunctions.contains(functionName))
         return SQLAuthDeny;
 
     return SQLAuthAllow;

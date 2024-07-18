@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if !PLATFORM(IOS_SIMULATOR)
+#if HAVE(IOSURFACE)
 
 #if PLATFORM(MAC) || USE(APPLE_INTERNAL_SDK)
 
@@ -40,12 +40,6 @@
 
 typedef struct __IOSurface *IOSurfaceRef;
 
-#if PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED < 110000
-enum {
-    kIOSurfaceLockReadOnly  = 0x00000001,
-};
-#endif
-
 #endif
 
 WTF_EXTERN_C_BEGIN
@@ -54,6 +48,7 @@ extern const CFStringRef kIOSurfaceAllocSize;
 extern const CFStringRef kIOSurfaceBytesPerElement;
 extern const CFStringRef kIOSurfaceBytesPerRow;
 extern const CFStringRef kIOSurfaceCacheMode;
+extern const CFStringRef kIOSurfaceColorSpace;
 extern const CFStringRef kIOSurfaceHeight;
 extern const CFStringRef kIOSurfacePixelFormat;
 extern const CFStringRef kIOSurfaceWidth;
@@ -76,10 +71,13 @@ size_t IOSurfaceGetHeight(IOSurfaceRef buffer);
 size_t IOSurfaceGetPropertyMaximum(CFStringRef property);
 size_t IOSurfaceGetWidth(IOSurfaceRef buffer);
 OSType IOSurfaceGetPixelFormat(IOSurfaceRef buffer);
+void IOSurfaceIncrementUseCount(IOSurfaceRef buffer);
 Boolean IOSurfaceIsInUse(IOSurfaceRef buffer);
 IOReturn IOSurfaceLock(IOSurfaceRef buffer, uint32_t options, uint32_t *seed);
 IOSurfaceRef IOSurfaceLookupFromMachPort(mach_port_t);
 IOReturn IOSurfaceUnlock(IOSurfaceRef buffer, uint32_t options, uint32_t *seed);
+size_t IOSurfaceGetWidthOfPlane(IOSurfaceRef buffer, size_t planeIndex);
+size_t IOSurfaceGetHeightOfPlane(IOSurfaceRef buffer, size_t planeIndex);
 
 WTF_EXTERN_C_END
 
@@ -89,18 +87,29 @@ WTF_EXTERN_C_END
 
 #else
 
-#if (PLATFORM(IOS) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 110000) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 101300)
-
 #import <IOSurface/IOSurfaceTypes.h>
 
-#else
-enum {
-    kIOSurfacePurgeableNonVolatile = 0,
-    kIOSurfacePurgeableVolatile = 1,
-    kIOSurfacePurgeableEmpty = 2,
-    kIOSurfacePurgeableKeepCurrent = 3,
+WTF_EXTERN_C_BEGIN
+
+#if HAVE(IOSURFACE_SET_OWNERSHIP) || HAVE(IOSURFACE_SET_OWNERSHIP_IDENTITY)
+typedef CF_ENUM(int, IOSurfaceMemoryLedgerTags) {
+    kIOSurfaceMemoryLedgerTagDefault     = 0x00000001,
+    kIOSurfaceMemoryLedgerTagNetwork     = 0x00000002,
+    kIOSurfaceMemoryLedgerTagMedia       = 0x00000003,
+    kIOSurfaceMemoryLedgerTagGraphics    = 0x00000004,
+    kIOSurfaceMemoryLedgerTagNeural      = 0x00000005,
 };
 #endif
+
+#if HAVE(IOSURFACE_SET_OWNERSHIP)
+IOReturn IOSurfaceSetOwnership(IOSurfaceRef buffer, task_t newOwner, int newLedgerTag, uint32_t newLedgerOptions);
+#endif
+
+#if HAVE(IOSURFACE_SET_OWNERSHIP_IDENTITY)
+kern_return_t IOSurfaceSetOwnershipIdentity(IOSurfaceRef buffer, mach_port_t task_id_token, int newLedgerTag, uint32_t newLedgerOptions);
+#endif
+
+WTF_EXTERN_C_END
 
 #endif
 
@@ -110,20 +119,22 @@ IOReturn IOSurfaceSetPurgeable(IOSurfaceRef buffer, uint32_t newState, uint32_t 
 
 WTF_EXTERN_C_END
 
-#if PLATFORM(IOS)
+#if HAVE(IOSURFACE_ACCELERATOR)
 #if USE(APPLE_INTERNAL_SDK)
 
 #import <IOSurfaceAccelerator/IOSurfaceAccelerator.h>
 
 #else
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED < 110000
+#if PLATFORM(WATCHOS) || PLATFORM(APPLETV)
 typedef uint32_t IOSurfaceID;
 #endif
 
 typedef struct __IOSurfaceAccelerator *IOSurfaceAcceleratorRef;
 
 WTF_EXTERN_C_BEGIN
+
+extern const CFStringRef kIOSurfaceAcceleratorUnwireSurfaceKey;
 
 IOReturn IOSurfaceAcceleratorCreate(CFAllocatorRef, CFDictionaryRef properties, IOSurfaceAcceleratorRef* acceleratorOut);
 CFRunLoopSourceRef IOSurfaceAcceleratorGetRunLoopSource(IOSurfaceAcceleratorRef);
@@ -141,6 +152,6 @@ IOReturn IOSurfaceAcceleratorTransformSurface(IOSurfaceAcceleratorRef, IOSurface
 WTF_EXTERN_C_END
 
 #endif // USE(APPLE_INTERNAL_SDK)
-#endif // PLATFORM(IOS)
+#endif // HAVE(IOSURFACE_ACCELERATOR)
 
-#endif // !PLATFORM(IOS_SIMULATOR)
+#endif // HAVE(IOSURFACE)

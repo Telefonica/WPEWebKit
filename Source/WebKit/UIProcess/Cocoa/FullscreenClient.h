@@ -27,21 +27,21 @@
 
 #import "WKFoundation.h"
 
-#if WK_API_ENABLED
-
 #import "APIFullscreenClient.h"
-#import "WeakObjCPtr.h"
+#import "WKWebView.h"
 #import <wtf/RetainPtr.h>
+#import <wtf/WeakObjCPtr.h>
 
-@class NSView;
 @protocol _WKFullscreenDelegate;
 
 namespace WebKit {
 
 class FullscreenClient : public API::FullscreenClient {
 public:
-    explicit FullscreenClient(NSView *);
+    explicit FullscreenClient(WKWebView *);
     ~FullscreenClient() { };
+
+    bool isType(API::FullscreenClient::Type target) const override { return target == API::FullscreenClient::WebKitType; };
 
     RetainPtr<id<_WKFullscreenDelegate>> delegate();
     void setDelegate(id<_WKFullscreenDelegate>);
@@ -52,17 +52,26 @@ public:
     void didExitFullscreen(WebPageProxy*) override;
 
 private:
-    NSView *m_webView;
+    WKWebView *m_webView;
     WeakObjCPtr<id <_WKFullscreenDelegate> > m_delegate;
 
     struct {
+#if PLATFORM(MAC)
         bool webViewWillEnterFullscreen : 1;
         bool webViewDidEnterFullscreen : 1;
         bool webViewWillExitFullscreen : 1;
         bool webViewDidExitFullscreen : 1;
+#else
+        bool webViewWillEnterElementFullscreen : 1;
+        bool webViewDidEnterElementFullscreen : 1;
+        bool webViewWillExitElementFullscreen : 1;
+        bool webViewDidExitElementFullscreen : 1;
+#endif
     } m_delegateMethods;
 };
-    
+
 } // namespace WebKit
 
-#endif // WK_API_ENABLED
+SPECIALIZE_TYPE_TRAITS_BEGIN(WebKit::FullscreenClient) \
+static bool isType(const API::FullscreenClient& client) { return client.isType(API::FullscreenClient::WebKitType); } \
+SPECIALIZE_TYPE_TRAITS_END()

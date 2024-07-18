@@ -8,43 +8,26 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/remote_bitrate_estimator/overuse_estimator.h"
+#include "modules/remote_bitrate_estimator/overuse_estimator.h"
 
-#include <assert.h>
 #include <math.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include <algorithm>
 
-#include "webrtc/base/logging.h"
-#include "webrtc/modules/remote_bitrate_estimator/include/bwe_defines.h"
-#include "webrtc/modules/remote_bitrate_estimator/test/bwe_test_logging.h"
+#include "api/network_state_predictor.h"
+#include "modules/remote_bitrate_estimator/test/bwe_test_logging.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
+namespace {
 
-enum { kMinFramePeriodHistoryLength = 60 };
-enum { kDeltaCounterMax = 1000 };
+constexpr int kMinFramePeriodHistoryLength = 60;
+constexpr int kDeltaCounterMax = 1000;
 
-OveruseEstimator::OveruseEstimator(const OverUseDetectorOptions& options)
-    : options_(options),
-      num_of_deltas_(0),
-      slope_(options_.initial_slope),
-      offset_(options_.initial_offset),
-      prev_offset_(options_.initial_offset),
-      E_(),
-      process_noise_(),
-      avg_noise_(options_.initial_avg_noise),
-      var_noise_(options_.initial_var_noise),
-      ts_delta_hist_() {
-  memcpy(E_, options_.initial_e, sizeof(E_));
-  memcpy(process_noise_, options_.initial_process_noise,
-         sizeof(process_noise_));
-}
+}  // namespace
 
-OveruseEstimator::~OveruseEstimator() {
-  ts_delta_hist_.clear();
-}
+OveruseEstimator::OveruseEstimator() = default;
 
 void OveruseEstimator::Update(int64_t t_delta,
                               double ts_delta,
@@ -73,12 +56,12 @@ void OveruseEstimator::Update(int64_t t_delta,
   }
 
   const double h[2] = {fs_delta, 1.0};
-  const double Eh[2] = {E_[0][0]*h[0] + E_[0][1]*h[1],
-                        E_[1][0]*h[0] + E_[1][1]*h[1]};
+  const double Eh[2] = {E_[0][0] * h[0] + E_[0][1] * h[1],
+                        E_[1][0] * h[0] + E_[1][1] * h[1]};
 
   BWE_TEST_LOGGING_PLOT(1, "d_ms", now_ms, slope_ * h[0] - offset_);
 
-  const double residual = t_ts_delta - slope_*h[0] - offset_;
+  const double residual = t_ts_delta - slope_ * h[0] - offset_;
 
   const bool in_stable_state =
       (current_hypothesis == BandwidthUsage::kBwNormal);
@@ -92,13 +75,12 @@ void OveruseEstimator::Update(int64_t t_delta,
                         min_frame_period, in_stable_state);
   }
 
-  const double denom = var_noise_ + h[0]*Eh[0] + h[1]*Eh[1];
+  const double denom = var_noise_ + h[0] * Eh[0] + h[1] * Eh[1];
 
-  const double K[2] = {Eh[0] / denom,
-                       Eh[1] / denom};
+  const double K[2] = {Eh[0] / denom, Eh[1] / denom};
 
-  const double IKh[2][2] = {{1.0 - K[0]*h[0], -K[0]*h[1]},
-                            {-K[1]*h[0], 1.0 - K[1]*h[1]}};
+  const double IKh[2][2] = {{1.0 - K[0] * h[0], -K[0] * h[1]},
+                            {-K[1] * h[0], 1.0 - K[1] * h[1]}};
   const double e00 = E_[0][0];
   const double e01 = E_[0][1];
 
@@ -109,12 +91,14 @@ void OveruseEstimator::Update(int64_t t_delta,
   E_[1][1] = e01 * IKh[1][0] + E_[1][1] * IKh[1][1];
 
   // The covariance matrix must be positive semi-definite.
-  bool positive_semi_definite = E_[0][0] + E_[1][1] >= 0 &&
+  bool positive_semi_definite =
+      E_[0][0] + E_[1][1] >= 0 &&
       E_[0][0] * E_[1][1] - E_[0][1] * E_[1][0] >= 0 && E_[0][0] >= 0;
-  assert(positive_semi_definite);
+  RTC_DCHECK(positive_semi_definite);
   if (!positive_semi_definite) {
-    LOG(LS_ERROR) << "The over-use estimator's covariance matrix is no longer "
-                     "semi-definite.";
+    RTC_LOG(LS_ERROR)
+        << "The over-use estimator's covariance matrix is no longer "
+           "semi-definite.";
   }
 
   slope_ = slope_ + K[0] * residual;
@@ -146,19 +130,18 @@ void OveruseEstimator::UpdateNoiseEstimate(double residual,
     return;
   }
   // Faster filter during startup to faster adapt to the jitter level
-  // of the network. |alpha| is tuned for 30 frames per second, but is scaled
-  // according to |ts_delta|.
+  // of the network. `alpha` is tuned for 30 frames per second, but is scaled
+  // according to `ts_delta`.
   double alpha = 0.01;
-  if (num_of_deltas_ > 10*30) {
+  if (num_of_deltas_ > 10 * 30) {
     alpha = 0.002;
   }
-  // Only update the noise estimate if we're not over-using. |beta| is a
+  // Only update the noise estimate if we're not over-using. `beta` is a
   // function of alpha and the time delta since the previous update.
   const double beta = pow(1 - alpha, ts_delta * 30.0 / 1000.0);
-  avg_noise_ = beta * avg_noise_
-              + (1 - beta) * residual;
-  var_noise_ = beta * var_noise_
-              + (1 - beta) * (avg_noise_ - residual) * (avg_noise_ - residual);
+  avg_noise_ = beta * avg_noise_ + (1 - beta) * residual;
+  var_noise_ = beta * var_noise_ +
+               (1 - beta) * (avg_noise_ - residual) * (avg_noise_ - residual);
   if (var_noise_ < 1) {
     var_noise_ = 1;
   }

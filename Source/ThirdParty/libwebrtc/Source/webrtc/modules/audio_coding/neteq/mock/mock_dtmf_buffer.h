@@ -8,31 +8,28 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_DTMF_BUFFER_H_
-#define WEBRTC_MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_DTMF_BUFFER_H_
+#ifndef MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_DTMF_BUFFER_H_
+#define MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_DTMF_BUFFER_H_
 
-#include "webrtc/modules/audio_coding/neteq/dtmf_buffer.h"
-
-#include "webrtc/test/gmock.h"
+#include "modules/audio_coding/neteq/dtmf_buffer.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
 class MockDtmfBuffer : public DtmfBuffer {
  public:
   MockDtmfBuffer(int fs) : DtmfBuffer(fs) {}
-  virtual ~MockDtmfBuffer() { Die(); }
-  MOCK_METHOD0(Die, void());
-  MOCK_METHOD0(Flush,
-      void());
-  MOCK_METHOD1(InsertEvent,
-      int(const DtmfEvent& event));
-  MOCK_METHOD2(GetEvent,
-      bool(uint32_t current_timestamp, DtmfEvent* event));
-  MOCK_CONST_METHOD0(Length,
-      size_t());
-  MOCK_CONST_METHOD0(Empty,
-      bool());
+  ~MockDtmfBuffer() override { Die(); }
+  MOCK_METHOD(void, Die, ());
+  MOCK_METHOD(void, Flush, (), (override));
+  MOCK_METHOD(int, InsertEvent, (const DtmfEvent& event), (override));
+  MOCK_METHOD(bool,
+              GetEvent,
+              (uint32_t current_timestamp, DtmfEvent* event),
+              (override));
+  MOCK_METHOD(size_t, Length, (), (const, override));
+  MOCK_METHOD(bool, Empty, (), (const, override));
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_DTMF_BUFFER_H_
+#endif  // MODULES_AUDIO_CODING_NETEQ_MOCK_MOCK_DTMF_BUFFER_H_

@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if ENABLE(GAMEPAD) && (defined(__LP64__) || PLATFORM(IOS))
+#if ENABLE(GAMEPAD)
 
 #include "GamepadProvider.h"
 #include <wtf/HashMap.h>
@@ -54,6 +54,15 @@ public:
     WEBCORE_EXPORT void startMonitoringInput();
 
     void gamepadHadInput(GameControllerGamepad&, bool hadButtonPresses);
+    void prewarmGameControllerDevicesIfNecessary();
+
+    void makeInvisibleGamepadsVisible();
+
+    size_t numberOfConnectedGamepads() const { return m_gamepadMap.size(); };
+
+#if !HAVE(GCCONTROLLER_HID_DEVICE_CHECK)
+    static bool willHandleVendorAndProduct(uint16_t vendorID, uint16_t productID);
+#endif
 
 private:
     GameControllerGamepadProvider();
@@ -70,9 +79,7 @@ private:
 
     void inputNotificationTimerFired();
 
-    void makeInvisibileGamepadsVisible();
-
-    HashMap<GCController *, std::unique_ptr<GameControllerGamepad>> m_gamepadMap;
+    HashMap<CFTypeRef, std::unique_ptr<GameControllerGamepad>> m_gamepadMap;
     Vector<PlatformGamepad*> m_gamepadVector;
     HashSet<PlatformGamepad*> m_invisibleGamepads;
 
@@ -80,9 +87,9 @@ private:
     RetainPtr<NSObject> m_disconnectObserver;
 
     RunLoop::Timer<GameControllerGamepadProvider> m_inputNotificationTimer;
-    bool m_shouldMakeInvisibileGamepadsVisible { false };
+    bool m_shouldMakeInvisibleGamepadsVisible { false };
 };
 
 } // namespace WebCore
 
-#endif // ENABLE(GAMEPAD) && (defined(__LP64__) || PLATFORM(IOS))
+#endif // ENABLE(GAMEPAD)

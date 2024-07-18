@@ -28,10 +28,10 @@ using namespace WebKit;
 using namespace WebCore;
 
 /**
- * SECTION: WebKitWebEditor
- * @Short_description: Access to editing capabilities of a #WebKitWebPage
- * @Title: WebKitWebEditor
+ * WebKitWebEditor:
  * @See_also: #WebKitWebPage
+ *
+ * Access to editing capabilities of a #WebKitWebPage.
  *
  * The WebKitWebEditor provides access to various editing capabilities of
  * a #WebKitWebPage such as a possibility to react to the current selection in
@@ -82,7 +82,7 @@ public:
     }
 
 private:
-    void didChangeSelection(WebPage&, StringImpl*) override
+    void didChangeSelection(WebPage&, const String&) final
     {
         g_signal_emit(m_editor, signals[SELECTION_CHANGED], 0);
     }
@@ -94,7 +94,7 @@ WebKitWebEditor* webkitWebEditorCreate(WebKitWebPage* webPage)
 {
     WebKitWebEditor* editor = WEBKIT_WEB_EDITOR(g_object_new(WEBKIT_TYPE_WEB_EDITOR, nullptr));
     editor->priv->webPage = webPage;
-    webkitWebPageGetPage(webPage)->setInjectedBundleEditorClient(std::make_unique<PageEditorClient>(editor));
+    webkitWebPageGetPage(webPage)->setInjectedBundleEditorClient(makeUnique<PageEditorClient>(editor));
     return editor;
 }
 

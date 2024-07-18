@@ -10,7 +10,7 @@
 
 /*
  *
- * Copyright (c) 2001-2006, Cisco Systems, Inc.
+ * Copyright (c) 2001-2017, Cisco Systems, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,7 +43,6 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
 
 #ifndef NULL_CIPHER_H
 #define NULL_CIPHER_H

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Igalia S.L.
+ * Copyright (C) 2011, 2020 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,13 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WebContextMenuProxyGtk_h
-#define WebContextMenuProxyGtk_h
+#pragma once
 
 #if ENABLE(CONTEXT_MENUS)
 
 #include "WebContextMenuItemGlib.h"
 #include "WebContextMenuProxy.h"
+#include <WebCore/GtkVersioning.h>
 #include <WebCore/IntPoint.h>
 #include <wtf/HashMap.h>
 #include <wtf/glib/GRefPtr.h>
@@ -42,35 +42,35 @@ class WebContextMenuItem;
 class WebContextMenuItemData;
 class WebPageProxy;
 
-class WebContextMenuProxyGtk : public WebContextMenuProxy {
+class WebContextMenuProxyGtk final : public WebContextMenuProxy {
 public:
-    static auto create(GtkWidget* widget, WebPageProxy& page, const ContextMenuContextData& context, const UserData& userData)
+    static auto create(GtkWidget* widget, WebPageProxy& page, ContextMenuContextData&& context, const UserData& userData)
     {
-        return adoptRef(*new WebContextMenuProxyGtk(widget, page, context, userData));
+        return adoptRef(*new WebContextMenuProxyGtk(widget, page, WTFMove(context), userData));
     }
     ~WebContextMenuProxyGtk();
 
     void populate(const Vector<WebContextMenuItemGlib>&);
-    GtkMenu* gtkMenu() const { return m_menu; }
+    GtkWidget* gtkWidget() const { return m_menu; }
+    static const char* widgetDismissedSignal;
 
 private:
-    WebContextMenuProxyGtk(GtkWidget*, WebPageProxy&, const ContextMenuContextData&, const UserData&);
+    WebContextMenuProxyGtk(GtkWidget*, WebPageProxy&, ContextMenuContextData&&, const UserData&);
     void show() override;
-    void showContextMenuWithItems(const Vector<WebContextMenuItemData>&) override;
+    Vector<Ref<WebContextMenuItem>> proposedItems() const override;
+    void showContextMenuWithItems(Vector<Ref<WebContextMenuItem>>&&) override;
     void append(GMenu*, const WebContextMenuItemGlib&);
     GRefPtr<GMenu> buildMenu(const Vector<WebContextMenuItemGlib>&);
-    void populate(const Vector<RefPtr<WebContextMenuItem>>&);
-    static void menuPositionFunction(GtkMenu*, gint*, gint*, gboolean*, WebContextMenuProxyGtk*);
+    void populate(const Vector<Ref<WebContextMenuItem>>&);
+    Vector<WebContextMenuItemGlib> populateSubMenu(const WebContextMenuItemData&);
 
     GtkWidget* m_webView;
-    WebPageProxy* m_page;
-    GtkMenu* m_menu;
-    WebCore::IntPoint m_popupPosition;
+    GtkWidget* m_menu;
     HashMap<unsigned long, void*> m_signalHandlers;
+    GRefPtr<GSimpleActionGroup> m_actionGroup { adoptGRef(g_simple_action_group_new()) };
 };
 
 
 } // namespace WebKit
 
 #endif // ENABLE(CONTEXT_MENUS)
-#endif // WebContextMenuProxyGtk_h

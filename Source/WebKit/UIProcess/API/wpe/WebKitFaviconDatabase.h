@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Igalia S.L.
+ * Copyright (C) 2012, 2017 Igalia S.L.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,7 +24,6 @@
 #ifndef WebKitFaviconDatabase_h
 #define WebKitFaviconDatabase_h
 
-#include <cairo.h>
 #include <gio/gio.h>
 #include <glib-object.h>
 #include <wpe/WebKitDefines.h>
@@ -46,12 +45,14 @@ typedef struct _WebKitFaviconDatabasePrivate WebKitFaviconDatabasePrivate;
 struct _WebKitFaviconDatabase {
     GObject parent;
 
+    /*< private >*/
     WebKitFaviconDatabasePrivate *priv;
 };
 
 struct _WebKitFaviconDatabaseClass {
     GObjectClass parent_class;
 
+    /*< private >*/
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
@@ -78,16 +79,6 @@ webkit_favicon_database_error_quark        (void);
 WEBKIT_API GType
 webkit_favicon_database_get_type           (void);
 
-WEBKIT_API void
-webkit_favicon_database_get_favicon        (WebKitFaviconDatabase *database,
-                                            const gchar           *page_uri,
-                                            GCancellable          *cancellable,
-                                            GAsyncReadyCallback    callback,
-                                            gpointer               user_data);
-WEBKIT_API cairo_surface_t *
-webkit_favicon_database_get_favicon_finish (WebKitFaviconDatabase *database,
-                                            GAsyncResult          *result,
-                                            GError               **error);
 WEBKIT_API gchar *
 webkit_favicon_database_get_favicon_uri    (WebKitFaviconDatabase *database,
                                             const gchar           *page_uri);

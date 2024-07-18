@@ -8,10 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_BLOCK_PROCESSOR_METRICS_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_BLOCK_PROCESSOR_METRICS_H_
-
-#include "webrtc/base/constructormagic.h"
+#ifndef MODULES_AUDIO_PROCESSING_AEC3_BLOCK_PROCESSOR_METRICS_H_
+#define MODULES_AUDIO_PROCESSING_AEC3_BLOCK_PROCESSOR_METRICS_H_
 
 namespace webrtc {
 
@@ -19,6 +17,9 @@ namespace webrtc {
 class BlockProcessorMetrics {
  public:
   BlockProcessorMetrics() = default;
+
+  BlockProcessorMetrics(const BlockProcessorMetrics&) = delete;
+  BlockProcessorMetrics& operator=(const BlockProcessorMetrics&) = delete;
 
   // Updates the metric with new capture data.
   void UpdateCapture(bool underrun);
@@ -38,10 +39,8 @@ class BlockProcessorMetrics {
   int render_buffer_underruns_ = 0;
   int render_buffer_overruns_ = 0;
   int buffer_render_calls_ = 0;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(BlockProcessorMetrics);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_BLOCK_PROCESSOR_METRICS_H_
+#endif  // MODULES_AUDIO_PROCESSING_AEC3_BLOCK_PROCESSOR_METRICS_H_

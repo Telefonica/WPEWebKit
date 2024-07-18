@@ -32,7 +32,7 @@ namespace WebCore {
 class InsertNodeBeforeCommand : public SimpleEditCommand {
 public:
     static Ref<InsertNodeBeforeCommand> create(Ref<Node>&& childToInsert, Node& childToInsertBefore,
-        ShouldAssumeContentIsAlwaysEditable shouldAssumeContentIsAlwaysEditable, EditAction editingAction = EditActionInsert)
+        ShouldAssumeContentIsAlwaysEditable shouldAssumeContentIsAlwaysEditable, EditAction editingAction = EditAction::Insert)
     {
         return adoptRef(*new InsertNodeBeforeCommand(WTFMove(childToInsert), childToInsertBefore, shouldAssumeContentIsAlwaysEditable, editingAction));
     }
@@ -45,7 +45,7 @@ private:
     void doUnapply() override;
 
 #ifndef NDEBUG
-    void getNodesInCommand(HashSet<Node*>&) override;
+    void getNodesInCommand(HashSet<Ref<Node>>&) override;
 #endif
 
     Ref<Node> m_insertChild;

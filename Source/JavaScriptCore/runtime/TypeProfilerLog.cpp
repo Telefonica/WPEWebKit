@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,25 +29,24 @@
 #include "config.h"
 #include "TypeProfilerLog.h"
 
-#include "JSCInlines.h"
-#include "SlotVisitor.h"
+#include "FrameTracers.h"
+#include "JSCJSValueInlines.h"
 #include "TypeLocation.h"
-#include <wtf/CurrentTime.h>
-
 
 namespace JSC {
 
 namespace TypeProfilerLogInternal {
-static const bool verbose = false;
+static constexpr bool verbose = false;
 }
 
-void TypeProfilerLog::initializeLog()
+TypeProfilerLog::TypeProfilerLog(VM& vm)
+    : m_vm(vm)
+    , m_logSize(50000)
+    , m_logStartPtr(new LogEntry[m_logSize])
+    , m_currentLogEntryPtr(m_logStartPtr)
+    , m_logEndPtr(m_logStartPtr + m_logSize)
 {
-    ASSERT(!m_logStartPtr);
-    m_logSize = 50000;
-    m_logStartPtr = new LogEntry[m_logSize];
-    m_currentLogEntryPtr = m_logStartPtr;
-    m_logEndPtr = m_logStartPtr + m_logSize;
+    ASSERT(m_logStartPtr);
 }
 
 TypeProfilerLog::~TypeProfilerLog()
@@ -55,27 +54,50 @@ TypeProfilerLog::~TypeProfilerLog()
     delete[] m_logStartPtr;
 }
 
-void TypeProfilerLog::processLogEntries(const String& reason)
+void TypeProfilerLog::processLogEntries(VM& vm, const String& reason)
 {
-    double before = 0;
+    // We need to do this because this code will call into calculatedDisplayName.
+    // calculatedDisplayName will clear any exception it sees (because it thinks
+    // it's a stack overflow). We may be called when an exception was already
+    // thrown, so we don't want calculatedDisplayName to clear that exception that
+    // was thrown before we even got here.
+    SuspendExceptionScope suspendExceptionScope(vm);
+
+    MonotonicTime before { };
     if (TypeProfilerLogInternal::verbose) {
         dataLog("Process caller:'", reason, "'");
-        before = currentTimeMS();
+        before = MonotonicTime::now();
     }
 
+    HashMap<Structure*, RefPtr<StructureShape>> cachedMonoProtoShapes;
+    HashMap<std::pair<Structure*, JSCell*>, RefPtr<StructureShape>> cachedPolyProtoShapes;
+
     LogEntry* entry = m_logStartPtr;
-    HashMap<Structure*, RefPtr<StructureShape>> seenShapes;
+
     while (entry != m_currentLogEntryPtr) {
         StructureID id = entry->structureID;
-        RefPtr<StructureShape> shape; 
+        RefPtr<StructureShape> shape;
         JSValue value = entry->value;
         Structure* structure = nullptr;
+        bool sawPolyProtoStructure = false;
         if (id) {
-            structure = Heap::heap(value.asCell())->structureIDTable().get(id); 
-            auto iter = seenShapes.find(structure);
-            if (iter == seenShapes.end()) {
-                shape = structure->toStructureShape(value);
-                seenShapes.set(structure, shape);
+            structure = id.decode();
+            auto iter = cachedMonoProtoShapes.find(structure);
+            if (iter == cachedMonoProtoShapes.end()) {
+                auto key = std::make_pair(structure, value.asCell());
+                auto iter = cachedPolyProtoShapes.find(key);
+                if (iter != cachedPolyProtoShapes.end()) {
+                    shape = iter->value;
+                    sawPolyProtoStructure = true;
+                }
+
+                if (!shape) {
+                    shape = structure->toStructureShape(value, sawPolyProtoStructure);
+                    if (sawPolyProtoStructure)
+                        cachedPolyProtoShapes.set(key, shape);
+                    else
+                        cachedMonoProtoShapes.set(structure, shape);
+                }
             } else
                 shape = iter->value;
         }
@@ -84,8 +106,8 @@ void TypeProfilerLog::processLogEntries(const String& reason)
         TypeLocation* location = entry->location;
         location->m_lastSeenType = type;
         if (location->m_globalTypeSet)
-            location->m_globalTypeSet->addTypeInformation(type, shape.copyRef(), structure);
-        location->m_instructionTypeSet->addTypeInformation(type, WTFMove(shape), structure);
+            location->m_globalTypeSet->addTypeInformation(type, shape.copyRef(), structure, sawPolyProtoStructure);
+        location->m_instructionTypeSet->addTypeInformation(type, WTFMove(shape), structure, sawPolyProtoStructure);
 
         entry++;
     }
@@ -98,17 +120,19 @@ void TypeProfilerLog::processLogEntries(const String& reason)
     m_currentLogEntryPtr = m_logStartPtr;
 
     if (TypeProfilerLogInternal::verbose) {
-        double after = currentTimeMS();
-        dataLogF(" Processing the log took: '%f' ms\n", after - before);
+        MonotonicTime after = MonotonicTime::now();
+        dataLogF(" Processing the log took: '%f' ms\n", (after - before).milliseconds());
     }
 }
 
-void TypeProfilerLog::visit(SlotVisitor& visitor)
+// We don't need a SlotVisitor version of this because TypeProfilerLog is only used by
+// dev tools, and is therefore not on the critical path for performance.
+void TypeProfilerLog::visit(AbstractSlotVisitor& visitor)
 {
     for (LogEntry* entry = m_logStartPtr; entry != m_currentLogEntryPtr; ++entry) {
         visitor.appendUnbarriered(entry->value);
         if (StructureID id = entry->structureID) {
-            Structure* structure = visitor.heap()->structureIDTable().get(id); 
+            Structure* structure = id.decode();
             visitor.appendUnbarriered(structure);
         }
     }

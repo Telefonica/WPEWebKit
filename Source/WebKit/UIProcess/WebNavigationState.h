@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,10 +30,13 @@
 
 namespace API {
 class Navigation;
+struct SubstituteData;
 }
 
 namespace WebCore {
 class ResourceRequest;
+
+enum class FrameLoadType : uint8_t;
 }
 
 namespace WebKit {
@@ -42,17 +45,20 @@ class WebPageProxy;
 class WebBackForwardListItem;
 
 class WebNavigationState {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit WebNavigationState();
     ~WebNavigationState();
 
-    Ref<API::Navigation> createBackForwardNavigation();
-    Ref<API::Navigation> createLoadRequestNavigation(WebCore::ResourceRequest&&);
-    Ref<API::Navigation> createReloadNavigation();
-    Ref<API::Navigation> createLoadDataNavigation();
+    Ref<API::Navigation> createBackForwardNavigation(WebBackForwardListItem& targetItem, WebBackForwardListItem* currentItem, WebCore::FrameLoadType);
+    Ref<API::Navigation> createLoadRequestNavigation(WebCore::ResourceRequest&&, WebBackForwardListItem* currentItem);
+    Ref<API::Navigation> createReloadNavigation(WebBackForwardListItem* currentAndTargetItem);
+    Ref<API::Navigation> createLoadDataNavigation(std::unique_ptr<API::SubstituteData>&&);
+    Ref<API::Navigation> createSimulatedLoadWithDataNavigation(WebCore::ResourceRequest&&, std::unique_ptr<API::SubstituteData>&&, WebBackForwardListItem* currentItem);
 
-    API::Navigation& navigation(uint64_t navigationID);
-    Ref<API::Navigation> takeNavigation(uint64_t navigationID);
+    bool hasNavigation(uint64_t navigationID) const { return m_navigations.contains(navigationID); }
+    API::Navigation* navigation(uint64_t navigationID);
+    RefPtr<API::Navigation> takeNavigation(uint64_t navigationID);
     void didDestroyNavigation(uint64_t navigationID);
     void clearAllNavigations();
 
@@ -61,8 +67,10 @@ public:
         return ++m_navigationID;
     }
 
+    using NavigationMap = HashMap<uint64_t, RefPtr<API::Navigation>>;
+
 private:
-    HashMap<uint64_t, RefPtr<API::Navigation>> m_navigations;
+    NavigationMap m_navigations;
     uint64_t m_navigationID { 0 };
 };
 

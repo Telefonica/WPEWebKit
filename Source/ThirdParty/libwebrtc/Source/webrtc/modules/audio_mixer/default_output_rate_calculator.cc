@@ -8,22 +8,24 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_mixer/default_output_rate_calculator.h"
+#include "modules/audio_mixer/default_output_rate_calculator.h"
 
 #include <algorithm>
+#include <iterator>
 
-#include "webrtc/modules/audio_processing/include/audio_processing.h"
+#include "modules/audio_processing/include/audio_processing.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
-int DefaultOutputRateCalculator::CalculateOutputRate(
-    const std::vector<int>& preferred_sample_rates) {
+int DefaultOutputRateCalculator::CalculateOutputRateFromRange(
+    rtc::ArrayView<const int> preferred_sample_rates) {
   if (preferred_sample_rates.empty()) {
     return DefaultOutputRateCalculator::kDefaultFrequency;
   }
   using NativeRate = AudioProcessing::NativeRate;
   const int maximal_frequency = *std::max_element(
-      preferred_sample_rates.begin(), preferred_sample_rates.end());
+      preferred_sample_rates.cbegin(), preferred_sample_rates.cend());
 
   RTC_DCHECK_LE(NativeRate::kSampleRate8kHz, maximal_frequency);
   RTC_DCHECK_GE(NativeRate::kSampleRate48kHz, maximal_frequency);

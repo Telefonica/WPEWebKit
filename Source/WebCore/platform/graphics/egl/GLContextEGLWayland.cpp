@@ -29,10 +29,11 @@
 
 namespace WebCore {
 
-GLContextEGL::GLContextEGL(PlatformDisplay& display, EGLContext context, EGLSurface surface, WlUniquePtr<struct wl_surface>&& wlSurface, struct wl_egl_window* wlWindow)
+GLContextEGL::GLContextEGL(PlatformDisplay& display, EGLContext context, EGLSurface surface, EGLConfig config, WlUniquePtr<struct wl_surface>&& wlSurface, struct wl_egl_window* wlWindow)
     : GLContext(display)
     , m_context(context)
     , m_surface(surface)
+    , m_config(config)
     , m_type(WindowSurface)
     , m_wlSurface(WTFMove(wlSurface))
     , m_wlWindow(wlWindow)
@@ -51,14 +52,7 @@ std::unique_ptr<GLContextEGL> GLContextEGL::createWaylandContext(PlatformDisplay
     if (!getEGLConfig(display, &config, WindowSurface))
         return nullptr;
 
-    static const EGLint contextAttributes[] = {
-#if USE(OPENGL_ES_2)
-        EGL_CONTEXT_CLIENT_VERSION, 2,
-#endif
-        EGL_NONE
-    };
-
-    EGLContext context = eglCreateContext(display, config, sharingContext, contextAttributes);
+    EGLContext context = createContextForEGLVersion(platformDisplay, config, sharingContext);
     if (context == EGL_NO_CONTEXT)
         return nullptr;
 
@@ -76,7 +70,7 @@ std::unique_ptr<GLContextEGL> GLContextEGL::createWaylandContext(PlatformDisplay
         return nullptr;
     }
 
-    return std::unique_ptr<GLContextEGL>(new GLContextEGL(platformDisplay, context, surface, WTFMove(wlSurface), window));
+    return std::unique_ptr<GLContextEGL>(new GLContextEGL(platformDisplay, context, surface, config, WTFMove(wlSurface), window));
 }
 
 void GLContextEGL::destroyWaylandWindow()

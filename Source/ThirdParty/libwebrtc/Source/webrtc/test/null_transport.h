@@ -7,10 +7,10 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#ifndef WEBRTC_TEST_NULL_TRANSPORT_H_
-#define WEBRTC_TEST_NULL_TRANSPORT_H_
+#ifndef TEST_NULL_TRANSPORT_H_
+#define TEST_NULL_TRANSPORT_H_
 
-#include "webrtc/api/call/transport.h"
+#include "api/call/transport.h"
 
 namespace webrtc {
 
@@ -19,12 +19,11 @@ class PacketReceiver;
 namespace test {
 class NullTransport : public Transport {
  public:
-  bool SendRtp(const uint8_t* packet,
-               size_t length,
+  bool SendRtp(rtc::ArrayView<const uint8_t> packet,
                const PacketOptions& options) override;
-  bool SendRtcp(const uint8_t* packet, size_t length) override;
+  bool SendRtcp(rtc::ArrayView<const uint8_t> packet) override;
 };
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_NULL_TRANSPORT_H_
+#endif  // TEST_NULL_TRANSPORT_H_

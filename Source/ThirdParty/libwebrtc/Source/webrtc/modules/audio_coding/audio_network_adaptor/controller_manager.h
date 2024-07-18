@@ -8,18 +8,20 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_CONTROLLER_MANAGER_H_
-#define WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_CONTROLLER_MANAGER_H_
+#ifndef MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_CONTROLLER_MANAGER_H_
+#define MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_CONTROLLER_MANAGER_H_
 
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/protobuf_utils.h"
-#include "webrtc/modules/audio_coding/audio_network_adaptor/controller.h"
+#include "absl/strings/string_view.h"
+#include "modules/audio_coding/audio_network_adaptor/controller.h"
 
 namespace webrtc {
+
+class DebugDumpWriter;
 
 class ControllerManager {
  public:
@@ -45,7 +47,7 @@ class ControllerManagerImpl final : public ControllerManager {
   };
 
   static std::unique_ptr<ControllerManager> Create(
-      const ProtoString& config_string,
+      absl::string_view config_string,
       size_t num_encoder_channels,
       rtc::ArrayView<const int> encoder_frame_lengths_ms,
       int min_encoder_bitrate_bps,
@@ -55,16 +57,31 @@ class ControllerManagerImpl final : public ControllerManager {
       bool initial_fec_enabled,
       bool initial_dtx_enabled);
 
+  static std::unique_ptr<ControllerManager> Create(
+      absl::string_view config_string,
+      size_t num_encoder_channels,
+      rtc::ArrayView<const int> encoder_frame_lengths_ms,
+      int min_encoder_bitrate_bps,
+      size_t intial_channels_to_encode,
+      int initial_frame_length_ms,
+      int initial_bitrate_bps,
+      bool initial_fec_enabled,
+      bool initial_dtx_enabled,
+      DebugDumpWriter* debug_dump_writer);
+
   explicit ControllerManagerImpl(const Config& config);
 
   // Dependency injection for testing.
   ControllerManagerImpl(
       const Config& config,
-      std::vector<std::unique_ptr<Controller>>&& controllers,
+      std::vector<std::unique_ptr<Controller>> controllers,
       const std::map<const Controller*, std::pair<int, float>>&
           chracteristic_points);
 
   ~ControllerManagerImpl() override;
+
+  ControllerManagerImpl(const ControllerManagerImpl&) = delete;
+  ControllerManagerImpl& operator=(const ControllerManagerImpl&) = delete;
 
   // Sort controllers based on their significance.
   std::vector<Controller*> GetSortedControllers(
@@ -90,20 +107,18 @@ class ControllerManagerImpl final : public ControllerManager {
 
   std::vector<std::unique_ptr<Controller>> controllers_;
 
-  rtc::Optional<int64_t> last_reordering_time_ms_;
+  absl::optional<int64_t> last_reordering_time_ms_;
   ScoringPoint last_scoring_point_;
 
   std::vector<Controller*> default_sorted_controllers_;
 
   std::vector<Controller*> sorted_controllers_;
 
-  // |scoring_points_| saves the scoring points of various
+  // `scoring_points_` saves the scoring points of various
   // controllers.
   std::map<const Controller*, ScoringPoint> controller_scoring_points_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(ControllerManagerImpl);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_CONTROLLER_MANAGER_H_
+#endif  // MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_CONTROLLER_MANAGER_H_

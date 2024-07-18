@@ -23,31 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "BlobDataFileReference.h"
+#import "config.h"
+#import "BlobDataFileReference.h"
 
 #if ENABLE(FILE_REPLACEMENT)
 
-#include "FileMetadata.h"
-#include "FileSystem.h"
-#include <wtf/SoftLinking.h>
-#include <wtf/text/CString.h>
-
-#if USE(APPLE_INTERNAL_SDK)
-#include <Bom/BOMCopier.h>
-#endif
-
-typedef struct _BOMCopier* BOMCopier;
-
-SOFT_LINK_PRIVATE_FRAMEWORK(Bom)
-SOFT_LINK(Bom, BOMCopierNew, BOMCopier, (), ())
-SOFT_LINK(Bom, BOMCopierFree, void, (BOMCopier copier), (copier))
-SOFT_LINK(Bom, BOMCopierCopyWithOptions, int, (BOMCopier copier, const char* fromObj, const char* toObj, CFDictionaryRef options), (copier, fromObj, toObj, options))
-
-#define kBOMCopierOptionCreatePKZipKey CFSTR("createPKZip")
-#define kBOMCopierOptionSequesterResourcesKey CFSTR("sequesterResources")
-#define kBOMCopierOptionKeepParentKey CFSTR("keepParent")
-#define kBOMCopierOptionCopyResourcesKey CFSTR("copyResources")
+#import <wtf/FileSystem.h>
+#import <wtf/text/CString.h>
 
 namespace WebCore {
 
@@ -58,30 +40,14 @@ void BlobDataFileReference::generateReplacementFile()
 
     prepareForFileAccess();
 
-    RetainPtr<NSFileCoordinator> coordinator = adoptNS([[NSFileCoordinator alloc] initWithFilePresenter:nil]);
-    [coordinator coordinateReadingItemAtURL:[NSURL fileURLWithPath:m_path] options:NSFileCoordinatorReadingWithoutChanges error:nullptr byAccessor:^(NSURL *newURL) {
-        // The archive is put into a subdirectory of temporary directory for historic reasons. Changing this will require WebCore to change at the same time.
-        CString archivePath([NSTemporaryDirectory() stringByAppendingPathComponent:@"WebKitGeneratedFileXXXXXX"].fileSystemRepresentation);
-        if (mkstemp(archivePath.mutableData()) == -1)
-            return;
-
-        NSDictionary *options = @{
-            (__bridge id)kBOMCopierOptionCreatePKZipKey : @YES,
-            (__bridge id)kBOMCopierOptionSequesterResourcesKey : @YES,
-            (__bridge id)kBOMCopierOptionKeepParentKey : @YES,
-            (__bridge id)kBOMCopierOptionCopyResourcesKey : @YES,
-        };
-
-        BOMCopier copier = BOMCopierNew();
-        if (!BOMCopierCopyWithOptions(copier, newURL.path.fileSystemRepresentation, archivePath.data(), (__bridge CFDictionaryRef)options))
-            m_replacementPath = String::fromUTF8(archivePath);
-        BOMCopierFree(copier);
-    }];
+    auto generatedFile = FileSystem::createTemporaryZipArchive(m_path);
+    if (!generatedFile.isNull())
+        m_replacementPath = WTFMove(generatedFile);
 
     m_replacementShouldBeGenerated = false;
     if (!m_replacementPath.isNull()) {
-        if (auto metadata = fileMetadataFollowingSymlinks(m_replacementPath))
-            m_size = metadata.value().length;
+        if (auto fileSize = FileSystem::fileSize(m_replacementPath))
+            m_size = *fileSize;
     }
 
     revokeFileAccess();

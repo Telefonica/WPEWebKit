@@ -26,12 +26,11 @@
 #import "config.h"
 #import "_WKUserContentFilterInternal.h"
 
-#if WK_API_ENABLED
-
-#include "WebCompiledContentRuleList.h"
-#include <WebCore/ContentExtensionCompiler.h>
-#include <WebCore/ContentExtensionError.h>
-#include <string>
+#import "WKContentRuleListInternal.h"
+#import "WebCompiledContentRuleList.h"
+#import <WebCore/ContentExtensionCompiler.h>
+#import <WebCore/ContentExtensionError.h>
+#import <string>
 
 @implementation _WKUserContentFilter
 
@@ -58,5 +57,3 @@
 }
 
 @end
-
-#endif // WK_API_ENABLED

@@ -26,17 +26,10 @@
 #include "config.h"
 #include "HardwareAccelerationManager.h"
 
-#include "WaylandCompositor.h"
-#include <WebCore/NotImplemented.h>
-#include <WebCore/PlatformDisplay.h>
-
-#if USE(REDIRECTED_XCOMPOSITE_WINDOW)
-#include <WebCore/PlatformDisplayX11.h>
-#endif
-
-using namespace WebCore;
+#include "AcceleratedBackingStore.h"
 
 namespace WebKit {
+using namespace WebCore;
 
 HardwareAccelerationManager& HardwareAccelerationManager::singleton()
 {
@@ -48,9 +41,14 @@ HardwareAccelerationManager::HardwareAccelerationManager()
     : m_canUseHardwareAcceleration(true)
     , m_forceHardwareAcceleration(false)
 {
-#if !ENABLE(OPENGL)
+#if !ENABLE(WEBGL)
     m_canUseHardwareAcceleration = false;
     return;
+#endif
+
+#if USE(GTK4)
+    RELEASE_ASSERT(AcceleratedBackingStore::checkRequirements());
+    m_forceHardwareAcceleration = true;
 #endif
 
     const char* disableCompositing = getenv("WEBKIT_DISABLE_COMPOSITING_MODE");
@@ -59,25 +57,10 @@ HardwareAccelerationManager::HardwareAccelerationManager()
         return;
     }
 
-#if USE(REDIRECTED_XCOMPOSITE_WINDOW)
-    if (PlatformDisplay::sharedDisplay().type() == PlatformDisplay::Type::X11) {
-        auto& display = downcast<PlatformDisplayX11>(PlatformDisplay::sharedDisplay());
-        std::optional<int> damageBase, errorBase;
-        if (!display.supportsXComposite() || !display.supportsXDamage(damageBase, errorBase)) {
-            m_canUseHardwareAcceleration = false;
-            return;
-        }
+    if (!AcceleratedBackingStore::checkRequirements()) {
+        m_canUseHardwareAcceleration = false;
+        return;
     }
-#endif
-
-#if PLATFORM(WAYLAND) && USE(EGL)
-    if (PlatformDisplay::sharedDisplay().type() == PlatformDisplay::Type::Wayland) {
-        if (!WaylandCompositor::singleton().isRunning()) {
-            m_canUseHardwareAcceleration = false;
-            return;
-        }
-    }
-#endif
 
     const char* forceCompositing = getenv("WEBKIT_FORCE_COMPOSITING_MODE");
     if (forceCompositing && strcmp(forceCompositing, "0"))

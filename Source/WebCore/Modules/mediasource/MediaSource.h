@@ -35,20 +35,32 @@
 #include "ActiveDOMObject.h"
 #include "EventTarget.h"
 #include "ExceptionOr.h"
-#include "GenericEventQueue.h"
+#include "HTMLMediaElement.h"
 #include "MediaSourcePrivateClient.h"
 #include "URLRegistry.h"
+#include <wtf/LoggerHelper.h>
+#include <wtf/RefCounted.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
 class ContentType;
-class HTMLMediaElement;
 class SourceBuffer;
 class SourceBufferList;
 class SourceBufferPrivate;
 class TimeRanges;
 
-class MediaSource final : public MediaSourcePrivateClient, public ActiveDOMObject, public EventTargetWithInlineData, public URLRegistrable {
+class MediaSource final
+    : public RefCounted<MediaSource>
+    , public MediaSourcePrivateClient
+    , public ActiveDOMObject
+    , public EventTargetWithInlineData
+    , public URLRegistrable
+#if !RELEASE_LOG_DISABLED
+    , private LoggerHelper
+#endif
+{
+    WTF_MAKE_ISO_ALLOCATED(MediaSource);
 public:
     static void setRegistry(URLRegistry*);
     static MediaSource* lookup(const String& url) { return s_registry ? static_cast<MediaSource*>(s_registry->lookup(url)) : nullptr; }
@@ -63,17 +75,21 @@ public:
     bool isClosed() const;
     bool isEnded() const;
     void sourceBufferDidChangeActiveState(SourceBuffer&, bool);
+    void sourceBufferDidChangeBufferedDirty(SourceBuffer&, bool);
 
     enum class EndOfStreamError { Network, Decode };
     void streamEndedWithError(std::optional<EndOfStreamError>);
 
     MediaTime duration() const final;
-    void durationChanged(const MediaTime&) final;
     std::unique_ptr<PlatformTimeRanges> buffered() const final;
 
     bool attachToElement(HTMLMediaElement&);
     void detachFromElement(HTMLMediaElement&);
-    void monitorSourceBuffers() override;
+#if USE(GSTREAMER)
+    void monitorSourceBuffers() final;
+#else
+    void monitorSourceBuffers();
+#endif
     bool isSeeking() const { return m_pendingSeekTime.isValid(); }
     Ref<TimeRanges> seekable();
     ExceptionOr<void> setLiveSeekableRange(double start, double end);
@@ -87,31 +103,40 @@ public:
     ReadyState readyState() const { return m_readyState; }
     ExceptionOr<void> endOfStream(std::optional<EndOfStreamError>);
 
-    HTMLMediaElement* mediaElement() const { return m_mediaElement; }
+    HTMLMediaElement* mediaElement() const { return m_mediaElement.get(); }
 
     SourceBufferList* sourceBuffers() { return m_sourceBuffers.get(); }
     SourceBufferList* activeSourceBuffers() { return m_activeSourceBuffers.get(); }
-    ExceptionOr<SourceBuffer&> addSourceBuffer(const String& type);
+    ExceptionOr<Ref<SourceBuffer>> addSourceBuffer(const String& type);
     ExceptionOr<void> removeSourceBuffer(SourceBuffer&);
-    static bool isTypeSupported(const String& type);
+    static bool isTypeSupported(ScriptExecutionContext&, const String& type);
 
     ScriptExecutionContext* scriptExecutionContext() const final;
 
     using RefCounted::ref;
     using RefCounted::deref;
 
-    bool hasPendingActivity() const final;
+    static const MediaTime& currentTimeFudgeFactor();
+    static bool contentTypeShouldGenerateTimestamps(const ContentType&);
 
-    const MediaTime& currentTimeFudgeFactor();
+#if !RELEASE_LOG_DISABLED
+    const Logger& logger() const final { return m_logger.get(); }
+    const void* logIdentifier() const final { return m_logIdentifier; }
+    const char* logClassName() const final { return "MediaSource"; }
+    WTFLogChannel& logChannel() const final;
+    void setLogIdentifier(const void*) final;
+#endif
 
-    virtual bool hasBufferedTime(const MediaTime&);
+    void failedToCreateRenderer(RendererType) final;
 
 private:
     explicit MediaSource(ScriptExecutionContext&);
 
+    // ActiveDOMObject.
     void stop() final;
-    bool canSuspendForDocumentSuspension() const final;
     const char* activeDOMObjectName() const final;
+    bool virtualHasPendingActivity() const final;
+    static bool isTypeSupported(ScriptExecutionContext&, const String& type, Vector<ContentType>&& contentTypesRequiringHardwareSupport);
 
     void setPrivateAndOpen(Ref<MediaSourcePrivate>&&) final;
     void seekToTime(const MediaTime&) final;
@@ -128,12 +153,14 @@ private:
     Vector<PlatformTimeRanges> activeRanges() const;
 
     ExceptionOr<Ref<SourceBufferPrivate>> createSourceBufferPrivate(const ContentType&);
-    void scheduleEvent(const AtomicString& eventName);
+    void scheduleEvent(const AtomString& eventName);
 
+    bool hasBufferedTime(const MediaTime&);
     bool hasCurrentTime();
     bool hasFutureTime();
 
     void regenerateActiveSourceBuffers();
+    void updateBufferedIfNeeded();
 
     void completeSeek();
 
@@ -142,15 +169,45 @@ private:
     RefPtr<MediaSourcePrivate> m_private;
     RefPtr<SourceBufferList> m_sourceBuffers;
     RefPtr<SourceBufferList> m_activeSourceBuffers;
-    mutable std::unique_ptr<PlatformTimeRanges> m_buffered;
+    std::unique_ptr<PlatformTimeRanges> m_buffered;
     std::unique_ptr<PlatformTimeRanges> m_liveSeekable;
-    HTMLMediaElement* m_mediaElement { nullptr };
+    WeakPtr<HTMLMediaElement> m_mediaElement;
     MediaTime m_duration;
     MediaTime m_pendingSeekTime;
     ReadyState m_readyState { ReadyState::Closed };
-    GenericEventQueue m_asyncEventQueue;
+#if !RELEASE_LOG_DISABLED
+    Ref<const Logger> m_logger;
+    const void* m_logIdentifier { nullptr };
+#endif
+    uint64_t m_associatedRegistryCount { 0 };
 };
 
-}
+String convertEnumerationToString(MediaSource::EndOfStreamError);
+String convertEnumerationToString(MediaSource::ReadyState);
+
+} // namespace WebCore
+
+namespace WTF {
+
+template<typename Type>
+struct LogArgument;
+
+template <>
+struct LogArgument<WebCore::MediaSource::EndOfStreamError> {
+    static String toString(const WebCore::MediaSource::EndOfStreamError error)
+    {
+        return convertEnumerationToString(error);
+    }
+};
+
+template <>
+struct LogArgument<WebCore::MediaSource::ReadyState> {
+    static String toString(const WebCore::MediaSource::ReadyState state)
+    {
+        return convertEnumerationToString(state);
+    }
+};
+
+} // namespace WTF
 
 #endif

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2000 Peter Kelly (pmk@post.com)
- * Copyright (C) 2006-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2018 Apple Inc. All rights reserved.
  * Copyright (C) 2013 Samsung Electronics. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -32,8 +32,12 @@ class StyleSheet;
 class CSSStyleSheet;
 
 class ProcessingInstruction final : public CharacterData, private CachedStyleSheetClient {
+    WTF_MAKE_ISO_ALLOCATED(ProcessingInstruction);
 public:
-    static Ref<ProcessingInstruction> create(Document&, const String& target, const String& data);
+    using WeakValueType = CharacterData::WeakValueType;
+    using CharacterData::weakPtrFactory;
+
+    static Ref<ProcessingInstruction> create(Document&, String&& target, String&& data);
     virtual ~ProcessingInstruction();
 
     const String& target() const { return m_target; }
@@ -52,14 +56,15 @@ public:
 
 private:
     friend class CharacterData;
-    ProcessingInstruction(Document&, const String& target, const String& data);
+    ProcessingInstruction(Document&, String&& target, String&& data);
 
     String nodeName() const override;
     NodeType nodeType() const override;
     Ref<Node> cloneNodeInternal(Document&, CloningOperation) override;
 
-    InsertionNotificationRequest insertedInto(ContainerNode&) override;
-    void removedFrom(ContainerNode&) override;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) override;
+    void didFinishInsertingNode() override;
+    void removedFromAncestor(RemovalType, ContainerNode&) override;
 
     void checkStyleSheet();
     void setCSSStyleSheet(const String& href, const URL& baseURL, const String& charset, const CachedCSSStyleSheet*) override;
@@ -87,7 +92,6 @@ private:
 #if ENABLE(XSLT)
     bool m_isXSL { false };
 #endif
-    bool m_isHandlingBeforeLoad { false };
 };
 
 } // namespace WebCore

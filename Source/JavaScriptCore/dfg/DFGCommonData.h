@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,14 +27,22 @@
 
 #if ENABLE(DFG_JIT)
 
+#include "BaselineJITCode.h"
+#include "CallLinkInfo.h"
 #include "CodeBlockJettisoningWatchpoint.h"
 #include "DFGAdaptiveInferredPropertyValueWatchpoint.h"
 #include "DFGAdaptiveStructureWatchpoint.h"
+#include "DFGCodeOriginPool.h"
 #include "DFGJumpReplacement.h"
 #include "DFGOSREntry.h"
 #include "InlineCallFrameSet.h"
-#include "JSCell.h"
+#include "JITMathIC.h"
+#include "JSCast.h"
+#include "PCToCodeOriginMap.h"
 #include "ProfilerCompilation.h"
+#include "RecordedStatuses.h"
+#include "StructureStubInfo.h"
+#include "YarrJIT.h"
 #include <wtf/Bag.h>
 #include <wtf/Noncopyable.h>
 
@@ -47,7 +55,7 @@ class TrackedReferences;
 namespace DFG {
 
 struct Node;
-struct Plan;
+class Plan;
 
 // CommonData holds the set of data that both DFG and FTL code blocks need to know
 // about themselves.
@@ -68,42 +76,32 @@ struct WeakReferenceTransition {
     WriteBarrier<JSCell> m_to;
 };
         
-class CommonData {
+class CommonData : public MathICHolder {
     WTF_MAKE_NONCOPYABLE(CommonData);
 public:
-    CommonData()
-        : isStillValid(true)
-        , frameRegisterCount(std::numeric_limits<unsigned>::max())
-        , requiredRegisterCountForExit(std::numeric_limits<unsigned>::max())
+    CommonData(bool isUnlinked)
+        : codeOrigins(CodeOriginPool::create())
+        , m_isUnlinked(isUnlinked)
     { }
     ~CommonData();
     
-    void notifyCompilingStructureTransition(Plan&, CodeBlock*, Node*);
-    CallSiteIndex addCodeOrigin(CodeOrigin);
-    CallSiteIndex addUniqueCallSiteIndex(CodeOrigin);
-    CallSiteIndex lastCallSite() const;
-    void removeCallSiteIndex(CallSiteIndex);
-    
     void shrinkToFit();
     
-    bool invalidate(); // Returns true if we did invalidate, or false if the code block was already invalidated.
-    bool hasInstalledVMTrapsBreakpoints() const { return isStillValid && hasVMTrapsBreakpointsInstalled; }
+    bool invalidateLinkedCode(); // Returns true if we did invalidate, or false if the code block was already invalidated.
+    bool hasInstalledVMTrapsBreakpoints() const { return m_isStillValid && m_hasVMTrapsBreakpointsInstalled; }
     void installVMTrapBreakpoints(CodeBlock* owner);
-    bool isVMTrapBreakpoint(void* address);
 
-    CatchEntrypointData* catchOSREntryDataForBytecodeIndex(unsigned bytecodeIndex)
+    bool isUnlinked() const { return m_isUnlinked; }
+    bool isStillValid() const { return m_isStillValid; }
+
+    CatchEntrypointData* catchOSREntryDataForBytecodeIndex(BytecodeIndex bytecodeIndex)
     {
-        return tryBinarySearch<CatchEntrypointData, unsigned>(
-            catchEntrypoints, catchEntrypoints.size(), bytecodeIndex,
+        return tryBinarySearch<CatchEntrypointData, BytecodeIndex>(
+            m_catchEntrypoints, m_catchEntrypoints.size(), bytecodeIndex,
             [] (const CatchEntrypointData* item) { return item->bytecodeIndex; });
     }
 
-    void appendCatchEntrypoint(unsigned bytecodeIndex, void* machineCode, Vector<FlushFormat>&& argumentFormats)
-    {
-        catchEntrypoints.append(CatchEntrypointData { machineCode,  WTFMove(argumentFormats), bytecodeIndex });
-    }
-
-    void finalizeCatchEntrypoints();
+    void finalizeCatchEntrypoints(Vector<CatchEntrypointData>&&);
 
     unsigned requiredRegisterCountForExecutionAndExit() const
     {
@@ -113,37 +111,46 @@ public:
     void validateReferences(const TrackedReferences&);
 
     static ptrdiff_t frameRegisterCountOffset() { return OBJECT_OFFSETOF(CommonData, frameRegisterCount); }
+    
+    void clearWatchpoints();
+
+    OptimizingCallLinkInfo* addCallLinkInfo(CodeOrigin codeOrigin, CallLinkInfo::UseDataIC useDataIC = CallLinkInfo::UseDataIC::No)
+    {
+        return m_callLinkInfos.add(codeOrigin, useDataIC);
+    }
 
     RefPtr<InlineCallFrameSet> inlineCallFrames;
-    Vector<CodeOrigin, 0, UnsafeVectorOverflow> codeOrigins;
+    Ref<CodeOriginPool> codeOrigins;
     
-    Vector<Identifier> dfgIdentifiers;
-    Vector<WeakReferenceTransition> transitions;
-    Vector<WriteBarrier<JSCell>> weakReferences;
-    Vector<WriteBarrier<Structure>> weakStructureReferences;
-    Vector<CatchEntrypointData> catchEntrypoints;
-    Bag<CodeBlockJettisoningWatchpoint> watchpoints;
-    Bag<AdaptiveStructureWatchpoint> adaptiveStructureWatchpoints;
-    Bag<AdaptiveInferredPropertyValueWatchpoint> adaptiveInferredPropertyValueWatchpoints;
-    Vector<JumpReplacement> jumpReplacements;
+    FixedVector<Identifier> m_dfgIdentifiers;
+    FixedVector<WeakReferenceTransition> m_transitions;
+    FixedVector<WriteBarrier<JSCell>> m_weakReferences;
+    FixedVector<StructureID> m_weakStructureReferences;
+    FixedVector<CatchEntrypointData> m_catchEntrypoints;
+    FixedVector<CodeBlockJettisoningWatchpoint> m_watchpoints;
+    FixedVector<AdaptiveStructureWatchpoint> m_adaptiveStructureWatchpoints;
+    FixedVector<AdaptiveInferredPropertyValueWatchpoint> m_adaptiveInferredPropertyValueWatchpoints;
+    std::unique_ptr<PCToCodeOriginMap> m_pcToCodeOriginMap;
+    RecordedStatuses recordedStatuses;
+    FixedVector<JumpReplacement> m_jumpReplacements;
+    Bag<StructureStubInfo> m_stubInfos;
+    Bag<OptimizingCallLinkInfo> m_callLinkInfos;
+    Yarr::YarrBoyerMoyerData m_boyerMooreData;
     
     ScratchBuffer* catchOSREntryBuffer;
     RefPtr<Profiler::Compilation> compilation;
-    bool livenessHasBeenProved; // Initialized and used on every GC.
-    bool allTransitionsHaveBeenMarked; // Initialized and used on every GC.
-    bool isStillValid;
-    bool hasVMTrapsBreakpointsInstalled { false };
     
 #if USE(JSVALUE32_64)
-    std::unique_ptr<Bag<double>> doubleConstants;
+    Bag<double> doubleConstants;
 #endif
     
-    unsigned frameRegisterCount;
-    unsigned requiredRegisterCountForExit;
+    unsigned frameRegisterCount { std::numeric_limits<unsigned>::max() };
+    unsigned requiredRegisterCountForExit { std::numeric_limits<unsigned>::max() };
 
 private:
-    HashSet<unsigned, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> callSiteIndexFreeList;
-
+    bool m_isUnlinked { false };
+    bool m_isStillValid { true };
+    bool m_hasVMTrapsBreakpointsInstalled { false };
 };
 
 CodeBlock* codeBlockForVMTrapPC(void* pc);

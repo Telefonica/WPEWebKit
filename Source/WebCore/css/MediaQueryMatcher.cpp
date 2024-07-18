@@ -21,13 +21,14 @@
 #include "MediaQueryMatcher.h"
 
 #include "Document.h"
+#include "EventNames.h"
 #include "Frame.h"
 #include "FrameView.h"
 #include "Logging.h"
 #include "MediaList.h"
 #include "MediaQueryEvaluator.h"
 #include "MediaQueryList.h"
-#include "MediaQueryListListener.h"
+#include "MediaQueryParserContext.h"
 #include "NodeRenderStyle.h"
 #include "RenderElement.h"
 #include "StyleResolver.h"
@@ -37,18 +38,20 @@
 namespace WebCore {
 
 MediaQueryMatcher::MediaQueryMatcher(Document& document)
-    : m_document(&document)
+    : m_document(document)
 {
 }
 
-MediaQueryMatcher::~MediaQueryMatcher()
-{
-}
+MediaQueryMatcher::~MediaQueryMatcher() = default;
 
 void MediaQueryMatcher::documentDestroyed()
 {
-    m_listeners.clear();
     m_document = nullptr;
+    auto mediaQueryLists = std::exchange(m_mediaQueryLists, { });
+    for (auto& mediaQueryList : mediaQueryLists) {
+        if (mediaQueryList)
+            mediaQueryList->detachFromMatcher();
+    }
 }
 
 String MediaQueryMatcher::mediaType() const
@@ -68,7 +71,7 @@ std::unique_ptr<RenderStyle> MediaQueryMatcher::documentElementUserAgentStyle() 
     if (!documentElement)
         return nullptr;
 
-    return m_document->styleScope().resolver().styleForElement(*documentElement, m_document->renderStyle(), nullptr, MatchOnlyUserAgentRules).renderStyle;
+    return m_document->styleScope().resolver().styleForElement(*documentElement, { m_document->renderStyle() }, RuleMatchingBehavior::MatchOnlyUserAgentRules).renderStyle;
 }
 
 bool MediaQueryMatcher::evaluate(const MediaQuerySet& media)
@@ -79,38 +82,28 @@ bool MediaQueryMatcher::evaluate(const MediaQuerySet& media)
     return MediaQueryEvaluator { mediaType(), *m_document, style.get() }.evaluate(media);
 }
 
+void MediaQueryMatcher::addMediaQueryList(MediaQueryList& list)
+{
+    ASSERT(!m_mediaQueryLists.contains(&list));
+    m_mediaQueryLists.append(list);
+}
+
+void MediaQueryMatcher::removeMediaQueryList(MediaQueryList& list)
+{
+    m_mediaQueryLists.removeFirst(&list);
+}
+
 RefPtr<MediaQueryList> MediaQueryMatcher::matchMedia(const String& query)
 {
     if (!m_document)
         return nullptr;
 
-    auto media = MediaQuerySet::create(query);
-    reportMediaQueryWarningIfNeeded(m_document, media.ptr());
-    bool result = evaluate(media.get());
-    return MediaQueryList::create(*this, WTFMove(media), result);
+    auto media = MediaQuerySet::create(query, MediaQueryParserContext(*m_document));
+    bool matches = evaluate(media.get());
+    return MediaQueryList::create(*m_document, *this, WTFMove(media), matches);
 }
 
-void MediaQueryMatcher::addListener(Ref<MediaQueryListListener>&& listener, MediaQueryList& query)
-{
-    if (!m_document)
-        return;
-
-    for (auto& existingListener : m_listeners) {
-        if (existingListener.listener.get() == listener.get() && existingListener.query.ptr() == &query)
-            return;
-    }
-
-    m_listeners.append(Listener { WTFMove(listener), query });
-}
-
-void MediaQueryMatcher::removeListener(MediaQueryListListener& listener, MediaQueryList& query)
-{
-    m_listeners.removeFirstMatching([&listener, &query](auto& existingListener) {
-        return existingListener.listener.get() == listener && existingListener.query.ptr() == &query;
-    });
-}
-
-void MediaQueryMatcher::styleResolverChanged()
+void MediaQueryMatcher::evaluateAll(EventMode eventMode)
 {
     ASSERT(m_document);
 
@@ -123,15 +116,11 @@ void MediaQueryMatcher::styleResolverChanged()
     LOG_WITH_STREAM(MediaQueries, stream << "MediaQueryMatcher::styleResolverChanged " << m_document->url());
 
     MediaQueryEvaluator evaluator { mediaType(), *m_document, style.get() };
-    Vector<Listener> listeners;
-    listeners.reserveInitialCapacity(m_listeners.size());
-    for (auto& listener : m_listeners)
-        listeners.uncheckedAppend({ listener.listener.copyRef(), listener.query.copyRef() });
-    for (auto& listener : listeners) {
-        bool notify;
-        listener.query->evaluate(evaluator, notify);
-        if (notify)
-            listener.listener->handleEvent(listener.query);
+
+    auto mediaQueryLists = m_mediaQueryLists;
+    for (auto& list : mediaQueryLists) {
+        if (RefPtr protectedList = list.get())
+            protectedList->evaluate(evaluator, eventMode);
     }
 }
 

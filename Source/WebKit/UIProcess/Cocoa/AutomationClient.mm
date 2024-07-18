@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,15 +26,14 @@
 #import "config.h"
 #import "AutomationClient.h"
 
-#if WK_API_ENABLED
-
 #if ENABLE(REMOTE_INSPECTOR)
 
 #import "WKProcessPool.h"
 #import "_WKAutomationDelegate.h"
 #import "_WKAutomationSessionConfiguration.h"
 #import <JavaScriptCore/RemoteInspector.h>
-#import <JavaScriptCore/RemoteInspectorConstants.h>
+#import <wtf/RunLoop.h>
+#import <wtf/spi/cf/CFBundleSPI.h>
 #import <wtf/text/WTFString.h>
 
 using namespace Inspector;
@@ -47,6 +46,9 @@ AutomationClient::AutomationClient(WKProcessPool *processPool, id <_WKAutomation
 {
     m_delegateMethods.allowsRemoteAutomation = [delegate respondsToSelector:@selector(_processPoolAllowsRemoteAutomation:)];
     m_delegateMethods.requestAutomationSession = [delegate respondsToSelector:@selector(_processPool:didRequestAutomationSessionWithIdentifier:configuration:)];
+    m_delegateMethods.requestedDebuggablesToWakeUp = [delegate respondsToSelector:@selector(_processPoolDidRequestInspectorDebuggablesToWakeUp:)];
+    m_delegateMethods.browserNameForAutomation = [delegate respondsToSelector:@selector(_processPoolBrowserNameForAutomation:)];
+    m_delegateMethods.browserVersionForAutomation = [delegate respondsToSelector:@selector(_processPoolBrowserVersionForAutomation:)];
 
     RemoteInspector::singleton().setClient(this);
 }
@@ -56,10 +58,14 @@ AutomationClient::~AutomationClient()
     RemoteInspector::singleton().setClient(nullptr);
 }
 
+// MARK: API::AutomationClient
+
 void AutomationClient::didRequestAutomationSession(WebKit::WebProcessPool*, const String& sessionIdentifier)
 {
-    requestAutomationSession(sessionIdentifier);
+    requestAutomationSession(sessionIdentifier, { });
 }
+
+// MARK: RemoteInspector::Client
 
 bool AutomationClient::remoteAutomationAllowed() const
 {
@@ -69,36 +75,58 @@ bool AutomationClient::remoteAutomationAllowed() const
     return false;
 }
 
-void AutomationClient::requestAutomationSession(const String& sessionIdentifier)
+void AutomationClient::requestAutomationSession(const String& sessionIdentifier, const RemoteInspector::Client::SessionCapabilities& sessionCapabilities)
 {
-    NSString *retainedIdentifier = sessionIdentifier;
-    requestAutomationSessionWithCapabilities(retainedIdentifier, nil);
-}
-
-void AutomationClient::requestAutomationSessionWithCapabilities(NSString *sessionIdentifier, NSDictionary *forwardedCapabilities)
-{
-    _WKAutomationSessionConfiguration *configuration = [_WKAutomationSessionConfiguration new];
-    if (NSNumber *value = forwardedCapabilities[WIRAllowInsecureMediaCaptureCapabilityKey]) {
-        if ([value isKindOfClass:[NSNumber class]])
-            configuration.allowsInsecureMediaCapture = value.boolValue;
-    }
-
-    if (NSNumber *value = forwardedCapabilities[WIRSuppressICECandidateFilteringCapabilityKey]) {
-        if ([value isKindOfClass:[NSNumber class]])
-            configuration.suppressesICECandidateFiltering = value.boolValue;
-    }
+    auto configuration = adoptNS([[_WKAutomationSessionConfiguration alloc] init]);
+    [configuration setAcceptInsecureCertificates:sessionCapabilities.acceptInsecureCertificates];
+    
+    if (sessionCapabilities.allowInsecureMediaCapture)
+        [configuration setAllowsInsecureMediaCapture:sessionCapabilities.allowInsecureMediaCapture.value()];
+    if (sessionCapabilities.suppressICECandidateFiltering)
+        [configuration setSuppressesICECandidateFiltering:sessionCapabilities.suppressICECandidateFiltering.value()];
 
     // Force clients to create and register a session asynchronously. Otherwise,
     // RemoteInspector will try to acquire its lock to register the new session and
     // deadlock because it's already taken while handling XPC messages.
-    dispatch_async(dispatch_get_main_queue(), ^{
+    NSString *requestedSessionIdentifier = sessionIdentifier;
+    RunLoop::main().dispatch([this, requestedSessionIdentifier = retainPtr(requestedSessionIdentifier), configuration = WTFMove(configuration)] {
         if (m_delegateMethods.requestAutomationSession)
-            [m_delegate.get() _processPool:m_processPool didRequestAutomationSessionWithIdentifier:sessionIdentifier configuration:configuration];
+            [m_delegate.get() _processPool:m_processPool didRequestAutomationSessionWithIdentifier:requestedSessionIdentifier.get() configuration:configuration.get()];
     });
+}
+
+// FIXME: Consider renaming AutomationClient and _WKAutomationDelegate to _WKInspectorDelegate since it isn't only used for automation now.
+// http://webkit.org/b/221933
+void AutomationClient::requestedDebuggablesToWakeUp()
+{
+    RunLoop::main().dispatch([this] {
+        if (m_delegateMethods.requestedDebuggablesToWakeUp)
+            [m_delegate.get() _processPoolDidRequestInspectorDebuggablesToWakeUp:m_processPool];
+    });
+}
+
+String AutomationClient::browserName() const
+{
+    if (m_delegateMethods.browserNameForAutomation)
+        return [m_delegate _processPoolBrowserNameForAutomation:m_processPool];
+
+    // Fall back to using the unlocalized app name (i.e., 'Safari').
+    NSBundle *appBundle = [NSBundle mainBundle];
+    NSString *displayName = appBundle.infoDictionary[(__bridge NSString *)_kCFBundleDisplayNameKey];
+    NSString *readableName = appBundle.infoDictionary[(__bridge NSString *)kCFBundleNameKey];
+    return displayName ?: readableName;
+}
+
+String AutomationClient::browserVersion() const
+{
+    if (m_delegateMethods.browserVersionForAutomation)
+        return [m_delegate _processPoolBrowserVersionForAutomation:m_processPool];
+
+    // Fall back to using the app short version (i.e., '11.1.1').
+    NSBundle *appBundle = [NSBundle mainBundle];
+    return appBundle.infoDictionary[(__bridge NSString *)_kCFBundleShortVersionStringKey];
 }
 
 } // namespace WebKit
 
 #endif // ENABLE(REMOTE_INSPECTOR)
-
-#endif // WK_API_ENABLED

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,60 +33,36 @@
 
 namespace JSC {
 
-inline void CodeBlockSet::mark(const AbstractLocker& locker, void* candidateCodeBlock)
-{
-    ASSERT(m_lock.isLocked());
-    // We have to check for 0 and -1 because those are used by the HashMap as markers.
-    uintptr_t value = reinterpret_cast<uintptr_t>(candidateCodeBlock);
-    
-    // This checks for both of those nasty cases in one go.
-    // 0 + 1 = 1
-    // -1 + 1 = 0
-    if (value + 1 <= 1)
-        return;
-
-    CodeBlock* codeBlock = static_cast<CodeBlock*>(candidateCodeBlock); 
-    if (!m_oldCodeBlocks.contains(codeBlock) && !m_newCodeBlocks.contains(codeBlock))
-        return;
-
-    mark(locker, codeBlock);
-}
-
 inline void CodeBlockSet::mark(const AbstractLocker&, CodeBlock* codeBlock)
 {
     if (!codeBlock)
         return;
 
+    // Conservative root scanning in Eden collection can only find PreciseAllocation that is allocated in this Eden cycle.
+    // Since CodeBlockSet::m_currentlyExecuting is strongly assuming that this catches all the currently executing CodeBlock,
+    // we now have a restriction that all CodeBlock needs to be a non-precise-allocation.
+    ASSERT(!codeBlock->isPreciseAllocation());
     m_currentlyExecuting.add(codeBlock);
 }
 
 template<typename Functor>
 void CodeBlockSet::iterate(const Functor& functor)
 {
-    auto locker = holdLock(m_lock);
+    Locker locker { m_lock };
     iterate(locker, functor);
 }
 
 template<typename Functor>
 void CodeBlockSet::iterate(const AbstractLocker&, const Functor& functor)
 {
-    for (auto& codeBlock : m_oldCodeBlocks) {
-        bool done = functor(codeBlock);
-        if (done)
-            return;
-    }
-    
-    for (auto& codeBlock : m_newCodeBlocks) {
-        bool done = functor(codeBlock);
-        if (done)
-            return;
-    }
+    for (CodeBlock* codeBlock : m_codeBlocks)
+        functor(codeBlock);
 }
 
 template<typename Functor>
 void CodeBlockSet::iterateCurrentlyExecuting(const Functor& functor)
 {
-    LockHolder locker(&m_lock);
+    Locker locker { m_lock };
     for (CodeBlock* codeBlock : m_currentlyExecuting)
         functor(codeBlock);
 }

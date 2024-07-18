@@ -25,16 +25,16 @@
 
 WI.TimelineDataGridNode = class TimelineDataGridNode extends WI.DataGridNode
 {
-    constructor(includesGraph, graphDataSource, hasChildren)
+    constructor(records, {hasChildren, includesGraph, graphDataSource} = {})
     {
-        super({}, hasChildren);
+        super({}, {hasChildren, copyable: false});
 
-        this.copyable = false;
-
+        this._records = records;
         this._includesGraph = includesGraph || false;
         this._graphDataSource = graphDataSource || null;
+        this._cachedData = null;
 
-        if (graphDataSource) {
+        if (this._graphDataSource) {
             this._graphContainerElement = document.createElement("div");
             this._timelineRecordBars = [];
         }
@@ -42,15 +42,11 @@ WI.TimelineDataGridNode = class TimelineDataGridNode extends WI.DataGridNode
 
     // Public
 
+    get records() { return this._records; }
+
     get record()
     {
         return this.records && this.records.length ? this.records[0] : null;
-    }
-
-    get records()
-    {
-        // Implemented by subclasses.
-        return [];
     }
 
     get graphDataSource()
@@ -63,8 +59,9 @@ WI.TimelineDataGridNode = class TimelineDataGridNode extends WI.DataGridNode
         if (!this._graphDataSource)
             return {};
 
-        var records = this.records || [];
-        return {graph: records.length ? records[0].startTime : 0};
+        return {
+            graph: this.record ? this.record.startTime : 0,
+        };
     }
 
     collapse()
@@ -116,8 +113,7 @@ WI.TimelineDataGridNode = class TimelineDataGridNode extends WI.DataGridNode
 
         if (value instanceof WI.SourceCodeLocation) {
             if (value.sourceCode instanceof WI.Resource) {
-                cell.classList.add(WI.ResourceTreeElement.ResourceIconStyleClassName);
-                cell.classList.add(value.sourceCode.type);
+                cell.classList.add(WI.ResourceTreeElement.ResourceIconStyleClassName, ...WI.Resource.classNamesForResource(value.sourceCode));
             } else if (value.sourceCode instanceof WI.Script) {
                 if (value.sourceCode.url) {
                     cell.classList.add(WI.ResourceTreeElement.ResourceIconStyleClassName);
@@ -154,7 +150,11 @@ WI.TimelineDataGridNode = class TimelineDataGridNode extends WI.DataGridNode
 
             var fragment = document.createDocumentFragment();
 
-            if (callFrame.sourceCodeLocation && callFrame.sourceCodeLocation.sourceCode) {
+            let iconElement = document.createElement("div");
+            iconElement.classList.add("icon");
+
+            let sourceCode = callFrame.sourceCodeLocation?.sourceCode;
+            if (sourceCode) {
                 // Give the whole cell a tooltip and keep it up to date.
                 callFrame.sourceCodeLocation.populateLiveDisplayLocationTooltip(cell);
 
@@ -162,11 +162,12 @@ WI.TimelineDataGridNode = class TimelineDataGridNode extends WI.DataGridNode
 
                 if (isAnonymousFunction) {
                     // For anonymous functions we show the resource or script icon and name.
-                    if (callFrame.sourceCodeLocation.sourceCode instanceof WI.Resource) {
-                        cell.classList.add(WI.ResourceTreeElement.ResourceIconStyleClassName);
-                        cell.classList.add(callFrame.sourceCodeLocation.sourceCode.type);
-                    } else if (callFrame.sourceCodeLocation.sourceCode instanceof WI.Script) {
-                        if (callFrame.sourceCodeLocation.sourceCode.url) {
+                    if (sourceCode instanceof WI.Resource) {
+                        cell.classList.add(WI.ResourceTreeElement.ResourceIconStyleClassName, ...WI.Resource.classNamesForResource(sourceCode));
+                        if (sourceCode.responseSource === WI.Resource.ResponseSource.InspectorOverride)
+                            iconElement.title = WI.UIString("This resource was loaded from a local override");
+                    } else if (sourceCode instanceof WI.Script) {
+                        if (sourceCode.url) {
                             cell.classList.add(WI.ResourceTreeElement.ResourceIconStyleClassName);
                             cell.classList.add(WI.Resource.Type.Script);
                         } else
@@ -194,19 +195,33 @@ WI.TimelineDataGridNode = class TimelineDataGridNode extends WI.DataGridNode
                 return fragment;
             }
 
-            var icon = document.createElement("div");
-            icon.classList.add("icon");
-
-            fragment.append(icon, functionName);
+            fragment.append(iconElement, functionName);
 
             return fragment;
+        }
+
+        if (value instanceof WI.DOMNode) {
+            cell.classList.add(WI.DOMTreeElementPathComponent.iconClassNameForNode(value));
+            return WI.linkifyNodeReference(value);
         }
 
         return super.createCellContent(columnIdentifier, cell);
     }
 
+    generateIconTitle(columnIdentifier)
+    {
+        let value = this.data[columnIdentifier];
+
+        if (value instanceof WI.SourceCodeLocation && value.sourceCode instanceof WI.Resource && value.sourceCode.responseSource === WI.Resource.ResponseSource.InspectorOverride)
+            return WI.UIString("This resource was loaded from a local override");
+
+        return super.generateIconTitle(columnIdentifier);
+    }
+
     refresh()
     {
+        this._cachedData = null;
+
         if (this._graphDataSource && this._includesGraph)
             this.needsGraphRefresh();
 
@@ -241,7 +256,7 @@ WI.TimelineDataGridNode = class TimelineDataGridNode extends WI.DataGridNode
         {
             var timelineRecordBar = this._timelineRecordBars[recordBarIndex];
             if (!timelineRecordBar)
-                timelineRecordBar = this._timelineRecordBars[recordBarIndex] = new WI.TimelineRecordBar(records, renderMode);
+                timelineRecordBar = this._timelineRecordBars[recordBarIndex] = new WI.TimelineRecordBar(this, records, renderMode);
             else {
                 timelineRecordBar.renderMode = renderMode;
                 timelineRecordBar.records = records;
@@ -325,8 +340,8 @@ WI.TimelineDataGridNode = class TimelineDataGridNode extends WI.DataGridNode
     displayName()
     {
         // Can be overridden by subclasses.
-        const includeDetails = true;
-        return WI.TimelineTabContentView.displayNameForRecord(this.record, true);
+        const includeDetailsInMainTitle = true;
+        return WI.TimelineTabContentView.displayNameForRecord(this.record, includeDetailsInMainTitle);
     }
 
     iconClassNames()

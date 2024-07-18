@@ -28,9 +28,11 @@
 #pragma once
 
 #include "IntPoint.h"
+#include <wtf/JSONValues.h>
 #include <wtf/MathExtras.h>
+#include <wtf/text/WTFString.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #include <CoreGraphics/CoreGraphics.h>
 #endif
 
@@ -45,11 +47,6 @@ typedef struct CGSize NSSize;
 typedef struct _NSSize NSSize;
 #endif
 #endif // PLATFORM(MAC)
-
-#if PLATFORM(WIN)
-struct D2D_SIZE_F;
-typedef D2D_SIZE_F D2D1_SIZE_F;
-#endif
 
 namespace WTF {
 class TextStream;
@@ -69,6 +66,9 @@ public:
 
     float width() const { return m_width; }
     float height() const { return m_height; }
+
+    float minDimension() const { return std::min(m_width, m_height); }
+    float maxDimension() const { return std::max(m_width, m_height); }
 
     void setWidth(float width) { m_width = width; }
     void setHeight(float height) { m_height = height; }
@@ -121,7 +121,10 @@ public:
            m_height < other.m_height ? m_height : other.m_height);
     }
 
-    WEBCORE_EXPORT float diagonalLength() const;
+    float diagonalLength() const
+    {
+        return std::hypot(m_width, m_height);
+    }
 
     float diagonalLengthSquared() const
     {
@@ -148,10 +151,8 @@ public:
     operator NSSize() const;
 #endif
 
-#if PLATFORM(WIN)
-    WEBCORE_EXPORT FloatSize(const D2D1_SIZE_F&);
-    operator D2D1_SIZE_F() const;
-#endif
+    String toJSONString() const;
+    WEBCORE_EXPORT Ref<JSON::Object> toJSONObject() const;
 
 private:
     float m_width { 0 };
@@ -256,3 +257,17 @@ WEBCORE_EXPORT WTF::TextStream& operator<<(WTF::TextStream&, const FloatSize&);
 
 } // namespace WebCore
 
+namespace WTF {
+template<> struct DefaultHash<WebCore::FloatSize>;
+template<> struct HashTraits<WebCore::FloatSize>;
+
+template<typename Type> struct LogArgument;
+template <>
+struct LogArgument<WebCore::FloatSize> {
+    static String toString(const WebCore::FloatSize& size)
+    {
+        return size.toJSONString();
+    }
+};
+    
+} // namespace WTF

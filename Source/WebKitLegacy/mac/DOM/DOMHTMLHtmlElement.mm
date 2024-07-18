@@ -29,11 +29,11 @@
 #import "ExceptionHandlers.h"
 #import <WebCore/HTMLHtmlElement.h>
 #import <WebCore/HTMLNames.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::HTMLHtmlElement*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -54,7 +54,7 @@
 - (NSString *)manifest
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getURLAttribute(WebCore::HTMLNames::manifestAttr);
+    return IMPL->getURLAttribute(WebCore::HTMLNames::manifestAttr).string();
 }
 
 - (void)setManifest:(NSString *)newManifest
@@ -64,3 +64,5 @@
 }
 
 @end
+
+#undef IMPL

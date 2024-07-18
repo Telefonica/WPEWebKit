@@ -29,6 +29,10 @@
 
 #if USE(APPLE_INTERNAL_SDK)
 
+#import <AppKit/NSMenu_Private.h>
+
+#elif USE(APPLE_INTERNAL_SDK)
+
 WTF_EXTERN_C_BEGIN
 #import <AppKit/NSMenu_Private.h>
 WTF_EXTERN_C_END
@@ -57,17 +61,16 @@ enum {
 
 @class QLPreviewMenuItem;
 
-#if __MAC_OS_X_VERSION_MAX_ALLOWED < 101200
-@interface NSMenuItem () <NSUserInterfaceItemIdentification>
-#else 
 @interface NSMenuItem ()
-#endif
-
 + (QLPreviewMenuItem *)standardQuickLookMenuItem;
 + (NSMenuItem *)standardShareMenuItemForItems:(NSArray *)items;
 @end
 
 #endif
+
+@interface NSMenu (Staging_81123724)
+- (BOOL)_containsItemMatchingEvent:(NSEvent *)event includingDisabledItems:(BOOL)includingDisabledItems;
+@end
 
 typedef NSUInteger NSPopUpMenuFlags;
 

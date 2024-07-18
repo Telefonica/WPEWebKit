@@ -22,31 +22,33 @@
 
 #include "LinearGradientAttributes.h"
 #include "RenderSVGResourceGradient.h"
-#include "SVGLinearGradientElement.h"
 
 namespace WebCore {
 
+class SVGLinearGradientElement;
+
 class RenderSVGResourceLinearGradient final : public RenderSVGResourceGradient {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGResourceLinearGradient);
 public:
     RenderSVGResourceLinearGradient(SVGLinearGradientElement&, RenderStyle&&);
     virtual ~RenderSVGResourceLinearGradient();
 
-    SVGLinearGradientElement& linearGradientElement() const { return downcast<SVGLinearGradientElement>(RenderSVGResourceGradient::gradientElement()); }
-
-    RenderSVGResourceType resourceType() const override { return LinearGradientResourceType; }
-
-    SVGUnitTypes::SVGUnitType gradientUnits() const override { return m_attributes.gradientUnits(); }
-    void calculateGradientTransform(AffineTransform& transform) override { transform = m_attributes.gradientTransform(); }
-    bool collectGradientAttributes() override;
-    void buildGradient(GradientData*) const override;
+    inline SVGLinearGradientElement& linearGradientElement() const;
 
     FloatPoint startPoint(const LinearGradientAttributes&) const;
     FloatPoint endPoint(const LinearGradientAttributes&) const;
 
 private:
+    RenderSVGResourceType resourceType() const final { return LinearGradientResourceType; }
+
+    SVGUnitTypes::SVGUnitType gradientUnits() const final { return m_attributes.gradientUnits(); }
+    AffineTransform gradientTransform() const final { return m_attributes.gradientTransform(); }
+    bool collectGradientAttributes() final;
+    Ref<Gradient> buildGradient(const RenderStyle&) const final;
+
     void gradientElement() const = delete;
 
-    const char* renderName() const override { return "RenderSVGResourceLinearGradient"; }
+    ASCIILiteral renderName() const final { return "RenderSVGResourceLinearGradient"_s; }
 
     LinearGradientAttributes m_attributes;
 };

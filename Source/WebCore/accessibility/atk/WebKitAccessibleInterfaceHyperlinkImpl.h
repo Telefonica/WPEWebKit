@@ -19,10 +19,10 @@
 
 #pragma once
 
-#if HAVE(ACCESSIBILITY)
+#if ENABLE(ACCESSIBILITY) && USE(ATK)
 
 #include <atk/atk.h>
 
 void webkitAccessibleHyperlinkImplInterfaceInit(AtkHyperlinkImplIface*);
 
-#endif // HAVE(ACCESSIBILITY)
+#endif // ENABLE(ACCESSIBILITY) && USE(ATK)

@@ -31,14 +31,16 @@ namespace WebKit {
 
 class BlobRegistryProxy final : public WebCore::BlobRegistry {
 public:
-    void registerFileBlobURL(const WebCore::URL&, Ref<WebCore::BlobDataFileReference>&&, const String& contentType) override;
-    void registerBlobURL(const WebCore::URL&, Vector<WebCore::BlobPart>&&, const String& contentType) override;
-    void registerBlobURL(const WebCore::URL&, const WebCore::URL& srcURL) override;
-    void registerBlobURLOptionallyFileBacked(const WebCore::URL&, const WebCore::URL& srcURL, RefPtr<WebCore::BlobDataFileReference>&&, const String& contentType) override;
-    void unregisterBlobURL(const WebCore::URL&) override;
-    void registerBlobURLForSlice(const WebCore::URL&, const WebCore::URL& srcURL, long long start, long long end) override;
-    unsigned long long blobSize(const WebCore::URL&) override;
-    void writeBlobsToTemporaryFiles(const Vector<String>& blobURLs, Function<void (const Vector<String>& filePaths)>&& completionHandler) override;
+    void registerFileBlobURL(const URL&, Ref<WebCore::BlobDataFileReference>&&, const String& path, const String& contentType) final;
+    void registerBlobURL(const URL&, Vector<WebCore::BlobPart>&&, const String& contentType) final;
+    void registerBlobURL(const URL&, const URL& srcURL, const WebCore::PolicyContainer&) final;
+    void registerBlobURLOptionallyFileBacked(const URL&, const URL& srcURL, RefPtr<WebCore::BlobDataFileReference>&&, const String& contentType) final;
+    void unregisterBlobURL(const URL&) final;
+    void registerBlobURLForSlice(const URL&, const URL& srcURL, long long start, long long end, const String& contentType) final;
+    unsigned long long blobSize(const URL&) final;
+    void writeBlobsToTemporaryFilesForIndexedDB(const Vector<String>& blobURLs, CompletionHandler<void(Vector<String>&& filePaths)>&&) final;
+    void registerBlobURLHandle(const URL&) final;
+    void unregisterBlobURLHandle(const URL&) final;
 };
 
 }

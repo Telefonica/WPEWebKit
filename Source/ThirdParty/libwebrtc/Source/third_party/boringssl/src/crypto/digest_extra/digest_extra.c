@@ -59,11 +59,12 @@
 #include <string.h>
 
 #include <openssl/asn1.h>
+#include <openssl/blake2.h>
 #include <openssl/bytestring.h>
 #include <openssl/nid.h>
 
-#include "internal.h"
 #include "../internal.h"
+#include "../fipsmodule/digest/internal.h"
 
 
 struct nid_to_digest {
@@ -82,11 +83,11 @@ static const struct nid_to_digest nid_to_digest_mapping[] = {
     {NID_sha384, EVP_sha384, SN_sha384, LN_sha384},
     {NID_sha512, EVP_sha512, SN_sha512, LN_sha512},
     {NID_md5_sha1, EVP_md5_sha1, SN_md5_sha1, LN_md5_sha1},
-    /* As a remnant of signing |EVP_MD|s, OpenSSL returned the corresponding
-     * hash function when given a signature OID. To avoid unintended lax parsing
-     * of hash OIDs, this is no longer supported for lookup by OID or NID.
-     * Node.js, however, exposes |EVP_get_digestbyname|'s full behavior to
-     * consumers so we retain it there. */
+    // As a remnant of signing |EVP_MD|s, OpenSSL returned the corresponding
+    // hash function when given a signature OID. To avoid unintended lax parsing
+    // of hash OIDs, this is no longer supported for lookup by OID or NID.
+    // Node.js, however, exposes |EVP_get_digestbyname|'s full behavior to
+    // consumers so we retain it there.
     {NID_undef, EVP_sha1, SN_dsaWithSHA, LN_dsaWithSHA},
     {NID_undef, EVP_sha1, SN_dsaWithSHA1, LN_dsaWithSHA1},
     {NID_undef, EVP_sha1, SN_ecdsa_with_SHA1, NULL},
@@ -104,7 +105,7 @@ static const struct nid_to_digest nid_to_digest_mapping[] = {
 
 const EVP_MD* EVP_get_digestbynid(int nid) {
   if (nid == NID_undef) {
-    /* Skip the |NID_undef| entries in |nid_to_digest_mapping|. */
+    // Skip the |NID_undef| entries in |nid_to_digest_mapping|.
     return NULL;
   }
 
@@ -120,22 +121,22 @@ const EVP_MD* EVP_get_digestbynid(int nid) {
 static const struct {
   uint8_t oid[9];
   uint8_t oid_len;
-  const EVP_MD *(*md_func) (void);
+  int nid;
 } kMDOIDs[] = {
-  /* 1.2.840.113549.2.4 */
-  { {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x04}, 8, EVP_md4 },
-  /* 1.2.840.113549.2.5 */
-  { {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x05}, 8, EVP_md5 },
-  /* 1.3.14.3.2.26 */
-  { {0x2b, 0x0e, 0x03, 0x02, 0x1a}, 5, EVP_sha1 },
-  /* 2.16.840.1.101.3.4.2.1 */
-  { {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01}, 9, EVP_sha256 },
-  /* 2.16.840.1.101.3.4.2.2 */
-  { {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02}, 9, EVP_sha384 },
-  /* 2.16.840.1.101.3.4.2.3 */
-  { {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03}, 9, EVP_sha512 },
-  /* 2.16.840.1.101.3.4.2.4 */
-  { {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04}, 9, EVP_sha224 },
+  // 1.2.840.113549.2.4
+  { {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x04}, 8, NID_md4 },
+  // 1.2.840.113549.2.5
+  { {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x05}, 8, NID_md5 },
+  // 1.3.14.3.2.26
+  { {0x2b, 0x0e, 0x03, 0x02, 0x1a}, 5, NID_sha1 },
+  // 2.16.840.1.101.3.4.2.1
+  { {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01}, 9, NID_sha256 },
+  // 2.16.840.1.101.3.4.2.2
+  { {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02}, 9, NID_sha384 },
+  // 2.16.840.1.101.3.4.2.3
+  { {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03}, 9, NID_sha512 },
+  // 2.16.840.1.101.3.4.2.4
+  { {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04}, 9, NID_sha224 },
 };
 
 static const EVP_MD *cbs_to_md(const CBS *cbs) {
@@ -143,7 +144,7 @@ static const EVP_MD *cbs_to_md(const CBS *cbs) {
     if (CBS_len(cbs) == kMDOIDs[i].oid_len &&
         OPENSSL_memcmp(CBS_data(cbs), kMDOIDs[i].oid, kMDOIDs[i].oid_len) ==
             0) {
-      return kMDOIDs[i].md_func();
+      return EVP_get_digestbynid(kMDOIDs[i].nid);
     }
   }
 
@@ -151,7 +152,7 @@ static const EVP_MD *cbs_to_md(const CBS *cbs) {
 }
 
 const EVP_MD *EVP_get_digestbyobj(const ASN1_OBJECT *obj) {
-  /* Handle objects with no corresponding OID. */
+  // Handle objects with no corresponding OID.
   if (obj->nid != NID_undef) {
     return EVP_get_digestbynid(obj->nid);
   }
@@ -175,10 +176,10 @@ const EVP_MD *EVP_parse_digest_algorithm(CBS *cbs) {
     return NULL;
   }
 
-  /* The parameters, if present, must be NULL. Historically, whether the NULL
-   * was included or omitted was not well-specified. When parsing an
-   * AlgorithmIdentifier, we allow both. (Note this code is not used when
-   * verifying RSASSA-PKCS1-v1_5 signatures.) */
+  // The parameters, if present, must be NULL. Historically, whether the NULL
+  // was included or omitted was not well-specified. When parsing an
+  // AlgorithmIdentifier, we allow both. (Note this code is not used when
+  // verifying RSASSA-PKCS1-v1_5 signatures.)
   if (CBS_len(&algorithm) > 0) {
     CBS param;
     if (!CBS_get_asn1(&algorithm, &param, CBS_ASN1_NULL) ||
@@ -190,6 +191,41 @@ const EVP_MD *EVP_parse_digest_algorithm(CBS *cbs) {
   }
 
   return ret;
+}
+
+int EVP_marshal_digest_algorithm(CBB *cbb, const EVP_MD *md) {
+  CBB algorithm, oid, null;
+  if (!CBB_add_asn1(cbb, &algorithm, CBS_ASN1_SEQUENCE) ||
+      !CBB_add_asn1(&algorithm, &oid, CBS_ASN1_OBJECT)) {
+    OPENSSL_PUT_ERROR(DIGEST, ERR_R_MALLOC_FAILURE);
+    return 0;
+  }
+
+  int found = 0;
+  int nid = EVP_MD_type(md);
+  for (size_t i = 0; i < OPENSSL_ARRAY_SIZE(kMDOIDs); i++) {
+    if (nid == kMDOIDs[i].nid) {
+      if (!CBB_add_bytes(&oid, kMDOIDs[i].oid, kMDOIDs[i].oid_len)) {
+        OPENSSL_PUT_ERROR(DIGEST, ERR_R_MALLOC_FAILURE);
+        return 0;
+      }
+      found = 1;
+      break;
+    }
+  }
+
+  if (!found) {
+    OPENSSL_PUT_ERROR(DIGEST, DIGEST_R_UNKNOWN_HASH);
+    return 0;
+  }
+
+  if (!CBB_add_asn1(&algorithm, &null, CBS_ASN1_NULL) ||
+      !CBB_flush(cbb)) {
+    OPENSSL_PUT_ERROR(DIGEST, ERR_R_MALLOC_FAILURE);
+    return 0;
+  }
+
+  return 1;
 }
 
 const EVP_MD *EVP_get_digestbyname(const char *name) {
@@ -204,3 +240,26 @@ const EVP_MD *EVP_get_digestbyname(const char *name) {
 
   return NULL;
 }
+
+static void blake2b256_init(EVP_MD_CTX *ctx) { BLAKE2B256_Init(ctx->md_data); }
+
+static void blake2b256_update(EVP_MD_CTX *ctx, const void *data, size_t len) {
+  BLAKE2B256_Update(ctx->md_data, data, len);
+}
+
+static void blake2b256_final(EVP_MD_CTX *ctx, uint8_t *md) {
+  BLAKE2B256_Final(md, ctx->md_data);
+}
+
+static const EVP_MD evp_md_blake2b256 = {
+  NID_undef,
+  BLAKE2B256_DIGEST_LENGTH,
+  0,
+  blake2b256_init,
+  blake2b256_update,
+  blake2b256_final,
+  BLAKE2B_CBLOCK,
+  sizeof(BLAKE2B_CTX),
+};
+
+const EVP_MD *EVP_blake2b256(void) { return &evp_md_blake2b256; }

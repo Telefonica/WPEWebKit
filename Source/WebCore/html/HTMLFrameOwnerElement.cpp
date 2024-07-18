@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2019 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,17 +25,20 @@
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "RenderWidget.h"
-#include "ShadowRoot.h"
 #include "SVGDocument.h"
+#include "SVGElementTypeHelpers.h"
+#include "ScriptController.h"
+#include "ShadowRoot.h"
 #include "StyleTreeResolver.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/Ref.h>
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLFrameOwnerElement);
+
 HTMLFrameOwnerElement::HTMLFrameOwnerElement(const QualifiedName& tagName, Document& document)
     : HTMLElement(tagName, document)
-    , m_contentFrame(nullptr)
-    , m_sandboxFlags(SandboxNone)
 {
 }
 
@@ -48,16 +51,15 @@ RenderWidget* HTMLFrameOwnerElement::renderWidget() const
     return downcast<RenderWidget>(renderer());
 }
 
-void HTMLFrameOwnerElement::setContentFrame(Frame* frame)
+void HTMLFrameOwnerElement::setContentFrame(Frame& frame)
 {
     // Make sure we will not end up with two frames referencing the same owner element.
     ASSERT(!m_contentFrame || m_contentFrame->ownerElement() != this);
-    ASSERT(frame);
     // Disconnected frames should not be allowed to load.
     ASSERT(isConnected());
     m_contentFrame = frame;
 
-    for (ContainerNode* node = this; node; node = node->parentOrShadowHostNode())
+    for (RefPtr<ContainerNode> node = this; node; node = node->parentOrShadowHostNode())
         node->incrementConnectedSubframeCount();
 }
 
@@ -66,20 +68,15 @@ void HTMLFrameOwnerElement::clearContentFrame()
     if (!m_contentFrame)
         return;
 
-    m_contentFrame = 0;
+    m_contentFrame = nullptr;
 
-    for (ContainerNode* node = this; node; node = node->parentOrShadowHostNode())
+    for (RefPtr<ContainerNode> node = this; node; node = node->parentOrShadowHostNode())
         node->decrementConnectedSubframeCount();
 }
 
 void HTMLFrameOwnerElement::disconnectContentFrame()
 {
-    // FIXME: Currently we don't do this in removedFrom because this causes an
-    // unload event in the subframe which could execute script that could then
-    // reach up into this document and then attempt to look back down. We should
-    // see if this behavior is really needed as Gecko does not allow this.
-    if (Frame* frame = contentFrame()) {
-        Ref<Frame> protect(*frame);
+    if (RefPtr<Frame> frame = m_contentFrame.get()) {
         frame->loader().frameDetached();
         frame->disconnectOwnerElement();
     }
@@ -93,12 +90,12 @@ HTMLFrameOwnerElement::~HTMLFrameOwnerElement()
 
 Document* HTMLFrameOwnerElement::contentDocument() const
 {
-    return m_contentFrame ? m_contentFrame->document() : 0;
+    return m_contentFrame ? m_contentFrame->document() : nullptr;
 }
 
-DOMWindow* HTMLFrameOwnerElement::contentWindow() const
+WindowProxy* HTMLFrameOwnerElement::contentWindow() const
 {
-    return m_contentFrame ? m_contentFrame->document()->domWindow() : 0;
+    return m_contentFrame ? &m_contentFrame->windowProxy() : nullptr;
 }
 
 void HTMLFrameOwnerElement::setSandboxFlags(SandboxFlags flags)
@@ -106,7 +103,7 @@ void HTMLFrameOwnerElement::setSandboxFlags(SandboxFlags flags)
     m_sandboxFlags = flags;
 }
 
-bool HTMLFrameOwnerElement::isKeyboardFocusable(KeyboardEvent& event) const
+bool HTMLFrameOwnerElement::isKeyboardFocusable(KeyboardEvent* event) const
 {
     return m_contentFrame && HTMLElement::isKeyboardFocusable(event);
 }
@@ -124,17 +121,32 @@ void HTMLFrameOwnerElement::scheduleInvalidateStyleAndLayerComposition()
 {
     if (Style::postResolutionCallbacksAreSuspended()) {
         RefPtr<HTMLFrameOwnerElement> element = this;
-        Style::queuePostResolutionCallback([element] {
+        Style::deprecatedQueuePostResolutionCallback([element] {
             element->invalidateStyleAndLayerComposition();
         });
     } else
         invalidateStyleAndLayerComposition();
 }
 
+bool HTMLFrameOwnerElement::isProhibitedSelfReference(const URL& completeURL) const
+{
+    // We allow one level of self-reference because some websites depend on that, but we don't allow more than one.
+    bool foundOneSelfReference = false;
+    for (auto* frame = document().frame(); frame; frame = frame->tree().parent()) {
+        // Use creationURL() because url() can be changed via History.replaceState() so it's not reliable.
+        if (equalIgnoringFragmentIdentifier(frame->document()->creationURL(), completeURL)) {
+            if (foundOneSelfReference)
+                return true;
+            foundOneSelfReference = true;
+        }
+    }
+    return false;
+}
+
 bool SubframeLoadingDisabler::canLoadFrame(HTMLFrameOwnerElement& owner)
 {
-    for (ContainerNode* node = &owner; node; node = node->parentOrShadowHostNode()) {
-        if (disabledSubtreeRoots().contains(node))
+    for (RefPtr<ContainerNode> node = &owner; node; node = node->parentOrShadowHostNode()) {
+        if (disabledSubtreeRoots().contains(node.get()))
             return false;
     }
     return true;

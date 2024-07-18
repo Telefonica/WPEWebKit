@@ -8,11 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "modules/desktop_capture/cropped_desktop_frame.h"
+
 #include <memory>
+#include <utility>
 
-#include "webrtc/modules/desktop_capture/cropped_desktop_frame.h"
-
-#include "webrtc/base/constructormagic.h"
+#include "modules/desktop_capture/desktop_region.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -22,20 +24,30 @@ class CroppedDesktopFrame : public DesktopFrame {
   CroppedDesktopFrame(std::unique_ptr<DesktopFrame> frame,
                       const DesktopRect& rect);
 
- private:
-  std::unique_ptr<DesktopFrame> frame_;
+  CroppedDesktopFrame(const CroppedDesktopFrame&) = delete;
+  CroppedDesktopFrame& operator=(const CroppedDesktopFrame&) = delete;
 
-  RTC_DISALLOW_COPY_AND_ASSIGN(CroppedDesktopFrame);
+ private:
+  const std::unique_ptr<DesktopFrame> frame_;
 };
 
 std::unique_ptr<DesktopFrame> CreateCroppedDesktopFrame(
     std::unique_ptr<DesktopFrame> frame,
     const DesktopRect& rect) {
-  if (!DesktopRect::MakeSize(frame->size()).ContainsRect(rect))
+  RTC_DCHECK(frame);
+
+  DesktopRect intersection = DesktopRect::MakeSize(frame->size());
+  intersection.IntersectWith(rect);
+  if (intersection.is_empty()) {
     return nullptr;
+  }
+
+  if (frame->size().equals(rect.size())) {
+    return frame;
+  }
 
   return std::unique_ptr<DesktopFrame>(
-      new CroppedDesktopFrame(std::move(frame), rect));
+      new CroppedDesktopFrame(std::move(frame), intersection));
 }
 
 CroppedDesktopFrame::CroppedDesktopFrame(std::unique_ptr<DesktopFrame> frame,
@@ -43,8 +55,12 @@ CroppedDesktopFrame::CroppedDesktopFrame(std::unique_ptr<DesktopFrame> frame,
     : DesktopFrame(rect.size(),
                    frame->stride(),
                    frame->GetFrameDataAtPos(rect.top_left()),
-                   frame->shared_memory()) {
-  frame_ = std::move(frame);
+                   frame->shared_memory()),
+      frame_(std::move(frame)) {
+  MoveFrameInfoFrom(frame_.get());
+  set_top_left(frame_->top_left().add(rect.top_left()));
+  mutable_updated_region()->IntersectWith(rect);
+  mutable_updated_region()->Translate(-rect.left(), -rect.top());
 }
 
 }  // namespace webrtc

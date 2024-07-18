@@ -8,13 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_API_NOTIFIER_H_
-#define WEBRTC_API_NOTIFIER_H_
+#ifndef API_NOTIFIER_H_
+#define API_NOTIFIER_H_
 
 #include <list>
 
-#include "webrtc/api/mediastreaminterface.h"
-#include "webrtc/base/checks.h"
+#include "api/media_stream_interface.h"
+#include "api/sequence_checker.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/system/no_unique_address.h"
 
 namespace webrtc {
 
@@ -23,15 +25,16 @@ namespace webrtc {
 template <class T>
 class Notifier : public T {
  public:
-  Notifier() {
-  }
+  Notifier() = default;
 
   virtual void RegisterObserver(ObserverInterface* observer) {
+    RTC_DCHECK_RUN_ON(&sequence_checker_);
     RTC_DCHECK(observer != nullptr);
     observers_.push_back(observer);
   }
 
   virtual void UnregisterObserver(ObserverInterface* observer) {
+    RTC_DCHECK_RUN_ON(&sequence_checker_);
     for (std::list<ObserverInterface*>::iterator it = observers_.begin();
          it != observers_.end(); it++) {
       if (*it == observer) {
@@ -42,6 +45,7 @@ class Notifier : public T {
   }
 
   void FireOnChanged() {
+    RTC_DCHECK_RUN_ON(&sequence_checker_);
     // Copy the list of observers to avoid a crash if the observer object
     // unregisters as a result of the OnChanged() call. If the same list is used
     // UnregisterObserver will affect the list make the iterator invalid.
@@ -53,9 +57,13 @@ class Notifier : public T {
   }
 
  protected:
-  std::list<ObserverInterface*> observers_;
+  std::list<ObserverInterface*> observers_ RTC_GUARDED_BY(sequence_checker_);
+
+ private:
+  RTC_NO_UNIQUE_ADDRESS SequenceChecker sequence_checker_{
+      SequenceChecker::kDetached};
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_NOTIFIER_H_
+#endif  // API_NOTIFIER_H_

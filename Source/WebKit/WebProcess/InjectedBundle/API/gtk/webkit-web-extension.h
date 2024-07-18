@@ -34,11 +34,13 @@
 #include <webkit2/WebKitScriptWorld.h>
 #include <webkit2/WebKitURIRequest.h>
 #include <webkit2/WebKitURIResponse.h>
+#include <webkit2/WebKitUserMessage.h>
 #include <webkit2/WebKitVersion.h>
 #include <webkit2/WebKitWebEditor.h>
 #include <webkit2/WebKitWebExtension.h>
 #include <webkit2/WebKitWebHitTestResult.h>
 #include <webkit2/WebKitWebPage.h>
+#include <webkit2/WebKitWebProcessEnumTypes.h>
 
 #include <webkit2/WebKitWebExtensionAutocleanups.h>
 

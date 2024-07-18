@@ -2,6 +2,7 @@
  * Copyright (C) 2010 University of Szeged
  * Copyright (C) 2010 Zoltan Herczeg
  * Copyright (C) 2011 Renata Hodovan (reni@webkit.org)
+ * Copyright (C) 2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,14 +29,18 @@
 #include "config.h"
 #include "RenderSVGResourceFilterPrimitive.h"
 
+#include "SVGElementTypeHelpers.h"
 #include "SVGFEDiffuseLightingElement.h"
+#include "SVGFEDropShadowElement.h"
 #include "SVGFEFloodElement.h"
-#include "SVGFEImage.h"
 #include "SVGFESpecularLightingElement.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
 #include "SVGNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderSVGResourceFilterPrimitive);
 
 RenderSVGResourceFilterPrimitive::RenderSVGResourceFilterPrimitive(SVGFilterPrimitiveStandardAttributes& filterPrimitiveElement, RenderStyle&& style)
     : RenderSVGHiddenContainer(filterPrimitiveElement, WTFMove(style))
@@ -51,65 +56,45 @@ void RenderSVGResourceFilterPrimitive::styleDidChange(StyleDifference diff, cons
 {
     RenderSVGHiddenContainer::styleDidChange(diff, oldStyle);
 
-    auto* filter = parent();
-    if (!filter)
-        return;
-
-    if (diff == StyleDifferenceEqual || !oldStyle)
+    if (diff == StyleDifference::Equal || !oldStyle)
         return;
 
     const SVGRenderStyle& newStyle = style().svgStyle();
-    if (is<SVGFEFloodElement>(filterPrimitiveElement())) {
+    if (is<SVGFEFloodElement>(filterPrimitiveElement()) || is<SVGFEDropShadowElement>(filterPrimitiveElement())) {
         if (newStyle.floodColor() != oldStyle->svgStyle().floodColor())
-            downcast<RenderSVGResourceFilter>(*filter).primitiveAttributeChanged(this, SVGNames::flood_colorAttr);
+            filterPrimitiveElement().primitiveAttributeChanged(SVGNames::flood_colorAttr);
         if (newStyle.floodOpacity() != oldStyle->svgStyle().floodOpacity())
-            downcast<RenderSVGResourceFilter>(*filter).primitiveAttributeChanged(this, SVGNames::flood_opacityAttr);
+            filterPrimitiveElement().primitiveAttributeChanged(SVGNames::flood_opacityAttr);
     } else if (is<SVGFEDiffuseLightingElement>(filterPrimitiveElement()) || is<SVGFESpecularLightingElement>(filterPrimitiveElement())) {
         if (newStyle.lightingColor() != oldStyle->svgStyle().lightingColor())
-            downcast<RenderSVGResourceFilter>(*filter).primitiveAttributeChanged(this, SVGNames::lighting_colorAttr);
+            filterPrimitiveElement().primitiveAttributeChanged(SVGNames::lighting_colorAttr);
     }
 }
 
-FloatRect RenderSVGResourceFilterPrimitive::determineFilterPrimitiveSubregion(FilterEffect& effect)
+void RenderSVGResourceFilterPrimitive::markFilterEffectForRepaint(FilterEffect* effect)
 {
-    auto& filter = downcast<SVGFilter>(effect.filter());
+    auto parent = this->parent();
+    if (!is<RenderSVGResourceFilter>(parent))
+        return;
 
-    // FETile, FETurbulence, FEFlood don't have input effects, take the filter region as unite rect.
-    FloatRect subregion;
-    if (unsigned numberOfInputEffects = effect.inputEffects().size()) {
-        subregion = determineFilterPrimitiveSubregion(*effect.inputEffect(0));
-        for (unsigned i = 1; i < numberOfInputEffects; ++i)
-            subregion.unite(determineFilterPrimitiveSubregion(*effect.inputEffect(i)));
-    } else
-        subregion = filter.filterRegionInUserSpace();
+    auto& filterRenderer = downcast<RenderSVGResourceFilter>(*parent);
 
-    // After calling determineFilterPrimitiveSubregion on the target effect, reset the subregion again for <feTile>.
-    if (effect.filterEffectType() == FilterEffectTypeTile)
-        subregion = filter.filterRegionInUserSpace();
+    if (effect)
+        filterRenderer.markFilterForRepaint(*effect);
 
-    FloatRect effectBoundaries = effect.effectBoundaries();
-    if (effect.hasX())
-        subregion.setX(effectBoundaries.x());
-    if (effect.hasY())
-        subregion.setY(effectBoundaries.y());
-    if (effect.hasWidth())
-        subregion.setWidth(effectBoundaries.width());
-    if (effect.hasHeight())
-        subregion.setHeight(effectBoundaries.height());
+    filterRenderer.markAllClientLayersForInvalidation();
+}
 
-    effect.setFilterPrimitiveSubregion(subregion);
+void RenderSVGResourceFilterPrimitive::markFilterEffectForRebuild()
+{
+    auto parent = this->parent();
+    if (!is<RenderSVGResourceFilter>(parent))
+        return;
 
-    FloatRect absoluteSubregion = filter.absoluteTransform().mapRect(subregion);
-    FloatSize filterResolution = filter.filterResolution();
-    absoluteSubregion.scale(filterResolution.width(), filterResolution.height());
+    auto& filterRenderer = downcast<RenderSVGResourceFilter>(*parent);
 
-    // Clip every filter effect to the filter region.
-    FloatRect absoluteScaledFilterRegion = filter.filterRegion();
-    absoluteScaledFilterRegion.scale(filterResolution.width(), filterResolution.height());
-    absoluteSubregion.intersect(absoluteScaledFilterRegion);
-
-    effect.setMaxEffectRect(absoluteSubregion);
-    return subregion;
+    filterRenderer.markFilterForRebuild();
+    filterRenderer.markAllClientLayersForInvalidation();
 }
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,25 +28,35 @@
 #include "RenderTheme.h"
 #include <wtf/RetainPtr.h>
 
-#if ENABLE(MEDIA_CONTROLS_SCRIPT)
 OBJC_CLASS NSDateComponentsFormatter;
-#endif
 
 namespace WebCore {
 
 class RenderThemeCocoa : public RenderTheme {
+public:
+    WEBCORE_EXPORT static RenderThemeCocoa& singleton();
+
 private:
+    void purgeCaches() override;
+
+    bool shouldHaveCapsLockIndicator(const HTMLInputElement&) const final;
+
 #if ENABLE(APPLE_PAY)
-    void adjustApplePayButtonStyle(StyleResolver&, RenderStyle&, const Element*) const override;
+    void adjustApplePayButtonStyle(RenderStyle&, const Element*) const override;
     bool paintApplePayButton(const RenderObject&, const PaintInfo&, const IntRect&) override;
 #endif
-protected:
-#if ENABLE(VIDEO)
+
+#if ENABLE(VIDEO) && ENABLE(MODERN_MEDIA_CONTROLS)
+    String mediaControlsStyleSheet() override;
+    Vector<String, 2> mediaControlsScripts() override;
+    String mediaControlsBase64StringForIconNameAndType(const String&, const String&) override;
     String mediaControlsFormattedStringForDuration(double) override;
-#endif
-#if ENABLE(MEDIA_CONTROLS_SCRIPT)
+
+    String m_mediaControlsLocalizedStringsScript;
+    String m_mediaControlsScript;
+    String m_mediaControlsStyleSheet;
     RetainPtr<NSDateComponentsFormatter> m_durationFormatter;
-#endif
+#endif // ENABLE(VIDEO) && ENABLE(MODERN_MEDIA_CONTROLS)
 };
 
 }

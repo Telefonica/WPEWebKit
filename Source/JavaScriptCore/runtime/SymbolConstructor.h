@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2021 Apple Inc. All rights reserved.
  * Copyright (C) 2015 Yusuke Suzuki <utatane.tea@gmail.com>.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,14 +33,14 @@ namespace JSC {
 class SymbolPrototype;
 class GetterSetter;
 
-class SymbolConstructor : public InternalFunction {
+class SymbolConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
-    static const unsigned StructureFlags = HasStaticPropertyTable | Base::StructureFlags;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
 
     static SymbolConstructor* create(VM& vm, Structure* structure, SymbolPrototype* prototype, GetterSetter*)
     {
-        SymbolConstructor* constructor = new (NotNull, allocateCell<SymbolConstructor>(vm.heap)) SymbolConstructor(vm, structure);
+        SymbolConstructor* constructor = new (NotNull, allocateCell<SymbolConstructor>(vm)) SymbolConstructor(vm, structure);
         constructor->finishCreation(vm, prototype);
         return constructor;
     }
@@ -49,16 +49,13 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
-
-protected:
-    void finishCreation(VM&, SymbolPrototype*);
 
 private:
     SymbolConstructor(VM&, Structure*);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
+    void finishCreation(VM&, SymbolPrototype*);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(SymbolConstructor, InternalFunction);
 
 } // namespace JSC

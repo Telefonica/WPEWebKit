@@ -23,45 +23,30 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
-#ifndef WebAlternativeTextClient_h
-#define WebAlternativeTextClient_h
-
 #import "CorrectionPanel.h"
 #import <WebCore/AlternativeTextClient.h>
 
 @class WebView;
 
 class WebAlternativeTextClient : public WebCore::AlternativeTextClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    WebAlternativeTextClient(WebView *);
+    explicit WebAlternativeTextClient(WebView *);
     virtual ~WebAlternativeTextClient();
-    void pageDestroyed() override;
 #if USE(AUTOCORRECTION_PANEL)
     void showCorrectionAlternative(WebCore::AlternativeTextType, const WebCore::FloatRect& boundingBoxOfReplacedString, const String& replacedString, const String& replacementString, const Vector<String>& alternativeReplacementStrings) override;
     void dismissAlternative(WebCore::ReasonForDismissingAlternativeText) override;
     String dismissAlternativeSoon(WebCore::ReasonForDismissingAlternativeText) override;
     void recordAutocorrectionResponse(WebCore::AutocorrectionResponse, const String& replacedString, const String& replacementString) override;
 #endif
-#if USE(DICTATION_ALTERNATIVES)
-    void showDictationAlternativeUI(const WebCore::FloatRect& boundingBoxOfDictatedText, uint64_t dictationContext) override;
-    void removeDictationAlternatives(uint64_t dictationContext) override;
-    Vector<String> dictationAlternatives(uint64_t dictationContext) override;
-#endif
+    void showDictationAlternativeUI(const WebCore::FloatRect& boundingBoxOfDictatedText, WebCore::DictationContext) override;
+    void removeDictationAlternatives(WebCore::DictationContext) override;
+    Vector<String> dictationAlternatives(WebCore::DictationContext) override;
+
 private:
-#if PLATFORM(IOS)
-#pragma clang diagnostic push
-#if defined(__has_warning) && __has_warning("-Wunused-private-field")
-#pragma clang diagnostic ignored "-Wunused-private-field"
-#endif
-#endif
-    WebView* m_webView;
-#if PLATFORM(IOS)
-#pragma clang diagnostic pop
-#endif
+    WebView *m_webView;
+
 #if USE(AUTOCORRECTION_PANEL)
     CorrectionPanel m_correctionPanel;
 #endif
 };
-
-#endif // WebAlternativeTextClient_h

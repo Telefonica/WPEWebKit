@@ -35,6 +35,7 @@ StepRange::StepRange()
     , m_minimum(0)
     , m_step(1)
     , m_stepBase(0)
+    , m_stepDescription()
 {
 }
 
@@ -49,7 +50,7 @@ StepRange::StepRange(const StepRange& stepRange)
 {
 }
 
-StepRange::StepRange(const Decimal& stepBase, RangeLimitations rangeLimitations, const Decimal& minimum, const Decimal& maximum, const Decimal& step, const StepDescription& stepDescription)
+StepRange::StepRange(const Decimal& stepBase, RangeLimitations rangeLimitations, const Decimal& minimum, const Decimal& maximum, const Decimal& step, const StepDescription& stepDescription, IsReversible isReversible)
     : m_maximum(maximum)
     , m_minimum(minimum)
     , m_step(step.isFinite() ? step : 1)
@@ -57,6 +58,7 @@ StepRange::StepRange(const Decimal& stepBase, RangeLimitations rangeLimitations,
     , m_stepDescription(stepDescription)
     , m_hasRangeLimitations(rangeLimitations == RangeLimitations::Valid)
     , m_hasStep(step.isFinite())
+    , m_isReversible(isReversible == IsReversible::Yes)
 {
     ASSERT(m_maximum.isFinite());
     ASSERT(m_minimum.isFinite());
@@ -93,16 +95,16 @@ Decimal StepRange::clampValue(const Decimal& value) const
     return clampedValue;
 }
 
-Decimal StepRange::parseStep(AnyStepHandling anyStepHandling, const StepDescription& stepDescription, const String& stepString)
+Decimal StepRange::parseStep(AnyStepHandling anyStepHandling, const StepDescription& stepDescription, StringView stepString)
 {
     if (stepString.isEmpty())
         return stepDescription.defaultValue();
 
-    if (equalLettersIgnoringASCIICase(stepString, "any")) {
+    if (equalLettersIgnoringASCIICase(stepString, "any"_s)) {
         switch (anyStepHandling) {
-        case RejectAny:
+        case AnyStepHandling::Reject:
             return Decimal::nan();
-        case AnyIsDefaultStep:
+        case AnyStepHandling::Default:
             return stepDescription.defaultValue();
         default:
             ASSERT_NOT_REACHED();
@@ -138,6 +140,20 @@ Decimal StepRange::parseStep(AnyStepHandling anyStepHandling, const StepDescript
 Decimal StepRange::roundByStep(const Decimal& value, const Decimal& base) const
 {
     return base + ((value - base) / m_step).round() * m_step;
+}
+
+Decimal StepRange::stepSnappedMaximum() const
+{
+    Decimal base = stepBase();
+    Decimal step =  m_step;
+    if (base - step == base || !(base / step).isFinite())
+        return Decimal::nan();
+    Decimal alignedMaximum = base + ((maximum() - base) / step).floor() * step;
+    if (alignedMaximum > maximum())
+        alignedMaximum -= step;
+    if (alignedMaximum < minimum())
+        return Decimal::nan();
+    return alignedMaximum;
 }
 
 bool StepRange::stepMismatch(const Decimal& valueForCheck) const

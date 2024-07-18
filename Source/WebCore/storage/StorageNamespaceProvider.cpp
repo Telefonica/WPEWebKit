@@ -35,68 +35,57 @@
 
 namespace WebCore {
 
-// Suggested by the HTML5 spec.
-unsigned localStorageDatabaseQuotaInBytes = 5 * 1024 * 1024;
-
 StorageNamespaceProvider::StorageNamespaceProvider()
 {
 }
 
 StorageNamespaceProvider::~StorageNamespaceProvider()
 {
-    ASSERT(m_pages.isEmpty());
 }
 
-void StorageNamespaceProvider::addPage(Page& page)
-{
-    ASSERT(!m_pages.contains(&page));
-
-    m_pages.add(&page);
-}
-
-void StorageNamespaceProvider::removePage(Page& page)
-{
-    ASSERT(m_pages.contains(&page));
-
-    m_pages.remove(&page);
-}
-
-RefPtr<StorageArea> StorageNamespaceProvider::localStorageArea(Document& document)
+Ref<StorageArea> StorageNamespaceProvider::localStorageArea(Document& document)
 {
     // This StorageNamespaceProvider was retrieved from the Document's Page,
     // so the Document had better still actually have a Page.
     ASSERT(document.page());
 
-    bool ephemeral = document.page()->usesEphemeralSession();
-    bool transient = !document.securityOrigin().canAccessLocalStorage(&document.topOrigin());
-
     RefPtr<StorageNamespace> storageNamespace;
-
-    if (transient)
-        storageNamespace = &transientLocalStorageNamespace(document.topOrigin(), document.page()->settings().localStorageQuota());
-    else if (ephemeral)
-        storageNamespace = document.page()->ephemeralLocalStorage();
+    if (document.canAccessResource(ScriptExecutionContext::ResourceType::LocalStorage) == ScriptExecutionContext::HasResourceAccess::DefaultForThirdParty)
+        storageNamespace = &transientLocalStorageNamespace(document.topOrigin(), document.page()->settings().localStorageQuota(), document.page()->sessionID());
     else
-        storageNamespace = &localStorageNamespace(document.page()->settings().localStorageQuota());
+        storageNamespace = &localStorageNamespace(document.page()->settings().localStorageQuota(), document.page()->sessionID());
 
-    return storageNamespace->storageArea(SecurityOriginData::fromSecurityOrigin(document.securityOrigin()));
+    return storageNamespace->storageArea(document.securityOrigin());
 }
 
-StorageNamespace& StorageNamespaceProvider::localStorageNamespace(unsigned quota)
+StorageNamespace& StorageNamespaceProvider::localStorageNamespace(unsigned quota, PAL::SessionID sessionID)
 {
     if (!m_localStorageNamespace)
-        m_localStorageNamespace = createLocalStorageNamespace(quota);
+        m_localStorageNamespace = createLocalStorageNamespace(quota, sessionID);
 
+    ASSERT(m_localStorageNamespace->sessionID() == sessionID);
     return *m_localStorageNamespace;
 }
 
-    StorageNamespace& StorageNamespaceProvider::transientLocalStorageNamespace(SecurityOrigin& securityOrigin, unsigned quota)
+StorageNamespace& StorageNamespaceProvider::transientLocalStorageNamespace(SecurityOrigin& securityOrigin, unsigned quota, PAL::SessionID sessionID)
 {
-    auto& slot = m_transientLocalStorageMap.add(&securityOrigin, nullptr).iterator->value;
+    auto& slot = m_transientLocalStorageNamespaces.add(securityOrigin.data(), nullptr).iterator->value;
     if (!slot)
-        slot = createTransientLocalStorageNamespace(securityOrigin, quota);
+        slot = createTransientLocalStorageNamespace(securityOrigin, quota, sessionID);
 
+    ASSERT(slot->sessionID() == sessionID);
     return *slot;
+}
+
+void StorageNamespaceProvider::setSessionIDForTesting(PAL::SessionID newSessionID)
+{
+    if (m_localStorageNamespace && newSessionID != m_localStorageNamespace->sessionID())
+        m_localStorageNamespace->setSessionIDForTesting(newSessionID);
+    
+    for (auto& transientLocalStorageNamespace : m_transientLocalStorageNamespaces.values()) {
+        if (newSessionID != transientLocalStorageNamespace->sessionID())
+            m_localStorageNamespace->setSessionIDForTesting(newSessionID);
+    }
 }
 
 }

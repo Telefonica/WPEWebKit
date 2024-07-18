@@ -32,11 +32,17 @@
 #include <wpe/WebKitContextMenuItem.h>
 #include <wpe/WebKitFrame.h>
 #include <wpe/WebKitScriptWorld.h>
+#include <wpe/WebKitSecurityOrigin.h>
 #include <wpe/WebKitURIRequest.h>
 #include <wpe/WebKitURIResponse.h>
+#include <wpe/WebKitUserMessage.h>
 #include <wpe/WebKitWebEditor.h>
 #include <wpe/WebKitWebExtension.h>
+#include <wpe/WebKitWebHitTestResult.h>
 #include <wpe/WebKitWebPage.h>
+#include <wpe/WebKitWebProcessEnumTypes.h>
+
+#include <wpe/WebKitWebExtensionAutocleanups.h>
 
 #undef __WEBKIT_WEB_EXTENSION_H_INSIDE__
 

@@ -24,9 +24,10 @@
 #include "DOMObjectCache.h"
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
-#include "GObjectEventListener.h"
+#include <WebCore/ElementInlines.h>
 #include <WebCore/HTMLNames.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
+#include "GObjectEventListener.h"
 #include "WebKitDOMDOMWindowPrivate.h"
 #include "WebKitDOMDocumentPrivate.h"
 #include "WebKitDOMEventPrivate.h"
@@ -37,6 +38,8 @@
 #include "ConvertToUTF8String.h"
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 namespace WebKit {
 
@@ -86,29 +89,29 @@ static gboolean webkit_dom_html_frame_element_remove_event_listener(WebKitDOMEve
     return WebKit::GObjectEventListener::removeEventListener(G_OBJECT(target), coreTarget, eventName, handler, useCapture);
 }
 
-static void webkit_dom_event_target_init(WebKitDOMEventTargetIface* iface)
+static void webkit_dom_html_frame_element_dom_event_target_init(WebKitDOMEventTargetIface* iface)
 {
     iface->dispatch_event = webkit_dom_html_frame_element_dispatch_event;
     iface->add_event_listener = webkit_dom_html_frame_element_add_event_listener;
     iface->remove_event_listener = webkit_dom_html_frame_element_remove_event_listener;
 }
 
-G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLFrameElement, webkit_dom_html_frame_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_event_target_init))
+G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLFrameElement, webkit_dom_html_frame_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_html_frame_element_dom_event_target_init))
 
 enum {
-    PROP_0,
-    PROP_FRAME_BORDER,
-    PROP_LONG_DESC,
-    PROP_MARGIN_HEIGHT,
-    PROP_MARGIN_WIDTH,
-    PROP_NAME,
-    PROP_NO_RESIZE,
-    PROP_SCROLLING,
-    PROP_SRC,
-    PROP_CONTENT_DOCUMENT,
-    PROP_CONTENT_WINDOW,
-    PROP_WIDTH,
-    PROP_HEIGHT,
+    DOM_HTML_FRAME_ELEMENT_PROP_0,
+    DOM_HTML_FRAME_ELEMENT_PROP_FRAME_BORDER,
+    DOM_HTML_FRAME_ELEMENT_PROP_LONG_DESC,
+    DOM_HTML_FRAME_ELEMENT_PROP_MARGIN_HEIGHT,
+    DOM_HTML_FRAME_ELEMENT_PROP_MARGIN_WIDTH,
+    DOM_HTML_FRAME_ELEMENT_PROP_NAME,
+    DOM_HTML_FRAME_ELEMENT_PROP_NO_RESIZE,
+    DOM_HTML_FRAME_ELEMENT_PROP_SCROLLING,
+    DOM_HTML_FRAME_ELEMENT_PROP_SRC,
+    DOM_HTML_FRAME_ELEMENT_PROP_CONTENT_DOCUMENT,
+    DOM_HTML_FRAME_ELEMENT_PROP_CONTENT_WINDOW,
+    DOM_HTML_FRAME_ELEMENT_PROP_WIDTH,
+    DOM_HTML_FRAME_ELEMENT_PROP_HEIGHT,
 };
 
 static void webkit_dom_html_frame_element_set_property(GObject* object, guint propertyId, const GValue* value, GParamSpec* pspec)
@@ -116,28 +119,28 @@ static void webkit_dom_html_frame_element_set_property(GObject* object, guint pr
     WebKitDOMHTMLFrameElement* self = WEBKIT_DOM_HTML_FRAME_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_FRAME_BORDER:
+    case DOM_HTML_FRAME_ELEMENT_PROP_FRAME_BORDER:
         webkit_dom_html_frame_element_set_frame_border(self, g_value_get_string(value));
         break;
-    case PROP_LONG_DESC:
+    case DOM_HTML_FRAME_ELEMENT_PROP_LONG_DESC:
         webkit_dom_html_frame_element_set_long_desc(self, g_value_get_string(value));
         break;
-    case PROP_MARGIN_HEIGHT:
+    case DOM_HTML_FRAME_ELEMENT_PROP_MARGIN_HEIGHT:
         webkit_dom_html_frame_element_set_margin_height(self, g_value_get_string(value));
         break;
-    case PROP_MARGIN_WIDTH:
+    case DOM_HTML_FRAME_ELEMENT_PROP_MARGIN_WIDTH:
         webkit_dom_html_frame_element_set_margin_width(self, g_value_get_string(value));
         break;
-    case PROP_NAME:
+    case DOM_HTML_FRAME_ELEMENT_PROP_NAME:
         webkit_dom_html_frame_element_set_name(self, g_value_get_string(value));
         break;
-    case PROP_NO_RESIZE:
+    case DOM_HTML_FRAME_ELEMENT_PROP_NO_RESIZE:
         webkit_dom_html_frame_element_set_no_resize(self, g_value_get_boolean(value));
         break;
-    case PROP_SCROLLING:
+    case DOM_HTML_FRAME_ELEMENT_PROP_SCROLLING:
         webkit_dom_html_frame_element_set_scrolling(self, g_value_get_string(value));
         break;
-    case PROP_SRC:
+    case DOM_HTML_FRAME_ELEMENT_PROP_SRC:
         webkit_dom_html_frame_element_set_src(self, g_value_get_string(value));
         break;
     default:
@@ -151,40 +154,40 @@ static void webkit_dom_html_frame_element_get_property(GObject* object, guint pr
     WebKitDOMHTMLFrameElement* self = WEBKIT_DOM_HTML_FRAME_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_FRAME_BORDER:
+    case DOM_HTML_FRAME_ELEMENT_PROP_FRAME_BORDER:
         g_value_take_string(value, webkit_dom_html_frame_element_get_frame_border(self));
         break;
-    case PROP_LONG_DESC:
+    case DOM_HTML_FRAME_ELEMENT_PROP_LONG_DESC:
         g_value_take_string(value, webkit_dom_html_frame_element_get_long_desc(self));
         break;
-    case PROP_MARGIN_HEIGHT:
+    case DOM_HTML_FRAME_ELEMENT_PROP_MARGIN_HEIGHT:
         g_value_take_string(value, webkit_dom_html_frame_element_get_margin_height(self));
         break;
-    case PROP_MARGIN_WIDTH:
+    case DOM_HTML_FRAME_ELEMENT_PROP_MARGIN_WIDTH:
         g_value_take_string(value, webkit_dom_html_frame_element_get_margin_width(self));
         break;
-    case PROP_NAME:
+    case DOM_HTML_FRAME_ELEMENT_PROP_NAME:
         g_value_take_string(value, webkit_dom_html_frame_element_get_name(self));
         break;
-    case PROP_NO_RESIZE:
+    case DOM_HTML_FRAME_ELEMENT_PROP_NO_RESIZE:
         g_value_set_boolean(value, webkit_dom_html_frame_element_get_no_resize(self));
         break;
-    case PROP_SCROLLING:
+    case DOM_HTML_FRAME_ELEMENT_PROP_SCROLLING:
         g_value_take_string(value, webkit_dom_html_frame_element_get_scrolling(self));
         break;
-    case PROP_SRC:
+    case DOM_HTML_FRAME_ELEMENT_PROP_SRC:
         g_value_take_string(value, webkit_dom_html_frame_element_get_src(self));
         break;
-    case PROP_CONTENT_DOCUMENT:
+    case DOM_HTML_FRAME_ELEMENT_PROP_CONTENT_DOCUMENT:
         g_value_set_object(value, webkit_dom_html_frame_element_get_content_document(self));
         break;
-    case PROP_CONTENT_WINDOW:
+    case DOM_HTML_FRAME_ELEMENT_PROP_CONTENT_WINDOW:
         g_value_set_object(value, webkit_dom_html_frame_element_get_content_window(self));
         break;
-    case PROP_WIDTH:
+    case DOM_HTML_FRAME_ELEMENT_PROP_WIDTH:
         g_value_set_long(value, webkit_dom_html_frame_element_get_width(self));
         break;
-    case PROP_HEIGHT:
+    case DOM_HTML_FRAME_ELEMENT_PROP_HEIGHT:
         g_value_set_long(value, webkit_dom_html_frame_element_get_height(self));
         break;
     default:
@@ -201,7 +204,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_FRAME_BORDER,
+        DOM_HTML_FRAME_ELEMENT_PROP_FRAME_BORDER,
         g_param_spec_string(
             "frame-border",
             "HTMLFrameElement:frame-border",
@@ -211,7 +214,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_LONG_DESC,
+        DOM_HTML_FRAME_ELEMENT_PROP_LONG_DESC,
         g_param_spec_string(
             "long-desc",
             "HTMLFrameElement:long-desc",
@@ -221,7 +224,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_MARGIN_HEIGHT,
+        DOM_HTML_FRAME_ELEMENT_PROP_MARGIN_HEIGHT,
         g_param_spec_string(
             "margin-height",
             "HTMLFrameElement:margin-height",
@@ -231,7 +234,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_MARGIN_WIDTH,
+        DOM_HTML_FRAME_ELEMENT_PROP_MARGIN_WIDTH,
         g_param_spec_string(
             "margin-width",
             "HTMLFrameElement:margin-width",
@@ -241,7 +244,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_NAME,
+        DOM_HTML_FRAME_ELEMENT_PROP_NAME,
         g_param_spec_string(
             "name",
             "HTMLFrameElement:name",
@@ -251,7 +254,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_NO_RESIZE,
+        DOM_HTML_FRAME_ELEMENT_PROP_NO_RESIZE,
         g_param_spec_boolean(
             "no-resize",
             "HTMLFrameElement:no-resize",
@@ -261,7 +264,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_SCROLLING,
+        DOM_HTML_FRAME_ELEMENT_PROP_SCROLLING,
         g_param_spec_string(
             "scrolling",
             "HTMLFrameElement:scrolling",
@@ -271,7 +274,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_SRC,
+        DOM_HTML_FRAME_ELEMENT_PROP_SRC,
         g_param_spec_string(
             "src",
             "HTMLFrameElement:src",
@@ -281,7 +284,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_CONTENT_DOCUMENT,
+        DOM_HTML_FRAME_ELEMENT_PROP_CONTENT_DOCUMENT,
         g_param_spec_object(
             "content-document",
             "HTMLFrameElement:content-document",
@@ -291,7 +294,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_CONTENT_WINDOW,
+        DOM_HTML_FRAME_ELEMENT_PROP_CONTENT_WINDOW,
         g_param_spec_object(
             "content-window",
             "HTMLFrameElement:content-window",
@@ -301,7 +304,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_WIDTH,
+        DOM_HTML_FRAME_ELEMENT_PROP_WIDTH,
         g_param_spec_long(
             "width",
             "HTMLFrameElement:width",
@@ -311,7 +314,7 @@ static void webkit_dom_html_frame_element_class_init(WebKitDOMHTMLFrameElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_HEIGHT,
+        DOM_HTML_FRAME_ELEMENT_PROP_HEIGHT,
         g_param_spec_long(
             "height",
             "HTMLFrameElement:height",
@@ -341,8 +344,7 @@ void webkit_dom_html_frame_element_set_frame_border(WebKitDOMHTMLFrameElement* s
     g_return_if_fail(WEBKIT_DOM_IS_HTML_FRAME_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLFrameElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::frameborderAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::frameborderAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_frame_element_get_long_desc(WebKitDOMHTMLFrameElement* self)
@@ -360,8 +362,7 @@ void webkit_dom_html_frame_element_set_long_desc(WebKitDOMHTMLFrameElement* self
     g_return_if_fail(WEBKIT_DOM_IS_HTML_FRAME_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLFrameElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::longdescAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::longdescAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_frame_element_get_margin_height(WebKitDOMHTMLFrameElement* self)
@@ -379,8 +380,7 @@ void webkit_dom_html_frame_element_set_margin_height(WebKitDOMHTMLFrameElement* 
     g_return_if_fail(WEBKIT_DOM_IS_HTML_FRAME_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLFrameElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::marginheightAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::marginheightAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_frame_element_get_margin_width(WebKitDOMHTMLFrameElement* self)
@@ -398,8 +398,7 @@ void webkit_dom_html_frame_element_set_margin_width(WebKitDOMHTMLFrameElement* s
     g_return_if_fail(WEBKIT_DOM_IS_HTML_FRAME_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLFrameElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::marginwidthAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::marginwidthAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_frame_element_get_name(WebKitDOMHTMLFrameElement* self)
@@ -417,8 +416,7 @@ void webkit_dom_html_frame_element_set_name(WebKitDOMHTMLFrameElement* self, con
     g_return_if_fail(WEBKIT_DOM_IS_HTML_FRAME_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLFrameElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gboolean webkit_dom_html_frame_element_get_no_resize(WebKitDOMHTMLFrameElement* self)
@@ -453,8 +451,7 @@ void webkit_dom_html_frame_element_set_scrolling(WebKitDOMHTMLFrameElement* self
     g_return_if_fail(WEBKIT_DOM_IS_HTML_FRAME_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLFrameElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::scrollingAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::scrollingAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_frame_element_get_src(WebKitDOMHTMLFrameElement* self)
@@ -472,8 +469,7 @@ void webkit_dom_html_frame_element_set_src(WebKitDOMHTMLFrameElement* self, cons
     g_return_if_fail(WEBKIT_DOM_IS_HTML_FRAME_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLFrameElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::srcAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::srcAttr, WTF::AtomString::fromUTF8(value));
 }
 
 WebKitDOMDocument* webkit_dom_html_frame_element_get_content_document(WebKitDOMHTMLFrameElement* self)
@@ -490,8 +486,7 @@ WebKitDOMDOMWindow* webkit_dom_html_frame_element_get_content_window(WebKitDOMHT
     WebCore::JSMainThreadNullState state;
     g_return_val_if_fail(WEBKIT_DOM_IS_HTML_FRAME_ELEMENT(self), 0);
     WebCore::HTMLFrameElement* item = WebKit::core(self);
-    RefPtr<WebCore::DOMWindow> gobjectResult = WTF::getPtr(item->contentWindow());
-    return WebKit::kit(gobjectResult.get());
+    return WebKit::kit(item->contentWindow());
 }
 
 glong webkit_dom_html_frame_element_get_width(WebKitDOMHTMLFrameElement* self)
@@ -512,3 +507,4 @@ glong webkit_dom_html_frame_element_get_height(WebKitDOMHTMLFrameElement* self)
     return result;
 }
 
+G_GNUC_END_IGNORE_DEPRECATIONS;

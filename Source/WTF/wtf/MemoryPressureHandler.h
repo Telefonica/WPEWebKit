@@ -31,37 +31,54 @@
 #include <wtf/FastMalloc.h>
 #include <wtf/Forward.h>
 #include <wtf/Function.h>
-#include <wtf/Optional.h>
 #include <wtf/RunLoop.h>
-
-#if USE(GLIB)
-#include <wtf/glib/GRefPtr.h>
-#endif
 
 #if OS(WINDOWS)
 #include <wtf/win/Win32Handle.h>
 #endif
 
+#if PLATFORM(COCOA)
+#include <wtf/OSObjectPtr.h>
+#endif
+
 namespace WTF {
 
-enum class MemoryUsagePolicy {
+enum class MemoryPressureStatus : uint8_t {
+    Normal,
+
+    // The entire system is at a warning or critical pressure level.
+    SystemWarning,
+    SystemCritical,
+
+    // This specific process crossed a warning or critical memory usage limit.
+    ProcessLimitWarning,
+    ProcessLimitCritical
+};
+
+enum class MemoryUsagePolicy : uint8_t {
     Unrestricted, // Allocate as much as you want
     Conservative, // Maybe you don't cache every single thing
     Strict, // Time to start pinching pennies for real
 };
 
-enum class WebsamProcessState {
+enum class MemoryType : uint8_t {
+    Normal,
+    Video
+};
+
+enum class WebsamProcessState : uint8_t {
     Active,
     Inactive,
 };
 
-enum class Critical { No, Yes };
-enum class Synchronous { No, Yes };
+enum class Critical : bool { No, Yes };
+enum class Synchronous : bool { No, Yes };
 
 typedef WTF::Function<void(Critical, Synchronous)> LowMemoryHandler;
 
 class MemoryPressureHandler {
-    friend class WTF::NeverDestroyed<MemoryPressureHandler>;
+    WTF_MAKE_FAST_ALLOCATED;
+    friend class WTF::LazyNeverDestroyed<MemoryPressureHandler>;
 public:
     WTF_EXPORT_PRIVATE static MemoryPressureHandler& singleton();
 
@@ -69,8 +86,12 @@ public:
 
     WTF_EXPORT_PRIVATE void setShouldUsePeriodicMemoryMonitor(bool);
 
+#if OS(LINUX) || OS(FREEBSD)
+    WTF_EXPORT_PRIVATE void triggerMemoryPressureEvent(bool isCritical);
+#endif
+
     void setMemoryKillCallback(WTF::Function<void()>&& function) { m_memoryKillCallback = WTFMove(function); }
-    void setMemoryPressureStatusChangedCallback(WTF::Function<void(bool)>&& function) { m_memoryPressureStatusChangedCallback = WTFMove(function); }
+    void setMemoryPressureStatusChangedCallback(WTF::Function<void(MemoryPressureStatus)>&& function) { m_memoryPressureStatusChangedCallback = WTFMove(function); }
     void setDidExceedInactiveLimitWhileActiveCallback(WTF::Function<void()>&& function) { m_didExceedInactiveLimitWhileActiveCallback = WTFMove(function); }
 
     void setLowMemoryHandler(LowMemoryHandler&& handler)
@@ -80,21 +101,25 @@ public:
 
     bool isUnderMemoryPressure() const
     {
-        return m_underMemoryPressure
+        auto memoryPressureStatus = m_memoryPressureStatus.load();
+        return memoryPressureStatus == MemoryPressureStatus::SystemCritical
+            || memoryPressureStatus == MemoryPressureStatus::ProcessLimitCritical
 #if PLATFORM(MAC)
             || m_memoryUsagePolicy >= MemoryUsagePolicy::Strict
 #endif
             || m_isSimulatingMemoryPressure;
     }
-    void setUnderMemoryPressure(bool);
+    bool isSimulatingMemoryPressure() const { return m_isSimulatingMemoryPressure; }
+    void setMemoryPressureStatus(MemoryPressureStatus);
 
-#if OS(LINUX)
-    static void waitForMemoryPressureEvent(void*);
-    static void pollMemoryPressure();
-    void setMemoryPressureMonitorHandle(int fd);
+    WTF_EXPORT_PRIVATE MemoryUsagePolicy currentMemoryUsagePolicy();
+
+#if PLATFORM(COCOA)
+    WTF_EXPORT_PRIVATE void setDispatchQueue(OSObjectPtr<dispatch_queue_t>&&);
 #endif
 
     class ReliefLogger {
+        WTF_MAKE_FAST_ALLOCATED;
     public:
         explicit ReliefLogger(const char *log)
             : m_logString(log)
@@ -122,6 +147,7 @@ public:
 
     private:
         struct MemoryUsage {
+            WTF_MAKE_STRUCT_FAST_ALLOCATED;
             MemoryUsage() = default;
             MemoryUsage(size_t resident, size_t physical)
                 : resident(resident)
@@ -140,6 +166,67 @@ public:
         WTF_EXPORT_PRIVATE static bool s_loggingEnabled;
     };
 
+    struct Configuration {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
+        WTF_EXPORT_PRIVATE Configuration();
+        WTF_EXPORT_PRIVATE Configuration(size_t, size_t, double, double, std::optional<double>, Seconds);
+
+        template<class Encoder> void encode(Encoder& encoder) const
+        {
+            encoder << baseThreshold;
+            encoder << baseThresholdVideo;
+            encoder << conservativeThresholdFraction;
+            encoder << strictThresholdFraction;
+            encoder << killThresholdFraction;
+            encoder << pollInterval;
+        }
+
+        template<class Decoder>
+        static std::optional<Configuration> decode(Decoder& decoder)
+        {
+            std::optional<size_t> baseThreshold;
+            decoder >> baseThreshold;
+            if (!baseThreshold)
+                return std::nullopt;
+
+            std::optional<size_t> baseThresholdVideo;
+            decoder >> baseThresholdVideo;
+            if (!baseThresholdVideo)
+                return std::nullopt;
+
+            std::optional<double> conservativeThresholdFraction;
+            decoder >> conservativeThresholdFraction;
+            if (!conservativeThresholdFraction)
+                return std::nullopt;
+
+            std::optional<double> strictThresholdFraction;
+            decoder >> strictThresholdFraction;
+            if (!strictThresholdFraction)
+                return std::nullopt;
+
+            std::optional<std::optional<double>> killThresholdFraction;
+            decoder >> killThresholdFraction;
+            if (!killThresholdFraction)
+                return std::nullopt;
+
+            std::optional<Seconds> pollInterval;
+            decoder >> pollInterval;
+            if (!pollInterval)
+                return std::nullopt;
+
+            return {{ *baseThreshold, *baseThresholdVideo, *conservativeThresholdFraction, *strictThresholdFraction, *killThresholdFraction, *pollInterval }};
+        }
+
+        size_t baseThreshold;
+        size_t baseThresholdVideo;
+        double conservativeThresholdFraction;
+        double strictThresholdFraction;
+        std::optional<double> killThresholdFraction;
+        Seconds pollInterval;
+    };
+    void setConfiguration(Configuration&& configuration);
+    void setConfiguration(const Configuration& configuration);
+
     WTF_EXPORT_PRIVATE void releaseMemory(Critical, Synchronous = Synchronous::No);
 
     WTF_EXPORT_PRIVATE void beginSimulatedMemoryPressure();
@@ -150,13 +237,18 @@ public:
 
     WTF_EXPORT_PRIVATE static void setPageCount(unsigned);
 
+    void setShouldLogMemoryMemoryPressureEvents(bool shouldLog) { m_shouldLogMemoryMemoryPressureEvents = shouldLog; }
+
 private:
-    size_t thresholdForMemoryKill();
+    std::optional<size_t> thresholdForMemoryKill(MemoryType);
+    size_t thresholdForPolicy(MemoryUsagePolicy, MemoryType);
+    MemoryUsagePolicy policyForFootprints(size_t, size_t);
+
     void memoryPressureStatusChanged();
 
     void uninstall();
 
-    void holdOff(unsigned);
+    void holdOff(Seconds);
 
     MemoryPressureHandler();
     ~MemoryPressureHandler() = delete;
@@ -166,46 +258,30 @@ private:
     void platformInitialize();
 
     void measurementTimerFired();
-    void shrinkOrDie();
-    void setMemoryUsagePolicyBasedOnFootprint(size_t);
+    void shrinkOrDie(size_t killThreshold, size_t killThresholdVideo);
+    void setMemoryUsagePolicyBasedOnFootprints(size_t, size_t);
     void doesExceedInactiveLimitWhileActive();
     void doesNotExceedInactiveLimitWhileActive();
 
-#if OS(LINUX)
-    class EventFDPoller {
-        WTF_MAKE_NONCOPYABLE(EventFDPoller); WTF_MAKE_FAST_ALLOCATED;
-    public:
-        EventFDPoller(int fd, WTF::Function<void ()>&& notifyHandler);
-        ~EventFDPoller();
-
-    private:
-        void readAndNotify() const;
-
-        std::optional<int> m_fd;
-        WTF::Function<void ()> m_notifyHandler;
-#if USE(GLIB)
-        GRefPtr<GSource> m_source;
-#endif
-        RefPtr<Thread> m_thread;
-    };
-#endif
-
-    WebsamProcessState m_processState { WebsamProcessState::Inactive };
-
     unsigned m_pageCount { 0 };
 
+    std::atomic<MemoryPressureStatus> m_memoryPressureStatus { MemoryPressureStatus::Normal };
     bool m_installed { false };
-    LowMemoryHandler m_lowMemoryHandler;
-
-    std::atomic<bool> m_underMemoryPressure;
     bool m_isSimulatingMemoryPressure { false };
+    bool m_shouldLogMemoryMemoryPressureEvents { true };
+    bool m_hasInvokedDidExceedInactiveLimitWhileActiveCallback { false };
+
+    WebsamProcessState m_processState { WebsamProcessState::Inactive };
+    
+    MemoryUsagePolicy m_memoryUsagePolicy { MemoryUsagePolicy::Unrestricted };
 
     std::unique_ptr<RunLoop::Timer<MemoryPressureHandler>> m_measurementTimer;
-    MemoryUsagePolicy m_memoryUsagePolicy { MemoryUsagePolicy::Unrestricted };
     WTF::Function<void()> m_memoryKillCallback;
-    WTF::Function<void(bool)> m_memoryPressureStatusChangedCallback;
+    WTF::Function<void(MemoryPressureStatus)> m_memoryPressureStatusChangedCallback;
     WTF::Function<void()> m_didExceedInactiveLimitWhileActiveCallback;
-    bool m_hasInvokedDidExceedInactiveLimitWhileActiveCallback { false };
+    LowMemoryHandler m_lowMemoryHandler;
+
+    Configuration m_configuration;
 
 #if OS(WINDOWS)
     void windowsMeasurementTimerFired();
@@ -213,18 +289,27 @@ private:
     Win32Handle m_lowMemoryHandle;
 #endif
 
-#if OS(LINUX)
-    std::optional<int> m_eventFD;
-    std::optional<int> m_pressureLevelFD;
-    std::unique_ptr<EventFDPoller> m_eventFDPoller;
+#if OS(LINUX) || OS(FREEBSD)
     RunLoop::Timer<MemoryPressureHandler> m_holdOffTimer;
     void holdOffTimerFired();
-    void logErrorAndCloseFDs(const char* error);
-    bool tryEnsureEventFD();
+
+    class MemoryUsagePoller {
+        WTF_MAKE_NONCOPYABLE(MemoryUsagePoller); WTF_MAKE_FAST_ALLOCATED;
+    public:
+        MemoryUsagePoller();
+        ~MemoryUsagePoller();
+
+    private:
+        RefPtr<Thread> m_thread;
+    };
+
+    std::unique_ptr<MemoryUsagePoller> m_memoryUsagePoller;
+#endif
+
+#if PLATFORM(COCOA)
+    OSObjectPtr<dispatch_queue_t> m_dispatchQueue;
 #endif
 };
-
-extern WTFLogChannel LogMemoryPressure;
 
 } // namespace WTF
 

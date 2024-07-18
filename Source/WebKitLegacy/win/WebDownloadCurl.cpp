@@ -35,19 +35,19 @@
 #include "WebURLAuthenticationChallenge.h"
 #include "WebURLCredential.h"
 #include "WebURLResponse.h"
-
-#include <wtf/text/CString.h>
-
-#include <io.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-
 #include <WebCore/BString.h>
+#include <WebCore/CurlDownload.h>
 #include <WebCore/NotImplemented.h>
 #include <WebCore/ResourceError.h>
 #include <WebCore/ResourceHandle.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
+#include <io.h>
+#include <pal/text/TextEncoding.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <wtf/FileSystem.h>
+#include <wtf/text/CString.h>
 
 using namespace WebCore;
 
@@ -64,7 +64,7 @@ void WebDownload::init(ResourceHandle* handle, const ResourceRequest& request, c
     m_delegate = delegate;
 
     m_download = adoptRef(new CurlDownload());
-    m_download->init(this, handle, request, response);
+    m_download->init(*this, handle, request, response);
 }
 
 void WebDownload::init(const URL& url, IWebDownloadDelegate* delegate)
@@ -72,7 +72,7 @@ void WebDownload::init(const URL& url, IWebDownloadDelegate* delegate)
     m_delegate = delegate;
 
     m_download = adoptRef(new CurlDownload());
-    m_download->init(this, url);
+    m_download->init(*this, url);
 }
 
 // IWebDownload -------------------------------------------------------------------
@@ -94,7 +94,7 @@ HRESULT WebDownload::initWithRequest(
         return E_FAIL;
 
     ResourceRequest resourceRequest;
-    resourceRequest.setURL(URL(ParsedURLString, String(url)));
+    resourceRequest.setURL(URL({ }, String(url)));
 
     const HTTPHeaderMap& headerMap = webRequest->httpHeaderFields();
     for (HTTPHeaderMap::const_iterator it = headerMap.begin(); it != headerMap.end(); ++it)
@@ -118,8 +118,7 @@ HRESULT WebDownload::start()
     if (!m_download)
         return E_FAIL;
 
-    if (!m_download->start())
-        return E_FAIL;
+    m_download->start();
 
     if (m_delegate)
         m_delegate->didBegin(this);
@@ -204,19 +203,18 @@ HRESULT WebDownload::useCredential(
    return E_FAIL;
 }
 
-void WebDownload::didReceiveResponse()
+void WebDownload::didReceiveResponse(const ResourceResponse& response)
 {
     COMPtr<WebDownload> protect = this;
 
     if (m_delegate) {
-        ResourceResponse response = m_download->getResponse();
         COMPtr<WebURLResponse> webResponse(AdoptCOM, WebURLResponse::createInstance(response));
         m_delegate->didReceiveResponse(this, webResponse.get());
 
         String suggestedFilename = response.suggestedFilename();
         if (suggestedFilename.isEmpty())
-            suggestedFilename = pathGetFileName(response.url().string());
-        suggestedFilename = decodeURLEscapeSequences(suggestedFilename);
+            suggestedFilename = FileSystem::pathFileName(response.url().string());
+        suggestedFilename = PAL::decodeURLEscapeSequences(suggestedFilename);
         BString suggestedFilenameBSTR(suggestedFilename);
         m_delegate->decideDestinationWithSuggestedFilename(this, suggestedFilenameBSTR);
     }

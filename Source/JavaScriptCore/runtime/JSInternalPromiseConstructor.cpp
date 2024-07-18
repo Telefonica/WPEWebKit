@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,9 +27,9 @@
 #include "JSInternalPromiseConstructor.h"
 
 #include "JSCBuiltins.h"
-#include "JSCInlines.h"
-#include "JSInternalPromise.h"
 #include "JSInternalPromisePrototype.h"
+#include "JSObjectInlines.h"
+#include "StructureInlines.h"
 
 #include "JSInternalPromiseConstructor.lut.h"
 
@@ -37,7 +37,7 @@ namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(JSInternalPromiseConstructor);
 
-const ClassInfo JSInternalPromiseConstructor::s_info = { "Function", &Base::s_info, &internalPromiseConstructorTable, nullptr, CREATE_METHOD_TABLE(JSInternalPromiseConstructor) };
+const ClassInfo JSInternalPromiseConstructor::s_info = { "Function"_s, &Base::s_info, &internalPromiseConstructorTable, nullptr, CREATE_METHOD_TABLE(JSInternalPromiseConstructor) };
 
 /* Source for JSInternalPromiseConstructor.lut.h
 @begin internalPromiseConstructorTable
@@ -47,40 +47,21 @@ const ClassInfo JSInternalPromiseConstructor::s_info = { "Function", &Base::s_in
 
 JSInternalPromiseConstructor* JSInternalPromiseConstructor::create(VM& vm, Structure* structure, JSInternalPromisePrototype* promisePrototype, GetterSetter* speciesSymbol)
 {
-    JSInternalPromiseConstructor* constructor = new (NotNull, allocateCell<JSInternalPromiseConstructor>(vm.heap)) JSInternalPromiseConstructor(vm, structure);
+    JSGlobalObject* globalObject = structure->globalObject();
+    FunctionExecutable* executable = promiseConstructorInternalPromiseConstructorCodeGenerator(vm);
+    JSInternalPromiseConstructor* constructor = new (NotNull, allocateCell<JSInternalPromiseConstructor>(vm)) JSInternalPromiseConstructor(vm, executable, globalObject, structure);
     constructor->finishCreation(vm, promisePrototype, speciesSymbol);
     return constructor;
 }
 
 Structure* JSInternalPromiseConstructor::createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
 {
-    return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+    return Structure::create(vm, globalObject, prototype, TypeInfo(JSFunctionType, StructureFlags), info());
 }
 
-JSInternalPromiseConstructor::JSInternalPromiseConstructor(VM& vm, Structure* structure)
-    : Base(vm, structure)
+JSInternalPromiseConstructor::JSInternalPromiseConstructor(VM& vm, FunctionExecutable* executable, JSGlobalObject* globalObject, Structure* structure)
+    : Base(vm, executable, globalObject, structure)
 {
-}
-
-static EncodedJSValue JSC_HOST_CALL constructPromise(ExecState* exec)
-{
-    JSGlobalObject* globalObject = exec->jsCallee()->globalObject();
-    VM& vm = exec->vm();
-    JSInternalPromise* promise = JSInternalPromise::create(vm, globalObject->internalPromiseStructure());
-    promise->initialize(exec, globalObject, exec->argument(0));
-    return JSValue::encode(promise);
-}
-
-ConstructType JSInternalPromiseConstructor::getConstructData(JSCell*, ConstructData& constructData)
-{
-    constructData.native.function = constructPromise;
-    return ConstructType::Host;
-}
-
-CallType JSInternalPromiseConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = constructPromise;
-    return CallType::Host;
 }
 
 } // namespace JSC

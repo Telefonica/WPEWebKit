@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@
 #if ENABLE(DFG_JIT)
 
 #include "ArrayPrototype.h"
+#include "CacheableIdentifierInlines.h"
 #include "DFGAbstractValue.h"
 #include "DFGGraph.h"
 #include "JSCInlines.h"
@@ -42,83 +43,119 @@ ArrayMode ArrayMode::fromObserved(const ConcurrentJSLocker& locker, ArrayProfile
         nonArray = Array::OriginalNonArray;
     else
         nonArray = Array::NonArray;
-    
+
+    auto handleContiguousModes = [&] (Array::Type type, ArrayModes observed) {
+        Array::Class isArray;
+        Array::Conversion converts;
+
+        RELEASE_ASSERT((observed & (asArrayModesIgnoringTypedArrays(toIndexingShape(type)) | asArrayModesIgnoringTypedArrays(toIndexingShape(type) | ArrayClass) | asArrayModesIgnoringTypedArrays(toIndexingShape(type) | ArrayClass | CopyOnWrite))) == observed);
+
+        if (observed & asArrayModesIgnoringTypedArrays(toIndexingShape(type))) {
+            if ((observed & asArrayModesIgnoringTypedArrays(toIndexingShape(type))) == observed)
+                isArray = nonArray;
+            else
+                isArray = Array::PossiblyArray;
+        } else
+            isArray = Array::Array;
+
+        if (action == Array::Write && (observed & asArrayModesIgnoringTypedArrays(toIndexingShape(type) | ArrayClass | CopyOnWrite)))
+            converts = Array::Convert;
+        else
+            converts = Array::AsIs;
+
+        return ArrayMode(type, isArray, converts, action).withProfile(locker, profile, makeSafe);
+    };
+
     ArrayModes observed = profile->observedArrayModes(locker);
     switch (observed) {
     case 0:
         return ArrayMode(Array::Unprofiled);
-    case asArrayModes(NonArray):
+    case asArrayModesIgnoringTypedArrays(NonArray):
         if (action == Array::Write && !profile->mayInterceptIndexedAccesses(locker))
-            return ArrayMode(Array::SelectUsingArguments, nonArray, Array::OutOfBounds, Array::Convert);
-        return ArrayMode(Array::SelectUsingPredictions, nonArray).withSpeculationFromProfile(locker, profile, makeSafe);
+            return ArrayMode(Array::SelectUsingArguments, nonArray, Array::OutOfBounds, Array::Convert, action);
+        return ArrayMode(Array::SelectUsingPredictions, nonArray, action).withSpeculationFromProfile(locker, profile, makeSafe);
 
-    case asArrayModes(ArrayWithUndecided):
+    case asArrayModesIgnoringTypedArrays(ArrayWithUndecided):
         if (action == Array::Write)
-            return ArrayMode(Array::SelectUsingArguments, Array::Array, Array::OutOfBounds, Array::Convert);
-        return ArrayMode(Array::Undecided, Array::Array, Array::OutOfBounds, Array::AsIs).withProfile(locker, profile, makeSafe);
+            return ArrayMode(Array::SelectUsingArguments, Array::Array, Array::OutOfBounds, Array::Convert, action);
+        return ArrayMode(Array::Undecided, Array::Array, Array::OutOfBounds, Array::AsIs, action).withProfile(locker, profile, makeSafe);
         
-    case asArrayModes(NonArray) | asArrayModes(ArrayWithUndecided):
+    case asArrayModesIgnoringTypedArrays(NonArray) | asArrayModesIgnoringTypedArrays(ArrayWithUndecided):
         if (action == Array::Write && !profile->mayInterceptIndexedAccesses(locker))
-            return ArrayMode(Array::SelectUsingArguments, Array::PossiblyArray, Array::OutOfBounds, Array::Convert);
-        return ArrayMode(Array::SelectUsingPredictions).withSpeculationFromProfile(locker, profile, makeSafe);
+            return ArrayMode(Array::SelectUsingArguments, Array::PossiblyArray, Array::OutOfBounds, Array::Convert, action);
+        return ArrayMode(Array::SelectUsingPredictions, action).withSpeculationFromProfile(locker, profile, makeSafe);
 
-    case asArrayModes(NonArrayWithInt32):
-        return ArrayMode(Array::Int32, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(ArrayWithInt32):
-        return ArrayMode(Array::Int32, Array::Array, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(NonArrayWithInt32) | asArrayModes(ArrayWithInt32):
-        return ArrayMode(Array::Int32, Array::PossiblyArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+    case asArrayModesIgnoringTypedArrays(NonArrayWithInt32):
+    case asArrayModesIgnoringTypedArrays(ArrayWithInt32):
+    case asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithInt32):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithInt32) | asArrayModesIgnoringTypedArrays(ArrayWithInt32):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithInt32) | asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithInt32):
+    case asArrayModesIgnoringTypedArrays(ArrayWithInt32) | asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithInt32):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithInt32) | asArrayModesIgnoringTypedArrays(ArrayWithInt32) | asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithInt32):
+        return handleContiguousModes(Array::Int32, observed);
 
-    case asArrayModes(NonArrayWithDouble):
-        return ArrayMode(Array::Double, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(ArrayWithDouble):
-        return ArrayMode(Array::Double, Array::Array, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(NonArrayWithDouble) | asArrayModes(ArrayWithDouble):
-        return ArrayMode(Array::Double, Array::PossiblyArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+    case asArrayModesIgnoringTypedArrays(NonArrayWithDouble):
+    case asArrayModesIgnoringTypedArrays(ArrayWithDouble):
+    case asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithDouble):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithDouble) | asArrayModesIgnoringTypedArrays(ArrayWithDouble):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithDouble) | asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithDouble):
+    case asArrayModesIgnoringTypedArrays(ArrayWithDouble) | asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithDouble):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithDouble) | asArrayModesIgnoringTypedArrays(ArrayWithDouble) | asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithDouble):
+        return handleContiguousModes(Array::Double, observed);
 
-    case asArrayModes(NonArrayWithContiguous):
-        return ArrayMode(Array::Contiguous, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(ArrayWithContiguous):
-        return ArrayMode(Array::Contiguous, Array::Array, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(NonArrayWithContiguous) | asArrayModes(ArrayWithContiguous):
-        return ArrayMode(Array::Contiguous, Array::PossiblyArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+    case asArrayModesIgnoringTypedArrays(NonArrayWithContiguous):
+    case asArrayModesIgnoringTypedArrays(ArrayWithContiguous):
+    case asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithContiguous):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithContiguous) | asArrayModesIgnoringTypedArrays(ArrayWithContiguous):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithContiguous) | asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithContiguous):
+    case asArrayModesIgnoringTypedArrays(ArrayWithContiguous) | asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithContiguous):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithContiguous) | asArrayModesIgnoringTypedArrays(ArrayWithContiguous) | asArrayModesIgnoringTypedArrays(CopyOnWriteArrayWithContiguous):
+        return handleContiguousModes(Array::Contiguous, observed);
 
-    case asArrayModes(NonArrayWithArrayStorage):
-        return ArrayMode(Array::ArrayStorage, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(NonArrayWithSlowPutArrayStorage):
-    case asArrayModes(NonArrayWithArrayStorage) | asArrayModes(NonArrayWithSlowPutArrayStorage):
-        return ArrayMode(Array::SlowPutArrayStorage, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(ArrayWithArrayStorage):
-        return ArrayMode(Array::ArrayStorage, Array::Array, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(ArrayWithSlowPutArrayStorage):
-    case asArrayModes(ArrayWithArrayStorage) | asArrayModes(ArrayWithSlowPutArrayStorage):
-        return ArrayMode(Array::SlowPutArrayStorage, Array::Array, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(NonArrayWithArrayStorage) | asArrayModes(ArrayWithArrayStorage):
-        return ArrayMode(Array::ArrayStorage, Array::PossiblyArray, Array::AsIs).withProfile(locker, profile, makeSafe);
-    case asArrayModes(NonArrayWithSlowPutArrayStorage) | asArrayModes(ArrayWithSlowPutArrayStorage):
-    case asArrayModes(NonArrayWithArrayStorage) | asArrayModes(ArrayWithArrayStorage) | asArrayModes(NonArrayWithSlowPutArrayStorage) | asArrayModes(ArrayWithSlowPutArrayStorage):
-        return ArrayMode(Array::SlowPutArrayStorage, Array::PossiblyArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+    case asArrayModesIgnoringTypedArrays(NonArrayWithArrayStorage):
+        return ArrayMode(Array::ArrayStorage, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
+    case asArrayModesIgnoringTypedArrays(NonArrayWithSlowPutArrayStorage):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithArrayStorage) | asArrayModesIgnoringTypedArrays(NonArrayWithSlowPutArrayStorage):
+        return ArrayMode(Array::SlowPutArrayStorage, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
+    case asArrayModesIgnoringTypedArrays(ArrayWithArrayStorage):
+        return ArrayMode(Array::ArrayStorage, Array::Array, Array::AsIs, action).withProfile(locker, profile, makeSafe);
+    case asArrayModesIgnoringTypedArrays(ArrayWithSlowPutArrayStorage):
+    case asArrayModesIgnoringTypedArrays(ArrayWithArrayStorage) | asArrayModesIgnoringTypedArrays(ArrayWithSlowPutArrayStorage):
+        return ArrayMode(Array::SlowPutArrayStorage, Array::Array, Array::AsIs, action).withProfile(locker, profile, makeSafe);
+    case asArrayModesIgnoringTypedArrays(NonArrayWithArrayStorage) | asArrayModesIgnoringTypedArrays(ArrayWithArrayStorage):
+        return ArrayMode(Array::ArrayStorage, Array::PossiblyArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
+    case asArrayModesIgnoringTypedArrays(NonArrayWithSlowPutArrayStorage) | asArrayModesIgnoringTypedArrays(ArrayWithSlowPutArrayStorage):
+    case asArrayModesIgnoringTypedArrays(NonArrayWithArrayStorage) | asArrayModesIgnoringTypedArrays(ArrayWithArrayStorage) | asArrayModesIgnoringTypedArrays(NonArrayWithSlowPutArrayStorage) | asArrayModesIgnoringTypedArrays(ArrayWithSlowPutArrayStorage):
+        return ArrayMode(Array::SlowPutArrayStorage, Array::PossiblyArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
     case Int8ArrayMode:
-        return ArrayMode(Array::Int8Array, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+        return ArrayMode(Array::Int8Array, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
     case Int16ArrayMode:
-        return ArrayMode(Array::Int16Array, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+        return ArrayMode(Array::Int16Array, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
     case Int32ArrayMode:
-        return ArrayMode(Array::Int32Array, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+        return ArrayMode(Array::Int32Array, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
     case Uint8ArrayMode:
-        return ArrayMode(Array::Uint8Array, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+        return ArrayMode(Array::Uint8Array, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
     case Uint8ClampedArrayMode:
-        return ArrayMode(Array::Uint8ClampedArray, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+        return ArrayMode(Array::Uint8ClampedArray, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
     case Uint16ArrayMode:
-        return ArrayMode(Array::Uint16Array, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+        return ArrayMode(Array::Uint16Array, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
     case Uint32ArrayMode:
-        return ArrayMode(Array::Uint32Array, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+        return ArrayMode(Array::Uint32Array, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
     case Float32ArrayMode:
-        return ArrayMode(Array::Float32Array, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+        return ArrayMode(Array::Float32Array, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
     case Float64ArrayMode:
-        return ArrayMode(Array::Float64Array, nonArray, Array::AsIs).withProfile(locker, profile, makeSafe);
+        return ArrayMode(Array::Float64Array, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
+    case BigInt64ArrayMode:
+        return ArrayMode(Array::BigInt64Array, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
+    case BigUint64ArrayMode:
+        return ArrayMode(Array::BigUint64Array, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
 
     default:
-        if ((observed & asArrayModes(NonArray)) && profile->mayInterceptIndexedAccesses(locker))
+        // If we have seen multiple TypedArray types, or a TypedArray and non-typed array, it doesn't make sense to try to convert the object since you can't convert typed arrays.
+        if (observed & ALL_TYPED_ARRAY_MODES)
+            return ArrayMode(Array::Generic, nonArray, Array::AsIs, action).withProfile(locker, profile, makeSafe);
+
+        if ((observed & asArrayModesIgnoringTypedArrays(NonArray)) && profile->mayInterceptIndexedAccesses(locker))
             return ArrayMode(Array::SelectUsingPredictions).withSpeculationFromProfile(locker, profile, makeSafe);
         
         Array::Type type;
@@ -146,15 +183,17 @@ ArrayMode ArrayMode::fromObserved(const ConcurrentJSLocker& locker, ArrayProfile
         else
             arrayClass = Array::PossiblyArray;
         
-        return ArrayMode(type, arrayClass, Array::Convert).withProfile(locker, profile, makeSafe);
+        return ArrayMode(type, arrayClass, Array::Convert, action).withProfile(locker, profile, makeSafe);
     }
 }
 
 static bool canBecomeGetArrayLength(Graph& graph, Node* node)
 {
+    if (node->op() == GetArrayLength)
+        return true;
     if (node->op() != GetById)
         return false;
-    auto uid = graph.identifiers()[node->identifierNumber()];
+    auto uid = node->cacheableIdentifier().uid();
     return uid == graph.m_vm.propertyNames->length.impl();
 }
 
@@ -167,15 +206,15 @@ ArrayMode ArrayMode::refine(
         // happen if we inlined code based on, say, a global variable watchpoint, but later
         // realized that the callsite could not have possibly executed. It may be worthwhile
         // to fix that, but for now I'm leaving it as-is.
-        return ArrayMode(Array::ForceExit);
+        return ArrayMode(Array::ForceExit, action());
     }
     
-    if (!isInt32Speculation(index))
-        return ArrayMode(Array::Generic);
+    if (!isInt32Speculation(index) && !mayBeLargeTypedArray())
+        return ArrayMode(Array::Generic, action());
     
     // If we had exited because of an exotic object behavior, then don't try to specialize.
     if (graph.hasExitSite(node->origin.semantic, ExoticObjectMode))
-        return ArrayMode(Array::Generic);
+        return ArrayMode(Array::Generic, action());
     
     // Note: our profiling currently doesn't give us good information in case we have
     // an unlikely control flow path that sets the base to a non-cell value. Value
@@ -192,7 +231,7 @@ ArrayMode ArrayMode::refine(
             // This is semantically identical to defineOwnProperty({configurable: true, writable:true, enumerable:true}),
             // which we can't model as a simple store to the typed array since typed array indexed properties
             // are non-configurable.
-            return ArrayMode(Array::Generic);
+            return ArrayMode(Array::Generic, action());
         }
         return result;
     };
@@ -207,19 +246,27 @@ ArrayMode ArrayMode::refine(
             return withTypeAndConversion(Array::Double, Array::Convert);
         return withTypeAndConversion(Array::Contiguous, Array::Convert);
     case Array::Undecided: {
+        // As long as we have a JSArray getting its length shouldn't require any sane chainness.
+        if (canBecomeGetArrayLength(graph, node) && isJSArray())
+            return *this;
+
         // If we have an OriginalArray and the JSArray prototype chain is sane,
         // any indexed access always return undefined. We have a fast path for that.
         JSGlobalObject* globalObject = graph.globalObjectFor(node->origin.semantic);
-        if ((node->op() == GetByVal || canBecomeGetArrayLength(graph, node))
-            && arrayClass() == Array::OriginalArray
-            && globalObject->arrayPrototypeChainIsSane()
-            && !graph.hasExitSite(node->origin.semantic, OutOfBounds)) {
-            graph.watchpoints().addLazily(globalObject->arrayPrototype()->structure()->transitionWatchpointSet());
-            graph.watchpoints().addLazily(globalObject->objectPrototype()->structure()->transitionWatchpointSet());
-            if (globalObject->arrayPrototypeChainIsSane())
-                return withSpeculation(Array::SaneChain);
+        Structure* arrayPrototypeStructure = globalObject->arrayPrototype()->structure();
+        Structure* objectPrototypeStructure = globalObject->objectPrototype()->structure();
+        if (node->op() == GetByVal
+            && isJSArrayWithOriginalStructure()
+            && !graph.hasExitSite(node->origin.semantic, OutOfBounds)
+            && arrayPrototypeStructure->transitionWatchpointSetIsStillValid()
+            && objectPrototypeStructure->transitionWatchpointSetIsStillValid()
+            && globalObject->arrayPrototypeChainIsSaneConcurrently(arrayPrototypeStructure, objectPrototypeStructure)) {
+            graph.registerAndWatchStructureTransition(arrayPrototypeStructure);
+            graph.registerAndWatchStructureTransition(objectPrototypeStructure);
+            if (globalObject->arrayPrototypeChainIsSaneConcurrently(arrayPrototypeStructure, objectPrototypeStructure))
+                return withSpeculation(Array::InBoundsSaneChain);
         }
-        return ArrayMode(Array::Generic);
+        return ArrayMode(Array::Generic, action());
     }
     case Array::Int32:
         if (!value || isInt32Speculation(value))
@@ -245,11 +292,16 @@ ArrayMode ArrayMode::refine(
     case Array::Uint32Array:
     case Array::Float32Array:
     case Array::Float64Array:
+    case Array::BigInt64Array:
+    case Array::BigUint64Array:
+        // FIXME: no idea why we only preserve this out-of-bounds information for PutByVal and not GetByVal as well.
+        // https://bugs.webkit.org/show_bug.cgi?id=231276
         if (node->op() == PutByVal) {
             if (graph.hasExitSite(node->origin.semantic, OutOfBounds) || !isInBounds())
                 return typedArrayResult(withSpeculation(Array::OutOfBounds));
         }
         return typedArrayResult(withSpeculation(Array::InBounds));
+
     case Array::Unprofiled:
     case Array::SelectUsingPredictions: {
         base &= ~SpecOther;
@@ -259,12 +311,15 @@ ArrayMode ArrayMode::refine(
         
         if (isDirectArgumentsSpeculation(base) || isScopedArgumentsSpeculation(base)) {
             // Handle out-of-bounds accesses as generic accesses.
-            if (graph.hasExitSite(node->origin.semantic, OutOfBounds) || !isInBounds())
-                return ArrayMode(Array::Generic);
-            
-            if (isDirectArgumentsSpeculation(base))
-                return withType(Array::DirectArguments);
-            return withType(Array::ScopedArguments);
+            Array::Type type = isDirectArgumentsSpeculation(base) ? Array::DirectArguments : Array::ScopedArguments;
+            if (graph.hasExitSite(node->origin.semantic, OutOfBounds) || !isInBounds()) {
+                // FIXME: Support OOB access for ScopedArguments.
+                // https://bugs.webkit.org/show_bug.cgi?id=179596
+                if (type == Array::DirectArguments)
+                    return ArrayMode(type, Array::NonArray, Array::OutOfBounds, Array::AsIs, action());
+                return ArrayMode(Array::Generic, action());
+            }
+            return withType(type);
         }
         
         ArrayMode result;
@@ -308,9 +363,15 @@ ArrayMode ArrayMode::refine(
         if (isFloat64ArraySpeculation(base))
             return typedArrayResult(result.withType(Array::Float64Array));
 
+        if (isBigInt64ArraySpeculation(base))
+            return typedArrayResult(result.withType(Array::BigInt64Array));
+
+        if (isBigUint64ArraySpeculation(base))
+            return typedArrayResult(result.withType(Array::BigUint64Array));
+
         if (type() == Array::Unprofiled)
-            return ArrayMode(Array::ForceExit);
-        return ArrayMode(Array::Generic);
+            return ArrayMode(Array::ForceExit, action());
+        return ArrayMode(Array::Generic, action());
     }
 
     default:
@@ -323,6 +384,23 @@ Structure* ArrayMode::originalArrayStructure(Graph& graph, const CodeOrigin& cod
     JSGlobalObject* globalObject = graph.globalObjectFor(codeOrigin);
     
     switch (arrayClass()) {
+    case Array::OriginalCopyOnWriteArray: {
+        if (conversion() == Array::AsIs) {
+            switch (type()) {
+            case Array::Int32:
+                return globalObject->originalArrayStructureForIndexingType(CopyOnWriteArrayWithInt32);
+            case Array::Double:
+                return globalObject->originalArrayStructureForIndexingType(CopyOnWriteArrayWithDouble);
+            case Array::Contiguous:
+                return globalObject->originalArrayStructureForIndexingType(CopyOnWriteArrayWithContiguous);
+            default:
+                CRASH();
+                return nullptr;
+            }
+        }
+        FALLTHROUGH;
+    }
+
     case Array::OriginalArray: {
         switch (type()) {
         case Array::Int32:
@@ -361,49 +439,68 @@ Structure* ArrayMode::originalArrayStructure(Graph& graph, Node* node) const
 
 bool ArrayMode::alreadyChecked(Graph& graph, Node* node, const AbstractValue& value, IndexingType shape) const
 {
+    ASSERT(isSpecific());
+
+    IndexingType indexingModeMask = IsArray | IndexingShapeMask;
+    if (action() == Array::Write)
+        indexingModeMask |= CopyOnWrite;
+
     switch (arrayClass()) {
-    case Array::OriginalArray: {
-        if (value.m_structure.isTop())
-            return false;
-        for (unsigned i = value.m_structure.size(); i--;) {
-            RegisteredStructure structure = value.m_structure[i];
-            if ((structure->indexingType() & IndexingShapeMask) != shape)
-                return false;
-            if (!(structure->indexingType() & IsArray))
-                return false;
-            if (!graph.globalObjectFor(node->origin.semantic)->isOriginalArrayStructure(structure.get()))
-                return false;
-        }
-        return true;
-    }
-        
     case Array::Array: {
-        if (arrayModesAlreadyChecked(value.m_arrayModes, asArrayModes(shape | IsArray)))
+        if (arrayModesAlreadyChecked(value.m_arrayModes, asArrayModesIgnoringTypedArrays(shape | IsArray)))
             return true;
-        if (value.m_structure.isTop())
+        if (!value.m_structure.isFinite())
             return false;
         for (unsigned i = value.m_structure.size(); i--;) {
             RegisteredStructure structure = value.m_structure[i];
-            if ((structure->indexingType() & IndexingShapeMask) != shape)
-                return false;
-            if (!(structure->indexingType() & IsArray))
+            if ((structure->indexingMode() & indexingModeMask) != (shape | IsArray))
                 return false;
         }
         return true;
     }
-        
-    default: {
-        if (arrayModesAlreadyChecked(value.m_arrayModes, asArrayModes(shape) | asArrayModes(shape | IsArray)))
+
+    // Array::OriginalNonArray can be shown when the value is a TypedArray with original structure.
+    // But here, we already filtered TypedArrays. So, just handle it like a NonArray.
+    case Array::OriginalNonArray:
+    case Array::NonArray: {
+        if (arrayModesAlreadyChecked(value.m_arrayModes, asArrayModesIgnoringTypedArrays(shape)))
             return true;
-        if (value.m_structure.isTop())
+        if (!value.m_structure.isFinite())
             return false;
         for (unsigned i = value.m_structure.size(); i--;) {
             RegisteredStructure structure = value.m_structure[i];
-            if ((structure->indexingType() & IndexingShapeMask) != shape)
+            if ((structure->indexingMode() & indexingModeMask) != shape)
                 return false;
         }
         return true;
-    } }
+    }
+
+    case Array::PossiblyArray: {
+        if (arrayModesAlreadyChecked(value.m_arrayModes, asArrayModesIgnoringTypedArrays(shape) | asArrayModesIgnoringTypedArrays(shape | IsArray)))
+            return true;
+        if (!value.m_structure.isFinite())
+            return false;
+        for (unsigned i = value.m_structure.size(); i--;) {
+            RegisteredStructure structure = value.m_structure[i];
+            if ((structure->indexingMode() & (indexingModeMask & ~IsArray)) != shape)
+                return false;
+        }
+        return true;
+    }
+
+    // If ArrayMode is Array::OriginalCopyOnWriteArray or Array::OriginalArray, CheckArray is never emitted. Instead, we always emit CheckStructure.
+    // So, we should perform the same check to the CheckStructure here.
+    case Array::OriginalArray:
+    case Array::OriginalCopyOnWriteArray: {
+        if (!value.m_structure.isFinite())
+            return false;
+        Structure* originalStructure = originalArrayStructure(graph, node);
+        if (value.m_structure.size() != 1)
+            return false;
+        return value.m_structure.onlyStructure().get() == originalStructure;
+    }
+    }
+    return false;
 }
 
 bool ArrayMode::alreadyChecked(Graph& graph, Node* node, const AbstractValue& value) const
@@ -435,13 +532,14 @@ bool ArrayMode::alreadyChecked(Graph& graph, Node* node, const AbstractValue& va
         
     case Array::SlowPutArrayStorage:
         switch (arrayClass()) {
-        case Array::OriginalArray: {
+        case Array::OriginalArray:
+        case Array::OriginalCopyOnWriteArray: {
             CRASH();
             return false;
         }
         
         case Array::Array: {
-            if (arrayModesAlreadyChecked(value.m_arrayModes, asArrayModes(ArrayWithArrayStorage) | asArrayModes(ArrayWithSlowPutArrayStorage)))
+            if (arrayModesAlreadyChecked(value.m_arrayModes, asArrayModesIgnoringTypedArrays(ArrayWithArrayStorage) | asArrayModesIgnoringTypedArrays(ArrayWithSlowPutArrayStorage)))
                 return true;
             if (value.m_structure.isTop())
                 return false;
@@ -454,9 +552,27 @@ bool ArrayMode::alreadyChecked(Graph& graph, Node* node, const AbstractValue& va
             }
             return true;
         }
-        
-        default: {
-            if (arrayModesAlreadyChecked(value.m_arrayModes, asArrayModes(NonArrayWithArrayStorage) | asArrayModes(ArrayWithArrayStorage) | asArrayModes(NonArrayWithSlowPutArrayStorage) | asArrayModes(ArrayWithSlowPutArrayStorage)))
+
+        // Array::OriginalNonArray can be shown when the value is a TypedArray with original structure.
+        // But here, we already filtered TypedArrays. So, just handle it like a NonArray.
+        case Array::NonArray:
+        case Array::OriginalNonArray: {
+            if (arrayModesAlreadyChecked(value.m_arrayModes, asArrayModesIgnoringTypedArrays(NonArrayWithArrayStorage) | asArrayModesIgnoringTypedArrays(NonArrayWithSlowPutArrayStorage)))
+                return true;
+            if (value.m_structure.isTop())
+                return false;
+            for (unsigned i = value.m_structure.size(); i--;) {
+                RegisteredStructure structure = value.m_structure[i];
+                if (!hasAnyArrayStorage(structure->indexingType()))
+                    return false;
+                if (structure->indexingType() & IsArray)
+                    return false;
+            }
+            return true;
+        }
+
+        case Array::PossiblyArray: {
+            if (arrayModesAlreadyChecked(value.m_arrayModes, asArrayModesIgnoringTypedArrays(NonArrayWithArrayStorage) | asArrayModesIgnoringTypedArrays(ArrayWithArrayStorage) | asArrayModesIgnoringTypedArrays(NonArrayWithSlowPutArrayStorage) | asArrayModesIgnoringTypedArrays(ArrayWithSlowPutArrayStorage)))
                 return true;
             if (value.m_structure.isTop())
                 return false;
@@ -466,7 +582,10 @@ bool ArrayMode::alreadyChecked(Graph& graph, Node* node, const AbstractValue& va
                     return false;
             }
             return true;
-        } }
+        }
+        default:
+            CRASH();
+        }
         
     case Array::DirectArguments:
         return speculationChecked(value.m_type, SpecDirectArguments);
@@ -501,6 +620,12 @@ bool ArrayMode::alreadyChecked(Graph& graph, Node* node, const AbstractValue& va
     case Array::Float64Array:
         return speculationChecked(value.m_type, SpecFloat64Array);
 
+    case Array::BigInt64Array:
+        return speculationChecked(value.m_type, SpecBigInt64Array);
+
+    case Array::BigUint64Array:
+        return speculationChecked(value.m_type, SpecBigUint64Array);
+
     case Array::AnyTypedArray:
         return speculationChecked(value.m_type, SpecTypedArrayView);
 
@@ -512,6 +637,18 @@ bool ArrayMode::alreadyChecked(Graph& graph, Node* node, const AbstractValue& va
     
     CRASH();
     return false;
+}
+
+const char* arrayActionToString(Array::Action action)
+{
+    switch (action) {
+    case Array::Read:
+        return "Read";
+    case Array::Write:
+        return "Write";
+    default:
+        return "Unknown!";
+    }
 }
 
 const char* arrayTypeToString(Array::Type type)
@@ -563,6 +700,10 @@ const char* arrayTypeToString(Array::Type type)
         return "Float32Array";
     case Array::Float64Array:
         return "Float64Array";
+    case Array::BigInt64Array:
+        return "BigInt64Array";
+    case Array::BigUint64Array:
+        return "BigUint64Array";
     case Array::AnyTypedArray:
         return "AnyTypedArray";
     default:
@@ -581,6 +722,8 @@ const char* arrayClassToString(Array::Class arrayClass)
         return "Array";
     case Array::OriginalArray:
         return "OriginalArray";
+    case Array::OriginalCopyOnWriteArray:
+        return "OriginalCopyOnWriteArray";
     case Array::NonArray:
         return "NonArray";
     case Array::OriginalNonArray:
@@ -595,14 +738,16 @@ const char* arrayClassToString(Array::Class arrayClass)
 const char* arraySpeculationToString(Array::Speculation speculation)
 {
     switch (speculation) {
-    case Array::SaneChain:
-        return "SaneChain";
+    case Array::InBoundsSaneChain:
+        return "InBoundsSaneChain";
     case Array::InBounds:
         return "InBounds";
     case Array::ToHole:
         return "ToHole";
     case Array::OutOfBounds:
         return "OutOfBounds";
+    case Array::OutOfBoundsSaneChain:
+        return "OutOfBoundsSaneChain";
     default:
         return "Unknown!";
     }
@@ -661,6 +806,10 @@ TypedArrayType toTypedArrayType(Array::Type type)
         return TypeFloat32;
     case Array::Float64Array:
         return TypeFloat64;
+    case Array::BigInt64Array:
+        return TypeBigInt64;
+    case Array::BigUint64Array:
+        return TypeBigUint64;
     case Array::AnyTypedArray:
         RELEASE_ASSERT_NOT_REACHED();
         return NotTypedArray;
@@ -690,6 +839,10 @@ Array::Type toArrayType(TypedArrayType type)
         return Array::Float32Array;
     case TypeFloat64:
         return Array::Float64Array;
+    case TypeBigInt64:
+        return Array::BigInt64Array;
+    case TypeBigUint64:
+        return Array::BigUint64Array;
     default:
         return Array::Generic;
     }
@@ -725,6 +878,8 @@ bool permitsBoundsCheckLowering(Array::Type type)
     case Array::Uint32Array:
     case Array::Float32Array:
     case Array::Float64Array:
+    case Array::BigInt64Array:
+    case Array::BigUint64Array:
     case Array::AnyTypedArray:
         return true;
     default:
@@ -741,12 +896,17 @@ bool ArrayMode::permitsBoundsCheckLowering() const
 
 void ArrayMode::dump(PrintStream& out) const
 {
-    out.print(type(), "+", arrayClass(), "+", speculation(), "+", conversion());
+    out.print(type(), "+", arrayClass(), "+", speculation(), "+", conversion(), "+", action());
 }
 
 } } // namespace JSC::DFG
 
 namespace WTF {
+
+void printInternal(PrintStream& out, JSC::DFG::Array::Action action)
+{
+    out.print(JSC::DFG::arrayActionToString(action));
+}
 
 void printInternal(PrintStream& out, JSC::DFG::Array::Type type)
 {

@@ -37,25 +37,24 @@
 #include <WebCore/HTMLInputElement.h>
 #include <WebCore/HTMLTextAreaElement.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 InjectedBundlePageFormClient::InjectedBundlePageFormClient(const WKBundlePageFormClientBase* client)
 {
     initialize(client);
 }
 
-void InjectedBundlePageFormClient::didFocusTextField(WebPage* page, HTMLInputElement* inputElement, WebFrame* frame)
+void InjectedBundlePageFormClient::didFocusTextField(WebPage* page, HTMLInputElement& inputElement, WebFrame* frame)
 {
     if (!m_client.didFocusTextField)
         return;
 
-    RefPtr<InjectedBundleNodeHandle> nodeHandle = InjectedBundleNodeHandle::getOrCreate(inputElement);
+    auto nodeHandle = InjectedBundleNodeHandle::getOrCreate(inputElement);
     m_client.didFocusTextField(toAPI(page), toAPI(nodeHandle.get()), toAPI(frame), m_client.base.clientInfo);
 }
 
-void InjectedBundlePageFormClient::textFieldDidBeginEditing(WebPage* page, HTMLInputElement* inputElement, WebFrame* frame)
+void InjectedBundlePageFormClient::textFieldDidBeginEditing(WebPage* page, HTMLInputElement& inputElement, WebFrame* frame)
 {
     if (!m_client.textFieldDidBeginEditing)
         return;
@@ -64,7 +63,7 @@ void InjectedBundlePageFormClient::textFieldDidBeginEditing(WebPage* page, HTMLI
     m_client.textFieldDidBeginEditing(toAPI(page), toAPI(nodeHandle.get()), toAPI(frame), m_client.base.clientInfo);
 }
 
-void InjectedBundlePageFormClient::textFieldDidEndEditing(WebPage* page, HTMLInputElement* inputElement, WebFrame* frame)
+void InjectedBundlePageFormClient::textFieldDidEndEditing(WebPage* page, HTMLInputElement& inputElement, WebFrame* frame)
 {
     if (!m_client.textFieldDidEndEditing)
         return;
@@ -73,7 +72,7 @@ void InjectedBundlePageFormClient::textFieldDidEndEditing(WebPage* page, HTMLInp
     m_client.textFieldDidEndEditing(toAPI(page), toAPI(nodeHandle.get()), toAPI(frame), m_client.base.clientInfo);
 }
 
-void InjectedBundlePageFormClient::textDidChangeInTextField(WebPage* page, HTMLInputElement* inputElement, WebFrame* frame, bool initiatedByUserTyping)
+void InjectedBundlePageFormClient::textDidChangeInTextField(WebPage* page, HTMLInputElement& inputElement, WebFrame* frame, bool initiatedByUserTyping)
 {
     if (!m_client.textDidChangeInTextField)
         return;
@@ -85,7 +84,7 @@ void InjectedBundlePageFormClient::textDidChangeInTextField(WebPage* page, HTMLI
     m_client.textDidChangeInTextField(toAPI(page), toAPI(nodeHandle.get()), toAPI(frame), m_client.base.clientInfo);
 }
 
-void InjectedBundlePageFormClient::textDidChangeInTextArea(WebPage* page, HTMLTextAreaElement* textAreaElement, WebFrame* frame)
+void InjectedBundlePageFormClient::textDidChangeInTextArea(WebPage* page, HTMLTextAreaElement& textAreaElement, WebFrame* frame)
 {
     if (!m_client.textDidChangeInTextArea)
         return;
@@ -117,7 +116,7 @@ static WKInputFieldActionType toWKInputFieldActionType(API::InjectedBundle::Form
     return WKInputFieldActionTypeCancel;
 }
 
-bool InjectedBundlePageFormClient::shouldPerformActionInTextField(WebPage* page, HTMLInputElement* inputElement, API::InjectedBundle::FormClient::InputFieldAction actionType, WebFrame* frame)
+bool InjectedBundlePageFormClient::shouldPerformActionInTextField(WebPage* page, HTMLInputElement& inputElement, API::InjectedBundle::FormClient::InputFieldAction actionType, WebFrame* frame)
 {
     if (!m_client.shouldPerformActionInTextField)
         return false;
@@ -158,18 +157,20 @@ void InjectedBundlePageFormClient::willSubmitForm(WebPage* page, HTMLFormElement
     userData = adoptRef(toImpl(userDataToPass));
 }
 
-void InjectedBundlePageFormClient::didAssociateFormControls(WebPage* page, const Vector<RefPtr<WebCore::Element>>& elements)
+void InjectedBundlePageFormClient::didAssociateFormControls(WebPage* page, const Vector<RefPtr<WebCore::Element>>& elements, WebFrame* frame)
 {
-    if (!m_client.didAssociateFormControls)
+    if (!m_client.didAssociateFormControls && !m_client.didAssociateFormControlsForFrame)
         return;
 
-    Vector<RefPtr<API::Object>> elementHandles;
-    elementHandles.reserveInitialCapacity(elements.size());
+    auto elementHandles = elements.map([](auto& element) -> RefPtr<API::Object> {
+        return InjectedBundleNodeHandle::getOrCreate(element.get());
+    });
+    if (!m_client.didAssociateFormControlsForFrame) {
+        m_client.didAssociateFormControls(toAPI(page), toAPI(API::Array::create(WTFMove(elementHandles)).ptr()), m_client.base.clientInfo);
+        return;
+    }
 
-    for (const auto& element : elements)
-        elementHandles.uncheckedAppend(InjectedBundleNodeHandle::getOrCreate(element.get()));
-
-    m_client.didAssociateFormControls(toAPI(page), toAPI(API::Array::create(WTFMove(elementHandles)).ptr()), m_client.base.clientInfo);
+    m_client.didAssociateFormControlsForFrame(toAPI(page), toAPI(API::Array::create(WTFMove(elementHandles)).ptr()), toAPI(frame), m_client.base.clientInfo);
 }
 
 bool InjectedBundlePageFormClient::shouldNotifyOnFormChanges(WebPage* page)

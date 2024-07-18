@@ -29,11 +29,11 @@
 #import "ExceptionHandlers.h"
 #import <WebCore/HTMLNames.h>
 #import <WebCore/HTMLTableCaptionElement.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::HTMLTableCaptionElement*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -63,3 +63,5 @@ DOMHTMLTableCaptionElement *kit(WebCore::HTMLTableCaptionElement* value)
     WebCoreThreadViolationCheckRoundOne();
     return static_cast<DOMHTMLTableCaptionElement*>(kit(static_cast<WebCore::Node*>(value)));
 }
+
+#undef IMPL

@@ -38,7 +38,7 @@ class Element;
 class Node;
 class Range;
 
-typedef HashMap<AtomicString, AtomicStringImpl*> Namespaces;
+typedef HashMap<AtomString, AtomStringImpl*> Namespaces;
 
 enum EntityMask {
     EntityAmp = 0x0001,
@@ -46,80 +46,76 @@ enum EntityMask {
     EntityGt = 0x0004,
     EntityQuot = 0x0008,
     EntityNbsp = 0x0010,
+    EntityTab = 0x0020,
+    EntityLineFeed = 0x0040,
+    EntityCarriageReturn = 0x0080,
 
     // Non-breaking space needs to be escaped in innerHTML for compatibility reason. See http://trac.webkit.org/changeset/32879
     // However, we cannot do this in a XML document because it does not have the entity reference defined (See the bug 19215).
     EntityMaskInCDATA = 0,
     EntityMaskInPCDATA = EntityAmp | EntityLt | EntityGt,
     EntityMaskInHTMLPCDATA = EntityMaskInPCDATA | EntityNbsp,
-    EntityMaskInAttributeValue = EntityAmp | EntityLt | EntityGt | EntityQuot,
+    EntityMaskInAttributeValue = EntityAmp | EntityLt | EntityGt | EntityQuot | EntityTab | EntityLineFeed | EntityCarriageReturn,
     EntityMaskInHTMLAttributeValue = EntityAmp | EntityQuot | EntityNbsp,
 };
 
-// FIXME: Noncopyable?
 class MarkupAccumulator {
+    WTF_MAKE_NONCOPYABLE(MarkupAccumulator);
 public:
-    MarkupAccumulator(Vector<Node*>*, EAbsoluteURLs, const Range* = nullptr, EFragmentSerialization = HTMLFragmentSerialization);
+    MarkupAccumulator(Vector<Node*>*, ResolveURLs, SerializationSyntax = SerializationSyntax::HTML);
     virtual ~MarkupAccumulator();
 
-    String serializeNodes(Node& targetNode, EChildrenOnly, Vector<QualifiedName>* tagNamesToSkip = nullptr);
+    String serializeNodes(Node& targetNode, SerializedNodes, Vector<QualifiedName>* tagNamesToSkip = nullptr);
 
     static void appendCharactersReplacingEntities(StringBuilder&, const String&, unsigned, unsigned, EntityMask);
 
 protected:
-    static size_t totalLength(const Vector<String>&);
-    size_t length() const { return m_markup.length(); }
+    unsigned length() const { return m_markup.length(); }
+    bool isAllASCII() const { return m_markup.isAllASCII(); }
 
-    void concatenateMarkup(StringBuilder&);
+    StringBuilder takeMarkup();
 
-    void appendString(const String&);
-    void appendEndTag(const Node& node)
-    {
-        if (is<Element>(node))
-            appendEndTag(downcast<Element>(node));
-    }
+    template<typename ...StringTypes> void append(StringTypes&&... strings) { m_markup.append(std::forward<StringTypes>(strings)...); }
 
-    virtual void appendEndTag(const Element&);
+    void startAppendingNode(const Node&, Namespaces* = nullptr);
+    void endAppendingNode(const Node&);
+
+    virtual void appendStartTag(StringBuilder&, const Element&, Namespaces*);
+    virtual void appendEndTag(StringBuilder&, const Element&);
     virtual void appendCustomAttributes(StringBuilder&, const Element&, Namespaces*);
     virtual void appendText(StringBuilder&, const Text&);
-    virtual void appendElement(StringBuilder&, const Element&, Namespaces*);
-
-    void appendStartTag(const Node&, Namespaces* = nullptr);
 
     void appendOpenTag(StringBuilder&, const Element&, Namespaces*);
     void appendCloseTag(StringBuilder&, const Element&);
 
-    void appendStartMarkup(StringBuilder&, const Node&, Namespaces*);
-    void appendEndMarkup(StringBuilder&, const Element&);
+    void appendNonElementNode(StringBuilder&, const Node&, Namespaces*);
 
-    void appendAttributeValue(StringBuilder&, const String&, bool isSerializingHTML);
-    void appendNamespace(StringBuilder&, const AtomicString& prefix, const AtomicString& namespaceURI, Namespaces&, bool allowEmptyDefaultNS = false);
-    void appendXMLDeclaration(StringBuilder&, const Document&);
-    void appendDocumentType(StringBuilder&, const DocumentType&);
-    void appendProcessingInstruction(StringBuilder&, const String& target, const String& data);
+    static void appendAttributeValue(StringBuilder&, const String&, bool isSerializingHTML);
     void appendAttribute(StringBuilder&, const Element&, const Attribute&, Namespaces*);
-    void appendCDATASection(StringBuilder&, const String&);
 
-    bool shouldAddNamespaceElement(const Element&);
-    bool shouldAddNamespaceAttribute(const Attribute&, Namespaces&);
-    bool shouldSelfClose(const Element&);
-    bool elementCannotHaveEndTag(const Node&);
     EntityMask entityMaskForText(const Text&) const;
 
     Vector<Node*>* const m_nodes;
-    const Range* const m_range;
 
 private:
+    void appendNamespace(StringBuilder&, const AtomString& prefix, const AtomString& namespaceURI, Namespaces&, bool allowEmptyDefaultNS = false);
     String resolveURLIfNeeded(const Element&, const String&) const;
     void appendQuotedURLAttributeValue(StringBuilder&, const Element&, const Attribute&);
-    void serializeNodesWithNamespaces(Node& targetNode, EChildrenOnly, const Namespaces*, Vector<QualifiedName>* tagNamesToSkip);
-    bool inXMLFragmentSerialization() const { return m_fragmentSerialization == XMLFragmentSerialization; }
+    void serializeNodesWithNamespaces(Node& targetNode, SerializedNodes, const Namespaces*, Vector<QualifiedName>* tagNamesToSkip);
+    bool inXMLFragmentSerialization() const { return m_serializationSyntax == SerializationSyntax::XML; }
     void generateUniquePrefix(QualifiedName&, const Namespaces&);
+    QualifiedName xmlAttributeSerialization(const Attribute&, Namespaces*);
 
     StringBuilder m_markup;
-    const EAbsoluteURLs m_resolveURLsMethod;
-    EFragmentSerialization m_fragmentSerialization;
-    unsigned m_prefixLevel;
+    const ResolveURLs m_resolveURLs;
+    const SerializationSyntax m_serializationSyntax;
+    unsigned m_prefixLevel { 0 };
 };
+
+inline void MarkupAccumulator::endAppendingNode(const Node& node)
+{
+    if (is<Element>(node))
+        appendEndTag(m_markup, downcast<Element>(node));
+}
 
 } // namespace WebCore

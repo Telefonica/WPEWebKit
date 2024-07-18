@@ -27,20 +27,23 @@
 #include "DeviceMotionEvent.h"
 
 #include "DeviceMotionData.h"
+#include "DeviceOrientationAndMotionAccessController.h"
+#include "JSDOMPromiseDeferred.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-DeviceMotionEvent::~DeviceMotionEvent()
-{
-}
+WTF_MAKE_ISO_ALLOCATED_IMPL(DeviceMotionEvent);
+
+DeviceMotionEvent::~DeviceMotionEvent() = default;
 
 DeviceMotionEvent::DeviceMotionEvent()
     : m_deviceMotionData(DeviceMotionData::create())
 {
 }
 
-DeviceMotionEvent::DeviceMotionEvent(const AtomicString& eventType, DeviceMotionData* deviceMotionData)
-    : Event(eventType, false, false) // Can't bubble, not cancelable
+DeviceMotionEvent::DeviceMotionEvent(const AtomString& eventType, DeviceMotionData* deviceMotionData)
+    : Event(eventType, CanBubble::No, IsCancelable::No)
     , m_deviceMotionData(deviceMotionData)
 {
 }
@@ -103,9 +106,9 @@ std::optional<double> DeviceMotionEvent::interval() const
     return m_deviceMotionData->interval();
 }
 
-void DeviceMotionEvent::initDeviceMotionEvent(const AtomicString& type, bool bubbles, bool cancelable, std::optional<DeviceMotionEvent::Acceleration>&& acceleration, std::optional<DeviceMotionEvent::Acceleration>&& accelerationIncludingGravity, std::optional<DeviceMotionEvent::RotationRate>&& rotationRate, std::optional<double> interval)
+void DeviceMotionEvent::initDeviceMotionEvent(const AtomString& type, bool bubbles, bool cancelable, std::optional<DeviceMotionEvent::Acceleration>&& acceleration, std::optional<DeviceMotionEvent::Acceleration>&& accelerationIncludingGravity, std::optional<DeviceMotionEvent::RotationRate>&& rotationRate, std::optional<double> interval)
 {
-    if (dispatched())
+    if (isBeingDispatched())
         return;
 
     initEvent(type, bubbles, cancelable);
@@ -123,5 +126,27 @@ EventInterface DeviceMotionEvent::eventInterface() const
     return EventInterfaceType;
 #endif
 }
+
+#if ENABLE(DEVICE_ORIENTATION)
+void DeviceMotionEvent::requestPermission(Document& document, PermissionPromise&& promise)
+{
+    auto* window = document.domWindow();
+    auto* page = document.page();
+    if (!window || !page)
+        return promise.reject(Exception { InvalidStateError, "No browsing context"_s });
+
+    String errorMessage;
+    if (!window->isAllowedToUseDeviceMotion(errorMessage)) {
+        document.addConsoleMessage(MessageSource::JS, MessageLevel::Warning, makeString("Call to requestPermission() failed, reason: ", errorMessage, "."));
+        return promise.resolve(PermissionState::Denied);
+    }
+
+    document.deviceOrientationAndMotionAccessController().shouldAllowAccess(document, [promise = WTFMove(promise)](auto permissionState) mutable {
+        if (permissionState == PermissionState::Prompt)
+            return promise.reject(Exception { NotAllowedError, "Requesting device motion access requires a user gesture to prompt"_s });
+        promise.resolve(permissionState);
+    });
+}
+#endif
 
 } // namespace WebCore

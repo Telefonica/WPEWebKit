@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,15 +26,15 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SchedulePair_h
-#define SchedulePair_h
+#pragma once
 
 #include <wtf/HashSet.h>
+#include <wtf/Hasher.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/text/WTFString.h>
 
-#if PLATFORM(COCOA) && !USE(CFURLCONNECTION)
+#if PLATFORM(COCOA)
 OBJC_CLASS NSRunLoop;
 #endif
 
@@ -44,7 +44,7 @@ class SchedulePair : public ThreadSafeRefCounted<SchedulePair> {
 public:
     static Ref<SchedulePair> create(CFRunLoopRef runLoop, CFStringRef mode) { return adoptRef(*new SchedulePair(runLoop, mode)); }
 
-#if PLATFORM(COCOA) && !USE(CFURLCONNECTION)
+#if PLATFORM(COCOA)
     static Ref<SchedulePair> create(NSRunLoop* runLoop, CFStringRef mode) { return adoptRef(*new SchedulePair(runLoop, mode)); }
     NSRunLoop* nsRunLoop() const { return m_nsRunLoop.get(); }
 #endif
@@ -59,28 +59,33 @@ private:
         : m_runLoop(runLoop)
     {
         if (mode)
-            m_mode = adoptCF(CFStringCreateCopy(0, mode));
+            m_mode = adoptCF(CFStringCreateCopy(nullptr, mode));
     }
 
-#if PLATFORM(COCOA) && !USE(CFURLCONNECTION)
+#if PLATFORM(COCOA)
     WTF_EXPORT_PRIVATE SchedulePair(NSRunLoop*, CFStringRef);
-    RetainPtr<NSRunLoop*> m_nsRunLoop;
+    RetainPtr<NSRunLoop> m_nsRunLoop;
 #endif
 
     RetainPtr<CFRunLoopRef> m_runLoop;
     RetainPtr<CFStringRef> m_mode;
 };
 
+inline void add(Hasher& hasher, const SchedulePair& pair)
+{
+    // FIXME: Hashing a CFHash here is unfortunate.
+    add(hasher, pair.runLoop(), pair.mode() ? CFHash(pair.mode()) : 0);
+}
+
 struct SchedulePairHash {
     static unsigned hash(const RefPtr<SchedulePair>& pair)
     {
-        uintptr_t hashCodes[2] = { reinterpret_cast<uintptr_t>(pair->runLoop()), pair->mode() ? CFHash(pair->mode()) : 0 };
-        return StringHasher::hashMemory<sizeof(hashCodes)>(hashCodes);
+        return computeHash(*pair);
     }
 
     static bool equal(const RefPtr<SchedulePair>& a, const RefPtr<SchedulePair>& b) { return a == b; }
 
-    static const bool safeToCompareToEmptyOrDeleted = true;
+    static constexpr bool safeToCompareToEmptyOrDeleted = true;
 };
 
 typedef HashSet<RefPtr<SchedulePair>, SchedulePairHash> SchedulePairHashSet;
@@ -89,5 +94,3 @@ typedef HashSet<RefPtr<SchedulePair>, SchedulePairHash> SchedulePairHashSet;
 
 using WTF::SchedulePair;
 using WTF::SchedulePairHashSet;
-
-#endif

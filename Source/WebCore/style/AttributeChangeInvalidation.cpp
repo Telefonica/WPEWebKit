@@ -27,8 +27,8 @@
 #include "AttributeChangeInvalidation.h"
 
 #include "ElementIterator.h"
+#include "ElementRareData.h"
 #include "StyleInvalidationFunctions.h"
-#include "StyleInvalidator.h"
 
 namespace WebCore {
 namespace Style {
@@ -39,67 +39,62 @@ static bool mayBeAffectedByAttributeChange(const RuleFeatureSet& features, bool 
     return nameSet.contains(attributeName.localName());
 }
 
-void AttributeChangeInvalidation::invalidateStyle(const QualifiedName& attributeName, const AtomicString& oldValue, const AtomicString& newValue)
+void AttributeChangeInvalidation::invalidateStyle(const QualifiedName& attributeName, const AtomString& oldValue, const AtomString& newValue)
 {
     if (newValue == oldValue)
         return;
 
     bool isHTML = m_element.isHTMLElement();
 
-    bool mayAffectStyle = false;
+    bool shouldInvalidateCurrent = false;
     bool mayAffectStyleInShadowTree = false;
 
+    auto attributeNameForLookups = attributeName.localName().convertToASCIILowercase();
+
     traverseRuleFeatures(m_element, [&] (const RuleFeatureSet& features, bool mayAffectShadowTree) {
-        if (!mayBeAffectedByAttributeChange(features, isHTML, attributeName))
-            return;
-        mayAffectStyle = true;
-        if (mayAffectShadowTree)
+        if (mayAffectShadowTree && mayBeAffectedByAttributeChange(features, isHTML, attributeName))
             mayAffectStyleInShadowTree = true;
+        if (features.attributesAffectingHost.contains(attributeNameForLookups))
+            shouldInvalidateCurrent = true;
+        else if (features.contentAttributeNamesInRules.contains(attributeNameForLookups))
+            shouldInvalidateCurrent = true;
     });
-
-    if (!mayAffectStyle)
-        return;
-
-    if (!isHTML) {
-        m_element.invalidateStyleForSubtree();
-        return;
-    }
 
     if (mayAffectStyleInShadowTree) {
         // FIXME: More fine-grained invalidation.
         m_element.invalidateStyleForSubtree();
-        return;
     }
 
-    m_element.invalidateStyle();
-
-    if (!childrenOfType<Element>(m_element).first())
-        return;
+    if (shouldInvalidateCurrent)
+        m_element.invalidateStyle();
 
     auto& ruleSets = m_element.styleResolver().ruleSets();
-    auto* attributeRules = ruleSets.ancestorAttributeRulesForHTML(attributeName.localName());
-    if (!attributeRules)
+
+    auto* invalidationRuleSets = ruleSets.attributeInvalidationRuleSets(attributeNameForLookups);
+    if (!invalidationRuleSets)
         return;
 
-    // Check if descendants may be affected by this attribute change.
-    for (auto* selector : attributeRules->attributeSelectors) {
-        bool oldMatches = oldValue.isNull() ? false : SelectorChecker::attributeSelectorMatches(m_element, attributeName, oldValue, *selector);
-        bool newMatches = newValue.isNull() ? false : SelectorChecker::attributeSelectorMatches(m_element, attributeName, newValue, *selector);
-
-        if (oldMatches != newMatches) {
-            m_descendantInvalidationRuleSet = attributeRules->ruleSet.get();
-            return;
+    for (auto& invalidationRuleSet : *invalidationRuleSets) {
+        for (auto* selector : invalidationRuleSet.invalidationSelectors) {
+            if (!selector->isAttributeSelector()) {
+                ASSERT_NOT_REACHED();
+                continue;
+            }
+            bool oldMatches = !oldValue.isNull() && SelectorChecker::attributeSelectorMatches(m_element, attributeName, oldValue, *selector);
+            bool newMatches = !newValue.isNull() && SelectorChecker::attributeSelectorMatches(m_element, attributeName, newValue, *selector);
+            if (oldMatches != newMatches) {
+                Invalidator::addToMatchElementRuleSets(m_matchElementRuleSets, invalidationRuleSet);
+                break;
+            }
         }
     }
 }
 
-void AttributeChangeInvalidation::invalidateDescendants()
+void AttributeChangeInvalidation::invalidateStyleWithRuleSets()
 {
-    if (!m_descendantInvalidationRuleSet)
-        return;
-    Invalidator invalidator(*m_descendantInvalidationRuleSet);
-    invalidator.invalidateStyle(m_element);
+    Invalidator::invalidateWithMatchElementRuleSets(m_element, m_matchElementRuleSets);
 }
+
 
 }
 }

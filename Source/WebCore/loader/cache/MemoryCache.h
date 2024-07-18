@@ -24,7 +24,6 @@
 
 #pragma once
 
-#include "NativeImage.h"
 #include "SecurityOriginHash.h"
 #include "Timer.h"
 #include <pal/SessionID.h>
@@ -41,7 +40,7 @@
 namespace WebCore  {
 
 class CachedResource;
-class URL;
+class CookieJar;
 class ResourceRequest;
 class ResourceResponse;
 class ScriptExecutionContext;
@@ -98,13 +97,13 @@ public:
     void remove(CachedResource&);
 
     static bool shouldRemoveFragmentIdentifier(const URL&);
-    static URL removeFragmentIdentifierIfNeeded(const URL&);
+    WEBCORE_EXPORT static URL removeFragmentIdentifierIfNeeded(const URL&);
 
     void revalidationSucceeded(CachedResource& revalidatingResource, const ResourceResponse&);
     void revalidationFailed(CachedResource& revalidatingResource);
 
-    void forEachResource(const WTF::Function<void(CachedResource&)>&);
-    void forEachSessionResource(PAL::SessionID, const WTF::Function<void(CachedResource&)>&);
+    void forEachResource(const Function<void(CachedResource&)>&);
+    void forEachSessionResource(PAL::SessionID, const Function<void(CachedResource&)>&);
     WEBCORE_EXPORT void destroyDecodedDataForAllImages();
 
     // Sets the cache's memory capacities, in bytes. These will hold only approximately,
@@ -157,9 +156,6 @@ public:
     WEBCORE_EXPORT void getOriginsWithCache(SecurityOriginSet& origins);
     WEBCORE_EXPORT HashSet<RefPtr<SecurityOrigin>> originsWithCache(PAL::SessionID) const;
 
-    WEBCORE_EXPORT bool addImageToCache(NativeImagePtr&&, const URL&, const String& domainForCachePartition);
-    WEBCORE_EXPORT void removeImageFromCache(const URL&, const String& domainForCachePartition);
-
     // pruneDead*() - Flush decoded and encoded data from resources not referenced by Web pages.
     // pruneLive*() - Flush decoded data from resources still referenced by Web pages.
     WEBCORE_EXPORT void pruneDeadResources(); // Automatically decide how much to prune.
@@ -176,10 +172,9 @@ private:
     ~MemoryCache(); // Not implemented to make sure nobody accidentally calls delete -- WebCore does not delete singletons.
 
     LRUList& lruListFor(CachedResource&);
-#ifndef NDEBUG
+
     void dumpStats();
     void dumpLRULists(bool includeLive) const;
-#endif
 
     unsigned liveCapacity() const;
     unsigned deadCapacity() const;
@@ -190,16 +185,16 @@ private:
     CachedResourceMap& ensureSessionResourceMap(PAL::SessionID);
     CachedResourceMap* sessionResourceMap(PAL::SessionID) const;
 
-    bool m_disabled;  // Whether or not the cache is enabled.
-    bool m_inPruneResources;
+    bool m_disabled { false };
+    bool m_inPruneResources { false };
 
     unsigned m_capacity;
-    unsigned m_minDeadCapacity;
+    unsigned m_minDeadCapacity { 0 };
     unsigned m_maxDeadCapacity;
     Seconds m_deadDecodedDataDeletionInterval;
 
-    unsigned m_liveSize; // The number of bytes currently consumed by "live" resources in the cache.
-    unsigned m_deadSize; // The number of bytes currently consumed by "dead" resources in the cache.
+    unsigned m_liveSize { 0 }; // The number of bytes currently consumed by "live" resources in the cache.
+    unsigned m_deadSize { 0 }; // The number of bytes currently consumed by "dead" resources in the cache.
 
     // Size-adjusted and popularity-aware LRU list collection for cache objects.  This collection can hold
     // more resources than the cached resource map, since it can also hold "stale" multiple versions of objects that are

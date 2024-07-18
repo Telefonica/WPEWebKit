@@ -27,21 +27,11 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
 {
     constructor(resource)
     {
+        console.assert(resource instanceof WI.Resource || resource instanceof WI.CSSStyleSheet);
+
         super(resource, "text");
 
         resource.addEventListener(WI.SourceCode.Event.ContentDidChange, this._sourceCodeContentDidChange, this);
-
-        this._textEditor = new WI.SourceCodeTextEditor(resource);
-        this._textEditor.addEventListener(WI.TextEditor.Event.ExecutionLineNumberDidChange, this._executionLineNumberDidChange, this);
-        this._textEditor.addEventListener(WI.TextEditor.Event.NumberOfSearchResultsDidChange, this._numberOfSearchResultsDidChange, this);
-        this._textEditor.addEventListener(WI.TextEditor.Event.ContentDidChange, this._textEditorContentDidChange, this);
-        this._textEditor.addEventListener(WI.TextEditor.Event.FormattingDidChange, this._textEditorFormattingDidChange, this);
-        this._textEditor.addEventListener(WI.SourceCodeTextEditor.Event.ContentWillPopulate, this._contentWillPopulate, this);
-        this._textEditor.addEventListener(WI.SourceCodeTextEditor.Event.ContentDidPopulate, this._contentDidPopulate, this);
-        this._textEditor.readOnly = !this._shouldBeEditable();
-
-        WI.probeManager.addEventListener(WI.ProbeManager.Event.ProbeSetAdded, this._probeSetsChanged, this);
-        WI.probeManager.addEventListener(WI.ProbeManager.Event.ProbeSetRemoved, this._probeSetsChanged, this);
 
         var toolTip = WI.UIString("Pretty print");
         var activatedToolTip = WI.UIString("Original formatting");
@@ -56,7 +46,7 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
         this._showTypesButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._toggleTypeAnnotations, this);
         this._showTypesButtonNavigationItem.enabled = false;
         this._showTypesButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
-        WI.showJavaScriptTypeInformationSetting.addEventListener(WI.Setting.Event.Changed, this._showJavaScriptTypeInformationSettingChanged, this);
+        WI.settings.showJavaScriptTypeInformation.addEventListener(WI.Setting.Event.Changed, this._showJavaScriptTypeInformationSettingChanged, this);
 
         let toolTipCodeCoverage = WI.UIString("Fade unexecuted code");
         let activatedToolTipCodeCoverage = WI.UIString("Do not fade unexecuted code");
@@ -64,14 +54,34 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
         this._codeCoverageButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._toggleUnexecutedCodeHighlights, this);
         this._codeCoverageButtonNavigationItem.enabled = false;
         this._codeCoverageButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
-        WI.enableControlFlowProfilerSetting.addEventListener(WI.Setting.Event.Changed, this._enableControlFlowProfilerSettingChanged, this);
+        WI.settings.enableControlFlowProfiler.addEventListener(WI.Setting.Event.Changed, this._enableControlFlowProfilerSettingChanged, this);
+
+        this._textEditor = new WI.SourceCodeTextEditor(resource);
+        this._textEditor.addEventListener(WI.TextEditor.Event.ExecutionLineNumberDidChange, this._executionLineNumberDidChange, this);
+        this._textEditor.addEventListener(WI.TextEditor.Event.NumberOfSearchResultsDidChange, this._numberOfSearchResultsDidChange, this);
+        this._textEditor.addEventListener(WI.TextEditor.Event.ContentDidChange, this._textEditorContentDidChange, this);
+        this._textEditor.addEventListener(WI.TextEditor.Event.FormattingDidChange, this._textEditorFormattingDidChange, this);
+        this._textEditor.addEventListener(WI.TextEditor.Event.MIMETypeChanged, this._handleTextEditorMIMETypeChanged, this);
+        this._textEditor.addEventListener(WI.SourceCodeTextEditor.Event.ContentWillPopulate, this._contentWillPopulate, this);
+        this._textEditor.addEventListener(WI.SourceCodeTextEditor.Event.ContentDidPopulate, this._contentDidPopulate, this);
+        this._textEditor.readOnly = !this._shouldBeEditable();
+
+        WI.debuggerManager.addEventListener(WI.DebuggerManager.Event.ProbeSetAdded, this._probeSetsChanged, this);
+        WI.debuggerManager.addEventListener(WI.DebuggerManager.Event.ProbeSetRemoved, this._probeSetsChanged, this);
     }
 
     // Public
 
     get navigationItems()
     {
-        return [this._prettyPrintButtonNavigationItem, this._showTypesButtonNavigationItem, this._codeCoverageButtonNavigationItem];
+        let items = super.navigationItems;
+
+        items.push(this._prettyPrintButtonNavigationItem);
+
+        if (!this.resource.localResourceOverride)
+            items.push(this._showTypesButtonNavigationItem, this._codeCoverageButtonNavigationItem);
+
+        return items;
     }
 
     get managesOwnIssues()
@@ -87,8 +97,8 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
 
     get supplementalRepresentedObjects()
     {
-        var objects = WI.probeManager.probeSets.filter(function(probeSet) {
-            return this._resource.contentIdentifier === probeSet.breakpoint.contentIdentifier;
+        let objects = WI.debuggerManager.probeSets.filter(function(probeSet) {
+            return !(probeSet.breakpoint instanceof WI.JavaScriptBreakpoint) || this._resource.contentIdentifier === probeSet.breakpoint.contentIdentifier;
         }, this);
 
         // If the SourceCodeTextEditor has an executionLineNumber, we can assume
@@ -99,35 +109,39 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
         return objects;
     }
 
-    revealPosition(position, textRangeToSelect, forceUnformatted)
+    revealPosition(position, options = {})
     {
-        this._textEditor.revealPosition(position, textRangeToSelect, forceUnformatted);
-    }
-
-    shown()
-    {
-        super.shown();
-
-        this._textEditor.shown();
-    }
-
-    hidden()
-    {
-        super.hidden();
-
-        this._textEditor.hidden();
+        this._textEditor.revealPosition(position, options);
     }
 
     closed()
     {
         super.closed();
 
-        this.resource.removeEventListener(null, null, this);
-        WI.probeManager.removeEventListener(null, null, this);
-        WI.showJavaScriptTypeInformationSetting.removeEventListener(null, null, this);
-        WI.enableControlFlowProfilerSetting.removeEventListener(null, null, this);
+        this.resource.removeEventListener(WI.SourceCode.Event.ContentDidChange, this._sourceCodeContentDidChange, this);
+        WI.settings.showJavaScriptTypeInformation.removeEventListener(WI.Setting.Event.Changed, this._showJavaScriptTypeInformationSettingChanged, this);
+        WI.settings.enableControlFlowProfiler.removeEventListener(WI.Setting.Event.Changed, this._enableControlFlowProfilerSettingChanged, this);
+        WI.debuggerManager.removeEventListener(WI.DebuggerManager.Event.ProbeSetAdded, this._probeSetsChanged, this);
+        WI.debuggerManager.removeEventListener(WI.DebuggerManager.Event.ProbeSetRemoved, this._probeSetsChanged, this);
+    }
 
-        this._textEditor.close();
+    contentAvailable(content, base64Encoded)
+    {
+        // Do nothing.
+    }
+
+    get createLocalResourceOverrideTooltip()
+    {
+        return WI.UIString("Click to create a Local Override from this content");
+    }
+
+    requestLocalResourceOverrideInitialContent()
+    {
+        return Promise.resolve({
+            mimeType: this.resource.mimeType,
+            base64Encoded: this.resource.base64Encoded,
+            content: this._textEditor.string,
+        });
     }
 
     get supportsSave()
@@ -137,9 +151,23 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
 
     get saveData()
     {
+        let saveData = {
+            content: this._textEditor.string,
+        };
+
         if (this.resource instanceof WI.CSSStyleSheet)
-            return {url: "web-inspector:///InspectorStyleSheet.css", content: this._textEditor.string, forceSaveAs: true};
-        return {url: this.resource.url, content: this._textEditor.string};
+            saveData.suggestedName = "InspectorStyleSheet.css";
+        else {
+            saveData.url = this.resource.url;
+
+            if (this.resource.urlComponents.path === "/") {
+                let extension = WI.fileExtensionForMIMEType(this.resource.mimeType);
+                if (extension)
+                    saveData.suggestedName = `index.${extension}`;
+            }
+        }
+
+        return saveData;
     }
 
     get supportsSearch()
@@ -194,6 +222,9 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
         if (this._textEditor.parentView === this)
             return;
 
+        if (this._hasContent())
+            return;
+
         this.removeLoadingIndicator();
 
         this.addSubview(this._textEditor);
@@ -204,10 +235,10 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
         this._prettyPrintButtonNavigationItem.enabled = this._textEditor.canBeFormatted();
 
         this._showTypesButtonNavigationItem.enabled = this._textEditor.canShowTypeAnnotations();
-        this._showTypesButtonNavigationItem.activated = WI.showJavaScriptTypeInformationSetting.value;
+        this._showTypesButtonNavigationItem.activated = WI.settings.showJavaScriptTypeInformation.value;
 
         this._codeCoverageButtonNavigationItem.enabled = this._textEditor.canShowCoverageHints();
-        this._codeCoverageButtonNavigationItem.activated = WI.enableControlFlowProfilerSetting.value;
+        this._codeCoverageButtonNavigationItem.activated = WI.settings.enableControlFlowProfiler.value;
     }
 
     _togglePrettyPrint(event)
@@ -234,17 +265,22 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
 
     _showJavaScriptTypeInformationSettingChanged(event)
     {
-        this._showTypesButtonNavigationItem.activated = WI.showJavaScriptTypeInformationSetting.value;
+        this._showTypesButtonNavigationItem.activated = WI.settings.showJavaScriptTypeInformation.value;
     }
 
     _enableControlFlowProfilerSettingChanged(event)
     {
-        this._codeCoverageButtonNavigationItem.activated = WI.enableControlFlowProfilerSetting.value;
+        this._codeCoverageButtonNavigationItem.activated = WI.settings.enableControlFlowProfiler.value;
     }
 
     _textEditorFormattingDidChange(event)
     {
         this._prettyPrintButtonNavigationItem.activated = this._textEditor.formatted;
+    }
+
+    _handleTextEditorMIMETypeChanged(event)
+    {
+        this._prettyPrintButtonNavigationItem.enabled = this._textEditor.canBeFormatted();
     }
 
     _sourceCodeContentDidChange(event)
@@ -258,8 +294,8 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
     _textEditorContentDidChange(event)
     {
         this._ignoreSourceCodeContentDidChangeEvent = true;
-        WI.branchManager.currentBranch.revisionForRepresentedObject(this.resource).content = this._textEditor.string;
-        delete this._ignoreSourceCodeContentDidChangeEvent;
+        this.resource.editableRevision.updateRevisionContent(this._textEditor.string);
+        this._ignoreSourceCodeContentDidChangeEvent = false;
     }
 
     _executionLineNumberDidChange(event)
@@ -275,7 +311,7 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
     _probeSetsChanged(event)
     {
         var breakpoint = event.data.probeSet.breakpoint;
-        if (breakpoint.sourceCodeLocation.sourceCode === this.resource)
+        if (!(breakpoint instanceof WI.JavaScriptBreakpoint) || breakpoint.sourceCodeLocation.sourceCode === this.resource)
             this.dispatchEventToListeners(WI.ContentView.Event.SupplementalRepresentedObjectsDidChange);
     }
 
@@ -284,12 +320,15 @@ WI.TextResourceContentView = class TextResourceContentView extends WI.ResourceCo
         if (this.resource instanceof WI.CSSStyleSheet)
             return true;
 
-        // Check the MIME-type for CSS since Resource.Type.Stylesheet also includes XSL, which we can't edit yet.
-        if (this.resource.type === WI.Resource.Type.Stylesheet && this.resource.syntheticMIMEType === "text/css")
+        // Check the MIME-type for CSS since Resource.Type.StyleSheet also includes XSL, which we can't edit yet.
+        if (this.resource.type === WI.Resource.Type.StyleSheet && this.resource.syntheticMIMEType === "text/css")
             return true;
 
         // Allow editing any local file since edits can be saved and reloaded right from the Inspector.
         if (this.resource.urlComponents.scheme === "file")
+            return true;
+
+        if (this.resource.localResourceOverride)
             return true;
 
         return false;

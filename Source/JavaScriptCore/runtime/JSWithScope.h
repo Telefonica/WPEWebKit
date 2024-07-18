@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2016 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2012-2022 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,15 +29,21 @@
 
 namespace JSC {
 
-class JSWithScope : public JSScope {
+class JSWithScope final : public JSScope {
 public:
-    typedef JSScope Base;
+    using Base = JSScope;
+
+    template<typename CellType, SubspaceAccess mode>
+    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    {
+        return vm.withScopeSpace<mode>();
+    }
 
     JS_EXPORT_PRIVATE static JSWithScope* create(VM&, JSGlobalObject*, JSScope* next, JSObject*);
 
     JSObject* object() { return m_object.get(); }
 
-    static void visitChildren(JSCell*, SlotVisitor&);
+    DECLARE_VISIT_CHILDREN;
 
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue proto);
 

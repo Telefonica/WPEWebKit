@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,13 +26,15 @@
 #pragma once
 
 #include <wtf/Lock.h>
+#include <wtf/MonotonicTime.h>
 #include <wtf/Ref.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/WorkQueue.h>
 
 namespace JSC {
 
-class ExecState;
+class CallFrame;
+class JSGlobalObject;
 class VM;
 
 class Watchdog : public WTF::ThreadSafeRefCounted<Watchdog> {
@@ -43,30 +45,32 @@ public:
     Watchdog(VM*);
     void willDestroyVM(VM*);
 
-    typedef bool (*ShouldTerminateCallback)(ExecState*, void* data1, void* data2);
-    void setTimeLimit(std::chrono::microseconds limit, ShouldTerminateCallback = 0, void* data1 = 0, void* data2 = 0);
+    typedef bool (*ShouldTerminateCallback)(JSGlobalObject*, void* data1, void* data2);
+    void setTimeLimit(Seconds limit, ShouldTerminateCallback = nullptr, void* data1 = nullptr, void* data2 = nullptr);
 
-    bool shouldTerminate(ExecState*);
+    bool shouldTerminate(JSGlobalObject*);
+
+    bool isActive() const { return m_hasEnteredVM; }
 
     bool hasTimeLimit();
     void enteredVM();
     void exitedVM();
 
-    static const std::chrono::microseconds noTimeLimit;
+    static constexpr Seconds noTimeLimit = Seconds::infinity();
 
 private:
-    void startTimer(std::chrono::microseconds timeLimit);
+    void startTimer(Seconds timeLimit);
     void stopTimer();
+
+    bool m_hasEnteredVM { false };
 
     Lock m_lock; // Guards access to m_vm.
     VM* m_vm;
 
-    std::chrono::microseconds m_timeLimit;
+    Seconds m_timeLimit;
 
-    std::chrono::microseconds m_cpuDeadline;
-    std::chrono::microseconds m_wallClockDeadline;
-
-    bool m_hasEnteredVM { false };
+    Seconds m_cpuDeadline;
+    MonotonicTime m_deadline;
 
     ShouldTerminateCallback m_callback;
     void* m_callbackData1;

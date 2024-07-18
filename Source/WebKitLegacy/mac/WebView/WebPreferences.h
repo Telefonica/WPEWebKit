@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2004, 2005, 2012 Apple Inc.  All rights reserved.
+ * Copyright (C) 2003-2022 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <WebKitLegacy/WebKitAvailability.h>
 
 /*!
 @enum WebCacheModel
@@ -61,15 +62,16 @@ typedef NS_ENUM(NSUInteger, WebCacheModel) {
     WebCacheModelDocumentViewer = 0,
     WebCacheModelDocumentBrowser = 1,
     WebCacheModelPrimaryWebBrowser = 2
-};
+} WEBKIT_ENUM_DEPRECATED_MAC(10_5, 10_14);
 
 typedef struct WebPreferencesPrivate WebPreferencesPrivate;
 
-extern NSString *WebPreferencesChangedNotification;
+extern NSString *WebPreferencesChangedNotification WEBKIT_DEPRECATED_MAC(10_3, 10_14);
 
 /*!
     @class WebPreferences
 */
+WEBKIT_CLASS_DEPRECATED_MAC(10_3, 10_14)
 @interface WebPreferences: NSObject <NSCoding>
 {
 @package
@@ -166,8 +168,9 @@ extern NSString *WebPreferencesChangedNotification;
 
 /*!
     @property javaEnabled
+    @discussion Deprecated function that does nothing and always returns false.
 */
-@property (nonatomic, getter=isJavaEnabled) BOOL javaEnabled;
+@property (nonatomic, getter=isJavaEnabled) BOOL javaEnabled WEBKIT_DEPRECATED_MAC(10_3, 10_15);
 
 /*!
     @property javaScriptEnabled

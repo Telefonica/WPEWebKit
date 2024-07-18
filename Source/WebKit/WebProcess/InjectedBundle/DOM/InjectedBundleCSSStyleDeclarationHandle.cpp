@@ -26,20 +26,27 @@
 #include "config.h"
 #include "InjectedBundleCSSStyleDeclarationHandle.h"
 
+#include <JavaScriptCore/APICast.h>
 #include <WebCore/CSSStyleDeclaration.h>
+#include <WebCore/JSCSSStyleDeclaration.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
+typedef HashMap<CSSStyleDeclaration*, InjectedBundleCSSStyleDeclarationHandle*> DOMStyleDeclarationHandleCache;
 
-typedef HashMap<CSSStyleDeclaration*, InjectedBundleCSSStyleDeclarationHandle*> DOMHandleCache;
-
-static DOMHandleCache& domHandleCache()
+static DOMStyleDeclarationHandleCache& domStyleDeclarationHandleCache()
 {
-    static NeverDestroyed<DOMHandleCache> cache;
+    static NeverDestroyed<DOMStyleDeclarationHandleCache> cache;
     return cache;
+}
+
+RefPtr<InjectedBundleCSSStyleDeclarationHandle> InjectedBundleCSSStyleDeclarationHandle::getOrCreate(JSContextRef, JSObjectRef object)
+{
+    CSSStyleDeclaration* cssStyleDeclaration = JSCSSStyleDeclaration::toWrapped(toJS(object)->vm(), toJS(object));
+    return getOrCreate(cssStyleDeclaration);
 }
 
 RefPtr<InjectedBundleCSSStyleDeclarationHandle> InjectedBundleCSSStyleDeclarationHandle::getOrCreate(CSSStyleDeclaration* styleDeclaration)
@@ -47,13 +54,13 @@ RefPtr<InjectedBundleCSSStyleDeclarationHandle> InjectedBundleCSSStyleDeclaratio
     if (!styleDeclaration)
         return nullptr;
 
-    DOMHandleCache::AddResult result = domHandleCache().add(styleDeclaration, nullptr);
+    DOMStyleDeclarationHandleCache::AddResult result = domStyleDeclarationHandleCache().add(styleDeclaration, nullptr);
     if (!result.isNewEntry)
         return result.iterator->value;
 
     auto styleDeclarationHandle = adoptRef(*new InjectedBundleCSSStyleDeclarationHandle(*styleDeclaration));
     result.iterator->value = styleDeclarationHandle.ptr();
-    return WTFMove(styleDeclarationHandle);
+    return styleDeclarationHandle;
 }
 
 InjectedBundleCSSStyleDeclarationHandle::InjectedBundleCSSStyleDeclarationHandle(CSSStyleDeclaration& styleDeclaration)
@@ -63,7 +70,12 @@ InjectedBundleCSSStyleDeclarationHandle::InjectedBundleCSSStyleDeclarationHandle
 
 InjectedBundleCSSStyleDeclarationHandle::~InjectedBundleCSSStyleDeclarationHandle()
 {
-    domHandleCache().remove(m_styleDeclaration.ptr());
+    domStyleDeclarationHandleCache().remove(m_styleDeclaration.ptr());
+}
+
+CSSStyleDeclaration* InjectedBundleCSSStyleDeclarationHandle::coreCSSStyleDeclaration()
+{
+    return m_styleDeclaration.ptr();
 }
 
 } // namespace WebKit

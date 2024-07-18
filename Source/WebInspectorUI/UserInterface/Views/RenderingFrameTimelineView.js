@@ -90,6 +90,9 @@ WI.RenderingFrameTimelineView = class RenderingFrameTimelineView extends WI.Time
         timeline.addEventListener(WI.Timeline.Event.RecordAdded, this._renderingFrameTimelineRecordAdded, this);
 
         this._pendingRecords = [];
+
+        for (let record of timeline.records)
+            this._processRecord(record);
     }
 
     static displayNameForDurationFilter(filter)
@@ -112,24 +115,9 @@ WI.RenderingFrameTimelineView = class RenderingFrameTimelineView extends WI.Time
 
     get showsLiveRecordingData() { return false; }
 
-    shown()
-    {
-        super.shown();
-
-        this._dataGrid.shown();
-    }
-
-    hidden()
-    {
-        this._dataGrid.hidden();
-
-        super.hidden();
-    }
-
     closed()
     {
-        console.assert(this.representedObject instanceof WI.Timeline);
-        this.representedObject.removeEventListener(null, null, this);
+        this.representedObject.removeEventListener(WI.Timeline.Event.RecordAdded, this._renderingFrameTimelineRecordAdded, this);
 
         this._dataGrid.closed();
     }
@@ -195,13 +183,6 @@ WI.RenderingFrameTimelineView = class RenderingFrameTimelineView extends WI.Time
         dataGridNode.revealAndSelect();
     }
 
-    dataGridNodeForTreeElement(treeElement)
-    {
-        if (treeElement instanceof WI.ProfileNodeTreeElement)
-            return new WI.ProfileNodeDataGridNode(treeElement.profileNode, this.zeroTime, this.startTime, this.endTime);
-        return null;
-    }
-
     matchDataGridNodeAgainstCustomFilters(node)
     {
         if (!super.matchDataGridNodeAgainstCustomFilters(node))
@@ -239,8 +220,10 @@ WI.RenderingFrameTimelineView = class RenderingFrameTimelineView extends WI.Time
         for (let renderingFrameTimelineRecord of this._pendingRecords) {
             console.assert(renderingFrameTimelineRecord instanceof WI.RenderingFrameTimelineRecord);
 
-            let dataGridNode = new WI.RenderingFrameTimelineDataGridNode(renderingFrameTimelineRecord, this.zeroTime);
-            this._dataGrid.addRowInSortOrder(null, dataGridNode);
+            let dataGridNode = new WI.RenderingFrameTimelineDataGridNode(renderingFrameTimelineRecord, {
+                graphDataSource: this,
+            });
+            this._dataGrid.addRowInSortOrder(dataGridNode);
 
             let stack = [{children: renderingFrameTimelineRecord.children, parentDataGridNode: dataGridNode, index: 0}];
             while (stack.length) {
@@ -253,9 +236,11 @@ WI.RenderingFrameTimelineView = class RenderingFrameTimelineView extends WI.Time
                 let childRecord = entry.children[entry.index];
                 let childDataGridNode = null;
                 if (childRecord.type === WI.TimelineRecord.Type.Layout) {
-                    childDataGridNode = new WI.LayoutTimelineDataGridNode(childRecord, this.zeroTime);
+                    childDataGridNode = new WI.LayoutTimelineDataGridNode(childRecord, {
+                        graphDataSource: this,
+                    });
 
-                    this._dataGrid.addRowInSortOrder(null, childDataGridNode, entry.parentDataGridNode);
+                    this._dataGrid.addRowInSortOrder(childDataGridNode, entry.parentDataGridNode);
                 } else if (childRecord.type === WI.TimelineRecord.Type.Script) {
                     let rootNodes = [];
                     if (childRecord.profile) {
@@ -263,13 +248,17 @@ WI.RenderingFrameTimelineView = class RenderingFrameTimelineView extends WI.Time
                         rootNodes = childRecord.profile.topDownRootNodes;
                     }
 
-                    childDataGridNode = new WI.ScriptTimelineDataGridNode(childRecord, this.zeroTime);
+                    childDataGridNode = new WI.ScriptTimelineDataGridNode(childRecord, {
+                        graphDataSource: this,
+                    });
 
-                    this._dataGrid.addRowInSortOrder(null, childDataGridNode, entry.parentDataGridNode);
+                    this._dataGrid.addRowInSortOrder(childDataGridNode, entry.parentDataGridNode);
 
                     for (let profileNode of rootNodes) {
-                        let profileNodeDataGridNode = new WI.ProfileNodeDataGridNode(profileNode, this.zeroTime, this.startTime, this.endTime);
-                        this._dataGrid.addRowInSortOrder(null, profileNodeDataGridNode, childDataGridNode);
+                        let profileNodeDataGridNode = new WI.ProfileNodeDataGridNode(profileNode, {
+                            graphDataSource: this,
+                        });
+                        this._dataGrid.addRowInSortOrder(profileNodeDataGridNode, childDataGridNode);
                     }
                 }
 
@@ -284,13 +273,18 @@ WI.RenderingFrameTimelineView = class RenderingFrameTimelineView extends WI.Time
 
     _renderingFrameTimelineRecordAdded(event)
     {
-        var renderingFrameTimelineRecord = event.data.record;
+        let renderingFrameTimelineRecord = event.data.record;
         console.assert(renderingFrameTimelineRecord instanceof WI.RenderingFrameTimelineRecord);
         console.assert(renderingFrameTimelineRecord.children.length, "Missing child records for rendering frame.");
 
-        this._pendingRecords.push(renderingFrameTimelineRecord);
+        this._processRecord(renderingFrameTimelineRecord);
 
         this.needsLayout();
+    }
+
+    _processRecord(renderingFrameTimelineRecord)
+    {
+        this._pendingRecords.push(renderingFrameTimelineRecord);
     }
 
     _scopeBarSelectionDidChange()
@@ -305,3 +299,4 @@ WI.RenderingFrameTimelineView.DurationFilter = {
     OverFifteenMilliseconds: "rendering-frame-timeline-view-duration-filter-over-15-ms"
 };
 
+WI.RenderingFrameTimelineView.ReferencePage = WI.ReferencePage.TimelinesTab.FramesView;

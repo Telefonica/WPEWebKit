@@ -30,38 +30,97 @@
 #include "Connection.h"
 #include "MessageReceiver.h"
 #include "MessageSender.h"
+#include "SharedMemory.h"
+#include <WebCore/MessageWithMessagePorts.h>
 #include <WebCore/SWClientConnection.h>
-#include <pal/SessionID.h>
+#include <wtf/UniqueRef.h>
 
 namespace WebCore {
 struct ExceptionData;
+class ResourceLoader;
 }
 
 namespace WebKit {
 
-class WebSWClientConnection : public WebCore::SWClientConnection, public IPC::MessageSender, public IPC::MessageReceiver {
+class WebSWOriginTable;
+class WebServiceWorkerProvider;
+
+class WebSWClientConnection final : public WebCore::SWClientConnection, private IPC::MessageSender, public IPC::MessageReceiver {
 public:
-    WebSWClientConnection(IPC::Connection&, const PAL::SessionID&);
-    WebSWClientConnection(const WebSWClientConnection&) = delete;
-    ~WebSWClientConnection() final;
+    static Ref<WebSWClientConnection> create() { return adoptRef(*new WebSWClientConnection); }
+    ~WebSWClientConnection();
 
-    uint64_t identifier() const final { return m_identifier; }
+    WebCore::SWServerConnectionIdentifier serverConnectionIdentifier() const final { return m_identifier; }
 
-    void scheduleJobInServer(const WebCore::ServiceWorkerJobData&) final;
+    void addServiceWorkerRegistrationInServer(WebCore::ServiceWorkerRegistrationIdentifier) final;
+    void removeServiceWorkerRegistrationInServer(WebCore::ServiceWorkerRegistrationIdentifier) final;
 
     void disconnectedFromWebProcess();
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) final;
 
+    bool mayHaveServiceWorkerRegisteredForOrigin(const WebCore::SecurityOriginData&) const final;
+
+    void connectionToServerLost();
+
+    bool isThrottleable() const { return m_isThrottleable; }
+    void updateThrottleState();
+
+    void terminateWorkerForTesting(WebCore::ServiceWorkerIdentifier, CompletionHandler<void()>&&);
+
 private:
+    WebSWClientConnection();
+
+    void scheduleJobInServer(const WebCore::ServiceWorkerJobData&) final;
+    void finishFetchingScriptInServer(const WebCore::ServiceWorkerJobDataIdentifier&, WebCore::ServiceWorkerRegistrationKey&&, WebCore::WorkerFetchResult&&) final;
+    void postMessageToServiceWorker(WebCore::ServiceWorkerIdentifier destinationIdentifier, WebCore::MessageWithMessagePorts&&, const WebCore::ServiceWorkerOrClientIdentifier& source) final;
+    void registerServiceWorkerClient(const WebCore::ClientOrigin&, WebCore::ServiceWorkerClientData&&, const std::optional<WebCore::ServiceWorkerRegistrationIdentifier>&, String&& userAgent) final;
+    void unregisterServiceWorkerClient(WebCore::ScriptExecutionContextIdentifier) final;
+    void scheduleUnregisterJobInServer(WebCore::ServiceWorkerRegistrationIdentifier, WebCore::ServiceWorkerOrClientIdentifier, CompletionHandler<void(WebCore::ExceptionOr<bool>&&)>&&) final;
+
+    void matchRegistration(WebCore::SecurityOriginData&& topOrigin, const URL& clientURL, RegistrationCallback&&) final;
+    void didMatchRegistration(uint64_t matchRequestIdentifier, std::optional<WebCore::ServiceWorkerRegistrationData>&&);
+    void didGetRegistrations(uint64_t matchRequestIdentifier, Vector<WebCore::ServiceWorkerRegistrationData>&&);
+    void whenRegistrationReady(const WebCore::SecurityOriginData& topOrigin, const URL& clientURL, WhenRegistrationReadyCallback&&) final;
+
+    void setServiceWorkerClientIsControlled(WebCore::ScriptExecutionContextIdentifier, WebCore::ServiceWorkerRegistrationData&&, CompletionHandler<void(bool)>&&);
+    void setWorkerIsControlled(WebCore::ScriptExecutionContextIdentifier, WebCore::ServiceWorkerRegistrationData&&, CompletionHandler<void(bool)>&&);
+
+    void getRegistrations(WebCore::SecurityOriginData&& topOrigin, const URL& clientURL, GetRegistrationsCallback&&) final;
+    void whenServiceWorkerIsTerminatedForTesting(WebCore::ServiceWorkerIdentifier, CompletionHandler<void()>&&) final;
+
+    void didResolveRegistrationPromise(const WebCore::ServiceWorkerRegistrationKey&) final;
+    void storeRegistrationsOnDiskForTesting(CompletionHandler<void()>&&) final;
+    
+    void subscribeToPushService(WebCore::ServiceWorkerRegistrationIdentifier, const Vector<uint8_t>& applicationServerKey, SubscribeToPushServiceCallback&&) final;
+    void unsubscribeFromPushService(WebCore::ServiceWorkerRegistrationIdentifier, WebCore::PushSubscriptionIdentifier, UnsubscribeFromPushServiceCallback&&) final;
+    void getPushSubscription(WebCore::ServiceWorkerRegistrationIdentifier, GetPushSubscriptionCallback&&) final;
+    void getPushPermissionState(WebCore::ServiceWorkerRegistrationIdentifier, GetPushPermissionStateCallback&&) final;
+    void getNotifications(const URL&, const String&, GetNotificationsCallback&&) final;
+
+    void enableNavigationPreload(WebCore::ServiceWorkerRegistrationIdentifier, ExceptionOrVoidCallback&&) final;
+    void disableNavigationPreload(WebCore::ServiceWorkerRegistrationIdentifier, ExceptionOrVoidCallback&&) final;
+    void setNavigationPreloadHeaderValue(WebCore::ServiceWorkerRegistrationIdentifier, String&&, ExceptionOrVoidCallback&&) final;
+    void getNavigationPreloadState(WebCore::ServiceWorkerRegistrationIdentifier, ExceptionOrNavigationPreloadStateCallback&&) final;
+    void focusServiceWorkerClient(WebCore::ScriptExecutionContextIdentifier, CompletionHandler<void(std::optional<WebCore::ServiceWorkerClientData>&&)>&&);
+
     void scheduleStorageJob(const WebCore::ServiceWorkerJobData&);
 
-    IPC::Connection* messageSenderConnection() final { return m_connection.ptr(); }
-    uint64_t messageSenderDestinationID() final { return m_identifier; }
+    void runOrDelayTaskForImport(Function<void()>&& task);
 
-    PAL::SessionID m_sessionID;
-    uint64_t m_identifier;
+    IPC::Connection* messageSenderConnection() const final;
+    uint64_t messageSenderDestinationID() const final { return 0; }
 
-    Ref<IPC::Connection> m_connection;
+    void setSWOriginTableSharedMemory(const SharedMemory::Handle&);
+    void setSWOriginTableIsImported();
+
+    void clear();
+
+    WebCore::SWServerConnectionIdentifier m_identifier;
+
+    UniqueRef<WebSWOriginTable> m_swOriginTable;
+
+    Deque<Function<void()>> m_tasksPendingOriginImport;
+    bool m_isThrottleable { true };
 }; // class WebSWServerConnection
 
 } // namespace WebKit

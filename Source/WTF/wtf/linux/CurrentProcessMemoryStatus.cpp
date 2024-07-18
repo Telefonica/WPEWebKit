@@ -24,23 +24,14 @@
  */
 
 #include "config.h"
-#include "CurrentProcessMemoryStatus.h"
-
-#if OS(LINUX)
+#include <wtf/linux/CurrentProcessMemoryStatus.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <wtf/PageBlock.h>
 
 namespace WTF {
-
-static inline size_t systemPageSize()
-{
-    static size_t pageSize = 0;
-    if (!pageSize)
-        pageSize = sysconf(_SC_PAGE_SIZE);
-    return pageSize;
-}
 
 void currentProcessMemoryStatus(ProcessMemoryStatus& memoryStatus)
 {
@@ -54,7 +45,7 @@ void currentProcessMemoryStatus(ProcessMemoryStatus& memoryStatus)
     if (!line)
         return;
 
-    size_t pageSize = systemPageSize();
+    size_t pageSize = WTF::pageSize();
     char* end = nullptr;
     unsigned long long intValue = strtoull(line, &end, 10);
     memoryStatus.size = intValue * pageSize;
@@ -73,5 +64,3 @@ void currentProcessMemoryStatus(ProcessMemoryStatus& memoryStatus)
 }
 
 } // namespace WTF
-
-#endif // OS(LINUX)

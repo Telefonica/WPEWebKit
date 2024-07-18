@@ -54,8 +54,8 @@ static void drawRectIntoContext(IntRect rect, FrameView* view, GraphicsContext& 
 
 GDIObject<HBITMAP> imageFromRect(const Frame* frame, IntRect& ir)
 {
-    PaintBehavior oldPaintBehavior = frame->view()->paintBehavior();
-    frame->view()->setPaintBehavior(oldPaintBehavior | PaintBehaviorFlattenCompositingLayers);
+    auto oldPaintBehavior = frame->view()->paintBehavior();
+    frame->view()->setPaintBehavior(oldPaintBehavior | PaintBehavior::FlattenCompositingLayers);
 
     void* bits = nullptr;
     auto hdc = adoptGDIObject(::CreateCompatibleDC(0));
@@ -68,15 +68,14 @@ GDIObject<HBITMAP> imageFromRect(const Frame* frame, IntRect& ir)
         return hbmp;
 
     HGDIOBJ hbmpOld = SelectObject(hdc.get(), hbmp.get());
-    CGContextRef context = CGBitmapContextCreate(static_cast<void*>(bits), w, h,
-        8, w * sizeof(RGBQUAD), deviceRGBColorSpaceRef(), kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
-    CGContextSaveGState(context);
+    auto context = adoptCF(CGBitmapContextCreate(static_cast<void*>(bits), w, h,
+        8, w * sizeof(RGBQUAD), sRGBColorSpaceRef(), kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst));
+    CGContextSaveGState(context.get());
 
-    GraphicsContext gc(context);
+    GraphicsContextCG gc(context.get());
 
     drawRectIntoContext(ir, frame->view(), gc);
 
-    CGContextRelease(context);
     SelectObject(hdc.get(), hbmpOld);
 
     frame->view()->setPaintBehavior(oldPaintBehavior);

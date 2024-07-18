@@ -44,7 +44,7 @@ inline WebURLRequestCachePolicy kit(WebCore::ResourceRequestCachePolicy policy)
     return static_cast<WebURLRequestCachePolicy>(policy);
 }
 
-class WebMutableURLRequest : public IWebMutableURLRequest, IWebMutableURLRequestPrivate
+class WebMutableURLRequest final : public IWebMutableURLRequest, IWebMutableURLRequestPrivate
 {
 public:
     static WebMutableURLRequest* createInstance();
@@ -53,11 +53,7 @@ public:
 
     static WebMutableURLRequest* createImmutableInstance();
     static WebMutableURLRequest* createImmutableInstance(const WebCore::ResourceRequest&);
-protected:
-    WebMutableURLRequest(bool isMutable);
-    ~WebMutableURLRequest();
 
-public:
     // IUnknown
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppvObject);
     virtual ULONG STDMETHODCALLTYPE AddRef();
@@ -105,7 +101,11 @@ public:
     const WebCore::HTTPHeaderMap& httpHeaderFields() const;
 
     const WebCore::ResourceRequest& resourceRequest() const;
-protected:
+
+private:
+    WebMutableURLRequest(bool isMutable);
+    ~WebMutableURLRequest();
+
     ULONG m_refCount { 0 };
     bool m_isMutable;
     WebCore::ResourceRequest m_request;

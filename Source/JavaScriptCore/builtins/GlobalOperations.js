@@ -26,105 +26,52 @@
 
 // @internal
 
-@globalPrivate
-function toInteger(target)
+@linkTimeConstant
+function toIntegerOrInfinity(target)
 {
     "use strict";
 
     var numberValue = +target;
 
-    // isNaN(numberValue)
-    if (numberValue !== numberValue)
+    // isNaN(numberValue) or 0
+    if (numberValue !== numberValue || !numberValue)
         return 0;
     return @trunc(numberValue);
 }
 
-@globalPrivate
+@linkTimeConstant
 function toLength(target)
 {
     "use strict";
 
-    var length = @toInteger(target);
+    var length = @toIntegerOrInfinity(target);
     // originally Math.min(Math.max(length, 0), maxSafeInteger));
     return +(length > 0 ? (length < @MAX_SAFE_INTEGER ? length : @MAX_SAFE_INTEGER) : 0);
 }
 
-@globalPrivate
-function isDictionary(object)
-{
-    "use strict";
-
-    return object == null || typeof object === "object";
-}
-
-@globalPrivate
+@linkTimeConstant
 @getter
 @overriddenName="get [Symbol.species]"
 function speciesGetter()
 {
+    "use strict";
     return this;
 }
 
-@globalPrivate
+@linkTimeConstant
 function speciesConstructor(obj, defaultConstructor)
 {
+    "use strict";
+
     var constructor = obj.constructor;
     if (constructor === @undefined)
         return defaultConstructor;
     if (!@isObject(constructor))
         @throwTypeError("|this|.constructor is not an Object or undefined");
-    constructor = constructor.@speciesSymbol;
-    if (constructor == null)
+    constructor = constructor.@@species;
+    if (@isUndefinedOrNull(constructor))
         return defaultConstructor;
     if (@isConstructor(constructor))
         return constructor;
     @throwTypeError("|this|.constructor[Symbol.species] is not a constructor");
-}
-
-@globalPrivate
-function copyDataProperties(target, source, excludedSet)
-{
-    if (!@isObject(target))
-        @throwTypeError("target needs to be an object");
-
-    if (source == null) 
-        return target;
-
-    let from = @Object(source); 
-    let keys = @Reflect.@ownKeys(from); 
-    let keysLength = keys.length;
-    for (let i = 0; i < keysLength; i++) {
-        let nextKey = keys[i];
-        if (!excludedSet.@has(nextKey)) {
-            if (@propertyIsEnumerable(from, nextKey)) {
-                let propValue = from[nextKey];
-                @defineEnumerableWritableConfigurableDataProperty(target, nextKey, propValue);
-            }
-        }
-    }
-
-    return target;
-}
-
-@globalPrivate
-function copyDataPropertiesNoExclusions(target, source)
-{
-    if (!@isObject(target))
-        @throwTypeError("target needs to be an object");
-
-    if (source == null) 
-        return target;
-
-    let from = @Object(source); 
-    let keys = @Reflect.@ownKeys(from); 
-    let keysLength = keys.length;
-    for (let i = 0; i < keysLength; i++) {
-        let nextKey = keys[i];
-        if (@propertyIsEnumerable(from, nextKey)) {
-            let propValue = from[nextKey];
-            @defineEnumerableWritableConfigurableDataProperty(target, nextKey, propValue);
-        }
-    }
-
-    return target;
 }

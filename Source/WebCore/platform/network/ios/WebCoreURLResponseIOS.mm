@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,49 +29,50 @@
 #import "config.h"
 #import "WebCoreURLResponseIOS.h"
 
+#if PLATFORM(IOS_FAMILY)
+
 #import "QuickLook.h"
-#import "UTIUtilities.h"
-#import "WebCoreSystemInterface.h"
 #import <MobileCoreServices/MobileCoreServices.h>
 
-#import "QuickLookSoftLink.h"
+#import <pal/ios/QuickLookSoftLink.h>
 
 namespace WebCore {
 
-void adjustMIMETypeIfNecessary(CFURLResponseRef cfResponse, bool isMainResourceLoad)
+void adjustMIMETypeIfNecessary(CFURLResponseRef response, bool isMainResourceLoad)
 {
-    RetainPtr<CFStringRef> mimeType = CFURLResponseGetMIMEType(cfResponse);
-    RetainPtr<CFStringRef> updatedMIMEType = mimeType;
-    if (!updatedMIMEType)
-        updatedMIMEType = defaultMIMEType().createCFString();
-
-#if USE(QUICK_LOOK)
-    // We must ensure that the MIME type is correct, so that QuickLook's web plugin is called when needed.
-    // We filter the basic MIME types so that we don't do unnecessary work in standard browsing situations.
-    if (isMainResourceLoad && shouldUseQuickLookForMIMEType((NSString *)updatedMIMEType.get())) {
-        RetainPtr<CFStringRef> suggestedFilename = adoptCF(CFURLResponseCopySuggestedFilename(cfResponse));
-        RetainPtr<CFStringRef> quickLookMIMEType = adoptCF((CFStringRef)QLTypeCopyBestMimeTypeForFileNameAndMimeType((NSString *)suggestedFilename.get(), (NSString *)mimeType.get()));
-        if (!quickLookMIMEType) {
-            auto url = CFURLResponseGetURL(cfResponse);
-            if ([(NSURL *)url isFileURL]) {
-                RetainPtr<CFStringRef> extension = adoptCF(CFURLCopyPathExtension(url));
-                if (extension) {
-                    RetainPtr<CFStringRef> uti = adoptCF(UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, extension.get(), nullptr));
-                    String MIMEType = MIMETypeFromUTITree(uti.get());
-                    if (!MIMEType.isEmpty())
-                        quickLookMIMEType = MIMEType.createCFString();
-                }
+    auto type = CFURLResponseGetMIMEType(response);
+    if (!type) {
+        // FIXME: <rdar://problem/46332893> is fixed, but for some reason, this special case is still needed; should resolve that issue and remove this.
+        if (auto extension = filePathExtension(response)) {
+            if (CFStringCompare(extension.get(), CFSTR("mjs"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
+                CFURLResponseSetMIMEType(response, CFSTR("text/javascript"));
+                return;
             }
         }
-
-        if (quickLookMIMEType)
-            updatedMIMEType = quickLookMIMEType;
     }
-#else
+
+#if !USE(QUICK_LOOK)
     UNUSED_PARAM(isMainResourceLoad);
+#else
+    // Ensure that the MIME type is correct so that QuickLook's web plug-in is called when needed.
+    // The shouldUseQuickLookForMIMEType function filters out the common MIME types so we don't do unnecessary work in those cases.
+    if (isMainResourceLoad && shouldUseQuickLookForMIMEType((__bridge NSString *)type)) {
+        RetainPtr<CFStringRef> updatedType;
+        auto suggestedFilename = adoptCF(CFURLResponseCopySuggestedFilename(response));
+        if (auto quickLookType = adoptNS(PAL::softLink_QuickLook_QLTypeCopyBestMimeTypeForFileNameAndMimeType((__bridge NSString *)suggestedFilename.get(), (__bridge NSString *)type)))
+            updatedType = (__bridge CFStringRef)quickLookType.get();
+        else if (auto extension = filePathExtension(response))
+            updatedType = preferredMIMETypeForFileExtensionFromUTType(extension.get());
+        if (updatedType && (!type || CFStringCompare(type, updatedType.get(), kCFCompareCaseInsensitive) != kCFCompareEqualTo)) {
+            CFURLResponseSetMIMEType(response, updatedType.get());
+            return;
+        }
+    }
 #endif // USE(QUICK_LOOK)
-    if (!mimeType || CFStringCompare(mimeType.get(), updatedMIMEType.get(), kCFCompareCaseInsensitive) != kCFCompareEqualTo)
-        CFURLResponseSetMIMEType(cfResponse, updatedMIMEType.get());
+    if (!type)
+        CFURLResponseSetMIMEType(response, CFSTR("application/octet-stream"));
 }
 
 } // namespace WebCore
+
+#endif // PLATFORM(IOS_FAMILY)

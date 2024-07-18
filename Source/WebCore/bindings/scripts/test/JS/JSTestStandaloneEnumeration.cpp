@@ -24,13 +24,14 @@
 
 #include "JSTestStandaloneEnumeration.h"
 
-#include <runtime/JSCInlines.h>
-#include <runtime/JSString.h>
+#include <JavaScriptCore/JSCInlines.h>
+#include <JavaScriptCore/JSString.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/SortedArrayMap.h>
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 String convertEnumerationToString(TestStandaloneEnumeration enumerationValue)
 {
@@ -44,18 +45,21 @@ String convertEnumerationToString(TestStandaloneEnumeration enumerationValue)
     return values[static_cast<size_t>(enumerationValue)];
 }
 
-template<> JSString* convertEnumerationToJS(ExecState& state, TestStandaloneEnumeration enumerationValue)
+template<> JSString* convertEnumerationToJS(JSGlobalObject& lexicalGlobalObject, TestStandaloneEnumeration enumerationValue)
 {
-    return jsStringWithCache(&state, convertEnumerationToString(enumerationValue));
+    return jsStringWithCache(lexicalGlobalObject.vm(), convertEnumerationToString(enumerationValue));
 }
 
-template<> std::optional<TestStandaloneEnumeration> parseEnumeration<TestStandaloneEnumeration>(ExecState& state, JSValue value)
+template<> std::optional<TestStandaloneEnumeration> parseEnumeration<TestStandaloneEnumeration>(JSGlobalObject& lexicalGlobalObject, JSValue value)
 {
-    auto stringValue = value.toWTFString(&state);
-    if (stringValue == "enumValue1")
-        return TestStandaloneEnumeration::EnumValue1;
-    if (stringValue == "enumValue2")
-        return TestStandaloneEnumeration::EnumValue2;
+    auto stringValue = value.toWTFString(&lexicalGlobalObject);
+    static constexpr std::pair<ComparableASCIILiteral, TestStandaloneEnumeration> mappings[] = {
+        { "enumValue1", TestStandaloneEnumeration::EnumValue1 },
+        { "enumValue2", TestStandaloneEnumeration::EnumValue2 },
+    };
+    static constexpr SortedArrayMap enumerationMapping { mappings };
+    if (auto* enumerationValue = enumerationMapping.tryGet(stringValue); LIKELY(enumerationValue))
+        return *enumerationValue;
     return std::nullopt;
 }
 

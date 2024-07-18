@@ -61,7 +61,7 @@ void GeolocationClientMock::setController(GeolocationController *controller)
     m_controller = controller;
 }
 
-void GeolocationClientMock::setPosition(RefPtr<GeolocationPosition>&& position)
+void GeolocationClientMock::setPosition(GeolocationPositionData&& position)
 {
     m_lastPosition = WTFMove(position);
     clearError();
@@ -72,7 +72,7 @@ void GeolocationClientMock::setPositionUnavailableError(const String& errorMessa
 {
     m_hasError = true;
     m_errorMessage = errorMessage;
-    m_lastPosition = nullptr;
+    m_lastPosition = std::nullopt;
     asyncUpdateController();
 }
 
@@ -120,13 +120,13 @@ void GeolocationClientMock::permissionTimerFired()
     // which fire synchronously from Geolocation::setIsAllowed() cannot reentrantly modify
     // m_pendingPermission.
     for (GeolocationSet::iterator it = m_pendingPermission.begin(); it != end; ++it)
-        (*it)->setIsAllowed(allowed);
+        (*it)->setIsAllowed(allowed, { });
     m_pendingPermission.clear();
 }
 
 void GeolocationClientMock::reset()
 {
-    m_lastPosition = nullptr;
+    m_lastPosition = std::nullopt;
     clearError();
     m_permissionState = PermissionStateUnset;
 }
@@ -136,9 +136,11 @@ void GeolocationClientMock::geolocationDestroyed()
     ASSERT(!m_isActive);
 }
 
-void GeolocationClientMock::startUpdating()
+void GeolocationClientMock::startUpdating(const String& authorizationToken, bool enableHighAccuracy)
 {
     ASSERT(!m_isActive);
+    UNUSED_PARAM(authorizationToken);
+    UNUSED_PARAM(enableHighAccuracy);
     m_isActive = true;
     asyncUpdateController();
 }
@@ -156,9 +158,9 @@ void GeolocationClientMock::setEnableHighAccuracy(bool)
     // See https://bugs.webkit.org/show_bug.cgi?id=49438
 }
 
-GeolocationPosition* GeolocationClientMock::lastPosition()
+std::optional<GeolocationPositionData> GeolocationClientMock::lastPosition()
 {
-    return m_lastPosition.get();
+    return m_lastPosition;
 }
 
 void GeolocationClientMock::asyncUpdateController()
@@ -172,9 +174,9 @@ void GeolocationClientMock::controllerTimerFired()
 {
     ASSERT(m_controller);
 
-    if (m_lastPosition.get()) {
+    if (m_lastPosition) {
         ASSERT(!m_hasError);
-        m_controller->positionChanged(m_lastPosition.get());
+        m_controller->positionChanged(*m_lastPosition);
     } else if (m_hasError) {
         auto geolocatioError = GeolocationError::create(GeolocationError::PositionUnavailable, m_errorMessage);
         m_controller->errorOccurred(geolocatioError.get());

@@ -26,67 +26,42 @@
 #import "config.h"
 #import "NetworkProcess.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "NetworkCache.h"
 #import "NetworkProcessCreationParameters.h"
-#import "ResourceCachesToClear.h"
+#import "ProcessAssertion.h"
 #import "SandboxInitializationParameters.h"
 #import "SecItemShim.h"
+#import <UIKit/UIKit.h>
 #import <WebCore/CertificateInfo.h>
 #import <WebCore/NotImplemented.h>
 #import <WebCore/WebCoreThreadSystemInterface.h>
 #import <pal/spi/cf/CFNetworkSPI.h>
-
-#define ENABLE_MANUAL_NETWORK_SANDBOXING 0
-
-using namespace WebCore;
+#import <wtf/cocoa/Entitlements.h>
 
 namespace WebKit {
 
-void NetworkProcess::initializeProcess(const ChildProcessInitializationParameters&)
+#if !PLATFORM(MACCATALYST)
+
+void NetworkProcess::initializeProcess(const AuxiliaryProcessInitializationParameters&)
 {
     InitWebCoreThreadSystemInterface();
 }
 
-void NetworkProcess::initializeProcessName(const ChildProcessInitializationParameters&)
+void NetworkProcess::initializeProcessName(const AuxiliaryProcessInitializationParameters&)
 {
     notImplemented();
 }
 
-void NetworkProcess::initializeSandbox(const ChildProcessInitializationParameters& parameters, SandboxInitializationParameters& sandboxParameters)
+void NetworkProcess::initializeSandbox(const AuxiliaryProcessInitializationParameters&, SandboxInitializationParameters&)
 {
-#if ENABLE_MANUAL_NETWORK_SANDBOXING
-    // Need to override the default, because service has a different bundle ID.
-    NSBundle *webkit2Bundle = [NSBundle bundleForClass:NSClassFromString(@"WKWebView")];
-    sandboxParameters.setOverrideSandboxProfilePath([webkit2Bundle pathForResource:@"com.apple.WebKit.NetworkProcess" ofType:@"sb"]);
-
-    ChildProcess::initializeSandbox(parameters, sandboxParameters);
-#else
-    UNUSED_PARAM(parameters);
-    UNUSED_PARAM(sandboxParameters);
-#endif
-}
-
-void NetworkProcess::allowSpecificHTTPSCertificateForHost(const CertificateInfo& certificateInfo, const String& host)
-{
-    [NSURLRequest setAllowsSpecificHTTPSCertificate:(NSArray *)certificateInfo.certificateChain() forHost:host];
-}
-
-void NetworkProcess::clearCacheForAllOrigins(uint32_t cachesToClear)
-{
-    ResourceCachesToClear resourceCachesToClear = static_cast<ResourceCachesToClear>(cachesToClear);
-    if (resourceCachesToClear == InMemoryResourceCachesOnly)
-        return;
-#if ENABLE(NETWORK_CACHE)
-    if (m_cache)
-        m_cache->clear();
-#endif
 }
 
 void NetworkProcess::platformInitializeNetworkProcess(const NetworkProcessCreationParameters& parameters)
 {
 #if ENABLE(SEC_ITEM_SHIM)
+    // SecItemShim is needed for CFNetwork APIs that query Keychains beneath us.
     initializeSecItemShim(*this);
 #endif
     platformInitializeNetworkProcessCocoa(parameters);
@@ -97,6 +72,45 @@ void NetworkProcess::platformTerminate()
     notImplemented();
 }
 
+static bool disableServiceWorkerEntitlementTestingOverride;
+
+bool NetworkProcess::parentProcessHasServiceWorkerEntitlement() const
+{
+    if (disableServiceWorkerEntitlementTestingOverride)
+        return false;
+
+    static bool hasEntitlement = WTF::hasEntitlement(parentProcessConnection()->xpcConnection(), "com.apple.developer.WebKit.ServiceWorkers"_s) || WTF::hasEntitlement(parentProcessConnection()->xpcConnection(), "com.apple.developer.web-browser"_s);
+    return hasEntitlement;
+}
+
+void NetworkProcess::disableServiceWorkerEntitlement()
+{
+    disableServiceWorkerEntitlementTestingOverride = true;
+}
+
+void NetworkProcess::clearServiceWorkerEntitlementOverride(CompletionHandler<void()>&& completionHandler)
+{
+    disableServiceWorkerEntitlementTestingOverride = false;
+    completionHandler();
+}
+
+#endif // !PLATFORM(MACCATALYST)
+
+void NetworkProcess::setIsHoldingLockedFiles(bool isHoldingLockedFiles)
+{
+    if (!isHoldingLockedFiles) {
+        m_holdingLockedFileAssertion = nullptr;
+        return;
+    }
+
+    if (m_holdingLockedFileAssertion && m_holdingLockedFileAssertion->isValid())
+        return;
+
+    // We synchronously take a process assertion when beginning a SQLite transaction so that we don't get suspended
+    // while holding a locked file. We would get killed if suspended while holding locked files.
+    m_holdingLockedFileAssertion = ProcessAssertion::create(getCurrentProcessID(), "Network Process is holding locked files"_s, ProcessAssertionType::FinishTaskInterruptable, ProcessAssertion::Mode::Sync);
+}
+
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

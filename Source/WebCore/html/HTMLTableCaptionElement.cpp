@@ -27,8 +27,11 @@
 
 #include "CSSPropertyNames.h"
 #include "HTMLNames.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLTableCaptionElement);
 
 using namespace HTMLNames;
 
@@ -43,20 +46,13 @@ Ref<HTMLTableCaptionElement> HTMLTableCaptionElement::create(const QualifiedName
     return adoptRef(*new HTMLTableCaptionElement(tagName, document));
 }
 
-bool HTMLTableCaptionElement::isPresentationAttribute(const QualifiedName& name) const
-{
-    if (name == alignAttr)
-        return true;
-    return HTMLElement::isPresentationAttribute(name);
-}
-
-void HTMLTableCaptionElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStyleProperties& style)
+void HTMLTableCaptionElement::collectPresentationalHintsForAttribute(const QualifiedName& name, const AtomString& value, MutableStyleProperties& style)
 {
     if (name == alignAttr) {
         if (!value.isEmpty())
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyCaptionSide, value);
+            addPropertyToPresentationalHintStyle(style, CSSPropertyCaptionSide, value);
     } else
-        HTMLElement::collectStyleForPresentationAttribute(name, value, style);
+        HTMLElement::collectPresentationalHintsForAttribute(name, value, style);
 }
 
 }

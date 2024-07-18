@@ -26,6 +26,8 @@
 
 #include "config.h"
 #include "BitmapTexturePool.h"
+#include <numeric>
+#include <wtf/text/StringToIntegerConversion.h>
 
 #if USE(TEXTURE_MAPPER_GL)
 #include "BitmapTextureGL.h"
@@ -33,8 +35,10 @@
 
 namespace WebCore {
 
-static const double releaseUnusedSecondsTolerance = 3;
-static const Seconds releaseUnusedTexturesTimerInterval { 500_ms };
+static const Seconds releaseUnusedSecondsTolerance { 3_s };
+static const Seconds releaseUnusedSecondsToleranceWhenPixelLimitExceeded { 50_ms };
+static const Seconds releaseUnusedTexturesTimerInterval { 250_ms };
+constexpr uint64_t defaultStoredPixelsLimit { 10 * 1920 * 1080 };
 
 #if USE(TEXTURE_MAPPER_GL)
 BitmapTexturePool::BitmapTexturePool(const TextureMapperContextAttributes& contextAttributes)
@@ -46,14 +50,12 @@ BitmapTexturePool::BitmapTexturePool(const TextureMapperContextAttributes& conte
 
 RefPtr<BitmapTexture> BitmapTexturePool::acquireTexture(const IntSize& size, const BitmapTexture::Flags flags)
 {
-    Vector<Entry>& list = flags & BitmapTexture::FBOAttachment ? m_attachmentTextures : m_textures;
-
-    Entry* selectedEntry = std::find_if(list.begin(), list.end(),
+    Entry* selectedEntry = std::find_if(m_textures.begin(), m_textures.end(),
         [&size](Entry& entry) { return entry.m_texture->refCount() == 1 && entry.m_texture->size() == size; });
 
-    if (selectedEntry == list.end()) {
-        list.append(Entry(createTexture(flags)));
-        selectedEntry = &list.last();
+    if (selectedEntry == m_textures.end()) {
+        m_textures.append(Entry(createTexture(flags)));
+        selectedEntry = &m_textures.last();
     }
 
     scheduleReleaseUnusedTextures();
@@ -71,22 +73,38 @@ void BitmapTexturePool::scheduleReleaseUnusedTextures()
 
 void BitmapTexturePool::releaseUnusedTexturesTimerFired()
 {
+    if (m_textures.isEmpty())
+        return;
+
     // Delete entries, which have been unused in releaseUnusedSecondsTolerance.
-    double minUsedTime = monotonicallyIncreasingTime() - releaseUnusedSecondsTolerance;
+    MonotonicTime minUsedTime = MonotonicTime::now() - releaseUnusedSecondsTolerance;
 
-    if (!m_textures.isEmpty()) {
-        m_textures.removeAllMatching([&minUsedTime](const Entry& entry) {
-            return entry.canBeReleased(minUsedTime);
-        });
-    }
+    static uint64_t storedPixelsLimit = defaultStoredPixelsLimit;
+    std::once_flag onceFlag;
+    std::call_once(onceFlag, []() {
+        String envString = String::fromLatin1(getenv("WPE_BITMAP_TEXTURE_POOL_PIXEL_LIMIT"));
+        if (!envString.isEmpty()) {
+            uint64_t limit = parseInteger<uint64_t>(envString).value_or(0);
+            storedPixelsLimit = limit > 0 ? limit : defaultStoredPixelsLimit;
+        }
+    });
+    const uint64_t storedPixelsNumber = std::accumulate(
+        m_textures.begin(),
+        m_textures.end(),
+        0,
+        [](const uint64_t accumulator, const auto& textureEntry) {
+            const auto& textureSize = textureEntry.m_texture->size();
+            return accumulator + textureSize.width() * textureSize.height();
+        }
+    );
+    if (storedPixelsNumber >= storedPixelsLimit)
+        minUsedTime = MonotonicTime::now() - releaseUnusedSecondsToleranceWhenPixelLimitExceeded;
 
-    if (!m_attachmentTextures.isEmpty()) {
-        m_attachmentTextures.removeAllMatching([&minUsedTime](const Entry& entry) {
-            return entry.canBeReleased(minUsedTime);
-        });
-    }
+    m_textures.removeAllMatching([&minUsedTime](const Entry& entry) {
+        return entry.canBeReleased(minUsedTime);
+    });
 
-    if (!m_textures.isEmpty() || !m_attachmentTextures.isEmpty())
+    if (!m_textures.isEmpty())
         scheduleReleaseUnusedTextures();
 }
 

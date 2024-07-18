@@ -22,6 +22,8 @@
 #include "config.h"
 #include "InputTypeNames.h"
 
+#include "CommonAtomStrings.h"
+#include "HTMLNames.h"
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
@@ -31,141 +33,127 @@ namespace InputTypeNames {
 // The type names must be lowercased because they will be the return values of
 // input.type and input.type must be lowercase according to DOM Level 2.
 
-const AtomicString& button()
+const AtomString& button()
 {
-    static NeverDestroyed<AtomicString> name("button", AtomicString::ConstructFromLiteral);
+    return HTMLNames::buttonTag->localName();
+}
+
+const AtomString& checkbox()
+{
+    static MainThreadNeverDestroyed<const AtomString> name("checkbox"_s);
     return name;
 }
 
-const AtomicString& checkbox()
+const AtomString& color()
 {
-    static NeverDestroyed<AtomicString> name("checkbox", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("color"_s);
     return name;
 }
 
-const AtomicString& color()
+const AtomString& date()
 {
-    static NeverDestroyed<AtomicString> name("color", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("date"_s);
     return name;
 }
 
-const AtomicString& date()
+const AtomString& datetimelocal()
 {
-    static NeverDestroyed<AtomicString> name("date", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("datetime-local"_s);
     return name;
 }
 
-const AtomicString& datetime()
+const AtomString& email()
 {
-    static NeverDestroyed<AtomicString> name("datetime", AtomicString::ConstructFromLiteral);
+    return emailAtom();
+}
+
+const AtomString& file()
+{
+    static MainThreadNeverDestroyed<const AtomString> name("file"_s);
     return name;
 }
 
-const AtomicString& datetimelocal()
+const AtomString& hidden()
 {
-    static NeverDestroyed<AtomicString> name("datetime-local", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("hidden"_s);
     return name;
 }
 
-const AtomicString& email()
+const AtomString& image()
 {
-    static NeverDestroyed<AtomicString> name("email", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("image"_s);
     return name;
 }
 
-const AtomicString& file()
+const AtomString& month()
 {
-    static NeverDestroyed<AtomicString> name("file", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("month"_s);
     return name;
 }
 
-const AtomicString& hidden()
+const AtomString& number()
 {
-    static NeverDestroyed<AtomicString> name("hidden", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("number"_s);
     return name;
 }
 
-const AtomicString& image()
+const AtomString& password()
 {
-    static NeverDestroyed<AtomicString> name("image", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("password"_s);
     return name;
 }
 
-const AtomicString& month()
+const AtomString& radio()
 {
-    static NeverDestroyed<AtomicString> name("month", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("radio"_s);
     return name;
 }
 
-const AtomicString& number()
+const AtomString& range()
 {
-    static NeverDestroyed<AtomicString> name("number", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("range"_s);
     return name;
 }
 
-const AtomicString& password()
+const AtomString& reset()
 {
-    static NeverDestroyed<AtomicString> name("password", AtomicString::ConstructFromLiteral);
+    return resetAtom();
+}
+
+const AtomString& search()
+{
+    return searchAtom();
+}
+
+const AtomString& submit()
+{
+    return submitAtom();
+}
+
+const AtomString& telephone()
+{
+    return telAtom();
+}
+
+const AtomString& text()
+{
+    return textAtom();
+}
+
+const AtomString& time()
+{
+    static MainThreadNeverDestroyed<const AtomString> name("time"_s);
     return name;
 }
 
-const AtomicString& radio()
+const AtomString& url()
 {
-    static NeverDestroyed<AtomicString> name("radio", AtomicString::ConstructFromLiteral);
-    return name;
+    return urlAtom();
 }
 
-const AtomicString& range()
+const AtomString& week()
 {
-    static NeverDestroyed<AtomicString> name("range", AtomicString::ConstructFromLiteral);
-    return name;
-}
-
-const AtomicString& reset()
-{
-    static NeverDestroyed<AtomicString> name("reset", AtomicString::ConstructFromLiteral);
-    return name;
-}
-
-const AtomicString& search()
-{
-    static NeverDestroyed<AtomicString> name("search", AtomicString::ConstructFromLiteral);
-    return name;
-}
-
-const AtomicString& submit()
-{
-    static NeverDestroyed<AtomicString> name("submit", AtomicString::ConstructFromLiteral);
-    return name;
-}
-
-const AtomicString& telephone()
-{
-    static NeverDestroyed<AtomicString> name("tel", AtomicString::ConstructFromLiteral);
-    return name;
-}
-
-const AtomicString& text()
-{
-    static NeverDestroyed<AtomicString> name("text", AtomicString::ConstructFromLiteral);
-    return name;
-}
-
-const AtomicString& time()
-{
-    static NeverDestroyed<AtomicString> name("time", AtomicString::ConstructFromLiteral);
-    return name;
-}
-
-const AtomicString& url()
-{
-    static NeverDestroyed<AtomicString> name("url", AtomicString::ConstructFromLiteral);
-    return name;
-}
-
-const AtomicString& week()
-{
-    static NeverDestroyed<AtomicString> name("week", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> name("week"_s);
     return name;
 }
 

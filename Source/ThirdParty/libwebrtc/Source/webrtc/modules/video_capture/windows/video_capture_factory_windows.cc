@@ -8,10 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/base/refcount.h"
-#include "webrtc/base/scoped_ref_ptr.h"
-#include "webrtc/modules/video_capture/windows/video_capture_ds.h"
-#include "webrtc/modules/video_capture/windows/video_capture_mf.h"
+#include "api/scoped_refptr.h"
+#include "modules/video_capture/windows/video_capture_ds.h"
 
 namespace webrtc {
 namespace videocapturemodule {
@@ -28,8 +26,7 @@ rtc::scoped_refptr<VideoCaptureModule> VideoCaptureImpl::Create(
     return nullptr;
 
   // TODO(tommi): Use Media Foundation implementation for Vista and up.
-  rtc::scoped_refptr<VideoCaptureDS> capture(
-      new rtc::RefCountedObject<VideoCaptureDS>());
+  auto capture = rtc::make_ref_counted<VideoCaptureDS>();
   if (capture->Init(device_id) != 0) {
     return nullptr;
   }

@@ -31,31 +31,30 @@
 #pragma once
 
 #include "File.h"
-#include "TextEncoding.h"
-#include <wtf/Forward.h>
-#include <wtf/Optional.h>
+#include <pal/text/TextEncoding.h>
+#include <variant>
 #include <wtf/RefCounted.h>
-#include <wtf/Variant.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
+template<typename> class ExceptionOr;
 class HTMLFormElement;
 
 class DOMFormData : public RefCounted<DOMFormData> {
 public:
-    using FormDataEntryValue = Variant<RefPtr<File>, String>;
+    using FormDataEntryValue = std::variant<RefPtr<File>, String>;
 
     struct Item {
         String name;
         FormDataEntryValue data;
     };
 
-    static Ref<DOMFormData> create(HTMLFormElement* form) { return adoptRef(*new DOMFormData(form)); }
-    static Ref<DOMFormData> create(const TextEncoding& encoding) { return adoptRef(*new DOMFormData(encoding)); }
+    static ExceptionOr<Ref<DOMFormData>> create(HTMLFormElement*);
+    static Ref<DOMFormData> create(const PAL::TextEncoding&);
 
     const Vector<Item>& items() const { return m_items; }
-    const TextEncoding& encoding() const { return m_encoding; }
+    const PAL::TextEncoding& encoding() const { return m_encoding; }
 
     void append(const String& name, const String& value);
     void append(const String& name, Blob&, const String& filename = { });
@@ -65,6 +64,7 @@ public:
     bool has(const String& name);
     void set(const String& name, const String& value);
     void set(const String& name, Blob&, const String& filename = { });
+    Ref<DOMFormData> clone() const;
 
     class Iterator {
     public:
@@ -78,13 +78,11 @@ public:
     Iterator createIterator() { return Iterator { *this }; }
 
 private:
-    explicit DOMFormData(const TextEncoding&);
-    explicit DOMFormData(HTMLFormElement*);
+    explicit DOMFormData(const PAL::TextEncoding& = PAL::UTF8Encoding());
 
-    Item createFileEntry(const String& name, Blob&, const String& filename);
     void set(const String& name, Item&&);
 
-    TextEncoding m_encoding;
+    PAL::TextEncoding m_encoding;
     Vector<Item> m_items;
 };
 

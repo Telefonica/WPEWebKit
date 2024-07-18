@@ -36,12 +36,11 @@
 #include "WebVisitedLinkStore.h"
 #include <WebCore/BString.h>
 #include <WebCore/HistoryItem.h>
-#include <WebCore/URL.h>
-#include <WebCore/PageGroup.h>
 #include <WebCore/SharedBuffer.h>
 #include <functional>
 #include <wtf/DateMath.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/URL.h>
 #include <wtf/Vector.h>
 
 #if USE(CF)
@@ -52,13 +51,6 @@
 #endif
 
 using namespace WebCore;
-using namespace std;
-
-static bool areEqualOrClose(double d1, double d2)
-{
-    double diff = d1-d2;
-    return (diff < .000001 && diff > -.000001);
-}
 
 static COMPtr<IPropertyBag> createUserInfoFromArray(BSTR notificationStr, IWebHistoryItem** data, size_t size)
 {
@@ -68,7 +60,7 @@ static COMPtr<IPropertyBag> createUserInfoFromArray(BSTR notificationStr, IWebHi
     RetainPtr<CFMutableDictionaryRef> dictionary = adoptCF(
         CFDictionaryCreateMutable(0, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
 
-    RetainPtr<CFStringRef> key = adoptCF(MarshallingHelpers::BSTRToCFStringRef(notificationStr));
+    auto key = MarshallingHelpers::BSTRToCFStringRef(notificationStr);
     CFDictionaryAddValue(dictionary.get(), key.get(), arrayItem.get());
 
     COMPtr<CFDictionaryPropertyBag> result = CFDictionaryPropertyBag::createInstance();
@@ -78,7 +70,7 @@ static COMPtr<IPropertyBag> createUserInfoFromArray(BSTR notificationStr, IWebHi
     Vector<COMPtr<IWebHistoryItem>, 1> arrayItem;
     arrayItem.reserveInitialCapacity(size);
     for (size_t i = 0; i < size; ++i)
-        arrayItem[i] = data[i];
+        arrayItem.uncheckedAppend(data[i]);
 
     HashMap<String, Vector<COMPtr<IWebHistoryItem>>> dictionary;
     String key(notificationStr, ::SysStringLen(notificationStr));
@@ -92,71 +84,12 @@ static inline COMPtr<IPropertyBag> createUserInfoFromHistoryItem(BSTR notificati
     return createUserInfoFromArray(notificationStr, &item, 1);
 }
 
-static inline void addDayToSystemTime(SYSTEMTIME& systemTime)
-{
-    systemTime.wDay += 1;
-    if (systemTime.wDay > 31) {
-        systemTime.wDay = 1;
-        systemTime.wMonth += 1;
-    }
-    if (systemTime.wMonth > 12) {
-        systemTime.wMonth = 1;
-        systemTime.wYear += 1;
-    }
-
-    // Convert to and from VariantTime to fix invalid dates like 2001-04-31.
-    DATE date = 0.0;
-    ::SystemTimeToVariantTime(&systemTime, &date);
-    ::VariantTimeToSystemTime(date, &systemTime);
-}
-
-static void getDayBoundaries(DATE day, DATE& beginningOfDay, DATE& beginningOfNextDay)
-{
-    SYSTEMTIME systemTime;
-    ::VariantTimeToSystemTime(day, &systemTime);
-
-    SYSTEMTIME beginningLocalTime;
-    ::SystemTimeToTzSpecificLocalTime(0, &systemTime, &beginningLocalTime);
-    beginningLocalTime.wHour = 0;
-    beginningLocalTime.wMinute = 0;
-    beginningLocalTime.wSecond = 0;
-    beginningLocalTime.wMilliseconds = 0;
-
-    SYSTEMTIME beginningOfNextDayLocalTime = beginningLocalTime;
-    addDayToSystemTime(beginningOfNextDayLocalTime);
-
-    SYSTEMTIME beginningSystemTime;
-    if (::TzSpecificLocalTimeToSystemTime(0, &beginningLocalTime, &beginningSystemTime))
-        ::SystemTimeToVariantTime(&beginningSystemTime, &beginningOfDay);
-
-    SYSTEMTIME beginningOfNextDaySystemTime;
-    if (::TzSpecificLocalTimeToSystemTime(0, &beginningOfNextDayLocalTime, &beginningOfNextDaySystemTime))
-        ::SystemTimeToVariantTime(&beginningOfNextDaySystemTime, &beginningOfNextDay);
-}
-
-static inline DATE beginningOfDay(DATE date)
-{
-    static DATE cachedBeginningOfDay = std::numeric_limits<DATE>::quiet_NaN();
-    static DATE cachedBeginningOfNextDay;
-    if (!(date >= cachedBeginningOfDay && date < cachedBeginningOfNextDay))
-        getDayBoundaries(date, cachedBeginningOfDay, cachedBeginningOfNextDay);
-    return cachedBeginningOfDay;
-}
-
-static inline WebHistory::DateKey dateKey(DATE date)
-{
-    // Converting from double (DATE) to int64_t (WebHistoryDateKey) is safe
-    // here because all sensible dates are in the range -2**48 .. 2**47 which
-    // safely fits in an int64_t.
-    return beginningOfDay(date) * secondsPerDay;
-}
-
 // WebHistory -----------------------------------------------------------------
 
 WebHistory::WebHistory()
 {
     gClassCount++;
-    gClassNameCount().add("WebHistory");
+    gClassNameCount().add("WebHistory"_s);
 
     m_preferences = WebPreferences::sharedStandardPreferences();
 }
@@ -164,7 +97,7 @@ WebHistory::WebHistory()
 WebHistory::~WebHistory()
 {
     gClassCount--;
-    gClassNameCount().remove("WebHistory");
+    gClassNameCount().remove("WebHistory"_s);
 }
 
 WebHistory* WebHistory::createInstance()

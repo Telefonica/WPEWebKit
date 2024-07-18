@@ -8,10 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_MIXER_OUTPUT_RATE_CALCULATOR_H_
-#define WEBRTC_MODULES_AUDIO_MIXER_OUTPUT_RATE_CALCULATOR_H_
+#ifndef MODULES_AUDIO_MIXER_OUTPUT_RATE_CALCULATOR_H_
+#define MODULES_AUDIO_MIXER_OUTPUT_RATE_CALCULATOR_H_
 
 #include <vector>
+
+#include "api/array_view.h"
 
 namespace webrtc {
 
@@ -19,11 +21,12 @@ namespace webrtc {
 // sample rates of the sources.
 class OutputRateCalculator {
  public:
-  virtual int CalculateOutputRate(
-      const std::vector<int>& preferred_sample_rates) = 0;
+  virtual int CalculateOutputRateFromRange(
+      rtc::ArrayView<const int> preferred_sample_rates) = 0;
+
   virtual ~OutputRateCalculator() {}
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_MIXER_OUTPUT_RATE_CALCULATOR_H_
+#endif  // MODULES_AUDIO_MIXER_OUTPUT_RATE_CALCULATOR_H_

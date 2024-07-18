@@ -17,19 +17,30 @@
  *  Boston, MA 02110-1301, USA.
  */
 
-#ifndef GUniquePtrSoup_h
-#define GUniquePtrSoup_h
+#pragma once
+
+#include <wtf/Platform.h>
+
+#if USE(SOUP)
 
 #include <libsoup/soup.h>
 #include <wtf/glib/GUniquePtr.h>
 
 namespace WTF {
 
-WTF_DEFINE_GPTR_DELETER(SoupURI, soup_uri_free)
 WTF_DEFINE_GPTR_DELETER(SoupCookie, soup_cookie_free)
+#if SOUP_CHECK_VERSION(2, 67, 1)
+WTF_DEFINE_GPTR_DELETER(SoupHSTSPolicy, soup_hsts_policy_free)
+#endif
+#if USE(SOUP2)
+WTF_DEFINE_GPTR_DELETER(SoupURI, soup_uri_free)
+#endif
+#if SOUP_CHECK_VERSION(2, 99, 3)
+WTF_DEFINE_GPTR_DELETER(SoupMessageHeaders, soup_message_headers_unref)
+#else
 WTF_DEFINE_GPTR_DELETER(SoupMessageHeaders, soup_message_headers_free)
-WTF_DEFINE_GPTR_DELETER(SoupBuffer, soup_buffer_free)
+#endif
 
 } // namespace WTF
 
-#endif
+#endif // USE(SOUP)

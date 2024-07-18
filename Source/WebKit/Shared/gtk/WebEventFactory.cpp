@@ -28,52 +28,89 @@
 #include "config.h"
 #include "WebEventFactory.h"
 
-#include "PlatformKeyboardEvent.h"
-#include "Scrollbar.h"
-#include "WindowsKeyboardCodes.h"
+#include <WebCore/GtkUtilities.h>
 #include <WebCore/GtkVersioning.h>
+#include <WebCore/PlatformKeyboardEvent.h>
+#include <WebCore/Scrollbar.h>
+#include <WebCore/WindowsKeyboardCodes.h>
 #include <gdk/gdk.h>
 #include <gdk/gdkkeysyms.h>
-#include <gtk/gtk.h>
 #include <wtf/ASCIICType.h>
-
-using namespace WebCore;
+#include <wtf/MathExtras.h>
 
 namespace WebKit {
 
+using namespace WebCore;
+
+#if GTK_CHECK_VERSION(4, 7, 0)
+// Keep in sync with https://gitlab.gnome.org/GNOME/gtk/-/blob/493660a296af3b8a140714988ddece4199818a04/gtk/gtkscrolledwindow.c#L204
+static const double gtkScrollDeltaMultiplier = 2.5;
+#endif
+
 static inline bool isGdkKeyCodeFromKeyPad(unsigned keyval)
 {
-    return keyval >= GDK_KP_Space && keyval <= GDK_KP_9;
+    return keyval >= GDK_KEY_KP_Space && keyval <= GDK_KEY_KP_9;
 }
 
-static inline WebEvent::Modifiers modifiersForEvent(const GdkEvent* event)
+static inline OptionSet<WebEvent::Modifier> modifiersForEvent(const GdkEvent* event)
 {
-    unsigned modifiers = 0;
+    OptionSet<WebEvent::Modifier> modifiers;
     GdkModifierType state;
 
     // Check for a valid state in GdkEvent.
     if (!gdk_event_get_state(event, &state))
-        return static_cast<WebEvent::Modifiers>(0);
+        return modifiers;
 
     if (state & GDK_CONTROL_MASK)
-        modifiers |= WebEvent::ControlKey;
+        modifiers.add(WebEvent::Modifier::ControlKey);
     if (state & GDK_SHIFT_MASK)
-        modifiers |= WebEvent::ShiftKey;
+        modifiers.add(WebEvent::Modifier::ShiftKey);
     if (state & GDK_MOD1_MASK)
-        modifiers |= WebEvent::AltKey;
+        modifiers.add(WebEvent::Modifier::AltKey);
     if (state & GDK_META_MASK)
-        modifiers |= WebEvent::MetaKey;
+        modifiers.add(WebEvent::Modifier::MetaKey);
     if (PlatformKeyboardEvent::modifiersContainCapsLock(state))
-        modifiers |= WebEvent::CapsLockKey;
+        modifiers.add(WebEvent::Modifier::CapsLockKey);
 
-    return static_cast<WebEvent::Modifiers>(modifiers);
+    GdkEventType type = gdk_event_get_event_type(const_cast<GdkEvent*>(event));
+    if (type != GDK_KEY_PRESS)
+        return modifiers;
+
+    // Modifier masks are set different in X than other platforms. This code makes WebKitGTK
+    // to behave similar to other platforms and other browsers under X (see http://crbug.com/127142#c8).
+
+    guint keyval;
+    gdk_event_get_keyval(event, &keyval);
+    switch (keyval) {
+    case GDK_KEY_Control_L:
+    case GDK_KEY_Control_R:
+        modifiers.add(WebEvent::Modifier::ControlKey);
+        break;
+    case GDK_KEY_Shift_L:
+    case GDK_KEY_Shift_R:
+        modifiers.add(WebEvent::Modifier::ShiftKey);
+        break;
+    case GDK_KEY_Alt_L:
+    case GDK_KEY_Alt_R:
+        modifiers.add(WebEvent::Modifier::AltKey);
+        break;
+    case GDK_KEY_Meta_L:
+    case GDK_KEY_Meta_R:
+        modifiers.add(WebEvent::Modifier::MetaKey);
+        break;
+    case GDK_KEY_Caps_Lock:
+        modifiers.add(WebEvent::Modifier::CapsLockKey);
+        break;
+    }
+
+    return modifiers;
 }
 
 static inline WebMouseEvent::Button buttonForEvent(const GdkEvent* event)
 {
     unsigned button = 0;
-
-    switch (event->type) {
+    GdkEventType type = gdk_event_get_event_type(const_cast<GdkEvent*>(event));
+    switch (type) {
     case GDK_ENTER_NOTIFY:
     case GDK_LEAVE_NOTIFY:
     case GDK_MOTION_NOTIFY: {
@@ -89,16 +126,22 @@ static inline WebMouseEvent::Button buttonForEvent(const GdkEvent* event)
         break;
     }
     case GDK_BUTTON_PRESS:
+#if !USE(GTK4)
     case GDK_2BUTTON_PRESS:
     case GDK_3BUTTON_PRESS:
-    case GDK_BUTTON_RELEASE:
-        if (event->button.button == 1)
+#endif
+    case GDK_BUTTON_RELEASE: {
+        guint eventButton;
+        gdk_event_get_button(event, &eventButton);
+
+        if (eventButton == 1)
             button = WebMouseEvent::LeftButton;
-        else if (event->button.button == 2)
+        else if (eventButton == 2)
             button = WebMouseEvent::MiddleButton;
-        else if (event->button.button == 3)
+        else if (eventButton == 3)
             button = WebMouseEvent::RightButton;
         break;
+    }
     default:
         ASSERT_NOT_REACHED();
     }
@@ -106,137 +149,240 @@ static inline WebMouseEvent::Button buttonForEvent(const GdkEvent* event)
     return static_cast<WebMouseEvent::Button>(button);
 }
 
-WebMouseEvent WebEventFactory::createWebMouseEvent(const GdkEvent* event, int currentClickCount)
+static inline short pressedMouseButtons(GdkModifierType state)
 {
-    double x, y, xRoot, yRoot;
+    // MouseEvent.buttons
+    // https://www.w3.org/TR/uievents/#ref-for-dom-mouseevent-buttons-1
+
+    // 0 MUST indicate no button is currently active.
+    short buttons = 0;
+
+    // 1 MUST indicate the primary button of the device (in general, the left button or the only button on
+    // single-button devices, used to activate a user interface control or select text).
+    if (state & GDK_BUTTON1_MASK)
+        buttons |= 1;
+
+    // 4 MUST indicate the auxiliary button (in general, the middle button, often combined with a mouse wheel).
+    if (state & GDK_BUTTON2_MASK)
+        buttons |= 4;
+
+    // 2 MUST indicate the secondary button (in general, the right button, often used to display a context menu),
+    // if present.
+    if (state & GDK_BUTTON3_MASK)
+        buttons |= 2;
+
+    return buttons;
+}
+
+WebMouseEvent WebEventFactory::createWebMouseEvent(const GdkEvent* event, int currentClickCount, std::optional<FloatSize> delta)
+{
+    double x, y;
     gdk_event_get_coords(event, &x, &y);
+    double xRoot, yRoot;
     gdk_event_get_root_coords(event, &xRoot, &yRoot);
 
+    return createWebMouseEvent(event, { clampToInteger(x), clampToInteger(y) }, { clampToInteger(xRoot), clampToInteger(yRoot) }, currentClickCount, delta);
+}
+
+WebMouseEvent WebEventFactory::createWebMouseEvent(const GdkEvent* event, const IntPoint& position, const IntPoint& globalPosition, int currentClickCount, std::optional<FloatSize> delta)
+{
+#if USE(GTK4)
+    // This can happen when a NativeWebMouseEvent representing a crossing event is copied.
+    if (!event)
+        return createWebMouseEvent(position);
+#endif
+
+    GdkModifierType state = static_cast<GdkModifierType>(0);
+    gdk_event_get_state(event, &state);
+
     WebEvent::Type type = static_cast<WebEvent::Type>(0);
-    switch (event->type) {
+    FloatSize movementDelta;
+
+    switch (gdk_event_get_event_type(const_cast<GdkEvent*>(event))) {
     case GDK_MOTION_NOTIFY:
     case GDK_ENTER_NOTIFY:
     case GDK_LEAVE_NOTIFY:
         type = WebEvent::MouseMove;
+        if (delta)
+            movementDelta = delta.value();
         break;
-    case GDK_BUTTON_PRESS:
+#if !USE(GTK4)
     case GDK_2BUTTON_PRESS:
     case GDK_3BUTTON_PRESS:
+#endif
+    case GDK_BUTTON_PRESS: {
         type = WebEvent::MouseDown;
+        guint eventButton;
+        gdk_event_get_button(event, &eventButton);
+        auto modifier = stateModifierForGdkButton(eventButton);
+        state = static_cast<GdkModifierType>(state | modifier);
         break;
-    case GDK_BUTTON_RELEASE:
+    }
+    case GDK_BUTTON_RELEASE: {
         type = WebEvent::MouseUp;
+        guint eventButton;
+        gdk_event_get_button(event, &eventButton);
+        auto modifier = stateModifierForGdkButton(eventButton);
+        state = static_cast<GdkModifierType>(state & ~modifier);
         break;
+    }
     default :
         ASSERT_NOT_REACHED();
     }
 
     return WebMouseEvent(type,
         buttonForEvent(event),
-        0,
-        IntPoint(x, y),
-        IntPoint(xRoot, yRoot),
-        0 /* deltaX */,
-        0 /* deltaY */,
+        pressedMouseButtons(state),
+        position,
+        globalPosition,
+        movementDelta.width(),
+        movementDelta.height(),
         0 /* deltaZ */,
         currentClickCount,
         modifiersForEvent(event),
-        WallTime::fromRawSeconds(gdk_event_get_time(event)));
+        wallTimeForEvent(event));
+}
+
+WebMouseEvent WebEventFactory::createWebMouseEvent(const IntPoint& position)
+{
+    // Mouse events without GdkEvent are crossing events, handled as a mouse move.
+    return WebMouseEvent(WebEvent::MouseMove, WebMouseEvent::NoButton, 0, position, position, 0, 0, 0, 0, { }, WallTime::now());
 }
 
 WebWheelEvent WebEventFactory::createWebWheelEvent(const GdkEvent* event)
 {
-#ifndef GTK_API_VERSION_2
-#if GTK_CHECK_VERSION(3, 20, 0)
-    WebWheelEvent::Phase phase = gdk_event_is_scroll_stop_event(event) ?
+    WebWheelEvent::Phase phase = !event || gdk_event_is_scroll_stop_event(event) ?
         WebWheelEvent::Phase::PhaseEnded :
         WebWheelEvent::Phase::PhaseChanged;
-#else
-    double deltaX, deltaY;
-    gdk_event_get_scroll_deltas(event, &deltaX, &deltaY);
-    WebWheelEvent::Phase phase = event->scroll.direction == GDK_SCROLL_SMOOTH && !deltaX && !deltaY ?
-        WebWheelEvent::Phase::PhaseEnded :
-        WebWheelEvent::Phase::PhaseChanged;
-#endif
-#else
-    WebWheelEvent::Phase phase = WebWheelEvent::Phase::PhaseChanged;
-#endif // GTK_API_VERSION_2
-
     return createWebWheelEvent(event, phase, WebWheelEvent::Phase::PhaseNone);
 }
 
 WebWheelEvent WebEventFactory::createWebWheelEvent(const GdkEvent* event, WebWheelEvent::Phase phase, WebWheelEvent::Phase momentumPhase)
 {
-    double x, y, xRoot, yRoot;
+    double x, y;
     gdk_event_get_coords(event, &x, &y);
+    double xRoot, yRoot;
     gdk_event_get_root_coords(event, &xRoot, &yRoot);
 
-    FloatSize wheelTicks;
-    switch (event->scroll.direction) {
-    case GDK_SCROLL_UP:
-        wheelTicks = FloatSize(0, 1);
-        break;
-    case GDK_SCROLL_DOWN:
-        wheelTicks = FloatSize(0, -1);
-        break;
-    case GDK_SCROLL_LEFT:
-        wheelTicks = FloatSize(1, 0);
-        break;
-    case GDK_SCROLL_RIGHT:
-        wheelTicks = FloatSize(-1, 0);
-        break;
-#if GTK_CHECK_VERSION(3, 3, 18)
-    case GDK_SCROLL_SMOOTH: {
-            double deltaX, deltaY;
-            gdk_event_get_scroll_deltas(event, &deltaX, &deltaY);
+    return createWebWheelEvent(event, { clampToInteger(x), clampToInteger(y) }, { clampToInteger(xRoot), clampToInteger(yRoot) }, phase, momentumPhase);
+}
+
+WebWheelEvent WebEventFactory::createWebWheelEvent(const GdkEvent* event, const IntPoint& position, const IntPoint& globalPosition, WebWheelEvent::Phase phase, WebWheelEvent::Phase momentumPhase)
+{
+    std::optional<FloatSize> wheelTicks;
+    GdkScrollDirection direction;
+    if (!gdk_event_get_scroll_direction(event, &direction)) {
+        direction = GDK_SCROLL_SMOOTH;
+        double deltaX, deltaY;
+        if (gdk_event_get_scroll_deltas(event, &deltaX, &deltaY))
             wheelTicks = FloatSize(-deltaX, -deltaY);
-        }
-        break;
-#endif
-    default:
-        ASSERT_NOT_REACHED();
     }
 
+    if (!wheelTicks) {
+        switch (direction) {
+        case GDK_SCROLL_UP:
+            wheelTicks = FloatSize(0, 1);
+            break;
+        case GDK_SCROLL_DOWN:
+            wheelTicks = FloatSize(0, -1);
+            break;
+        case GDK_SCROLL_LEFT:
+            wheelTicks = FloatSize(1, 0);
+            break;
+        case GDK_SCROLL_RIGHT:
+            wheelTicks = FloatSize(-1, 0);
+            break;
+        case GDK_SCROLL_SMOOTH:
+            wheelTicks = FloatSize(0, 0);
+            break;
+        }
+    }
+
+    return createWebWheelEvent(event, position, globalPosition, wheelTicks.value(), phase, momentumPhase);
+}
+
+WebWheelEvent WebEventFactory::createWebWheelEvent(const GdkEvent* event, const IntPoint& position, const IntPoint& globalPosition, const FloatSize& wheelTicks)
+{
+    WebWheelEvent::Phase phase = gdk_event_get_event_type(const_cast<GdkEvent*>(event)) != GDK_SCROLL
+        || gdk_event_is_scroll_stop_event(event) ?
+        WebWheelEvent::Phase::PhaseEnded :
+        WebWheelEvent::Phase::PhaseChanged;
+    return createWebWheelEvent(event, position, globalPosition, wheelTicks, phase, WebWheelEvent::Phase::PhaseNone);
+}
+
+WebWheelEvent WebEventFactory::createWebWheelEvent(const GdkEvent* event, const IntPoint& position, const IntPoint& globalPosition, const FloatSize& wheelTicks, WebWheelEvent::Phase phase, WebWheelEvent::Phase momentumPhase)
+{
     // FIXME: [GTK] Add a setting to change the pixels per line used for scrolling
     // https://bugs.webkit.org/show_bug.cgi?id=54826
     float step = static_cast<float>(Scrollbar::pixelsPerLineStep());
-    FloatSize delta(wheelTicks.width() * step, wheelTicks.height() * step);
+    FloatSize delta;
+    bool hasPreciseScrollingDeltas = false;
+
+#if GTK_CHECK_VERSION(4, 7, 0)
+    hasPreciseScrollingDeltas = gdk_event_get_event_type(const_cast<GdkEvent*>(event)) != GDK_SCROLL
+        || gdk_scroll_event_get_unit(const_cast<GdkEvent*>(event)) != GDK_SCROLL_UNIT_WHEEL;
+
+    if (hasPreciseScrollingDeltas)
+        delta = wheelTicks.scaled(gtkScrollDeltaMultiplier);
+    else
+        delta = wheelTicks.scaled(step);
+#else
+    delta = wheelTicks.scaled(step);
+
+    GdkScrollDirection direction;
+    if (!gdk_event_get_scroll_direction(event, &direction)) {
+        double deltaX, deltaY;
+        if (gdk_event_get_scroll_deltas(event, &deltaX, &deltaY)) {
+            if (auto* device = gdk_event_get_source_device(event))
+                hasPreciseScrollingDeltas = gdk_device_get_source(device) != GDK_SOURCE_MOUSE;
+        }
+    }
+#endif
 
     return WebWheelEvent(WebEvent::Wheel,
-        IntPoint(x, y),
-        IntPoint(xRoot, yRoot),
+        position,
+        globalPosition,
         delta,
         wheelTicks,
         phase,
         momentumPhase,
         WebWheelEvent::ScrollByPixelWheelEvent,
+        hasPreciseScrollingDeltas,
         modifiersForEvent(event),
-        WallTime::fromRawSeconds(gdk_event_get_time(event)));
+        wallTimeForEvent(event));
 }
 
-WebKeyboardEvent WebEventFactory::createWebKeyboardEvent(const GdkEvent* event, const WebCore::CompositionResults& compositionResults, Vector<String>&& commands)
+WebKeyboardEvent WebEventFactory::createWebKeyboardEvent(const GdkEvent* event, const String& text, bool handledByInputMethod, std::optional<Vector<CompositionUnderline>>&& preeditUnderlines, std::optional<EditingRange>&& preeditSelectionRange, Vector<String>&& commands)
 {
+    guint keyval;
+    gdk_event_get_keyval(event, &keyval);
+    guint16 keycode;
+    gdk_event_get_keycode(event, &keycode);
+    GdkEventType type = gdk_event_get_event_type(const_cast<GdkEvent*>(event));
+
     return WebKeyboardEvent(
-        event->type == GDK_KEY_RELEASE ? WebEvent::KeyUp : WebEvent::KeyDown,
-        compositionResults.simpleString.length() ? compositionResults.simpleString : PlatformKeyboardEvent::singleCharacterString(event->key.keyval),
-        PlatformKeyboardEvent::keyValueForGdkKeyCode(event->key.keyval),
-        PlatformKeyboardEvent::keyCodeForHardwareKeyCode(event->key.hardware_keycode),
-        PlatformKeyboardEvent::keyIdentifierForGdkKeyCode(event->key.keyval),
-        PlatformKeyboardEvent::windowsKeyCodeForGdkKeyCode(event->key.keyval),
-        static_cast<int>(event->key.keyval),
-        compositionResults.compositionUpdated(),
+        type == GDK_KEY_RELEASE ? WebEvent::KeyUp : WebEvent::KeyDown,
+        text.isNull() ? PlatformKeyboardEvent::singleCharacterString(keyval) : text,
+        PlatformKeyboardEvent::keyValueForGdkKeyCode(keyval),
+        PlatformKeyboardEvent::keyCodeForHardwareKeyCode(keycode),
+        PlatformKeyboardEvent::keyIdentifierForGdkKeyCode(keyval),
+        PlatformKeyboardEvent::windowsKeyCodeForGdkKeyCode(keyval),
+        static_cast<int>(keyval),
+        handledByInputMethod,
+        WTFMove(preeditUnderlines),
+        WTFMove(preeditSelectionRange),
         WTFMove(commands),
-        isGdkKeyCodeFromKeyPad(event->key.keyval),
+        isGdkKeyCodeFromKeyPad(keyval),
         modifiersForEvent(event),
-        WallTime::fromRawSeconds(gdk_event_get_time(event)));
+        wallTimeForEvent(event));
 }
 
 #if ENABLE(TOUCH_EVENTS)
 WebTouchEvent WebEventFactory::createWebTouchEvent(const GdkEvent* event, Vector<WebPlatformTouchPoint>&& touchPoints)
 {
-#ifndef GTK_API_VERSION_2
     WebEvent::Type type = WebEvent::NoType;
-    switch (event->type) {
+    GdkEventType eventType = gdk_event_get_event_type(const_cast<GdkEvent*>(event));
+    switch (eventType) {
     case GDK_TOUCH_BEGIN:
         type = WebEvent::TouchStart;
         break;
@@ -246,14 +392,14 @@ WebTouchEvent WebEventFactory::createWebTouchEvent(const GdkEvent* event, Vector
     case GDK_TOUCH_END:
         type = WebEvent::TouchEnd;
         break;
+    case GDK_TOUCH_CANCEL:
+        type = WebEvent::TouchCancel;
+        break;
     default:
         ASSERT_NOT_REACHED();
     }
 
-    return WebTouchEvent(type, WTFMove(touchPoints), modifiersForEvent(event), WallTime::fromRawSeconds(gdk_event_get_time(event)));
-#else
-    return WebTouchEvent();
-#endif // GTK_API_VERSION_2
+    return WebTouchEvent(type, WTFMove(touchPoints), modifiersForEvent(event), wallTimeForEvent(event));
 }
 #endif
 

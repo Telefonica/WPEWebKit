@@ -30,10 +30,14 @@
 
 #if ENABLE(MATHML)
 
+#include "HTTPParsers.h"
 #include "MathMLNames.h"
 #include "RenderMathMLToken.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(MathMLTokenElement);
 
 using namespace MathMLNames;
 
@@ -79,7 +83,7 @@ bool MathMLTokenElement::childShouldCreateRenderer(const Node& child) const
 
 std::optional<UChar32> MathMLTokenElement::convertToSingleCodePoint(StringView string)
 {
-    auto codePoints = stripLeadingAndTrailingWhitespace(string).codePoints();
+    auto codePoints = stripLeadingAndTrailingHTTPSpaces(string).codePoints();
     auto iterator = codePoints.begin();
     if (iterator == codePoints.end())
         return std::nullopt;

@@ -27,92 +27,87 @@
 #include "config.h"
 #include "ProcessLauncher.h"
 
+#include "BubblewrapLauncher.h"
 #include "Connection.h"
+#include "FlatpakLauncher.h"
 #include "ProcessExecutablePath.h"
-#include <WebCore/FileSystem.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <glib.h>
+#include <wtf/FileSystem.h>
 #include <wtf/RunLoop.h>
 #include <wtf/UniStdExtras.h>
-#include <wtf/glib/GLibUtilities.h>
 #include <wtf/glib/GUniquePtr.h>
+#include <wtf/glib/Sandbox.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/WTFString.h>
 
-#if PLATFORM(WPE)
-#include <wpe/wpe.h>
+#if !USE(SYSTEM_MALLOC) && OS(LINUX)
+#include <bmalloc/valgrind.h>
 #endif
-
-using namespace WebCore;
 
 namespace WebKit {
 
-static void childSetupFunction(gpointer userData)
+#if OS(LINUX)
+static bool isFlatpakSpawnUsable()
 {
-    int socket = GPOINTER_TO_INT(userData);
-    close(socket);
+    static std::optional<bool> ret;
+    if (ret)
+        return *ret;
+
+    // For our usage to work we need flatpak >= 1.5.2 on the host and flatpak-xdg-utils > 1.0.1 in the sandbox
+    GRefPtr<GSubprocess> process = adoptGRef(g_subprocess_new(static_cast<GSubprocessFlags>(G_SUBPROCESS_FLAGS_STDOUT_SILENCE | G_SUBPROCESS_FLAGS_STDERR_SILENCE),
+        nullptr, "flatpak-spawn", "--sandbox", "--sandbox-expose-path-ro-try=/this_path_doesnt_exist", "echo", nullptr));
+
+    if (!process.get())
+        ret = false;
+    else
+        ret = g_subprocess_wait_check(process.get(), nullptr, nullptr);
+
+    return *ret;
 }
+#endif
 
 void ProcessLauncher::launchProcess()
 {
-    GPid pid = 0;
-
-    IPC::Connection::SocketPair socketPair = IPC::Connection::createPlatformConnection(IPC::Connection::ConnectionOptions::SetCloexecOnServer);
+    IPC::Connection::SocketPair socketPair = IPC::Connection::createPlatformConnection(IPC::Connection::ConnectionOptions::SetCloexecOnClient | IPC::Connection::ConnectionOptions::SetCloexecOnServer);
 
     String executablePath;
     CString realExecutablePath;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    String pluginPath;
-    CString realPluginPath;
-#endif
     switch (m_launchOptions.processType) {
     case ProcessLauncher::ProcessType::Web:
         executablePath = executablePathOfWebProcess();
         break;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    case ProcessLauncher::ProcessType::Plugin64:
-    case ProcessLauncher::ProcessType::Plugin32:
-        executablePath = executablePathOfPluginProcess();
-#if ENABLE(PLUGIN_PROCESS_GTK2)
-        if (m_launchOptions.extraInitializationData.contains("requires-gtk2"))
-            executablePath.append('2');
-#endif
-        pluginPath = m_launchOptions.extraInitializationData.get("plugin-path");
-        realPluginPath = fileSystemRepresentation(pluginPath);
-        break;
-#endif
     case ProcessLauncher::ProcessType::Network:
         executablePath = executablePathOfNetworkProcess();
         break;
-    case ProcessLauncher::ProcessType::Storage:
-        executablePath = executablePathOfStorageProcess();
+#if ENABLE(GPU_PROCESS)
+    case ProcessLauncher::ProcessType::GPU:
+        executablePath = executablePathOfGPUProcess();
         break;
+#endif
     default:
         ASSERT_NOT_REACHED();
         return;
     }
 
-    realExecutablePath = fileSystemRepresentation(executablePath);
+    realExecutablePath = FileSystem::fileSystemRepresentation(executablePath);
+    GUniquePtr<gchar> processIdentifier(g_strdup_printf("%" PRIu64, m_launchOptions.processIdentifier.toUInt64()));
     GUniquePtr<gchar> webkitSocket(g_strdup_printf("%d", socketPair.client));
     unsigned nargs = 4; // size of the argv array for g_spawn_async()
-
-#if PLATFORM(WPE)
-    GUniquePtr<gchar> wpeSocket;
-    if (m_launchOptions.processType == ProcessLauncher::ProcessType::Web) {
-        wpeSocket = GUniquePtr<gchar>(g_strdup_printf("%d", wpe_renderer_host_create_client()));
-        nargs++;
-    }
-#endif
 
 #if ENABLE(DEVELOPER_MODE)
     Vector<CString> prefixArgs;
     if (!m_launchOptions.processCmdPrefix.isNull()) {
-        Vector<String> splitArgs;
-        m_launchOptions.processCmdPrefix.split(' ', splitArgs);
-        for (auto& arg : splitArgs)
+        for (auto& arg : m_launchOptions.processCmdPrefix.split(' '))
             prefixArgs.append(arg.utf8());
         nargs += prefixArgs.size();
+    }
+
+    bool configureJSCForTesting = false;
+    if (m_launchOptions.processType == ProcessLauncher::ProcessType::Web && m_client && m_client->shouldConfigureJSCForTesting()) {
+        configureJSCForTesting = true;
+        nargs++;
     }
 #endif
 
@@ -124,39 +119,65 @@ void ProcessLauncher::launchProcess()
         argv[i++] = const_cast<char*>(arg.data());
 #endif
     argv[i++] = const_cast<char*>(realExecutablePath.data());
+    argv[i++] = processIdentifier.get();
     argv[i++] = webkitSocket.get();
-#if PLATFORM(WPE)
-    if (m_launchOptions.processType == ProcessLauncher::ProcessType::Web)
-        argv[i++] = wpeSocket.get();
-#endif
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    argv[i++] = const_cast<char*>(realPluginPath.data());
-#else
-    argv[i++] = nullptr;
+#if ENABLE(DEVELOPER_MODE)
+    if (configureJSCForTesting)
+        argv[i++] = const_cast<char*>("--configure-jsc-for-testing");
 #endif
     argv[i++] = nullptr;
+
+    // Warning: we want GIO to be able to spawn with posix_spawn() rather than fork()/exec(), in
+    // order to better accommodate applications that use a huge amount of memory or address space
+    // in the UI process, like Eclipse. This means we must use GSubprocess in a manner that follows
+    // the rules documented in g_spawn_async_with_pipes_and_fds() for choosing between posix_spawn()
+    // (optimized/ideal codepath) vs. fork()/exec() (fallback codepath). As of GLib 2.74, the rules
+    // relevant to GSubprocess are (a) must inherit fds, (b) must not search path from envp, and (c)
+    // must not use a child setup fuction.
+    //
+    // Please keep this comment in sync with the duplicate comment in XDGDBusProxy::launch.
+    GRefPtr<GSubprocessLauncher> launcher = adoptGRef(g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_INHERIT_FDS));
+    g_subprocess_launcher_take_fd(launcher.get(), socketPair.client, socketPair.client);
 
     GUniqueOutPtr<GError> error;
-    if (!g_spawn_async(nullptr, argv, nullptr, static_cast<GSpawnFlags>(G_SPAWN_LEAVE_DESCRIPTORS_OPEN | G_SPAWN_DO_NOT_REAP_CHILD), childSetupFunction, GINT_TO_POINTER(socketPair.server), &pid, &error.outPtr()))
-        g_error("Unable to fork a new child process: %s", error->message);
+    GRefPtr<GSubprocess> process;
 
-    // Don't expose the parent socket to potential future children.
-    if (!setCloseOnExec(socketPair.client))
-        RELEASE_ASSERT_NOT_REACHED();
+#if OS(LINUX)
+    const char* sandboxEnv = g_getenv("WEBKIT_FORCE_SANDBOX");
+    bool sandboxEnabled = m_launchOptions.extraInitializationData.get<HashTranslatorASCIILiteral>("enable-sandbox"_s) == "true"_s;
 
-    auto childWatchFunc = [](GPid pid, gint status, gpointer) {
-        GUniqueOutPtr<GError> error;
-        if (!g_spawn_check_exit_status(status, &error.outPtr()))
-            g_warning("%s", error->message);
-        g_spawn_close_pid(pid);
-    };
-    g_child_watch_add(pid, childWatchFunc, nullptr);
+    if (sandboxEnv)
+        sandboxEnabled = !strcmp(sandboxEnv, "1");
 
-    close(socketPair.client);
-    m_processIdentifier = pid;
+#if !USE(SYSTEM_MALLOC)
+    if (RUNNING_ON_VALGRIND)
+        sandboxEnabled = false;
+#endif
+
+    if (sandboxEnabled && isFlatpakSpawnUsable())
+        process = flatpakSpawn(launcher.get(), m_launchOptions, argv, socketPair.client, &error.outPtr());
+#if ENABLE(BUBBLEWRAP_SANDBOX)
+    // You cannot use bubblewrap within Flatpak or Docker/podman so lets ensure it never happens.
+    // Snap can allow it but has its own limitations that require workarounds.
+    else if (sandboxEnabled && !isInsideFlatpak() && !isInsideSnap() && !isInsideContainer())
+        process = bubblewrapSpawn(launcher.get(), m_launchOptions, argv, &error.outPtr());
+#endif // ENABLE(BUBBLEWRAP_SANDBOX)
+    else
+#endif // OS(LINUX)
+        process = adoptGRef(g_subprocess_launcher_spawnv(launcher.get(), argv, &error.outPtr()));
+
+    if (!process.get())
+        g_error("Unable to spawn a new child process: %s", error->message);
+
+    const char* processIdStr = g_subprocess_get_identifier(process.get());
+    if (!processIdStr)
+        g_error("Spawned process died immediately. This should not happen.");
+
+    m_processIdentifier = g_ascii_strtoll(processIdStr, nullptr, 0);
+    RELEASE_ASSERT(m_processIdentifier);
 
     // We've finished launching the process, message back to the main run loop.
-    RunLoop::main().dispatch([protectedThis = makeRef(*this), this, serverSocket = socketPair.server] {
+    RunLoop::main().dispatch([protectedThis = Ref { *this }, this, serverSocket = socketPair.server] {
         didFinishLaunchingProcess(m_processIdentifier, serverSocket);
     });
 }

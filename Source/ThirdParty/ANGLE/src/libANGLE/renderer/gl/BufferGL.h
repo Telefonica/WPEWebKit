@@ -21,39 +21,40 @@ class StateManagerGL;
 class BufferGL : public BufferImpl
 {
   public:
-    BufferGL(const gl::BufferState &state,
-             const FunctionsGL *functions,
-             StateManagerGL *stateManager);
+    BufferGL(const gl::BufferState &state, GLuint buffer);
     ~BufferGL() override;
 
-    gl::Error setData(ContextImpl *context,
-                      GLenum target,
-                      const void *data,
-                      size_t size,
-                      GLenum usage) override;
-    gl::Error setSubData(ContextImpl *context,
-                         GLenum target,
-                         const void *data,
-                         size_t size,
-                         size_t offset) override;
-    gl::Error copySubData(ContextImpl *contextImpl,
-                          BufferImpl *source,
-                          GLintptr sourceOffset,
-                          GLintptr destOffset,
-                          GLsizeiptr size) override;
-    gl::Error map(ContextImpl *contextImpl, GLenum access, GLvoid **mapPtr) override;
-    gl::Error mapRange(ContextImpl *contextImpl,
-                       size_t offset,
-                       size_t length,
-                       GLbitfield access,
-                       GLvoid **mapPtr) override;
-    gl::Error unmap(ContextImpl *contextImpl, GLboolean *result) override;
+    void destroy(const gl::Context *context) override;
 
-    gl::Error getIndexRange(GLenum type,
-                            size_t offset,
-                            size_t count,
-                            bool primitiveRestartEnabled,
-                            gl::IndexRange *outRange) override;
+    angle::Result setData(const gl::Context *context,
+                          gl::BufferBinding target,
+                          const void *data,
+                          size_t size,
+                          gl::BufferUsage usage) override;
+    angle::Result setSubData(const gl::Context *context,
+                             gl::BufferBinding target,
+                             const void *data,
+                             size_t size,
+                             size_t offset) override;
+    angle::Result copySubData(const gl::Context *context,
+                              BufferImpl *source,
+                              GLintptr sourceOffset,
+                              GLintptr destOffset,
+                              GLsizeiptr size) override;
+    angle::Result map(const gl::Context *context, GLenum access, void **mapPtr) override;
+    angle::Result mapRange(const gl::Context *context,
+                           size_t offset,
+                           size_t length,
+                           GLbitfield access,
+                           void **mapPtr) override;
+    angle::Result unmap(const gl::Context *context, GLboolean *result) override;
+
+    angle::Result getIndexRange(const gl::Context *context,
+                                gl::DrawElementsType type,
+                                size_t offset,
+                                size_t count,
+                                bool primitiveRestartEnabled,
+                                gl::IndexRange *outRange) override;
 
     GLuint getBufferID() const;
 
@@ -62,17 +63,13 @@ class BufferGL : public BufferImpl
     size_t mMapOffset;
     size_t mMapSize;
 
-    bool mShadowBufferData;
     angle::MemoryBuffer mShadowCopy;
 
     size_t mBufferSize;
-
-    const FunctionsGL *mFunctions;
-    StateManagerGL *mStateManager;
 
     GLuint mBufferID;
 };
 
 }  // namespace rx
 
-#endif // LIBANGLE_RENDERER_GL_BUFFERGL_H_
+#endif  // LIBANGLE_RENDERER_GL_BUFFERGL_H_

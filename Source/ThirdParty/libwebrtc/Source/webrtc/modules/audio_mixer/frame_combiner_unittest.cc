@@ -8,63 +8,92 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_mixer/frame_combiner.h"
+#include "modules/audio_mixer/frame_combiner.h"
 
+#include <cstdint>
+#include <initializer_list>
 #include <numeric>
-#include <sstream>
 #include <string>
+#include <type_traits>
+#include <vector>
 
-#include "webrtc/audio/utility/audio_frame_operations.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/audio_mixer/gain_change_calculator.h"
-#include "webrtc/modules/audio_mixer/sine_wave_generator.h"
-#include "webrtc/test/gtest.h"
+#include "absl/types/optional.h"
+#include "api/array_view.h"
+#include "api/rtp_packet_info.h"
+#include "api/rtp_packet_infos.h"
+#include "api/units/timestamp.h"
+#include "audio/utility/audio_frame_operations.h"
+#include "modules/audio_mixer/gain_change_calculator.h"
+#include "modules/audio_mixer/sine_wave_generator.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/strings/string_builder.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
 namespace {
-std::string ProduceDebugText(int sample_rate_hz,
-                             int number_of_channels,
-                             int number_of_sources) {
-  std::ostringstream ss;
-  ss << "Sample rate: " << sample_rate_hz << " ,";
-  ss << "number of channels: " << number_of_channels << " ,";
-  ss << "number of sources: " << number_of_sources;
-  return ss.str();
-}
+
+using ::testing::ElementsAreArray;
+using ::testing::IsEmpty;
+using ::testing::UnorderedElementsAreArray;
+
+struct FrameCombinerConfig {
+  bool use_limiter;
+  int sample_rate_hz;
+  int number_of_channels;
+  float wave_frequency;
+};
 
 std::string ProduceDebugText(int sample_rate_hz,
                              int number_of_channels,
-                             int number_of_sources,
-                             bool limiter_active,
-                             float wave_frequency) {
-  std::ostringstream ss;
+                             int number_of_sources) {
+  rtc::StringBuilder ss;
   ss << "Sample rate: " << sample_rate_hz << " ,";
   ss << "number of channels: " << number_of_channels << " ,";
-  ss << "number of sources: " << number_of_sources << " ,";
-  ss << "limiter active: " << (limiter_active ? "true" : "false") << " ,";
-  ss << "wave frequency: " << wave_frequency << " ,";
-  return ss.str();
+  ss << "number of sources: " << number_of_sources;
+  return ss.Release();
+}
+
+std::string ProduceDebugText(const FrameCombinerConfig& config) {
+  rtc::StringBuilder ss;
+  ss << "Sample rate: " << config.sample_rate_hz << " ,";
+  ss << "number of channels: " << config.number_of_channels << " ,";
+  ss << "limiter active: " << (config.use_limiter ? "on" : "off") << " ,";
+  ss << "wave frequency: " << config.wave_frequency << " ,";
+  return ss.Release();
 }
 
 AudioFrame frame1;
 AudioFrame frame2;
-AudioFrame audio_frame_for_mixing;
 
 void SetUpFrames(int sample_rate_hz, int number_of_channels) {
+  RtpPacketInfo packet_info1(/*ssrc=*/1001, /*csrcs=*/{},
+                             /*rtp_timestamp=*/1000,
+                             /*receive_time=*/Timestamp::Millis(1));
+  RtpPacketInfo packet_info2(/*ssrc=*/4004, /*csrcs=*/{},
+                             /*rtp_timestamp=*/1234,
+                             /*receive_time=*/Timestamp::Millis(2));
+  RtpPacketInfo packet_info3(/*ssrc=*/7007, /*csrcs=*/{},
+                             /*rtp_timestamp=*/1333,
+                             /*receive_time=*/Timestamp::Millis(2));
+
+  frame1.packet_infos_ = RtpPacketInfos({packet_info1});
+  frame2.packet_infos_ = RtpPacketInfos({packet_info2, packet_info3});
+
   for (auto* frame : {&frame1, &frame2}) {
-    frame->UpdateFrame(-1, 0, nullptr,
-                       rtc::CheckedDivExact(sample_rate_hz, 100),
+    frame->UpdateFrame(0, nullptr, rtc::CheckedDivExact(sample_rate_hz, 100),
                        sample_rate_hz, AudioFrame::kNormalSpeech,
                        AudioFrame::kVadActive, number_of_channels);
   }
 }
 }  // namespace
 
+// The limiter requires sample rate divisible by 2000.
 TEST(FrameCombiner, BasicApiCallsLimiter) {
   FrameCombiner combiner(true);
-  for (const int rate : {8000, 16000, 32000, 48000}) {
-    for (const int number_of_channels : {1, 2}) {
+  for (const int rate : {8000, 18000, 34000, 48000}) {
+    for (const int number_of_channels : {1, 2, 4, 8}) {
       const std::vector<AudioFrame*> all_frames = {&frame1, &frame2};
       SetUpFrames(rate, number_of_channels);
 
@@ -73,6 +102,7 @@ TEST(FrameCombiner, BasicApiCallsLimiter) {
             ProduceDebugText(rate, number_of_channels, number_of_frames));
         const std::vector<AudioFrame*> frames_to_combine(
             all_frames.begin(), all_frames.begin() + number_of_frames);
+        AudioFrame audio_frame_for_mixing;
         combiner.Combine(frames_to_combine, number_of_channels, rate,
                          frames_to_combine.size(), &audio_frame_for_mixing);
       }
@@ -80,13 +110,102 @@ TEST(FrameCombiner, BasicApiCallsLimiter) {
   }
 }
 
-// No APM limiter means no AudioProcessing::NativeRate restriction
-// on rate. The rate has to be divisible by 100 since we use
-// 10 ms frames, though.
+// The RtpPacketInfos field of the mixed packet should contain the union of the
+// RtpPacketInfos from the frames that were actually mixed.
+TEST(FrameCombiner, ContainsAllRtpPacketInfos) {
+  static constexpr int kSampleRateHz = 48000;
+  static constexpr int kNumChannels = 1;
+  FrameCombiner combiner(true);
+  const std::vector<AudioFrame*> all_frames = {&frame1, &frame2};
+  SetUpFrames(kSampleRateHz, kNumChannels);
+
+  for (const int number_of_frames : {0, 1, 2}) {
+    SCOPED_TRACE(
+        ProduceDebugText(kSampleRateHz, kNumChannels, number_of_frames));
+    const std::vector<AudioFrame*> frames_to_combine(
+        all_frames.begin(), all_frames.begin() + number_of_frames);
+
+    std::vector<RtpPacketInfo> packet_infos;
+    for (const auto& frame : frames_to_combine) {
+      packet_infos.insert(packet_infos.end(), frame->packet_infos_.begin(),
+                          frame->packet_infos_.end());
+    }
+
+    AudioFrame audio_frame_for_mixing;
+    combiner.Combine(frames_to_combine, kNumChannels, kSampleRateHz,
+                     frames_to_combine.size(), &audio_frame_for_mixing);
+    EXPECT_THAT(audio_frame_for_mixing.packet_infos_,
+                UnorderedElementsAreArray(packet_infos));
+  }
+}
+
+// There are DCHECKs in place to check for invalid parameters.
+TEST(FrameCombinerDeathTest, DebugBuildCrashesWithManyChannels) {
+  FrameCombiner combiner(true);
+  for (const int rate : {8000, 18000, 34000, 48000}) {
+    for (const int number_of_channels : {10, 20, 21}) {
+      if (static_cast<size_t>(rate / 100 * number_of_channels) >
+          AudioFrame::kMaxDataSizeSamples) {
+        continue;
+      }
+      const std::vector<AudioFrame*> all_frames = {&frame1, &frame2};
+      SetUpFrames(rate, number_of_channels);
+
+      const int number_of_frames = 2;
+      SCOPED_TRACE(
+          ProduceDebugText(rate, number_of_channels, number_of_frames));
+      const std::vector<AudioFrame*> frames_to_combine(
+          all_frames.begin(), all_frames.begin() + number_of_frames);
+      AudioFrame audio_frame_for_mixing;
+#if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
+      EXPECT_DEATH(
+          combiner.Combine(frames_to_combine, number_of_channels, rate,
+                           frames_to_combine.size(), &audio_frame_for_mixing),
+          "");
+#elif !RTC_DCHECK_IS_ON
+      combiner.Combine(frames_to_combine, number_of_channels, rate,
+                       frames_to_combine.size(), &audio_frame_for_mixing);
+#endif
+    }
+  }
+}
+
+TEST(FrameCombinerDeathTest, DebugBuildCrashesWithHighRate) {
+  FrameCombiner combiner(true);
+  for (const int rate : {50000, 96000, 128000, 196000}) {
+    for (const int number_of_channels : {1, 2, 3}) {
+      if (static_cast<size_t>(rate / 100 * number_of_channels) >
+          AudioFrame::kMaxDataSizeSamples) {
+        continue;
+      }
+      const std::vector<AudioFrame*> all_frames = {&frame1, &frame2};
+      SetUpFrames(rate, number_of_channels);
+
+      const int number_of_frames = 2;
+      SCOPED_TRACE(
+          ProduceDebugText(rate, number_of_channels, number_of_frames));
+      const std::vector<AudioFrame*> frames_to_combine(
+          all_frames.begin(), all_frames.begin() + number_of_frames);
+      AudioFrame audio_frame_for_mixing;
+#if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
+      EXPECT_DEATH(
+          combiner.Combine(frames_to_combine, number_of_channels, rate,
+                           frames_to_combine.size(), &audio_frame_for_mixing),
+          "");
+#elif !RTC_DCHECK_IS_ON
+      combiner.Combine(frames_to_combine, number_of_channels, rate,
+                       frames_to_combine.size(), &audio_frame_for_mixing);
+#endif
+    }
+  }
+}
+
+// With no limiter, the rate has to be divisible by 100 since we use
+// 10 ms frames.
 TEST(FrameCombiner, BasicApiCallsNoLimiter) {
   FrameCombiner combiner(false);
   for (const int rate : {8000, 10000, 11000, 32000, 44100}) {
-    for (const int number_of_channels : {1, 2}) {
+    for (const int number_of_channels : {1, 2, 4, 8}) {
       const std::vector<AudioFrame*> all_frames = {&frame1, &frame2};
       SetUpFrames(rate, number_of_channels);
 
@@ -95,6 +214,7 @@ TEST(FrameCombiner, BasicApiCallsNoLimiter) {
             ProduceDebugText(rate, number_of_channels, number_of_frames));
         const std::vector<AudioFrame*> frames_to_combine(
             all_frames.begin(), all_frames.begin() + number_of_frames);
+        AudioFrame audio_frame_for_mixing;
         combiner.Combine(frames_to_combine, number_of_channels, rate,
                          frames_to_combine.size(), &audio_frame_for_mixing);
       }
@@ -108,10 +228,11 @@ TEST(FrameCombiner, CombiningZeroFramesShouldProduceSilence) {
     for (const int number_of_channels : {1, 2}) {
       SCOPED_TRACE(ProduceDebugText(rate, number_of_channels, 0));
 
+      AudioFrame audio_frame_for_mixing;
+
       const std::vector<AudioFrame*> frames_to_combine;
       combiner.Combine(frames_to_combine, number_of_channels, rate,
                        frames_to_combine.size(), &audio_frame_for_mixing);
-
       const int16_t* audio_frame_for_mixing_data =
           audio_frame_for_mixing.data();
       const std::vector<int16_t> mixed_data(
@@ -120,6 +241,7 @@ TEST(FrameCombiner, CombiningZeroFramesShouldProduceSilence) {
 
       const std::vector<int16_t> expected(number_of_channels * rate / 100, 0);
       EXPECT_EQ(mixed_data, expected);
+      EXPECT_THAT(audio_frame_for_mixing.packet_infos_, IsEmpty());
     }
   }
 }
@@ -127,8 +249,10 @@ TEST(FrameCombiner, CombiningZeroFramesShouldProduceSilence) {
 TEST(FrameCombiner, CombiningOneFrameShouldNotChangeFrame) {
   FrameCombiner combiner(false);
   for (const int rate : {8000, 10000, 11000, 32000, 44100}) {
-    for (const int number_of_channels : {1, 2}) {
+    for (const int number_of_channels : {1, 2, 4, 8, 10}) {
       SCOPED_TRACE(ProduceDebugText(rate, number_of_channels, 1));
+
+      AudioFrame audio_frame_for_mixing;
 
       SetUpFrames(rate, number_of_channels);
       int16_t* frame1_data = frame1.mutable_data();
@@ -146,61 +270,68 @@ TEST(FrameCombiner, CombiningOneFrameShouldNotChangeFrame) {
       std::vector<int16_t> expected(number_of_channels * rate / 100);
       std::iota(expected.begin(), expected.end(), 0);
       EXPECT_EQ(mixed_data, expected);
+      EXPECT_THAT(audio_frame_for_mixing.packet_infos_,
+                  ElementsAreArray(frame1.packet_infos_));
     }
   }
 }
 
 // Send a sine wave through the FrameCombiner, and check that the
-// difference between input and output varies smoothly. This is to
-// catch issues like chromium:695993.
+// difference between input and output varies smoothly. Also check
+// that it is inside reasonable bounds. This is to catch issues like
+// chromium:695993 and chromium:816875.
 TEST(FrameCombiner, GainCurveIsSmoothForAlternatingNumberOfStreams) {
-  // Test doesn't work with rates requiring a band split, because it
-  // introduces a small delay measured in single samples, and this
-  // test cannot handle it.
-  //
-  // TODO(aleloi): Add more rates when APM limiter doesn't use band
-  // split.
-  for (const bool use_limiter : {true, false}) {
-    for (const int rate : {8000, 16000}) {
-      constexpr int number_of_channels = 2;
-      for (const float wave_frequency : {50, 400, 3200}) {
-        SCOPED_TRACE(ProduceDebugText(rate, number_of_channels, 1, use_limiter,
-                                      wave_frequency));
+  // Rates are divisible by 2000 when limiter is active.
+  std::vector<FrameCombinerConfig> configs = {
+      {false, 30100, 2, 50.f},  {false, 16500, 1, 3200.f},
+      {true, 8000, 1, 3200.f},  {true, 16000, 1, 50.f},
+      {true, 18000, 8, 3200.f}, {true, 10000, 2, 50.f},
+  };
 
-        FrameCombiner combiner(use_limiter);
+  for (const auto& config : configs) {
+    SCOPED_TRACE(ProduceDebugText(config));
 
-        constexpr int16_t wave_amplitude = 30000;
-        SineWaveGenerator wave_generator(wave_frequency, wave_amplitude);
+    FrameCombiner combiner(config.use_limiter);
 
-        GainChangeCalculator change_calculator;
-        float cumulative_change = 0.f;
+    constexpr int16_t wave_amplitude = 30000;
+    SineWaveGenerator wave_generator(config.wave_frequency, wave_amplitude);
 
-        constexpr size_t iterations = 100;
+    GainChangeCalculator change_calculator;
+    float cumulative_change = 0.f;
 
-        for (size_t i = 0; i < iterations; ++i) {
-          SetUpFrames(rate, number_of_channels);
-          wave_generator.GenerateNextFrame(&frame1);
-          AudioFrameOperations::Mute(&frame2);
+    constexpr size_t iterations = 100;
 
-          std::vector<AudioFrame*> frames_to_combine = {&frame1};
-          if (i % 2 == 0) {
-            frames_to_combine.push_back(&frame2);
-          }
-          const size_t number_of_samples =
-              frame1.samples_per_channel_ * number_of_channels;
+    for (size_t i = 0; i < iterations; ++i) {
+      SetUpFrames(config.sample_rate_hz, config.number_of_channels);
+      wave_generator.GenerateNextFrame(&frame1);
+      AudioFrameOperations::Mute(&frame2);
 
-          // Ensures limiter is on if 'use_limiter'.
-          constexpr size_t number_of_streams = 2;
-          combiner.Combine(frames_to_combine, number_of_channels, rate,
-                           number_of_streams, &audio_frame_for_mixing);
-          cumulative_change += change_calculator.CalculateGainChange(
-              rtc::ArrayView<const int16_t>(frame1.data(), number_of_samples),
-              rtc::ArrayView<const int16_t>(audio_frame_for_mixing.data(),
-                                            number_of_samples));
-        }
-        RTC_DCHECK_LT(cumulative_change, 10);
+      std::vector<AudioFrame*> frames_to_combine = {&frame1};
+      if (i % 2 == 0) {
+        frames_to_combine.push_back(&frame2);
       }
+      const size_t number_of_samples =
+          frame1.samples_per_channel_ * config.number_of_channels;
+
+      // Ensures limiter is on if 'use_limiter'.
+      constexpr size_t number_of_streams = 2;
+      AudioFrame audio_frame_for_mixing;
+      combiner.Combine(frames_to_combine, config.number_of_channels,
+                       config.sample_rate_hz, number_of_streams,
+                       &audio_frame_for_mixing);
+      cumulative_change += change_calculator.CalculateGainChange(
+          rtc::ArrayView<const int16_t>(frame1.data(), number_of_samples),
+          rtc::ArrayView<const int16_t>(audio_frame_for_mixing.data(),
+                                        number_of_samples));
     }
+
+    // Check that the gain doesn't vary too much.
+    EXPECT_LT(cumulative_change, 10);
+
+    // Check that the latest gain is within reasonable bounds. It
+    // should be slightly less that 1.
+    EXPECT_LT(0.9f, change_calculator.LatestGain());
+    EXPECT_LT(change_calculator.LatestGain(), 1.01f);
   }
 }
 }  // namespace webrtc

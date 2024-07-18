@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,23 +28,23 @@
 
 #if ENABLE(DFG_JIT)
 
+#include "ButterflyInlines.h"
+#include "ClonedArguments.h"
 #include "DFGArgumentsUtilities.h"
 #include "DFGClobberize.h"
 #include "DFGForAllKills.h"
 #include "DFGGraph.h"
+#include "DFGMayExit.h"
 #include "DFGPhase.h"
-#include "JSCInlines.h"
 #include <wtf/ListDump.h>
 
 namespace JSC { namespace DFG {
 
 namespace {
 
-namespace DFGVarargsForwardingPhaseInternal {
-static const bool verbose = false;
-}
 
 class VarargsForwardingPhase : public Phase {
+    static constexpr bool verbose = false;
 public:
     VarargsForwardingPhase(Graph& graph)
         : Phase(graph, "varargs forwarding")
@@ -55,7 +55,7 @@ public:
     {
         DFG_ASSERT(m_graph, nullptr, m_graph.m_form != SSA);
         
-        if (DFGVarargsForwardingPhaseInternal::verbose) {
+        if (verbose) {
             dataLog("Graph before varargs forwarding:\n");
             m_graph.dump();
         }
@@ -87,49 +87,67 @@ private:
         // We expect calls into this function to be rare. So, this is written in a simple O(n) manner.
         
         Node* candidate = block->at(candidateNodeIndex);
-        if (DFGVarargsForwardingPhaseInternal::verbose)
+        if (verbose)
             dataLog("Handling candidate ", candidate, "\n");
         
+        // We eliminate GetButterfly over CreateClonedArguments if the butterfly is only
+        // used by a GetByOffset  that loads the CreateClonedArguments's length. We also
+        // eliminate it if the GetButterfly node is totally unused.
+        Vector<Node*, 1> candidateButterflies; 
+
         // Find the index of the last node in this block to use the candidate, and look for escaping
         // sites.
         unsigned lastUserIndex = candidateNodeIndex;
-        Vector<VirtualRegister, 2> relevantLocals; // This is a set. We expect it to be a small set.
+        Vector<Operand, 2> relevantLocals; // This is a set. We expect it to be a small set.
         for (unsigned nodeIndex = candidateNodeIndex + 1; nodeIndex < block->size(); ++nodeIndex) {
             Node* node = block->at(nodeIndex);
-            
+
+            auto defaultEscape = [&] {
+                if (m_graph.uses(node, candidate)) {
+                    if (verbose)
+                        dataLog("    Escape at ", node, "\n");
+                    return true;
+                }
+                return false;
+            };
+
+            bool validGetByOffset = false;
             switch (node->op()) {
             case MovHint:
                 if (node->child1() != candidate)
                     break;
                 lastUserIndex = nodeIndex;
-                if (!relevantLocals.contains(node->unlinkedLocal()))
-                    relevantLocals.append(node->unlinkedLocal());
+                if (!relevantLocals.contains(node->unlinkedOperand()))
+                    relevantLocals.append(node->unlinkedOperand());
                 break;
                 
+            case CheckVarargs:
             case Check: {
                 bool sawEscape = false;
                 m_graph.doToChildren(
                     node,
                     [&] (Edge edge) {
-                        if (edge == candidate)
+                        if (edge == candidate) {
                             lastUserIndex = nodeIndex;
-                        
-                        if (edge.willNotHaveCheck())
-                            return;
-                        
-                        if (alreadyChecked(edge.useKind(), SpecObject))
-                            return;
-                        
-                        sawEscape = true;
+
+                            if (edge.willNotHaveCheck())
+                                return;
+
+                            if (alreadyChecked(edge.useKind(), SpecObject))
+                                return;
+
+                            sawEscape = true;
+                        }
                     });
                 if (sawEscape) {
-                    if (DFGVarargsForwardingPhaseInternal::verbose)
+                    if (verbose)
                         dataLog("    Escape at ", node, "\n");
                     return;
                 }
                 break;
             }
                 
+            case VarargsLength:
             case LoadVarargs:
                 if (m_graph.uses(node, candidate))
                     lastUserIndex = nodeIndex;
@@ -140,7 +158,7 @@ private:
             case TailCallVarargs:
             case TailCallVarargsInlinedCaller:
                 if (node->child1() == candidate || node->child2() == candidate) {
-                    if (DFGVarargsForwardingPhaseInternal::verbose)
+                    if (verbose)
                         dataLog("    Escape at ", node, "\n");
                     return;
                 }
@@ -150,36 +168,96 @@ private:
                 
             case SetLocal:
                 if (node->child1() == candidate && node->variableAccessData()->isLoadedFrom()) {
-                    if (DFGVarargsForwardingPhaseInternal::verbose)
+                    if (verbose)
                         dataLog("    Escape at ", node, "\n");
                     return;
                 }
                 break;
-                
-            default:
-                if (m_graph.uses(node, candidate)) {
-                    if (DFGVarargsForwardingPhaseInternal::verbose)
-                        dataLog("    Escape at ", node, "\n");
-                    return;
+
+            case GetArrayLength: {
+                if (node->arrayMode().type() == Array::DirectArguments && node->child1() == candidate && node->child1()->op() == CreateDirectArguments) {
+                    lastUserIndex = nodeIndex;
+                    break;
                 }
+                if (defaultEscape())
+                    return;
+                break;
             }
             
+            case GetButterfly: {
+                if (node->child1() == candidate && candidate->op() == CreateClonedArguments) {
+                    lastUserIndex = nodeIndex;
+                    candidateButterflies.append(node);
+                    break;
+                }
+                if (defaultEscape())
+                    return;
+                break;
+            }
+                
+            case FilterGetByStatus:
+            case FilterPutByStatus:
+            case FilterCallLinkStatus:
+            case FilterInByStatus:
+            case FilterDeleteByStatus:
+            case FilterCheckPrivateBrandStatus:
+            case FilterSetPrivateBrandStatus:
+                break;
+
+            case GetByOffset: {
+                if (node->child1()->op() == GetButterfly
+                    && candidateButterflies.contains(node->child1().node())
+                    && node->child2() == candidate
+                    && node->storageAccessData().offset == clonedArgumentsLengthPropertyOffset) {
+                    ASSERT(node->child1()->child1() == candidate);
+                    ASSERT(isOutOfLineOffset(clonedArgumentsLengthPropertyOffset));
+                    // We're good to go. This is getting the length of the arguments.
+                    lastUserIndex = nodeIndex;
+                    validGetByOffset = true;
+                    break;
+                }
+                if (defaultEscape())
+                    return;
+                break;
+            }
+
+            default:
+                if (defaultEscape())
+                    return;
+                break;
+            }
+
+            if (!validGetByOffset) {
+                for (Node* butterfly : candidateButterflies) {
+                    if (m_graph.uses(node, butterfly)) {
+                        if (verbose)
+                            dataLog("    Butterfly escaped at ", node, "\n");
+                        return;
+                    }
+                }
+            }
+
             forAllKilledOperands(
                 m_graph, node, block->tryAt(nodeIndex + 1),
-                [&] (VirtualRegister reg) {
-                    if (DFGVarargsForwardingPhaseInternal::verbose)
-                        dataLog("    Killing ", reg, " while we are interested in ", listDump(relevantLocals), "\n");
+                [&] (Operand operand) {
+                    if (verbose)
+                        dataLog("    Killing ", operand, " while we are interested in ", listDump(relevantLocals), "\n");
                     for (unsigned i = 0; i < relevantLocals.size(); ++i) {
-                        if (relevantLocals[i] == reg) {
+                        if (operand == relevantLocals[i]) {
                             relevantLocals[i--] = relevantLocals.last();
                             relevantLocals.removeLast();
                             lastUserIndex = nodeIndex;
+                            ASSERT(!relevantLocals.contains(operand));
+                            break;
                         }
                     }
                 });
         }
-        if (DFGVarargsForwardingPhaseInternal::verbose)
+        if (verbose)
             dataLog("Selected lastUserIndex = ", lastUserIndex, ", ", block->at(lastUserIndex), "\n");
+
+        InlineCallFrame* startingInlineCallFrame = block->at(candidateNodeIndex)->origin.forExit.inlineCallFrame();
+        HashSet<InlineCallFrame*, WTF::DefaultHash<InlineCallFrame*>, WTF::NullableHashTraits<InlineCallFrame*>> seenInlineCallFrames;
         
         // We're still in business. Determine if between the candidate and the last user there is any
         // effect that could interfere with sinking.
@@ -192,27 +270,25 @@ private:
             // what gets read on OSR exit.
             switch (node->op()) {
             case MovHint:
-            case ZombieHint:
             case KillStack:
-                if (argumentsInvolveStackSlot(candidate, node->unlinkedLocal())) {
-                    if (DFGVarargsForwardingPhaseInternal::verbose)
+                if (argumentsInvolveStackSlot(candidate, node->unlinkedOperand())) {
+                    if (verbose)
                         dataLog("    Interference at ", node, "\n");
                     return;
                 }
                 break;
                 
             case PutStack:
-                if (argumentsInvolveStackSlot(candidate, node->stackAccessData()->local)) {
-                    if (DFGVarargsForwardingPhaseInternal::verbose)
+                if (argumentsInvolveStackSlot(candidate, node->stackAccessData()->operand)) {
+                    if (verbose)
                         dataLog("    Interference at ", node, "\n");
                     return;
                 }
                 break;
                 
             case SetLocal:
-            case Flush:
-                if (argumentsInvolveStackSlot(candidate, node->local())) {
-                    if (DFGVarargsForwardingPhaseInternal::verbose)
+                if (argumentsInvolveStackSlot(candidate, node->operand())) {
+                    if (verbose)
                         dataLog("    Interference at ", node, "\n");
                     return;
                 }
@@ -228,21 +304,38 @@ private:
                             return;
                         }
                         ASSERT(!heap.payload().isTop());
-                        VirtualRegister reg(heap.payload().value32());
-                        if (argumentsInvolveStackSlot(candidate, reg))
+                        if (argumentsInvolveStackSlot(candidate, heap.operand()))
                             doesInterfere = true;
                     },
                     NoOpClobberize());
                 if (doesInterfere) {
-                    if (DFGVarargsForwardingPhaseInternal::verbose)
+                    if (verbose)
                         dataLog("    Interference at ", node, "\n");
                     return;
                 }
             } }
+
+
+            if (startingInlineCallFrame) {
+                if (mayExit(m_graph, node) != DoesNotExit)
+                    seenInlineCallFrames.add(node->origin.forExit.inlineCallFrame());
+            }
+        }
+
+        for (InlineCallFrame* inlineCallFrame : seenInlineCallFrames) {
+            ASSERT(startingInlineCallFrame);
+
+            while (1) {
+                if (!inlineCallFrame)
+                    return;
+                if (inlineCallFrame == startingInlineCallFrame)
+                    break;
+                inlineCallFrame = inlineCallFrame->directCaller.inlineCallFrame();
+            }
         }
         
         // We can make this work.
-        if (DFGVarargsForwardingPhaseInternal::verbose)
+        if (verbose)
             dataLog("    Will do forwarding!\n");
         m_changed = true;
         
@@ -260,17 +353,28 @@ private:
             DFG_CRASH(m_graph, candidate, "bad node type");
             break;
         }
+
+        InsertionSet insertionSet(m_graph);
         for (unsigned nodeIndex = candidateNodeIndex + 1; nodeIndex <= lastUserIndex; ++nodeIndex) {
             Node* node = block->at(nodeIndex);
             switch (node->op()) {
             case Check:
+            case CheckVarargs:
             case MovHint:
             case PutHint:
                 // We don't need to change anything with these.
                 break;
                 
+            case VarargsLength: {
+                if (node->argumentsChild() != candidate)
+                    break;
+
+                node->convertToIdentityOn(emitCodeToGetArgumentsArrayLength(insertionSet, candidate, nodeIndex, node->origin, /* addThis = */ true));
+                break;
+            }
+
             case LoadVarargs:
-                if (node->child1() != candidate)
+                if (node->argumentsChild() != candidate)
                     break;
                 node->setOpAndDefaultFlags(ForwardVarargs);
                 break;
@@ -306,9 +410,46 @@ private:
                 // soon, since it has no real users. DCE will surely kill it. If we make it to SSA, then
                 // SSA conversion will kill it.
                 break;
-                
+
+            case GetButterfly: {
+                if (node->child1().node() == candidate) {
+                    ASSERT(candidateButterflies.contains(node));
+                    node->child1() = Edge();
+                    node->remove(m_graph);
+                }
+                break;
+            }
+
+            case FilterGetByStatus:
+            case FilterPutByStatus:
+            case FilterCallLinkStatus:
+            case FilterInByStatus:
+            case FilterDeleteByStatus:
+            case FilterCheckPrivateBrandStatus:
+            case FilterSetPrivateBrandStatus:
+                if (node->child1().node() == candidate)
+                    node->remove(m_graph);
+                break;
+
+            case GetByOffset: {
+                if (node->child2() == candidate) {
+                    ASSERT(candidateButterflies.contains(node->child1().node())); // It's no longer a GetButterfly node, but it should've been a candidate butterfly.
+                    ASSERT(node->storageAccessData().offset == clonedArgumentsLengthPropertyOffset);
+                    node->convertToIdentityOn(
+                        emitCodeToGetArgumentsArrayLength(insertionSet, candidate, nodeIndex, node->origin));
+                }
+                break;
+            }
+
+            case GetArrayLength:
+                if (node->arrayMode().type() == Array::DirectArguments && node->child1() == candidate) {
+                    node->convertToIdentityOn(
+                        emitCodeToGetArgumentsArrayLength(insertionSet, candidate, nodeIndex, node->origin));
+                }
+                break;
+
             default:
-                if (ASSERT_DISABLED)
+                if (!ASSERT_ENABLED)
                     break;
                 m_graph.doToChildren(
                     node,
@@ -318,6 +459,8 @@ private:
                 break;
             }
         }
+
+        insertionSet.execute(block);
     }
     
     bool m_changed;

@@ -24,12 +24,14 @@
  */
 
 #import "config.h"
-
-#if ENABLE(FULLSCREEN_API) && !PLATFORM(IOS)
-
 #import "WKFullScreenWindowController.h"
 
+#if ENABLE(FULLSCREEN_API) && !PLATFORM(IOS_FAMILY)
+
+#import "AppKitSPI.h"
 #import "LayerTreeContext.h"
+#import "NativeWebMouseEvent.h"
+#import "VideoFullscreenManagerProxy.h"
 #import "WKAPICast.h"
 #import "WKViewInternal.h"
 #import "WKViewPrivate.h"
@@ -40,15 +42,22 @@
 #import <WebCore/GeometryUtilities.h>
 #import <WebCore/IntRect.h>
 #import <WebCore/LocalizedStrings.h>
+#import <WebCore/VideoFullscreenInterfaceMac.h>
+#import <WebCore/VideoFullscreenModel.h>
 #import <WebCore/WebCoreFullScreenPlaceholderView.h>
 #import <WebCore/WebCoreFullScreenWindow.h>
+#import <pal/spi/cg/CoreGraphicsSPI.h>
+#import <pal/spi/mac/NSWindowSPI.h>
 #import <pal/system/SleepDisabler.h>
 #import <wtf/BlockObjCExceptions.h>
-
-using namespace WebKit;
-using namespace WebCore;
+#import <wtf/NakedRef.h>
 
 static const NSTimeInterval DefaultWatchdogTimerInterval = 1;
+
+@interface WKFullScreenWindowController (VideoFullscreenManagerProxyClient)
+- (void)didEnterPictureInPicture;
+- (void)didExitPictureInPicture;
+@end
 
 enum FullScreenState : NSInteger {
     NotInFullScreen,
@@ -59,14 +68,9 @@ enum FullScreenState : NSInteger {
     ExitingFullScreen,
 };
 
-@interface NSWindow (WebNSWindowDetails)
-- (void)exitFullScreenMode:(id)sender;
-- (void)enterFullScreenMode:(id)sender;
-@end
-
 @interface WKFullScreenWindowController (Private) <NSAnimationDelegate>
-- (void)_replaceView:(NSView*)view with:(NSView*)otherView;
-- (WebFullScreenManagerProxy*)_manager;
+- (void)_replaceView:(NSView *)view with:(NSView *)otherView;
+- (WebKit::WebFullScreenManagerProxy *)_manager;
 - (void)_startEnterFullScreenAnimationWithDuration:(NSTimeInterval)duration;
 - (void)_startExitFullScreenAnimationWithDuration:(NSTimeInterval)duration;
 @end
@@ -82,17 +86,23 @@ static void makeResponderFirstResponderIfDescendantOfView(NSWindow *window, NSRe
         [window makeFirstResponder:responder];
 }
 
-@implementation WKFullScreenWindowController
+@implementation WKFullScreenWindowController {
+    std::unique_ptr<WebKit::VideoFullscreenManagerProxy::VideoInPictureInPictureDidChangeObserver> _pipObserver;
+}
 
 #pragma mark -
 #pragma mark Initialization
-- (id)initWithWindow:(NSWindow *)window webView:(NSView *)webView page:(WebPageProxy&)page
+- (id)initWithWindow:(NSWindow *)window webView:(NSView *)webView page:(NakedRef<WebKit::WebPageProxy>)page
 {
     self = [super initWithWindow:window];
     if (!self)
         return nil;
     [window setDelegate:self];
-    [window setCollectionBehavior:([window collectionBehavior] | NSWindowCollectionBehaviorFullScreenPrimary)];
+    [window setCollectionBehavior:([window collectionBehavior] | NSWindowCollectionBehaviorFullScreenPrimary | NSWindowCollectionBehaviorStationary)];
+
+    // Hide the titlebar during the animation to full screen so that only the WKWebView content is visible.
+    window.titlebarAlphaValue = 0;
+    window.animationBehavior = NSWindowAnimationBehaviorNone;
 
     NSView *contentView = [window contentView];
     contentView.hidden = YES;
@@ -112,8 +122,10 @@ static void makeResponderFirstResponderIfDescendantOfView(NSWindow *window, NSRe
     [self windowDidLoad];
     [window displayIfNeeded];
     _webView = webView;
-    _page = &page;
-    
+    _page = page.ptr();
+
+    [self videoControlsManagerDidChange];
+
     return self;
 }
 
@@ -125,21 +137,14 @@ static void makeResponderFirstResponderIfDescendantOfView(NSWindow *window, NSRe
     
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 
-    if (_repaintCallback) {
-        _repaintCallback->invalidate(WebKit::CallbackBase::Error::OwnerWasInvalidated);
-        // invalidate() calls completeFinishExitFullScreenAnimationAfterRepaint, which
-        // clears _repaintCallback.
-        ASSERT(!_repaintCallback);
-    }
-
     [super dealloc];
 }
 
 #pragma mark -
 #pragma mark Accessors
 
-@synthesize initialFrame=_initialFrame;
-@synthesize finalFrame=_finalFrame;
+@synthesize initialFrame = _initialFrame;
+@synthesize finalFrame = _finalFrame;
 
 - (BOOL)isFullScreen
 {
@@ -178,6 +183,18 @@ static void makeResponderFirstResponderIfDescendantOfView(NSWindow *window, NSRe
 }
 
 #pragma mark -
+#pragma mark NSResponder overrides
+
+- (void)noResponderFor:(SEL)eventMethod
+{
+    // The default behavior of the last link in the responder chain is to call NSBeep() if the
+    // event in question is a -keyDown:. Adding a no-op override of -noResponderFor: in a subclass
+    // of NSWindowController, which is typically the last link in a responder chain, avoids the
+    // NSBeep() when -keyDown: goes unhandled.
+    UNUSED_PARAM(eventMethod);
+}
+
+#pragma mark -
 #pragma mark Exposed Interface
 
 static RetainPtr<CGDataProviderRef> createImageProviderWithCopiedData(CGDataProviderRef sourceProvider)
@@ -210,8 +227,8 @@ static RetainPtr<CGImageRef> createImageWithCopiedData(CGImageRef sourceImage)
 
     if (!screen)
         screen = [NSScreen mainScreen];
-    NSRect screenFrame = [screen frame];
 
+    NSRect screenFrame = WebCore::safeScreenFrame(screen);
     NSRect webViewFrame = convertRectToScreen([_webView window], [_webView convertRect:[_webView frame] toView:nil]);
 
     // Flip coordinate system:
@@ -225,9 +242,11 @@ static RetainPtr<CGImageRef> createImageWithCopiedData(CGImageRef sourceImage)
     // future overhead.
     webViewContents = createImageWithCopiedData(webViewContents.get());
 
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     // Screen updates to be re-enabled in _startEnterFullScreenAnimationWithDuration:
     NSDisableScreenUpdates();
     [[self window] setAutodisplay:NO];
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
     [self _manager]->saveScrollPosition();
     _savedTopContentInset = _page->topContentInset();
@@ -241,12 +260,10 @@ static RetainPtr<CGImageRef> createImageWithCopiedData(CGImageRef sourceImage)
     _page->setSuppressVisibilityUpdates(true);
 
     // Swap the webView placeholder into place.
-    if (!_webViewPlaceholder) {
+    if (!_webViewPlaceholder)
         _webViewPlaceholder = adoptNS([[WebCoreFullScreenPlaceholderView alloc] initWithFrame:[_webView frame]]);
-        [_webViewPlaceholder setAction:@selector(cancelOperation:)];
-    }
     [_webViewPlaceholder setTarget:nil];
-    [_webViewPlaceholder setContents:(id)webViewContents.get()];
+    [_webViewPlaceholder setContents:(__bridge id)webViewContents.get()];
     self.savedConstraints = _webView.superview.constraints;
     [self _replaceView:_webView with:_webViewPlaceholder.get()];
     
@@ -256,12 +273,12 @@ static RetainPtr<CGImageRef> createImageWithCopiedData(CGImageRef sourceImage)
     _webView.frame = NSInsetRect(contentView.bounds, 0, -_page->topContentInset());
 
     _savedScale = _page->pageScaleFactor();
-    _page->scalePage(1, IntPoint());
+    _page->scalePage(1, WebCore::IntPoint());
     [self _manager]->setAnimatingFullScreen(true);
     [self _manager]->willEnterFullScreen();
 }
 
-- (void)beganEnterFullScreenWithInitialFrame:(const WebCore::IntRect&)initialFrame finalFrame:(const WebCore::IntRect&)finalFrame
+- (void)beganEnterFullScreenWithInitialFrame:(NSRect)initialFrame finalFrame:(NSRect)finalFrame
 {
     if (_fullScreenState != WaitingToEnterFullScreen)
         return;
@@ -270,11 +287,43 @@ static RetainPtr<CGImageRef> createImageWithCopiedData(CGImageRef sourceImage)
     _initialFrame = initialFrame;
     _finalFrame = finalFrame;
 
-    [self.window orderBack: self]; // Make sure the full screen window is part of the correct Space.
-    [[self window] enterFullScreenMode:self];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+
+    auto clipLayer = _clipView.get().layer;
+    NSView *contentView = [[self window] contentView];
+
+    // Give the initial animations a speed of "0". We want the animations in place when we order in
+    // the window, but to not start animating until we get the callback from AppKit with the required
+    // animation duration. These animations will be replaced with the final animations in
+    // -_startEnterFullScreenAnimationWithDuration:
+    [clipLayer addAnimation:zoomAnimation(_initialFrame, _finalFrame, self.window.screen.frame, 1, 0, AnimateIn) forKey:@"fullscreen"];
+    clipLayer.mask = createMask(contentView.bounds);
+    [clipLayer.mask addAnimation:maskAnimation(_initialFrame, _finalFrame, self.window.screen.frame, 1, 0, AnimateIn) forKey:@"fullscreen"];
+    contentView.hidden = NO;
+
+    NSWindow* window = self.window;
+    NSWindowCollectionBehavior behavior = [window collectionBehavior];
+    [window setCollectionBehavior:(behavior | NSWindowCollectionBehaviorCanJoinAllSpaces)];
+    [window makeFirstResponder:_webView];
+    [window makeKeyAndOrderFront:self];
+    [window setCollectionBehavior:behavior];
+
+    _page->setSuppressVisibilityUpdates(false);
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+    [[self window] setAutodisplay:YES];
+    ALLOW_DEPRECATED_DECLARATIONS_END
+    [[self window] displayIfNeeded];
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+    NSEnableScreenUpdates();
+    ALLOW_DEPRECATED_DECLARATIONS_END
+
+    [CATransaction commit];
+
+    [self.window enterFullScreenMode:self];
 }
 
-static const float minVideoWidth = 480 + 20 + 20; // Note: Keep in sync with mediaControlsApple.css (video:-webkit-full-screen::-webkit-media-controls-panel)
+static const float minVideoWidth = 468; // Keep in sync with `--controls-bar-width`.
 
 - (void)finishedEnterFullScreenAnimation:(bool)completed
 {
@@ -284,8 +333,10 @@ static const float minVideoWidth = 480 + 20 + 20; // Note: Keep in sync with med
     if (completed) {
         _fullScreenState = InFullScreen;
 
+        ALLOW_DEPRECATED_DECLARATIONS_BEGIN
         // Screen updates to be re-enabled ta the end of the current block.
         NSDisableScreenUpdates();
+        ALLOW_DEPRECATED_DECLARATIONS_END
         [self _manager]->didEnterFullScreen();
         [self _manager]->setAnimatingFullScreen(false);
 
@@ -299,11 +350,16 @@ static const float minVideoWidth = 480 + 20 + 20; // Note: Keep in sync with med
         NSSize minContentSize = self.window.contentMinSize;
         minContentSize.width = minVideoWidth;
         self.window.contentMinSize = minContentSize;
+
+        // Always show the titlebar in full screen mode.
+        self.window.titlebarAlphaValue = 1;
     } else {
         // Transition to fullscreen failed. Clean up.
         _fullScreenState = NotInFullScreen;
 
+        ALLOW_DEPRECATED_DECLARATIONS_BEGIN
         [[self window] setAutodisplay:YES];
+        ALLOW_DEPRECATED_DECLARATIONS_END
         _page->setSuppressVisibilityUpdates(false);
 
         NSResponder *firstResponder = [[self window] firstResponder];
@@ -315,18 +371,47 @@ static const float minVideoWidth = 480 + 20 + 20; // Note: Keep in sync with med
         makeResponderFirstResponderIfDescendantOfView(_webView.window, firstResponder, _webView);
         [[_webView window] makeKeyAndOrderFront:self];
 
-        _page->scalePage(_savedScale, IntPoint());
+        _page->scalePage(_savedScale, WebCore::IntPoint());
         [self _manager]->restoreScrollPosition();
         _page->setTopContentInset(_savedTopContentInset);
         [self _manager]->didExitFullScreen();
         [self _manager]->setAnimatingFullScreen(false);
+
+        // FIXME(53342): remove once pointer events fire when elements move out from under the pointer.
+        NSEvent *fakeEvent = [NSEvent mouseEventWithType:NSEventTypeMouseMoved
+            location:[NSEvent mouseLocation]
+            modifierFlags:[[NSApp currentEvent] modifierFlags]
+            timestamp:[NSDate timeIntervalSinceReferenceDate]
+            windowNumber:[[_webView window] windowNumber]
+            context:nullptr
+            eventNumber:0
+            clickCount:0
+            pressure:0];
+        WebKit::NativeWebMouseEvent webEvent(fakeEvent, nil, _webView);
+        _page->handleMouseEvent(webEvent);
     }
 
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     NSEnableScreenUpdates();
+    ALLOW_DEPRECATED_DECLARATIONS_END
+
+    if (_requestedExitFullScreen) {
+        _requestedExitFullScreen = NO;
+        [self exitFullScreen];
+    }
 }
 
 - (void)exitFullScreen
 {
+    if (_fullScreenState == EnteringFullScreen
+        || _fullScreenState == WaitingToEnterFullScreen) {
+        // Do not try to exit fullscreen during the enter animation; remember
+        // that exit was requested and perform the exit upon enter fullscreen
+        // animation complete.
+        _requestedExitFullScreen = YES;
+        return;
+    }
+
     if (_watchdogTimer) {
         [_watchdogTimer invalidate];
         _watchdogTimer.clear();
@@ -338,9 +423,11 @@ static const float minVideoWidth = 480 + 20 + 20; // Note: Keep in sync with med
 
     [_webViewPlaceholder setExitWarningVisible:NO];
 
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     // Screen updates to be re-enabled in _startExitFullScreenAnimationWithDuration: or beganExitFullScreenWithInitialFrame:finalFrame:
     NSDisableScreenUpdates();
     [[self window] setAutodisplay:NO];
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
     // See the related comment in enterFullScreen:
     // We will resume the normal behavior in _startExitFullScreenAnimationWithDuration:
@@ -351,12 +438,24 @@ static const float minVideoWidth = 480 + 20 + 20; // Note: Keep in sync with med
     [self _manager]->willExitFullScreen();
 }
 
+- (void)exitFullScreenImmediately
+{
+    if (_fullScreenState == NotInFullScreen)
+        return;
+
+    [self _manager]->requestExitFullScreen();
+    [_webViewPlaceholder setExitWarningVisible:NO];
+    [self _manager]->willExitFullScreen();
+    _fullScreenState = ExitingFullScreen;
+    [self finishedExitFullScreenAnimationAndExitImmediately:YES];
+}
+
 - (void)requestExitFullScreen
 {
     [self _manager]->requestExitFullScreen();
 }
 
-- (void)beganExitFullScreenWithInitialFrame:(const WebCore::IntRect&)initialFrame finalFrame:(const WebCore::IntRect&)finalFrame
+- (void)beganExitFullScreenWithInitialFrame:(NSRect)initialFrame finalFrame:(NSRect)finalFrame
 {
     if (_fullScreenState != WaitingToExitFullScreen)
         return;
@@ -364,19 +463,41 @@ static const float minVideoWidth = 480 + 20 + 20; // Note: Keep in sync with med
 
     if (![[self window] isOnActiveSpace]) {
         // If the full screen window is not in the active space, the NSWindow full screen animation delegate methods
-        // will never be called. So call finishedExitFullScreenAnimation explicitly.
-        [self finishedExitFullScreenAnimation:YES];
+        // will never be called. So call finishedExitFullScreenAnimationAndExitImmediately explicitly.
+        [self finishedExitFullScreenAnimationAndExitImmediately:NO];
 
         // Because we are breaking the normal animation pattern, re-enable screen updates
         // as exitFullScreen has disabled them, but _startExitFullScreenAnimationWithDuration:
         // will never be called.
+        ALLOW_DEPRECATED_DECLARATIONS_BEGIN
         NSEnableScreenUpdates();
+        ALLOW_DEPRECATED_DECLARATIONS_END
     }
 
     [[self window] exitFullScreenMode:self];
 }
 
-- (void)finishedExitFullScreenAnimation:(bool)completed
+WTF_DECLARE_CF_TYPE_TRAIT(CGImage);
+
+static RetainPtr<CGImageRef> takeWindowSnapshot(CGSWindowID windowID, bool captureAtNominalResolution)
+{
+    CGSWindowCaptureOptions options = kCGSCaptureIgnoreGlobalClipShape;
+    if (captureAtNominalResolution)
+        options |= kCGSWindowCaptureNominalResolution;
+    RetainPtr<CFArrayRef> windowSnapshotImages = adoptCF(CGSHWCaptureWindowList(CGSMainConnectionID(), &windowID, 1, options));
+
+    if (windowSnapshotImages && CFArrayGetCount(windowSnapshotImages.get()))
+        return checked_cf_cast<CGImageRef>(CFArrayGetValueAtIndex(windowSnapshotImages.get(), 0));
+
+    // Fall back to the non-hardware capture path if we didn't get a snapshot
+    // (which usually happens if the window is fully off-screen).
+    CGWindowImageOption imageOptions = kCGWindowImageBoundsIgnoreFraming | kCGWindowImageShouldBeOpaque;
+    if (captureAtNominalResolution)
+        imageOptions |= kCGWindowImageNominalResolution;
+    return adoptCF(CGWindowListCreateImage(CGRectNull, kCGWindowListOptionIncludingWindow, windowID, imageOptions));
+}
+
+- (void)finishedExitFullScreenAnimationAndExitImmediately:(bool)immediately
 {
     if (_fullScreenState == InFullScreen) {
         // If we are currently in the InFullScreen state, this notification is unexpected, meaning
@@ -391,52 +512,88 @@ static const float minVideoWidth = 480 + 20 + 20; // Note: Keep in sync with med
         return;
     _fullScreenState = NotInFullScreen;
 
+    // Hide the titlebar at the end of the animation so that it can slide away without turning blank.
+    self.window.titlebarAlphaValue = 0;
+
     NSResponder *firstResponder = [[self window] firstResponder];
 
-    // Screen updates to be re-enabled in completeFinishExitFullScreenAnimationAfterRepaint.
-    NSDisableScreenUpdates();
-    _page->setSuppressVisibilityUpdates(true);
-    [[self window] orderOut:self];
-    NSView *contentView = [[self window] contentView];
-    contentView.hidden = YES;
-    [_backgroundView.get().layer removeAllAnimations];
-    [[_webViewPlaceholder window] setAutodisplay:NO];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    NSRect exitPlaceholderScreenRect = _initialFrame;
+    exitPlaceholderScreenRect.origin.y = NSMaxY(WebCore::safeScreenFrame([[NSScreen screens] objectAtIndex:0])) - NSMaxY(exitPlaceholderScreenRect);
 
-    [self _replaceView:_webViewPlaceholder.get() with:_webView];
+    RetainPtr<CGImageRef> webViewContents = takeWindowSnapshot([[_webView window] windowNumber], true);
+    webViewContents = adoptCF(CGImageCreateWithImageInRect(webViewContents.get(), NSRectToCGRect(exitPlaceholderScreenRect)));
+    
+    _exitPlaceholder = adoptNS([[NSView alloc] initWithFrame:[_webView frame]]);
+    [_exitPlaceholder setWantsLayer: YES];
+    [_exitPlaceholder setAutoresizesSubviews: YES];
+    [_exitPlaceholder setLayerContentsPlacement: NSViewLayerContentsPlacementScaleProportionallyToFit];
+    [_exitPlaceholder setLayerContentsRedrawPolicy: NSViewLayerContentsRedrawNever];
+    [_exitPlaceholder setFrame:[_webView frame]];
+    [[_exitPlaceholder layer] setContents:(__bridge id)webViewContents.get()];
+    [[_webView superview] addSubview:_exitPlaceholder.get() positioned:NSWindowAbove relativeTo:_webView];
+
+    [CATransaction commit];
+    [CATransaction flush];
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    
+    [_backgroundView.get().layer removeAllAnimations];
+    _page->setSuppressVisibilityUpdates(true);
+    [_webView removeFromSuperview];
+    [_webView setFrame:[_webViewPlaceholder frame]];
+    [_webView setAutoresizingMask:[_webViewPlaceholder autoresizingMask]];
+    [[_webViewPlaceholder superview] addSubview:_webView positioned:NSWindowBelow relativeTo:_webViewPlaceholder.get()];
+
     BEGIN_BLOCK_OBJC_EXCEPTIONS
     [NSLayoutConstraint activateConstraints:self.savedConstraints];
     END_BLOCK_OBJC_EXCEPTIONS
     self.savedConstraints = nil;
     makeResponderFirstResponderIfDescendantOfView(_webView.window, firstResponder, _webView);
 
-    [[_webView window] makeKeyAndOrderFront:self];
-
     // These messages must be sent after the swap or flashing will occur during forceRepaint:
     [self _manager]->didExitFullScreen();
     [self _manager]->setAnimatingFullScreen(false);
-    _page->scalePage(_savedScale, IntPoint());
+    _page->scalePage(_savedScale, WebCore::IntPoint());
     [self _manager]->restoreScrollPosition();
     _page->setTopContentInset(_savedTopContentInset);
 
-    if (_repaintCallback) {
-        _repaintCallback->invalidate(WebKit::CallbackBase::Error::OwnerWasInvalidated);
-        // invalidate() calls completeFinishExitFullScreenAnimationAfterRepaint, which
-        // clears _repaintCallback.
-        ASSERT(!_repaintCallback);
+    [CATransaction commit];
+    [CATransaction flush];
+
+    if (immediately) {
+        [self completeFinishExitFullScreenAnimation];
+        return;
     }
-    _repaintCallback = VoidCallback::create([self](WebKit::CallbackBase::Error) {
-        [self completeFinishExitFullScreenAnimationAfterRepaint];
+
+    _page->forceRepaint([weakSelf = WeakObjCPtr<WKFullScreenWindowController>(self)] {
+        [weakSelf completeFinishExitFullScreenAnimation];
     });
-    _page->forceRepaint(_repaintCallback.copyRef());
 }
 
-- (void)completeFinishExitFullScreenAnimationAfterRepaint
+- (void)completeFinishExitFullScreenAnimation
 {
-    _repaintCallback = nullptr;
-    [[_webView window] setAutodisplay:YES];
-    [[_webView window] displayIfNeeded];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+
+    [_webViewPlaceholder removeFromSuperview];
+    [[self window] orderOut:self];
+    NSView *contentView = [[self window] contentView];
+    contentView.hidden = YES;
+    [_exitPlaceholder removeFromSuperview];
+    [[_exitPlaceholder layer] setContents:nil];
+    _exitPlaceholder = nil;
+    
+    [[_webView window] makeKeyAndOrderFront:self];
+    _webViewPlaceholder = nil;
+    
     _page->setSuppressVisibilityUpdates(false);
-    NSEnableScreenUpdates();
+    _page->setNeedsDOMWindowResizeEvent();
+
+    [CATransaction commit];
+    [CATransaction flush];
 }
 
 - (void)performClose:(id)sender
@@ -451,15 +608,51 @@ static const float minVideoWidth = 480 + 20 + 20; // Note: Keep in sync with med
     // has closed or the web process has crashed.  Just walk through our
     // normal exit full screen sequence, but don't wait to be called back
     // in response.
-    if ([self isFullScreen])
-        [self exitFullScreen];
-    
-    if (_fullScreenState == ExitingFullScreen)
-        [self finishedExitFullScreenAnimation:YES];
-
-    _webView = nil;
+    [self exitFullScreenImmediately];
 
     [super close];
+
+    _webView = nil;
+}
+
+- (void)videoControlsManagerDidChange
+{
+}
+
+- (void)clearVideoFullscreenManagerObserver
+{
+    _pipObserver = nullptr;
+}
+
+- (void)setVideoFullscreenManagerObserver
+{
+    auto* videoFullscreenManager = self._videoFullscreenManager;
+    if (!videoFullscreenManager)
+        return;
+
+    ASSERT(!_pipObserver);
+    if (_pipObserver)
+        return;
+
+    _pipObserver = WTF::makeUnique<WebKit::VideoFullscreenManagerProxy::VideoInPictureInPictureDidChangeObserver>([self] (bool inPiP) {
+        if (inPiP)
+            [self didEnterPictureInPicture];
+        else
+            [self didExitPictureInPicture];
+    });
+
+    videoFullscreenManager->addVideoInPictureInPictureDidChangeObserver(*_pipObserver);
+}
+
+- (void)didEnterPictureInPicture
+{
+    if ([self isFullScreen])
+        [self requestExitFullScreen];
+}
+
+- (void)didExitPictureInPicture
+{
+    [self clearVideoFullscreenManagerObserver];
 }
 
 #pragma mark -
@@ -490,32 +683,52 @@ static const float minVideoWidth = 480 + 20 + 20; // Note: Keep in sync with med
     [self finishedEnterFullScreenAnimation:NO];
 }
 
-- (void)windowDidEnterFullScreen:(NSNotification*)notification
+- (void)windowDidEnterFullScreen:(NSNotification *)notification
 {
+    RetainPtr<WKFullScreenWindowController> retain = self;
     [self finishedEnterFullScreenAnimation:YES];
+    [self setVideoFullscreenManagerObserver];
 }
 
 - (void)windowDidFailToExitFullScreen:(NSWindow *)window
 {
-    [self finishedExitFullScreenAnimation:NO];
+    RetainPtr<WKFullScreenWindowController> retain = self;
+    [self finishedExitFullScreenAnimationAndExitImmediately:YES];
+    [self clearVideoFullscreenManagerObserver];
 }
 
-- (void)windowDidExitFullScreen:(NSNotification*)notification
+- (void)windowDidExitFullScreen:(NSNotification *)notification
 {
-    [self finishedExitFullScreenAnimation:YES];
+    RetainPtr<WKFullScreenWindowController> retain = self;
+    [self finishedExitFullScreenAnimationAndExitImmediately:NO];
+    [self clearVideoFullscreenManagerObserver];
+}
+
+- (NSWindow *)destinationWindowToExitFullScreenForWindow:(NSWindow *)window
+{
+    return self.webViewPlaceholder.window;
 }
 
 #pragma mark -
 #pragma mark Internal Interface
 
-- (WebFullScreenManagerProxy*)_manager
+- (WebKit::WebFullScreenManagerProxy*)_manager
 {
     if (!_page)
         return nullptr;
+
     return _page->fullScreenManager();
 }
 
-- (void)_replaceView:(NSView*)view with:(NSView*)otherView
+- (WebKit::VideoFullscreenManagerProxy*)_videoFullscreenManager
+{
+    if (!_page)
+        return nullptr;
+
+    return _page->videoFullscreenManager();
+}
+
+- (void)_replaceView:(NSView *)view with:(NSView *)otherView
 {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
@@ -535,10 +748,10 @@ static CAMediaTimingFunction *timingFunctionForDuration(CFTimeInterval duration)
 }
 
 enum AnimationDirection { AnimateIn, AnimateOut };
-static CAAnimation *zoomAnimation(const FloatRect& initialFrame, const FloatRect& finalFrame, const FloatRect& screenFrame, CFTimeInterval duration, AnimationDirection direction)
+static CAAnimation *zoomAnimation(const WebCore::FloatRect& initialFrame, const WebCore::FloatRect& finalFrame, const WebCore::FloatRect& screenFrame, CFTimeInterval duration, float speed, AnimationDirection direction)
 {
     CABasicAnimation *scaleAnimation = [CABasicAnimation animationWithKeyPath:@"transform"];
-    FloatRect scaleRect = smallestRectWithAspectRatioAroundRect(finalFrame.size().aspectRatio(), initialFrame);
+    WebCore::FloatRect scaleRect = smallestRectWithAspectRatioAroundRect(finalFrame.size().aspectRatio(), initialFrame);
     CGAffineTransform resetOriginTransform = CGAffineTransformMakeTranslation(screenFrame.x() - finalFrame.x(), screenFrame.y() - finalFrame.y());
     CGAffineTransform scaleTransform = CGAffineTransformMakeScale(scaleRect.width() / finalFrame.width(), scaleRect.height() / finalFrame.height());
     CGAffineTransform translateTransform = CGAffineTransformMakeTranslation(scaleRect.x() - screenFrame.x(), scaleRect.y() - screenFrame.y());
@@ -557,7 +770,7 @@ static CAAnimation *zoomAnimation(const FloatRect& initialFrame, const FloatRect
     return scaleAnimation;
 }
 
-static CALayer *createMask(const FloatRect& bounds)
+static CALayer *createMask(const WebCore::FloatRect& bounds)
 {
     CALayer *maskLayer = [CALayer layer];
     maskLayer.anchorPoint = CGPointZero;
@@ -567,18 +780,18 @@ static CALayer *createMask(const FloatRect& bounds)
     return maskLayer;
 }
 
-static CAAnimation *maskAnimation(const FloatRect& initialFrame, const FloatRect& finalFrame, const FloatRect& screenFrame, CFTimeInterval duration, AnimationDirection direction)
+static CAAnimation *maskAnimation(const WebCore::FloatRect& initialFrame, const WebCore::FloatRect& finalFrame, const WebCore::FloatRect& screenFrame, CFTimeInterval duration, float speed, AnimationDirection direction)
 {
     CABasicAnimation *boundsAnimation = [CABasicAnimation animationWithKeyPath:@"bounds"];
-    FloatRect boundsRect = largestRectWithAspectRatioInsideRect(initialFrame.size().aspectRatio(), finalFrame);
-    NSValue *boundsValue = [NSValue valueWithRect:FloatRect(FloatPoint(), boundsRect.size())];
+    WebCore::FloatRect boundsRect = largestRectWithAspectRatioInsideRect(initialFrame.size().aspectRatio(), finalFrame);
+    NSValue *boundsValue = [NSValue valueWithRect:WebCore::FloatRect(WebCore::FloatPoint(), boundsRect.size())];
     if (direction == AnimateIn)
         boundsAnimation.fromValue = boundsValue;
     else
         boundsAnimation.toValue = boundsValue;
 
     CABasicAnimation *positionAnimation = [CABasicAnimation animationWithKeyPath:@"position"];
-    NSValue *positionValue = [NSValue valueWithPoint:FloatPoint(boundsRect.location() - screenFrame.location())];
+    NSValue *positionValue = [NSValue valueWithPoint:WebCore::FloatPoint(boundsRect.location() - screenFrame.location())];
     if (direction == AnimateIn)
         positionAnimation.fromValue = positionValue;
     else
@@ -609,27 +822,15 @@ static CAAnimation *fadeAnimation(CFTimeInterval duration, AnimationDirection di
 
 - (void)_startEnterFullScreenAnimationWithDuration:(NSTimeInterval)duration
 {
-    NSView* contentView = [[self window] contentView];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
 
-    [[_clipView layer] addAnimation:zoomAnimation(_initialFrame, _finalFrame, self.window.screen.frame, duration, AnimateIn) forKey:@"fullscreen"];
-    CALayer *maskLayer = createMask(contentView.bounds);
-    [maskLayer addAnimation:maskAnimation(_initialFrame, _finalFrame, self.window.screen.frame, duration, AnimateIn) forKey:@"fullscreen"];
-    [_clipView layer].mask = maskLayer;
-
-    contentView.hidden = NO;
+    auto clipLayer = _clipView.get().layer;
+    [clipLayer addAnimation:zoomAnimation(_initialFrame, _finalFrame, self.window.screen.frame, duration, 1, AnimateIn) forKey:@"fullscreen"];
+    [clipLayer.mask addAnimation:maskAnimation(_initialFrame, _finalFrame, self.window.screen.frame, duration, 1, AnimateIn) forKey:@"fullscreen"];
     [_backgroundView.get().layer addAnimation:fadeAnimation(duration, AnimateIn) forKey:@"fullscreen"];
 
-    NSWindow* window = [self window];
-    NSWindowCollectionBehavior behavior = [window collectionBehavior];
-    [window setCollectionBehavior:(behavior | NSWindowCollectionBehaviorCanJoinAllSpaces)];
-    [window makeKeyAndOrderFront:self];
-    [window setCollectionBehavior:behavior];
-    [window makeFirstResponder:_webView];
-
-    _page->setSuppressVisibilityUpdates(false);
-    [[self window] setAutodisplay:YES];
-    [[self window] displayIfNeeded];
-    NSEnableScreenUpdates();
+    [CATransaction commit];
 }
 
 - (void)_startExitFullScreenAnimationWithDuration:(NSTimeInterval)duration
@@ -642,19 +843,23 @@ static CAAnimation *fadeAnimation(CFTimeInterval duration, AnimationDirection di
         _fullScreenState = ExitingFullScreen;
     }
 
-    [[_clipView layer] addAnimation:zoomAnimation(_initialFrame, _finalFrame, self.window.screen.frame, duration, AnimateOut) forKey:@"fullscreen"];
+    [[_clipView layer] addAnimation:zoomAnimation(_initialFrame, _finalFrame, self.window.screen.frame, duration, 1, AnimateOut) forKey:@"fullscreen"];
     NSView* contentView = [[self window] contentView];
     CALayer *maskLayer = createMask(contentView.bounds);
-    [maskLayer addAnimation:maskAnimation(_initialFrame, _finalFrame, self.window.screen.frame, duration, AnimateOut) forKey:@"fullscreen"];
+    [maskLayer addAnimation:maskAnimation(_initialFrame, _finalFrame, self.window.screen.frame, duration, 1, AnimateOut) forKey:@"fullscreen"];
     [_clipView layer].mask = maskLayer;
 
     contentView.hidden = NO;
     [_backgroundView.get().layer addAnimation:fadeAnimation(duration, AnimateOut) forKey:@"fullscreen"];
 
     _page->setSuppressVisibilityUpdates(false);
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     [[self window] setAutodisplay:YES];
+    ALLOW_DEPRECATED_DECLARATIONS_END
     [[self window] displayIfNeeded];
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     NSEnableScreenUpdates();
+    ALLOW_DEPRECATED_DECLARATIONS_END
 }
 
 - (void)_watchdogTimerFired:(NSTimer *)timer
@@ -664,4 +869,4 @@ static CAAnimation *fadeAnimation(CFTimeInterval duration, AnimationDirection di
 
 @end
 
-#endif // ENABLE(FULLSCREEN_API) && !PLATFORM(IOS)
+#endif // ENABLE(FULLSCREEN_API) && !PLATFORM(IOS_FAMILY)

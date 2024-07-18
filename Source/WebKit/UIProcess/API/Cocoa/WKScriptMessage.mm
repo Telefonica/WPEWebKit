@@ -26,20 +26,19 @@
 #import "config.h"
 #import "WKScriptMessageInternal.h"
 
-#if WK_API_ENABLED
-
-#import "WKFrameInfo.h"
-#import "WeakObjCPtr.h"
+#import <WebKit/WKFrameInfo.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/WeakObjCPtr.h>
 
 @implementation WKScriptMessage {
     RetainPtr<id> _body;
-    WebKit::WeakObjCPtr<WKWebView> _webView;
+    WeakObjCPtr<WKWebView> _webView;
     RetainPtr<WKFrameInfo> _frameInfo;
     RetainPtr<NSString> _name;
+    RetainPtr<WKContentWorld> _world;
 }
 
-- (instancetype)_initWithBody:(id)body webView:(WKWebView *)webView frameInfo:(WKFrameInfo *)frameInfo name:(NSString *)name
+- (instancetype)_initWithBody:(id)body webView:(WKWebView *)webView frameInfo:(WKFrameInfo *)frameInfo name:(NSString *)name world:(WKContentWorld *)world
 {
     if (!(self = [super init]))
         return nil;
@@ -48,9 +47,9 @@
     _webView = webView;
     _frameInfo = frameInfo;
     _name = adoptNS([name copy]);
+    _world = world;
 
     return self;
-
 }
 
 - (id)body
@@ -73,7 +72,9 @@
     return _name.get();
 }
 
+- (WKContentWorld *)world
+{
+    return _world.get();
+}
+
 @end
-
-#endif
-

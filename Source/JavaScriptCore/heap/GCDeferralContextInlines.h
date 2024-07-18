@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,19 +30,18 @@
 
 namespace JSC {
 
-ALWAYS_INLINE GCDeferralContext::GCDeferralContext(Heap& heap)
-    : m_heap(heap)
+ALWAYS_INLINE GCDeferralContext::GCDeferralContext(VM& vm)
+    : m_vm(vm)
 {
 }
 
 ALWAYS_INLINE GCDeferralContext::~GCDeferralContext()
 {
-    ASSERT(!DisallowGC::isInEffectOnCurrentThread());
-#if ENABLE(GC_VALIDATION)
-    ASSERT(!m_heap.vm()->isInitializingObject());
-#endif
+    if constexpr (validateDFGDoesGC)
+        m_vm.verifyCanGC();
+
     if (UNLIKELY(m_shouldGC))
-        m_heap.collectIfNecessaryOrDefer();
+        m_vm.heap.collectIfNecessaryOrDefer();
 }
 
 } // namespace JSC

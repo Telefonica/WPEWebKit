@@ -32,9 +32,9 @@
 #import "DOMRangeInternal.h"
 #import "WebFrameInternal.h"
 #import "WebHTMLViewInternal.h"
-#import "WebTypesInternal.h"
 #import "WebView.h"
 #import <WebCore/Frame.h>
+#import <WebCore/SimpleRange.h>
 
 @interface NSWindow (WebNSWindowDetails)
 - (void)_setForceActiveControls:(BOOL)flag;
@@ -84,18 +84,16 @@ using namespace WebCore;
 {
     NSRect scrollFrame = NSMakeRect(0, 0, 100, 100);
     NSRect tableFrame = NSZeroRect;    
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     tableFrame.size = [NSScrollView contentSizeForFrameSize:scrollFrame.size hasHorizontalScroller:NO hasVerticalScroller:YES borderType:NSNoBorder];
-#pragma clang diagnostic pop
-    NSTableColumn *column = [[NSTableColumn alloc] init];
+    ALLOW_DEPRECATED_DECLARATIONS_END
+    auto column = adoptNS([[NSTableColumn alloc] init]);
     [column setWidth:tableFrame.size.width];
     [column setEditable:NO];
     
     _tableView = [[NSTableView alloc] initWithFrame:tableFrame];
     [_tableView setAutoresizingMask:NSViewWidthSizable];
-    [_tableView addTableColumn:column];
-    [column release];
+    [_tableView addTableColumn:column.get()];
     [_tableView setGridStyleMask:NSTableViewGridNone];
     [_tableView setCornerView:nil];
     [_tableView setHeaderView:nil];
@@ -105,7 +103,7 @@ using namespace WebCore;
     [_tableView setTarget:self];
     [_tableView setDoubleAction:@selector(tableAction:)];
     
-    NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:scrollFrame];
+    auto scrollView = adoptNS([[NSScrollView alloc] initWithFrame:scrollFrame]);
     [scrollView setBorderType:NSNoBorder];
     [scrollView setHasVerticalScroller:YES];
     [scrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
@@ -114,10 +112,8 @@ using namespace WebCore;
     
     _popupWindow = [[NSWindow alloc] initWithContentRect:scrollFrame styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
     [_popupWindow setAlphaValue:0.88f];
-    [_popupWindow setContentView:scrollView];
-    [scrollView release];
+    [_popupWindow setContentView:scrollView.get()];
     [_popupWindow setHasShadow:YES];
-    [_popupWindow setOneShot:YES];
     [_popupWindow _setForceActiveControls:YES];
     [_popupWindow setReleasedWhenClosed:NO];
 }
@@ -131,13 +127,12 @@ using namespace WebCore;
 
     NSRect windowFrame;
     NSPoint wordStart = topLeft;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     windowFrame.origin = [[_view window] convertBaseToScreen:[_htmlView convertPoint:wordStart toView:nil]];
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
     windowFrame.size.height = numberToShow * [_tableView rowHeight] + (numberToShow + 1) * [_tableView intercellSpacing].height;
     windowFrame.origin.y -= windowFrame.size.height;
-    NSDictionary *attributes = [NSDictionary dictionaryWithObjectsAndKeys:[NSFont systemFontOfSize:12.0f], NSFontAttributeName, nil];
+    NSDictionary *attributes = @{ NSFontAttributeName: [NSFont systemFontOfSize:12.0f] };
     CGFloat maxWidth = 0;
     int maxIndex = -1;
     for (NSUInteger i = 0; i < numberToShow; i++) {
@@ -149,10 +144,9 @@ using namespace WebCore;
     }
     windowFrame.size.width = 100;
     if (maxIndex >= 0) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        ALLOW_DEPRECATED_DECLARATIONS_BEGIN
         maxWidth = ceilf([NSScrollView frameSizeForContentSize:NSMakeSize(maxWidth, 100.0f) hasHorizontalScroller:NO hasVerticalScroller:YES borderType:NSNoBorder].width);
-#pragma clang diagnostic pop
+        ALLOW_DEPRECATED_DECLARATIONS_END
         maxWidth = ceilf([NSWindow frameRectForContentRect:NSMakeRect(0.0f, 0.0f, maxWidth, 100.0f) styleMask:NSWindowStyleMaskBorderless].size.width);
         maxWidth += 5.0f;
         windowFrame.size.width = std::max(maxWidth, windowFrame.size.width);
@@ -179,9 +173,9 @@ using namespace WebCore;
 
         // Get preceeding word stem
         WebFrame *frame = [_htmlView _frame];
-        DOMRange *selection = kit(core(frame)->selection().toNormalizedRange().get());
+        DOMRange *selection = kit(core(frame)->selection().selection().toNormalizedRange());
         DOMRange *wholeWord = [frame _rangeByAlteringCurrentSelection:FrameSelection::AlterationExtend
-            direction:DirectionBackward granularity:WordGranularity];
+            direction:SelectionDirection::Backward granularity:TextGranularity::WordGranularity];
         DOMRange *prefix = [wholeWord cloneRange];
         [prefix setEnd:[selection startContainer] offset:[selection startOffset]];
 

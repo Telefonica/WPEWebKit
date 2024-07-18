@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2015 The ANGLE Project Authors. All rights reserved.
+// Copyright 2015 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -62,9 +62,14 @@ class FunctionsGLX
     glx::Pbuffer createPbuffer(glx::FBConfig config, const int *attribList) const;
     void destroyPbuffer(glx::Pbuffer pbuffer) const;
     void queryDrawable(glx::Drawable drawable, int attribute, unsigned int *value) const;
+    glx::Pixmap createPixmap(glx::FBConfig config, Pixmap pixmap, const int *attribList) const;
+    void destroyPixmap(Pixmap pixmap) const;
 
     // GLX_ARB_create_context
-    glx::Context createContextAttribsARB(glx::FBConfig config, glx::Context shareContext, Bool direct, const int *attribList) const;
+    glx::Context createContextAttribsARB(glx::FBConfig config,
+                                         glx::Context shareContext,
+                                         Bool direct,
+                                         const int *attribList) const;
 
     // GLX_EXT_swap_control
     void swapIntervalEXT(glx::Drawable drawable, int interval) const;
@@ -75,11 +80,19 @@ class FunctionsGLX
     // GLX_SGI_swap_control
     int swapIntervalSGI(int interval) const;
 
+    // GLX_OML_sync_control
+    bool getSyncValuesOML(glx::Drawable drawable, int64_t *ust, int64_t *msc, int64_t *sbc) const;
+    bool getMscRateOML(glx::Drawable drawable, int32_t *numerator, int32_t *denominator) const;
+
+    // GLX_EXT_texture_from_pixmap
+    void bindTexImageEXT(glx::Drawable drawable, int buffer, const int *attribList) const;
+    void releaseTexImageEXT(glx::Drawable drawable, int buffer) const;
+
   private:
     // So as to isolate GLX from angle we do not include angleutils.h and cannot
     // use angle::NonCopyable so we replicated it here instead.
-    FunctionsGLX(const FunctionsGLX&) = delete;
-    void operator=(const FunctionsGLX&) = delete;
+    FunctionsGLX(const FunctionsGLX &) = delete;
+    void operator=(const FunctionsGLX &) = delete;
 
     struct GLXFunctionTable;
 
@@ -91,6 +104,6 @@ class FunctionsGLX
     std::vector<std::string> mExtensions;
 };
 
-}
+}  // namespace rx
 
-#endif // LIBANGLE_RENDERER_GL_GLX_FUNCTIONSGLX_H_
+#endif  // LIBANGLE_RENDERER_GL_GLX_FUNCTIONSGLX_H_

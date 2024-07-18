@@ -54,7 +54,7 @@ WI.ChartDetailsSectionRow = class ChartDetailsSectionRow extends WI.DetailsSecti
         this._items = new Map;
         this._title = "";
         this._chartSize = chartSize;
-        this._radius = (this._chartSize / 2) - 1;   // Subtract one to accomodate chart stroke width.
+        this._radius = (this._chartSize / 2) - 1; // Subtract one to accomodate chart stroke width.
         this._innerRadius = innerRadiusRatio ? Math.floor(this._radius * innerRadiusRatio) : 0;
         this._total = 0;
 
@@ -312,7 +312,7 @@ WI.ChartDetailsSectionRow = class ChartDetailsSectionRow extends WI.DetailsSecti
             return [
                 "M", x1, y1,                                // Starting position.
                 "A", r1, r1, 0, largeArcFlag, 1, x2, y2,    // Draw outer arc.
-                "L", x3, y3,                                // Connect outer and innner arcs.
+                "L", x3, y3,                                // Connect outer and inner arcs.
                 "A", r2, r2, 0, largeArcFlag, 0, x4, y4,    // Draw inner arc.
                 "Z"                                         // Close path.
             ].join(" ");

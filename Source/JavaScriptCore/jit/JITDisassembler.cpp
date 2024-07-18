@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,8 +31,7 @@
 #include "CodeBlock.h"
 #include "CodeBlockWithJITType.h"
 #include "Disassembler.h"
-#include "JIT.h"
-#include "JSCInlines.h"
+#include "JSCellInlines.h"
 #include "LinkBuffer.h"
 #include "ProfilerCompilation.h"
 #include <wtf/StringPrintStream.h>
@@ -41,8 +40,8 @@ namespace JSC {
 
 JITDisassembler::JITDisassembler(CodeBlock *codeBlock)
     : m_codeBlock(codeBlock)
-    , m_labelForBytecodeIndexInMainPath(codeBlock->instructionCount())
-    , m_labelForBytecodeIndexInSlowPath(codeBlock->instructionCount())
+    , m_labelForBytecodeIndexInMainPath(codeBlock->instructions().size())
+    , m_labelForBytecodeIndexInSlowPath(codeBlock->instructions().size())
 {
 }
 
@@ -52,6 +51,9 @@ JITDisassembler::~JITDisassembler()
 
 void JITDisassembler::dump(PrintStream& out, LinkBuffer& linkBuffer)
 {
+    m_codeStart = linkBuffer.entrypoint<DisassemblyPtrTag>().untaggedExecutableAddress();
+    m_codeEnd = bitwise_cast<uint8_t*>(m_codeStart) + linkBuffer.size();
+
     dumpHeader(out, linkBuffer);
     dumpDisassembly(out, linkBuffer, m_startOfCode, m_labelForBytecodeIndexInMainPath[0]);
     
@@ -89,7 +91,7 @@ void JITDisassembler::reportToProfiler(Profiler::Compilation* compilation, LinkB
 
 void JITDisassembler::dumpHeader(PrintStream& out, LinkBuffer& linkBuffer)
 {
-    out.print("Generated Baseline JIT code for ", CodeBlockWithJITType(m_codeBlock, JITCode::BaselineJIT), ", instruction count = ", m_codeBlock->instructionCount(), "\n");
+    out.print("Generated Baseline JIT code for ", CodeBlockWithJITType(m_codeBlock, JITType::BaselineJIT), ", instructions size = ", m_codeBlock->instructionsSize(), "\n");
     out.print("   Source: ", m_codeBlock->sourceCodeOnOneLine(), "\n");
     out.print("   Code at [", RawPointer(linkBuffer.debugAddress()), ", ", RawPointer(static_cast<char*>(linkBuffer.debugAddress()) + linkBuffer.size()), "):\n");
 }
@@ -118,7 +120,7 @@ Vector<JITDisassembler::DumpedOp> JITDisassembler::dumpVectorForInstructions(Lin
         }
         out.reset();
         result.append(DumpedOp());
-        result.last().index = i;
+        result.last().bytecodeIndex = BytecodeIndex(i);
         out.print(prefix);
         m_codeBlock->dumpBytecode(out, i);
         for (unsigned nextIndex = i + 1; ; nextIndex++) {
@@ -154,16 +156,16 @@ void JITDisassembler::reportInstructions(Profiler::Compilation* compilation, Lin
     for (unsigned i = 0; i < dumpedOps.size(); ++i) {
         compilation->addDescription(
             Profiler::CompiledBytecode(
-                Profiler::OriginStack(Profiler::Origin(compilation->bytecodes(), dumpedOps[i].index)),
+                Profiler::OriginStack(Profiler::Origin(compilation->bytecodes(), dumpedOps[i].bytecodeIndex)),
                 dumpedOps[i].disassembly));
     }
 }
 
 void JITDisassembler::dumpDisassembly(PrintStream& out, LinkBuffer& linkBuffer, MacroAssembler::Label from, MacroAssembler::Label to)
 {
-    CodeLocationLabel fromLocation = linkBuffer.locationOf(from);
-    CodeLocationLabel toLocation = linkBuffer.locationOf(to);
-    disassemble(fromLocation, bitwise_cast<uintptr_t>(toLocation.executableAddress()) - bitwise_cast<uintptr_t>(fromLocation.executableAddress()), "        ", out);
+    CodeLocationLabel<DisassemblyPtrTag> fromLocation = linkBuffer.locationOf<DisassemblyPtrTag>(from);
+    CodeLocationLabel<DisassemblyPtrTag> toLocation = linkBuffer.locationOf<DisassemblyPtrTag>(to);
+    disassemble(fromLocation, toLocation.dataLocation<uintptr_t>() - fromLocation.dataLocation<uintptr_t>(), m_codeStart, m_codeEnd, "        ", out);
 }
 
 } // namespace JSC

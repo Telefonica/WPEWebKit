@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Peter Varga (pvarga@inf.u-szeged.hu), University of Szeged
  * All rights reserved.
  *
@@ -28,6 +28,7 @@
 #pragma once
 
 #include <limits.h>
+#include "YarrErrorCode.h"
 
 namespace JSC { namespace Yarr {
 
@@ -36,30 +37,41 @@ namespace JSC { namespace Yarr {
 #define YarrStackSpaceForBackTrackInfoBackReference 2
 #define YarrStackSpaceForBackTrackInfoAlternative 1 // One per alternative.
 #define YarrStackSpaceForBackTrackInfoParentheticalAssertion 1
-#define YarrStackSpaceForBackTrackInfoParenthesesOnce 1 // Only for !fixed quantifiers.
+#define YarrStackSpaceForBackTrackInfoParenthesesOnce 2
 #define YarrStackSpaceForBackTrackInfoParenthesesTerminal 1
-#define YarrStackSpaceForBackTrackInfoParentheses 2
+#define YarrStackSpaceForBackTrackInfoParentheses 4
 #define YarrStackSpaceForDotStarEnclosure 1
 
-static const unsigned quantifyInfinite = UINT_MAX;
-static const unsigned offsetNoMatch = std::numeric_limits<unsigned>::max();
+static constexpr unsigned quantifyInfinite = UINT_MAX;
+static constexpr unsigned offsetNoMatch = std::numeric_limits<unsigned>::max();
 
 // The below limit restricts the number of "recursive" match calls in order to
 // avoid spending exponential time on complex regular expressions.
-static const unsigned matchLimit = 1000000;
+static constexpr unsigned matchLimit = 1000000;
 
-enum JSRegExpResult {
-    JSRegExpMatch = 1,
-    JSRegExpNoMatch = 0,
-    JSRegExpErrorNoMatch = -1,
-    JSRegExpErrorHitLimit = -2,
-    JSRegExpErrorNoMemory = -3,
-    JSRegExpErrorInternal = -4
+enum class MatchFrom { VMThread, CompilerThread };
+
+enum class JSRegExpResult {
+    Match = 1,
+    NoMatch = 0,
+    ErrorNoMatch = -1,
+    JITCodeFailure = -2,
+    ErrorHitLimit = -3,
+    ErrorNoMemory = -4,
+    ErrorInternal = -5,
 };
 
-enum YarrCharSize {
+enum class CharSize : uint8_t {
     Char8,
     Char16
+};
+
+enum class BuiltInCharacterClassID : unsigned {
+    DigitClassID,
+    SpaceClassID,
+    WordClassID,
+    DotClassID,
+    BaseUnicodePropertyID
 };
 
 struct BytecodePattern;

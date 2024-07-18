@@ -26,12 +26,13 @@
 #pragma once
 
 #include <wtf/MonotonicTime.h>
-#include <wtf/Optional.h>
 #include <wtf/Seconds.h>
 
 namespace WTF {
 
 struct CPUTime {
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+
     MonotonicTime cpuTime;
     Seconds userTime;
     Seconds systemTime;
@@ -39,6 +40,11 @@ struct CPUTime {
     WTF_EXPORT_PRIVATE double percentageCPUUsageSince(const CPUTime&) const;
 
     WTF_EXPORT_PRIVATE static std::optional<CPUTime> get();
+
+    // Returns the current CPU time of the current thread.
+    // Precision varies depending on platform but is usually as good or better
+    // than a millisecond.
+    WTF_EXPORT_PRIVATE static Seconds forCurrentThread();
 };
 
 } // namespace WTF

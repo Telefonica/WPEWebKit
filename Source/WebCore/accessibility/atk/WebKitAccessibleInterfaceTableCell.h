@@ -21,12 +21,10 @@
 
 #pragma once
 
-#if HAVE(ACCESSIBILITY)
+#if ENABLE(ACCESSIBILITY) && USE(ATK)
 
 #include <atk/atk.h>
 
-#if ATK_CHECK_VERSION(2,11,90)
 void webkitAccessibleTableCellInterfaceInit(AtkTableCellIface*);
-#endif
 
-#endif // HAVE(ACCESSIBILITY)
+#endif // ENABLE(ACCESSIBILITY) && USE(ATK)

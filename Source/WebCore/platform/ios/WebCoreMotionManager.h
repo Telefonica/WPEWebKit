@@ -23,40 +23,38 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WebCoreMotionManager_h
-#define WebCoreMotionManager_h
+#if PLATFORM(IOS_FAMILY) && ENABLE(DEVICE_ORIENTATION)
 
-#import "DeviceMotionClientIOS.h"
-#import "DeviceOrientationClientIOS.h"
 #import <CoreLocation/CoreLocation.h>
-#import <wtf/HashCountedSet.h>
+#import <wtf/RetainPtr.h>
+#import <wtf/WeakHashSet.h>
 
-#if PLATFORM(IOS)
+constexpr float kMotionUpdateInterval = 1.0f / 60.0f;
+@class CMMotionManager;
 
-#import <CoreMotion/CoreMotion.h>
+namespace WebCore {
+class DeviceMotionClientIOS;
+class MotionManagerClient;
+}
 
-const float kMotionUpdateInterval = 1.0f / 60.0f;
-
-@interface WebCoreMotionManager : NSObject {
-    CMMotionManager* m_motionManager;
-    CLLocationManager* m_locationManager;
-    HashSet<WebCore::DeviceMotionClientIOS*> m_deviceMotionClients;
-    HashSet<WebCore::DeviceOrientationClientIOS*> m_deviceOrientationClients;
-    NSTimer* m_updateTimer;
+WEBCORE_EXPORT @interface WebCoreMotionManager : NSObject {
+    RetainPtr<CMMotionManager> m_motionManager;
+    RetainPtr<CLLocationManager> m_locationManager;
+    WeakHashSet<WebCore::MotionManagerClient> m_deviceMotionClients;
+    WeakHashSet<WebCore::MotionManagerClient> m_deviceOrientationClients;
+    RetainPtr<NSTimer> m_updateTimer;
     BOOL m_gyroAvailable;
     BOOL m_headingAvailable;
     BOOL m_initialized;
 }
 
 + (WebCoreMotionManager *)sharedManager;
-- (void)addMotionClient:(WebCore::DeviceMotionClientIOS *)client;
-- (void)removeMotionClient:(WebCore::DeviceMotionClientIOS *)client;
-- (void)addOrientationClient:(WebCore::DeviceOrientationClientIOS *)client;
-- (void)removeOrientationClient:(WebCore::DeviceOrientationClientIOS *)client;
+- (void)addMotionClient:(WebCore::MotionManagerClient *)client;
+- (void)removeMotionClient:(WebCore::MotionManagerClient *)client;
+- (void)addOrientationClient:(WebCore::MotionManagerClient *)client;
+- (void)removeOrientationClient:(WebCore::MotionManagerClient *)client;
 - (BOOL)gyroAvailable;
 - (BOOL)headingAvailable;
 @end
 
-#endif
-
-#endif // WebCoreMotionManager_h
+#endif // PLATFORM(IOS_FAMILY) && ENABLE(DEVICE_ORIENTATION)

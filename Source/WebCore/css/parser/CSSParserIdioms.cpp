@@ -40,18 +40,11 @@ bool isValueAllowedInMode(unsigned short id, CSSParserMode mode)
         return isUASheetBehavior(mode);
     case CSSValueWebkitFocusRingColor:
         return isUASheetBehavior(mode) || isQuirksModeBehavior(mode);
+    case CSSValueInternalThCenter:
+        return isUASheetBehavior(mode);
     default:
         return true;
     }
-}
-
-URL completeURL(const CSSParserContext& context, const String& url)
-{
-    if (url.isNull())
-        return URL();
-    if (context.charset.isEmpty())
-        return URL(context.baseURL, url);
-    return URL(context.baseURL, url, context.charset);
 }
 
 } // namespace WebCore

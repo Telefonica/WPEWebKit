@@ -25,19 +25,23 @@
 
 WI.ConsoleTabContentView = class ConsoleTabContentView extends WI.ContentBrowserTabContentView
 {
-    constructor(identifier)
+    constructor()
     {
-        let {image, title} = WI.ConsoleTabContentView.tabInfo();
-        let tabBarItem = new WI.GeneralTabBarItem(image, title);
+        super(ConsoleTabContentView.tabInfo(), {
+            hideBackForwardButtons: true,
+            disableBackForwardNavigation: true,
+            flexibleNavigationItem: new WI.NavigationItem,
+        });
 
-        super(identifier || "console", "console", tabBarItem, null, null, true);
+        this._wasShowingSplitConsole = false;
     }
 
     static tabInfo()
     {
         return {
+            identifier: ConsoleTabContentView.Type,
             image: "Images/Console.svg",
-            title: WI.UIString("Console"),
+            displayName: WI.UIString("Console", "Console Tab Name", "Name of Console Tab"),
         };
     }
 
@@ -48,23 +52,28 @@ WI.ConsoleTabContentView = class ConsoleTabContentView extends WI.ContentBrowser
         return WI.ConsoleTabContentView.Type;
     }
 
-    shown()
+    attached()
     {
-        super.shown();
+        super.attached();
+
+        this._wasShowingSplitConsole = WI.isShowingSplitConsole();
+        if (this._wasShowingSplitConsole)
+            WI.hideSplitConsole();
+
+        this.contentBrowser.showContentView(WI.consoleContentView);
+        WI.consoleContentView.dispatchEventToListeners(WI.ContentView.Event.NavigationItemsDidChange);
 
         WI.consoleContentView.prompt.focus();
 
-        if (this.contentBrowser.currentContentView === WI.consoleContentView)
-            return;
-
-        // Be sure to close the view in the split content browser before showing it in the
-        // tab content browser. We can only show a content view in one browser at a time.
-        if (WI.consoleContentView.parentContainer)
-            WI.consoleContentView.parentContainer.closeContentView(WI.consoleContentView);
-
-        this.contentBrowser.showContentView(WI.consoleContentView);
-
         console.assert(this.contentBrowser.currentContentView === WI.consoleContentView);
+    }
+
+    detached()
+    {
+        super.detached();
+
+        if (this._wasShowingSplitConsole)
+            WI.showSplitConsole();
     }
 
     showRepresentedObject(representedObject, cookie)

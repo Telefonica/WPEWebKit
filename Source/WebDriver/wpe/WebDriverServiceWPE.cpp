@@ -32,76 +32,120 @@
 
 namespace WebDriver {
 
+void WebDriverService::platformInit()
+{
+}
+
 Capabilities WebDriverService::platformCapabilities()
 {
     Capabilities capabilities;
-    capabilities.platformName = String("linux");
+    capabilities.platformName = String("linux"_s);
     capabilities.setWindowRect = false;
     return capabilities;
 }
 
-bool WebDriverService::platformValidateCapability(const String& name, const RefPtr<JSON::Value>& value) const
+bool WebDriverService::platformValidateCapability(const String& name, const Ref<JSON::Value>& value) const
 {
-    if (name != "wpe:browserOptions")
+    if (name != "wpe:browserOptions"_s)
         return true;
 
-    RefPtr<JSON::Object> browserOptions;
-    if (!value->asObject(browserOptions))
+    auto browserOptions = value->asObject();
+    if (!browserOptions)
         return false;
 
     if (browserOptions->isNull())
         return true;
 
     // If browser options are provided, binary is required.
-    String binary;
-    if (!browserOptions->getString(ASCIILiteral("binary"), binary))
+    auto binary = browserOptions->getString("binary"_s);
+    if (!binary)
         return false;
 
-    RefPtr<JSON::Value> browserArgumentsValue;
-    RefPtr<JSON::Array> browserArguments;
-    if (browserOptions->getValue(ASCIILiteral("args"), browserArgumentsValue) && !browserArgumentsValue->asArray(browserArguments))
-        return false;
-
-    unsigned browserArgumentsLength = browserArguments->length();
-    for (unsigned i = 0; i < browserArgumentsLength; ++i) {
-        RefPtr<JSON::Value> value = browserArguments->get(i);
-        String argument;
-        if (!value->asString(argument))
+    if (auto browserArgumentsValue = browserOptions->getValue("args"_s)) {
+        auto browserArguments = browserArgumentsValue->asArray();
+        if (!browserArguments)
             return false;
+
+        unsigned browserArgumentsLength = browserArguments->length();
+        for (unsigned i = 0; i < browserArgumentsLength; ++i) {
+            auto argument = browserArguments->get(i)->asString();
+            if (!argument)
+                return false;
+        }
+    }
+
+    if (auto certificatesValue = browserOptions->getValue("certificates"_s)) {
+        auto certificates = certificatesValue->asArray();
+        if (!certificates)
+            return false;
+
+        unsigned certificatesLength = certificates->length();
+        for (unsigned i = 0; i < certificatesLength; ++i) {
+            auto certificate = certificates->get(i)->asObject();
+            if (!certificate)
+                return false;
+
+            auto host = certificate->getString("host"_s);
+            if (!host)
+                return false;
+
+            auto certificateFile = certificate->getString("certificateFile"_s);
+            if (!certificateFile)
+                return false;
+        }
     }
 
     return true;
 }
 
-bool WebDriverService::platformMatchCapability(const String&, const RefPtr<JSON::Value>&) const
+bool WebDriverService::platformMatchCapability(const String&, const Ref<JSON::Value>&) const
 {
     return true;
 }
 
 void WebDriverService::platformParseCapabilities(const JSON::Object& matchedCapabilities, Capabilities& capabilities) const
 {
-    capabilities.browserBinary = String("dyz");
-    capabilities.browserArguments = Vector<String> { ASCIILiteral("--automation") };
+    capabilities.browserBinary = String("MiniBrowser"_s);
+    capabilities.browserArguments = Vector<String> { "--automation"_s };
 
-    RefPtr<JSON::Object> browserOptions;
-    if (!matchedCapabilities.getObject(ASCIILiteral("wpe:browserOptions"), browserOptions))
+    auto browserOptions = matchedCapabilities.getObject("wpe:browserOptions"_s);
+    if (!browserOptions)
         return;
 
-    String browserBinary;
-    if (browserOptions->getString(ASCIILiteral("binary"), browserBinary))
+    auto browserBinary = browserOptions->getString("binary"_s);
+    if (!!browserBinary) {
         capabilities.browserBinary = browserBinary;
+        capabilities.browserArguments = std::nullopt;
+    }
 
-    RefPtr<JSON::Array> browserArguments;
-    if (browserOptions->getArray(ASCIILiteral("args"), browserArguments) && browserArguments->length()) {
+    auto browserArguments = browserOptions->getArray("args"_s);
+    if (browserArguments && browserArguments->length()) {
         unsigned browserArgumentsLength = browserArguments->length();
         capabilities.browserArguments = Vector<String>();
         capabilities.browserArguments->reserveInitialCapacity(browserArgumentsLength);
         for (unsigned i = 0; i < browserArgumentsLength; ++i) {
-            RefPtr<JSON::Value> value = browserArguments->get(i);
-            String argument;
-            value->asString(argument);
+            auto argument = browserArguments->get(i)->asString();
             ASSERT(!argument.isNull());
             capabilities.browserArguments->uncheckedAppend(WTFMove(argument));
+        }
+    }
+
+    auto certificates = browserOptions->getArray("certificates"_s);
+    if (certificates && certificates->length()) {
+        unsigned certificatesLength = certificates->length();
+        capabilities.certificates = Vector<std::pair<String, String>>();
+        capabilities.certificates->reserveInitialCapacity(certificatesLength);
+        for (unsigned i = 0; i < certificatesLength; ++i) {
+            auto certificate = certificates->get(i)->asObject();
+            ASSERT(certificate);
+
+            auto host = certificate->getString("host"_s);
+            ASSERT(!host.isNull());
+
+            auto certificateFile = certificate->getString("certificateFile"_s);
+            ASSERT(!certificateFile.isNull());
+
+            capabilities.certificates->uncheckedAppend({ WTFMove(host), WTFMove(certificateFile) });
         }
     }
 }

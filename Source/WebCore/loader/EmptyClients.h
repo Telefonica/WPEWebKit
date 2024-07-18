@@ -40,6 +40,7 @@ namespace WebCore {
 
 class DiagnosticLoggingClient;
 class EditorClient;
+class HTMLImageElement;
 class PageConfiguration;
 
 class EmptyChromeClient : public ChromeClient {
@@ -61,7 +62,7 @@ class EmptyChromeClient : public ChromeClient {
     void focusedElementChanged(Element*) final { }
     void focusedFrameChanged(Frame*) final { }
 
-    Page* createWindow(Frame&, const FrameLoadRequest&, const WindowFeatures&, const NavigationAction&) final { return nullptr; }
+    Page* createWindow(Frame&, const WindowFeatures&, const NavigationAction&) final { return nullptr; }
     void show() final { }
 
     bool canRunModal() final { return false; }
@@ -82,11 +83,12 @@ class EmptyChromeClient : public ChromeClient {
     void setResizable(bool) final { }
 
     void addMessageToConsole(MessageSource, MessageLevel, const String&, unsigned, unsigned, const String&) final { }
+    void addMessageWithArgumentsToConsole(MessageSource, MessageLevel, const String&, Span<const String>, unsigned, unsigned, const String&) final { }
 
     bool canRunBeforeUnloadConfirmPanel() final { return false; }
     bool runBeforeUnloadConfirmPanel(const String&, Frame&) final { return true; }
 
-    void closeWindowSoon() final { }
+    void closeWindow() final { }
 
     void runJavaScriptAlert(Frame&, const String&) final { }
     bool runJavaScriptConfirm(Frame&, const String&) final { return false; }
@@ -101,31 +103,30 @@ class EmptyChromeClient : public ChromeClient {
 
     KeyboardUIMode keyboardUIMode() final { return KeyboardAccessDefault; }
 
+    bool hoverSupportedByPrimaryPointingDevice() const final { return false; };
+    bool hoverSupportedByAnyAvailablePointingDevice() const final { return false; }
+    std::optional<PointerCharacteristics> pointerCharacteristicsOfPrimaryPointingDevice() const final { return std::nullopt; };
+    OptionSet<PointerCharacteristics> pointerCharacteristicsOfAllAvailablePointingDevices() const final { return { }; }
+
     void invalidateRootView(const IntRect&) final { }
     void invalidateContentsAndRootView(const IntRect&) override { }
     void invalidateContentsForSlowScroll(const IntRect&) final { }
     void scroll(const IntSize&, const IntRect&, const IntRect&) final { }
 
-#if USE(COORDINATED_GRAPHICS)
-    void delegatedScrollRequested(const IntPoint&) final { }
-#endif
-
     IntPoint screenToRootView(const IntPoint& p) const final { return p; }
     IntRect rootViewToScreen(const IntRect& r) const final { return r; }
-
-#if PLATFORM(IOS)
     IntPoint accessibilityScreenToRootView(const IntPoint& p) const final { return p; };
     IntRect rootViewToAccessibilityScreen(const IntRect& r) const final { return r; };
-#endif
+
+    void didFinishLoadingImageForElement(HTMLImageElement&) final { }
 
     PlatformPageClient platformPageClient() const final { return 0; }
     void contentsSizeChanged(Frame&, const IntSize&) const final { }
+    void intrinsicContentsSizeChanged(const IntSize&) const final { }
 
-    void mouseDidMoveOverElement(const HitTestResult&, unsigned) final { }
+    void mouseDidMoveOverElement(const HitTestResult&, unsigned, const String&, TextDirection) final { }
 
-    void setToolTip(const String&, TextDirection) final { }
-
-    void print(Frame&) final { }
+    void print(Frame&, const StringWithDirection&) final { }
 
     void exceededDatabaseQuota(Frame&, const String&, DatabaseDetails) final { }
 
@@ -136,23 +137,40 @@ class EmptyChromeClient : public ChromeClient {
     std::unique_ptr<ColorChooser> createColorChooser(ColorChooserClient&, const Color&) final;
 #endif
 
-    void runOpenPanel(Frame&, FileChooser&) final;
-    void loadIconForFiles(const Vector<String>&, FileIconLoader&) final { }
-
-    void elementDidFocus(Element&) final { }
-    void elementDidBlur(Element&) final { }
-
-#if !PLATFORM(IOS)
-    void setCursor(const Cursor&) final { }
-    void setCursorHiddenUntilMouseMoves(bool) final { }
+#if ENABLE(DATALIST_ELEMENT)
+    std::unique_ptr<DataListSuggestionPicker> createDataListSuggestionPicker(DataListSuggestionsClient&) final;
+    bool canShowDataListSuggestionLabels() const final { return false; }
 #endif
 
-    void scrollRectIntoView(const IntRect&) const final { }
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+    std::unique_ptr<DateTimeChooser> createDateTimeChooser(DateTimeChooserClient&) final;
+#endif
+
+#if ENABLE(APP_HIGHLIGHTS)
+    void storeAppHighlight(AppHighlight&&) const final;
+#endif
+
+    void setTextIndicator(const TextIndicatorData&) const final;
+
+    DisplayRefreshMonitorFactory* displayRefreshMonitorFactory() const final;
+
+    void runOpenPanel(Frame&, FileChooser&) final;
+    void showShareSheet(ShareDataWithParsedURL&, CompletionHandler<void(bool)>&&) final;
+    void loadIconForFiles(const Vector<String>&, FileIconLoader&) final { }
+
+    void elementDidFocus(Element&, const FocusOptions&) final { }
+    void elementDidBlur(Element&) final { }
+
+    void setCursor(const Cursor&) final { }
+    void setCursorHiddenUntilMouseMoves(bool) final { }
+
+    void scrollContainingScrollViewsToRevealRect(const IntRect&) const final { }
+    void scrollMainFrameToRevealRect(const IntRect&) const final { }
 
     void attachRootGraphicsLayer(Frame&, GraphicsLayer*) final { }
-    void attachViewOverlayGraphicsLayer(Frame&, GraphicsLayer*) final { }
+    void attachViewOverlayGraphicsLayer(GraphicsLayer*) final { }
     void setNeedsOneShotDrawingSynchronization() final { }
-    void scheduleCompositingLayerFlush() final { }
+    void triggerRenderingUpdate() final { }
 
 #if PLATFORM(WIN)
     void setLastSetCursorToCurrentCursor() final { }
@@ -164,11 +182,10 @@ class EmptyChromeClient : public ChromeClient {
     void didPreventDefaultForEvent() final { }
 #endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     void didReceiveMobileDocType(bool) final { }
     void setNeedsScrollNotifications(Frame&, bool) final { }
-    void observedContentChange(Frame&) final { }
-    void clearContentChangeObservers(Frame&) final { }
+    void didFinishContentChangeObserving(Frame&, WKContentChange) final { }
     void notifyRevealedSelectionByScrollingFrame(Frame&) final { }
     void didLayout(LayoutType) final { }
     void didStartOverflowScroll() final { }
@@ -180,15 +197,17 @@ class EmptyChromeClient : public ChromeClient {
     void addOrUpdateScrollingLayer(Node*, PlatformLayer*, PlatformLayer*, const IntSize&, bool, bool) final { }
     void removeScrollingLayer(Node*, PlatformLayer*, PlatformLayer*) final { }
 
-    void webAppOrientationsUpdated() final { };
-    void showPlaybackTargetPicker(bool) final { };
-#endif // PLATFORM(IOS)
+    void webAppOrientationsUpdated() final { }
+    void showPlaybackTargetPicker(bool, RouteSharingPolicy, const String&) final { }
+
+    bool showDataDetectorsUIForElement(const Element&, const Event&) final { return false; }
+#endif // PLATFORM(IOS_FAMILY)
 
 #if ENABLE(ORIENTATION_EVENTS)
     int deviceOrientation() const final { return 0; }
 #endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     bool isStopping() final { return false; }
 #endif
 
@@ -196,14 +215,17 @@ class EmptyChromeClient : public ChromeClient {
     
     bool isEmptyChromeClient() const final { return true; }
 
-    void didAssociateFormControls(const Vector<RefPtr<Element>>&) final { }
+    void didAssociateFormControls(const Vector<RefPtr<Element>>&, Frame&) final { }
     bool shouldNotifyOnFormChanges() final { return false; }
 
     RefPtr<Icon> createIconForFiles(const Vector<String>& /* filenames */) final { return nullptr; }
+
+    void requestCookieConsent(CompletionHandler<void(CookieConsentDecisionResult)>&&) final;
+    void classifyModalContainerControls(Vector<String>&&, CompletionHandler<void(Vector<ModalContainerControlType>&&)>&&) final;
+    void decidePolicyForModalContainer(OptionSet<ModalContainerControlType>, CompletionHandler<void(ModalContainerDecision)>&&) final;
 };
 
-void fillWithEmptyClients(PageConfiguration&);
-UniqueRef<EditorClient> createEmptyEditorClient();
 DiagnosticLoggingClient& emptyDiagnosticLoggingClient();
+WEBCORE_EXPORT PageConfiguration pageConfigurationWithEmptyClients(PAL::SessionID);
 
 }

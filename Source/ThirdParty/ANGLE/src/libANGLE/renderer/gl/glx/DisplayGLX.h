@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2015 The ANGLE Project Authors. All rights reserved.
+// Copyright 2015 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -10,30 +10,21 @@
 #define LIBANGLE_RENDERER_GL_GLX_DISPLAYGLX_H_
 
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "common/Optional.h"
 #include "libANGLE/renderer/gl/DisplayGL.h"
+#include "libANGLE/renderer/gl/RendererGL.h"
 #include "libANGLE/renderer/gl/glx/FunctionsGLX.h"
 
 namespace rx
 {
 
 class FunctionsGLX;
+class WorkerContext;
 
-// State-tracking data for the swap control to allow DisplayGLX to remember per
-// drawable information for swap control.
-struct SwapControlData
-{
-    SwapControlData();
-
-    // Set by the drawable
-    int targetSwapInterval;
-
-    // DisplayGLX-side state-tracking
-    int maxSwapInterval;
-    int currentSwapInterval;
-};
+struct SwapControlData;
 
 class DisplayGLX : public DisplayGL
 {
@@ -43,6 +34,11 @@ class DisplayGLX : public DisplayGL
 
     egl::Error initialize(egl::Display *display) override;
     void terminate() override;
+
+    egl::Error makeCurrent(egl::Display *display,
+                           egl::Surface *drawSurface,
+                           egl::Surface *readSurface,
+                           gl::Context *context) override;
 
     SurfaceImpl *createWindowSurface(const egl::SurfaceState &state,
                                      EGLNativeWindowType window,
@@ -57,27 +53,35 @@ class DisplayGLX : public DisplayGL
                                      NativePixmapType nativePixmap,
                                      const egl::AttributeMap &attribs) override;
 
+    egl::Error validatePixmap(const egl::Config *config,
+                              EGLNativePixmapType pixmap,
+                              const egl::AttributeMap &attributes) const override;
+
+    ContextImpl *createContext(const gl::State &state,
+                               gl::ErrorSet *errorSet,
+                               const egl::Config *configuration,
+                               const gl::Context *shareContext,
+                               const egl::AttributeMap &attribs) override;
+
     egl::ConfigSet generateConfigs() override;
 
     bool testDeviceLost() override;
-    egl::Error restoreLostDevice() override;
+    egl::Error restoreLostDevice(const egl::Display *display) override;
 
     bool isValidNativeWindow(EGLNativeWindowType window) const override;
 
-    egl::Error getDevice(DeviceImpl **device) override;
+    egl::Error waitClient(const gl::Context *context) override;
+    egl::Error waitNative(const gl::Context *context, EGLint engine) override;
 
-    std::string getVendorString() const override;
+    gl::Version getMaxSupportedESVersion() const override;
 
-    egl::Error waitClient() const override;
-    egl::Error waitNative(EGLint engine,
-                          egl::Surface *drawSurface,
-                          egl::Surface *readSurface) const override;
-
-    // Synchronizes with the X server, if the display has been opened by ANGLE.
+    // Synchronizes with the X server.
     // Calling this is required at the end of every functions that does buffered
     // X calls (not for glX calls) otherwise there might be race conditions
     // between the application's display and ANGLE's one.
-    void syncXCommands() const;
+    // Calling this only syncs if ANGLE opened the display, or if alwaysSync
+    // is true.
+    void syncXCommands(bool alwaysSync) const;
 
     // Depending on the supported GLX extension, swap interval can be set
     // globally or per drawable. This function will make sure the drawable's
@@ -85,11 +89,20 @@ class DisplayGLX : public DisplayGL
     // acts as expected.
     void setSwapInterval(glx::Drawable drawable, SwapControlData *data);
 
-    bool isValidWindowVisualId(unsigned long visualId) const;
+    bool isWindowVisualIdSpecified() const;
+    bool isMatchingWindowVisualId(unsigned long visualId) const;
+
+    WorkerContext *createWorkerContext(std::string *infoLog);
+
+    void initializeFrontendFeatures(angle::FrontendFeatures *features) const override;
+
+    void populateFeatureList(angle::FeatureList *features) override;
+
+    RendererGL *getRenderer() const override;
+
+    bool isX11() const override;
 
   private:
-    const FunctionsGL *getFunctionsGL() const override;
-
     egl::Error initializeContext(glx::FBConfig config,
                                  const egl::AttributeMap &eglAttributes,
                                  glx::Context *context);
@@ -97,21 +110,30 @@ class DisplayGLX : public DisplayGL
     void generateExtensions(egl::DisplayExtensions *outExtensions) const override;
     void generateCaps(egl::Caps *outCaps) const override;
 
+    egl::Error makeCurrentSurfaceless(gl::Context *context) override;
+
     int getGLXFBConfigAttrib(glx::FBConfig config, int attrib) const;
     egl::Error createContextAttribs(glx::FBConfig,
                                     const Optional<gl::Version> &version,
                                     int profileMask,
-                                    glx::Context *context) const;
+                                    glx::Context *context);
 
-    FunctionsGL *mFunctionsGL;
+    std::shared_ptr<RendererGL> mRenderer;
 
     std::map<int, glx::FBConfig> configIdToGLXConfig;
 
     EGLint mRequestedVisual;
     glx::FBConfig mContextConfig;
+    std::vector<int> mAttribs;
+    XVisualInfo *mVisuals;
     glx::Context mContext;
+    glx::Context mSharedContext;
+    angle::HashMap<std::thread::id, glx::Context> mCurrentNativeContexts;
+
     // A pbuffer the context is current on during ANGLE initialization
-    glx::Pbuffer mDummyPbuffer;
+    glx::Pbuffer mInitPbuffer;
+
+    std::vector<glx::Pbuffer> mWorkerPbufferPool;
 
     bool mUsesNewXDisplay;
     bool mIsMesa;
@@ -120,6 +142,7 @@ class DisplayGLX : public DisplayGL
     bool mHasARBCreateContextProfile;
     bool mHasARBCreateContextRobustness;
     bool mHasEXTCreateContextES2Profile;
+    bool mHasNVRobustnessVideoMemoryPurge;
 
     enum class SwapControl
     {
@@ -133,11 +156,13 @@ class DisplayGLX : public DisplayGL
     int mMaxSwapInterval;
     int mCurrentSwapInterval;
 
+    glx::Drawable mCurrentDrawable;
+
     FunctionsGLX mGLX;
     Display *mXDisplay;
     egl::Display *mEGLDisplay;
 };
 
-}
+}  // namespace rx
 
-#endif // LIBANGLE_RENDERER_GL_GLX_DISPLAYGLX_H_
+#endif  // LIBANGLE_RENDERER_GL_GLX_DISPLAYGLX_H_

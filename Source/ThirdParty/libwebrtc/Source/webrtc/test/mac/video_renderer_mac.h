@@ -8,11 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_TEST_MAC_VIDEO_RENDERER_MAC_H_
-#define WEBRTC_TEST_MAC_VIDEO_RENDERER_MAC_H_
+#ifndef TEST_MAC_VIDEO_RENDERER_MAC_H_
+#define TEST_MAC_VIDEO_RENDERER_MAC_H_
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/test/gl/gl_renderer.h"
+#include "test/gl/gl_renderer.h"
 
 @class CocoaWindow;
 
@@ -24,6 +23,9 @@ class MacRenderer : public GlRenderer {
   MacRenderer();
   virtual ~MacRenderer();
 
+  MacRenderer(const MacRenderer&) = delete;
+  MacRenderer& operator=(const MacRenderer&) = delete;
+
   bool Init(const char* window_title, int width, int height);
 
   // Implements GlRenderer.
@@ -31,10 +33,8 @@ class MacRenderer : public GlRenderer {
 
  private:
   CocoaWindow* window_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(MacRenderer);
 };
-}  // test
-}  // webrtc
+}  // namespace test
+}  // namespace webrtc
 
-#endif  // WEBRTC_TEST_MAC_VIDEO_RENDERER_MAC_H_
+#endif  // TEST_MAC_VIDEO_RENDERER_MAC_H_

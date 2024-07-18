@@ -23,16 +23,23 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+@class UIEvent;
 @class UIView;
 
 @protocol WKFormPeripheral
+- (BOOL)isEditing;
 - (void)beginEditing;
 - (void)endEditing;
 - (UIView *)assistantView;
+@optional
+- (BOOL)handleKeyEvent:(UIEvent *)event;
+@property (nonatomic) BOOL singleTapShouldEndEditing;
 @end
 
 @protocol WKFormControl
 - (UIView *)controlView;
 - (void)controlBeginEditing;
 - (void)controlEndEditing;
+@optional
+- (BOOL)controlHandleKeyEvent:(UIEvent *)event;
 @end

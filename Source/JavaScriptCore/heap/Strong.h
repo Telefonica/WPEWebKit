@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,19 +25,21 @@
 
 #pragma once
 
-#include <wtf/Assertions.h>
 #include "Handle.h"
 #include "HandleSet.h"
+#include "JSLock.h"
+#include "StrongForward.h"
+#include <wtf/Assertions.h>
 
 namespace JSC {
 
 class VM;
 
 // A strongly referenced handle that prevents the object it points to from being garbage collected.
-template <typename T> class Strong : public Handle<T> {
+template <typename T, ShouldStrongDestructorGrabLock shouldStrongDestructorGrabLock> class Strong : public Handle<T> {
     using Handle<T>::slot;
     using Handle<T>::setSlot;
-    template <typename U> friend class Strong;
+    template <typename U, ShouldStrongDestructorGrabLock> friend class Strong;
 
 public:
     typedef typename Handle<T>::ExternalType ExternalType;
@@ -112,7 +114,7 @@ public:
             return *this;
         }
 
-        set(*HandleSet::heapFor(other.slot())->vm(), other.get());
+        set(HandleSet::heapFor(other.slot())->vm(), other.get());
         return *this;
     }
 
@@ -120,8 +122,16 @@ public:
     {
         if (!slot())
             return;
-        HandleSet::heapFor(slot())->deallocate(slot());
-        setSlot(0);
+
+        auto* heap = HandleSet::heapFor(slot());
+        if (shouldStrongDestructorGrabLock == ShouldStrongDestructorGrabLock::Yes) {
+            JSLockHolder holder(heap->vm());
+            heap->deallocate(slot());
+            setSlot(nullptr);
+        } else {
+            heap->deallocate(slot());
+            setSlot(nullptr);
+        }
     }
 
 private:
@@ -131,7 +141,7 @@ private:
     {
         ASSERT(slot());
         JSValue value = HandleTypes<T>::toJSValue(externalType);
-        HandleSet::heapFor(slot())->writeBarrier(slot(), value);
+        HandleSet::heapFor(slot())->template writeBarrier<std::is_base_of_v<JSCell, T>>(slot(), value);
         *slot() = value;
     }
 };
@@ -146,7 +156,7 @@ template<class T> inline void swap(Strong<T>& a, Strong<T>& b)
 namespace WTF {
 
 template<typename T> struct VectorTraits<JSC::Strong<T>> : SimpleClassVectorTraits {
-    static const bool canCompareWithMemcmp = false;
+    static constexpr bool canCompareWithMemcmp = false;
 };
 
 template<typename P> struct HashTraits<JSC::Strong<P>> : SimpleClassHashTraits<JSC::Strong<P>> { };

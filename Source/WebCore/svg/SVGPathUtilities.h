@@ -1,6 +1,6 @@
 /*
  * Copyright (C) Research In Motion Limited 2010, 2012. All rights reserved.
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -28,36 +28,37 @@ namespace WebCore {
 class FloatPoint;
 class Path;
 class SVGPathByteStream;
-class SVGPathElement;
 class SVGPathSeg;
-class SVGPathSegListValues;
-
-// String/SVGPathByteStream -> Path
-bool buildPathFromString(const String&, Path&);
-bool buildPathFromByteStream(const SVGPathByteStream&, Path&);
+class SVGPathSegList;
 
 // Path -> String
 String buildStringFromPath(const Path&);
 
-// SVGPathSegListValues/String -> SVGPathByteStream
-bool buildSVGPathByteStreamFromSVGPathSegListValues(const SVGPathSegListValues&, SVGPathByteStream& result, PathParsingMode);
-bool appendSVGPathByteStreamFromSVGPathSeg(RefPtr<SVGPathSeg>&&, SVGPathByteStream&, PathParsingMode);
+// String/SVGPathByteStream -> Path
+Path buildPathFromString(const String&);
+Path buildPathFromByteStream(const SVGPathByteStream&);
+
+// SVGPathSegList/String -> SVGPathByteStream
+bool buildSVGPathByteStreamFromSVGPathSegList(const SVGPathSegList&, SVGPathByteStream& result, PathParsingMode, bool checkForInitialMoveTo = true);
 bool buildSVGPathByteStreamFromString(const String&, SVGPathByteStream&, PathParsingMode);
 
-// SVGPathByteStream/SVGPathSegListValues -> String
-bool buildStringFromByteStream(const SVGPathByteStream&, String&, PathParsingMode);
-bool buildStringFromSVGPathSegListValues(const SVGPathSegListValues&, String&, PathParsingMode);
+// SVGPathByteStream -> String
+bool buildStringFromByteStream(const SVGPathByteStream&, String&, PathParsingMode, bool checkForInitialMoveTo = true);
 
-// SVGPathByteStream -> SVGPathSegListValues
-bool buildSVGPathSegListValuesFromByteStream(const SVGPathByteStream&, SVGPathElement&, SVGPathSegListValues&, PathParsingMode);
+// SVGPathByteStream -> SVGPathSegList
+bool buildSVGPathSegListFromByteStream(const SVGPathByteStream&, SVGPathSegList&, PathParsingMode);
 
 bool canBlendSVGPathByteStreams(const SVGPathByteStream& from, const SVGPathByteStream& to);
 
 bool buildAnimatedSVGPathByteStream(const SVGPathByteStream& from, const SVGPathByteStream& to, SVGPathByteStream& result, float progress);
 bool addToSVGPathByteStream(SVGPathByteStream& streamToAppendTo, const SVGPathByteStream& from, unsigned repeatCount = 1);
 
-bool getSVGPathSegAtLengthFromSVGPathByteStream(const SVGPathByteStream&, float length, unsigned& pathSeg);
-bool getTotalLengthOfSVGPathByteStream(const SVGPathByteStream&, float& totalLength);
-bool getPointAtLengthOfSVGPathByteStream(const SVGPathByteStream&, float length, FloatPoint&);
+unsigned getSVGPathSegAtLengthFromSVGPathByteStream(const SVGPathByteStream&, float length);
+float getTotalLengthOfSVGPathByteStream(const SVGPathByteStream&);
+FloatPoint getPointAtLengthOfSVGPathByteStream(const SVGPathByteStream&, float length);
+
+// Convert an SVG path byte stream containing a mixed of relative/absolute draw commands into another byte stream
+// such that all draw commands are absolute. Returns nullptr if an error occurs.
+std::unique_ptr<SVGPathByteStream> convertSVGPathByteStreamToAbsoluteCoordinates(const SVGPathByteStream&);
 
 } // namespace WebCore

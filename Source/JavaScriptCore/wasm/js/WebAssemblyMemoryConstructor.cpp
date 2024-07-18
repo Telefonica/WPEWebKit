@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,125 +28,146 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "FunctionPrototype.h"
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
+#include "JSGlobalObjectInlines.h"
+#include "JSObjectInlines.h"
 #include "JSWebAssemblyHelpers.h"
 #include "JSWebAssemblyMemory.h"
+#include "StructureInlines.h"
 #include "WasmMemory.h"
 #include "WasmPageCount.h"
 #include "WebAssemblyMemoryPrototype.h"
-#include <wtf/Optional.h>
 
 #include "WebAssemblyMemoryConstructor.lut.h"
 
 namespace JSC {
 
-const ClassInfo WebAssemblyMemoryConstructor::s_info = { "Function", &Base::s_info, &constructorTableWebAssemblyMemory, nullptr, CREATE_METHOD_TABLE(WebAssemblyMemoryConstructor) };
+const ClassInfo WebAssemblyMemoryConstructor::s_info = { "Function"_s, &Base::s_info, &constructorTableWebAssemblyMemory, nullptr, CREATE_METHOD_TABLE(WebAssemblyMemoryConstructor) };
+
+static JSC_DECLARE_HOST_FUNCTION(constructJSWebAssemblyMemory);
+static JSC_DECLARE_HOST_FUNCTION(callJSWebAssemblyMemory);
 
 /* Source for WebAssemblyMemoryConstructor.lut.h
  @begin constructorTableWebAssemblyMemory
  @end
  */
 
-static EncodedJSValue JSC_HOST_CALL constructJSWebAssemblyMemory(ExecState* exec)
+JSC_DEFINE_HOST_FUNCTION(constructJSWebAssemblyMemory, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     auto throwScope = DECLARE_THROW_SCOPE(vm);
-    if (exec->argumentCount() != 1)
-        return JSValue::encode(throwException(exec, throwScope, createTypeError(exec, ASCIILiteral("WebAssembly.Memory expects exactly one argument"))));
+
+    JSObject* newTarget = asObject(callFrame->newTarget());
+    Structure* webAssemblyMemoryStructure = JSC_GET_DERIVED_STRUCTURE(vm, webAssemblyMemoryStructure, newTarget, callFrame->jsCallee());
+    RETURN_IF_EXCEPTION(throwScope, { });
 
     JSObject* memoryDescriptor;
     {
-        JSValue argument = exec->argument(0);
+        JSValue argument = callFrame->argument(0);
         if (!argument.isObject())
-            return JSValue::encode(throwException(exec, throwScope, createTypeError(exec, ASCIILiteral("WebAssembly.Memory expects its first argument to be an object"))));
+            return JSValue::encode(throwException(globalObject, throwScope, createTypeError(globalObject, "WebAssembly.Memory expects its first argument to be an object"_s)));
         memoryDescriptor = jsCast<JSObject*>(argument);
     }
 
     Wasm::PageCount initialPageCount;
     {
-        Identifier initial = Identifier::fromString(&vm, "initial");
-        JSValue minSizeValue = memoryDescriptor->get(exec, initial);
+        Identifier initial = Identifier::fromString(vm, "initial"_s);
+        JSValue initSizeValue = memoryDescriptor->get(globalObject, initial);
         RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
-        uint32_t size = toNonWrappingUint32(exec, minSizeValue);
+        Identifier minimum = Identifier::fromString(vm, "minimum"_s);
+        JSValue minSizeValue = memoryDescriptor->get(globalObject, minimum);
+        RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
+        if (!minSizeValue.isUndefined() && !initSizeValue.isUndefined()) {
+            // Error because both specified.
+            return throwVMTypeError(globalObject, throwScope, "WebAssembly.Memory 'initial' and 'minimum' options are specified at the same time"_s);
+        }
+        if (!initSizeValue.isUndefined())
+            minSizeValue = initSizeValue;
+
+        uint32_t size = toNonWrappingUint32(globalObject, minSizeValue);
         RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
         if (!Wasm::PageCount::isValid(size))
-            return JSValue::encode(throwException(exec, throwScope, createRangeError(exec, ASCIILiteral("WebAssembly.Memory 'initial' page count is too large"))));
+            return JSValue::encode(throwException(globalObject, throwScope, createRangeError(globalObject, "WebAssembly.Memory 'initial' page count is too large"_s)));
+        if (Wasm::PageCount(size).bytes() > MAX_ARRAY_BUFFER_SIZE)
+            return JSValue::encode(throwException(globalObject, throwScope, createOutOfMemoryError(globalObject)));
         initialPageCount = Wasm::PageCount(size);
     }
 
     Wasm::PageCount maximumPageCount;
     {
-        Identifier maximum = Identifier::fromString(&vm, "maximum");
-        bool hasProperty = memoryDescriptor->hasProperty(exec, maximum);
+        // In WebIDL, "present" means that [[Get]] result is undefined, not [[HasProperty]] result.
+        // https://webidl.spec.whatwg.org/#idl-dictionaries
+        Identifier maximum = Identifier::fromString(vm, "maximum"_s);
+        JSValue maxSizeValue = memoryDescriptor->get(globalObject, maximum);
         RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
-        if (hasProperty) {
-            JSValue maxSizeValue = memoryDescriptor->get(exec, maximum);
-            RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
-            uint32_t size = toNonWrappingUint32(exec, maxSizeValue);
+        if (!maxSizeValue.isUndefined()) {
+            uint32_t size = toNonWrappingUint32(globalObject, maxSizeValue);
             RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
             if (!Wasm::PageCount::isValid(size))
-                return JSValue::encode(throwException(exec, throwScope, createRangeError(exec, ASCIILiteral("WebAssembly.Memory 'maximum' page count is too large"))));
+                return JSValue::encode(throwException(globalObject, throwScope, createRangeError(globalObject, "WebAssembly.Memory 'maximum' page count is too large"_s)));
             maximumPageCount = Wasm::PageCount(size);
 
             if (initialPageCount > maximumPageCount) {
-                return JSValue::encode(throwException(exec, throwScope,
-                    createRangeError(exec, ASCIILiteral("'maximum' page count must be than greater than or equal to the 'initial' page count"))));
+                return JSValue::encode(throwException(globalObject, throwScope,
+                    createRangeError(globalObject, "'maximum' page count must be than greater than or equal to the 'initial' page count"_s)));
             }
         }
     }
 
-    RefPtr<Wasm::Memory> memory = Wasm::Memory::create(vm, initialPageCount, maximumPageCount);
-    if (!memory)
-        return JSValue::encode(throwException(exec, throwScope, createOutOfMemoryError(exec)));
+    Wasm::MemorySharingMode sharingMode = Wasm::MemorySharingMode::Default;
+    if (Options::useSharedArrayBuffer()) {
+        JSValue sharedValue = memoryDescriptor->get(globalObject, Identifier::fromString(vm, "shared"_s));
+        RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
+        bool shared = sharedValue.toBoolean(globalObject);
+        RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
+        if (shared) {
+            if (!maximumPageCount)
+                return throwVMTypeError(globalObject, throwScope, "'maximum' page count must be defined if 'shared' is true"_s);
+            sharingMode = Wasm::MemorySharingMode::Shared;
+        }
+    }
 
-    auto* jsMemory = JSWebAssemblyMemory::create(exec, vm, exec->lexicalGlobalObject()->WebAssemblyMemoryStructure(), adoptRef(*memory.leakRef()));
+    auto* jsMemory = JSWebAssemblyMemory::tryCreate(globalObject, vm, webAssemblyMemoryStructure);
     RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
 
+    RefPtr<Wasm::Memory> memory = Wasm::Memory::tryCreate(vm, initialPageCount, maximumPageCount, sharingMode,
+        [&vm, jsMemory] (Wasm::Memory::GrowSuccess, Wasm::PageCount oldPageCount, Wasm::PageCount newPageCount) { jsMemory->growSuccessCallback(vm, oldPageCount, newPageCount); });
+    if (!memory)
+        return JSValue::encode(throwException(globalObject, throwScope, createOutOfMemoryError(globalObject)));
+
+    jsMemory->adopt(memory.releaseNonNull());
+    
     return JSValue::encode(jsMemory);
 }
 
-static EncodedJSValue JSC_HOST_CALL callJSWebAssemblyMemory(ExecState* exec)
+JSC_DEFINE_HOST_FUNCTION(callJSWebAssemblyMemory, (JSGlobalObject* globalObject, CallFrame*))
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     auto throwScope = DECLARE_THROW_SCOPE(vm);
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(exec, throwScope, "WebAssembly.Memory"));
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, throwScope, "WebAssembly.Memory"));
 }
 
 WebAssemblyMemoryConstructor* WebAssemblyMemoryConstructor::create(VM& vm, Structure* structure, WebAssemblyMemoryPrototype* thisPrototype)
 {
-    auto* constructor = new (NotNull, allocateCell<WebAssemblyMemoryConstructor>(vm.heap)) WebAssemblyMemoryConstructor(vm, structure);
+    auto* constructor = new (NotNull, allocateCell<WebAssemblyMemoryConstructor>(vm)) WebAssemblyMemoryConstructor(vm, structure);
     constructor->finishCreation(vm, thisPrototype);
     return constructor;
 }
 
 Structure* WebAssemblyMemoryConstructor::createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
 {
-    return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+    return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
 }
 
 void WebAssemblyMemoryConstructor::finishCreation(VM& vm, WebAssemblyMemoryPrototype* prototype)
 {
-    Base::finishCreation(vm, ASCIILiteral("Memory"));
+    Base::finishCreation(vm, 1, "Memory"_s, PropertyAdditionMode::WithoutStructureTransition);
     putDirectWithoutTransition(vm, vm.propertyNames->prototype, prototype, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly);
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum | PropertyAttribute::DontDelete);
 }
 
 WebAssemblyMemoryConstructor::WebAssemblyMemoryConstructor(VM& vm, Structure* structure)
-    : Base(vm, structure)
+    : Base(vm, structure, callJSWebAssemblyMemory, constructJSWebAssemblyMemory)
 {
-}
-
-ConstructType WebAssemblyMemoryConstructor::getConstructData(JSCell*, ConstructData& constructData)
-{
-    constructData.native.function = constructJSWebAssemblyMemory;
-    return ConstructType::Host;
-}
-
-CallType WebAssemblyMemoryConstructor::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = callJSWebAssemblyMemory;
-    return CallType::Host;
 }
 
 } // namespace JSC

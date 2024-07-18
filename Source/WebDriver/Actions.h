@@ -33,7 +33,7 @@ enum class MouseButton { None, Left, Middle, Right };
 enum class PointerType { Mouse, Pen, Touch };
 
 struct InputSource {
-    enum class Type { None, Key, Pointer };
+    enum class Type { None, Key, Pointer, Wheel };
 
     Type type;
     std::optional<PointerType> pointerType;
@@ -51,8 +51,8 @@ struct PointerOrigin {
 };
 
 struct Action {
-    enum class Type { None, Key, Pointer };
-    enum class Subtype { Pause, PointerUp, PointerDown, PointerMove, PointerCancel, KeyUp, KeyDown };
+    enum class Type { None, Key, Pointer, Wheel };
+    enum class Subtype { Pause, PointerUp, PointerDown, PointerMove, PointerCancel, KeyUp, KeyDown, Scroll };
 
     Action(const String& id, Type type, Subtype subtype)
         : id(id)
@@ -71,6 +71,8 @@ struct Action {
     std::optional<PointerOrigin> origin;
     std::optional<int64_t> x;
     std::optional<int64_t> y;
+    std::optional<int64_t> deltaX;
+    std::optional<int64_t> deltaY;
 
     std::optional<String> key;
 };

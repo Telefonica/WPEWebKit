@@ -8,20 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/neteq/audio_vector.h"
-
-#include <assert.h>
+#include "modules/audio_coding/neteq/audio_vector.h"
 
 #include <algorithm>
 #include <memory>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/typedefs.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
-AudioVector::AudioVector()
-    : AudioVector(kDefaultInitialSize) {
+AudioVector::AudioVector() : AudioVector(kDefaultInitialSize) {
   Clear();
 }
 
@@ -47,16 +43,15 @@ void AudioVector::CopyTo(AudioVector* copy_to) const {
   copy_to->end_index_ = Size();
 }
 
-void AudioVector::CopyTo(
-    size_t length, size_t position, int16_t* copy_to) const {
+void AudioVector::CopyTo(size_t length,
+                         size_t position,
+                         int16_t* copy_to) const {
   if (length == 0)
     return;
   length = std::min(length, Size() - position);
   const size_t copy_index = (begin_index_ + position) % capacity_;
-  const size_t first_chunk_length =
-      std::min(length, capacity_ - copy_index);
-  memcpy(copy_to, &array_[copy_index],
-         first_chunk_length * sizeof(int16_t));
+  const size_t first_chunk_length = std::min(length, capacity_ - copy_index);
+  memcpy(copy_to, &array_[copy_index], first_chunk_length * sizeof(int16_t));
   const size_t remaining_length = length - first_chunk_length;
   if (remaining_length > 0) {
     memcpy(&copy_to[first_chunk_length], array_.get(),
@@ -102,8 +97,9 @@ void AudioVector::PushBack(const AudioVector& append_this) {
   PushBack(append_this, append_this.Size(), 0);
 }
 
-void AudioVector::PushBack(
-    const AudioVector& append_this, size_t length, size_t position) {
+void AudioVector::PushBack(const AudioVector& append_this,
+                           size_t length,
+                           size_t position) {
   RTC_DCHECK_LE(position, append_this.Size());
   RTC_DCHECK_LE(length, append_this.Size() - position);
 
@@ -116,8 +112,8 @@ void AudioVector::PushBack(
 
   const size_t start_index =
       (append_this.begin_index_ + position) % append_this.capacity_;
-  const size_t first_chunk_length = std::min(
-      length, append_this.capacity_ - start_index);
+  const size_t first_chunk_length =
+      std::min(length, append_this.capacity_ - start_index);
   PushBack(&append_this.array_[start_index], first_chunk_length);
 
   const size_t remaining_length = length - first_chunk_length;
@@ -179,8 +175,7 @@ void AudioVector::InsertAt(const int16_t* insert_this,
   }
 }
 
-void AudioVector::InsertZerosAt(size_t length,
-                                size_t position) {
+void AudioVector::InsertZerosAt(size_t length, size_t position) {
   if (length == 0)
     return;
   // Cap the insert position at the current array length.
@@ -249,14 +244,14 @@ void AudioVector::OverwriteAt(const int16_t* insert_this,
 
 void AudioVector::CrossFade(const AudioVector& append_this,
                             size_t fade_length) {
-  // Fade length cannot be longer than the current vector or |append_this|.
-  assert(fade_length <= Size());
-  assert(fade_length <= append_this.Size());
+  // Fade length cannot be longer than the current vector or `append_this`.
+  RTC_DCHECK_LE(fade_length, Size());
+  RTC_DCHECK_LE(fade_length, append_this.Size());
   fade_length = std::min(fade_length, Size());
   fade_length = std::min(fade_length, append_this.Size());
   size_t position = Size() - fade_length + begin_index_;
   // Cross fade the overlapping regions.
-  // |alpha| is the mixing factor in Q14.
+  // `alpha` is the mixing factor in Q14.
   // TODO(hlundin): Consider skipping +1 in the denominator to produce a
   // smoother cross-fade, in particular at the end of the fade.
   int alpha_step = 16384 / (static_cast<int>(fade_length) + 1);
@@ -265,10 +260,11 @@ void AudioVector::CrossFade(const AudioVector& append_this,
     alpha -= alpha_step;
     array_[(position + i) % capacity_] =
         (alpha * array_[(position + i) % capacity_] +
-            (16384 - alpha) * append_this[i] + 8192) >> 14;
+         (16384 - alpha) * append_this[i] + 8192) >>
+        14;
   }
-  assert(alpha >= 0);  // Verify that the slope was correct.
-  // Append what is left of |append_this|.
+  RTC_DCHECK_GE(alpha, 0);  // Verify that the slope was correct.
+  // Append what is left of `append_this`.
   size_t samples_to_push_back = append_this.Size() - fade_length;
   if (samples_to_push_back > 0)
     PushBack(append_this, samples_to_push_back, fade_length);
@@ -289,8 +285,8 @@ void AudioVector::Reserve(size_t n) {
     return;
   const size_t length = Size();
   // Reserve one more sample to remove the ambiguity between empty vector and
-  // full vector. Therefore |begin_index_| == |end_index_| indicates empty
-  // vector, and |begin_index_| == (|end_index_| + 1) % capacity indicates
+  // full vector. Therefore `begin_index_` == `end_index_` indicates empty
+  // vector, and `begin_index_` == (`end_index_` + 1) % capacity indicates
   // full vector.
   std::unique_ptr<int16_t[]> temp_array(new int16_t[n + 1]);
   CopyTo(length, 0, temp_array.get());
@@ -319,8 +315,8 @@ void AudioVector::InsertByPushBack(const int16_t* insert_this,
 }
 
 void AudioVector::InsertByPushFront(const int16_t* insert_this,
-                                   size_t length,
-                                   size_t position) {
+                                    size_t length,
+                                    size_t position) {
   std::unique_ptr<int16_t[]> temp_array(nullptr);
   if (position > 0) {
     // TODO(minyue): see if it is possible to avoid copying to a buffer.
@@ -335,8 +331,7 @@ void AudioVector::InsertByPushFront(const int16_t* insert_this,
     PushFront(temp_array.get(), position);
 }
 
-void AudioVector::InsertZerosByPushBack(size_t length,
-                                        size_t position) {
+void AudioVector::InsertZerosByPushBack(size_t length, size_t position) {
   const size_t move_chunk_length = Size() - position;
   std::unique_ptr<int16_t[]> temp_array(nullptr);
   if (move_chunk_length > 0) {
@@ -359,8 +354,7 @@ void AudioVector::InsertZerosByPushBack(size_t length,
     PushBack(temp_array.get(), move_chunk_length);
 }
 
-void AudioVector::InsertZerosByPushFront(size_t length,
-                                         size_t position) {
+void AudioVector::InsertZerosByPushFront(size_t length, size_t position) {
   std::unique_ptr<int16_t[]> temp_array(nullptr);
   if (position > 0) {
     temp_array.reset(new int16_t[position]);

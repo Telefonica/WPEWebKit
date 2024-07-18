@@ -25,7 +25,8 @@
 
 #pragma once
 
-#include <WebCore/URL.h>
+#include <wtf/URL.h>
+#include <wtf/WeakHashSet.h>
 
 namespace WebKit {
 
@@ -39,29 +40,42 @@ public:
         Finished
     };
 
-    void didStartProvisionalLoad(const WebCore::URL&);
-    void didReceiveServerRedirectForProvisionalLoad(const WebCore::URL&);
+    class Observer : public CanMakeWeakPtr<Observer> {
+    public:
+        virtual ~Observer() = default;
+
+        virtual void didFinishLoad() = 0;
+    };
+
+    void addObserver(Observer&);
+    void removeObserver(Observer&);
+
+    void didStartProvisionalLoad(const URL&);
+    void didExplicitOpen(const URL&);
+    void didReceiveServerRedirectForProvisionalLoad(const URL&);
     void didFailProvisionalLoad();
 
     void didCommitLoad();
     void didFinishLoad();
     void didFailLoad();
 
-    void didSameDocumentNotification(const WebCore::URL&);
+    void didSameDocumentNotification(const URL&);
 
     State state() const { return m_state; }
-    const WebCore::URL& url() const { return m_url; }
-    const WebCore::URL& provisionalURL() const { return m_provisionalURL; }
+    const URL& url() const { return m_url; }
+    void setURL(const URL& url) { m_url = url; }
+    const URL& provisionalURL() const { return m_provisionalURL; }
 
-    void setUnreachableURL(const WebCore::URL&);
-    const WebCore::URL& unreachableURL() const { return m_unreachableURL; }
+    void setUnreachableURL(const URL&);
+    const URL& unreachableURL() const { return m_unreachableURL; }
 
 private:
     State m_state { State::Finished };
-    WebCore::URL m_url;
-    WebCore::URL m_provisionalURL;
-    WebCore::URL m_unreachableURL;
-    WebCore::URL m_lastUnreachableURL;
+    URL m_url;
+    URL m_provisionalURL;
+    URL m_unreachableURL;
+    URL m_lastUnreachableURL;
+    WeakHashSet<Observer> m_observers;
 };
 
 } // namespace WebKit

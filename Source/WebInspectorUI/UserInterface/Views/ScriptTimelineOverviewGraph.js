@@ -52,7 +52,9 @@ WI.ScriptTimelineOverviewGraph = class ScriptTimelineOverviewGraph extends WI.Ti
 
     layout()
     {
-        if (!this.visible)
+        super.layout();
+
+        if (this.hidden)
             return;
 
         let secondsPerPixel = this.timelineOverview.secondsPerPixel;
@@ -62,7 +64,7 @@ WI.ScriptTimelineOverviewGraph = class ScriptTimelineOverviewGraph extends WI.Ti
         {
             let timelineRecordBar = this._timelineRecordBars[recordBarIndex];
             if (!timelineRecordBar)
-                timelineRecordBar = this._timelineRecordBars[recordBarIndex] = new WI.TimelineRecordBar(records, renderMode);
+                timelineRecordBar = this._timelineRecordBars[recordBarIndex] = new WI.TimelineRecordBar(this, records, renderMode);
             else {
                 timelineRecordBar.renderMode = renderMode;
                 timelineRecordBar.records = records;
@@ -84,6 +86,20 @@ WI.ScriptTimelineOverviewGraph = class ScriptTimelineOverviewGraph extends WI.Ti
             this._timelineRecordBars[recordBarIndex].records = null;
             this._timelineRecordBars[recordBarIndex].element.remove();
         }
+    }
+
+    updateSelectedRecord()
+    {
+        super.updateSelectedRecord();
+
+        for (let recordBar of this._timelineRecordBars) {
+            if (recordBar.records.includes(this.selectedRecord)) {
+                this.selectedRecordBar = recordBar;
+                return;
+            }
+        }
+
+        this.selectedRecordBar = null;
     }
 
     // Private

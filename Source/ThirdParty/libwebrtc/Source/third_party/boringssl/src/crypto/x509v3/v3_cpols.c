@@ -69,6 +69,7 @@
 #include <openssl/stack.h>
 #include <openssl/x509v3.h>
 
+#include "internal.h"
 #include "pcy_int.h"
 
 /* Certificate policies extension support: this one is a bit complex... */
@@ -231,27 +232,26 @@ static POLICYINFO *policy_section(X509V3_CTX *ctx,
             }
             pol->policyid = pobj;
 
-        } else if (!name_cmp(cnf->name, "CPS")) {
+        } else if (!x509v3_name_cmp(cnf->name, "CPS")) {
             if (!pol->qualifiers)
                 pol->qualifiers = sk_POLICYQUALINFO_new_null();
             if (!(qual = POLICYQUALINFO_new()))
                 goto merr;
             if (!sk_POLICYQUALINFO_push(pol->qualifiers, qual))
                 goto merr;
-            /* TODO(fork): const correctness */
-            qual->pqualid = (ASN1_OBJECT *)OBJ_nid2obj(NID_id_qt_cps);
+            qual->pqualid = OBJ_nid2obj(NID_id_qt_cps);
             if (qual->pqualid == NULL) {
                 OPENSSL_PUT_ERROR(X509V3, ERR_R_INTERNAL_ERROR);
                 goto err;
             }
-            qual->d.cpsuri = M_ASN1_IA5STRING_new();
+            qual->d.cpsuri = ASN1_IA5STRING_new();
             if (qual->d.cpsuri == NULL) {
                 goto err;
             }
             if (!ASN1_STRING_set(qual->d.cpsuri, cnf->value,
                                  strlen(cnf->value)))
                 goto merr;
-        } else if (!name_cmp(cnf->name, "userNotice")) {
+        } else if (!x509v3_name_cmp(cnf->name, "userNotice")) {
             STACK_OF(CONF_VALUE) *unot;
             if (*cnf->value != '@') {
                 OPENSSL_PUT_ERROR(X509V3, X509V3_R_EXPECTED_A_SECTION_NAME);
@@ -306,8 +306,7 @@ static POLICYQUALINFO *notice_section(X509V3_CTX *ctx,
     POLICYQUALINFO *qual;
     if (!(qual = POLICYQUALINFO_new()))
         goto merr;
-    /* TODO(fork): const correctness */
-    qual->pqualid = (ASN1_OBJECT *)OBJ_nid2obj(NID_id_qt_unotice);
+    qual->pqualid = OBJ_nid2obj(NID_id_qt_unotice);
     if (qual->pqualid == NULL) {
         OPENSSL_PUT_ERROR(X509V3, ERR_R_INTERNAL_ERROR);
         goto err;
@@ -318,7 +317,7 @@ static POLICYQUALINFO *notice_section(X509V3_CTX *ctx,
     for (i = 0; i < sk_CONF_VALUE_num(unot); i++) {
         cnf = sk_CONF_VALUE_value(unot, i);
         if (!strcmp(cnf->name, "explicitText")) {
-            not->exptext = M_ASN1_VISIBLESTRING_new();
+            not->exptext = ASN1_VISIBLESTRING_new();
             if (not->exptext == NULL)
                 goto merr;
             if (!ASN1_STRING_set(not->exptext, cnf->value,

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,11 +30,8 @@
 #include "JSContextRefPrivate.h"
 #include "JavaScript.h"
 #include "Options.h"
-
-#include <chrono>
-#include <wtf/Atomics.h>
+#include <wtf/CPUTime.h>
 #include <wtf/Condition.h>
-#include <wtf/CurrentTime.h>
 #include <wtf/Lock.h>
 #include <wtf/Threading.h>
 #include <wtf/text/StringBuilder.h>
@@ -43,7 +40,6 @@
 #include <dispatch/dispatch.h>
 #endif
 
-using namespace std::chrono;
 using JSC::Options;
 
 static JSGlobalContextRef context = nullptr;
@@ -57,7 +53,7 @@ static JSValueRef currentCPUTimeAsJSFunctionCallback(JSContextRef ctx, JSObjectR
     UNUSED_PARAM(exception);
     
     ASSERT(JSContextGetGlobalContext(ctx) == context);
-    return JSValueMakeNumber(ctx, currentCPUTime().count() / 1000000.);
+    return JSValueMakeNumber(ctx, CPUTime::forCurrentThread().seconds());
 }
 
 bool shouldTerminateCallbackWasCalled = false;
@@ -80,7 +76,7 @@ static bool extendTerminateCallback(JSContextRef ctx, void*)
     extendTerminateCallbackCalled++;
     if (extendTerminateCallbackCalled == 1) {
         JSContextGroupRef contextGroup = JSContextGetGroup(ctx);
-        JSContextGroupSetExecutionTimeLimit(contextGroup, .200f, extendTerminateCallback, 0);
+        JSContextGroupSetExecutionTimeLimit(contextGroup, .200f, extendTerminateCallback, nullptr);
         return false;
     }
     return true;
@@ -97,7 +93,7 @@ static bool dispatchTermitateCallback(JSContextRef, void*)
 
 struct TierOptions {
     const char* tier;
-    unsigned timeLimitAdjustmentMillis;
+    Seconds timeLimitAdjustment;
     const char* optionsStr;
 };
 
@@ -108,6 +104,7 @@ static void testResetAfterTimeout(bool& failed)
     const char* reentryScript = "100";
     JSStringRef script = JSStringCreateWithUTF8CString(reentryScript);
     v = JSEvaluateScript(context, script, nullptr, nullptr, 1, &exception);
+    JSStringRelease(script);
     if (exception) {
         printf("FAIL: Watchdog timeout was not reset.\n");
         failed = true;
@@ -120,16 +117,19 @@ static void testResetAfterTimeout(bool& failed)
 int testExecutionTimeLimit()
 {
     static const TierOptions tierOptionsList[] = {
-        { "LLINT",    0,   "--useConcurrentJIT=false --useLLInt=true --useJIT=false" },
-        { "Baseline", 0,   "--useConcurrentJIT=false --useLLInt=true --useJIT=true --useDFGJIT=false" },
-        { "DFG",      200,   "--useConcurrentJIT=false --useLLInt=true --useJIT=true --useDFGJIT=true --useFTLJIT=false" },
-        { "FTL",      500, "--useConcurrentJIT=false --useLLInt=true --useJIT=true --useDFGJIT=true --useFTLJIT=true" },
+        { "LLINT",    0_ms,   "--useConcurrentJIT=false --useLLInt=true --useJIT=false" },
+#if ENABLE(JIT)
+        { "Baseline", 0_ms,   "--useConcurrentJIT=false --useLLInt=true --useJIT=true --useDFGJIT=false" },
+        { "DFG",      200_ms,   "--useConcurrentJIT=false --useLLInt=true --useJIT=true --useDFGJIT=true --useFTLJIT=false" },
+#if ENABLE(FTL_JIT)
+        { "FTL",      500_ms, "--useConcurrentJIT=false --useLLInt=true --useJIT=true --useDFGJIT=true --useFTLJIT=true" },
+#endif
+#endif // ENABLE(JIT)
     };
     
     bool failed = false;
 
-    JSC::initializeThreading();
-    Options::initialize(); // Ensure options is initialized first.
+    JSC::initialize();
 
     for (auto tierOptions : tierOptionsList) {
         StringBuilder savedOptionsBuilder;
@@ -137,8 +137,8 @@ int testExecutionTimeLimit()
 
         Options::setOptions(tierOptions.optionsStr);
         
-        unsigned tierAdjustmentMillis = tierOptions.timeLimitAdjustmentMillis;
-        double timeLimit;
+        Seconds tierAdjustment = tierOptions.timeLimitAdjustment;
+        Seconds timeLimit;
 
         context = JSGlobalContextCreateInGroup(nullptr, nullptr);
 
@@ -154,10 +154,14 @@ int testExecutionTimeLimit()
         JSStringRelease(currentCPUTimeStr);
 
         /* Test script on another thread: */
-        timeLimit = (100 + tierAdjustmentMillis) / 1000.0;
-        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit, shouldTerminateCallback, 0);
+        timeLimit = 100_ms + tierAdjustment;
+        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit.seconds(), shouldTerminateCallback, nullptr);
         {
-            unsigned timeAfterWatchdogShouldHaveFired = 300 + tierAdjustmentMillis;
+#if OS(LINUX) && (CPU(MIPS) || CPU(ARM_THUMB2))
+            Seconds timeAfterWatchdogShouldHaveFired = 500_ms + tierAdjustment;
+#else
+            Seconds timeAfterWatchdogShouldHaveFired = 300_ms + tierAdjustment;
+#endif
 
             JSStringRef script = JSStringCreateWithUTF8CString("function foo() { while (true) { } } foo();");
             exception = nullptr;
@@ -167,7 +171,7 @@ int testExecutionTimeLimit()
                 JSEvaluateScript(context, script, nullptr, nullptr, 1, exn);
             });
 
-            sleep(Seconds(timeAfterWatchdogShouldHaveFired / 1000.0));
+            sleep(timeAfterWatchdogShouldHaveFired);
 
             if (shouldTerminateCallbackWasCalled)
                 printf("PASS: %s script timed out as expected.\n", tierOptions.tier);
@@ -177,36 +181,45 @@ int testExecutionTimeLimit()
             }
 
             if (!exception) {
-                printf("FAIL: %s TerminatedExecutionException was not thrown.\n", tierOptions.tier);
+                printf("FAIL: %s TerminationException was not thrown.\n", tierOptions.tier);
                 exit(1);
             }
 
             thread->waitForCompletion();
             testResetAfterTimeout(failed);
+
+            JSStringRelease(script);
         }
 
         /* Test script timeout: */
-        timeLimit = (100 + tierAdjustmentMillis) / 1000.0;
-        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit, shouldTerminateCallback, 0);
+        timeLimit = 100_ms + tierAdjustment;
+        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit.seconds(), shouldTerminateCallback, nullptr);
         {
-            unsigned timeAfterWatchdogShouldHaveFired = 300 + tierAdjustmentMillis;
+            Seconds timeAfterWatchdogShouldHaveFired = 300_ms + tierAdjustment;
 
-            StringBuilder scriptBuilder;
-            scriptBuilder.appendLiteral("function foo() { var startTime = currentCPUTime(); while (true) { for (var i = 0; i < 1000; i++); if (currentCPUTime() - startTime > ");
-            scriptBuilder.appendNumber(timeAfterWatchdogShouldHaveFired / 1000.0);
-            scriptBuilder.appendLiteral(") break; } } foo();");
+            CString scriptText = makeString(
+                "function foo() {"
+                    "var startTime = currentCPUTime();"
+                    "while (true) {"
+                        "for (var i = 0; i < 1000; i++);"
+                        "if (currentCPUTime() - startTime > ", timeAfterWatchdogShouldHaveFired.seconds(), ") break;"
+                    "}"
+                "}"
+                "foo();"
+            ).utf8();
 
-            JSStringRef script = JSStringCreateWithUTF8CString(scriptBuilder.toString().utf8().data());
+            JSStringRef script = JSStringCreateWithUTF8CString(scriptText.data());
             exception = nullptr;
             shouldTerminateCallbackWasCalled = false;
-            auto startTime = currentCPUTime();
+            auto startTime = CPUTime::forCurrentThread();
             JSEvaluateScript(context, script, nullptr, nullptr, 1, &exception);
-            auto endTime = currentCPUTime();
+            auto endTime = CPUTime::forCurrentThread();
+            JSStringRelease(script);
 
-            if (((endTime - startTime) < milliseconds(timeAfterWatchdogShouldHaveFired)) && shouldTerminateCallbackWasCalled)
+            if (((endTime - startTime) < timeAfterWatchdogShouldHaveFired) && shouldTerminateCallbackWasCalled)
                 printf("PASS: %s script timed out as expected.\n", tierOptions.tier);
             else {
-                if ((endTime - startTime) >= milliseconds(timeAfterWatchdogShouldHaveFired))
+                if ((endTime - startTime) >= timeAfterWatchdogShouldHaveFired)
                     printf("FAIL: %s script did not time out as expected.\n", tierOptions.tier);
                 if (!shouldTerminateCallbackWasCalled)
                     printf("FAIL: %s script timeout callback was not called.\n", tierOptions.tier);
@@ -214,7 +227,7 @@ int testExecutionTimeLimit()
             }
             
             if (!exception) {
-                printf("FAIL: %s TerminatedExecutionException was not thrown.\n", tierOptions.tier);
+                printf("FAIL: %s TerminationException was not thrown.\n", tierOptions.tier);
                 failed = true;
             }
 
@@ -222,34 +235,34 @@ int testExecutionTimeLimit()
         }
 
         /* Test script timeout with tail calls: */
-        timeLimit = (100 + tierAdjustmentMillis) / 1000.0;
-        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit, shouldTerminateCallback, 0);
+        timeLimit = 100_ms + tierAdjustment;
+        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit.seconds(), shouldTerminateCallback, nullptr);
         {
-            unsigned timeAfterWatchdogShouldHaveFired = 300 + tierAdjustmentMillis;
+            Seconds timeAfterWatchdogShouldHaveFired = 300_ms + tierAdjustment;
 
-            StringBuilder scriptBuilder;
-            scriptBuilder.appendLiteral("var startTime = currentCPUTime();"
-                                 "function recurse(i) {"
-                                     "'use strict';"
-                                     "if (i % 1000 === 0) {"
-                                        "if (currentCPUTime() - startTime >");
-            scriptBuilder.appendNumber(timeAfterWatchdogShouldHaveFired / 1000.0);
-            scriptBuilder.appendLiteral("       ) { return; }");
-            scriptBuilder.appendLiteral("    }");
-            scriptBuilder.appendLiteral("    return recurse(i + 1); }");
-            scriptBuilder.appendLiteral("recurse(0);");
+            CString scriptText = makeString(
+                "var startTime = currentCPUTime();"
+                "function recurse(i) {"
+                    "'use strict';"
+                    "if (i % 1000 === 0) {"
+                        "if (currentCPUTime() - startTime >", timeAfterWatchdogShouldHaveFired.seconds(), ") { return; }"
+                    "}"
+                "return recurse(i + 1); }"
+                "recurse(0);"
+            ).utf8();
 
-            JSStringRef script = JSStringCreateWithUTF8CString(scriptBuilder.toString().utf8().data());
+            JSStringRef script = JSStringCreateWithUTF8CString(scriptText.data());
             exception = nullptr;
             shouldTerminateCallbackWasCalled = false;
-            auto startTime = currentCPUTime();
+            auto startTime = CPUTime::forCurrentThread();
             JSEvaluateScript(context, script, nullptr, nullptr, 1, &exception);
-            auto endTime = currentCPUTime();
+            auto endTime = CPUTime::forCurrentThread();
+            JSStringRelease(script);
 
-            if (((endTime - startTime) < milliseconds(timeAfterWatchdogShouldHaveFired)) && shouldTerminateCallbackWasCalled)
+            if (((endTime - startTime) < timeAfterWatchdogShouldHaveFired) && shouldTerminateCallbackWasCalled)
                 printf("PASS: %s script with infinite tail calls timed out as expected .\n", tierOptions.tier);
             else {
-                if ((endTime - startTime) >= milliseconds(timeAfterWatchdogShouldHaveFired))
+                if ((endTime - startTime) >= timeAfterWatchdogShouldHaveFired)
                     printf("FAIL: %s script with infinite tail calls did not time out as expected.\n", tierOptions.tier);
                 if (!shouldTerminateCallbackWasCalled)
                     printf("FAIL: %s script with infinite tail calls' timeout callback was not called.\n", tierOptions.tier);
@@ -257,34 +270,44 @@ int testExecutionTimeLimit()
             }
             
             if (!exception) {
-                printf("FAIL: %s TerminatedExecutionException was not thrown.\n", tierOptions.tier);
+                printf("FAIL: %s TerminationException was not thrown.\n", tierOptions.tier);
                 failed = true;
             }
 
             testResetAfterTimeout(failed);
         }
 
-        /* Test the script timeout's TerminatedExecutionException should NOT be catchable: */
-        timeLimit = (100 + tierAdjustmentMillis) / 1000.0;
-        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit, shouldTerminateCallback, 0);
+        /* Test the script timeout's TerminationException should NOT be catchable: */
+        timeLimit = 100_ms + tierAdjustment;
+        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit.seconds(), shouldTerminateCallback, nullptr);
         {
-            unsigned timeAfterWatchdogShouldHaveFired = 300 + tierAdjustmentMillis;
+            Seconds timeAfterWatchdogShouldHaveFired = 300_ms + tierAdjustment;
             
-            StringBuilder scriptBuilder;
-            scriptBuilder.appendLiteral("function foo() { var startTime = currentCPUTime(); try { while (true) { for (var i = 0; i < 1000; i++); if (currentCPUTime() - startTime > ");
-            scriptBuilder.appendNumber(timeAfterWatchdogShouldHaveFired / 1000.0);
-            scriptBuilder.appendLiteral(") break; } } catch(e) { } } foo();");
+            CString scriptText = makeString(
+                "function foo() {"
+                    "var startTime = currentCPUTime();"
+                    "try {"
+                        "while (true) {"
+                            "for (var i = 0; i < 1000; i++);"
+                                "if (currentCPUTime() - startTime > ", timeAfterWatchdogShouldHaveFired.seconds(), ") break;"
+                        "}"
+                    "} catch(e) { }"
+                "}"
+                "foo();"
+            ).utf8();
 
-            JSStringRef script = JSStringCreateWithUTF8CString(scriptBuilder.toString().utf8().data());
+            JSStringRef script = JSStringCreateWithUTF8CString(scriptText.data());
             exception = nullptr;
             shouldTerminateCallbackWasCalled = false;
 
-            auto startTime = currentCPUTime();
+            auto startTime = CPUTime::forCurrentThread();
             JSEvaluateScript(context, script, nullptr, nullptr, 1, &exception);
-            auto endTime = currentCPUTime();
+            auto endTime = CPUTime::forCurrentThread();
             
-            if (((endTime - startTime) >= milliseconds(timeAfterWatchdogShouldHaveFired)) || !shouldTerminateCallbackWasCalled) {
-                if (!((endTime - startTime) < milliseconds(timeAfterWatchdogShouldHaveFired)))
+            JSStringRelease(script);
+
+            if (((endTime - startTime) >= timeAfterWatchdogShouldHaveFired) || !shouldTerminateCallbackWasCalled) {
+                if (!((endTime - startTime) < timeAfterWatchdogShouldHaveFired))
                     printf("FAIL: %s script did not time out as expected.\n", tierOptions.tier);
                 if (!shouldTerminateCallbackWasCalled)
                     printf("FAIL: %s script timeout callback was not called.\n", tierOptions.tier);
@@ -292,9 +315,9 @@ int testExecutionTimeLimit()
             }
             
             if (exception)
-                printf("PASS: %s TerminatedExecutionException was not catchable as expected.\n", tierOptions.tier);
+                printf("PASS: %s TerminationException was not catchable as expected.\n", tierOptions.tier);
             else {
-                printf("FAIL: %s TerminatedExecutionException was caught.\n", tierOptions.tier);
+                printf("FAIL: %s TerminationException was caught.\n", tierOptions.tier);
                 failed = true;
             }
 
@@ -302,28 +325,36 @@ int testExecutionTimeLimit()
         }
         
         /* Test script timeout with no callback: */
-        timeLimit = (100 + tierAdjustmentMillis) / 1000.0;
-        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit, 0, 0);
+        timeLimit = 100_ms + tierAdjustment;
+        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit.seconds(), nullptr, nullptr);
         {
-            unsigned timeAfterWatchdogShouldHaveFired = 300 + tierAdjustmentMillis;
+            Seconds timeAfterWatchdogShouldHaveFired = 300_ms + tierAdjustment;
             
-            StringBuilder scriptBuilder;
-            scriptBuilder.appendLiteral("function foo() { var startTime = currentCPUTime(); while (true) { for (var i = 0; i < 1000; i++); if (currentCPUTime() - startTime > ");
-            scriptBuilder.appendNumber(timeAfterWatchdogShouldHaveFired / 1000.0);
-            scriptBuilder.appendLiteral(") break; } } foo();");
+            CString scriptText = makeString(
+                "function foo() {"
+                    "var startTime = currentCPUTime();"
+                    "while (true) {"
+                        "for (var i = 0; i < 1000; i++);"
+                            "if (currentCPUTime() - startTime > ", timeAfterWatchdogShouldHaveFired.seconds(), ") break;"
+                    "}"
+                "}"
+                "foo();"
+            ).utf8();
             
-            JSStringRef script = JSStringCreateWithUTF8CString(scriptBuilder.toString().utf8().data());
+            JSStringRef script = JSStringCreateWithUTF8CString(scriptText.data());
             exception = nullptr;
             shouldTerminateCallbackWasCalled = false;
 
-            auto startTime = currentCPUTime();
+            auto startTime = CPUTime::forCurrentThread();
             JSEvaluateScript(context, script, nullptr, nullptr, 1, &exception);
-            auto endTime = currentCPUTime();
+            auto endTime = CPUTime::forCurrentThread();
             
-            if (((endTime - startTime) < milliseconds(timeAfterWatchdogShouldHaveFired)) && !shouldTerminateCallbackWasCalled)
+            JSStringRelease(script);
+
+            if (((endTime - startTime) < timeAfterWatchdogShouldHaveFired) && !shouldTerminateCallbackWasCalled)
                 printf("PASS: %s script timed out as expected when no callback is specified.\n", tierOptions.tier);
             else {
-                if ((endTime - startTime) >= milliseconds(timeAfterWatchdogShouldHaveFired))
+                if ((endTime - startTime) >= timeAfterWatchdogShouldHaveFired)
                     printf("FAIL: %s script did not time out as expected when no callback is specified.\n", tierOptions.tier);
                 else
                     printf("FAIL: %s script called stale callback function.\n", tierOptions.tier);
@@ -331,7 +362,7 @@ int testExecutionTimeLimit()
             }
             
             if (!exception) {
-                printf("FAIL: %s TerminatedExecutionException was not thrown.\n", tierOptions.tier);
+                printf("FAIL: %s TerminationException was not thrown.\n", tierOptions.tier);
                 failed = true;
             }
 
@@ -339,28 +370,36 @@ int testExecutionTimeLimit()
         }
         
         /* Test script timeout cancellation: */
-        timeLimit = (100 + tierAdjustmentMillis) / 1000.0;
-        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit, cancelTerminateCallback, 0);
+        timeLimit = 100_ms + tierAdjustment;
+        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit.seconds(), cancelTerminateCallback, nullptr);
         {
-            unsigned timeAfterWatchdogShouldHaveFired = 300 + tierAdjustmentMillis;
+            Seconds timeAfterWatchdogShouldHaveFired = 300_ms + tierAdjustment;
             
-            StringBuilder scriptBuilder;
-            scriptBuilder.appendLiteral("function foo() { var startTime = currentCPUTime(); while (true) { for (var i = 0; i < 1000; i++); if (currentCPUTime() - startTime > ");
-            scriptBuilder.appendNumber(timeAfterWatchdogShouldHaveFired / 1000.0);
-            scriptBuilder.appendLiteral(") break; } } foo();");
+            CString scriptText = makeString(
+                "function foo() {"
+                    "var startTime = currentCPUTime();"
+                    "while (true) {"
+                        "for (var i = 0; i < 1000; i++);"
+                            "if (currentCPUTime() - startTime > ", timeAfterWatchdogShouldHaveFired.seconds(), ") break;"
+                    "}"
+                "}"
+                "foo();"
+            ).utf8();
 
-            JSStringRef script = JSStringCreateWithUTF8CString(scriptBuilder.toString().utf8().data());
+            JSStringRef script = JSStringCreateWithUTF8CString(scriptText.data());
             exception = nullptr;
             cancelTerminateCallbackWasCalled = false;
 
-            auto startTime = currentCPUTime();
+            auto startTime = CPUTime::forCurrentThread();
             JSEvaluateScript(context, script, nullptr, nullptr, 1, &exception);
-            auto endTime = currentCPUTime();
+            auto endTime = CPUTime::forCurrentThread();
             
-            if (((endTime - startTime) >= milliseconds(timeAfterWatchdogShouldHaveFired)) && cancelTerminateCallbackWasCalled && !exception)
+            JSStringRelease(script);
+
+            if (((endTime - startTime) >= timeAfterWatchdogShouldHaveFired) && cancelTerminateCallbackWasCalled && !exception)
                 printf("PASS: %s script timeout was cancelled as expected.\n", tierOptions.tier);
             else {
-                if (((endTime - startTime) < milliseconds(timeAfterWatchdogShouldHaveFired)) || exception)
+                if (((endTime - startTime) < timeAfterWatchdogShouldHaveFired) || exception)
                     printf("FAIL: %s script timeout was not cancelled.\n", tierOptions.tier);
                 if (!cancelTerminateCallbackWasCalled)
                     printf("FAIL: %s script timeout callback was not called.\n", tierOptions.tier);
@@ -368,39 +407,47 @@ int testExecutionTimeLimit()
             }
             
             if (exception) {
-                printf("FAIL: %s Unexpected TerminatedExecutionException thrown.\n", tierOptions.tier);
+                printf("FAIL: %s Unexpected TerminationException thrown.\n", tierOptions.tier);
                 failed = true;
             }
         }
         
         /* Test script timeout extension: */
-        timeLimit = (100 + tierAdjustmentMillis) / 1000.0;
-        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit, extendTerminateCallback, 0);
+        timeLimit = 100_ms + tierAdjustment;
+        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit.seconds(), extendTerminateCallback, nullptr);
         {
-            unsigned timeBeforeExtendedDeadline = 250 + tierAdjustmentMillis;
-            unsigned timeAfterExtendedDeadline = 600 + tierAdjustmentMillis;
-            unsigned maxBusyLoopTime = 750 + tierAdjustmentMillis;
+            Seconds timeBeforeExtendedDeadline = 250_ms + tierAdjustment;
+            Seconds timeAfterExtendedDeadline = 600_ms + tierAdjustment;
+            Seconds maxBusyLoopTime = 750_ms + tierAdjustment;
 
-            StringBuilder scriptBuilder;
-            scriptBuilder.appendLiteral("function foo() { var startTime = currentCPUTime(); while (true) { for (var i = 0; i < 1000; i++); if (currentCPUTime() - startTime > ");
-            scriptBuilder.appendNumber(maxBusyLoopTime / 1000.0); // in seconds.
-            scriptBuilder.appendLiteral(") break; } } foo();");
+            CString scriptText = makeString(
+                "function foo() {"
+                    "var startTime = currentCPUTime();"
+                    "while (true) {"
+                        "for (var i = 0; i < 1000; i++);"
+                            "if (currentCPUTime() - startTime > ", maxBusyLoopTime.seconds(), ") break;"
+                    "}"
+                "}"
+                "foo();"
+            ).utf8();
 
-            JSStringRef script = JSStringCreateWithUTF8CString(scriptBuilder.toString().utf8().data());
+            JSStringRef script = JSStringCreateWithUTF8CString(scriptText.data());
             exception = nullptr;
             extendTerminateCallbackCalled = 0;
 
-            auto startTime = currentCPUTime();
+            auto startTime = CPUTime::forCurrentThread();
             JSEvaluateScript(context, script, nullptr, nullptr, 1, &exception);
-            auto endTime = currentCPUTime();
+            auto endTime = CPUTime::forCurrentThread();
             auto deltaTime = endTime - startTime;
             
-            if ((deltaTime >= milliseconds(timeBeforeExtendedDeadline)) && (deltaTime < milliseconds(timeAfterExtendedDeadline)) && (extendTerminateCallbackCalled == 2) && exception)
+            JSStringRelease(script);
+
+            if ((deltaTime >= timeBeforeExtendedDeadline) && (deltaTime < timeAfterExtendedDeadline) && (extendTerminateCallbackCalled == 2) && exception)
                 printf("PASS: %s script timeout was extended as expected.\n", tierOptions.tier);
             else {
-                if (deltaTime < milliseconds(timeBeforeExtendedDeadline))
+                if (deltaTime < timeBeforeExtendedDeadline)
                     printf("FAIL: %s script timeout was not extended as expected.\n", tierOptions.tier);
-                else if (deltaTime >= milliseconds(timeAfterExtendedDeadline))
+                else if (deltaTime >= timeAfterExtendedDeadline)
                     printf("FAIL: %s script did not timeout.\n", tierOptions.tier);
                 
                 if (extendTerminateCallbackCalled < 1)
@@ -409,7 +456,7 @@ int testExecutionTimeLimit()
                     printf("FAIL: %s script timeout callback was not called after timeout extension.\n", tierOptions.tier);
                 
                 if (!exception)
-                    printf("FAIL: %s TerminatedExecutionException was not thrown during timeout extension test.\n", tierOptions.tier);
+                    printf("FAIL: %s TerminationException was not thrown during timeout extension test.\n", tierOptions.tier);
                 
                 failed = true;
             }
@@ -417,17 +464,23 @@ int testExecutionTimeLimit()
 
 #if HAVE(MACH_EXCEPTIONS)
         /* Test script timeout from dispatch queue: */
-        timeLimit = (100 + tierAdjustmentMillis) / 1000.0;
-        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit, dispatchTermitateCallback, 0);
+        timeLimit = 100_ms + tierAdjustment;
+        JSContextGroupSetExecutionTimeLimit(contextGroup, timeLimit.seconds(), dispatchTermitateCallback, nullptr);
         {
-            unsigned timeAfterWatchdogShouldHaveFired = 300 + tierAdjustmentMillis;
+            Seconds timeAfterWatchdogShouldHaveFired = 300_ms + tierAdjustment;
 
-            StringBuilder scriptBuilder;
-            scriptBuilder.appendLiteral("function foo() { var startTime = currentCPUTime(); while (true) { for (var i = 0; i < 1000; i++); if (currentCPUTime() - startTime > ");
-            scriptBuilder.appendNumber(timeAfterWatchdogShouldHaveFired / 1000.0);
-            scriptBuilder.appendLiteral(") break; } } foo();");
+            CString scriptText = makeString(
+                "function foo() {"
+                    "var startTime = currentCPUTime();"
+                    "while (true) {"
+                        "for (var i = 0; i < 1000; i++);"
+                            "if (currentCPUTime() - startTime > ", timeAfterWatchdogShouldHaveFired.seconds(), ") break;"
+                    "}"
+                "}"
+                "foo();"
+            ).utf8();
 
-            JSStringRef script = JSStringCreateWithUTF8CString(scriptBuilder.toString().utf8().data());
+            JSStringRef script = JSStringCreateWithUTF8CString(scriptText.data());
             exception = nullptr;
             dispatchTerminateCallbackCalled = false;
 
@@ -443,34 +496,36 @@ int testExecutionTimeLimit()
             bool didSynchronize = false;
             bool& didSynchronizeRef = didSynchronize;
 
-            std::chrono::microseconds startTime;
-            std::chrono::microseconds endTime;
+            Seconds startTime;
+            Seconds endTime;
 
-            std::chrono::microseconds& startTimeRef = startTime;
-            std::chrono::microseconds& endTimeRef = endTime;
+            Seconds& startTimeRef = startTime;
+            Seconds& endTimeRef = endTime;
 
             dispatch_group_t group = dispatch_group_create();
             dispatch_group_async(group, dispatch_get_global_queue(0, 0), ^{
-                startTimeRef = currentCPUTime();
+                startTimeRef = CPUTime::forCurrentThread();
                 JSEvaluateScript(contextRef, scriptRef, nullptr, nullptr, 1, &exceptionRef);
-                endTimeRef = currentCPUTime();
-                auto locker = WTF::holdLock(syncLockRef);
+                endTimeRef = CPUTime::forCurrentThread();
+                Locker locker { syncLockRef };
                 didSynchronizeRef = true;
                 synchronizeRef.notifyAll();
             });
 
-            auto locker = holdLock(syncLock);
+            Locker locker { syncLock };
             synchronize.wait(syncLock, [&] { return didSynchronize; });
 
-            if (((endTime - startTime) < milliseconds(timeAfterWatchdogShouldHaveFired)) && dispatchTerminateCallbackCalled)
+            if (((endTime - startTime) < timeAfterWatchdogShouldHaveFired) && dispatchTerminateCallbackCalled)
                 printf("PASS: %s script on dispatch queue timed out as expected.\n", tierOptions.tier);
             else {
-                if ((endTime - startTime) >= milliseconds(timeAfterWatchdogShouldHaveFired))
+                if ((endTime - startTime) >= timeAfterWatchdogShouldHaveFired)
                     printf("FAIL: %s script on dispatch queue did not time out as expected.\n", tierOptions.tier);
                 if (!shouldTerminateCallbackWasCalled)
                     printf("FAIL: %s script on dispatch queue timeout callback was not called.\n", tierOptions.tier);
                 failed = true;
             }
+
+            JSStringRelease(script);
         }
 #endif
 

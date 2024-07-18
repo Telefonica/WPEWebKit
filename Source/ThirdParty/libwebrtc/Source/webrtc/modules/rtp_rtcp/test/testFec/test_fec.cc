@@ -18,12 +18,12 @@
 
 #include <list>
 
-#include "webrtc/base/random.h"
-#include "webrtc/modules/rtp_rtcp/source/byte_io.h"
-#include "webrtc/modules/rtp_rtcp/source/forward_error_correction.h"
-#include "webrtc/modules/rtp_rtcp/source/forward_error_correction_internal.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/testsupport/fileutils.h"
+#include "modules/rtp_rtcp/source/byte_io.h"
+#include "modules/rtp_rtcp/source/forward_error_correction.h"
+#include "modules/rtp_rtcp/source/forward_error_correction_internal.h"
+#include "rtc_base/random.h"
+#include "test/gtest.h"
+#include "test/testsupport/file_utils.h"
 
 // #define VERBOSE_OUTPUT
 
@@ -35,8 +35,10 @@ namespace test {
 using fec_private_tables::kPacketMaskBurstyTbl;
 
 void ReceivePackets(
-    ForwardErrorCorrection::ReceivedPacketList* to_decode_list,
-    ForwardErrorCorrection::ReceivedPacketList* received_packet_list,
+    std::vector<std::unique_ptr<ForwardErrorCorrection::ReceivedPacket>>*
+        to_decode_list,
+    std::vector<std::unique_ptr<ForwardErrorCorrection::ReceivedPacket>>*
+        received_packet_list,
     size_t num_packets_to_decode,
     float reorder_rate,
     float duplicate_rate,
@@ -68,9 +70,7 @@ void ReceivePackets(
           new ForwardErrorCorrection::ReceivedPacket());
       *duplicate_packet = *received_packet;
       duplicate_packet->pkt = new ForwardErrorCorrection::Packet();
-      memcpy(duplicate_packet->pkt->data, received_packet->pkt->data,
-             received_packet->pkt->length);
-      duplicate_packet->pkt->length = received_packet->pkt->length;
+      duplicate_packet->pkt->data = received_packet->pkt->data;
 
       to_decode_list->push_back(std::move(duplicate_packet));
       random_variable = random->Rand<float>();
@@ -78,13 +78,7 @@ void ReceivePackets(
   }
 }
 
-// Too slow to finish before timeout on iOS. See webrtc:4755.
-#if defined(WEBRTC_IOS)
-#define MAYBE_FecTest DISABLED_FecTest
-#else
-#define MAYBE_FecTest FecTest
-#endif
-TEST(FecTest, MAYBE_FecTest) {
+void RunTest(bool use_flexfec) {
   // TODO(marpan): Split this function into subroutines/helper functions.
   enum { kMaxNumberMediaPackets = 48 };
   enum { kMaxNumberFecPackets = 48 };
@@ -105,19 +99,19 @@ TEST(FecTest, MAYBE_FecTest) {
       sizeof(kPacketMaskBurstyTbl) / sizeof(*kPacketMaskBurstyTbl)};
 
   ASSERT_EQ(12, kMaxMediaPackets[1]) << "Max media packets for bursty mode not "
-                                     << "equal to 12.";
+                                        "equal to 12.";
 
-  std::unique_ptr<ForwardErrorCorrection> fec =
-      ForwardErrorCorrection::CreateUlpfec();
   ForwardErrorCorrection::PacketList media_packet_list;
   std::list<ForwardErrorCorrection::Packet*> fec_packet_list;
-  ForwardErrorCorrection::ReceivedPacketList to_decode_list;
-  ForwardErrorCorrection::ReceivedPacketList received_packet_list;
+  std::vector<std::unique_ptr<ForwardErrorCorrection::ReceivedPacket>>
+      to_decode_list;
+  std::vector<std::unique_ptr<ForwardErrorCorrection::ReceivedPacket>>
+      received_packet_list;
   ForwardErrorCorrection::RecoveredPacketList recovered_packet_list;
   std::list<uint8_t*> fec_mask_list;
 
-  // Running over only one loss rate to limit execution time.
-  const float loss_rate[] = {0.5f};
+  // Running over only two loss rates to limit execution time.
+  const float loss_rate[] = {0.05f, 0.01f};
   const uint32_t loss_rate_size = sizeof(loss_rate) / sizeof(*loss_rate);
   const float reorder_rate = 0.1f;
   const float duplicate_rate = 0.1f;
@@ -138,7 +132,24 @@ TEST(FecTest, MAYBE_FecTest) {
 
   uint16_t seq_num = 0;
   uint32_t timestamp = random.Rand<uint32_t>();
-  const uint32_t ssrc = random.Rand(1u, 0xfffffffe);
+  const uint32_t media_ssrc = random.Rand(1u, 0xfffffffe);
+  uint32_t fec_ssrc;
+  uint16_t fec_seq_num_offset;
+  if (use_flexfec) {
+    fec_ssrc = random.Rand(1u, 0xfffffffe);
+    fec_seq_num_offset = random.Rand(0, 1 << 15);
+  } else {
+    fec_ssrc = media_ssrc;
+    fec_seq_num_offset = 0;
+  }
+
+  std::unique_ptr<ForwardErrorCorrection> fec;
+  if (use_flexfec) {
+    fec = ForwardErrorCorrection::CreateFlexfec(fec_ssrc, media_ssrc);
+  } else {
+    RTC_DCHECK_EQ(media_ssrc, fec_ssrc);
+    fec = ForwardErrorCorrection::CreateUlpfec(fec_ssrc);
+  }
 
   // Loop over the mask types: random and bursty.
   for (int mask_type_idx = 0; mask_type_idx < kNumFecMaskTypes;
@@ -179,10 +190,9 @@ TEST(FecTest, MAYBE_FecTest) {
                    num_media_packets * mask_bytes_per_fec_packet);
 
             // Transfer packet masks from bit-mask to byte-mask.
-            internal::GeneratePacketMasks(num_media_packets, num_fec_packets,
-                                          num_imp_packets,
-                                          kUseUnequalProtection,
-                                          mask_table, packet_mask.get());
+            internal::GeneratePacketMasks(
+                num_media_packets, num_fec_packets, num_imp_packets,
+                kUseUnequalProtection, &mask_table, packet_mask.get());
 
 #ifdef VERBOSE_OUTPUT
             printf(
@@ -240,12 +250,14 @@ TEST(FecTest, MAYBE_FecTest) {
               const uint32_t kMinPacketSize = 12;
               const uint32_t kMaxPacketSize = static_cast<uint32_t>(
                   IP_PACKET_SIZE - 12 - 28 - fec->MaxPacketOverhead());
-              media_packet->length = random.Rand(kMinPacketSize,
-                                                 kMaxPacketSize);
+              size_t packet_length =
+                  random.Rand(kMinPacketSize, kMaxPacketSize);
+              media_packet->data.SetSize(packet_length);
 
+              uint8_t* data = media_packet->data.MutableData();
               // Generate random values for the first 2 bytes.
-              media_packet->data[0] = random.Rand<uint8_t>();
-              media_packet->data[1] = random.Rand<uint8_t>();
+              data[0] = random.Rand<uint8_t>();
+              data[1] = random.Rand<uint8_t>();
 
               // The first two bits are assumed to be 10 by the
               // FEC encoder. In fact the FEC decoder will set the
@@ -253,30 +265,27 @@ TEST(FecTest, MAYBE_FecTest) {
               // actually were. Set the first two bits to 10
               // so that a memcmp can be performed for the
               // whole restored packet.
-              media_packet->data[0] |= 0x80;
-              media_packet->data[0] &= 0xbf;
+              data[0] |= 0x80;
+              data[0] &= 0xbf;
 
               // FEC is applied to a whole frame.
               // A frame is signaled by multiple packets without
               // the marker bit set followed by the last packet of
               // the frame for which the marker bit is set.
               // Only push one (fake) frame to the FEC.
-              media_packet->data[1] &= 0x7f;
+              data[1] &= 0x7f;
 
-              ByteWriter<uint16_t>::WriteBigEndian(&media_packet->data[2],
-                                                   seq_num);
-              ByteWriter<uint32_t>::WriteBigEndian(&media_packet->data[4],
-                                                   timestamp);
-              ByteWriter<uint32_t>::WriteBigEndian(&media_packet->data[8],
-                                                   ssrc);
+              ByteWriter<uint16_t>::WriteBigEndian(&data[2], seq_num);
+              ByteWriter<uint32_t>::WriteBigEndian(&data[4], timestamp);
+              ByteWriter<uint32_t>::WriteBigEndian(&data[8], media_ssrc);
               // Generate random values for payload
-              for (size_t j = 12; j < media_packet->length; ++j) {
-                media_packet->data[j] = random.Rand<uint8_t>();
+              for (size_t j = 12; j < packet_length; ++j) {
+                data[j] = random.Rand<uint8_t>();
               }
               media_packet_list.push_back(std::move(media_packet));
               seq_num++;
             }
-            media_packet_list.back()->data[1] |= 0x80;
+            media_packet_list.back()->data.MutableData()[1] |= 0x80;
 
             ASSERT_EQ(0, fec->EncodeFec(media_packet_list, protection_factor,
                                         num_imp_packets, kUseUnequalProtection,
@@ -284,8 +293,10 @@ TEST(FecTest, MAYBE_FecTest) {
                 << "EncodeFec() failed";
 
             ASSERT_EQ(num_fec_packets, fec_packet_list.size())
-                << "We requested " << num_fec_packets << " FEC packets, but "
-                << "EncodeFec() produced " << fec_packet_list.size();
+                << "We requested " << num_fec_packets
+                << " FEC packets, but "
+                   "EncodeFec() produced "
+                << fec_packet_list.size();
 
             memset(media_loss_mask, 0, sizeof(media_loss_mask));
             uint32_t media_packet_idx = 0;
@@ -299,11 +310,10 @@ TEST(FecTest, MAYBE_FecTest) {
                     received_packet(
                         new ForwardErrorCorrection::ReceivedPacket());
                 received_packet->pkt = new ForwardErrorCorrection::Packet();
-                received_packet->pkt->length = media_packet->length;
-                memcpy(received_packet->pkt->data, media_packet->data,
-                       media_packet->length);
-                received_packet->seq_num =
-                    ByteReader<uint16_t>::ReadBigEndian(&media_packet->data[2]);
+                received_packet->pkt->data = media_packet->data;
+                received_packet->ssrc = media_ssrc;
+                received_packet->seq_num = ByteReader<uint16_t>::ReadBigEndian(
+                    media_packet->data.data() + 2);
                 received_packet->is_fec = false;
                 received_packet_list.push_back(std::move(received_packet));
               }
@@ -320,12 +330,10 @@ TEST(FecTest, MAYBE_FecTest) {
                     received_packet(
                         new ForwardErrorCorrection::ReceivedPacket());
                 received_packet->pkt = new ForwardErrorCorrection::Packet();
-                received_packet->pkt->length = fec_packet->length;
-                memcpy(received_packet->pkt->data, fec_packet->data,
-                       fec_packet->length);
-                received_packet->seq_num = seq_num;
+                received_packet->pkt->data = fec_packet->data;
+                received_packet->seq_num = fec_seq_num_offset + seq_num;
                 received_packet->is_fec = true;
-                received_packet->ssrc = ssrc;
+                received_packet->ssrc = fec_ssrc;
                 received_packet_list.push_back(std::move(received_packet));
 
                 fec_mask_list.push_back(fec_packet_masks[fec_packet_idx]);
@@ -393,11 +401,10 @@ TEST(FecTest, MAYBE_FecTest) {
                   }
                 }
               }
-              ASSERT_EQ(0,
-                        fec->DecodeFec(&to_decode_list, &recovered_packet_list))
-                  << "DecodeFec() failed";
-              ASSERT_TRUE(to_decode_list.empty())
-                  << "Received packet list is not empty.";
+              for (const auto& received_packet : to_decode_list) {
+                fec->DecodeFec(*received_packet, &recovered_packet_list);
+              }
+              to_decode_list.clear();
             }
             media_packet_idx = 0;
             for (const auto& media_packet : media_packet_list) {
@@ -411,13 +418,15 @@ TEST(FecTest, MAYBE_FecTest) {
                 ForwardErrorCorrection::RecoveredPacket* recovered_packet =
                     recovered_packet_list_it->get();
 
-                ASSERT_EQ(recovered_packet->pkt->length, media_packet->length)
+                ASSERT_EQ(recovered_packet->pkt->data.size(),
+                          media_packet->data.size())
                     << "Recovered packet length not identical to original "
-                    << "media packet";
-                ASSERT_EQ(0, memcmp(recovered_packet->pkt->data,
-                                    media_packet->data, media_packet->length))
+                       "media packet";
+                ASSERT_EQ(0, memcmp(recovered_packet->pkt->data.cdata(),
+                                    media_packet->data.cdata(),
+                                    media_packet->data.size()))
                     << "Recovered packet payload not identical to original "
-                    << "media packet";
+                       "media packet";
                 recovered_packet_list.pop_front();
               }
               ++media_packet_idx;
@@ -444,13 +453,21 @@ TEST(FecTest, MAYBE_FecTest) {
           }  // loop over num_imp_packets
         }    // loop over FecPackets
       }      // loop over num_media_packets
-    }  // loop over loss rates
-  }    // loop over mask types
+    }        // loop over loss rates
+  }          // loop over mask types
 
   // Have DecodeFec clear the recovered packet list.
   fec->ResetState(&recovered_packet_list);
   ASSERT_TRUE(recovered_packet_list.empty())
       << "Recovered packet list is not empty";
+}
+
+TEST(FecTest, UlpfecTest) {
+  RunTest(false);
+}
+
+TEST(FecTest, FlexfecTest) {
+  RunTest(true);
 }
 
 }  // namespace test

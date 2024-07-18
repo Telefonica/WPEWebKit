@@ -27,16 +27,16 @@
 
 #include <utility>
 #include <wtf/Forward.h>
-#include <wtf/Seconds.h>
+#include <wtf/URL.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebDriver {
 
 struct Timeouts {
-    std::optional<Seconds> script;
-    std::optional<Seconds> pageLoad;
-    std::optional<Seconds> implicit;
+    std::optional<double> script;
+    std::optional<double> pageLoad;
+    std::optional<double> implicit;
 };
 
 enum class PageLoadStrategy {
@@ -53,15 +53,28 @@ enum class UnhandledPromptBehavior {
     Ignore
 };
 
+struct Proxy {
+    String type;
+    std::optional<URL> autoconfigURL;
+    std::optional<URL> ftpURL;
+    std::optional<URL> httpURL;
+    std::optional<URL> httpsURL;
+    std::optional<URL> socksURL;
+    std::optional<uint8_t> socksVersion;
+    Vector<String> ignoreAddressList;
+};
+
 struct Capabilities {
     std::optional<String> browserName;
     std::optional<String> browserVersion;
     std::optional<String> platformName;
     std::optional<bool> acceptInsecureCerts;
+    std::optional<bool> strictFileInteractability;
     std::optional<bool> setWindowRect;
     std::optional<Timeouts> timeouts;
     std::optional<PageLoadStrategy> pageLoadStrategy;
     std::optional<UnhandledPromptBehavior> unhandledPromptBehavior;
+    std::optional<Proxy> proxy;
 #if PLATFORM(GTK) || PLATFORM(WPE)
     std::optional<String> browserBinary;
     std::optional<Vector<String>> browserArguments;
@@ -69,6 +82,10 @@ struct Capabilities {
 #endif
 #if PLATFORM(GTK)
     std::optional<bool> useOverlayScrollbars;
+#endif
+#if USE(INSPECTOR_SOCKET_SERVER)
+    std::optional<String> targetAddr;
+    std::optional<int> targetPort;
 #endif
 };
 

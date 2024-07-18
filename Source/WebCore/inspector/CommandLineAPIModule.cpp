@@ -26,16 +26,15 @@
 #include "config.h"
 #include "CommandLineAPIModule.h"
 
-#include "CommandLineAPIModuleSource.h"
 #include "JSDOMGlobalObject.h"
 #include "WebInjectedScriptManager.h"
-#include <heap/HeapInlines.h>
-#include <inspector/InjectedScript.h>
+#include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/InjectedScript.h>
+
+namespace WebCore {
 
 using namespace JSC;
 using namespace Inspector;
-
-namespace WebCore {
 
 void CommandLineAPIModule::injectIfNeeded(InjectedScriptManager* injectedScriptManager, const InjectedScript& injectedScript)
 {
@@ -44,23 +43,28 @@ void CommandLineAPIModule::injectIfNeeded(InjectedScriptManager* injectedScriptM
 }
 
 CommandLineAPIModule::CommandLineAPIModule()
-    : InjectedScriptModule(ASCIILiteral("CommandLineAPI"))
+    : InjectedScriptModule("CommandLineAPI"_s)
 {
 }
 
-String CommandLineAPIModule::source() const
+JSFunction* CommandLineAPIModule::injectModuleFunction(JSC::JSGlobalObject* lexicalGlobalObject) const
 {
-    return StringImpl::createWithoutCopying(CommandLineAPIModuleSource_js, sizeof(CommandLineAPIModuleSource_js));
+    if (auto* globalObject = jsCast<JSDOMGlobalObject*>(lexicalGlobalObject))
+        return globalObject->builtinInternalFunctions().commandLineAPIModuleSource().m_injectModuleFunction.get();
+
+    WTFLogAlways("Attempted to get `injectModule` function from `CommandLineAPIModule` for non-`JSDOMGlobalObject`.");
+    RELEASE_ASSERT_NOT_REACHED();
+    return nullptr;
 }
 
-JSValue CommandLineAPIModule::host(InjectedScriptManager* injectedScriptManager, ExecState* exec) const
+JSValue CommandLineAPIModule::host(InjectedScriptManager* injectedScriptManager, JSGlobalObject* lexicalGlobalObject) const
 {
     // CommandLineAPIModule should only ever be used by a WebInjectedScriptManager.
     WebInjectedScriptManager* pageInjectedScriptManager = static_cast<WebInjectedScriptManager*>(injectedScriptManager);
     ASSERT(pageInjectedScriptManager->commandLineAPIHost());
 
-    JSDOMGlobalObject* globalObject = jsCast<JSDOMGlobalObject*>(exec->lexicalGlobalObject());
-    return pageInjectedScriptManager->commandLineAPIHost()->wrapper(exec, globalObject);
+    JSDOMGlobalObject* globalObject = jsCast<JSDOMGlobalObject*>(lexicalGlobalObject);
+    return pageInjectedScriptManager->commandLineAPIHost()->wrapper(lexicalGlobalObject, globalObject);
 }
 
 } // namespace WebCore

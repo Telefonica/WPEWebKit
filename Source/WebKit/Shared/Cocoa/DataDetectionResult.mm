@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,13 +26,9 @@
 #import "config.h"
 #import "DataDetectionResult.h"
 
-#import "ArgumentCodersCF.h"
+#import "ArgumentCodersCocoa.h"
 #import "WebCoreArgumentCoders.h"
-#import <pal/spi/cocoa/DataDetectorsCoreSPI.h>
-#import <wtf/SoftLinking.h>
-
-SOFT_LINK_PRIVATE_FRAMEWORK(DataDetectorsCore)
-SOFT_LINK_CLASS(DataDetectorsCore, DDScannerResult)
+#import <pal/cocoa/DataDetectorsCoreSoftLink.h>
 
 namespace WebKit {
 
@@ -40,32 +36,18 @@ namespace WebKit {
 
 void DataDetectionResult::encode(IPC::Encoder& encoder) const
 {
-    RetainPtr<NSMutableData> data = adoptNS([[NSMutableData alloc] init]);
-    RetainPtr<NSKeyedArchiver> archiver = adoptNS([[NSKeyedArchiver alloc] initForWritingWithMutableData:data.get()]);
-    [archiver setRequiresSecureCoding:YES];
-    [archiver encodeObject:results.get() forKey:@"dataDetectorResults"];
-    [archiver finishEncoding];
-    
-    IPC::encode(encoder, reinterpret_cast<CFDataRef>(data.get()));        
+    encoder << results;
 }
 
-bool DataDetectionResult::decode(IPC::Decoder& decoder, DataDetectionResult& result)
+std::optional<DataDetectionResult> DataDetectionResult::decode(IPC::Decoder& decoder)
 {
-    RetainPtr<CFDataRef> data;
-    if (!IPC::decode(decoder, data))
-        return false;
-    
-    RetainPtr<NSKeyedUnarchiver> unarchiver = adoptNS([[NSKeyedUnarchiver alloc] initForReadingWithData:(NSData *)data.get()]);
-    [unarchiver setRequiresSecureCoding:YES];
-    @try {
-        result.results = [unarchiver decodeObjectOfClasses:[NSSet setWithArray:@[ [NSArray class], getDDScannerResultClass()] ] forKey:@"dataDetectorResults"];
-    } @catch (NSException *exception) {
-        LOG_ERROR("Failed to decode NSArray of DDScanResult: %@", exception);
-        return false;
-    }
-    
-    [unarchiver finishDecoding];
-    return true;
+    auto results = IPC::decode<NSArray>(decoder, @[ NSArray.class, PAL::getDDScannerResultClass() ]);
+    if (!results)
+        return std::nullopt;
+
+    DataDetectionResult result;
+    result.results = WTFMove(*results);
+    return { WTFMove(result) };
 }
 #endif
 

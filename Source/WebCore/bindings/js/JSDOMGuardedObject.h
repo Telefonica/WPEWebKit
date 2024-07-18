@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,10 +27,10 @@
 
 #include "ActiveDOMCallback.h"
 #include "JSDOMGlobalObject.h"
-#include <heap/HeapInlines.h>
-#include <heap/SlotVisitorInlines.h>
-#include <heap/StrongInlines.h>
-#include <runtime/JSCell.h>
+#include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/JSCell.h>
+#include <JavaScriptCore/SlotVisitorInlines.h>
+#include <JavaScriptCore/StrongInlines.h>
 
 namespace WebCore {
 
@@ -40,26 +40,30 @@ public:
 
     bool isSuspended() const { return !m_guarded || !canInvokeCallback(); } // The wrapper world has gone away or active DOM objects have been suspended.
 
-    void visitAggregate(JSC::SlotVisitor& visitor) { visitor.append(m_guarded); }
+    template<typename Visitor> void visitAggregate(Visitor& visitor) { visitor.append(m_guarded); }
 
     JSC::JSValue guardedObject() const { return m_guarded.get(); }
     JSDOMGlobalObject* globalObject() const { return m_globalObject.get(); }
 
+    void clear();
+
 protected:
     DOMGuardedObject(JSDOMGlobalObject&, JSC::JSCell&);
 
-    void clear();
     void contextDestroyed() override;
-    bool isEmpty() { return !m_guarded; }
+    bool isEmpty() const { return !m_guarded; }
 
     JSC::Weak<JSC::JSCell> m_guarded;
     JSC::Weak<JSDOMGlobalObject> m_globalObject;
+
+private:
+    void removeFromGlobalObject();
 };
 
 template <typename T> class DOMGuarded : public DOMGuardedObject {
 protected:
     DOMGuarded(JSDOMGlobalObject& globalObject, T& guarded) : DOMGuardedObject(globalObject, guarded) { }
-    T* guarded() const { return JSC::jsDynamicCast<T*>(globalObject()->vm(), guardedObject()); }
+    T* guarded() const { return JSC::jsDynamicCast<T*>(guardedObject()); }
 };
 
 } // namespace WebCore

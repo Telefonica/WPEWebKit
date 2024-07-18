@@ -23,20 +23,19 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "APIWebArchive.h"
+#import "config.h"
+#import "APIWebArchive.h"
 
 #if PLATFORM(COCOA)
 
-#include "APIArray.h"
-#include "APIData.h"
-#include "APIWebArchiveResource.h"
-#include <WebCore/LegacyWebArchive.h>
-#include <wtf/RetainPtr.h>
-
-using namespace WebCore;
+#import "APIArray.h"
+#import "APIData.h"
+#import "APIWebArchiveResource.h"
+#import <WebCore/LegacyWebArchive.h>
+#import <wtf/RetainPtr.h>
 
 namespace API {
+using namespace WebCore;
 
 Ref<WebArchive> WebArchive::create(WebArchiveResource* mainResource, RefPtr<API::Array>&& subresources, RefPtr<API::Array>&& subframeArchives)
 {
@@ -53,9 +52,9 @@ Ref<WebArchive> WebArchive::create(RefPtr<LegacyWebArchive>&& legacyWebArchive)
     return adoptRef(*new WebArchive(legacyWebArchive.releaseNonNull()));
 }
 
-Ref<WebArchive> WebArchive::create(Range& range)
+Ref<WebArchive> WebArchive::create(const SimpleRange& range)
 {
-    return adoptRef(*new WebArchive(LegacyWebArchive::create(&range)));
+    return adoptRef(*new WebArchive(LegacyWebArchive::create(range)));
 }
 
 WebArchive::WebArchive(WebArchiveResource* mainResource, RefPtr<API::Array>&& subresources, RefPtr<API::Array>&& subframeArchives)
@@ -133,7 +132,7 @@ API::Array* WebArchive::subframeArchives()
     return m_cachedSubframeArchives.get();
 }
 
-static void releaseCFData(unsigned char*, const void* data)
+static void releaseWebArchiveData(unsigned char*, const void* data)
 {
     // Balanced by CFRetain in WebArchive::data().
     CFRelease(data);
@@ -143,10 +142,10 @@ Ref<API::Data> WebArchive::data()
 {
     RetainPtr<CFDataRef> rawDataRepresentation = m_legacyWebArchive->rawDataRepresentation();
 
-    // Balanced by CFRelease in releaseCFData.
+    // Balanced by CFRelease in releaseWebArchiveData.
     CFRetain(rawDataRepresentation.get());
 
-    return API::Data::createWithoutCopying(CFDataGetBytePtr(rawDataRepresentation.get()), CFDataGetLength(rawDataRepresentation.get()), releaseCFData, rawDataRepresentation.get());
+    return API::Data::createWithoutCopying(CFDataGetBytePtr(rawDataRepresentation.get()), CFDataGetLength(rawDataRepresentation.get()), releaseWebArchiveData, rawDataRepresentation.get());
 }
 
 LegacyWebArchive* WebArchive::coreLegacyWebArchive()

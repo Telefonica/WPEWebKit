@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011 Google Inc. All rights reserved.
- * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -32,65 +32,49 @@
 #include "config.h"
 #include "AudioTrack.h"
 
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
 
-#include "HTMLMediaElement.h"
+#include "AudioTrackClient.h"
+#include "AudioTrackConfiguration.h"
+#include "AudioTrackList.h"
+#include "AudioTrackPrivate.h"
+#include "CommonAtomStrings.h"
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
 
-const AtomicString& AudioTrack::alternativeKeyword()
+const AtomString& AudioTrack::descriptionKeyword()
 {
-    static NeverDestroyed<AtomicString> alternative("alternative", AtomicString::ConstructFromLiteral);
-    return alternative;
-}
-
-const AtomicString& AudioTrack::descriptionKeyword()
-{
-    static NeverDestroyed<AtomicString> description("description", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> description("description"_s);
     return description;
 }
 
-const AtomicString& AudioTrack::mainKeyword()
+const AtomString& AudioTrack::mainDescKeyword()
 {
-    static NeverDestroyed<AtomicString> main("main", AtomicString::ConstructFromLiteral);
-    return main;
-}
-
-const AtomicString& AudioTrack::mainDescKeyword()
-{
-    static NeverDestroyed<AtomicString> mainDesc("main-desc", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> mainDesc("main-desc"_s);
     return mainDesc;
 }
 
-const AtomicString& AudioTrack::translationKeyword()
+const AtomString& AudioTrack::translationKeyword()
 {
-    static NeverDestroyed<AtomicString> translation("translation", AtomicString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> translation("translation"_s);
     return translation;
 }
 
-const AtomicString& AudioTrack::commentaryKeyword()
-{
-    static NeverDestroyed<AtomicString> commentary("commentary", AtomicString::ConstructFromLiteral);
-    return commentary;
-}
-
-AudioTrack::AudioTrack(AudioTrackClient& client, AudioTrackPrivate& trackPrivate)
-    : MediaTrackBase(MediaTrackBase::AudioTrack, trackPrivate.id(), trackPrivate.label(), trackPrivate.language())
-    , m_client(&client)
+AudioTrack::AudioTrack(ScriptExecutionContext* context, AudioTrackPrivate& trackPrivate)
+    : MediaTrackBase(context, MediaTrackBase::AudioTrack, trackPrivate.id(), trackPrivate.label(), trackPrivate.language())
     , m_private(trackPrivate)
     , m_enabled(trackPrivate.enabled())
+    , m_configuration(AudioTrackConfiguration::create())
 {
-    m_private->setClient(this);
-#if !RELEASE_LOG_DISABLED
-    m_private->setLogger(logger(), logIdentifier());
-#endif
+    m_private->setClient(*this);
     updateKindFromPrivate();
+    updateConfigurationFromPrivate();
 }
 
 AudioTrack::~AudioTrack()
 {
-    m_private->setClient(nullptr);
+    m_private->clearClient();
 }
 
 void AudioTrack::setPrivate(AudioTrackPrivate& trackPrivate)
@@ -98,23 +82,34 @@ void AudioTrack::setPrivate(AudioTrackPrivate& trackPrivate)
     if (m_private.ptr() == &trackPrivate)
         return;
 
-    m_private->setClient(nullptr);
+    m_private->clearClient();
     m_private = trackPrivate;
     m_private->setEnabled(m_enabled);
-    m_private->setClient(this);
+    m_private->setClient(*this);
 #if !RELEASE_LOG_DISABLED
     m_private->setLogger(logger(), logIdentifier());
 #endif
 
     updateKindFromPrivate();
+    updateConfigurationFromPrivate();
+    setId(m_private->id());
 }
 
-bool AudioTrack::isValidKind(const AtomicString& value) const
+void AudioTrack::setLanguage(const AtomString& language)
 {
-    return value == alternativeKeyword()
-        || value == commentaryKeyword()
+    TrackBase::setLanguage(language);
+
+    m_clients.forEach([&] (auto& client) {
+        client.audioTrackLanguageChanged(*this);
+    });
+}
+
+bool AudioTrack::isValidKind(const AtomString& value) const
+{
+    return value == alternativeAtom()
+        || value == commentaryAtom()
         || value == descriptionKeyword()
-        || value == mainKeyword()
+        || value == mainAtom()
         || value == mainDescKeyword()
         || value == translationKeyword();
 }
@@ -125,6 +120,21 @@ void AudioTrack::setEnabled(bool enabled)
         return;
 
     m_private->setEnabled(enabled);
+    m_clients.forEach([this] (auto& client) {
+        client.audioTrackEnabledChanged(*this);
+    });
+}
+
+void AudioTrack::addClient(AudioTrackClient& client)
+{
+    ASSERT(!m_clients.contains(client));
+    m_clients.add(client);
+}
+
+void AudioTrack::clearClient(AudioTrackClient& client)
+{
+    ASSERT(m_clients.contains(client));
+    m_clients.remove(client);
 }
 
 size_t AudioTrack::inbandTrackIndex() const
@@ -139,41 +149,55 @@ void AudioTrack::enabledChanged(bool enabled)
 
     m_enabled = enabled;
 
-    if (m_client)
-        m_client->audioTrackEnabledChanged(*this);
+    m_clients.forEach([this] (auto& client) {
+        client.audioTrackEnabledChanged(*this);
+    });
 }
 
-void AudioTrack::idChanged(const AtomicString& id)
+void AudioTrack::configurationChanged(const PlatformAudioTrackConfiguration& configuration)
+{
+    m_configuration->setState(configuration);
+}
+
+void AudioTrack::idChanged(const AtomString& id)
 {
     setId(id);
+    m_clients.forEach([this] (auto& client) {
+        client.audioTrackIdChanged(*this);
+    });
 }
 
-void AudioTrack::labelChanged(const AtomicString& label)
+void AudioTrack::labelChanged(const AtomString& label)
 {
     setLabel(label);
+    m_clients.forEach([this] (auto& client) {
+        client.audioTrackLabelChanged(*this);
+    });
 }
 
-void AudioTrack::languageChanged(const AtomicString& language)
+void AudioTrack::languageChanged(const AtomString& language)
 {
     setLanguage(language);
 }
 
 void AudioTrack::willRemove()
 {
-    mediaElement()->removeAudioTrack(*this);
+    m_clients.forEach([this] (auto& client) {
+        client.willRemoveAudioTrack(*this);
+    });
 }
 
 void AudioTrack::updateKindFromPrivate()
 {
     switch (m_private->kind()) {
     case AudioTrackPrivate::Alternative:
-        setKind(AudioTrack::alternativeKeyword());
+        setKind(alternativeAtom());
         break;
     case AudioTrackPrivate::Description:
         setKind(AudioTrack::descriptionKeyword());
         break;
     case AudioTrackPrivate::Main:
-        setKind(AudioTrack::mainKeyword());
+        setKind(mainAtom());
         break;
     case AudioTrackPrivate::MainDesc:
         setKind(AudioTrack::mainDescKeyword());
@@ -182,10 +206,10 @@ void AudioTrack::updateKindFromPrivate()
         setKind(AudioTrack::translationKeyword());
         break;
     case AudioTrackPrivate::Commentary:
-        setKind(AudioTrack::commentaryKeyword());
+        setKind(commentaryAtom());
         break;
     case AudioTrackPrivate::None:
-        setKind(emptyString());
+        setKind(emptyAtom());
         break;
     default:
         ASSERT_NOT_REACHED();
@@ -193,13 +217,18 @@ void AudioTrack::updateKindFromPrivate()
     }
 }
 
-void AudioTrack::setMediaElement(HTMLMediaElement* element)
+void AudioTrack::updateConfigurationFromPrivate()
 {
-    TrackBase::setMediaElement(element);
-#if !RELEASE_LOG_DISABLED
-    m_private->setLogger(logger(), logIdentifier());
-#endif
+    m_configuration->setState(m_private->configuration());
 }
+
+#if !RELEASE_LOG_DISABLED
+void AudioTrack::setLogger(const Logger& logger, const void* logIdentifier)
+{
+    TrackBase::setLogger(logger, logIdentifier);
+    m_private->setLogger(logger, this->logIdentifier());
+}
+#endif
 
 } // namespace WebCore
 

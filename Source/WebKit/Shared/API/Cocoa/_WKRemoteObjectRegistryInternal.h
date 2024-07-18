@@ -24,8 +24,7 @@
  */
 
 #import "_WKRemoteObjectRegistry.h"
-
-#if WK_API_ENABLED
+#import <wtf/NakedRef.h>
 
 namespace IPC {
 class MessageSender;
@@ -35,13 +34,16 @@ namespace WebKit {
 class RemoteObjectInvocation;
 class RemoteObjectRegistry;
 class UserData;
+class WebPage;
+class WebPageProxy;
 }
 
 @interface _WKRemoteObjectRegistry ()
 
 @property (nonatomic, readonly) WebKit::RemoteObjectRegistry& remoteObjectRegistry;
 
-- (id)_initWithMessageSender:(IPC::MessageSender&)messageSender;
+- (id)_initWithWebPage:(NakedRef<WebKit::WebPage>)messageSender;
+- (id)_initWithWebPageProxy:(NakedRef<WebKit::WebPageProxy>)messageSender;
 - (void)_invalidate;
 
 - (void)_sendInvocation:(NSInvocation *)invocation interface:(_WKRemoteObjectInterface *)interface;
@@ -51,5 +53,3 @@ class UserData;
 - (void)_releaseReplyWithID:(uint64_t)replyID;
 
 @end
-
-#endif // WK_API_ENABLED

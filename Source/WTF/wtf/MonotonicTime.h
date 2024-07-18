@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,11 +23,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WTF_MonotonicTime_h
-#define WTF_MonotonicTime_h
+#pragma once
 
 #include <wtf/ClockType.h>
-#include <wtf/Seconds.h>
+#include <wtf/GenericTimeMixin.h>
 
 namespace WTF {
 
@@ -38,112 +37,46 @@ class PrintStream;
 // possibly don't count downtime. This uses floating point internally so that you can reason about
 // infinity and other things that arise in math. It's acceptable to use this to wrap NaN times,
 // negative times, and infinite times, so long as they are all relative to the same clock.
-// Specifically, MonotonicTime should be used in agreement with the principle that
-// MonotonicTime::now().secondsSinceEpoch().value() is the same as
-// WTF::monotonicallyIncreasingTime().
-class MonotonicTime {
+class MonotonicTime final : public GenericTimeMixin<MonotonicTime> {
 public:
-    static const ClockType clockType = ClockType::Monotonic;
+    static constexpr ClockType clockType = ClockType::Monotonic;
     
     // This is the epoch. So, x.secondsSinceEpoch() should be the same as x - MonotonicTime().
-    constexpr MonotonicTime() { }
-    
-    // Call this if you know for sure that the double represents time according to
-    // WTF::monotonicallyIncreasingTime(). It must be in seconds and it must be from the same time
-    // source.
-    static constexpr MonotonicTime fromRawSeconds(double value)
-    {
-        return MonotonicTime(value);
-    }
-    
-    WTF_EXPORT_PRIVATE static MonotonicTime now();
-    
-    static constexpr MonotonicTime infinity() { return fromRawSeconds(std::numeric_limits<double>::infinity()); }
-    static constexpr MonotonicTime nan() { return fromRawSeconds(std::numeric_limits<double>::quiet_NaN()); }
+    constexpr MonotonicTime() = default;
 
-    constexpr Seconds secondsSinceEpoch() const { return Seconds(m_value); }
+#if OS(DARWIN)
+    WTF_EXPORT_PRIVATE static MonotonicTime fromMachAbsoluteTime(uint64_t);
+    WTF_EXPORT_PRIVATE uint64_t toMachAbsoluteTime() const;
+#endif
+
+    WTF_EXPORT_PRIVATE static MonotonicTime now();
     
     MonotonicTime approximateMonotonicTime() const { return *this; }
     WTF_EXPORT_PRIVATE WallTime approximateWallTime() const;
-    
-    explicit constexpr operator bool() const { return !!m_value; }
-    
-    constexpr MonotonicTime operator+(Seconds other) const
-    {
-        return fromRawSeconds(m_value + other.value());
-    }
-    
-    constexpr MonotonicTime operator-(Seconds other) const
-    {
-        return fromRawSeconds(m_value - other.value());
-    }
 
-    Seconds operator%(Seconds other) const
-    {
-        return Seconds { fmod(m_value, other.value()) };
-    }
-    
-    // Time is a scalar and scalars can be negated as this could arise from algebraic
-    // transformations. So, we allow it.
-    constexpr MonotonicTime operator-() const
-    {
-        return fromRawSeconds(-m_value);
-    }
-    
-    MonotonicTime operator+=(Seconds other)
-    {
-        return *this = *this + other;
-    }
-    
-    MonotonicTime operator-=(Seconds other)
-    {
-        return *this = *this - other;
-    }
-    
-    constexpr Seconds operator-(MonotonicTime other) const
-    {
-        return Seconds(m_value - other.m_value);
-    }
-    
-    constexpr bool operator==(MonotonicTime other) const
-    {
-        return m_value == other.m_value;
-    }
-    
-    constexpr bool operator!=(MonotonicTime other) const
-    {
-        return m_value != other.m_value;
-    }
-    
-    constexpr bool operator<(MonotonicTime other) const
-    {
-        return m_value < other.m_value;
-    }
-    
-    constexpr bool operator>(MonotonicTime other) const
-    {
-        return m_value > other.m_value;
-    }
-    
-    constexpr bool operator<=(MonotonicTime other) const
-    {
-        return m_value <= other.m_value;
-    }
-    
-    constexpr bool operator>=(MonotonicTime other) const
-    {
-        return m_value >= other.m_value;
-    }
-    
     WTF_EXPORT_PRIVATE void dump(PrintStream&) const;
 
+    struct MarkableTraits;
+
 private:
+    friend class GenericTimeMixin<MonotonicTime>;
     constexpr MonotonicTime(double rawValue)
-        : m_value(rawValue)
+        : GenericTimeMixin<MonotonicTime>(rawValue)
     {
     }
+};
+static_assert(sizeof(MonotonicTime) == sizeof(double));
 
-    double m_value { 0 };
+struct MonotonicTime::MarkableTraits {
+    static bool isEmptyValue(MonotonicTime time)
+    {
+        return std::isnan(time.m_value);
+    }
+
+    static constexpr MonotonicTime emptyValue()
+    {
+        return MonotonicTime::nan();
+    }
 };
 
 } // namespace WTF
@@ -168,5 +101,3 @@ inline bool isfinite(WTF::MonotonicTime time)
 } // namespace std
 
 using WTF::MonotonicTime;
-
-#endif // WTF_MonotonicTime_h

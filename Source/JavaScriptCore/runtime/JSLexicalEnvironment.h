@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2009, 2013-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,19 +40,19 @@ class JSLexicalEnvironment : public JSSymbolTableObject {
     friend class JIT;
     friend class LLIntOffsetsExtractor;
 public:
-    template<typename CellType>
-    static Subspace* subspaceFor(VM& vm)
+    template<typename CellType, SubspaceAccess>
+    static CompleteSubspace* subspaceFor(VM& vm)
     {
-        RELEASE_ASSERT(!CellType::needsDestruction);
-        return &vm.jsValueGigacageCellSpace;
+        static_assert(!CellType::needsDestruction);
+        return &vm.variableSizedCellSpace();
     }
 
     using Base = JSSymbolTableObject;
-    static const unsigned StructureFlags = Base::StructureFlags | OverridesGetOwnPropertySlot | OverridesGetPropertyNames;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | OverridesGetOwnPropertySlot | OverridesGetOwnSpecialPropertyNames | OverridesPut;
 
     WriteBarrierBase<Unknown>* variables()
     {
-        return bitwise_cast<WriteBarrierBase<Unknown>*>(bitwise_cast<char*>(Gigacage::caged(Gigacage::JSValue, this)) + offsetOfVariables());
+        return bitwise_cast<WriteBarrierBase<Unknown>*>(bitwise_cast<char*>(this) + offsetOfVariables());
     }
 
     bool isValidScopeOffset(ScopeOffset offset)
@@ -74,12 +74,12 @@ public:
     static size_t offsetOfVariable(ScopeOffset offset)
     {
         Checked<size_t> scopeOffset = offset.offset();
-        return (offsetOfVariables() + scopeOffset * sizeof(WriteBarrier<Unknown>)).unsafeGet();
+        return offsetOfVariables() + scopeOffset * sizeof(WriteBarrier<Unknown>);
     }
 
     static size_t allocationSizeForScopeSize(Checked<size_t> scopeSize)
     {
-        return (offsetOfVariables() + scopeSize * sizeof(WriteBarrier<Unknown>)).unsafeGet();
+        return offsetOfVariables() + scopeSize * sizeof(WriteBarrier<Unknown>);
     }
 
     static size_t allocationSize(SymbolTable* symbolTable)
@@ -93,7 +93,7 @@ public:
         JSLexicalEnvironment* result = 
             new (
                 NotNull,
-                allocateCell<JSLexicalEnvironment>(vm.heap, allocationSize(symbolTable)))
+                allocateCell<JSLexicalEnvironment>(vm, allocationSize(symbolTable)))
             JSLexicalEnvironment(vm, structure, currentScope, symbolTable);
         result->finishCreation(vm, initialValue);
         return result;
@@ -105,12 +105,12 @@ public:
         return create(vm, structure, currentScope, symbolTable, initialValue);
     }
         
-    static bool getOwnPropertySlot(JSObject*, ExecState*, PropertyName, PropertySlot&);
-    static void getOwnNonIndexPropertyNames(JSObject*, ExecState*, PropertyNameArray&, EnumerationMode);
+    static bool getOwnPropertySlot(JSObject*, JSGlobalObject*, PropertyName, PropertySlot&);
+    static void getOwnSpecialPropertyNames(JSObject*, JSGlobalObject*, PropertyNameArray&, DontEnumPropertiesMode);
 
-    static bool put(JSCell*, ExecState*, PropertyName, JSValue, PutPropertySlot&);
+    static bool put(JSCell*, JSGlobalObject*, PropertyName, JSValue, PutPropertySlot&);
 
-    static bool deleteProperty(JSCell*, ExecState*, PropertyName);
+    static bool deleteProperty(JSCell*, JSGlobalObject*, PropertyName, DeletePropertySlot&);
 
     DECLARE_INFO;
 
@@ -134,8 +134,8 @@ protected:
         }
     }
 
-    static void visitChildren(JSCell*, SlotVisitor&);
-    static void heapSnapshot(JSCell*, HeapSnapshotBuilder&);
+    DECLARE_VISIT_CHILDREN;
+    static void analyzeHeap(JSCell*, HeapAnalyzer&);
 };
 
 inline JSLexicalEnvironment::JSLexicalEnvironment(VM& vm, Structure* structure, JSScope* currentScope, SymbolTable* symbolTable)
@@ -143,10 +143,4 @@ inline JSLexicalEnvironment::JSLexicalEnvironment(VM& vm, Structure* structure, 
 {
 }
 
-inline JSLexicalEnvironment* asActivation(JSValue value)
-{
-    ASSERT(asObject(value)->inherits(*value.getObject()->vm(), JSLexicalEnvironment::info()));
-    return jsCast<JSLexicalEnvironment*>(asObject(value));
-}
-    
 } // namespace JSC

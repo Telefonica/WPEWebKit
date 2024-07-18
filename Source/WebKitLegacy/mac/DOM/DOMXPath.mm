@@ -45,13 +45,6 @@
     [super dealloc];
 }
 
-- (void)finalize
-{
-    if (_internal)
-        IMPL->deref();
-    [super finalize];
-}
-
 - (NSString *)lookupNamespaceURI:(NSString *)prefix
 {
     return IMPL->lookupNamespaceURI(prefix);
@@ -70,11 +63,13 @@ DOMNativeXPathNSResolver *kit(WebCore::XPathNSResolver* impl)
         return nil;
     
     if (DOMNativeXPathNSResolver *wrapper = getDOMWrapper(impl))
-        return [[wrapper retain] autorelease];
+        return retainPtr(wrapper).autorelease();
     
-    DOMNativeXPathNSResolver *wrapper = [[DOMNativeXPathNSResolver alloc] _init];
+    auto wrapper = adoptNS([[DOMNativeXPathNSResolver alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(impl);
     impl->ref();
-    addDOMWrapper(wrapper, impl);
-    return [wrapper autorelease];    
+    addDOMWrapper(wrapper.get(), impl);
+    return wrapper.autorelease();    
 }
+
+#undef IMPL

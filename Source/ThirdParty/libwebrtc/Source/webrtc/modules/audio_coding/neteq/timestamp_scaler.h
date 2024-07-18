@@ -8,12 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_NETEQ_TIMESTAMP_SCALER_H_
-#define WEBRTC_MODULES_AUDIO_CODING_NETEQ_TIMESTAMP_SCALER_H_
+#ifndef MODULES_AUDIO_CODING_NETEQ_TIMESTAMP_SCALER_H_
+#define MODULES_AUDIO_CODING_NETEQ_TIMESTAMP_SCALER_H_
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/audio_coding/neteq/packet.h"
-#include "webrtc/typedefs.h"
+#include "modules/audio_coding/neteq/packet.h"
 
 namespace webrtc {
 
@@ -35,18 +33,21 @@ class TimestampScaler {
 
   virtual ~TimestampScaler() {}
 
+  TimestampScaler(const TimestampScaler&) = delete;
+  TimestampScaler& operator=(const TimestampScaler&) = delete;
+
   // Start over.
   virtual void Reset();
 
-  // Scale the timestamp in |packet| from external to internal.
+  // Scale the timestamp in `packet` from external to internal.
   virtual void ToInternal(Packet* packet);
 
-  // Scale the timestamp for all packets in |packet_list| from external to
+  // Scale the timestamp for all packets in `packet_list` from external to
   // internal.
   virtual void ToInternal(PacketList* packet_list);
 
-  // Returns the internal equivalent of |external_timestamp|, given the
-  // RTP payload type |rtp_payload_type|.
+  // Returns the internal equivalent of `external_timestamp`, given the
+  // RTP payload type `rtp_payload_type`.
   virtual uint32_t ToInternal(uint32_t external_timestamp,
                               uint8_t rtp_payload_type);
 
@@ -60,9 +61,7 @@ class TimestampScaler {
   uint32_t external_ref_;
   uint32_t internal_ref_;
   const DecoderDatabase& decoder_database_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(TimestampScaler);
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_TIMESTAMP_SCALER_H_
+#endif  // MODULES_AUDIO_CODING_NETEQ_TIMESTAMP_SCALER_H_

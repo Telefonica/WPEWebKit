@@ -23,27 +23,25 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "NetworkCacheData.h"
+#import "config.h"
+#import "NetworkCacheData.h"
 
-#if ENABLE(NETWORK_CACHE)
-
-#include "SharedMemory.h"
-#include <dispatch/dispatch.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
+#import "SharedMemory.h"
+#import <dispatch/dispatch.h>
+#import <sys/mman.h>
+#import <sys/stat.h>
 
 namespace WebKit {
 namespace NetworkCache {
 
 Data::Data(const uint8_t* data, size_t size)
-    : m_dispatchData(adoptDispatch(dispatch_data_create(data, size, nullptr, DISPATCH_DATA_DESTRUCTOR_DEFAULT)))
+    : m_dispatchData(adoptOSObject(dispatch_data_create(data, size, nullptr, DISPATCH_DATA_DESTRUCTOR_DEFAULT)))
     , m_size(size)
 {
 }
 
-Data::Data(DispatchPtr<dispatch_data_t> dispatchData, Backing backing)
-    : m_dispatchData(dispatchData)
+Data::Data(OSObjectPtr<dispatch_data_t>&& dispatchData, Backing backing)
+    : m_dispatchData(WTFMove(dispatchData))
     , m_size(m_dispatchData ? dispatch_data_get_size(m_dispatchData.get()) : 0)
     , m_isMap(m_size && backing == Backing::Map)
 {
@@ -51,7 +49,7 @@ Data::Data(DispatchPtr<dispatch_data_t> dispatchData, Backing backing)
 
 Data Data::empty()
 {
-    return { DispatchPtr<dispatch_data_t>(dispatch_data_empty) };
+    return { OSObjectPtr<dispatch_data_t> { dispatch_data_empty } };
 }
 
 const uint8_t* Data::data() const
@@ -59,7 +57,7 @@ const uint8_t* Data::data() const
     if (!m_data && m_dispatchData) {
         const void* data;
         size_t size;
-        m_dispatchData = adoptDispatch(dispatch_data_create_map(m_dispatchData.get(), &data, &size));
+        m_dispatchData = adoptOSObject(dispatch_data_create_map(m_dispatchData.get(), &data, &size));
         ASSERT(size == m_size);
         m_data = static_cast<const uint8_t*>(data);
     }
@@ -71,18 +69,18 @@ bool Data::isNull() const
     return !m_dispatchData;
 }
 
-bool Data::apply(const Function<bool (const uint8_t*, size_t)>& applier) const
+bool Data::apply(const Function<bool(Span<const uint8_t>)>& applier) const
 {
     if (!m_size)
         return false;
     return dispatch_data_apply(m_dispatchData.get(), [&applier](dispatch_data_t, size_t, const void* data, size_t size) {
-        return applier(static_cast<const uint8_t*>(data), size);
+        return applier({ static_cast<const uint8_t*>(data), size });
     });
 }
 
 Data Data::subrange(size_t offset, size_t size) const
 {
-    return { adoptDispatch(dispatch_data_create_subrange(dispatchData(), offset, size)) };
+    return { adoptOSObject(dispatch_data_create_subrange(dispatchData(), offset, size)) };
 }
 
 Data concatenate(const Data& a, const Data& b)
@@ -91,17 +89,20 @@ Data concatenate(const Data& a, const Data& b)
         return b;
     if (b.isNull())
         return a;
-    return { adoptDispatch(dispatch_data_create_concat(a.dispatchData(), b.dispatchData())) };
+    return { adoptOSObject(dispatch_data_create_concat(a.dispatchData(), b.dispatchData())) };
 }
 
-Data Data::adoptMap(void* map, size_t size, int fd)
+Data Data::adoptMap(FileSystem::MappedFileData&& mappedFile, FileSystem::PlatformFileHandle fd)
 {
-    ASSERT(map && map != MAP_FAILED);
-    close(fd);
-    auto bodyMap = adoptDispatch(dispatch_data_create(map, size, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), [map, size] {
+    size_t size = mappedFile.size();
+    void* map = mappedFile.leakHandle();
+    ASSERT(map);
+    ASSERT(map != MAP_FAILED);
+    FileSystem::closeFile(fd);
+    auto bodyMap = adoptOSObject(dispatch_data_create(map, size, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), [map, size] {
         munmap(map, size);
     }));
-    return { bodyMap, Data::Backing::Map };
+    return { WTFMove(bodyMap), Data::Backing::Map };
 }
 
 RefPtr<SharedMemory> Data::tryCreateSharedMemory() const
@@ -109,10 +110,8 @@ RefPtr<SharedMemory> Data::tryCreateSharedMemory() const
     if (isNull() || !isMap())
         return nullptr;
 
-    return SharedMemory::create(const_cast<uint8_t*>(data()), m_size, SharedMemory::Protection::ReadOnly);
+    return SharedMemory::wrapMap(const_cast<uint8_t*>(data()), m_size, SharedMemory::Protection::ReadOnly);
 }
 
 }
 }
-
-#endif

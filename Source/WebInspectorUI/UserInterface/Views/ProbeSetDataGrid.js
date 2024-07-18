@@ -33,7 +33,7 @@ WI.ProbeSetDataGrid = class ProbeSetDataGrid extends WI.DataGrid
         var columns = {};
         for (var probe of probeSet.probes) {
             var title = probe.expression || WI.UIString("(uninitialized)");
-            columns[probe.id] = {title};
+            columns[WI.ProbeSetDataGrid.columnIdentifierForProbe(probe)] = {title};
         }
 
         super(columns);
@@ -46,14 +46,20 @@ WI.ProbeSetDataGrid = class ProbeSetDataGrid extends WI.DataGrid
         this._lastUpdatedFrame = null;
         this._nodesSinceLastNavigation = [];
 
-        this._listenerSet = new WI.EventListenerSet(this, "ProbeSetDataGrid instance listeners");
-        this._listenerSet.register(probeSet, WI.ProbeSet.Event.ProbeAdded, this._setupProbe);
-        this._listenerSet.register(probeSet, WI.ProbeSet.Event.ProbeRemoved, this._teardownProbe);
-        this._listenerSet.register(probeSet, WI.ProbeSet.Event.SamplesCleared, this._setupData);
-        this._listenerSet.register(WI.Probe, WI.Probe.Event.ExpressionChanged, this._probeExpressionChanged);
-        this._listenerSet.install();
+        probeSet.addEventListener(WI.ProbeSet.Event.ProbeAdded, this._setupProbe, this);
+        probeSet.addEventListener(WI.ProbeSet.Event.ProbeRemoved, this._teardownProbe, this);
+        probeSet.addEventListener(WI.ProbeSet.Event.SamplesCleared, this._setupData, this);
+
+        WI.Probe.addEventListener(WI.Probe.Event.ExpressionChanged, this._probeExpressionChanged, this);
 
         this._setupData();
+    }
+
+    // Static
+
+    static columnIdentifierForProbe(probe)
+    {
+        return "probe" + probe.id;
     }
 
     // Public
@@ -63,7 +69,11 @@ WI.ProbeSetDataGrid = class ProbeSetDataGrid extends WI.DataGrid
         for (var probe of this.probeSet)
             this._teardownProbe(probe);
 
-        this._listenerSet.uninstall(true);
+        this.probeSet.removeEventListener(WI.ProbeSet.Event.ProbeAdded, this._setupProbe, this);
+        this.probeSet.removeEventListener(WI.ProbeSet.Event.ProbeRemoved, this._teardownProbe, this);
+        this.probeSet.removeEventListener(WI.ProbeSet.Event.SamplesCleared, this._setupData, this);
+
+        WI.Probe.removeEventListener(WI.Probe.Event.ExpressionChanged, this._probeExpressionChanged, this);
     }
 
     // Private
@@ -71,7 +81,7 @@ WI.ProbeSetDataGrid = class ProbeSetDataGrid extends WI.DataGrid
     _setupProbe(event)
     {
         var probe = event.data;
-        this.insertColumn(probe.id, {title: probe.expression});
+        this.insertColumn(WI.ProbeSetDataGrid.columnIdentifierForProbe(probe), {title: probe.expression});
 
         for (var frame of this._data.frames)
             this._updateNodeForFrame(frame);
@@ -80,7 +90,7 @@ WI.ProbeSetDataGrid = class ProbeSetDataGrid extends WI.DataGrid
     _teardownProbe(event)
     {
         var probe = event.data;
-        this.removeColumn(probe.id);
+        this.removeColumn(WI.ProbeSetDataGrid.columnIdentifierForProbe(probe));
 
         for (var frame of this._data.frames)
             this._updateNodeForFrame(frame);
@@ -92,16 +102,17 @@ WI.ProbeSetDataGrid = class ProbeSetDataGrid extends WI.DataGrid
         for (var frame of this._data.frames)
             this._updateNodeForFrame(frame);
 
-        this._dataListeners = new WI.EventListenerSet(this, "ProbeSetDataGrid data table listeners");
-        this._dataListeners.register(this._data, WI.ProbeSetDataTable.Event.FrameInserted, this._dataFrameInserted);
-        this._dataListeners.register(this._data, WI.ProbeSetDataTable.Event.SeparatorInserted, this._dataSeparatorInserted);
-        this._dataListeners.register(this._data, WI.ProbeSetDataTable.Event.WillRemove, this._teardownData);
-        this._dataListeners.install();
+        this._data.addEventListener(WI.ProbeSetDataTable.Event.FrameInserted, this._dataFrameInserted, this);
+        this._data.addEventListener(WI.ProbeSetDataTable.Event.SeparatorInserted, this._dataSeparatorInserted, this);
+        this._data.addEventListener(WI.ProbeSetDataTable.Event.WillRemove, this._teardownData, this);
     }
 
     _teardownData()
     {
-        this._dataListeners.uninstall(true);
+        this._data.removeEventListener(WI.ProbeSetDataTable.Event.FrameInserted, this._dataFrameInserted, this);
+        this._data.removeEventListener(WI.ProbeSetDataTable.Event.SeparatorInserted, this._dataSeparatorInserted, this);
+        this._data.removeEventListener(WI.ProbeSetDataTable.Event.WillRemove, this._teardownData, this);
+
         this.removeChildren();
         this._frameNodes = new Map;
         this._lastUpdatedFrame = null;
@@ -176,14 +187,15 @@ WI.ProbeSetDataGrid = class ProbeSetDataGrid extends WI.DataGrid
         if (probe.breakpoint !== this.probeSet.breakpoint)
             return;
 
-        if (!this.columns.has(probe.id))
+        let columnIdentifier = WI.ProbeSetDataGrid.columnIdentifierForProbe(probe);
+        if (!this.columns.has(columnIdentifier))
             return;
 
-        var oldColumn = this.columns.get(probe.id);
-        this.removeColumn(probe.id);
+        var oldColumn = this.columns.get(columnIdentifier);
+        this.removeColumn(columnIdentifier);
         var ordinal = oldColumn["ordinal"];
         var newColumn = {title: event.data.newValue};
-        this.insertColumn(probe.id, newColumn, ordinal);
+        this.insertColumn(columnIdentifier, newColumn, ordinal);
 
         for (var frame of this._data.frames)
             this._updateNodeForFrame(frame);

@@ -17,12 +17,13 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef WebKitWebExtensionPrivate_h
-#define WebKitWebExtensionPrivate_h
+#pragma once
 
 #include "InjectedBundle.h"
+#include "UserMessage.h"
+#include "WKDeclarationSpecifiers.h"
 #include "WebKitWebExtension.h"
 
 WebKitWebExtension* webkitWebExtensionCreate(WebKit::InjectedBundle*);
-
-#endif // WebKitWebExtensionPrivate_h
+void webkitWebExtensionDidReceiveUserMessage(WebKitWebExtension*, WebKit::UserMessage&&);
+WK_EXPORT void webkitWebExtensionSetGarbageCollectOnPageDestroy(WebKitWebExtension*);

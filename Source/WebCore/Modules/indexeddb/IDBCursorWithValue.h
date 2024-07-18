@@ -25,25 +25,24 @@
 
 #pragma once
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBCursor.h"
 #include <wtf/TypeCasts.h>
 
 namespace WebCore {
 
 class IDBCursorWithValue final : public IDBCursor {
+    WTF_MAKE_ISO_ALLOCATED(IDBCursorWithValue);
 public:
-    static Ref<IDBCursorWithValue> create(IDBTransaction&, IDBObjectStore&, const IDBCursorInfo&);
-    static Ref<IDBCursorWithValue> create(IDBTransaction&, IDBIndex&, const IDBCursorInfo&);
+    static Ref<IDBCursorWithValue> create(IDBObjectStore&, const IDBCursorInfo&);
+    static Ref<IDBCursorWithValue> create(IDBIndex&, const IDBCursorInfo&);
 
     virtual ~IDBCursorWithValue();
 
     bool isKeyCursorWithValue() const  override { return true; }
 
 private:
-    IDBCursorWithValue(IDBTransaction&, IDBObjectStore&, const IDBCursorInfo&);
-    IDBCursorWithValue(IDBTransaction&, IDBIndex&, const IDBCursorInfo&);
+    IDBCursorWithValue(IDBObjectStore&, const IDBCursorInfo&);
+    IDBCursorWithValue(IDBIndex&, const IDBCursorInfo&);
 };
 
 } // namespace WebCore
@@ -51,5 +50,3 @@ private:
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::IDBCursorWithValue)
     static bool isType(const WebCore::IDBCursor& cursor) { return cursor.isKeyCursorWithValue(); }
 SPECIALIZE_TYPE_TRAITS_END()
-
-#endif // ENABLE(INDEXED_DATABASE)

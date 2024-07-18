@@ -29,6 +29,8 @@
 #include "APIDictionary.h"
 #include "WKAPICast.h"
 #include "WKArray.h"
+#include "WKBundleFileHandleRef.h"
+#include "WKBundleFrame.h"
 #include "WKContextPrivate.h"
 #include "WKMutableDictionary.h"
 #include "WKPageGroup.h"
@@ -36,13 +38,7 @@
 #include "WebPageGroup.h"
 #include "WebUserContentControllerProxy.h"
 
-#if PLATFORM(MAC)
-#include "WKContextPrivateMac.h"
-#endif
-
 // Deprecated functions that should be removed from the framework once nobody uses them.
-
-using namespace WebKit;
 
 void WKContextSetUsesNetworkProcess(WKContextRef, bool)
 {
@@ -52,27 +48,30 @@ void WKContextSetProcessModel(WKContextRef, WKProcessModel)
 {
 }
 
-WKStringRef WKPageGroupCopyIdentifier(WKPageGroupRef)
+void WKPreferencesSetQTKitEnabled(WKPreferencesRef, bool)
+{
+}
+
+bool WKPreferencesGetQTKitEnabled(WKPreferencesRef)
+{
+    return false;
+}
+
+JSValueRef WKBundleFrameGetJavaScriptWrapperForFileForWorld(WKBundleFrameRef, WKBundleFileHandleRef, WKBundleScriptWorldRef)
 {
     return nullptr;
 }
 
-void WKPageGroupAddUserContentFilter(WKPageGroupRef pageGroupRef, WKUserContentFilterRef contentFilterRef)
+WKBundleFileHandleRef WKBundleFileHandleCreateWithPath(WKStringRef)
 {
-#if ENABLE(CONTENT_EXTENSIONS)
-    toImpl(pageGroupRef)->userContentController().addContentRuleList(*toImpl(contentFilterRef));
-#else
-    UNUSED_PARAM(pageGroupRef);
-    UNUSED_PARAM(contentFilterRef);
-#endif
+    return nullptr;
 }
 
-void WKPageGroupRemoveUserContentFilter(WKPageGroupRef pageGroupRef, WKStringRef contentFilterNameRef)
+void WKPreferencesSetAccelerated2DCanvasEnabled(WKPreferencesRef, bool)
 {
-#if ENABLE(CONTENT_EXTENSIONS)
-    toImpl(pageGroupRef)->userContentController().removeContentRuleList(toWTFString(contentFilterNameRef));
-#else
-    UNUSED_PARAM(pageGroupRef);
-    UNUSED_PARAM(contentFilterNameRef);
-#endif
+}
+
+bool WKPreferencesGetAccelerated2DCanvasEnabled(WKPreferencesRef)
+{
+    return false;
 }

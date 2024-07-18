@@ -8,20 +8,32 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/examples/peerconnection/client/linux/main_wnd.h"
+#include "examples/peerconnection/client/linux/main_wnd.h"
 
+#include <cairo.h>
+#include <gdk/gdk.h>
 #include <gdk/gdkkeysyms.h>
+#include <glib-object.h>
+#include <glib.h>
+#include <gobject/gclosure.h>
 #include <gtk/gtk.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include "libyuv/convert_from.h"
-#include "webrtc/api/video/i420_buffer.h"
-#include "webrtc/examples/peerconnection/client/defaults.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/base/stringutils.h"
+#include <cstdint>
+#include <map>
+#include <utility>
 
-using rtc::sprintfn;
+#include "api/video/i420_buffer.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video/video_rotation.h"
+#include "api/video/video_source_interface.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
+#include "third_party/libyuv/include/libyuv/convert.h"
+#include "third_party/libyuv/include/libyuv/convert_from.h"
 
 namespace {
 
@@ -30,7 +42,8 @@ namespace {
 // GtkMainWnd instance.
 //
 
-gboolean OnDestroyedCallback(GtkWidget* widget, GdkEvent* event,
+gboolean OnDestroyedCallback(GtkWidget* widget,
+                             GdkEvent* event,
                              gpointer data) {
   reinterpret_cast<GtkMainWnd*>(data)->OnDestroyed(widget, event);
   return FALSE;
@@ -45,14 +58,17 @@ gboolean SimulateButtonClick(gpointer button) {
   return false;
 }
 
-gboolean OnKeyPressCallback(GtkWidget* widget, GdkEventKey* key,
+gboolean OnKeyPressCallback(GtkWidget* widget,
+                            GdkEventKey* key,
                             gpointer data) {
   reinterpret_cast<GtkMainWnd*>(data)->OnKeyPress(widget, key);
   return false;
 }
 
-void OnRowActivatedCallback(GtkTreeView* tree_view, GtkTreePath* path,
-                            GtkTreeViewColumn* column, gpointer data) {
+void OnRowActivatedCallback(GtkTreeView* tree_view,
+                            GtkTreePath* path,
+                            GtkTreeViewColumn* column,
+                            gpointer data) {
   reinterpret_cast<GtkMainWnd*>(data)->OnRowActivated(tree_view, path, column);
 }
 
@@ -90,8 +106,8 @@ void InitializeList(GtkWidget* list) {
 
 // Adds an entry to a tree view.
 void AddToList(GtkWidget* list, const gchar* str, int value) {
-  GtkListStore* store = GTK_LIST_STORE(
-      gtk_tree_view_get_model(GTK_TREE_VIEW(list)));
+  GtkListStore* store =
+      GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(list)));
 
   GtkTreeIter iter;
   gtk_list_store_append(store, &iter);
@@ -131,13 +147,22 @@ gboolean Draw(GtkWidget* widget, cairo_t* cr, gpointer data) {
 // GtkMainWnd implementation.
 //
 
-GtkMainWnd::GtkMainWnd(const char* server, int port, bool autoconnect,
+GtkMainWnd::GtkMainWnd(const char* server,
+                       int port,
+                       bool autoconnect,
                        bool autocall)
-    : window_(NULL), draw_area_(NULL), vbox_(NULL), server_edit_(NULL),
-      port_edit_(NULL), peer_list_(NULL), callback_(NULL),
-      server_(server), autoconnect_(autoconnect), autocall_(autocall) {
+    : window_(NULL),
+      draw_area_(NULL),
+      vbox_(NULL),
+      server_edit_(NULL),
+      port_edit_(NULL),
+      peer_list_(NULL),
+      callback_(NULL),
+      server_(server),
+      autoconnect_(autoconnect),
+      autocall_(autocall) {
   char buffer[10];
-  sprintfn(buffer, sizeof(buffer), "%i", port);
+  snprintf(buffer, sizeof(buffer), "%i", port);
   port_ = buffer;
 }
 
@@ -153,12 +178,13 @@ bool GtkMainWnd::IsWindow() {
   return window_ != NULL && GTK_IS_WINDOW(window_);
 }
 
-void GtkMainWnd::MessageBox(const char* caption, const char* text,
+void GtkMainWnd::MessageBox(const char* caption,
+                            const char* text,
                             bool is_error) {
-  GtkWidget* dialog = gtk_message_dialog_new(GTK_WINDOW(window_),
-      GTK_DIALOG_DESTROY_WITH_PARENT,
-      is_error ? GTK_MESSAGE_ERROR : GTK_MESSAGE_INFO,
-      GTK_BUTTONS_CLOSE, "%s", text);
+  GtkWidget* dialog = gtk_message_dialog_new(
+      GTK_WINDOW(window_), GTK_DIALOG_DESTROY_WITH_PARENT,
+      is_error ? GTK_MESSAGE_ERROR : GTK_MESSAGE_INFO, GTK_BUTTONS_CLOSE, "%s",
+      text);
   gtk_window_set_title(GTK_WINDOW(dialog), caption);
   gtk_dialog_run(GTK_DIALOG(dialog));
   gtk_widget_destroy(dialog);
@@ -173,7 +199,6 @@ MainWindow::UI GtkMainWnd::current_ui() {
 
   return STREAMING;
 }
-
 
 void GtkMainWnd::StartLocalRenderer(webrtc::VideoTrackInterface* local_video) {
   local_renderer_.reset(new VideoRenderer(this, local_video));
@@ -227,7 +252,7 @@ bool GtkMainWnd::Destroy() {
 }
 
 void GtkMainWnd::SwitchToConnectUI() {
-  LOG(INFO) << __FUNCTION__;
+  RTC_LOG(LS_INFO) << __FUNCTION__;
 
   RTC_DCHECK(IsWindow());
   RTC_DCHECK(vbox_ == NULL);
@@ -239,20 +264,12 @@ void GtkMainWnd::SwitchToConnectUI() {
     peer_list_ = NULL;
   }
 
-#if GTK_MAJOR_VERSION == 2
-  vbox_ = gtk_vbox_new(FALSE, 5);
-#else
   vbox_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-#endif
   GtkWidget* valign = gtk_alignment_new(0, 1, 0, 0);
   gtk_container_add(GTK_CONTAINER(vbox_), valign);
   gtk_container_add(GTK_CONTAINER(window_), vbox_);
 
-#if GTK_MAJOR_VERSION == 2
-  GtkWidget* hbox = gtk_hbox_new(FALSE, 5);
-#else
   GtkWidget* hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-#endif
 
   GtkWidget* label = gtk_label_new("Server");
   gtk_container_add(GTK_CONTAINER(hbox), label);
@@ -283,7 +300,7 @@ void GtkMainWnd::SwitchToConnectUI() {
 }
 
 void GtkMainWnd::SwitchToPeerList(const Peers& peers) {
-  LOG(INFO) << __FUNCTION__;
+  RTC_LOG(LS_INFO) << __FUNCTION__;
 
   if (!peer_list_) {
     gtk_container_set_border_width(GTK_CONTAINER(window_), 0);
@@ -320,7 +337,7 @@ void GtkMainWnd::SwitchToPeerList(const Peers& peers) {
 }
 
 void GtkMainWnd::SwitchToStreamingUI() {
-  LOG(INFO) << __FUNCTION__;
+  RTC_LOG(LS_INFO) << __FUNCTION__;
 
   RTC_DCHECK(draw_area_ == NULL);
 
@@ -361,11 +378,7 @@ void GtkMainWnd::OnClicked(GtkWidget* widget) {
 void GtkMainWnd::OnKeyPress(GtkWidget* widget, GdkEventKey* key) {
   if (key->type == GDK_KEY_PRESS) {
     switch (key->keyval) {
-#if GTK_MAJOR_VERSION == 2
-      case GDK_Escape:
-#else
       case GDK_KEY_Escape:
-#endif
         if (draw_area_) {
           callback_->DisconnectFromCurrentPeer();
         } else if (peer_list_) {
@@ -373,13 +386,8 @@ void GtkMainWnd::OnKeyPress(GtkWidget* widget, GdkEventKey* key) {
         }
         break;
 
-#if GTK_MAJOR_VERSION == 2
-      case GDK_KP_Enter:
-      case GDK_Return:
-#else
       case GDK_KEY_KP_Enter:
       case GDK_KEY_Return:
-#endif
         if (vbox_) {
           OnClicked(NULL);
         } else if (peer_list_) {
@@ -394,7 +402,8 @@ void GtkMainWnd::OnKeyPress(GtkWidget* widget, GdkEventKey* key) {
   }
 }
 
-void GtkMainWnd::OnRowActivated(GtkTreeView* tree_view, GtkTreePath* path,
+void GtkMainWnd::OnRowActivated(GtkTreeView* tree_view,
+                                GtkTreePath* path,
                                 GtkTreeViewColumn* column) {
   RTC_DCHECK(peer_list_ != NULL);
   GtkTreeIter iter;
@@ -402,12 +411,12 @@ void GtkMainWnd::OnRowActivated(GtkTreeView* tree_view, GtkTreePath* path,
   GtkTreeSelection* selection =
       gtk_tree_view_get_selection(GTK_TREE_VIEW(tree_view));
   if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
-     char* text;
-     int id = -1;
-     gtk_tree_model_get(model, &iter, 0, &text, 1, &id,  -1);
-     if (id != -1)
-       callback_->ConnectToPeer(id);
-     g_free(text);
+    char* text;
+    int id = -1;
+    gtk_tree_model_get(model, &iter, 0, &text, 1, &id, -1);
+    if (id != -1)
+      callback_->ConnectToPeer(id);
+    g_free(text);
   }
 }
 
@@ -464,22 +473,14 @@ void GtkMainWnd::OnRedraw() {
       }
     }
 
-#if GTK_MAJOR_VERSION == 2
-    gdk_draw_rgb_32_image(draw_area_->window,
-                          draw_area_->style->fg_gc[GTK_STATE_NORMAL], 0, 0,
-                          width_ * 2, height_ * 2, GDK_RGB_DITHER_MAX,
-                          draw_buffer_.get(), (width_ * 2) * 4);
-#else
     gtk_widget_queue_draw(draw_area_);
-#endif
   }
 
   gdk_threads_leave();
 }
 
 void GtkMainWnd::Draw(GtkWidget* widget, cairo_t* cr) {
-#if GTK_MAJOR_VERSION != 2
-  cairo_format_t format = CAIRO_FORMAT_RGB24;
+  cairo_format_t format = CAIRO_FORMAT_ARGB32;
   cairo_surface_t* surface = cairo_image_surface_create_for_data(
       draw_buffer_.get(), format, width_ * 2, height_ * 2,
       cairo_format_stride_for_width(format, width_ * 2));
@@ -487,9 +488,6 @@ void GtkMainWnd::Draw(GtkWidget* widget, cairo_t* cr) {
   cairo_rectangle(cr, 0, 0, width_ * 2, height_ * 2);
   cairo_fill(cr);
   cairo_surface_destroy(surface);
-#else
-  RTC_NOTREACHED();
-#endif
 }
 
 GtkMainWnd::VideoRenderer::VideoRenderer(
@@ -519,8 +517,7 @@ void GtkMainWnd::VideoRenderer::SetSize(int width, int height) {
   gdk_threads_leave();
 }
 
-void GtkMainWnd::VideoRenderer::OnFrame(
-    const webrtc::VideoFrame& video_frame) {
+void GtkMainWnd::VideoRenderer::OnFrame(const webrtc::VideoFrame& video_frame) {
   gdk_threads_enter();
 
   rtc::scoped_refptr<webrtc::I420BufferInterface> buffer(
@@ -530,17 +527,17 @@ void GtkMainWnd::VideoRenderer::OnFrame(
   }
   SetSize(buffer->width(), buffer->height());
 
-  // The order in the name of libyuv::I420To(ABGR,RGBA) is ambiguous because
-  // it doesn't tell you if it is referring to how it is laid out in memory as
-  // bytes or if endiannes is taken into account.
-  // This was supposed to be a call to libyuv::I420ToRGBA but it was resulting
-  // in a reddish video output (see https://bugs.webrtc.org/6857) because it
-  // was producing an unexpected byte order (ABGR, byte swapped).
-  libyuv::I420ToABGR(buffer->DataY(), buffer->StrideY(),
-                     buffer->DataU(), buffer->StrideU(),
-                     buffer->DataV(), buffer->StrideV(),
-                     image_.get(), width_ * 4,
-                     buffer->width(), buffer->height());
+  // TODO(bugs.webrtc.org/6857): This conversion is correct for little-endian
+  // only. Cairo ARGB32 treats pixels as 32-bit values in *native* byte order,
+  // with B in the least significant byte of the 32-bit value. Which on
+  // little-endian means that memory layout is BGRA, with the B byte stored at
+  // lowest address. Libyuv's ARGB format (surprisingly?) uses the same
+  // little-endian format, with B in the first byte in memory, regardless of
+  // native endianness.
+  libyuv::I420ToARGB(buffer->DataY(), buffer->StrideY(), buffer->DataU(),
+                     buffer->StrideU(), buffer->DataV(), buffer->StrideV(),
+                     image_.get(), width_ * 4, buffer->width(),
+                     buffer->height());
 
   gdk_threads_leave();
 

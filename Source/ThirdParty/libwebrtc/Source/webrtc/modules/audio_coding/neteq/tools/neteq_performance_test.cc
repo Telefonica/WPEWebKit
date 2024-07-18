@@ -8,19 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/neteq/tools/neteq_performance_test.h"
+#include "modules/audio_coding/neteq/tools/neteq_performance_test.h"
 
-#include "webrtc/api/audio_codecs/builtin_audio_decoder_factory.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/common_types.h"
-#include "webrtc/modules/audio_coding/codecs/pcm16b/pcm16b.h"
-#include "webrtc/modules/audio_coding/neteq/include/neteq.h"
-#include "webrtc/modules/audio_coding/neteq/tools/audio_loop.h"
-#include "webrtc/modules/audio_coding/neteq/tools/rtp_generator.h"
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/system_wrappers/include/clock.h"
-#include "webrtc/test/testsupport/fileutils.h"
-#include "webrtc/typedefs.h"
+#include "api/audio/audio_frame.h"
+#include "api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "api/neteq/neteq.h"
+#include "modules/audio_coding/codecs/pcm16b/pcm16b.h"
+#include "modules/audio_coding/neteq/default_neteq_factory.h"
+#include "modules/audio_coding/neteq/tools/audio_loop.h"
+#include "modules/audio_coding/neteq/tools/rtp_generator.h"
+#include "rtc_base/checks.h"
+#include "system_wrappers/include/clock.h"
+#include "test/testsupport/file_utils.h"
 
 using webrtc::NetEq;
 using webrtc::test::AudioLoop;
@@ -35,17 +34,19 @@ int64_t NetEqPerformanceTest::Run(int runtime_ms,
   const std::string kInputFileName =
       webrtc::test::ResourcePath("audio_coding/testfile32kHz", "pcm");
   const int kSampRateHz = 32000;
-  const webrtc::NetEqDecoder kDecoderType =
-      webrtc::NetEqDecoder::kDecoderPCM16Bswb32kHz;
   const std::string kDecoderName = "pcm16-swb32";
   const int kPayloadType = 95;
 
   // Initialize NetEq instance.
   NetEq::Config config;
   config.sample_rate_hz = kSampRateHz;
-  NetEq* neteq = NetEq::Create(config, CreateBuiltinAudioDecoderFactory());
-  // Register decoder in |neteq|.
-  if (neteq->RegisterPayloadType(kDecoderType, kDecoderName, kPayloadType) != 0)
+  webrtc::Clock* clock = webrtc::Clock::GetRealTimeClock();
+  auto audio_decoder_factory = CreateBuiltinAudioDecoderFactory();
+  auto neteq =
+      DefaultNetEqFactory().CreateNetEq(config, audio_decoder_factory, clock);
+  // Register decoder in `neteq`.
+  if (!neteq->RegisterPayloadType(kPayloadType,
+                                  SdpAudioFormat("l16", kSampRateHz, 1)))
     return -1;
 
   // Set up AudioLoop object.
@@ -75,35 +76,31 @@ int64_t NetEqPerformanceTest::Run(int runtime_ms,
   RTC_CHECK_EQ(sizeof(input_payload), payload_len);
 
   // Main loop.
-  webrtc::Clock* clock = webrtc::Clock::GetRealTimeClock();
   int64_t start_time_ms = clock->TimeInMilliseconds();
   AudioFrame out_frame;
   while (time_now_ms < runtime_ms) {
     while (packet_input_time_ms <= time_now_ms) {
-      // Drop every N packets, where N = FLAGS_lossrate.
+      // Drop every N packets, where N = FLAG_lossrate.
       bool lost = false;
       if (lossrate > 0) {
         lost = ((rtp_header.sequenceNumber - 1) % lossrate) == 0;
       }
       if (!lost) {
         // Insert packet.
-        int error =
-            neteq->InsertPacket(rtp_header, input_payload,
-                                packet_input_time_ms * kSampRateHz / 1000);
+        int error = neteq->InsertPacket(rtp_header, input_payload);
         if (error != NetEq::kOK)
           return -1;
       }
 
       // Get next packet.
-      packet_input_time_ms = rtp_gen.GetRtpHeader(kPayloadType,
-                                                  kInputBlockSizeSamples,
-                                                  &rtp_header);
+      packet_input_time_ms = rtp_gen.GetRtpHeader(
+          kPayloadType, kInputBlockSizeSamples, &rtp_header);
       input_samples = audio_loop.GetNextBlock();
       if (input_samples.empty())
         return -1;
       payload_len = WebRtcPcm16b_Encode(input_samples.data(),
                                         input_samples.size(), input_payload);
-      assert(payload_len == kInputBlockSizeSamples * sizeof(int16_t));
+      RTC_DCHECK_EQ(payload_len, kInputBlockSizeSamples * sizeof(int16_t));
     }
 
     // Get output audio, but don't do anything with it.
@@ -113,8 +110,7 @@ int64_t NetEqPerformanceTest::Run(int runtime_ms,
     if (error != NetEq::kOK)
       return -1;
 
-    assert(out_frame.samples_per_channel_ ==
-           static_cast<size_t>(kSampRateHz * 10 / 1000));
+    RTC_DCHECK_EQ(out_frame.samples_per_channel_, (kSampRateHz * 10) / 1000);
 
     static const int kOutputBlockSizeMs = 10;
     time_now_ms += kOutputBlockSizeMs;
@@ -125,7 +121,6 @@ int64_t NetEqPerformanceTest::Run(int runtime_ms,
     }
   }
   int64_t end_time_ms = clock->TimeInMilliseconds();
-  delete neteq;
   return end_time_ms - start_time_ms;
 }
 

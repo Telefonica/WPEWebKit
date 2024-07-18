@@ -23,90 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef DataReference_h
-#define DataReference_h
+#pragma once
 
-#include <WebCore/SharedBuffer.h>
-#include <wtf/Vector.h>
+#include "ArrayReference.h"
+#include <wtf/Span.h>
 
 namespace IPC {
 
-class Decoder;
-class Encoder;
-    
-class DataReference {
-public:
-    DataReference()
-        : m_data(0)
-        , m_size(0)
-    {
-    }
-
-    DataReference(const uint8_t* data, size_t size)
-        : m_data(data)
-        , m_size(size)
-    {
-    }
-
-    template<size_t inlineCapacity>
-    DataReference(const Vector<uint8_t, inlineCapacity>& vector)
-        : m_data(vector.data())
-        , m_size(vector.size())
-    {
-    }
-
-    bool isEmpty() const { return size() == 0; }
-
-    size_t size() const { return m_size; }
-    const uint8_t* data() const 
-    { 
-        if (isEmpty())
-            return 0;
-        return m_data; 
-    }
-
-    Vector<uint8_t> vector() const
-    {
-        Vector<uint8_t> result;
-        result.append(m_data, m_size);
-
-        return result;
-    }
-
-    virtual void encode(Encoder&) const;
-    static bool decode(Decoder&, DataReference&);
-
-    virtual ~DataReference() { }
-
-private:
-    const uint8_t* m_data;
-    size_t m_size;
-};
-
-class SharedBufferDataReference : public DataReference {
-public:
-    // FIXME: This class doesn't handle null, so the argument should be a reference or PassRef.
-    SharedBufferDataReference(WebCore::SharedBuffer* buffer)
-        : m_buffer(buffer)
-    {
-    }
-
-private:
-    // FIXME: It is a bad idea to violate the Liskov Substitution Principle as we do here.
-    // Since we are using DataReference as a polymoprhic base class in this fashion,
-    // then we need it to be a base class that does not have functions such as isEmpty,
-    // size, data, and vector, all of which will do the wrong thing if they are called.
-    // Deleting these functions here does not prevent them from being called.
-    bool isEmpty() const = delete;
-    size_t size() const = delete;
-    const uint8_t* data() const = delete;
-    Vector<uint8_t> vector() const = delete;
-
-    void encode(Encoder&) const override;
-
-    RefPtr<WebCore::SharedBuffer> m_buffer;
-};
+using DataReference = Span<const uint8_t>;
 
 } // namespace IPC
-
-#endif // DataReference_h

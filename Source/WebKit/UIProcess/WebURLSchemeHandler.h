@@ -25,7 +25,9 @@
 
 #pragma once
 
+#include "WebURLSchemeHandlerIdentifier.h"
 #include "WebURLSchemeTask.h"
+#include <WebCore/ResourceLoaderIdentifier.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/RefCounted.h>
@@ -37,19 +39,23 @@ class ResourceRequest;
 
 namespace WebKit {
 
+struct URLSchemeTaskParameters;
 class WebPageProxy;
+class WebProcessProxy;
+
+using SyncLoadCompletionHandler = CompletionHandler<void(const WebCore::ResourceResponse&, const WebCore::ResourceError&, const Vector<uint8_t>&)>;
 
 class WebURLSchemeHandler : public RefCounted<WebURLSchemeHandler> {
     WTF_MAKE_NONCOPYABLE(WebURLSchemeHandler);
 public:
     virtual ~WebURLSchemeHandler();
 
-    uint64_t identifier() const { return m_identifier; }
+    WebURLSchemeHandlerIdentifier identifier() const { return m_identifier; }
 
-    void startTask(WebPageProxy&, uint64_t taskIdentifier, const WebCore::ResourceRequest&);
-    void stopTask(WebPageProxy&, uint64_t taskIdentifier);
-    void stopAllTasksForPage(WebPageProxy&);
-    void taskCompleted(WebURLSchemeTask&);
+    void startTask(WebPageProxy&, WebProcessProxy&, WebCore::PageIdentifier, URLSchemeTaskParameters&&, SyncLoadCompletionHandler&&);
+    void stopTask(WebPageProxy&, WebCore::ResourceLoaderIdentifier taskIdentifier);
+    void stopAllTasksForPage(WebPageProxy&, WebProcessProxy*);
+    void taskCompleted(WebPageProxyIdentifier, WebURLSchemeTask&);
 
 protected:
     WebURLSchemeHandler();
@@ -57,14 +63,17 @@ protected:
 private:
     virtual void platformStartTask(WebPageProxy&, WebURLSchemeTask&) = 0;
     virtual void platformStopTask(WebPageProxy&, WebURLSchemeTask&) = 0;
-    virtual void platformTaskCompleted(WebURLSchemeTask&) = 0;
+    virtual void platformTaskCompleted(WebURLSchemeTask&) { };
 
-    void removeTaskFromPageMap(uint64_t pageID, uint64_t taskID);
+    void removeTaskFromPageMap(WebPageProxyIdentifier, WebCore::ResourceLoaderIdentifier);
+    WebProcessProxy* processForTaskIdentifier(WebPageProxy&, WebCore::ResourceLoaderIdentifier) const;
 
-    uint64_t m_identifier;
+    WebURLSchemeHandlerIdentifier m_identifier;
 
-    HashMap<uint64_t, Ref<WebURLSchemeTask>> m_tasks;
-    HashMap<uint64_t, HashSet<uint64_t>> m_tasksByPageIdentifier;
+    HashMap<std::pair<WebCore::ResourceLoaderIdentifier, WebPageProxyIdentifier>, Ref<WebURLSchemeTask>> m_tasks;
+    HashMap<WebPageProxyIdentifier, HashSet<WebCore::ResourceLoaderIdentifier>> m_tasksByPageIdentifier;
+    
+    SyncLoadCompletionHandler m_syncLoadCompletionHandler;
 
 }; // class WebURLSchemeHandler
 

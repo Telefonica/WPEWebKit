@@ -26,7 +26,9 @@
 #include "config.h"
 #include "SplitElementCommand.h"
 
+#include "CompositeEditCommand.h"
 #include "Element.h"
+#include "ElementInlines.h"
 #include "HTMLNames.h"
 #include <wtf/Assertions.h>
 
@@ -84,7 +86,7 @@ void SplitElementCommand::doUnapply()
         m_element2->insertBefore(child, refChild.get());
 
     // Recover the id attribute of the original element.
-    const AtomicString& id = m_element1->getIdAttribute();
+    const AtomString& id = m_element1->getIdAttribute();
     if (!id.isNull())
         m_element2->setIdAttribute(id);
 
@@ -100,7 +102,7 @@ void SplitElementCommand::doReapply()
 }
 
 #ifndef NDEBUG
-void SplitElementCommand::getNodesInCommand(HashSet<Node*>& nodes)
+void SplitElementCommand::getNodesInCommand(HashSet<Ref<Node>>& nodes)
 {
     addNodeAndDescendants(m_element1.get(), nodes);
     addNodeAndDescendants(m_element2.ptr(), nodes);

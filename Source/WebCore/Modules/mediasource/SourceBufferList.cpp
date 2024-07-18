@@ -36,12 +36,22 @@
 #include "Event.h"
 #include "EventNames.h"
 #include "SourceBuffer.h"
+#include "WebCoreOpaqueRoot.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(SourceBufferList);
+
+Ref<SourceBufferList> SourceBufferList::create(ScriptExecutionContext* context)
+{
+    auto result = adoptRef(*new SourceBufferList(context));
+    result->suspendIfNeeded();
+    return result;
+}
+
 SourceBufferList::SourceBufferList(ScriptExecutionContext* context)
-    : ContextDestructionObserver(context)
-    , m_asyncEventQueue(*this)
+    : ActiveDOMObject(context)
 {
 }
 
@@ -89,14 +99,20 @@ void SourceBufferList::swap(Vector<RefPtr<SourceBuffer>>& other)
         scheduleEvent(eventNames().removesourcebufferEvent);
 }
 
-void SourceBufferList::scheduleEvent(const AtomicString& eventName)
+void SourceBufferList::scheduleEvent(const AtomString& eventName)
 {
-    auto event = Event::create(eventName, false, false);
-    event->setTarget(this);
-
-    m_asyncEventQueue.enqueueEvent(WTFMove(event));
+    queueTaskToDispatchEvent(*this, TaskSource::MediaElement, Event::create(eventName, Event::CanBubble::No, Event::IsCancelable::No));
 }
 
+const char* SourceBufferList::activeDOMObjectName() const
+{
+    return "SourceBufferList";
+}
+
+WebCoreOpaqueRoot root(SourceBufferList* list)
+{
+    return WebCoreOpaqueRoot { list };
+}
 
 } // namespace WebCore
 

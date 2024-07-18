@@ -27,12 +27,12 @@
 
 #import "DOMNodeInternal.h"
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/Text.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::Text*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -53,7 +53,8 @@
 - (DOMText *)replaceWholeText:(NSString *)content
 {
     WebCore::JSMainThreadNullState state;
-    return kit(IMPL->replaceWholeText(content).get());
+    RefPtr { IMPL }->replaceWholeText(content);
+    return self;
 }
 
 @end
@@ -63,3 +64,5 @@ DOMText *kit(WebCore::Text* value)
     WebCoreThreadViolationCheckRoundOne();
     return static_cast<DOMText*>(kit(static_cast<WebCore::Node*>(value)));
 }
+
+#undef IMPL

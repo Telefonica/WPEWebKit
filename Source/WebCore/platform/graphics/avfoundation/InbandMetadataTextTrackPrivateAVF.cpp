@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,7 +26,7 @@
 #include "config.h"
 #include "InbandMetadataTextTrackPrivateAVF.h"
 
-#if ENABLE(VIDEO) && ENABLE(DATACUE_VALUE) && (USE(AVFOUNDATION) || PLATFORM(IOS))
+#if ENABLE(VIDEO) && ENABLE(DATACUE_VALUE) && (USE(AVFOUNDATION) || PLATFORM(IOS_FAMILY))
 
 #include "InbandTextTrackPrivateClient.h"
 #include "Logging.h"
@@ -38,27 +38,25 @@
 
 namespace WebCore {
 
-Ref<InbandMetadataTextTrackPrivateAVF> InbandMetadataTextTrackPrivateAVF::create(InbandTextTrackPrivate::Kind kind, InbandTextTrackPrivate::CueFormat cueFormat, const AtomicString& id)
+Ref<InbandMetadataTextTrackPrivateAVF> InbandMetadataTextTrackPrivateAVF::create(InbandTextTrackPrivate::Kind kind, InbandTextTrackPrivate::CueFormat cueFormat, const AtomString& id)
 {
     return adoptRef(*new InbandMetadataTextTrackPrivateAVF(kind, cueFormat, id));
 }
 
-InbandMetadataTextTrackPrivateAVF::InbandMetadataTextTrackPrivateAVF(InbandTextTrackPrivate::Kind kind, InbandTextTrackPrivate::CueFormat cueFormat, const AtomicString& id)
+InbandMetadataTextTrackPrivateAVF::InbandMetadataTextTrackPrivateAVF(InbandTextTrackPrivate::Kind kind, InbandTextTrackPrivate::CueFormat cueFormat, const AtomString& id)
     : InbandTextTrackPrivate(cueFormat)
     , m_kind(kind)
     , m_id(id)
 {
 }
 
-InbandMetadataTextTrackPrivateAVF::~InbandMetadataTextTrackPrivateAVF()
-{
-}
+InbandMetadataTextTrackPrivateAVF::~InbandMetadataTextTrackPrivateAVF() = default;
 
 #if ENABLE(DATACUE_VALUE)
 
-void InbandMetadataTextTrackPrivateAVF::addDataCue(const MediaTime& start, const MediaTime& end, Ref<SerializedPlatformRepresentation>&& cueData, const String& type)
+void InbandMetadataTextTrackPrivateAVF::addDataCue(const MediaTime& start, const MediaTime& end, Ref<SerializedPlatformDataCue>&& cueData, const String& type)
 {
-    ASSERT(cueFormat() == Data);
+    ASSERT(cueFormat() == CueFormat::Data);
     ASSERT(start >= MediaTime::zeroTime());
 
     if (!client())
@@ -106,4 +104,4 @@ void InbandMetadataTextTrackPrivateAVF::flushPartialCues()
 
 } // namespace WebCore
 
-#endif // ENABLE(VIDEO) && (USE(AVFOUNDATION) || PLATFORM(IOS))
+#endif // ENABLE(VIDEO) && (USE(AVFOUNDATION) || PLATFORM(IOS_FAMILY))

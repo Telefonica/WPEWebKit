@@ -8,14 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/test/conversational_speech/wavreader_factory.h"
+#include "modules/audio_processing/test/conversational_speech/wavreader_factory.h"
 
 #include <cstddef>
 
-#include "webrtc/base/array_view.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/common_audio/wav_file.h"
-#include "webrtc/typedefs.h"
+#include "absl/strings/string_view.h"
+#include "api/array_view.h"
+#include "common_audio/wav_file.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 namespace test {
@@ -25,7 +25,7 @@ using conversational_speech::WavReaderInterface;
 
 class WavReaderAdaptor final : public WavReaderInterface {
  public:
-  explicit WavReaderAdaptor(const std::string& filepath)
+  explicit WavReaderAdaptor(absl::string_view filepath)
       : wav_reader_(filepath) {}
   ~WavReaderAdaptor() override = default;
 
@@ -37,17 +37,11 @@ class WavReaderAdaptor final : public WavReaderInterface {
     return wav_reader_.ReadSamples(samples.size(), samples.begin());
   }
 
-  int SampleRate() const override {
-    return wav_reader_.sample_rate();
-  }
+  int SampleRate() const override { return wav_reader_.sample_rate(); }
 
-  size_t NumChannels() const override {
-    return wav_reader_.num_channels();
-  }
+  size_t NumChannels() const override { return wav_reader_.num_channels(); }
 
-  size_t NumSamples() const override {
-    return wav_reader_.num_samples();
-  }
+  size_t NumSamples() const override { return wav_reader_.num_samples(); }
 
  private:
   WavReader wav_reader_;
@@ -62,7 +56,7 @@ WavReaderFactory::WavReaderFactory() = default;
 WavReaderFactory::~WavReaderFactory() = default;
 
 std::unique_ptr<WavReaderInterface> WavReaderFactory::Create(
-    const std::string& filepath) const {
+    absl::string_view filepath) const {
   return std::unique_ptr<WavReaderAdaptor>(new WavReaderAdaptor(filepath));
 }
 

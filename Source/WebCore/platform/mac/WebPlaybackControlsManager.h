@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,27 +38,25 @@ struct MediaSelectionOption;
 
 WEBCORE_EXPORT
 @interface WebPlaybackControlsManager : NSObject
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101300
     <AVTouchBarPlaybackControlsControlling>
-#else
-    <AVFunctionBarPlaybackControlsControlling>
-#endif
 {
 @private
     NSTimeInterval _contentDuration;
     RetainPtr<AVValueTiming> _timing;
     NSTimeInterval _seekToTime;
     RetainPtr<NSArray> _seekableTimeRanges;
-    BOOL _hasEnabledAudio;
-    BOOL _hasEnabledVideo;
     RetainPtr<NSArray<AVTouchBarMediaSelectionOption *>> _audioTouchBarMediaSelectionOptions;
     RetainPtr<AVTouchBarMediaSelectionOption> _currentAudioTouchBarMediaSelectionOption;
     RetainPtr<NSArray<AVTouchBarMediaSelectionOption *>> _legibleTouchBarMediaSelectionOptions;
     RetainPtr<AVTouchBarMediaSelectionOption> _currentLegibleTouchBarMediaSelectionOption;
-    float _rate;
-    BOOL _canTogglePlayback;
-
     RefPtr<WebCore::PlaybackSessionInterfaceMac> _playbackSessionInterfaceMac;
+    double _defaultPlaybackRate;
+    float _rate;
+    BOOL _playing;
+    BOOL _hasEnabledAudio;
+    BOOL _hasEnabledVideo;
+    BOOL _canTogglePlayback;
+    BOOL _canSeek;
 }
 
 @property (assign) WebCore::PlaybackSessionInterfaceMac* playbackSessionInterfaceMac;
@@ -70,10 +68,13 @@ WEBCORE_EXPORT
 @property (nonatomic) BOOL hasEnabledVideo;
 @property (getter=isPlaying) BOOL playing;
 @property BOOL canTogglePlayback;
+@property double defaultPlaybackRate;
 @property (nonatomic) float rate;
 @property BOOL allowsPictureInPicturePlayback;
 @property (getter=isPictureInPictureActive) BOOL pictureInPictureActive;
 @property BOOL canTogglePictureInPicture;
+- (void)togglePictureInPicture;
+@property (nonatomic, readonly) BOOL canSeek;
 
 - (AVTouchBarMediaSelectionOption *)currentAudioTouchBarMediaSelectionOption;
 - (void)setCurrentAudioTouchBarMediaSelectionOption:(AVTouchBarMediaSelectionOption *)option;
@@ -83,6 +84,9 @@ WEBCORE_EXPORT
 - (void)setLegibleMediaSelectionOptions:(const Vector<WebCore::MediaSelectionOption>&)options withSelectedIndex:(NSUInteger)selectedIndex;
 - (void)setAudioMediaSelectionIndex:(NSUInteger)selectedIndex;
 - (void)setLegibleMediaSelectionIndex:(NSUInteger)selectedIndex;
+
+- (void)setDefaultPlaybackRate:(double)defaultPlaybackRate fromJavaScript:(BOOL)fromJavaScript;
+- (void)setRate:(double)rate fromJavaScript:(BOOL)fromJavaScript;
 @end
 
 #endif // ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)

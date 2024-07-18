@@ -27,38 +27,32 @@
 #pragma once
 
 #include "ExceptionOr.h"
-#include "Gradient.h"
+#include "FloatPoint.h"
 
 namespace WebCore {
 
+class CanvasRenderingContext;
+class Gradient;
+
 class CanvasGradient : public RefCounted<CanvasGradient> {
 public:
-    static Ref<CanvasGradient> create(const FloatPoint& p0, const FloatPoint& p1)
-    {
-        return adoptRef(*new CanvasGradient(p0, p1));
-    }
-    static Ref<CanvasGradient> create(const FloatPoint& p0, float r0, const FloatPoint& p1, float r1)
-    {
-        return adoptRef(*new CanvasGradient(p0, r0, p1, r1));
-    }
+    static Ref<CanvasGradient> create(const FloatPoint& p0, const FloatPoint& p1, CanvasRenderingContext&);
+    static Ref<CanvasGradient> create(const FloatPoint& p0, float r0, const FloatPoint& p1, float r1, CanvasRenderingContext&);
+    static Ref<CanvasGradient> create(const FloatPoint& centerPoint, float angleInRadians, CanvasRenderingContext&);
+    ~CanvasGradient();
 
     Gradient& gradient() { return m_gradient; }
     const Gradient& gradient() const { return m_gradient; }
 
-    ExceptionOr<void> addColorStop(float value, const String& color);
-
-#if ENABLE(DASHBOARD_SUPPORT)
-    void setDashboardCompatibilityMode() { m_dashboardCompatibilityMode = true; }
-#endif
+    ExceptionOr<void> addColorStop(double value, const String& color);
 
 private:
-    CanvasGradient(const FloatPoint& p0, const FloatPoint& p1);
-    CanvasGradient(const FloatPoint& p0, float r0, const FloatPoint& p1, float r1);
+    CanvasGradient(const FloatPoint& p0, const FloatPoint& p1, CanvasRenderingContext&);
+    CanvasGradient(const FloatPoint& p0, float r0, const FloatPoint& p1, float r1, CanvasRenderingContext&);
+    CanvasGradient(const FloatPoint& centerPoint, float angleInRadians, CanvasRenderingContext&);
 
     Ref<Gradient> m_gradient;
-#if ENABLE(DASHBOARD_SUPPORT)
-    bool m_dashboardCompatibilityMode { false };
-#endif
+    Ref<CanvasRenderingContext> m_context;
 };
 
 }

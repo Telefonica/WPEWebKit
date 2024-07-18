@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,14 +27,17 @@
 
 #include "DOMRectInit.h"
 #include "ScriptWrappable.h"
+#include <wtf/IsoMalloc.h>
 #include <wtf/MathExtras.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
 
 namespace WebCore {
 
+class WebCoreOpaqueRoot;
+
 class DOMRectReadOnly : public ScriptWrappable, public RefCounted<DOMRectReadOnly> {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_ISO_ALLOCATED_EXPORT(DOMRectReadOnly, WEBCORE_EXPORT);
 public:
     static Ref<DOMRectReadOnly> create(double x, double y, double width, double height) { return adoptRef(*new DOMRectReadOnly(x, y, width, height)); }
     static Ref<DOMRectReadOnly> fromRect(const DOMRectInit& init) { return create(init.x, init.y, init.width, init.height); }
@@ -66,6 +69,8 @@ protected:
     double m_y { 0 };
     double m_width { 0 }; // Can be negative.
     double m_height { 0 }; // Can be negative.
-}; 
+};
 
-}
+WebCoreOpaqueRoot root(DOMRectReadOnly*);
+
+} // namespace WebCore

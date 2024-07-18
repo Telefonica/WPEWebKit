@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/remb.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/remb.h"
 
-#include "webrtc/test/gmock.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/rtcp_packet_parser.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
+#include "test/rtcp_packet_parser.h"
 
-using testing::ElementsAreArray;
-using testing::IsEmpty;
-using testing::make_tuple;
+using ::testing::ElementsAreArray;
+using ::testing::IsEmpty;
+using ::testing::make_tuple;
 using webrtc::rtcp::Remb;
 
 namespace webrtc {
@@ -24,7 +24,7 @@ namespace {
 const uint32_t kSenderSsrc = 0x12345678;
 const uint32_t kRemoteSsrcs[] = {0x23456789, 0x2345678a, 0x2345678b};
 const uint32_t kBitrateBps = 0x3fb93 * 2;  // 522022;
-const uint64_t kBitrateBps64bit = 0x3fb93ULL << 30;
+const int64_t kBitrateBps64bit = int64_t{0x3fb93} << 30;
 const uint8_t kPacket[] = {0x8f, 206,  0x00, 0x07, 0x12, 0x34, 0x56, 0x78,
                            0x00, 0x00, 0x00, 0x00, 'R',  'E',  'M',  'B',
                            0x03, 0x07, 0xfb, 0x93, 0x23, 0x45, 0x67, 0x89,
@@ -101,9 +101,22 @@ TEST(RtcpPacketRembTest, ParseFailsWhenUniqueIdentifierIsNotRemb) {
 TEST(RtcpPacketRembTest, ParseFailsWhenBitrateDoNotFitIn64bits) {
   uint8_t packet[kPacketLength];
   memcpy(packet, kPacket, kPacketLength);
-  packet[17] |= 0xfc;  // Set exponenta component to maximum of 63.
+  packet[17] |= 0xfc;  // Set exponent component to maximum of 63.
   packet[19] |= 0x02;  // Ensure mantissa is at least 2.
 
+  Remb remb;
+  EXPECT_FALSE(test::ParseSinglePacket(packet, &remb));
+}
+
+TEST(RtcpPacketRembTest, ParseFailsWhenBitrateDoNotFitIn63bits) {
+  uint8_t packet[kPacketLength];
+  memcpy(packet, kPacket, kPacketLength);
+  packet[17] = 56 << 2;  // Set exponent component to 56.
+  packet[18] = 0;        // Set mantissa to 200 > 128
+  packet[19] = 200;
+
+  // Result value 200 * 2^56 can't be represented with int64_t and thus should
+  // be rejected.
   Remb remb;
   EXPECT_FALSE(test::ParseSinglePacket(packet, &remb));
 }

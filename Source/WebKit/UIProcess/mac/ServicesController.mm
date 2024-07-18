@@ -33,6 +33,7 @@
 #import <pal/spi/cocoa/NSExtensionSPI.h>
 #import <pal/spi/mac/NSSharingServicePickerSPI.h>
 #import <pal/spi/mac/NSSharingServiceSPI.h>
+#import <wtf/BlockPtr.h>
 #import <wtf/NeverDestroyed.h>
 
 namespace WebKit {
@@ -52,7 +53,6 @@ ServicesController::ServicesController()
 {
     refreshExistingServices();
 
-#ifdef __LP64__
     auto refreshCallback = [this](NSArray *, NSError *) {
         // We coalese refreshes from the notification callbacks because they can come in small batches.
         refreshExistingServices(false);
@@ -62,12 +62,22 @@ ServicesController::ServicesController()
     m_extensionWatcher = [NSExtension beginMatchingExtensionsWithAttributes:extensionAttributes completion:refreshCallback];
     auto uiExtensionAttributes = @{ @"NSExtensionPointName" : @"com.apple.ui-services" };
     m_uiExtensionWatcher = [NSExtension beginMatchingExtensionsWithAttributes:uiExtensionAttributes completion:refreshCallback];
-#endif // __LP64__
 }
 
-static bool hasCompatibleServicesForItems(NSArray *items)
+static void hasCompatibleServicesForItems(dispatch_group_t group, NSArray *items, WTF::Function<void(bool)>&& completionHandler)
 {
-    return [NSSharingService sharingServicesForItems:items mask:NSSharingServiceMaskViewer | NSSharingServiceMaskEditor].count;
+    NSSharingServiceMask servicesMask = NSSharingServiceMaskViewer | NSSharingServiceMaskEditor;
+
+    if ([NSSharingService respondsToSelector:@selector(getSharingServicesForItems:mask:completion:)]) {
+        dispatch_group_enter(group);
+        [NSSharingService getSharingServicesForItems:items mask:servicesMask completion:makeBlockPtr([completionHandler = WTFMove(completionHandler), group](NSArray *services) {
+            completionHandler(services.count);
+            dispatch_group_leave(group);
+        }).get()];
+        return;
+    }
+    
+    completionHandler([NSSharingService sharingServicesForItems:items mask:servicesMask].count);
 }
 
 void ServicesController::refreshExistingServices(bool refreshImmediately)
@@ -79,32 +89,41 @@ void ServicesController::refreshExistingServices(bool refreshImmediately)
 
     auto refreshTime = dispatch_time(DISPATCH_TIME_NOW, refreshImmediately ? 0 : (int64_t)(1 * NSEC_PER_SEC));
     dispatch_after(refreshTime, m_refreshQueue, ^{
-        static NeverDestroyed<NSImage *> image([[NSImage alloc] init]);
-        bool hasImageServices = hasCompatibleServicesForItems(@[ image ]);
+        auto serviceLookupGroup = adoptOSObject(dispatch_group_create());
 
-        static NeverDestroyed<NSAttributedString *> attributedString([[NSAttributedString alloc] initWithString:@"a"]);
-        bool hasSelectionServices = hasCompatibleServicesForItems(@[ attributedString ]);
+        static NSImage *image { [[NSImage alloc] init] };
+        hasCompatibleServicesForItems(serviceLookupGroup.get(), @[ image ], [this] (bool hasServices) {
+            m_hasImageServices = hasServices;
+        });
 
-        static NSAttributedString *attributedStringWithRichContent;
-        if (!attributedStringWithRichContent) {
-            dispatch_sync(dispatch_get_main_queue(), ^ {
+        static NSAttributedString *attributedString { [[NSAttributedString alloc] initWithString:@"a"] };
+        hasCompatibleServicesForItems(serviceLookupGroup.get(), @[ attributedString ], [this] (bool hasServices) {
+            m_hasSelectionServices = hasServices;
+        });
+
+        static NeverDestroyed<RetainPtr<NSAttributedString>> attributedStringWithRichContent;
+        static std::once_flag attributedStringWithRichContentOnceFlag;
+        std::call_once(attributedStringWithRichContentOnceFlag, [&] {
+            WorkQueue::main().dispatchSync([&] {
                 auto attachment = adoptNS([[NSTextAttachment alloc] init]);
-                auto cell = adoptNS([[NSTextAttachmentCell alloc] initImageCell:image.get()]);
+                auto cell = adoptNS([[NSTextAttachmentCell alloc] initImageCell:image]);
                 [attachment setAttachmentCell:cell.get()];
-                NSMutableAttributedString *richString = (NSMutableAttributedString *)[NSMutableAttributedString attributedStringWithAttachment:attachment.get()];
+                auto richString = adoptNS([[NSAttributedString attributedStringWithAttachment:attachment.get()] mutableCopy]);
                 [richString appendAttributedString:attributedString];
-                attributedStringWithRichContent = [richString retain];
+                attributedStringWithRichContent.get() = WTFMove(richString);
             });
-        }
+        });
 
-        bool hasRichContentServices = hasCompatibleServicesForItems(@[ attributedStringWithRichContent ]);
-        
-        dispatch_async(dispatch_get_main_queue(), ^{
-            bool availableServicesChanged = (hasImageServices != m_hasImageServices) || (hasSelectionServices != m_hasSelectionServices) || (hasRichContentServices != m_hasRichContentServices);
+        hasCompatibleServicesForItems(serviceLookupGroup.get(), @[ attributedStringWithRichContent.get().get() ], [this] (bool hasServices) {
+            m_hasRichContentServices = hasServices;
+        });
 
-            m_hasSelectionServices = hasSelectionServices;
-            m_hasImageServices = hasImageServices;
-            m_hasRichContentServices = hasRichContentServices;
+        dispatch_group_notify(serviceLookupGroup.get(), dispatch_get_main_queue(), makeBlockPtr([this] {
+            bool availableServicesChanged = (m_lastSentHasImageServices != m_hasImageServices) || (m_lastSentHasSelectionServices != m_hasSelectionServices) || (m_lastSentHasRichContentServices != m_hasRichContentServices);
+
+            m_lastSentHasSelectionServices = m_hasSelectionServices;
+            m_lastSentHasImageServices = m_hasImageServices;
+            m_lastSentHasRichContentServices = m_hasRichContentServices;
 
             if (availableServicesChanged) {
                 for (auto& processPool : WebProcessPool::allProcessPools())
@@ -112,7 +131,7 @@ void ServicesController::refreshExistingServices(bool refreshImmediately)
             }
 
             m_hasPendingRefresh = false;
-        });
+        }).get());
     });
 }
 

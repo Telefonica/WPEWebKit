@@ -26,19 +26,19 @@
 #include "config.h"
 #include "ThreadedCompositor.h"
 
-#if USE(COORDINATED_GRAPHICS_THREADED)
+#if USE(COORDINATED_GRAPHICS)
 
 #include "CompositingRunLoop.h"
+#include "EventDispatcher.h"
 #include "ThreadedDisplayRefreshMonitor.h"
-#include "WebPage.h"
+#include "WebProcess.h"
 #include <WebCore/PlatformDisplay.h>
-#include <WebCore/Settings.h>
 #include <WebCore/TransformationMatrix.h>
 #include <wtf/SetForScope.h>
 
 #if USE(LIBEPOXY)
 #include <epoxy/gl.h>
-#elif USE(OPENGL_ES_2)
+#elif USE(OPENGL_ES)
 #include <GLES2/gl2.h>
 #else
 #include <GL/gl.h>
@@ -47,37 +47,36 @@
 namespace WebKit {
 using namespace WebCore;
 
-Ref<ThreadedCompositor> ThreadedCompositor::create(Client& client, ThreadedDisplayRefreshMonitor::Client& displayRefreshMonitorClient, WebPage& webPage, const IntSize& viewportSize, float scaleFactor, ShouldDoFrameSync doFrameSync, TextureMapper::PaintFlags paintFlags)
+Ref<ThreadedCompositor> ThreadedCompositor::create(Client& client, ThreadedDisplayRefreshMonitor::Client& displayRefreshMonitorClient, PlatformDisplayID displayID, const IntSize& viewportSize, float scaleFactor, TextureMapper::PaintFlags paintFlags, bool nonCompositedWebGLEnabled)
 {
-    return adoptRef(*new ThreadedCompositor(client, displayRefreshMonitorClient, webPage, viewportSize, scaleFactor, doFrameSync, paintFlags));
+    return adoptRef(*new ThreadedCompositor(client, displayRefreshMonitorClient, displayID, viewportSize, scaleFactor, paintFlags, nonCompositedWebGLEnabled));
 }
 
-ThreadedCompositor::ThreadedCompositor(Client& client, ThreadedDisplayRefreshMonitor::Client& displayRefreshMonitorClient, WebPage& webPage, const IntSize& viewportSize, float scaleFactor, ShouldDoFrameSync doFrameSync, TextureMapper::PaintFlags paintFlags)
+ThreadedCompositor::ThreadedCompositor(Client& client, ThreadedDisplayRefreshMonitor::Client& displayRefreshMonitorClient, PlatformDisplayID displayID, const IntSize& viewportSize, float scaleFactor, TextureMapper::PaintFlags paintFlags, bool nonCompositedWebGLEnabled)
     : m_client(client)
-    , m_doFrameSync(doFrameSync)
     , m_paintFlags(paintFlags)
-    , m_nonCompositedWebGLEnabled(webPage.corePage()->settings().nonCompositedWebGLEnabled())
-    , m_compositingRunLoop(std::make_unique<CompositingRunLoop>([this] { renderLayerTree(); }))
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-    , m_displayRefreshMonitor(ThreadedDisplayRefreshMonitor::create(displayRefreshMonitorClient))
-#endif
+    , m_nonCompositedWebGLEnabled(nonCompositedWebGLEnabled)
+    , m_compositingRunLoop(makeUnique<CompositingRunLoop>([this] { renderLayerTree(); }))
+    , m_displayRefreshMonitor(ThreadedDisplayRefreshMonitor::create(displayID, displayRefreshMonitorClient))
 {
     {
         // Locking isn't really necessary here, but it's done for consistency.
-        LockHolder locker(m_attributes.lock);
+        Locker locker { m_attributes.lock };
         m_attributes.viewportSize = viewportSize;
         m_attributes.scaleFactor = scaleFactor;
         m_attributes.needsResize = !viewportSize.isEmpty();
     }
 
-    m_compositingRunLoop->performTaskSync([this, protectedThis = makeRef(*this)] {
+    m_compositingRunLoop->performTaskSync([this, protectedThis = Ref { *this }] {
         m_scene = adoptRef(new CoordinatedGraphicsScene(this));
         m_nativeSurfaceHandle = m_client.nativeSurfaceHandleForCompositing();
-        if (m_nativeSurfaceHandle) {
-            createGLContext();
+
+        createGLContext();
+        if (m_context) {
+            if (!m_nativeSurfaceHandle)
+                m_paintFlags |= TextureMapper::PaintingMirrored;
             m_scene->setActive(true);
-        } else
-            m_scene->setActive(false);
+        }
     });
 }
 
@@ -89,66 +88,101 @@ void ThreadedCompositor::createGLContext()
 {
     ASSERT(!RunLoop::isMain());
 
-    // If nonCompositedWebGL is enabled there will be a gl context created for the window to render webgl. We can't
-    // create another context for the same window as this breaks the rendering on some platforms.
+    // If nonCompositedWebGL is enabled there will be a gl context created for the window to render WebGL. We can't
+    // create another context for the same window.
     if (m_nonCompositedWebGLEnabled)
         return;
 
-    ASSERT(m_nativeSurfaceHandle);
-
-    m_context = GLContext::createContextForWindow(reinterpret_cast<GLNativeWindowType>(m_nativeSurfaceHandle), &PlatformDisplay::sharedDisplayForCompositing());
-    if (!m_context)
-        return;
-
-    if (m_doFrameSync == ShouldDoFrameSync::No) {
-        if (m_context->makeContextCurrent())
-            m_context->swapInterval(0);
-    }
+    // GLNativeWindowType depends on the EGL implementation: reinterpret_cast works
+    // for pointers (only if they are 64-bit wide and not for other cases), and static_cast for
+    // numeric types (and when needed they get extended to 64-bit) but not for pointers. Using
+    // a plain C cast expression in this one instance works in all cases.
+    static_assert(sizeof(GLNativeWindowType) <= sizeof(uint64_t), "GLNativeWindowType must not be longer than 64 bits.");
+    auto windowType = (GLNativeWindowType) m_nativeSurfaceHandle;
+    m_context = GLContext::createContextForWindow(windowType, &PlatformDisplay::sharedDisplayForCompositing());
+    if (m_context)
+        m_context->makeContextCurrent();
 }
 
 void ThreadedCompositor::invalidate()
 {
     m_scene->detach();
     m_compositingRunLoop->stopUpdates();
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
     m_displayRefreshMonitor->invalidate();
-#endif
-    m_compositingRunLoop->performTaskSync([this, protectedThis = makeRef(*this)] {
-        m_scene->purgeGLResources();
-        m_context = nullptr;
+    m_compositingRunLoop->performTaskSync([this, protectedThis = Ref { *this }] {
+        if (m_context) {
+            if (!m_context->makeContextCurrent())
+                return;
+
+            // Update the scene at this point ensures the layers state are correctly propagated
+            // in the ThreadedCompositor and in the CompositingCoordinator.
+            updateSceneWithoutRendering();
+
+            m_scene->purgeGLResources();
+            m_context = nullptr;
+        }
         m_client.didDestroyGLContext();
         m_scene = nullptr;
     });
     m_compositingRunLoop = nullptr;
 }
 
-void ThreadedCompositor::setNativeSurfaceHandleForCompositing(uint64_t handle)
+void ThreadedCompositor::suspend()
 {
-    m_compositingRunLoop->stopUpdates();
-    m_compositingRunLoop->performTaskSync([this, protectedThis = makeRef(*this), handle] {
-        // A new native handle can't be set without destroying the previous one first if any.
-        ASSERT(!!handle ^ !!m_nativeSurfaceHandle);
-        m_nativeSurfaceHandle = handle;
-        if (m_nativeSurfaceHandle) {
-            createGLContext();
-            m_scene->setActive(true);
-        } else {
-            m_scene->setActive(false);
-            m_context = nullptr;
-        }
+    if (++m_suspendedCount > 1)
+        return;
+
+    m_compositingRunLoop->suspend();
+    m_compositingRunLoop->performTaskSync([this, protectedThis = Ref { *this }] {
+        m_scene->setActive(false);
     });
+}
+
+void ThreadedCompositor::suspendToTransparent()
+{
+    // If we're in nonCompositedWebGL mode, the WebGLRenderingContext will have painted the
+    // transparent background. We don't need to do anything besides suspending.
+    if (m_nonCompositedWebGLEnabled) {
+        suspend();
+        return;
+    }
+
+    // When not in nonCompositedWebGL, we need to request a redraw to paint the transparent
+    // background, and when the scene is completed, suspend.
+    if (++m_suspendedCount > 1)
+        return;
+
+    // Set the flag for transparent and request a redraw.
+    m_compositingRunLoop->performTaskSync([this, protectedThis = Ref { *this }] {
+        m_suspendToTransparentState = SuspendToTransparentState::Requested;
+    });
+    m_compositingRunLoop->scheduleUpdate();
+}
+
+void ThreadedCompositor::resume()
+{
+    ASSERT(m_suspendedCount > 0);
+    if (--m_suspendedCount > 0)
+        return;
+
+    m_compositingRunLoop->performTaskSync([this, protectedThis = Ref { *this }] {
+        m_scene->setActive(true);
+        m_suspendToTransparentState = SuspendToTransparentState::None;
+    });
+    m_compositingRunLoop->resume();
+    m_compositingRunLoop->scheduleUpdate();
 }
 
 void ThreadedCompositor::setScaleFactor(float scale)
 {
-    LockHolder locker(m_attributes.lock);
+    Locker locker { m_attributes.lock };
     m_attributes.scaleFactor = scale;
     m_compositingRunLoop->scheduleUpdate();
 }
 
 void ThreadedCompositor::setScrollPosition(const IntPoint& scrollPosition, float scale)
 {
-    LockHolder locker(m_attributes.lock);
+    Locker locker { m_attributes.lock };
     m_attributes.scrollPosition = scrollPosition;
     m_attributes.scaleFactor = scale;
     m_compositingRunLoop->scheduleUpdate();
@@ -156,30 +190,11 @@ void ThreadedCompositor::setScrollPosition(const IntPoint& scrollPosition, float
 
 void ThreadedCompositor::setViewportSize(const IntSize& viewportSize, float scale)
 {
-    LockHolder locker(m_attributes.lock);
+    Locker locker { m_attributes.lock };
     m_attributes.viewportSize = viewportSize;
     m_attributes.scaleFactor = scale;
     m_attributes.needsResize = true;
     m_compositingRunLoop->scheduleUpdate();
-}
-
-void ThreadedCompositor::setDrawsBackground(bool drawsBackground)
-{
-    LockHolder locker(m_attributes.lock);
-    m_attributes.drawsBackground = drawsBackground;
-    m_compositingRunLoop->scheduleUpdate();
-}
-
-void ThreadedCompositor::renderNextFrame()
-{
-    ASSERT(RunLoop::isMain());
-    m_client.renderNextFrame();
-}
-
-void ThreadedCompositor::commitScrollOffset(uint32_t layerID, const IntSize& offset)
-{
-    ASSERT(RunLoop::isMain());
-    m_client.commitScrollOffset(layerID, offset);
 }
 
 void ThreadedCompositor::updateViewport()
@@ -191,9 +206,8 @@ void ThreadedCompositor::forceRepaint()
 {
     // FIXME: Enable this for WPE once it's possible to do these forced updates
     // in a way that doesn't starve out the underlying graphics buffers.
-#if PLATFORM(GTK)
-    m_compositingRunLoop->performTaskSync([this, protectedThis = makeRef(*this)] {
-        SetForScope<bool> change(m_inForceRepaint, true);
+#if PLATFORM(GTK) && !USE(WPE_RENDERER)
+    m_compositingRunLoop->performTaskSync([this, protectedThis = Ref { *this }] {
         renderLayerTree();
     });
 #endif
@@ -210,8 +224,12 @@ void ThreadedCompositor::renderNonCompositedWebGL()
     {
         LockHolder locker(m_attributes.lock);
         states = WTFMove(m_attributes.states);
+
+        // Set clientRenderNextFrame to true so frameComplete() causes a call to renderNextFrame().
         m_attributes.clientRendersNextFrame = true;
     }
+
+    m_scene->applyStateChangesAndNotifyVideoPosition(states);
 
     m_client.didRenderFrame();
 }
@@ -229,22 +247,19 @@ void ThreadedCompositor::renderLayerTree()
     if (!m_context || !m_context->makeContextCurrent())
         return;
 
-    m_client.willRenderFrame();
-
     // Retrieve the scene attributes in a thread-safe manner.
     WebCore::IntSize viewportSize;
     WebCore::IntPoint scrollPosition;
     float scaleFactor;
-    bool drawsBackground;
     bool needsResize;
+
     Vector<WebCore::CoordinatedGraphicsState> states;
 
     {
-        LockHolder locker(m_attributes.lock);
+        Locker locker { m_attributes.lock };
         viewportSize = m_attributes.viewportSize;
         scrollPosition = m_attributes.scrollPosition;
         scaleFactor = m_attributes.scaleFactor;
-        drawsBackground = m_attributes.drawsBackground;
         needsResize = m_attributes.needsResize;
 
         states = WTFMove(m_attributes.states);
@@ -252,39 +267,37 @@ void ThreadedCompositor::renderLayerTree()
         if (!states.isEmpty()) {
             // Client has to be notified upon finishing this scene update.
             m_attributes.clientRendersNextFrame = true;
-
-            // Coordinate scene update completion with the client in case of changed or updated platform layers.
-            // But do not change coordinateUpdateCompletionWithClient while in force repaint because that
-            // demands immediate scene update completion regardless of platform layers.
-            if (!m_inForceRepaint) {
-                bool coordinateUpdate = false;
-                for (auto& state : states)
-                    coordinateUpdate |= std::any_of(state.layersToUpdate.begin(), state.layersToUpdate.end(),
-                        [](auto& it) { return it.second.platformLayerChanged || it.second.platformLayerUpdated; });
-                m_attributes.coordinateUpdateCompletionWithClient = coordinateUpdate;
-            }
-        } else
-            m_attributes.clientRendersNextFrame = false;
+        }
 
         // Reset the needsResize attribute to false.
         m_attributes.needsResize = false;
     }
 
-    if (needsResize)
-        glViewport(0, 0, viewportSize.width(), viewportSize.height());
-
     TransformationMatrix viewportTransform;
     viewportTransform.scale(scaleFactor);
     viewportTransform.translate(-scrollPosition.x(), -scrollPosition.y());
 
-    if (!drawsBackground) {
-        glClearColor(0, 0, 0, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-    }
+    // Resize the client, if necessary, before the will-render-frame call is dispatched.
+    // GL viewport is updated separately, if necessary. This establishes sequencing where
+    // everything inside the will-render and did-render scope is done for a constant-sized scene,
+    // and similarly all GL operations are done inside that specific scope.
+
+    if (needsResize)
+        m_client.resize(viewportSize);
+
+    m_client.willRenderFrame();
+
+    if (needsResize)
+        glViewport(0, 0, viewportSize.width(), viewportSize.height());
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
 
     m_scene->applyStateChanges(states);
-    m_scene->paintToCurrentGLContext(viewportTransform, 1, FloatRect { FloatPoint { }, viewportSize },
-        Color::transparent, !drawsBackground, scrollPosition, m_paintFlags);
+    if (m_suspendToTransparentState != SuspendToTransparentState::Requested)
+        m_scene->paintToCurrentGLContext(viewportTransform, FloatRect { FloatPoint { }, viewportSize }, m_paintFlags);
+    else
+        m_suspendToTransparentState = SuspendToTransparentState::WaitingForFrameComplete;
 
     m_context->swapBuffers();
 
@@ -302,62 +315,60 @@ void ThreadedCompositor::sceneUpdateFinished()
     //  - a DisplayRefreshMonitor callback was requested from the Web engine
     bool shouldDispatchDisplayRefreshCallback { false };
 
-    // If coordinateUpdateCompletionWithClient is true, the scene update completion has to be
-    // delayed until the DisplayRefreshMonitor callback.
-    bool shouldCoordinateUpdateCompletionWithClient { false };
-
     {
-        LockHolder locker(m_attributes.lock);
+        Locker locker { m_attributes.lock };
         shouldDispatchDisplayRefreshCallback = m_attributes.clientRendersNextFrame
             || m_displayRefreshMonitor->requiresDisplayRefreshCallback();
-        shouldCoordinateUpdateCompletionWithClient = m_attributes.coordinateUpdateCompletionWithClient;
     }
 
-    LockHolder stateLocker(m_compositingRunLoop->stateLock());
+    if (m_suspendToTransparentState == SuspendToTransparentState::WaitingForFrameComplete) {
+        m_compositingRunLoop->suspend();
+        m_scene->setActive(false);
+        m_suspendToTransparentState = SuspendToTransparentState::None;
+    }
+
+    Locker stateLocker { m_compositingRunLoop->stateLock() };
 
     // Schedule the DisplayRefreshMonitor callback, if necessary.
     if (shouldDispatchDisplayRefreshCallback)
         m_displayRefreshMonitor->dispatchDisplayRefreshCallback();
 
-    // Mark the scene update as completed if no coordination is required and if not in a forced repaint.
-    if (!shouldCoordinateUpdateCompletionWithClient && !m_inForceRepaint)
-        m_compositingRunLoop->updateCompleted(stateLocker);
+    // Always notify the ScrollingTrees to make sure scrolling does not depend on the main thread.
+    WebProcess::singleton().eventDispatcher().notifyScrollingTreesDisplayWasRefreshed(m_displayRefreshMonitor->displayID());
 
-    // Independent of the scene update, the composition itself is now completed.
-    m_compositingRunLoop->compositionCompleted(stateLocker);
+    // Mark the scene update as completed.
+    m_compositingRunLoop->updateCompleted(stateLocker);
 }
 
 void ThreadedCompositor::updateSceneState(const CoordinatedGraphicsState& state)
 {
-    LockHolder locker(m_attributes.lock);
+    Locker locker { m_attributes.lock };
     m_attributes.states.append(state);
     m_compositingRunLoop->scheduleUpdate();
 }
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-RefPtr<WebCore::DisplayRefreshMonitor> ThreadedCompositor::displayRefreshMonitor(PlatformDisplayID)
+void ThreadedCompositor::updateScene()
 {
-    return m_displayRefreshMonitor.copyRef();
+    m_compositingRunLoop->scheduleUpdate();
 }
 
-void ThreadedCompositor::handleDisplayRefreshMonitorUpdate()
+void ThreadedCompositor::updateSceneWithoutRendering()
 {
-    // Retrieve coordinateUpdateCompletionWithClient.
-    bool coordinateUpdateCompletionWithClient { false };
+    Vector<WebCore::CoordinatedGraphicsState> states;
+
     {
-        LockHolder locker(m_attributes.lock);
-        coordinateUpdateCompletionWithClient = std::exchange(m_attributes.coordinateUpdateCompletionWithClient, false);
+        Locker locker { m_attributes.lock };
+        states = WTFMove(m_attributes.states);
+
     }
-
-    LockHolder stateLocker(m_compositingRunLoop->stateLock());
-
-    // If required, mark the current scene update as completed. CompositingRunLoop will take care of
-    // scheduling a new update in case an update was marked as pending due to previous layer flushes
-    // or DisplayRefreshMonitor notifications.
-    if (coordinateUpdateCompletionWithClient)
-        m_compositingRunLoop->updateCompleted(stateLocker);
+    m_scene->applyStateChanges(states);
+    m_scene->updateSceneState();
 }
-#endif
+
+WebCore::DisplayRefreshMonitor& ThreadedCompositor::displayRefreshMonitor() const
+{
+    return m_displayRefreshMonitor.get();
+}
 
 void ThreadedCompositor::frameComplete()
 {
@@ -365,5 +376,11 @@ void ThreadedCompositor::frameComplete()
     sceneUpdateFinished();
 }
 
+void ThreadedCompositor::targetRefreshRateDidChange(unsigned rate)
+{
+    ASSERT(RunLoop::isMain());
+    m_displayRefreshMonitor->setTargetRefreshRate(rate);
 }
-#endif // USE(COORDINATED_GRAPHICS_THREADED)
+
+}
+#endif // USE(COORDINATED_GRAPHICS)

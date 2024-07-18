@@ -8,13 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_COMMON_AUDIO_REAL_FOURIER_H_
-#define WEBRTC_COMMON_AUDIO_REAL_FOURIER_H_
+#ifndef COMMON_AUDIO_REAL_FOURIER_H_
+#define COMMON_AUDIO_REAL_FOURIER_H_
+
+#include <stddef.h>
 
 #include <complex>
 #include <memory>
 
-#include "webrtc/system_wrappers/include/aligned_malloc.h"
+#include "rtc_base/memory/aligned_malloc.h"
 
 // Uniform interface class for the real DFT and its inverse, for power-of-2
 // input lengths. Also contains helper functions for buffer allocation, taking
@@ -48,7 +50,7 @@ class RealFourier {
   // output (i.e. |2^order / 2 + 1|).
   static size_t ComplexLength(int order);
 
-  // Buffer allocation helpers. The buffers are large enough to hold |count|
+  // Buffer allocation helpers. The buffers are large enough to hold `count`
   // floats/complexes and suitably aligned for use by the implementation.
   // The returned scopers are set up with proper deleters; the caller owns
   // the allocated memory.
@@ -71,5 +73,4 @@ class RealFourier {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_COMMON_AUDIO_REAL_FOURIER_H_
-
+#endif  // COMMON_AUDIO_REAL_FOURIER_H_

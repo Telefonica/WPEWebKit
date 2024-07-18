@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef PublicSuffix_h
-#define PublicSuffix_h
+#pragma once
 
 #include <wtf/text/WTFString.h>
 
@@ -32,11 +31,11 @@
 
 namespace WebCore {
 
-WEBCORE_EXPORT bool isPublicSuffix(const String& domain);
+WEBCORE_EXPORT bool isPublicSuffix(StringView domain);
 WEBCORE_EXPORT String topPrivatelyControlledDomain(const String& domain);
+WEBCORE_EXPORT void setTopPrivatelyControlledDomain(const String& domain, const String& topPrivatelyControlledDomain);
+String decodeHostName(const String& domain);
 
 } // namespace WebCore
 
 #endif // ENABLE(PUBLIC_SUFFIX_LIST)
-
-#endif // PublicSuffix_h

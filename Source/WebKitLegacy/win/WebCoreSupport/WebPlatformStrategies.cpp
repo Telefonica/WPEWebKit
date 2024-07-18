@@ -25,17 +25,18 @@
 
 #include "WebPlatformStrategies.h"
 
-#include "FrameLoader.h"
 #include "WebFrameNetworkingContext.h"
 #include "WebResourceLoadScheduler.h"
+#include <WebCore/AudioDestination.h>
+#include <WebCore/BlobRegistry.h>
 #include <WebCore/BlobRegistryImpl.h>
+#include <WebCore/FrameLoader.h>
+#include <WebCore/MediaStrategy.h>
 #include <WebCore/NetworkStorageSession.h>
 #include <WebCore/Page.h>
-#include <WebCore/PageGroup.h>
-#include <WebCore/PlatformCookieJar.h>
 
 #if USE(CFURLCONNECTION)
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
+#include <pal/spi/win/CFNetworkSPIWin.h>
 #endif
 
 using namespace WebCore;
@@ -50,11 +51,6 @@ WebPlatformStrategies::WebPlatformStrategies()
     setPlatformStrategies(this);
 }
 
-CookiesStrategy* WebPlatformStrategies::createCookiesStrategy()
-{
-    return this;
-}
-
 LoaderStrategy* WebPlatformStrategies::createLoaderStrategy()
 {
     return new WebResourceLoadScheduler;
@@ -65,43 +61,41 @@ PasteboardStrategy* WebPlatformStrategies::createPasteboardStrategy()
     return nullptr;
 }
 
+class WebMediaStrategy final : public MediaStrategy {
+private:
+#if ENABLE(WEB_AUDIO)
+    Ref<AudioDestination> createAudioDestination(AudioIOCallback& callback, const String& inputDeviceId,
+        unsigned numberOfInputChannels, unsigned numberOfOutputChannels, float sampleRate) override
+    {
+        return AudioDestination::create(callback, inputDeviceId, numberOfInputChannels, numberOfOutputChannels, sampleRate);
+    }
+#endif
+};
+
+MediaStrategy* WebPlatformStrategies::createMediaStrategy()
+{
+    return new WebMediaStrategy;
+}
+
+class WebBlobRegistry final : public BlobRegistry {
+private:
+    void registerFileBlobURL(const URL& url, Ref<BlobDataFileReference>&& reference, const String&, const String& contentType) final { m_blobRegistry.registerFileBlobURL(url, WTFMove(reference), contentType); }
+    void registerBlobURL(const URL& url, Vector<BlobPart>&& parts, const String& contentType) final { m_blobRegistry.registerBlobURL(url, WTFMove(parts), contentType); }
+    void registerBlobURL(const URL& url, const URL& srcURL, const PolicyContainer& policyContainer) final { m_blobRegistry.registerBlobURL(url, srcURL, policyContainer); }
+    void registerBlobURLOptionallyFileBacked(const URL& url, const URL& srcURL, RefPtr<BlobDataFileReference>&& reference, const String& contentType) final { m_blobRegistry.registerBlobURLOptionallyFileBacked(url, srcURL, WTFMove(reference), contentType, { }); }
+    void registerBlobURLForSlice(const URL& url, const URL& srcURL, long long start, long long end, const String& contentType) final { m_blobRegistry.registerBlobURLForSlice(url, srcURL, start, end, contentType); }
+    void unregisterBlobURL(const URL& url) final { m_blobRegistry.unregisterBlobURL(url); }
+    unsigned long long blobSize(const URL& url) final { return m_blobRegistry.blobSize(url); }
+    void writeBlobsToTemporaryFilesForIndexedDB(const Vector<String>& blobURLs, CompletionHandler<void(Vector<String>&& filePaths)>&& completionHandler) final { m_blobRegistry.writeBlobsToTemporaryFilesForIndexedDB(blobURLs, WTFMove(completionHandler)); }
+    void registerBlobURLHandle(const URL& url) final { m_blobRegistry.registerBlobURLHandle(url); }
+    void unregisterBlobURLHandle(const URL& url) final { m_blobRegistry.unregisterBlobURLHandle(url); }
+
+    BlobRegistryImpl* blobRegistryImpl() final { return &m_blobRegistry; }
+
+    BlobRegistryImpl m_blobRegistry;
+};
+
 BlobRegistry* WebPlatformStrategies::createBlobRegistry()
 {
-    return new BlobRegistryImpl;
-}
-
-std::pair<String, bool> WebPlatformStrategies::cookiesForDOM(const WebCore::NetworkStorageSession& session, const WebCore::URL& firstParty, const WebCore::URL& url, WebCore::IncludeSecureCookies includeSecureCookies)
-{
-    return WebCore::cookiesForDOM(session, firstParty, url, includeSecureCookies);
-}
-
-void WebPlatformStrategies::setCookiesFromDOM(const NetworkStorageSession& session, const URL& firstParty, const URL& url, const String& cookieString)
-{
-    WebCore::setCookiesFromDOM(session, firstParty, url, cookieString);
-}
-
-bool WebPlatformStrategies::cookiesEnabled(const NetworkStorageSession& session, const URL& firstParty, const URL& url)
-{
-    return WebCore::cookiesEnabled(session, firstParty, url);
-}
-
-std::pair<String, bool> WebPlatformStrategies::cookieRequestHeaderFieldValue(const NetworkStorageSession& session, const URL& firstParty, const URL& url, WebCore::IncludeSecureCookies includeSecureCookies)
-{
-    return WebCore::cookieRequestHeaderFieldValue(session, firstParty, url, includeSecureCookies);
-}
-
-std::pair<String, bool> WebPlatformStrategies::cookieRequestHeaderFieldValue(PAL::SessionID sessionID, const URL& firstParty, const URL& url, WebCore::IncludeSecureCookies includeSecureCookies)
-{
-    auto& session = sessionID.isEphemeral() ? WebFrameNetworkingContext::ensurePrivateBrowsingSession() : NetworkStorageSession::defaultStorageSession();
-    return WebCore::cookieRequestHeaderFieldValue(session, firstParty, url, includeSecureCookies);
-}
-
-bool WebPlatformStrategies::getRawCookies(const NetworkStorageSession& session, const URL& firstParty, const URL& url, Vector<Cookie>& rawCookies)
-{
-    return WebCore::getRawCookies(session, firstParty, url, rawCookies);
-}
-
-void WebPlatformStrategies::deleteCookie(const NetworkStorageSession& session, const URL& url, const String& cookieName)
-{
-    WebCore::deleteCookie(session, url, cookieName);
+    return new WebBlobRegistry;
 }

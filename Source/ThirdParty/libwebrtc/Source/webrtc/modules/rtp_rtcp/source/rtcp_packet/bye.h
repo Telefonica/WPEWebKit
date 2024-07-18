@@ -9,13 +9,14 @@
  *
  */
 
-#ifndef WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_BYE_H_
-#define WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_BYE_H_
+#ifndef MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_BYE_H_
+#define MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_BYE_H_
 
 #include <string>
 #include <vector>
 
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet.h"
+#include "absl/strings/string_view.h"
+#include "modules/rtp_rtcp/source/rtcp_packet.h"
 
 namespace webrtc {
 namespace rtcp {
@@ -31,11 +32,9 @@ class Bye : public RtcpPacket {
   // Parse assumes header is already parsed and validated.
   bool Parse(const CommonHeader& packet);
 
-  void SetSenderSsrc(uint32_t ssrc) { sender_ssrc_ = ssrc; }
   bool SetCsrcs(std::vector<uint32_t> csrcs);
-  void SetReason(std::string reason);
+  void SetReason(absl::string_view reason);
 
-  uint32_t sender_ssrc() const { return sender_ssrc_; }
   const std::vector<uint32_t>& csrcs() const { return csrcs_; }
   const std::string& reason() const { return reason_; }
 
@@ -44,16 +43,15 @@ class Bye : public RtcpPacket {
   bool Create(uint8_t* packet,
               size_t* index,
               size_t max_length,
-              RtcpPacket::PacketReadyCallback* callback) const override;
+              PacketReadyCallback callback) const override;
 
  private:
   static const int kMaxNumberOfCsrcs = 0x1f - 1;  // First item is sender SSRC.
 
-  uint32_t sender_ssrc_;
   std::vector<uint32_t> csrcs_;
   std::string reason_;
 };
 
 }  // namespace rtcp
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_BYE_H_
+#endif  // MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_BYE_H_

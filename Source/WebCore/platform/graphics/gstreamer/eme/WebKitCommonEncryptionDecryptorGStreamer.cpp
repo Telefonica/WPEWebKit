@@ -25,101 +25,113 @@
 
 #if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
 
+#include "CDMProxy.h"
+#include "GStreamerCommon.h"
 #include "GStreamerEMEUtilities.h"
-#include "SharedBuffer.h"
-#include <CDMInstance.h>
 #include <wtf/Condition.h>
 #include <wtf/PrintStream.h>
 #include <wtf/RunLoop.h>
-#include <wtf/text/StringHash.h>
+#include <wtf/Scope.h>
+#include <wtf/glib/WTFGType.h>
 
-using WebCore::CDMInstance;
+using WebCore::CDMProxy;
+
+// Instances of this class are tied to the decryptor lifecycle. They can't be alive after the decryptor has been destroyed.
+class CDMProxyDecryptionClientImplementation : public WebCore::CDMProxyDecryptionClient {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    CDMProxyDecryptionClientImplementation(WebKitMediaCommonEncryptionDecrypt* decryptor)
+        : m_decryptor(decryptor) { }
+    virtual bool isAborting()
+    {
+        return webKitMediaCommonEncryptionDecryptIsAborting(m_decryptor);
+    }
+    virtual ~CDMProxyDecryptionClientImplementation() = default;
+private:
+    WebKitMediaCommonEncryptionDecrypt* m_decryptor;
+};
+
+enum DecryptionState {
+    Idle,
+    Decrypting,
+    FlushPending
+};
 
 #define WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE((obj), WEBKIT_TYPE_MEDIA_CENC_DECRYPT, WebKitMediaCommonEncryptionDecryptPrivate))
 struct _WebKitMediaCommonEncryptionDecryptPrivate {
-    bool m_keyReceived { false };
-    Lock m_mutex;
-    Condition m_condition;
-    RefPtr<CDMInstance> m_cdmInstance;
-    WTF::HashMap<String, WebCore::InitData> m_initDatas;
-    WTF::HashMap<WebCore::InitData, Ref<WebCore::SharedBuffer>> m_keyIds;
-    Vector<GRefPtr<GstEvent>> m_protectionEvents;
-    uint32_t m_currentEvent { 0 };
-    bool m_isFlushing { false };
+    RefPtr<CDMProxy> cdmProxy;
+
+    // Protect the access to the structure members.
+    Lock lock;
+    Condition condition;
+
+    bool isFlushing { false };
+    bool isStopped { true };
+    std::unique_ptr<CDMProxyDecryptionClientImplementation> cdmProxyDecryptionClientImplementation;
+    enum DecryptionState decryptionState { DecryptionState::Idle };
 };
 
-static GstStateChangeReturn webKitMediaCommonEncryptionDecryptorChangeState(GstElement*, GstStateChange transition);
-static void webKitMediaCommonEncryptionDecryptorSetContext(GstElement*, GstContext*);
-static void webKitMediaCommonEncryptionDecryptorFinalize(GObject*);
-static GstCaps* webkitMediaCommonEncryptionDecryptTransformCaps(GstBaseTransform*, GstPadDirection, GstCaps*, GstCaps*);
-static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseTransform*, GstBuffer*);
-static gboolean webkitMediaCommonEncryptionDecryptSinkEventHandler(GstBaseTransform*, GstEvent*);
-static void webkitMediaCommonEncryptionDecryptProcessProtectionEvents(WebKitMediaCommonEncryptionDecrypt*, Ref<WebCore::SharedBuffer>&&);
-static bool webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(WebKitMediaCommonEncryptionDecrypt*);
+static constexpr Seconds MaxSecondsToWaitForCDMProxy = 5_s;
 
-GST_DEBUG_CATEGORY_STATIC(webkit_media_common_encryption_decrypt_debug_category);
+static void constructed(GObject*);
+static GstStateChangeReturn changeState(GstElement*, GstStateChange transition);
+static GstCaps* transformCaps(GstBaseTransform*, GstPadDirection, GstCaps*, GstCaps*);
+static gboolean acceptCaps(GstBaseTransform*, GstPadDirection, GstCaps*);
+static GstFlowReturn transformInPlace(GstBaseTransform*, GstBuffer*);
+static gboolean sinkEventHandler(GstBaseTransform*, GstEvent*);
+static void setContext(GstElement*, GstContext*);
+
+GST_DEBUG_CATEGORY(webkit_media_common_encryption_decrypt_debug_category);
 #define GST_CAT_DEFAULT webkit_media_common_encryption_decrypt_debug_category
 
 #define webkit_media_common_encryption_decrypt_parent_class parent_class
-G_DEFINE_TYPE(WebKitMediaCommonEncryptionDecrypt, webkit_media_common_encryption_decrypt, GST_TYPE_BASE_TRANSFORM);
+WEBKIT_DEFINE_TYPE(WebKitMediaCommonEncryptionDecrypt, webkit_media_common_encryption_decrypt, GST_TYPE_BASE_TRANSFORM)
 
 static void webkit_media_common_encryption_decrypt_class_init(WebKitMediaCommonEncryptionDecryptClass* klass)
 {
     GObjectClass* gobjectClass = G_OBJECT_CLASS(klass);
-    gobjectClass->finalize = webKitMediaCommonEncryptionDecryptorFinalize;
+    gobjectClass->constructed = constructed;
 
     GST_DEBUG_CATEGORY_INIT(webkit_media_common_encryption_decrypt_debug_category,
         "webkitcenc", 0, "Common Encryption base class");
 
     GstElementClass* elementClass = GST_ELEMENT_CLASS(klass);
-    elementClass->change_state = GST_DEBUG_FUNCPTR(webKitMediaCommonEncryptionDecryptorChangeState);
-    elementClass->set_context = GST_DEBUG_FUNCPTR(webKitMediaCommonEncryptionDecryptorSetContext);
+    elementClass->change_state = GST_DEBUG_FUNCPTR(changeState);
+    elementClass->set_context = GST_DEBUG_FUNCPTR(setContext);
 
     GstBaseTransformClass* baseTransformClass = GST_BASE_TRANSFORM_CLASS(klass);
-    baseTransformClass->transform_ip = GST_DEBUG_FUNCPTR(webkitMediaCommonEncryptionDecryptTransformInPlace);
-    baseTransformClass->transform_caps = GST_DEBUG_FUNCPTR(webkitMediaCommonEncryptionDecryptTransformCaps);
+    baseTransformClass->transform_ip = GST_DEBUG_FUNCPTR(transformInPlace);
+    baseTransformClass->transform_caps = GST_DEBUG_FUNCPTR(transformCaps);
+    baseTransformClass->accept_caps = GST_DEBUG_FUNCPTR(acceptCaps);
     baseTransformClass->transform_ip_on_passthrough = FALSE;
-    baseTransformClass->sink_event = GST_DEBUG_FUNCPTR(webkitMediaCommonEncryptionDecryptSinkEventHandler);
-
-    klass->setupCipher = [](WebKitMediaCommonEncryptionDecrypt*, GstBuffer*) { return true; };
-    klass->releaseCipher = [](WebKitMediaCommonEncryptionDecrypt*) { };
-    klass->handleKeyId = [](WebKitMediaCommonEncryptionDecrypt*, const WebCore::SharedBuffer&) { return true; };
-    klass->attemptToDecryptWithLocalInstance = [](WebKitMediaCommonEncryptionDecrypt*, const WebCore::SharedBuffer&) { return false; };
-
-    g_type_class_add_private(klass, sizeof(WebKitMediaCommonEncryptionDecryptPrivate));
+    baseTransformClass->passthrough_on_same_caps = TRUE;
+    baseTransformClass->sink_event = GST_DEBUG_FUNCPTR(sinkEventHandler);
 }
 
-static void webkit_media_common_encryption_decrypt_init(WebKitMediaCommonEncryptionDecrypt* self)
+static void constructed(GObject* object)
 {
-    WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
+    GST_CALL_PARENT(G_OBJECT_CLASS, constructed, (object));
 
-    self->priv = priv;
-    new (priv) WebKitMediaCommonEncryptionDecryptPrivate();
-
-    GstBaseTransform* base = GST_BASE_TRANSFORM(self);
+    GstBaseTransform* base = GST_BASE_TRANSFORM(object);
     gst_base_transform_set_in_place(base, TRUE);
     gst_base_transform_set_passthrough(base, FALSE);
     gst_base_transform_set_gap_aware(base, FALSE);
+
+    WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(base);
+    WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
+    priv->cdmProxyDecryptionClientImplementation = makeUnique<CDMProxyDecryptionClientImplementation>(self);
 }
 
-static void webKitMediaCommonEncryptionDecryptorFinalize(GObject* object)
-{
-    WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(object);
-    WebKitMediaCommonEncryptionDecryptPrivate* priv = self->priv;
-
-    priv->~WebKitMediaCommonEncryptionDecryptPrivate();
-    GST_CALL_PARENT(G_OBJECT_CLASS, finalize, (object));
-}
-
-static GstCaps* webkitMediaCommonEncryptionDecryptTransformCaps(GstBaseTransform* base, GstPadDirection direction, GstCaps* caps, GstCaps* filter)
+static GstCaps* transformCaps(GstBaseTransform* base, GstPadDirection direction, GstCaps* caps, GstCaps* filter)
 {
     if (direction == GST_PAD_UNKNOWN)
         return nullptr;
 
-    GST_LOG_OBJECT(base, "direction: %s, caps: %" GST_PTR_FORMAT " filter: %" GST_PTR_FORMAT, (direction == GST_PAD_SRC) ? "src" : "sink", caps, filter);
+    GST_DEBUG_OBJECT(base, "direction: %s, caps: %" GST_PTR_FORMAT " filter: %" GST_PTR_FORMAT, (direction == GST_PAD_SRC) ? "src" : "sink", caps, filter);
 
     GstCaps* transformedCaps = gst_caps_new_empty();
     WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(base);
+    WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
 
     unsigned size = gst_caps_get_size(caps);
     for (unsigned i = 0; i < size; ++i) {
@@ -127,57 +139,43 @@ static GstCaps* webkitMediaCommonEncryptionDecryptTransformCaps(GstBaseTransform
         GUniquePtr<GstStructure> outgoingStructure = nullptr;
 
         if (direction == GST_PAD_SINK) {
-            if (!gst_structure_has_field(incomingStructure, "original-media-type"))
-                continue;
+            bool canDoPassthrough = false;
+            if (!gst_structure_has_field(incomingStructure, "original-media-type")) {
+                // Let's check compatibility with src pad caps to see if we can do passthrough.
+                GRefPtr<GstCaps> srcPadTemplateCaps = adoptGRef(gst_pad_get_pad_template_caps(GST_BASE_TRANSFORM_SRC_PAD(base)));
+                unsigned srcPadTemplateCapsSize = gst_caps_get_size(srcPadTemplateCaps.get());
+                for (unsigned j = 0; !canDoPassthrough && j < srcPadTemplateCapsSize; ++j)
+                    canDoPassthrough = gst_structure_can_intersect(incomingStructure, gst_caps_get_structure(srcPadTemplateCaps.get(), j));
+
+                if (!canDoPassthrough)
+                    continue;
+            }
 
             outgoingStructure = GUniquePtr<GstStructure>(gst_structure_copy(incomingStructure));
-            gst_structure_set_name(outgoingStructure.get(), gst_structure_get_string(outgoingStructure.get(), "original-media-type"));
+
+            if (!canDoPassthrough)
+                gst_structure_set_name(outgoingStructure.get(), gst_structure_get_string(outgoingStructure.get(), "original-media-type"));
 
             // Filter out the DRM related fields from the down-stream caps.
-            for (int j = 0; j < gst_structure_n_fields(incomingStructure); ++j) {
-                const gchar* fieldName = gst_structure_nth_field_name(incomingStructure, j);
-
-                if (g_str_has_prefix(fieldName, "protection-system")
-                    || g_str_has_prefix(fieldName, "original-media-type")
-                    || g_str_has_prefix(fieldName, "encryption-algorithm")
-                    || g_str_has_prefix(fieldName, "encoding-scope")
-                    || g_str_has_prefix(fieldName, "cipher-mode"))
-                    gst_structure_remove_field(outgoingStructure.get(), fieldName);
-            }
+            gst_structure_remove_fields(outgoingStructure.get(), "protection-system", "original-media-type", "encryption-algorithm", "encoding-scope", "cipher-mode", nullptr);
         } else {
             outgoingStructure = GUniquePtr<GstStructure>(gst_structure_copy(incomingStructure));
-            // Filter out the video related fields from the up-stream caps,
-            // because they are not relevant to the input caps of this element and
-            // can cause caps negotiation failures with adaptive bitrate streams.
-            for (int index = gst_structure_n_fields(outgoingStructure.get()) - 1; index >= 0; --index) {
-                const gchar* fieldName = gst_structure_nth_field_name(outgoingStructure.get(), index);
-                GST_TRACE("Check field \"%s\" for removal", fieldName);
+            if (!gst_base_transform_is_passthrough(base)) {
+                // Filter out the video related fields from the up-stream caps,
+                // because they are not relevant to the input caps of this element and
+                // can cause caps negotiation failures with adaptive bitrate streams.
+                gst_structure_remove_fields(outgoingStructure.get(), "base-profile", "codec_data", "height", "framerate", "level", "pixel-aspect-ratio", "profile", "rate", "width", nullptr);
 
-                if (!g_strcmp0(fieldName, "base-profile")
-                    || !g_strcmp0(fieldName, "codec_data")
-                    || !g_strcmp0(fieldName, "height")
-                    || !g_strcmp0(fieldName, "framerate")
-                    || !g_strcmp0(fieldName, "level")
-                    || !g_strcmp0(fieldName, "pixel-aspect-ratio")
-                    || !g_strcmp0(fieldName, "profile")
-                    || !g_strcmp0(fieldName, "rate")
-                    || !g_strcmp0(fieldName, "width")) {
-                    gst_structure_remove_field(outgoingStructure.get(), fieldName);
-                    GST_TRACE("Removing field %s", fieldName);
-                }
-            }
+                gst_structure_set(outgoingStructure.get(), "protection-system", G_TYPE_STRING, klass->protectionSystemId(self),
+                    "original-media-type", G_TYPE_STRING, gst_structure_get_name(incomingStructure), nullptr);
 
-            gst_structure_set(outgoingStructure.get(), "original-media-type", G_TYPE_STRING, gst_structure_get_name(incomingStructure), nullptr);
-
-            WebKitMediaCommonEncryptionDecryptPrivate* priv = self->priv;
-            LockHolder locker(priv->m_mutex);
-
-            if (webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(self)) {
+                // GST_PROTECTION_UNSPECIFIED_SYSTEM_ID was added in the GStreamer
+                // developement git master which will ship as version 1.16.0.
                 gst_structure_set_name(outgoingStructure.get(),
-                    WebCore::GStreamerEMEUtilities::isUnspecifiedKeySystem(priv->m_cdmInstance->keySystem()) ? "application/x-webm-enc" : "application/x-cenc");
-                gst_structure_set(outgoingStructure.get(),
-                    "protection-system", G_TYPE_STRING, WebCore::GStreamerEMEUtilities::keySystemToUuid(priv->m_cdmInstance->keySystem()), nullptr);
-
+#if GST_CHECK_VERSION(1, 16, 0)
+                    !g_strcmp0(klass->protectionSystemId(self), GST_PROTECTION_UNSPECIFIED_SYSTEM_ID) ? "application/x-webm-enc" :
+#endif
+                    "application/x-cenc");
             }
         }
 
@@ -197,357 +195,319 @@ static GstCaps* webkitMediaCommonEncryptionDecryptTransformCaps(GstBaseTransform
     if (filter) {
         GstCaps* intersection;
 
-        GST_LOG_OBJECT(base, "Using filter caps %" GST_PTR_FORMAT, filter);
+        GST_DEBUG_OBJECT(base, "Using filter caps %" GST_PTR_FORMAT, filter);
         intersection = gst_caps_intersect_full(transformedCaps, filter, GST_CAPS_INTERSECT_FIRST);
         gst_caps_unref(transformedCaps);
         transformedCaps = intersection;
     }
 
-    GST_LOG_OBJECT(base, "returning %" GST_PTR_FORMAT, transformedCaps);
+    GST_DEBUG_OBJECT(base, "returning %" GST_PTR_FORMAT, transformedCaps);
     return transformedCaps;
 }
 
-static GstFlowReturn webkitMediaCommonEncryptionDecryptTransformInPlace(GstBaseTransform* base, GstBuffer* buffer)
+static gboolean acceptCaps(GstBaseTransform* trans, GstPadDirection direction, GstCaps* caps)
+{
+    gboolean result = GST_BASE_TRANSFORM_CLASS(parent_class)->accept_caps(trans, direction, caps);
+
+    if (result || direction == GST_PAD_SRC)
+        return result;
+
+    GRefPtr<GstCaps> srcPadTemplateCaps = adoptGRef(gst_pad_get_pad_template_caps(GST_BASE_TRANSFORM_SRC_PAD(trans)));
+    result = gst_caps_can_intersect(caps, srcPadTemplateCaps.get());
+    GST_TRACE_OBJECT(trans, "attempted to match %" GST_PTR_FORMAT " with the src pad template caps %" GST_PTR_FORMAT " to see if we can go passthrough mode, result %s",
+        caps, srcPadTemplateCaps.get(), boolForPrinting(result));
+
+    return result;
+}
+
+static GstFlowReturn transformInPlace(GstBaseTransform* base, GstBuffer* buffer)
 {
     WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(base);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
 
     GstProtectionMeta* protectionMeta = reinterpret_cast<GstProtectionMeta*>(gst_buffer_get_protection_meta(buffer));
     if (!protectionMeta) {
-        GST_TRACE_OBJECT(self, "buffer %p has no protection meta, assuming it's not encrypted", buffer);
+        GST_TRACE_OBJECT(self, "Buffer %p does not contain protection meta, not decrypting", buffer);
         return GST_FLOW_OK;
     }
 
-    LockHolder locker(priv->m_mutex);
-    const GValue* streamEncryptionEventsList = gst_structure_get_value(protectionMeta->info, "stream-encryption-events");
-    if (streamEncryptionEventsList && GST_VALUE_HOLDS_LIST(streamEncryptionEventsList)) {
-        unsigned streamEncryptionEventsListSize = gst_value_list_get_size(streamEncryptionEventsList);
-        for (unsigned i = 0; i < streamEncryptionEventsListSize; ++i)
-            priv->m_protectionEvents.append(GRefPtr<GstEvent>(static_cast<GstEvent*>(g_value_get_boxed(gst_value_list_get_value(streamEncryptionEventsList, i)))));
-        gst_structure_remove_field(protectionMeta->info, "stream-encryption-events");
-        if (!gst_structure_n_fields(protectionMeta->info)) {
-            GST_ERROR_OBJECT(self, "buffer %p did not have enough protection meta-data", buffer);
-            return GST_FLOW_NOT_SUPPORTED;
-        }
+    Locker locker { priv->lock };
+
+    if (priv->isFlushing) {
+        GST_DEBUG_OBJECT(self, "Decryption aborted because of flush");
+        return GST_FLOW_FLUSHING;
     }
 
-    const GValue* value;
-    value = gst_structure_get_value(protectionMeta->info, "kid");
-    GstBuffer* keyIDBuffer = nullptr;
-    if (!value) {
-        GST_ERROR_OBJECT(self, "No key ID available for encrypted sample");
-        return GST_FLOW_NOT_SUPPORTED;
-    }
-
-    keyIDBuffer = gst_value_get_buffer(value);
-
-    if (!priv->m_protectionEvents.isEmpty()) {
-        GstMappedBuffer mappedKeyID(keyIDBuffer, GST_MAP_READ);
-        if (!mappedKeyID) {
-            GST_ERROR_OBJECT(self, "Failed to map key ID buffer");
-            return GST_FLOW_NOT_SUPPORTED;
-        }
-        auto keyId = WebCore::SharedBuffer::create(mappedKeyID.data(), mappedKeyID.size());
-        webkitMediaCommonEncryptionDecryptProcessProtectionEvents(self, WTFMove(keyId));
-    }
-
-    // The key might not have been received yet. Wait for it.
-    if (!priv->m_keyReceived) {
-        GST_DEBUG_OBJECT(self, "key not available yet, waiting for it");
-        if (GST_STATE(GST_ELEMENT(self)) < GST_STATE_PAUSED || (GST_STATE_TARGET(GST_ELEMENT(self)) != GST_STATE_VOID_PENDING && GST_STATE_TARGET(GST_ELEMENT(self)) < GST_STATE_PAUSED)) {
-            GST_ERROR_OBJECT(self, "can't process key requests in less than PAUSED state");
-            return GST_FLOW_NOT_SUPPORTED;
-        }
-        if (!priv->m_condition.waitFor(priv->m_mutex, WEBCORE_GSTREAMER_EME_LICENSE_KEY_RESPONSE_TIMEOUT, [priv] { return priv->m_isFlushing || priv->m_keyReceived; })) {
-            if (!priv->m_keyReceived) {
-                GST_ERROR_OBJECT(self, "key not available");
-                return GST_FLOW_NOT_SUPPORTED;
-            }
-        }
-
-        if (priv->m_isFlushing) {
-            GST_DEBUG_OBJECT(self, "flushing");
+    // The CDM instance needs to be negotiated before we can begin decryption.
+    if (!priv->cdmProxy) {
+        GST_DEBUG_OBJECT(self, "CDM not available, going to wait for it");
+        priv->condition.waitFor(priv->lock, MaxSecondsToWaitForCDMProxy, [priv] {
+            return priv->isFlushing || priv->cdmProxy || priv->isStopped;
+        });
+        // Note that waitFor() releases the lock internally while it waits, so isFlushing may have been changed.
+        if (priv->isFlushing) {
+            GST_DEBUG_OBJECT(self, "Decryption aborted because of flush");
             return GST_FLOW_FLUSHING;
         }
-
-        GST_DEBUG_OBJECT(self, "key received, continuing");
+        if (priv->isStopped) {
+            GST_DEBUG_OBJECT(self, "Element is closing");
+            return GST_FLOW_OK;
+        }
+        if (!priv->cdmProxy) {
+            GST_ELEMENT_ERROR(self, STREAM, FAILED, ("CDMProxy was not retrieved in time"), (nullptr));
+            return GST_FLOW_NOT_SUPPORTED;
+        }
+        GST_DEBUG_OBJECT(self, "CDM now available with address %p", priv->cdmProxy.get());
     }
+
+    // We are still going to be locked when running this, so no need to lock here.
+    auto scopeExit = makeScopeExit([buffer, protectionMeta, priv] {
+        gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
+        priv->decryptionState = DecryptionState::Idle;
+    });
+
+    bool isCbcs = !g_strcmp0(gst_structure_get_string(protectionMeta->info, "cipher-mode"), "cbcs");
 
     unsigned ivSize;
     if (!gst_structure_get_uint(protectionMeta->info, "iv_size", &ivSize)) {
-        GST_ERROR_OBJECT(self, "Failed to get iv_size");
-        gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
+        GST_ELEMENT_ERROR(self, STREAM, FAILED, ("Failed to get iv_size"), (nullptr));
+        return GST_FLOW_NOT_SUPPORTED;
+    }
+    if (!ivSize && !gst_structure_get_uint(protectionMeta->info, "constant_iv_size", &ivSize)) {
+        GST_ELEMENT_ERROR(self, STREAM, FAILED, ("No iv_size and failed to get constant_iv_size"), (nullptr));
+        ASSERT(isCbcs);
         return GST_FLOW_NOT_SUPPORTED;
     }
 
     gboolean encrypted;
     if (!gst_structure_get_boolean(protectionMeta->info, "encrypted", &encrypted)) {
-        GST_ERROR_OBJECT(self, "Failed to get encrypted flag");
-        gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
+        GST_ELEMENT_ERROR(self, STREAM, FAILED, ("Failed to get encrypted flag"), (nullptr));
         return GST_FLOW_NOT_SUPPORTED;
     }
 
     if (!ivSize || !encrypted) {
-        gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
+        GST_TRACE_OBJECT(self, "iv size %u, encrypted %s, bailing out OK as unencrypted", ivSize, boolForPrinting(encrypted));
         return GST_FLOW_OK;
     }
 
-    GST_TRACE_OBJECT(base, "protection meta: %" GST_PTR_FORMAT, protectionMeta->info);
+    GST_DEBUG_OBJECT(base, "protection meta: %" GST_PTR_FORMAT, protectionMeta->info);
 
-    unsigned subSampleCount;
-    if (!gst_structure_get_uint(protectionMeta->info, "subsample_count", &subSampleCount)) {
-        GST_ERROR_OBJECT(self, "Failed to get subsample_count");
-        gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
+    unsigned subSampleCount = 0;
+    // cbcs could not include the subsample_count.
+    if (!gst_structure_get_uint(protectionMeta->info, "subsample_count", &subSampleCount) && !isCbcs) {
+        GST_ELEMENT_ERROR(self, STREAM, FAILED, ("Failed to get subsample_count"), (nullptr));
         return GST_FLOW_NOT_SUPPORTED;
     }
 
+    const GValue* value;
     GstBuffer* subSamplesBuffer = nullptr;
     if (subSampleCount) {
         value = gst_structure_get_value(protectionMeta->info, "subsamples");
         if (!value) {
-            GST_ERROR_OBJECT(self, "Failed to get subsamples");
-            gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
+            GST_ELEMENT_ERROR(self, STREAM, FAILED, ("Failed to get subsamples"), (nullptr));
             return GST_FLOW_NOT_SUPPORTED;
         }
         subSamplesBuffer = gst_value_get_buffer(value);
-    }
-
-#ifndef GST_DISABLE_GST_DEBUG
-    if (gst_debug_category_get_threshold(GST_CAT_DEFAULT) >= GST_LEVEL_MEMDUMP) {
-        GstMappedBuffer mappedKeyID(keyIDBuffer, GST_MAP_READ);
-        if (!mappedKeyID) {
-            GST_ERROR_OBJECT(self, "failed to map key ID buffer");
+        if (!subSamplesBuffer) {
+            GST_ELEMENT_ERROR(self, STREAM, FAILED, ("There is no subsamples buffer, but a positive subsample count"), (nullptr));
             return GST_FLOW_NOT_SUPPORTED;
         }
-        GST_MEMDUMP_OBJECT(self, "key ID for sample", mappedKeyID.data(), mappedKeyID.size());
     }
-#endif
 
-    WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
-    if (!klass->setupCipher(self, keyIDBuffer)) {
-        GST_ERROR_OBJECT(self, "Failed to configure cipher");
-        gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
+    value = gst_structure_get_value(protectionMeta->info, "kid");
+
+    if (!value) {
+        GST_ELEMENT_ERROR(self, STREAM, FAILED, ("Failed to get key id for buffer"), (nullptr));
         return GST_FLOW_NOT_SUPPORTED;
     }
+    GstBuffer* keyIDBuffer = gst_value_get_buffer(value);
 
     value = gst_structure_get_value(protectionMeta->info, "iv");
     if (!value) {
-        GST_ERROR_OBJECT(self, "Failed to get IV for sample");
-        klass->releaseCipher(self);
-        gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
+        GST_ELEMENT_ERROR(self, STREAM, FAILED, ("Failed to get IV for sample"), (nullptr));
         return GST_FLOW_NOT_SUPPORTED;
     }
 
     GstBuffer* ivBuffer = gst_value_get_buffer(value);
+    WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
+
+    ASSERT(priv->decryptionState == DecryptionState::Idle);
+    // Value is set back to Idle in the scopeExit.
+    priv->decryptionState = DecryptionState::Decrypting;
+
     GST_TRACE_OBJECT(self, "decrypting");
-    if (!klass->decrypt(self, keyIDBuffer, ivBuffer, buffer, subSampleCount, subSamplesBuffer)) {
-        GST_ERROR_OBJECT(self, "Decryption failed");
-        klass->releaseCipher(self);
-        gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
+
+    bool didDecryptionSucceed;
+
+    // Temporarily release the lock while we don't need to access priv. The lower level API is used
+    // in order to avoid creating several scopes with different Locker instances in each one.
+    {
+        DropLockForScope noLockScope { locker };
+        didDecryptionSucceed = klass->decrypt(self, ivBuffer, keyIDBuffer, buffer, subSampleCount, subSamplesBuffer);
+    }
+
+    // Accessing priv members again.
+    if (priv->isFlushing || priv->decryptionState == DecryptionState::FlushPending) {
+        GST_DEBUG_OBJECT(self, "flushing, bailing out");
+        return GST_FLOW_FLUSHING;
+    }
+
+    if (!didDecryptionSucceed) {
+        GST_ELEMENT_ERROR(self, STREAM, DECRYPT, ("Decryption failed"), (nullptr));
         return GST_FLOW_NOT_SUPPORTED;
     }
 
-    klass->releaseCipher(self);
-    gst_buffer_remove_meta(buffer, reinterpret_cast<GstMeta*>(protectionMeta));
     return GST_FLOW_OK;
 }
 
-static bool webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(WebKitMediaCommonEncryptionDecrypt* self)
+static bool isCDMProxyAvailable(WebKitMediaCommonEncryptionDecrypt* self)
 {
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
-
-    ASSERT(priv->m_mutex.isLocked());
-
-    if (!priv->m_cdmInstance) {
-        GRefPtr<GstContext> context = adoptGRef(gst_element_get_context(GST_ELEMENT(self), "drm-cdm-instance"));
-        // According to the GStreamer documentation, if we can't find the context, we should run a downstream query, then an upstream one and then send a bus
-        // message. In this case that does not make a lot of sense since only the app (player) answers it, meaning that no query is going to solve it. A message
-        // could be helpful but the player sets the context as soon as it gets the CDMInstance and if it does not have it, we have no way of asking for one as it is
-        // something provided by crossplatform code. This means that we won't be able to answer the bus request in any way either. Summing up, neither queries nor bus
-        // requests are useful here.
-        if (context) {
-            const GValue* value = gst_structure_get_value(gst_context_get_structure(context.get()), "cdm-instance");
-            priv->m_cdmInstance = value ? reinterpret_cast<CDMInstance*>(g_value_get_pointer(value)) : nullptr;
-            if (priv->m_cdmInstance)
-                GST_DEBUG_OBJECT(self, "received new CDMInstance %p", priv->m_cdmInstance.get());
-            else
-                GST_TRACE_OBJECT(self, "former instance was detached");
-        }
-    }
-
-    GST_TRACE_OBJECT(self, "CDMInstance available %s", boolForPrinting(priv->m_cdmInstance.get()));
-    return priv->m_cdmInstance;
+    Locker locker { priv->lock };
+    return priv->cdmProxy;
 }
 
-static void webkitMediaCommonEncryptionDecryptProcessProtectionEvents(WebKitMediaCommonEncryptionDecrypt* self, Ref<WebCore::SharedBuffer>&& kid)
+static CDMProxy* getCDMProxyFromGstContext(WebKitMediaCommonEncryptionDecrypt* self)
+{
+    GRefPtr<GstContext> context = adoptGRef(gst_element_get_context(GST_ELEMENT(self), "drm-cdm-proxy"));
+    CDMProxy* proxy = nullptr;
+
+    // According to the GStreamer documentation, if we can't find the context, we should run a downstream query, then an upstream one and then send a bus
+    // message. In this case that does not make a lot of sense since only the app (player) answers it, meaning that no query is going to solve it. A message
+    // could be helpful but the player sets the context as soon as it gets the CDMInstance and if it does not have it, we have no way of asking for one as it is
+    // something provided by crossplatform code. This means that we won't be able to answer the bus request in any way either. Summing up, neither queries nor bus
+    // requests are useful here.
+    if (context) {
+        const GValue* value = gst_structure_get_value(gst_context_get_structure(context.get()), "cdm-proxy");
+        if (value) {
+            proxy = reinterpret_cast<CDMProxy*>(g_value_get_pointer(value));
+            if (proxy) {
+                GST_DEBUG_OBJECT(self, "received a new CDM proxy instance %p, refcount %u", proxy, proxy->refCount());
+                return proxy;
+            }
+        }
+        GST_TRACE_OBJECT(self, "CDMProxy not available in the context");
+    }
+    return nullptr;
+}
+
+static void attachCDMProxy(WebKitMediaCommonEncryptionDecrypt* self, CDMProxy* proxy)
 {
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
     WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
 
-    ASSERT(priv->m_mutex.isLocked());
-
-    bool isCDMInstanceAvailable = webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(self);
-
-    WebCore::InitData concatenatedInitDatas;
-    for (auto& event : priv->m_protectionEvents) {
-        GstBuffer* buffer = nullptr;
-        const char* eventKeySystemUUID = nullptr;
-        gst_event_parse_protection(event.get(), &eventKeySystemUUID, &buffer, nullptr);
-        const char* eventKeySystem = WebCore::GStreamerEMEUtilities::uuidToKeySystem(eventKeySystemUUID);
-
-        GST_TRACE_OBJECT(self, "handling protection event %u for %s", GST_EVENT_SEQNUM(event.get()), eventKeySystem);
-
-        if (isCDMInstanceAvailable && g_strcmp0(WebCore::GStreamerEMEUtilities::keySystemToUuid(eventKeySystem), WebCore::GStreamerEMEUtilities::keySystemToUuid(priv->m_cdmInstance->keySystem()))) {
-            GST_TRACE_OBJECT(self, "protection event for a different key system");
-            continue;
-        }
-
-        if (priv->m_currentEvent == GST_EVENT_SEQNUM(event.get())) {
-            GST_TRACE_OBJECT(self, "event %u already handled", priv->m_currentEvent);
-            continue;
-        }
-
-        WebCore::InitData initData;
-        if (isCDMInstanceAvailable)
-            initData = priv->m_initDatas.get(priv->m_cdmInstance->keySystem());
-
-        priv->m_currentEvent = GST_EVENT_SEQNUM(event.get());
-
-        if (initData.isEmpty() || gst_buffer_memcmp(buffer, 0, initData.characters8(), initData.sizeInBytes())) {
-            GstMappedBuffer mappedBuffer(buffer, GST_MAP_READ);
-            if (!mappedBuffer) {
-                GST_WARNING_OBJECT(self, "cannot map protection data");
-                continue;
-            }
-
-            initData = WebCore::InitData(mappedBuffer.data(), mappedBuffer.size());
-            GST_DEBUG_OBJECT(self, "init data of size %u", mappedBuffer.size());
-            GST_TRACE_OBJECT(self, "init data MD5 %s", WebCore::GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
-            GST_MEMDUMP_OBJECT(self, "init data", mappedBuffer.data(), mappedBuffer.size());
-            priv->m_initDatas.set(eventKeySystem, initData);
-            GST_MEMDUMP_OBJECT(self, "key ID", reinterpret_cast<const uint8_t*>(kid->data()), kid->size());
-            priv->m_keyIds.set(initData, kid.copyRef());
-
-            priv->m_keyReceived = isCDMInstanceAvailable && !klass->handleKeyId(self, WTFMove(kid));
-            if (!priv->m_keyReceived) {
-                if (isCDMInstanceAvailable) {
-                    GST_DEBUG_OBJECT(self, "posting event and considering key not received");
-                    gst_element_post_message(GST_ELEMENT(self), gst_message_new_element(GST_OBJECT(self),
-                        gst_structure_new("drm-initialization-data-encountered", "init-data", GST_TYPE_BUFFER, buffer, "key-system-uuid", G_TYPE_STRING, eventKeySystemUUID, nullptr)));
-                    break;
-                } else {
-                    GST_TRACE_OBJECT(self, "concatenating init data and considering key not received");
-                    priv->m_currentEvent = 0;
-                    concatenatedInitDatas.append(initData);
-                }
-            } else {
-                GST_DEBUG_OBJECT(self, "key is already usable");
-                priv->m_condition.notifyOne();
-                break;
-            }
-        } else {
-            GST_DEBUG_OBJECT(self, "init data already present");
-            break;
-        }
-    }
-
-    priv->m_protectionEvents.clear();
-
-    if (!isCDMInstanceAvailable && !concatenatedInitDatas.isEmpty()) {
-        GRefPtr<GstBuffer> buffer = adoptGRef(gst_buffer_new_allocate(nullptr, concatenatedInitDatas.sizeInBytes(), nullptr));
-        GstMappedBuffer mappedBuffer(buffer.get(), GST_MAP_WRITE);
-        if (!mappedBuffer) {
-            GST_WARNING_OBJECT(self, "cannot map writable init data");
-            return;
-        }
-        memcpy(mappedBuffer.data(), concatenatedInitDatas.characters8(), concatenatedInitDatas.sizeInBytes());
-        GST_DEBUG_OBJECT(self, "reporting concatenated init datas of size %u", concatenatedInitDatas.sizeInBytes());
-        GST_TRACE_OBJECT(self, "init data MD5 %s", WebCore::GStreamerEMEUtilities::initDataMD5(concatenatedInitDatas).utf8().data());
-        GST_MEMDUMP_OBJECT(self, "init data", reinterpret_cast<const uint8_t*>(concatenatedInitDatas.characters8()), concatenatedInitDatas.sizeInBytes());
-        gst_element_post_message(GST_ELEMENT(self), gst_message_new_element(GST_OBJECT(self), gst_structure_new("drm-initialization-data-encountered", "init-data", GST_TYPE_BUFFER, buffer.get(), nullptr)));
-    }
+    Locker locker { priv->lock };
+    GST_DEBUG_OBJECT(self, "Attaching CDMProxy %p", proxy);
+    priv->cdmProxy = proxy;
+    klass->cdmProxyAttached(self, priv->cdmProxy);
+    priv->condition.notifyOne();
 }
 
-static gboolean webkitMediaCommonEncryptionDecryptSinkEventHandler(GstBaseTransform* trans, GstEvent* event)
+static gboolean installCDMProxyIfNotAvailable(WebKitMediaCommonEncryptionDecrypt* self)
+{
+    if (!isCDMProxyAvailable(self)) {
+        gboolean result = FALSE;
+
+        CDMProxy* proxy = getCDMProxyFromGstContext(self);
+        if (proxy) {
+            attachCDMProxy(self, proxy);
+            result = TRUE;
+        } else {
+            GST_ERROR_OBJECT(self, "Failed to retrieve CDMProxy from context");
+            result = FALSE;
+        }
+        return result;
+    }
+
+    return TRUE;
+}
+
+static gboolean sinkEventHandler(GstBaseTransform* trans, GstEvent* event)
 {
     WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(trans);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
-    WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
-    gboolean result = FALSE;
 
+    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=191355
+    // We should be handling protection events in this class in
+    // addition to out-of-band data. In regular playback, after a
+    // preferred system ID context is set, any future protection
+    // events will not be handled by the demuxer, so they must be
+    // handled in here.
     switch (GST_EVENT_TYPE(event)) {
-    case GST_EVENT_PROTECTION: {
-        const char* systemId = nullptr;
-
-        gst_event_parse_protection(event, &systemId, nullptr, nullptr);
-        GST_TRACE_OBJECT(self, "received protection event %u for %s", GST_EVENT_SEQNUM(event), systemId);
-
-        LockHolder locker(priv->m_mutex);
-        priv->m_protectionEvents.append(event);
-        result = TRUE;
-        gst_event_unref(event);
-        break;
-    }
     case GST_EVENT_CUSTOM_DOWNSTREAM_OOB: {
-        const GstStructure* structure = gst_event_get_structure(event);
-        if (gst_structure_has_name(structure, "drm-attempt-to-decrypt-with-local-instance")) {
-            gst_event_unref(event);
-            result = TRUE;
-            LockHolder locker(priv->m_mutex);
-            RELEASE_ASSERT(webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(self));
-            auto initData = priv->m_initDatas.get(priv->m_cdmInstance->keySystem());
-            auto keyId = !initData.isEmpty() ? priv->m_keyIds.get(initData) : nullptr;
-            GST_DEBUG_OBJECT(self, "attempting to decrypt with local instance %p, key id %p", priv->m_cdmInstance.get(), keyId);
-            if (keyId) {
-                GST_MEMDUMP_OBJECT(self, "key id", reinterpret_cast<const uint8_t*>(keyId->data()), keyId->size());
-                priv->m_keyReceived = klass->attemptToDecryptWithLocalInstance(self, *keyId);
-            }
-            GST_DEBUG_OBJECT(self, "attempted to decrypt with local instance %p, key received %s", priv->m_cdmInstance.get(), WTF::boolForPrinting(priv->m_keyReceived));
-            if (priv->m_keyReceived)
-                priv->m_condition.notifyOne();
-        }
-        break;
+        ASSERT(gst_event_has_name(event, "attempt-to-decrypt"));
+        GST_DEBUG_OBJECT(self, "Handling attempt-to-decrypt");
+        gboolean result = installCDMProxyIfNotAvailable(self);
+        gst_event_unref(event);
+        return result;
     }
-    case GST_EVENT_FLUSH_START: {
+    case GST_EVENT_FLUSH_START:
+        GST_DEBUG_OBJECT(self, "Flush-start");
         {
-            LockHolder locker(priv->m_mutex);
-            ASSERT(!priv->m_isFlushing);
-            priv->m_isFlushing = true;
-            GST_DEBUG_OBJECT(self, "flushing");
-            priv->m_condition.notifyOne();
+            Locker locker { priv->lock };
+            bool isCdmProxyAttached = priv->cdmProxy;
+            priv->isFlushing = true;
+            ASSERT(priv->decryptionState == DecryptionState::Idle || priv->decryptionState == DecryptionState::Decrypting);
+            if (priv->decryptionState == DecryptionState::Decrypting)
+                priv->decryptionState = DecryptionState::FlushPending;
+            if (isCdmProxyAttached) {
+                locker.unlockEarly();
+                priv->cdmProxy->abortWaitingForKey();
+            } else
+                priv->condition.notifyOne();
         }
-        result = GST_BASE_TRANSFORM_CLASS(parent_class)->sink_event(trans, event);
         break;
-    }
-    case GST_EVENT_FLUSH_STOP: {
+    case GST_EVENT_FLUSH_STOP:
+        GST_DEBUG_OBJECT(self, "Flush-stop");
         {
-            LockHolder locker(priv->m_mutex);
-            ASSERT(priv->m_isFlushing);
-            priv->m_isFlushing = false;
-            GST_DEBUG_OBJECT(self, "flushing done");
+            Locker locker { priv->lock };
+            priv->isFlushing = false;
         }
-        result = GST_BASE_TRANSFORM_CLASS(parent_class)->sink_event(trans, event);
         break;
-    }
     default:
-        result = GST_BASE_TRANSFORM_CLASS(parent_class)->sink_event(trans, event);
         break;
     }
 
-    return result;
+    return GST_BASE_TRANSFORM_CLASS(parent_class)->sink_event(trans, event);
 }
 
-static GstStateChangeReturn webKitMediaCommonEncryptionDecryptorChangeState(GstElement* element, GstStateChange transition)
+bool webKitMediaCommonEncryptionDecryptIsAborting(WebKitMediaCommonEncryptionDecrypt* self)
+{
+    WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
+    Locker locker { priv->lock };
+    return priv->isFlushing || priv->isStopped;
+}
+
+WeakPtr<WebCore::CDMProxyDecryptionClient> webKitMediaCommonEncryptionDecryptGetCDMProxyDecryptionClient(WebKitMediaCommonEncryptionDecrypt* self)
+{
+    WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
+    return *priv->cdmProxyDecryptionClientImplementation;
+}
+
+static GstStateChangeReturn changeState(GstElement* element, GstStateChange transition)
 {
     WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(element);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
 
     switch (transition) {
-    case GST_STATE_CHANGE_PAUSED_TO_READY:
-        GST_DEBUG_OBJECT(self, "PAUSED->READY");
-        priv->m_isFlushing = false;
-        priv->m_condition.notifyOne();
+    case GST_STATE_CHANGE_READY_TO_PAUSED: {
+        GST_DEBUG_OBJECT(self, "READY->PAUSED");
+
+        LockHolder locker(priv->lock);
+        priv->isStopped = false;
         break;
+    }
+    case GST_STATE_CHANGE_PAUSED_TO_READY: {
+        // We need to do this here instead of after the , otherwise we won't be able to break the wait.
+        GST_DEBUG_OBJECT(self, "PAUSED->READY");
+
+        LockHolder locker(priv->lock);
+        priv->isStopped = true;
+        priv->condition.notifyOne();
+        if (priv->cdmProxy)
+            priv->cdmProxy->abortWaitingForKey();
+        break;
+    }
     default:
         break;
     }
@@ -559,26 +519,22 @@ static GstStateChangeReturn webKitMediaCommonEncryptionDecryptorChangeState(GstE
     return result;
 }
 
-static void webKitMediaCommonEncryptionDecryptorSetContext(GstElement* element, GstContext* context)
+static void setContext(GstElement* element, GstContext* context)
 {
     WebKitMediaCommonEncryptionDecrypt* self = WEBKIT_MEDIA_CENC_DECRYPT(element);
     WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
+    WebKitMediaCommonEncryptionDecryptClass* klass = WEBKIT_MEDIA_CENC_DECRYPT_GET_CLASS(self);
 
-    if (gst_context_has_context_type(context, "drm-cdm-instance")) {
-        const GValue* value = gst_structure_get_value(gst_context_get_structure(context), "cdm-instance");
-        LockHolder locker(priv->m_mutex);
-        priv->m_cdmInstance = value ? reinterpret_cast<CDMInstance*>(g_value_get_pointer(value)) : nullptr;
-        GST_DEBUG_OBJECT(self, "received new CDMInstance %p", priv->m_cdmInstance.get());
+    if (gst_context_has_context_type(context, "drm-cdm-proxy")) {
+        const GValue* value = gst_structure_get_value(gst_context_get_structure(context), "cdm-proxy");
+        Locker locker { priv->lock };
+        priv->cdmProxy = value ? reinterpret_cast<CDMProxy*>(g_value_get_pointer(value)) : nullptr;
+        GST_DEBUG_OBJECT(self, "received new CDMInstance %p", priv->cdmProxy.get());
+        klass->cdmProxyAttached(self, priv->cdmProxy);
         return;
     }
 
     GST_ELEMENT_CLASS(parent_class)->set_context(element, context);
 }
 
-RefPtr<CDMInstance> webKitMediaCommonEncryptionDecryptCDMInstance(WebKitMediaCommonEncryptionDecrypt* self)
-{
-    WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
-    ASSERT(priv->m_mutex.isLocked());
-    return webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(self) ? priv->m_cdmInstance : nullptr;
-}
 #endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)

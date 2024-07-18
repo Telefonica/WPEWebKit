@@ -26,8 +26,6 @@
 #import "config.h"
 #import "WKSnapshotConfiguration.h"
 
-#if WK_API_ENABLED
-
 @implementation WKSnapshotConfiguration
 
 - (instancetype)init
@@ -36,9 +34,16 @@
         return nil;
 
     self.rect = CGRectNull;
+    self.afterScreenUpdates = YES;
     return self;
 }
 
+- (void)dealloc
+{
+    [_snapshotWidth release];
+
+    [super dealloc];
+}
 
 - (id)copyWithZone:(NSZone *)zone
 {
@@ -46,10 +51,9 @@
 
     snapshotConfiguration.rect = self.rect;
     snapshotConfiguration.snapshotWidth = self.snapshotWidth;
+    snapshotConfiguration.afterScreenUpdates = self.afterScreenUpdates;
 
     return snapshotConfiguration;
 }
 
 @end
-
-#endif

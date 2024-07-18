@@ -24,15 +24,14 @@
  */
 
 #include "config.h"
-#include "WebEvent.h"
+#include "WebTouchEvent.h"
 
 #if ENABLE(TOUCH_EVENTS)
 
 #include "WebCoreArgumentCoders.h"
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 void WebPlatformTouchPoint::encode(IPC::Encoder& encoder) const
 {

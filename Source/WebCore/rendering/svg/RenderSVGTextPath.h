@@ -24,14 +24,19 @@
 
 namespace WebCore {
 
+class SVGGeometryElement;
+class SVGTextPathElement;
+
 class RenderSVGTextPath final : public RenderSVGInline {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGTextPath);
 public:
     RenderSVGTextPath(SVGTextPathElement&, RenderStyle&&);
 
     SVGTextPathElement& textPathElement() const;
+    SVGGeometryElement* targetElement() const;
 
     Path layoutPath() const;
-    float startOffset() const;
+    const SVGLengthValue& startOffset() const;
     bool exactAlignment() const;
     bool stretchMethod() const;
 
@@ -39,7 +44,7 @@ private:
     void graphicsElement() const = delete;
 
     bool isSVGTextPath() const override { return true; }
-    const char* renderName() const override { return "RenderSVGTextPath"; }
+    ASCIILiteral renderName() const override { return "RenderSVGTextPath"_s; }
 
     Path m_layoutPath;
 };

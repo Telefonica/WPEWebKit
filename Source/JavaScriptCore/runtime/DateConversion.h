@@ -24,13 +24,12 @@
 
 #pragma once
 
+#include <wtf/Forward.h>
 #include <wtf/GregorianDateTime.h>
 
-namespace WTF {
-class String;
-} // namespace WTF
-
 namespace JSC {
+
+class DateCache;
 
 enum DateTimeFormat {
     DateTimeFormatDate = 1,
@@ -38,6 +37,6 @@ enum DateTimeFormat {
     DateTimeFormatDateAndTime = DateTimeFormatDate | DateTimeFormatTime
 };
 
-JS_EXPORT_PRIVATE WTF::String formatDateTime(const GregorianDateTime&, DateTimeFormat, bool asUTCVariant);
+JS_EXPORT_PRIVATE WTF::String formatDateTime(const GregorianDateTime&, DateTimeFormat, bool asUTCVariant, DateCache&);
 
 } // namespace JSC

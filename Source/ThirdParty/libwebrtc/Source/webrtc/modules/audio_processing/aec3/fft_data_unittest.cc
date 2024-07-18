@@ -8,19 +8,19 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/aec3/fft_data.h"
+#include "modules/audio_processing/aec3/fft_data.h"
 
-#include "webrtc/system_wrappers/include/cpu_features_wrapper.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/typedefs.h"
+#include "rtc_base/system/arch.h"
+#include "system_wrappers/include/cpu_features_wrapper.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
 #if defined(WEBRTC_ARCH_X86_FAMILY)
 // Verifies that the optimized methods are bitexact to their reference
 // counterparts.
-TEST(FftData, TestOptimizations) {
-  if (WebRtc_GetCPUInfo(kSSE2) != 0) {
+TEST(FftData, TestSse2Optimizations) {
+  if (GetCPUInfo(kSSE2) != 0) {
     FftData x;
 
     for (size_t k = 0; k < x.re.size(); ++k) {
@@ -34,9 +34,32 @@ TEST(FftData, TestOptimizations) {
 
     std::array<float, kFftLengthBy2Plus1> spectrum;
     std::array<float, kFftLengthBy2Plus1> spectrum_sse2;
-    x.Spectrum(Aec3Optimization::kNone, &spectrum);
-    x.Spectrum(Aec3Optimization::kSse2, &spectrum_sse2);
+    x.Spectrum(Aec3Optimization::kNone, spectrum);
+    x.Spectrum(Aec3Optimization::kSse2, spectrum_sse2);
     EXPECT_EQ(spectrum, spectrum_sse2);
+  }
+}
+
+// Verifies that the optimized methods are bitexact to their reference
+// counterparts.
+TEST(FftData, TestAvx2Optimizations) {
+  if (GetCPUInfo(kAVX2) != 0) {
+    FftData x;
+
+    for (size_t k = 0; k < x.re.size(); ++k) {
+      x.re[k] = k + 1;
+    }
+
+    x.im[0] = x.im[x.im.size() - 1] = 0.f;
+    for (size_t k = 1; k < x.im.size() - 1; ++k) {
+      x.im[k] = 2.f * (k + 1);
+    }
+
+    std::array<float, kFftLengthBy2Plus1> spectrum;
+    std::array<float, kFftLengthBy2Plus1> spectrum_avx2;
+    x.Spectrum(Aec3Optimization::kNone, spectrum);
+    x.Spectrum(Aec3Optimization::kAvx2, spectrum_avx2);
+    EXPECT_EQ(spectrum, spectrum_avx2);
   }
 }
 #endif
@@ -44,12 +67,12 @@ TEST(FftData, TestOptimizations) {
 #if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
 
 // Verifies the check for null output in CopyToPackedArray.
-TEST(FftData, NonNullCopyToPackedArrayOutput) {
+TEST(FftDataDeathTest, NonNullCopyToPackedArrayOutput) {
   EXPECT_DEATH(FftData().CopyToPackedArray(nullptr), "");
 }
 
 // Verifies the check for null output in Spectrum.
-TEST(FftData, NonNullSpectrumOutput) {
+TEST(FftDataDeathTest, NonNullSpectrumOutput) {
   EXPECT_DEATH(FftData().Spectrum(Aec3Optimization::kNone, nullptr), "");
 }
 
@@ -102,7 +125,7 @@ TEST(FftData, Spectrum) {
   }
 
   std::array<float, kFftLengthBy2Plus1> spectrum;
-  x.Spectrum(Aec3Optimization::kNone, &spectrum);
+  x.Spectrum(Aec3Optimization::kNone, spectrum);
 
   EXPECT_EQ(x.re[0] * x.re[0], spectrum[0]);
   EXPECT_EQ(x.re[spectrum.size() - 1] * x.re[spectrum.size() - 1],

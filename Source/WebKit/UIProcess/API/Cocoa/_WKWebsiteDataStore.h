@@ -25,27 +25,6 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <WebKit/WKWebsiteDataStore.h>
 
-typedef NS_OPTIONS(NSUInteger, WKWebsiteDataTypes) {
-    WKWebsiteDataTypeAll = NSUIntegerMax,
-} WK_API_AVAILABLE(macosx(10.11), ios(9.0));
-
-
-WK_CLASS_DEPRECATED_WITH_REPLACEMENT("WKWebsiteDataStore", macosx(10.10, 10.11), ios(8.0, 9.0))
-@interface _WKWebsiteDataStore : NSObject
-
-+ (_WKWebsiteDataStore *)defaultDataStore;
-+ (_WKWebsiteDataStore *)nonPersistentDataStore;
-
-@property (readonly, getter=isNonPersistent) BOOL nonPersistent;
-
-- (void)fetchDataRecordsOfTypes:(WKWebsiteDataTypes)websiteDataTypes completionHandler:(void (^)(NSArray *))completionHandler;
-- (void)removeDataOfTypes:(WKWebsiteDataTypes)websiteDataTypes forDataRecords:(NSArray *)dataRecords completionHandler:(void (^)(void))completionHandler;
-- (void)removeDataOfTypes:(WKWebsiteDataTypes)websiteDataTypes modifiedSince:(NSDate *)date completionHandler:(void (^)(void))completionHandler;
-
-@end
-
-#endif
+// FIXME: Remove this file once rdar://94573631 is resolved.

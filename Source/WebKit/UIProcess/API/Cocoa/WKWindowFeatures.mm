@@ -26,8 +26,7 @@
 #import "config.h"
 #import "WKWindowFeaturesInternal.h"
 
-#if WK_API_ENABLED
-
+#import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/WindowFeatures.h>
 #import <wtf/RetainPtr.h>
 
@@ -35,6 +34,9 @@
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKWindowFeatures.class, self))
+        return;
+
     _windowFeatures->API::WindowFeatures::~WindowFeatures();
 
     [super dealloc];
@@ -124,5 +126,3 @@
 }
 
 @end
-
-#endif

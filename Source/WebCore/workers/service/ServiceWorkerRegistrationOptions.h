@@ -31,39 +31,46 @@
 
 namespace WebCore {
 
-enum class ServiceWorkerUpdateViaCache;
-enum class WorkerType;
+enum class ServiceWorkerUpdateViaCache : uint8_t;
+enum class WorkerType : bool;
 
-struct RegistrationOptions {
+struct ServiceWorkerRegistrationOptions {
     String scope;
     WorkerType type;
     ServiceWorkerUpdateViaCache updateViaCache;
 
-    RegistrationOptions isolatedCopy() const;
+    ServiceWorkerRegistrationOptions isolatedCopy() const &;
+    ServiceWorkerRegistrationOptions isolatedCopy() &&;
 
     template<class Encoder> void encode(Encoder&) const;
-    template<class Decoder> static bool decode(Decoder&, RegistrationOptions&);
+    template<class Decoder> static std::optional<ServiceWorkerRegistrationOptions> decode(Decoder&);
 };
 
 template<class Encoder>
-void RegistrationOptions::encode(Encoder& encoder) const
+void ServiceWorkerRegistrationOptions::encode(Encoder& encoder) const
 {
-    encoder << scope;
-    encoder.encodeEnum(type);
-    encoder.encodeEnum(updateViaCache);
+    encoder << scope << type << updateViaCache;
 }
 
 template<class Decoder>
-bool RegistrationOptions::decode(Decoder& decoder, RegistrationOptions& options)
+std::optional<ServiceWorkerRegistrationOptions> ServiceWorkerRegistrationOptions::decode(Decoder& decoder)
 {
-    if (!decoder.decode(options.scope))
-        return false;
-    if (!decoder.decodeEnum(options.type))
-        return false;
-    if (!decoder.decodeEnum(options.updateViaCache))
-        return false;
+    std::optional<String> scope;
+    decoder >> scope;
+    if (!scope)
+        return std::nullopt;
 
-    return true;
+    std::optional<WorkerType> type;
+    decoder >> type;
+    if (!type)
+        return std::nullopt;
+
+    std::optional<ServiceWorkerUpdateViaCache> updateViaCache;
+    decoder >> updateViaCache;
+    if (!updateViaCache)
+        return std::nullopt;
+
+    return ServiceWorkerRegistrationOptions { WTFMove(*scope), WTFMove(*type), WTFMove(*updateViaCache) };
 }
 
 } // namespace WebCore

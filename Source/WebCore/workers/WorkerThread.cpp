@@ -27,284 +27,170 @@
 #include "config.h"
 #include "WorkerThread.h"
 
-#include "ContentSecurityPolicyResponseHeaders.h"
 #include "IDBConnectionProxy.h"
 #include "ScriptSourceCode.h"
 #include "SecurityOrigin.h"
 #include "SocketProvider.h"
-#include "ThreadGlobalData.h"
-#include "URL.h"
 #include "WorkerGlobalScope.h"
-#include "WorkerInspectorController.h"
-#include <utility>
-#include <wtf/Lock.h>
-#include <wtf/NeverDestroyed.h>
-#include <wtf/Noncopyable.h>
-#include <wtf/text/WTFString.h>
-
-#if PLATFORM(IOS)
-#include "FloatingPointEnvironment.h"
-#include "WebCoreThread.h"
-#endif
-
-#if USE(GLIB)
-#include <wtf/glib/GRefPtr.h>
-#endif
+#include "WorkerScriptFetcher.h"
+#include <JavaScriptCore/ScriptCallStack.h>
+#include <wtf/SetForScope.h>
+#include <wtf/Threading.h>
 
 namespace WebCore {
 
-static StaticLock threadSetMutex;
-
-static HashSet<WorkerThread*>& workerThreads()
-{
-    static NeverDestroyed<HashSet<WorkerThread*>> workerThreads;
-
-    return workerThreads;
-}
+static std::atomic<unsigned> workerThreadCounter { 0 };
 
 unsigned WorkerThread::workerThreadCount()
 {
-    std::lock_guard<StaticLock> lock(threadSetMutex);
+    return workerThreadCounter;
+}
 
-    return workerThreads().size();
+WorkerParameters WorkerParameters::isolatedCopy() const
+{
+    return {
+        scriptURL.isolatedCopy(),
+        ownerURL.isolatedCopy(),
+        name.isolatedCopy(),
+        inspectorIdentifier.isolatedCopy(),
+        userAgent.isolatedCopy(),
+        isOnline,
+        contentSecurityPolicyResponseHeaders.isolatedCopy(),
+        shouldBypassMainWorldContentSecurityPolicy,
+        crossOriginEmbedderPolicy.isolatedCopy(),
+        timeOrigin,
+        referrerPolicy,
+        workerType,
+        credentials,
+        settingsValues.isolatedCopy(),
+        workerThreadMode,
+        sessionID,
+#if ENABLE(SERVICE_WORKER)
+        crossThreadCopy(serviceWorkerData),
+#endif
+        clientIdentifier
+    };
 }
 
 struct WorkerThreadStartupData {
     WTF_MAKE_NONCOPYABLE(WorkerThreadStartupData); WTF_MAKE_FAST_ALLOCATED;
 public:
-    WorkerThreadStartupData(const URL& scriptURL, const String& identifier, const String& userAgent, const String& sourceCode, WorkerThreadStartMode, const ContentSecurityPolicyResponseHeaders&, bool shouldBypassMainWorldContentSecurityPolicy, const SecurityOrigin& topOrigin, MonotonicTime timeOrigin, PAL::SessionID);
+    WorkerThreadStartupData(const WorkerParameters& params, const ScriptBuffer& sourceCode, WorkerThreadStartMode, const SecurityOrigin& topOrigin);
 
-    URL m_scriptURL;
-    String m_identifier;
-    String m_userAgent;
-    String m_sourceCode;
-    WorkerThreadStartMode m_startMode;
-    ContentSecurityPolicyResponseHeaders m_contentSecurityPolicyResponseHeaders;
-    bool m_shouldBypassMainWorldContentSecurityPolicy;
-    Ref<SecurityOrigin> m_topOrigin;
-    MonotonicTime m_timeOrigin;
-    PAL::SessionID m_sessionID;
+    WorkerParameters params;
+    Ref<SecurityOrigin> origin;
+    ScriptBuffer sourceCode;
+    WorkerThreadStartMode startMode;
+    Ref<SecurityOrigin> topOrigin;
 };
 
-WorkerThreadStartupData::WorkerThreadStartupData(const URL& scriptURL, const String& identifier, const String& userAgent, const String& sourceCode, WorkerThreadStartMode startMode, const ContentSecurityPolicyResponseHeaders& contentSecurityPolicyResponseHeaders, bool shouldBypassMainWorldContentSecurityPolicy, const SecurityOrigin& topOrigin, MonotonicTime timeOrigin, PAL::SessionID sessionID)
-    : m_scriptURL(scriptURL.isolatedCopy())
-    , m_identifier(identifier.isolatedCopy())
-    , m_userAgent(userAgent.isolatedCopy())
-    , m_sourceCode(sourceCode.isolatedCopy())
-    , m_startMode(startMode)
-    , m_contentSecurityPolicyResponseHeaders(contentSecurityPolicyResponseHeaders.isolatedCopy())
-    , m_shouldBypassMainWorldContentSecurityPolicy(shouldBypassMainWorldContentSecurityPolicy)
-    , m_topOrigin(topOrigin.isolatedCopy())
-    , m_timeOrigin(timeOrigin)
-    , m_sessionID(sessionID.isolatedCopy())
+WorkerThreadStartupData::WorkerThreadStartupData(const WorkerParameters& other, const ScriptBuffer& sourceCode, WorkerThreadStartMode startMode, const SecurityOrigin& topOrigin)
+    : params(other.isolatedCopy())
+    , origin(SecurityOrigin::create(other.scriptURL)->isolatedCopy())
+    , sourceCode(sourceCode.isolatedCopy())
+    , startMode(startMode)
+    , topOrigin(topOrigin.isolatedCopy())
 {
 }
 
-WorkerThread::WorkerThread(const URL& scriptURL, const String& identifier, const String& userAgent, const String& sourceCode, WorkerLoaderProxy& workerLoaderProxy, WorkerReportingProxy& workerReportingProxy, WorkerThreadStartMode startMode, const ContentSecurityPolicyResponseHeaders& contentSecurityPolicyResponseHeaders, bool shouldBypassMainWorldContentSecurityPolicy, const SecurityOrigin& topOrigin, MonotonicTime timeOrigin, IDBClient::IDBConnectionProxy* connectionProxy, SocketProvider* socketProvider, JSC::RuntimeFlags runtimeFlags, PAL::SessionID sessionID)
-    : m_workerLoaderProxy(workerLoaderProxy)
+WorkerThread::WorkerThread(const WorkerParameters& params, const ScriptBuffer& sourceCode, WorkerLoaderProxy& workerLoaderProxy, WorkerDebuggerProxy& workerDebuggerProxy, WorkerReportingProxy& workerReportingProxy, WorkerThreadStartMode startMode, const SecurityOrigin& topOrigin, IDBClient::IDBConnectionProxy* connectionProxy, SocketProvider* socketProvider, JSC::RuntimeFlags runtimeFlags)
+    : WorkerOrWorkletThread(params.inspectorIdentifier.isolatedCopy(), params.workerThreadMode)
+    , m_workerLoaderProxy(workerLoaderProxy)
+    , m_workerDebuggerProxy(workerDebuggerProxy)
     , m_workerReportingProxy(workerReportingProxy)
     , m_runtimeFlags(runtimeFlags)
-    , m_startupData(std::make_unique<WorkerThreadStartupData>(scriptURL, identifier, userAgent, sourceCode, startMode, contentSecurityPolicyResponseHeaders, shouldBypassMainWorldContentSecurityPolicy, topOrigin, timeOrigin, sessionID))
-#if ENABLE(INDEXED_DATABASE)
+    , m_startupData(makeUnique<WorkerThreadStartupData>(params, sourceCode, startMode, topOrigin))
     , m_idbConnectionProxy(connectionProxy)
-#endif
     , m_socketProvider(socketProvider)
 {
-#if !ENABLE(INDEXED_DATABASE)
-    UNUSED_PARAM(connectionProxy);
-#endif
-
-    std::lock_guard<StaticLock> lock(threadSetMutex);
-
-    workerThreads().add(this);
+    ++workerThreadCounter;
 }
 
 WorkerThread::~WorkerThread()
 {
-    std::lock_guard<StaticLock> lock(threadSetMutex);
-
-    ASSERT(workerThreads().contains(this));
-    workerThreads().remove(this);
+    ASSERT(workerThreadCounter);
+    --workerThreadCounter;
 }
 
-bool WorkerThread::start()
+Ref<Thread> WorkerThread::createThread()
 {
-    // Mutex protection is necessary to ensure that m_thread is initialized when the thread starts.
-    LockHolder lock(m_threadCreationAndWorkerGlobalScopeMutex);
+    if (is<WorkerMainRunLoop>(runLoop())) {
+        // This worker should run on the main thread.
+        RunLoop::main().dispatch([protectedThis = Ref { *this }] {
+            protectedThis->workerOrWorkletThread();
+        });
+        ASSERT(isMainThread());
+        return Thread::current();
+    }
 
-    if (m_thread)
-        return true;
-
-    m_thread = Thread::create("WebCore: Worker", [this] {
-        workerThread();
-    });
-
-    return m_thread;
+    return Thread::create(threadName(), [this] {
+        workerOrWorkletThread();
+    }, ThreadType::JavaScript);
 }
 
-void WorkerThread::workerThread()
+RefPtr<WorkerOrWorkletGlobalScope> WorkerThread::createGlobalScope()
 {
-    // Propagate the mainThread's fenv to workers.
-#if PLATFORM(IOS)
-    FloatingPointEnvironment::singleton().propagateMainThreadEnvironment();
-#endif
+    return createWorkerGlobalScope(m_startupData->params, WTFMove(m_startupData->origin), WTFMove(m_startupData->topOrigin));
+}
 
-#if USE(GLIB)
-    GRefPtr<GMainContext> mainContext = adoptGRef(g_main_context_new());
-    g_main_context_push_thread_default(mainContext.get());
-#endif
+bool WorkerThread::shouldWaitForWebInspectorOnStartup() const
+{
+    return m_startupData->startMode == WorkerThreadStartMode::WaitForInspector;
+}
 
-    WorkerScriptController* scriptController;
-    {
-        // Mutex protection is necessary to ensure that we don't change m_workerGlobalScope
-        // while WorkerThread::stop() is accessing it. Note that WorkerThread::stop() can
-        // be called before we've finished creating the WorkerGlobalScope.
-        LockHolder lock(m_threadCreationAndWorkerGlobalScopeMutex);
-        m_workerGlobalScope = createWorkerGlobalScope(m_startupData->m_scriptURL, m_startupData->m_identifier, m_startupData->m_userAgent, m_startupData->m_contentSecurityPolicyResponseHeaders, m_startupData->m_shouldBypassMainWorldContentSecurityPolicy, WTFMove(m_startupData->m_topOrigin), m_startupData->m_timeOrigin, m_startupData->m_sessionID);
+void WorkerThread::evaluateScriptIfNecessary(String& exceptionMessage)
+{
+    SetForScope isInStaticScriptEvaluation(m_isInStaticScriptEvaluation, true);
 
-        scriptController = m_workerGlobalScope->script();
+    // We are currently holding only the initial script code. If the WorkerType is Module, we should fetch the entire graph before executing the rest of this.
+    // We invoke module loader as if we are executing inline module script tag in Document.
 
-        if (m_runLoop.terminated()) {
-            // The worker was terminated before the thread had a chance to run. Since the context didn't exist yet,
-            // forbidExecution() couldn't be called from stop().
-            scriptController->scheduleExecutionTermination();
-            scriptController->forbidExecution();
+    WeakPtr<ScriptBufferSourceProvider> sourceProvider;
+    if (m_startupData->params.workerType == WorkerType::Classic) {
+        ScriptSourceCode sourceCode(m_startupData->sourceCode, URL(m_startupData->params.scriptURL));
+        sourceProvider = static_cast<ScriptBufferSourceProvider&>(sourceCode.provider());
+        globalScope()->script()->evaluate(sourceCode, &exceptionMessage);
+        finishedEvaluatingScript();
+    } else {
+        auto scriptFetcher = WorkerScriptFetcher::create(globalScope()->credentials(), globalScope()->destination(), globalScope()->referrerPolicy());
+        ScriptSourceCode sourceCode(m_startupData->sourceCode, URL(m_startupData->params.scriptURL), { }, JSC::SourceProviderSourceType::Module, scriptFetcher.copyRef());
+        sourceProvider = static_cast<ScriptBufferSourceProvider&>(sourceCode.provider());
+        bool success = globalScope()->script()->loadModuleSynchronously(scriptFetcher.get(), sourceCode);
+        if (success) {
+            if (std::optional<LoadableScript::Error> error = scriptFetcher->error()) {
+                if (std::optional<LoadableScript::ConsoleMessage> message = error->consoleMessage)
+                    exceptionMessage = message->message;
+                else
+                    exceptionMessage = "Importing a module script failed."_s;
+                globalScope()->reportException(exceptionMessage, { }, { }, { }, { }, { });
+            } else if (!scriptFetcher->wasCanceled()) {
+                globalScope()->script()->linkAndEvaluateModule(scriptFetcher.get(), sourceCode, &exceptionMessage);
+                finishedEvaluatingScript();
+            }
         }
     }
+    if (sourceProvider)
+        globalScope()->setMainScriptSourceProvider(*sourceProvider);
 
-    if (m_startupData->m_startMode == WorkerThreadStartMode::WaitForInspector) {
-        startRunningDebuggerTasks();
-
-        // If the worker was somehow terminated while processing debugger commands.
-        if (m_runLoop.terminated())
-            scriptController->forbidExecution();
-    }
-
-    scriptController->evaluate(ScriptSourceCode(m_startupData->m_sourceCode, m_startupData->m_scriptURL));
     // Free the startup data to cause its member variable deref's happen on the worker's thread (since
     // all ref/derefs of these objects are happening on the thread at this point). Note that
     // WorkerThread::~WorkerThread happens on a different thread where it was created.
     m_startupData = nullptr;
-
-    runEventLoop();
-
-#if USE(GLIB)
-    g_main_context_pop_thread_default(mainContext.get());
-#endif
-
-    RefPtr<Thread> protector = m_thread;
-
-    ASSERT(m_workerGlobalScope->hasOneRef());
-
-    RefPtr<WorkerGlobalScope> workerGlobalScopeToDelete;
-    {
-        // Mutex protection is necessary to ensure that we don't change m_workerGlobalScope
-        // while WorkerThread::stop is accessing it.
-        LockHolder lock(m_threadCreationAndWorkerGlobalScopeMutex);
-
-        // Delay the destruction of the WorkerGlobalScope context until after we've unlocked the
-        // m_threadCreationAndWorkerGlobalScopeMutex. This is needed because destructing the
-        // context will trigger the main thread to race against us to delete the WorkerThread
-        // object, and the WorkerThread object owns the mutex we need to unlock after this.
-        workerGlobalScopeToDelete = WTFMove(m_workerGlobalScope);
-    }
-
-    // The below assignment will destroy the context, which will in turn notify messaging proxy.
-    // We cannot let any objects survive past thread exit, because no other thread will run GC or otherwise destroy them.
-    workerGlobalScopeToDelete = nullptr;
-
-    // Clean up WebCore::ThreadGlobalData before WTF::Thread goes away!
-    threadGlobalData().destroy();
-
-    // The thread object may be already destroyed from notification now, don't try to access "this".
-    protector->detach();
-}
-
-void WorkerThread::startRunningDebuggerTasks()
-{
-    ASSERT(!m_pausedForDebugger);
-    m_pausedForDebugger = true;
-
-    MessageQueueWaitResult result;
-    do {
-        result = m_runLoop.runInMode(m_workerGlobalScope.get(), WorkerRunLoop::debuggerMode());
-    } while (result != MessageQueueTerminated && m_pausedForDebugger);
-}
-
-void WorkerThread::stopRunningDebuggerTasks()
-{
-    m_pausedForDebugger = false;
-}
-
-void WorkerThread::runEventLoop()
-{
-    // Does not return until terminated.
-    m_runLoop.run(m_workerGlobalScope.get());
-}
-
-void WorkerThread::stop()
-{
-    // Mutex protection is necessary to ensure that m_workerGlobalScope isn't changed by
-    // WorkerThread::workerThread() while we're accessing it. Note also that stop() can
-    // be called before m_workerGlobalScope is fully created.
-    LockHolder lock(m_threadCreationAndWorkerGlobalScopeMutex);
-
-    // Ensure that tasks are being handled by thread event loop. If script execution weren't forbidden, a while(1) loop in JS could keep the thread alive forever.
-    if (m_workerGlobalScope) {
-        m_workerGlobalScope->script()->scheduleExecutionTermination();
-
-        m_runLoop.postTaskAndTerminate({ ScriptExecutionContext::Task::CleanupTask, [] (ScriptExecutionContext& context ) {
-            WorkerGlobalScope& workerGlobalScope = downcast<WorkerGlobalScope>(context);
-
-#if ENABLE(INDEXED_DATABASE)
-            workerGlobalScope.stopIndexedDatabase();
-#endif
-
-            workerGlobalScope.stopActiveDOMObjects();
-
-            workerGlobalScope.inspectorController().workerTerminating();
-
-            // Event listeners would keep DOMWrapperWorld objects alive for too long. Also, they have references to JS objects,
-            // which become dangling once Heap is destroyed.
-            workerGlobalScope.removeAllEventListeners();
-
-            // Stick a shutdown command at the end of the queue, so that we deal
-            // with all the cleanup tasks the databases post first.
-            workerGlobalScope.postTask({ ScriptExecutionContext::Task::CleanupTask, [] (ScriptExecutionContext& context) {
-                WorkerGlobalScope& workerGlobalScope = downcast<WorkerGlobalScope>(context);
-                // It's not safe to call clearScript until all the cleanup tasks posted by functions initiated by WorkerThreadShutdownStartTask have completed.
-                workerGlobalScope.clearScript();
-            } });
-
-        } });
-        return;
-    }
-    m_runLoop.terminate();
-}
-
-void WorkerThread::releaseFastMallocFreeMemoryInAllThreads()
-{
-    std::lock_guard<StaticLock> lock(threadSetMutex);
-
-    for (auto* workerThread : workerThreads()) {
-        workerThread->runLoop().postTask([] (ScriptExecutionContext&) {
-            WTF::releaseFastMallocFreeMemory();
-        });
-    }
 }
 
 IDBClient::IDBConnectionProxy* WorkerThread::idbConnectionProxy()
 {
-#if ENABLE(INDEXED_DATABASE)
     return m_idbConnectionProxy.get();
-#else
-    return nullptr;
-#endif
 }
 
 SocketProvider* WorkerThread::socketProvider()
 {
     return m_socketProvider.get();
+}
+
+WorkerGlobalScope* WorkerThread::globalScope()
+{
+    return downcast<WorkerGlobalScope>(WorkerOrWorkletThread::globalScope());
 }
 
 } // namespace WebCore

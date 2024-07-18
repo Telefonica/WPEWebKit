@@ -28,7 +28,7 @@
 
 #if ENABLE(DFG_JIT)
 
-#include "DFGGraph.h"
+#include "JSCJSValueInlines.h"
 
 namespace JSC { namespace DFG {
 
@@ -37,9 +37,14 @@ void PureValue::dump(PrintStream& out) const
     out.print(Graph::opName(op()));
     out.print("(");
     CommaPrinter comma;
-    for (unsigned i = 0; i < AdjacencyList::Size; ++i) {
-        if (children().child(i))
-            out.print(comma, children().child(i));
+    if (isVarargs()) {
+        for (unsigned i = 0; i < m_children.numChildren(); ++i)
+            out.print(comma, m_graph->m_varArgChildren[m_children.firstChild() + i].sanitized());
+    } else {
+        for (unsigned i = 0; i < AdjacencyList::Size; ++i) {
+            if (m_children.child(i))
+                out.print(comma, m_children.child(i));
+        }
     }
     if (m_info)
         out.print(comma, m_info);

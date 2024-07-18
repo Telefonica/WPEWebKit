@@ -66,6 +66,9 @@ public:
     {
         auto it = m_map.find(key);
         exists = it != m_map.end();
+        if (!exists)
+            return nullptr;
+        
         return it->value.get();
     }
 
@@ -79,7 +82,7 @@ public:
 
     const MapType& map() const { return m_map; }
 
-protected:
+private:
     explicit Dictionary(MapType);
 
     MapType m_map;

@@ -23,50 +23,64 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef MarshallingHelpers_H
-#define MarshallingHelpers_H
+#pragma once
 
 #include <wtf/Forward.h>
+
+#if USE(CF)
 #include <CoreFoundation/CoreFoundation.h>
+#include <wtf/RetainPtr.h>
+#endif
 
 namespace WebCore {
-    class IntRect;
-    class URL;
+class IntRect;
 }
 
 class MarshallingHelpers
 {
 public:
-    static WebCore::URL BSTRToKURL(BSTR);
-    static BSTR URLToBSTR(const WebCore::URL&);
-    static CFURLRef PathStringToFileCFURLRef(const WTF::String&);
+    static URL BSTRToKURL(BSTR);
+    static BSTR URLToBSTR(const URL&);
+
+#if USE(CF)
+    static RetainPtr<CFURLRef> PathStringToFileCFURLRef(const WTF::String&);
     static WTF::String FileCFURLRefToPathString(CFURLRef fileURL);
-    static CFURLRef BSTRToCFURLRef(BSTR);
-    static CFStringRef BSTRToCFStringRef(BSTR);
-    static CFStringRef LPCOLESTRToCFStringRef(LPCOLESTR);
+    static RetainPtr<CFURLRef> BSTRToCFURLRef(BSTR);
+    static RetainPtr<CFStringRef> BSTRToCFStringRef(BSTR);
+    static RetainPtr<CFStringRef> LPCOLESTRToCFStringRef(LPCOLESTR);
     static BSTR CFStringRefToBSTR(CFStringRef);
     static int CFNumberRefToInt(CFNumberRef);
-    static CFNumberRef intToCFNumberRef(int);
+    static RetainPtr<CFNumberRef> intToCFNumberRef(int);
     static CFAbsoluteTime DATEToCFAbsoluteTime(DATE);
     static DATE CFAbsoluteTimeToDATE(CFAbsoluteTime);
     static SAFEARRAY* stringArrayToSafeArray(CFArrayRef);
     static SAFEARRAY* intArrayToSafeArray(CFArrayRef);
+#else
+    static double DATEToAbsoluteTime(DATE);
+    static DATE absoluteTimeToDATE(double);
+#endif
+
     static SAFEARRAY* intRectToSafeArray(const WebCore::IntRect&);
+
+#if USE(CF)
     static SAFEARRAY* iunknownArrayToSafeArray(CFArrayRef);
-    static CFArrayRef safeArrayToStringArray(SAFEARRAY*);
-    static CFArrayRef safeArrayToIntArray(SAFEARRAY*);
-    static CFArrayRef safeArrayToIUnknownArray(SAFEARRAY*);
+    static RetainPtr<CFArrayRef> safeArrayToStringArray(SAFEARRAY*);
+    static RetainPtr<CFArrayRef> safeArrayToIntArray(SAFEARRAY*);
+    static RetainPtr<CFArrayRef> safeArrayToIUnknownArray(SAFEARRAY*);
     static const void* IUnknownRetainCallback(CFAllocatorRef, const void*);
     static void IUnknownReleaseCallback(CFAllocatorRef, const void*);
     static CFArrayCallBacks kIUnknownArrayCallBacks;
     static CFDictionaryValueCallBacks kIUnknownDictionaryValueCallBacks;
+#endif
 
 private:
-    static CFAbsoluteTime MarshallingHelpers::windowsEpochAbsoluteTime();
+#if USE(CF)
+    static CFAbsoluteTime windowsEpochAbsoluteTime();
+#else
+    static double windowsEpochAbsoluteTime();
+#endif
 
 private:
     MarshallingHelpers();
     ~MarshallingHelpers();
 };
-
-#endif

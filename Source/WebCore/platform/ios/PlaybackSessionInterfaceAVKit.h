@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,28 +26,21 @@
 
 #pragma once
 
-#if PLATFORM(IOS)
+#if PLATFORM(COCOA)
 
 #include "EventListener.h"
 #include "HTMLMediaElementEnums.h"
-#include "PlaybackSessionInterface.h"
 #include "PlaybackSessionModel.h"
 #include "Timer.h"
 #include <functional>
 #include <objc/objc.h>
+#include <wtf/Forward.h>
+#include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
-#include <wtf/RefPtr.h>
 #include <wtf/RetainPtr.h>
+#include <wtf/WeakPtr.h>
 
 OBJC_CLASS WebAVPlayerController;
-OBJC_CLASS AVPlayerViewController;
-OBJC_CLASS UIViewController;
-OBJC_CLASS UIWindow;
-OBJC_CLASS UIView;
-
-namespace WTF {
-class String;
-}
 
 namespace WebCore {
 class IntRect;
@@ -55,9 +48,9 @@ class PlaybackSessionModel;
 class WebPlaybackSessionChangeObserver;
 
 class WEBCORE_EXPORT PlaybackSessionInterfaceAVKit
-    : public PlaybackSessionInterface
-    , public PlaybackSessionModelClient
-    , public RefCounted<PlaybackSessionInterfaceAVKit> {
+    : public PlaybackSessionModelClient
+    , public RefCounted<PlaybackSessionInterfaceAVKit>
+    , public CanMakeWeakPtr<PlaybackSessionInterfaceAVKit> {
 
 public:
     static Ref<PlaybackSessionInterfaceAVKit> create(PlaybackSessionModel& model)
@@ -65,36 +58,33 @@ public:
         return adoptRef(*new PlaybackSessionInterfaceAVKit(model));
     }
     virtual ~PlaybackSessionInterfaceAVKit();
-    PlaybackSessionModel* playbackSessionModel() const { return m_playbackSessionModel; }
-
-    // PlaybackSessionInterface
-    WEBCORE_EXPORT void resetMediaState() override;
+    PlaybackSessionModel* playbackSessionModel() const;
 
     // PlaybackSessionModelClient
-    WEBCORE_EXPORT void durationChanged(double) override;
-    WEBCORE_EXPORT void currentTimeChanged(double currentTime, double anchorTime) override;
-    WEBCORE_EXPORT void bufferedTimeChanged(double) override;
-    WEBCORE_EXPORT void rateChanged(bool isPlaying, float playbackRate) override;
-    WEBCORE_EXPORT void seekableRangesChanged(const TimeRanges&, double lastModifiedTime, double liveUpdateInterval) override;
-    WEBCORE_EXPORT void canPlayFastReverseChanged(bool) override;
-    WEBCORE_EXPORT void audioMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& options, uint64_t selectedIndex) override;
-    WEBCORE_EXPORT void legibleMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& options, uint64_t selectedIndex) override;
-    WEBCORE_EXPORT void externalPlaybackChanged(bool enabled, PlaybackSessionModel::ExternalPlaybackTargetType, const String& localizedDeviceName) override;
-    WEBCORE_EXPORT void wirelessVideoPlaybackDisabledChanged(bool) override;
-    WEBCORE_EXPORT void mutedChanged(bool) override;
+    void durationChanged(double) override;
+    void currentTimeChanged(double currentTime, double anchorTime) override;
+    void bufferedTimeChanged(double) override;
+    void rateChanged(OptionSet<PlaybackSessionModel::PlaybackState>, double playbackRate, double defaultPlaybackRate) override;
+    void seekableRangesChanged(const TimeRanges&, double lastModifiedTime, double liveUpdateInterval) override;
+    void canPlayFastReverseChanged(bool) override;
+    void audioMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& options, uint64_t selectedIndex) override;
+    void legibleMediaSelectionOptionsChanged(const Vector<MediaSelectionOption>& options, uint64_t selectedIndex) override;
+    void externalPlaybackChanged(bool enabled, PlaybackSessionModel::ExternalPlaybackTargetType, const String& localizedDeviceName) override;
+    void wirelessVideoPlaybackDisabledChanged(bool) override;
+    void mutedChanged(bool) override;
+    void volumeChanged(double) override;
+    void modelDestroyed() override;
 
-    WEBCORE_EXPORT virtual void invalidate();
+    void invalidate();
 
     WebAVPlayerController *playerController() const { return m_playerController.get(); }
 
-protected:
-    WEBCORE_EXPORT PlaybackSessionInterfaceAVKit(PlaybackSessionModel&);
-
+private:
+    PlaybackSessionInterfaceAVKit(PlaybackSessionModel&);
     RetainPtr<WebAVPlayerController> m_playerController;
     PlaybackSessionModel* m_playbackSessionModel { nullptr };
 };
 
 }
 
-#endif
-
+#endif // PLATFORM(COCOA)

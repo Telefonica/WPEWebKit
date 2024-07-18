@@ -24,14 +24,19 @@
 #include "HTMLScriptElement.h"
 
 #include "Document.h"
+#include "ElementInlines.h"
 #include "Event.h"
 #include "EventNames.h"
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
+#include "Settings.h"
 #include "Text.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/Ref.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLScriptElement);
 
 using namespace HTMLNames;
 
@@ -58,7 +63,7 @@ void HTMLScriptElement::childrenChanged(const ChildChange& change)
     ScriptElement::childrenChanged(change);
 }
 
-void HTMLScriptElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLScriptElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == srcAttr)
         handleSourceAttribute(value);
@@ -68,21 +73,21 @@ void HTMLScriptElement::parseAttribute(const QualifiedName& name, const AtomicSt
         HTMLElement::parseAttribute(name, value);
 }
 
-Node::InsertionNotificationRequest HTMLScriptElement::insertedInto(ContainerNode& insertionPoint)
+Node::InsertedIntoAncestorResult HTMLScriptElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    HTMLElement::insertedInto(insertionPoint);
-    return shouldCallFinishedInsertingSubtree(insertionPoint) ? InsertionShouldCallFinishedInsertingSubtree : InsertionDone;
+    HTMLElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    return ScriptElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
 }
 
-void HTMLScriptElement::finishedInsertingSubtree()
+void HTMLScriptElement::didFinishInsertingNode()
 {
-    ScriptElement::finishedInsertingSubtree();
+    ScriptElement::didFinishInsertingNode();
 }
 
 // https://html.spec.whatwg.org/multipage/scripting.html#dom-script-text
-void HTMLScriptElement::setText(const String& value)
+void HTMLScriptElement::setText(String&& value)
 {
-    setTextContent(value);
+    setTextContent(WTFMove(value));
 }
 
 void HTMLScriptElement::setAsync(bool async)
@@ -96,7 +101,7 @@ bool HTMLScriptElement::async() const
     return hasAttributeWithoutSynchronization(asyncAttr) || forceAsync();
 }
 
-void HTMLScriptElement::setCrossOrigin(const AtomicString& value)
+void HTMLScriptElement::setCrossOrigin(const AtomString& value)
 {
     setAttributeWithoutSynchronization(crossoriginAttr, value);
 }
@@ -173,12 +178,29 @@ void HTMLScriptElement::dispatchLoadEvent()
     ASSERT(!haveFiredLoadEvent());
     setHaveFiredLoadEvent(true);
 
-    dispatchEvent(Event::create(eventNames().loadEvent, false, false));
+    dispatchEvent(Event::create(eventNames().loadEvent, Event::CanBubble::No, Event::IsCancelable::No));
 }
 
 Ref<Element> HTMLScriptElement::cloneElementWithoutAttributesAndChildren(Document& targetDocument)
 {
     return adoptRef(*new HTMLScriptElement(tagQName(), targetDocument, false, alreadyStarted()));
+}
+
+void HTMLScriptElement::setReferrerPolicyForBindings(const AtomString& value)
+{
+    setAttributeWithoutSynchronization(referrerpolicyAttr, value);
+}
+
+String HTMLScriptElement::referrerPolicyForBindings() const
+{
+    return referrerPolicyToString(referrerPolicy());
+}
+
+ReferrerPolicy HTMLScriptElement::referrerPolicy() const
+{
+    if (document().settings().referrerPolicyAttributeEnabled())
+        return parseReferrerPolicy(attributeWithoutSynchronization(referrerpolicyAttr), ReferrerPolicySource::ReferrerPolicyAttribute).value_or(ReferrerPolicy::EmptyString);
+    return ReferrerPolicy::EmptyString;
 }
 
 }

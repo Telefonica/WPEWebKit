@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,13 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#pragma once
+
 #include <WebKit/WKNavigationDataRef.h>
 
 #ifdef __OBJC__
 
 #import <WebKit/WKFoundation.h>
-
-#if WK_API_ENABLED
 
 #import <Foundation/Foundation.h>
 
@@ -42,7 +42,5 @@ WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
 @property (readonly) NSURLResponse *response;
 
 @end
-
-#endif // WK_API_ENABLED
 
 #endif // defined(__OBJC__)

@@ -44,16 +44,17 @@ std::optional<WebUserScriptData> WebUserScriptData::decode(IPC::Decoder& decoder
     if (!identifier)
         return std::nullopt;
     
-    std::optional<uint64_t> worldIdentifier;
+    std::optional<ContentWorldIdentifier> worldIdentifier;
     decoder >> worldIdentifier;
     if (!worldIdentifier)
         return std::nullopt;
     
-    WebCore::UserScript userScript;
-    if (!decoder.decode(userScript))
+    std::optional<WebCore::UserScript> userScript;
+    decoder >> userScript;
+    if (!userScript)
         return std::nullopt;
     
-    return {{ WTFMove(*identifier), WTFMove(*worldIdentifier), WTFMove(userScript) }};
+    return {{ WTFMove(*identifier), WTFMove(*worldIdentifier), WTFMove(*userScript) }};
 }
 
 void WebUserStyleSheetData::encode(IPC::Encoder& encoder) const
@@ -70,7 +71,7 @@ std::optional<WebUserStyleSheetData> WebUserStyleSheetData::decode(IPC::Decoder&
     if (!identifier)
         return std::nullopt;
     
-    std::optional<uint64_t> worldIdentifier;
+    std::optional<ContentWorldIdentifier> worldIdentifier;
     decoder >> worldIdentifier;
     if (!worldIdentifier)
         return std::nullopt;
@@ -97,7 +98,7 @@ std::optional<WebScriptMessageHandlerData> WebScriptMessageHandlerData::decode(I
     if (!identifier)
         return std::nullopt;
     
-    std::optional<uint64_t> worldIdentifier;
+    std::optional<ContentWorldIdentifier> worldIdentifier;
     decoder >> worldIdentifier;
     if (!worldIdentifier)
         return std::nullopt;

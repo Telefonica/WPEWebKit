@@ -28,6 +28,7 @@
 #include "BitmapImage.h"
 
 #include "FloatRect.h"
+#include "GeometryUtilities.h"
 #include "GraphicsContext.h"
 #include "ImageBuffer.h"
 #include "ImageObserver.h"
@@ -35,12 +36,12 @@
 #include "Logging.h"
 #include "Settings.h"
 #include "Timer.h"
-#include <wtf/CurrentTime.h>
 #include <wtf/Vector.h>
 #include <wtf/text/TextStream.h>
 #include <wtf/text/WTFString.h>
-#if USE(CG) && PLATFORM(WIN)
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
+
+#if USE(CG)
+#include <pal/spi/cg/CoreGraphicsSPI.h>
 #endif
 
 namespace WebCore {
@@ -51,9 +52,8 @@ BitmapImage::BitmapImage(ImageObserver* observer)
 {
 }
 
-BitmapImage::BitmapImage(NativeImagePtr&& image, ImageObserver* observer)
-    : Image(observer)
-    , m_source(ImageSource::create(WTFMove(image)))
+BitmapImage::BitmapImage(Ref<NativeImage>&& image)
+    : m_source(ImageSource::create(WTFMove(image)))
 {
 }
 
@@ -76,14 +76,16 @@ void BitmapImage::destroyDecodedData(bool destroyAll)
 {
     LOG(Images, "BitmapImage::%s - %p - url: %s", __FUNCTION__, this, sourceURL().string().utf8().data());
 
-    if (!destroyAll)
-        m_source->destroyDecodedDataBeforeFrame(m_currentFrame);
-    else if (!canDestroyDecodedData())
-        m_source->destroyAllDecodedDataExcludeFrame(m_currentFrame);
-    else {
-        m_source->destroyAllDecodedData();
+    if (!destroyAll) {
+        // Destroy all the frames between frame0 and m_currentFrame.
+        m_source->destroyDecodedData(1, m_currentFrame);
+    } else if (!canDestroyDecodedData()) {
+        // Destroy all the frames except frame0 and m_currentFrame.
+        m_source->destroyDecodedData(1, m_currentFrame);
+        m_source->destroyDecodedData(m_currentFrame + 1, frameCount());
+    } else {
+        m_source->destroyDecodedData(0, frameCount());
         m_currentFrameDecodingStatus = DecodingStatus::Invalid;
-        m_currentFrame = 0;
     }
 
     // There's no need to throw away the decoder unless we're explicitly asked
@@ -117,7 +119,7 @@ EncodedDataStatus BitmapImage::dataChanged(bool allDataReceived)
     m_currentFrameDecodingStatus = DecodingStatus::Invalid;
     return m_source->dataChanged(data(), allDataReceived);
 }
-    
+
 void BitmapImage::setCurrentFrameDecodingStatusIfNecessary(DecodingStatus decodingStatus)
 {
     // When new data is received, m_currentFrameDecodingStatus is set to DecodingStatus::Invalid
@@ -128,80 +130,123 @@ void BitmapImage::setCurrentFrameDecodingStatusIfNecessary(DecodingStatus decodi
     m_currentFrameDecodingStatus = decodingStatus;
 }
 
-NativeImagePtr BitmapImage::frameImageAtIndexCacheIfNeeded(size_t index, SubsamplingLevel subsamplingLevel, const GraphicsContext* targetContext)
+RefPtr<NativeImage> BitmapImage::frameImageAtIndexCacheIfNeeded(size_t index, SubsamplingLevel subsamplingLevel)
 {
     if (!frameHasFullSizeNativeImageAtIndex(index, subsamplingLevel)) {
         LOG(Images, "BitmapImage::%s - %p - url: %s [subsamplingLevel was %d, resampling]", __FUNCTION__, this, sourceURL().string().utf8().data(), static_cast<int>(frameSubsamplingLevelAtIndex(index)));
         invalidatePlatformData();
     }
-#if USE(DIRECT2D)
-    m_source->setTargetContext(targetContext);
-#else
-    UNUSED_PARAM(targetContext);
-#endif
     return m_source->frameImageAtIndexCacheIfNeeded(index, subsamplingLevel);
 }
 
-NativeImagePtr BitmapImage::nativeImage(const GraphicsContext* targetContext)
+RefPtr<NativeImage> BitmapImage::nativeImage(const DestinationColorSpace&)
 {
-    return frameImageAtIndexCacheIfNeeded(0, SubsamplingLevel::Default, targetContext);
+    // FIXME: Handle the case when the requested colorSpace is not equal to BitmapImage::colorSpace().
+    return frameImageAtIndexCacheIfNeeded(0, SubsamplingLevel::Default);
 }
 
-NativeImagePtr BitmapImage::nativeImageForCurrentFrame(const GraphicsContext* targetContext)
+RefPtr<NativeImage> BitmapImage::nativeImageForCurrentFrame()
 {
-    return frameImageAtIndexCacheIfNeeded(m_currentFrame, SubsamplingLevel::Default, targetContext);
+    return frameImageAtIndexCacheIfNeeded(m_currentFrame, SubsamplingLevel::Default);
+}
+
+RefPtr<NativeImage> BitmapImage::preTransformedNativeImageForCurrentFrame(bool respectOrientation)
+{
+    auto image = nativeImageForCurrentFrame();
+    if (!image)
+        return image;
+
+    auto orientation = respectOrientation ? orientationForCurrentFrame() : ImageOrientation(ImageOrientation::None);
+    auto correctedSize = m_source->densityCorrectedSize(orientation);
+    if (orientation == ImageOrientation::None && !correctedSize)
+        return image;
+
+    auto correctedSizeFloat = correctedSize ? FloatSize(correctedSize.value()) : size();
+    auto buffer = ImageBuffer::create(correctedSizeFloat, RenderingPurpose::Unspecified, 1, DestinationColorSpace::SRGB(), PixelFormat::BGRA8);
+    if (!buffer)
+        return image;
+
+    auto sourceSize = this->sourceSize();
+
+    FloatRect destRect(FloatPoint(), correctedSizeFloat);
+    FloatRect sourceRect(FloatPoint(), sourceSize);
+
+    buffer->context().drawNativeImage(*image, sourceSize, destRect, sourceRect, { orientation });
+    return ImageBuffer::sinkIntoNativeImage(WTFMove(buffer));
 }
 
 #if USE(CG)
-NativeImagePtr BitmapImage::nativeImageOfSize(const IntSize& size, const GraphicsContext* targetContext)
+RefPtr<NativeImage> BitmapImage::nativeImageOfSize(const IntSize& size)
 {
     size_t count = frameCount();
 
     for (size_t i = 0; i < count; ++i) {
-        auto image = frameImageAtIndexCacheIfNeeded(i, SubsamplingLevel::Default, targetContext);
-        if (image && nativeImageSize(image) == size)
+        auto image = frameImageAtIndexCacheIfNeeded(i, SubsamplingLevel::Default);
+        if (image && image->size() == size)
             return image;
     }
 
     // Fallback to the first frame image if we can't find the right size
-    return frameImageAtIndexCacheIfNeeded(0, SubsamplingLevel::Default, targetContext);
+    return frameImageAtIndexCacheIfNeeded(0, SubsamplingLevel::Default);
 }
 
-Vector<NativeImagePtr> BitmapImage::framesNativeImages()
+Vector<Ref<NativeImage>> BitmapImage::framesNativeImages()
 {
-    Vector<NativeImagePtr> images;
+    Vector<Ref<NativeImage>> images;
     size_t count = frameCount();
 
     for (size_t i = 0; i < count; ++i) {
         if (auto image = frameImageAtIndexCacheIfNeeded(i))
-            images.append(image);
+            images.append(*image);
     }
 
     return images;
 }
 #endif
 
-#if !ASSERT_DISABLED
+#if ASSERT_ENABLED
 bool BitmapImage::notSolidColor()
 {
     return size().width() != 1 || size().height() != 1 || frameCount() > 1;
 }
-#endif
+#endif // ASSERT_ENABLED
 
-ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator op, BlendMode mode, DecodingMode decodingMode, ImageOrientationDescription description)
+static inline void drawNativeImage(NativeImage& image, GraphicsContext& context, const FloatRect& destRect, const FloatRect& srcRect, const IntSize& srcSize, const ImagePaintingOptions& options)
 {
-    if (destRect.isEmpty() || srcRect.isEmpty())
+    // Subsampling may have given us an image that is smaller than size().
+    IntSize subsampledImageSize = image.size();
+    if (options.orientation().usesWidthAsHeight())
+        subsampledImageSize = subsampledImageSize.transposedSize();
+
+    // srcRect is in the coordinates of the unsubsampled image, so we have to map it to the subsampled image.
+    FloatRect adjustedSrcRect = srcRect;
+    if (subsampledImageSize != srcSize)
+        adjustedSrcRect = mapRect(srcRect, FloatRect({ }, srcSize), FloatRect({ }, subsampledImageSize));
+
+    context.drawNativeImage(image, subsampledImageSize, destRect, adjustedSrcRect, options);
+}
+
+ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& destRect, const FloatRect& requestedSrcRect, const ImagePaintingOptions& options)
+{
+    if (destRect.isEmpty() || requestedSrcRect.isEmpty())
         return ImageDrawResult::DidNothing;
 
-    FloatSize scaleFactorForDrawing = context.scaleFactorForDrawing(destRect, srcRect);
-    IntSize sizeForDrawing = expandedIntSize(size() * scaleFactorForDrawing);
+    auto srcRect = requestedSrcRect;
+    auto preferredSize = size();
+    auto srcSize = sourceSize();
+
+    if (preferredSize != srcSize)
+        srcRect.scale(srcSize.width() / preferredSize.width(), srcSize.height() / preferredSize.height());
+
+    auto scaleFactorForDrawing = context.scaleFactorForDrawing(destRect, srcRect);
+    auto sizeForDrawing = expandedIntSize(srcSize * scaleFactorForDrawing);
     ImageDrawResult result = ImageDrawResult::DidDraw;
 
     m_currentSubsamplingLevel = m_allowSubsampling ? subsamplingLevelForScaleFactor(context, scaleFactorForDrawing) : SubsamplingLevel::Default;
     LOG(Images, "BitmapImage::%s - %p - url: %s [subsamplingLevel = %d scaleFactorForDrawing = (%.4f, %.4f)]", __FUNCTION__, this, sourceURL().string().utf8().data(), static_cast<int>(m_currentSubsamplingLevel), scaleFactorForDrawing.width(), scaleFactorForDrawing.height());
 
-    NativeImagePtr image;
-    if (decodingMode == DecodingMode::Asynchronous) {
+    RefPtr<NativeImage> image;
+    if (options.decodingMode() == DecodingMode::Asynchronous) {
         ASSERT(!canAnimate());
         ASSERT(!m_currentFrame || m_animationFinished);
 
@@ -219,9 +264,9 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
         if (m_currentFrameDecodingStatus == DecodingStatus::Decoding)
             result = ImageDrawResult::DidRequestDecoding;
 
-        if (!frameHasDecodedNativeImageCompatibleWithOptionsAtIndex(m_currentFrame, m_currentSubsamplingLevel, DecodingMode::Asynchronous)) {
+        if (!frameHasDecodedNativeImageCompatibleWithOptionsAtIndex(m_currentFrame, m_currentSubsamplingLevel, DecodingOptions(DecodingMode::Asynchronous))) {
             if (m_showDebugBackground)
-                fillWithSolidColor(context, destRect, Color(Color::yellow).colorWithAlpha(0.5), op);
+                fillWithSolidColor(context, destRect, Color::yellow.colorWithAlphaByte(128), options.compositeOperator());
             return result;
         }
 
@@ -232,7 +277,7 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
         ASSERT_IMPLIES(status == StartAnimationStatus::DecodingActive, (!m_currentFrame && !m_repetitionsComplete) || frameHasFullSizeNativeImageAtIndex(m_currentFrame, m_currentSubsamplingLevel));
 
         if (status == StartAnimationStatus::DecodingActive && m_showDebugBackground) {
-            fillWithSolidColor(context, destRect, Color(Color::yellow).colorWithAlpha(0.5), op);
+            fillWithSolidColor(context, destRect, Color::yellow.colorWithAlphaByte(128), options.compositeOperator());
             return result;
         }
         
@@ -242,7 +287,7 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
             m_source->destroyIncompleteDecodedData();
         
         bool frameIsCompatible = frameHasDecodedNativeImageCompatibleWithOptionsAtIndex(m_currentFrame, m_currentSubsamplingLevel, DecodingOptions(sizeForDrawing));
-        bool frameIsBeingDecoded = frameIsBeingDecodedAndIsCompatibleWithOptionsAtIndex(m_currentFrame, DecodingMode::Asynchronous);
+        bool frameIsBeingDecoded = frameIsBeingDecodedAndIsCompatibleWithOptionsAtIndex(m_currentFrame, DecodingOptions(DecodingMode::Asynchronous));
         
         if (frameIsCompatible) {
             image = frameImageAtIndex(m_currentFrame);
@@ -250,12 +295,12 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
         } else if (frameIsBeingDecoded) {
             // FIXME: instead of showing the yellow rectangle and returning we need to wait for this frame to finish decoding.
             if (m_showDebugBackground) {
-                fillWithSolidColor(context, destRect, Color(Color::yellow).colorWithAlpha(0.5), op);
+                fillWithSolidColor(context, destRect, Color::yellow.colorWithAlphaByte(128), options.compositeOperator());
                 LOG(Images, "BitmapImage::%s - %p - url: %s [waiting for async decoding to finish]", __FUNCTION__, this, sourceURL().string().utf8().data());
             }
             return ImageDrawResult::DidRequestDecoding;
         } else {
-            image = frameImageAtIndexCacheIfNeeded(m_currentFrame, m_currentSubsamplingLevel, &context);
+            image = frameImageAtIndexCacheIfNeeded(m_currentFrame, m_currentSubsamplingLevel);
             LOG(Images, "BitmapImage::%s - %p - url: %s [an image frame will be decoded synchronously]", __FUNCTION__, this, sourceURL().string().utf8().data());
         }
         
@@ -269,15 +314,17 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
     ASSERT(image);
     Color color = singlePixelSolidColor();
     if (color.isValid()) {
-        fillWithSolidColor(context, destRect, color, op);
+        fillWithSolidColor(context, destRect, color, options.compositeOperator());
         return result;
     }
 
-    ImageOrientation orientation(description.imageOrientation());
-    if (description.respectImageOrientation() == RespectImageOrientation)
+    auto orientation = options.orientation();
+    if (orientation == ImageOrientation::FromImage) {
         orientation = frameOrientationAtIndex(m_currentFrame);
+        drawNativeImage(*image, context, destRect, srcRect, IntSize(sourceSize(orientation)), { options, orientation });
+    } else
+        drawNativeImage(*image, context, destRect, srcRect, IntSize(sourceSize(orientation)), options);
 
-    drawNativeImage(image, context, destRect, srcRect, IntSize(size()), op, mode, orientation);
     m_currentFrameDecodingStatus = frameDecodingStatusAtIndex(m_currentFrame);
 
     if (imageObserver())
@@ -286,18 +333,23 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
     return result;
 }
 
-void BitmapImage::drawPattern(GraphicsContext& ctxt, const FloatRect& destRect, const FloatRect& tileRect, const AffineTransform& transform, const FloatPoint& phase, const FloatSize& spacing, CompositeOperator op, BlendMode blendMode)
+void BitmapImage::drawPattern(GraphicsContext& ctxt, const FloatRect& destRect, const FloatRect& tileRect, const AffineTransform& transform, const FloatPoint& phase, const FloatSize& spacing, const ImagePaintingOptions& options)
 {
     if (tileRect.isEmpty())
         return;
 
     if (!ctxt.drawLuminanceMask()) {
-        Image::drawPattern(ctxt, destRect, tileRect, transform, phase, spacing, op, blendMode);
+        // If new data is received, the current incomplete decoded frame has to be destroyed.
+        if (m_currentFrameDecodingStatus == DecodingStatus::Invalid)
+            m_source->destroyIncompleteDecodedData();
+        
+        Image::drawPattern(ctxt, destRect, tileRect, transform, phase, spacing, { options, ImageOrientation::FromImage });
+        m_currentFrameDecodingStatus = frameDecodingStatusAtIndex(m_currentFrame);
         return;
     }
 
     if (!m_cachedImage) {
-        auto buffer = ImageBuffer::createCompatibleBuffer(expandedIntSize(tileRect.size()), ColorSpaceSRGB, ctxt);
+        auto buffer = ctxt.createAlignedImageBuffer(expandedIntSize(tileRect.size()));
         if (!buffer)
             return;
 
@@ -306,18 +358,18 @@ void BitmapImage::drawPattern(GraphicsContext& ctxt, const FloatRect& destRect, 
         // Temporarily reset image observer, we don't want to receive any changeInRect() calls due to this relayout.
         setImageObserver(nullptr);
 
-        draw(buffer->context(), tileRect, tileRect, op, blendMode, DecodingMode::Synchronous, ImageOrientationDescription());
+        draw(buffer->context(), tileRect, tileRect, { options, DecodingMode::Synchronous, ImageOrientation::FromImage });
 
         setImageObserver(observer);
         buffer->convertToLuminanceMask();
 
-        m_cachedImage = buffer->copyImage(DontCopyBackingStore, Unscaled);
+        m_cachedImage = ImageBuffer::sinkIntoImage(WTFMove(buffer), PreserveResolution::Yes);
         if (!m_cachedImage)
             return;
     }
 
     ctxt.setDrawLuminanceMask(false);
-    m_cachedImage->drawPattern(ctxt, destRect, tileRect, transform, phase, spacing, op, blendMode);
+    m_cachedImage->drawPattern(ctxt, destRect, tileRect, transform, phase, spacing, { options, ImageOrientation::FromImage });
 }
 
 bool BitmapImage::shouldAnimate() const
@@ -337,7 +389,7 @@ bool BitmapImage::canUseAsyncDecodingForLargeImages() const
 
 bool BitmapImage::shouldUseAsyncDecodingForAnimatedImages() const
 {
-    return canAnimate() && m_allowAnimatedImageAsyncDecoding && (shouldUseAsyncDecodingForAnimatedImagesForTesting() || m_source->canUseAsyncDecoding());
+    return canAnimate() && m_allowAnimatedImageAsyncDecoding && (shouldUseAsyncDecodingForTesting() || m_source->canUseAsyncDecoding());
 }
 
 void BitmapImage::clearTimer()
@@ -348,7 +400,7 @@ void BitmapImage::clearTimer()
 void BitmapImage::startTimer(Seconds delay)
 {
     ASSERT(!m_frameTimer);
-    m_frameTimer = std::make_unique<Timer>(*this, &BitmapImage::advanceAnimation);
+    m_frameTimer = makeUnique<Timer>(*this, &BitmapImage::advanceAnimation);
     m_frameTimer->startOneShot(delay);
 }
 
@@ -356,7 +408,7 @@ SubsamplingLevel BitmapImage::subsamplingLevelForScaleFactor(GraphicsContext& co
 {
 #if USE(CG)
     // Never use subsampled images for drawing into PDF contexts.
-    if (CGContextGetType(context.platformContext()) == kCGContextTypePDF)
+    if (context.hasPlatformContext() && CGContextGetType(context.platformContext()) == kCGContextTypePDF)
         return SubsamplingLevel::Default;
 
     float scale = std::min(float(1), std::max(scaleFactor.width(), scaleFactor.height()));
@@ -387,6 +439,8 @@ bool BitmapImage::canDestroyDecodedData()
 
 BitmapImage::StartAnimationStatus BitmapImage::internalStartAnimation()
 {
+    LOG_WITH_STREAM(Images, stream << "BitmapImage " << this << " internalStartAnimation");
+
     if (!canAnimate())
         return StartAnimationStatus::CannotStart;
 
@@ -395,7 +449,7 @@ BitmapImage::StartAnimationStatus BitmapImage::internalStartAnimation()
 
     // Don't start a new animation until we draw the frame that is currently being decoded.
     size_t nextFrame = (m_currentFrame + 1) % frameCount();
-    if (frameIsBeingDecodedAndIsCompatibleWithOptionsAtIndex(nextFrame, DecodingMode::Asynchronous)) {
+    if (frameIsBeingDecodedAndIsCompatibleWithOptionsAtIndex(nextFrame, DecodingOptions(DecodingMode::Asynchronous))) {
         LOG(Images, "BitmapImage::%s - %p - url: %s [nextFrame = %ld is being decoded]", __FUNCTION__, this, sourceURL().string().utf8().data(), nextFrame);
         return StartAnimationStatus::DecodingActive;
     }
@@ -416,15 +470,9 @@ BitmapImage::StartAnimationStatus BitmapImage::internalStartAnimation()
             destroyDecodedDataIfNecessary(false);
             return StartAnimationStatus::CannotStart;
         }
-    }
 
-    // When looping on an animation, destroy de decoded data when in the first frame instead of the last one.
-    // If it's done in the last one and a redraw happens before the animation advances, we need to decode all
-    // the animation frames to get the last one again, which causes a delay in the animation. If this happens
-    // while in the first one, we only need to decode a single frame.
-    if (m_currentFrame == 0)
         destroyDecodedDataIfNecessary(true);
-
+    }
 
     // Don't advance the animation to an incomplete frame.
     if (!m_source->isAllDataReceived() && !frameIsCompleteAtIndex(nextFrame))
@@ -444,7 +492,7 @@ BitmapImage::StartAnimationStatus BitmapImage::internalStartAnimation()
     // through the callback newFrameNativeImageAvailableAtIndex(). Otherwise, advanceAnimation() will be called
     // when the timer fires and m_currentFrame will be advanced to nextFrame since it is not being decoded.
     if (shouldUseAsyncDecodingForAnimatedImages()) {
-        if (frameHasDecodedNativeImageCompatibleWithOptionsAtIndex(nextFrame, m_currentSubsamplingLevel, { }))
+        if (frameHasDecodedNativeImageCompatibleWithOptionsAtIndex(nextFrame, m_currentSubsamplingLevel, DecodingOptions(std::optional<IntSize>())))
             LOG(Images, "BitmapImage::%s - %p - url: %s [cachedFrameCount = %ld nextFrame = %ld]", __FUNCTION__, this, sourceURL().string().utf8().data(), ++m_cachedFrameCount, nextFrame);
         else {
             m_source->requestFrameAsyncDecodingAtIndex(nextFrame, m_currentSubsamplingLevel);
@@ -452,7 +500,6 @@ BitmapImage::StartAnimationStatus BitmapImage::internalStartAnimation()
             LOG(Images, "BitmapImage::%s - %p - url: %s [requesting async decoding for nextFrame = %ld]", __FUNCTION__, this, sourceURL().string().utf8().data(), nextFrame);
         }
 
-        m_desiredFrameDecodeTimeForTesting = time + std::max(m_frameDecodingDurationForTesting, 0_s);
         if (m_clearDecoderAfterAsyncFrameRequestForTesting)
             m_source->resetData(data());
     }
@@ -466,20 +513,9 @@ void BitmapImage::advanceAnimation()
 {
     clearTimer();
 
-    // Pretend as if decoding nextFrame has taken m_frameDecodingDurationForTesting from
-    // the time this decoding was requested.
-    if (shouldUseAsyncDecodingForAnimatedImagesForTesting()) {
-        MonotonicTime time = MonotonicTime::now();
-        // Start a timer with the remaining time from now till the m_desiredFrameDecodeTime.
-        if (m_desiredFrameDecodeTimeForTesting > std::max(time, m_desiredFrameStartTime)) {
-            startTimer(m_desiredFrameDecodeTimeForTesting - time);
-            return;
-        }
-    }
-
     // Don't advance to nextFrame unless its decoding has finished or was not required.
     size_t nextFrame = (m_currentFrame + 1) % frameCount();
-    if (!frameIsBeingDecodedAndIsCompatibleWithOptionsAtIndex(nextFrame, DecodingMode::Asynchronous))
+    if (!frameIsBeingDecodedAndIsCompatibleWithOptionsAtIndex(nextFrame, DecodingOptions(DecodingMode::Asynchronous)))
         internalAdvanceAnimation();
     else {
         // Force repaint if showDebugBackground() is on.
@@ -492,7 +528,7 @@ void BitmapImage::advanceAnimation()
 void BitmapImage::internalAdvanceAnimation()
 {
     m_currentFrame = (m_currentFrame + 1) % frameCount();
-    ASSERT(!frameIsBeingDecodedAndIsCompatibleWithOptionsAtIndex(m_currentFrame, DecodingMode::Asynchronous));
+    ASSERT(!frameIsBeingDecodedAndIsCompatibleWithOptionsAtIndex(m_currentFrame, DecodingOptions(DecodingMode::Asynchronous)));
 
     destroyDecodedDataIfNecessary(false);
 
@@ -533,10 +569,10 @@ void BitmapImage::resetAnimation()
     destroyDecodedDataIfNecessary(true);
 }
 
-void BitmapImage::decode(WTF::Function<void()>&& callback)
+void BitmapImage::decode(Function<void()>&& callback)
 {
     if (!m_decodingCallbacks)
-        m_decodingCallbacks = std::make_unique<Vector<Function<void()>, 1>>();
+        m_decodingCallbacks = makeUnique<Vector<Function<void()>, 1>>();
 
     m_decodingCallbacks->append(WTFMove(callback));
 
@@ -616,6 +652,13 @@ void BitmapImage::imageFrameAvailableAtIndex(size_t index)
 
     if (imageObserver())
         imageObserver()->imageFrameAvailable(*this, ImageAnimatingState::No, nullptr, decodingStatus);
+}
+
+DestinationColorSpace BitmapImage::colorSpace()
+{
+    if (auto nativeImage = this->nativeImage())
+        return nativeImage->colorSpace();
+    return DestinationColorSpace::SRGB();
 }
 
 unsigned BitmapImage::decodeCountForTesting() const

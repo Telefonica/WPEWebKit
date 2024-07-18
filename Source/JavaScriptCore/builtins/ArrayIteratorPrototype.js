@@ -28,81 +28,42 @@ function next()
 {
     "use strict";
 
-    if (this == null)
-        @throwTypeError("%ArrayIteratorPrototype%.next requires that |this| not be null or undefined");
-
-    let next = this.@arrayIteratorNext;
-    if (next === @undefined)
+    if (!@isArrayIterator(this))
         @throwTypeError("%ArrayIteratorPrototype%.next requires that |this| be an Array Iterator instance");
 
-    return next.@call(this);
+    var array = @getArrayIteratorInternalField(this, @arrayIteratorFieldIteratedObject);
+    if (@isTypedArrayView(array) && @isDetached(array))
+        @throwTypeError("Underlying ArrayBuffer has been detached from the view");
+
+    var kind = @getArrayIteratorInternalField(this, @arrayIteratorFieldKind);
+    return @arrayIteratorNextHelper.@call(this, array, kind);
 }
 
-@globalPrivate
-function arrayIteratorValueNext()
+// FIXME: We have to have this because we can't implement this all as one function and meet our inlining heuristics.
+// Collectively, next and this have ~130 bytes of bytecodes but our limit is 120.
+@linkTimeConstant
+function arrayIteratorNextHelper(array, kind)
 {
     "use strict";
     var done = true;
     var value;
 
-    var array = this.@iteratedObject;
-    if (!this.@arrayIteratorIsDone) {
-        var index = this.@arrayIteratorNextIndex;
-        var length = array.length >>> 0;
-        if (index >= length) {
-            this.@arrayIteratorIsDone = true;
-        } else {
-            this.@arrayIteratorNextIndex = index + 1;
+    var index = @getArrayIteratorInternalField(this, @arrayIteratorFieldIndex);
+    if (index !== -1) {
+        var length = @isTypedArrayView(array) ? @typedArrayLength(array) : @toLength(array.length);
+        if (index < length) {
+            @putArrayIteratorInternalField(this, @arrayIteratorFieldIndex, index + 1);
             done = false;
-            value = array[index];
-        }
+            if (kind === @iterationKindKey)
+                value = index;
+            else {
+                value = array[index];
+                if (kind === @iterationKindEntries)
+                    value = [index, value];
+            }
+        } else
+            @putArrayIteratorInternalField(this, @arrayIteratorFieldIndex, -1);
     }
 
-    return { done, value };
-}
-
-@globalPrivate
-function arrayIteratorKeyNext()
-{
-    "use strict";
-    var done = true;
-    var value;
-
-    var array = this.@iteratedObject;
-    if (!this.@arrayIteratorIsDone) {
-        var index = this.@arrayIteratorNextIndex;
-        var length = array.length >>> 0;
-        if (index >= length) {
-            this.@arrayIteratorIsDone = true;
-        } else {
-            this.@arrayIteratorNextIndex = index + 1;
-            done = false;
-            value = index;
-        }
-    }
-
-    return { done, value };
-}
-
-@globalPrivate
-function arrayIteratorKeyValueNext()
-{
-    "use strict";
-    var done = true;
-    var value;
-
-    var array = this.@iteratedObject;
-    if (!this.@arrayIteratorIsDone) {
-        var index = this.@arrayIteratorNextIndex;
-        var length = array.length >>> 0;
-        if (index >= length) {
-            this.@arrayIteratorIsDone = true;
-        } else {
-            this.@arrayIteratorNextIndex = index + 1;
-            done = false;
-            value = [ index, array[index] ];
-        }
-    }
-
-    return { done, value };
+    return { value, done };
 }

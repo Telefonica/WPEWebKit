@@ -12,8 +12,8 @@
 
 #include <memory>
 
-#include "webrtc/modules/desktop_capture/screen_drawer.h"
-#include "webrtc/system_wrappers/include/sleep.h"
+#include "modules/desktop_capture/screen_drawer.h"
+#include "system_wrappers/include/sleep.h"
 
 namespace webrtc {
 
@@ -82,16 +82,17 @@ class ScreenDrawerWin : public ScreenDrawer {
   void Clear() override;
   void WaitForPendingDraws() override;
   bool MayDrawIncompleteShapes() override;
+  WindowId window_id() const override;
 
  private:
   // Bring the window to the front, this can help to avoid the impact from other
   // windows or shadow effects.
   void BringToFront();
 
-  // Draw a line with |color|.
+  // Draw a line with `color`.
   void DrawLine(DesktopVector start, DesktopVector end, RgbaColor color);
 
-  // Draw a dot with |color|.
+  // Draw a dot with `color`.
   void DrawDot(DesktopVector vect, RgbaColor color);
 
   const DesktopRect rect_;
@@ -104,7 +105,7 @@ ScreenDrawerWin::ScreenDrawerWin()
       rect_(GetScreenRect()),
       window_(CreateDrawerWindow(rect_)),
       hdc_(GetWindowDC(window_)) {
-  // We do not need to handle any messages for the |window_|, so disable Windows
+  // We do not need to handle any messages for the `window_`, so disable Windows
   // from processing windows ghosting feature.
   DisableProcessWindowsGhosting();
 
@@ -156,6 +157,10 @@ void ScreenDrawerWin::WaitForPendingDraws() {
 
 bool ScreenDrawerWin::MayDrawIncompleteShapes() {
   return true;
+}
+
+WindowId ScreenDrawerWin::window_id() const {
+  return reinterpret_cast<WindowId>(window_);
 }
 
 void ScreenDrawerWin::DrawLine(DesktopVector start,

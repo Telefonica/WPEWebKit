@@ -60,10 +60,11 @@
 
 #include <openssl/mem.h>
 
+#include "internal.h"
 #include "../../internal.h"
 
 
-uint8_t *MD5(const uint8_t *data, size_t len, uint8_t *out) {
+uint8_t *MD5(const uint8_t *data, size_t len, uint8_t out[MD5_DIGEST_LENGTH]) {
   MD5_CTX ctx;
   MD5_Init(&ctx);
   MD5_Update(&ctx, data, len);
@@ -81,42 +82,40 @@ int MD5_Init(MD5_CTX *md5) {
   return 1;
 }
 
-#if !defined(OPENSSL_NO_ASM) && \
-    (defined(OPENSSL_X86_64) || defined(OPENSSL_X86))
-#define MD5_ASM
+#if defined(MD5_ASM)
 #define md5_block_data_order md5_block_asm_data_order
+#else
+static void md5_block_data_order(uint32_t *state, const uint8_t *data,
+                                 size_t num);
 #endif
 
-
-void md5_block_data_order(uint32_t *state, const uint8_t *data, size_t num);
 
 #define DATA_ORDER_IS_LITTLE_ENDIAN
 
 #define HASH_CTX MD5_CTX
 #define HASH_CBLOCK 64
+#define HASH_DIGEST_LENGTH 16
 #define HASH_UPDATE MD5_Update
 #define HASH_TRANSFORM MD5_Transform
 #define HASH_FINAL MD5_Final
-#define HASH_MAKE_STRING(c, s) \
-  do {                         \
-    uint32_t ll;               \
-    ll = (c)->h[0];            \
-    HOST_l2c(ll, (s));         \
-    ll = (c)->h[1];            \
-    HOST_l2c(ll, (s));         \
-    ll = (c)->h[2];            \
-    HOST_l2c(ll, (s));         \
-    ll = (c)->h[3];            \
-    HOST_l2c(ll, (s));         \
+#define HASH_MAKE_STRING(c, s)           \
+  do {                                   \
+    CRYPTO_store_u32_le((s), (c)->h[0]); \
+    (s) += 4;                            \
+    CRYPTO_store_u32_le((s), (c)->h[1]); \
+    (s) += 4;                            \
+    CRYPTO_store_u32_le((s), (c)->h[2]); \
+    (s) += 4;                            \
+    CRYPTO_store_u32_le((s), (c)->h[3]); \
+    (s) += 4;                            \
   } while (0)
 #define HASH_BLOCK_DATA_ORDER md5_block_data_order
 
 #include "../digest/md32_common.h"
 
-/* As pointed out by Wei Dai <weidai@eskimo.com>, the above can be
- * simplified to the code below.  Wei attributes these optimizations
- * to Peter Gutmann's SHS code, and he attributes it to Rich Schroeppel.
- */
+// As pointed out by Wei Dai <weidai@eskimo.com>, the above can be
+// simplified to the code below.  Wei attributes these optimizations
+// to Peter Gutmann's SHS code, and he attributes it to Rich Schroeppel.
 #define F(b, c, d) ((((c) ^ (d)) & (b)) ^ (d))
 #define G(b, c, d) ((((b) ^ (c)) & (d)) ^ (c))
 #define H(b, c, d) ((b) ^ (c) ^ (d))
@@ -152,12 +151,13 @@ void md5_block_data_order(uint32_t *state, const uint8_t *data, size_t num);
     (a) += (b);                            \
   } while (0)
 
-#ifndef md5_block_data_order
+#ifndef MD5_ASM
 #ifdef X
 #undef X
 #endif
-void md5_block_data_order(uint32_t *state, const uint8_t *data, size_t num) {
-  uint32_t A, B, C, D, l;
+static void md5_block_data_order(uint32_t *state, const uint8_t *data,
+                                 size_t num) {
+  uint32_t A, B, C, D;
   uint32_t XX0, XX1, XX2, XX3, XX4, XX5, XX6, XX7, XX8, XX9, XX10, XX11, XX12,
       XX13, XX14, XX15;
 #define X(i) XX##i
@@ -168,56 +168,56 @@ void md5_block_data_order(uint32_t *state, const uint8_t *data, size_t num) {
   D = state[3];
 
   for (; num--;) {
-    HOST_c2l(data, l);
-    X(0) = l;
-    HOST_c2l(data, l);
-    X(1) = l;
-    /* Round 0 */
+    X(0) = CRYPTO_load_u32_le(data);
+    data += 4;
+    X(1) = CRYPTO_load_u32_le(data);
+    data += 4;
+    // Round 0
     R0(A, B, C, D, X(0), 7, 0xd76aa478L);
-    HOST_c2l(data, l);
-    X(2) = l;
+    X(2) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(D, A, B, C, X(1), 12, 0xe8c7b756L);
-    HOST_c2l(data, l);
-    X(3) = l;
+    X(3) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(C, D, A, B, X(2), 17, 0x242070dbL);
-    HOST_c2l(data, l);
-    X(4) = l;
+    X(4) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(B, C, D, A, X(3), 22, 0xc1bdceeeL);
-    HOST_c2l(data, l);
-    X(5) = l;
+    X(5) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(A, B, C, D, X(4), 7, 0xf57c0fafL);
-    HOST_c2l(data, l);
-    X(6) = l;
+    X(6) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(D, A, B, C, X(5), 12, 0x4787c62aL);
-    HOST_c2l(data, l);
-    X(7) = l;
+    X(7) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(C, D, A, B, X(6), 17, 0xa8304613L);
-    HOST_c2l(data, l);
-    X(8) = l;
+    X(8) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(B, C, D, A, X(7), 22, 0xfd469501L);
-    HOST_c2l(data, l);
-    X(9) = l;
+    X(9) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(A, B, C, D, X(8), 7, 0x698098d8L);
-    HOST_c2l(data, l);
-    X(10) = l;
+    X(10) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(D, A, B, C, X(9), 12, 0x8b44f7afL);
-    HOST_c2l(data, l);
-    X(11) = l;
+    X(11) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(C, D, A, B, X(10), 17, 0xffff5bb1L);
-    HOST_c2l(data, l);
-    X(12) = l;
+    X(12) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(B, C, D, A, X(11), 22, 0x895cd7beL);
-    HOST_c2l(data, l);
-    X(13) = l;
+    X(13) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(A, B, C, D, X(12), 7, 0x6b901122L);
-    HOST_c2l(data, l);
-    X(14) = l;
+    X(14) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(D, A, B, C, X(13), 12, 0xfd987193L);
-    HOST_c2l(data, l);
-    X(15) = l;
+    X(15) = CRYPTO_load_u32_le(data);
+    data += 4;
     R0(C, D, A, B, X(14), 17, 0xa679438eL);
     R0(B, C, D, A, X(15), 22, 0x49b40821L);
-    /* Round 1 */
+    // Round 1
     R1(A, B, C, D, X(1), 5, 0xf61e2562L);
     R1(D, A, B, C, X(6), 9, 0xc040b340L);
     R1(C, D, A, B, X(11), 14, 0x265e5a51L);
@@ -234,7 +234,7 @@ void md5_block_data_order(uint32_t *state, const uint8_t *data, size_t num) {
     R1(D, A, B, C, X(2), 9, 0xfcefa3f8L);
     R1(C, D, A, B, X(7), 14, 0x676f02d9L);
     R1(B, C, D, A, X(12), 20, 0x8d2a4c8aL);
-    /* Round 2 */
+    // Round 2
     R2(A, B, C, D, X(5), 4, 0xfffa3942L);
     R2(D, A, B, C, X(8), 11, 0x8771f681L);
     R2(C, D, A, B, X(11), 16, 0x6d9d6122L);
@@ -251,7 +251,7 @@ void md5_block_data_order(uint32_t *state, const uint8_t *data, size_t num) {
     R2(D, A, B, C, X(12), 11, 0xe6db99e5L);
     R2(C, D, A, B, X(15), 16, 0x1fa27cf8L);
     R2(B, C, D, A, X(2), 23, 0xc4ac5665L);
-    /* Round 3 */
+    // Round 3
     R3(A, B, C, D, X(0), 6, 0xf4292244L);
     R3(D, A, B, C, X(7), 10, 0x432aff97L);
     R3(C, D, A, B, X(14), 15, 0xab9423a7L);
@@ -281,6 +281,7 @@ void md5_block_data_order(uint32_t *state, const uint8_t *data, size_t num) {
 #undef DATA_ORDER_IS_LITTLE_ENDIAN
 #undef HASH_CTX
 #undef HASH_CBLOCK
+#undef HASH_DIGEST_LENGTH
 #undef HASH_UPDATE
 #undef HASH_TRANSFORM
 #undef HASH_FINAL
@@ -295,5 +296,3 @@ void md5_block_data_order(uint32_t *state, const uint8_t *data, size_t num) {
 #undef R1
 #undef R2
 #undef R3
-#undef HOST_c2l
-#undef HOST_l2c

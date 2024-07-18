@@ -84,7 +84,7 @@ void FontCascadeFonts::GlyphPageCacheEntry::setGlyphDataForCharacter(UChar32 cha
 {
     ASSERT(!glyphDataForCharacter(character).glyph);
     if (!m_mixedFont) {
-        m_mixedFont = std::make_unique<MixedFontGlyphPage>(m_singleFont.get());
+        m_mixedFont = makeUnique<MixedFontGlyphPage>(m_singleFont.get());
         m_singleFont = nullptr;
     }
     m_mixedFont->setGlyphDataForCharacter(character, glyphData);
@@ -96,26 +96,30 @@ void FontCascadeFonts::GlyphPageCacheEntry::setSingleFontPage(RefPtr<GlyphPage>&
     m_singleFont = page;
 }
 
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(FontCascadeFonts);
+
 FontCascadeFonts::FontCascadeFonts(RefPtr<FontSelector>&& fontSelector)
     : m_cachedPrimaryFont(nullptr)
     , m_fontSelector(fontSelector)
     , m_fontSelectorVersion(m_fontSelector ? m_fontSelector->version() : 0)
-    , m_generation(FontCache::singleton().generation())
+    , m_generation(FontCache::forCurrentThread().generation())
 {
+#if ASSERT_ENABLED
+    if (!isMainThread())
+        m_thread = Thread::current();
+#endif
 }
 
 FontCascadeFonts::FontCascadeFonts(const FontPlatformData& platformData)
     : m_cachedPrimaryFont(nullptr)
     , m_fontSelectorVersion(0)
-    , m_generation(FontCache::singleton().generation())
+    , m_generation(FontCache::forCurrentThread().generation())
     , m_isForPlatformFont(true)
 {
-    m_realizedFallbackRanges.append(FontRanges(FontCache::singleton().fontForPlatformData(platformData)));
+    m_realizedFallbackRanges.append(FontRanges(FontCache::forCurrentThread().fontForPlatformData(platformData)));
 }
 
-FontCascadeFonts::~FontCascadeFonts()
-{
-}
+FontCascadeFonts::~FontCascadeFonts() = default;
 
 void FontCascadeFonts::determinePitch(const FontCascadeDescription& description)
 {
@@ -140,9 +144,9 @@ static FontRanges realizeNextFallback(const FontCascadeDescription& description,
 {
     ASSERT(index < description.effectiveFamilyCount());
 
-    auto& fontCache = FontCache::singleton();
+    auto& fontCache = FontCache::forCurrentThread();
     while (index < description.effectiveFamilyCount()) {
-        auto visitor = WTF::makeVisitor([&](const AtomicString& family) -> FontRanges {
+        auto visitor = WTF::makeVisitor([&](const AtomString& family) -> FontRanges {
             if (family.isEmpty())
                 return FontRanges();
             if (fontSelector) {
@@ -157,7 +161,7 @@ static FontRanges realizeNextFallback(const FontCascadeDescription& description,
             return fontFamilySpecification.fontRanges(description);
         });
         const auto& currentFamily = description.effectiveFamilyAt(index++);
-        auto ranges = WTF::visit(visitor, currentFamily);
+        auto ranges = std::visit(visitor, currentFamily);
         if (!ranges.isNull())
             return ranges;
     }
@@ -177,7 +181,7 @@ const FontRanges& FontCascadeFonts::realizeFallbackRangesAt(const FontCascadeDes
         return m_realizedFallbackRanges[index];
 
     ASSERT(index == m_realizedFallbackRanges.size());
-    ASSERT(FontCache::singleton().generation() == m_generation);
+    ASSERT(FontCache::forCurrentThread().generation() == m_generation);
 
     m_realizedFallbackRanges.append(FontRanges());
     auto& fontRanges = m_realizedFallbackRanges.last();
@@ -185,9 +189,9 @@ const FontRanges& FontCascadeFonts::realizeFallbackRangesAt(const FontCascadeDes
     if (!index) {
         fontRanges = realizeNextFallback(description, m_lastRealizedFallbackIndex, m_fontSelector.get());
         if (fontRanges.isNull() && m_fontSelector)
-            fontRanges = m_fontSelector->fontRangesForFamily(description, standardFamily);
+            fontRanges = m_fontSelector->fontRangesForFamily(description, familyNamesData->at(FamilyNamesIndex::StandardFamily));
         if (fontRanges.isNull())
-            fontRanges = FontRanges(FontCache::singleton().lastResortFallbackFont(description));
+            fontRanges = FontRanges(FontCache::forCurrentThread().lastResortFallbackFont(description));
         return fontRanges;
     }
 
@@ -347,14 +351,14 @@ GlyphData FontCascadeFonts::glyphDataForSystemFallback(UChar32 character, const 
     if (!font)
         font = &realizeFallbackRangesAt(description, 0).fontForFirstRange();
 
-    auto systemFallbackFont = font->systemFallbackFontForCharacter(character, description, m_isForPlatformFont);
+    auto systemFallbackFont = font->systemFallbackFontForCharacter(character, description, m_isForPlatformFont ? IsForPlatformFont::Yes : IsForPlatformFont::No);
     if (!systemFallbackFont)
         return GlyphData();
 
     if (systemFallbackShouldBeInvisible)
         systemFallbackFont = const_cast<Font*>(&systemFallbackFont->invisibleFont());
 
-    if (systemFallbackFont->platformData().orientation() == Vertical && !systemFallbackFont->hasVerticalGlyphs() && FontCascade::isCJKIdeographOrSymbol(character))
+    if (systemFallbackFont->platformData().orientation() == FontOrientation::Vertical && !systemFallbackFont->hasVerticalGlyphs() && FontCascade::isCJKIdeographOrSymbol(character))
         variant = BrokenIdeographVariant;
 
     GlyphData fallbackGlyphData;
@@ -363,7 +367,7 @@ GlyphData FontCascadeFonts::glyphDataForSystemFallback(UChar32 character, const 
     else
         fallbackGlyphData = systemFallbackFont->variantFont(description, variant)->glyphDataForCharacter(character);
 
-    if (fallbackGlyphData.font && fallbackGlyphData.font->platformData().orientation() == Vertical && !fallbackGlyphData.font->isTextOrientationFallback()) {
+    if (fallbackGlyphData.font && fallbackGlyphData.font->platformData().orientation() == FontOrientation::Vertical && !fallbackGlyphData.font->isTextOrientationFallback()) {
         if (variant == NormalVariant && !FontCascade::isCJKIdeographOrSymbol(character))
             fallbackGlyphData = glyphDataForNonCJKCharacterWithGlyphOrientation(character, description.nonCJKGlyphOrientation(), fallbackGlyphData);
     }
@@ -381,11 +385,26 @@ enum class FallbackVisibility {
     Invisible
 };
 
+static void opportunisticallyStartFontDataURLLoading(const FontCascadeDescription& description, FontSelector* fontSelector)
+{
+    // It is a somewhat common practice for a font foundry to break up a single font into two fonts, each having a random half of
+    // the alphabet, and then encoding the two fonts as data: urls (with different font-family names).
+    // Therefore, if these two fonts don't get loaded at (nearly) the same time, there will be a flash of unintelligible text where
+    // only a random half of the letters are visible.
+    // This code attempts to pre-warm these data urls to make them load at closer to the same time. However, font loading is
+    // asynchronous, and this code doesn't actually fix the race - it just makes it more likely for the two fonts to tie in the race.
+    if (!fontSelector)
+        return;
+    for (unsigned i = 0; i < description.familyCount(); ++i)
+        fontSelector->opportunisticallyStartFontDataURLLoading(description, description.familyAt(i));
+}
+
 GlyphData FontCascadeFonts::glyphDataForVariant(UChar32 character, const FontCascadeDescription& description, FontVariant variant, unsigned fallbackIndex)
 {
     FallbackVisibility fallbackVisibility = FallbackVisibility::Immaterial;
     ExternalResourceDownloadPolicy policy = ExternalResourceDownloadPolicy::Allow;
     GlyphData loadingResult;
+    opportunisticallyStartFontDataURLLoading(description, m_fontSelector.get());
     for (; ; ++fallbackIndex) {
         auto& fontRanges = realizeFallbackRangesAt(description, fallbackIndex);
         if (fontRanges.isNull())
@@ -408,7 +427,7 @@ GlyphData FontCascadeFonts::glyphDataForVariant(UChar32 character, const FontCas
             data.font = &data.font->invisibleFont();
 
         if (variant == NormalVariant) {
-            if (data.font->platformData().orientation() == Vertical && !data.font->isTextOrientationFallback()) {
+            if (data.font->platformData().orientation() == FontOrientation::Vertical && !data.font->isTextOrientationFallback()) {
                 if (!FontCascade::isCJKIdeographOrSymbol(character))
                     return glyphDataForNonCJKCharacterWithGlyphOrientation(character, description.nonCJKGlyphOrientation(), data);
 
@@ -463,7 +482,7 @@ static RefPtr<GlyphPage> glyphPageFromFontRanges(unsigned pageNumber, const Font
         }
         break;
     }
-    if (!font || font->platformData().orientation() == Vertical)
+    if (!font || font->platformData().orientation() == FontOrientation::Vertical)
         return nullptr;
 
     if (desiredVisibility == FallbackVisibility::Invisible && font->visibility() == Font::Visibility::Visible)
@@ -473,7 +492,7 @@ static RefPtr<GlyphPage> glyphPageFromFontRanges(unsigned pageNumber, const Font
 
 GlyphData FontCascadeFonts::glyphDataForCharacter(UChar32 c, const FontCascadeDescription& description, FontVariant variant)
 {
-    ASSERT(isMainThread());
+    ASSERT(m_thread ? m_thread->ptr() == &Thread::current() : isMainThread());
     ASSERT(variant != AutoVariant);
 
     if (variant != NormalVariant)

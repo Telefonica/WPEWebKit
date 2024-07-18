@@ -25,19 +25,29 @@
 
 WI.CallFrameView = class CallFrameView extends WI.Object
 {
-    constructor(callFrame, showFunctionName)
+    constructor(callFrame, {showFunctionName, indicateIfBlackboxed, isAsyncBoundaryCallFrame, isTruncatedBoundaryCallFrame} = {})
     {
         console.assert(callFrame instanceof WI.CallFrame);
 
         var callFrameElement = document.createElement("div");
         callFrameElement.classList.add("call-frame", WI.CallFrameView.iconClassNameForCallFrame(callFrame));
+        if (isAsyncBoundaryCallFrame)
+            callFrameElement.classList.add("async-boundary");
+        if (isTruncatedBoundaryCallFrame)
+            callFrameElement.classList.add("truncated-boundary");
 
         var subtitleElement = document.createElement("span");
         subtitleElement.classList.add("subtitle");
 
         var sourceCodeLocation = callFrame.sourceCodeLocation;
         if (sourceCodeLocation) {
-            WI.linkifyElement(callFrameElement, sourceCodeLocation);
+            if (indicateIfBlackboxed)
+                callFrameElement.classList.toggle("blackboxed", callFrame.blackboxed);
+
+            WI.linkifyElement(callFrameElement, sourceCodeLocation, {
+                ignoreNetworkTab: true,
+                ignoreSearchTab: true,
+            });
 
             var linkElement = document.createElement("a");
             linkElement.classList.add("source-link");
@@ -46,7 +56,7 @@ WI.CallFrameView = class CallFrameView extends WI.Object
             if (showFunctionName) {
                 var separatorElement = document.createElement("span");
                 separatorElement.classList.add("separator");
-                separatorElement.textContent = " — ";
+                separatorElement.textContent = ` ${emDash} `;
                 subtitleElement.append(separatorElement);
             }
 
@@ -63,7 +73,7 @@ WI.CallFrameView = class CallFrameView extends WI.Object
             var imgElement = document.createElement("img");
             imgElement.classList.add("icon");
 
-            titleElement.append(imgElement, callFrame.functionName || WI.UIString("(anonymous function)"));
+            titleElement.append(imgElement, callFrame.displayName);
         }
 
         callFrameElement.append(titleElement, subtitleElement);

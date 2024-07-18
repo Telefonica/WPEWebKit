@@ -31,15 +31,15 @@
 #import "DOMNodeInternal.h"
 #import "DOMStyleSheetInternal.h"
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/MediaList.h>
 #import <WebCore/Node.h>
 #import <WebCore/StyleSheet.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL reinterpret_cast<WebCore::StyleSheet*>(_internal)
 
@@ -111,12 +111,14 @@ DOMStyleSheet *kit(WebCore::StyleSheet* value)
     if (!value)
         return nil;
     if (DOMStyleSheet *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMStyleSheet *wrapper = [[kitClass(value) alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    RetainPtr<DOMStyleSheet> wrapper = adoptNS([[kitClass(value) alloc] _init]);
     if (!wrapper)
         return nil;
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
+
+#undef IMPL

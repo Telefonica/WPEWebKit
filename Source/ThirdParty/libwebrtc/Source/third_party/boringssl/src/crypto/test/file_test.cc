@@ -28,11 +28,15 @@
 #include <openssl/err.h>
 
 #include "../internal.h"
+#include "./test_util.h"
 
 
 FileTest::FileTest(std::unique_ptr<FileTest::LineReader> reader,
-                   std::function<void(const std::string &)> comment_callback)
-    : reader_(std::move(reader)), comment_callback_(comment_callback) {}
+                   std::function<void(const std::string &)> comment_callback,
+                   bool is_kas_test)
+    : reader_(std::move(reader)),
+      is_kas_test_(is_kas_test),
+      comment_callback_(std::move(comment_callback)) {}
 
 FileTest::~FileTest() {}
 
@@ -121,9 +125,16 @@ FileTest::ReadResult FileTest::ReadNext() {
         in_instruction_block = false;
         // Delimit instruction block from test with a blank line.
         current_test_ += "\r\n";
+      } else if (is_kas_test_) {
+        // KAS tests have random blank lines scattered around.
+        current_test_ += "\r\n";
       }
     } else if (buf[0] == '#') {
-      if (comment_callback_) {
+      if (is_kas_test_ && seen_non_comment_) {
+        // KAS tests have comments after the initial comment block which need
+        // to be included in the corresponding place in the output.
+        current_test_ += std::string(buf.get());
+      } else if (comment_callback_) {
         comment_callback_(buf.get());
       }
       // Otherwise ignore comments.
@@ -133,6 +144,7 @@ FileTest::ReadResult FileTest::ReadNext() {
       // request files are hopelessly inconsistent.
     } else if (buf[0] == '[') {  // Inside an instruction block.
       is_at_new_instruction_block_ = true;
+      seen_non_comment_ = true;
       if (start_line_ != 0) {
         // Instructions should be separate blocks.
         fprintf(stderr, "Line %u is an instruction in a test case.\n", line_);
@@ -144,17 +156,30 @@ FileTest::ReadResult FileTest::ReadNext() {
       }
 
       // Parse the line as an instruction ("[key = value]" or "[key]").
-      std::string kv = StripSpace(buf.get(), len);
-      if (kv[kv.size() - 1] != ']') {
-        fprintf(stderr, "Line %u, invalid instruction: %s\n", line_,
-                kv.c_str());
-        return kReadError;
+
+      // KAS tests contain invalid syntax.
+      std::string kv = buf.get();
+      const bool is_broken_kas_instruction =
+          is_kas_test_ &&
+          (kv == "[SHA(s) supported (Used for hashing Z): SHA512 \r\n");
+
+      if (!is_broken_kas_instruction) {
+        kv = StripSpace(buf.get(), len);
+        if (kv[kv.size() - 1] != ']') {
+          fprintf(stderr, "Line %u, invalid instruction: '%s'\n", line_,
+                  kv.c_str());
+          return kReadError;
+        }
+      } else {
+        // Just remove the newline for the broken instruction.
+        kv = kv.substr(0, kv.size() - 2);
       }
+
       current_test_ += kv + "\r\n";
       kv = std::string(kv.begin() + 1, kv.end() - 1);
 
       for (;;) {
-        size_t idx = kv.find(",");
+        size_t idx = kv.find(',');
         if (idx == std::string::npos) {
           idx = kv.size();
         }
@@ -180,11 +205,10 @@ FileTest::ReadResult FileTest::ReadNext() {
 
       // Duplicate keys are rewritten to have “/2”, “/3”, … suffixes.
       std::string mapped_key = key;
-      for (unsigned i = 2; attributes_.count(mapped_key) != 0; i++) {
-        char suffix[32];
-        snprintf(suffix, sizeof(suffix), "/%u", i);
-        suffix[sizeof(suffix)-1] = 0;
-        mapped_key = key + suffix;
+      // If absent, the value will be zero-initialized.
+      const size_t num_occurrences = ++attribute_count_[key];
+      if (num_occurrences > 1) {
+        mapped_key += "/" + std::to_string(num_occurrences);
       }
 
       unused_attributes_.insert(mapped_key);
@@ -262,85 +286,40 @@ bool FileTest::GetInstruction(std::string *out_value, const std::string &key) {
   return true;
 }
 
+void FileTest::IgnoreAllUnusedInstructions() {
+  unused_instructions_.clear();
+}
+
+const std::string &FileTest::GetInstructionOrDie(const std::string &key) {
+  if (!HasInstruction(key)) {
+    abort();
+  }
+  return instructions_[key];
+}
+
+bool FileTest::GetInstructionBytes(std::vector<uint8_t> *out,
+                                   const std::string &key) {
+  std::string value;
+  return GetInstruction(&value, key) && ConvertToBytes(out, value);
+}
+
 const std::string &FileTest::CurrentTestToString() const {
   return current_test_;
 }
 
-static bool FromHexDigit(uint8_t *out, char c) {
-  if ('0' <= c && c <= '9') {
-    *out = c - '0';
-    return true;
-  }
-  if ('a' <= c && c <= 'f') {
-    *out = c - 'a' + 10;
-    return true;
-  }
-  if ('A' <= c && c <= 'F') {
-    *out = c - 'A' + 10;
-    return true;
-  }
-  return false;
-}
-
 bool FileTest::GetBytes(std::vector<uint8_t> *out, const std::string &key) {
   std::string value;
-  if (!GetAttribute(&value, key)) {
-    return false;
-  }
-
-  if (value.size() >= 2 && value[0] == '"' && value[value.size() - 1] == '"') {
-    out->assign(value.begin() + 1, value.end() - 1);
-    return true;
-  }
-
-  if (value.size() % 2 != 0) {
-    PrintLine("Error decoding value: %s", value.c_str());
-    return false;
-  }
-  out->clear();
-  out->reserve(value.size() / 2);
-  for (size_t i = 0; i < value.size(); i += 2) {
-    uint8_t hi, lo;
-    if (!FromHexDigit(&hi, value[i]) || !FromHexDigit(&lo, value[i + 1])) {
-      PrintLine("Error decoding value: %s", value.c_str());
-      return false;
-    }
-    out->push_back((hi << 4) | lo);
-  }
-  return true;
-}
-
-static std::string EncodeHex(const uint8_t *in, size_t in_len) {
-  static const char kHexDigits[] = "0123456789abcdef";
-  std::string ret;
-  ret.reserve(in_len * 2);
-  for (size_t i = 0; i < in_len; i++) {
-    ret += kHexDigits[in[i] >> 4];
-    ret += kHexDigits[in[i] & 0xf];
-  }
-  return ret;
-}
-
-bool FileTest::ExpectBytesEqual(const uint8_t *expected, size_t expected_len,
-                                const uint8_t *actual, size_t actual_len) {
-  if (expected_len == actual_len &&
-      OPENSSL_memcmp(expected, actual, expected_len) == 0) {
-    return true;
-  }
-
-  std::string expected_hex = EncodeHex(expected, expected_len);
-  std::string actual_hex = EncodeHex(actual, actual_len);
-  PrintLine("Expected: %s", expected_hex.c_str());
-  PrintLine("Actual:   %s", actual_hex.c_str());
-  return false;
+  return GetAttribute(&value, key) && ConvertToBytes(out, value);
 }
 
 void FileTest::ClearTest() {
   start_line_ = 0;
   type_.clear();
   parameter_.clear();
+  attribute_count_.clear();
   attributes_.clear();
   unused_attributes_.clear();
+  unused_instructions_.clear();
   current_test_ = "";
 }
 
@@ -355,6 +334,20 @@ void FileTest::OnKeyUsed(const std::string &key) {
 
 void FileTest::OnInstructionUsed(const std::string &key) {
   unused_instructions_.erase(key);
+}
+
+bool FileTest::ConvertToBytes(std::vector<uint8_t> *out,
+                              const std::string &value) {
+  if (value.size() >= 2 && value[0] == '"' && value[value.size() - 1] == '"') {
+    out->assign(value.begin() + 1, value.end() - 1);
+    return true;
+  }
+
+  if (!DecodeHex(out, value)) {
+    PrintLine("Error decoding value: %s", value.c_str());
+    return false;
+  }
+  return true;
 }
 
 bool FileTest::IsAtNewInstructionBlock() const {
@@ -421,7 +414,7 @@ int FileTestMain(const FileTest::Options &opts) {
     return 1;
   }
 
-  FileTest t(std::move(reader), opts.comment_callback);
+  FileTest t(std::move(reader), opts.comment_callback, opts.is_kas_test);
 
   bool failed = false;
   while (true) {
@@ -464,4 +457,8 @@ int FileTestMain(const FileTest::Options &opts) {
   }
 
   return failed ? 1 : 0;
+}
+
+void FileTest::SkipCurrent() {
+  ClearTest();
 }

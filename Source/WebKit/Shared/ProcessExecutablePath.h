@@ -32,6 +32,8 @@ namespace WebKit {
 String executablePathOfWebProcess();
 String executablePathOfPluginProcess();
 String executablePathOfNetworkProcess();
-String executablePathOfStorageProcess();
+#if ENABLE(GPU_PROCESS)
+String executablePathOfGPUProcess();
+#endif
 
 }

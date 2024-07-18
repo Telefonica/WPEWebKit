@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,22 +26,23 @@
 #include "config.h"
 #include "LegacyCDMSessionClearKey.h"
 
-#include "JSMainThreadExecState.h"
+#include "JSExecState.h"
 #include "Logging.h"
-#include "TextEncoding.h"
+#include <pal/text/TextEncoding.h>
 #include "WebKitMediaKeyError.h"
-#include <runtime/JSGlobalObject.h>
-#include <runtime/JSLock.h>
-#include <runtime/JSONObject.h>
-#include <runtime/VM.h>
+#include <JavaScriptCore/BuiltinNames.h>
+#include <JavaScriptCore/JSGlobalObjectInlines.h>
+#include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/JSONObject.h>
+#include <JavaScriptCore/VM.h>
 #include <wtf/UUID.h>
 #include <wtf/text/Base64.h>
 
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA)
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 static VM& clearKeyVM()
 {
@@ -49,15 +50,13 @@ static VM& clearKeyVM()
     return vm;
 }
 
-CDMSessionClearKey::CDMSessionClearKey(CDMSessionClient* client)
+CDMSessionClearKey::CDMSessionClearKey(LegacyCDMSessionClient& client)
     : m_client(client)
-    , m_sessionId(createCanonicalUUIDString())
+    , m_sessionId(createVersion4UUIDString())
 {
 }
 
-CDMSessionClearKey::~CDMSessionClearKey()
-{
-}
+CDMSessionClearKey::~CDMSessionClearKey() = default;
 
 RefPtr<Uint8Array> CDMSessionClearKey::generateKeyRequest(const String& mimeType, Uint8Array* initData, String& destinationURL, unsigned short& errorCode, uint32_t& systemCode)
 {
@@ -72,7 +71,7 @@ RefPtr<Uint8Array> CDMSessionClearKey::generateKeyRequest(const String& mimeType
     m_initData = initData;
 
     bool sawError = false;
-    String keyID = UTF8Encoding().decode(reinterpret_cast_ptr<char*>(m_initData->baseAddress()), m_initData->byteLength(), true, sawError);
+    String keyID = PAL::UTF8Encoding().decode(static_cast<char*>(m_initData->baseAddress()), m_initData->byteLength(), true, sawError);
     if (sawError) {
         errorCode = WebKitMediaKeyError::MEDIA_KEYERR_CLIENT;
         return nullptr;
@@ -103,15 +102,15 @@ bool CDMSessionClearKey::update(Uint8Array* rawKeysData, RefPtr<Uint8Array>& nex
         JSLockHolder lock(vm);
         auto scope = DECLARE_THROW_SCOPE(vm);
         auto* globalObject = JSGlobalObject::create(vm, JSGlobalObject::createStructure(vm, jsNull()));
-        auto& state = *globalObject->globalExec();
+        auto& lexicalGlobalObject = *globalObject;
 
-        auto keysDataValue = JSONParse(&state, rawKeysString);
+        auto keysDataValue = JSONParse(&lexicalGlobalObject, rawKeysString);
         if (scope.exception() || !keysDataValue.isObject()) {
             LOG(Media, "CDMSessionClearKey::update(%p) - failed: invalid JSON", this);
             break;
         }
 
-        auto keysArrayValue = asObject(keysDataValue)->get(&state, Identifier::fromString(&state, "keys"));
+        auto keysArrayValue = asObject(keysDataValue)->get(&lexicalGlobalObject, vm.propertyNames->builtinNames().keysPublicName());
         if (scope.exception() || !isJSArray(keysArrayValue)) {
             LOG(Media, "CDMSessionClearKey::update(%p) - failed: keys array missing or empty", this);
             break;
@@ -126,7 +125,7 @@ bool CDMSessionClearKey::update(Uint8Array* rawKeysData, RefPtr<Uint8Array>& nex
 
         bool foundValidKey = false;
         for (unsigned i = 0; i < length; ++i) {
-            auto keyValue = keysArray->getIndex(&state, i);
+            auto keyValue = keysArray->getIndex(&lexicalGlobalObject, i);
 
             if (scope.exception() || !keyValue.isObject()) {
                 LOG(Media, "CDMSessionClearKey::update(%p) - failed: null keyDictionary", this);
@@ -135,49 +134,49 @@ bool CDMSessionClearKey::update(Uint8Array* rawKeysData, RefPtr<Uint8Array>& nex
 
             auto keyObject = asObject(keyValue);
 
-            auto getStringProperty = [&scope, &state, &keyObject](const char* name) -> String {
-                auto value = keyObject->get(&state, Identifier::fromString(&state, name));
+            auto getStringProperty = [&scope, &lexicalGlobalObject, &keyObject, &vm](ASCIILiteral name) -> String {
+                auto value = keyObject->get(&lexicalGlobalObject, Identifier::fromString(vm, name));
                 if (scope.exception() || !value.isString())
                     return { };
 
-                auto string = asString(value)->value(&state);
+                auto string = asString(value)->value(&lexicalGlobalObject);
                 if (scope.exception())
                     return { };
                 
                 return string;
             };
 
-            auto algorithm = getStringProperty("alg");
-            if (!equalLettersIgnoringASCIICase(algorithm, "a128kw")) {
+            auto algorithm = getStringProperty("alg"_s);
+            if (!equalLettersIgnoringASCIICase(algorithm, "a128kw"_s)) {
                 LOG(Media, "CDMSessionClearKey::update(%p) - failed: algorithm unsupported", this);
                 continue;
             }
 
-            auto keyType = getStringProperty("kty");
-            if (!equalLettersIgnoringASCIICase(keyType, "oct")) {
+            auto keyType = getStringProperty("kty"_s);
+            if (!equalLettersIgnoringASCIICase(keyType, "oct"_s)) {
                 LOG(Media, "CDMSessionClearKey::update(%p) - failed: keyType unsupported", this);
                 continue;
             }
 
-            auto keyId = getStringProperty("kid");
+            auto keyId = getStringProperty("kid"_s);
             if (keyId.isEmpty()) {
                 LOG(Media, "CDMSessionClearKey::update(%p) - failed: keyId missing or empty", this);
                 continue;
             }
 
-            auto rawKeyData = getStringProperty("k");
+            auto rawKeyData = getStringProperty("k"_s);
             if (rawKeyData.isEmpty())  {
                 LOG(Media, "CDMSessionClearKey::update(%p) - failed: key missing or empty", this);
                 continue;
             }
 
-            Vector<uint8_t> keyData;
-            if (!base64Decode(rawKeyData, keyData) || keyData.isEmpty()) {
+            auto keyData = base64Decode(rawKeyData);
+            if (!keyData || keyData->isEmpty()) {
                 LOG(Media, "CDMSessionClearKey::update(%p) - failed: unable to base64 decode key", this);
                 continue;
             }
 
-            m_cachedKeys.set(keyId, WTFMove(keyData));
+            m_cachedKeys.set(keyId, WTFMove(*keyData));
             foundValidKey = true;
         }
 
@@ -196,7 +195,7 @@ RefPtr<ArrayBuffer> CDMSessionClearKey::cachedKeyForKeyID(const String& keyId) c
         return nullptr;
 
     auto keyData = m_cachedKeys.get(keyId);
-    RefPtr<Uint8Array> keyDataArray = Uint8Array::create(keyData.data(), keyData.size());
+    auto keyDataArray = Uint8Array::create(keyData.data(), keyData.size());
     return keyDataArray->unsharedBuffer();
 }
 

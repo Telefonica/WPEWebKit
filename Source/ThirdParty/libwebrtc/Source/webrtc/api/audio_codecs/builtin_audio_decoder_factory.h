@@ -8,18 +8,21 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_API_AUDIO_CODECS_BUILTIN_AUDIO_DECODER_FACTORY_H_
-#define WEBRTC_API_AUDIO_CODECS_BUILTIN_AUDIO_DECODER_FACTORY_H_
+#ifndef API_AUDIO_CODECS_BUILTIN_AUDIO_DECODER_FACTORY_H_
+#define API_AUDIO_CODECS_BUILTIN_AUDIO_DECODER_FACTORY_H_
 
-#include "webrtc/api/audio_codecs/audio_decoder_factory.h"
-#include "webrtc/base/scoped_ref_ptr.h"
+#include "api/audio_codecs/audio_decoder_factory.h"
+#include "api/scoped_refptr.h"
 
 namespace webrtc {
 
 // Creates a new factory that can create the built-in types of audio decoders.
-// NOTE: This function is still under development and may change without notice.
+// Note: This will link with all the code implementing those codecs, so if you
+// only need a subset of the codecs, consider using
+// CreateAudioDecoderFactory<...codecs listed here...>() or
+// CreateOpusAudioDecoderFactory() instead.
 rtc::scoped_refptr<AudioDecoderFactory> CreateBuiltinAudioDecoderFactory();
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_AUDIO_CODECS_BUILTIN_AUDIO_DECODER_FACTORY_H_
+#endif  // API_AUDIO_CODECS_BUILTIN_AUDIO_DECODER_FACTORY_H_

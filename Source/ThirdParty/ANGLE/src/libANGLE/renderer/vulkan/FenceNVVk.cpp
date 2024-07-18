@@ -10,34 +10,44 @@
 #include "libANGLE/renderer/vulkan/FenceNVVk.h"
 
 #include "common/debug.h"
+#include "libANGLE/Context.h"
+#include "libANGLE/renderer/vulkan/ContextVk.h"
+#include "libANGLE/renderer/vulkan/vk_utils.h"
 
 namespace rx
 {
 
-FenceNVVk::FenceNVVk() : FenceNVImpl()
+FenceNVVk::FenceNVVk() : FenceNVImpl() {}
+
+FenceNVVk::~FenceNVVk() {}
+
+void FenceNVVk::onDestroy(const gl::Context *context)
 {
+    mFenceSync.releaseToRenderer(vk::GetImpl(context)->getRenderer());
 }
 
-FenceNVVk::~FenceNVVk()
+angle::Result FenceNVVk::set(const gl::Context *context, GLenum condition)
 {
+    ASSERT(condition == GL_ALL_COMPLETED_NV);
+    return mFenceSync.initialize(vk::GetImpl(context), false);
 }
 
-gl::Error FenceNVVk::set(GLenum condition)
+angle::Result FenceNVVk::test(const gl::Context *context, GLboolean *outFinished)
 {
-    UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
+    ContextVk *contextVk = vk::GetImpl(context);
+    bool signaled        = false;
+    ANGLE_TRY(mFenceSync.getStatus(contextVk, contextVk, &signaled));
+
+    ASSERT(outFinished);
+    *outFinished = signaled ? GL_TRUE : GL_FALSE;
+    return angle::Result::Continue;
 }
 
-gl::Error FenceNVVk::test(GLboolean *outFinished)
+angle::Result FenceNVVk::finish(const gl::Context *context)
 {
-    UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
-}
-
-gl::Error FenceNVVk::finish()
-{
-    UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
+    VkResult outResult;
+    ContextVk *contextVk = vk::GetImpl(context);
+    return mFenceSync.clientWait(contextVk, contextVk, true, UINT64_MAX, &outResult);
 }
 
 }  // namespace rx

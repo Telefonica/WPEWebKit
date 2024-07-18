@@ -23,16 +23,22 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import "WKBrowsingContextHandle.h"
+#import "WKBrowsingContextHandlePrivate.h"
+#import "WebPageProxyIdentifier.h"
+#import <WebCore/PageIdentifier.h>
+#import <wtf/NakedRef.h>
 
-#if WK_API_ENABLED
+namespace WebKit {
+class WebPage;
+class WebPageProxy;
+}
 
 @interface WKBrowsingContextHandle ()
 
-@property (nonatomic, readonly, getter = _pageID) uint64_t pageID;
+@property (nonatomic, readonly, getter=_pageProxyID) WebKit::WebPageProxyIdentifier pageProxyID;
+@property (nonatomic, readonly, getter=_webPageID) uint64_t webPageID;
 
-- (id)_initWithPageID:(uint64_t)pageID;
-
+- (id)_initWithPageProxy:(NakedRef<WebKit::WebPageProxy>)page;
+- (id)_initWithPage:(NakedRef<WebKit::WebPage>)page;
+- (id)_initWithPageProxyID:(WebKit::WebPageProxyIdentifier)pageProxyID andWebPageID:(WebCore::PageIdentifier)webPageID;
 @end
-
-#endif // WK_API_ENABLED

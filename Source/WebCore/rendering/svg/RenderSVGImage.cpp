@@ -35,46 +35,76 @@
 #include "RenderLayer.h"
 #include "RenderSVGResource.h"
 #include "RenderSVGResourceFilter.h"
+#include "SVGElementTypeHelpers.h"
 #include "SVGImageElement.h"
 #include "SVGRenderingContext.h"
 #include "SVGResources.h"
 #include "SVGResourcesCache.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/StackStats.h>
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderSVGImage);
+
 RenderSVGImage::RenderSVGImage(SVGImageElement& element, RenderStyle&& style)
-    : RenderSVGModelObject(element, WTFMove(style))
+    : LegacyRenderSVGModelObject(element, WTFMove(style))
     , m_needsBoundariesUpdate(true)
     , m_needsTransformUpdate(true)
-    , m_imageResource(std::make_unique<RenderImageResource>())
+    , m_imageResource(makeUnique<RenderImageResource>())
 {
     imageResource().initialize(*this);
 }
 
-RenderSVGImage::~RenderSVGImage()
-{
-}
+RenderSVGImage::~RenderSVGImage() = default;
 
 void RenderSVGImage::willBeDestroyed()
 {
     imageResource().shutdown();
-    RenderSVGModelObject::willBeDestroyed();
+    LegacyRenderSVGModelObject::willBeDestroyed();
 }
 
 SVGImageElement& RenderSVGImage::imageElement() const
 {
-    return downcast<SVGImageElement>(RenderSVGModelObject::element());
+    return downcast<SVGImageElement>(LegacyRenderSVGModelObject::element());
+}
+
+FloatRect RenderSVGImage::calculateObjectBoundingBox() const
+{
+    LayoutSize intrinsicSize;
+    if (CachedImage* cachedImage = imageResource().cachedImage())
+        intrinsicSize = cachedImage->imageSizeForRenderer(nullptr, style().effectiveZoom());
+
+    SVGLengthContext lengthContext(&imageElement());
+
+    Length width = style().width();
+    Length height = style().height();
+
+    float concreteWidth;
+    if (!width.isAuto())
+        concreteWidth = lengthContext.valueForLength(width, SVGLengthMode::Width);
+    else if (!height.isAuto() && !intrinsicSize.isEmpty())
+        concreteWidth = lengthContext.valueForLength(height, SVGLengthMode::Height) * intrinsicSize.width() / intrinsicSize.height();
+    else
+        concreteWidth = intrinsicSize.width();
+
+    float concreteHeight;
+    if (!height.isAuto())
+        concreteHeight = lengthContext.valueForLength(height, SVGLengthMode::Height);
+    else if (!width.isAuto() && !intrinsicSize.isEmpty())
+        concreteHeight = lengthContext.valueForLength(width, SVGLengthMode::Width) * intrinsicSize.height() / intrinsicSize.width();
+    else
+        concreteHeight = intrinsicSize.height();
+
+    return { imageElement().x().value(lengthContext), imageElement().y().value(lengthContext), concreteWidth, concreteHeight };
 }
 
 bool RenderSVGImage::updateImageViewport()
 {
     FloatRect oldBoundaries = m_objectBoundingBox;
+    m_objectBoundingBox = calculateObjectBoundingBox();
+
     bool updatedViewport = false;
-
-    SVGLengthContext lengthContext(&imageElement());
-    m_objectBoundingBox = FloatRect(imageElement().x().value(lengthContext), imageElement().y().value(lengthContext), imageElement().width().value(lengthContext), imageElement().height().value(lengthContext));
-
     URL imageSourceURL = document().completeURL(imageElement().imageSourceURL());
 
     // Images with preserveAspectRatio=none should force non-uniform scaling. This can be achieved
@@ -105,7 +135,7 @@ void RenderSVGImage::layout()
     StackStats::LayoutCheckPoint layoutCheckPoint;
     ASSERT(needsLayout());
 
-    LayoutRepainter repainter(*this, SVGRenderSupport::checkForSVGRepaintDuringLayout(*this) && selfNeedsLayout());
+    LayoutRepainter repainter(*this, SVGRenderSupport::checkForSVGRepaintDuringLayout(*this) && selfNeedsLayout(), RepaintOutlineBounds::No);
     updateImageViewport();
 
     bool transformOrBoundariesUpdate = m_needsTransformUpdate || m_needsBoundariesUpdate;
@@ -115,12 +145,8 @@ void RenderSVGImage::layout()
     }
 
     if (m_needsBoundariesUpdate) {
-        m_repaintBoundingBoxExcludingShadow = m_objectBoundingBox;
-        SVGRenderSupport::intersectRepaintRectWithResources(*this, m_repaintBoundingBoxExcludingShadow);
-
-        m_repaintBoundingBox = m_repaintBoundingBoxExcludingShadow;
-        SVGRenderSupport::intersectRepaintRectWithShadows(*this, m_repaintBoundingBox);
-
+        m_repaintBoundingBox = m_objectBoundingBox;
+        SVGRenderSupport::intersectRepaintRectWithResources(*this, m_repaintBoundingBox);
         m_needsBoundariesUpdate = false;
     }
 
@@ -130,7 +156,7 @@ void RenderSVGImage::layout()
 
     // If our bounds changed, notify the parents.
     if (transformOrBoundariesUpdate)
-        RenderSVGModelObject::setNeedsBoundariesUpdate();
+        LegacyRenderSVGModelObject::setNeedsBoundariesUpdate();
 
     repainter.repaintAfterLayout();
     clearNeedsLayout();
@@ -138,8 +164,8 @@ void RenderSVGImage::layout()
 
 void RenderSVGImage::paint(PaintInfo& paintInfo, const LayoutPoint&)
 {
-    if (paintInfo.context().paintingDisabled() || paintInfo.phase != PaintPhaseForeground
-        || style().visibility() == HIDDEN || !imageResource().cachedImage())
+    if (paintInfo.context().paintingDisabled() || paintInfo.phase != PaintPhase::Foreground
+        || style().visibility() == Visibility::Hidden || !imageResource().cachedImage())
         return;
 
     FloatRect boundingBox = repaintRectInLocalCoordinates();
@@ -150,11 +176,11 @@ void RenderSVGImage::paint(PaintInfo& paintInfo, const LayoutPoint&)
     GraphicsContextStateSaver stateSaver(childPaintInfo.context());
     childPaintInfo.applyTransform(m_localTransform);
 
-    if (childPaintInfo.phase == PaintPhaseForeground) {
+    if (childPaintInfo.phase == PaintPhase::Foreground) {
         SVGRenderingContext renderingContext(*this, childPaintInfo);
 
         if (renderingContext.isRenderingPrepared()) {
-            if (style().svgStyle().bufferedRendering() == BR_STATIC && renderingContext.bufferForeground(m_bufferedForeground))
+            if (style().svgStyle().bufferedRendering() == BufferedRendering::Static && renderingContext.bufferForeground(m_bufferedForeground))
                 return;
 
             paintForeground(childPaintInfo);
@@ -181,7 +207,7 @@ void RenderSVGImage::paintForeground(PaintInfo& paintInfo)
 
 void RenderSVGImage::invalidateBufferedForeground()
 {
-    m_bufferedForeground.reset();
+    m_bufferedForeground = nullptr;
 }
 
 bool RenderSVGImage::nodeAtFloatPoint(const HitTestRequest& request, HitTestResult& result, const FloatPoint& pointInParent, HitTestAction hitTestAction)
@@ -190,18 +216,20 @@ bool RenderSVGImage::nodeAtFloatPoint(const HitTestRequest& request, HitTestResu
     if (hitTestAction != HitTestForeground)
         return false;
 
-    PointerEventsHitRules hitRules(PointerEventsHitRules::SVG_IMAGE_HITTESTING, request, style().pointerEvents());
-    bool isVisible = (style().visibility() == VISIBLE);
+    PointerEventsHitRules hitRules(PointerEventsHitRules::SVG_IMAGE_HITTESTING, request, style().effectivePointerEvents());
+    bool isVisible = (style().visibility() == Visibility::Visible);
     if (isVisible || !hitRules.requireVisible) {
-        FloatPoint localPoint = localToParentTransform().inverse().value_or(AffineTransform()).mapPoint(pointInParent);
+        FloatPoint localPoint = valueOrDefault(localToParentTransform().inverse()).mapPoint(pointInParent);
             
         if (!SVGRenderSupport::pointInClippingArea(*this, localPoint))
             return false;
 
+        SVGHitTestCycleDetectionScope hitTestScope(*this);
+
         if (hitRules.canHitFill) {
             if (m_objectBoundingBox.contains(localPoint)) {
                 updateHitTestResult(result, LayoutPoint(localPoint));
-                if (result.addNodeToListBasedTestResult(&imageElement(), request, localPoint) == HitTestProgress::Stop)
+                if (result.addNodeToListBasedTestResult(nodeForHitTest(), request, flooredLayoutPoint(localPoint)) == HitTestProgress::Stop)
                     return true;
             }
         }
@@ -223,7 +251,8 @@ void RenderSVGImage::imageChanged(WrappedImagePtr, const IntRect*)
     // Update the SVGImageCache sizeAndScales entry in case image loading finished after layout.
     // (https://bugs.webkit.org/show_bug.cgi?id=99489)
     m_objectBoundingBox = FloatRect();
-    updateImageViewport();
+    if (updateImageViewport())
+        setNeedsLayout();
 
     invalidateBufferedForeground();
 

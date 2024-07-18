@@ -8,12 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "common_audio/smoothing_filter.h"
+
 #include <cmath>
 #include <memory>
 
-#include "webrtc/base/fakeclock.h"
-#include "webrtc/common_audio/smoothing_filter.h"
-#include "webrtc/test/gtest.h"
+#include "rtc_base/fake_clock.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
@@ -25,7 +26,7 @@ constexpr int64_t kClockInitialTime = 123456;
 struct SmoothingFilterStates {
   explicit SmoothingFilterStates(int init_time_ms)
       : smoothing_filter(init_time_ms) {
-    fake_clock.AdvanceTime(rtc::TimeDelta::FromMilliseconds(kClockInitialTime));
+    fake_clock.AdvanceTime(TimeDelta::Millis(kClockInitialTime));
   }
   rtc::ScopedFakeClock fake_clock;
   SmoothingFilterImpl smoothing_filter;
@@ -33,7 +34,7 @@ struct SmoothingFilterStates {
 
 // This function does the following:
 //   1. Add a sample to filter at current clock,
-//   2. Advance the clock by |advance_time_ms|,
+//   2. Advance the clock by `advance_time_ms`,
 //   3. Get the output of both SmoothingFilter and verify that it equals to an
 //      expected value.
 void CheckOutput(SmoothingFilterStates* states,
@@ -41,8 +42,7 @@ void CheckOutput(SmoothingFilterStates* states,
                  int advance_time_ms,
                  float expected_ouput) {
   states->smoothing_filter.AddSample(sample);
-  states->fake_clock.AdvanceTime(
-      rtc::TimeDelta::FromMilliseconds(advance_time_ms));
+  states->fake_clock.AdvanceTime(TimeDelta::Millis(advance_time_ms));
   auto output = states->smoothing_filter.GetAverage();
   EXPECT_TRUE(output);
   EXPECT_NEAR(expected_ouput, *output, kMaxAbsError);
@@ -123,7 +123,8 @@ TEST(SmoothingFilterTest, InitTimeEqualsOne) {
   constexpr int kInitTimeMs = 1;
   SmoothingFilterStates states(kInitTimeMs);
   CheckOutput(&states, 1.0f, 1, 1.0f);
-  CheckOutput(&states, 0.5f, 1, 1.0f * exp(-1.0f) + (1.0f - exp(-1.0f)) * 0.5f);
+  CheckOutput(&states, 0.5f, 1,
+              1.0f * std::exp(-1.0f) + (1.0f - std::exp(-1.0f)) * 0.5f);
 }
 
 TEST(SmoothingFilterTest, GetAverageOutputsEmptyBeforeFirstSample) {
@@ -132,8 +133,7 @@ TEST(SmoothingFilterTest, GetAverageOutputsEmptyBeforeFirstSample) {
   EXPECT_FALSE(states.smoothing_filter.GetAverage());
   constexpr float kFirstSample = 1.2345f;
   states.smoothing_filter.AddSample(kFirstSample);
-  EXPECT_EQ(rtc::Optional<float>(kFirstSample),
-            states.smoothing_filter.GetAverage());
+  EXPECT_EQ(kFirstSample, states.smoothing_filter.GetAverage());
 }
 
 TEST(SmoothingFilterTest, CannotChangeTimeConstantDuringInitialization) {
@@ -141,23 +141,24 @@ TEST(SmoothingFilterTest, CannotChangeTimeConstantDuringInitialization) {
   SmoothingFilterStates states(kInitTimeMs);
   states.smoothing_filter.AddSample(0.0);
 
-  // During initialization, |SetTimeConstantMs| does not take effect.
-  states.fake_clock.AdvanceTime(
-      rtc::TimeDelta::FromMilliseconds(kInitTimeMs - 1));
+  // During initialization, `SetTimeConstantMs` does not take effect.
+  states.fake_clock.AdvanceTime(TimeDelta::Millis(kInitTimeMs - 1));
   states.smoothing_filter.AddSample(0.0);
 
   EXPECT_FALSE(states.smoothing_filter.SetTimeConstantMs(kInitTimeMs * 2));
-  EXPECT_NE(exp(-1.0f / (kInitTimeMs * 2)), states.smoothing_filter.alpha());
+  EXPECT_NE(std::exp(-1.0f / (kInitTimeMs * 2)),
+            states.smoothing_filter.alpha());
 
-  states.fake_clock.AdvanceTime(rtc::TimeDelta::FromMilliseconds(1));
+  states.fake_clock.AdvanceTime(TimeDelta::Millis(1));
   states.smoothing_filter.AddSample(0.0);
   // When initialization finishes, the time constant should be come
-  // |kInitTimeConstantMs|.
-  EXPECT_FLOAT_EQ(exp(-1.0f / kInitTimeMs), states.smoothing_filter.alpha());
+  // `kInitTimeConstantMs`.
+  EXPECT_FLOAT_EQ(std::exp(-1.0f / kInitTimeMs),
+                  states.smoothing_filter.alpha());
 
-  // After initialization, |SetTimeConstantMs| takes effect.
+  // After initialization, `SetTimeConstantMs` takes effect.
   EXPECT_TRUE(states.smoothing_filter.SetTimeConstantMs(kInitTimeMs * 2));
-  EXPECT_FLOAT_EQ(exp(-1.0f / (kInitTimeMs * 2)),
+  EXPECT_FLOAT_EQ(std::exp(-1.0f / (kInitTimeMs * 2)),
                   states.smoothing_filter.alpha());
 }
 

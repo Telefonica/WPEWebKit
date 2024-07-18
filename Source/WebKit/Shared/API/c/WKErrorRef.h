@@ -39,6 +39,7 @@ enum {
     kWKErrorCodeCannotUseRestrictedPort =                        103,
     kWKErrorCodeFrameLoadBlockedByContentBlocker =               104,
     kWKErrorCodeFrameLoadBlockedByContentFilter =                105,
+    kWKErrorCodeFrameLoadBlockedByRestrictions =                 106,
     kWKErrorCodeCannotFindPlugIn =                               200,
     kWKErrorCodeCannotLoadPlugIn =                               201,
     kWKErrorCodeJavaUnavailable =                                202,
@@ -46,11 +47,13 @@ enum {
     kWKErrorCodePlugInWillHandleLoad =                           204,
     kWKErrorCodeInsecurePlugInVersion =                          205,
     kWKErrorInternal =                                           300,
+    kWKErrorCodeCancelled =                                      302,
+    kWKErrorCodeFileDoesNotExist =                               303,
 };
 
-WK_EXPORT WKTypeID WKErrorGetTypeID();
+WK_EXPORT WKTypeID WKErrorGetTypeID(void);
 
-WK_EXPORT WKStringRef WKErrorCopyWKErrorDomain();
+WK_EXPORT WKStringRef WKErrorCopyWKErrorDomain(void);
 
 WK_EXPORT WKStringRef WKErrorCopyDomain(WKErrorRef error);
 WK_EXPORT int WKErrorGetErrorCode(WKErrorRef error);

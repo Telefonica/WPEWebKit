@@ -24,13 +24,9 @@
 
 #include "ConservativeRoots.h"
 #include "MachineContext.h"
-#include <setjmp.h>
-#include <stdlib.h>
 #include <wtf/BitVector.h>
 #include <wtf/PageBlock.h>
 #include <wtf/StdLibExtras.h>
-
-using namespace WTF;
 
 namespace JSC {
 
@@ -87,13 +83,13 @@ static void copyMemory(void* dst, const void* src, size_t size)
 {
     size_t dstAsSize = reinterpret_cast<size_t>(dst);
     size_t srcAsSize = reinterpret_cast<size_t>(src);
-    RELEASE_ASSERT(dstAsSize == WTF::roundUpToMultipleOf<sizeof(intptr_t)>(dstAsSize));
-    RELEASE_ASSERT(srcAsSize == WTF::roundUpToMultipleOf<sizeof(intptr_t)>(srcAsSize));
-    RELEASE_ASSERT(size == WTF::roundUpToMultipleOf<sizeof(intptr_t)>(size));
+    RELEASE_ASSERT(dstAsSize == WTF::roundUpToMultipleOf<sizeof(CPURegister)>(dstAsSize));
+    RELEASE_ASSERT(srcAsSize == WTF::roundUpToMultipleOf<sizeof(CPURegister)>(srcAsSize));
+    RELEASE_ASSERT(size == WTF::roundUpToMultipleOf<sizeof(CPURegister)>(size));
 
-    intptr_t* dstPtr = reinterpret_cast<intptr_t*>(dst);
-    const intptr_t* srcPtr = reinterpret_cast<const intptr_t*>(src);
-    size /= sizeof(intptr_t);
+    CPURegister* dstPtr = reinterpret_cast<CPURegister*>(dst);
+    const CPURegister* srcPtr = reinterpret_cast<const CPURegister*>(src);
+    size /= sizeof(CPURegister);
     while (size--)
         *dstPtr++ = *srcPtr++;
 }
@@ -104,15 +100,15 @@ static void copyMemory(void* dst, const void* src, size_t size)
 // acquire a lock. Since 'thread' is suspended, trying to acquire a lock
 // will deadlock if 'thread' holds that lock.
 // This function, specifically the memory copying, was causing problems with Address Sanitizer in
-// apps. Since we cannot blacklist the system memcpy we must use our own naive implementation,
+// apps. Since we cannot disallow the system memcpy we must use our own naive implementation,
 // copyMemory, for ASan to work on either instrumented or non-instrumented builds. This is not a
 // significant performance loss as tryCopyOtherThreadStack is only called as part of an O(heapsize)
 // operation. As the heap is generally much larger than the stack the performance hit is minimal.
 // See: https://bugs.webkit.org/show_bug.cgi?id=146297
-void MachineThreads::tryCopyOtherThreadStack(Thread& thread, void* buffer, size_t capacity, size_t* size)
+void MachineThreads::tryCopyOtherThreadStack(const ThreadSuspendLocker& locker, Thread& thread, void* buffer, size_t capacity, size_t* size)
 {
     PlatformRegisters registers;
-    size_t registersSize = thread.getRegisters(registers);
+    size_t registersSize = thread.getRegisters(locker, registers);
 
     // This is a workaround for <rdar://problem/27607384>. libdispatch recycles work
     // queue threads without running pthread exit destructors. This can cause us to scan a
@@ -135,55 +131,59 @@ void MachineThreads::tryCopyOtherThreadStack(Thread& thread, void* buffer, size_
     *size += stack.second;
 }
 
-bool MachineThreads::tryCopyOtherThreadStacks(const AbstractLocker& locker, void* buffer, size_t capacity, size_t* size)
+bool MachineThreads::tryCopyOtherThreadStacks(const AbstractLocker& locker, void* buffer, size_t capacity, size_t* size, Thread& currentThreadForGC)
 {
     // Prevent two VMs from suspending each other's threads at the same time,
     // which can cause deadlock: <rdar://problem/20300842>.
-    static StaticLock mutex;
-    std::lock_guard<StaticLock> lock(mutex);
+    static Lock suspendLock;
+    Locker suspendLocker { suspendLock };
 
     *size = 0;
 
     Thread& currentThread = Thread::current();
-    const auto& threads = m_threadGroup->threads(locker);
+    const ListHashSet<Ref<Thread>>& threads = m_threadGroup->threads(locker);
     BitVector isSuspended(threads.size());
 
     {
-        unsigned index = 0;
-        for (auto& thread : threads) {
-            if (thread.get() != currentThread) {
-                auto result = thread->suspend();
-                if (result)
-                    isSuspended.set(index);
-                else {
+        ThreadSuspendLocker threadSuspendLocker;
+        {
+            unsigned index = 0;
+            for (const Ref<Thread>& thread : threads) {
+                if (thread.ptr() != &currentThread
+                    && thread.ptr() != &currentThreadForGC) {
+                    auto result = thread->suspend(threadSuspendLocker);
+                    if (result)
+                        isSuspended.set(index);
+                    else {
 #if OS(DARWIN)
-                    // These threads will be removed from the ThreadGroup. Thus, we do not do anything here except for reporting.
-                    ASSERT(result.error() != KERN_SUCCESS);
-                    WTFReportError(__FILE__, __LINE__, WTF_PRETTY_FUNCTION,
-                        "JavaScript garbage collection encountered an invalid thread (err 0x%x): Thread [%d/%d: %p] id %u.",
-                        result.error(), index, threads.size(), thread.ptr(), thread->id());
+                        // These threads will be removed from the ThreadGroup. Thus, we do not do anything here except for reporting.
+                        ASSERT(result.error() != KERN_SUCCESS);
+                        WTFReportError(__FILE__, __LINE__, WTF_PRETTY_FUNCTION,
+                            "JavaScript garbage collection encountered an invalid thread (err 0x%x): Thread [%d/%d: %p].",
+                            result.error(), index, threads.size(), thread.ptr());
 #endif
+                    }
                 }
+                ++index;
             }
-            ++index;
         }
-    }
 
-    {
-        unsigned index = 0;
-        for (auto& thread : threads) {
-            if (isSuspended.get(index))
-                tryCopyOtherThreadStack(thread.get(), buffer, capacity, size);
-            ++index;
+        {
+            unsigned index = 0;
+            for (auto& thread : threads) {
+                if (isSuspended.get(index))
+                    tryCopyOtherThreadStack(threadSuspendLocker, thread.get(), buffer, capacity, size);
+                ++index;
+            }
         }
-    }
 
-    {
-        unsigned index = 0;
-        for (auto& thread : threads) {
-            if (isSuspended.get(index))
-                thread->resume();
-            ++index;
+        {
+            unsigned index = 0;
+            for (auto& thread : threads) {
+                if (isSuspended.get(index))
+                    thread->resume(threadSuspendLocker);
+                ++index;
+            }
         }
     }
 
@@ -199,7 +199,7 @@ static void growBuffer(size_t size, void** buffer, size_t* capacity)
     *buffer = fastMalloc(*capacity);
 }
 
-void MachineThreads::gatherConservativeRoots(ConservativeRoots& conservativeRoots, JITStubRoutineSet& jitStubRoutines, CodeBlockSet& codeBlocks, CurrentThreadState* currentThreadState)
+void MachineThreads::gatherConservativeRoots(ConservativeRoots& conservativeRoots, JITStubRoutineSet& jitStubRoutines, CodeBlockSet& codeBlocks, CurrentThreadState* currentThreadState, Thread* currentThread)
 {
     if (currentThreadState)
         gatherFromCurrentThread(conservativeRoots, jitStubRoutines, codeBlocks, *currentThreadState);
@@ -207,8 +207,8 @@ void MachineThreads::gatherConservativeRoots(ConservativeRoots& conservativeRoot
     size_t size;
     size_t capacity = 0;
     void* buffer = nullptr;
-    auto locker = holdLock(m_threadGroup->getLock());
-    while (!tryCopyOtherThreadStacks(locker, buffer, capacity, &size))
+    Locker locker { m_threadGroup->getLock() };
+    while (!tryCopyOtherThreadStacks(locker, buffer, capacity, &size, *currentThread))
         growBuffer(size, &buffer, &capacity);
 
     if (!buffer)

@@ -25,12 +25,9 @@
 
 namespace WebCore {
 
-enum AnyStepHandling { RejectAny, AnyIsDefaultStep };
+enum class AnyStepHandling : bool { Reject, Default };
 
-enum class RangeLimitations {
-    Valid,
-    Invalid
-};
+enum class RangeLimitations : bool { Valid, Invalid };
 
 class StepRange {
 public:
@@ -43,12 +40,12 @@ public:
     struct StepDescription {
         WTF_MAKE_FAST_ALLOCATED;
     public:
-        int defaultStep;
-        int defaultStepBase;
-        int stepScaleFactor;
-        StepValueShouldBe stepValueShouldBe;
+        int defaultStep { 1 };
+        int defaultStepBase { 0 };
+        int stepScaleFactor { 1 };
+        StepValueShouldBe stepValueShouldBe { StepValueShouldBeReal };
 
-        StepDescription(int defaultStep, int defaultStepBase, int stepScaleFactor, StepValueShouldBe stepValueShouldBe = StepValueShouldBeReal)
+        constexpr StepDescription(int defaultStep, int defaultStepBase, int stepScaleFactor, StepValueShouldBe stepValueShouldBe = StepValueShouldBeReal)
             : defaultStep(defaultStep)
             , defaultStepBase(defaultStepBase)
             , stepScaleFactor(stepScaleFactor)
@@ -56,13 +53,7 @@ public:
         {
         }
 
-        StepDescription()
-            : defaultStep(1)
-            , defaultStepBase(0)
-            , stepScaleFactor(1)
-            , stepValueShouldBe(StepValueShouldBeReal)
-        {
-        }
+        StepDescription() = default;
 
         Decimal defaultValue() const
         {
@@ -70,9 +61,11 @@ public:
         }
     };
 
+    enum class IsReversible : bool { No, Yes };
+
     StepRange();
     StepRange(const StepRange&);
-    StepRange(const Decimal& stepBase, RangeLimitations, const Decimal& minimum, const Decimal& maximum, const Decimal& step, const StepDescription&);
+    StepRange(const Decimal& stepBase, RangeLimitations, const Decimal& minimum, const Decimal& maximum, const Decimal& step, const StepDescription&, IsReversible = IsReversible::No);
     Decimal acceptableError() const;
     Decimal alignValueForStep(const Decimal& currentValue, const Decimal& newValue) const;
     Decimal clampValue(const Decimal& value) const;
@@ -80,11 +73,13 @@ public:
     bool hasRangeLimitations() const { return m_hasRangeLimitations; }
     Decimal maximum() const { return m_maximum; }
     Decimal minimum() const { return m_minimum; }
-    static Decimal parseStep(AnyStepHandling, const StepDescription&, const String&);
+    Decimal stepSnappedMaximum() const;
+    static Decimal parseStep(AnyStepHandling, const StepDescription&, StringView);
     Decimal step() const { return m_step; }
     Decimal stepBase() const { return m_stepBase; }
     int stepScaleFactor() const { return m_stepDescription.stepScaleFactor; }
     bool stepMismatch(const Decimal&) const;
+    bool isReversible() const { return m_isReversible; }
 
     // Clamp the middle value according to the step
     Decimal defaultValue() const
@@ -118,6 +113,7 @@ private:
     const StepDescription m_stepDescription;
     const bool m_hasRangeLimitations { false };
     const bool m_hasStep { false };
+    const bool m_isReversible { false };
 };
 
 } // namespace WebCore

@@ -29,6 +29,7 @@
 
 #import <dispatch/dispatch.h>
 #import <wtf/Lock.h>
+#import <wtf/OSObjectPtr.h>
 #import <wtf/ThreadSafeRefCounted.h>
 #import <wtf/spi/darwin/XPCSPI.h>
 
@@ -63,11 +64,11 @@ private:
     // We make sure that m_client is thread safe and immediately cleared in close().
     Lock m_mutex;
 
-    xpc_connection_t m_connection;
-    dispatch_queue_t m_queue;
+    OSObjectPtr<xpc_connection_t> m_connection;
+    OSObjectPtr<dispatch_queue_t> m_queue;
     Client* m_client;
     bool m_closed { false };
-#if (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200)
+#if PLATFORM(MAC)
     bool m_validated { false };
 #endif
 };

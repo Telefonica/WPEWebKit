@@ -26,7 +26,7 @@
 #include <WebCore/Document.h>
 #include "GObjectEventListener.h"
 #include <WebCore/HTMLNames.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
 #include "WebKitDOMEventPrivate.h"
 #include "WebKitDOMEventTarget.h"
 #include "WebKitDOMHTMLCollectionPrivate.h"
@@ -36,6 +36,8 @@
 #include "ConvertToUTF8String.h"
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 namespace WebKit {
 
@@ -85,19 +87,19 @@ static gboolean webkit_dom_html_map_element_remove_event_listener(WebKitDOMEvent
     return WebKit::GObjectEventListener::removeEventListener(G_OBJECT(target), coreTarget, eventName, handler, useCapture);
 }
 
-static void webkit_dom_event_target_init(WebKitDOMEventTargetIface* iface)
+static void webkit_dom_html_map_element_dom_event_target_init(WebKitDOMEventTargetIface* iface)
 {
     iface->dispatch_event = webkit_dom_html_map_element_dispatch_event;
     iface->add_event_listener = webkit_dom_html_map_element_add_event_listener;
     iface->remove_event_listener = webkit_dom_html_map_element_remove_event_listener;
 }
 
-G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLMapElement, webkit_dom_html_map_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_event_target_init))
+G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLMapElement, webkit_dom_html_map_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_html_map_element_dom_event_target_init))
 
 enum {
-    PROP_0,
-    PROP_AREAS,
-    PROP_NAME,
+    DOM_HTML_MAP_ELEMENT_PROP_0,
+    DOM_HTML_MAP_ELEMENT_PROP_AREAS,
+    DOM_HTML_MAP_ELEMENT_PROP_NAME,
 };
 
 static void webkit_dom_html_map_element_set_property(GObject* object, guint propertyId, const GValue* value, GParamSpec* pspec)
@@ -105,7 +107,7 @@ static void webkit_dom_html_map_element_set_property(GObject* object, guint prop
     WebKitDOMHTMLMapElement* self = WEBKIT_DOM_HTML_MAP_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_NAME:
+    case DOM_HTML_MAP_ELEMENT_PROP_NAME:
         webkit_dom_html_map_element_set_name(self, g_value_get_string(value));
         break;
     default:
@@ -119,10 +121,10 @@ static void webkit_dom_html_map_element_get_property(GObject* object, guint prop
     WebKitDOMHTMLMapElement* self = WEBKIT_DOM_HTML_MAP_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_AREAS:
+    case DOM_HTML_MAP_ELEMENT_PROP_AREAS:
         g_value_set_object(value, webkit_dom_html_map_element_get_areas(self));
         break;
-    case PROP_NAME:
+    case DOM_HTML_MAP_ELEMENT_PROP_NAME:
         g_value_take_string(value, webkit_dom_html_map_element_get_name(self));
         break;
     default:
@@ -139,7 +141,7 @@ static void webkit_dom_html_map_element_class_init(WebKitDOMHTMLMapElementClass*
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_AREAS,
+        DOM_HTML_MAP_ELEMENT_PROP_AREAS,
         g_param_spec_object(
             "areas",
             "HTMLMapElement:areas",
@@ -149,7 +151,7 @@ static void webkit_dom_html_map_element_class_init(WebKitDOMHTMLMapElementClass*
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_NAME,
+        DOM_HTML_MAP_ELEMENT_PROP_NAME,
         g_param_spec_string(
             "name",
             "HTMLMapElement:name",
@@ -188,7 +190,7 @@ void webkit_dom_html_map_element_set_name(WebKitDOMHTMLMapElement* self, const g
     g_return_if_fail(WEBKIT_DOM_IS_HTML_MAP_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLMapElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, WTF::AtomString::fromUTF8(value));
 }
 
+G_GNUC_END_IGNORE_DEPRECATIONS;

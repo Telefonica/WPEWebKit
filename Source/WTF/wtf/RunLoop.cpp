@@ -24,22 +24,31 @@
  */
 
 #include "config.h"
-#include "RunLoop.h"
+#include <wtf/RunLoop.h>
 
 #include <wtf/NeverDestroyed.h>
+#include <wtf/Ref.h>
 #include <wtf/StdLibExtras.h>
-#include <wtf/ThreadSpecific.h>
 
 namespace WTF {
 
 static RunLoop* s_mainRunLoop;
+#if USE(WEB_THREAD)
+static RunLoop* s_webRunLoop;
+#endif
 
 // Helper class for ThreadSpecificData.
 class RunLoop::Holder {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     Holder()
         : m_runLoop(adoptRef(*new RunLoop))
     {
+    }
+
+    ~Holder()
+    {
+        m_runLoop->threadWillExit();
     }
 
     RunLoop& runLoop() { return m_runLoop; }
@@ -48,18 +57,25 @@ private:
     Ref<RunLoop> m_runLoop;
 };
 
-void RunLoop::initializeMainRunLoop()
+void RunLoop::initializeMain()
 {
-    if (s_mainRunLoop)
-        return;
-    initializeMainThread();
+    RELEASE_ASSERT(!s_mainRunLoop);
     s_mainRunLoop = &RunLoop::current();
+}
+
+auto RunLoop::runLoopHolder() -> ThreadSpecific<Holder>&
+{
+    static LazyNeverDestroyed<ThreadSpecific<Holder>> runLoopHolder;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        runLoopHolder.construct();
+    });
+    return runLoopHolder;
 }
 
 RunLoop& RunLoop::current()
 {
-    static NeverDestroyed<ThreadSpecific<Holder>> runLoopHolder;
-    return runLoopHolder.get()->runLoop();
+    return runLoopHolder()->runLoop();
 }
 
 RunLoop& RunLoop::main()
@@ -68,70 +84,110 @@ RunLoop& RunLoop::main()
     return *s_mainRunLoop;
 }
 
+#if USE(WEB_THREAD)
+void RunLoop::initializeWeb()
+{
+    RELEASE_ASSERT(!s_webRunLoop);
+    s_webRunLoop = &RunLoop::current();
+}
+
+RunLoop& RunLoop::web()
+{
+    ASSERT(s_webRunLoop);
+    return *s_webRunLoop;
+}
+
+RunLoop* RunLoop::webIfExists()
+{
+    return s_webRunLoop;
+}
+#endif
+
 bool RunLoop::isMain()
 {
     ASSERT(s_mainRunLoop);
-    return s_mainRunLoop == &RunLoop::current();
+    // Avoid constructing the RunLoop for the current thread if it has not been created yet.
+    return runLoopHolder().isSet() && s_mainRunLoop == &RunLoop::current();
 }
 
 void RunLoop::performWork()
 {
-    // It is important to handle the functions in the queue one at a time because while inside one of these
-    // functions we might re-enter RunLoop::performWork() and we need to be able to pick up where we left off.
-    // See http://webkit.org/b/89590 for more discussion.
+    bool didSuspendFunctions = false;
 
-    // One possible scenario when handling the function queue is as follows:
-    // - RunLoop::performWork() is invoked with 1 function on the queue
-    // - Handling that function results in 1 more function being enqueued
-    // - Handling that one results in yet another being enqueued
-    // - And so on
-    //
-    // In this situation one invocation of performWork() never returns so all other event sources are blocked.
-    // By only handling up to the number of functions that were in the queue when performWork() is called
-    // we guarantee to occasionally return from the run loop so other event sources will be allowed to spin.
-
-    size_t functionsToHandle = 0;
     {
-        Function<void ()> function;
-        {
-            MutexLocker locker(m_functionQueueLock);
-            functionsToHandle = m_functionQueue.size();
+        Locker locker { m_nextIterationLock };
 
-            if (m_functionQueue.isEmpty())
-                return;
+        // If the RunLoop re-enters or re-schedules, we're expected to execute all functions in order.
+        while (!m_currentIteration.isEmpty())
+            m_nextIteration.prepend(m_currentIteration.takeLast());
 
-            function = m_functionQueue.takeFirst();
+        m_currentIteration = std::exchange(m_nextIteration, { });
+    }
+
+    while (!m_currentIteration.isEmpty()) {
+        if (m_isFunctionDispatchSuspended) {
+            didSuspendFunctions = true;
+            break;
         }
 
+        auto function = m_currentIteration.takeFirst();
         function();
     }
 
-    for (size_t functionsHandled = 1; functionsHandled < functionsToHandle; ++functionsHandled) {
-        Function<void ()> function;
-        {
-            MutexLocker locker(m_functionQueueLock);
+    // Suspend only for a single cycle.
+    m_isFunctionDispatchSuspended = false;
+    m_hasSuspendedFunctions = didSuspendFunctions;
 
-            // Even if we start off with N functions to handle and we've only handled less than N functions, the queue
-            // still might be empty because those functions might have been handled in an inner RunLoop::performWork().
-            // In that case we should bail here.
-            if (m_functionQueue.isEmpty())
-                break;
-
-            function = m_functionQueue.takeFirst();
-        }
-        
-        function();
-    }
+    if (m_hasSuspendedFunctions)
+        wakeUp();
 }
 
-void RunLoop::dispatch(Function<void ()>&& function)
+void RunLoop::dispatch(Function<void()>&& function)
 {
+    RELEASE_ASSERT(function);
+    bool needsWakeup = false;
+
     {
-        MutexLocker locker(m_functionQueueLock);
-        m_functionQueue.append(WTFMove(function));
+        Locker locker { m_nextIterationLock };
+        needsWakeup = m_nextIteration.isEmpty();
+        m_nextIteration.append(WTFMove(function));
     }
 
+    if (needsWakeup)
+        wakeUp();
+}
+
+Ref<RunLoop::DispatchTimer> RunLoop::dispatchAfter(Seconds delay, Function<void()>&& function)
+{
+    RELEASE_ASSERT(function);
+    Ref<DispatchTimer> timer = adoptRef(*new DispatchTimer(*this));
+    timer->setFunction([timer = timer.copyRef(), function = WTFMove(function)]() mutable {
+        Ref<DispatchTimer> protectedTimer { WTFMove(timer) };
+        function();
+        protectedTimer->stop();
+    });
+    timer->startOneShot(delay);
+    return timer;
+}
+
+void RunLoop::suspendFunctionDispatchForCurrentCycle()
+{
+    // Don't suspend if there are already suspended functions to avoid unexecuted function pile-up.
+    if (m_isFunctionDispatchSuspended || m_hasSuspendedFunctions)
+        return;
+
+    m_isFunctionDispatchSuspended = true;
+    // Wake up (even if there is nothing to do) to disable suspension.
     wakeUp();
+}
+
+void RunLoop::threadWillExit()
+{
+    m_currentIteration.clear();
+    {
+        Locker locker { m_nextIterationLock };
+        m_nextIteration.clear();
+    }
 }
 
 } // namespace WTF

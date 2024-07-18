@@ -26,8 +26,6 @@
 #include "config.h"
 #include "IndexValueStore.h"
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBError.h"
 #include "IDBKeyRangeData.h"
 #include "Logging.h"
@@ -92,7 +90,7 @@ IDBError IndexValueStore::addRecord(const IDBKeyData& indexKey, const IDBKeyData
         return IDBError(ConstraintError);
 
     if (result.isNewEntry)
-        result.iterator->value = std::make_unique<IndexValueEntry>(m_unique);
+        result.iterator->value = makeUnique<IndexValueEntry>(m_unique);
 
     result.iterator->value->addKey(valueKey);
     m_orderedKeys.insert(indexKey);
@@ -402,18 +400,11 @@ const IDBKeyData& IndexValueStore::Iterator::primaryKey()
 String IndexValueStore::loggingString() const
 {
     StringBuilder builder;
-    for (auto& key : m_orderedKeys) {
-        builder.appendLiteral("Key: ");
-        builder.append(key.loggingString());
-        builder.appendLiteral("  Entry has ");
-        builder.appendNumber(m_records.get(key)->getCount());
-        builder.appendLiteral(" entries");
-    }
+    for (auto& key : m_orderedKeys)
+        builder.append("Key: ", key.loggingString(), "  Entry has ", m_records.get(key)->getCount(), " entries");
     return builder.toString();
 }
 #endif
 
 } // namespace IDBServer
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

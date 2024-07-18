@@ -23,8 +23,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
 #if ENABLE(DATA_DETECTION)
 
 typedef struct __DDResult *DDResultRef;
@@ -35,12 +33,14 @@ typedef struct __DDResult *DDResultRef;
 #import <DataDetectorsCore/DDScannerResult.h>
 #import <DataDetectorsCore/DataDetectorsCore.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import <DataDetectorsCore/DDOptionalSource.h>
 #import <DataDetectorsCore/DDURLifier.h>
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)
 
 #else // !USE(APPLE_INTERNAL_SDK)
+
+#import <Foundation/Foundation.h>
 
 typedef enum {
     DDScannerTypeStandard = 0,
@@ -95,7 +95,6 @@ extern CFStringRef const DDBinderTrackingNumberKey;
 extern CFStringRef const DDBinderFlightInformationKey;
 extern CFStringRef const DDBinderParsecSourceKey;
 extern CFStringRef const DDBinderSignatureBlockKey;
-extern NSString * const DDURLScheme;
 
 @interface DDScannerResult : NSObject <NSCoding, NSSecureCoding>
 + (NSArray *)resultsFromCoreResults:(CFArrayRef)coreResults;
@@ -104,17 +103,10 @@ extern NSString * const DDURLScheme;
 
 #define DDResultPropertyPassiveDisplay   (1 << 0)
 
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101200
-typedef struct __DDQueryOffset {
-    CFIndex queryIndex;
-    CFIndex offset;
-} DDQueryOffset;
-#else
 typedef struct __DDQueryOffset {
     CFIndex queryIndex:32;
     CFIndex offset:32;
 } DDQueryOffset;
-#endif
 
 typedef struct __DDQueryRange {
     DDQueryOffset start;
@@ -123,11 +115,7 @@ typedef struct __DDQueryRange {
 
 #endif // !USE(APPLE_INTERNAL_SDK)
 
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101200
-static_assert(sizeof(DDQueryOffset) == sizeof(CFIndex) * 2, "DDQueryOffset is no longer the size of two CFIndexes. Update the definition of DDQueryOffset in this file to match the new size.");
-#else
 static_assert(sizeof(DDQueryOffset) == 8, "DDQueryOffset is no longer 8 bytes. Update the definition of DDQueryOffset in this file to match the new size.");
-#endif
 
 typedef struct __DDScanQuery *DDScanQueryRef;
 typedef struct __DDScanner *DDScannerRef;
@@ -159,7 +147,7 @@ void *DDScanQueryGetFragmentMetaData(DDScanQueryRef, CFIndex queryIndex);
 bool DDResultHasProperties(DDResultRef, CFIndex propertySet);
 CFArrayRef DDResultGetSubResults(DDResultRef);
 DDQueryRange DDResultGetQueryRangeForURLification(DDResultRef);
-
+void DDResultDisableURLSchemeChecking();
 WTF_EXTERN_C_END
 
 #endif

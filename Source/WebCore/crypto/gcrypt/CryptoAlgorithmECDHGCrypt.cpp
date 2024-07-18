@@ -28,15 +28,16 @@
 #include "config.h"
 #include "CryptoAlgorithmECDH.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 #include "CryptoKeyEC.h"
+#include "GCryptUtilities.h"
 #include <pal/crypto/gcrypt/Handle.h>
 #include <pal/crypto/gcrypt/Utilities.h>
 
 namespace WebCore {
 
-static std::optional<Vector<uint8_t>> gcryptDerive(gcry_sexp_t baseKeySexp, gcry_sexp_t publicKeySexp)
+static std::optional<Vector<uint8_t>> gcryptDerive(gcry_sexp_t baseKeySexp, gcry_sexp_t publicKeySexp, size_t keySizeInBytes)
 {
     // First, retrieve private key data, which is roughly of the following form:
     // (private-key
@@ -49,12 +50,11 @@ static std::optional<Vector<uint8_t>> gcryptDerive(gcry_sexp_t baseKeySexp, gcry
         if (!dSexp)
             return std::nullopt;
 
-        size_t dataLength = 0;
-        const char* data = gcry_sexp_nth_data(dSexp, 1, &dataLength);
+        auto data = mpiData(dSexp);
         if (!data)
             return std::nullopt;
 
-        gcry_sexp_build(&dataSexp, nullptr, "(data(flags raw)(value %b))", dataLength, data);
+        gcry_sexp_build(&dataSexp, nullptr, "(data(flags raw)(value %b))", data->size(), data->data());
         if (!dataSexp)
             return std::nullopt;
     }
@@ -72,7 +72,10 @@ static std::optional<Vector<uint8_t>> gcryptDerive(gcry_sexp_t baseKeySexp, gcry
     //   (ecdh
     //     (s ...)
     //     (e ...)))
-    Vector<uint8_t> output;
+    PAL::GCrypt::Handle<gcry_mpi_t> xMPI(gcry_mpi_new(0));
+    if (!xMPI)
+        return std::nullopt;
+
     {
         PAL::GCrypt::Handle<gcry_sexp_t> sSexp(gcry_sexp_find_token(cipherSexp, "s", 0));
         if (!sSexp)
@@ -90,36 +93,18 @@ static std::optional<Vector<uint8_t>> gcryptDerive(gcry_sexp_t baseKeySexp, gcry
         if (error != GPG_ERR_NO_ERROR)
             return std::nullopt;
 
-        PAL::GCrypt::Handle<gcry_mpi_t> xMPI(gcry_mpi_new(0));
-        if (!xMPI)
-            return std::nullopt;
-
         // We're only interested in the x-coordinate.
         gcry_mpi_point_snatch_get(xMPI, nullptr, nullptr, point.release());
-
-        size_t dataLength = 0;
-        error = gcry_mpi_print(GCRYMPI_FMT_USG, nullptr, 0, &dataLength, xMPI);
-        if (error != GPG_ERR_NO_ERROR) {
-            PAL::GCrypt::logError(error);
-            return std::nullopt;
-        }
-
-        output.grow(dataLength);
-        error = gcry_mpi_print(GCRYMPI_FMT_USG, output.data(), output.size(), nullptr, xMPI);
-        if (error != GPG_ERR_NO_ERROR) {
-            PAL::GCrypt::logError(error);
-            return std::nullopt;
-        }
     }
 
-    return output;
+    return mpiZeroPrefixedData(xMPI, keySizeInBytes);
 }
 
 std::optional<Vector<uint8_t>> CryptoAlgorithmECDH::platformDeriveBits(const CryptoKeyEC& baseKey, const CryptoKeyEC& publicKey)
 {
-    return gcryptDerive(baseKey.platformKey(), publicKey.platformKey());
+    return gcryptDerive(baseKey.platformKey(), publicKey.platformKey(), (baseKey.keySizeInBits() + 7) / 8);
 }
 
 } // namespace WebCore
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

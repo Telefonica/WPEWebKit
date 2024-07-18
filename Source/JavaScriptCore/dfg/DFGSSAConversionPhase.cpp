@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,12 +35,21 @@
 #include "DFGPhase.h"
 #include "DFGSSACalculator.h"
 #include "DFGVariableAccessDataDump.h"
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
+#include "OperandsInlines.h"
+
+#undef RELEASE_ASSERT
+#define RELEASE_ASSERT(assertion) do { \
+    if (!(assertion)) { \
+        WTFReportAssertionFailure(__FILE__, __LINE__, WTF_PRETTY_FUNCTION, #assertion); \
+        CRASH(); \
+    } \
+} while (0)
 
 namespace JSC { namespace DFG {
 
 class SSAConversionPhase : public Phase {
-    static const bool verbose = false;
+    static constexpr bool verbose = false;
     
 public:
     SSAConversionPhase(Graph& graph)
@@ -60,16 +69,28 @@ public:
 
         HashMap<unsigned, BasicBlock*, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> entrypointIndexToArgumentsBlock;
 
-        {
-            m_graph.m_numberOfEntrypoints = m_graph.m_roots.size();
+        m_graph.m_numberOfEntrypoints = m_graph.m_roots.size();
+        m_graph.m_argumentFormats.resize(m_graph.m_numberOfEntrypoints);
 
+        for (unsigned entrypointIndex = 0; entrypointIndex < m_graph.m_numberOfEntrypoints; ++entrypointIndex) {
+            BasicBlock* oldRoot = m_graph.m_roots[entrypointIndex];
+            entrypointIndexToArgumentsBlock.add(entrypointIndex, oldRoot);
+            
+            NodeOrigin origin = oldRoot->at(0)->origin;
+            m_insertionSet.insertNode(
+                0, SpecNone, InitializeEntrypointArguments, origin, OpInfo(entrypointIndex));
+            m_insertionSet.insertNode(
+                0, SpecNone, ExitOK, origin);
+            m_insertionSet.execute(oldRoot);
+        }
+
+        if (m_graph.m_numberOfEntrypoints > 1) {
             BlockInsertionSet blockInsertionSet(m_graph);
             BasicBlock* newRoot = blockInsertionSet.insert(0, 1.0f);
 
             EntrySwitchData* entrySwitchData = m_graph.m_entrySwitchData.add();
             for (unsigned entrypointIndex = 0; entrypointIndex < m_graph.m_numberOfEntrypoints; ++entrypointIndex) {
                 BasicBlock* oldRoot = m_graph.m_roots[entrypointIndex];
-                entrypointIndexToArgumentsBlock.add(entrypointIndex, oldRoot);
                 entrySwitchData->cases.append(oldRoot);
 
                 ASSERT(oldRoot->predecessors.isEmpty());
@@ -77,23 +98,14 @@ public:
 
                 if (oldRoot->isCatchEntrypoint) {
                     ASSERT(!!entrypointIndex);
-                    m_graph.m_entrypointIndexToCatchBytecodeOffset.add(entrypointIndex, oldRoot->bytecodeBegin);
+                    m_graph.m_entrypointIndexToCatchBytecodeIndex.add(entrypointIndex, oldRoot->bytecodeBegin);
                 }
-
-                NodeOrigin origin = oldRoot->at(0)->origin;
-                m_insertionSet.insertNode(
-                    0, SpecNone, InitializeEntrypointArguments, origin, OpInfo(entrypointIndex));
-                m_insertionSet.insertNode(
-                    0, SpecNone, ExitOK, origin);
-                m_insertionSet.execute(oldRoot);
             }
 
             RELEASE_ASSERT(entrySwitchData->cases[0] == m_graph.block(0)); // We strongly assume the normal call entrypoint is the first item in the list.
 
-            m_graph.m_argumentFormats.resize(m_graph.m_numberOfEntrypoints);
-
             const bool exitOK = false;
-            NodeOrigin origin { CodeOrigin(0), CodeOrigin(0), exitOK };
+            NodeOrigin origin { CodeOrigin(BytecodeIndex(0)), CodeOrigin(BytecodeIndex(0)), exitOK };
             newRoot->appendNode(
                 m_graph, SpecNone, EntrySwitch, origin, OpInfo(entrySwitchData));
 
@@ -102,7 +114,7 @@ public:
 
             blockInsertionSet.execute();
         }
-
+        
         SSACalculator calculator(m_graph);
 
         m_graph.ensureSSADominators();
@@ -123,7 +135,7 @@ public:
             m_ssaVariableForVariable.add(&variable, ssaVariable);
         }
         
-        // Find all SetLocals and create Defs for them. We handle SetArgument by creating a
+        // Find all SetLocals and create Defs for them. We handle SetArgumentDefinitely by creating a
         // GetLocal, and recording the flush format.
         for (BlockIndex blockIndex = m_graph.numBlocks(); blockIndex--;) {
             BasicBlock* block = m_graph.block(blockIndex);
@@ -134,7 +146,7 @@ public:
             // assignment for every local.
             for (unsigned nodeIndex = 0; nodeIndex < block->size(); ++nodeIndex) {
                 Node* node = block->at(nodeIndex);
-                if (node->op() != SetLocal && node->op() != SetArgument)
+                if (node->op() != SetLocal && node->op() != SetArgumentDefinitely)
                     continue;
                 
                 VariableAccessData* variable = node->variableAccessData();
@@ -143,12 +155,12 @@ public:
                 if (node->op() == SetLocal)
                     childNode = node->child1().node();
                 else {
-                    ASSERT(node->op() == SetArgument);
+                    ASSERT(node->op() == SetArgumentDefinitely);
                     childNode = m_insertionSet.insertNode(
                         nodeIndex, node->variableAccessData()->prediction(),
                         GetStack, node->origin,
-                        OpInfo(m_graph.m_stackAccessData.add(variable->local(), variable->flushFormat())));
-                    if (!ASSERT_DISABLED)
+                        OpInfo(m_graph.m_stackAccessData.add(variable->operand(), variable->flushFormat())));
+                    if (ASSERT_ENABLED)
                         m_argumentGetters.add(childNode);
                     m_argumentMapping.add(node, childNode);
                 }
@@ -167,7 +179,7 @@ public:
                 VariableAccessData* variable = m_variableForSSAIndex[ssaVariable->index()];
                 
                 // Prune by liveness. This doesn't buy us much other than compile times.
-                Node* headNode = block->variablesAtHead.operand(variable->local());
+                Node* headNode = block->variablesAtHead.operand(variable->operand());
                 if (!headNode)
                     return nullptr;
 
@@ -244,12 +256,14 @@ public:
         //
         //   - SetLocal turns into PutStack if it's flushed, or turns into a Check otherwise.
         //
-        //   - Flush loses its children and turns into a Phantom.
+        //   - Flush is removed.
         //
         //   - PhantomLocal becomes Phantom, and its child is whatever is specified by
         //     valueForOperand.
         //
-        //   - SetArgument is removed. Note that GetStack nodes have already been inserted.
+        //   - SetArgumentDefinitely is removed. Note that GetStack nodes have already been inserted.
+        //
+        //   - SetArgumentMaybe is removed. It should not have any data flow uses.
         Operands<Node*> valueForOperand(OperandsLike, m_graph.block(0)->variablesAtHead);
         for (BasicBlock* block : m_graph.blocksInPreOrder()) {
             valueForOperand.clear();
@@ -287,7 +301,7 @@ public:
                         ASSERT(!node->replacement());
                     }
                     if (verbose)
-                        dataLog("Mapping: ", VirtualRegister(valueForOperand.operandForIndex(i)), " -> ", node, "\n");
+                        dataLog("Mapping: ", valueForOperand.operandForIndex(i), " -> ", node, "\n");
                     valueForOperand[i] = node;
                 }
             }
@@ -300,11 +314,11 @@ public:
                 VariableAccessData* variable = m_variableForSSAIndex[phiDef->variable()->index()];
                 
                 m_insertionSet.insert(phiInsertionPoint, phiDef->value());
-                valueForOperand.operand(variable->local()) = phiDef->value();
+                valueForOperand.operand(variable->operand()) = phiDef->value();
                 
                 m_insertionSet.insertNode(
                     phiInsertionPoint, SpecNone, MovHint, block->at(0)->origin.withInvalidExit(),
-                    OpInfo(variable->local().offset()), phiDef->value()->defaultEdge());
+                    OpInfo(variable->operand()), phiDef->value()->defaultEdge());
             }
 
             if (block->at(0)->origin.exitOK)
@@ -324,7 +338,7 @@ public:
                 case MovHint: {
                     m_insertionSet.insertNode(
                         nodeIndex, SpecNone, KillStack, node->origin,
-                        OpInfo(node->unlinkedLocal().offset()));
+                        OpInfo(node->unlinkedOperand()));
                     node->origin.exitOK = false; // KillStack clobbers exit.
                     break;
                 }
@@ -336,19 +350,19 @@ public:
                     if (!!(node->flags() & NodeIsFlushed)) {
                         node->convertToPutStack(
                             m_graph.m_stackAccessData.add(
-                                variable->local(), variable->flushFormat()));
+                                variable->operand(), variable->flushFormat()));
                     } else
-                        node->remove();
+                        node->remove(m_graph);
                     
                     if (verbose)
-                        dataLog("Mapping: ", variable->local(), " -> ", child, "\n");
-                    valueForOperand.operand(variable->local()) = child;
+                        dataLog("Mapping: ", variable->operand(), " -> ", child, "\n");
+                    valueForOperand.operand(variable->operand()) = child;
                     break;
                 }
                     
                 case GetStack: {
                     ASSERT(m_argumentGetters.contains(node));
-                    valueForOperand.operand(node->stackAccessData()->local) = node;
+                    valueForOperand.operand(node->stackAccessData()->operand) = node;
                     break;
                 }
                     
@@ -356,29 +370,34 @@ public:
                     VariableAccessData* variable = node->variableAccessData();
                     node->children.reset();
                     
-                    node->remove();
+                    node->remove(m_graph);
                     if (verbose)
-                        dataLog("Replacing node ", node, " with ", valueForOperand.operand(variable->local()), "\n");
-                    node->setReplacement(valueForOperand.operand(variable->local()));
+                        dataLog("Replacing node ", node, " with ", valueForOperand.operand(variable->operand()), "\n");
+                    node->setReplacement(valueForOperand.operand(variable->operand()));
                     break;
                 }
                     
                 case Flush: {
                     node->children.reset();
-                    node->remove();
+                    node->remove(m_graph);
                     break;
                 }
                     
                 case PhantomLocal: {
                     ASSERT(node->child1().useKind() == UntypedUse);
                     VariableAccessData* variable = node->variableAccessData();
-                    node->child1() = valueForOperand.operand(variable->local())->defaultEdge();
-                    node->remove();
+                    node->child1() = valueForOperand.operand(variable->operand())->defaultEdge();
+                    node->remove(m_graph);
                     break;
                 }
                     
-                case SetArgument: {
-                    node->remove();
+                case SetArgumentDefinitely: {
+                    node->remove(m_graph);
+                    break;
+                }
+
+                case SetArgumentMaybe: {
+                    node->remove(m_graph);
                     break;
                 }
                     
@@ -406,11 +425,13 @@ public:
                     // We have to use an unchecked use because at least sometimes, the end of the block
                     // is not exitOK.
                     UseKind useKind = uncheckedUseKindFor(format);
+
+                    dataLogLnIf(verbose, "Inserting Upsilon for ", variable->operand(), " propagating ", valueForOperand.operand(variable->operand()), " to ", phiNode);
                     
                     m_insertionSet.insertNode(
                         upsilonInsertionPoint, SpecNone, Upsilon, upsilonOrigin,
                         OpInfo(phiNode), Edge(
-                            valueForOperand.operand(variable->local()),
+                            valueForOperand.operand(variable->operand()),
                             useKind));
                 }
             }
@@ -430,7 +451,7 @@ public:
             block->variablesAtTail.clear();
             block->valuesAtHead.clear();
             block->valuesAtHead.clear();
-            block->ssa = std::make_unique<BasicBlock::SSAData>(block);
+            block->ssa = makeUnique<BasicBlock::SSAData>(block);
         }
 
         for (auto& pair : entrypointIndexToArgumentsBlock) {

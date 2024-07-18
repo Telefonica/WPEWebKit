@@ -26,17 +26,17 @@
 
 #pragma once
 
+#include "ContentSecurityPolicy.h"
 #include "ContentSecurityPolicyHash.h"
 #include "ContentSecurityPolicySource.h"
-#include <wtf/HashSet.h>
 #include <wtf/OptionSet.h>
+#include <wtf/RobinHoodHashSet.h>
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class ContentSecurityPolicy;
-class URL;
 
 class ContentSecurityPolicySourceList {
 public:
@@ -44,43 +44,65 @@ public:
 
     void parse(const String&);
 
-    bool matches(const URL&, bool didReceiveRedirectResponse);
-    bool matches(const ContentSecurityPolicyHash&) const;
+    bool matches(const URL&, bool didReceiveRedirectResponse) const;
+    bool matches(const Vector<ContentSecurityPolicyHash>&) const;
+    bool matchesAll(const Vector<ContentSecurityPolicyHash>&) const;
     bool matches(const String& nonce) const;
 
     OptionSet<ContentSecurityPolicyHashAlgorithm> hashAlgorithmsUsed() const { return m_hashAlgorithmsUsed; }
 
     bool allowInline() const { return m_allowInline && m_hashes.isEmpty() && m_nonces.isEmpty(); }
     bool allowEval() const { return m_allowEval; }
+    bool allowWasmEval() const { return m_allowWasmEval; }
     bool allowSelf() const { return m_allowSelf; }
     bool isNone() const { return m_isNone; }
+    bool allowNonParserInsertedScripts() const { return m_allowNonParserInsertedScripts; }
+    bool allowUnsafeHashes() const { return m_allowUnsafeHashes; }
+    bool shouldReportSample() const { return m_reportSample; }
 
 private:
-    void parse(const UChar* begin, const UChar* end);
-
-    bool parseSource(const UChar* begin, const UChar* end, String& scheme, String& host, std::optional<uint16_t>& port, String& path, bool& hostHasWildcard, bool& portHasWildcard);
-    bool parseScheme(const UChar* begin, const UChar* end, String& scheme);
-    bool parseHost(const UChar* begin, const UChar* end, String& host, bool& hostHasWildcard);
-    bool parsePort(const UChar* begin, const UChar* end, std::optional<uint16_t>& port, bool& portHasWildcard);
-    bool parsePath(const UChar* begin, const UChar* end, String& path);
-
-    bool parseNonceSource(const UChar* begin, const UChar* end);
+    struct Host {
+        StringView value;
+        bool hasWildcard { false };
+    };
+    struct Port {
+        std::optional<uint16_t> value;
+        bool hasWildcard { false };
+    };
+    struct Source {
+        StringView scheme;
+        Host host;
+        Port port;
+        String path;
+    };
 
     bool isProtocolAllowedByStar(const URL&) const;
-
-    bool parseHashSource(const UChar* begin, const UChar* end);
+    bool isValidSourceForExtensionMode(const ContentSecurityPolicySourceList::Source&);
+    template<typename CharacterType> void parse(StringParsingBuffer<CharacterType>);
+    template<typename CharacterType> std::optional<Source> parseSource(StringParsingBuffer<CharacterType>);
+    template<typename CharacterType> StringView parseScheme(StringParsingBuffer<CharacterType>);
+    template<typename CharacterType> std::optional<Host> parseHost(StringParsingBuffer<CharacterType>);
+    template<typename CharacterType> std::optional<Port> parsePort(StringParsingBuffer<CharacterType>);
+    template<typename CharacterType> String parsePath(StringParsingBuffer<CharacterType>);
+    template<typename CharacterType> bool parseNonceSource(StringParsingBuffer<CharacterType>);
+    template<typename CharacterType> bool parseHashSource(StringParsingBuffer<CharacterType>);
 
     const ContentSecurityPolicy& m_policy;
     Vector<ContentSecurityPolicySource> m_list;
-    HashSet<String> m_nonces;
+    MemoryCompactLookupOnlyRobinHoodHashSet<String> m_nonces;
     HashSet<ContentSecurityPolicyHash> m_hashes;
     OptionSet<ContentSecurityPolicyHashAlgorithm> m_hashAlgorithmsUsed;
     String m_directiveName;
+    ContentSecurityPolicyModeForExtension m_contentSecurityPolicyModeForExtension { ContentSecurityPolicyModeForExtension::None };
     bool m_allowSelf { false };
     bool m_allowStar { false };
     bool m_allowInline { false };
     bool m_allowEval { false };
+    bool m_allowWasmEval { false };
     bool m_isNone { false };
+    bool m_allowNonParserInsertedScripts { false };
+    bool m_allowUnsafeHashes { false };
+    bool m_reportSample { false };
 };
 
 } // namespace WebCore

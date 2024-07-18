@@ -37,10 +37,10 @@ WI.TimelineOverviewGraph = class TimelineOverviewGraph extends WI.View
         this._currentTime = 0;
         this._timelineOverview = timelineOverview;
         this._selectedRecord = null;
-        this._selectedRecordChanged = false;
+        this._selectedRecordBar = null;
         this._scheduledSelectedRecordLayoutUpdateIdentifier = undefined;
         this._selected = false;
-        this._visible = true;
+        this._hidden = false;
     }
 
     // Public
@@ -63,11 +63,20 @@ WI.TimelineOverviewGraph = class TimelineOverviewGraph extends WI.View
         if (timelineType === WI.TimelineRecord.Type.RenderingFrame)
             return new WI.RenderingFrameTimelineOverviewGraph(timeline, timelineOverview);
 
+        if (timelineType === WI.TimelineRecord.Type.CPU)
+            return new WI.CPUTimelineOverviewGraph(timeline, timelineOverview);
+
         if (timelineType === WI.TimelineRecord.Type.Memory)
             return new WI.MemoryTimelineOverviewGraph(timeline, timelineOverview);
 
         if (timelineType === WI.TimelineRecord.Type.HeapAllocations)
             return new WI.HeapAllocationsTimelineOverviewGraph(timeline, timelineOverview);
+
+        if (timelineType === WI.TimelineRecord.Type.Media)
+            return new WI.MediaTimelineOverviewGraph(timeline, timelineOverview);
+
+        if (timelineType === WI.TimelineRecord.Type.Screenshots)
+            return new WI.ScreenshotsTimelineOverviewGraph(timeline, timelineOverview);
 
         throw new Error("Can't make a graph for an unknown timeline.");
     }
@@ -150,9 +159,22 @@ WI.TimelineOverviewGraph = class TimelineOverviewGraph extends WI.View
 
     get secondsPerPixel() { return this._timelineOverview.secondsPerPixel; }
 
-    get visible()
+    get hidden()
     {
-        return this._visible;
+        return this._hidden;
+    }
+
+    set hidden(hidden)
+    {
+        if (!xor(hidden, this._hidden))
+            return;
+
+        this._hidden = hidden;
+
+        this.element.classList.toggle("hidden", this._hidden);
+
+        if (!this._hidden)
+            this.updateLayout();
     }
 
     get selectedRecord()
@@ -166,9 +188,30 @@ WI.TimelineOverviewGraph = class TimelineOverviewGraph extends WI.View
             return;
 
         this._selectedRecord = x;
-        this._selectedRecordChanged = true;
 
         this._needsSelectedRecordLayout();
+    }
+
+    get selectedRecordBar()
+    {
+        return this._selectedRecordBar;
+    }
+
+    set selectedRecordBar(recordBar)
+    {
+        if (this._selectedRecordBar === recordBar)
+            return;
+
+        if (this._selectedRecordBar)
+            this._selectedRecordBar.selected = false;
+
+        this._selectedRecordBar = recordBar;
+
+        if (this._selectedRecordBar) {
+            this._selectedRecordBar.selected = true;
+
+            console.assert(this._selectedRecordBar.records.includes(this._selectedRecord));
+        }
     }
 
     get height()
@@ -177,7 +220,10 @@ WI.TimelineOverviewGraph = class TimelineOverviewGraph extends WI.View
         return 36;
     }
 
-    get selected() { return this._selected; }
+    get selected()
+    {
+        return this._selected;
+    }
 
     set selected(x)
     {
@@ -186,25 +232,6 @@ WI.TimelineOverviewGraph = class TimelineOverviewGraph extends WI.View
 
         this._selected = x;
         this.element.classList.toggle("selected", this._selected);
-    }
-
-    shown()
-    {
-        if (this._visible)
-            return;
-
-        this._visible = true;
-        this.element.classList.toggle("hidden", !this._visible);
-        this.updateLayout();
-    }
-
-    hidden()
-    {
-        if (!this._visible)
-            return;
-
-        this._visible = false;
-        this.element.classList.toggle("hidden", !this._visible);
     }
 
     reset()
@@ -220,10 +247,24 @@ WI.TimelineOverviewGraph = class TimelineOverviewGraph extends WI.View
     needsLayout()
     {
         // FIXME: needsLayout can be removed once <https://webkit.org/b/150741> is fixed.
-        if (!this._visible)
+        if (this._hidden)
             return;
 
         super.needsLayout();
+    }
+
+    didLayoutSubtree()
+    {
+        super.didLayoutSubtree();
+
+        this.updateSelectedRecord();
+    }
+
+    // TimelineRecordBar delegate
+
+    timelineRecordBarClicked(timelineRecordBar)
+    {
+        this.selectedRecord = timelineRecordBar.records[0];
     }
 
     // Protected
@@ -248,7 +289,7 @@ WI.TimelineOverviewGraph = class TimelineOverviewGraph extends WI.View
             this._scheduledSelectedRecordLayoutUpdateIdentifier = undefined;
 
             this.updateSelectedRecord();
-            this.dispatchEventToListeners(WI.TimelineOverviewGraph.Event.RecordSelected, {record: this.selectedRecord});
+            this.dispatchEventToListeners(WI.TimelineOverviewGraph.Event.RecordSelected, {record: this.selectedRecord, recordBar: this.selectedRecordBar});
         });
     }
 };

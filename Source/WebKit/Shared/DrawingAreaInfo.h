@@ -23,22 +23,54 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef DrawingAreaType_h
-#define DrawingAreaType_h
+#pragma once
+
+#include <wtf/EnumTraits.h>
+#include <wtf/ObjectIdentifier.h>
 
 namespace WebKit {
 
-enum DrawingAreaType {
+enum class DrawingAreaType : uint8_t {
 #if PLATFORM(COCOA)
-#if !PLATFORM(IOS)
-    DrawingAreaTypeTiledCoreAnimation,
+#if !PLATFORM(IOS_FAMILY)
+    TiledCoreAnimation,
 #endif
-    DrawingAreaTypeRemoteLayerTree,
-#else
-    DrawingAreaTypeImpl
+    RemoteLayerTree,
+#elif USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
+    CoordinatedGraphics,
+#endif
+#if USE(GRAPHICS_LAYER_WC)
+    WC,
 #endif
 };
+    
+enum {
+    ActivityStateChangeAsynchronous = 0
+};
+typedef uint64_t ActivityStateChangeID;
+
+enum DrawingAreaIdentifierType { };
+using DrawingAreaIdentifier = ObjectIdentifier<DrawingAreaIdentifierType>;
 
 } // namespace WebKit
 
-#endif // DrawingAreaType_h
+namespace WTF {
+
+template<> struct EnumTraits<WebKit::DrawingAreaType> {
+    using values = EnumValues<
+        WebKit::DrawingAreaType
+#if PLATFORM(COCOA)
+#if !PLATFORM(IOS_FAMILY)
+        , WebKit::DrawingAreaType::TiledCoreAnimation
+#endif
+        , WebKit::DrawingAreaType::RemoteLayerTree
+#elif USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
+        , WebKit::DrawingAreaType::CoordinatedGraphics
+#endif
+#if USE(GRAPHICS_LAYER_WC)
+        , WebKit::DrawingAreaType::WC
+#endif
+    >;
+};
+
+} // namespace WTF

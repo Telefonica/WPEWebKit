@@ -37,7 +37,6 @@
 #include "WebStorageNamespaceProvider.h"
 #include <WebCore/COMPtr.h>
 #include <WebCore/Page.h>
-#include <WebCore/PageGroup.h>
 #include <WebCore/PlatformDisplay.h>
 #include <WebCore/RenderThemeWin.h>
 #include <WebCore/SharedBuffer.h>
@@ -163,14 +162,11 @@ STDAPI LocalServerDidDie()
 void shutDownWebKit()
 {
     WebKit::WebStorageNamespaceProvider::closeLocalStorage();
-#if USE(EGL)
-    PlatformDisplay::shutDownEglDisplays();
-#endif
 }
 
 //FIXME: We should consider moving this to a new file for cross-project functionality
-WEBKIT_API RefPtr<WebCore::SharedBuffer> loadResourceIntoBuffer(const char* name);
-RefPtr<WebCore::SharedBuffer> loadResourceIntoBuffer(const char* name)
+WEBKIT_API RefPtr<WebCore::FragmentedSharedBuffer> loadResourceIntoBuffer(const char* name);
+RefPtr<WebCore::FragmentedSharedBuffer> loadResourceIntoBuffer(const char* name)
 {
     int idr;
     // temporary hack to get resource id
@@ -247,7 +243,9 @@ typedef JSClassRef (*JSClassCreateFunction)(const JSClassDefinition* definition)
 typedef void* (*JSObjectGetPrivateFunction)(JSObjectRef);
 typedef JSObjectRef (*JSObjectMakeFunctionStub)(JSContextRef, JSClassRef, void*);
 typedef void (*JSObjectSetPropertyFunction)(JSContextRef, JSObjectRef, JSStringRef propertyName, JSValueRef, JSPropertyAttributes, JSValueRef* exception);
+#if USE(CF)
 typedef JSStringRef (*JSStringCreateWithCFStringFunction)(CFStringRef);
+#endif
 typedef JSStringRef (*JSStringCreateWithUTF8CStringFunction)(const char*);
 typedef const JSChar* (*JSStringGetCharactersPtrFunction)(JSStringRef);
 typedef size_t (*JSStringGetLengthFunction)(JSStringRef);
@@ -262,7 +260,9 @@ JSClassCreateFunction m_jsClassCreateFunction = nullptr;
 JSObjectGetPrivateFunction m_jsObjectGetPrivateFunction = nullptr;
 JSObjectMakeFunctionStub m_jsObjectMakeFunction = nullptr;
 JSObjectSetPropertyFunction m_jsObjectSetPropertyFunction = nullptr;
+#if USE(CF)
 JSStringCreateWithCFStringFunction m_jsStringCreateWithCFStringFunction = nullptr;
+#endif
 JSStringCreateWithUTF8CStringFunction m_jsStringCreateWithUTF8CStringFunction = nullptr;
 JSStringGetCharactersPtrFunction m_jsStringGetCharactersPtrFunction = nullptr;
 JSStringGetLengthFunction m_jsStringGetLengthFunction = nullptr;
@@ -286,7 +286,9 @@ void bindJavaScriptTrampoline()
     m_jsObjectGetPrivateFunction = reinterpret_cast<JSObjectGetPrivateFunction>(::GetProcAddress(library, "JSObjectGetPrivate"));
     m_jsObjectMakeFunction = reinterpret_cast<JSObjectMakeFunctionStub>(::GetProcAddress(library, "JSObjectMake"));
     m_jsObjectSetPropertyFunction = reinterpret_cast<JSObjectSetPropertyFunction>(::GetProcAddress(library, "JSObjectSetProperty"));;
+#if USE(CF)
     m_jsStringCreateWithCFStringFunction = reinterpret_cast<JSStringCreateWithCFStringFunction>(::GetProcAddress(library, "JSStringCreateWithCFString"));
+#endif
     m_jsStringCreateWithUTF8CStringFunction = reinterpret_cast<JSStringCreateWithUTF8CStringFunction>(::GetProcAddress(library, "JSStringCreateWithUTF8CString"));
     m_jsStringGetCharactersPtrFunction = reinterpret_cast<JSStringGetCharactersPtrFunction>(::GetProcAddress(library, "JSStringGetCharactersPtr"));
     m_jsStringGetLengthFunction = reinterpret_cast<JSStringGetLengthFunction>(::GetProcAddress(library, "JSStringGetLength"));
@@ -329,12 +331,14 @@ WEBKIT_API void JSObjectSetProperty(JSContextRef ctx, JSObjectRef object, JSStri
         m_jsObjectSetPropertyFunction(ctx, object, propertyName, value, attributes, exception);
 }
 
+#if USE(CF)
 WEBKIT_API JSStringRef JSStringCreateWithCFString(CFStringRef value)
 {
     if (m_jsStringCreateWithCFStringFunction)
         return m_jsStringCreateWithCFStringFunction(value);
     return nullptr;
 }
+#endif
 
 WEBKIT_API JSStringRef JSStringCreateWithUTF8CString(const char* value)
 {

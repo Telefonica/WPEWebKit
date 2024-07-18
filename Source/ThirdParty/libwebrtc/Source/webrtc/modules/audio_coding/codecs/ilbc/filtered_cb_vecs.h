@@ -16,10 +16,11 @@
 
 ******************************************************************/
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_FILTERED_CB_VECS_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_FILTERED_CB_VECS_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_FILTERED_CB_VECS_H_
+#define MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_FILTERED_CB_VECS_H_
 
-#include "defines.h"
+#include <stddef.h>
+#include <stdint.h>
 
 /*----------------------------------------------------------------*
  *  Construct an additional codebook vector by filtering the
@@ -28,11 +29,11 @@
  *---------------------------------------------------------------*/
 
 void WebRtcIlbcfix_FilteredCbVecs(
-    int16_t *cbvectors, /* (o) Codebook vector for the higher section */
-    int16_t *CBmem,  /* (i) Codebook memory that is filtered to create a
-                                           second CB section */
-    size_t lMem,  /* (i) Length of codebook memory */
-    size_t samples    /* (i) Number of samples to filter */
-                                  );
+    int16_t* cbvectors, /* (o) Codebook vector for the higher section */
+    int16_t* CBmem,     /* (i) Codebook memory that is filtered to create a
+                                              second CB section */
+    size_t lMem,        /* (i) Length of codebook memory */
+    size_t samples      /* (i) Number of samples to filter */
+);
 
 #endif

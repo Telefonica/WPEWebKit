@@ -27,48 +27,74 @@
 #include "WebsiteDataStoreParameters.h"
 
 #include "WebCoreArgumentCoders.h"
+#include "WebsiteDataStore.h"
 
 namespace WebKit {
 
-WebsiteDataStoreParameters::~WebsiteDataStoreParameters()
-{
-}
+WebsiteDataStoreParameters::~WebsiteDataStoreParameters() = default;
 
 void WebsiteDataStoreParameters::encode(IPC::Encoder& encoder) const
 {
-    encoder << sessionID;
+    encoder << networkSessionParameters;
     encoder << uiProcessCookieStorageIdentifier;
     encoder << cookieStoragePathExtensionHandle;
-    encoder << pendingCookies;
-    encoder << cacheStorageDirectory;
-    encoder << cacheStorageDirectoryExtensionHandle;
+#if PLATFORM(IOS_FAMILY)
+    encoder << cookieStorageDirectoryExtensionHandle;
+    encoder << containerCachesDirectoryExtensionHandle;
+    encoder << parentBundleDirectoryExtensionHandle;
+    encoder << tempDirectoryExtensionHandle;
+#endif
 }
 
-bool WebsiteDataStoreParameters::decode(IPC::Decoder& decoder, WebsiteDataStoreParameters& parameters)
+std::optional<WebsiteDataStoreParameters> WebsiteDataStoreParameters::decode(IPC::Decoder& decoder)
 {
-    if (!decoder.decode(parameters.sessionID))
-        return false;
+    WebsiteDataStoreParameters parameters;
 
-    if (!decoder.decode(parameters.uiProcessCookieStorageIdentifier))
-        return false;
+    std::optional<NetworkSessionCreationParameters> networkSessionParameters;
+    decoder >> networkSessionParameters;
+    if (!networkSessionParameters)
+        return std::nullopt;
+    parameters.networkSessionParameters = WTFMove(*networkSessionParameters);
 
-    if (!decoder.decode(parameters.cookieStoragePathExtensionHandle))
-        return false;
+    std::optional<Vector<uint8_t>> uiProcessCookieStorageIdentifier;
+    decoder >> uiProcessCookieStorageIdentifier;
+    if (!uiProcessCookieStorageIdentifier)
+        return std::nullopt;
+    parameters.uiProcessCookieStorageIdentifier = WTFMove(*uiProcessCookieStorageIdentifier);
 
-    std::optional<Vector<WebCore::Cookie>> pendingCookies;
-    decoder >> pendingCookies;
-    if (!pendingCookies)
-        return false;
-    parameters.pendingCookies = WTFMove(*pendingCookies);
+    std::optional<SandboxExtension::Handle> cookieStoragePathExtensionHandle;
+    decoder >> cookieStoragePathExtensionHandle;
+    if (!cookieStoragePathExtensionHandle)
+        return std::nullopt;
+    parameters.cookieStoragePathExtensionHandle = WTFMove(*cookieStoragePathExtensionHandle);
 
-    if (!decoder.decode(parameters.cacheStorageDirectory))
-        return false;
+#if PLATFORM(IOS_FAMILY)
+    std::optional<std::optional<SandboxExtension::Handle>> cookieStorageDirectoryExtensionHandle;
+    decoder >> cookieStorageDirectoryExtensionHandle;
+    if (!cookieStorageDirectoryExtensionHandle)
+        return std::nullopt;
+    parameters.cookieStorageDirectoryExtensionHandle = WTFMove(*cookieStorageDirectoryExtensionHandle);
 
-    if (!decoder.decode(parameters.cacheStorageDirectoryExtensionHandle))
-        return false;
+    std::optional<std::optional<SandboxExtension::Handle>> containerCachesDirectoryExtensionHandle;
+    decoder >> containerCachesDirectoryExtensionHandle;
+    if (!containerCachesDirectoryExtensionHandle)
+        return std::nullopt;
+    parameters.containerCachesDirectoryExtensionHandle = WTFMove(*containerCachesDirectoryExtensionHandle);
 
-    return true;
+    std::optional<std::optional<SandboxExtension::Handle>> parentBundleDirectoryExtensionHandle;
+    decoder >> parentBundleDirectoryExtensionHandle;
+    if (!parentBundleDirectoryExtensionHandle)
+        return std::nullopt;
+    parameters.parentBundleDirectoryExtensionHandle = WTFMove(*parentBundleDirectoryExtensionHandle);
+
+    std::optional<std::optional<SandboxExtension::Handle>> tempDirectoryExtensionHandle;
+    decoder >> tempDirectoryExtensionHandle;
+    if (!tempDirectoryExtensionHandle)
+        return std::nullopt;
+    parameters.tempDirectoryExtensionHandle = WTFMove(*tempDirectoryExtensionHandle);
+#endif
+
+    return parameters;
 }
-
 
 } // namespace WebKit

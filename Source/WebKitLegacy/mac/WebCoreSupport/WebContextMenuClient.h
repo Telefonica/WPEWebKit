@@ -44,13 +44,14 @@ class WebContextMenuClient : public WebCore::ContextMenuClient
     , public WebSharingServicePickerClient
 #endif
 {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebContextMenuClient(WebView *webView);
     virtual ~WebContextMenuClient();
 
     void contextMenuDestroyed() override;
 
-    void downloadURL(const WebCore::URL&) override;
+    void downloadURL(const URL&) override;
     void searchWithGoogle(const WebCore::Frame*) override;
     void lookUpInDictionary(WebCore::Frame*) override;
     bool isSpeaking() override;
@@ -59,11 +60,23 @@ public:
     void searchWithSpotlight() override;
     void showContextMenu() override;
 
+#if ENABLE(IMAGE_ANALYSIS)
+    bool supportsLookUpInImages() final { return false; }
+#endif
+
+#if ENABLE(IMAGE_ANALYSIS_ENHANCEMENTS)
+    bool supportsCopySubject() final { return false; }
+#endif
+
 #if ENABLE(SERVICE_CONTROLS)
     // WebSharingServicePickerClient
     void sharingServicePickerWillBeDestroyed(WebSharingServicePickerController &) override;
     WebCore::FloatRect screenRectForCurrentSharingServicePickerItem(WebSharingServicePickerController &) override;
     RetainPtr<NSImage> imageForCurrentSharingServicePickerItem(WebSharingServicePickerController &) override;
+#endif
+
+#if HAVE(TRANSLATION_UI_SERVICES)
+    void handleTranslation(const WebCore::TranslationContextMenuInfo&) final;
 #endif
 
 private:

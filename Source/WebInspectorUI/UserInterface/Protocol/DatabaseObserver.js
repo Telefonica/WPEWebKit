@@ -23,12 +23,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WI.DatabaseObserver = class DatabaseObserver
+WI.DatabaseObserver = class DatabaseObserver extends InspectorBackend.Dispatcher
 {
     // Events defined by the "Database" domain.
 
     addDatabase(database)
     {
-        WI.storageManager.databaseWasAdded(database.id, database.domain, database.name, database.version);
+        WI.databaseManager.databaseWasAdded(database.id, database.domain, database.name, database.version);
     }
 };

@@ -45,13 +45,13 @@ WebActionPropertyBag::WebActionPropertyBag(const NavigationAction& action, RefPt
     , m_frame(WTFMove(frame))
 {
     gClassCount++;
-    gClassNameCount().add("WebActionPropertyBag");
+    gClassNameCount().add("WebActionPropertyBag"_s);
 }
 
 WebActionPropertyBag::~WebActionPropertyBag()
 {
     gClassCount--;
-    gClassNameCount().remove("WebActionPropertyBag");
+    gClassNameCount().remove("WebActionPropertyBag"_s);
 }
 
 WebActionPropertyBag* WebActionPropertyBag::createInstance(const NavigationAction& action, RefPtr<HTMLFormElement>&& form, RefPtr<Frame>&& frame)
@@ -98,14 +98,6 @@ static bool isEqual(LPCWSTR s1, LPCWSTR s2)
     return !wcscmp(s1, s2);
 }
 
-static const MouseEvent* findMouseEvent(const Event* event)
-{
-    for (const Event* e = event; e; e = e->underlyingEvent())
-        if (e->isMouseEvent())
-            return static_cast<const MouseEvent*>(e);
-    return nullptr;
-}
-
 HRESULT WebActionPropertyBag::Read(LPCOLESTR pszPropName, VARIANT *pVar, IErrorLog * /*pErrorLog*/)
 {
     if (!pszPropName)
@@ -119,16 +111,17 @@ HRESULT WebActionPropertyBag::Read(LPCOLESTR pszPropName, VARIANT *pVar, IErrorL
         return S_OK;
     }
     if (isEqual(pszPropName, WebActionElementKey)) {
-        if (const MouseEvent* mouseEvent = findMouseEvent(m_action.event())) {
+        if (auto mouseEvent = m_action.mouseEventData()) {
             V_VT(pVar) = VT_UNKNOWN;
-            V_UNKNOWN(pVar) = WebElementPropertyBag::createInstance(m_frame->eventHandler().hitTestResultAtPoint(mouseEvent->absoluteLocation()));
+            constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::DisallowUserAgentShadowContent, HitTestRequest::Type::AllowChildFrameContent };
+            V_UNKNOWN(pVar) = WebElementPropertyBag::createInstance(m_frame->eventHandler().hitTestResultAtPoint(mouseEvent->absoluteLocation, hitType));
             return S_OK;
         }
     }
     if (isEqual(pszPropName, WebActionButtonKey)) {
-        if (const MouseEvent* mouseEvent = findMouseEvent(m_action.event())) {
+        if (auto mouseEvent = m_action.mouseEventData()) {
             V_VT(pVar) = VT_I4;
-            V_I4(pVar) = mouseEvent->button();
+            V_I4(pVar) = mouseEvent->button;
             return S_OK;
         }
     }
@@ -138,14 +131,14 @@ HRESULT WebActionPropertyBag::Read(LPCOLESTR pszPropName, VARIANT *pVar, IErrorL
         return S_OK;
     }
     if (isEqual(pszPropName, WebActionModifierFlagsKey)) {
-        if (const UIEventWithKeyState* keyEvent = findEventWithKeyState(const_cast<Event*>(m_action.event()))) {
+        if (auto keyEvent = m_action.keyStateEventData()) {
             unsigned modifiers = 0;
 
-            if (keyEvent->ctrlKey())
+            if (keyEvent->ctrlKey)
                 modifiers |= MK_CONTROL;
-            if (keyEvent->shiftKey())
+            if (keyEvent->shiftKey)
                 modifiers |= MK_SHIFT;
-            if (keyEvent->altKey())
+            if (keyEvent->altKey)
                 modifiers |= MK_ALT;
 
             V_VT(pVar) = VT_UI4;

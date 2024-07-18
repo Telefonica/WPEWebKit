@@ -31,22 +31,26 @@
 
 #if PLATFORM(COCOA)
 #include <wtf/RetainPtr.h>
+#include <wtf/WeakObjCPtr.h>
 #endif
 
 #if PLATFORM(MAC)
 OBJC_CLASS NSPopover;
-#elif PLATFORM(IOS)
+#elif PLATFORM(IOS_FAMILY)
 OBJC_CLASS UIViewController;
 OBJC_CLASS WebValidationBubbleDelegate;
 OBJC_CLASS WebValidationBubbleTapRecognizer;
+OBJC_CLASS WebValidationBubbleViewController;
 #endif
 
 #if PLATFORM(MAC)
 OBJC_CLASS NSView;
 using PlatformView = NSView;
-#elif PLATFORM(IOS)
+#elif PLATFORM(IOS_FAMILY)
 OBJC_CLASS UIView;
 using PlatformView = UIView;
+#elif PLATFORM(GTK)
+using PlatformView = GtkWidget;
 #else
 using PlatformView = void;
 #endif
@@ -59,17 +63,25 @@ public:
         double minimumFontSize { 0 };
     };
 
+#if PLATFORM(GTK)
+    using ShouldNotifyFocusEventsCallback = Function<void(PlatformView*, bool shouldNotifyFocusEvents)>;
+    static Ref<ValidationBubble> create(PlatformView* view, const String& message, const Settings& settings, ShouldNotifyFocusEventsCallback&& callback)
+    {
+        return adoptRef(*new ValidationBubble(view, message, settings, WTFMove(callback)));
+    }
+#else
     static Ref<ValidationBubble> create(PlatformView* view, const String& message, const Settings& settings)
     {
         return adoptRef(*new ValidationBubble(view, message, settings));
     }
+#endif
 
     WEBCORE_EXPORT ~ValidationBubble();
 
     const String& message() const { return m_message; }
     double fontSize() const { return m_fontSize; }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     WEBCORE_EXPORT void setAnchorRect(const IntRect& anchorRect, UIViewController* presentingViewController = nullptr);
     WEBCORE_EXPORT void show();
 #else
@@ -77,18 +89,26 @@ public:
 #endif
 
 private:
+#if PLATFORM(GTK)
+    WEBCORE_EXPORT ValidationBubble(PlatformView*, const String& message, const Settings&, ShouldNotifyFocusEventsCallback&&);
+    void invalidate();
+#else
     WEBCORE_EXPORT ValidationBubble(PlatformView*, const String& message, const Settings&);
+#endif
 
     PlatformView* m_view;
     String m_message;
     double m_fontSize { 0 };
 #if PLATFORM(MAC)
     RetainPtr<NSPopover> m_popover;
-#elif PLATFORM(IOS)
-    RetainPtr<UIViewController> m_popoverController;
+#elif PLATFORM(IOS_FAMILY)
+    RetainPtr<WebValidationBubbleViewController> m_popoverController;
     RetainPtr<WebValidationBubbleTapRecognizer> m_tapRecognizer;
     RetainPtr<WebValidationBubbleDelegate> m_popoverDelegate;
-    UIViewController *m_presentingViewController;
+    WeakObjCPtr<UIViewController> m_presentingViewController;
+#elif PLATFORM(GTK)
+    GtkWidget* m_popover { nullptr };
+    ShouldNotifyFocusEventsCallback m_shouldNotifyFocusEventsCallback { nullptr };
 #endif
 };
 

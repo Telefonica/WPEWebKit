@@ -8,40 +8,36 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_TEST_TESTSTEREO_H_
-#define WEBRTC_MODULES_AUDIO_CODING_TEST_TESTSTEREO_H_
+#ifndef MODULES_AUDIO_CODING_TEST_TESTSTEREO_H_
+#define MODULES_AUDIO_CODING_TEST_TESTSTEREO_H_
 
 #include <math.h>
 
 #include <memory>
 
-#include "webrtc/modules/audio_coding/test/ACMTest.h"
-#include "webrtc/modules/audio_coding/test/Channel.h"
-#include "webrtc/modules/audio_coding/test/PCMFile.h"
+#include "modules/audio_coding/acm2/acm_receiver.h"
+#include "modules/audio_coding/include/audio_coding_module.h"
+#include "modules/audio_coding/test/PCMFile.h"
 
 #define PCMA_AND_PCMU
 
 namespace webrtc {
 
-enum StereoMonoMode {
-  kNotSet,
-  kMono,
-  kStereo
-};
+enum StereoMonoMode { kNotSet, kMono, kStereo };
 
 class TestPackStereo : public AudioPacketizationCallback {
  public:
   TestPackStereo();
   ~TestPackStereo();
 
-  void RegisterReceiverACM(AudioCodingModule* acm);
+  void RegisterReceiverACM(acm2::AcmReceiver* acm_receiver);
 
-  int32_t SendData(const FrameType frame_type,
-                   const uint8_t payload_type,
-                   const uint32_t timestamp,
+  int32_t SendData(AudioFrameType frame_type,
+                   uint8_t payload_type,
+                   uint32_t timestamp,
                    const uint8_t* payload_data,
-                   const size_t payload_size,
-                   const RTPFragmentationHeader* fragmentation) override;
+                   size_t payload_size,
+                   int64_t absolute_capture_timestamp_ms) override;
 
   uint16_t payload_size();
   uint32_t timestamp_diff();
@@ -50,7 +46,7 @@ class TestPackStereo : public AudioPacketizationCallback {
   void set_lost_packet(bool lost);
 
  private:
-  AudioCodingModule* receiver_acm_;
+  acm2::AcmReceiver* receiver_acm_;
   int16_t seq_no_;
   uint32_t timestamp_diff_;
   uint32_t last_in_timestamp_;
@@ -61,30 +57,32 @@ class TestPackStereo : public AudioPacketizationCallback {
   bool lost_packet_;
 };
 
-class TestStereo : public ACMTest {
+class TestStereo {
  public:
-  explicit TestStereo(int test_mode);
+  TestStereo();
   ~TestStereo();
 
-  void Perform() override;
+  void Perform();
 
  private:
   // The default value of '-1' indicates that the registration is based only on
   // codec name and a sampling frequncy matching is not required. This is useful
   // for codecs which support several sampling frequency.
-  void RegisterSendCodec(char side, char* codec_name, int32_t samp_freq_hz,
-                         int rate, int pack_size, int channels,
-                         int payload_type);
+  void RegisterSendCodec(char side,
+                         char* codec_name,
+                         int32_t samp_freq_hz,
+                         int rate,
+                         int pack_size,
+                         int channels);
 
-  void Run(TestPackStereo* channel, int in_channels, int out_channels,
+  void Run(TestPackStereo* channel,
+           int in_channels,
+           int out_channels,
            int percent_loss = 0);
   void OpenOutFile(int16_t test_number);
-  void DisplaySendReceiveCodec();
-
-  int test_mode_;
 
   std::unique_ptr<AudioCodingModule> acm_a_;
-  std::unique_ptr<AudioCodingModule> acm_b_;
+  std::unique_ptr<acm2::AcmReceiver> acm_b_;
 
   TestPackStereo* channel_a2b_;
 
@@ -96,23 +94,8 @@ class TestStereo : public ACMTest {
   uint16_t pack_size_bytes_;
   int counter_;
   char* send_codec_name_;
-
-  // Payload types for stereo codecs and CNG
-#ifdef WEBRTC_CODEC_G722
-  int g722_pltype_;
-#endif
-  int l16_8khz_pltype_;
-  int l16_16khz_pltype_;
-  int l16_32khz_pltype_;
-#ifdef PCMA_AND_PCMU
-  int pcma_pltype_;
-  int pcmu_pltype_;
-#endif
-#ifdef WEBRTC_CODEC_OPUS
-  int opus_pltype_;
-#endif
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_TEST_TESTSTEREO_H_
+#endif  // MODULES_AUDIO_CODING_TEST_TESTSTEREO_H_

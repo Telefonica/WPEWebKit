@@ -27,15 +27,17 @@ WI.LayersTabContentView = class LayersTabContentView extends WI.ContentBrowserTa
 {
     constructor()
     {
-        let {image, title} = WI.LayersTabContentView.tabInfo();
-        let tabBarItem = new WI.GeneralTabBarItem(image, title);
+        super(LayersTabContentView.tabInfo(), {
+            detailsSidebarPanelConstructors: [WI.LayerDetailsSidebarPanel],
+            hideBackForwardButtons: true,
+            disableBackForwardNavigation: true,
+        });
 
-        const navigationSidebarPanelConstructor = null;
-        const detailsSidebarPanelConstructors = [WI.LayerDetailsSidebarPanel];
-        const disableBackForward = true;
-        super("layers", "layers", tabBarItem, navigationSidebarPanelConstructor, detailsSidebarPanelConstructors, disableBackForward);
+        this._layerDetailsSidebarPanel = this.detailsSidebarPanels[0];
+        this._layerDetailsSidebarPanel.addEventListener(WI.LayerDetailsSidebarPanel.Event.SelectedLayerChanged, this._detailsSidebarSelectedLayerChanged, this);
 
         this._layers3DContentView = new WI.Layers3DContentView;
+        this._layers3DContentView.addEventListener(WI.Layers3DContentView.Event.SelectedLayerChanged, this._contentViewSelectedLayerChanged, this);
     }
 
     // Static
@@ -43,14 +45,15 @@ WI.LayersTabContentView = class LayersTabContentView extends WI.ContentBrowserTa
     static tabInfo()
     {
         return {
+            identifier: LayersTabContentView.Type,
             image: "Images/Layers.svg",
-            title: WI.UIString("Layers"),
+            displayName: WI.UIString("Layers", "Layers Tab Name", "Name of Layers Tab"),
         };
     }
 
     static isTabAllowed()
     {
-        return window.LayerTreeAgent && WI.settings.experimentalEnableLayersTab.value;
+        return InspectorBackend.hasDomain("LayerTree");
     }
 
     // Public
@@ -58,11 +61,28 @@ WI.LayersTabContentView = class LayersTabContentView extends WI.ContentBrowserTa
     get type() { return WI.LayersTabContentView.Type; }
     get supportsSplitContentBrowser() { return false; }
 
-    shown()
+    selectLayerForNode(node)
     {
-        super.shown();
+        this._layers3DContentView.selectLayerForNode(node);
+    }
+
+    attached()
+    {
+        super.attached();
 
         this.contentBrowser.showContentView(this._layers3DContentView);
+    }
+
+    // Private
+
+    _detailsSidebarSelectedLayerChanged(event)
+    {
+        this._layers3DContentView.selectLayerById(event.data.layerId);
+    }
+
+    _contentViewSelectedLayerChanged(event)
+    {
+        this._layerDetailsSidebarPanel.selectNodeByLayerId(event.data.layerId);
     }
 };
 

@@ -55,18 +55,17 @@
  * [including the GNU Public Licence.] */
 
 #if defined(__linux) || defined(__sun) || defined(__hpux)
-/* Following definition aliases fopen to fopen64 on above mentioned
- * platforms. This makes it possible to open and sequentially access
- * files larger than 2GB from 32-bit application. It does not allow to
- * traverse them beyond 2GB with fseek/ftell, but on the other hand *no*
- * 32-bit platform permits that, not with fseek/ftell. Not to mention
- * that breaking 2GB limit for seeking would require surgery to *our*
- * API. But sequential access suffices for practical cases when you
- * can run into large files, such as fingerprinting, so we can let API
- * alone. For reference, the list of 32-bit platforms which allow for
- * sequential access of large files without extra "magic" comprise *BSD,
- * Darwin, IRIX...
- */
+// Following definition aliases fopen to fopen64 on above mentioned
+// platforms. This makes it possible to open and sequentially access
+// files larger than 2GB from 32-bit application. It does not allow to
+// traverse them beyond 2GB with fseek/ftell, but on the other hand *no*
+// 32-bit platform permits that, not with fseek/ftell. Not to mention
+// that breaking 2GB limit for seeking would require surgery to *our*
+// API. But sequential access suffices for practical cases when you
+// can run into large files, such as fingerprinting, so we can let API
+// alone. For reference, the list of 32-bit platforms which allow for
+// sequential access of large files without extra "magic" comprise *BSD,
+// Darwin, IRIX...
 #ifndef _FILE_OFFSET_BITS
 #define _FILE_OFFSET_BITS 64
 #endif
@@ -74,13 +73,16 @@
 
 #include <openssl/bio.h>
 
+#if !defined(OPENSSL_TRUSTY)
+
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
-#include <openssl/buf.h>
 #include <openssl/err.h>
 #include <openssl/mem.h>
+
+#include "../internal.h"
 
 
 #define BIO_FP_READ 0x02
@@ -104,13 +106,12 @@ BIO *BIO_new_file(const char *filename, const char *mode) {
     return NULL;
   }
 
-  ret = BIO_new(BIO_s_file());
+  ret = BIO_new_fp(file, BIO_CLOSE);
   if (ret == NULL) {
     fclose(file);
     return NULL;
   }
 
-  BIO_set_fp(ret, file, BIO_CLOSE);
   return ret;
 }
 
@@ -157,7 +158,7 @@ static int file_read(BIO *b, char *out, int outl) {
     return -1;
   }
 
-  /* fread reads at most |outl| bytes, so |ret| fits in an int. */
+  // fread reads at most |outl| bytes, so |ret| fits in an int.
   return (int)ret;
 }
 
@@ -184,6 +185,7 @@ static long file_ctrl(BIO *b, int cmd, long num, void *ptr) {
   switch (cmd) {
     case BIO_CTRL_RESET:
       num = 0;
+      OPENSSL_FALLTHROUGH;
     case BIO_C_FILE_SEEK:
       ret = (long)fseek(fp, num, 0);
       break;
@@ -205,16 +207,16 @@ static long file_ctrl(BIO *b, int cmd, long num, void *ptr) {
       b->shutdown = (int)num & BIO_CLOSE;
       if (num & BIO_FP_APPEND) {
         if (num & BIO_FP_READ) {
-          BUF_strlcpy(p, "a+", sizeof(p));
+          OPENSSL_strlcpy(p, "a+", sizeof(p));
         } else {
-          BUF_strlcpy(p, "a", sizeof(p));
+          OPENSSL_strlcpy(p, "a", sizeof(p));
         }
       } else if ((num & BIO_FP_READ) && (num & BIO_FP_WRITE)) {
-        BUF_strlcpy(p, "r+", sizeof(p));
+        OPENSSL_strlcpy(p, "r+", sizeof(p));
       } else if (num & BIO_FP_WRITE) {
-        BUF_strlcpy(p, "w", sizeof(p));
+        OPENSSL_strlcpy(p, "w", sizeof(p));
       } else if (num & BIO_FP_READ) {
-        BUF_strlcpy(p, "r", sizeof(p));
+        OPENSSL_strlcpy(p, "r", sizeof(p));
       } else {
         OPENSSL_PUT_ERROR(BIO, BIO_R_BAD_FOPEN_MODE);
         ret = 0;
@@ -232,7 +234,7 @@ static long file_ctrl(BIO *b, int cmd, long num, void *ptr) {
       b->init = 1;
       break;
     case BIO_C_GET_FILE_PTR:
-      /* the ptr parameter is actually a FILE ** in this case. */
+      // the ptr parameter is actually a FILE ** in this case.
       if (ptr != NULL) {
         fpp = (FILE **)ptr;
         *fpp = (FILE *)b->ptr;
@@ -311,3 +313,5 @@ int BIO_rw_filename(BIO *bio, const char *filename) {
   return BIO_ctrl(bio, BIO_C_SET_FILENAME,
                   BIO_CLOSE | BIO_FP_READ | BIO_FP_WRITE, (char *)filename);
 }
+
+#endif  // OPENSSL_TRUSTY

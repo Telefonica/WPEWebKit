@@ -36,18 +36,26 @@ AdaptiveInferredPropertyValueWatchpointBase::AdaptiveInferredPropertyValueWatchp
     RELEASE_ASSERT(key.kind() == PropertyCondition::Equivalence);
 }
 
-void AdaptiveInferredPropertyValueWatchpointBase::install()
+void AdaptiveInferredPropertyValueWatchpointBase::initialize(const ObjectPropertyCondition& key)
 {
-    RELEASE_ASSERT(m_key.isWatchable());
+    m_key = key;
+    RELEASE_ASSERT(key.kind() == PropertyCondition::Equivalence);
+}
 
-    m_key.object()->structure()->addTransitionWatchpoint(&m_structureWatchpoint);
+void AdaptiveInferredPropertyValueWatchpointBase::install(VM& vm)
+{
+    RELEASE_ASSERT(m_key.isWatchable(PropertyCondition::MakeNoChanges));
 
-    PropertyOffset offset = m_key.object()->structure()->getConcurrently(m_key.uid());
-    WatchpointSet* set = m_key.object()->structure()->propertyReplacementWatchpointSet(offset);
+    Structure* structure = m_key.object()->structure();
+
+    structure->addTransitionWatchpoint(&m_structureWatchpoint);
+
+    PropertyOffset offset = structure->get(vm, m_key.uid());
+    WatchpointSet* set = structure->propertyReplacementWatchpointSet(offset);
     set->add(&m_propertyWatchpoint);
 }
 
-void AdaptiveInferredPropertyValueWatchpointBase::fire(const FireDetail& detail)
+void AdaptiveInferredPropertyValueWatchpointBase::fire(VM& vm, const FireDetail& detail)
 {
     // One of the watchpoints fired, but the other one didn't. Make sure that neither of them are
     // in any set anymore. This simplifies things by allowing us to reinstall the watchpoints
@@ -61,11 +69,11 @@ void AdaptiveInferredPropertyValueWatchpointBase::fire(const FireDetail& detail)
         return;
 
     if (m_key.isWatchable(PropertyCondition::EnsureWatchability)) {
-        install();
+        install(vm);
         return;
     }
 
-    handleFire(detail);
+    handleFire(vm, detail);
 }
 
 bool AdaptiveInferredPropertyValueWatchpointBase::isValid() const
@@ -73,22 +81,22 @@ bool AdaptiveInferredPropertyValueWatchpointBase::isValid() const
     return true;
 }
 
-void AdaptiveInferredPropertyValueWatchpointBase::StructureWatchpoint::fireInternal(const FireDetail& detail)
+void AdaptiveInferredPropertyValueWatchpointBase::StructureWatchpoint::fireInternal(VM& vm, const FireDetail& detail)
 {
     ptrdiff_t myOffset = OBJECT_OFFSETOF(AdaptiveInferredPropertyValueWatchpointBase, m_structureWatchpoint);
 
     AdaptiveInferredPropertyValueWatchpointBase* parent = bitwise_cast<AdaptiveInferredPropertyValueWatchpointBase*>(bitwise_cast<char*>(this) - myOffset);
 
-    parent->fire(detail);
+    parent->fire(vm, detail);
 }
 
-void AdaptiveInferredPropertyValueWatchpointBase::PropertyWatchpoint::fireInternal(const FireDetail& detail)
+void AdaptiveInferredPropertyValueWatchpointBase::PropertyWatchpoint::fireInternal(VM& vm, const FireDetail& detail)
 {
     ptrdiff_t myOffset = OBJECT_OFFSETOF(AdaptiveInferredPropertyValueWatchpointBase, m_propertyWatchpoint);
 
     AdaptiveInferredPropertyValueWatchpointBase* parent = bitwise_cast<AdaptiveInferredPropertyValueWatchpointBase*>(bitwise_cast<char*>(this) - myOffset);
     
-    parent->fire(detail);
+    parent->fire(vm, detail);
 }
     
 } // namespace JSC

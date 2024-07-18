@@ -25,10 +25,11 @@
 
 WI.RenderingFrameTimelineRecord = class RenderingFrameTimelineRecord extends WI.TimelineRecord
 {
-    constructor(startTime, endTime)
+    constructor(startTime, endTime, name)
     {
         super(WI.TimelineRecord.Type.RenderingFrame, startTime, endTime);
 
+        this._name = name || "";
         this._durationByTaskType = new Map;
         this._frameIndex = -1;
     }
@@ -46,9 +47,9 @@ WI.RenderingFrameTimelineRecord = class RenderingFrameTimelineRecord extends WI.
         case WI.RenderingFrameTimelineRecord.TaskType.Script:
             return WI.UIString("Script");
         case WI.RenderingFrameTimelineRecord.TaskType.Layout:
-            return WI.UIString("Layout");
+            return WI.repeatedUIString.timelineRecordLayout();
         case WI.RenderingFrameTimelineRecord.TaskType.Paint:
-            return WI.UIString("Paint");
+            return WI.repeatedUIString.timelineRecordPaint();
         case WI.RenderingFrameTimelineRecord.TaskType.Other:
             return WI.UIString("Other");
         }
@@ -69,6 +70,27 @@ WI.RenderingFrameTimelineRecord = class RenderingFrameTimelineRecord extends WI.
         }
     }
 
+    // Import / Export
+
+    static async fromJSON(json)
+    {
+        let {startTime, endTime} = json;
+        let record = new WI.RenderingFrameTimelineRecord(startTime, endTime);
+        record.setupFrameIndex();
+        return record;
+    }
+
+    toJSON()
+    {
+        // FIXME: durationByTaskType data cannot be calculated if this does not have children.
+
+        return {
+            type: this.type,
+            startTime: this.startTime,
+            endTime: this.endTime,
+        };
+    }
+
     // Public
 
     get frameIndex()
@@ -79,6 +101,11 @@ WI.RenderingFrameTimelineRecord = class RenderingFrameTimelineRecord extends WI.
     get frameNumber()
     {
         return this._frameIndex + 1;
+    }
+
+    get name()
+    {
+        return this._name;
     }
 
     setupFrameIndex()
@@ -112,7 +139,7 @@ WI.RenderingFrameTimelineRecord = class RenderingFrameTimelineRecord extends WI.
                 // Layout events synchronously triggered from JavaScript must be subtracted from the total
                 // script time, to prevent the time from being counted twice.
                 duration -= this.children.reduce(function(previousValue, currentValue) {
-                    if (currentValue.type === WI.TimelineRecord.Type.Layout && (currentValue.sourceCodeLocation || currentValue.callFrames))
+                    if (currentValue.type === WI.TimelineRecord.Type.Layout && (currentValue.sourceCodeLocation || currentValue.stackTrace))
                         return previousValue + currentValue.duration;
                     return previousValue;
                 }, 0);

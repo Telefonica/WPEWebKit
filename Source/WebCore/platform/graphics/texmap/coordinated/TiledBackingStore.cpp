@@ -41,14 +41,11 @@ TiledBackingStore::TiledBackingStore(TiledBackingStoreClient& client, float cont
     , m_tileSize(defaultTileDimension, defaultTileDimension)
     , m_coverAreaMultiplier(2.0f)
     , m_contentsScale(contentsScale)
-    , m_supportsAlpha(false)
     , m_pendingTileCreation(false)
 {
 }
 
-TiledBackingStore::~TiledBackingStore()
-{
-}
+TiledBackingStore::~TiledBackingStore() = default;
 
 void TiledBackingStore::setTrajectoryVector(const FloatPoint& trajectoryVector)
 {
@@ -223,7 +220,7 @@ void TiledBackingStore::createTiles(const IntRect& visibleRect, const IntRect& s
     unsigned tilesToCreateCount = tilesToCreate.size();
     for (unsigned n = 0; n < tilesToCreateCount; ++n) {
         Tile::Coordinate coordinate = tilesToCreate[n];
-        m_tiles.add(coordinate, std::make_unique<Tile>(*this, coordinate));
+        m_tiles.add(coordinate, makeUnique<Tile>(*this, coordinate));
     }
     requiredTileCount -= tilesToCreateCount;
 
@@ -395,14 +392,6 @@ Tile::Coordinate TiledBackingStore::tileCoordinateForPoint(const IntPoint& point
     int x = point.x() / m_tileSize.width();
     int y = point.y() / m_tileSize.height();
     return Tile::Coordinate(std::max(x, 0), std::max(y, 0));
-}
-
-void TiledBackingStore::setSupportsAlpha(bool a)
-{
-    if (a == m_supportsAlpha)
-        return;
-    m_supportsAlpha = a;
-    invalidate(m_rect);
 }
 
 }

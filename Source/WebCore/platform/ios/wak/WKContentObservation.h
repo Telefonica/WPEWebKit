@@ -26,6 +26,8 @@
 #ifndef WKContentObservation_h
 #define WKContentObservation_h
 
+#include <TargetConditionals.h>
+
 #if TARGET_OS_IPHONE
 
 #ifdef __cplusplus
@@ -38,14 +40,6 @@ typedef enum
     WKContentVisibilityChange       = 2,
     WKContentIndeterminateChange    = 1
 }   WKContentChange;
-
-WEBCORE_EXPORT void WKStopObservingContentChanges(void);
-WEBCORE_EXPORT void WKBeginObservingContentChanges(bool allowsIntedeterminateChanges);
-
-WEBCORE_EXPORT WKContentChange WKObservedContentChange(void);
-
-WEBCORE_EXPORT int WebThreadCountOfObservedContentModifiers(void);
-WEBCORE_EXPORT void WebThreadClearObservedContentModifiers(void);
 
 #ifdef __cplusplus
 }

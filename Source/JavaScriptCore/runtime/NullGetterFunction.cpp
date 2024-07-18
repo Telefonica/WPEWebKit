@@ -26,29 +26,25 @@
 #include "config.h"
 #include "NullGetterFunction.h"
 
-#include "JSCJSValueInlines.h"
 #include "JSCInlines.h"
 
 namespace JSC {
 
-const ClassInfo NullGetterFunction::s_info = { "Function", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(NullGetterFunction) };
+const ClassInfo NullGetterFunction::s_info = { "Function"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(NullGetterFunction) };
 
 namespace NullGetterFunctionInternal {
-static EncodedJSValue JSC_HOST_CALL callReturnUndefined(ExecState*)
+
+static JSC_DECLARE_HOST_FUNCTION(callReturnUndefined);
+
+JSC_DEFINE_HOST_FUNCTION(callReturnUndefined, (JSGlobalObject*, CallFrame*))
 {
     return JSValue::encode(jsUndefined());
 }
 }
 
-CallType NullGetterFunction::getCallData(JSCell*, CallData& callData)
+NullGetterFunction::NullGetterFunction(VM& vm, Structure* structure)
+    : Base(vm, structure, NullGetterFunctionInternal::callReturnUndefined, nullptr)
 {
-    callData.native.function = NullGetterFunctionInternal::callReturnUndefined;
-    return CallType::Host;
-}
-
-ConstructType NullGetterFunction::getConstructData(JSCell*, ConstructData&)
-{
-    return ConstructType::None;
 }
 
 }

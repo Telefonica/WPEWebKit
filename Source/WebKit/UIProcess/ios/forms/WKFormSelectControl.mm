@@ -26,9 +26,9 @@
 #import "config.h"
 #import "WKFormSelectControl.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
-#import "UIKitSPI.h"
+#import "UserInterfaceIdiom.h"
 #import "WKContentView.h"
 #import "WKContentViewInteraction.h"
 #import "WKFormPopover.h"
@@ -65,40 +65,34 @@ CGFloat adjustedFontSize(CGFloat textWidth, UIFont *font, CGFloat initialFontSiz
 
 - (instancetype)initWithView:(WKContentView *)view
 {
-    if (!(self = [super init]))
-        return nil;
-
     bool hasGroups = false;
-    for (size_t i = 0; i < view.assistedNodeInformation.selectOptions.size(); ++i) {
-        if (view.assistedNodeInformation.selectOptions[i].isGroup) {
+    for (size_t i = 0; i < view.focusedElementInformation.selectOptions.size(); ++i) {
+        if (view.focusedElementInformation.selectOptions[i].isGroup) {
             hasGroups = true;
             break;
         }
     }
 
-    if (UICurrentUserInterfaceIdiomIsPad())
-        _control = adoptNS([[WKSelectPopover alloc] initWithView:view hasGroups:hasGroups]);
-    else if (view.assistedNodeInformation.isMultiSelect || hasGroups)
-        _control = adoptNS([[WKMultipleSelectPicker alloc] initWithView:view]);
+    RetainPtr<NSObject <WKFormControl>> control;
+
+#if ENABLE(IOS_FORM_CONTROL_REFRESH)
+    if (view._shouldUseContextMenusForFormControls) {
+        if (view.focusedElementInformation.isMultiSelect)
+            control = adoptNS([[WKSelectMultiplePicker alloc] initWithView:view]);
+        else
+            control = adoptNS([[WKSelectPicker alloc] initWithView:view]);
+        return [super initWithView:view control:WTFMove(control)];
+    }
+#endif
+
+    if (!currentUserInterfaceIdiomIsSmallScreen())
+        control = adoptNS([[WKSelectPopover alloc] initWithView:view hasGroups:hasGroups]);
+    else if (view.focusedElementInformation.isMultiSelect || hasGroups)
+        control = adoptNS([[WKMultipleSelectPicker alloc] initWithView:view]);
     else
-        _control = adoptNS([[WKSelectSinglePicker alloc] initWithView:view]);
-        
-    return self;
-}
+        control = adoptNS([[WKSelectSinglePicker alloc] initWithView:view]);
 
-- (UIView *)assistantView
-{
-    return [_control controlView];
-}
-
-- (void)beginEditing
-{
-    [_control controlBeginEditing];
-}
-
-- (void)endEditing
-{
-    [_control controlEndEditing];
+    return [super initWithView:view control:WTFMove(control)];
 }
 
 @end
@@ -107,10 +101,23 @@ CGFloat adjustedFontSize(CGFloat textWidth, UIFont *font, CGFloat initialFontSiz
 
 - (void)selectRow:(NSInteger)rowIndex inComponent:(NSInteger)componentIndex extendingSelection:(BOOL)extendingSelection
 {
-    if ([_control respondsToSelector:@selector(selectRow:inComponent:extendingSelection:)])
-        [id<WKSelectTesting>(_control.get()) selectRow:rowIndex inComponent:componentIndex extendingSelection:extendingSelection];
+    if ([self.control respondsToSelector:@selector(selectRow:inComponent:extendingSelection:)])
+        [id<WKSelectTesting>(self.control) selectRow:rowIndex inComponent:componentIndex extendingSelection:extendingSelection];
+}
+
+- (NSString *)selectFormPopoverTitle
+{
+    if (![self.control isKindOfClass:[WKSelectPopover class]])
+        return nil;
+    return [(WKSelectPopover *)self.control tableViewController].title;
+}
+
+- (BOOL)selectFormAccessoryHasCheckedItemAtRow:(long)rowIndex
+{
+    return [self.control respondsToSelector:@selector(selectFormAccessoryHasCheckedItemAtRow:)]
+        && [id<WKSelectTesting>(self.control) selectFormAccessoryHasCheckedItemAtRow:rowIndex];
 }
 
 @end
 
-#endif  // PLATFORM(IOS)
+#endif  // PLATFORM(IOS_FAMILY)

@@ -23,35 +23,29 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "ScrollAnimatorIOS.h"
+#import "config.h"
+#import "ScrollAnimatorIOS.h"
 
-#include "Frame.h"
-#include "RenderLayer.h"
-#include "ScrollableArea.h"
+#if PLATFORM(IOS_FAMILY)
+
+#import "Frame.h"
+#import "RenderLayer.h"
+#import "ScrollableArea.h"
+#import "ScrollingEffectsController.h"
 
 #if ENABLE(TOUCH_EVENTS)
-#include "PlatformTouchEventIOS.h"
+#import "PlatformTouchEventIOS.h"
 #endif
-
-using namespace WebCore;
 
 namespace WebCore {
 
 std::unique_ptr<ScrollAnimator> ScrollAnimator::create(ScrollableArea& scrollableArea)
 {
-    return std::make_unique<ScrollAnimatorIOS>(scrollableArea);
+    return makeUnique<ScrollAnimatorIOS>(scrollableArea);
 }
 
 ScrollAnimatorIOS::ScrollAnimatorIOS(ScrollableArea& scrollableArea)
     : ScrollAnimator(scrollableArea)
-#if ENABLE(TOUCH_EVENTS)
-    , m_touchScrollAxisLatch(AxisLatchNotComputed)
-    , m_inTouchSequence(false)
-    , m_committedToScrollAxis(false)
-    , m_startedScroll(false)
-    , m_scrollableAreaForTouchSequence(0)
-#endif
 {
 }
 
@@ -103,8 +97,9 @@ bool ScrollAnimatorIOS::handleTouchEvent(const PlatformTouchEvent& touchEvent)
         determineScrollableAreaForTouchSequence(touchDelta);
 
     if (!m_committedToScrollAxis) {
-        bool horizontallyScrollable = m_scrollableArea.scrollSize(HorizontalScrollbar);
-        bool verticallyScrollable = m_scrollableArea.scrollSize(VerticalScrollbar);
+        auto scrollSize = m_scrollableArea.maximumScrollPosition() - m_scrollableArea.minimumScrollPosition();
+        bool horizontallyScrollable = scrollSize.width();
+        bool verticallyScrollable = scrollSize.height();
 
         if (!horizontallyScrollable && !verticallyScrollable)
             return false;
@@ -144,13 +139,13 @@ bool ScrollAnimatorIOS::handleTouchEvent(const PlatformTouchEvent& touchEvent)
     // Horizontal
     if (m_touchScrollAxisLatch != AxisLatchVertical) {
         int delta = touchDelta.width();
-        handled |= m_scrollableAreaForTouchSequence->scroll(delta < 0 ? ScrollLeft : ScrollRight, ScrollByPixel, abs(delta));
+        handled |= m_scrollableAreaForTouchSequence->scroll(delta < 0 ? ScrollLeft : ScrollRight, ScrollGranularity::Pixel, abs(delta));
     }
     
     // Vertical
     if (m_touchScrollAxisLatch != AxisLatchHorizontal) {
         int delta = touchDelta.height();
-        handled |= m_scrollableAreaForTouchSequence->scroll(delta < 0 ? ScrollUp : ScrollDown, ScrollByPixel, abs(delta));
+        handled |= m_scrollableAreaForTouchSequence->scroll(delta < 0 ? ScrollUp : ScrollDown, ScrollGranularity::Pixel, abs(delta));
     }
     
     // Return false until we manage to scroll at all, and then keep returning true until the gesture ends.
@@ -169,12 +164,18 @@ void ScrollAnimatorIOS::determineScrollableAreaForTouchSequence(const IntSize& s
 {
     ASSERT(!m_scrollableAreaForTouchSequence);
 
-    ScrollableArea* scrollableArea = &m_scrollableArea;
+    auto horizontalEdge = ScrollableArea::targetSideForScrollDelta(scrollDelta, ScrollEventAxis::Horizontal);
+    auto verticalEdge = ScrollableArea::targetSideForScrollDelta(scrollDelta, ScrollEventAxis::Vertical);
+
+    auto* scrollableArea = &m_scrollableArea;
     while (true) {
-        if (!scrollableArea->isPinnedInBothDirections(scrollDelta))
+        if (verticalEdge && !scrollableArea->isPinnedOnSide(*verticalEdge))
             break;
 
-        ScrollableArea* enclosingArea = scrollableArea->enclosingScrollableArea();
+        if (horizontalEdge && !scrollableArea->isPinnedOnSide(*horizontalEdge))
+            break;
+
+        auto* enclosingArea = scrollableArea->enclosingScrollableArea();
         if (!enclosingArea)
             break;
 
@@ -187,3 +188,5 @@ void ScrollAnimatorIOS::determineScrollableAreaForTouchSequence(const IntSize& s
 #endif
 
 } // namespace WebCore
+
+#endif // PLATFORM(IOS_FAMILY)

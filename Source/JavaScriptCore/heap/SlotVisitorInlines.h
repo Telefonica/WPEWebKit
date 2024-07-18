@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,9 +25,10 @@
 
 #pragma once
 
+#include "AbstractSlotVisitorInlines.h"
+#include "MarkedBlock.h"
+#include "PreciseAllocation.h"
 #include "SlotVisitor.h"
-#include "Weak.h"
-#include "WeakInlines.h"
 
 namespace JSC {
 
@@ -46,17 +47,16 @@ ALWAYS_INLINE void SlotVisitor::appendUnbarriered(JSCell* cell)
         return;
     
     Dependency dependency;
-    if (UNLIKELY(cell->isLargeAllocation())) {
-        dependency = nullDependency();
-        if (LIKELY(cell->largeAllocation().isMarked())) {
-            if (LIKELY(!m_heapSnapshotBuilder))
+    if (UNLIKELY(cell->isPreciseAllocation())) {
+        if (LIKELY(cell->preciseAllocation().isMarked())) {
+            if (LIKELY(!m_heapAnalyzer))
                 return;
         }
     } else {
         MarkedBlock& block = cell->markedBlock();
         dependency = block.aboutToMark(m_markingVersion);
         if (LIKELY(block.isMarked(cell, dependency))) {
-            if (LIKELY(!m_heapSnapshotBuilder))
+            if (LIKELY(!m_heapAnalyzer))
                 return;
         }
     }
@@ -85,9 +85,8 @@ ALWAYS_INLINE void SlotVisitor::appendHiddenUnbarriered(JSCell* cell)
         return;
     
     Dependency dependency;
-    if (UNLIKELY(cell->isLargeAllocation())) {
-        dependency = nullDependency();
-        if (LIKELY(cell->largeAllocation().isMarked()))
+    if (UNLIKELY(cell->isPreciseAllocation())) {
+        if (LIKELY(cell->preciseAllocation().isMarked()))
             return;
     } else {
         MarkedBlock& block = cell->markedBlock();
@@ -105,16 +104,26 @@ ALWAYS_INLINE void SlotVisitor::append(const Weak<T>& weak)
     appendUnbarriered(weak.get());
 }
 
-template<typename T>
-ALWAYS_INLINE void SlotVisitor::append(const WriteBarrierBase<T>& slot)
+template<typename T, typename Traits>
+ALWAYS_INLINE void SlotVisitor::append(const WriteBarrierBase<T, Traits>& slot)
 {
     appendUnbarriered(slot.get());
 }
 
-template<typename T>
-ALWAYS_INLINE void SlotVisitor::appendHidden(const WriteBarrierBase<T>& slot)
+template<typename T, typename Traits>
+ALWAYS_INLINE void SlotVisitor::appendHidden(const WriteBarrierBase<T, Traits>& slot)
 {
     appendHiddenUnbarriered(slot.get());
+}
+
+ALWAYS_INLINE void SlotVisitor::append(const WriteBarrierStructureID& slot)
+{
+    appendUnbarriered(reinterpret_cast<JSCell*>(slot.get()));
+}
+
+ALWAYS_INLINE void SlotVisitor::appendHidden(const WriteBarrierStructureID& slot)
+{
+    appendHiddenUnbarriered(reinterpret_cast<JSCell*>(slot.get()));
 }
 
 template<typename Iterator>
@@ -136,11 +145,28 @@ ALWAYS_INLINE void SlotVisitor::appendValuesHidden(const WriteBarrierBase<Unknow
         appendHidden(barriers[i]);
 }
 
+ALWAYS_INLINE bool SlotVisitor::isMarked(const void* p) const
+{
+    return heap()->isMarked(p);
+}
+
+ALWAYS_INLINE bool SlotVisitor::isMarked(MarkedBlock& container, HeapCell* cell) const
+{
+    return container.isMarked(markingVersion(), cell);
+}
+
+ALWAYS_INLINE bool SlotVisitor::isMarked(PreciseAllocation& container, HeapCell* cell) const
+{
+    return container.isMarked(markingVersion(), cell);
+}
+
 inline void SlotVisitor::reportExtraMemoryVisited(size_t size)
 {
     if (m_isFirstVisit) {
-        heap()->reportExtraMemoryVisited(size);
         m_nonCellVisitCount += size;
+        // FIXME: Change this to use SaturatedArithmetic when available.
+        // https://bugs.webkit.org/show_bug.cgi?id=170411
+        m_extraMemorySize += size;
     }
 }
 
@@ -151,21 +177,6 @@ inline void SlotVisitor::reportExternalMemoryVisited(size_t size)
         heap()->reportExternalMemoryVisited(size);
 }
 #endif
-
-inline Heap* SlotVisitor::heap() const
-{
-    return &m_heap;
-}
-
-inline VM& SlotVisitor::vm()
-{
-    return *m_heap.m_vm;
-}
-
-inline const VM& SlotVisitor::vm() const
-{
-    return *m_heap.m_vm;
-}
 
 template<typename Func>
 IterationStatus SlotVisitor::forEachMarkStack(const Func& func)

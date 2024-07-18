@@ -27,14 +27,29 @@
 
 #if ENABLE(SERVICE_WORKER)
 
+#include <wtf/Forward.h>
+
 namespace WebCore {
 
-enum class ServiceWorkerUpdateViaCache {
+enum class ServiceWorkerUpdateViaCache : uint8_t {
     Imports,
     All,
     None,
 };
 
 } // namespace WebCore
+
+namespace WTF {
+
+template <> struct EnumTraits<WebCore::ServiceWorkerUpdateViaCache> {
+    using values = EnumValues<
+        WebCore::ServiceWorkerUpdateViaCache,
+        WebCore::ServiceWorkerUpdateViaCache::Imports,
+        WebCore::ServiceWorkerUpdateViaCache::All,
+        WebCore::ServiceWorkerUpdateViaCache::None
+    >;
+};
+
+} // namespace WTF
 
 #endif // ENABLE(SERVICE_WORKER)

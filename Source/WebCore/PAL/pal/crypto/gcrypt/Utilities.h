@@ -27,6 +27,7 @@
 #pragma once
 
 #include <gcrypt.h>
+#include <optional>
 #include <wtf/Assertions.h>
 
 namespace PAL {

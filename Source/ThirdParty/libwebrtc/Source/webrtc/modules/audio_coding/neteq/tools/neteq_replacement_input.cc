@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/neteq/tools/neteq_replacement_input.h"
+#include "modules/audio_coding/neteq/tools/neteq_replacement_input.h"
 
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/audio_coding/neteq/tools/fake_decode_from_file.h"
+#include "modules/audio_coding/neteq/tools/fake_decode_from_file.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 namespace test {
@@ -28,22 +28,34 @@ NetEqReplacementInput::NetEqReplacementInput(
   RTC_CHECK(source_);
   packet_ = source_->PopPacket();
   ReplacePacket();
-  RTC_CHECK(packet_);
 }
 
-rtc::Optional<int64_t> NetEqReplacementInput::NextPacketTime() const {
+absl::optional<int64_t> NetEqReplacementInput::NextPacketTime() const {
   return packet_
-             ? rtc::Optional<int64_t>(static_cast<int64_t>(packet_->time_ms))
-             : rtc::Optional<int64_t>();
+             ? absl::optional<int64_t>(static_cast<int64_t>(packet_->time_ms))
+             : absl::nullopt;
 }
 
-rtc::Optional<int64_t> NetEqReplacementInput::NextOutputEventTime() const {
+absl::optional<int64_t> NetEqReplacementInput::NextOutputEventTime() const {
   return source_->NextOutputEventTime();
+}
+
+absl::optional<NetEqInput::SetMinimumDelayInfo>
+NetEqReplacementInput::NextSetMinimumDelayInfo() const {
+  return source_->NextSetMinimumDelayInfo();
 }
 
 std::unique_ptr<NetEqInput::PacketData> NetEqReplacementInput::PopPacket() {
   std::unique_ptr<PacketData> to_return = std::move(packet_);
-  packet_ = source_->PopPacket();
+  while (true) {
+    packet_ = source_->PopPacket();
+    if (!packet_)
+      break;
+    if (packet_->payload.size() > packet_->header.paddingLength) {
+      // Not padding only. Good to go. Skip this packet otherwise.
+      break;
+    }
+  }
   ReplacePacket();
   return to_return;
 }
@@ -52,11 +64,15 @@ void NetEqReplacementInput::AdvanceOutputEvent() {
   source_->AdvanceOutputEvent();
 }
 
+void NetEqReplacementInput::AdvanceSetMinimumDelay() {
+  source_->AdvanceSetMinimumDelay();
+}
+
 bool NetEqReplacementInput::ended() const {
   return source_->ended();
 }
 
-rtc::Optional<RTPHeader> NetEqReplacementInput::NextHeader() const {
+absl::optional<RTPHeader> NetEqReplacementInput::NextHeader() const {
   return source_->NextHeader();
 }
 
@@ -82,15 +98,16 @@ void NetEqReplacementInput::ReplacePacket() {
     return;
   }
 
-  rtc::Optional<RTPHeader> next_hdr = source_->NextHeader();
+  absl::optional<RTPHeader> next_hdr = source_->NextHeader();
   RTC_DCHECK(next_hdr);
   uint8_t payload[12];
   RTC_DCHECK_LE(last_frame_size_timestamps_, 120 * 48);
   uint32_t input_frame_size_timestamps = last_frame_size_timestamps_;
   const uint32_t timestamp_diff =
       next_hdr->timestamp - packet_->header.timestamp;
+  const bool opus_dtx = packet_->payload.size() <= 2;
   if (next_hdr->sequenceNumber == packet_->header.sequenceNumber + 1 &&
-      timestamp_diff <= 120 * 48) {
+      timestamp_diff <= 120 * 48 && !opus_dtx) {
     // Packets are in order and the timestamp diff is less than 5760 samples.
     // Accept the timestamp diff as a valid frame size.
     input_frame_size_timestamps = timestamp_diff;

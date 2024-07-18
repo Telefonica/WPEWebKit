@@ -8,18 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_NETEQ_POST_DECODE_VAD_H_
-#define WEBRTC_MODULES_AUDIO_CODING_NETEQ_POST_DECODE_VAD_H_
+#ifndef MODULES_AUDIO_CODING_NETEQ_POST_DECODE_VAD_H_
+#define MODULES_AUDIO_CODING_NETEQ_POST_DECODE_VAD_H_
 
-#include <string>  // size_t
+#include <stddef.h>
+#include <stdint.h>
 
-#include "webrtc/api/audio_codecs/audio_decoder.h"
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/common_audio/vad/include/webrtc_vad.h"
-#include "webrtc/common_types.h"  // NULL
-#include "webrtc/modules/audio_coding/neteq/defines.h"
-#include "webrtc/modules/audio_coding/neteq/packet.h"
-#include "webrtc/typedefs.h"
+#include "api/audio_codecs/audio_decoder.h"
+#include "common_audio/vad/include/webrtc_vad.h"
 
 namespace webrtc {
 
@@ -30,10 +26,12 @@ class PostDecodeVad {
         running_(false),
         active_speech_(true),
         sid_interval_counter_(0),
-        vad_instance_(NULL) {
-  }
+        vad_instance_(NULL) {}
 
   virtual ~PostDecodeVad();
+
+  PostDecodeVad(const PostDecodeVad&) = delete;
+  PostDecodeVad& operator=(const PostDecodeVad&) = delete;
 
   // Enables post-decode VAD.
   void Enable();
@@ -44,10 +42,13 @@ class PostDecodeVad {
   // Initializes post-decode VAD.
   void Init();
 
-  // Updates post-decode VAD with the audio data in |signal| having |length|
-  // samples. The data is of type |speech_type|, at the sample rate |fs_hz|.
-  void Update(int16_t* signal, size_t length,
-              AudioDecoder::SpeechType speech_type, bool sid_frame, int fs_hz);
+  // Updates post-decode VAD with the audio data in `signal` having `length`
+  // samples. The data is of type `speech_type`, at the sample rate `fs_hz`.
+  void Update(int16_t* signal,
+              size_t length,
+              AudioDecoder::SpeechType speech_type,
+              bool sid_frame,
+              int fs_hz);
 
   // Accessors.
   bool enabled() const { return enabled_; }
@@ -64,9 +65,7 @@ class PostDecodeVad {
   bool active_speech_;
   int sid_interval_counter_;
   ::VadInst* vad_instance_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(PostDecodeVad);
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_POST_DECODE_VAD_H_
+#endif  // MODULES_AUDIO_CODING_NETEQ_POST_DECODE_VAD_H_

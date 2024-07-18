@@ -8,126 +8,245 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_RTP_RTCP_SOURCE_RECEIVE_STATISTICS_IMPL_H_
-#define WEBRTC_MODULES_RTP_RTCP_SOURCE_RECEIVE_STATISTICS_IMPL_H_
-
-#include "webrtc/modules/rtp_rtcp/include/receive_statistics.h"
+#ifndef MODULES_RTP_RTCP_SOURCE_RECEIVE_STATISTICS_IMPL_H_
+#define MODULES_RTP_RTCP_SOURCE_RECEIVE_STATISTICS_IMPL_H_
 
 #include <algorithm>
-#include <map>
+#include <functional>
+#include <memory>
+#include <utility>
+#include <vector>
 
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/rate_statistics.h"
-#include "webrtc/system_wrappers/include/ntp_time.h"
+#include "absl/types/optional.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "modules/rtp_rtcp/include/receive_statistics.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
+#include "rtc_base/bitrate_tracker.h"
+#include "rtc_base/containers/flat_map.h"
+#include "rtc_base/numerics/sequence_number_unwrapper.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
-class StreamStatisticianImpl : public StreamStatistician {
+// Extends StreamStatistician with methods needed by the implementation.
+class StreamStatisticianImplInterface : public StreamStatistician {
  public:
-  StreamStatisticianImpl(Clock* clock,
-                         RtcpStatisticsCallback* rtcp_callback,
-                         StreamDataCountersCallback* rtp_callback);
-  virtual ~StreamStatisticianImpl() {}
+  virtual ~StreamStatisticianImplInterface() = default;
+  virtual void MaybeAppendReportBlockAndReset(
+      std::vector<rtcp::ReportBlock>& report_blocks) = 0;
+  virtual void SetMaxReorderingThreshold(int max_reordering_threshold) = 0;
+  virtual void EnableRetransmitDetection(bool enable) = 0;
+  virtual void UpdateCounters(const RtpPacketReceived& packet) = 0;
+};
 
-  bool GetStatistics(RtcpStatistics* statistics, bool reset) override;
-  void GetDataCounters(size_t* bytes_received,
-                       uint32_t* packets_received) const override;
-  void GetReceiveStreamDataCounters(
-      StreamDataCounters* data_counters) const override;
+// Thread-compatible implementation of StreamStatisticianImplInterface.
+class StreamStatisticianImpl : public StreamStatisticianImplInterface {
+ public:
+  StreamStatisticianImpl(uint32_t ssrc,
+                         Clock* clock,
+                         int max_reordering_threshold);
+  ~StreamStatisticianImpl() override;
+
+  // Implements StreamStatistician
+  RtpReceiveStats GetStats() const override;
+  absl::optional<int> GetFractionLostInPercent() const override;
+  StreamDataCounters GetReceiveStreamDataCounters() const override;
   uint32_t BitrateReceived() const override;
-  bool IsRetransmitOfOldPacket(const RTPHeader& header,
-                               int64_t min_rtt) const override;
-  bool IsPacketInOrder(uint16_t sequence_number) const override;
 
-  void IncomingPacket(const RTPHeader& rtp_header,
-                      size_t packet_length,
-                      bool retransmitted);
-  void FecPacketReceived(const RTPHeader& header, size_t packet_length);
-  void SetMaxReorderingThreshold(int max_reordering_threshold);
-  virtual void LastReceiveTimeNtp(uint32_t* secs, uint32_t* frac) const;
+  // Implements StreamStatisticianImplInterface
+  void MaybeAppendReportBlockAndReset(
+      std::vector<rtcp::ReportBlock>& report_blocks) override;
+  void SetMaxReorderingThreshold(int max_reordering_threshold) override;
+  void EnableRetransmitDetection(bool enable) override;
+  // Updates StreamStatistician for incoming packets.
+  void UpdateCounters(const RtpPacketReceived& packet) override;
 
  private:
-  bool InOrderPacketInternal(uint16_t sequence_number) const;
-  RtcpStatistics CalculateRtcpStatistics();
-  void UpdateJitter(const RTPHeader& header, NtpTime receive_time);
-  void UpdateCounters(const RTPHeader& rtp_header,
-                      size_t packet_length,
-                      bool retransmitted);
-  void NotifyRtpCallback() LOCKS_EXCLUDED(stream_lock_);
-  void NotifyRtcpCallback() LOCKS_EXCLUDED(stream_lock_);
+  bool IsRetransmitOfOldPacket(const RtpPacketReceived& packet,
+                               Timestamp now) const;
+  void UpdateJitter(const RtpPacketReceived& packet, Timestamp receive_time);
+  void ReviseFrequencyAndJitter(int payload_type_frequency);
+  // Updates StreamStatistician for out of order packets.
+  // Returns true if packet considered to be out of order.
+  bool UpdateOutOfOrder(const RtpPacketReceived& packet,
+                        int64_t sequence_number,
+                        Timestamp now);
+  // Checks if this StreamStatistician received any rtp packets.
+  bool ReceivedRtpPacket() const { return last_receive_time_.has_value(); }
 
+  const uint32_t ssrc_;
   Clock* const clock_;
-  rtc::CriticalSection stream_lock_;
-  RateStatistics incoming_bitrate_;
-  uint32_t ssrc_;
-  int max_reordering_threshold_;  // In number of packets or sequence numbers.
+  // Delta used to map internal timestamps to Unix epoch ones.
+  const TimeDelta delta_internal_unix_epoch_;
+  BitrateTracker incoming_bitrate_;
+  // In number of packets or sequence numbers.
+  int max_reordering_threshold_;
+  bool enable_retransmit_detection_;
+  bool cumulative_loss_is_capped_;
 
   // Stats on received RTP packets.
   uint32_t jitter_q4_;
-  uint32_t cumulative_loss_;
-  uint32_t jitter_q4_transmission_time_offset_;
+  // Cumulative loss according to RFC 3550, which may be negative (and often is,
+  // if packets are reordered and there are non-RTX retransmissions).
+  int32_t cumulative_loss_;
+  // Offset added to outgoing rtcp reports, to make ensure that the reported
+  // cumulative loss is non-negative. Reports with negative values confuse some
+  // senders, in particular, our own loss-based bandwidth estimator.
+  int32_t cumulative_loss_rtcp_offset_;
 
-  int64_t last_receive_time_ms_;
-  NtpTime last_receive_time_ntp_;
+  absl::optional<Timestamp> last_receive_time_;
   uint32_t last_received_timestamp_;
-  int32_t last_received_transmission_time_offset_;
-  uint16_t received_seq_first_;
-  uint16_t received_seq_max_;
-  uint16_t received_seq_wraps_;
+  RtpSequenceNumberUnwrapper seq_unwrapper_;
+  int64_t received_seq_first_;
+  int64_t received_seq_max_;
+  // Assume that the other side restarted when there are two sequential packets
+  // with large jump from received_seq_max_.
+  absl::optional<uint16_t> received_seq_out_of_order_;
 
   // Current counter values.
-  size_t received_packet_overhead_;
   StreamDataCounters receive_counters_;
 
   // Counter values when we sent the last report.
-  uint32_t last_report_inorder_packets_;
-  uint32_t last_report_old_packets_;
-  uint16_t last_report_seq_max_;
-  RtcpStatistics last_reported_statistics_;
+  int32_t last_report_cumulative_loss_;
+  int64_t last_report_seq_max_;
 
-  RtcpStatisticsCallback* const rtcp_callback_;
-  StreamDataCountersCallback* const rtp_callback_;
+  // The sample frequency of the last received packet.
+  int last_payload_type_frequency_;
 };
 
-class ReceiveStatisticsImpl : public ReceiveStatistics,
-                              public RtcpStatisticsCallback,
-                              public StreamDataCountersCallback {
+// Thread-safe implementation of StreamStatisticianImplInterface.
+class StreamStatisticianLocked : public StreamStatisticianImplInterface {
  public:
-  explicit ReceiveStatisticsImpl(Clock* clock);
+  StreamStatisticianLocked(uint32_t ssrc,
+                           Clock* clock,
+                           int max_reordering_threshold)
+      : impl_(ssrc, clock, max_reordering_threshold) {}
+  ~StreamStatisticianLocked() override = default;
 
-  ~ReceiveStatisticsImpl();
-
-  // Implement ReceiveStatistics.
-  void IncomingPacket(const RTPHeader& header,
-                      size_t packet_length,
-                      bool retransmitted) override;
-  void FecPacketReceived(const RTPHeader& header,
-                         size_t packet_length) override;
-  StatisticianMap GetActiveStatisticians() const override;
-  StreamStatistician* GetStatistician(uint32_t ssrc) const override;
-  void SetMaxReorderingThreshold(int max_reordering_threshold) override;
-
-  void RegisterRtcpStatisticsCallback(
-      RtcpStatisticsCallback* callback) override;
-
-  void RegisterRtpStatisticsCallback(
-      StreamDataCountersCallback* callback) override;
+  RtpReceiveStats GetStats() const override {
+    MutexLock lock(&stream_lock_);
+    return impl_.GetStats();
+  }
+  absl::optional<int> GetFractionLostInPercent() const override {
+    MutexLock lock(&stream_lock_);
+    return impl_.GetFractionLostInPercent();
+  }
+  StreamDataCounters GetReceiveStreamDataCounters() const override {
+    MutexLock lock(&stream_lock_);
+    return impl_.GetReceiveStreamDataCounters();
+  }
+  uint32_t BitrateReceived() const override {
+    MutexLock lock(&stream_lock_);
+    return impl_.BitrateReceived();
+  }
+  void MaybeAppendReportBlockAndReset(
+      std::vector<rtcp::ReportBlock>& report_blocks) override {
+    MutexLock lock(&stream_lock_);
+    impl_.MaybeAppendReportBlockAndReset(report_blocks);
+  }
+  void SetMaxReorderingThreshold(int max_reordering_threshold) override {
+    MutexLock lock(&stream_lock_);
+    return impl_.SetMaxReorderingThreshold(max_reordering_threshold);
+  }
+  void EnableRetransmitDetection(bool enable) override {
+    MutexLock lock(&stream_lock_);
+    return impl_.EnableRetransmitDetection(enable);
+  }
+  void UpdateCounters(const RtpPacketReceived& packet) override {
+    MutexLock lock(&stream_lock_);
+    return impl_.UpdateCounters(packet);
+  }
 
  private:
-  void StatisticsUpdated(const RtcpStatistics& statistics,
-                         uint32_t ssrc) override;
-  void CNameChanged(const char* cname, uint32_t ssrc) override;
-  void DataCountersUpdated(const StreamDataCounters& counters,
-                           uint32_t ssrc) override;
+  mutable Mutex stream_lock_;
+  StreamStatisticianImpl impl_ RTC_GUARDED_BY(&stream_lock_);
+};
 
-  typedef std::map<uint32_t, StreamStatisticianImpl*> StatisticianImplMap;
+// Thread-compatible implementation.
+class ReceiveStatisticsImpl : public ReceiveStatistics {
+ public:
+  ReceiveStatisticsImpl(
+      Clock* clock,
+      std::function<std::unique_ptr<StreamStatisticianImplInterface>(
+          uint32_t ssrc,
+          Clock* clock,
+          int max_reordering_threshold)> stream_statistician_factory);
+  ~ReceiveStatisticsImpl() override = default;
+
+  // Implements ReceiveStatisticsProvider.
+  std::vector<rtcp::ReportBlock> RtcpReportBlocks(size_t max_blocks) override;
+
+  // Implements RtpPacketSinkInterface
+  void OnRtpPacket(const RtpPacketReceived& packet) override;
+
+  // Implements ReceiveStatistics.
+  StreamStatistician* GetStatistician(uint32_t ssrc) const override;
+  void SetMaxReorderingThreshold(int max_reordering_threshold) override;
+  void SetMaxReorderingThreshold(uint32_t ssrc,
+                                 int max_reordering_threshold) override;
+  void EnableRetransmitDetection(uint32_t ssrc, bool enable) override;
+
+ private:
+  StreamStatisticianImplInterface* GetOrCreateStatistician(uint32_t ssrc);
 
   Clock* const clock_;
-  rtc::CriticalSection receive_statistics_lock_;
-  StatisticianImplMap statisticians_;
-
-  RtcpStatisticsCallback* rtcp_stats_callback_;
-  StreamDataCountersCallback* rtp_stats_callback_;
+  std::function<std::unique_ptr<StreamStatisticianImplInterface>(
+      uint32_t ssrc,
+      Clock* clock,
+      int max_reordering_threshold)>
+      stream_statistician_factory_;
+  // The index within `all_ssrcs_` that was last returned.
+  size_t last_returned_ssrc_idx_;
+  std::vector<uint32_t> all_ssrcs_;
+  int max_reordering_threshold_;
+  flat_map<uint32_t /*ssrc*/, std::unique_ptr<StreamStatisticianImplInterface>>
+      statisticians_;
 };
+
+// Thread-safe implementation wrapping access to ReceiveStatisticsImpl with a
+// mutex.
+class ReceiveStatisticsLocked : public ReceiveStatistics {
+ public:
+  explicit ReceiveStatisticsLocked(
+      Clock* clock,
+      std::function<std::unique_ptr<StreamStatisticianImplInterface>(
+          uint32_t ssrc,
+          Clock* clock,
+          int max_reordering_threshold)> stream_statitician_factory)
+      : impl_(clock, std::move(stream_statitician_factory)) {}
+  ~ReceiveStatisticsLocked() override = default;
+  std::vector<rtcp::ReportBlock> RtcpReportBlocks(size_t max_blocks) override {
+    MutexLock lock(&receive_statistics_lock_);
+    return impl_.RtcpReportBlocks(max_blocks);
+  }
+  void OnRtpPacket(const RtpPacketReceived& packet) override {
+    MutexLock lock(&receive_statistics_lock_);
+    return impl_.OnRtpPacket(packet);
+  }
+  StreamStatistician* GetStatistician(uint32_t ssrc) const override {
+    MutexLock lock(&receive_statistics_lock_);
+    return impl_.GetStatistician(ssrc);
+  }
+  void SetMaxReorderingThreshold(int max_reordering_threshold) override {
+    MutexLock lock(&receive_statistics_lock_);
+    return impl_.SetMaxReorderingThreshold(max_reordering_threshold);
+  }
+  void SetMaxReorderingThreshold(uint32_t ssrc,
+                                 int max_reordering_threshold) override {
+    MutexLock lock(&receive_statistics_lock_);
+    return impl_.SetMaxReorderingThreshold(ssrc, max_reordering_threshold);
+  }
+  void EnableRetransmitDetection(uint32_t ssrc, bool enable) override {
+    MutexLock lock(&receive_statistics_lock_);
+    return impl_.EnableRetransmitDetection(ssrc, enable);
+  }
+
+ private:
+  mutable Mutex receive_statistics_lock_;
+  ReceiveStatisticsImpl impl_ RTC_GUARDED_BY(&receive_statistics_lock_);
+};
+
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_RTP_RTCP_SOURCE_RECEIVE_STATISTICS_IMPL_H_
+#endif  // MODULES_RTP_RTCP_SOURCE_RECEIVE_STATISTICS_IMPL_H_

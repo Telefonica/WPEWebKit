@@ -58,11 +58,7 @@ $code=<<___;
 #if __ARM_MAX_ARCH__>=7
 .text
 ___
-$code.=<<___ if ($flavour =~ /64/);
-#if !defined(__clang__) || defined(BORINGSSL_CLANG_SUPPORTS_DOT_ARCH)
-.arch  armv8-a+crypto
-#endif
-___
+$code.=".arch	armv8-a+crypto\n"			if ($flavour =~ /64/);
 $code.=<<___						if ($flavour !~ /64/);
 .arch	armv7-a	// don't confuse not-so-latest binutils with argv8 :-)
 .fpu	neon
@@ -81,12 +77,17 @@ my ($zero,$rcon,$mask,$in0,$in1,$tmp,$key)=
 	$flavour=~/64/? map("q$_",(0..6)) : map("q$_",(0..3,8..10));
 
 
+# On AArch64, put the data .rodata and use adrp + add for compatibility with
+# execute-only memory. On AArch32, put it in .text and use adr.
+$code.= ".section .rodata\n" if ($flavour =~ /64/);
 $code.=<<___;
 .align	5
 .Lrcon:
 .long	0x01,0x01,0x01,0x01
 .long	0x0c0f0e0d,0x0c0f0e0d,0x0c0f0e0d,0x0c0f0e0d	// rotate-n-splat
 .long	0x1b,0x1b,0x1b,0x1b
+
+.text
 
 .globl	${prefix}_set_encrypt_key
 .type	${prefix}_set_encrypt_key,%function
@@ -95,6 +96,8 @@ ${prefix}_set_encrypt_key:
 .Lenc_key:
 ___
 $code.=<<___	if ($flavour =~ /64/);
+	// Armv8.3-A PAuth: even though x30 is pushed to stack it is not popped later.
+	AARCH64_VALID_CALL_TARGET
 	stp	x29,x30,[sp,#-16]!
 	add	x29,sp,#0
 ___
@@ -112,7 +115,15 @@ $code.=<<___;
 	tst	$bits,#0x3f
 	b.ne	.Lenc_key_abort
 
+___
+$code.=<<___	if ($flavour =~ /64/);
+	adrp	$ptr,:pg_hi21:.Lrcon
+	add	$ptr,$ptr,:lo12:.Lrcon
+___
+$code.=<<___	if ($flavour !~ /64/);
 	adr	$ptr,.Lrcon
+___
+$code.=<<___;
 	cmp	$bits,#192
 
 	veor	$zero,$zero,$zero
@@ -265,6 +276,7 @@ $code.=<<___;
 ${prefix}_set_decrypt_key:
 ___
 $code.=<<___	if ($flavour =~ /64/);
+	AARCH64_SIGN_LINK_REGISTER
 	stp	x29,x30,[sp,#-16]!
 	add	x29,sp,#0
 ___
@@ -308,6 +320,7 @@ $code.=<<___	if ($flavour !~ /64/);
 ___
 $code.=<<___	if ($flavour =~ /64/);
 	ldp	x29,x30,[sp],#16
+	AARCH64_VALIDATE_LINK_REGISTER
 	ret
 ___
 $code.=<<___;
@@ -327,6 +340,7 @@ $code.=<<___;
 .type	${prefix}_${dir}crypt,%function
 .align	5
 ${prefix}_${dir}crypt:
+	AARCH64_VALID_CALL_TARGET
 	ldr	$rounds,[$key,#240]
 	vld1.32	{$rndkey0},[$key],#16
 	vld1.8	{$inout},[$inp]
@@ -374,6 +388,8 @@ $code.=<<___;
 ${prefix}_cbc_encrypt:
 ___
 $code.=<<___	if ($flavour =~ /64/);
+	// Armv8.3-A PAuth: even though x30 is pushed to stack it is not popped later.
+	AARCH64_VALID_CALL_TARGET
 	stp	x29,x30,[sp,#-16]!
 	add	x29,sp,#0
 ___
@@ -703,6 +719,8 @@ $code.=<<___;
 ${prefix}_ctr32_encrypt_blocks:
 ___
 $code.=<<___	if ($flavour =~ /64/);
+	// Armv8.3-A PAuth: even though x30 is pushed to stack it is not popped later.
+	AARCH64_VALID_CALL_TARGET
 	stp		x29,x30,[sp,#-16]!
 	add		x29,sp,#0
 ___
@@ -730,20 +748,34 @@ $code.=<<___;
 	add		$key_,$key,#32
 	mov		$cnt,$rounds
 	cclr		$step,lo
+
+	// ARM Cortex-A57 and Cortex-A72 cores running in 32-bit mode are
+	// affected by silicon errata #1742098 [0] and #1655431 [1],
+	// respectively, where the second instruction of an aese/aesmc
+	// instruction pair may execute twice if an interrupt is taken right
+	// after the first instruction consumes an input register of which a
+	// single 32-bit lane has been updated the last time it was modified.
+	//
+	// This function uses a counter in one 32-bit lane. The vmov.32 lines
+	// could write to $dat1 and $dat2 directly, but that trips this bugs.
+	// We write to $ivec and copy to the final register as a workaround.
+	//
+	// [0] ARM-EPM-049219 v23 Cortex-A57 MPCore Software Developers Errata Notice
+	// [1] ARM-EPM-012079 v11.0 Cortex-A72 MPCore Software Developers Errata Notice
 #ifndef __ARMEB__
 	rev		$ctr, $ctr
 #endif
-	vorr		$dat1,$dat0,$dat0
 	add		$tctr1, $ctr, #1
-	vorr		$dat2,$dat0,$dat0
-	add		$ctr, $ctr, #2
 	vorr		$ivec,$dat0,$dat0
 	rev		$tctr1, $tctr1
-	vmov.32		${dat1}[3],$tctr1
+	vmov.32		${ivec}[3],$tctr1
+	add		$ctr, $ctr, #2
+	vorr		$dat1,$ivec,$ivec
 	b.ls		.Lctr32_tail
 	rev		$tctr2, $ctr
+	vmov.32		${ivec}[3],$tctr2
 	sub		$len,$len,#3		// bias
-	vmov.32		${dat2}[3],$tctr2
+	vorr		$dat2,$ivec,$ivec
 	b		.Loop3x_ctr32
 
 .align	4
@@ -770,11 +802,11 @@ $code.=<<___;
 	aese		$dat1,q8
 	aesmc		$tmp1,$dat1
 	 vld1.8		{$in0},[$inp],#16
-	 vorr		$dat0,$ivec,$ivec
+	 add		$tctr0,$ctr,#1
 	aese		$dat2,q8
 	aesmc		$dat2,$dat2
 	 vld1.8		{$in1},[$inp],#16
-	 vorr		$dat1,$ivec,$ivec
+	 rev		$tctr0,$tctr0
 	aese		$tmp0,q9
 	aesmc		$tmp0,$tmp0
 	aese		$tmp1,q9
@@ -783,8 +815,6 @@ $code.=<<___;
 	 mov		$key_,$key
 	aese		$dat2,q9
 	aesmc		$tmp2,$dat2
-	 vorr		$dat2,$ivec,$ivec
-	 add		$tctr0,$ctr,#1
 	aese		$tmp0,q12
 	aesmc		$tmp0,$tmp0
 	aese		$tmp1,q12
@@ -799,21 +829,26 @@ $code.=<<___;
 	aesmc		$tmp0,$tmp0
 	aese		$tmp1,q13
 	aesmc		$tmp1,$tmp1
+	 // Note the logic to update $dat0, $dat1, and $dat1 is written to work
+	 // around a bug in ARM Cortex-A57 and Cortex-A72 cores running in
+	 // 32-bit mode. See the comment above.
 	 veor		$in2,$in2,$rndlast
-	 rev		$tctr0,$tctr0
+	 vmov.32	${ivec}[3], $tctr0
 	aese		$tmp2,q13
 	aesmc		$tmp2,$tmp2
-	 vmov.32	${dat0}[3], $tctr0
+	 vorr		$dat0,$ivec,$ivec
 	 rev		$tctr1,$tctr1
 	aese		$tmp0,q14
 	aesmc		$tmp0,$tmp0
+	 vmov.32	${ivec}[3], $tctr1
+	 rev		$tctr2,$ctr
 	aese		$tmp1,q14
 	aesmc		$tmp1,$tmp1
-	 vmov.32	${dat1}[3], $tctr1
-	 rev		$tctr2,$ctr
+	 vorr		$dat1,$ivec,$ivec
+	 vmov.32	${ivec}[3], $tctr2
 	aese		$tmp2,q14
 	aesmc		$tmp2,$tmp2
-	 vmov.32	${dat2}[3], $tctr2
+	 vorr		$dat2,$ivec,$ivec
 	 subs		$len,$len,#3
 	aese		$tmp0,q15
 	aese		$tmp1,q15
@@ -933,7 +968,7 @@ if ($flavour =~ /64/) {			######## 64-bit code
 	s/^(\s+)v/$1/o		or	# strip off v prefix
 	s/\bbx\s+lr\b/ret/o;
 
-	# fix up remainig legacy suffixes
+	# fix up remaining legacy suffixes
 	s/\.[ui]?8//o;
 	m/\],#8/o and s/\.16b/\.8b/go;
 	s/\.[ui]?32//o and s/\.16b/\.4s/go;
@@ -992,7 +1027,7 @@ if ($flavour =~ /64/) {			######## 64-bit code
 	s/\bv([0-9])\.[12468]+[bsd]\b/q$1/go;	# new->old registers
 	s/\/\/\s?/@ /o;				# new->old style commentary
 
-	# fix up remainig new-style suffixes
+	# fix up remaining new-style suffixes
 	s/\{q([0-9]+)\},\s*\[(.+)\],#8/sprintf "{d%d},[$2]!",2*$1/eo	or
 	s/\],#[0-9]+/]!/o;
 
@@ -1009,4 +1044,4 @@ if ($flavour =~ /64/) {			######## 64-bit code
     }
 }
 
-close STDOUT;
+close STDOUT or die "error closing STDOUT";

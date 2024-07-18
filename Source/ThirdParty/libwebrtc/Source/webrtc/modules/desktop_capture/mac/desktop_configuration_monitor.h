@@ -8,60 +8,48 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_MAC_DESKTOP_CONFIGURATION_MONITOR_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_MAC_DESKTOP_CONFIGURATION_MONITOR_H_
+#ifndef MODULES_DESKTOP_CAPTURE_MAC_DESKTOP_CONFIGURATION_MONITOR_H_
+#define MODULES_DESKTOP_CAPTURE_MAC_DESKTOP_CONFIGURATION_MONITOR_H_
 
 #include <ApplicationServices/ApplicationServices.h>
 
 #include <memory>
 #include <set>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/desktop_capture/mac/desktop_configuration.h"
-#include "webrtc/system_wrappers/include/atomic32.h"
+#include "api/ref_counted_base.h"
+#include "modules/desktop_capture/mac/desktop_configuration.h"
+#include "rtc_base/synchronization/mutex.h"
 
 namespace webrtc {
 
-class EventWrapper;
-
 // The class provides functions to synchronize capturing and display
 // reconfiguring across threads, and the up-to-date MacDesktopConfiguration.
-class DesktopConfigurationMonitor {
+class DesktopConfigurationMonitor final
+    : public rtc::RefCountedNonVirtual<DesktopConfigurationMonitor> {
  public:
   DesktopConfigurationMonitor();
-  // Acquires a lock on the current configuration.
-  void Lock();
-  // Releases the lock previously acquired.
-  void Unlock();
-  // Returns the current desktop configuration. Should only be called when the
-  // lock has been acquired.
-  const MacDesktopConfiguration& desktop_configuration() {
-    return desktop_configuration_;
-  }
+  ~DesktopConfigurationMonitor();
 
-  void AddRef() { ++ref_count_; }
-  void Release() {
-    if (--ref_count_ == 0)
-      delete this;
-  }
+  DesktopConfigurationMonitor(const DesktopConfigurationMonitor&) = delete;
+  DesktopConfigurationMonitor& operator=(const DesktopConfigurationMonitor&) =
+      delete;
+
+  // Returns the current desktop configuration.
+  MacDesktopConfiguration desktop_configuration();
 
  private:
   static void DisplaysReconfiguredCallback(CGDirectDisplayID display,
                                            CGDisplayChangeSummaryFlags flags,
-                                           void *user_parameter);
-  ~DesktopConfigurationMonitor();
-
+                                           void* user_parameter);
   void DisplaysReconfigured(CGDirectDisplayID display,
                             CGDisplayChangeSummaryFlags flags);
 
-  Atomic32 ref_count_;
+  Mutex desktop_configuration_lock_;
+  MacDesktopConfiguration desktop_configuration_
+      RTC_GUARDED_BY(&desktop_configuration_lock_);
   std::set<CGDirectDisplayID> reconfiguring_displays_;
-  MacDesktopConfiguration desktop_configuration_;
-  std::unique_ptr<EventWrapper> display_configuration_capture_event_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(DesktopConfigurationMonitor);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_MAC_DESKTOP_CONFIGURATION_MONITOR_H_
+#endif  // MODULES_DESKTOP_CAPTURE_MAC_DESKTOP_CONFIGURATION_MONITOR_H_

@@ -89,7 +89,7 @@ FloatPointGraph::Node* FloatPointGraph::findOrCreateNode(FloatPoint point)
             return testNode.get();
     }
 
-    m_allNodes.append(std::make_unique<FloatPointGraph::Node>(point));
+    m_allNodes.append(makeUnique<FloatPointGraph::Node>(point));
     return m_allNodes.last().get();
 }
 
@@ -260,7 +260,13 @@ static FloatPointGraph::Polygon edgesForRect(FloatRect rect, FloatPointGraph& gr
 static Vector<FloatPointGraph::Polygon> polygonsForRect(const Vector<FloatRect>& rects, FloatPointGraph& graph)
 {
     Vector<FloatRect> sortedRects = rects;
-    std::sort(sortedRects.begin(), sortedRects.end(), [](FloatRect a, FloatRect b) { return b.y() > a.y(); });
+    // FIXME: Replace it with 2 dimensional sort.
+    std::sort(sortedRects.begin(), sortedRects.end(), [](FloatRect a, FloatRect b) {
+        return a.x() < b.x();
+    });
+    std::sort(sortedRects.begin(), sortedRects.end(), [](FloatRect a, FloatRect b) {
+        return a.y() < b.y();
+    });
 
     Vector<FloatPointGraph::Polygon> rectPolygons;
     rectPolygons.reserveInitialCapacity(sortedRects.size());
@@ -284,27 +290,27 @@ static Vector<FloatPointGraph::Polygon> polygonsForRect(const Vector<FloatRect>&
 
 Vector<Path> PathUtilities::pathsWithShrinkWrappedRects(const Vector<FloatRect>& rects, float radius)
 {
-    Vector<Path> paths;
-
     if (rects.isEmpty())
-        return paths;
+        return { };
 
     if (rects.size() > 20) {
         Path path;
-        path.addRoundedRect(unionRect(rects), FloatSize(radius, radius));
-        paths.append(path);
-        return paths;
+        for (const auto& rect : rects)
+            path.addRoundedRect(rect, FloatSize(radius, radius));
+        return { WTFMove(path) };
     }
 
     FloatPointGraph graph;
     Vector<FloatPointGraph::Polygon> polys = polygonsForRect(rects, graph);
     if (polys.isEmpty()) {
         Path path;
-        path.addRoundedRect(unionRect(rects), FloatSize(radius, radius));
-        paths.append(path);
-        return paths;
+        for (const auto& rect : rects)
+            path.addRoundedRect(rect, FloatSize(radius, radius));
+        return { WTFMove(path) };
     }
 
+    Vector<Path> paths;
+    paths.reserveInitialCapacity(polys.size());
     for (auto& poly : polys) {
         Path path;
         for (unsigned i = 0; i < poly.size(); ++i) {
@@ -336,7 +342,7 @@ Vector<Path> PathUtilities::pathsWithShrinkWrappedRects(const Vector<FloatRect>&
             path.addArcTo(*fromEdge.second, *toEdge.first + toOffset, clampedRadius);
         }
         path.closeSubpath();
-        paths.append(path);
+        paths.uncheckedAppend(WTFMove(path));
     }
     return paths;
 }
@@ -491,10 +497,10 @@ Path PathUtilities::pathWithShrinkWrappedRectsForOutline(const Vector<FloatRect>
 {
     ASSERT(borderData.hasBorderRadius());
 
-    FloatSize topLeftRadius { borderData.topLeft().width.value(), borderData.topLeft().height.value() };
-    FloatSize topRightRadius { borderData.topRight().width.value(), borderData.topRight().height.value() };
-    FloatSize bottomRightRadius { borderData.bottomRight().width.value(), borderData.bottomRight().height.value() };
-    FloatSize bottomLeftRadius { borderData.bottomLeft().width.value(), borderData.bottomLeft().height.value() };
+    FloatSize topLeftRadius { borderData.topLeftRadius().width.value(), borderData.topLeftRadius().height.value() };
+    FloatSize topRightRadius { borderData.topRightRadius().width.value(), borderData.topRightRadius().height.value() };
+    FloatSize bottomRightRadius { borderData.bottomRightRadius().width.value(), borderData.bottomRightRadius().height.value() };
+    FloatSize bottomLeftRadius { borderData.bottomLeftRadius().width.value(), borderData.bottomLeftRadius().height.value() };
 
     auto roundedRect = [topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius, outlineOffset, deviceScaleFactor] (const FloatRect& rect)
     {
@@ -535,13 +541,14 @@ Path PathUtilities::pathWithShrinkWrappedRectsForOutline(const Vector<FloatRect>
     bottomLeftRadius = firstLineRadii.bottomLeft();
     topRightRadius = lastLineRadii.topRight();
     bottomRightRadius = lastLineRadii.bottomRight();
-    Vector<FloatPoint> corners;
     // physical topLeft/topRight/bottomRight/bottomLeft
     auto isHorizontal = isHorizontalWritingMode(writingMode);
-    corners.append(firstLineRect.minXMinYCorner());
-    corners.append(isHorizontal ? lastLineRect.maxXMinYCorner() : firstLineRect.maxXMinYCorner());
-    corners.append(lastLineRect.maxXMaxYCorner());
-    corners.append(isHorizontal ? firstLineRect.minXMaxYCorner() : lastLineRect.minXMaxYCorner());
+    auto corners = Vector<FloatPoint>::from(
+        firstLineRect.minXMinYCorner(),
+        isHorizontal ? lastLineRect.maxXMinYCorner() : firstLineRect.maxXMinYCorner(),
+        lastLineRect.maxXMaxYCorner(),
+        isHorizontal ? firstLineRect.minXMaxYCorner() : lastLineRect.minXMaxYCorner()
+    );
 
     for (unsigned i = 0; i < poly.size(); ++i) {
         auto moveOrAddLineTo = [i, &path] (const FloatPoint& startPoint)
@@ -578,14 +585,10 @@ Path PathUtilities::pathWithShrinkWrappedRectsForOutline(const Vector<FloatRect>
             continue;
         }
         }
-        FloatPoint startPoint;
-        FloatPoint endPoint;
-        std::tie(startPoint, endPoint) = startAndEndPointsForCorner(fromEdge, toEdge, radius);
+        auto [startPoint, endPoint] = startAndEndPointsForCorner(fromEdge, toEdge, radius);
         moveOrAddLineTo(startPoint);
 
-        FloatPoint cp1;
-        FloatPoint cp2;
-        std::tie(cp1, cp2) = controlPointsForBezierCurve(corner, fromEdge, toEdge, radius);
+        auto [cp1, cp2] = controlPointsForBezierCurve(corner, fromEdge, toEdge, radius);
         path.addBezierCurveTo(cp1, cp2, endPoint);
     }
     path.closeSubpath();

@@ -20,176 +20,170 @@
 #pragma once
 
 #include "BlobData.h"
-#include "URL.h"
+#include <variant>
 #include <wtf/Forward.h>
 #include <wtf/RefCounted.h>
+#include <wtf/URL.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
+namespace PAL {
+class TextEncoding;
+}
+
 namespace WebCore {
 
+class BlobRegistryImpl;
 class DOMFormData;
-class Document;
 class File;
-class TextEncoding;
+class SharedBuffer;
 
-class FormDataElement {
-public:
-    enum class Type {
-        Data,
-        EncodedFile,
-        EncodedBlob,
-    };
+struct FormDataElement {
+    struct EncodedFileData;
+    struct EncodedBlobData;
+    using Data = std::variant<Vector<uint8_t>, EncodedFileData, EncodedBlobData>;
 
-    FormDataElement()
-        : m_type(Type::Data)
-    {
-    }
-
-    explicit FormDataElement(const Vector<char>& array)
-        : m_type(Type::Data)
-        , m_data(array)
-    {
-    }
-
-    FormDataElement(const String& filename, long long fileStart, long long fileLength, double expectedFileModificationTime, bool shouldGenerateFile)
-        : m_type(Type::EncodedFile)
-        , m_filename(filename)
-        , m_fileStart(fileStart)
-        , m_fileLength(fileLength)
-        , m_expectedFileModificationTime(expectedFileModificationTime)
-        , m_shouldGenerateFile(shouldGenerateFile)
-        , m_ownsGeneratedFile(false)
-    {
-    }
-
+    FormDataElement() = default;
+    explicit FormDataElement(Data&& data)
+        : data(WTFMove(data)) { }
+    explicit FormDataElement(Vector<uint8_t>&& array)
+        : data(WTFMove(array)) { }
+    FormDataElement(const String& filename, int64_t fileStart, int64_t fileLength, std::optional<WallTime> expectedFileModificationTime)
+        : data(EncodedFileData { filename, fileStart, fileLength, expectedFileModificationTime }) { }
     explicit FormDataElement(const URL& blobURL)
-        : m_type(Type::EncodedBlob)
-        , m_url(blobURL)
-    {
-    }
+        : data(EncodedBlobData { blobURL }) { }
 
+    uint64_t lengthInBytes(const Function<uint64_t(const URL&)>&) const;
     uint64_t lengthInBytes() const;
 
     FormDataElement isolatedCopy() const;
 
-    template<typename Encoder>
-    void encode(Encoder&) const;
-    template<typename Decoder>
-    static std::optional<FormDataElement> decode(Decoder&);
+    template<typename Encoder> void encode(Encoder& encoder) const
+    {
+        encoder << data;
+    }
+    template<typename Decoder> static std::optional<FormDataElement> decode(Decoder& decoder)
+    {
+        std::optional<Data> data;
+        decoder >> data;
+        if (!data)
+            return std::nullopt;
+        return FormDataElement(WTFMove(*data));
+    }
 
-    Type m_type;
-    Vector<char> m_data;
-    String m_filename;
-    URL m_url; // For Blob or URL.
-    int64_t m_fileStart;
-    int64_t m_fileLength;
-    double m_expectedFileModificationTime;
-    // FIXME: Generated file support in FormData is almost identical to Blob, they should be merged.
-    // We can't just switch to using Blobs for all files for two reasons:
-    // 1. Not all platforms enable BLOB support.
-    // 2. EncodedFile form data elements do not have a valid m_expectedFileModificationTime, meaning that we always upload the latest content from disk.
-    String m_generatedFilename;
-    bool m_shouldGenerateFile;
-    bool m_ownsGeneratedFile;
+    struct EncodedFileData {
+        String filename;
+        int64_t fileStart { 0 };
+        int64_t fileLength { 0 };
+        std::optional<WallTime> expectedFileModificationTime;
+
+        bool fileModificationTimeMatchesExpectation() const;
+
+        EncodedFileData isolatedCopy() const
+        {
+            return { filename.isolatedCopy(), fileStart, fileLength, expectedFileModificationTime };
+        }
+        
+        bool operator==(const EncodedFileData& other) const
+        {
+            return filename == other.filename
+                && fileStart == other.fileStart
+                && fileLength == other.fileLength
+                && expectedFileModificationTime == other.expectedFileModificationTime;
+        }
+        template<typename Encoder> void encode(Encoder& encoder) const
+        {
+            encoder << filename << fileStart << fileLength << expectedFileModificationTime;
+        }
+        template<typename Decoder> static std::optional<EncodedFileData> decode(Decoder& decoder)
+        {
+            std::optional<String> filename;
+            decoder >> filename;
+            if (!filename)
+                return std::nullopt;
+            
+            std::optional<int64_t> fileStart;
+            decoder >> fileStart;
+            if (!fileStart)
+                return std::nullopt;
+            
+            std::optional<int64_t> fileLength;
+            decoder >> fileLength;
+            if (!fileLength)
+                return std::nullopt;
+            
+            std::optional<std::optional<WallTime>> expectedFileModificationTime;
+            decoder >> expectedFileModificationTime;
+            if (!expectedFileModificationTime)
+                return std::nullopt;
+
+            return {{
+                WTFMove(*filename),
+                WTFMove(*fileStart),
+                WTFMove(*fileLength),
+                WTFMove(*expectedFileModificationTime)
+            }};
+        }
+
+    };
+    
+    struct EncodedBlobData {
+        URL url;
+
+        bool operator==(const EncodedBlobData& other) const
+        {
+            return url == other.url;
+        }
+        template<typename Encoder> void encode(Encoder& encoder) const
+        {
+            encoder << url;
+        }
+        template<typename Decoder> static std::optional<EncodedBlobData> decode(Decoder& decoder)
+        {
+            std::optional<URL> url;
+            decoder >> url;
+            if (!url)
+                return std::nullopt;
+
+            return {{ WTFMove(*url) }};
+        }
+    };
+    
+    bool operator==(const FormDataElement& other) const
+    {
+        if (&other == this)
+            return true;
+        if (data.index() != other.data.index())
+            return false;
+        if (!data.index())
+            return std::get<0>(data) == std::get<0>(other.data);
+        if (data.index() == 1)
+            return std::get<1>(data) == std::get<1>(other.data);
+        return std::get<2>(data) == std::get<2>(other.data);
+    }
+    bool operator!=(const FormDataElement& other) const
+    {
+        return !(*this == other);
+    }
+    
+    Data data;
 };
 
-inline bool operator==(const FormDataElement& a, const FormDataElement& b)
-{
-    if (&a == &b)
-        return true;
+class FormData;
 
-    if (a.m_type != b.m_type)
-        return false;
-    if (a.m_type == FormDataElement::Type::Data)
-        return a.m_data == b.m_data;
-    if (a.m_type == FormDataElement::Type::EncodedFile)
-        return a.m_filename == b.m_filename && a.m_fileStart == b.m_fileStart && a.m_fileLength == b.m_fileLength && a.m_expectedFileModificationTime == b.m_expectedFileModificationTime;
-    if (a.m_type == FormDataElement::Type::EncodedBlob)
-        return a.m_url == b.m_url;
+struct FormDataForUpload {
+public:
+    FormDataForUpload(FormDataForUpload&&) = default;
+    ~FormDataForUpload();
 
-    return true;
-}
-
-inline bool operator!=(const FormDataElement& a, const FormDataElement& b)
-{
-    return !(a == b);
-}
-
-
-template<typename Encoder>
-void FormDataElement::encode(Encoder& encoder) const
-{
-    encoder.encodeEnum(m_type);
-
-    switch (m_type) {
-    case Type::Data:
-        encoder << m_data;
-        break;
-
-    case Type::EncodedFile:
-        encoder << m_filename;
-        encoder << m_generatedFilename;
-        encoder << m_shouldGenerateFile;
-        encoder << m_fileStart;
-        encoder << m_fileLength;
-        encoder << m_expectedFileModificationTime;
-        break;
-
-    case Type::EncodedBlob:
-        encoder << m_url.string();
-        break;
-    }
-}
-
-template<typename Decoder>
-std::optional<FormDataElement> FormDataElement::decode(Decoder& decoder)
-{
-    FormDataElement result;
-    if (!decoder.decodeEnum(result.m_type))
-        return std::nullopt;
-
-    switch (result.m_type) {
-    case Type::Data:
-        if (!decoder.decode(result.m_data))
-            return std::nullopt;
-
-        return WTFMove(result);
-
-    case Type::EncodedFile:
-        if (!decoder.decode(result.m_filename))
-            return std::nullopt;
-        if (!decoder.decode(result.m_generatedFilename))
-            return std::nullopt;
-        if (!decoder.decode(result.m_shouldGenerateFile))
-            return std::nullopt;
-        result.m_ownsGeneratedFile = false;
-        if (!decoder.decode(result.m_fileStart))
-            return std::nullopt;
-        if (!decoder.decode(result.m_fileLength))
-            return std::nullopt;
-
-        if (result.m_fileLength != BlobDataItem::toEndOfFile && result.m_fileLength < result.m_fileStart)
-            return std::nullopt;
-
-        if (!decoder.decode(result.m_expectedFileModificationTime))
-            return std::nullopt;
-
-        return WTFMove(result);
-
-    case Type::EncodedBlob: {
-        String blobURLString;
-        if (!decoder.decode(blobURLString))
-            return std::nullopt;
-
-        result.m_url = URL(URL(), blobURLString);
-
-        return WTFMove(result);
-    }
-    }
-
-    return std::nullopt;
-}
+    FormData& data() { return m_data.get(); }
+private:
+    friend class FormData;
+    FormDataForUpload(FormData&, Vector<String>&&);
+    
+    Ref<FormData> m_data;
+    Vector<String> m_temporaryZipFiles;
+};
 
 class FormData : public RefCounted<FormData> {
 public:
@@ -201,16 +195,18 @@ public:
 
     WEBCORE_EXPORT static Ref<FormData> create();
     WEBCORE_EXPORT static Ref<FormData> create(const void*, size_t);
-    static Ref<FormData> create(const CString&);
+    WEBCORE_EXPORT static Ref<FormData> create(const CString&);
+    static Ref<FormData> create(Vector<uint8_t>&&);
     static Ref<FormData> create(const Vector<char>&);
+    static Ref<FormData> create(const Vector<uint8_t>&);
     static Ref<FormData> create(const DOMFormData&, EncodingType = FormURLEncoded);
-    static Ref<FormData> createMultiPart(const DOMFormData&, Document*);
+    static Ref<FormData> createMultiPart(const DOMFormData&);
     WEBCORE_EXPORT ~FormData();
 
     // FIXME: Both these functions perform a deep copy of m_elements, but differ in handling of other data members.
     // How much of that is intentional? We need better names that explain the difference.
     Ref<FormData> copy() const;
-    Ref<FormData> isolatedCopy() const;
+    WEBCORE_EXPORT Ref<FormData> isolatedCopy() const;
 
     template<typename Encoder>
     void encode(Encoder&) const;
@@ -218,24 +214,25 @@ public:
     static RefPtr<FormData> decode(Decoder&);
 
     WEBCORE_EXPORT void appendData(const void* data, size_t);
-    void appendFile(const String& filePath, bool shouldGenerateFile = false);
-    WEBCORE_EXPORT void appendFileRange(const String& filename, long long start, long long length, double expectedModificationTime, bool shouldGenerateFile = false);
+    void appendFile(const String& filePath);
+    WEBCORE_EXPORT void appendFileRange(const String& filename, long long start, long long length, std::optional<WallTime> expectedModificationTime);
     WEBCORE_EXPORT void appendBlob(const URL& blobURL);
-    char* expandDataStore(size_t);
 
-    Vector<char> flatten() const; // omits files
+    WEBCORE_EXPORT Vector<uint8_t> flatten() const; // omits files
     String flattenToString() const; // omits files
 
     // Resolve all blob references so we only have file and data.
     // If the FormData has no blob references to resolve, this is returned.
-    Ref<FormData> resolveBlobReferences();
+    WEBCORE_EXPORT Ref<FormData> resolveBlobReferences(BlobRegistryImpl* = nullptr);
+    bool containsBlobElement() const;
+
+    WEBCORE_EXPORT FormDataForUpload prepareForUpload();
 
     bool isEmpty() const { return m_elements.isEmpty(); }
     const Vector<FormDataElement>& elements() const { return m_elements; }
     const Vector<char>& boundary() const { return m_boundary; }
 
-    void generateFiles(Document*);
-    void removeGeneratedFilesIfNeeded();
+    WEBCORE_EXPORT RefPtr<SharedBuffer> asSharedBuffer() const;
 
     bool alwaysStream() const { return m_alwaysStream; }
     void setAlwaysStream(bool alwaysStream) { m_alwaysStream = alwaysStream; }
@@ -245,38 +242,35 @@ public:
     void setIdentifier(int64_t identifier) { m_identifier = identifier; }
     int64_t identifier() const { return m_identifier; }
 
-    bool containsPasswordData() const { return m_containsPasswordData; }
-    void setContainsPasswordData(bool containsPasswordData) { m_containsPasswordData = containsPasswordData; }
+    unsigned imageOrMediaFilesCount() const;
 
     static EncodingType parseEncodingType(const String& type)
     {
-        if (equalLettersIgnoringASCIICase(type, "text/plain"))
+        if (equalLettersIgnoringASCIICase(type, "text/plain"_s))
             return TextPlain;
-        if (equalLettersIgnoringASCIICase(type, "multipart/form-data"))
+        if (equalLettersIgnoringASCIICase(type, "multipart/form-data"_s))
             return MultipartFormData;
         return FormURLEncoded;
     }
 
-    uint64_t lengthInBytes() const;
+    WEBCORE_EXPORT uint64_t lengthInBytes() const;
+
+    WEBCORE_EXPORT URL asBlobURL() const;
 
 private:
     FormData();
     FormData(const FormData&);
 
-    void appendMultiPartFileValue(const File&, Vector<char>& header, TextEncoding&, Document*);
-    void appendMultiPartStringValue(const String&, Vector<char>& header, TextEncoding&);
-    void appendMultiPartKeyValuePairItems(const DOMFormData&, Document*);
+    void appendMultiPartFileValue(const File&, Vector<char>& header, PAL::TextEncoding&);
+    void appendMultiPartStringValue(const String&, Vector<char>& header, PAL::TextEncoding&);
+    void appendMultiPartKeyValuePairItems(const DOMFormData&);
     void appendNonMultiPartKeyValuePairItems(const DOMFormData&, EncodingType);
-
-    bool hasGeneratedFiles() const;
-    bool hasOwnedGeneratedFiles() const;
 
     Vector<FormDataElement> m_elements;
 
     int64_t m_identifier { 0 };
     bool m_alwaysStream { false };
     Vector<char> m_boundary;
-    bool m_containsPasswordData { false };
     mutable std::optional<uint64_t> m_lengthInBytes;
 };
 
@@ -302,7 +296,7 @@ void FormData::encode(Encoder& encoder) const
 template<typename Decoder>
 RefPtr<FormData> FormData::decode(Decoder& decoder)
 {
-    RefPtr<FormData> data = FormData::create();
+    auto data = FormData::create();
 
     if (!decoder.decode(data->m_alwaysStream))
         return nullptr;

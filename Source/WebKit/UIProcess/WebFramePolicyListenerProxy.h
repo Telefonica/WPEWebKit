@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,39 +25,48 @@
 
 #pragma once
 
-#include "WebFrameListenerProxy.h"
+#include "APIObject.h"
+#include "PolicyDecision.h"
+#include <WebCore/FrameLoaderTypes.h>
+#include <wtf/CompletionHandler.h>
+#include <wtf/Vector.h>
 
-#if PLATFORM(COCOA)
-#include "WKFoundation.h"
-#endif
-
-#define DELEGATE_REF_COUNTING_TO_COCOA (PLATFORM(COCOA) && WK_API_ENABLED)
+namespace API {
+class WebsitePolicies;
+}
 
 namespace WebKit {
 
-class WebFramePolicyListenerProxy : public WebFrameListenerProxy {
+class SafeBrowsingWarning;
+
+enum class ProcessSwapRequestedByClient : bool { No, Yes };
+enum class ShouldExpectSafeBrowsingResult : bool { No, Yes };
+enum class ShouldExpectAppBoundDomainResult : bool { No, Yes };
+
+class WebFramePolicyListenerProxy : public API::ObjectImpl<API::Object::Type::FramePolicyListener> {
 public:
-    static const Type APIType = Type::FramePolicyListener;
 
-    static Ref<WebFramePolicyListenerProxy> create(WebFrameProxy* frame, uint64_t listenerID)
+    using Reply = CompletionHandler<void(WebCore::PolicyAction, API::WebsitePolicies*, ProcessSwapRequestedByClient, RefPtr<SafeBrowsingWarning>&&, std::optional<NavigatingToAppBoundDomain>)>;
+    static Ref<WebFramePolicyListenerProxy> create(Reply&& reply, ShouldExpectSafeBrowsingResult expectSafeBrowsingResult, ShouldExpectAppBoundDomainResult expectAppBoundDomainResult)
     {
-        return adoptRef(*new WebFramePolicyListenerProxy(frame, listenerID));
+        return adoptRef(*new WebFramePolicyListenerProxy(WTFMove(reply), expectSafeBrowsingResult, expectAppBoundDomainResult));
     }
+    ~WebFramePolicyListenerProxy();
 
-    void use(const WebsitePolicies&);
+    void use(API::WebsitePolicies* = nullptr, ProcessSwapRequestedByClient = ProcessSwapRequestedByClient::No);
     void download();
     void ignore();
+    
+    void didReceiveSafeBrowsingResults(RefPtr<SafeBrowsingWarning>&&);
+    void didReceiveAppBoundDomainResult(std::optional<NavigatingToAppBoundDomain>);
 
 private:
-    WebFramePolicyListenerProxy(WebFrameProxy*, uint64_t listenerID);
+    WebFramePolicyListenerProxy(Reply&&, ShouldExpectSafeBrowsingResult, ShouldExpectAppBoundDomainResult);
 
-    Type type() const override { return APIType; }
-
-#if DELEGATE_REF_COUNTING_TO_COCOA
-    void* operator new(size_t size) { return newObject(size, APIType); }
-#endif
+    std::optional<std::pair<RefPtr<API::WebsitePolicies>, ProcessSwapRequestedByClient>> m_policyResult;
+    std::optional<RefPtr<SafeBrowsingWarning>> m_safeBrowsingWarning;
+    std::optional<std::optional<NavigatingToAppBoundDomain>> m_isNavigatingToAppBoundDomain;
+    Reply m_reply;
 };
 
 } // namespace WebKit
-
-#undef DELEGATE_REF_COUNTING_TO_COCOA

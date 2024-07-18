@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,10 +25,53 @@
 
 WI.FlexibleSpaceNavigationItem = class FlexibleSpaceNavigationItem extends WI.NavigationItem
 {
+    constructor(navigationItem, alignItem)
+    {
+        super();
+
+        console.assert(!navigationItem || navigationItem instanceof WI.NavigationItem);
+
+        this._navigationItem = navigationItem || null;
+
+        if (this._navigationItem) {
+            this._navigationItem = navigationItem;
+            this.element.classList.add(alignItem || WI.FlexibleSpaceNavigationItem.Align.Start);
+        }
+    }
+
     // Protected
 
     get additionalClassNames()
     {
         return ["flexible-space"];
     }
+
+    update(options = {})
+    {
+        super.update(options);
+
+        if (!this._navigationItem)
+            return;
+
+        if (!options.expandOnly)
+            return;
+
+        let flexibleWidth = this.width;
+        if (!flexibleWidth)
+            return;
+
+        this.element.appendChild(this._navigationItem.element);
+
+        this._navigationItem.update(options);
+        let itemWidth = this._navigationItem.width;
+
+        let remainingWidth = flexibleWidth - itemWidth;
+        if (remainingWidth <= 0)
+            this.element.removeChild(this._navigationItem.element);
+    }
+};
+
+WI.FlexibleSpaceNavigationItem.Align = {
+    Start: "align-start",
+    End: "align-end",
 };

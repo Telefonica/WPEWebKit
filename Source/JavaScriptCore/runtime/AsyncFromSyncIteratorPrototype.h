@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2017 Oleksandr Skachkov <gskachkov@gmail.com>.
+ * Copyright (C) 2017-2019 Oleksandr Skachkov <gskachkov@gmail.com>.
+ * Copyright (C) 2021-2022 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,9 +29,17 @@
 
 namespace JSC {
 
-class AsyncFromSyncIteratorPrototype : public JSNonFinalObject {
+class AsyncFromSyncIteratorPrototype final : public JSNonFinalObject {
 public:
     using Base = JSNonFinalObject;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
+
+    template<typename CellType, SubspaceAccess>
+    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    {
+        STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(AsyncFromSyncIteratorPrototype, Base);
+        return &vm.plainObjectSpace();
+    }
 
     DECLARE_INFO;
 
@@ -41,11 +50,9 @@ public:
         return Structure::create(vm, globalObject, proto, TypeInfo(ObjectType, StructureFlags), info());
     }
 
-    protected:
-    void finishCreation(VM&, JSGlobalObject*);
-        
-    private:
+private:
     AsyncFromSyncIteratorPrototype(VM&, Structure*);
+    void finishCreation(VM&);
 };
     
 } // namespace JSC

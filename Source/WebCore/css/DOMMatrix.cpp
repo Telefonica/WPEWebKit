@@ -27,13 +27,14 @@
 #include "DOMMatrix.h"
 
 #include "ScriptExecutionContext.h"
+#include <JavaScriptCore/Float32Array.h>
 #include <cmath>
 #include <limits>
 
 namespace WebCore {
 
 // https://drafts.fxtf.org/geometry/#dom-dommatrixreadonly-dommatrixreadonly
-ExceptionOr<Ref<DOMMatrix>> DOMMatrix::create(ScriptExecutionContext& scriptExecutionContext, std::optional<Variant<String, Vector<double>>>&& init)
+ExceptionOr<Ref<DOMMatrix>> DOMMatrix::create(ScriptExecutionContext& scriptExecutionContext, std::optional<std::variant<String, Vector<double>>>&& init)
 {
     if (!init)
         return adoptRef(*new DOMMatrix);
@@ -229,7 +230,9 @@ Ref<DOMMatrix> DOMMatrix::skewYSelf(double sy)
 Ref<DOMMatrix> DOMMatrix::invertSelf()
 {
     auto inverse = m_matrix.inverse();
-    if (!inverse) {
+    if (inverse)
+        m_matrix = *inverse;
+    else {
         m_matrix.setMatrix(
             std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(),
             std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(),
@@ -238,7 +241,6 @@ Ref<DOMMatrix> DOMMatrix::invertSelf()
         );
         m_is2D = false;
     }
-    m_matrix = inverse.value();
     return Ref<DOMMatrix> { *this };
 }
 

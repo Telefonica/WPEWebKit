@@ -13,23 +13,62 @@ package org.webrtc;
 /** Java wrapper for a C++ MediaSourceInterface. */
 public class MediaSource {
   /** Tracks MediaSourceInterface.SourceState */
-  public enum State { INITIALIZING, LIVE, ENDED, MUTED }
+  public enum State {
+    INITIALIZING,
+    LIVE,
+    ENDED,
+    MUTED;
 
-  final long nativeSource; // Package-protected for PeerConnectionFactory.
+    @CalledByNative("State")
+    static State fromNativeIndex(int nativeIndex) {
+      return values()[nativeIndex];
+    }
+  }
+
+  private final RefCountDelegate refCountDelegate;
+  private long nativeSource;
 
   public MediaSource(long nativeSource) {
+    refCountDelegate = new RefCountDelegate(() -> JniCommon.nativeReleaseRef(nativeSource));
     this.nativeSource = nativeSource;
   }
 
   public State state() {
-    return nativeState(nativeSource);
+    checkMediaSourceExists();
+    return nativeGetState(nativeSource);
   }
 
   public void dispose() {
-    free(nativeSource);
+    checkMediaSourceExists();
+    refCountDelegate.release();
+    nativeSource = 0;
   }
 
-  private static native State nativeState(long pointer);
+  /** Returns a pointer to webrtc::MediaSourceInterface. */
+  protected long getNativeMediaSource() {
+    checkMediaSourceExists();
+    return nativeSource;
+  }
 
-  private static native void free(long nativeSource);
+  /**
+   * Runs code in {@code runnable} holding a reference to the media source. If the object has
+   * already been released, does nothing.
+   */
+  void runWithReference(Runnable runnable) {
+    if (refCountDelegate.safeRetain()) {
+      try {
+        runnable.run();
+      } finally {
+        refCountDelegate.release();
+      }
+    }
+  }
+
+  private void checkMediaSourceExists() {
+    if (nativeSource == 0) {
+      throw new IllegalStateException("MediaSource has been disposed.");
+    }
+  }
+
+  private static native State nativeGetState(long pointer);
 }

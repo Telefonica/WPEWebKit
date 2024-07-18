@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
+ *  Copyright (C) 2006-2021 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -24,34 +24,30 @@
 
 namespace JSC {
 
-class FunctionPrototype : public InternalFunction {
+class FunctionPrototype final : public InternalFunction {
 public:
     typedef InternalFunction Base;
 
     static FunctionPrototype* create(VM& vm, Structure* structure)
     {
-        FunctionPrototype* prototype = new (NotNull, allocateCell<FunctionPrototype>(vm.heap)) FunctionPrototype(vm, structure);
+        FunctionPrototype* prototype = new (NotNull, allocateCell<FunctionPrototype>(vm)) FunctionPrototype(vm, structure);
         prototype->finishCreation(vm, String());
         return prototype;
     }
 
-    void addFunctionProperties(ExecState*, JSGlobalObject*, JSFunction** callFunction, JSFunction** applyFunction, JSFunction** hasInstanceSymbolFunction);
-
-    void initRestrictedProperties(ExecState*, JSGlobalObject*);
+    void addFunctionProperties(VM&, JSGlobalObject*, JSFunction** callFunction, JSFunction** applyFunction, JSFunction** hasInstanceSymbolFunction);
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue proto)
     {
-        return Structure::create(vm, globalObject, proto, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, proto, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
     DECLARE_INFO;
 
-protected:
-    void finishCreation(VM&, const String& name);
-
 private:
     FunctionPrototype(VM&, Structure*);
-    static CallType getCallData(JSCell*, CallData&);
+    void finishCreation(VM&, const String& name);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(FunctionPrototype, InternalFunction);
 
 } // namespace JSC

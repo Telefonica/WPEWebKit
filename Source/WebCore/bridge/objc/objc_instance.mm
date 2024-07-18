@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2008-2009, 2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,16 +30,18 @@
 #import "ObjCRuntimeObject.h"
 #import "WebScriptObject.h"
 #import "WebScriptObjectProtocol.h"
-#import "runtime/FunctionPrototype.h"
 #import "runtime_method.h"
-#import <runtime/Error.h>
-#import <runtime/JSLock.h>
-#import <runtime/ObjectPrototype.h>
+#import <JavaScriptCore/Error.h>
+#import <JavaScriptCore/FunctionPrototype.h>
+#import <JavaScriptCore/JSGlobalObjectInlines.h>
+#import <JavaScriptCore/JSLock.h>
+#import <JavaScriptCore/ObjectPrototype.h>
 #import <wtf/Assertions.h>
 #import <wtf/HashMap.h>
 #import <wtf/MainThread.h>
 #import <wtf/NeverDestroyed.h>
 #import <wtf/ThreadSpecific.h>
+#import <wtf/spi/cocoa/objcSPI.h>
 
 #ifdef NDEBUG
 #define OBJC_LOG(formatAndArgs...) ((void)0)
@@ -50,93 +52,96 @@
 }
 #endif
 
-using namespace JSC::Bindings;
-using namespace JSC;
+@interface NSObject (WebDescriptionCategory)
+- (NSString *)_web_description;
+@end
 
-static NSString *s_exception;
-static JSGlobalObject* s_exceptionEnvironment; // No need to protect this value, since we just use it for a pointer comparison.
+namespace JSC {
+namespace Bindings {
 
-static HashMap<id, ObjcInstance*>& wrapperCache()
+static RetainPtr<NSString>& globalException()
 {
-    static NeverDestroyed<HashMap<id, ObjcInstance*>> map;
+    static NeverDestroyed<RetainPtr<NSString>> exception;
+    return exception;
+}
+
+// No need to protect this value, since we just use it for a pointer comparison.
+// FIXME: A new object can happen to be equal to the old one, so even pointer comparison is not safe. Maybe we can use NeverDestroyed<JSC::Weak>?
+static JSGlobalObject* s_exceptionEnvironment;
+
+static HashMap<CFTypeRef, ObjcInstance*>& wrapperCache()
+{
+    static NeverDestroyed<HashMap<CFTypeRef, ObjcInstance*>> map;
     return map;
 }
 
-RuntimeObject* ObjcInstance::newRuntimeObject(ExecState* exec)
+RuntimeObject* ObjcInstance::newRuntimeObject(JSGlobalObject* lexicalGlobalObject)
 {
     // FIXME: deprecatedGetDOMStructure uses the prototype off of the wrong global object.
-    return ObjCRuntimeObject::create(exec->vm(), WebCore::deprecatedGetDOMStructure<ObjCRuntimeObject>(exec), this);
+    return ObjCRuntimeObject::create(lexicalGlobalObject->vm(), WebCore::deprecatedGetDOMStructure<ObjCRuntimeObject>(lexicalGlobalObject), this);
 }
 
-void ObjcInstance::setGlobalException(NSString* exception, JSGlobalObject* exceptionEnvironment)
+void ObjcInstance::setGlobalException(NSString *exception, JSGlobalObject* exceptionEnvironment)
 {
-    NSString *oldException = s_exception;
-    s_exception = [exception copy];
-    [oldException release];
-
+    globalException() = adoptNS([exception copy]);
     s_exceptionEnvironment = exceptionEnvironment;
 }
 
-void ObjcInstance::moveGlobalExceptionToExecState(ExecState* exec)
+void ObjcInstance::moveGlobalExceptionToExecState(JSGlobalObject* lexicalGlobalObject)
 {
-    VM& vm = exec->vm();
+    VM& vm = lexicalGlobalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    if (!s_exception) {
+    if (!globalException()) {
         ASSERT(!s_exceptionEnvironment);
         return;
     }
 
-    if (!s_exceptionEnvironment || s_exceptionEnvironment == exec->vmEntryGlobalObject()) {
-        JSLockHolder lock(exec);
-        throwError(exec, scope, s_exception);
+    if (!s_exceptionEnvironment || s_exceptionEnvironment == vm.deprecatedVMEntryGlobalObject(lexicalGlobalObject)) {
+        JSLockHolder lock(vm);
+        throwError(lexicalGlobalObject, scope, globalException().get());
     }
 
-    [s_exception release];
-    s_exception = nil;
-    s_exceptionEnvironment = 0;
+    globalException() = nil;
+    s_exceptionEnvironment = nullptr;
 }
 
 ObjcInstance::ObjcInstance(id instance, RefPtr<RootObject>&& rootObject) 
     : Instance(WTFMove(rootObject))
     , _instance(instance)
-    , _class(0)
-    , _pool(0)
-    , _beginCount(0)
 {
 }
 
-RefPtr<ObjcInstance> ObjcInstance::create(id instance, RefPtr<RootObject>&& rootObject)
+Ref<ObjcInstance> ObjcInstance::create(id instance, RefPtr<RootObject>&& rootObject)
 {
-    auto result = wrapperCache().add(instance, nullptr);
+    auto result = wrapperCache().add((__bridge CFTypeRef)instance, nullptr);
     if (result.isNewEntry) {
-        RefPtr<ObjcInstance> wrapper = adoptRef(new ObjcInstance(instance, WTFMove(rootObject)));
-        result.iterator->value = wrapper.get();
+        auto wrapper = adoptRef(*new ObjcInstance(instance, WTFMove(rootObject)));
+        result.iterator->value = wrapper.ptr();
         return wrapper;
     }
 
-    return result.iterator->value;
+    ASSERT(result.iterator->value);
+    return *result.iterator->value;
 }
 
 ObjcInstance::~ObjcInstance() 
 {
     // Both -finalizeForWebScript and -dealloc/-finalize of _instance may require autorelease pools.
-    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+    @autoreleasepool {
+        ASSERT(_instance);
+        wrapperCache().remove((__bridge CFTypeRef)_instance.get());
 
-    ASSERT(_instance);
-    wrapperCache().remove(_instance.get());
-
-    if ([_instance.get() respondsToSelector:@selector(finalizeForWebScript)])
-        [_instance.get() performSelector:@selector(finalizeForWebScript)];
-    _instance = 0;
-
-    [pool drain];
+        if ([_instance respondsToSelector:@selector(finalizeForWebScript)])
+            [_instance performSelector:@selector(finalizeForWebScript)];
+        _instance = 0;
+    }
 }
 
 void ObjcInstance::virtualBegin()
 {
-    if (!_pool)
-        _pool = [[NSAutoreleasePool alloc] init];
+    if (!m_autoreleasePool)
+        m_autoreleasePool = objc_autoreleasePoolPush();
     _beginCount++;
 }
 
@@ -145,8 +150,9 @@ void ObjcInstance::virtualEnd()
     _beginCount--;
     ASSERT(_beginCount >= 0);
     if (!_beginCount) {
-        [_pool drain];
-        _pool = 0;
+        ASSERT(m_autoreleasePool);
+        objc_autoreleasePoolPop(m_autoreleasePool);
+        m_autoreleasePool = nullptr;
     }
 }
 
@@ -161,71 +167,71 @@ Bindings::Class* ObjcInstance::getClass() const
 
 bool ObjcInstance::supportsInvokeDefaultMethod() const
 {
-    return [_instance.get() respondsToSelector:@selector(invokeDefaultMethodWithArguments:)];
+    return [_instance respondsToSelector:@selector(invokeDefaultMethodWithArguments:)];
 }
 
-class ObjCRuntimeMethod : public RuntimeMethod {
+class ObjCRuntimeMethod final : public RuntimeMethod {
 public:
-    static ObjCRuntimeMethod* create(ExecState* exec, JSGlobalObject* globalObject, const String& name, Bindings::Method* method)
+    static ObjCRuntimeMethod* create(JSGlobalObject* lexicalGlobalObject, JSGlobalObject* globalObject, const String& name, Bindings::Method* method)
     {
         VM& vm = globalObject->vm();
         // FIXME: deprecatedGetDOMStructure uses the prototype off of the wrong global object
         // We need to pass in the right global object for "i".
-        Structure* domStructure = WebCore::deprecatedGetDOMStructure<ObjCRuntimeMethod>(exec);
-        ObjCRuntimeMethod* runtimeMethod = new (NotNull, allocateCell<ObjCRuntimeMethod>(vm.heap)) ObjCRuntimeMethod(globalObject, domStructure, method);
+        Structure* domStructure = WebCore::deprecatedGetDOMStructure<ObjCRuntimeMethod>(lexicalGlobalObject);
+        ObjCRuntimeMethod* runtimeMethod = new (NotNull, allocateCell<ObjCRuntimeMethod>(vm)) ObjCRuntimeMethod(vm, domStructure, method);
         runtimeMethod->finishCreation(vm, name);
         return runtimeMethod;
     }
 
     static Structure* createStructure(VM& vm, JSC::JSGlobalObject* globalObject, JSC::JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), &s_info);
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), &s_info);
     }
 
     DECLARE_INFO;
 
 private:
-    typedef RuntimeMethod Base;
+    using Base = RuntimeMethod;
 
-    ObjCRuntimeMethod(JSGlobalObject* globalObject, Structure* structure, Bindings::Method* method)
-        : RuntimeMethod(globalObject, structure, method)
+    ObjCRuntimeMethod(VM& vm, Structure* structure, Bindings::Method* method)
+        : Base(vm, structure, method)
     {
     }
 
     void finishCreation(VM& vm, const String& name)
     {
         Base::finishCreation(vm, name);
-        ASSERT(inherits(vm, info()));
+        ASSERT(inherits(info()));
     }
 };
 
-const ClassInfo ObjCRuntimeMethod::s_info = { "ObjCRuntimeMethod", &RuntimeMethod::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(ObjCRuntimeMethod) };
+const ClassInfo ObjCRuntimeMethod::s_info = { "ObjCRuntimeMethod"_s, &RuntimeMethod::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(ObjCRuntimeMethod) };
 
-JSC::JSValue ObjcInstance::getMethod(ExecState* exec, PropertyName propertyName)
+JSC::JSValue ObjcInstance::getMethod(JSGlobalObject* lexicalGlobalObject, PropertyName propertyName)
 {
     Method* method = getClass()->methodNamed(propertyName, this);
-    return ObjCRuntimeMethod::create(exec, exec->lexicalGlobalObject(), propertyName.publicName(), method);
+    return ObjCRuntimeMethod::create(lexicalGlobalObject, lexicalGlobalObject, propertyName.publicName(), method);
 }
 
-JSC::JSValue ObjcInstance::invokeMethod(ExecState* exec, RuntimeMethod* runtimeMethod)
+JSC::JSValue ObjcInstance::invokeMethod(JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame, RuntimeMethod* runtimeMethod)
 {
-    JSC::VM& vm = exec->vm();
+    JSC::VM& vm = lexicalGlobalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    if (!asObject(runtimeMethod)->inherits(vm, ObjCRuntimeMethod::info()))
-        return throwTypeError(exec, scope, ASCIILiteral("Attempt to invoke non-plug-in method on plug-in object."));
+    if (!asObject(runtimeMethod)->inherits<ObjCRuntimeMethod>())
+        return throwTypeError(lexicalGlobalObject, scope, "Attempt to invoke non-plug-in method on plug-in object."_s);
 
     ObjcMethod *method = static_cast<ObjcMethod*>(runtimeMethod->method());
     ASSERT(method);
 
-    return invokeObjcMethod(exec, method);
+    return invokeObjcMethod(lexicalGlobalObject, callFrame, method);
 }
 
-JSC::JSValue ObjcInstance::invokeObjcMethod(ExecState* exec, ObjcMethod* method)
+JSC::JSValue ObjcInstance::invokeObjcMethod(JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame, ObjcMethod* method)
 {
     JSValue result = jsUndefined();
     
-    JSLock::DropAllLocks dropAllLocks(exec); // Can't put this inside the @try scope because it unwinds incorrectly.
+    JSLock::DropAllLocks dropAllLocks(lexicalGlobalObject); // Can't put this inside the @try scope because it unwinds incorrectly.
 
     setGlobalException(nil);
     
@@ -243,14 +249,14 @@ JSC::JSValue ObjcInstance::invokeObjcMethod(ExecState* exec, ObjcMethod* method)
 
         // Invoke invokeUndefinedMethodFromWebScript:withArguments:, pass JavaScript function
         // name as first (actually at 2) argument and array of args as second.
-        NSString* jsName = (NSString* )method->javaScriptName();
+        NSString* jsName = (__bridge NSString *)method->javaScriptName();
         [invocation setArgument:&jsName atIndex:2];
 
         NSMutableArray* objcArgs = [NSMutableArray array];
-        int count = exec->argumentCount();
+        int count = callFrame->argumentCount();
         for (int i = 0; i < count; i++) {
-            ObjcValue value = convertValueToObjcValue(exec, exec->uncheckedArgument(i), ObjcObjectType);
-            [objcArgs addObject:value.objectValue];
+            ObjcValue value = convertValueToObjcValue(lexicalGlobalObject, callFrame->uncheckedArgument(i), ObjcObjectType);
+            [objcArgs addObject:(__bridge id)value.objectValue];
         }
         [invocation setArgument:&objcArgs atIndex:3];
     } else {
@@ -264,7 +270,7 @@ JSC::JSValue ObjcInstance::invokeObjcMethod(ExecState* exec, ObjcMethod* method)
             // types.
             ASSERT(objcValueType != ObjcInvalidType && objcValueType != ObjcVoidType);
 
-            ObjcValue value = convertValueToObjcValue(exec, exec->argument(i - 2), objcValueType);
+            ObjcValue value = convertValueToObjcValue(lexicalGlobalObject, callFrame->argument(i - 2), objcValueType);
 
             switch (objcValueType) {
                 case ObjcObjectType:
@@ -328,29 +334,29 @@ JSC::JSValue ObjcInstance::invokeObjcMethod(ExecState* exec, ObjcMethod* method)
 
     if (*type != 'v') {
         [invocation getReturnValue:buffer];
-        result = convertObjcValueToValue(exec, buffer, objcValueType, m_rootObject.get());
+        result = convertObjcValueToValue(lexicalGlobalObject, buffer, objcValueType, m_rootObject.get());
     }
 } @catch(NSException* localException) {
 }
-    moveGlobalExceptionToExecState(exec);
+    moveGlobalExceptionToExecState(lexicalGlobalObject);
 
     // Work around problem in some versions of GCC where result gets marked volatile and
     // it can't handle copying from a volatile to non-volatile.
     return const_cast<JSValue&>(result);
 }
 
-JSC::JSValue ObjcInstance::invokeDefaultMethod(ExecState* exec)
+JSC::JSValue ObjcInstance::invokeDefaultMethod(JSGlobalObject* lexicalGlobalObject, CallFrame* callFrame)
 {
     JSValue result = jsUndefined();
 
-    JSLock::DropAllLocks dropAllLocks(exec); // Can't put this inside the @try scope because it unwinds incorrectly.
+    JSLock::DropAllLocks dropAllLocks(lexicalGlobalObject); // Can't put this inside the @try scope because it unwinds incorrectly.
     setGlobalException(nil);
     
 @try {
-    if (![_instance.get() respondsToSelector:@selector(invokeDefaultMethodWithArguments:)])
+    if (![_instance respondsToSelector:@selector(invokeDefaultMethodWithArguments:)])
         return result;
 
-    NSMethodSignature* signature = [_instance.get() methodSignatureForSelector:@selector(invokeDefaultMethodWithArguments:)];
+    NSMethodSignature* signature = [_instance methodSignatureForSelector:@selector(invokeDefaultMethodWithArguments:)];
     NSInvocation* invocation = [NSInvocation invocationWithMethodSignature:signature];
     [invocation setSelector:@selector(invokeDefaultMethodWithArguments:)];
     [invocation setTarget:_instance.get()];
@@ -361,10 +367,10 @@ JSC::JSValue ObjcInstance::invokeDefaultMethod(ExecState* exec)
     }
 
     NSMutableArray* objcArgs = [NSMutableArray array];
-    unsigned count = exec->argumentCount();
+    unsigned count = callFrame->argumentCount();
     for (unsigned i = 0; i < count; i++) {
-        ObjcValue value = convertValueToObjcValue(exec, exec->uncheckedArgument(i), ObjcObjectType);
-        [objcArgs addObject:value.objectValue];
+        ObjcValue value = convertValueToObjcValue(lexicalGlobalObject, callFrame->uncheckedArgument(i), ObjcObjectType);
+        [objcArgs addObject:(__bridge id)value.objectValue];
     }
     [invocation setArgument:&objcArgs atIndex:2];
 
@@ -380,17 +386,17 @@ JSC::JSValue ObjcInstance::invokeDefaultMethod(ExecState* exec)
     // OK with 32 here.
     char buffer[32];
     [invocation getReturnValue:buffer];
-    result = convertObjcValueToValue(exec, buffer, objcValueType, m_rootObject.get());
+    result = convertObjcValueToValue(lexicalGlobalObject, buffer, objcValueType, m_rootObject.get());
 } @catch(NSException* localException) {
 }
-    moveGlobalExceptionToExecState(exec);
+    moveGlobalExceptionToExecState(lexicalGlobalObject);
 
     // Work around problem in some versions of GCC where result gets marked volatile and
     // it can't handle copying from a volatile to non-volatile.
     return const_cast<JSValue&>(result);
 }
 
-bool ObjcInstance::setValueOfUndefinedField(ExecState* exec, PropertyName propertyName, JSValue aValue)
+bool ObjcInstance::setValueOfUndefinedField(JSGlobalObject* lexicalGlobalObject, PropertyName propertyName, JSValue aValue)
 {
     String name(propertyName.publicName());
     if (name.isNull())
@@ -400,7 +406,7 @@ bool ObjcInstance::setValueOfUndefinedField(ExecState* exec, PropertyName proper
     if (![targetObject respondsToSelector:@selector(setValue:forUndefinedKey:)])
         return false;
 
-    JSLock::DropAllLocks dropAllLocks(exec); // Can't put this inside the @try scope because it unwinds incorrectly.
+    JSLock::DropAllLocks dropAllLocks(lexicalGlobalObject); // Can't put this inside the @try scope because it unwinds incorrectly.
 
     // This check is not really necessary because NSObject implements
     // setValue:forUndefinedKey:, and unfortunately the default implementation
@@ -408,21 +414,21 @@ bool ObjcInstance::setValueOfUndefinedField(ExecState* exec, PropertyName proper
     if ([targetObject respondsToSelector:@selector(setValue:forUndefinedKey:)]){
         setGlobalException(nil);
     
-        ObjcValue objcValue = convertValueToObjcValue(exec, aValue, ObjcObjectType);
+        ObjcValue objcValue = convertValueToObjcValue(lexicalGlobalObject, aValue, ObjcObjectType);
 
         @try {
-            [targetObject setValue:objcValue.objectValue forUndefinedKey:[NSString stringWithCString:name.ascii().data() encoding:NSASCIIStringEncoding]];
+            [targetObject setValue:(__bridge id)objcValue.objectValue forUndefinedKey:[NSString stringWithCString:name.ascii().data() encoding:NSASCIIStringEncoding]];
         } @catch(NSException* localException) {
             // Do nothing.  Class did not override valueForUndefinedKey:.
         }
 
-        moveGlobalExceptionToExecState(exec);
+        moveGlobalExceptionToExecState(lexicalGlobalObject);
     }
     
     return true;
 }
 
-JSC::JSValue ObjcInstance::getValueOfUndefinedField(ExecState* exec, PropertyName propertyName) const
+JSC::JSValue ObjcInstance::getValueOfUndefinedField(JSGlobalObject* lexicalGlobalObject, PropertyName propertyName) const
 {
     String name(propertyName.publicName());
     if (name.isNull())
@@ -432,7 +438,7 @@ JSC::JSValue ObjcInstance::getValueOfUndefinedField(ExecState* exec, PropertyNam
     
     id targetObject = getObject();
 
-    JSLock::DropAllLocks dropAllLocks(exec); // Can't put this inside the @try scope because it unwinds incorrectly.
+    JSLock::DropAllLocks dropAllLocks(lexicalGlobalObject); // Can't put this inside the @try scope because it unwinds incorrectly.
 
     // This check is not really necessary because NSObject implements
     // valueForUndefinedKey:, and unfortunately the default implementation
@@ -442,12 +448,12 @@ JSC::JSValue ObjcInstance::getValueOfUndefinedField(ExecState* exec, PropertyNam
     
         @try {
             id objcValue = [targetObject valueForUndefinedKey:[NSString stringWithCString:name.ascii().data() encoding:NSASCIIStringEncoding]];
-            result = convertObjcValueToValue(exec, &objcValue, ObjcObjectType, m_rootObject.get());
+            result = convertObjcValueToValue(lexicalGlobalObject, &objcValue, ObjcObjectType, m_rootObject.get());
         } @catch(NSException* localException) {
             // Do nothing.  Class did not override valueForUndefinedKey:.
         }
 
-        moveGlobalExceptionToExecState(exec);
+        moveGlobalExceptionToExecState(lexicalGlobalObject);
     }
 
     // Work around problem in some versions of GCC where result gets marked volatile and
@@ -455,45 +461,26 @@ JSC::JSValue ObjcInstance::getValueOfUndefinedField(ExecState* exec, PropertyNam
     return const_cast<JSValue&>(result);
 }
 
-JSC::JSValue ObjcInstance::defaultValue(ExecState* exec, PreferredPrimitiveType hint) const
+JSC::JSValue ObjcInstance::defaultValue(JSGlobalObject* lexicalGlobalObject, PreferredPrimitiveType hint) const
 {
     if (hint == PreferString)
-        return stringValue(exec);
+        return stringValue(lexicalGlobalObject);
     if (hint == PreferNumber)
-        return numberValue(exec);
-    if ([_instance.get() isKindOfClass:[NSString class]])
-        return stringValue(exec);
-    if ([_instance.get() isKindOfClass:[NSNumber class]])
-        return numberValue(exec);
-    return valueOf(exec);
+        return numberValue(lexicalGlobalObject);
+    if ([_instance isKindOfClass:[NSString class]])
+        return stringValue(lexicalGlobalObject);
+    if ([_instance isKindOfClass:[NSNumber class]])
+        return numberValue(lexicalGlobalObject);
+    return valueOf(lexicalGlobalObject);
 }
 
-static WTF::ThreadSpecific<uint32_t>* s_descriptionDepth;
+static ThreadSpecific<uint32_t>* s_descriptionDepth;
 
-@interface NSObject (WebDescriptionCategory)
-- (NSString *)_web_description;
-@end
-
-@implementation NSObject (WebDescriptionCategory)
-
-- (NSString *)_web_description
-{
-    ASSERT(s_descriptionDepth);
-    if (s_descriptionDepth->isSet() && **s_descriptionDepth)
-        return [NSString stringWithFormat:@"<%@>", NSStringFromClass([self class])];
-    // We call _web_description here since this method should only be called
-    // once we have already swizzled this method with the one on NSObject.
-    // Thus, _web_description is actually the original description method.
-    return [self _web_description];
-}
-
-@end
-
-JSC::JSValue ObjcInstance::stringValue(ExecState* exec) const
+JSC::JSValue ObjcInstance::stringValue(JSGlobalObject* lexicalGlobalObject) const
 {
     static std::once_flag initializeDescriptionDepthOnceFlag;
     std::call_once(initializeDescriptionDepthOnceFlag, [] {
-        s_descriptionDepth = new WTF::ThreadSpecific<uint32_t>();
+        s_descriptionDepth = new ThreadSpecific<uint32_t>();
         **s_descriptionDepth = 0;
 
         auto descriptionMethod = class_getInstanceMethod([NSObject class], @selector(description));
@@ -502,24 +489,44 @@ JSC::JSValue ObjcInstance::stringValue(ExecState* exec) const
     });
 
     (**s_descriptionDepth)++;
-    JSC::JSValue result = convertNSStringToString(exec, [getObject() description]);
+    JSC::JSValue result = convertNSStringToString(lexicalGlobalObject, [getObject() description]);
     (**s_descriptionDepth)--;
     return result;
 }
 
-JSC::JSValue ObjcInstance::numberValue(ExecState*) const
+bool ObjcInstance::isInStringValue()
 {
-    // FIXME:  Implement something sensible
+    return s_descriptionDepth && s_descriptionDepth->isSet() && **s_descriptionDepth;
+}
+
+JSC::JSValue ObjcInstance::numberValue(JSGlobalObject*) const
+{
     return jsNumber(0);
 }
 
 JSC::JSValue ObjcInstance::booleanValue() const
 {
-    // FIXME:  Implement something sensible
     return jsBoolean(false);
 }
 
-JSC::JSValue ObjcInstance::valueOf(ExecState* exec) const 
+JSC::JSValue ObjcInstance::valueOf(JSGlobalObject* lexicalGlobalObject) const 
 {
-    return stringValue(exec);
+    return stringValue(lexicalGlobalObject);
 }
+
+}
+}
+
+@implementation NSObject (WebDescriptionCategory)
+
+- (NSString *)_web_description
+{
+    if (JSC::Bindings::ObjcInstance::isInStringValue())
+        return [NSString stringWithFormat:@"<%@>", NSStringFromClass([self class])];
+
+    // Calling _web_description here invokes the implementation of the original description
+    // method from NSObject, because we have already swapped implementations.
+    return [self _web_description];
+}
+
+@end

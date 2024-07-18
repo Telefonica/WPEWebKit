@@ -25,9 +25,13 @@
 
 #pragma once
 
+#include <atomic>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/UUID.h>
+
 namespace WTF {
 
-template <typename IdentifierType, typename StaticType, typename ClassType>
+template <typename IdentifierType, typename ClassType>
 class IdentifiedBase {
 public:
     IdentifierType identifier() const
@@ -36,53 +40,84 @@ public:
     }
 
 protected:
-    IdentifiedBase()
-        : m_identifier(++s_currentIdentifier)
-    {
-    }
-
-    IdentifiedBase(const IdentifiedBase& other)
-        : m_identifier(other.m_identifier)
-    {
-    }
+    IdentifiedBase(const IdentifiedBase&) = default;
 
     explicit IdentifiedBase(IdentifierType identifier)
         : m_identifier(identifier)
     {
     }
 
+    IdentifiedBase& operator=(const IdentifiedBase&) = default;
+
 private:
     IdentifierType m_identifier;
-    static StaticType s_currentIdentifier;
 };
 
-template<typename IdentifierType, typename StaticType, typename ClassType> StaticType IdentifiedBase<IdentifierType, StaticType, ClassType>::s_currentIdentifier;
-
 template <typename T>
-class Identified : public IdentifiedBase<uint64_t, uint64_t, T> {
+class Identified : public IdentifiedBase<uint64_t, T> {
 protected:
-    Identified() = default;
+    Identified()
+        : IdentifiedBase<uint64_t, T>(generateIdentifier())
+    {
+    }
+
     Identified(const Identified&) = default;
+    Identified& operator=(const Identified&) = default;
 
     explicit Identified(uint64_t identifier)
-        : IdentifiedBase<uint64_t, uint64_t, T>(identifier)
+        : IdentifiedBase<uint64_t, T>(identifier)
     {
+    }
+
+private:
+    static uint64_t generateIdentifier()
+    {
+        static uint64_t currentIdentifier;
+        return ++currentIdentifier;
     }
 };
 
 template <typename T>
-class ThreadSafeIdentified : public IdentifiedBase<uint64_t, std::atomic<uint64_t>, T> {
+class ThreadSafeIdentified : public IdentifiedBase<uint64_t, T> {
 protected:
-    ThreadSafeIdentified() = default;
-    ThreadSafeIdentified(const ThreadSafeIdentified&) = default;
-
-    explicit ThreadSafeIdentified(uint64_t identifier)
-        : IdentifiedBase<uint64_t, std::atomic<uint64_t>, T>(identifier)
+    ThreadSafeIdentified()
+        : IdentifiedBase<uint64_t, T>(generateIdentifier())
     {
     }
+
+    ThreadSafeIdentified(const ThreadSafeIdentified&) = default;
+    ThreadSafeIdentified& operator=(const ThreadSafeIdentified&) = default;
+
+    explicit ThreadSafeIdentified(uint64_t identifier)
+        : IdentifiedBase<uint64_t, T>(identifier)
+    {
+    }
+
+private:
+    static uint64_t generateIdentifier()
+    {
+        static LazyNeverDestroyed<std::atomic<uint64_t>> currentIdentifier;
+        static std::once_flag initializeCurrentIdentifier;
+        std::call_once(initializeCurrentIdentifier, [] {
+            currentIdentifier.construct(0);
+        });
+        return ++currentIdentifier.get();
+    }
+};
+
+template <typename T>
+class UUIDIdentified : public IdentifiedBase<UUID, T> {
+protected:
+    UUIDIdentified()
+        : IdentifiedBase<UUID, T>(UUID::createVersion4())
+    {
+    }
+
+    UUIDIdentified(const UUIDIdentified&) = default;
 };
 
 } // namespace WTF
 
 using WTF::Identified;
 using WTF::ThreadSafeIdentified;
+using WTF::UUIDIdentified;

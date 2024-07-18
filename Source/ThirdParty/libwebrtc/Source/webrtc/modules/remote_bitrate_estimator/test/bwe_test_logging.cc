@@ -8,42 +8,45 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/remote_bitrate_estimator/test/bwe_test_logging.h"
+#include "modules/remote_bitrate_estimator/test/bwe_test_logging.h"
 
 #if BWE_TEST_LOGGING_COMPILE_TIME_ENABLE
 
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
 
 #include <algorithm>
-#include <sstream>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/format_macros.h"
-#include "webrtc/base/platform_thread.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/platform_thread.h"
+#include "rtc_base/strings/string_builder.h"
 
 namespace webrtc {
 namespace testing {
 namespace bwe {
 
-Logging Logging::g_Logging;
-
 static std::string ToString(uint32_t v) {
-  std::stringstream ss;
+  rtc::StringBuilder ss;
   ss << v;
-  return ss.str();
+  return ss.Release();
 }
+
+Logging::ThreadState::ThreadState() = default;
+Logging::ThreadState::~ThreadState() = default;
 
 Logging::Context::Context(uint32_t name, int64_t timestamp_ms, bool enabled) {
   Logging::GetInstance()->PushState(ToString(name), timestamp_ms, enabled);
 }
 
-Logging::Context::Context(const std::string& name, int64_t timestamp_ms,
+Logging::Context::Context(const std::string& name,
+                          int64_t timestamp_ms,
                           bool enabled) {
   Logging::GetInstance()->PushState(name, timestamp_ms, enabled);
 }
 
-Logging::Context::Context(const char* name, int64_t timestamp_ms,
+Logging::Context::Context(const char* name,
+                          int64_t timestamp_ms,
                           bool enabled) {
   Logging::GetInstance()->PushState(name, timestamp_ms, enabled);
 }
@@ -53,31 +56,32 @@ Logging::Context::~Context() {
 }
 
 Logging* Logging::GetInstance() {
-  return &g_Logging;
+  static Logging* logging = new Logging();
+  return logging;
 }
 
 void Logging::SetGlobalContext(uint32_t name) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   thread_map_[rtc::CurrentThreadId()].global_state.tag = ToString(name);
 }
 
 void Logging::SetGlobalContext(const std::string& name) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   thread_map_[rtc::CurrentThreadId()].global_state.tag = name;
 }
 
 void Logging::SetGlobalContext(const char* name) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   thread_map_[rtc::CurrentThreadId()].global_state.tag = name;
 }
 
 void Logging::SetGlobalEnable(bool enabled) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   thread_map_[rtc::CurrentThreadId()].global_state.enabled = enabled;
 }
 
 void Logging::Log(const char format[], ...) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   ThreadMap::iterator it = thread_map_.find(rtc::CurrentThreadId());
   RTC_DCHECK(it != thread_map_.end());
   const State& state = it->second.stack.top();
@@ -114,7 +118,7 @@ void Logging::Plot(int figure,
                    double value,
                    uint32_t ssrc,
                    const std::string& alg_name) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   ThreadMap::iterator it = thread_map_.find(rtc::CurrentThreadId());
   RTC_DCHECK(it != thread_map_.end());
   const State& state = it->second.stack.top();
@@ -128,7 +132,7 @@ void Logging::PlotBar(int figure,
                       const std::string& name,
                       double value,
                       int flow_id) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   ThreadMap::iterator it = thread_map_.find(rtc::CurrentThreadId());
   RTC_DCHECK(it != thread_map_.end());
   const State& state = it->second.stack.top();
@@ -141,7 +145,7 @@ void Logging::PlotBaselineBar(int figure,
                               const std::string& name,
                               double value,
                               int flow_id) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   ThreadMap::iterator it = thread_map_.find(rtc::CurrentThreadId());
   RTC_DCHECK(it != thread_map_.end());
   const State& state = it->second.stack.top();
@@ -157,7 +161,7 @@ void Logging::PlotErrorBar(int figure,
                            double yhigh,
                            const std::string& error_title,
                            int flow_id) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   ThreadMap::iterator it = thread_map_.find(rtc::CurrentThreadId());
   RTC_DCHECK(it != thread_map_.end());
   const State& state = it->second.stack.top();
@@ -176,7 +180,7 @@ void Logging::PlotLimitErrorBar(int figure,
                                 double ymax,
                                 const std::string& limit_title,
                                 int flow_id) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   ThreadMap::iterator it = thread_map_.find(rtc::CurrentThreadId());
   RTC_DCHECK(it != thread_map_.end());
   const State& state = it->second.stack.top();
@@ -191,7 +195,7 @@ void Logging::PlotLabel(int figure,
                         const std::string& title,
                         const std::string& y_label,
                         int num_flows) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   ThreadMap::iterator it = thread_map_.find(rtc::CurrentThreadId());
   RTC_DCHECK(it != thread_map_.end());
   const State& state = it->second.stack.top();
@@ -201,18 +205,16 @@ void Logging::PlotLabel(int figure,
   }
 }
 
-Logging::Logging()
-    : thread_map_() {
-}
+Logging::Logging() : thread_map_() {}
+
+Logging::~Logging() = default;
 
 Logging::State::State() : tag(""), timestamp_ms(0), enabled(true) {}
 
-Logging::State::State(const std::string& tag, int64_t timestamp_ms,
+Logging::State::State(const std::string& tag,
+                      int64_t timestamp_ms,
                       bool enabled)
-    : tag(tag),
-      timestamp_ms(timestamp_ms),
-      enabled(enabled) {
-}
+    : tag(tag), timestamp_ms(timestamp_ms), enabled(enabled) {}
 
 void Logging::State::MergePrevious(const State& previous) {
   if (tag.empty()) {
@@ -224,9 +226,10 @@ void Logging::State::MergePrevious(const State& previous) {
   enabled = previous.enabled && enabled;
 }
 
-void Logging::PushState(const std::string& append_to_tag, int64_t timestamp_ms,
+void Logging::PushState(const std::string& append_to_tag,
+                        int64_t timestamp_ms,
                         bool enabled) {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   State new_state(append_to_tag, timestamp_ms, enabled);
   ThreadState* thread_state = &thread_map_[rtc::CurrentThreadId()];
   std::stack<State>* stack = &thread_state->stack;
@@ -239,7 +242,7 @@ void Logging::PushState(const std::string& append_to_tag, int64_t timestamp_ms,
 }
 
 void Logging::PopState() {
-  rtc::CritScope cs(&crit_sect_);
+  MutexLock lock(&mutex_);
   ThreadMap::iterator it = thread_map_.find(rtc::CurrentThreadId());
   RTC_DCHECK(it != thread_map_.end());
   std::stack<State>* stack = &it->second.stack;

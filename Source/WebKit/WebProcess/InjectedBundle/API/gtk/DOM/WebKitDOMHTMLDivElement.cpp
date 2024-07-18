@@ -24,9 +24,10 @@
 #include "DOMObjectCache.h"
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
-#include "GObjectEventListener.h"
+#include <WebCore/ElementInlines.h>
 #include <WebCore/HTMLNames.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
+#include "GObjectEventListener.h"
 #include "WebKitDOMEventPrivate.h"
 #include "WebKitDOMEventTarget.h"
 #include "WebKitDOMHTMLDivElementPrivate.h"
@@ -35,6 +36,8 @@
 #include "ConvertToUTF8String.h"
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 namespace WebKit {
 
@@ -84,18 +87,18 @@ static gboolean webkit_dom_html_div_element_remove_event_listener(WebKitDOMEvent
     return WebKit::GObjectEventListener::removeEventListener(G_OBJECT(target), coreTarget, eventName, handler, useCapture);
 }
 
-static void webkit_dom_event_target_init(WebKitDOMEventTargetIface* iface)
+static void webkit_dom_html_div_element_dom_event_target_init(WebKitDOMEventTargetIface* iface)
 {
     iface->dispatch_event = webkit_dom_html_div_element_dispatch_event;
     iface->add_event_listener = webkit_dom_html_div_element_add_event_listener;
     iface->remove_event_listener = webkit_dom_html_div_element_remove_event_listener;
 }
 
-G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLDivElement, webkit_dom_html_div_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_event_target_init))
+G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLDivElement, webkit_dom_html_div_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_html_div_element_dom_event_target_init))
 
 enum {
-    PROP_0,
-    PROP_ALIGN,
+    DOM_HTML_DIV_ELEMENT_PROP_0,
+    DOM_HTML_DIV_ELEMENT_PROP_ALIGN,
 };
 
 static void webkit_dom_html_div_element_set_property(GObject* object, guint propertyId, const GValue* value, GParamSpec* pspec)
@@ -103,7 +106,7 @@ static void webkit_dom_html_div_element_set_property(GObject* object, guint prop
     WebKitDOMHTMLDivElement* self = WEBKIT_DOM_HTML_DIV_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_ALIGN:
+    case DOM_HTML_DIV_ELEMENT_PROP_ALIGN:
         webkit_dom_html_div_element_set_align(self, g_value_get_string(value));
         break;
     default:
@@ -117,7 +120,7 @@ static void webkit_dom_html_div_element_get_property(GObject* object, guint prop
     WebKitDOMHTMLDivElement* self = WEBKIT_DOM_HTML_DIV_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_ALIGN:
+    case DOM_HTML_DIV_ELEMENT_PROP_ALIGN:
         g_value_take_string(value, webkit_dom_html_div_element_get_align(self));
         break;
     default:
@@ -134,7 +137,7 @@ static void webkit_dom_html_div_element_class_init(WebKitDOMHTMLDivElementClass*
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_ALIGN,
+        DOM_HTML_DIV_ELEMENT_PROP_ALIGN,
         g_param_spec_string(
             "align",
             "HTMLDivElement:align",
@@ -164,7 +167,7 @@ void webkit_dom_html_div_element_set_align(WebKitDOMHTMLDivElement* self, const 
     g_return_if_fail(WEBKIT_DOM_IS_HTML_DIV_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLDivElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::alignAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::alignAttr, WTF::AtomString::fromUTF8(value));
 }
 
+G_GNUC_END_IGNORE_DEPRECATIONS;

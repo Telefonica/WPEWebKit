@@ -8,10 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/video_coding/utility/frame_dropper.h"
+#include "modules/video_coding/utility/frame_dropper.h"
 
-#include "webrtc/base/logging.h"
-#include "webrtc/test/gtest.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 
@@ -45,7 +44,7 @@ class FrameDropperTest : public ::testing::Test {
   void ValidateNoDropsAtTargetBitrate(int large_frame_size_bytes,
                                       int large_frame_rate,
                                       bool is_large_frame_delta) {
-    // Smaller frame size is computed to meet |kTargetBitRateKbps|.
+    // Smaller frame size is computed to meet `kTargetBitRateKbps`.
     int small_frame_size_bytes =
         kFrameSizeBytes -
         (large_frame_size_bytes * large_frame_rate) / kIncomingFrameRate;

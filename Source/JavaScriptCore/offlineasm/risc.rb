@@ -1,4 +1,4 @@
-# Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
+# Copyright (C) 2011-2020 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -259,8 +259,12 @@ def riscLowerMalformedAddressesDouble(list)
             case node.opcode
             when "loadd"
                 newList << Instruction.new(node.codeOrigin, "loadd", [node.operands[0].riscDoubleAddress(newList), node.operands[1]], node.annotation)
+            when "loadf"
+                newList << Instruction.new(node.codeOrigin, "loadf", [node.operands[0].riscDoubleAddress(newList), node.operands[1]], node.annotation)
             when "stored"
                 newList << Instruction.new(node.codeOrigin, "stored", [node.operands[0], node.operands[1].riscDoubleAddress(newList)], node.annotation)
+            when "storef"
+                newList << Instruction.new(node.codeOrigin, "storef", [node.operands[0], node.operands[1].riscDoubleAddress(newList)], node.annotation)
             else
                 newList << node
             end
@@ -362,14 +366,14 @@ class Immediate
     end
 end
 
-def riscLowerMalformedImmediates(list, validImmediates)
+def riscLowerMalformedImmediates(list, validImmediates, validLogicalImmediates)
     newList = []
     list.each {
         | node |
         if node.is_a? Instruction
             annotation = node.annotation
             case node.opcode
-            when "move"
+            when "move", "moveii"
                 newList << node
             when "addi", "addp", "addq", "addis", "subi", "subp", "subq", "subis"
                 if node.operands[0].is_a? Immediate and
@@ -395,6 +399,8 @@ def riscLowerMalformedImmediates(list, validImmediates)
                 else
                     newList << node.riscLowerMalformedImmediatesRecurse(newList, validImmediates)
                 end
+            when "ori", "orh", "orp", "oris", "xori", "xorp", "andi", "andp"
+                newList << node.riscLowerMalformedImmediatesRecurse(newList, validLogicalImmediates)
             else
                 newList << node.riscLowerMalformedImmediatesRecurse(newList, validImmediates)
             end
@@ -426,73 +432,72 @@ end
 # addi tmp, bar
 #
 
-def riscAsRegister(preList, postList, operand, suffix, needStore)
+def riscLowerOperandToRegister(insn, preList, postList, operandIndex, suffix, needStore)
+    operand = insn.operands[operandIndex]
     return operand unless operand.address?
-    
-    tmp = Tmp.new(operand.codeOrigin, if suffix == "d" then :fpr else :gpr end)
-    preList << Instruction.new(operand.codeOrigin, "load" + suffix, [operand, tmp])
+
+    tmp = Tmp.new(insn.codeOrigin, if suffix == "d" then :fpr else :gpr end)
+    preList << Instruction.new(insn.codeOrigin, "load" + suffix, [operand, tmp])
     if needStore
-        postList << Instruction.new(operand.codeOrigin, "store" + suffix, [tmp, operand])
+        postList << Instruction.new(insn.codeOrigin, "store" + suffix, [tmp, operand])
     end
     tmp
 end
 
-def riscAsRegisters(preList, postList, operands, suffix)
+def riscLowerOperandsToRegisters(insn, preList, postList, suffix)
     newOperands = []
-    operands.each_with_index {
+    insn.operands.each_with_index {
         | operand, index |
-        newOperands << riscAsRegister(preList, postList, operand, suffix, index == operands.size - 1)
+        newOperands << riscLowerOperandToRegister(insn, preList, postList, index, suffix, index == insn.operands.size - 1)
     }
     newOperands
 end
 
+class Instruction
+    def riscCloneWithOperandLowered(preList, postList, operandIndex, suffix, needStore)
+        operand = riscLowerOperandToRegister(self, preList, postList, operandIndex, suffix, needStore)
+        cloneWithNewOperands([operand])
+    end
+    def riscCloneWithOperandsLowered(preList, postList, suffix)
+        operands = riscLowerOperandsToRegisters(self, preList, postList, suffix)
+        cloneWithNewOperands(operands)
+    end
+end
+
 def riscLowerMisplacedAddresses(list)
     newList = []
+    hasBackendSpecificLowering = Instruction.respond_to? "lowerMisplacedAddresses#{$activeBackend}"
     list.each {
         | node |
         if node.is_a? Instruction
+            if hasBackendSpecificLowering
+                wasHandled, newList = Instruction.send("lowerMisplacedAddresses#{$activeBackend}", node, newList)
+                next if wasHandled
+            end
+
             postInstructions = []
             annotation = node.annotation
             case node.opcode
             when "addi", "addis", "andi", "lshifti", "muli", "negi", "noti", "ori", "oris",
                 "rshifti", "urshifti", "subi", "subis", "xori", /^bi/, /^bti/, /^ci/, /^ti/
-                newList << Instruction.new(node.codeOrigin,
-                                           node.opcode,
-                                           riscAsRegisters(newList, postInstructions, node.operands, "i"),
-                                           annotation)
+                newList << node.riscCloneWithOperandsLowered(newList, postInstructions, "i")
+            when "orh"
+                newList << node.riscCloneWithOperandsLowered(newList, postInstructions, "h")
             when "addp", "andp", "lshiftp", "mulp", "negp", "orp", "rshiftp", "urshiftp",
                 "subp", "xorp", /^bp/, /^btp/, /^cp/
-                newList << Instruction.new(node.codeOrigin,
-                                           node.opcode,
-                                           riscAsRegisters(newList, postInstructions, node.operands, "p"),
-                                           annotation)
+                newList << node.riscCloneWithOperandsLowered(newList, postInstructions, "p")
             when "addq", "andq", "lshiftq", "mulq", "negq", "orq", "rshiftq", "urshiftq",
                 "subq", "xorq", /^bq/, /^btq/, /^cq/
-                newList << Instruction.new(node.codeOrigin,
-                                           node.opcode,
-                                           riscAsRegisters(newList, postInstructions, node.operands, "q"),
-                                           annotation)
+                newList << node.riscCloneWithOperandsLowered(newList, postInstructions, "q")
             when "bbeq", "bbneq", "bba", "bbaeq", "bbb", "bbbeq", "btbz", "btbnz", "tbz", "tbnz",
                 "cbeq", "cbneq", "cba", "cbaeq", "cbb", "cbbeq"
-                newList << Instruction.new(node.codeOrigin,
-                                           node.opcode,
-                                           riscAsRegisters(newList, postInstructions, node.operands, "b"),
-                                           annotation)
+                newList << node.riscCloneWithOperandsLowered(newList, postInstructions, "b")
             when "bbgt", "bbgteq", "bblt", "bblteq", "btbs", "tbs", "cbgt", "cbgteq", "cblt", "cblteq"
-                newList << Instruction.new(node.codeOrigin,
-                                           node.opcode,
-                                           riscAsRegisters(newList, postInstructions, node.operands, "bs"),
-                                           annotation)
+                newList << node.riscCloneWithOperandsLowered(newList, postInstructions, "bs")
             when "addd", "divd", "subd", "muld", "sqrtd", /^bd/
-                newList << Instruction.new(node.codeOrigin,
-                                           node.opcode,
-                                           riscAsRegisters(newList, postInstructions, node.operands, "d"),
-                                           annotation)
+                newList << node.riscCloneWithOperandsLowered(newList, postInstructions, "d")
             when "jmp", "call"
-                newList << Instruction.new(node.codeOrigin,
-                                           node.opcode,
-                                           [riscAsRegister(newList, postInstructions, node.operands[0], "p", false)],
-                                           annotation)
+                newList << node.riscCloneWithOperandLowered(newList, postInstructions, 0, "p", false)
             else
                 newList << node
             end
@@ -575,7 +580,7 @@ def riscLowerNot(list)
         if node.is_a? Instruction
             case node.opcode
             when "noti", "notp"
-                raise "Wrong nubmer of operands at #{node.codeOriginString}" unless node.operands.size == 1
+                raise "Wrong number of operands at #{node.codeOriginString}" unless node.operands.size == 1
                 suffix = node.opcode[-1..-1]
                 newList << Instruction.new(node.codeOrigin, "xor" + suffix,
                                            [Immediate.new(node.codeOrigin, -1), node.operands[0]])

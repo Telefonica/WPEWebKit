@@ -48,16 +48,16 @@ public:
     class ElementRecord {
         WTF_MAKE_NONCOPYABLE(ElementRecord); WTF_MAKE_FAST_ALLOCATED;
     public:
-        ElementRecord(Ref<HTMLStackItem>&&, std::unique_ptr<ElementRecord>);
+        ElementRecord(HTMLStackItem&&, std::unique_ptr<ElementRecord>);
         ~ElementRecord();
-    
-        Element& element() const { return m_item->element(); }
-        ContainerNode& node() const { return m_item->node(); }
-        const AtomicString& namespaceURI() const { return m_item->namespaceURI(); }
-        HTMLStackItem& stackItem() { return m_item.get(); }
-        const HTMLStackItem& stackItem() const { return m_item.get(); }
 
-        void replaceElement(Ref<HTMLStackItem>&&);
+        Element& element() const { return m_item.element(); }
+        ContainerNode& node() const { return m_item.node(); }
+        const AtomString& namespaceURI() const { return m_item.namespaceURI(); }
+        HTMLStackItem& stackItem() { return m_item; }
+        const HTMLStackItem& stackItem() const { return m_item; }
+
+        void replaceElement(HTMLStackItem&&);
 
         bool isAbove(ElementRecord&) const;
 
@@ -69,7 +69,7 @@ public:
         std::unique_ptr<ElementRecord> releaseNext() { return WTFMove(m_next); }
         void setNext(std::unique_ptr<ElementRecord> next) { m_next = WTFMove(next); }
 
-        Ref<HTMLStackItem> m_item;
+        HTMLStackItem m_item;
         std::unique_ptr<ElementRecord> m_next;
     };
 
@@ -96,20 +96,20 @@ public:
     ElementRecord& topRecord() const;
     ElementRecord* find(Element&) const;
     ElementRecord* furthestBlockForFormattingElement(Element&) const;
-    ElementRecord* topmost(const AtomicString& tagName) const;
+    ElementRecord* topmost(const AtomString& tagName) const;
 
-    void insertAbove(Ref<HTMLStackItem>&&, ElementRecord&);
+    void insertAbove(HTMLStackItem&&, ElementRecord&);
 
-    void push(Ref<HTMLStackItem>&&);
-    void pushRootNode(Ref<HTMLStackItem>&&);
-    void pushHTMLHtmlElement(Ref<HTMLStackItem>&&);
-    void pushHTMLHeadElement(Ref<HTMLStackItem>&&);
-    void pushHTMLBodyElement(Ref<HTMLStackItem>&&);
+    void push(HTMLStackItem&&);
+    void pushRootNode(HTMLStackItem&&);
+    void pushHTMLHtmlElement(HTMLStackItem&&);
+    void pushHTMLHeadElement(HTMLStackItem&&);
+    void pushHTMLBodyElement(HTMLStackItem&&);
 
     void pop();
-    void popUntil(const AtomicString& tagName);
+    void popUntil(const AtomString& tagName);
     void popUntil(Element&);
-    void popUntilPopped(const AtomicString& tagName);
+    void popUntilPopped(const AtomString& tagName);
     void popUntilPopped(const QualifiedName& tagName) { popUntilPopped(tagName.localName()); }
 
     void popUntilPopped(Element&);
@@ -129,18 +129,18 @@ public:
     void removeHTMLHeadElement(Element&);
 
     bool contains(Element&) const;
-    bool contains(const AtomicString& tagName) const;
+    bool contains(const AtomString& tagName) const;
 
     bool inScope(Element&) const;
-    bool inScope(const AtomicString& tagName) const;
+    bool inScope(const AtomString& tagName) const;
     bool inScope(const QualifiedName&) const;
-    bool inListItemScope(const AtomicString& tagName) const;
+    bool inListItemScope(const AtomString& tagName) const;
     bool inListItemScope(const QualifiedName&) const;
-    bool inTableScope(const AtomicString& tagName) const;
+    bool inTableScope(const AtomString& tagName) const;
     bool inTableScope(const QualifiedName&) const;
-    bool inButtonScope(const AtomicString& tagName) const;
+    bool inButtonScope(const AtomString& tagName) const;
     bool inButtonScope(const QualifiedName&) const;
-    bool inSelectScope(const AtomicString& tagName) const;
+    bool inSelectScope(const AtomString& tagName) const;
     bool inSelectScope(const QualifiedName&) const;
 
     bool hasNumberedHeaderElementInScope() const;
@@ -159,8 +159,8 @@ public:
 #endif
 
 private:
-    void pushCommon(Ref<HTMLStackItem>&&);
-    void pushRootNodeCommon(Ref<HTMLStackItem>&&);
+    void pushCommon(HTMLStackItem&&);
+    void pushRootNodeCommon(HTMLStackItem&&);
     void popCommon();
     void removeNonTopCommon(Element&);
 

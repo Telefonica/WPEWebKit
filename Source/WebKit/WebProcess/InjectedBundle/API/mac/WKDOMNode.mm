@@ -26,12 +26,14 @@
 #import "config.h"
 #import "WKDOMNodePrivate.h"
 
-#if WK_API_ENABLED
-
 #import "InjectedBundleNodeHandle.h"
 #import "WKBundleAPICast.h"
 #import "WKDOMInternals.h"
 #import <WebCore/Document.h>
+#import <WebCore/RenderObject.h>
+#import <WebCore/SimpleRange.h>
+#import <wtf/MainThread.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
 @implementation WKDOMNode
 
@@ -49,7 +51,9 @@
 
 - (void)dealloc
 {
-    WebKit::WKDOMNodeCache().remove(_impl.get());
+    ensureOnMainRunLoop([node = WTFMove(_impl)] {
+        WebKit::WKDOMNodeCache().remove(node.get());
+    });
     [super dealloc];
 }
 
@@ -112,9 +116,7 @@
     _impl->document().updateLayoutIgnorePendingStylesheets();
     if (!_impl->renderer())
         return nil;
-    Vector<WebCore::IntRect> rects;
-    _impl->textRects(rects);
-    return WebKit::toNSArray(rects);
+    return createNSArray(WebCore::RenderObject::absoluteTextRects(WebCore::makeRangeSelectingNodeContents(*_impl))).autorelease();
 }
 
 @end
@@ -123,10 +125,7 @@
 
 - (WKBundleNodeHandleRef)_copyBundleNodeHandleRef
 {
-    auto nodeHandle = WebKit::InjectedBundleNodeHandle::getOrCreate(_impl.get());
-    return toAPI(nodeHandle.leakRef());
+    return toAPI(WebKit::InjectedBundleNodeHandle::getOrCreate(_impl.get()).leakRef());
 }
 
 @end
-
-#endif // WK_API_ENABLED

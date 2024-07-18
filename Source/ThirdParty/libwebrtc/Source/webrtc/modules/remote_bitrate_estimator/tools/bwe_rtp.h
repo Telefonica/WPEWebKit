@@ -8,29 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_TOOLS_BWE_RTP_H_
-#define WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_TOOLS_BWE_RTP_H_
+#ifndef MODULES_REMOTE_BITRATE_ESTIMATOR_TOOLS_BWE_RTP_H_
+#define MODULES_REMOTE_BITRATE_ESTIMATOR_TOOLS_BWE_RTP_H_
 
-#include <string>
+#include <memory>
 
-namespace webrtc {
-class Clock;
-class RemoteBitrateEstimator;
-class RemoteBitrateObserver;
-class RtpHeaderParser;
-namespace test {
-class RtpFileReader;
-}
-}
+#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
+#include "test/rtp_file_reader.h"
 
-bool ParseArgsAndSetupEstimator(
+bool ParseArgsAndSetupRtpReader(
     int argc,
     char** argv,
-    webrtc::Clock* clock,
-    webrtc::RemoteBitrateObserver* observer,
-    webrtc::test::RtpFileReader** rtp_reader,
-    webrtc::RtpHeaderParser** parser,
-    webrtc::RemoteBitrateEstimator** estimator,
-    std::string* estimator_used);
+    std::unique_ptr<webrtc::test::RtpFileReader>& rtp_reader,
+    webrtc::RtpHeaderExtensionMap& rtp_header_extensions);
 
-#endif  // WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_TOOLS_BWE_RTP_H_
+#endif  // MODULES_REMOTE_BITRATE_ESTIMATOR_TOOLS_BWE_RTP_H_

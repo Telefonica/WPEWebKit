@@ -25,6 +25,8 @@
 
 #pragma once
 
+#if PLATFORM(IOS_FAMILY)
+
 #include "ThemeCocoa.h"
 
 namespace WebCore {
@@ -32,6 +34,9 @@ namespace WebCore {
 class ThemeIOS final : public ThemeCocoa {
 private:
     bool userPrefersReducedMotion() const final;
+    bool userPrefersContrast() const final;
 };
 
 } // namespace WebCore
+
+#endif // PLATFORM(IOS_FAMILY)

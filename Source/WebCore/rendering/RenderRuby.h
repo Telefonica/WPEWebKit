@@ -51,41 +51,34 @@ namespace WebCore {
 
 // <ruby> when used as 'display:inline'
 class RenderRubyAsInline final : public RenderInline {
+    WTF_MAKE_ISO_ALLOCATED(RenderRubyAsInline);
 public:
     RenderRubyAsInline(Element&, RenderStyle&&);
     virtual ~RenderRubyAsInline();
 
-    void addChild(RenderObject* child, RenderObject* beforeChild = 0) override;
-    void removeChild(RenderObject& child) override;
-
-protected:
+private:
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override;
 
-private:
     bool isRubyInline() const final { return true; }
-    const char* renderName() const override { return "RenderRuby (inline)"; }
+    ASCIILiteral renderName() const override { return "RenderRuby (inline)"_s; }
     bool createsAnonymousWrapper() const override { return true; }
 };
 
 // <ruby> when used as 'display:block' or 'display:inline-block'
 class RenderRubyAsBlock final : public RenderBlockFlow {
+    WTF_MAKE_ISO_ALLOCATED(RenderRubyAsBlock);
 public:
     RenderRubyAsBlock(Element&, RenderStyle&&);
     virtual ~RenderRubyAsBlock();
 
     Element& element() const { return downcast<Element>(nodeForNonAnonymous()); }
 
-    void addChild(RenderObject* child, RenderObject* beforeChild = 0) override;
-    void removeChild(RenderObject& child) override;
-
-protected:
+private:
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override;
 
-private:
     bool isRubyBlock() const final { return true; }
-    const char* renderName() const override { return "RenderRuby (block)"; }
+    ASCIILiteral renderName() const override { return "RenderRuby (block)"_s; }
     bool createsAnonymousWrapper() const override { return true; }
-    void removeLeftoverAnonymousBlock(RenderBlock*) override { ASSERT_NOT_REACHED(); }
 };
 
 

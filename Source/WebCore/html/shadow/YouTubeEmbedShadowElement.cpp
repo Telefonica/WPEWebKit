@@ -27,18 +27,23 @@
 #include "YouTubeEmbedShadowElement.h"
 
 #include "RenderBlockFlow.h"
+#include "ShadowPseudoIds.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-Ref<YouTubeEmbedShadowElement> YouTubeEmbedShadowElement::create(Document& doc)
+WTF_MAKE_ISO_ALLOCATED_IMPL(YouTubeEmbedShadowElement);
+
+Ref<YouTubeEmbedShadowElement> YouTubeEmbedShadowElement::create(Document& document)
 {
-    return adoptRef(*new YouTubeEmbedShadowElement(doc));
+    auto element = adoptRef(*new YouTubeEmbedShadowElement(document));
+    element->setPseudo(ShadowPseudoIds::webkitPluginReplacement());
+    return element;
 }
 
 YouTubeEmbedShadowElement::YouTubeEmbedShadowElement(Document& document)
     : HTMLDivElement(HTMLNames::divTag, document)
 {
-    setPseudo(AtomicString("-webkit-plugin-replacement", AtomicString::ConstructFromLiteral));
 }
 
 RenderPtr<RenderElement> YouTubeEmbedShadowElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)

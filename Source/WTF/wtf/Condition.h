@@ -23,10 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WTF_Condition_h
-#define WTF_Condition_h
+#pragma once
 
-#include <wtf/CurrentTime.h>
+#include <wtf/Lock.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/ParkingLot.h>
 #include <wtf/TimeWithDynamicClockType.h>
@@ -36,25 +35,22 @@ namespace WTF {
 // This is a condition variable that is suitable for use with any lock-like object, including
 // our own WTF::Lock. It features standard wait()/notifyOne()/notifyAll() methods in addition to
 // a variety of wait-with-timeout methods. This includes methods that use WTF's own notion of
-// time, like wall-clock time (i.e. currentTime()) and monotonic time (i.e.
-// monotonicallyIncreasingTime()). This is a very efficient condition variable. It only requires
-// one byte of memory. notifyOne() and notifyAll() require just a load and branch for the fast
-// case where no thread is waiting. This condition variable, when used with WTF::Lock, can
-// outperform a system condition variable and lock by up to 58x.
-
-// This is a struct without a constructor or destructor so that it can be statically initialized.
-// Use Lock in instance variables.
-struct ConditionBase {
+// time, like wall-clock time (i.e. WallTime) and monotonic time (i.e. MonotonicTime). This is
+// a very efficient condition variable. It only requires one byte of memory. notifyOne() and
+// notifyAll() require just a load and branch for the fast case where no thread is waiting.
+// This condition variable, when used with WTF::Lock, can outperform a system condition variable
+// and lock by up to 58x.
+class Condition final {
+    WTF_MAKE_NONCOPYABLE(Condition);
+    WTF_MAKE_FAST_ALLOCATED;
+public:
     // Condition will accept any kind of time and convert it internally, but this typedef tells
     // you what kind of time Condition would be able to use without conversions. However, if you
     // are unlikely to be affected by the cost of conversions, it is better to use MonotonicTime.
-    typedef ParkingLot::Time Time;
-    
-    void construct()
-    {
-        m_hasWaiters.store(false);
-    }
-    
+    using Time = ParkingLot::Time;
+
+    constexpr Condition() = default;
+
     // Wait on a parking queue while releasing the given lock. It will unlock the lock just before
     // parking, and relock it upon wakeup. Returns true if we woke up due to some call to
     // notifyOne() or notifyAll(). Returns false if we woke up due to a timeout. Note that this form
@@ -73,44 +69,38 @@ struct ConditionBase {
     template<typename LockType>
     bool waitUntil(LockType& lock, const TimeWithDynamicClockType& timeout)
     {
-        bool result;
-        if (timeout < timeout.nowWithSameClock()) {
-            lock.unlock();
-            result = false;
-        } else {
-            result = ParkingLot::parkConditionally(
-                &m_hasWaiters,
-                [this] () -> bool {
-                    // Let everyone know that we will be waiting. Do this while we hold the queue lock,
-                    // to prevent races with notifyOne().
-                    m_hasWaiters.store(true);
-                    return true;
-                },
-                [&lock] () { lock.unlock(); },
-                timeout).wasUnparked;
-        }
-        lock.lock();
-        return result;
+        return waitUntilUnchecked(lock, timeout);
     }
 
-    // Wait until the given predicate is satisfied. Returns true if it is satisfied in the end.
-    // May return early due to timeout.
-    template<typename LockType, typename Functor>
-    bool waitUntil(
-        LockType& lock, const TimeWithDynamicClockType& timeout, const Functor& predicate)
+    bool waitUntil(Lock& lock, const TimeWithDynamicClockType& timeout) WTF_REQUIRES_LOCK(lock)
     {
-        while (!predicate()) {
-            if (!waitUntil(lock, timeout))
-                return predicate();
-        }
-        return true;
+        return waitUntilUnchecked(lock, timeout);
     }
 
     // Wait until the given predicate is satisfied. Returns true if it is satisfied in the end.
     // May return early due to timeout.
     template<typename LockType, typename Functor>
-    bool waitFor(
-        LockType& lock, Seconds relativeTimeout, const Functor& predicate)
+    bool waitUntil(LockType& lock, const TimeWithDynamicClockType& timeout, const Functor& predicate)
+    {
+        return waitUntilUnchecked(lock, timeout, predicate);
+    }
+
+    template<typename Functor>
+    bool waitUntil(Lock& lock, const TimeWithDynamicClockType& timeout, const Functor& predicate) WTF_REQUIRES_LOCK(lock)
+    {
+        return waitUntilUnchecked(lock, timeout, predicate);
+    }
+
+    // Wait until the given predicate is satisfied. Returns true if it is satisfied in the end.
+    // May return early due to timeout.
+    template<typename LockType, typename Functor>
+    bool waitFor(LockType& lock, Seconds relativeTimeout, const Functor& predicate)
+    {
+        return waitUntil(lock, MonotonicTime::now() + relativeTimeout, predicate);
+    }
+
+    template<typename Functor>
+    bool waitFor(Lock& lock, Seconds relativeTimeout, const Functor& predicate) WTF_REQUIRES_LOCK(lock)
     {
         return waitUntil(lock, MonotonicTime::now() + relativeTimeout, predicate);
     }
@@ -121,14 +111,31 @@ struct ConditionBase {
         return waitUntil(lock, MonotonicTime::now() + relativeTimeout);
     }
 
+    bool waitFor(Lock& lock, Seconds relativeTimeout) WTF_REQUIRES_LOCK(lock)
+    {
+        return waitUntil(lock, MonotonicTime::now() + relativeTimeout);
+    }
+
     template<typename LockType>
     void wait(LockType& lock)
     {
         waitUntil(lock, Time::infinity());
     }
 
+    void wait(Lock& lock) WTF_REQUIRES_LOCK(lock)
+    {
+        waitUntil(lock, Time::infinity());
+    }
+
     template<typename LockType, typename Functor>
     void wait(LockType& lock, const Functor& predicate)
+    {
+        while (!predicate())
+            wait(lock);
+    }
+
+    template<typename Functor>
+    void wait(Lock& lock, const Functor& predicate) WTF_REQUIRES_LOCK(lock)
     {
         while (!predicate())
             wait(lock);
@@ -174,24 +181,47 @@ struct ConditionBase {
     }
     
 private:
-    Atomic<bool> m_hasWaiters;
-};
-
-class Condition : public ConditionBase {
-    WTF_MAKE_NONCOPYABLE(Condition);
-public:
-    Condition()
+    template<typename LockType>
+    bool waitUntilUnchecked(LockType& lock, const TimeWithDynamicClockType& timeout) WTF_IGNORES_THREAD_SAFETY_ANALYSIS
     {
-        construct();
+        bool result;
+        if (timeout < timeout.nowWithSameClock()) {
+            lock.unlock();
+            result = false;
+        } else {
+            result = ParkingLot::parkConditionally(
+                &m_hasWaiters,
+                [this] () -> bool {
+                    // Let everyone know that we will be waiting. Do this while we hold the queue lock,
+                    // to prevent races with notifyOne().
+                    m_hasWaiters.store(true);
+                    return true;
+                },
+                [&lock] () WTF_IGNORES_THREAD_SAFETY_ANALYSIS {
+                    lock.unlock();
+                },
+                timeout).wasUnparked;
+        }
+        lock.lock();
+        return result;
     }
+
+    template<typename LockType, typename Functor>
+    bool waitUntilUnchecked(LockType& lock, const TimeWithDynamicClockType& timeout, const Functor& predicate) WTF_IGNORES_THREAD_SAFETY_ANALYSIS
+    {
+        while (!predicate()) {
+            if (!waitUntil(lock, timeout))
+                return predicate();
+        }
+        return true;
+    }
+
+    Atomic<bool> m_hasWaiters { false };
 };
 
-typedef ConditionBase StaticCondition;
+using StaticCondition = Condition;
 
 } // namespace WTF
 
 using WTF::Condition;
 using WTF::StaticCondition;
-
-#endif // WTF_Condition_h
-

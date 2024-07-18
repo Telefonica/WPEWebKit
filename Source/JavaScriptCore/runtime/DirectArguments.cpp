@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,13 +28,12 @@
 
 #include "CodeBlock.h"
 #include "GenericArgumentsInlines.h"
-#include "JSCInlines.h"
 
 namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(DirectArguments);
 
-const ClassInfo DirectArguments::s_info = { "Arguments", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(DirectArguments) };
+const ClassInfo DirectArguments::s_info = { "Arguments"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(DirectArguments) };
 
 DirectArguments::DirectArguments(VM& vm, Structure* structure, unsigned length, unsigned capacity)
     : GenericArguments(vm, structure)
@@ -50,7 +49,7 @@ DirectArguments* DirectArguments::createUninitialized(
     VM& vm, Structure* structure, unsigned length, unsigned capacity)
 {
     DirectArguments* result =
-        new (NotNull, allocateCell<DirectArguments>(vm.heap, allocationSize(capacity)))
+        new (NotNull, allocateCell<DirectArguments>(vm, allocationSize(capacity)))
         DirectArguments(vm, structure, length, capacity);
     result->finishCreation(vm);
     return result;
@@ -61,37 +60,38 @@ DirectArguments* DirectArguments::create(VM& vm, Structure* structure, unsigned 
     DirectArguments* result = createUninitialized(vm, structure, length, capacity);
     
     for (unsigned i = capacity; i--;)
-        result->storage()[i].clear();
+        result->storage()[i].setUndefined();
     
     return result;
 }
 
-DirectArguments* DirectArguments::createByCopying(ExecState* exec)
+DirectArguments* DirectArguments::createByCopying(JSGlobalObject* globalObject, CallFrame* callFrame)
 {
-    VM& vm = exec->vm();
+    VM& vm = globalObject->vm();
     
-    unsigned length = exec->argumentCount();
-    unsigned capacity = std::max(length, static_cast<unsigned>(exec->codeBlock()->numParameters() - 1));
+    unsigned length = callFrame->argumentCount();
+    unsigned capacity = std::max(length, static_cast<unsigned>(callFrame->codeBlock()->numParameters() - 1));
     DirectArguments* result = createUninitialized(
-        vm, exec->lexicalGlobalObject()->directArgumentsStructure(), length, capacity);
+        vm, globalObject->directArgumentsStructure(), length, capacity);
     
     for (unsigned i = capacity; i--;)
-        result->storage()[i].set(vm, result, exec->getArgumentUnsafe(i));
+        result->storage()[i].set(vm, result, callFrame->getArgumentUnsafe(i));
     
-    result->callee().set(vm, result, jsCast<JSFunction*>(exec->jsCallee()));
+    result->setCallee(vm, jsCast<JSFunction*>(callFrame->jsCallee()));
     
     return result;
 }
 
-size_t DirectArguments::estimatedSize(JSCell* cell)
+size_t DirectArguments::estimatedSize(JSCell* cell, VM& vm)
 {
     DirectArguments* thisObject = jsCast<DirectArguments*>(cell);
     size_t mappedArgumentsSize = thisObject->m_mappedArguments ? thisObject->mappedArgumentsSize() * sizeof(bool) : 0;
     size_t modifiedArgumentsSize = thisObject->m_modifiedArgumentsDescriptor ? thisObject->m_length * sizeof(bool) : 0;
-    return Base::estimatedSize(cell) + mappedArgumentsSize + modifiedArgumentsSize;
+    return Base::estimatedSize(cell, vm) + mappedArgumentsSize + modifiedArgumentsSize;
 }
 
-void DirectArguments::visitChildren(JSCell* thisCell, SlotVisitor& visitor)
+template<typename Visitor>
+void DirectArguments::visitChildrenImpl(JSCell* thisCell, Visitor& visitor)
 {
     DirectArguments* thisObject = static_cast<DirectArguments*>(thisCell);
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
@@ -101,57 +101,69 @@ void DirectArguments::visitChildren(JSCell* thisCell, SlotVisitor& visitor)
     visitor.append(thisObject->m_callee);
 
     if (thisObject->m_mappedArguments)
-        visitor.markAuxiliary(thisObject->m_mappedArguments.get());
+        visitor.markAuxiliary(thisObject->m_mappedArguments.get(thisObject->internalLength()));
     GenericArguments<DirectArguments>::visitChildren(thisCell, visitor);
 }
+
+DEFINE_VISIT_CHILDREN(DirectArguments);
 
 Structure* DirectArguments::createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
 {
     return Structure::create(vm, globalObject, prototype, TypeInfo(DirectArgumentsType, StructureFlags), info());
 }
 
-void DirectArguments::overrideThings(VM& vm)
+void DirectArguments::overrideThings(JSGlobalObject* globalObject)
 {
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
     RELEASE_ASSERT(!m_mappedArguments);
     
     putDirect(vm, vm.propertyNames->length, jsNumber(m_length), static_cast<unsigned>(PropertyAttribute::DontEnum));
     putDirect(vm, vm.propertyNames->callee, m_callee.get(), static_cast<unsigned>(PropertyAttribute::DontEnum));
-    putDirect(vm, vm.propertyNames->iteratorSymbol, globalObject()->arrayProtoValuesFunction(), static_cast<unsigned>(PropertyAttribute::DontEnum));
+    putDirect(vm, vm.propertyNames->iteratorSymbol, globalObject->arrayProtoValuesFunction(), static_cast<unsigned>(PropertyAttribute::DontEnum));
     
-    void* backingStore = vm.gigacageAuxiliarySpace(m_mappedArguments.kind).tryAllocate(mappedArgumentsSize());
-    RELEASE_ASSERT(backingStore);
+    void* backingStore = vm.gigacageAuxiliarySpace(m_mappedArguments.kind).allocate(vm, mappedArgumentsSize(), nullptr, AllocationFailureMode::ReturnNull);
+    if (UNLIKELY(!backingStore)) {
+        throwOutOfMemoryError(globalObject, scope);
+        return;
+    }
     bool* overrides = static_cast<bool*>(backingStore);
-    m_mappedArguments.set(vm, this, overrides);
-    for (unsigned i = m_length; i--;)
+    m_mappedArguments.set(vm, this, overrides, internalLength());
+    for (unsigned i = internalLength(); i--;)
         overrides[i] = false;
 }
 
-void DirectArguments::overrideThingsIfNecessary(VM& vm)
+void DirectArguments::overrideThingsIfNecessary(JSGlobalObject* globalObject)
 {
     if (!m_mappedArguments)
-        overrideThings(vm);
+        overrideThings(globalObject);
 }
 
-void DirectArguments::unmapArgument(VM& vm, unsigned index)
+void DirectArguments::unmapArgument(JSGlobalObject* globalObject, unsigned index)
 {
-    overrideThingsIfNecessary(vm);
-    m_mappedArguments[index] = true;
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    overrideThingsIfNecessary(globalObject);
+    RETURN_IF_EXCEPTION(scope, void());
+
+    m_mappedArguments.at(index, internalLength()) = true;
 }
 
-void DirectArguments::copyToArguments(ExecState* exec, VirtualRegister firstElementDest, unsigned offset, unsigned length)
+void DirectArguments::copyToArguments(JSGlobalObject* globalObject, JSValue* firstElementDest, unsigned offset, unsigned length)
 {
     if (!m_mappedArguments) {
         unsigned limit = std::min(length + offset, m_length);
         unsigned i;
-        VirtualRegister start = firstElementDest - offset;
         for (i = offset; i < limit; ++i)
-            exec->r(start + i) = storage()[i].get();
+            firstElementDest[i - offset] = storage()[i].get();
         for (; i < length; ++i)
-            exec->r(start + i) = get(exec, i);
+            firstElementDest[i - offset] = get(globalObject, i);
         return;
     }
 
-    GenericArguments::copyToArguments(exec, firstElementDest, offset, length);
+    GenericArguments::copyToArguments(globalObject, firstElementDest, offset, length);
 }
 
 unsigned DirectArguments::mappedArgumentsSize()

@@ -22,25 +22,21 @@
 
 #include "SVGLocatable.h"
 #include "SVGTransformValue.h"
-#include <wtf/text/WTFString.h>
 
 namespace WebCore {
     
 class AffineTransform;
-class SVGTransformListValues;
 
 class SVGTransformable : public SVGLocatable {
 public:
-    enum TransformParsingMode {
-        ClearList,
-        DoNotClearList
-    };
-
     virtual ~SVGTransformable();
 
-    static bool parseTransformAttribute(SVGTransformListValues&, const UChar*& ptr, const UChar* end, TransformParsingMode = ClearList);
-    static bool parseTransformValue(SVGTransformValue::SVGTransformType, const UChar*& ptr, const UChar* end, SVGTransformValue&);
-    static SVGTransformValue::SVGTransformType parseTransformType(const String&);
+    static std::optional<SVGTransformValue> parseTransformValue(SVGTransformValue::SVGTransformType, StringParsingBuffer<LChar>&);
+    static std::optional<SVGTransformValue> parseTransformValue(SVGTransformValue::SVGTransformType, StringParsingBuffer<UChar>&);
+
+    static std::optional<SVGTransformValue::SVGTransformType> parseTransformType(StringView);
+    static std::optional<SVGTransformValue::SVGTransformType> parseTransformType(StringParsingBuffer<LChar>&);
+    static std::optional<SVGTransformValue::SVGTransformType> parseTransformType(StringParsingBuffer<UChar>&);
 
     AffineTransform localCoordinateSpaceTransform(SVGLocatable::CTMScope) const override { return animatedLocalTransform(); }
     virtual AffineTransform animatedLocalTransform() const = 0;

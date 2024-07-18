@@ -34,13 +34,13 @@
 
 namespace WebCore {
 
-class SharedBuffer;
+class FragmentedSharedBuffer;
 
 class ArchiveFactory {
 public:
-    static bool isArchiveMimeType(const String&);
-    static RefPtr<Archive> create(const URL&, SharedBuffer* data, const String& mimeType);
-    static void registerKnownArchiveMIMETypes();
+    static bool isArchiveMIMEType(const String&);
+    static RefPtr<Archive> create(const URL&, FragmentedSharedBuffer* data, const String& mimeType);
+    static void registerKnownArchiveMIMETypes(HashSet<String, ASCIICaseInsensitiveHash>&);
 };
 
 } // namespace WebCore

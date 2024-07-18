@@ -23,15 +23,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef NetworkCacheSubresourcesEntry_h
-#define NetworkCacheSubresourcesEntry_h
+#pragma once
 
 #if ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
 
 #include "NetworkCacheStorage.h"
 #include <WebCore/ResourceRequest.h>
-#include <WebCore/URL.h>
-#include <wtf/HashMap.h>
+#include <wtf/URL.h>
 
 namespace WebKit {
 namespace NetworkCache {
@@ -40,28 +38,38 @@ class SubresourceInfo {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     void encode(WTF::Persistence::Encoder&) const;
-    static bool decode(WTF::Persistence::Decoder&, SubresourceInfo&);
+    static std::optional<SubresourceInfo> decode(WTF::Persistence::Decoder&);
 
     SubresourceInfo() = default;
     SubresourceInfo(const Key&, const WebCore::ResourceRequest&, const SubresourceInfo* previousInfo);
 
     const Key& key() const { return m_key; }
-    std::chrono::system_clock::time_point lastSeen() const { return m_lastSeen; }
-    std::chrono::system_clock::time_point firstSeen() const { return m_firstSeen; }
+    WallTime lastSeen() const { return m_lastSeen; }
+    WallTime firstSeen() const { return m_firstSeen; }
 
     bool isTransient() const { return m_isTransient; }
-    const WebCore::URL& firstPartyForCookies() const { ASSERT(!m_isTransient); return m_firstPartyForCookies; }
+    const URL& firstPartyForCookies() const { ASSERT(!m_isTransient); return m_firstPartyForCookies; }
     const WebCore::HTTPHeaderMap& requestHeaders() const { ASSERT(!m_isTransient); return m_requestHeaders; }
     WebCore::ResourceLoadPriority priority() const { ASSERT(!m_isTransient); return m_priority; }
-    
+
+    bool isSameSite() const { ASSERT(!m_isTransient); return m_isSameSite; }
+    bool isTopSite() const { return false; }
+
     void setNonTransient() { m_isTransient = false; }
+
+    bool isFirstParty() const;
+
+    bool isAppInitiated() const { return m_isAppInitiated; }
+    void setIsAppInitiated(bool isAppInitiated) { m_isAppInitiated = isAppInitiated; }
 
 private:
     Key m_key;
-    std::chrono::system_clock::time_point m_lastSeen;
-    std::chrono::system_clock::time_point m_firstSeen;
+    WallTime m_lastSeen;
+    WallTime m_firstSeen;
     bool m_isTransient { false };
-    WebCore::URL m_firstPartyForCookies;
+    bool m_isSameSite { false };
+    bool m_isAppInitiated { true };
+    URL m_firstPartyForCookies;
     WebCore::HTTPHeaderMap m_requestHeaders;
     WebCore::ResourceLoadPriority m_priority;
 };
@@ -88,14 +96,14 @@ public:
     static std::unique_ptr<SubresourcesEntry> decodeStorageRecord(const Storage::Record&);
 
     const Key& key() const { return m_key; }
-    std::chrono::system_clock::time_point timeStamp() const { return m_timeStamp; }
-    const Vector<SubresourceInfo>& subresources() const { return m_subresources; }
+    WallTime timeStamp() const { return m_timeStamp; }
+    Vector<SubresourceInfo>& subresources() { return m_subresources; }
 
     void updateSubresourceLoads(const Vector<std::unique_ptr<SubresourceLoad>>&);
 
 private:
     Key m_key;
-    std::chrono::system_clock::time_point m_timeStamp;
+    WallTime m_timeStamp;
     Vector<SubresourceInfo> m_subresources;
 };
 
@@ -103,4 +111,3 @@ private:
 } // namespace NetworkCache
 
 #endif // ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
-#endif // NetworkCacheSubresourcesEntry_h

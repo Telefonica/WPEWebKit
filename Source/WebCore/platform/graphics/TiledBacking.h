@@ -26,14 +26,8 @@
 #pragma once
 
 #include <wtf/MonotonicTime.h>
-#include <wtf/Optional.h>
 
 namespace WebCore {
-
-enum TileSizeMode {
-    StandardTileSizeMode,
-    GiantTileSizeMode
-};
 
 class FloatPoint;
 class FloatRect;
@@ -42,6 +36,13 @@ class IntRect;
 class IntSize;
 class PlatformCALayer;
 
+struct VelocityData;
+
+enum TileSizeMode {
+    StandardTileSizeMode,
+    GiantTileSizeMode
+};
+
 enum ScrollingModeIndication {
     SynchronousScrollingBecauseOfLackOfScrollingCoordinatorIndication,
     SynchronousScrollingBecauseOfStyleIndication,
@@ -49,29 +50,9 @@ enum ScrollingModeIndication {
     AsyncScrollingIndication
 };
 
-struct VelocityData  {
-    double horizontalVelocity;
-    double verticalVelocity;
-    double scaleChangeRate;
-    MonotonicTime lastUpdateTime;
-    
-    VelocityData(double horizontal = 0, double vertical = 0, double scaleChange = 0, MonotonicTime updateTime = MonotonicTime())
-        : horizontalVelocity(horizontal)
-        , verticalVelocity(vertical)
-        , scaleChangeRate(scaleChange)
-        , lastUpdateTime(updateTime)
-    {
-    }
-    
-    bool velocityOrScaleIsChanging() const
-    {
-        return horizontalVelocity || verticalVelocity || scaleChangeRate;
-    }
-};
-
 class TiledBacking {
 public:
-    virtual ~TiledBacking() { }
+    virtual ~TiledBacking() = default;
 
     virtual void setVisibleRect(const FloatRect&) = 0;
     virtual FloatRect visibleRect() const = 0;
@@ -114,7 +95,8 @@ public:
     virtual void setTileCoverage(TileCoverage) = 0;
     virtual TileCoverage tileCoverage() const = 0;
 
-    virtual void adjustTileCoverageRect(FloatRect& coverageRect, const FloatSize& newSize, const FloatRect& previousVisibleRect, const FloatRect& currentVisibleRect, float contentsScale) const = 0;
+    virtual FloatRect adjustTileCoverageRect(const FloatRect& coverageRect, const FloatRect& previousVisibleRect, const FloatRect& currentVisibleRect, bool sizeChanged) = 0;
+    virtual FloatRect adjustTileCoverageRectForScrolling(const FloatRect& coverageRect, const FloatSize& newSize, const FloatRect& previousVisibleRect, const FloatRect& currentVisibleRect, float contentsScale) = 0;
 
     virtual void willStartLiveResize() = 0;
     virtual void didEndLiveResize() = 0;
@@ -122,10 +104,9 @@ public:
     virtual IntSize tileSize() const = 0;
 
     virtual void revalidateTiles() = 0;
-    virtual void forceRepaint() = 0;
 
-    virtual void setScrollingPerformanceLoggingEnabled(bool) = 0;
-    virtual bool scrollingPerformanceLoggingEnabled() const = 0;
+    virtual void setScrollingPerformanceTestingEnabled(bool) = 0;
+    virtual bool scrollingPerformanceTestingEnabled() const = 0;
     
     virtual double retainedTileBackingStoreMemory() const = 0;
 

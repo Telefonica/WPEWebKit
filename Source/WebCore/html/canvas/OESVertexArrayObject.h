@@ -25,25 +25,24 @@
 
 #pragma once
 
-#include "GraphicsTypes3D.h"
 #include "WebGLExtension.h"
 
 namespace WebCore {
 
-class WebGLRenderingContextBase;
-class WebGLVertexArrayObjectOES;
-
 class OESVertexArrayObject final : public WebGLExtension {
+    WTF_MAKE_ISO_ALLOCATED(OESVertexArrayObject);
 public:
     explicit OESVertexArrayObject(WebGLRenderingContextBase&);
+    virtual ~OESVertexArrayObject();
+
+    ExtensionName getName() const override;
+
+    static bool supported(GraphicsContextGL&);
 
     RefPtr<WebGLVertexArrayObjectOES> createVertexArrayOES();
     void deleteVertexArrayOES(WebGLVertexArrayObjectOES*);
-    GC3Dboolean isVertexArrayOES(WebGLVertexArrayObjectOES*);
+    GCGLboolean isVertexArrayOES(WebGLVertexArrayObjectOES*);
     void bindVertexArrayOES(WebGLVertexArrayObjectOES*);
-
-private:
-    ExtensionName getName() const final;
 };
 
 } // namespace WebCore

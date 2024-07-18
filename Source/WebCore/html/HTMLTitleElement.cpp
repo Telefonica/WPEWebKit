@@ -24,6 +24,7 @@
 #include "HTMLTitleElement.h"
 
 #include "Document.h"
+#include "ElementInlines.h"
 #include "HTMLNames.h"
 #include "NodeRenderStyle.h"
 #include "RenderElement.h"
@@ -31,11 +32,15 @@
 #include "StyleInheritedData.h"
 #include "StyleResolver.h"
 #include "Text.h"
+#include "TextManipulationController.h"
 #include "TextNodeTraversal.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/Ref.h>
 #include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLTitleElement);
 
 using namespace HTMLNames;
 
@@ -50,16 +55,16 @@ Ref<HTMLTitleElement> HTMLTitleElement::create(const QualifiedName& tagName, Doc
     return adoptRef(*new HTMLTitleElement(tagName, document));
 }
 
-Node::InsertionNotificationRequest HTMLTitleElement::insertedInto(ContainerNode& insertionPoint)
+Node::InsertedIntoAncestorResult HTMLTitleElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    HTMLElement::insertedInto(insertionPoint);
+    HTMLElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
     document().titleElementAdded(*this);
-    return InsertionDone;
+    return InsertedIntoAncestorResult::Done;
 }
 
-void HTMLTitleElement::removedFrom(ContainerNode& insertionPoint)
+void HTMLTitleElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
 {
-    HTMLElement::removedFrom(insertionPoint);
+    HTMLElement::removedFromAncestor(removalType, oldParentOfRemovedTree);
     document().titleElementRemoved(*this);
 }
 
@@ -77,17 +82,17 @@ String HTMLTitleElement::text() const
 
 StringWithDirection HTMLTitleElement::computedTextWithDirection()
 {
-    TextDirection direction = LTR;
+    auto direction = TextDirection::LTR;
     if (auto* computedStyle = this->computedStyle())
         direction = computedStyle->direction();
     else
-        direction = styleResolver().styleForElement(*this, parentElement() ? parentElement()->renderStyle() : nullptr).renderStyle->direction();
+        direction = styleResolver().styleForElement(*this, { parentElement() ? parentElement()->renderStyle() : nullptr }).renderStyle->direction();
     return { text(), direction };
 }
 
-void HTMLTitleElement::setText(const String& value)
+void HTMLTitleElement::setText(String&& value)
 {
-    setTextContent(value);
+    setTextContent(WTFMove(value));
 }
 
 }

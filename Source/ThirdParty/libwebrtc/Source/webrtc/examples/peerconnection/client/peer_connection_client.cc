@@ -8,68 +8,49 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/examples/peerconnection/client/peer_connection_client.h"
+#include "examples/peerconnection/client/peer_connection_client.h"
 
-#include "webrtc/examples/peerconnection/client/defaults.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/base/nethelpers.h"
-#include "webrtc/base/stringutils.h"
-
-#ifdef WIN32
-#include "webrtc/base/win32socketserver.h"
-#endif
-
-using rtc::sprintfn;
+#include "api/units/time_delta.h"
+#include "examples/peerconnection/client/defaults.h"
+#include "rtc_base/async_dns_resolver.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/net_helpers.h"
+#include "rtc_base/thread.h"
 
 namespace {
 
 // This is our magical hangup signal.
-const char kByeMessage[] = "BYE";
+constexpr char kByeMessage[] = "BYE";
 // Delay between server connection retries, in milliseconds
-const int kReconnectDelay = 2000;
+constexpr webrtc::TimeDelta kReconnectDelay = webrtc::TimeDelta::Seconds(2);
 
-rtc::AsyncSocket* CreateClientSocket(int family) {
-#ifdef WIN32
-  rtc::Win32Socket* sock = new rtc::Win32Socket();
-  sock->CreateT(family, SOCK_STREAM);
-  return sock;
-#elif defined(WEBRTC_POSIX)
+rtc::Socket* CreateClientSocket(int family) {
   rtc::Thread* thread = rtc::Thread::Current();
   RTC_DCHECK(thread != NULL);
-  return thread->socketserver()->CreateAsyncSocket(family, SOCK_STREAM);
-#else
-#error Platform not supported.
-#endif
+  return thread->socketserver()->CreateSocket(family, SOCK_STREAM);
 }
 
 }  // namespace
 
 PeerConnectionClient::PeerConnectionClient()
-  : callback_(NULL),
-    resolver_(NULL),
-    state_(NOT_CONNECTED),
-    my_id_(-1) {
-}
+    : callback_(NULL), resolver_(nullptr), state_(NOT_CONNECTED), my_id_(-1) {}
 
-PeerConnectionClient::~PeerConnectionClient() {
-}
+PeerConnectionClient::~PeerConnectionClient() = default;
 
 void PeerConnectionClient::InitSocketSignals() {
   RTC_DCHECK(control_socket_.get() != NULL);
   RTC_DCHECK(hanging_get_.get() != NULL);
   control_socket_->SignalCloseEvent.connect(this,
-      &PeerConnectionClient::OnClose);
-  hanging_get_->SignalCloseEvent.connect(this,
-      &PeerConnectionClient::OnClose);
+                                            &PeerConnectionClient::OnClose);
+  hanging_get_->SignalCloseEvent.connect(this, &PeerConnectionClient::OnClose);
   control_socket_->SignalConnectEvent.connect(this,
-      &PeerConnectionClient::OnConnect);
-  hanging_get_->SignalConnectEvent.connect(this,
-      &PeerConnectionClient::OnHangingGetConnect);
-  control_socket_->SignalReadEvent.connect(this,
-      &PeerConnectionClient::OnRead);
-  hanging_get_->SignalReadEvent.connect(this,
-      &PeerConnectionClient::OnHangingGetRead);
+                                              &PeerConnectionClient::OnConnect);
+  hanging_get_->SignalConnectEvent.connect(
+      this, &PeerConnectionClient::OnHangingGetConnect);
+  control_socket_->SignalReadEvent.connect(this, &PeerConnectionClient::OnRead);
+  hanging_get_->SignalReadEvent.connect(
+      this, &PeerConnectionClient::OnHangingGetRead);
 }
 
 int PeerConnectionClient::id() const {
@@ -90,13 +71,14 @@ void PeerConnectionClient::RegisterObserver(
   callback_ = callback;
 }
 
-void PeerConnectionClient::Connect(const std::string& server, int port,
+void PeerConnectionClient::Connect(const std::string& server,
+                                   int port,
                                    const std::string& client_name) {
   RTC_DCHECK(!server.empty());
   RTC_DCHECK(!client_name.empty());
 
   if (state_ != NOT_CONNECTED) {
-    LOG(WARNING)
+    RTC_LOG(LS_WARNING)
         << "The client must not be connected before you can call Connect()";
     callback_->OnServerConnectionFailure();
     return;
@@ -115,26 +97,32 @@ void PeerConnectionClient::Connect(const std::string& server, int port,
   client_name_ = client_name;
 
   if (server_address_.IsUnresolvedIP()) {
+    RTC_DCHECK_NE(state_, RESOLVING);
+    RTC_DCHECK(!resolver_);
     state_ = RESOLVING;
-    resolver_ = new rtc::AsyncResolver();
-    resolver_->SignalDone.connect(this, &PeerConnectionClient::OnResolveResult);
-    resolver_->Start(server_address_);
+    resolver_ = std::make_unique<webrtc::AsyncDnsResolver>();
+    resolver_->Start(server_address_,
+                     [this] { OnResolveResult(resolver_->result()); });
   } else {
     DoConnect();
   }
 }
 
 void PeerConnectionClient::OnResolveResult(
-    rtc::AsyncResolverInterface* resolver) {
-  if (resolver_->GetError() != 0) {
+    const webrtc::AsyncDnsResolverResult& result) {
+  if (result.GetError() != 0) {
     callback_->OnServerConnectionFailure();
-    resolver_->Destroy(false);
-    resolver_ = NULL;
+    resolver_.reset();
     state_ = NOT_CONNECTED;
-  } else {
-    server_address_ = resolver_->address();
-    DoConnect();
+    return;
   }
+  if (!result.GetResolvedAddress(AF_INET, &server_address_)) {
+    callback_->OnServerConnectionFailure();
+    resolver_.reset();
+    state_ = NOT_CONNECTED;
+    return;
+  }
+  DoConnect();
 }
 
 void PeerConnectionClient::DoConnect() {
@@ -142,8 +130,8 @@ void PeerConnectionClient::DoConnect() {
   hanging_get_.reset(CreateClientSocket(server_address_.ipaddr().family()));
   InitSocketSignals();
   char buffer[1024];
-  sprintfn(buffer, sizeof(buffer),
-           "GET /sign_in?%s HTTP/1.0\r\n\r\n", client_name_.c_str());
+  snprintf(buffer, sizeof(buffer), "GET /sign_in?%s HTTP/1.0\r\n\r\n",
+           client_name_.c_str());
   onconnect_data_ = buffer;
 
   bool ret = ConnectControlSocket();
@@ -164,12 +152,12 @@ bool PeerConnectionClient::SendToPeer(int peer_id, const std::string& message) {
     return false;
 
   char headers[1024];
-  sprintfn(headers, sizeof(headers),
-      "POST /message?peer_id=%i&to=%i HTTP/1.0\r\n"
-      "Content-Length: %i\r\n"
-      "Content-Type: text/plain\r\n"
-      "\r\n",
-      my_id_, peer_id, message.length());
+  snprintf(headers, sizeof(headers),
+           "POST /message?peer_id=%i&to=%i HTTP/1.0\r\n"
+           "Content-Length: %zu\r\n"
+           "Content-Type: text/plain\r\n"
+           "\r\n",
+           my_id_, peer_id, message.length());
   onconnect_data_ = headers;
   onconnect_data_ += message;
   return ConnectControlSocket();
@@ -196,8 +184,8 @@ bool PeerConnectionClient::SignOut() {
 
     if (my_id_ != -1) {
       char buffer[1024];
-      sprintfn(buffer, sizeof(buffer),
-          "GET /sign_out?peer_id=%i HTTP/1.0\r\n\r\n", my_id_);
+      snprintf(buffer, sizeof(buffer),
+               "GET /sign_out?peer_id=%i HTTP/1.0\r\n\r\n", my_id_);
       onconnect_data_ = buffer;
       return ConnectControlSocket();
     } else {
@@ -216,10 +204,7 @@ void PeerConnectionClient::Close() {
   hanging_get_->Close();
   onconnect_data_.clear();
   peers_.clear();
-  if (resolver_ != NULL) {
-    resolver_->Destroy(false);
-    resolver_ = NULL;
-  }
+  resolver_.reset();
   my_id_ = -1;
   state_ = NOT_CONNECTED;
 }
@@ -234,17 +219,17 @@ bool PeerConnectionClient::ConnectControlSocket() {
   return true;
 }
 
-void PeerConnectionClient::OnConnect(rtc::AsyncSocket* socket) {
+void PeerConnectionClient::OnConnect(rtc::Socket* socket) {
   RTC_DCHECK(!onconnect_data_.empty());
   size_t sent = socket->Send(onconnect_data_.c_str(), onconnect_data_.length());
   RTC_DCHECK(sent == onconnect_data_.length());
   onconnect_data_.clear();
 }
 
-void PeerConnectionClient::OnHangingGetConnect(rtc::AsyncSocket* socket) {
+void PeerConnectionClient::OnHangingGetConnect(rtc::Socket* socket) {
   char buffer[1024];
-  sprintfn(buffer, sizeof(buffer),
-           "GET /wait?peer_id=%i HTTP/1.0\r\n\r\n", my_id_);
+  snprintf(buffer, sizeof(buffer), "GET /wait?peer_id=%i HTTP/1.0\r\n\r\n",
+           my_id_);
   int len = static_cast<int>(strlen(buffer));
   int sent = socket->Send(buffer, len);
   RTC_DCHECK(sent == len);
@@ -273,7 +258,8 @@ bool PeerConnectionClient::GetHeaderValue(const std::string& data,
   return false;
 }
 
-bool PeerConnectionClient::GetHeaderValue(const std::string& data, size_t eoh,
+bool PeerConnectionClient::GetHeaderValue(const std::string& data,
+                                          size_t eoh,
                                           const char* header_pattern,
                                           std::string* value) {
   RTC_DCHECK(value != NULL);
@@ -289,7 +275,7 @@ bool PeerConnectionClient::GetHeaderValue(const std::string& data, size_t eoh,
   return false;
 }
 
-bool PeerConnectionClient::ReadIntoBuffer(rtc::AsyncSocket* socket,
+bool PeerConnectionClient::ReadIntoBuffer(rtc::Socket* socket,
                                           std::string* data,
                                           size_t* content_length) {
   char buffer[0xffff];
@@ -303,7 +289,7 @@ bool PeerConnectionClient::ReadIntoBuffer(rtc::AsyncSocket* socket,
   bool ret = false;
   size_t i = data->find("\r\n\r\n");
   if (i != std::string::npos) {
-    LOG(INFO) << "Headers received";
+    RTC_LOG(LS_INFO) << "Headers received";
     if (GetHeaderValue(*data, i, "\r\nContent-Length: ", content_length)) {
       size_t total_response_size = (i + 4) + *content_length;
       if (data->length() >= total_response_size) {
@@ -321,18 +307,18 @@ bool PeerConnectionClient::ReadIntoBuffer(rtc::AsyncSocket* socket,
         // We haven't received everything.  Just continue to accept data.
       }
     } else {
-      LOG(LS_ERROR) << "No content length field specified by the server.";
+      RTC_LOG(LS_ERROR) << "No content length field specified by the server.";
     }
   }
   return ret;
 }
 
-void PeerConnectionClient::OnRead(rtc::AsyncSocket* socket) {
+void PeerConnectionClient::OnRead(rtc::Socket* socket) {
   size_t content_length = 0;
   if (ReadIntoBuffer(socket, &control_data_, &content_length)) {
     size_t peer_id = 0, eoh = 0;
-    bool ok = ParseServerResponse(control_data_, content_length, &peer_id,
-                                  &eoh);
+    bool ok =
+        ParseServerResponse(control_data_, content_length, &peer_id, &eoh);
     if (ok) {
       if (my_id_ == -1) {
         // First response.  Let's store our server assigned ID.
@@ -351,7 +337,8 @@ void PeerConnectionClient::OnRead(rtc::AsyncSocket* socket) {
             std::string name;
             bool connected;
             if (ParseEntry(control_data_.substr(pos, eol - pos), &name, &id,
-                           &connected) && id != my_id_) {
+                           &connected) &&
+                id != my_id_) {
               peers_[id] = name;
               callback_->OnPeerConnected(id, name);
             }
@@ -378,13 +365,13 @@ void PeerConnectionClient::OnRead(rtc::AsyncSocket* socket) {
   }
 }
 
-void PeerConnectionClient::OnHangingGetRead(rtc::AsyncSocket* socket) {
-  LOG(INFO) << __FUNCTION__;
+void PeerConnectionClient::OnHangingGetRead(rtc::Socket* socket) {
+  RTC_LOG(LS_INFO) << __FUNCTION__;
   size_t content_length = 0;
   if (ReadIntoBuffer(socket, &notification_data_, &content_length)) {
     size_t peer_id = 0, eoh = 0;
-    bool ok = ParseServerResponse(notification_data_, content_length,
-                                  &peer_id, &eoh);
+    bool ok =
+        ParseServerResponse(notification_data_, content_length, &peer_id, &eoh);
 
     if (ok) {
       // Store the position where the body begins.
@@ -457,7 +444,7 @@ bool PeerConnectionClient::ParseServerResponse(const std::string& response,
                                                size_t* eoh) {
   int status = GetResponseStatus(response.c_str());
   if (status != 200) {
-    LOG(LS_ERROR) << "Received error from server";
+    RTC_LOG(LS_ERROR) << "Received error from server";
     Close();
     callback_->OnDisconnected();
     return false;
@@ -470,15 +457,14 @@ bool PeerConnectionClient::ParseServerResponse(const std::string& response,
 
   *peer_id = -1;
 
-  // See comment in peer_channel.cc for why we use the Pragma header and
-  // not e.g. "X-Peer-Id".
+  // See comment in peer_channel.cc for why we use the Pragma header.
   GetHeaderValue(response, *eoh, "\r\nPragma: ", peer_id);
 
   return true;
 }
 
-void PeerConnectionClient::OnClose(rtc::AsyncSocket* socket, int err) {
-  LOG(INFO) << __FUNCTION__;
+void PeerConnectionClient::OnClose(rtc::Socket* socket, int err) {
+  RTC_LOG(LS_INFO) << __FUNCTION__;
 
   socket->Close();
 
@@ -497,17 +483,12 @@ void PeerConnectionClient::OnClose(rtc::AsyncSocket* socket, int err) {
     }
   } else {
     if (socket == control_socket_.get()) {
-      LOG(WARNING) << "Connection refused; retrying in 2 seconds";
-      rtc::Thread::Current()->PostDelayed(RTC_FROM_HERE, kReconnectDelay, this,
-                                          0);
+      RTC_LOG(LS_WARNING) << "Connection refused; retrying in 2 seconds";
+      rtc::Thread::Current()->PostDelayedTask(
+          SafeTask(safety_.flag(), [this] { DoConnect(); }), kReconnectDelay);
     } else {
       Close();
       callback_->OnDisconnected();
     }
   }
-}
-
-void PeerConnectionClient::OnMessage(rtc::Message* msg) {
-  // ignore msg; there is currently only one supported message ("retry")
-  DoConnect();
 }

@@ -25,55 +25,69 @@
 
 #pragma once
 
-#if USE(NETWORK_SESSION)
-
 #include "NetworkDataTask.h"
-#include <WebCore/ResourceRequest.h>
-#include <WebCore/ResourceResponse.h>
+#include "WebPageProxyIdentifier.h"
+#include <WebCore/FrameIdentifier.h>
+#include <WebCore/NetworkLoadInformation.h>
+#include <WebCore/PageIdentifier.h>
 #include <WebCore/StoredCredentialsPolicy.h>
 #include <pal/SessionID.h>
-#include <wtf/Function.h>
+#include <wtf/CompletionHandler.h>
 
 namespace WebCore {
+class ResourceError;
 class SecurityOrigin;
+class SharedBuffer;
 }
 
 namespace WebKit {
 
-class NetworkCORSPreflightChecker final : private NetworkDataTaskClient  {
+class NetworkProcess;
+class NetworkResourceLoader;
+
+class NetworkCORSPreflightChecker final : private NetworkDataTaskClient {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     struct Parameters {
         WebCore::ResourceRequest originalRequest;
         Ref<WebCore::SecurityOrigin> sourceOrigin;
+        RefPtr<WebCore::SecurityOrigin> topOrigin;
+        String referrer;
+        String userAgent;
         PAL::SessionID sessionID;
+        WebPageProxyIdentifier webPageProxyID;
         WebCore::StoredCredentialsPolicy storedCredentialsPolicy;
     };
-    enum class Result { Success, Failure };
-    using CompletionCallback = WTF::Function<void(Result)>;
+    using CompletionCallback = CompletionHandler<void(WebCore::ResourceError&&)>;
 
-    NetworkCORSPreflightChecker(Parameters&&, CompletionCallback&&);
+    NetworkCORSPreflightChecker(NetworkProcess&, NetworkResourceLoader*, Parameters&&, bool shouldCaptureExtraNetworkLoadMetrics, CompletionCallback&&);
     ~NetworkCORSPreflightChecker();
     const WebCore::ResourceRequest& originalRequest() const { return m_parameters.originalRequest; }
 
     void startPreflight();
 
+    WebCore::NetworkTransactionInformation takeInformation();
+
 private:
     void willPerformHTTPRedirection(WebCore::ResourceResponse&&, WebCore::ResourceRequest&&, RedirectCompletionHandler&&) final;
-    void didReceiveChallenge(const WebCore::AuthenticationChallenge&, ChallengeCompletionHandler&&) final;
-    void didReceiveResponseNetworkSession(WebCore::ResourceResponse&&, ResponseCompletionHandler&&) final;
-    void didReceiveData(Ref<WebCore::SharedBuffer>&&) final;
+    void didReceiveChallenge(WebCore::AuthenticationChallenge&&, NegotiatedLegacyTLS, ChallengeCompletionHandler&&) final;
+    void didReceiveResponse(WebCore::ResourceResponse&&, NegotiatedLegacyTLS, PrivateRelayed, ResponseCompletionHandler&&) final;
+    void didReceiveData(const WebCore::SharedBuffer&) final;
     void didCompleteWithError(const WebCore::ResourceError&, const WebCore::NetworkLoadMetrics&) final;
     void didSendData(uint64_t totalBytesSent, uint64_t totalBytesExpectedToSend) final;
     void wasBlocked() final;
     void cannotShowURL() final;
+    void wasBlockedByRestrictions() final;
+    void wasBlockedByDisabledFTP() final;
 
     Parameters m_parameters;
+    Ref<NetworkProcess> m_networkProcess;
     WebCore::ResourceResponse m_response;
     CompletionCallback m_completionCallback;
     RefPtr<NetworkDataTask> m_task;
+    bool m_shouldCaptureExtraNetworkLoadMetrics { false };
+    WebCore::NetworkTransactionInformation m_loadInformation;
+    WeakPtr<NetworkResourceLoader> m_networkResourceLoader;
 };
 
 } // namespace WebKit
-
-#endif // USE(NETWORK_SESSION)

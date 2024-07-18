@@ -23,8 +23,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
 #if USE(APPKIT)
 
 #if USE(APPLE_INTERNAL_SDK)
@@ -38,6 +36,7 @@
 
 @interface NSScrollerImpPair ()
 + (NSUserInterfaceLayoutDirection)scrollerLayoutDirection;
++ (void)_updateAllScrollerImpPairsForNewRecommendedScrollerStyle:(NSScrollerStyle)newRecommendedScrollerStyle;
 @end
 
 #else
@@ -105,6 +104,7 @@ typedef NSUInteger NSOverlayScrollerState;
 - (NSPoint)mouseLocationInScrollerForScrollerImp:(NSScrollerImp *)scrollerImp;
 - (NSRect)convertRectToLayer:(NSRect)aRect;
 - (BOOL)shouldUseLayerPerPartForScrollerImp:(NSScrollerImp *)scrollerImp;
+- (NSAppearance *)effectiveAppearanceForScrollerImp:(NSScrollerImp *)scrollerImp;
 @end
 
 @protocol NSScrollerImpPairDelegate;
@@ -133,6 +133,7 @@ typedef NSUInteger NSOverlayScrollerState;
 - (void)endLiveResize;
 - (void)beginScrollGesture;
 - (void)endScrollGesture;
++ (void)_updateAllScrollerImpPairsForNewRecommendedScrollerStyle:(NSScrollerStyle)newRecommendedScrollerStyle;
 @end
 
 @protocol NSScrollerImpPairDelegate

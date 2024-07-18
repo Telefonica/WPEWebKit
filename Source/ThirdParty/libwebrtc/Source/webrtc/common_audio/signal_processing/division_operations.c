@@ -21,7 +21,8 @@
  *
  */
 
-#include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
+#include "common_audio/signal_processing/include/signal_processing_library.h"
+#include "rtc_base/sanitizer.h"
 
 uint32_t WebRtcSpl_DivU32U16(uint32_t num, uint16_t den)
 {
@@ -109,7 +110,8 @@ int32_t WebRtcSpl_DivW32HiLow(int32_t num, int16_t den_hi, int16_t den_low)
     tmpW32 = (den_hi * approx << 1) + ((den_low * approx >> 15) << 1);
     // tmpW32 = den * approx
 
-    tmpW32 = (int32_t)0x7fffffffL - tmpW32; // result in Q30 (tmpW32 = 2.0-(den*approx))
+    // result in Q30 (tmpW32 = 2.0-(den*approx))
+    tmpW32 = (int32_t)((int64_t)0x7fffffffL - tmpW32);
 
     // Store tmpW32 in hi and low format
     tmp_hi = (int16_t)(tmpW32 >> 16);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,31 +33,36 @@ namespace JSC {
 
 class InternalFunctionAllocationProfile {
 public:
-    Structure* structure() { return m_structure.get(); }
+    static inline ptrdiff_t offsetOfStructureID() { return OBJECT_OFFSETOF(InternalFunctionAllocationProfile, m_structureID); }
+
+    Structure* structure() { return m_structureID.get(); }
     Structure* createAllocationStructureFromBase(VM&, JSGlobalObject*, JSCell* owner, JSObject* prototype, Structure* base);
 
-    void clear() { m_structure.clear(); }
-    void visitAggregate(SlotVisitor& visitor) { visitor.append(m_structure); }
+    void clear() { m_structureID.clear(); }
+    template<typename Visitor> void visitAggregate(Visitor& visitor) { visitor.append(m_structureID); }
 
 private:
-    WriteBarrier<Structure> m_structure;
+    WriteBarrierStructureID m_structureID;
 };
 
-inline Structure* InternalFunctionAllocationProfile::createAllocationStructureFromBase(VM& vm, JSGlobalObject* globalObject, JSCell* owner, JSObject* prototype, Structure* baseStructure)
+inline Structure* InternalFunctionAllocationProfile::createAllocationStructureFromBase(VM& vm, JSGlobalObject* baseGlobalObject, JSCell* owner, JSObject* prototype, Structure* baseStructure)
 {
-    ASSERT(!m_structure || m_structure.get()->classInfo() != baseStructure->classInfo());
+    ASSERT(!m_structureID || m_structureID.get()->classInfoForCells() != baseStructure->classInfoForCells() || m_structureID->globalObject() != baseStructure->globalObject());
+    ASSERT(baseStructure->hasMonoProto());
 
     Structure* structure;
+    // FIXME: Implement polymorphic prototypes for subclasses of builtin types:
+    // https://bugs.webkit.org/show_bug.cgi?id=177318
     if (prototype == baseStructure->storedPrototype())
         structure = baseStructure;
     else
-        structure = vm.prototypeMap.emptyStructureForPrototypeFromBaseStructure(globalObject, prototype, baseStructure);
+        structure = baseGlobalObject->structureCache().emptyStructureForPrototypeFromBaseStructure(baseGlobalObject, prototype, baseStructure);
 
     // Ensure that if another thread sees the structure, it will see it properly created.
     WTF::storeStoreFence();
 
-    m_structure.set(vm, owner, structure);
-    return m_structure.get();
+    m_structureID.set(vm, owner, structure);
+    return structure;
 }
 
 } // namespace JSC

@@ -33,7 +33,7 @@ class Text;
 
 class DeleteFromTextNodeCommand : public SimpleEditCommand {
 public:
-    static Ref<DeleteFromTextNodeCommand> create(Ref<Text>&& node, unsigned offset, unsigned count, EditAction editingAction = EditActionDelete)
+    static Ref<DeleteFromTextNodeCommand> create(Ref<Text>&& node, unsigned offset, unsigned count, EditAction editingAction = EditAction::Delete)
     {
         return adoptRef(*new DeleteFromTextNodeCommand(WTFMove(node), offset, count, editingAction));
     }
@@ -46,7 +46,7 @@ private:
     void doUnapply() override;
     
 #ifndef NDEBUG
-    void getNodesInCommand(HashSet<Node*>&) override;
+    void getNodesInCommand(HashSet<Ref<Node>>&) override;
 #endif
     
     Ref<Text> m_node;

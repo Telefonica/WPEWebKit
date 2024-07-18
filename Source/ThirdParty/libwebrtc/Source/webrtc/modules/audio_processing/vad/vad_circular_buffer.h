@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_VAD_VAD_CIRCULAR_BUFFER_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_VAD_VAD_CIRCULAR_BUFFER_H_
+#ifndef MODULES_AUDIO_PROCESSING_VAD_VAD_CIRCULAR_BUFFER_H_
+#define MODULES_AUDIO_PROCESSING_VAD_VAD_CIRCULAR_BUFFER_H_
 
 #include <memory>
 
@@ -38,8 +38,8 @@ class VadCircularBuffer {
   // The mean value of the elements in the buffer. The return value is zero if
   // buffer is empty, i.e. no value is inserted.
   double Mean();
-  // Remove transients. If the values exceed |val_threshold| for a period
-  // shorter then or equal to |width_threshold|, then that period is considered
+  // Remove transients. If the values exceed `val_threshold` for a period
+  // shorter then or equal to `width_threshold`, then that period is considered
   // transient and set to zero.
   int RemoveTransient(int width_threshold, double val_threshold);
 
@@ -49,7 +49,7 @@ class VadCircularBuffer {
   // insertion. |index = 1| is the one before the most recent insertion, and
   // so on.
   int Get(int index, double* value) const;
-  // Set a given position to |value|. |index| is interpreted as above.
+  // Set a given position to `value`. `index` is interpreted as above.
   int Set(int index, double value);
   // Return the number of valid elements in the buffer.
   int BufferLevel();
@@ -66,4 +66,4 @@ class VadCircularBuffer {
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_VAD_VAD_CIRCULAR_BUFFER_H_
+#endif  // MODULES_AUDIO_PROCESSING_VAD_VAD_CIRCULAR_BUFFER_H_

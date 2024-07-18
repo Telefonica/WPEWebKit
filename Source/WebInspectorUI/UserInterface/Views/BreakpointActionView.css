@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,24 +35,15 @@ body[dir=rtl] .breakpoint-action-button-container {
     float: left;
 }
 
-:matches(.breakpoint-action-append-button, .breakpoint-action-remove-button) {
+:is(.breakpoint-action-append-button, .breakpoint-action-remove-button) {
     background-origin: border-box;
     width: 13px;
     height: 13px;
-    margin-top: 2px;
+    margin-block-start: 5px;
+    margin-inline-start: 5px;
     background-color: transparent;
     border: none;
     opacity: 0.6;
-
-    --breakpoint-action-button-margin-start: 5px;
-}
-
-body[dir=ltr] :matches(.breakpoint-action-append-button, .breakpoint-action-remove-button) {
-    margin-left: var(--breakpoint-action-button-margin-start);
-}
-
-body[dir=rtl] :matches(.breakpoint-action-append-button, .breakpoint-action-remove-button) {
-    margin-right: var(--breakpoint-action-button-margin-start);
 }
 
 .breakpoint-action-append-button {
@@ -73,20 +64,10 @@ body[dir=rtl] :matches(.breakpoint-action-append-button, .breakpoint-action-remo
     box-shadow: inset 0 0 2px hsl(0, 0%, 78%);
 }
 
-.breakpoint-action-block-body > .description {
-    color: var(--text-color-gray-medium);
+.breakpoint-action-block-body .description {
+    flex-grow: 1;
     text-align: right;
-    margin-top: 6px;
-
-    --breakpoint-action-block-body-description-margin-end: 2px;
-}
-
-body[dir=ltr] .breakpoint-action-block-body > .description {
-    margin-right: var(--breakpoint-action-block-body-description-margin-end);
-}
-
-body[dir=rtl] .breakpoint-action-block-body > .description {
-    margin-left: var(--breakpoint-action-block-body-description-margin-end);
+    color: var(--text-color-gray-medium);
 }
 
 .breakpoint-action-block-body > input {
@@ -94,10 +75,16 @@ body[dir=rtl] .breakpoint-action-block-body > .description {
     text-align: left;
 }
 
+.breakpoint-action-block-body > .flex {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
 .breakpoint-action-eval-editor {
     margin: 2px 0;
     padding: 2px 0 1px 0;
-    -webkit-appearance: textfield;
+    appearance: textfield;
     border: 1px solid hsl(0, 0%, 78%);
     background: white;
 }
@@ -110,4 +97,25 @@ body[dir=rtl] .breakpoint-action-block-body > .description {
 .breakpoint-action-eval-editor > .CodeMirror-scroll {
     width: 336px; /* NOTE: Fixed value, manually tuned to .edit-breakpoint-popover-content.wide width */
     overflow: hidden;
+}
+
+@media (prefers-color-scheme: dark) {
+    .breakpoint-action-block-body {
+        border-color: var(--text-color-quaternary);
+        background-color: unset;
+        box-shadow: unset;
+    }
+
+    .breakpoint-action-block-body > .description {
+        color: var(--text-color-secondary);
+    }
+
+    .breakpoint-action-append-button,
+    .breakpoint-action-remove-button {
+        filter: invert();
+    }
+
+    .breakpoint-action-eval-editor {
+        background: var(--background-color-content);
+    }
 }

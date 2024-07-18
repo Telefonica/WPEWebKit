@@ -67,9 +67,11 @@ if ($flavour && $flavour ne "void") {
     ( $xlate="${dir}../../../perlasm/arm-xlate.pl" and -f $xlate) or
     die "can't locate arm-xlate.pl";
 
-    open STDOUT,"| \"$^X\" $xlate $flavour $output";
+    open OUT,"| \"$^X\" $xlate $flavour $output";
+    *STDOUT=*OUT;
 } else {
-    open STDOUT,">$output";
+    open OUT,">$output";
+    *STDOUT=*OUT;
 }
 
 $ctx="r0";	# parameter block
@@ -207,6 +209,10 @@ $code=<<___;
 # define VFP_ABI_PUSH
 # define VFP_ABI_POP
 #endif
+
+@ Silence ARMv8 deprecated IT instruction warnings. This file is used by both
+@ ARMv7 and ARMv8 processors and does not use ARMv8 instructions.
+.arch  armv7-a
 
 #ifdef __ARMEL__
 # define LO 0
@@ -666,4 +672,4 @@ while(<SELF>) {
 close SELF;
 
 print $code;
-close STDOUT; # enforce flush
+close STDOUT or die "error closing STDOUT"; # enforce flush

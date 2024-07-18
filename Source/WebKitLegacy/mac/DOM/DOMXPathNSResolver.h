@@ -24,10 +24,11 @@
  */
 
 #import <WebKitLegacy/WebKitAvailability.h>
+#import <objc/NSObject.h>
 
 @class NSString;
 
-WEBKIT_CLASS_AVAILABLE_MAC(10_5)
+WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 @protocol DOMXPathNSResolver <NSObject>
 - (NSString *)lookupNamespaceURI:(NSString *)prefix;
 @end

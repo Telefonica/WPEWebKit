@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2014, 2016 Apple Inc. All rights reserved.
 # Copyright (c) 2014 University of Washington. All rights reserved.
@@ -29,16 +29,22 @@ import logging
 import string
 from string import Template
 
-from generator import Generator, ucfirst
-from models import ObjectType, EnumType, Frameworks
-from objc_generator import ObjCTypeCategory, ObjCGenerator
-from objc_generator_templates import ObjCGeneratorTemplates as ObjCTemplates
+try:
+    from .generator import Generator, ucfirst
+    from .models import ObjectType, EnumType, Frameworks
+    from .objc_generator import ObjCTypeCategory, ObjCGenerator
+    from .objc_generator_templates import ObjCGeneratorTemplates as ObjCTemplates
+except ImportError:
+    from generator import Generator, ucfirst
+    from models import ObjectType, EnumType, Frameworks
+    from objc_generator import ObjCTypeCategory, ObjCGenerator
+    from objc_generator_templates import ObjCGeneratorTemplates as ObjCTemplates
 
 log = logging.getLogger('global')
 
 
 def add_newline(lines):
-    if lines and lines[-1] == '':
+    if not len(lines) or lines[-1] == '':
         return
     lines.append('')
 
@@ -51,7 +57,7 @@ class ObjCProtocolTypesImplementationGenerator(ObjCGenerator):
         return '%sTypes.mm' % self.protocol_name()
 
     def domains_to_generate(self):
-        return filter(self.should_generate_types_for_domain, Generator.domains_to_generate(self))
+        return list(filter(self.should_generate_types_for_domain, Generator.domains_to_generate(self)))
 
     def generate_output(self):
         secondary_headers = [
@@ -75,7 +81,7 @@ class ObjCProtocolTypesImplementationGenerator(ObjCGenerator):
         sections = []
         sections.append(self.generate_license())
         sections.append(Template(ObjCTemplates.ImplementationPrelude).substitute(None, **header_args))
-        sections.extend(map(self.generate_type_implementations, domains))
+        sections.extend(list(map(self.generate_type_implementations, domains)))
         sections.append(Template(ObjCTemplates.ImplementationPostlude).substitute(None, **header_args))
         return '\n\n'.join(sections)
 
@@ -85,7 +91,7 @@ class ObjCProtocolTypesImplementationGenerator(ObjCGenerator):
             if (isinstance(declaration.type, ObjectType)):
                 add_newline(lines)
                 lines.append(self.generate_type_implementation(domain, declaration))
-        return '\n'.join(lines)
+        return self.wrap_with_guard_for_condition(domain.condition, '\n'.join(lines))
 
     def generate_type_implementation(self, domain, declaration):
         lines = []
@@ -94,8 +100,8 @@ class ObjCProtocolTypesImplementationGenerator(ObjCGenerator):
         if self.get_generator_setting('generate_frontend', False):
             lines.append('')
             lines.append(self._generate_init_method_for_payload(domain, declaration))
-            lines.append(self._generate_init_method_for_json_object(domain, declaration))
-        required_members = filter(lambda member: not member.is_optional, declaration.type_members)
+            lines.append(self._generate_init_method_for_protocol_object(domain, declaration))
+        required_members = [member for member in declaration.type_members if not member.is_optional]
         if required_members:
             lines.append('')
             lines.append(self._generate_init_method_for_required_members(domain, declaration, required_members))
@@ -106,13 +112,13 @@ class ObjCProtocolTypesImplementationGenerator(ObjCGenerator):
             lines.append(self._generate_getter_for_member(domain, declaration, member))
         lines.append('')
         lines.append('@end')
-        return '\n'.join(lines)
+        return self.wrap_with_guard_for_condition(declaration.condition, '\n'.join(lines))
 
-    def _generate_init_method_for_json_object(self, domain, declaration):
+    def _generate_init_method_for_protocol_object(self, domain, declaration):
         lines = []
-        lines.append('- (instancetype)initWithJSONObject:(RWIProtocolJSONObject *)jsonObject')
+        lines.append('- (instancetype)initWithProtocolObject:(RWIProtocolJSONObject *)object')
         lines.append('{')
-        lines.append('    if (!(self = [super initWithInspectorObject:[jsonObject toInspectorObject].get()]))')
+        lines.append('    if (!(self = [super initWithJSONObject:[object toJSONObject].get()]))')
         lines.append('        return nil;')
         lines.append('')
         lines.append('    return self;')
@@ -137,13 +143,13 @@ class ObjCProtocolTypesImplementationGenerator(ObjCGenerator):
             var_name = ObjCGenerator.identifier_to_objc_identifier(member_name)
             conversion_expression = self.payload_to_objc_expression_for_member(declaration, member)
             if isinstance(member.type, EnumType):
-                lines.append('    std::optional<%s> %s = %s;' % (objc_type, var_name, conversion_expression))
                 if not member.is_optional:
+                    lines.append('    auto %s = %s;' % (var_name, conversion_expression))
                     lines.append('    THROW_EXCEPTION_FOR_BAD_ENUM_VALUE(%s, @"%s");' % (var_name, member_name))
-                    lines.append('    self.%s = %s.value();' % (var_name, var_name))
+                    lines.append('    self.%s = *%s;' % (var_name, var_name))
                 else:
-                    lines.append('    if (%s)' % var_name)
-                    lines.append('        self.%s = %s.value();' % (var_name, var_name))
+                    lines.append('    if (auto %s = %s)' % (var_name, conversion_expression))
+                    lines.append('        self.%s = *%s;' % (var_name, var_name))
             else:
                 lines.append('    self.%s = %s;' % (var_name, conversion_expression))
 
@@ -167,7 +173,7 @@ class ObjCProtocolTypesImplementationGenerator(ObjCGenerator):
         lines.append('        return nil;')
         lines.append('')
 
-        required_pointer_members = filter(lambda member: ObjCGenerator.is_type_objc_pointer_type(member.type), required_members)
+        required_pointer_members = [member for member in required_members if ObjCGenerator.is_type_objc_pointer_type(member.type)]
         if required_pointer_members:
             for member in required_pointer_members:
                 var_name = ObjCGenerator.identifier_to_objc_identifier(member.member_name)

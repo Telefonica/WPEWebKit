@@ -1,5 +1,6 @@
 /*
  * Copyright (C) Research In Motion Limited 2011. All rights reserved.
+ * Copyright (C) 2018-2022 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,38 +22,27 @@
 #include "SVGFEDropShadowElement.h"
 
 #include "RenderStyle.h"
-#include "SVGFilterBuilder.h"
 #include "SVGNames.h"
 #include "SVGParserUtilities.h"
 #include "SVGRenderStyle.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
 
-// Animated property definitions
-DEFINE_ANIMATED_STRING(SVGFEDropShadowElement, SVGNames::inAttr, In1, in1)
-DEFINE_ANIMATED_NUMBER(SVGFEDropShadowElement, SVGNames::dxAttr, Dx, dx)
-DEFINE_ANIMATED_NUMBER(SVGFEDropShadowElement, SVGNames::dyAttr, Dy, dy)
-DEFINE_ANIMATED_NUMBER_MULTIPLE_WRAPPERS(SVGFEDropShadowElement, SVGNames::stdDeviationAttr, stdDeviationXIdentifier(), StdDeviationX, stdDeviationX)
-DEFINE_ANIMATED_NUMBER_MULTIPLE_WRAPPERS(SVGFEDropShadowElement, SVGNames::stdDeviationAttr, stdDeviationYIdentifier(), StdDeviationY, stdDeviationY)
-
-BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGFEDropShadowElement)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(in1)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(dx)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(dy)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(stdDeviationX)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(stdDeviationY)
-    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGFilterPrimitiveStandardAttributes)
-END_REGISTER_ANIMATED_PROPERTIES
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFEDropShadowElement);
 
 inline SVGFEDropShadowElement::SVGFEDropShadowElement(const QualifiedName& tagName, Document& document)
     : SVGFilterPrimitiveStandardAttributes(tagName, document)
-    , m_dx(2)
-    , m_dy(2)
-    , m_stdDeviationX(2)
-    , m_stdDeviationY(2)
 {
     ASSERT(hasTagName(SVGNames::feDropShadowTag));
-    registerAnimatedPropertiesForSVGFEDropShadowElement();
+    
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        PropertyRegistry::registerProperty<SVGNames::inAttr, &SVGFEDropShadowElement::m_in1>();
+        PropertyRegistry::registerProperty<SVGNames::dxAttr, &SVGFEDropShadowElement::m_dx>();
+        PropertyRegistry::registerProperty<SVGNames::dyAttr, &SVGFEDropShadowElement::m_dy>();
+        PropertyRegistry::registerProperty<SVGNames::stdDeviationAttr, &SVGFEDropShadowElement::m_stdDeviationX, &SVGFEDropShadowElement::m_stdDeviationY>();
+    });
 }
 
 Ref<SVGFEDropShadowElement> SVGFEDropShadowElement::create(const QualifiedName& tagName, Document& document)
@@ -60,48 +50,35 @@ Ref<SVGFEDropShadowElement> SVGFEDropShadowElement::create(const QualifiedName& 
     return adoptRef(*new SVGFEDropShadowElement(tagName, document));
 }
 
-const AtomicString& SVGFEDropShadowElement::stdDeviationXIdentifier()
-{
-    static NeverDestroyed<AtomicString> s_identifier("SVGStdDeviationX", AtomicString::ConstructFromLiteral);
-    return s_identifier;
-}
-
-const AtomicString& SVGFEDropShadowElement::stdDeviationYIdentifier()
-{
-    static NeverDestroyed<AtomicString> s_identifier("SVGStdDeviationY", AtomicString::ConstructFromLiteral);
-    return s_identifier;
-}
-
 void SVGFEDropShadowElement::setStdDeviation(float x, float y)
 {
-    setStdDeviationXBaseValue(x);
-    setStdDeviationYBaseValue(y);
-    invalidate();
+    m_stdDeviationX->setBaseValInternal(x);
+    m_stdDeviationY->setBaseValInternal(y);
+    updateSVGRendererForElementChange();
 }
 
-void SVGFEDropShadowElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void SVGFEDropShadowElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == SVGNames::stdDeviationAttr) {
-        float x, y;
-        if (parseNumberOptionalNumber(value, x, y)) {
-            setStdDeviationXBaseValue(x);
-            setStdDeviationYBaseValue(y);
+        if (auto result = parseNumberOptionalNumber(value)) {
+            m_stdDeviationX->setBaseValInternal(result->first);
+            m_stdDeviationY->setBaseValInternal(result->second);
         }
         return;
     }
 
     if (name == SVGNames::inAttr) {
-        setIn1BaseValue(value);
+        m_in1->setBaseValInternal(value);
         return;
     }
 
     if (name == SVGNames::dxAttr) {
-        setDxBaseValue(value.toFloat());
+        m_dx->setBaseValInternal(value.toFloat());
         return;
     }
 
     if (name == SVGNames::dyAttr) {
-        setDyBaseValue(value.toFloat());
+        m_dy->setBaseValInternal(value.toFloat());
         return;
     }
 
@@ -110,16 +87,68 @@ void SVGFEDropShadowElement::parseAttribute(const QualifiedName& name, const Ato
 
 void SVGFEDropShadowElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (attrName == SVGNames::inAttr || attrName == SVGNames::stdDeviationAttr || attrName == SVGNames::dxAttr || attrName == SVGNames::dyAttr) {
+    if (attrName == SVGNames::inAttr) {
         InstanceInvalidationGuard guard(*this);
-        invalidate();
+        updateSVGRendererForElementChange();
+        return;
+    }
+
+    if (attrName == SVGNames::stdDeviationAttr && (stdDeviationX() < 0 || stdDeviationY() < 0)) {
+        InstanceInvalidationGuard guard(*this);
+        markFilterEffectForRebuild();
+        return;
+    }
+
+    if (attrName == SVGNames::stdDeviationAttr || attrName == SVGNames::dxAttr || attrName == SVGNames::dyAttr) {
+        InstanceInvalidationGuard guard(*this);
+        primitiveAttributeChanged(attrName);
         return;
     }
 
     SVGFilterPrimitiveStandardAttributes::svgAttributeChanged(attrName);
 }
 
-RefPtr<FilterEffect> SVGFEDropShadowElement::build(SVGFilterBuilder* filterBuilder, Filter& filter)
+bool SVGFEDropShadowElement::setFilterEffectAttribute(FilterEffect& effect, const QualifiedName& attrName)
+{
+    auto& feDropShadow = downcast<FEDropShadow>(effect);
+
+    if (attrName == SVGNames::stdDeviationAttr) {
+        bool stdDeviationXChanged = feDropShadow.setStdDeviationX(stdDeviationX());
+        bool stdDeviationYChanged = feDropShadow.setStdDeviationY(stdDeviationY());
+        return stdDeviationXChanged || stdDeviationYChanged;
+    }
+
+    if (attrName == SVGNames::dxAttr)
+        return feDropShadow.setDx(dx());
+    if (attrName == SVGNames::dyAttr)
+        return feDropShadow.setDy(dy());
+
+    RenderObject* renderer = this->renderer();
+    ASSERT(renderer);
+    const RenderStyle& style = renderer->style();
+
+    if (attrName == SVGNames::flood_colorAttr)
+        return feDropShadow.setShadowColor(style.svgStyle().floodColor());
+    if (attrName == SVGNames::flood_opacityAttr)
+        return feDropShadow.setShadowOpacity(style.svgStyle().floodOpacity());
+
+    ASSERT_NOT_REACHED();
+    return false;
+}
+
+bool SVGFEDropShadowElement::isIdentity() const
+{
+    return !stdDeviationX() && !stdDeviationY() && !dx() && !dy();
+}
+
+IntOutsets SVGFEDropShadowElement::outsets(const FloatRect& targetBoundingBox, SVGUnitTypes::SVGUnitType primitiveUnits) const
+{
+    auto offset = SVGFilter::calculateResolvedSize({ dx(), dy() }, targetBoundingBox, primitiveUnits);
+    auto stdDeviation = SVGFilter::calculateResolvedSize({ stdDeviationX(), stdDeviationY() }, targetBoundingBox, primitiveUnits);
+    return FEDropShadow::calculateOutsets(offset, stdDeviation);
+}
+
+RefPtr<FilterEffect> SVGFEDropShadowElement::createFilterEffect(const FilterEffectVector&, const GraphicsContext&) const
 {
     RenderObject* renderer = this->renderer();
     if (!renderer)
@@ -130,16 +159,10 @@ RefPtr<FilterEffect> SVGFEDropShadowElement::build(SVGFilterBuilder* filterBuild
 
     const SVGRenderStyle& svgStyle = renderer->style().svgStyle();
     
-    const Color& color = svgStyle.floodColor();
+    Color color = renderer->style().colorByApplyingColorFilter(svgStyle.floodColor());
     float opacity = svgStyle.floodOpacity();
 
-    FilterEffect* input1 = filterBuilder->getEffectById(in1());
-    if (!input1)
-        return nullptr;
-
-    RefPtr<FilterEffect> effect = FEDropShadow::create(filter, stdDeviationX(), stdDeviationY(), dx(), dy(), color, opacity);
-    effect->inputEffects().append(input1);
-    return effect;
+    return FEDropShadow::create(stdDeviationX(), stdDeviationY(), dx(), dy(), color, opacity);
 }
 
-}
+} // namespace WebCore

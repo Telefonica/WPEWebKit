@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,29 +28,35 @@
 
 #pragma once
 
+#include "ElementContext.h"
+#include "IntRect.h"
+#include "ProcessIdentifier.h"
+#include <wtf/EnumTraits.h>
+
 namespace WebCore {
 
-enum FrameState {
-    FrameStateProvisional,
+enum class FrameState : uint8_t {
+    Provisional,
     // This state indicates we are ready to commit to a page,
     // which means the view will transition to use the new data source.
-    FrameStateCommittedPage,
-    FrameStateComplete
+    CommittedPage,
+    Complete
 };
 
-enum class PolicyAction {
+enum class PolicyAction : uint8_t {
     Use,
     Download,
-    Ignore
+    Ignore,
+    StopAllLoads
 };
 
-enum class ReloadOption {
+enum class ReloadOption : uint8_t {
     ExpiredOnly = 1 << 0,
     FromOrigin  = 1 << 1,
     DisableContentBlockers = 1 << 2,
 };
 
-enum class FrameLoadType {
+enum class FrameLoadType : uint8_t {
     Standard,
     Back,
     Forward,
@@ -63,12 +69,62 @@ enum class FrameLoadType {
     ReloadExpiredOnly
 };
 
-enum class NewFrameOpenerPolicy {
+enum class IsMetaRefresh : bool { No, Yes };
+enum class WillContinueLoading : bool { No, Yes };
+
+class PolicyCheckIdentifier {
+public:
+    PolicyCheckIdentifier() = default;
+
+    static PolicyCheckIdentifier create();
+
+    bool isValidFor(PolicyCheckIdentifier);
+    bool operator==(const PolicyCheckIdentifier& other) const { return m_process == other.m_process && m_policyCheck == other.m_policyCheck; }
+
+    template<class Encoder> void encode(Encoder&) const;
+    template<class Decoder> static std::optional<PolicyCheckIdentifier> decode(Decoder&);
+
+private:
+    PolicyCheckIdentifier(ProcessIdentifier process, uint64_t policyCheck)
+        : m_process(process)
+        , m_policyCheck(policyCheck)
+    { }
+
+    ProcessIdentifier m_process;
+    uint64_t m_policyCheck { 0 };
+};
+
+template<class Encoder>
+void PolicyCheckIdentifier::encode(Encoder& encoder) const
+{
+    encoder << m_process << m_policyCheck;
+}
+
+template<class Decoder>
+std::optional<PolicyCheckIdentifier> PolicyCheckIdentifier::decode(Decoder& decoder)
+{
+    auto process = ProcessIdentifier::decode(decoder);
+    if (!process)
+        return std::nullopt;
+
+    uint64_t policyCheck;
+    if (!decoder.decode(policyCheck))
+        return std::nullopt;
+
+    return PolicyCheckIdentifier { *process, policyCheck };
+}
+
+enum class ShouldContinuePolicyCheck : bool {
+    Yes,
+    No
+};
+
+enum class NewFrameOpenerPolicy : uint8_t {
     Suppress,
     Allow
 };
 
-enum class NavigationType {
+enum class NavigationType : uint8_t {
     LinkClicked,
     FormSubmitted,
     BackForward,
@@ -77,38 +133,44 @@ enum class NavigationType {
     Other
 };
 
-enum class ShouldOpenExternalURLsPolicy {
+enum class ShouldOpenExternalURLsPolicy : uint8_t {
     ShouldNotAllow,
-    ShouldAllowExternalSchemes,
+    ShouldAllowExternalSchemesButNotAppLinks,
     ShouldAllow,
 };
 
-enum class InitiatedByMainFrame {
+enum class InitiatedByMainFrame : uint8_t {
     Yes,
     Unknown,
 };
 
-enum ClearProvisionalItemPolicy {
-    ShouldClearProvisionalItem,
-    ShouldNotClearProvisionalItem
+enum class ClearProvisionalItem : bool {
+    Yes,
+    No
 };
 
-enum class ObjectContentType {
+enum class StopLoadingPolicy {
+    PreventDuringUnloadEvents,
+    AlwaysStopLoading
+};
+
+enum class ObjectContentType : uint8_t {
     None,
     Image,
     Frame,
     PlugIn,
 };
 
-enum UnloadEventPolicy {
-    UnloadEventPolicyNone,
-    UnloadEventPolicyUnloadOnly,
-    UnloadEventPolicyUnloadAndPageHide
+enum class UnloadEventPolicy {
+    None,
+    UnloadOnly,
+    UnloadAndPageHide
 };
 
-enum ShouldSendReferrer {
-    MaybeSendReferrer,
-    NeverSendReferrer
+enum class BrowsingContextGroupSwitchDecision : uint8_t {
+    StayInGroup,
+    NewSharedGroup,
+    NewIsolatedGroup,
 };
 
 // Passed to FrameLoader::urlSelected() and ScriptController::executeIfJavaScriptURL()
@@ -120,45 +182,130 @@ enum ShouldReplaceDocumentIfJavaScriptURL {
     DoNotReplaceDocumentIfJavaScriptURL
 };
 
-enum WebGLLoadPolicy {
+enum class WebGLLoadPolicy : uint8_t {
     WebGLBlockCreation,
     WebGLAllowCreation,
     WebGLPendingCreation
 };
 
-enum class LockHistory {
-    Yes,
-    No
+enum class LockHistory : bool { No, Yes };
+enum class LockBackForwardList : bool { No, Yes };
+enum class AllowNavigationToInvalidURL : bool { No, Yes };
+enum class HasInsecureContent : bool { No, Yes };
+
+struct SystemPreviewInfo {
+    ElementContext element;
+
+    IntRect previewRect;
+    bool isPreview { false };
+
+    template<class Encoder> void encode(Encoder&) const;
+    template<class Decoder> static std::optional<SystemPreviewInfo> decode(Decoder&);
 };
 
-enum class LockBackForwardList {
-    Yes,
-    No
+template<class Encoder>
+void SystemPreviewInfo::encode(Encoder& encoder) const
+{
+    encoder << element << previewRect << isPreview;
+}
+
+template<class Decoder>
+std::optional<SystemPreviewInfo> SystemPreviewInfo::decode(Decoder& decoder)
+{
+    std::optional<ElementContext> element;
+    decoder >> element;
+    if (!element)
+        return std::nullopt;
+
+    std::optional<IntRect> previewRect;
+    decoder >> previewRect;
+    if (!previewRect)
+        return std::nullopt;
+
+    std::optional<bool> isPreview;
+    decoder >> isPreview;
+    if (!isPreview)
+        return std::nullopt;
+
+    return { { WTFMove(*element), WTFMove(*previewRect), WTFMove(*isPreview) } };
+}
+
+enum class LoadCompletionType : bool {
+    Finish,
+    Cancel
 };
 
-enum class AllowNavigationToInvalidURL {
-    Yes,
-    No
-};
-
-enum class HasInsecureContent {
-    Yes,
+enum class AllowsContentJavaScript : bool {
     No,
+    Yes,
 };
 
 } // namespace WebCore
 
 namespace WTF {
 
-template<typename> struct EnumTraits;
-template<typename E, E...> struct EnumValues;
+template<> struct EnumTraits<WebCore::FrameLoadType> {
+    using values = EnumValues<
+        WebCore::FrameLoadType,
+        WebCore::FrameLoadType::Standard,
+        WebCore::FrameLoadType::Back,
+        WebCore::FrameLoadType::Forward,
+        WebCore::FrameLoadType::IndexedBackForward,
+        WebCore::FrameLoadType::Reload,
+        WebCore::FrameLoadType::Same,
+        WebCore::FrameLoadType::RedirectWithLockedBackForwardList,
+        WebCore::FrameLoadType::Replace,
+        WebCore::FrameLoadType::ReloadFromOrigin,
+        WebCore::FrameLoadType::ReloadExpiredOnly
+    >;
+};
+
+template<> struct EnumTraits<WebCore::NavigationType> {
+    using values = EnumValues<
+        WebCore::NavigationType,
+        WebCore::NavigationType::LinkClicked,
+        WebCore::NavigationType::FormSubmitted,
+        WebCore::NavigationType::BackForward,
+        WebCore::NavigationType::Reload,
+        WebCore::NavigationType::FormResubmitted,
+        WebCore::NavigationType::Other
+    >;
+};
 
 template<> struct EnumTraits<WebCore::PolicyAction> {
     using values = EnumValues<
         WebCore::PolicyAction,
         WebCore::PolicyAction::Use,
         WebCore::PolicyAction::Download,
-        WebCore::PolicyAction::Ignore
+        WebCore::PolicyAction::Ignore,
+        WebCore::PolicyAction::StopAllLoads
+    >;
+};
+
+template<> struct EnumTraits<WebCore::BrowsingContextGroupSwitchDecision> {
+    using values = EnumValues<
+        WebCore::BrowsingContextGroupSwitchDecision,
+        WebCore::BrowsingContextGroupSwitchDecision::StayInGroup,
+        WebCore::BrowsingContextGroupSwitchDecision::NewSharedGroup,
+        WebCore::BrowsingContextGroupSwitchDecision::NewIsolatedGroup
+    >;
+};
+
+template<> struct EnumTraits<WebCore::ShouldOpenExternalURLsPolicy> {
+    using values = EnumValues<
+        WebCore::ShouldOpenExternalURLsPolicy,
+        WebCore::ShouldOpenExternalURLsPolicy::ShouldNotAllow,
+        WebCore::ShouldOpenExternalURLsPolicy::ShouldAllowExternalSchemesButNotAppLinks,
+        WebCore::ShouldOpenExternalURLsPolicy::ShouldAllow
+    >;
+};
+
+template<> struct EnumTraits<WebCore::WebGLLoadPolicy> {
+    using values = EnumValues<
+        WebCore::WebGLLoadPolicy,
+        WebCore::WebGLLoadPolicy::WebGLBlockCreation,
+        WebCore::WebGLLoadPolicy::WebGLAllowCreation,
+        WebCore::WebGLLoadPolicy::WebGLPendingCreation
     >;
 };
 

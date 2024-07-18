@@ -25,10 +25,15 @@
 
 // @internal
 
-function mapLikeForEach(callback)
+function forEachWrapper(backingMapOrSet, callback)
 {
     "use strict";
-    this.@backingMap.forEach((value, key, map) => {
+    backingMapOrSet.@forEach((value, key) => {
         callback(value, key, this);
     });
+}
+
+function getUserMediaShim(constraints, successCallback, errorCallback)
+{
+    this.mediaDevices.getUserMedia(constraints).then(successCallback, errorCallback);
 }

@@ -23,22 +23,19 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WebBackForwardList_h
-#define WebBackForwardList_h
+#pragma once
 
 #include "APIObject.h"
 #include "WebBackForwardListItem.h"
 #include "WebPageProxy.h"
+#include <WebCore/BackForwardItemIdentifier.h>
 #include <wtf/Ref.h>
-#include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
-#if USE(CF)
-#include <CoreFoundation/CFDictionary.h>
-#endif
 
 namespace WebKit {
 
 struct BackForwardListState;
+struct WebBackForwardListCounts;
 
 class WebBackForwardList : public API::ObjectImpl<API::Object::Type::BackForwardList> {
 public:
@@ -50,8 +47,10 @@ public:
 
     virtual ~WebBackForwardList();
 
-    void addItem(WebBackForwardListItem*);
-    void goToItem(WebBackForwardListItem*);
+    WebBackForwardListItem* itemForID(const WebCore::BackForwardItemIdentifier&);
+
+    void addItem(Ref<WebBackForwardListItem>&&);
+    void goToItem(WebBackForwardListItem&);
     void removeAllItems();
     void clear();
 
@@ -60,11 +59,14 @@ public:
     WebBackForwardListItem* forwardItem() const;
     WebBackForwardListItem* itemAtIndex(int) const;
 
+    WebBackForwardListItem* goBackItemSkippingItemsWithoutUserGesture() const;
+    WebBackForwardListItem* goForwardItemSkippingItemsWithoutUserGesture() const;
+
     const BackForwardListItemVector& entries() const { return m_entries; }
 
-    uint32_t currentIndex() const { return m_currentIndex; }
-    int backListCount() const;
-    int forwardListCount() const;
+    unsigned backListCount() const;
+    unsigned forwardListCount() const;
+    WebBackForwardListCounts counts() const;
 
     Ref<API::Array> backList() const;
     Ref<API::Array> forwardList() const;
@@ -76,6 +78,11 @@ public:
     void restoreFromState(BackForwardListState);
 
     Vector<BackForwardListItemState> itemStates() const;
+    Vector<BackForwardListItemState> filteredItemStates(Function<bool(WebBackForwardListItem&)>&&) const;
+
+#if !LOG_DISABLED
+    const char* loggingString();
+#endif
 
 private:
     explicit WebBackForwardList(WebPageProxy&);
@@ -84,12 +91,7 @@ private:
 
     WebPageProxy* m_page;
     BackForwardListItemVector m_entries;
-    
-    bool m_hasCurrentIndex;
-    unsigned m_currentIndex;
-    unsigned m_capacity;
+    std::optional<size_t> m_currentIndex;
 };
 
 } // namespace WebKit
-
-#endif // WebBackForwardList_h

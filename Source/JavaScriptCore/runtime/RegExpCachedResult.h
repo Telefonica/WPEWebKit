@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,7 +25,9 @@
 
 #pragma once
 
-#include "RegExpObject.h"
+#include "Heap.h"
+#include "JSObject.h"
+#include "RegExp.h"
 
 namespace JSC {
 
@@ -43,44 +45,38 @@ class JSString;
 // m_reifiedResult and m_reifiedInput hold the cached results.
 class RegExpCachedResult {
 public:
-    RegExpCachedResult(VM& vm, JSObject* owner, RegExp* emptyRegExp)
-        : m_result(0, 0)
-        , m_reified(false)
-    {
-        m_lastInput.set(vm, owner, jsEmptyString(&vm));
-        m_lastRegExp.set(vm, owner, emptyRegExp);
-    }
-
     ALWAYS_INLINE void record(VM& vm, JSObject* owner, RegExp* regExp, JSString* input, MatchResult result)
     {
-        vm.heap.writeBarrier(owner);
         m_lastRegExp.setWithoutWriteBarrier(regExp);
         m_lastInput.setWithoutWriteBarrier(input);
         m_result = result;
         m_reified = false;
+        vm.writeBarrier(owner);
     }
 
-    JSArray* lastResult(ExecState*, JSObject* owner);
-    void setInput(ExecState*, JSObject* owner, JSString*);
+    JSArray* lastResult(JSGlobalObject*, JSObject* owner);
+    void setInput(JSGlobalObject*, JSObject* owner, JSString*);
 
-    JSString* leftContext(ExecState*, JSObject* owner);
-    JSString* rightContext(ExecState*, JSObject* owner);
+    JSString* leftContext(JSGlobalObject*, JSObject* owner);
+    JSString* rightContext(JSGlobalObject*, JSObject* owner);
 
     JSString* input()
     {
         return m_reified ? m_reifiedInput.get() : m_lastInput.get();
     }
 
-    void visitChildren(SlotVisitor&);
+    DECLARE_VISIT_AGGREGATE;
 
+    // m_lastRegExp would be nullptr when RegExpCachedResult is not reified.
+    // If we find m_lastRegExp is nullptr, it means this should hold the empty RegExp.
     static ptrdiff_t offsetOfLastRegExp() { return OBJECT_OFFSETOF(RegExpCachedResult, m_lastRegExp); }
     static ptrdiff_t offsetOfLastInput() { return OBJECT_OFFSETOF(RegExpCachedResult, m_lastInput); }
     static ptrdiff_t offsetOfResult() { return OBJECT_OFFSETOF(RegExpCachedResult, m_result); }
     static ptrdiff_t offsetOfReified() { return OBJECT_OFFSETOF(RegExpCachedResult, m_reified); }
 
 private:
-    MatchResult m_result;
-    bool m_reified;
+    MatchResult m_result { 0, 0 };
+    bool m_reified { false };
     WriteBarrier<JSString> m_lastInput;
     WriteBarrier<RegExp> m_lastRegExp;
     WriteBarrier<JSArray> m_reifiedResult;

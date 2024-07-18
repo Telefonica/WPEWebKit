@@ -30,249 +30,176 @@
 
 #if USE(CURL)
 
-#include "CurlContext.h"
-#include "CurlSSLHandle.h"
-#include "HTTPHeaderNames.h"
 #include "HTTPParsers.h"
 #include "ResourceRequest.h"
-#include <wtf/MainThread.h>
-#include <wtf/text/CString.h>
-
-using namespace WebCore;
+#include "ResourceResponse.h"
+#include "SharedBuffer.h"
+#include "SynchronousLoaderClient.h"
 
 namespace WebCore {
 
-// CurlDownload --------------------------------------------------------------------------
-
-CurlDownload::CurlDownload() = default;
-
 CurlDownload::~CurlDownload()
 {
-    closeFile();
-    moveFileToDestination();
+    if (m_curlRequest)
+        m_curlRequest->invalidateClient();
 }
 
-void CurlDownload::init(CurlDownloadListener* listener, const URL& url)
+void CurlDownload::init(CurlDownloadListener& listener, const URL& url)
 {
-    if (!listener)
-        return;
-
-    LockHolder locker(m_mutex);
-
-    m_listener = listener;
-    m_url = url;
+    m_listener = &listener;
+    m_request.setURL(url);
 }
 
-void CurlDownload::init(CurlDownloadListener* listener, ResourceHandle*, const ResourceRequest& request, const ResourceResponse&)
+void CurlDownload::init(CurlDownloadListener& listener, ResourceHandle*, const ResourceRequest& request, const ResourceResponse&)
 {
-    if (!listener)
-        return;
-
-    URL url(ParsedURLString, request.url());
-
-    init(listener, url);
-
-    addHeaders(request);
+    m_listener = &listener;
+    m_request = request.isolatedCopy();
 }
 
-bool CurlDownload::start()
+void CurlDownload::start()
 {
-    m_job = CurlJobManager::singleton().add(m_curlHandle, *this);
-    return !!m_job;
+    ASSERT(isMainThread());
+
+    m_curlRequest = createCurlRequest(m_request);
+    m_curlRequest->enableDownloadToFile();
+    m_curlRequest->start();
 }
 
 bool CurlDownload::cancel()
 {
-    CurlJobTicket job = m_job;
-    m_job = nullptr;
-    CurlJobManager::singleton().cancel(job);
+    m_isCancelled = true;
+
+    if (!m_curlRequest)
+        m_curlRequest->cancel();
+
     return true;
 }
 
-ResourceResponse CurlDownload::getResponse() const
+Ref<CurlRequest> CurlDownload::createCurlRequest(ResourceRequest& request)
 {
-    LockHolder locker(m_mutex);
-    ResourceResponse response(m_responseUrl, m_responseMIMEType, 0, m_responseTextEncodingName);
-    response.setHTTPHeaderField(m_httpHeaderFieldName, m_httpHeaderFieldValue);
-    return response;
+    // FIXME: Use a correct sessionID.
+    auto curlRequest = CurlRequest::create(request, *this);
+    return curlRequest;
 }
 
-void CurlDownload::retain()
+void CurlDownload::curlDidReceiveResponse(CurlRequest& request, CurlResponse&& response)
 {
-    ref();
-}
+    ASSERT(isMainThread());
 
-void CurlDownload::release()
-{
-    deref();
-}
-
-void CurlDownload::setupRequest()
-{
-    LockHolder locker(m_mutex);
-
-    m_curlHandle.initialize();
-    m_curlHandle.enableShareHandle();
-
-    m_curlHandle.setUrl(m_url);
-    m_curlHandle.setHeaderCallbackFunction(headerCallback, this);
-    m_curlHandle.setWriteCallbackFunction(writeCallback, this);
-    m_curlHandle.enableFollowLocation();
-    m_curlHandle.enableHttpAuthentication(CURLAUTH_ANY);
-    m_curlHandle.setCACertPath(CurlContext::singleton().sslHandle().getCACertPath());
-
-}
-
-void CurlDownload::notifyFinish()
-{
-    callOnMainThread([protectedThis = makeRef(*this)] {
-        if (!protectedThis->m_job)
-            return;
-        protectedThis->didFinish();
-    });
-}
-
-void CurlDownload::notifyFail()
-{
-    callOnMainThread([protectedThis = makeRef(*this)] {
-        if (!protectedThis->m_job)
-            return;
-        protectedThis->didFail();
-    });
-}
-
-void CurlDownload::closeFile()
-{
-    LockHolder locker(m_mutex);
-
-    if (m_tempHandle != invalidPlatformFileHandle) {
-        WebCore::closeFile(m_tempHandle);
-        m_tempHandle = invalidPlatformFileHandle;
-    }
-}
-
-void CurlDownload::moveFileToDestination()
-{
-    LockHolder locker(m_mutex);
-
-    if (m_destination.isEmpty())
+    if (m_isCancelled)
         return;
 
-    moveFile(m_tempPath, m_destination);
-}
+    m_response = ResourceResponse(response);
 
-void CurlDownload::writeDataToFile(const char* data, int size)
-{
-    if (m_tempPath.isEmpty())
-        m_tempPath = openTemporaryFile("download", m_tempHandle);
-
-    if (m_tempHandle != invalidPlatformFileHandle)
-        writeToFile(m_tempHandle, data, size);
-}
-
-void CurlDownload::addHeaders(const ResourceRequest& request)
-{
-    LockHolder locker(m_mutex);
-    m_curlHandle.appendRequestHeaders(request.httpHeaderFields());
-}
-
-void CurlDownload::didReceiveHeader(const String& header)
-{
-    LockHolder locker(m_mutex);
-
-    if (header == "\r\n" || header == "\n") {
-
-        auto httpCode = m_curlHandle.getResponseCode();
-
-        if (httpCode && *httpCode >= 200 && *httpCode < 300) {
-            auto url = m_curlHandle.getEffectiveURL();
-            callOnMainThread([protectedThis = makeRef(*this), url = url.isolatedCopy()] {
-                ResourceResponse localResponse = protectedThis->getResponse();
-                protectedThis->m_responseUrl = url;
-                protectedThis->m_responseMIMEType = extractMIMETypeFromMediaType(localResponse.httpHeaderField(HTTPHeaderName::ContentType));
-                protectedThis->m_responseTextEncodingName = extractCharsetFromMediaType(localResponse.httpHeaderField(HTTPHeaderName::ContentType));
-
-                protectedThis->didReceiveResponse();
-            });
-        }
-    } else {
-        callOnMainThread([protectedThis = makeRef(*this), header = header.isolatedCopy()] {
-            int splitPos = header.find(":");
-            if (splitPos != -1)
-                protectedThis->m_httpHeaderFieldName = header.left(splitPos);
-                protectedThis->m_httpHeaderFieldValue = header.substring(splitPos + 1).stripWhiteSpace();
-        });
+    if (m_response.shouldRedirect()) {
+        willSendRequest();
+        return;
     }
-}
 
-void CurlDownload::didReceiveData(void* data, int size)
-{
-    LockHolder locker(m_mutex);
-
-    callOnMainThread([protectedThis = makeRef(*this), size] {
-        protectedThis->didReceiveDataOfLength(size);
-    });
-
-    writeDataToFile(static_cast<const char*>(data), size);
-}
-
-void CurlDownload::didReceiveResponse()
-{
     if (m_listener)
-        m_listener->didReceiveResponse();
+        m_listener->didReceiveResponse(m_response);
+
+    request.completeDidReceiveResponse();
 }
 
-void CurlDownload::didReceiveDataOfLength(int size)
+
+void CurlDownload::curlDidReceiveData(CurlRequest&, const SharedBuffer& buffer)
 {
+    ASSERT(isMainThread());
+
+    if (m_isCancelled)
+        return;
+
     if (m_listener)
-        m_listener->didReceiveDataOfLength(size);
+        m_listener->didReceiveDataOfLength(buffer.size());
 }
 
-void CurlDownload::didFinish()
+void CurlDownload::curlDidComplete(CurlRequest& request, NetworkLoadMetrics&&)
 {
-    closeFile();
-    moveFileToDestination();
+    ASSERT(isMainThread());
+
+    if (m_isCancelled)
+        return;
+
+    if (!m_destination.isEmpty()) {
+        if (!request.getDownloadedFilePath().isEmpty())
+            FileSystem::moveFile(request.getDownloadedFilePath(), m_destination);
+    }
 
     if (m_listener)
         m_listener->didFinish();
 }
 
-void CurlDownload::didFail()
+void CurlDownload::curlDidFailWithError(CurlRequest& request, ResourceError&&, CertificateInfo&&)
 {
-    closeFile();
-    {
-        LockHolder locker(m_mutex);
+    ASSERT(isMainThread());
 
-        if (m_deletesFileUponFailure)
-            deleteFile(m_tempPath);
-    }
+    if (m_isCancelled)
+        return;
+
+    if (m_deletesFileUponFailure && !request.getDownloadedFilePath().isEmpty())
+        FileSystem::deleteFile(request.getDownloadedFilePath());
 
     if (m_listener)
         m_listener->didFail();
 }
 
-size_t CurlDownload::writeCallback(char* ptr, size_t size, size_t nmemb, void* data)
+bool CurlDownload::shouldRedirectAsGET(const ResourceRequest& request, bool crossOrigin)
 {
-    size_t totalSize = size * nmemb;
-    CurlDownload* download = reinterpret_cast<CurlDownload*>(data);
+    if ((request.httpMethod() == "GET"_s) || (request.httpMethod() == "HEAD"_s))
+        return false;
 
-    if (download)
-        download->didReceiveData(static_cast<void*>(ptr), totalSize);
+    if (!request.url().protocolIsInHTTPFamily())
+        return true;
 
-    return totalSize;
+    if (m_response.isSeeOther())
+        return true;
+
+    if ((m_response.isMovedPermanently() || m_response.isFound()) && (request.httpMethod() == "POST"_s))
+        return true;
+
+    if (crossOrigin && (request.httpMethod() == "DELETE"_s))
+        return true;
+
+    return false;
 }
 
-size_t CurlDownload::headerCallback(char* ptr, size_t size, size_t nmemb, void* data)
+void CurlDownload::willSendRequest()
 {
-    size_t totalSize = size * nmemb;
-    CurlDownload* download = reinterpret_cast<CurlDownload*>(data);
+    ASSERT(isMainThread());
 
-    String header(static_cast<const char*>(ptr), totalSize);
+    static const int maxRedirects = 20;
 
-    if (download)
-        download->didReceiveHeader(header);
+    if (m_redirectCount++ > maxRedirects) {
+        if (m_listener)
+            m_listener->didFail();
+        return;
+    }
 
-    return totalSize;
+    String location = m_response.httpHeaderField(HTTPHeaderName::Location);
+    URL newURL = URL(m_response.url(), location);
+    bool crossOrigin = !protocolHostAndPortAreEqual(m_request.url(), newURL);
+
+    ResourceRequest newRequest = m_request;
+    newRequest.setURL(newURL);
+
+    if (shouldRedirectAsGET(newRequest, crossOrigin)) {
+        newRequest.setHTTPMethod("GET"_s);
+        newRequest.setHTTPBody(nullptr);
+        newRequest.clearHTTPContentType();
+    }
+
+    if (crossOrigin) {
+        // If the network layer carries over authentication headers from the original request
+        // in a cross-origin redirect, we want to clear those headers here. 
+        newRequest.clearHTTPAuthorization();
+        newRequest.clearHTTPOrigin();
+    }
+
+    m_curlRequest->cancel();
+
+    m_curlRequest = createCurlRequest(newRequest);
+    m_curlRequest->start();
 }
 
 }

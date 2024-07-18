@@ -26,59 +26,62 @@
 #include "config.h"
 #include "IDBDatabaseIdentifier.h"
 
-#if ENABLE(INDEXED_DATABASE)
-
-#include "FileSystem.h"
 #include "SecurityOrigin.h"
+#include <wtf/FileSystem.h>
 #include <wtf/Ref.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-IDBDatabaseIdentifier::IDBDatabaseIdentifier(const String& databaseName, SecurityOriginData&& openingOrigin, SecurityOriginData&& mainFrameOrigin)
+IDBDatabaseIdentifier::IDBDatabaseIdentifier(const String& databaseName, SecurityOriginData&& openingOrigin, SecurityOriginData&& mainFrameOrigin, bool isTransient)
     : m_databaseName(databaseName)
-    , m_openingOrigin(WTFMove(openingOrigin))
-    , m_mainFrameOrigin(WTFMove(mainFrameOrigin))
-
+    , m_origin { WTFMove(mainFrameOrigin), WTFMove(openingOrigin) }
+    , m_isTransient(isTransient)
 {
     // The empty string is a valid database name, but a null string is not.
     ASSERT(!databaseName.isNull());
 }
 
-IDBDatabaseIdentifier IDBDatabaseIdentifier::isolatedCopy() const
+IDBDatabaseIdentifier IDBDatabaseIdentifier::isolatedCopy() const &
 {
     IDBDatabaseIdentifier identifier;
-
     identifier.m_databaseName = m_databaseName.isolatedCopy();
-    identifier.m_openingOrigin = m_openingOrigin.isolatedCopy();
-    identifier.m_mainFrameOrigin = m_mainFrameOrigin.isolatedCopy();
-
+    identifier.m_origin = m_origin.isolatedCopy();
+    identifier.m_isTransient = m_isTransient;
     return identifier;
 }
 
-String IDBDatabaseIdentifier::databaseDirectoryRelativeToRoot(const String& rootDirectory) const
+IDBDatabaseIdentifier IDBDatabaseIdentifier::isolatedCopy() &&
 {
-    return databaseDirectoryRelativeToRoot(m_mainFrameOrigin, m_openingOrigin, rootDirectory);
+    IDBDatabaseIdentifier identifier;
+    identifier.m_databaseName = WTFMove(m_databaseName).isolatedCopy();
+    identifier.m_origin = WTFMove(m_origin).isolatedCopy();
+    identifier.m_isTransient = m_isTransient;
+    return identifier;
 }
 
-String IDBDatabaseIdentifier::databaseDirectoryRelativeToRoot(const SecurityOriginData& topLevelOrigin, const SecurityOriginData& openingOrigin, const String& rootDirectory)
+String IDBDatabaseIdentifier::databaseDirectoryRelativeToRoot(const String& rootDirectory, ASCIILiteral versionString) const
 {
-    String mainFrameDirectory = pathByAppendingComponent(rootDirectory, topLevelOrigin.databaseIdentifier());
+    return databaseDirectoryRelativeToRoot(m_origin, rootDirectory, versionString);
+}
+
+String IDBDatabaseIdentifier::databaseDirectoryRelativeToRoot(const ClientOrigin& origin, const String& rootDirectory, ASCIILiteral versionString)
+{
+    String versionDirectory = FileSystem::pathByAppendingComponent(rootDirectory, StringView { versionString });
+    String mainFrameDirectory = FileSystem::pathByAppendingComponent(versionDirectory, origin.topOrigin.databaseIdentifier());
 
     // If the opening origin and main frame origins are the same, there is no partitioning.
-    if (openingOrigin == topLevelOrigin)
+    if (origin.topOrigin == origin.clientOrigin)
         return mainFrameDirectory;
 
-    return pathByAppendingComponent(mainFrameDirectory, openingOrigin.databaseIdentifier());
+    return FileSystem::pathByAppendingComponent(mainFrameDirectory, origin.clientOrigin.databaseIdentifier());
 }
 
 #if !LOG_DISABLED
-String IDBDatabaseIdentifier::debugString() const
+String IDBDatabaseIdentifier::loggingString() const
 {
-    return makeString(m_databaseName, "@", m_openingOrigin.debugString(), ":", m_mainFrameOrigin.debugString());
+    return makeString(m_databaseName, "@", m_origin.topOrigin.debugString(), ":", m_origin.clientOrigin.debugString(), m_isTransient ? ", transient" : "");
 }
 #endif
 
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

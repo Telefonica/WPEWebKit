@@ -23,13 +23,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import <Foundation/NSObject.h>
+#if defined(__cplusplus)
 
-@class CLLocationManager;
-@class NSString;
+#import <Foundation/Foundation.h>
 
 namespace WebCore {
-class GeolocationPosition;
+class GeolocationPositionData;
 }
 
 // WebGeolocationCoreLocationDelegate abstracts the location services of CoreLocation.
@@ -43,7 +42,7 @@ class GeolocationPosition;
 - (void)geolocationAuthorizationGranted;
 - (void)geolocationAuthorizationDenied;
 
-- (void)positionChanged:(WebCore::GeolocationPosition*)position;
+- (void)positionChanged:(WebCore::GeolocationPositionData&&)position;
 - (void)errorOccurred:(NSString *)errorMessage;
 - (void)resetGeolocation;
 @end
@@ -59,3 +58,5 @@ class GeolocationPosition;
 
 - (void)setEnableHighAccuracy:(BOOL)flag;
 @end
+
+#endif

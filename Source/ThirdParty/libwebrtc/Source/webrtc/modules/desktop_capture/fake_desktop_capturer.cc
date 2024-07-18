@@ -8,9 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/desktop_capture/fake_desktop_capturer.h"
+#include "modules/desktop_capture/fake_desktop_capturer.h"
 
 #include <utility>
+
+#include "modules/desktop_capture/desktop_capture_types.h"
+#include "modules/desktop_capture/desktop_frame.h"
 
 namespace webrtc {
 
@@ -29,9 +32,9 @@ int FakeDesktopCapturer::num_capture_attempts() const {
   return num_capture_attempts_;
 }
 
-// Uses the |generator| provided as DesktopFrameGenerator, FakeDesktopCapturer
+// Uses the `generator` provided as DesktopFrameGenerator, FakeDesktopCapturer
 // does
-// not take the ownership of |generator|.
+// not take the ownership of `generator`.
 void FakeDesktopCapturer::set_frame_generator(
     DesktopFrameGenerator* generator) {
   generator_ = generator;

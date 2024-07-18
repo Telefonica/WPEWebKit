@@ -26,19 +26,20 @@
 #include "config.h"
 #include "CryptoAlgorithmRegistry.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 #include "CryptoAlgorithm.h"
-#include <wtf/Lock.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
 
-static StaticLock registryMutex;
-
 CryptoAlgorithmRegistry& CryptoAlgorithmRegistry::singleton()
 {
-    static NeverDestroyed<CryptoAlgorithmRegistry> registry;
+    static LazyNeverDestroyed<CryptoAlgorithmRegistry> registry;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        registry.construct();
+    });
     return registry;
 }
 
@@ -52,7 +53,7 @@ std::optional<CryptoAlgorithmIdentifier> CryptoAlgorithmRegistry::identifier(con
     if (name.isEmpty())
         return std::nullopt;
 
-    std::lock_guard<StaticLock> lock(registryMutex);
+    Locker locker { m_lock };
 
     // FIXME: How is it helpful to call isolatedCopy on the argument to find?
     auto identifier = m_identifiers.find(name.isolatedCopy());
@@ -64,7 +65,7 @@ std::optional<CryptoAlgorithmIdentifier> CryptoAlgorithmRegistry::identifier(con
 
 String CryptoAlgorithmRegistry::name(CryptoAlgorithmIdentifier identifier)
 {
-    std::lock_guard<StaticLock> lock(registryMutex);
+    Locker locker { m_lock };
 
     auto contructor = m_constructors.find(static_cast<unsigned>(identifier));
     if (contructor == m_constructors.end())
@@ -75,7 +76,7 @@ String CryptoAlgorithmRegistry::name(CryptoAlgorithmIdentifier identifier)
 
 RefPtr<CryptoAlgorithm> CryptoAlgorithmRegistry::create(CryptoAlgorithmIdentifier identifier)
 {
-    std::lock_guard<StaticLock> lock(registryMutex);
+    Locker locker { m_lock };
 
     auto contructor = m_constructors.find(static_cast<unsigned>(identifier));
     if (contructor == m_constructors.end())
@@ -86,7 +87,7 @@ RefPtr<CryptoAlgorithm> CryptoAlgorithmRegistry::create(CryptoAlgorithmIdentifie
 
 void CryptoAlgorithmRegistry::registerAlgorithm(const String& name, CryptoAlgorithmIdentifier identifier, CryptoAlgorithmConstructor constructor)
 {
-    std::lock_guard<StaticLock> lock(registryMutex);
+    Locker locker { m_lock };
 
     ASSERT(!m_identifiers.contains(name));
     ASSERT(!m_constructors.contains(static_cast<unsigned>(identifier)));
@@ -98,4 +99,4 @@ void CryptoAlgorithmRegistry::registerAlgorithm(const String& name, CryptoAlgori
 
 } // namespace WebCore
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

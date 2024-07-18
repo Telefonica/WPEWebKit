@@ -25,24 +25,29 @@
 
 #pragma once
 
+#include <optional>
+#include <wtf/Forward.h>
+
 namespace WebCore {
 
 class Geolocation;
-class GeolocationPosition;
+class GeolocationPositionData;
 class Page;
 
 class GeolocationClient {
 public:
     virtual void geolocationDestroyed() = 0;
 
-    virtual void startUpdating() = 0;
+    virtual void startUpdating(const String& authorizationToken, bool needsHighAccuracy) = 0;
     virtual void stopUpdating() = 0;
+    virtual void revokeAuthorizationToken(const String&) { }
+
     // FIXME: The V2 Geolocation specification proposes that this property is
     // renamed. See http://www.w3.org/2008/geolocation/track/issues/6
     // We should update WebKit to reflect this if and when the V2 specification
     // is published.
     virtual void setEnableHighAccuracy(bool) = 0;
-    virtual GeolocationPosition* lastPosition() = 0;
+    virtual std::optional<GeolocationPositionData> lastPosition() = 0;
 
     virtual void requestPermission(Geolocation&) = 0;
     virtual void cancelPermissionRequest(Geolocation&) = 0;
@@ -50,7 +55,7 @@ public:
     void provideGeolocationTo(Page*, GeolocationClient&);
 
 protected:
-    virtual ~GeolocationClient() { }
+    virtual ~GeolocationClient() = default;
 };
 
 WEBCORE_EXPORT void provideGeolocationTo(Page*, GeolocationClient&);

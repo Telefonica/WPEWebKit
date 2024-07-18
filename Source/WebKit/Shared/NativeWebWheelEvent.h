@@ -23,23 +23,31 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef NativeWebWheelEvent_h
-#define NativeWebWheelEvent_h
+#pragma once
 
-#include "WebEvent.h"
+#include "WebWheelEvent.h"
 
 #if USE(APPKIT)
 #include <wtf/RetainPtr.h>
 OBJC_CLASS NSView;
+OBJC_CLASS NSEvent;
 #endif
 
 #if PLATFORM(GTK)
 #include <WebCore/GUniquePtrGtk.h>
+#if USE(GTK4)
+typedef struct _GdkEvent GdkEvent;
+#else
 typedef union _GdkEvent GdkEvent;
 #endif
+#endif
 
-#if PLATFORM(WPE)
+#if USE(LIBWPE)
 struct wpe_input_axis_event;
+#endif
+
+#if PLATFORM(WIN)
+#include <windows.h>
 #endif
 
 namespace WebKit {
@@ -52,17 +60,21 @@ public:
     NativeWebWheelEvent(const NativeWebWheelEvent&);
     NativeWebWheelEvent(GdkEvent*);
     NativeWebWheelEvent(GdkEvent*, WebWheelEvent::Phase, WebWheelEvent::Phase momentumPhase);
-#elif PLATFORM(WPE)
-    NativeWebWheelEvent(struct wpe_input_axis_event*, float deviceScaleFactor);
+    NativeWebWheelEvent(GdkEvent*, const WebCore::IntPoint&, const WebCore::FloatSize& wheelTicks);
+    NativeWebWheelEvent(GdkEvent*, const WebCore::IntPoint& position, const WebCore::IntPoint& globalPosition, const WebCore::FloatSize& delta, const WebCore::FloatSize& wheelTicks, WebWheelEvent::Phase, WebWheelEvent::Phase momentumPhase, bool hasPreciseDeltas = false);
+#elif USE(LIBWPE)
+    NativeWebWheelEvent(struct wpe_input_axis_event*, float deviceScaleFactor, WebWheelEvent::Phase, WebWheelEvent::Phase momentumPhase);
+#elif PLATFORM(WIN)
+    NativeWebWheelEvent(HWND, UINT message, WPARAM, LPARAM);
 #endif
 
 #if USE(APPKIT)
     NSEvent* nativeEvent() const { return m_nativeEvent.get(); }
 #elif PLATFORM(GTK)
     GdkEvent* nativeEvent() const { return m_nativeEvent.get(); }
-#elif PLATFORM(IOS)
-    const void* nativeEvent() const { return 0; }
-#elif PLATFORM(WPE)
+#elif PLATFORM(WIN)
+    const MSG* nativeEvent() const { return &m_nativeEvent; }
+#else
     const void* nativeEvent() const { return nullptr; }
 #endif
 
@@ -71,9 +83,9 @@ private:
     RetainPtr<NSEvent> m_nativeEvent;
 #elif PLATFORM(GTK)
     GUniquePtr<GdkEvent> m_nativeEvent;
+#elif PLATFORM(WIN)
+    MSG m_nativeEvent;
 #endif
 };
 
 } // namespace WebKit
-
-#endif // NativeWebWheelEvent_h

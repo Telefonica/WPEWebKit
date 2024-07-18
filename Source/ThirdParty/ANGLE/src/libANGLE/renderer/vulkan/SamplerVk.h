@@ -11,6 +11,8 @@
 #define LIBANGLE_RENDERER_VULKAN_SAMPLERVK_H_
 
 #include "libANGLE/renderer/SamplerImpl.h"
+#include "libANGLE/renderer/vulkan/ContextVk.h"
+#include "libANGLE/renderer/vulkan/vk_helpers.h"
 
 namespace rx
 {
@@ -18,8 +20,20 @@ namespace rx
 class SamplerVk : public SamplerImpl
 {
   public:
-    SamplerVk();
+    SamplerVk(const gl::SamplerState &state);
     ~SamplerVk() override;
+
+    void onDestroy(const gl::Context *context) override;
+    angle::Result syncState(const gl::Context *context, const bool dirty) override;
+
+    const vk::SamplerHelper &getSampler() const
+    {
+        ASSERT(mSampler.valid());
+        return mSampler.get();
+    }
+
+  private:
+    vk::SamplerBinding mSampler;
 };
 
 }  // namespace rx

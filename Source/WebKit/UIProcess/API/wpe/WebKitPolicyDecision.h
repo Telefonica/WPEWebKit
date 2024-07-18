@@ -26,6 +26,7 @@
 
 #include <glib-object.h>
 #include <wpe/WebKitDefines.h>
+#include <wpe/WebKitWebsitePolicies.h>
 
 G_BEGIN_DECLS
 
@@ -50,6 +51,7 @@ struct _WebKitPolicyDecision {
 struct _WebKitPolicyDecisionClass {
     GObjectClass parent_class;
 
+    /*< private >*/
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
@@ -61,6 +63,10 @@ webkit_policy_decision_get_type (void);
 
 WEBKIT_API void
 webkit_policy_decision_use      (WebKitPolicyDecision *decision);
+
+WEBKIT_API void
+webkit_policy_decision_use_with_policies  (WebKitPolicyDecision *decision,
+                                           WebKitWebsitePolicies *policies);
 
 WEBKIT_API void
 webkit_policy_decision_ignore   (WebKitPolicyDecision *decision);

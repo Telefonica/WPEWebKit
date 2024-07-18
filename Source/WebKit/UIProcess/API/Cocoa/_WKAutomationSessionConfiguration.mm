@@ -26,8 +26,6 @@
 #import "config.h"
 #import "_WKAutomationSessionConfiguration.h"
 
-#if WK_API_ENABLED
-
 @implementation _WKAutomationSessionConfiguration
 
 - (instancetype)init
@@ -35,6 +33,7 @@
     if (!(self = [super init]))
         return nil;
 
+    _acceptInsecureCertificates = NO;
     _allowsInsecureMediaCapture = YES;
     _suppressesICECandidateFiltering = NO;
 
@@ -45,6 +44,7 @@
 {
     _WKAutomationSessionConfiguration *configuration = [(_WKAutomationSessionConfiguration *)[[self class] allocWithZone:zone] init];
 
+    configuration.acceptInsecureCertificates = self.acceptInsecureCertificates;
     configuration.allowsInsecureMediaCapture = self.allowsInsecureMediaCapture;
     configuration.suppressesICECandidateFiltering = self.suppressesICECandidateFiltering;
 
@@ -52,5 +52,3 @@
 }
 
 @end
-
-#endif // WK_API_ENABLED

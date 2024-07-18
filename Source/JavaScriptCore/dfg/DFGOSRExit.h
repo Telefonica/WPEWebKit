@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,15 +28,26 @@
 #if ENABLE(DFG_JIT)
 
 #include "DFGOSRExitBase.h"
+#include "DFGVariableEventStream.h"
 #include "GPRInfo.h"
 #include "MacroAssembler.h"
 #include "MethodOfGettingAValueProfile.h"
 #include "Operands.h"
 #include "ValueRecovery.h"
+#include <wtf/RefPtr.h>
 
 namespace JSC {
 
+class ArrayProfile;
 class CCallHelpers;
+
+namespace Probe {
+class Context;
+} // namespace Probe
+
+namespace Profiler {
+class OSRExit;
+} // namespace Profiler
 
 namespace DFG {
 
@@ -48,6 +59,7 @@ struct Node;
 // may need be performed should a speculation check fail.
 enum SpeculationRecoveryType : uint8_t {
     SpeculativeAdd,
+    SpeculativeAddSelf,
     SpeculativeAddImmediate,
     BooleanSpeculationCheck
 };
@@ -63,7 +75,7 @@ public:
         , m_dest(dest)
         , m_type(type)
     {
-        ASSERT(m_type == SpeculativeAdd || m_type == BooleanSpeculationCheck);
+        ASSERT(m_type == SpeculativeAdd || m_type == SpeculativeAddSelf || m_type == BooleanSpeculationCheck);
     }
 
     SpeculationRecovery(SpeculationRecoveryType type, GPRReg dest, int32_t immediate)
@@ -91,6 +103,10 @@ private:
     SpeculationRecoveryType m_type;
 };
 
+JSC_DECLARE_JIT_OPERATION(operationCompileOSRExit, void, (CallFrame*, void*));
+JSC_DECLARE_JIT_OPERATION(operationDebugPrintSpeculationFailure, void, (CallFrame*, void*, void*));
+JSC_DECLARE_JIT_OPERATION(operationMaterializeOSRExitSideState, void, (VM*, const OSRExitBase*, EncodedJSValue*));
+
 // === OSRExit ===
 //
 // This structure describes how to exit the speculative path by
@@ -98,21 +114,14 @@ private:
 struct OSRExit : public OSRExitBase {
     OSRExit(ExitKind, JSValueSource, MethodOfGettingAValueProfile, SpeculativeJIT*, unsigned streamIndex, unsigned recoveryIndex = UINT_MAX);
 
-    static void JIT_OPERATION compileOSRExit(ExecState*) WTF_INTERNAL;
+    CodeLocationLabel<JSInternalPtrTag> m_patchableJumpLocation;
 
-    unsigned m_patchableCodeOffset { 0 };
-    
-    MacroAssemblerCodeRef m_code;
-    
     JSValueSource m_jsValueSource;
     MethodOfGettingAValueProfile m_valueProfile;
     
     unsigned m_recoveryIndex;
 
-    void setPatchableCodeOffset(MacroAssembler::PatchableJump);
-    MacroAssembler::Jump getPatchableCodeOffsetAsJump() const;
-    CodeLocationJump codeLocationForRepatch(CodeBlock*) const;
-    void correctJump(LinkBuffer&);
+    CodeLocationJump<JSInternalPtrTag> codeLocationForRepatch() const { return CodeLocationJump<JSInternalPtrTag>(m_patchableJumpLocation); }
 
     unsigned m_streamIndex;
     void considerAddingAsFrequentExitSite(CodeBlock* profiledCodeBlock)
@@ -120,16 +129,18 @@ struct OSRExit : public OSRExitBase {
         OSRExitBase::considerAddingAsFrequentExitSite(profiledCodeBlock, ExitFromDFG);
     }
 
-private:
     static void compileExit(CCallHelpers&, VM&, const OSRExit&, const Operands<ValueRecovery>&, SpeculationRecovery*);
-    static void emitRestoreArguments(CCallHelpers&, const Operands<ValueRecovery>&);
-    static void JIT_OPERATION debugOperationPrintSpeculationFailure(ExecState*, void*, void*) WTF_INTERNAL;
+
+private:
+    static void emitRestoreArguments(CCallHelpers&, VM&, const Operands<ValueRecovery>&);
+    friend void JIT_OPERATION_ATTRIBUTES operationDebugPrintSpeculationFailure(CallFrame*, void*, void*);
 };
 
 struct SpeculationFailureDebugInfo {
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
     CodeBlock* codeBlock;
     ExitKind kind;
-    unsigned bytecodeOffset;
+    BytecodeIndex bytecodeIndex;
 };
 
 } } // namespace JSC::DFG

@@ -34,11 +34,11 @@
 #import "DOMNodeInternal.h"
 #import "DOMStyleSheetInternal.h"
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::CSSStyleSheet*>(reinterpret_cast<WebCore::StyleSheet*>(_internal))
 
@@ -59,7 +59,9 @@
 - (DOMCSSRuleList *)rules
 {
     WebCore::JSMainThreadNullState state;
-    return kit(WTF::getPtr(IMPL->rules()));
+    // Calling IMPL->cssRules (not IMPL->rules) is intentional, as `rules` should just be an alias for `cssRules`.
+    // See https://bugs.webkit.org/show_bug.cgi?id=197725 for more information.
+    return kit(WTF::getPtr(IMPL->cssRules()));
 }
 
 - (unsigned)insertRule:(NSString *)rule index:(unsigned)index
@@ -102,3 +104,5 @@ DOMCSSStyleSheet *kit(WebCore::CSSStyleSheet* value)
     WebCoreThreadViolationCheckRoundOne();
     return static_cast<DOMCSSStyleSheet*>(kit(static_cast<WebCore::StyleSheet*>(value)));
 }
+
+#undef IMPL

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2007 Apple Inc.  All rights reserved.
- * Copyright (C) 2017 Sony Interactive Entertainment Inc.
+ * Copyright (C) 2018 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,15 +23,17 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
-#ifndef AuthenticationChallenge_h
-#define AuthenticationChallenge_h
+
+#pragma once
 
 #include "AuthenticationChallengeBase.h"
 #include "AuthenticationClient.h"
 
 namespace WebCore {
 
-class AuthenticationChallenge final : public AuthenticationChallengeBase {
+class CurlResponse;
+
+class WEBCORE_EXPORT AuthenticationChallenge final : public AuthenticationChallengeBase {
 public:
     AuthenticationChallenge()
     {
@@ -42,17 +44,21 @@ public:
     {
     }
 
-    AuthenticationChallenge(uint16_t, long, unsigned, const ResourceResponse&, AuthenticationClient* = nullptr);
+    AuthenticationChallenge(const CurlResponse&, unsigned, const ResourceResponse&, AuthenticationClient* = nullptr);
+    AuthenticationChallenge(const URL&, const CertificateInfo&, const ResourceError&, AuthenticationClient* = nullptr);
+
     AuthenticationClient* authenticationClient() const { return m_authenticationClient.get(); }
 
 private:
-    ProtectionSpaceServerType protectionSpaceServerTypeFromURI(const URL&);
-    ProtectionSpace protectionSpaceFromHandle(uint16_t, long, const ResourceResponse&);
+    ProtectionSpace::ServerType protectionSpaceServerTypeFromURI(const URL&, bool isForProxy);
+    ProtectionSpace protectionSpaceForPasswordBased(const CurlResponse&, const ResourceResponse&);
+    ProtectionSpace protectionSpaceForServerTrust(const URL&, const CertificateInfo&);
+    std::optional<uint16_t> determineProxyPort(const URL&);
+    ProtectionSpace::AuthenticationScheme authenticationSchemeFromCurlAuth(long);
+    String parseRealm(const ResourceResponse&);
     void removeLeadingAndTrailingQuotes(String&);
 
     RefPtr<AuthenticationClient> m_authenticationClient;
 };
 
-}
-
-#endif
+} // namespace WebCore

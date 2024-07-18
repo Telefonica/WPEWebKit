@@ -34,7 +34,8 @@ namespace WebCore {
 
 class DOMCacheStorage : public RefCounted<DOMCacheStorage>, public ActiveDOMObject {
 public:
-    static Ref<DOMCacheStorage> create(ScriptExecutionContext& context, Ref<CacheStorageConnection>&& connection) { return adoptRef(*new DOMCacheStorage(context, WTFMove(connection))); }
+    static Ref<DOMCacheStorage> create(ScriptExecutionContext&, Ref<CacheStorageConnection>&&);
+    ~DOMCacheStorage();
 
     using KeysPromise = DOMPromiseDeferred<IDLSequence<IDLDOMString>>;
 
@@ -50,10 +51,13 @@ private:
     // ActiveDOMObject
     void stop() final;
     const char* activeDOMObjectName() const final;
-    bool canSuspendForDocumentSuspension() const final;
 
-    void retrieveCaches(WTF::Function<void(std::optional<Exception>&&)>&&);
-    String origin() const;
+    void doOpen(const String& name, DOMPromiseDeferred<IDLInterface<DOMCache>>&&);
+    void doRemove(const String&, DOMPromiseDeferred<IDLBoolean>&&);
+    void doSequentialMatch(DOMCache::RequestInfo&&, CacheQueryOptions&&, Ref<DeferredPromise>&&);
+    void retrieveCaches(CompletionHandler<void(std::optional<Exception>&&)>&&);
+    Ref<DOMCache> findCacheOrCreate(DOMCacheEngine::CacheInfo&&);
+    std::optional<ClientOrigin> origin() const;
 
     Vector<Ref<DOMCache>> m_caches;
     uint64_t m_updateCounter { 0 };

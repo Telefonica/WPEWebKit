@@ -25,11 +25,14 @@
 
 #include "config.h"
 
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
 
 #include "TrackEvent.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(TrackEvent);
 
 static inline std::optional<TrackEvent::TrackEventTrack> convertToTrackEventTrack(Ref<TrackBase>&& track)
 {
@@ -48,21 +51,19 @@ static inline std::optional<TrackEvent::TrackEventTrack> convertToTrackEventTrac
     return std::nullopt;
 }
 
-TrackEvent::TrackEvent(const AtomicString& type, bool canBubble, bool cancelable, Ref<TrackBase>&& track)
+TrackEvent::TrackEvent(const AtomString& type, CanBubble canBubble, IsCancelable cancelable, Ref<TrackBase>&& track)
     : Event(type, canBubble, cancelable)
     , m_track(convertToTrackEventTrack(WTFMove(track)))
 {
 }
 
-TrackEvent::TrackEvent(const AtomicString& type, Init&& initializer, IsTrusted isTrusted)
+TrackEvent::TrackEvent(const AtomString& type, Init&& initializer, IsTrusted isTrusted)
     : Event(type, initializer, isTrusted)
     , m_track(WTFMove(initializer.track))
 {
 }
 
-TrackEvent::~TrackEvent()
-{
-}
+TrackEvent::~TrackEvent() = default;
 
 EventInterface TrackEvent::eventInterface() const
 {

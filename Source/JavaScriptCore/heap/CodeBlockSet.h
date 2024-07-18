@@ -43,51 +43,38 @@ class VM;
 // once they hasOneRef() and nobody is running code from that CodeBlock.
 
 class CodeBlockSet {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(CodeBlockSet);
-
 public:
     CodeBlockSet();
     ~CodeBlockSet();
 
-    void lastChanceToFinalize(VM&);
-    
-    // Add a CodeBlock. This is only called by CodeBlock constructors.
-    void add(CodeBlock*);
-    
-    // Clear all mark bits for all CodeBlocks.
-    void clearMarksForFullCollection();
-
-    // Mark a pointer that may be a CodeBlock that belongs to the set of DFG
-    // blocks. This is defined in CodeBlock.h.
-private:
     void mark(const AbstractLocker&, CodeBlock* candidateCodeBlock);
-public:
-    void mark(const AbstractLocker&, void* candidateCodeBlock);
-    
-    // Delete all code blocks that are only referenced by this set (i.e. owned
-    // by this set), and that have not been marked.
-    void deleteUnmarkedAndUnreferenced(VM&, CollectionScope);
     
     void clearCurrentlyExecuting();
 
     bool contains(const AbstractLocker&, void* candidateCodeBlock);
-    Lock& getLock() { return m_lock; }
+    Lock& getLock() WTF_RETURNS_LOCK(m_lock) { return m_lock; }
+
+    // This is expected to run only when we're not adding to the set for now. If
+    // this needs to run concurrently in the future, we'll need to lock around this.
+    bool isCurrentlyExecuting(CodeBlock*);
 
     // Visits each CodeBlock in the heap until the visitor function returns true
     // to indicate that it is done iterating, or until every CodeBlock has been
     // visited.
     template<typename Functor> void iterate(const Functor&);
     template<typename Functor> void iterate(const AbstractLocker&, const Functor&);
-    
+
     template<typename Functor> void iterateCurrentlyExecuting(const Functor&);
     
     void dump(PrintStream&) const;
+    
+    void add(CodeBlock*);
+    void remove(CodeBlock*);
 
 private:
-    void promoteYoungCodeBlocks(const AbstractLocker&);
-
-    HashSet<CodeBlock*> m_oldCodeBlocks;
-    HashSet<CodeBlock*> m_newCodeBlocks;
+    HashSet<CodeBlock*> m_codeBlocks;
     HashSet<CodeBlock*> m_currentlyExecuting;
     Lock m_lock;
 };

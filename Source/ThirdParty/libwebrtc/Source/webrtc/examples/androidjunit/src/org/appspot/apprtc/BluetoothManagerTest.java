@@ -13,9 +13,6 @@ package org.appspot.apprtc;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -32,16 +29,16 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.media.AudioManager;
 import android.util.Log;
-import java.util.LinkedList;
+import androidx.test.core.app.ApplicationProvider;
+import java.util.ArrayList;
 import java.util.List;
 import org.appspot.apprtc.AppRTCBluetoothManager.State;
-import org.chromium.testing.local.LocalRobolectricTestRunner;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowApplication;
 import org.robolectric.shadows.ShadowLog;
+import org.robolectric.RobolectricTestRunner;
 
 /**
  * Verifies basic behavior of the AppRTCBluetoothManager class.
@@ -49,7 +46,7 @@ import org.robolectric.shadows.ShadowLog;
  * but a mocked version is used instead. Hence, the parts "driven" by the AppRTC
  * audio manager are not included in this test.
  */
-@RunWith(LocalRobolectricTestRunner.class)
+@RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class BluetoothManagerTest {
   private static final String TAG = "BluetoothManagerTest";
@@ -68,12 +65,12 @@ public class BluetoothManagerTest {
   @Before
   public void setUp() {
     ShadowLog.stream = System.out;
-    context = ShadowApplication.getInstance().getApplicationContext();
+    context = ApplicationProvider.getApplicationContext();
     mockedAppRtcAudioManager = mock(AppRTCAudioManager.class);
     mockedAudioManager = mock(AudioManager.class);
     mockedBluetoothHeadset = mock(BluetoothHeadset.class);
     mockedBluetoothDevice = mock(BluetoothDevice.class);
-    mockedBluetoothDeviceList = new LinkedList<BluetoothDevice>();
+    mockedBluetoothDeviceList = new ArrayList<BluetoothDevice>();
 
     // Simulate that bluetooth SCO audio is available by default.
     when(mockedAudioManager.isBluetoothScoAvailableOffCall()).thenReturn(true);
@@ -119,7 +116,7 @@ public class BluetoothManagerTest {
       protected boolean hasPermission(Context context, String permission) {
         Log.d(TAG, "hasPermission(" + permission + ")");
         // Ensure that the client asks for Bluetooth permission.
-        return (permission == android.Manifest.permission.BLUETOOTH);
+        return android.Manifest.permission.BLUETOOTH.equals(permission);
       }
 
       @Override

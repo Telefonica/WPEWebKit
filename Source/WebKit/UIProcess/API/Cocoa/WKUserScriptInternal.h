@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,39 +25,37 @@
 
 #import "WKUserScriptPrivate.h"
 
-#if WK_API_ENABLED
-
 #import "APIUserScript.h"
 
-namespace API {
+namespace WebKit {
 
-inline WKUserScript *wrapper(UserScript& userScript)
-{
-    ASSERT([userScript.wrapper() isKindOfClass:[WKUserScript class]]);
-    return (WKUserScript *)userScript.wrapper();
+template<> struct WrapperTraits<API::UserScript> {
+    using WrapperClass = WKUserScript;
+};
+
 }
+
+namespace API {
 
 inline WebCore::UserScriptInjectionTime toWebCoreUserScriptInjectionTime(WKUserScriptInjectionTime injectionTime)
 {
     switch (injectionTime) {
     case WKUserScriptInjectionTimeAtDocumentStart:
-        return WebCore::InjectAtDocumentStart;
-
+        return WebCore::UserScriptInjectionTime::DocumentStart;
     case WKUserScriptInjectionTimeAtDocumentEnd:
-        return WebCore::InjectAtDocumentEnd;
+        return WebCore::UserScriptInjectionTime::DocumentEnd;
     }
 
     ASSERT_NOT_REACHED();
-    return WebCore::InjectAtDocumentEnd;
+    return WebCore::UserScriptInjectionTime::DocumentEnd;
 }
 
 inline WKUserScriptInjectionTime toWKUserScriptInjectionTime(WebCore::UserScriptInjectionTime injectionTime)
 {
     switch (injectionTime) {
-    case WebCore::InjectAtDocumentStart:
+    case WebCore::UserScriptInjectionTime::DocumentStart:
         return WKUserScriptInjectionTimeAtDocumentStart;
-
-    case WebCore::InjectAtDocumentEnd:
+    case WebCore::UserScriptInjectionTime::DocumentEnd:
         return WKUserScriptInjectionTimeAtDocumentEnd;
     }
 
@@ -72,5 +70,3 @@ inline WKUserScriptInjectionTime toWKUserScriptInjectionTime(WebCore::UserScript
     API::ObjectStorage<API::UserScript> _userScript;
 }
 @end
-
-#endif

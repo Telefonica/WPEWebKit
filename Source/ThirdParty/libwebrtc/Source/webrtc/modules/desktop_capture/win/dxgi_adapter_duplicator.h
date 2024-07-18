@@ -8,18 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_DXGI_ADAPTER_DUPLICATOR_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_DXGI_ADAPTER_DUPLICATOR_H_
+#ifndef MODULES_DESKTOP_CAPTURE_WIN_DXGI_ADAPTER_DUPLICATOR_H_
+#define MODULES_DESKTOP_CAPTURE_WIN_DXGI_ADAPTER_DUPLICATOR_H_
 
 #include <wrl/client.h>
 
 #include <vector>
 
-#include "webrtc/modules/desktop_capture/desktop_geometry.h"
-#include "webrtc/modules/desktop_capture/shared_desktop_frame.h"
-#include "webrtc/modules/desktop_capture/win/d3d_device.h"
-#include "webrtc/modules/desktop_capture/win/dxgi_context.h"
-#include "webrtc/modules/desktop_capture/win/dxgi_output_duplicator.h"
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/shared_desktop_frame.h"
+#include "modules/desktop_capture/win/d3d_device.h"
+#include "modules/desktop_capture/win/dxgi_context.h"
+#include "modules/desktop_capture/win/dxgi_output_duplicator.h"
 
 namespace webrtc {
 
@@ -43,10 +43,10 @@ class DxgiAdapterDuplicator {
   bool Initialize();
 
   // Sequentially calls Duplicate function of all the DxgiOutputDuplicator
-  // instances owned by this instance, and writes into |target|.
+  // instances owned by this instance, and writes into `target`.
   bool Duplicate(Context* context, SharedDesktopFrame* target);
 
-  // Captures one monitor and writes into |target|. |monitor_id| should be
+  // Captures one monitor and writes into `target`. `monitor_id` should be
   // between [0, screen_count()).
   bool DuplicateMonitor(Context* context,
                         int monitor_id,
@@ -55,9 +55,13 @@ class DxgiAdapterDuplicator {
   // Returns desktop rect covered by this DxgiAdapterDuplicator.
   DesktopRect desktop_rect() const { return desktop_rect_; }
 
-  // Returns the size of one screen owned by this DxgiAdapterDuplicator. |id|
+  // Returns the size of one screen owned by this DxgiAdapterDuplicator. `id`
   // should be between [0, screen_count()).
   DesktopRect ScreenRect(int id) const;
+
+  // Returns the device name of one screen owned by this DxgiAdapterDuplicator
+  // in utf8 encoding. `id` should be between [0, screen_count()).
+  const std::string& GetDeviceName(int id) const;
 
   // Returns the count of screens owned by this DxgiAdapterDuplicator. These
   // screens can be retrieved by an interger in the range of
@@ -68,10 +72,10 @@ class DxgiAdapterDuplicator {
 
   void Unregister(const Context* const context);
 
-  // The minimum num_frames_captured() returned by |duplicators_|.
+  // The minimum num_frames_captured() returned by `duplicators_`.
   int64_t GetNumFramesCaptured() const;
 
-  // Moves |desktop_rect_| and all underlying |duplicators_|. See
+  // Moves `desktop_rect_` and all underlying `duplicators_`. See
   // DxgiDuplicatorController::TranslateRect().
   void TranslateRect(const DesktopVector& position);
 
@@ -85,4 +89,4 @@ class DxgiAdapterDuplicator {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_DXGI_ADAPTER_DUPLICATOR_H_
+#endif  // MODULES_DESKTOP_CAPTURE_WIN_DXGI_ADAPTER_DUPLICATOR_H_

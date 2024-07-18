@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2017 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,8 +24,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef Module_h
-#define Module_h
+#pragma once
 
 #include <wtf/Noncopyable.h>
 #include <wtf/text/WTFString.h>
@@ -37,12 +37,17 @@
 typedef struct _GModule GModule;
 #endif
 
+#if OS(WINDOWS)
+#include <windows.h>
+#endif
+
 namespace WebKit {
 
 class Module {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(Module);
 public:
-    Module(const String& path);
+    explicit Module(const String& path);
     ~Module();
 
     bool load();
@@ -56,19 +61,15 @@ public:
 
     template<typename FunctionType> FunctionType functionPointer(const char* functionName) const;
 
-#if USE(CF) && !defined(__LP64__)
-    CFBundleRefNum bundleResourceMap();
-#endif
-
 private:
     void* platformFunctionPointer(const char* functionName) const;
 
     String m_path;
+#if OS(WINDOWS)
+    HMODULE m_module;
+#endif
 #if USE(CF)
     RetainPtr<CFBundleRef> m_bundle;
-#if !defined(__LP64__)
-    CFBundleRefNum m_bundleResourceMap;
-#endif
 #elif USE(GLIB)
     GModule* m_handle;
 #endif
@@ -80,5 +81,3 @@ template<typename FunctionType> FunctionType Module::functionPointer(const char*
 }
 
 }
-
-#endif

@@ -33,35 +33,35 @@
 
 #include "Document.h"
 #include "SubtleCrypto.h"
-#include <runtime/ArrayBufferView.h>
+#include <JavaScriptCore/ArrayBufferView.h>
 #include <wtf/CryptographicallyRandomNumber.h>
+#include <wtf/UUID.h>
 
 #if OS(DARWIN)
-#include "CommonCryptoUtilities.h"
+#include <CommonCrypto/CommonCryptor.h>
+#include <CommonCrypto/CommonRandom.h>
 #endif
 
 namespace WebCore {
 
-Crypto::Crypto(ScriptExecutionContext& context)
-    : ContextDestructionObserver(&context)
-#if ENABLE(SUBTLE_CRYPTO)
+Crypto::Crypto(ScriptExecutionContext* context)
+    : ContextDestructionObserver(context)
+#if ENABLE(WEB_CRYPTO)
     , m_subtle(SubtleCrypto::create(context))
 #endif
 {
 }
 
-Crypto::~Crypto()
-{
-}
+Crypto::~Crypto() = default;
 
 ExceptionOr<void> Crypto::getRandomValues(ArrayBufferView& array)
 {
-    if (!isInt(array.getType()))
+    if (!isInt(array.getType()) && !isBigInt(array.getType()))
         return Exception { TypeMismatchError };
     if (array.byteLength() > 65536)
         return Exception { QuotaExceededError };
 #if OS(DARWIN)
-    int rc = CCRandomCopyBytes(kCCRandomDefault, array.baseAddress(), array.byteLength());
+    auto rc = CCRandomGenerateBytes(array.baseAddress(), array.byteLength());
     RELEASE_ASSERT(rc == kCCSuccess);
 #else
     cryptographicallyRandomValues(array.baseAddress(), array.byteLength());
@@ -69,7 +69,12 @@ ExceptionOr<void> Crypto::getRandomValues(ArrayBufferView& array)
     return { };
 }
 
-#if ENABLE(SUBTLE_CRYPTO)
+String Crypto::randomUUID() const
+{
+    return createVersion4UUIDString();
+}
+
+#if ENABLE(WEB_CRYPTO)
 
 SubtleCrypto& Crypto::subtle()
 {

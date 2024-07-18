@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,106 +26,118 @@
 #pragma once
 
 #include "CompilationResult.h"
-#include "DFGCompilationKey.h"
-#include "DFGCompilationMode.h"
+#include "DFGDesiredGlobalProperties.h"
 #include "DFGDesiredIdentifiers.h"
 #include "DFGDesiredTransitions.h"
 #include "DFGDesiredWatchpoints.h"
 #include "DFGDesiredWeakReferences.h"
 #include "DFGFinalizer.h"
+#include "DFGJITCode.h"
 #include "DeferredCompilationCallback.h"
+#include "JITPlan.h"
 #include "Operands.h"
 #include "ProfilerCompilation.h"
+#include "RecordedStatuses.h"
 #include <wtf/HashMap.h>
+#include <wtf/Lock.h>
 #include <wtf/ThreadSafeRefCounted.h>
 
 namespace JSC {
 
 class CodeBlock;
-class SlotVisitor;
 
 namespace DFG {
 
 class ThreadData;
+class JITData;
 
 #if ENABLE(DFG_JIT)
 
-struct Plan : public ThreadSafeRefCounted<Plan> {
+class Plan final : public JITPlan {
+    using Base = JITPlan;
+
+public:
     Plan(
         CodeBlock* codeBlockToCompile, CodeBlock* profiledDFGCodeBlock,
-        CompilationMode, unsigned osrEntryBytecodeIndex,
-        const Operands<JSValue>& mustHandleValues);
+        JITCompilationMode, BytecodeIndex osrEntryBytecodeIndex,
+        const Operands<std::optional<JSValue>>& mustHandleValues);
     ~Plan();
 
-    void compileInThread(ThreadData*);
-    
-    CompilationResult finalizeWithoutNotifyingCallback();
-    void finalizeAndNotifyCallback();
-    
-    void notifyCompiling();
-    void notifyReady();
-    
-    CompilationKey key();
-    
-    void markCodeBlocks(SlotVisitor&);
-    template<typename Func>
-    void iterateCodeBlocksForGC(const Func&);
-    void checkLivenessAndVisitChildren(SlotVisitor&);
-    bool isKnownToBeLiveDuringGC();
-    void cancel();
+    size_t codeSize() const final;
+    void finalizeInGC() final;
+    CompilationResult finalize() override;
 
-    bool canTierUpAndOSREnter() const { return !tierUpAndOSREnterBytecodes.isEmpty(); }
-    
+    void notifyReady() final;
+    void cancel() final;
+
+    bool isKnownToBeLiveAfterGC() final;
+    bool isKnownToBeLiveDuringGC(AbstractSlotVisitor&) final;
+    bool iterateCodeBlocksForGC(AbstractSlotVisitor&, const Function<void(CodeBlock*)>&) final;
+    bool checkLivenessAndVisitChildren(AbstractSlotVisitor&) final;
+
+
+    bool canTierUpAndOSREnter() const { return !m_tierUpAndOSREnterBytecodes.isEmpty(); }
+
     void cleanMustHandleValuesIfNecessary();
-    
-    // Warning: pretty much all of the pointer fields in this object get nulled by cancel(). So, if
-    // you're writing code that is callable on the cancel path, be sure to null check everything!
-    
-    VM* vm;
 
-    // These can be raw pointers because we visit them during every GC in checkLivenessAndVisitChildren.
-    CodeBlock* codeBlock;
-    CodeBlock* profiledDFGCodeBlock;
+    BytecodeIndex osrEntryBytecodeIndex() const { return m_osrEntryBytecodeIndex; }
+    const Operands<std::optional<JSValue>>& mustHandleValues() const { return m_mustHandleValues; }
+    Profiler::Compilation* compilation() const { return m_compilation.get(); }
 
-    CompilationMode mode;
-    const unsigned osrEntryBytecodeIndex;
-    Operands<JSValue> mustHandleValues;
-    bool mustHandleValuesMayIncludeGarbage { true };
-    Lock mustHandleValueCleaningLock;
-    
-    ThreadData* threadData;
+    Finalizer* finalizer() const { return m_finalizer.get(); }
+    void setFinalizer(std::unique_ptr<Finalizer>&& finalizer) { m_finalizer = WTFMove(finalizer); }
 
-    RefPtr<Profiler::Compilation> compilation;
+    RefPtr<InlineCallFrameSet> inlineCallFrames() const { return m_inlineCallFrames; }
+    DesiredWatchpoints& watchpoints() { return m_watchpoints; }
+    DesiredIdentifiers& identifiers() { return m_identifiers; }
+    DesiredWeakReferences& weakReferences() { return m_weakReferences; }
+    DesiredTransitions& transitions() { return m_transitions; }
+    RecordedStatuses& recordedStatuses() { return m_recordedStatuses; }
 
-    std::unique_ptr<Finalizer> finalizer;
-    
-    RefPtr<InlineCallFrameSet> inlineCallFrames;
-    DesiredWatchpoints watchpoints;
-    DesiredIdentifiers identifiers;
-    DesiredWeakReferences weakReferences;
-    DesiredTransitions transitions;
-    
-    bool willTryToTierUp { false };
+    bool willTryToTierUp() const { return m_willTryToTierUp; }
+    void setWillTryToTierUp(bool willTryToTierUp) { m_willTryToTierUp = willTryToTierUp; }
 
-    HashMap<unsigned, Vector<unsigned>> tierUpInLoopHierarchy;
-    Vector<unsigned> tierUpAndOSREnterBytecodes;
+    HashMap<BytecodeIndex, FixedVector<BytecodeIndex>>& tierUpInLoopHierarchy() { return m_tierUpInLoopHierarchy; }
+    Vector<BytecodeIndex>& tierUpAndOSREnterBytecodes() { return m_tierUpAndOSREnterBytecodes; }
 
-    enum Stage { Preparing, Compiling, Ready, Cancelled };
-    Stage stage;
+    DeferredCompilationCallback* callback() const { return m_callback.get(); }
+    void setCallback(Ref<DeferredCompilationCallback>&& callback) { m_callback = WTFMove(callback); }
 
-    RefPtr<DeferredCompilationCallback> callback;
+    std::unique_ptr<JITData> finalizeJITData(const JITCode&);
 
 private:
-    bool computeCompileTimes() const;
-    bool reportCompileTimes() const;
+    CompilationPath compileInThreadImpl() override;
     
-    enum CompilationPath { FailPath, DFGPath, FTLPath, CancelPath };
-    CompilationPath compileInThreadImpl();
-    
+    bool isStillValidOnMainThread();
     bool isStillValid();
     void reallyAdd(CommonData*);
 
-    double m_timeBeforeFTL;
+    // These can be raw pointers because we visit them during every GC in checkLivenessAndVisitChildren.
+    CodeBlock* m_profiledDFGCodeBlock;
+
+    Operands<std::optional<JSValue>> m_mustHandleValues;
+    bool m_mustHandleValuesMayIncludeGarbage WTF_GUARDED_BY_LOCK(m_mustHandleValueCleaningLock) { true };
+    Lock m_mustHandleValueCleaningLock;
+
+    bool m_willTryToTierUp { false };
+
+    const BytecodeIndex m_osrEntryBytecodeIndex;
+
+    RefPtr<Profiler::Compilation> m_compilation;
+
+    std::unique_ptr<Finalizer> m_finalizer;
+
+    RefPtr<InlineCallFrameSet> m_inlineCallFrames;
+    DesiredWatchpoints m_watchpoints;
+    DesiredIdentifiers m_identifiers;
+    DesiredWeakReferences m_weakReferences;
+    DesiredTransitions m_transitions;
+    RecordedStatuses m_recordedStatuses;
+
+    HashMap<BytecodeIndex, FixedVector<BytecodeIndex>> m_tierUpInLoopHierarchy;
+    Vector<BytecodeIndex> m_tierUpAndOSREnterBytecodes;
+
+    RefPtr<DeferredCompilationCallback> m_callback;
 };
 
 #endif // ENABLE(DFG_JIT)

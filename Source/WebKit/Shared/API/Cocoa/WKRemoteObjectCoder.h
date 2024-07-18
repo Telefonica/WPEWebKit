@@ -25,8 +25,6 @@
 
 #import "WKFoundation.h"
 
-#if WK_API_ENABLED
-
 namespace API {
 class Dictionary;
 }
@@ -45,4 +43,6 @@ class Dictionary;
 
 @end
 
-#endif // WK_API_ENABLED
+namespace WebKit {
+bool methodSignaturesAreCompatible(NSString *, NSString *);
+}

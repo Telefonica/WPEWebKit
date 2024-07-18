@@ -30,17 +30,19 @@
 #include "MarshallingHelpers.h"
 #include "WebPreferences.h"
 #include "WebSecurityOrigin.h"
-#include <wtf/RetainPtr.h>
 #include <WebCore/ApplicationCache.h>
 #include <WebCore/ApplicationCacheStorage.h>
 #include <WebCore/COMPtr.h>
-#include <WebCore/FileSystem.h>
 #include <WebCore/SecurityOrigin.h>
 #include <comutil.h>
+#include <wtf/FileSystem.h>
+#include <wtf/RetainPtr.h>
 
 using namespace WebCore;
 
+#if USE(CF)
 static CFStringRef WebKitLocalCacheDefaultsKey = CFSTR("WebKitLocalCache");
+#endif
 
 // WebApplicationCache ---------------------------------------------------------------------------
 
@@ -48,13 +50,13 @@ WebApplicationCache::WebApplicationCache()
     : m_refCount(0)
 {
     gClassCount++;
-    gClassNameCount().add("WebApplicationCache");
+    gClassNameCount().add("WebApplicationCache"_s);
 }
 
 WebApplicationCache::~WebApplicationCache()
 {
     gClassCount--;
-    gClassNameCount().remove("WebApplicationCache");
+    gClassNameCount().remove("WebApplicationCache"_s);
 }
 
 WebApplicationCache* WebApplicationCache::createInstance()
@@ -66,7 +68,7 @@ WebApplicationCache* WebApplicationCache::createInstance()
 
 static String applicationCachePath()
 {
-    String path = localUserSpecificStorageDirectory();
+    String path = FileSystem::localUserSpecificStorageDirectory();
 
 #if USE(CF)
     auto cacheDirectoryPreference = adoptCF(CFPreferencesCopyAppValue(WebKitLocalCacheDefaultsKey, WebPreferences::applicationId()));
@@ -79,7 +81,7 @@ static String applicationCachePath()
 
 WebCore::ApplicationCacheStorage& WebApplicationCache::storage()
 {
-    static ApplicationCacheStorage& storage = ApplicationCacheStorage::create(applicationCachePath(), "ApplicationCache").leakRef();
+    static ApplicationCacheStorage& storage = ApplicationCacheStorage::create(applicationCachePath(), "ApplicationCache"_s).leakRef();
 
     return storage;
 }
@@ -158,7 +160,7 @@ HRESULT WebApplicationCache::diskUsageForOrigin(IWebSecurityOrigin* origin, long
     if (!webSecurityOrigin)
         return E_FAIL;
 
-    *size = storage().diskUsageForOrigin(*webSecurityOrigin->securityOrigin());
+    *size = storage().diskUsageForOrigin(webSecurityOrigin->securityOrigin()->data());
     return S_OK;
 }
 
@@ -178,7 +180,7 @@ HRESULT WebApplicationCache::deleteCacheForOrigin(IWebSecurityOrigin* origin)
     if (!webSecurityOrigin)
         return E_FAIL;
 
-    storage().deleteCacheForOrigin(*webSecurityOrigin->securityOrigin());
+    storage().deleteCacheForOrigin(webSecurityOrigin->securityOrigin()->data());
     return S_OK;
 }
 
@@ -187,23 +189,22 @@ HRESULT WebApplicationCache::originsWithCache(IPropertyBag** origins)
     if (!origins)
         return E_POINTER;
 
-    HashSet<RefPtr<WebCore::SecurityOrigin>> coreOrigins;
-    storage().getOriginsWithCache(coreOrigins);
+    auto coreOrigins = storage().originsWithCache();
 
+#if USE(CF)
     RetainPtr<CFMutableArrayRef> arrayItem = adoptCF(CFArrayCreateMutable(kCFAllocatorDefault, coreOrigins.size(), &MarshallingHelpers::kIUnknownArrayCallBacks));
 
-    for (auto it : coreOrigins)
-        CFArrayAppendValue(arrayItem.get(), reinterpret_cast<void*>(WebSecurityOrigin::createInstance(&(*it))));
+    for (auto& coreOrigin : coreOrigins)
+        CFArrayAppendValue(arrayItem.get(), reinterpret_cast<void*>(WebSecurityOrigin::createInstance(coreOrigin.securityOrigin().ptr())));
 
-    RetainPtr<CFMutableDictionaryRef> dictionary = adoptCF(
-        CFDictionaryCreateMutable(0, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
-
-    RetainPtr<CFStringRef> key = adoptCF(MarshallingHelpers::BSTRToCFStringRef(_bstr_t(L"origins")));
+    auto dictionary = adoptCF(CFDictionaryCreateMutable(0, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+    auto key = MarshallingHelpers::BSTRToCFStringRef(_bstr_t(L"origins"));
     CFDictionaryAddValue(dictionary.get(), key.get(), arrayItem.get());
 
     COMPtr<CFDictionaryPropertyBag> result = CFDictionaryPropertyBag::createInstance();
     result->setDictionary(dictionary.get());
     *origins = result.leakRef();
+#endif
 
     return S_OK;
 }

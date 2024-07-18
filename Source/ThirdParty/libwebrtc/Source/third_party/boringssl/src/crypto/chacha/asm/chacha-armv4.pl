@@ -44,9 +44,11 @@ if ($flavour && $flavour ne "void") {
     ( $xlate="${dir}../../perlasm/arm-xlate.pl" and -f $xlate) or
     die "can't locate arm-xlate.pl";
 
-    open STDOUT,"| \"$^X\" $xlate $flavour $output";
+    open OUT,"| \"$^X\" $xlate $flavour $output";
+    *STDOUT=*OUT;
 } else {
-    open STDOUT,">$output";
+    open OUT,">$output";
+    *STDOUT=*OUT;
 }
 
 sub AUTOLOAD()		# thunk [simplified] x86-style perlasm
@@ -171,9 +173,15 @@ my @ret;
 $code.=<<___;
 #include <openssl/arm_arch.h>
 
+@ Silence ARMv8 deprecated IT instruction warnings. This file is used by both
+@ ARMv7 and ARMv8 processors and does not use ARMv8 instructions.
+.arch  armv7-a
+
 .text
-#if defined(__thumb2__)
+#if defined(__thumb2__) || defined(__clang__)
 .syntax	unified
+#endif
+#if defined(__thumb2__)
 .thumb
 #else
 .code	32
@@ -1155,4 +1163,4 @@ foreach (split("\n",$code)) {
 
 	print $_,"\n";
 }
-close STDOUT;
+close STDOUT or die "error closing STDOUT";

@@ -8,35 +8,53 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_VIDEO_CODING_GENERIC_DECODER_H_
-#define WEBRTC_MODULES_VIDEO_CODING_GENERIC_DECODER_H_
+#ifndef MODULES_VIDEO_CODING_GENERIC_DECODER_H_
+#define MODULES_VIDEO_CODING_GENERIC_DECODER_H_
 
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/thread_checker.h"
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/modules/video_coding/encoded_frame.h"
-#include "webrtc/modules/video_coding/include/video_codec_interface.h"
-#include "webrtc/modules/video_coding/timestamp_map.h"
-#include "webrtc/modules/video_coding/timing.h"
+#include <cstdint>
+#include <deque>
+#include <string>
+#include <utility>
+
+#include "api/field_trials_view.h"
+#include "api/sequence_checker.h"
+#include "api/video/encoded_frame.h"
+#include "api/video_codecs/video_decoder.h"
+#include "modules/video_coding/encoded_frame.h"
+#include "modules/video_coding/timing/timing.h"
+#include "rtc_base/synchronization/mutex.h"
 
 namespace webrtc {
 
 class VCMReceiveCallback;
 
-enum { kDecoderFrameMemoryLength = 10 };
+struct FrameInfo {
+  FrameInfo() = default;
+  FrameInfo(const FrameInfo&) = delete;
+  FrameInfo& operator=(const FrameInfo&) = delete;
+  FrameInfo(FrameInfo&&) = default;
+  FrameInfo& operator=(FrameInfo&&) = default;
 
-struct VCMFrameInformation {
-  int64_t renderTimeMs;
-  int64_t decodeStartTimeMs;
-  void* userData;
+  uint32_t rtp_timestamp;
+  // This is likely not optional, but some inputs seem to sometimes be negative.
+  // TODO(bugs.webrtc.org/13756): See if this can be replaced with Timestamp
+  // once all inputs to this field use Timestamp instead of an integer.
+  absl::optional<Timestamp> render_time;
+  absl::optional<Timestamp> decode_start;
   VideoRotation rotation;
   VideoContentType content_type;
   EncodedImage::Timing timing;
+  int64_t ntp_time_ms;
+  RtpPacketInfos packet_infos;
+  // ColorSpace is not stored here, as it might be modified by decoders.
+  VideoFrameType frame_type;
 };
 
 class VCMDecodedFrameCallback : public DecodedImageCallback {
  public:
-  VCMDecodedFrameCallback(VCMTiming* timing, Clock* clock);
+  VCMDecodedFrameCallback(VCMTiming* timing,
+                          Clock* clock,
+                          const FieldTrialsView& field_trials);
   ~VCMDecodedFrameCallback() override;
   void SetUserReceiveCallback(VCMReceiveCallback* receiveCallback);
   VCMReceiveCallback* UserReceiveCallback();
@@ -44,20 +62,19 @@ class VCMDecodedFrameCallback : public DecodedImageCallback {
   int32_t Decoded(VideoFrame& decodedImage) override;
   int32_t Decoded(VideoFrame& decodedImage, int64_t decode_time_ms) override;
   void Decoded(VideoFrame& decodedImage,
-               rtc::Optional<int32_t> decode_time_ms,
-               rtc::Optional<uint8_t> qp) override;
-  int32_t ReceivedDecodedReferenceFrame(const uint64_t pictureId) override;
-  int32_t ReceivedDecodedFrame(const uint64_t pictureId) override;
+               absl::optional<int32_t> decode_time_ms,
+               absl::optional<uint8_t> qp) override;
 
-  uint64_t LastReceivedPictureID() const;
-  void OnDecoderImplementationName(const char* implementation_name);
+  void OnDecoderInfoChanged(const VideoDecoder::DecoderInfo& decoder_info);
 
-  void Map(uint32_t timestamp, VCMFrameInformation* frameInfo);
-  int32_t Pop(uint32_t timestamp);
+  void Map(FrameInfo frameInfo);
+  void ClearTimestampMap();
 
  private:
-  rtc::ThreadChecker construction_thread_;
-  // Protect |_timestampMap|.
+  std::pair<absl::optional<FrameInfo>, size_t> FindFrameInfo(
+      uint32_t rtp_timestamp) RTC_EXCLUSIVE_LOCKS_REQUIRED(lock_);
+
+  SequenceChecker construction_thread_;
   Clock* const _clock;
   // This callback must be set before the decoder thread starts running
   // and must only be unset when external threads (e.g decoder thread)
@@ -66,55 +83,50 @@ class VCMDecodedFrameCallback : public DecodedImageCallback {
   // from the same thread, and therfore a lock is not required to access it.
   VCMReceiveCallback* _receiveCallback = nullptr;
   VCMTiming* _timing;
-  rtc::CriticalSection lock_;
-  VCMTimestampMap _timestampMap GUARDED_BY(lock_);
-  uint64_t _lastReceivedPictureID;
+  Mutex lock_;
+  std::deque<FrameInfo> frame_infos_ RTC_GUARDED_BY(lock_);
   int64_t ntp_offset_;
 };
 
 class VCMGenericDecoder {
-  friend class VCMCodecDataBase;
-
  public:
-  explicit VCMGenericDecoder(VideoDecoder* decoder, bool isExternal = false);
+  explicit VCMGenericDecoder(VideoDecoder* decoder);
   ~VCMGenericDecoder();
 
   /**
-  * Initialize the decoder with the information from the VideoCodec
-  */
-  int32_t InitDecode(const VideoCodec* settings, int32_t numberOfCores);
+   * Initialize the decoder with the information from the `settings`
+   */
+  bool Configure(const VideoDecoder::Settings& settings);
 
   /**
-  * Decode to a raw I420 frame,
-  *
-  * inputVideoBuffer reference to encoded video frame
-  */
-  int32_t Decode(const VCMEncodedFrame& inputFrame, int64_t nowMs);
+   * Decode to a raw I420 frame,
+   *
+   * inputVideoBuffer reference to encoded video frame
+   */
+  // TODO(https://bugs.webrtc.org/9378): Remove VCMEncodedFrame variant
+  // once the usage from code in deprecated/ is gone.
+  int32_t Decode(const VCMEncodedFrame& inputFrame, Timestamp now);
+  int32_t Decode(const EncodedFrame& inputFrame, Timestamp now);
 
   /**
-  * Free the decoder memory
-  */
-  int32_t Release();
-
-  /**
-  * Set decode callback. Deregistering while decoding is illegal.
-  */
+   * Set decode callback. Deregistering while decoding is illegal.
+   */
   int32_t RegisterDecodeCompleteCallback(VCMDecodedFrameCallback* callback);
 
-  bool External() const;
-  bool PrefersLateDecoding() const;
+  bool IsSameDecoder(VideoDecoder* decoder) const {
+    return decoder_ == decoder;
+  }
 
  private:
-  VCMDecodedFrameCallback* _callback;
-  VCMFrameInformation _frameInfos[kDecoderFrameMemoryLength];
-  uint32_t _nextFrameInfoIdx;
-  VideoDecoder* const _decoder;
-  VideoCodecType _codecType;
-  bool _isExternal;
-  bool _keyFrameDecoded;
+  int32_t Decode(const EncodedImage& frame,
+                 Timestamp now,
+                 int64_t render_time_ms);
+  VCMDecodedFrameCallback* _callback = nullptr;
+  VideoDecoder* const decoder_;
   VideoContentType _last_keyframe_content_type;
+  VideoDecoder::DecoderInfo decoder_info_;
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_VIDEO_CODING_GENERIC_DECODER_H_
+#endif  // MODULES_VIDEO_CODING_GENERIC_DECODER_H_

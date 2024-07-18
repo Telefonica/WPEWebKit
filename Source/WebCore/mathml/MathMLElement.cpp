@@ -31,20 +31,28 @@
 
 #if ENABLE(MATHML)
 
+#include "ElementInlines.h"
 #include "EventHandler.h"
 #include "FrameLoader.h"
 #include "HTMLAnchorElement.h"
+#include "HTMLElement.h"
+#include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
 #include "MathMLNames.h"
 #include "MouseEvent.h"
 #include "RenderTableCell.h"
+#include "Settings.h"
+#include <wtf/IsoMallocInlines.h>
+#include <wtf/text/StringConcatenateNumbers.h>
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(MathMLElement);
+
 using namespace MathMLNames;
 
-MathMLElement::MathMLElement(const QualifiedName& tagName, Document& document)
-    : StyledElement(tagName, document, CreateMathMLElement)
+MathMLElement::MathMLElement(const QualifiedName& tagName, Document& document, ConstructionType constructionType)
+    : StyledElement(tagName, document, constructionType)
 {
 }
 
@@ -70,7 +78,7 @@ unsigned MathMLElement::rowSpan() const
     return std::max(1u, std::min(limitToOnlyHTMLNonNegative(rowSpanValue, 1u), maxRowspan));
 }
 
-void MathMLElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void MathMLElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == hrefAttr) {
         bool wasLink = isLink();
@@ -83,47 +91,86 @@ void MathMLElement::parseAttribute(const QualifiedName& name, const AtomicString
     } else if (name == columnspanAttr) {
         if (is<RenderTableCell>(renderer()) && hasTagName(mtdTag))
             downcast<RenderTableCell>(renderer())->colSpanOrRowSpanChanged();
-    } else
+    } else if (name == HTMLNames::tabindexAttr) {
+        if (value.isEmpty())
+            setTabIndexExplicitly(std::nullopt);
+        else if (auto optionalTabIndex = parseHTMLInteger(value))
+            setTabIndexExplicitly(optionalTabIndex.value());
+    } else {
+        auto& eventName = HTMLElement::eventNameForEventHandlerAttribute(name);
+        if (!eventName.isNull()) {
+            setAttributeEventListener(eventName, name, value);
+            return;
+        }
+
         StyledElement::parseAttribute(name, value);
+    }
 }
 
-bool MathMLElement::isPresentationAttribute(const QualifiedName& name) const
+bool MathMLElement::hasPresentationalHintsForAttribute(const QualifiedName& name) const
 {
-    if (name == backgroundAttr || name == colorAttr || name == dirAttr || name == fontfamilyAttr || name == fontsizeAttr || name == fontstyleAttr || name == fontweightAttr || name == mathbackgroundAttr || name == mathcolorAttr || name == mathsizeAttr)
+    if (name == backgroundAttr || name == colorAttr || name == dirAttr || name == fontfamilyAttr || name == fontsizeAttr || name == fontstyleAttr || name == fontweightAttr || name == mathbackgroundAttr || name == mathcolorAttr || name == mathsizeAttr || name == displaystyleAttr)
         return true;
-    return StyledElement::isPresentationAttribute(name);
+    return StyledElement::hasPresentationalHintsForAttribute(name);
 }
 
-void MathMLElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStyleProperties& style)
+static String convertMathSizeIfNeeded(const AtomString& value)
+{
+    if (value == "small"_s)
+        return "0.75em"_s;
+    if (value == "normal"_s)
+        return "1em"_s;
+    if (value == "big"_s)
+        return "1.5em"_s;
+
+    // FIXME: mathsize accepts any MathML length, including named spaces (see parseMathMLLength).
+    // FIXME: Might be better to use double than float.
+    // FIXME: Might be better to use "shortest" numeric formatting instead of fixed width.
+    bool ok = false;
+    float unitlessValue = value.toFloat(&ok);
+    if (!ok)
+        return value;
+    return makeString(FormattedNumber::fixedWidth(unitlessValue * 100, 3), '%');
+}
+
+void MathMLElement::collectPresentationalHintsForAttribute(const QualifiedName& name, const AtomString& value, MutableStyleProperties& style)
 {
     if (name == mathbackgroundAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyBackgroundColor, value);
-    else if (name == mathsizeAttr) {
-        // The following three values of mathsize are handled in WebCore/css/mathml.css
-        if (value != "normal" && value != "small" && value != "big")
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyFontSize, value);
-    } else if (name == mathcolorAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyColor, value);
-    // FIXME: deprecated attributes that should loose in a conflict with a non deprecated attribute
-    else if (name == fontsizeAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyFontSize, value);
-    else if (name == backgroundAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyBackgroundColor, value);
-    else if (name == colorAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyColor, value);
-    else if (name == fontstyleAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyFontStyle, value);
-    else if (name == fontweightAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyFontWeight, value);
-    else if (name == fontfamilyAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyFontFamily, value);
+        addPropertyToPresentationalHintStyle(style, CSSPropertyBackgroundColor, value);
+    else if (name == mathsizeAttr)
+        addPropertyToPresentationalHintStyle(style, CSSPropertyFontSize, convertMathSizeIfNeeded(value));
+    else if (name == mathcolorAttr)
+        addPropertyToPresentationalHintStyle(style, CSSPropertyColor, value);
     else if (name == dirAttr) {
-        if (hasTagName(mathTag) || hasTagName(mrowTag) || hasTagName(mstyleTag) || isMathMLToken())
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyDirection, value);
-    }  else {
-        ASSERT(!isPresentationAttribute(name));
-        StyledElement::collectStyleForPresentationAttribute(name, value
-        , style);
+        if (document().settings().coreMathMLEnabled() || hasTagName(mathTag) || hasTagName(mrowTag) || hasTagName(mstyleTag) || isMathMLToken())
+            addPropertyToPresentationalHintStyle(style, CSSPropertyDirection, value);
+    } else if (name == displaystyleAttr) {
+        if (equalLettersIgnoringASCIICase(value, "false"_s))
+            addPropertyToPresentationalHintStyle(style, CSSPropertyMathStyle, CSSValueCompact);
+        else if (equalLettersIgnoringASCIICase(value, "true"_s))
+            addPropertyToPresentationalHintStyle(style, CSSPropertyMathStyle, CSSValueNormal);
+    } else {
+        if (document().settings().coreMathMLEnabled()) {
+            StyledElement::collectPresentationalHintsForAttribute(name, value, style);
+            return;
+        }
+        // FIXME: The following are deprecated attributes that should lose if there is a conflict with a non-deprecated attribute.
+        if (name == fontsizeAttr)
+            addPropertyToPresentationalHintStyle(style, CSSPropertyFontSize, value);
+        else if (name == backgroundAttr)
+            addPropertyToPresentationalHintStyle(style, CSSPropertyBackgroundColor, value);
+        else if (name == colorAttr)
+            addPropertyToPresentationalHintStyle(style, CSSPropertyColor, value);
+        else if (name == fontstyleAttr)
+            addPropertyToPresentationalHintStyle(style, CSSPropertyFontStyle, value);
+        else if (name == fontweightAttr)
+            addPropertyToPresentationalHintStyle(style, CSSPropertyFontWeight, value);
+        else if (name == fontfamilyAttr)
+            addPropertyToPresentationalHintStyle(style, CSSPropertyFontFamily, value);
+        else {
+            ASSERT(!hasPresentationalHintsForAttribute(name));
+            StyledElement::collectPresentationalHintsForAttribute(name, value, style);
+        }
     }
 }
 
@@ -133,9 +180,9 @@ bool MathMLElement::childShouldCreateRenderer(const Node& child) const
     return is<MathMLElement>(child);
 }
 
-bool MathMLElement::willRespondToMouseClickEvents()
+bool MathMLElement::willRespondToMouseClickEventsWithEditability(Editability editability) const
 {
-    return isLink() || StyledElement::willRespondToMouseClickEvents();
+    return isLink() || StyledElement::willRespondToMouseClickEventsWithEditability(editability);
 }
 
 void MathMLElement::defaultEventHandler(Event& event)
@@ -151,7 +198,7 @@ void MathMLElement::defaultEventHandler(Event& event)
             const auto& url = stripLeadingAndTrailingHTMLSpaces(href);
             event.setDefaultHandled();
             if (auto* frame = document().frame())
-                frame->loader().urlSelected(document().completeURL(url), "_self", &event, LockHistory::No, LockBackForwardList::No, MaybeSendReferrer, document().shouldOpenExternalURLsPolicyToPropagate());
+                frame->loader().changeLocation(document().completeURL(url), selfTargetFrameName(), &event, ReferrerPolicy::EmptyString, document().shouldOpenExternalURLsPolicyToPropagate());
             return;
         }
     }
@@ -167,15 +214,7 @@ bool MathMLElement::canStartSelection() const
     return hasEditableStyle();
 }
 
-bool MathMLElement::isFocusable() const
-{
-    if (renderer() && renderer()->absoluteClippedOverflowRect().isEmpty())
-        return false;
-
-    return StyledElement::isFocusable();
-}
-
-bool MathMLElement::isKeyboardFocusable(KeyboardEvent& event) const
+bool MathMLElement::isKeyboardFocusable(KeyboardEvent* event) const
 {
     if (isFocusable() && StyledElement::supportsFocus())
         return StyledElement::isKeyboardFocusable(event);
@@ -207,24 +246,6 @@ bool MathMLElement::supportsFocus() const
         return StyledElement::supportsFocus();
     // If not a link we should still be able to focus the element if it has tabIndex.
     return isLink() || StyledElement::supportsFocus();
-}
-
-int MathMLElement::tabIndex() const
-{
-    // Skip the supportsFocus check in StyledElement.
-    return Element::tabIndex();
-}
-
-StringView MathMLElement::stripLeadingAndTrailingWhitespace(const StringView& stringView)
-{
-    unsigned start = 0, stringLength = stringView.length();
-    while (stringLength > 0 && isHTMLSpace(stringView[start])) {
-        start++;
-        stringLength--;
-    }
-    while (stringLength > 0 && isHTMLSpace(stringView[start + stringLength - 1]))
-        stringLength--;
-    return stringView.substring(start, stringLength);
 }
 
 }

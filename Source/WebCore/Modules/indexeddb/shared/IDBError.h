@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "DOMException.h"
 #include "ExceptionCode.h"
 #include <wtf/text/WTFString.h>
@@ -39,10 +37,13 @@ public:
 
     static IDBError userDeleteError()
     {
-        return IDBError { UnknownError, ASCIILiteral("Database deleted by request of the user") };
+        return IDBError { UnknownError, "Database deleted by request of the user"_s };
     }
-
-    WEBCORE_EXPORT IDBError& operator=(const IDBError&);
+    
+    static IDBError serverConnectionLostError()
+    {
+        return IDBError { UnknownError, "Connection to Indexed Database server lost. Refresh the page to try again"_s };
+    }
 
     RefPtr<DOMException> toDOMException() const;
 
@@ -51,11 +52,13 @@ public:
     String message() const;
 
     bool isNull() const { return !m_code; }
+    operator bool() const { return !isNull(); }
 
-    IDBError isolatedCopy() const;
+    IDBError isolatedCopy() const & { return IDBError { m_code, m_message.isolatedCopy() }; }
+    IDBError isolatedCopy() && { return IDBError { m_code, WTFMove(m_message).isolatedCopy() }; }
 
     template<class Encoder> void encode(Encoder&) const;
-    template<class Decoder> static bool decode(Decoder&, IDBError&);
+    template<class Decoder> static WARN_UNUSED_RETURN bool decode(Decoder&, IDBError&);
 
 private:
     std::optional<ExceptionCode> m_code;
@@ -67,7 +70,7 @@ void IDBError::encode(Encoder& encoder) const
 {
     if (m_code) {
         encoder << true;
-        encoder.encodeEnum(m_code.value());
+        encoder << m_code.value();
     } else
         encoder << false;
     encoder << m_message;
@@ -82,7 +85,7 @@ bool IDBError::decode(Decoder& decoder, IDBError& error)
 
     if (hasCode) {
         ExceptionCode ec;
-        if (!decoder.decodeEnum(ec))
+        if (!decoder.decode(ec))
             return false;
         error.m_code = ec;
     } else
@@ -95,5 +98,3 @@ bool IDBError::decode(Decoder& decoder, IDBError& error)
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

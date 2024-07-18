@@ -25,14 +25,13 @@
 
 #pragma once
 
-#include "PlatformExportMacros.h"
 #include <wtf/Forward.h>
 
 namespace WebCore {
 
 class CachedResource;
 
-class CachedResourceHandleBase {
+class WEBCORE_EXPORT CachedResourceHandleBase {
 public:
     ~CachedResourceHandleBase();
 
@@ -49,7 +48,7 @@ protected:
     CachedResourceHandleBase(CachedResource*);
     CachedResourceHandleBase(const CachedResourceHandleBase&);
 
-    WEBCORE_EXPORT void setResource(CachedResource*);
+    void setResource(CachedResource*);
     
 private:
     CachedResourceHandleBase& operator=(const CachedResourceHandleBase&) { return *this; } 
@@ -74,6 +73,7 @@ public:
     CachedResourceHandle& operator=(const CachedResourceHandle& o) { setResource(o.get()); return *this; }
     template<typename U> CachedResourceHandle& operator=(const CachedResourceHandle<U>& o) { setResource(o.get()); return *this; }
 
+    bool operator==(const CachedResourceHandle& o) const { return operator==(static_cast<const CachedResourceHandleBase&>(o)); }
     bool operator==(const CachedResourceHandleBase& o) const { return get() == o.get(); }
     bool operator!=(const CachedResourceHandleBase& o) const { return get() != o.get(); }
 };

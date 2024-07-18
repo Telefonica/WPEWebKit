@@ -9,15 +9,24 @@
  *
  */
 
-#include "webrtc/modules/video_coding/codecs/h264/include/h264.h"
+#include "modules/video_coding/codecs/h264/include/h264.h"
+
+#include <memory>
+#include <string>
+
+#include "absl/container/inlined_vector.h"
+#include "absl/types/optional.h"
+#include "api/video_codecs/sdp_video_format.h"
+#include "media/base/media_constants.h"
+#include "rtc_base/trace_event.h"
 
 #if defined(WEBRTC_USE_H264)
-#include "webrtc/modules/video_coding/codecs/h264/h264_decoder_impl.h"
-#include "webrtc/modules/video_coding/codecs/h264/h264_encoder_impl.h"
+#include "modules/video_coding/codecs/h264/h264_decoder_impl.h"
+#include "modules/video_coding/codecs/h264/h264_encoder_impl.h"
 #endif
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
 
@@ -27,15 +36,7 @@ namespace {
 bool g_rtc_use_h264 = true;
 #endif
 
-}  // namespace
-
-void DisableRtcUseH264() {
-#if defined(WEBRTC_USE_H264)
-  g_rtc_use_h264 = false;
-#endif
-}
-
-// If any H.264 codec is supported (iOS HW or OpenH264/FFmpeg).
+// If H.264 OpenH264/FFmpeg codec is supported.
 bool IsH264CodecSupported() {
 #if defined(WEBRTC_USE_H264)
   return g_rtc_use_h264;
@@ -44,14 +45,95 @@ bool IsH264CodecSupported() {
 #endif
 }
 
-H264Encoder* H264Encoder::Create(const cricket::VideoCodec& codec) {
+constexpr ScalabilityMode kSupportedScalabilityModes[] = {
+    ScalabilityMode::kL1T1, ScalabilityMode::kL1T2, ScalabilityMode::kL1T3};
+
+}  // namespace
+
+SdpVideoFormat CreateH264Format(H264Profile profile,
+                                H264Level level,
+                                const std::string& packetization_mode,
+                                bool add_scalability_modes) {
+  const absl::optional<std::string> profile_string =
+      H264ProfileLevelIdToString(H264ProfileLevelId(profile, level));
+  RTC_CHECK(profile_string);
+  absl::InlinedVector<ScalabilityMode, kScalabilityModeCount> scalability_modes;
+  if (add_scalability_modes) {
+    for (const auto scalability_mode : kSupportedScalabilityModes) {
+      scalability_modes.push_back(scalability_mode);
+    }
+  }
+  return SdpVideoFormat(
+      cricket::kH264CodecName,
+      {{cricket::kH264FmtpProfileLevelId, *profile_string},
+       {cricket::kH264FmtpLevelAsymmetryAllowed, "1"},
+       {cricket::kH264FmtpPacketizationMode, packetization_mode}},
+      scalability_modes);
+}
+
+void DisableRtcUseH264() {
+#if defined(WEBRTC_USE_H264)
+  g_rtc_use_h264 = false;
+#endif
+}
+
+std::vector<SdpVideoFormat> SupportedH264Codecs(bool add_scalability_modes) {
+  TRACE_EVENT0("webrtc", __func__);
+  if (!IsH264CodecSupported())
+    return std::vector<SdpVideoFormat>();
+  // We only support encoding Constrained Baseline Profile (CBP), but the
+  // decoder supports more profiles. We can list all profiles here that are
+  // supported by the decoder and that are also supersets of CBP, i.e. the
+  // decoder for that profile is required to be able to decode CBP. This means
+  // we can encode and send CBP even though we negotiated a potentially
+  // higher profile. See the H264 spec for more information.
+  //
+  // We support both packetization modes 0 (mandatory) and 1 (optional,
+  // preferred).
+  return {CreateH264Format(H264Profile::kProfileBaseline, H264Level::kLevel3_1,
+                           "1", add_scalability_modes),
+          CreateH264Format(H264Profile::kProfileBaseline, H264Level::kLevel3_1,
+                           "0", add_scalability_modes),
+          CreateH264Format(H264Profile::kProfileConstrainedBaseline,
+                           H264Level::kLevel3_1, "1", add_scalability_modes),
+          CreateH264Format(H264Profile::kProfileConstrainedBaseline,
+                           H264Level::kLevel3_1, "0", add_scalability_modes),
+          CreateH264Format(H264Profile::kProfileMain, H264Level::kLevel3_1, "1",
+                           add_scalability_modes),
+          CreateH264Format(H264Profile::kProfileMain, H264Level::kLevel3_1, "0",
+                           add_scalability_modes)};
+}
+
+std::vector<SdpVideoFormat> SupportedH264DecoderCodecs() {
+  TRACE_EVENT0("webrtc", __func__);
+  if (!IsH264CodecSupported())
+    return std::vector<SdpVideoFormat>();
+
+  std::vector<SdpVideoFormat> supportedCodecs = SupportedH264Codecs();
+
+  // OpenH264 doesn't yet support High Predictive 4:4:4 encoding but it does
+  // support decoding.
+  supportedCodecs.push_back(CreateH264Format(
+      H264Profile::kProfilePredictiveHigh444, H264Level::kLevel3_1, "1"));
+  supportedCodecs.push_back(CreateH264Format(
+      H264Profile::kProfilePredictiveHigh444, H264Level::kLevel3_1, "0"));
+
+  return supportedCodecs;
+}
+
+std::unique_ptr<H264Encoder> H264Encoder::Create() {
+  return Create(cricket::CreateVideoCodec(cricket::kH264CodecName));
+}
+
+std::unique_ptr<H264Encoder> H264Encoder::Create(
+    const cricket::VideoCodec& codec) {
   RTC_DCHECK(H264Encoder::IsSupported());
 #if defined(WEBRTC_USE_H264)
   RTC_CHECK(g_rtc_use_h264);
-  LOG(LS_INFO) << "Creating H264EncoderImpl.";
-  return new H264EncoderImpl(codec);
+  RTC_LOG(LS_INFO) << "Creating H264EncoderImpl.";
+  return std::make_unique<H264EncoderImpl>(codec);
 #else
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return nullptr;
 #endif
 }
@@ -60,14 +142,23 @@ bool H264Encoder::IsSupported() {
   return IsH264CodecSupported();
 }
 
-H264Decoder* H264Decoder::Create() {
+bool H264Encoder::SupportsScalabilityMode(ScalabilityMode scalability_mode) {
+  for (const auto& entry : kSupportedScalabilityModes) {
+    if (entry == scalability_mode) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::unique_ptr<H264Decoder> H264Decoder::Create() {
   RTC_DCHECK(H264Decoder::IsSupported());
 #if defined(WEBRTC_USE_H264)
   RTC_CHECK(g_rtc_use_h264);
-  LOG(LS_INFO) << "Creating H264DecoderImpl.";
-  return new H264DecoderImpl();
+  RTC_LOG(LS_INFO) << "Creating H264DecoderImpl.";
+  return std::make_unique<H264DecoderImpl>();
 #else
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return nullptr;
 #endif
 }

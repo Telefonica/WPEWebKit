@@ -4,6 +4,7 @@
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
  * Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
  * Copyright (C) 2010 Renata Hodovan <reni@inf.u-szeged.hu>
+ * Copyright (C) 2017-2022 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,106 +22,54 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef FETurbulence_h
-#define FETurbulence_h
+#pragma once
 
+#include "ColorComponents.h"
 #include "FilterEffect.h"
-#include "Filter.h"
 
 namespace WebCore {
 
-enum TurbulenceType {
-    FETURBULENCE_TYPE_UNKNOWN = 0,
-    FETURBULENCE_TYPE_FRACTALNOISE = 1,
-    FETURBULENCE_TYPE_TURBULENCE = 2
+enum class TurbulenceType {
+    Unknown,
+    FractalNoise,
+    Turbulence
 };
 
 class FETurbulence : public FilterEffect {
 public:
-    static Ref<FETurbulence> create(Filter&, TurbulenceType, float, float, int, float, bool);
+    WEBCORE_EXPORT static Ref<FETurbulence> create(TurbulenceType, float baseFrequencyX, float baseFrequencyY, int numOctaves, float seed, bool stitchTiles);
 
-    TurbulenceType type() const;
+    TurbulenceType type() const { return m_type; }
     bool setType(TurbulenceType);
 
-    float baseFrequencyY() const;
-    bool setBaseFrequencyY(float);
-
-    float baseFrequencyX() const;
+    float baseFrequencyX() const { return m_baseFrequencyX; }
     bool setBaseFrequencyX(float);
 
-    float seed() const;
+    float baseFrequencyY() const { return m_baseFrequencyY; }
+    bool setBaseFrequencyY(float);
+
+    float seed() const { return m_seed; }
     bool setSeed(float);
 
-    int numOctaves() const;
+    int numOctaves() const { return m_numOctaves; }
     bool setNumOctaves(int);
 
-    bool stitchTiles() const;
+    bool stitchTiles() const { return m_stitchTiles; }
     bool setStitchTiles(bool);
 
-    static void fillRegionWorker(void*);
-
-    void platformApplySoftware() override;
-    void dump() override;
-    
-    void determineAbsolutePaintRect() override { setAbsolutePaintRect(enclosingIntRect(maxEffectRect())); }
-
-    WTF::TextStream& externalRepresentation(WTF::TextStream&, int indention) const override;
+    template<class Encoder> void encode(Encoder&) const;
+    template<class Decoder> static std::optional<Ref<FETurbulence>> decode(Decoder&);
 
 private:
-    static const int s_blockSize = 256;
-    static const int s_blockMask = s_blockSize - 1;
+    FETurbulence(TurbulenceType, float baseFrequencyX, float baseFrequencyY, int numOctaves, float seed, bool stitchTiles);
 
-    static const int s_minimalRectDimension = (100 * 100); // Empirical data limit for parallel jobs.
+    unsigned numberOfEffectInputs() const override { return 0; }
 
-    struct PaintingData {
-        PaintingData(long paintingSeed, const IntSize& paintingSize)
-            : seed(paintingSeed)
-            , filterSize(paintingSize)
-        {
-        }
+    FloatRect calculateImageRect(const Filter&, const FilterImageVector& inputs, const FloatRect& primitiveSubregion) const override;
 
-        long seed;
-        int latticeSelector[2 * s_blockSize + 2];
-        float gradient[4][2 * s_blockSize + 2][2];
-        IntSize filterSize;
+    std::unique_ptr<FilterEffectApplier> createSoftwareApplier() const override;
 
-        inline long random();
-    };
-
-    struct StitchData {
-        StitchData()
-            : width(0)
-            , wrapX(0)
-            , height(0)
-            , wrapY(0)
-        {
-        }
-
-        int width; // How much to subtract to wrap for stitching.
-        int wrapX; // Minimum value to wrap.
-        int height;
-        int wrapY;
-    };
-
-    template<typename Type>
-    friend class ParallelJobs;
-
-    struct FillRegionParameters {
-        FETurbulence* filter;
-        Uint8ClampedArray* pixelArray;
-        PaintingData* paintingData;
-        int startY;
-        int endY;
-    };
-
-    static void fillRegionWorker(FillRegionParameters*);
-
-    FETurbulence(Filter&, TurbulenceType, float, float, int, float, bool);
-
-    inline void initPaint(PaintingData&);
-    float noise2D(int channel, PaintingData&, StitchData&, const FloatPoint&);
-    unsigned char calculateTurbulenceValueForPoint(int channel, PaintingData&, StitchData&, const FloatPoint&);
-    inline void fillRegion(Uint8ClampedArray*, PaintingData&, int, int);
+    WTF::TextStream& externalRepresentation(WTF::TextStream&, FilterRepresentation) const override;
 
     TurbulenceType m_type;
     float m_baseFrequencyX;
@@ -130,6 +79,67 @@ private:
     bool m_stitchTiles;
 };
 
+template<class Encoder>
+void FETurbulence::encode(Encoder& encoder) const
+{
+    encoder << m_type;
+    encoder << m_baseFrequencyX;
+    encoder << m_baseFrequencyY;
+    encoder << m_numOctaves;
+    encoder << m_seed;
+    encoder << m_stitchTiles;
+}
+
+template<class Decoder>
+std::optional<Ref<FETurbulence>> FETurbulence::decode(Decoder& decoder)
+{
+    std::optional<TurbulenceType> type;
+    decoder >> type;
+    if (!type)
+        return std::nullopt;
+
+    std::optional<float> baseFrequencyX;
+    decoder >> baseFrequencyX;
+    if (!baseFrequencyX)
+        return std::nullopt;
+
+    std::optional<float> baseFrequencyY;
+    decoder >> baseFrequencyY;
+    if (!baseFrequencyY)
+        return std::nullopt;
+
+    std::optional<int> numOctaves;
+    decoder >> numOctaves;
+    if (!numOctaves)
+        return std::nullopt;
+
+    std::optional<float> seed;
+    decoder >> seed;
+    if (!seed)
+        return std::nullopt;
+
+    std::optional<bool> stitchTiles;
+    decoder >> stitchTiles;
+    if (!stitchTiles)
+        return std::nullopt;
+
+    return FETurbulence::create(*type, *baseFrequencyX, *baseFrequencyY, *numOctaves, *seed, *stitchTiles);
+}
+
 } // namespace WebCore
 
-#endif // FETurbulence_h
+namespace WTF {
+
+template<> struct EnumTraits<WebCore::TurbulenceType> {
+    using values = EnumValues<
+        WebCore::TurbulenceType,
+
+        WebCore::TurbulenceType::Unknown,
+        WebCore::TurbulenceType::FractalNoise,
+        WebCore::TurbulenceType::Turbulence
+    >;
+};
+
+} // namespace WTF
+
+SPECIALIZE_TYPE_TRAITS_FILTER_EFFECT(FETurbulence)

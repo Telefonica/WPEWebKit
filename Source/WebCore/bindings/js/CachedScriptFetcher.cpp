@@ -29,8 +29,10 @@
 #include "CachedResourceLoader.h"
 #include "CachedScript.h"
 #include "ContentSecurityPolicy.h"
+#include "CrossOriginAccessControl.h"
 #include "Document.h"
 #include "Settings.h"
+#include "WorkerOrWorkletGlobalScope.h"
 
 namespace WebCore {
 
@@ -39,12 +41,12 @@ Ref<CachedScriptFetcher> CachedScriptFetcher::create(const String& charset)
     return adoptRef(*new CachedScriptFetcher(charset));
 }
 
-CachedResourceHandle<CachedScript> CachedScriptFetcher::requestModuleScript(Document& document, const URL& sourceURL) const
+CachedResourceHandle<CachedScript> CachedScriptFetcher::requestModuleScript(Document& document, const URL& sourceURL, String&& integrity) const
 {
-    return requestScriptWithCache(document, sourceURL, String());
+    return requestScriptWithCache(document, sourceURL, String { }, WTFMove(integrity), { });
 }
 
-CachedResourceHandle<CachedScript> CachedScriptFetcher::requestScriptWithCache(Document& document, const URL& sourceURL, const String& crossOriginMode) const
+CachedResourceHandle<CachedScript> CachedScriptFetcher::requestScriptWithCache(Document& document, const URL& sourceURL, const String& crossOriginMode, String&& integrity, std::optional<ResourceLoadPriority> resourceLoadPriority) const
 {
     if (!document.settings().isScriptEnabled())
         return nullptr;
@@ -54,16 +56,18 @@ CachedResourceHandle<CachedScript> CachedScriptFetcher::requestScriptWithCache(D
     ResourceLoaderOptions options = CachedResourceLoader::defaultCachedResourceOptions();
     options.contentSecurityPolicyImposition = hasKnownNonce ? ContentSecurityPolicyImposition::SkipPolicyCheck : ContentSecurityPolicyImposition::DoPolicyCheck;
     options.sameOriginDataURLFlag = SameOriginDataURLFlag::Set;
+    options.integrity = WTFMove(integrity);
+    options.referrerPolicy = m_referrerPolicy;
+    options.nonce = m_nonce;
 
-    CachedResourceRequest request(ResourceRequest(sourceURL), options);
-    request.setAsPotentiallyCrossOrigin(crossOriginMode, document);
+    auto request = createPotentialAccessControlRequest(sourceURL, WTFMove(options), document, crossOriginMode);
     request.upgradeInsecureRequestIfNeeded(document);
-
     request.setCharset(m_charset);
+    request.setPriority(WTFMove(resourceLoadPriority));
     if (!m_initiatorName.isNull())
         request.setInitiator(m_initiatorName);
 
-    return document.cachedResourceLoader().requestScript(WTFMove(request)).valueOr(nullptr);
+    return document.cachedResourceLoader().requestScript(WTFMove(request)).value_or(nullptr);
 }
 
 }

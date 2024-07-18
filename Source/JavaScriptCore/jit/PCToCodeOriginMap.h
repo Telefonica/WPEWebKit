@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,6 @@
 #include "CodeOrigin.h"
 #include "MacroAssembler.h"
 #include "VM.h"
-#include <wtf/Optional.h>
 #include <wtf/Vector.h>
 
 namespace JSC {
@@ -45,6 +44,7 @@ class LinkBuffer;
 class PCToCodeOriginMapBuilder;
 
 class PCToCodeOriginMapBuilder {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(PCToCodeOriginMapBuilder);
     friend class PCToCodeOriginMap;
 
@@ -53,11 +53,17 @@ public:
     PCToCodeOriginMapBuilder(PCToCodeOriginMapBuilder&& other);
 
 #if ENABLE(FTL_JIT)
-    PCToCodeOriginMapBuilder(VM&, B3::PCToOriginMap&&);
+    enum JSTag { JSCodeOriginMap };
+    PCToCodeOriginMapBuilder(JSTag, VM&, B3::PCToOriginMap);
+#endif
+
+#if ENABLE(WEBASSEMBLY_B3JIT)
+    enum WasmTag { WasmCodeOriginMap };
+    PCToCodeOriginMapBuilder(WasmTag, B3::PCToOriginMap);
 #endif
 
     void appendItem(MacroAssembler::Label, const CodeOrigin&);
-    static CodeOrigin defaultCodeOrigin() { return CodeOrigin(0, nullptr); }
+    static CodeOrigin defaultCodeOrigin() { return CodeOrigin(BytecodeIndex(0)); }
 
     bool didBuildMapping() const { return m_shouldBuildMapping; }
 
@@ -69,12 +75,13 @@ private:
         CodeOrigin codeOrigin;
     };
 
-    VM& m_vm;
     Vector<CodeRange> m_codeRanges;
     bool m_shouldBuildMapping;
 };
 
+// FIXME: <rdar://problem/39436658>
 class PCToCodeOriginMap {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(PCToCodeOriginMap);
 public:
     PCToCodeOriginMap(PCToCodeOriginMapBuilder&&, LinkBuffer&);

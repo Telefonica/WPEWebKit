@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,27 +25,28 @@
 
 #pragma once
 
+#include "BytecodeIndex.h"
 #include "CalleeBits.h"
-#include "VMEntryRecord.h"
+#include "SourceID.h"
 #include "WasmIndexOrName.h"
-#include <functional>
+#include <wtf/Function.h>
 #include <wtf/Indenter.h>
+#include <wtf/IterationStatus.h>
 #include <wtf/text/WTFString.h>
 
 namespace JSC {
 
-struct CodeOrigin;
+struct EntryFrame;
 struct InlineCallFrame;
 
+class CallFrame;
 class CodeBlock;
-class ExecState;
+class CodeOrigin;
 class JSCell;
 class JSFunction;
 class ClonedArguments;
 class Register;
 class RegisterAtOffsetList;
-
-typedef ExecState CallFrame;
 
 class StackVisitor {
 public:
@@ -62,11 +63,11 @@ public:
 
         size_t index() const { return m_index; }
         size_t argumentCountIncludingThis() const { return m_argumentCountIncludingThis; }
-        bool callerIsVMEntryFrame() const { return m_callerIsVMEntryFrame; }
+        bool callerIsEntryFrame() const { return m_callerIsEntryFrame; }
         CallFrame* callerFrame() const { return m_callerFrame; }
         CalleeBits callee() const { return m_callee; }
         CodeBlock* codeBlock() const { return m_codeBlock; }
-        unsigned bytecodeOffset() const { return m_bytecodeOffset; }
+        BytecodeIndex bytecodeIndex() const { return m_bytecodeIndex; }
         InlineCallFrame* inlineCallFrame() const {
 #if ENABLE(DFG_JIT)
             return m_inlineCallFrame;
@@ -88,20 +89,23 @@ public:
         JS_EXPORT_PRIVATE String sourceURL() const;
         JS_EXPORT_PRIVATE String toString() const;
 
-        JS_EXPORT_PRIVATE intptr_t sourceID();
+        JS_EXPORT_PRIVATE SourceID sourceID();
 
         CodeType codeType() const;
         bool hasLineAndColumnInfo() const;
         JS_EXPORT_PRIVATE void computeLineAndColumn(unsigned& line, unsigned& column) const;
 
-        RegisterAtOffsetList* calleeSaveRegisters();
+#if ENABLE(ASSEMBLER)
+        std::optional<RegisterAtOffsetList> calleeSaveRegistersForUnwinding();
+#endif
 
-        ClonedArguments* createArguments();
-        VMEntryFrame* vmEntryFrame() const { return m_VMEntryFrame; }
+        ClonedArguments* createArguments(VM&);
         CallFrame* callFrame() const { return m_callFrame; }
+
+        JS_EXPORT_PRIVATE bool isImplementationVisibilityPrivate() const;
         
         void dump(PrintStream&, Indenter = Indenter()) const;
-        void dump(PrintStream&, Indenter, std::function<void(PrintStream&)> prefix) const;
+        void dump(PrintStream&, Indenter, WTF::Function<void(PrintStream&)> prefix) const;
 
     private:
         Frame() { }
@@ -114,36 +118,38 @@ public:
         InlineCallFrame* m_inlineCallFrame;
 #endif
         CallFrame* m_callFrame;
-        VMEntryFrame* m_VMEntryFrame;
-        VMEntryFrame* m_CallerVMEntryFrame;
+        EntryFrame* m_entryFrame;
+        EntryFrame* m_callerEntryFrame;
         CallFrame* m_callerFrame;
         CalleeBits m_callee;
         CodeBlock* m_codeBlock;
         size_t m_index;
         size_t m_argumentCountIncludingThis;
-        unsigned m_bytecodeOffset;
-        Wasm::IndexOrName m_wasmFunctionIndexOrName;
-        bool m_callerIsVMEntryFrame : 1;
+        BytecodeIndex m_bytecodeIndex;
+        bool m_callerIsEntryFrame : 1;
         bool m_isWasmFrame : 1;
+        Wasm::IndexOrName m_wasmFunctionIndexOrName;
 
         friend class StackVisitor;
     };
 
-    enum Status {
-        Continue = 0,
-        Done = 1
+    // StackVisitor::visit() expects a Functor that implements the following method:
+    //     IterationStatus operator()(StackVisitor&) const;
+
+    enum EmptyEntryFrameAction {
+        ContinueIfTopEntryFrameIsEmpty,
+        TerminateIfTopEntryFrameIsEmpty,
     };
 
-    // StackVisitor::visit() expects a Functor that implements the following method:
-    //     Status operator()(StackVisitor&) const;
-
-    template <typename Functor>
-    static void visit(CallFrame* startFrame, VM* vm, const Functor& functor)
+    template <EmptyEntryFrameAction action = ContinueIfTopEntryFrameIsEmpty, typename Functor>
+    static void visit(CallFrame* startFrame, VM& vm, const Functor& functor)
     {
         StackVisitor visitor(startFrame, vm);
+        if (action == TerminateIfTopEntryFrameIsEmpty && visitor.topEntryFrameIsEmpty())
+            return;
         while (visitor->callFrame()) {
-            Status status = functor(visitor);
-            if (status != Continue)
+            IterationStatus status = functor(visitor);
+            if (status != IterationStatus::Continue)
                 break;
             visitor.gotoNextFrame();
         }
@@ -153,39 +159,42 @@ public:
     ALWAYS_INLINE Frame* operator->() { return &m_frame; }
     void unwindToMachineCodeBlockFrame();
 
+    bool topEntryFrameIsEmpty() const { return m_topEntryFrameIsEmpty; }
+
 private:
-    JS_EXPORT_PRIVATE StackVisitor(CallFrame* startFrame, VM*);
+    JS_EXPORT_PRIVATE StackVisitor(CallFrame* startFrame, VM&);
 
     JS_EXPORT_PRIVATE void gotoNextFrame();
 
     void readFrame(CallFrame*);
-    void readNonInlinedFrame(CallFrame*, CodeOrigin* = 0);
+    void readNonInlinedFrame(CallFrame*, CodeOrigin* = nullptr);
 #if ENABLE(DFG_JIT)
     void readInlinedFrame(CallFrame*, CodeOrigin*);
 #endif
 
     Frame m_frame;
+    bool m_topEntryFrameIsEmpty { false };
 };
 
 class CallerFunctor {
 public:
     CallerFunctor()
         : m_hasSkippedFirstFrame(false)
-        , m_callerFrame(0)
+        , m_callerFrame(nullptr)
     {
     }
 
     CallFrame* callerFrame() const { return m_callerFrame; }
 
-    StackVisitor::Status operator()(StackVisitor& visitor) const
+    IterationStatus operator()(StackVisitor& visitor) const
     {
         if (!m_hasSkippedFirstFrame) {
             m_hasSkippedFirstFrame = true;
-            return StackVisitor::Continue;
+            return IterationStatus::Continue;
         }
 
         m_callerFrame = visitor->callFrame();
-        return StackVisitor::Done;
+        return IterationStatus::Done;
     }
     
 private:

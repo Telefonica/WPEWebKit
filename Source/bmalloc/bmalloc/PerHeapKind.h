@@ -26,6 +26,9 @@
 #pragma once
 
 #include "HeapKind.h"
+#include <array>
+
+#if !BUSE(LIBPAS)
 
 namespace bmalloc {
 
@@ -104,3 +107,4 @@ public:
 
 } // namespace bmalloc
 
+#endif

@@ -26,30 +26,83 @@
 #import "config.h"
 #import "Download.h"
 
-#if USE(NETWORK_SESSION)
-
 #import "DataReference.h"
-#import <WebCore/NotImplemented.h>
+#import "NetworkSessionCocoa.h"
+#import "WKDownloadProgress.h"
+#import <pal/spi/cf/CFNetworkSPI.h>
+#import <pal/spi/cocoa/NSProgressSPI.h>
+#import <wtf/BlockPtr.h>
 
 namespace WebKit {
 
-void Download::resume(const IPC::DataReference& resumeData, const String& path, const SandboxExtension::Handle& sandboxExtensionHandle)
+void Download::resume(const IPC::DataReference& resumeData, const String& path, SandboxExtension::Handle&& sandboxExtensionHandle)
 {
-    notImplemented();
+    m_sandboxExtension = SandboxExtension::create(WTFMove(sandboxExtensionHandle));
+    if (m_sandboxExtension)
+        m_sandboxExtension->consume();
+
+    auto* networkSession = m_downloadManager.client().networkSession(m_sessionID);
+    if (!networkSession) {
+        WTFLogAlways("Could not find network session with given session ID");
+        return;
+    }
+    auto& cocoaSession = static_cast<NetworkSessionCocoa&>(*networkSession);
+    auto nsData = adoptNS([[NSData alloc] initWithBytes:resumeData.data() length:resumeData.size()]);
+
+    NSMutableDictionary *dictionary = [NSPropertyListSerialization propertyListWithData:nsData.get() options:NSPropertyListMutableContainersAndLeaves format:0 error:nullptr];
+    [dictionary setObject:static_cast<NSString*>(path) forKey:@"NSURLSessionResumeInfoLocalPath"];
+    NSData *updatedData = [NSPropertyListSerialization dataWithPropertyList:dictionary format:NSPropertyListXMLFormat_v1_0 options:0 error:nullptr];
+
+    // FIXME: Use nsData instead of updatedData once we've migrated from _WKDownload to WKDownload
+    // because there's no reason to set the local path we got from the data back into the data.
+    m_downloadTask = [cocoaSession.sessionWrapperForDownloadResume().session downloadTaskWithResumeData:updatedData];
+    auto taskIdentifier = [m_downloadTask taskIdentifier];
+    ASSERT(!cocoaSession.sessionWrapperForDownloadResume().downloadMap.contains(taskIdentifier));
+    cocoaSession.sessionWrapperForDownloadResume().downloadMap.add(taskIdentifier, m_downloadID);
+    m_downloadTask.get()._pathToDownloadTaskFile = path;
+
+    [m_downloadTask resume];
 }
     
-void Download::platformCancelNetworkLoad()
+void Download::platformCancelNetworkLoad(CompletionHandler<void(const IPC::DataReference&)>&& completionHandler)
 {
+    ASSERT(isMainRunLoop());
     ASSERT(m_downloadTask);
-    [m_downloadTask cancelByProducingResumeData: ^(NSData * _Nullable resumeData)
-    {
-        if (resumeData && resumeData.bytes && resumeData.length)
-            didCancel(IPC::DataReference(reinterpret_cast<const uint8_t*>(resumeData.bytes), resumeData.length));
-        else
-            didCancel({ });
-    }];
+    [m_downloadTask cancelByProducingResumeData:makeBlockPtr([completionHandler = WTFMove(completionHandler)] (NSData *resumeData) mutable {
+        ensureOnMainRunLoop([resumeData = retainPtr(resumeData), completionHandler = WTFMove(completionHandler)] () mutable  {
+            auto resumeDataReference = resumeData ? IPC::DataReference { static_cast<const uint8_t*>([resumeData bytes]), [resumeData length] } : IPC::DataReference { };
+            completionHandler(resumeDataReference);
+        });
+    }).get()];
+}
+
+void Download::platformDestroyDownload()
+{
+    if (m_progress)
+#if HAVE(NSPROGRESS_PUBLISHING_SPI)
+        [m_progress _unpublish];
+#else
+        [m_progress unpublish];
+#endif
+}
+
+void Download::publishProgress(const URL& url, SandboxExtension::Handle&& sandboxExtensionHandle)
+{
+    ASSERT(!m_progress);
+    ASSERT(url.isValid());
+
+    auto sandboxExtension = SandboxExtension::create(WTFMove(sandboxExtensionHandle));
+
+    ASSERT(sandboxExtension);
+    if (!sandboxExtension)
+        return;
+
+    m_progress = adoptNS([[WKDownloadProgress alloc] initWithDownloadTask:m_downloadTask.get() download:*this URL:(NSURL *)url sandboxExtension:sandboxExtension]);
+#if HAVE(NSPROGRESS_PUBLISHING_SPI)
+    [m_progress _publish];
+#else
+    [m_progress publish];
+#endif
 }
 
 }
-
-#endif // USE(NETWORK_SESSION)

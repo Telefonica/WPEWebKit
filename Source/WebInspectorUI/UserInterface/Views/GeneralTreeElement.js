@@ -50,6 +50,11 @@ WI.GeneralTreeElement = class GeneralTreeElement extends WI.TreeElement
         return this._iconElement;
     }
 
+    get statusElement()
+    {
+        return this._statusElement;
+    }
+
     get titlesElement()
     {
         this._createElementsIfNeeded();
@@ -186,6 +191,46 @@ WI.GeneralTreeElement = class GeneralTreeElement extends WI.TreeElement
         this._tooltipHandledSeparately = !!x;
     }
 
+    createFoldersAsNeededForSubpath(subpath, comparator)
+    {
+        if (!subpath)
+            return this;
+
+        let components = subpath.split("/");
+        if (components.length === 1)
+            return this;
+
+        if (!this._subpathFolderTreeElementMap)
+            this._subpathFolderTreeElementMap = new Map;
+
+        let currentPath = "";
+        let currentFolderTreeElement = this;
+
+        for (let component of components) {
+            if (component === components.lastValue)
+                break;
+
+            if (currentPath)
+                currentPath += "/";
+            currentPath += component;
+
+            let cachedFolder = this._subpathFolderTreeElementMap.get(currentPath);
+            if (cachedFolder) {
+                currentFolderTreeElement = cachedFolder;
+                continue;
+            }
+
+            let newFolder = new WI.FolderTreeElement(component);
+            this._subpathFolderTreeElementMap.set(currentPath, newFolder);
+
+            let index = insertionIndexForObjectInListSortedByFunction(newFolder, currentFolderTreeElement.children, comparator || WI.ResourceTreeElement.compareFolderAndResourceTreeElements);
+            currentFolderTreeElement.insertChild(newFolder, index);
+            currentFolderTreeElement = newFolder;
+        }
+
+        return currentFolderTreeElement;
+    }
+
     // Overrides from TreeElement (Private)
 
     isEventWithinDisclosureTriangle(event)
@@ -212,7 +257,7 @@ WI.GeneralTreeElement = class GeneralTreeElement extends WI.TreeElement
 
     ondetach()
     {
-        // Overriden by subclasses.
+        // Overridden by subclasses.
     }
 
     onreveal()
@@ -290,6 +335,8 @@ WI.GeneralTreeElement = class GeneralTreeElement extends WI.TreeElement
         } else if (this._mainTitle instanceof Node) {
             this._mainTitleElement.removeChildren();
             this._mainTitleElement.appendChild(this._mainTitle);
+            if (this._mainTitle instanceof DocumentFragment)
+                this._mainTitle = this._mainTitleElement.textContent;
         }
 
         if (typeof this._subtitle === "string" && this._subtitle) {
@@ -301,6 +348,9 @@ WI.GeneralTreeElement = class GeneralTreeElement extends WI.TreeElement
             this._createSubtitleElementIfNeeded();
             this._subtitleElement.removeChildren();
             this._subtitleElement.appendChild(this._subtitle);
+            if (this._subtitle instanceof DocumentFragment)
+                this._subtitle = this._subtitleElement.textContent;
+            this._titlesElement.classList.remove(WI.GeneralTreeElement.NoSubtitleStyleClassName);
         } else {
             if (this._subtitleElement)
                 this._subtitleElement.textContent = "";

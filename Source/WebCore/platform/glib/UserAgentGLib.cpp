@@ -27,9 +27,11 @@
 #include "config.h"
 #include "UserAgent.h"
 
-#include "URL.h"
+#include "HTTPParsers.h"
 #include "UserAgentQuirks.h"
 #include <wtf/NeverDestroyed.h>
+#include <wtf/URL.h>
+#include <wtf/glib/ChassisType.h>
 #include <wtf/text/StringBuilder.h>
 
 #if OS(UNIX)
@@ -49,6 +51,8 @@ static const char* platformForUAString()
 #if OS(MAC_OS_X)
     return "Macintosh";
 #else
+    if (chassisType() == WTF::ChassisType::Mobile)
+        return "Linux";
     return "X11";
 #endif
 }
@@ -56,55 +60,55 @@ static const char* platformForUAString()
 static const String platformVersionForUAString()
 {
 #if OS(UNIX)
+    if (chassisType() == WTF::ChassisType::Mobile)
+        return "like Android 4.4"_s;
+
     struct utsname name;
     uname(&name);
-    static NeverDestroyed<const String> uaOSVersion(String::format("%s %s", name.sysname, name.machine));
+    static NeverDestroyed<const String> uaOSVersion(makeString(name.sysname, ' ', name.machine));
     return uaOSVersion;
 #else
     // We will always claim to be Safari in Intel Mac OS X, since Safari without
     // OS X or anything on ARM triggers mobile versions of some websites.
-    //
-    // FIXME: The final result should include OS version, e.g. "Intel Mac OS X 10_8_4".
-    static NeverDestroyed<const String> uaOSVersion(MAKE_STATIC_STRING_IMPL("Intel Mac OS X"));
+    static NeverDestroyed<const String> uaOSVersion(MAKE_STATIC_STRING_IMPL("Intel Mac OS X 10_13_4"));
     return uaOSVersion;
 #endif
-}
-
-static const char* versionForUAString()
-{
-    return USER_AGENT_MAJOR_VERSION "." USER_AGENT_MINOR_VERSION;
 }
 
 static String buildUserAgentString(const UserAgentQuirks& quirks)
 {
     StringBuilder uaString;
-    uaString.appendLiteral("Mozilla/5.0 ");
-    uaString.append('(');
+    uaString.append("Mozilla/5.0 (");
 
     if (quirks.contains(UserAgentQuirks::NeedsMacintoshPlatform))
         uaString.append(UserAgentQuirks::stringForQuirk(UserAgentQuirks::NeedsMacintoshPlatform));
-    else if (quirks.contains(UserAgentQuirks::NeedsLinuxDesktopPlatform))
-        uaString.append(UserAgentQuirks::stringForQuirk(UserAgentQuirks::NeedsLinuxDesktopPlatform));
     else {
-        uaString.append(platformForUAString());
-        uaString.appendLiteral("; ");
+        uaString.append(platformForUAString(), "; ");
+#if defined(USER_AGENT_BRANDING)
+        uaString.append(USER_AGENT_BRANDING "; ");
+#endif
         uaString.append(platformVersionForUAString());
     }
 
-    uaString.appendLiteral(") AppleWebKit/");
-    uaString.append(versionForUAString());
-    uaString.appendLiteral(" (KHTML, like Gecko) ");
-
-    // Note that Chrome UAs advertise *both* Chrome and Safari.
-    if (quirks.contains(UserAgentQuirks::NeedsChromeBrowser)) {
-        uaString.append(UserAgentQuirks::stringForQuirk(UserAgentQuirks::NeedsChromeBrowser));
-        uaString.appendLiteral(" ");
+    if (quirks.contains(UserAgentQuirks::NeedsFirefoxBrowser)) {
+        uaString.append(UserAgentQuirks::stringForQuirk(UserAgentQuirks::NeedsFirefoxBrowser));
+        return uaString.toString();
     }
 
+    uaString.append(") AppleWebKit/605.1.15 (KHTML, like Gecko) ");
+
+    // Note that Chrome UAs advertise *both* Chrome/X and Safari/X, but it does
+    // not advertise Version/X.
+    if (quirks.contains(UserAgentQuirks::NeedsChromeBrowser)) {
+        uaString.append(UserAgentQuirks::stringForQuirk(UserAgentQuirks::NeedsChromeBrowser), ' ');
     // Version/X is mandatory *before* Safari/X to be a valid Safari UA. See
     // https://bugs.webkit.org/show_bug.cgi?id=133403 for details.
-    uaString.appendLiteral("Version/11.0 Safari/");
-    uaString.append(versionForUAString());
+    } else
+        uaString.append("Version/16.0 ");
+
+    if (chassisType() == WTF::ChassisType::Mobile)
+        uaString.append("Mobile ");
+    uaString.append("Safari/605.1.15");
 
     return uaString.toString();
 }
@@ -125,22 +129,40 @@ String standardUserAgent(const String& applicationName, const String& applicatio
     // browsers that are "Safari" but not running on OS X are the Safari iOS browser. Getting this
     // wrong can cause sites to load the wrong JavaScript, CSS, or custom fonts. In some cases
     // sites won't load resources at all.
-    if (applicationName.isEmpty())
-        return standardUserAgentStatic();
 
-    String finalApplicationVersion = applicationVersion;
-    if (finalApplicationVersion.isEmpty())
-        finalApplicationVersion = versionForUAString();
+    String userAgent;
+    if (applicationName.isEmpty()) {
+        userAgent = standardUserAgentStatic();
+    } else {
+        String finalApplicationVersion = applicationVersion;
+        if (finalApplicationVersion.isEmpty())
+            finalApplicationVersion = "605.1.15"_s;
+        userAgent = standardUserAgentStatic() + ' ' + applicationName + '/' + finalApplicationVersion;
+    }
 
-    return standardUserAgentStatic() + ' ' + applicationName + '/' + finalApplicationVersion;
+    static bool checked = false;
+    if (!checked) {
+        // For release builds, we'll only check the first resource load, mainly to ensure that any
+        // configured application details or user agent branding is OK.
+        RELEASE_ASSERT_WITH_MESSAGE(isValidUserAgentHeaderValue(userAgent), "%s is not a valid user agent header", userAgent.utf8().data());
+        checked = true;
+    }
+    ASSERT(isValidUserAgentHeaderValue(userAgent));
+    return userAgent;
 }
 
 String standardUserAgentForURL(const URL& url)
 {
     auto quirks = UserAgentQuirks::quirksForURL(url);
     // The null string means we don't need a specific UA for the given URL.
-    return quirks.isEmpty() ? String() : buildUserAgentString(quirks);
+    // Note: UserAgentQuirks::NeedsUnbrandedUserAgent is implemented by simply
+    // not returning here.
+    if (quirks.isEmpty())
+        return String();
+
+    String userAgent(buildUserAgentString(quirks));
+    ASSERT(isValidUserAgentHeaderValue(userAgent));
+    return userAgent;
 }
 
 } // namespace WebCore
-

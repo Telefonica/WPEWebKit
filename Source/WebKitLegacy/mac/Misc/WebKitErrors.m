@@ -29,10 +29,11 @@
 #import <WebKitLegacy/WebKitErrors.h>
 
 #import "WebLocalizableStringsInternal.h"
+#import <Foundation/NSURLError.h>
 #import <WebKitLegacy/WebKitErrorsPrivate.h>
 #import <WebKitLegacy/WebNSURLExtras.h>
 
-#import <pthread.h>
+#import <dispatch/dispatch.h>
 
 NSString *WebKitErrorDomain = @"WebKitErrorDomain";
 
@@ -58,32 +59,57 @@ NSString * const WebKitErrorPlugInPageURLStringKey =    @"WebKitErrorPlugInPageU
 
 #define WebKitErrorDescriptionGeolocationLocationUnknown UI_STRING_INTERNAL("The current location cannot be found.", "WebKitErrorGeolocationLocationUnknown description")
 
-static pthread_once_t registerErrorsControl = PTHREAD_ONCE_INIT;
-static void registerErrors(void);
+static NSMutableDictionary *descriptions = nil;
+
+@interface NSError (WebKitInternal)
+- (instancetype)_webkit_initWithDomain:(NSString *)domain code:(int)code URL:(NSURL *)URL __attribute__((objc_method_family(init)));
+@end
+
+@implementation NSError (WebKitInternal)
+
+- (instancetype)_webkit_initWithDomain:(NSString *)domain code:(int)code URL:(NSURL *)URL
+{
+    // Insert a localized string here for those folks not savvy to our category methods.
+    NSString *localizedDescription = [[descriptions objectForKey:domain] objectForKey:@(code)];
+    NSDictionary *userInfo = [NSDictionary dictionaryWithObjectsAndKeys:
+        URL, @"NSErrorFailingURLKey",
+        [URL absoluteString], NSURLErrorFailingURLStringErrorKey,
+        localizedDescription, NSLocalizedDescriptionKey,
+        nil];
+    return [self initWithDomain:domain code:code userInfo:userInfo];
+}
+
+@end
 
 @implementation NSError (WebKitExtras)
 
-static NSMutableDictionary *descriptions = nil;
-
 + (void)_registerWebKitErrors
 {
-    pthread_once(&registerErrorsControl, registerErrors);
-}
+    static dispatch_once_t flag;
+    dispatch_once(&flag, ^{
+        @autoreleasepool {
+            NSDictionary *dict = [NSDictionary dictionaryWithObjectsAndKeys:
+                // Policy errors
+                WebKitErrorDescriptionCannotShowMIMEType,                   @(WebKitErrorCannotShowMIMEType),
+                WebKitErrorDescriptionCannotShowURL,                        @(WebKitErrorCannotShowURL),
+                WebKitErrorDescriptionFrameLoadInterruptedByPolicyChange,   @(WebKitErrorFrameLoadInterruptedByPolicyChange),
+                WebKitErrorDescriptionCannotUseRestrictedPort,              @(WebKitErrorCannotUseRestrictedPort),
+                WebKitErrorDescriptionFrameLoadBlockedByContentFilter,      @(WebKitErrorFrameLoadBlockedByContentFilter),
 
--(id)_webkit_initWithDomain:(NSString *)domain code:(int)code URL:(NSURL *)URL
-{
-    NSDictionary *descriptionsDict;
-    NSString *localizedDesc;
-    NSDictionary *dict;
-    // insert a localized string here for those folks not savvy to our category methods
-    descriptionsDict = [descriptions objectForKey:domain];
-    localizedDesc = descriptionsDict ? [descriptionsDict objectForKey:[NSNumber numberWithInt:code]] : nil;
-    dict = [NSDictionary dictionaryWithObjectsAndKeys:
-        URL, @"NSErrorFailingURLKey",
-        [URL absoluteString], @"NSErrorFailingURLStringKey",
-        localizedDesc, NSLocalizedDescriptionKey,
-        nil];
-    return [self initWithDomain:domain code:code userInfo:dict];
+                // Plug-in and java errors
+                WebKitErrorDescriptionCannotFindPlugin,                     @(WebKitErrorCannotFindPlugIn),
+                WebKitErrorDescriptionCannotLoadPlugin,                     @(WebKitErrorCannotLoadPlugIn),
+                WebKitErrorDescriptionJavaUnavailable,                      @(WebKitErrorJavaUnavailable),
+                WebKitErrorDescriptionPlugInCancelledConnection,            @(WebKitErrorPlugInCancelledConnection),
+                WebKitErrorDescriptionPlugInWillHandleLoad,                 @(WebKitErrorPlugInWillHandleLoad),
+
+                // Geolocation errors
+                WebKitErrorDescriptionGeolocationLocationUnknown,           @(WebKitErrorGeolocationLocationUnknown),
+                nil];
+
+            [NSError _webkit_addErrorsWithCodesAndDescriptions:dict inDomain:WebKitErrorDomain];
+        }
+    });
 }
 
 +(id)_webkit_errorWithDomain:(NSString *)domain code:(int)code URL:(NSURL *)URL
@@ -112,7 +138,7 @@ static NSMutableDictionary *descriptions = nil;
     
     NSMutableDictionary *userInfo = [[NSMutableDictionary alloc] init];
     NSDictionary *descriptionsForWebKitErrorDomain = [descriptions objectForKey:WebKitErrorDomain];
-    NSString *localizedDescription = [descriptionsForWebKitErrorDomain objectForKey:[NSNumber numberWithInt:code]];
+    NSString *localizedDescription = [descriptionsForWebKitErrorDomain objectForKey:@(code)];
     if (localizedDescription)
         [userInfo setObject:localizedDescription forKey:NSLocalizedDescriptionKey];
     if (contentURL) {
@@ -143,34 +169,6 @@ static NSMutableDictionary *descriptions = nil;
         descriptions = [[NSMutableDictionary alloc] init];
 
     [descriptions setObject:dictionary forKey:domain];
-}
-
-static void registerErrors()
-{
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-
-    NSDictionary *dict = [NSDictionary dictionaryWithObjectsAndKeys:
-        // Policy errors
-        WebKitErrorDescriptionCannotShowMIMEType,                   [NSNumber numberWithInt: WebKitErrorCannotShowMIMEType],
-        WebKitErrorDescriptionCannotShowURL,                        [NSNumber numberWithInt: WebKitErrorCannotShowURL],
-        WebKitErrorDescriptionFrameLoadInterruptedByPolicyChange,   [NSNumber numberWithInt: WebKitErrorFrameLoadInterruptedByPolicyChange],
-        WebKitErrorDescriptionCannotUseRestrictedPort,              [NSNumber numberWithInt: WebKitErrorCannotUseRestrictedPort],
-        WebKitErrorDescriptionFrameLoadBlockedByContentFilter,      [NSNumber numberWithInt: WebKitErrorFrameLoadBlockedByContentFilter],
-
-        // Plug-in and java errors
-        WebKitErrorDescriptionCannotFindPlugin,                     [NSNumber numberWithInt: WebKitErrorCannotFindPlugIn],
-        WebKitErrorDescriptionCannotLoadPlugin,                     [NSNumber numberWithInt: WebKitErrorCannotLoadPlugIn],
-        WebKitErrorDescriptionJavaUnavailable,                      [NSNumber numberWithInt: WebKitErrorJavaUnavailable],
-        WebKitErrorDescriptionPlugInCancelledConnection,            [NSNumber numberWithInt: WebKitErrorPlugInCancelledConnection],
-        WebKitErrorDescriptionPlugInWillHandleLoad,                 [NSNumber numberWithInt: WebKitErrorPlugInWillHandleLoad],
-
-        // Geolocation errors
-        WebKitErrorDescriptionGeolocationLocationUnknown,           [NSNumber numberWithInt: WebKitErrorGeolocationLocationUnknown],
-        nil];
-
-    [NSError _webkit_addErrorsWithCodesAndDescriptions:dict inDomain:WebKitErrorDomain];
-
-    [pool drain];
 }
 
 @end

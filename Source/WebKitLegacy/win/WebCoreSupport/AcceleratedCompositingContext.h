@@ -40,6 +40,7 @@
 class WebView;
 
 class AcceleratedCompositingContext : public WebCore::GraphicsLayerClient {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(AcceleratedCompositingContext);
 public:
     explicit AcceleratedCompositingContext(WebView&);
@@ -52,7 +53,7 @@ public:
     bool enabled();
 
     // GraphicsLayerClient
-    void paintContents(const WebCore::GraphicsLayer*, WebCore::GraphicsContext&, WebCore::GraphicsLayerPaintingPhase, const WebCore::FloatRect& rectToPaint, WebCore::GraphicsLayerPaintBehavior) override;
+    void paintContents(const WebCore::GraphicsLayer*, WebCore::GraphicsContext&, const WebCore::FloatRect& rectToPaint, WebCore::GraphicsLayerPaintBehavior) override;
     float deviceScaleFactor() const override;
 
     void initialize();
@@ -65,14 +66,14 @@ public:
     bool flushPendingLayerChangesSoon();
     void scrollNonCompositedContents(const WebCore::IntRect& scrollRect, const WebCore::IntSize& scrollOffset);
 
-    static bool acceleratedCompositingAvailable();
+    String layerTreeAsString() const;
 
 private:
     WebView& m_webView;
     std::unique_ptr<WebCore::GLContext> m_context;
     HWND m_window;
-    std::unique_ptr<WebCore::GraphicsLayer> m_rootLayer;
-    std::unique_ptr<WebCore::GraphicsLayer> m_nonCompositedContentLayer;
+    RefPtr<WebCore::GraphicsLayer> m_rootLayer;
+    RefPtr<WebCore::GraphicsLayer> m_nonCompositedContentLayer;
     std::unique_ptr<WebCore::TextureMapper> m_textureMapper;
     WebCore::TextureMapperFPSCounter m_fpsCounter;
 

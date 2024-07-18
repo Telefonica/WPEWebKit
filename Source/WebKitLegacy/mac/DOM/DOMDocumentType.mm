@@ -29,12 +29,12 @@
 #import "DOMNodeInternal.h"
 #import <WebCore/DocumentType.h>
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/NamedNodeMap.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::DocumentType*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -91,3 +91,5 @@ DOMDocumentType *kit(WebCore::DocumentType* value)
     WebCoreThreadViolationCheckRoundOne();
     return static_cast<DOMDocumentType*>(kit(static_cast<WebCore::Node*>(value)));
 }
+
+#undef IMPL

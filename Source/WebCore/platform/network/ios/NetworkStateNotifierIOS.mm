@@ -26,9 +26,11 @@
 #import "config.h"
 #import "NetworkStateNotifier.h"
 
-#import "Settings.h"
+#if PLATFORM(IOS_FAMILY)
+
+#import "DeprecatedGlobalSettings.h"
 #import "WebCoreThreadRun.h"
-#import <wtf/SoftLinking.h>
+#import <wtf/BlockPtr.h>
 
 #if USE(APPLE_INTERNAL_SDK)
 #import <AppSupport/CPNetworkObserver.h>
@@ -40,11 +42,8 @@
 @end
 #endif
 
-SOFT_LINK_PRIVATE_FRAMEWORK(AppSupport);
-SOFT_LINK_CLASS(AppSupport, CPNetworkObserver);
-
 @interface WebNetworkStateObserver : NSObject {
-    void (^block)();
+    BlockPtr<void()> block;
 }
 - (id)initWithBlock:(void (^)())block;
 @end
@@ -55,15 +54,9 @@ SOFT_LINK_CLASS(AppSupport, CPNetworkObserver);
 {
     if (!(self = [super init]))
         return nil;
-    [[getCPNetworkObserverClass() sharedNetworkObserver] addNetworkReachableObserver:self selector:@selector(networkStateChanged:)];
-    block = [observerBlock copy];
+    [[CPNetworkObserver sharedNetworkObserver] addNetworkReachableObserver:self selector:@selector(networkStateChanged:)];
+    block = makeBlockPtr(observerBlock);
     return self;
-}
-
-- (void)dealloc
-{
-    [block release];
-    [super dealloc];
 }
 
 - (void)networkStateChanged:(NSNotification *)unusedNotification
@@ -78,18 +71,20 @@ namespace WebCore {
 
 void NetworkStateNotifier::updateStateWithoutNotifying()
 {
-    m_isOnLine = [[getCPNetworkObserverClass() sharedNetworkObserver] isNetworkReachable];
+    m_isOnLine = [[CPNetworkObserver sharedNetworkObserver] isNetworkReachable];
 }
 
 void NetworkStateNotifier::startObserving()
 {
-    if (Settings::shouldOptOutOfNetworkStateObservation())
+    if (DeprecatedGlobalSettings::shouldOptOutOfNetworkStateObservation())
         return;
     m_observer = adoptNS([[WebNetworkStateObserver alloc] initWithBlock:^ {
-        WebThreadRun(^ {
+        callOnMainThread([] {
             NetworkStateNotifier::singleton().updateStateSoon();
         });
     }]);
 }
 
 } // namespace WebCore
+
+#endif // PLATFORM(IOS_FAMILY)

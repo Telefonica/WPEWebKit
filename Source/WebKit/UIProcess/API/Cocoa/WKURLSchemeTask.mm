@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,18 +24,28 @@
  */
 
 #import "config.h"
+#import "WKURLSchemeTask.h"
+
+#import "WKFrameInfoInternal.h"
 #import "WKURLSchemeTaskInternal.h"
-
-#if WK_API_ENABLED
-
 #import "WebURLSchemeHandler.h"
 #import "WebURLSchemeTask.h"
 #import <WebCore/ResourceError.h>
 #import <WebCore/ResourceResponse.h>
 #import <WebCore/SharedBuffer.h>
 #import <wtf/BlockPtr.h>
+#import <wtf/CompletionHandler.h>
+#import <wtf/MainThread.h>
 
-using namespace WebCore;
+static WebKit::WebURLSchemeTask::ExceptionType getExceptionTypeFromMainRunLoop(Function<WebKit::WebURLSchemeTask::ExceptionType ()>&& function)
+{
+    WebKit::WebURLSchemeTask::ExceptionType exceptionType;
+    callOnMainRunLoopAndWait([function = WTFMove(function), &exceptionType] {
+        exceptionType = function();
+    });
+
+    return exceptionType;
+}
 
 static void raiseExceptionIfNecessary(WebKit::WebURLSchemeTask::ExceptionType exceptionType)
 {
@@ -57,51 +67,102 @@ static void raiseExceptionIfNecessary(WebKit::WebURLSchemeTask::ExceptionType ex
     case WebKit::WebURLSchemeTask::ExceptionType::RedirectAfterResponse:
         [NSException raise:NSInternalInconsistencyException format:@"No redirects are allowed after the response"];
         break;
+    case WebKit::WebURLSchemeTask::ExceptionType::WaitingForRedirectCompletionHandler:
+        [NSException raise:NSInternalInconsistencyException format:@"No callbacks are allowed while waiting for the redirection completion handler to be invoked"];
+        break;
     }
 }
 
 @implementation WKURLSchemeTaskImpl
 
+- (instancetype)init
+{
+    RELEASE_ASSERT_NOT_REACHED();
+}
+
 - (void)dealloc
 {
-    _urlSchemeTask->API::URLSchemeTask::~URLSchemeTask();
-
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKURLSchemeTaskImpl.class, self))
+        return;
+    _urlSchemeTask->WebURLSchemeTask::~WebURLSchemeTask();
     [super dealloc];
 }
 
 - (NSURLRequest *)request
 {
-    return _urlSchemeTask->task().request().nsURLRequest(DoNotUpdateHTTPBody);
+    return _urlSchemeTask->nsRequest();
+}
+
+- (BOOL)_requestOnlyIfCached
+{
+    return _urlSchemeTask->nsRequest().cachePolicy == NSURLRequestReturnCacheDataDontLoad;
+}
+
+- (void)_willPerformRedirection:(NSURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completionHandler
+{
+    auto function = [protectedSelf = retainPtr(self), self, protectedResponse = retainPtr(response), response, protectedRequest = retainPtr(request), request, handler = makeBlockPtr(completionHandler)] () mutable {
+        return _urlSchemeTask->willPerformRedirection(response, request, [handler = WTFMove(handler)] (WebCore::ResourceRequest&& actualNewRequest) {
+            handler.get()(actualNewRequest.nsURLRequest(WebCore::HTTPBodyUpdatePolicy::UpdateHTTPBody));
+        });
+    };
+
+    auto result = getExceptionTypeFromMainRunLoop(WTFMove(function));
+    raiseExceptionIfNecessary(result);
 }
 
 - (void)didReceiveResponse:(NSURLResponse *)response
 {
-    auto result = _urlSchemeTask->task().didReceiveResponse(response);
+    auto function = [protectedSelf = retainPtr(self), self, protectedResponse = retainPtr(response), response] {
+        return _urlSchemeTask->didReceiveResponse(response);
+    };
+
+    auto result = getExceptionTypeFromMainRunLoop(WTFMove(function));
     raiseExceptionIfNecessary(result);
 }
 
 - (void)didReceiveData:(NSData *)data
 {
-    auto result = _urlSchemeTask->task().didReceiveData(WebCore::SharedBuffer::create(data));
+    auto function = [protectedSelf = retainPtr(self), self, protectedData = retainPtr(data), data] () mutable {
+        return _urlSchemeTask->didReceiveData(WebCore::SharedBuffer::create(data));
+    };
+
+    auto result = getExceptionTypeFromMainRunLoop(WTFMove(function));
     raiseExceptionIfNecessary(result);
 }
 
 - (void)didFinish
 {
-    auto result = _urlSchemeTask->task().didComplete({ });
+    auto function = [protectedSelf = retainPtr(self), self] {
+        return _urlSchemeTask->didComplete({ });
+    };
+
+    auto result = getExceptionTypeFromMainRunLoop(WTFMove(function));
     raiseExceptionIfNecessary(result);
 }
 
 - (void)didFailWithError:(NSError *)error
 {
-    auto result = _urlSchemeTask->task().didComplete(error);
+    auto function = [protectedSelf = retainPtr(self), self, protectedError = retainPtr(error), error] {
+        return _urlSchemeTask->didComplete(error);
+    };
+
+    auto result = getExceptionTypeFromMainRunLoop(WTFMove(function));
     raiseExceptionIfNecessary(result);
 }
 
 - (void)_didPerformRedirection:(NSURLResponse *)response newRequest:(NSURLRequest *)request
 {
-    auto result = _urlSchemeTask->task().didPerformRedirection(response, request);
+    auto function = [protectedSelf = retainPtr(self), self, protectedResponse = retainPtr(response), response, protectedRequest = retainPtr(request), request] {
+        return _urlSchemeTask->didPerformRedirection(response, request);
+    };
+
+    auto result = getExceptionTypeFromMainRunLoop(WTFMove(function));
     raiseExceptionIfNecessary(result);
+}
+
+- (WKFrameInfo *)_frame
+{
+    return wrapper(_urlSchemeTask->frameInfo());
 }
 
 #pragma mark WKObject protocol implementation
@@ -112,5 +173,3 @@ static void raiseExceptionIfNecessary(WebKit::WebURLSchemeTask::ExceptionType ex
 }
 
 @end
-
-#endif // #if WK_API_ENABLED

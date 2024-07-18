@@ -25,7 +25,8 @@
 
 #pragma once
 
-#include <wtf/text/WTFString.h>
+#include <wtf/Hasher.h>
+#include <wtf/URL.h>
 
 namespace WebCore {
 
@@ -45,8 +46,15 @@ struct SecurityOriginData {
     {
     }
     
-    WEBCORE_EXPORT static SecurityOriginData fromSecurityOrigin(const SecurityOrigin&);
     WEBCORE_EXPORT static SecurityOriginData fromFrame(Frame*);
+    static SecurityOriginData fromURL(const URL& url)
+    {
+        return SecurityOriginData {
+            url.protocol().isNull() ? emptyString() : url.protocol().convertToASCIILowercase(),
+            url.host().isNull() ? emptyString() : url.host().convertToASCIILowercase(),
+            url.port()
+        };
+    }
 
     WEBCORE_EXPORT Ref<SecurityOrigin> securityOrigin() const;
 
@@ -57,12 +65,13 @@ struct SecurityOriginData {
     String host;
     std::optional<uint16_t> port;
 
-    WEBCORE_EXPORT SecurityOriginData isolatedCopy() const;
+    WEBCORE_EXPORT SecurityOriginData isolatedCopy() const &;
+    WEBCORE_EXPORT SecurityOriginData isolatedCopy() &&;
 
     // Serialize the security origin to a string that could be used as part of
     // file names. This format should be used in storage APIs only.
     WEBCORE_EXPORT String databaseIdentifier() const;
-    WEBCORE_EXPORT static std::optional<SecurityOriginData> fromDatabaseIdentifier(const String&);
+    WEBCORE_EXPORT static std::optional<SecurityOriginData> fromDatabaseIdentifier(StringView);
     
     template<class Encoder> void encode(Encoder&) const;
     template<class Decoder> static std::optional<SecurityOriginData> decode(Decoder&);
@@ -77,12 +86,22 @@ struct SecurityOriginData {
         return protocol.isHashTableDeletedValue();
     }
     
+    WEBCORE_EXPORT String toString() const;
+
+    URL toURL() const;
+
 #if !LOG_DISABLED
-    WEBCORE_EXPORT String debugString() const;
+    String debugString() const { return toString(); }
 #endif
 };
 
 WEBCORE_EXPORT bool operator==(const SecurityOriginData&, const SecurityOriginData&);
+inline bool operator!=(const SecurityOriginData& first, const SecurityOriginData& second) { return !(first == second); }
+
+inline void add(Hasher& hasher, const SecurityOriginData& data)
+{
+    add(hasher, data.protocol, data.host, data.port);
+}
 
 template<class Encoder>
 void SecurityOriginData::encode(Encoder& encoder) const
@@ -105,29 +124,26 @@ std::optional<SecurityOriginData> SecurityOriginData::decode(Decoder& decoder)
     if (!host)
         return std::nullopt;
     
-    std::optional<uint16_t> port;
-    if (!decoder.decode(port))
+    std::optional<std::optional<uint16_t>> port;
+    decoder >> port;
+    if (!port)
         return std::nullopt;
     
-    return {{ WTFMove(*protocol), WTFMove(*host), WTFMove(port) }};
+    SecurityOriginData data { WTFMove(*protocol), WTFMove(*host), WTFMove(*port) };
+    if (data.isHashTableDeletedValue())
+        return std::nullopt;
+
+    return data;
 }
 
-struct SecurityOriginDataHashTraits : WTF::SimpleClassHashTraits<SecurityOriginData> {
+struct SecurityOriginDataHashTraits : SimpleClassHashTraits<SecurityOriginData> {
     static const bool hasIsEmptyValueFunction = true;
     static const bool emptyValueIsZero = false;
     static bool isEmptyValue(const SecurityOriginData& data) { return data.isEmpty(); }
 };
 
 struct SecurityOriginDataHash {
-    static unsigned hash(const SecurityOriginData& data)
-    {
-        unsigned hashCodes[3] = {
-            data.protocol.impl() ? data.protocol.impl()->hash() : 0,
-            data.host.impl() ? data.host.impl()->hash() : 0,
-            data.port.value_or(0)
-        };
-        return StringHasher::hashMemory<sizeof(hashCodes)>(hashCodes);
-    }
+    static unsigned hash(const SecurityOriginData& data) { return computeHash(data); }
     static bool equal(const SecurityOriginData& a, const SecurityOriginData& b) { return a == b; }
     static const bool safeToCompareToEmptyOrDeleted = false;
 };
@@ -137,8 +153,6 @@ struct SecurityOriginDataHash {
 namespace WTF {
 
 template<> struct HashTraits<WebCore::SecurityOriginData> : WebCore::SecurityOriginDataHashTraits { };
-template<> struct DefaultHash<WebCore::SecurityOriginData> {
-    typedef WebCore::SecurityOriginDataHash Hash;
-};
+template<> struct DefaultHash<WebCore::SecurityOriginData> : WebCore::SecurityOriginDataHash { };
 
 } // namespace WTF

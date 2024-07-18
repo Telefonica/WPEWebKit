@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,63 +37,65 @@
 #import <WebCore/Document.h>
 #import <WebCore/DragController.h>
 #import <WebCore/Editor.h>
-#import <WebCore/Element.h>
+#import <WebCore/ElementInlines.h>
 #import <WebCore/Frame.h>
 #import <WebCore/FrameDestructionObserver.h>
 #import <WebCore/FrameView.h>
 #import <WebCore/GraphicsContextCG.h>
 #import <WebCore/LegacyWebArchive.h>
-#import <WebCore/MainFrame.h>
+#import <WebCore/LocalCurrentGraphicsContext.h>
 #import <WebCore/NotImplemented.h>
 #import <WebCore/Page.h>
+#import <WebCore/PagePasteboardContext.h>
 #import <WebCore/Pasteboard.h>
 #import <WebCore/RenderImage.h>
-#import <WebCore/ResourceHandle.h>
 #import <WebCore/StringTruncator.h>
-#import <WebCore/WebCoreNSURLExtras.h>
-#import <WebKitSystemInterface.h>
 #import <wtf/StdLibExtras.h>
+#import <wtf/cocoa/NSURLExtras.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import "UIKitSPI.h"
 #endif
 
-using namespace WebCore;
-using namespace WebKit;
-
 namespace WebKit {
+using namespace WebCore;
 
-#if PLATFORM(MAC)
+#if USE(APPKIT)
+using DragImage = NSImage *;
+#else
+using DragImage = CGImageRef;
+#endif
 
-static RefPtr<ShareableBitmap> convertImageToBitmap(NSImage *image, const IntSize& size, Frame& frame)
+static RefPtr<ShareableBitmap> convertDragImageToBitmap(DragImage image, const IntSize& size, Frame& frame)
 {
-    ShareableBitmap::Configuration bitmapConfiguration;
-    bitmapConfiguration.colorSpace.cgColorSpace = screenColorSpace(frame.mainFrame().view());
-    auto bitmap = ShareableBitmap::createShareable(size, bitmapConfiguration);
+    auto bitmap = ShareableBitmap::create(size, { screenColorSpace(frame.mainFrame().view()) });
     if (!bitmap)
         return nullptr;
 
     auto graphicsContext = bitmap->createGraphicsContext();
+    if (!graphicsContext)
+        return nullptr;
 
-    RetainPtr<NSGraphicsContext> savedContext = [NSGraphicsContext currentContext];
-
-    [NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithGraphicsPort:graphicsContext->platformContext() flipped:YES]];
+    LocalCurrentGraphicsContext savedContext(*graphicsContext);
+#if USE(APPKIT)
     [image drawInRect:NSMakeRect(0, 0, bitmap->size().width(), bitmap->size().height()) fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
-
-    [NSGraphicsContext setCurrentContext:savedContext.get()];
+#else
+    CGContextDrawImage(graphicsContext->platformContext(), CGRectMake(0, 0, size.width(), size.height()), image);
+#endif
 
     return bitmap;
-}
-
-void WebDragClient::didConcludeEditDrag()
-{
 }
 
 void WebDragClient::startDrag(DragItem dragItem, DataTransfer&, Frame& frame)
 {
     auto& image = dragItem.image;
+
+#if USE(APPKIT)
     IntSize bitmapSize([image.get() size]);
-    RefPtr<ShareableBitmap> bitmap = convertImageToBitmap(image.get().get(), bitmapSize, frame);
+#else
+    IntSize bitmapSize(CGImageGetWidth(image.get().get()), CGImageGetHeight(image.get().get()));
+#endif
+    auto bitmap = convertDragImageToBitmap(image.get().get(), bitmapSize, frame);
     ShareableBitmap::Handle handle;
     if (!bitmap || !bitmap->createHandle(handle))
         return;
@@ -101,6 +103,15 @@ void WebDragClient::startDrag(DragItem dragItem, DataTransfer&, Frame& frame)
     m_page->willStartDrag();
     m_page->send(Messages::WebPageProxy::StartDrag(dragItem, handle));
 }
+
+void WebDragClient::didConcludeEditDrag()
+{
+#if PLATFORM(IOS_FAMILY)
+    m_page->didConcludeEditDrag();
+#endif
+}
+
+#if USE(APPKIT)
 
 static WebCore::CachedImage* cachedImage(Element& element)
 {
@@ -113,25 +124,9 @@ static WebCore::CachedImage* cachedImage(Element& element)
     return image;
 }
 
-#if ENABLE(ATTACHMENT_ELEMENT)
-void WebDragClient::declareAndWriteAttachment(const String& pasteboardName, Element& element, const URL& url, const String& path, WebCore::Frame* frame)
-{
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    ASSERT(pasteboardName == String(NSDragPboard));
-#pragma clang diagnostic pop
-    
-    NSURL* nsURL = (NSURL *)url;
-    m_page->send(Messages::WebPageProxy::SetPromisedDataForAttachment(pasteboardName, String(nsURL.lastPathComponent), String(nsURL.pathExtension), path, String(nsURL.absoluteString), userVisibleString(nsURL)));
-}
-#endif
-
 void WebDragClient::declareAndWriteDragImage(const String& pasteboardName, Element& element, const URL& url, const String& label, Frame*)
 {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    ASSERT(pasteboardName == String(NSDragPboard));
-#pragma clang diagnostic pop
+    ASSERT(pasteboardName == String(NSPasteboardNameDrag));
 
     WebCore::CachedImage* image = cachedImage(element);
 
@@ -144,35 +139,31 @@ void WebDragClient::declareAndWriteDragImage(const String& pasteboardName, Eleme
 
     String title = label;
     if (title.isEmpty()) {
-        title = url.lastPathComponent();
+        title = url.lastPathComponent().toString();
         if (title.isEmpty())
-            title = userVisibleString((NSURL *)url);
+            title = WTF::userVisibleString(url);
     }
 
-    RefPtr<LegacyWebArchive> archive = LegacyWebArchive::create(element);
+    auto archive = LegacyWebArchive::create(element);
 
     NSURLResponse *response = image->response().nsURLResponse();
     
-    RefPtr<SharedBuffer> imageBuffer = image->image()->data();
-    size_t imageSize = imageBuffer->size();
+    auto imageBuffer = image->image()->data();
+
     SharedMemory::Handle imageHandle;
-    
-    RefPtr<SharedMemory> sharedMemoryBuffer = SharedMemory::allocate(imageBuffer->size());
-    if (!sharedMemoryBuffer)
-        return;
-    memcpy(sharedMemoryBuffer->data(), imageBuffer->data(), imageSize);
-    sharedMemoryBuffer->createHandle(imageHandle, SharedMemory::Protection::ReadOnly);
-    
+    {
+        auto sharedMemoryBuffer = SharedMemory::copyBuffer(*imageBuffer);
+        if (!sharedMemoryBuffer)
+            return;
+        sharedMemoryBuffer->createHandle(imageHandle, SharedMemory::Protection::ReadOnly);
+    }
     RetainPtr<CFDataRef> data = archive ? archive->rawDataRepresentation() : 0;
     SharedMemory::Handle archiveHandle;
-    size_t archiveSize = 0;
     if (data) {
-        RefPtr<SharedBuffer> archiveBuffer = SharedBuffer::create((NSData *)data.get());
-        RefPtr<SharedMemory> archiveSharedMemoryBuffer = SharedMemory::allocate(archiveBuffer->size());
+        auto archiveBuffer = SharedBuffer::create((__bridge NSData *)data.get());
+        auto archiveSharedMemoryBuffer = SharedMemory::copyBuffer(archiveBuffer.get());
         if (!archiveSharedMemoryBuffer)
             return;
-        archiveSize = archiveBuffer->size();
-        memcpy(archiveSharedMemoryBuffer->data(), archiveBuffer->data(), archiveSize);
         archiveSharedMemoryBuffer->createHandle(archiveHandle, SharedMemory::Protection::ReadOnly);
     }
 
@@ -183,63 +174,18 @@ void WebDragClient::declareAndWriteDragImage(const String& pasteboardName, Eleme
             filename = downloadFilename;
     }
 
-    m_page->send(Messages::WebPageProxy::SetPromisedDataForImage(pasteboardName, imageHandle, imageSize, filename, extension, title, String([[response URL] absoluteString]), userVisibleString((NSURL *)url), archiveHandle, archiveSize));
+    m_page->send(Messages::WebPageProxy::SetPromisedDataForImage(pasteboardName, WTFMove(imageHandle), filename, extension, title, String([[response URL] absoluteString]), WTF::userVisibleString(url), WTFMove(archiveHandle), element.document().originIdentifierForPasteboard()));
 }
 
-#endif // PLATFORM(MAC)
-
-#if PLATFORM(IOS)
-
-static RefPtr<ShareableBitmap> convertCGImageToBitmap(CGImageRef image, const IntSize& size, Frame& frame)
-{
-    ShareableBitmap::Configuration bitmapConfiguration;
-    bitmapConfiguration.colorSpace.cgColorSpace = screenColorSpace(frame.mainFrame().view());
-    auto bitmap = ShareableBitmap::createShareable(size, bitmapConfiguration);
-    if (!bitmap)
-        return nullptr;
-
-    auto graphicsContext = bitmap->createGraphicsContext();
-    UIGraphicsPushContext(graphicsContext->platformContext());
-    CGContextDrawImage(graphicsContext->platformContext(), CGRectMake(0, 0, size.width(), size.height()), image);
-    UIGraphicsPopContext();
-    return bitmap;
-}
-
-void WebDragClient::startDrag(DragItem dragItem, DataTransfer& dataTransfer, Frame& frame)
-{
-    auto& image = dragItem.image;
-
-    IntSize bitmapSize(CGImageGetWidth(image.get().get()), CGImageGetHeight(image.get().get()));
-    auto bitmap = convertCGImageToBitmap(image.get().get(), bitmapSize, frame);
-    ShareableBitmap::Handle handle;
-    if (!bitmap || !bitmap->createHandle(handle))
-        return;
-
-    m_page->willStartDrag();
-    m_page->send(Messages::WebPageProxy::StartDrag(dragItem, handle));
-}
+#else
 
 void WebDragClient::declareAndWriteDragImage(const String& pasteboardName, Element& element, const URL& url, const String& label, Frame*)
 {
-    if (auto frame = element.document().frame())
-        frame->editor().writeImageToPasteboard(*Pasteboard::createForDragAndDrop(), element, url, label);
+    if (RefPtr frame = element.document().frame())
+        frame->editor().writeImageToPasteboard(*Pasteboard::createForDragAndDrop(PagePasteboardContext::create(frame->pageID())), element, url, label);
 }
 
-void WebDragClient::didConcludeEditDrag()
-{
-    m_page->didConcludeEditDataInteraction();
-}
-
-#if ENABLE(ATTACHMENT_ELEMENT)
-
-void WebDragClient::declareAndWriteAttachment(const String&, Element&, const URL&, const String&, Frame*)
-{
-    notImplemented();
-}
-
-#endif
-
-#endif // PLATFORM(IOS)
+#endif // USE(APPKIT)
 
 } // namespace WebKit
 

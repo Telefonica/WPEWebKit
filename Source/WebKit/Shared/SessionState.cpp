@@ -27,23 +27,14 @@
 #include "SessionState.h"
 
 #include "WebCoreArgumentCoders.h"
+#include <WebCore/BackForwardItemIdentifier.h>
 
 namespace WebKit {
-
-bool isValidEnum(WebCore::ShouldOpenExternalURLsPolicy policy)
-{
-    switch (policy) {
-    case WebCore::ShouldOpenExternalURLsPolicy::ShouldAllow:
-    case WebCore::ShouldOpenExternalURLsPolicy::ShouldAllowExternalSchemes:
-    case WebCore::ShouldOpenExternalURLsPolicy::ShouldNotAllow:
-        return true;
-    }
-    return false;
-}
+using namespace WebCore;
 
 void HTTPBody::Element::encode(IPC::Encoder& encoder) const
 {
-    encoder.encodeEnum(type);
+    encoder << type;
     encoder << data;
     encoder << filePath;
     encoder << fileStart;
@@ -67,7 +58,7 @@ static bool isValidEnum(HTTPBody::Element::Type type)
 auto HTTPBody::Element::decode(IPC::Decoder& decoder) -> std::optional<Element>
 {
     Element result;
-    if (!decoder.decodeEnum(result.type) || !isValidEnum(result.type))
+    if (!decoder.decode(result.type) || !isValidEnum(result.type))
         return std::nullopt;
     if (!decoder.decode(result.data))
         return std::nullopt;
@@ -82,7 +73,7 @@ auto HTTPBody::Element::decode(IPC::Decoder& decoder) -> std::optional<Element>
     if (!decoder.decode(result.blobURLString))
         return std::nullopt;
 
-    return WTFMove(result);
+    return result;
 }
 
 void HTTPBody::encode(IPC::Encoder& encoder) const
@@ -108,7 +99,7 @@ void FrameState::encode(IPC::Encoder& encoder) const
     encoder << referrer;
     encoder << target;
 
-    encoder << documentState;
+    encoder << m_documentState;
     encoder << stateObjectData;
 
     encoder << documentSequenceNumber;
@@ -120,12 +111,13 @@ void FrameState::encode(IPC::Encoder& encoder) const
 
     encoder << httpBody;
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     encoder << exposedContentRect;
     encoder << unobscuredContentRect;
     encoder << minimumLayoutSizeInScrollViewCoordinates;
     encoder << contentSize;
     encoder << scaleIsInitial;
+    encoder << obscuredInsets;
 #endif
 
     encoder << children;
@@ -143,8 +135,10 @@ std::optional<FrameState> FrameState::decode(IPC::Decoder& decoder)
     if (!decoder.decode(result.target))
         return std::nullopt;
 
-    if (!decoder.decode(result.documentState))
+    if (!decoder.decode(result.m_documentState))
         return std::nullopt;
+    result.validateDocumentState();
+
     if (!decoder.decode(result.stateObjectData))
         return std::nullopt;
 
@@ -163,7 +157,7 @@ std::optional<FrameState> FrameState::decode(IPC::Decoder& decoder)
     if (!decoder.decode(result.httpBody))
         return std::nullopt;
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     if (!decoder.decode(result.exposedContentRect))
         return std::nullopt;
     if (!decoder.decode(result.unobscuredContentRect))
@@ -174,19 +168,25 @@ std::optional<FrameState> FrameState::decode(IPC::Decoder& decoder)
         return std::nullopt;
     if (!decoder.decode(result.scaleIsInitial))
         return std::nullopt;
+    if (!decoder.decode(result.obscuredInsets))
+        return std::nullopt;
 #endif
 
     if (!decoder.decode(result.children))
         return std::nullopt;
 
-    return WTFMove(result);
+    return result;
 }
 
 void PageState::encode(IPC::Encoder& encoder) const
 {
-    encoder << title;
-    encoder << mainFrameState;
-    encoder.encodeEnum(shouldOpenExternalURLsPolicy);
+    encoder << title << mainFrameState << !!sessionStateObject;
+
+    if (sessionStateObject)
+        encoder << sessionStateObject->wireBytes();
+
+    encoder << shouldOpenExternalURLsPolicy;
+    encoder << wasCreatedByJSWithoutUserInteraction;
 }
 
 bool PageState::decode(IPC::Decoder& decoder, PageState& result)
@@ -198,7 +198,27 @@ bool PageState::decode(IPC::Decoder& decoder, PageState& result)
     if (!mainFrameState)
         return false;
     result.mainFrameState = WTFMove(*mainFrameState);
-    if (!decoder.decodeEnum(result.shouldOpenExternalURLsPolicy) || !isValidEnum(result.shouldOpenExternalURLsPolicy))
+
+    bool hasSessionState;
+    if (!decoder.decode(hasSessionState))
+        return false;
+
+    if (hasSessionState) {
+        Vector<uint8_t> wireBytes;
+        if (!decoder.decode(wireBytes))
+            return false;
+
+        result.sessionStateObject = SerializedScriptValue::createFromWireBytes(WTFMove(wireBytes));
+    }
+
+    std::optional<ShouldOpenExternalURLsPolicy> shouldOpenExternalURLsPolicy;
+    decoder >> shouldOpenExternalURLsPolicy;
+    if (!shouldOpenExternalURLsPolicy)
+        return false;
+
+    result.shouldOpenExternalURLsPolicy = *shouldOpenExternalURLsPolicy;
+
+    if (!decoder.decode(result.wasCreatedByJSWithoutUserInteraction))
         return false;
 
     return true;
@@ -208,19 +228,25 @@ void BackForwardListItemState::encode(IPC::Encoder& encoder) const
 {
     encoder << identifier;
     encoder << pageState;
+    encoder << hasCachedPage;
 }
 
 std::optional<BackForwardListItemState> BackForwardListItemState::decode(IPC::Decoder& decoder)
 {
     BackForwardListItemState result;
 
-    if (!decoder.decode(result.identifier))
+    auto identifier = BackForwardItemIdentifier::decode(decoder);
+    if (!identifier)
         return std::nullopt;
+    result.identifier = *identifier;
 
     if (!decoder.decode(result.pageState))
         return std::nullopt;
 
-    return WTFMove(result);
+    if (!decoder.decode(result.hasCachedPage))
+        return std::nullopt;
+
+    return result;
 }
 
 void BackForwardListState::encode(IPC::Encoder& encoder) const
@@ -241,6 +267,32 @@ std::optional<BackForwardListState> BackForwardListState::decode(IPC::Decoder& d
         return std::nullopt;
 
     return {{ WTFMove(*items), WTFMove(currentIndex) }};
+}
+
+void FrameState::validateDocumentState() const
+{
+    for (auto& stateString : m_documentState) {
+        if (stateString.isNull())
+            continue;
+
+        if (!stateString.is8Bit())
+            continue;
+
+        // rdar://48634553 indicates 8-bit string can be invalid.
+        const LChar* characters8 = stateString.characters8();
+        for (unsigned i = 0; i < stateString.length(); ++i) {
+            auto character = characters8[i];
+            RELEASE_ASSERT(isLatin1(character));
+        }
+    }
+}
+
+void FrameState::setDocumentState(const Vector<AtomString>& documentState, ShouldValidate shouldValidate)
+{
+    m_documentState = documentState;
+
+    if (shouldValidate == ShouldValidate::Yes)
+        validateDocumentState();
 }
 
 } // namespace WebKit

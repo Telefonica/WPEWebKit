@@ -25,17 +25,18 @@
 
 #pragma once
 
+#include "InspectorAgentBase.h"
 #include "InspectorBackendDispatchers.h"
 #include "InspectorFrontendDispatchers.h"
-#include "inspector/InspectorAgentBase.h"
 #include <wtf/Forward.h>
 #include <wtf/HashMap.h>
+#include <wtf/MonotonicTime.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/Vector.h>
 #include <wtf/text/StringHash.h>
 
 namespace JSC {
-class ExecState;
+class CallFrame;
 }
 
 namespace Inspector {
@@ -45,33 +46,40 @@ class InjectedScriptManager;
 class InspectorHeapAgent;
 class ScriptArguments;
 class ScriptCallStack;
-typedef String ErrorString;
 
 class JS_EXPORT_PRIVATE InspectorConsoleAgent : public InspectorAgentBase, public ConsoleBackendDispatcherHandler {
     WTF_MAKE_NONCOPYABLE(InspectorConsoleAgent);
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    InspectorConsoleAgent(AgentContext&, InspectorHeapAgent*);
-    virtual ~InspectorConsoleAgent();
+    InspectorConsoleAgent(AgentContext&);
+    ~InspectorConsoleAgent() override;
 
-    void didCreateFrontendAndBackend(FrontendRouter*, BackendDispatcher*) override;
-    void willDestroyFrontendAndBackend(DisconnectReason) override;
-    void discardValues() override;
+    // InspectorAgentBase
+    void didCreateFrontendAndBackend(FrontendRouter*, BackendDispatcher*) final;
+    void willDestroyFrontendAndBackend(DisconnectReason) final;
+    void discardValues() final;
 
-    void enable(ErrorString&) override;
-    void disable(ErrorString&) override;
-    void clearMessages(ErrorString&) override;
-    void setMonitoringXHREnabled(ErrorString&, bool enabled) override = 0;
+    // ConsoleBackendDispatcherHandler
+    Protocol::ErrorStringOr<void> enable() final;
+    Protocol::ErrorStringOr<void> disable() final;
+    Protocol::ErrorStringOr<void> clearMessages() override;
+    Protocol::ErrorStringOr<Ref<JSON::ArrayOf<Protocol::Console::Channel>>> getLoggingChannels() override;
+    Protocol::ErrorStringOr<void> setLoggingChannelLevel(Protocol::Console::ChannelSource, Protocol::Console::ChannelLevel) override;
+
+    void setHeapAgent(InspectorHeapAgent* agent) { m_heapAgent = agent; }
 
     bool enabled() const { return m_enabled; }
+    bool developerExtrasEnabled() const;
     void reset();
 
     void addMessageToConsole(std::unique_ptr<ConsoleMessage>);
 
-    void startTiming(const String& title);
-    void stopTiming(const String& title, Ref<ScriptCallStack>&&);
+    void startTiming(JSC::JSGlobalObject*, const String& label);
+    void logTiming(JSC::JSGlobalObject*, const String& label, Ref<ScriptArguments>&&);
+    void stopTiming(JSC::JSGlobalObject*, const String& label);
     void takeHeapSnapshot(const String& title);
-    void count(JSC::ExecState*, Ref<ScriptArguments>&&);
+    void count(JSC::JSGlobalObject*, const String& label);
+    void countReset(JSC::JSGlobalObject*, const String& label);
 
 protected:
     void addConsoleMessage(std::unique_ptr<ConsoleMessage>);
@@ -79,13 +87,12 @@ protected:
     InjectedScriptManager& m_injectedScriptManager;
     std::unique_ptr<ConsoleFrontendDispatcher> m_frontendDispatcher;
     RefPtr<ConsoleBackendDispatcher> m_backendDispatcher;
-    InspectorHeapAgent* m_heapAgent;
+    InspectorHeapAgent* m_heapAgent { nullptr };
 
-    ConsoleMessage* m_previousMessage { nullptr };
     Vector<std::unique_ptr<ConsoleMessage>> m_consoleMessages;
     int m_expiredConsoleMessageCount { 0 };
     HashMap<String, unsigned> m_counts;
-    HashMap<String, double> m_times;
+    HashMap<String, MonotonicTime> m_times;
     bool m_enabled { false };
 };
 

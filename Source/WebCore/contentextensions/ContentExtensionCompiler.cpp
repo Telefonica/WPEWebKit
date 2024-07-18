@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,88 +40,63 @@
 #include "NFA.h"
 #include "NFAToDFA.h"
 #include "URLFilterParser.h"
-#include <wtf/CurrentTime.h>
+#include <wtf/CrossThreadCopier.h>
 #include <wtf/DataLog.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
 
-namespace WebCore {
-namespace ContentExtensions {
+namespace WebCore::ContentExtensions {
 
-static void serializeString(Vector<SerializedActionByte>& actions, const String& string)
-{
-    // Append Selector length (4 bytes).
-    uint32_t stringLength = string.length();
-    actions.grow(actions.size() + sizeof(uint32_t));
-    *reinterpret_cast<uint32_t*>(&actions[actions.size() - sizeof(uint32_t)]) = stringLength;
-    bool wideCharacters = !string.is8Bit();
-    actions.append(wideCharacters);
-    // Append Selector.
-    if (wideCharacters) {
-        uint32_t startIndex = actions.size();
-        actions.grow(actions.size() + sizeof(UChar) * stringLength);
-        for (uint32_t i = 0; i < stringLength; ++i)
-            *reinterpret_cast<UChar*>(&actions[startIndex + i * sizeof(UChar)]) = string[i];
-    } else {
-        for (uint32_t i = 0; i < stringLength; ++i)
-            actions.append(string[i]);
-    }
-}
-
+// css-display-none combining is special because we combine the string arguments with commas because we know they are css selectors.
 struct PendingDisplayNoneActions {
-    Vector<String> selectors;
-    Vector<unsigned> clientLocations;
+    StringBuilder combinedSelectors;
+    Vector<uint32_t> clientLocations;
 };
+
 using PendingDisplayNoneActionsMap = HashMap<Trigger, PendingDisplayNoneActions, TriggerHash, TriggerHashTraits>;
 
-static void resolvePendingDisplayNoneActions(Vector<SerializedActionByte>& actions, Vector<unsigned>& actionLocations, PendingDisplayNoneActionsMap& pendingDisplayNoneActionsMap)
+static void resolvePendingDisplayNoneActions(Vector<SerializedActionByte>& actions, Vector<uint32_t>& actionLocations, PendingDisplayNoneActionsMap& map)
 {
-    for (auto& slot : pendingDisplayNoneActionsMap) {
-        PendingDisplayNoneActions& pendingActions = slot.value;
-
-        StringBuilder combinedSelectors;
-        for (unsigned i = 0; i < pendingActions.selectors.size(); ++i) {
-            if (i)
-                combinedSelectors.append(',');
-            combinedSelectors.append(pendingActions.selectors[i]);
-        }
-
-        unsigned actionLocation = actions.size();
-        actions.append(static_cast<SerializedActionByte>(ActionType::CSSDisplayNoneSelector));
-        serializeString(actions, combinedSelectors.toString());
-        for (unsigned clientLocation : pendingActions.clientLocations)
+    for (auto& pendingDisplayNoneActions : map.values()) {
+        uint32_t actionLocation = actions.size();
+        actions.append(WTF::alternativeIndexV<CSSDisplayNoneSelectorAction, ActionData>);
+        serializeString(actions, pendingDisplayNoneActions.combinedSelectors.toString());
+        for (uint32_t clientLocation : pendingDisplayNoneActions.clientLocations)
             actionLocations[clientLocation] = actionLocation;
     }
-    pendingDisplayNoneActionsMap.clear();
+    map.clear();
 }
 
 static Vector<unsigned> serializeActions(const Vector<ContentExtensionRule>& ruleList, Vector<SerializedActionByte>& actions)
 {
     ASSERT(!actions.size());
 
-    Vector<unsigned> actionLocations;
+    Vector<uint32_t> actionLocations;
 
-    // Order only matters because of IgnorePreviousRules. All other identical actions can be combined between each IgnorePreviousRules
-    // and CSSDisplayNone strings can be combined if their triggers are identical.
     using ActionLocation = uint32_t;
-    using ActionMap = HashMap<ResourceFlags, ActionLocation, DefaultHash<ResourceFlags>::Hash, WTF::UnsignedWithZeroKeyHashTraits<ResourceFlags>>;
+    using ActionMap = HashMap<ResourceFlags, ActionLocation, DefaultHash<ResourceFlags>, WTF::UnsignedWithZeroKeyHashTraits<ResourceFlags>>;
+    using StringActionMap = HashMap<std::pair<String, ResourceFlags>, ActionLocation, DefaultHash<std::pair<String, ResourceFlags>>, PairHashTraits<HashTraits<String>, WTF::UnsignedWithZeroKeyHashTraits<ResourceFlags>>>;
+    using RedirectActionMap = HashMap<std::pair<RedirectAction, ResourceFlags>, ActionLocation, DefaultHash<std::pair<RedirectAction, ResourceFlags>>, PairHashTraits<HashTraits<RedirectAction>, WTF::UnsignedWithZeroKeyHashTraits<ResourceFlags>>>;
+    using ModifyHeadersActionMap = HashMap<std::pair<ModifyHeadersAction, ResourceFlags>, ActionLocation, DefaultHash<std::pair<ModifyHeadersAction, ResourceFlags>>, PairHashTraits<HashTraits<ModifyHeadersAction>, WTF::UnsignedWithZeroKeyHashTraits<ResourceFlags>>>;
     ActionMap blockLoadActionsMap;
     ActionMap blockCookiesActionsMap;
     PendingDisplayNoneActionsMap cssDisplayNoneActionsMap;
     ActionMap ignorePreviousRuleActionsMap;
     ActionMap makeHTTPSActionsMap;
+    StringActionMap notifyActionsMap;
+    RedirectActionMap redirectActionMap;
+    ModifyHeadersActionMap modifyHeadersActionMap;
 
-    for (unsigned ruleIndex = 0; ruleIndex < ruleList.size(); ++ruleIndex) {
-        const ContentExtensionRule& rule = ruleList[ruleIndex];
-        ActionType actionType = rule.action().type();
-
-        if (actionType == ActionType::IgnorePreviousRules) {
+    for (auto& rule : ruleList) {
+        auto& actionData = rule.action().data();
+        if (std::holds_alternative<IgnorePreviousRulesAction>(actionData)) {
             resolvePendingDisplayNoneActions(actions, actionLocations, cssDisplayNoneActionsMap);
 
             blockLoadActionsMap.clear();
             blockCookiesActionsMap.clear();
             cssDisplayNoneActionsMap.clear();
             makeHTTPSActionsMap.clear();
+            notifyActionsMap.clear();
         } else
             ignorePreviousRuleActionsMap.clear();
 
@@ -130,57 +105,73 @@ static Vector<unsigned> serializeActions(const Vector<ContentExtensionRule>& rul
         if (!rule.trigger().conditions.isEmpty()) {
             actionLocations.append(actions.size());
 
-            actions.append(static_cast<SerializedActionByte>(actionType));
-            if (actionType == ActionType::CSSDisplayNoneSelector)
-                serializeString(actions, rule.action().stringArgument());
+            actions.append(actionData.index());
+            std::visit(WTF::makeVisitor([&](const auto& member) {
+                member.serialize(actions);
+            }), actionData);
             continue;
         }
 
         ResourceFlags flags = rule.trigger().flags;
-        unsigned actionLocation = std::numeric_limits<unsigned>::max();
-        
-        auto findOrMakeActionLocation = [&] (ActionMap& map) 
-        {
-            const auto existingAction = map.find(flags);
-            if (existingAction == map.end()) {
-                actionLocation = actions.size();
-                actions.append(static_cast<SerializedActionByte>(actionType));
-                map.set(flags, actionLocation);
-            } else
-                actionLocation = existingAction->value;
+
+        auto findOrMakeActionLocation = [&] (ActionMap& map) {
+            return map.ensure(flags, [&] {
+                auto newActionLocation = actions.size();
+                actions.append(actionData.index());
+                return newActionLocation;
+            }).iterator->value;
         };
 
-        switch (actionType) {
-        case ActionType::CSSDisplayNoneSelector: {
+        auto findOrMakeNotifyActionLocation = [&] (auto& map, const auto& action) {
+            return map.ensure({ action.string, flags }, [&] {
+                auto newActionLocation = actions.size();
+                actions.append(actionData.index());
+                action.serialize(actions);
+                return newActionLocation;
+            }).iterator->value;
+        };
+
+        auto findOrMakeOtherActionLocation = [&] (auto& map, const auto& action) {
+            return map.ensure({ action, flags }, [&] {
+                auto newActionLocation = actions.size();
+                actions.append(actionData.index());
+                action.serialize(actions);
+                return newActionLocation;
+            }).iterator->value;
+        };
+
+        auto actionLocation = std::visit(WTF::makeVisitor([&] (const CSSDisplayNoneSelectorAction& actionData) {
             const auto addResult = cssDisplayNoneActionsMap.add(rule.trigger(), PendingDisplayNoneActions());
-            PendingDisplayNoneActions& pendingDisplayNoneActions = addResult.iterator->value;
-            pendingDisplayNoneActions.selectors.append(rule.action().stringArgument());
-            pendingDisplayNoneActions.clientLocations.append(actionLocations.size());
+            auto& pendingStringActions = addResult.iterator->value;
+            if (!pendingStringActions.combinedSelectors.isEmpty())
+                pendingStringActions.combinedSelectors.append(',');
+            pendingStringActions.combinedSelectors.append(actionData.string);
+            pendingStringActions.clientLocations.append(actionLocations.size());
 
-            actionLocation = std::numeric_limits<unsigned>::max();
-            break;
-        }
-        case ActionType::IgnorePreviousRules:
-            findOrMakeActionLocation(ignorePreviousRuleActionsMap);
-            break;
-        case ActionType::BlockLoad:
-            findOrMakeActionLocation(blockLoadActionsMap);
-            break;
-        case ActionType::BlockCookies:
-            findOrMakeActionLocation(blockCookiesActionsMap);
-            break;
-        case ActionType::MakeHTTPS:
-            findOrMakeActionLocation(makeHTTPSActionsMap);
-            break;
-        }
-
+            // resolvePendingDisplayNoneActions will fill this in later.
+            return std::numeric_limits<ActionLocation>::max();
+        }, [&] (const IgnorePreviousRulesAction&) {
+            return findOrMakeActionLocation(ignorePreviousRuleActionsMap);
+        }, [&] (const BlockLoadAction&) {
+            return findOrMakeActionLocation(blockLoadActionsMap);
+        }, [&] (const BlockCookiesAction&) {
+            return findOrMakeActionLocation(blockCookiesActionsMap);
+        }, [&] (const MakeHTTPSAction&) {
+            return findOrMakeActionLocation(makeHTTPSActionsMap);
+        }, [&] (const NotifyAction& actionData) {
+            return findOrMakeNotifyActionLocation(notifyActionsMap, actionData);
+        }, [&] (const ModifyHeadersAction& action) {
+            return findOrMakeOtherActionLocation(modifyHeadersActionMap, action);
+        }, [&] (const RedirectAction& action) {
+            return findOrMakeOtherActionLocation(redirectActionMap, action);
+        }), actionData);
         actionLocations.append(actionLocation);
     }
     resolvePendingDisplayNoneActions(actions, actionLocations, cssDisplayNoneActionsMap);
     return actionLocations;
 }
 
-typedef HashSet<uint64_t, DefaultHash<uint64_t>::Hash, WTF::UnsignedWithZeroKeyHashTraits<uint64_t>> UniversalActionSet;
+using UniversalActionSet = HashSet<uint64_t, DefaultHash<uint64_t>, WTF::UnsignedWithZeroKeyHashTraits<uint64_t>>;
 
 static void addUniversalActionsToDFA(DFA& dfa, UniversalActionSet&& universalActions)
 {
@@ -201,7 +192,7 @@ static void addUniversalActionsToDFA(DFA& dfa, UniversalActionSet&& universalAct
 }
 
 template<typename Functor>
-static void compileToBytecode(CombinedURLFilters&& filters, UniversalActionSet&& universalActions, Functor writeBytecodeToClient)
+static bool compileToBytecode(CombinedURLFilters&& filters, UniversalActionSet&& universalActions, Functor writeBytecodeToClient)
 {
     // Smaller maxNFASizes risk high compiling and interpreting times from having too many DFAs,
     // larger maxNFASizes use too much memory when compiling.
@@ -232,22 +223,27 @@ static void compileToBytecode(CombinedURLFilters&& filters, UniversalActionSet&&
 
     const unsigned smallDFASize = 100;
     DFACombiner smallDFACombiner;
-    filters.processNFAs(maxNFASize, [&](NFA&& nfa) {
+    bool processedSuccessfully = filters.processNFAs(maxNFASize, [&](NFA&& nfa) {
 #if CONTENT_EXTENSIONS_STATE_MACHINE_DEBUGGING
         dataLogF("NFA\n");
         nfa.debugPrintDot();
 #endif
         LOG_LARGE_STRUCTURES(nfa, nfa.memoryUsed());
-        DFA dfa = NFAToDFA::convert(nfa);
-        LOG_LARGE_STRUCTURES(dfa, dfa.memoryUsed());
+        auto dfa = NFAToDFA::convert(WTFMove(nfa));
+        if (!dfa)
+            return false;
+        LOG_LARGE_STRUCTURES(*dfa, dfa->memoryUsed());
 
-        if (dfa.graphSize() < smallDFASize)
-            smallDFACombiner.addDFA(WTFMove(dfa));
+        if (dfa->graphSize() < smallDFASize)
+            smallDFACombiner.addDFA(WTFMove(*dfa));
         else {
-            dfa.minimize();
-            lowerDFAToBytecode(WTFMove(dfa));
+            dfa->minimize();
+            lowerDFAToBytecode(WTFMove(*dfa));
         }
+        return true;
     });
+    if (!processedSuccessfully)
+        return false;
 
     smallDFACombiner.combineDFAs(smallDFASize, [&](DFA&& dfa) {
         LOG_LARGE_STRUCTURES(dfa, dfa.memoryUsed());
@@ -270,57 +266,41 @@ static void compileToBytecode(CombinedURLFilters&& filters, UniversalActionSet&&
         writeBytecodeToClient(WTFMove(bytecode));
     }
     LOG_LARGE_STRUCTURES(universalActions, universalActions.capacity() * sizeof(unsigned));
+    return true;
 }
 
-std::error_code compileRuleList(ContentExtensionCompilationClient& client, String&& ruleJSON)
+std::error_code compileRuleList(ContentExtensionCompilationClient& client, String&& ruleJSON, Vector<ContentExtensionRule>&& parsedRuleList)
 {
-    auto ruleList = parseRuleList(WTFMove(ruleJSON));
-    if (!ruleList.hasValue())
-        return ruleList.error();
-    Vector<ContentExtensionRule> parsedRuleList = WTFMove(ruleList.value());
-
-    bool domainConditionSeen = false;
-    bool topURLConditionSeen = false;
-    for (const auto& rule : parsedRuleList) {
-        switch (rule.trigger().conditionType) {
-        case Trigger::ConditionType::None:
-            break;
-        case Trigger::ConditionType::IfDomain:
-        case Trigger::ConditionType::UnlessDomain:
-            domainConditionSeen = true;
-            break;
-        case Trigger::ConditionType::IfTopURL:
-        case Trigger::ConditionType::UnlessTopURL:
-            topURLConditionSeen = true;
-            break;
-        }
-    }
-    if (topURLConditionSeen && domainConditionSeen)
-        return ContentExtensionError::JSONTopURLAndDomainConditions;
+#if ASSERT_ENABLED
+    callOnMainThread([ruleJSON = ruleJSON.isolatedCopy(), parsedRuleList = crossThreadCopy(parsedRuleList)] {
+        ASSERT(parseRuleList(ruleJSON).value() == parsedRuleList);
+    });
+#endif
 
 #if CONTENT_EXTENSIONS_PERFORMANCE_REPORTING
-    double patternPartitioningStart = monotonicallyIncreasingTime();
+    MonotonicTime patternPartitioningStart = MonotonicTime::now();
 #endif
     
-    client.writeSource(ruleJSON);
+    client.writeSource(std::exchange(ruleJSON, String()));
 
     Vector<SerializedActionByte> actions;
     Vector<unsigned> actionLocations = serializeActions(parsedRuleList, actions);
     LOG_LARGE_STRUCTURES(actions, actions.capacity() * sizeof(SerializedActionByte));
-    client.writeActions(WTFMove(actions), domainConditionSeen);
-
-    UniversalActionSet universalActionsWithoutConditions;
-    UniversalActionSet universalActionsWithConditions;
-    UniversalActionSet universalTopURLActions;
+    client.writeActions(WTFMove(actions));
 
     // FIXME: These don't all need to be in memory at the same time.
-    CombinedURLFilters filtersWithoutConditions;
-    CombinedURLFilters filtersWithConditions;
+    CombinedURLFilters urlFilters;
+    UniversalActionSet universalActions;
+    URLFilterParser urlFilterParser(urlFilters);
+
     CombinedURLFilters topURLFilters;
-    URLFilterParser filtersWithoutConditionParser(filtersWithoutConditions);
-    URLFilterParser filtersWithConditionParser(filtersWithConditions);
+    UniversalActionSet topURLUniversalActions;
     URLFilterParser topURLFilterParser(topURLFilters);
-    
+
+    CombinedURLFilters frameURLFilters;
+    UniversalActionSet frameURLUniversalActions;
+    URLFilterParser frameURLFilterParser(frameURLFilters);
+
     for (unsigned ruleIndex = 0; ruleIndex < parsedRuleList.size(); ++ruleIndex) {
         const ContentExtensionRule& contentExtensionRule = parsedRuleList[ruleIndex];
         const Trigger& trigger = contentExtensionRule.trigger();
@@ -331,55 +311,44 @@ std::error_code compileRuleList(ContentExtensionCompilationClient& client, Strin
         ASSERT(!(~ActionFlagMask & (static_cast<uint64_t>(trigger.flags) << 32)));
         uint64_t actionLocationAndFlags = (static_cast<uint64_t>(trigger.flags) << 32) | static_cast<uint64_t>(actionLocations[ruleIndex]);
         URLFilterParser::ParseStatus status = URLFilterParser::Ok;
-        if (trigger.conditions.isEmpty()) {
-            ASSERT(trigger.conditionType == Trigger::ConditionType::None);
-            status = filtersWithoutConditionParser.addPattern(trigger.urlFilter, trigger.urlFilterIsCaseSensitive, actionLocationAndFlags);
-            if (status == URLFilterParser::MatchesEverything) {
-                universalActionsWithoutConditions.add(actionLocationAndFlags);
-                status = URLFilterParser::Ok;
-            }
-            if (status != URLFilterParser::Ok) {
-                dataLogF("Error while parsing %s: %s\n", trigger.urlFilter.utf8().data(), URLFilterParser::statusString(status).utf8().data());
-                return ContentExtensionError::JSONInvalidRegex;
-            }
-        } else {
-            switch (trigger.conditionType) {
-            case Trigger::ConditionType::IfDomain:
-            case Trigger::ConditionType::IfTopURL:
-                actionLocationAndFlags |= IfConditionFlag;
+        status = urlFilterParser.addPattern(trigger.urlFilter, trigger.urlFilterIsCaseSensitive, actionLocationAndFlags);
+        if (status == URLFilterParser::MatchesEverything) {
+            universalActions.add(actionLocationAndFlags);
+            status = URLFilterParser::Ok;
+        }
+        if (status != URLFilterParser::Ok) {
+            dataLogF("Error while parsing %s: %s\n", trigger.urlFilter.utf8().data(), URLFilterParser::statusString(status).characters());
+            return ContentExtensionError::JSONInvalidRegex;
+        }
+
+        for (const String& condition : trigger.conditions) {
+            switch (static_cast<ActionCondition>(trigger.flags & ActionConditionMask)) {
+            case ActionCondition::None:
+                ASSERT_NOT_REACHED();
                 break;
-            case Trigger::ConditionType::None:
-            case Trigger::ConditionType::UnlessDomain:
-            case Trigger::ConditionType::UnlessTopURL:
-                ASSERT(!(actionLocationAndFlags & IfConditionFlag));
-                break;
-            }
-            
-            status = filtersWithConditionParser.addPattern(trigger.urlFilter, trigger.urlFilterIsCaseSensitive, actionLocationAndFlags);
-            if (status == URLFilterParser::MatchesEverything) {
-                universalActionsWithConditions.add(actionLocationAndFlags);
-                status = URLFilterParser::Ok;
-            }
-            if (status != URLFilterParser::Ok) {
-                dataLogF("Error while parsing %s: %s\n", trigger.urlFilter.utf8().data(), URLFilterParser::statusString(status).utf8().data());
-                return ContentExtensionError::JSONInvalidRegex;
-            }
-            for (const String& condition : trigger.conditions) {
-                if (domainConditionSeen) {
-                    ASSERT(!topURLConditionSeen);
-                    topURLFilters.addDomain(actionLocationAndFlags, condition);
-                } else {
-                    ASSERT(topURLConditionSeen);
-                    status = topURLFilterParser.addPattern(condition, trigger.topURLConditionIsCaseSensitive, actionLocationAndFlags);
-                    if (status == URLFilterParser::MatchesEverything) {
-                        universalTopURLActions.add(actionLocationAndFlags);
-                        status = URLFilterParser::Ok;
-                    }
-                    if (status != URLFilterParser::Ok) {
-                        dataLogF("Error while parsing %s: %s\n", condition.utf8().data(), URLFilterParser::statusString(status).utf8().data());
-                        return ContentExtensionError::JSONInvalidRegex;
-                    }
+            case ActionCondition::IfTopURL:
+            case ActionCondition::UnlessTopURL:
+                status = topURLFilterParser.addPattern(condition, trigger.topURLFilterIsCaseSensitive, actionLocationAndFlags);
+                if (status == URLFilterParser::MatchesEverything) {
+                    topURLUniversalActions.add(actionLocationAndFlags);
+                    status = URLFilterParser::Ok;
                 }
+                if (status != URLFilterParser::Ok) {
+                    dataLogF("Error while parsing %s: %s\n", condition.utf8().data(), URLFilterParser::statusString(status).characters());
+                    return ContentExtensionError::JSONInvalidRegex;
+                }
+                break;
+            case ActionCondition::IfFrameURL:
+                status = frameURLFilterParser.addPattern(condition, trigger.frameURLFilterIsCaseSensitive, actionLocationAndFlags);
+                if (status == URLFilterParser::MatchesEverything) {
+                    frameURLUniversalActions.add(actionLocationAndFlags);
+                    status = URLFilterParser::Ok;
+                }
+                if (status != URLFilterParser::Ok) {
+                    dataLogF("Error while parsing %s: %s\n", condition.utf8().data(), URLFilterParser::statusString(status).characters());
+                    return ContentExtensionError::JSONInvalidRegex;
+                }
+                break;
             }
         }
         ASSERT(status == URLFilterParser::Ok);
@@ -390,34 +359,38 @@ std::error_code compileRuleList(ContentExtensionCompilationClient& client, Strin
     actionLocations.clear();
 
 #if CONTENT_EXTENSIONS_PERFORMANCE_REPORTING
-    double patternPartitioningEnd = monotonicallyIncreasingTime();
-    dataLogF("    Time spent partitioning the rules into groups: %f\n", (patternPartitioningEnd - patternPartitioningStart));
+    MonotonicTime patternPartitioningEnd = MonotonicTime::now();
+    dataLogF("    Time spent partitioning the rules into groups: %f\n", (patternPartitioningEnd - patternPartitioningStart).seconds());
 #endif
 
     LOG_LARGE_STRUCTURES(filtersWithoutConditions, filtersWithoutConditions.memoryUsed());
     LOG_LARGE_STRUCTURES(filtersWithConditions, filtersWithConditions.memoryUsed());
     LOG_LARGE_STRUCTURES(topURLFilters, topURLFilters.memoryUsed());
+    LOG_LARGE_STRUCTURES(frameURLFilters, frameURLFilters.memoryUsed());
 
 #if CONTENT_EXTENSIONS_PERFORMANCE_REPORTING
-    double totalNFAToByteCodeBuildTimeStart = monotonicallyIncreasingTime();
+    MonotonicTime totalNFAToByteCodeBuildTimeStart = MonotonicTime::now();
 #endif
 
-    compileToBytecode(WTFMove(filtersWithoutConditions), WTFMove(universalActionsWithoutConditions), [&](Vector<DFABytecode>&& bytecode) {
-        client.writeFiltersWithoutConditionsBytecode(WTFMove(bytecode));
+    bool success = compileToBytecode(WTFMove(urlFilters), WTFMove(universalActions), [&](Vector<DFABytecode>&& bytecode) {
+        client.writeURLFiltersBytecode(WTFMove(bytecode));
     });
-    compileToBytecode(WTFMove(filtersWithConditions), WTFMove(universalActionsWithConditions), [&](Vector<DFABytecode>&& bytecode) {
-        client.writeFiltersWithConditionsBytecode(WTFMove(bytecode));
-    });
-    compileToBytecode(WTFMove(topURLFilters), WTFMove(universalTopURLActions), [&](Vector<DFABytecode>&& bytecode) {
+    if (!success)
+        return ContentExtensionError::ErrorWritingSerializedNFA;
+    success = compileToBytecode(WTFMove(topURLFilters), WTFMove(topURLUniversalActions), [&](Vector<DFABytecode>&& bytecode) {
         client.writeTopURLFiltersBytecode(WTFMove(bytecode));
     });
-    
-#if CONTENT_EXTENSIONS_PERFORMANCE_REPORTING
-    double totalNFAToByteCodeBuildTimeEnd = monotonicallyIncreasingTime();
-    dataLogF("    Time spent building and compiling the DFAs: %f\n", (totalNFAToByteCodeBuildTimeEnd - totalNFAToByteCodeBuildTimeStart));
+    if (!success)
+        return ContentExtensionError::ErrorWritingSerializedNFA;
+    success = compileToBytecode(WTFMove(frameURLFilters), WTFMove(frameURLUniversalActions), [&](Vector<DFABytecode>&& bytecode) {
+        client.writeFrameURLFiltersBytecode(WTFMove(bytecode));
+    });
+    if (!success)
+        return ContentExtensionError::ErrorWritingSerializedNFA;
 
-    dataLogF("    Number of machines without condition filters: %d (total bytecode size = %d)\n", machinesWithoutConditionsCount, totalBytecodeSizeForMachinesWithoutConditions);
-    dataLogF("    Number of machines with condition filters: %d (total bytecode size = %d)\n", machinesWithConditionsCount, totalBytecodeSizeForMachinesWithConditions);
+#if CONTENT_EXTENSIONS_PERFORMANCE_REPORTING
+    MonotonicTime totalNFAToByteCodeBuildTimeEnd = MonotonicTime::now();
+    dataLogF("    Time spent building and compiling the DFAs: %f\n", (totalNFAToByteCodeBuildTimeEnd - totalNFAToByteCodeBuildTimeStart).seconds());
 #endif
 
     client.finalize();
@@ -425,7 +398,6 @@ std::error_code compileRuleList(ContentExtensionCompilationClient& client, Strin
     return { };
 }
 
-} // namespace ContentExtensions
-} // namespace WebCore
+} // namespace WebCore::ContentExtensions
 
 #endif // ENABLE(CONTENT_EXTENSIONS)

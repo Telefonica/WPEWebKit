@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,17 +24,68 @@
  */
  
 #import "config.h"
+#import "WebProcessPool.h"
 #import "WebProcessProxy.h"
 
 #if PLATFORM(MAC)
 
+#import "CodeSigning.h"
 #import "WKFullKeyboardAccessWatcher.h"
+#import <signal.h>
+#import <wtf/ProcessPrivilege.h>
 
 namespace WebKit {
 
 bool WebProcessProxy::fullKeyboardAccessEnabled()
 {
     return [WKFullKeyboardAccessWatcher fullKeyboardAccessEnabled];
+}
+
+bool WebProcessProxy::shouldAllowNonValidInjectedCode() const
+{
+    static bool isSystemWebKit = [] {
+        NSBundle *webkit2Bundle = [NSBundle bundleForClass:NSClassFromString(@"WKWebView")];
+        return [webkit2Bundle.bundlePath hasPrefix:@"/System/"];
+    }();
+
+    if (!isSystemWebKit)
+        return false;
+
+    static bool isPlatformBinary = currentProcessIsPlatformBinary();
+    if (isPlatformBinary)
+        return false;
+
+    const String& path = m_processPool->configuration().injectedBundlePath();
+    return !path.isEmpty() && !path.startsWith("/System/"_s);
+}
+
+void WebProcessProxy::startDisplayLink(DisplayLinkObserverID observerID, WebCore::PlatformDisplayID displayID, WebCore::FramesPerSecond preferredFramesPerSecond)
+{
+    ASSERT(hasProcessPrivilege(ProcessPrivilege::CanCommunicateWithWindowServer));
+    ASSERT(connection());
+    processPool().startDisplayLink(*connection(), observerID, displayID, preferredFramesPerSecond);
+}
+
+void WebProcessProxy::stopDisplayLink(DisplayLinkObserverID observerID, WebCore::PlatformDisplayID displayID)
+{
+    ASSERT(connection());
+    processPool().stopDisplayLink(*connection(), observerID, displayID);
+}
+
+void WebProcessProxy::setDisplayLinkPreferredFramesPerSecond(DisplayLinkObserverID observerID, WebCore::PlatformDisplayID displayID, WebCore::FramesPerSecond preferredFramesPerSecond)
+{
+    ASSERT(connection());
+    processPool().setDisplayLinkPreferredFramesPerSecond(*connection(), observerID, displayID, preferredFramesPerSecond);
+}
+
+void WebProcessProxy::platformSuspendProcess()
+{
+    // FIXME: Adopt RunningBoard on macOS to support process suspension.
+}
+
+void WebProcessProxy::platformResumeProcess()
+{
+    // FIXME: Adopt RunningBoard on macOS to support process suspension.
 }
 
 } // namespace WebKit

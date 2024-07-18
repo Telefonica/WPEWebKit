@@ -1,6 +1,11 @@
 include_rules = [
-  "+webrtc/base",
-  "+webrtc/logging/rtc_event_log",
-  "+webrtc/system_wrappers",
-  "+webrtc/video",
+  "+logging/rtc_event_log",
+  "+system_wrappers",
+  "+video",
 ]
+specific_include_rules = {
+  "goog_cc_network_control_unittest.cc": [
+    "+call/video_receive_stream.h",
+  ],
+}
+

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,18 +26,15 @@
 #include "config.h"
 #include "SourceProvider.h"
 
-#include "JSCInlines.h"
-#include <wtf/Lock.h>
-
 namespace JSC {
 
-SourceProvider::SourceProvider(const SourceOrigin& sourceOrigin, const String& url, const TextPosition& startPosition, SourceProviderSourceType sourceType)
-    : m_sourceOrigin(sourceOrigin)
-    , m_url(url)
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(StringSourceProvider);
+
+SourceProvider::SourceProvider(const SourceOrigin& sourceOrigin, String&& sourceURL, const TextPosition& startPosition, SourceProviderSourceType sourceType)
+    : m_sourceType(sourceType)
+    , m_sourceOrigin(sourceOrigin)
+    , m_sourceURL(WTFMove(sourceURL))
     , m_startPosition(startPosition)
-    , m_sourceType(sourceType)
-    , m_validated(false)
-    , m_id(0)
 {
 }
 
@@ -45,16 +42,21 @@ SourceProvider::~SourceProvider()
 {
 }
 
-static StaticLock providerIdLock;
-
 void SourceProvider::getID()
 {
-    LockHolder lock(&providerIdLock);
     if (!m_id) {
-        static intptr_t nextProviderID = 0;
+        static std::atomic<SourceID> nextProviderID = nullID;
         m_id = ++nextProviderID;
+        RELEASE_ASSERT(m_id);
     }
 }
+
+#if ENABLE(WEBASSEMBLY)
+BaseWebAssemblySourceProvider::BaseWebAssemblySourceProvider(const SourceOrigin& sourceOrigin, String&& sourceURL)
+    : SourceProvider(sourceOrigin, WTFMove(sourceURL), TextPosition(), SourceProviderSourceType::WebAssembly)
+{
+}
+#endif
 
 } // namespace JSC
 

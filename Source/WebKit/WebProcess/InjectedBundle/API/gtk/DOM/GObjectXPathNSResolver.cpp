@@ -22,15 +22,18 @@
 #include <wtf/text/CString.h>
 #include <wtf/text/WTFString.h>
 
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
+
 namespace WebKit {
 
 GObjectXPathNSResolver::~GObjectXPathNSResolver()
 {
 }
 
-String GObjectXPathNSResolver::lookupNamespaceURI(const String& prefix)
+AtomString GObjectXPathNSResolver::lookupNamespaceURI(const AtomString& prefix)
 {
-    return String::fromUTF8(webkit_dom_xpath_ns_resolver_lookup_namespace_uri(m_resolver.get(), prefix.utf8().data()));
+    return AtomString::fromUTF8(webkit_dom_xpath_ns_resolver_lookup_namespace_uri(m_resolver.get(), prefix.string().utf8().data()));
 }
 
 } // namespace WebKit
+G_GNUC_END_IGNORE_DEPRECATIONS;

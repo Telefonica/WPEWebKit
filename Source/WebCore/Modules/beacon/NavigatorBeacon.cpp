@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,10 +29,13 @@
 #include "CachedRawResource.h"
 #include "CachedResourceLoader.h"
 #include "Document.h"
+#include "DocumentLoader.h"
 #include "Frame.h"
+#include "FrameDestructionObserverInlines.h"
 #include "HTTPParsers.h"
 #include "Navigator.h"
-#include "URL.h"
+#include "Page.h"
+#include <wtf/URL.h>
 
 namespace WebCore {
 
@@ -51,7 +54,7 @@ NavigatorBeacon* NavigatorBeacon::from(Navigator& navigator)
 {
     auto* supplement = static_cast<NavigatorBeacon*>(Supplement<Navigator>::from(&navigator, supplementName()));
     if (!supplement) {
-        auto newSupplement = std::make_unique<NavigatorBeacon>(navigator);
+        auto newSupplement = makeUnique<NavigatorBeacon>(navigator);
         supplement = newSupplement.get();
         provideTo(&navigator, supplementName(), WTFMove(newSupplement));
     }
@@ -63,7 +66,7 @@ const char* NavigatorBeacon::supplementName()
     return "NavigatorBeacon";
 }
 
-void NavigatorBeacon::notifyFinished(CachedResource& resource)
+void NavigatorBeacon::notifyFinished(CachedResource& resource, const NetworkLoadMetrics&)
 {
     if (!resource.resourceError().isNull())
         logError(resource.resourceError());
@@ -86,16 +89,16 @@ void NavigatorBeacon::logError(const ResourceError& error)
     if (!document)
         return;
 
-    const char* messageMiddle = ". ";
+    ASCIILiteral messageMiddle { ". "_s };
     String description = error.localizedDescription();
     if (description.isEmpty()) {
         if (error.isAccessControl())
-            messageMiddle = " due to access control checks.";
+            messageMiddle = " due to access control checks."_s;
         else
-            messageMiddle = ".";
+            messageMiddle = "."_s;
     }
 
-    document->addConsoleMessage(MessageSource::Network, MessageLevel::Error, makeString(ASCIILiteral("Beacon API cannot load "), error.failingURL().string(), ASCIILiteral(messageMiddle), description));
+    document->addConsoleMessage(MessageSource::Network, MessageLevel::Error, makeString("Beacon API cannot load "_s, error.failingURL().string(), messageMiddle, description));
 }
 
 ExceptionOr<bool> NavigatorBeacon::sendBeacon(Document& document, const String& url, std::optional<FetchBody::Init>&& body)
@@ -103,11 +106,11 @@ ExceptionOr<bool> NavigatorBeacon::sendBeacon(Document& document, const String& 
     URL parsedUrl = document.completeURL(url);
 
     // Set parsedUrl to the result of the URL parser steps with url and base. If the algorithm returns an error, or if
-    // parsedUrl's scheme is not "http" or "https", throw a " TypeError" exception and terminate these steps.
+    // parsedUrl's scheme is not "http" or "https", throw a "TypeError" exception and terminate these steps.
     if (!parsedUrl.isValid())
-        return Exception { TypeError, ASCIILiteral("This URL is invalid") };
+        return Exception { TypeError, "This URL is invalid"_s };
     if (!parsedUrl.protocolIsInHTTPFamily())
-        return Exception { TypeError, ASCIILiteral("Beacons can only be sent over HTTP(S)") };
+        return Exception { TypeError, "Beacons can only be sent over HTTP(S)"_s };
 
     if (!document.frame())
         return false;
@@ -119,25 +122,34 @@ ExceptionOr<bool> NavigatorBeacon::sendBeacon(Document& document, const String& 
     }
 
     ResourceRequest request(parsedUrl);
-    request.setHTTPMethod(ASCIILiteral("POST"));
+    request.setHTTPMethod("POST"_s);
+    request.setRequester(ResourceRequest::Requester::Beacon);
+    if (auto* documentLoader = document.loader())
+        request.setIsAppInitiated(documentLoader->lastNavigationWasAppInitiated());
 
-    FetchOptions options;
+    ResourceLoaderOptions options;
     options.credentials = FetchOptions::Credentials::Include;
     options.cache = FetchOptions::Cache::NoCache;
     options.keepAlive = true;
+    options.sendLoadCallbacks = SendCallbackPolicy::SendCallbacks;
+
     if (body) {
-        options.mode = FetchOptions::Mode::Cors;
+        options.mode = FetchOptions::Mode::NoCors;
         String mimeType;
-        auto fetchBody = FetchBody::extract(document, WTFMove(body.value()), mimeType);
+        auto result = FetchBody::extract(WTFMove(body.value()), mimeType);
+        if (result.hasException())
+            return result.releaseException();
+        auto fetchBody = result.releaseReturnValue();
+        if (fetchBody.isReadableStream())
+            return Exception { TypeError, "Beacons cannot send ReadableStream body"_s };
 
-        if (fetchBody.hasReadableStream())
-            return Exception { TypeError, ASCIILiteral("Beacons cannot send ReadableStream body") };
-
-        request.setHTTPBody(fetchBody.bodyAsFormData(document));
+        request.setHTTPBody(fetchBody.bodyAsFormData());
         if (!mimeType.isEmpty()) {
             request.setHTTPContentType(mimeType);
-            if (isCrossOriginSafeRequestHeader(HTTPHeaderName::ContentType, mimeType))
-                options.mode = FetchOptions::Mode::NoCors;
+            if (!isCrossOriginSafeRequestHeader(HTTPHeaderName::ContentType, mimeType)) {
+                options.mode = FetchOptions::Mode::Cors;
+                options.httpHeadersToKeep.add(HTTPHeadersToKeepFromCleaning::ContentType);
+            }
         }
     }
 

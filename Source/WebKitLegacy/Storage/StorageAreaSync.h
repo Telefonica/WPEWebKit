@@ -29,6 +29,7 @@
 #include <WebCore/Timer.h>
 #include <wtf/Condition.h>
 #include <wtf/HashMap.h>
+#include <wtf/Lock.h>
 #include <wtf/text/StringHash.h>
 
 namespace WebCore {
@@ -39,7 +40,7 @@ namespace WebKit {
 
 class StorageAreaImpl;
 
-class StorageAreaSync : public ThreadSafeRefCounted<StorageAreaSync> {
+class StorageAreaSync : public ThreadSafeRefCounted<StorageAreaSync, WTF::DestructionThread::Main> {
 public:
     static Ref<StorageAreaSync> create(RefPtr<WebCore::StorageSyncManager>&&, Ref<StorageAreaImpl>&&, const String& databaseIdentifier);
     ~StorageAreaSync();
@@ -98,7 +99,7 @@ private:
 
     mutable Lock m_importLock;
     Condition m_importCondition;
-    bool m_importComplete;
+    bool m_importComplete WTF_GUARDED_BY_LOCK(m_importLock);
     void markImported();
     void migrateItemTableIfNeeded();
 };

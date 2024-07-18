@@ -26,15 +26,13 @@
 #import "config.h"
 #import "WebURLSchemeHandlerCocoa.h"
 
-#import "APIURLSchemeTask.h"
 #import "WKFoundation.h"
 #import "WKURLSchemeHandler.h"
 #import "WKURLSchemeTaskInternal.h"
 #import "WKWebViewInternal.h"
+#import "WebPageProxy.h"
 #import "WebURLSchemeTask.h"
 #import <wtf/RunLoop.h>
-
-using namespace WebCore;
 
 namespace WebKit {
 
@@ -50,42 +48,18 @@ WebURLSchemeHandlerCocoa::WebURLSchemeHandlerCocoa(id <WKURLSchemeHandler> apiHa
 
 void WebURLSchemeHandlerCocoa::platformStartTask(WebPageProxy& page, WebURLSchemeTask& task)
 {
-#if WK_API_ENABLED
-    auto result = m_apiTasks.add(task.identifier(), API::URLSchemeTask::create(task));
-    ASSERT(result.isNewEntry);
-
-    [m_apiHandler.get() webView:fromWebPageProxy(page) startURLSchemeTask:wrapper(result.iterator->value.get())];
-#else
-    UNUSED_PARAM(page);
-    UNUSED_PARAM(task);
-#endif
+    auto strongTask = retainPtr(wrapper(task));
+    if (auto webView = page.cocoaView())
+        [m_apiHandler.get() webView:webView.get() startURLSchemeTask:strongTask.get()];
 }
 
 void WebURLSchemeHandlerCocoa::platformStopTask(WebPageProxy& page, WebURLSchemeTask& task)
 {
-#if WK_API_ENABLED
-    auto iterator = m_apiTasks.find(task.identifier());
-    if (iterator == m_apiTasks.end())
-        return;
-
-    [m_apiHandler.get() webView:fromWebPageProxy(page) stopURLSchemeTask:wrapper(iterator->value.get())];
-
-    m_apiTasks.remove(iterator);
-#else
-    UNUSED_PARAM(page);
-    UNUSED_PARAM(task);
-#endif
-}
-
-void WebURLSchemeHandlerCocoa::platformTaskCompleted(WebURLSchemeTask& task)
-{
-#if WK_API_ENABLED
-    // Release the last reference to this API task on the next spin of the runloop.
-    RunLoop::main().dispatch([takenTask = m_apiTasks.take(task.identifier())] {
-    });
-#else
-    UNUSED_PARAM(task);
-#endif
+    auto strongTask = retainPtr(wrapper(task));
+    if (auto webView = page.cocoaView())
+        [m_apiHandler.get() webView:webView.get() stopURLSchemeTask:strongTask.get()];
+    else
+        task.suppressTaskStoppedExceptions();
 }
 
 } // namespace WebKit

@@ -40,12 +40,16 @@ class FunctionExecutable;
 namespace JSC {
 
 /* Builtin.Promise */
-extern const char* s_builtinPromiseRejectPromiseCode;
+extern const char* const s_builtinPromiseRejectPromiseCode;
 extern const int s_builtinPromiseRejectPromiseCodeLength;
 extern const JSC::ConstructAbility s_builtinPromiseRejectPromiseCodeConstructAbility;
-extern const char* s_builtinPromiseFulfillPromiseCode;
+extern const JSC::ConstructorKind s_builtinPromiseRejectPromiseCodeConstructorKind;
+extern const JSC::ImplementationVisibility s_builtinPromiseRejectPromiseCodeImplementationVisibility;
+extern const char* const s_builtinPromiseFulfillPromiseCode;
 extern const int s_builtinPromiseFulfillPromiseCodeLength;
 extern const JSC::ConstructAbility s_builtinPromiseFulfillPromiseCodeConstructAbility;
+extern const JSC::ConstructorKind s_builtinPromiseFulfillPromiseCodeConstructorKind;
+extern const JSC::ImplementationVisibility s_builtinPromiseFulfillPromiseCodeImplementationVisibility;
 
 #define JSC_FOREACH_BUILTIN_PROMISE_BUILTIN_DATA(macro) \
     macro(rejectPromise, builtinPromiseRejectPromise, 2) \
@@ -55,8 +59,8 @@ extern const JSC::ConstructAbility s_builtinPromiseFulfillPromiseCodeConstructAb
 #define JSC_BUILTIN_BUILTIN_PROMISE_FULFILLPROMISE 1
 
 #define JSC_FOREACH_BUILTIN.PROMISE_BUILTIN_CODE(macro) \
-    macro(builtinPromiseRejectPromiseCode, rejectPromise, static_cast<const char*>(nullptr), s_builtinPromiseRejectPromiseCodeLength) \
-    macro(builtinPromiseFulfillPromiseCode, fulfillPromise, static_cast<const char*>(nullptr), s_builtinPromiseFulfillPromiseCodeLength) \
+    macro(builtinPromiseRejectPromiseCode, rejectPromise, ASCIILiteral(), s_builtinPromiseRejectPromiseCodeLength) \
+    macro(builtinPromiseFulfillPromiseCode, fulfillPromise, ASCIILiteral(), s_builtinPromiseFulfillPromiseCodeLength) \
 
 #define JSC_FOREACH_BUILTIN.PROMISE_BUILTIN_FUNCTION_NAME(macro) \
     macro(fulfillPromise) \
@@ -108,6 +112,7 @@ JSC_FOREACH_BUILTIN.PROMISE_BUILTIN_CODE(DECLARE_BUILTIN_GENERATOR)
 #include "BuiltinExecutables.h"
 #include "HeapInlines.h"
 #include "IdentifierInlines.h"
+#include "ImplementationVisibility.h"
 #include "Intrinsic.h"
 #include "JSCellInlines.h"
 #include "VM.h"
@@ -115,35 +120,41 @@ JSC_FOREACH_BUILTIN.PROMISE_BUILTIN_CODE(DECLARE_BUILTIN_GENERATOR)
 namespace JSC {
 
 const JSC::ConstructAbility s_builtinPromiseRejectPromiseCodeConstructAbility = JSC::ConstructAbility::CannotConstruct;
-const int s_builtinPromiseRejectPromiseCodeLength = 410;
+const JSC::ConstructorKind s_builtinPromiseRejectPromiseCodeConstructorKind = JSC::ConstructorKind::None;
+const JSC::ImplementationVisibility s_builtinPromiseRejectPromiseCodeImplementationVisibility = JSC::ImplementationVisibility::Public;
+const int s_builtinPromiseRejectPromiseCodeLength = 337;
 static const JSC::Intrinsic s_builtinPromiseRejectPromiseCodeIntrinsic = JSC::NoIntrinsic;
-const char* s_builtinPromiseRejectPromiseCode =
+const char* const s_builtinPromiseRejectPromiseCode =
     "(function (promise, reason)\n" \
     "{\n" \
     "    \"use strict\";\n" \
+    "\n" \
     "    var reactions = promise.@promiseRejectReactions;\n" \
     "    promise.@promiseResult = reason;\n" \
     "    promise.@promiseFulfillReactions = undefined;\n" \
     "    promise.@promiseRejectReactions = undefined;\n" \
     "    promise.@promiseState = @promiseRejected;\n" \
-    "    @InspectorInstrumentation.promiseRejected(promise, reason, reactions);\n" \
+    "\n" \
     "    @triggerPromiseReactions(reactions, reason);\n" \
     "})\n" \
 ;
 
 const JSC::ConstructAbility s_builtinPromiseFulfillPromiseCodeConstructAbility = JSC::ConstructAbility::CannotConstruct;
-const int s_builtinPromiseFulfillPromiseCodeLength = 409;
+const JSC::ConstructorKind s_builtinPromiseFulfillPromiseCodeConstructorKind = JSC::ConstructorKind::None;
+const JSC::ImplementationVisibility s_builtinPromiseFulfillPromiseCodeImplementationVisibility = JSC::ImplementationVisibility::Public;
+const int s_builtinPromiseFulfillPromiseCodeLength = 336;
 static const JSC::Intrinsic s_builtinPromiseFulfillPromiseCodeIntrinsic = JSC::NoIntrinsic;
-const char* s_builtinPromiseFulfillPromiseCode =
+const char* const s_builtinPromiseFulfillPromiseCode =
     "(function (promise, value)\n" \
     "{\n" \
     "    \"use strict\";\n" \
+    "\n" \
     "    var reactions = promise.@promiseFulfillReactions;\n" \
     "    promise.@promiseResult = value;\n" \
     "    promise.@promiseFulfillReactions = undefined;\n" \
     "    promise.@promiseRejectReactions = undefined;\n" \
     "    promise.@promiseState = @promiseFulfilled;\n" \
-    "    @InspectorInstrumentation.promiseFulfilled(promise, value, reactions);\n" \
+    "\n" \
     "    @triggerPromiseReactions(reactions, value);\n" \
     "})\n" \
 ;
@@ -152,7 +163,7 @@ const char* s_builtinPromiseFulfillPromiseCode =
 #define DEFINE_BUILTIN_GENERATOR(codeName, functionName, overriddenName, argumentCount) \
 JSC::FunctionExecutable* codeName##Generator(JSC::VM& vm) \
 {\
-    return vm.builtinExecutables()->codeName##Executable()->link(vm, vm.builtinExecutables()->codeName##Source(), std::nullopt, s_##codeName##Intrinsic); }
+    return vm.builtinExecutables()->codeName##Executable()->link(vm, nullptr, vm.builtinExecutables()->codeName##Source(), std::nullopt, s_##codeName##Intrinsic); }
 JSC_FOREACH_BUILTIN.PROMISE_BUILTIN_CODE(DEFINE_BUILTIN_GENERATOR)
 #undef DEFINE_BUILTIN_GENERATOR
 

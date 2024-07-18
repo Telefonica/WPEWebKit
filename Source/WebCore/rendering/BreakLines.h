@@ -132,9 +132,12 @@ inline unsigned nextBreakablePosition(LazyLineBreakIterator& lazyBreakIterator, 
 template<typename CharacterType, NonBreakingSpaceBehavior nonBreakingSpaceBehavior>
 inline unsigned nextBreakablePositionKeepingAllWords(const CharacterType* string, unsigned length, unsigned startPosition)
 {
+    // FIXME: Use ICU instead.
     for (unsigned i = startPosition; i < length; i++) {
         if (isBreakableSpace<nonBreakingSpaceBehavior>(string[i]))
             return i;
+        if (string[i] == ideographicSpace)
+            return i + 1;
     }
     return length;
 }
@@ -187,12 +190,25 @@ inline unsigned nextBreakablePositionIgnoringNBSPWithoutShortcut(LazyLineBreakIt
     return nextBreakablePosition<UChar, NonBreakingSpaceBehavior::IgnoreNonBreakingSpace, CanUseShortcut::No>(lazyBreakIterator, stringView.characters16(), stringView.length(), startPosition);
 }
 
-inline bool isBreakable(LazyLineBreakIterator& lazyBreakIterator, unsigned startPosition, std::optional<unsigned>& nextBreakable, bool breakNBSP, bool canUseShortcut, bool keepAllWords)
+inline unsigned nextBreakablePositionBreakCharacter(LazyLineBreakIterator& lazyBreakIterator, unsigned startPosition)
+{
+    auto stringView = lazyBreakIterator.stringView();
+    ASSERT(startPosition <= stringView.length());
+    // FIXME: Can/Should we implement this using a Shared Iterator (performance issue)
+    // https://bugs.webkit.org/show_bug.cgi?id=197876
+    NonSharedCharacterBreakIterator iterator(stringView);
+    std::optional<unsigned> next = ubrk_following(iterator, startPosition);
+    return next.value_or(stringView.length());
+}
+
+inline bool isBreakable(LazyLineBreakIterator& lazyBreakIterator, unsigned startPosition, std::optional<unsigned>& nextBreakable, bool breakNBSP, bool canUseShortcut, bool keepAllWords, bool breakAnywhere)
 {
     if (nextBreakable && nextBreakable.value() >= startPosition)
         return startPosition == nextBreakable;
 
-    if (keepAllWords) {
+    if (breakAnywhere)
+        nextBreakable = nextBreakablePositionBreakCharacter(lazyBreakIterator, startPosition);
+    else if (keepAllWords) {
         if (breakNBSP)
             nextBreakable = nextBreakablePositionKeepingAllWords(lazyBreakIterator, startPosition);
         else

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WKBundlePageUIClient_h
-#define WKBundlePageUIClient_h
+#pragma once
 
 #include <WebKit/WKBase.h>
 #include <WebKit/WKEvent.h>
@@ -35,30 +34,6 @@ enum {
     WKBundlePageUIElementHidden
 };
 typedef uint32_t WKBundlePageUIElementVisibility;
-
-enum {
-    WKConsoleMessageSourceXML,
-    WKConsoleMessageSourceJS,
-    WKConsoleMessageSourceNetwork,
-    WKConsoleMessageSourceConsoleAPI,
-    WKConsoleMessageSourceStorage,
-    WKConsoleMessageSourceAppCache,
-    WKConsoleMessageSourceRendering,
-    WKConsoleMessageSourceCSS,
-    WKConsoleMessageSourceSecurity,
-    WKConsoleMessageSourceContentBlocker,
-    WKConsoleMessageSourceOther
-};
-typedef uint32_t WKConsoleMessageSource;
-
-enum {
-    WKConsoleMessageLevelLog,
-    WKConsoleMessageLevelWarning,
-    WKConsoleMessageLevelError,
-    WKConsoleMessageLevelDebug,
-    WKConsoleMessageLevelInfo,
-};
-typedef uint32_t WKConsoleMessageLevel;
 
 
 typedef void (*WKBundlePageWillAddMessageToConsoleCallback)(WKBundlePageRef page, WKStringRef message, uint32_t lineNumber, const void *clientInfo);
@@ -79,7 +54,8 @@ typedef WKStringRef (*WKBundlePagePlugInCreateStartLabelSubtitleCallback)(WKStri
 typedef WKStringRef (*WKBundlePagePlugInCreateExtraStyleSheetCallback)(const void *clientInfo);
 typedef WKStringRef (*WKBundlePagePlugInCreateExtraScriptCallback)(const void *clientInfo);
 typedef void (*WKBundlePageDidClickAutoFillButtonCallback)(WKBundlePageRef page, WKBundleNodeHandleRef inputElement, WKTypeRef* userData, const void *clientInfo);
-typedef void (*WKBundlePageWillAddDetailedMessageToConsoleCallback)(WKBundlePageRef page, WKConsoleMessageSource, WKConsoleMessageLevel, WKStringRef message, uint32_t lineNumber, uint32_t columnNumber, WKStringRef url, const void *clientInfo);
+typedef void (*WKBundlePageDidResignInputElementStrongPasswordAppearance)(WKBundlePageRef page, WKBundleNodeHandleRef inputElement, WKTypeRef* userData, const void *clientInfo);
+typedef void (*WKBundlePageWillAddMessageWithDetailsToConsoleCallback)(WKBundlePageRef page, WKStringRef message, WKArrayRef messageArguments, uint32_t lineNumber, uint32_t columnNumber, WKStringRef sourceID, const void *clientInfo);
 
 typedef struct WKBundlePageUIClientBase {
     int                                                                 version;
@@ -196,7 +172,6 @@ typedef struct WKBundlePageUIClientV3 {
     WKBundlePageDidClickAutoFillButtonCallback                          didClickAutoFillButton;
 } WKBundlePageUIClientV3;
 
-
 typedef struct WKBundlePageUIClientV4 {
     WKBundlePageUIClientBase                                            base;
 
@@ -234,8 +209,48 @@ typedef struct WKBundlePageUIClientV4 {
     WKBundlePageDidClickAutoFillButtonCallback                          didClickAutoFillButton;
 
     // Version 4.
-    WKBundlePageWillAddDetailedMessageToConsoleCallback                 willAddDetailedMessageToConsole;
+    WKBundlePageDidResignInputElementStrongPasswordAppearance           didResignInputElementStrongPasswordAppearance;
 } WKBundlePageUIClientV4;
 
+typedef struct WKBundlePageUIClientV5 {
+    WKBundlePageUIClientBase                                            base;
 
-#endif // WKBundlePageUIClient_h
+    // Version 0.
+    WKBundlePageWillAddMessageToConsoleCallback                         willAddMessageToConsole;
+    WKBundlePageWillSetStatusbarTextCallback                            willSetStatusbarText;
+    WKBundlePageWillRunJavaScriptAlertCallback                          willRunJavaScriptAlert;
+    WKBundlePageWillRunJavaScriptConfirmCallback                        willRunJavaScriptConfirm;
+    WKBundlePageWillRunJavaScriptPromptCallback                         willRunJavaScriptPrompt;
+    WKBundlePageMouseDidMoveOverElementCallback                         mouseDidMoveOverElement;
+    WKBundlePageDidScrollCallback                                       pageDidScroll;
+    void*                                                               unused1;
+    WKBundlePageGenerateFileForUploadCallback                           shouldGenerateFileForUpload;
+    WKBundlePageGenerateFileForUploadCallback                           generateFileForUpload;
+    void*                                                               unused2;
+    WKBundlePageStatusBarIsVisibleCallback                              statusBarIsVisible;
+    WKBundlePageMenuBarIsVisibleCallback                                menuBarIsVisible;
+    WKBundlePageToolbarsAreVisibleCallback                              toolbarsAreVisible;
+
+    // Version 1.
+    WKBundlePageReachedAppCacheOriginQuotaCallback                      didReachApplicationCacheOriginQuota;
+
+    // Version 2.
+    WKBundlePageExceededDatabaseQuotaCallback                           didExceedDatabaseQuota;
+    WKBundlePagePlugInCreateStartLabelTitleCallback                     createPlugInStartLabelTitle;
+    WKBundlePagePlugInCreateStartLabelSubtitleCallback                  createPlugInStartLabelSubtitle;
+    WKBundlePagePlugInCreateExtraStyleSheetCallback                     createPlugInExtraStyleSheet;
+    WKBundlePagePlugInCreateExtraScriptCallback                         createPlugInExtraScript;
+
+    // Version 3.
+    void*                                                               unused3;
+    void*                                                               unused4;
+    void*                                                               unused5;
+
+    WKBundlePageDidClickAutoFillButtonCallback                          didClickAutoFillButton;
+
+    // Version 4.
+    WKBundlePageDidResignInputElementStrongPasswordAppearance           didResignInputElementStrongPasswordAppearance;
+
+    // Version 5.
+    WKBundlePageWillAddMessageWithDetailsToConsoleCallback              willAddMessageWithDetailsToConsole;
+} WKBundlePageUIClientV5;

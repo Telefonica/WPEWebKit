@@ -36,16 +36,23 @@
 #include <gtk/gtk.h>
 #include <memory>
 
+namespace WebCore {
+enum class DOMPasteAccessPolicy : uint8_t;
+}
+
 namespace WebKit {
 
 class DrawingAreaProxy;
 class WebPageNamespace;
+
+enum class UndoOrRedo : bool;
 
 class PageClientImpl : public PageClient
 #if ENABLE(FULLSCREEN_API)
     , public WebFullScreenManagerProxyClient
 #endif
 {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit PageClientImpl(GtkWidget*);
 
@@ -53,15 +60,17 @@ public:
 
 private:
     // PageClient
-    std::unique_ptr<DrawingAreaProxy> createDrawingAreaProxy() override;
+    std::unique_ptr<DrawingAreaProxy> createDrawingAreaProxy(WebProcessProxy&) override;
     void setViewNeedsDisplay(const WebCore::Region&) override;
-    void requestScroll(const WebCore::FloatPoint& scrollPosition, const WebCore::IntPoint& scrollOrigin, bool isProgrammaticScroll) override;
+    void requestScroll(const WebCore::FloatPoint& scrollPosition, const WebCore::IntPoint& scrollOrigin, WebCore::ScrollIsAnimated) override;
+    void requestScrollToRect(const WebCore::FloatRect& targetRect, const WebCore::FloatPoint& origin) override;
     WebCore::FloatPoint viewScrollPosition() override;
     WebCore::IntSize viewSize() override;
     bool isViewWindowActive() override;
     bool isViewFocused() override;
     bool isViewVisible() override;
     bool isViewInWindow() override;
+    void processWillSwap() override;
     void processDidExit() override;
     void didRelaunchProcess() override;
     void pageClosed() override;
@@ -70,33 +79,48 @@ private:
     void setCursor(const WebCore::Cursor&) override;
     void setCursorHiddenUntilMouseMoves(bool) override;
     void didChangeViewportProperties(const WebCore::ViewportAttributes&) override;
-    void registerEditCommand(Ref<WebEditCommandProxy>&&, WebPageProxy::UndoOrRedo) override;
+    void registerEditCommand(Ref<WebEditCommandProxy>&&, UndoOrRedo) override;
     void clearAllEditCommands() override;
-    bool canUndoRedo(WebPageProxy::UndoOrRedo) override;
-    void executeUndoRedo(WebPageProxy::UndoOrRedo) override;
+    bool canUndoRedo(UndoOrRedo) override;
+    void executeUndoRedo(UndoOrRedo) override;
     WebCore::FloatRect convertToDeviceSpace(const WebCore::FloatRect&) override;
     WebCore::FloatRect convertToUserSpace(const WebCore::FloatRect&) override;
     WebCore::IntPoint screenToRootView(const WebCore::IntPoint&) override;
     WebCore::IntRect rootViewToScreen(const WebCore::IntRect&) override;
+    WebCore::IntPoint accessibilityScreenToRootView(const WebCore::IntPoint&) override;
+    WebCore::IntRect rootViewToAccessibilityScreen(const WebCore::IntRect&) override;
     void doneWithKeyEvent(const NativeWebKeyboardEvent&, bool wasEventHandled) override;
     RefPtr<WebPopupMenuProxy> createPopupMenuProxy(WebPageProxy&) override;
-    RefPtr<WebContextMenuProxy> createContextMenuProxy(WebPageProxy&, const ContextMenuContextData&, const UserData&) override;
+    Ref<WebContextMenuProxy> createContextMenuProxy(WebPageProxy&, ContextMenuContextData&&, const UserData&) override;
 #if ENABLE(INPUT_TYPE_COLOR)
-    RefPtr<WebColorPicker> createColorPicker(WebPageProxy*, const WebCore::Color& intialColor, const WebCore::IntRect&) override;
+    RefPtr<WebColorPicker> createColorPicker(WebPageProxy*, const WebCore::Color& initialColor, const WebCore::IntRect&, Vector<WebCore::Color>&&) override;
 #endif
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+    RefPtr<WebDateTimePicker> createDateTimePicker(WebPageProxy&) override;
+#endif
+#if ENABLE(DATALIST_ELEMENT)
+    RefPtr<WebDataListSuggestionsDropdown> createDataListSuggestionsDropdown(WebPageProxy&) override;
+#endif
+    Ref<WebCore::ValidationBubble> createValidationBubble(const String& message, const WebCore::ValidationBubble::Settings&) final;
     void selectionDidChange() override;
+    RefPtr<ViewSnapshot> takeViewSnapshot(std::optional<WebCore::IntRect>&&) override;
 #if ENABLE(DRAG_SUPPORT)
-    void startDrag(Ref<WebCore::SelectionData>&&, WebCore::DragOperation, RefPtr<ShareableBitmap>&& dragImage) override;
+    void startDrag(WebCore::SelectionData&&, OptionSet<WebCore::DragOperation>, RefPtr<ShareableBitmap>&& dragImage, WebCore::IntPoint&& dragImageHotspot) override;
+    void didPerformDragControllerAction() override;
 #endif
 
     void enterAcceleratedCompositingMode(const LayerTreeContext&) override;
     void exitAcceleratedCompositingMode() override;
     void updateAcceleratedCompositingMode(const LayerTreeContext&) override;
 
-    void handleDownloadRequest(DownloadProxy*) override;
+    void handleDownloadRequest(DownloadProxy&) override;
     void didChangeContentSize(const WebCore::IntSize&) override;
     void didCommitLoadForMainFrame(const String& mimeType, bool useCustomContentProvider) override;
-    void didFailLoadForMainFrame() override { }
+    void didStartProvisionalLoadForMainFrame() override;
+    void didFirstVisuallyNonEmptyLayoutForMainFrame() override;
+    void didFinishNavigation(API::Navigation*) override;
+    void didFailNavigation(API::Navigation*) override;
+    void didSameDocumentNavigationForMainFrame(SameDocumentNavigationType) override;
 
     // Auxiliary Client Creation
 #if ENABLE(FULLSCREEN_API)
@@ -122,10 +146,6 @@ private:
     void willRecordNavigationSnapshot(WebBackForwardListItem&) override;
     void didRemoveNavigationGestureSnapshot() override;
 
-    void didFirstVisuallyNonEmptyLayoutForMainFrame() override;
-    void didFinishLoadForMainFrame() override;
-    void didSameDocumentNavigationForMainFrame(SameDocumentNavigationType) override;
-
 #if ENABLE(TOUCH_EVENTS)
     void doneWithTouchEvent(const NativeWebTouchEvent&, bool wasEventHandled) override;
 #endif
@@ -137,17 +157,29 @@ private:
     void refView() override;
     void derefView() override;
 
-    void didRestoreScrollPosition() override { }
+    void didRestoreScrollPosition() override;
     void isPlayingAudioWillChange() final { }
     void isPlayingAudioDidChange() final { }
+
+    void requestDOMPasteAccess(WebCore::DOMPasteAccessCategory, const WebCore::IntRect&, const String&, CompletionHandler<void(WebCore::DOMPasteAccessResponse)>&&) final;
 
 #if ENABLE(VIDEO) && USE(GSTREAMER)
     bool decidePolicyForInstallMissingMediaPluginsPermissionRequest(InstallMissingMediaPluginsPermissionRequest&) override;
 #endif
 
-    WebCore::UserInterfaceLayoutDirection userInterfaceLayoutDirection() override { return WebCore::UserInterfaceLayoutDirection::LTR; }
+    WebCore::UserInterfaceLayoutDirection userInterfaceLayoutDirection() override;
 
-    JSGlobalContextRef javascriptGlobalContext() override;
+    bool effectiveAppearanceIsDark() const override;
+
+#if USE(WPE_RENDERER)
+    IPC::Attachment hostFileDescriptor() override;
+#endif
+
+    void didChangeWebPageID() const override;
+
+    void makeViewBlank(bool) override;
+
+    WebCore::Color accentColor() override;
 
     // Members of PageClientImpl class
     GtkWidget* m_viewWidget;

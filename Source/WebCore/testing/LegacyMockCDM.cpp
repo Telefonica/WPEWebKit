@@ -31,73 +31,74 @@
 #include "LegacyCDM.h"
 #include "LegacyCDMSession.h"
 #include "WebKitMediaKeyError.h"
-#include <runtime/JSCInlines.h>
-#include <runtime/TypedArrayInlines.h>
-#include <runtime/Uint8Array.h>
+#include <JavaScriptCore/JSCInlines.h>
+#include <JavaScriptCore/TypedArrayInlines.h>
+#include <JavaScriptCore/Uint8Array.h>
 
 namespace WebCore {
 
-class MockCDMSession : public CDMSession {
+class MockCDMSession : public LegacyCDMSession {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    MockCDMSession(CDMSessionClient*);
-    virtual ~MockCDMSession() { }
+    MockCDMSession(LegacyCDMSessionClient&);
+    virtual ~MockCDMSession() = default;
 
-    void setClient(CDMSessionClient* client) override { m_client = client; }
     const String& sessionId() const override { return m_sessionId; }
     RefPtr<Uint8Array> generateKeyRequest(const String& mimeType, Uint8Array* initData, String& destinationURL, unsigned short& errorCode, uint32_t& systemCode) override;
     void releaseKeys() override;
     bool update(Uint8Array*, RefPtr<Uint8Array>& nextMessage, unsigned short& errorCode, uint32_t& systemCode) override;
+    RefPtr<ArrayBuffer> cachedKeyForKeyID(const String&) const override { return nullptr; }
 
 protected:
-    CDMSessionClient* m_client;
+    WeakPtr<LegacyCDMSessionClient> m_client;
     String m_sessionId;
 };
 
-bool MockCDM::supportsKeySystem(const String& keySystem)
+bool LegacyMockCDM::supportsKeySystem(const String& keySystem)
 {
-    return equalLettersIgnoringASCIICase(keySystem, "com.webcore.mock");
+    return equalLettersIgnoringASCIICase(keySystem, "com.webcore.mock"_s);
 }
 
-bool MockCDM::supportsKeySystemAndMimeType(const String& keySystem, const String& mimeType)
+bool LegacyMockCDM::supportsKeySystemAndMimeType(const String& keySystem, const String& mimeType)
 {
     if (!supportsKeySystem(keySystem))
         return false;
 
-    return equalLettersIgnoringASCIICase(mimeType, "video/mock");
+    return equalLettersIgnoringASCIICase(mimeType, "video/mock"_s);
 }
 
-bool MockCDM::supportsMIMEType(const String& mimeType)
+bool LegacyMockCDM::supportsMIMEType(const String& mimeType)
 {
-    return equalLettersIgnoringASCIICase(mimeType, "video/mock");
+    return equalLettersIgnoringASCIICase(mimeType, "video/mock"_s);
 }
 
-std::unique_ptr<CDMSession> MockCDM::createSession(CDMSessionClient* client)
+std::unique_ptr<LegacyCDMSession> LegacyMockCDM::createSession(LegacyCDMSessionClient& client)
 {
-    return std::make_unique<MockCDMSession>(client);
+    return makeUnique<MockCDMSession>(client);
 }
 
 static Uint8Array* initDataPrefix()
 {
     const unsigned char prefixData[] = { 'm', 'o', 'c', 'k' };
-    static Uint8Array* prefix = Uint8Array::create(prefixData, WTF_ARRAY_LENGTH(prefixData)).leakRef();
+    static Uint8Array& prefix { Uint8Array::create(prefixData, WTF_ARRAY_LENGTH(prefixData)).leakRef() };
 
-    return prefix;
+    return &prefix;
 }
 
 static Uint8Array* keyPrefix()
 {
     static const unsigned char prefixData[] = {'k', 'e', 'y'};
-    static Uint8Array* prefix = Uint8Array::create(prefixData, WTF_ARRAY_LENGTH(prefixData)).leakRef();
+    static Uint8Array& prefix { Uint8Array::create(prefixData, WTF_ARRAY_LENGTH(prefixData)).leakRef() };
 
-    return prefix;
+    return &prefix;
 }
 
 static Uint8Array* keyRequest()
 {
     static const unsigned char requestData[] = {'r', 'e', 'q', 'u', 'e', 's', 't'};
-    static Uint8Array* request = Uint8Array::create(requestData, WTF_ARRAY_LENGTH(requestData)).leakRef();
+    static Uint8Array& request { Uint8Array::create(requestData, WTF_ARRAY_LENGTH(requestData)).leakRef() };
 
-    return request;
+    return &request;
 }
 
 static String generateSessionId()
@@ -106,7 +107,7 @@ static String generateSessionId()
     return String::number(monotonicallyIncreasingSessionId++);
 }
 
-MockCDMSession::MockCDMSession(CDMSessionClient* client)
+MockCDMSession::MockCDMSession(LegacyCDMSessionClient& client)
     : m_client(client)
     , m_sessionId(generateSessionId())
 {

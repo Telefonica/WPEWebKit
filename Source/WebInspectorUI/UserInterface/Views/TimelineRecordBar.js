@@ -25,13 +25,16 @@
 
 WI.TimelineRecordBar = class TimelineRecordBar extends WI.Object
 {
-    constructor(records, renderMode)
+    constructor(delegate, records, renderMode)
     {
         super();
+
+        this._delegate = delegate || null;
 
         this._element = document.createElement("div");
         this._element.classList.add("timeline-record-bar");
         this._element[WI.TimelineRecordBar.ElementReferenceSymbol] = this;
+        this._element.addEventListener("click", this._handleClick.bind(this));
 
         this.renderMode = renderMode;
         this.records = records;
@@ -179,6 +182,16 @@ WI.TimelineRecordBar = class TimelineRecordBar extends WI.Object
         return this._element;
     }
 
+    get selected()
+    {
+        return this._element.classList.contains("selected");
+    }
+
+    set selected(selected)
+    {
+        this._element.classList.toggle("selected", !!selected);
+    }
+
     get renderMode()
     {
         return this._renderMode;
@@ -223,8 +236,10 @@ WI.TimelineRecordBar = class TimelineRecordBar extends WI.Object
                 this._element.classList.remove(oldRecordEventType);
                 this._element.classList.add(newRecord.eventType);
             }
-            if (newRecord.usesActiveStartTime !== oldRecordUsesActiveStartTime)
-                this._element.classList.toggle("has-inactive-segment", newRecord.usesActiveStartTime);
+            if (newRecord.usesActiveStartTime !== oldRecordUsesActiveStartTime) {
+                if (!this._delegate || !this._delegate.timelineRecordBarCustomChildren)
+                    this._element.classList.toggle("has-inactive-segment", newRecord.usesActiveStartTime);
+            }
         } else
             this._element.classList.remove(oldRecordType, oldRecordEventType, "has-inactive-segment");
     }
@@ -232,7 +247,7 @@ WI.TimelineRecordBar = class TimelineRecordBar extends WI.Object
     refresh(graphDataSource)
     {
         if (isNaN(graphDataSource.secondsPerPixel))
-            return;
+            return false;
 
         console.assert(graphDataSource.zeroTime);
         console.assert(graphDataSource.startTime);
@@ -268,6 +283,8 @@ WI.TimelineRecordBar = class TimelineRecordBar extends WI.Object
         if (barUnfinished)
             barEndTime = graphCurrentTime;
 
+        var barDuration = barEndTime - barStartTime;
+
         var graphDuration = graphEndTime - graphStartTime;
 
         let newBarPosition = (barStartTime - graphStartTime) / graphDuration;
@@ -276,6 +293,36 @@ WI.TimelineRecordBar = class TimelineRecordBar extends WI.Object
 
         var newBarWidth = ((barEndTime - graphStartTime) / graphDuration) - newBarPosition;
         this._updateElementPosition(this._element, newBarWidth, "width");
+
+        if (this._delegate && this._delegate.timelineRecordBarCustomChildren) {
+            this._element.removeChildren();
+
+            this._element.classList.add("has-custom-children");
+            this._element.classList.toggle("unfinished", barUnfinished);
+
+            let children = this._delegate.timelineRecordBarCustomChildren(this);
+            for (let child of children) {
+                let childElement;
+                if (child.image) {
+                    childElement = this._element.appendChild(document.createElement("img"));
+                    childElement.src = child.image;
+                } else
+                    childElement = this._element.appendChild(document.createElement("div"));
+
+                childElement.classList.add(...child.classNames);
+                childElement.title = child.title;
+                this._updateElementPosition(childElement, (child.startTime - barStartTime) / barDuration, property);
+
+                if (typeof child.endTime === "number") {
+                    let childEndTime = !isNaN(child.endTime) ? child.endTime : barEndTime;
+                    this._updateElementPosition(childElement, (childEndTime - child.startTime) / barDuration, "width");
+                }
+            }
+
+            return true;
+        }
+
+        this._element.classList.remove("has-custom-children");
 
         if (!this._activeBarElement && this._renderMode !== WI.TimelineRecordBar.RenderMode.InactiveOnly) {
             this._activeBarElement = document.createElement("div");
@@ -311,8 +358,6 @@ WI.TimelineRecordBar = class TimelineRecordBar extends WI.Object
             var barActiveStartTime = this._records.reduce(function(previousValue, currentValue) { return Math.min(previousValue, currentValue.activeStartTime); }, Infinity);
         else
             var barActiveStartTime = this._records.reduce(function(previousValue, currentValue) { return Math.max(previousValue, currentValue.activeStartTime); }, 0);
-
-        var barDuration = barEndTime - barStartTime;
 
         var inactiveUnfinished = isNaN(barActiveStartTime) || barActiveStartTime >= graphCurrentTime;
         this._element.classList.toggle("unfinished", inactiveUnfinished);
@@ -371,6 +416,15 @@ WI.TimelineRecordBar = class TimelineRecordBar extends WI.Object
         let currentPositionAprox = Math.round(parseFloat(element.style[property]) * 100);
         if (currentPositionAprox !== newPositionAprox)
             element.style[property] = (newPositionAprox / 100) + "%";
+    }
+
+    _handleClick(event)
+    {
+        // Ensure that the container "click" listener added by `WI.TimelineOverview` isn't called.
+        event.__timelineRecordClickEventHandled = true;
+
+        if (this._delegate && this._delegate.timelineRecordBarClicked)
+            this._delegate.timelineRecordBarClicked(this);
     }
 };
 

@@ -26,66 +26,41 @@
 
 WI.GeneralTabBarItem = class GeneralTabBarItem extends WI.TabBarItem
 {
-    constructor(image, title, representedObject)
+    // Static
+
+    static fromTabContentView(tabContentView)
     {
-        super(image, title, representedObject);
+        console.assert(tabContentView instanceof WI.TabContentView);
 
-        let closeButtonElement = document.createElement("div");
-        closeButtonElement.classList.add(WI.TabBarItem.CloseButtonStyleClassName);
-        closeButtonElement.title = WI.UIString("Click to close this tab; Option-click to close all tabs except this one");
-        this.element.insertBefore(closeButtonElement, this.element.firstChild);
-
-        this.element.addEventListener("contextmenu", this._handleContextMenuEvent.bind(this));
+        let {image, displayName, title} = tabContentView.tabInfo();
+        return new WI.GeneralTabBarItem(tabContentView, image, displayName, title);
     }
 
     // Public
 
-    set title(title)
+    get displayName()
     {
-        if (title) {
-            this._titleElement = document.createElement("span");
-            this._titleElement.classList.add("title");
-
-            let titleContentElement = document.createElement("span");
-            titleContentElement.classList.add("content");
-            titleContentElement.textContent = title;
-            this._titleElement.appendChild(titleContentElement);
-
-            this.element.insertBefore(this._titleElement, this.element.lastChild);
-        } else {
-            if (this._titleElement)
-                this._titleElement.remove();
-
-            this._titleElement = null;
-        }
-
-        super.title = title;
+        return super.displayName;
     }
 
-    // Private
-
-    _handleContextMenuEvent(event)
+    set displayName(displayName)
     {
-        if (!this._parentTabBar)
-            return;
+        if (displayName) {
+            this._displayNameElement = document.createElement("span");
+            this._displayNameElement.className = "name";
 
-        let closeTab = () => {
-            this._parentTabBar.removeTabBarItem(this);
-        };
+            let displayNameContentElement = this._displayNameElement.appendChild(document.createElement("span"));
+            displayNameContentElement.className = "content";
+            displayNameContentElement.textContent = displayName;
 
-        let closeOtherTabs = () => {
-            let tabBarItems = this._parentTabBar.tabBarItems;
-            for (let i = tabBarItems.length - 1; i >= 0; --i) {
-                let item = tabBarItems[i];
-                if (item === this || item instanceof WI.PinnedTabBarItem)
-                    continue;
-                this._parentTabBar.removeTabBarItem(item);
-            }
-        };
+            this.element.insertBefore(this._displayNameElement, this.element.lastChild);
+        } else {
+            if (this._displayNameElement)
+                this._displayNameElement.remove();
 
-        let hasOtherNonPinnedTabs = this._parentTabBar.tabBarItems.some((item) => item !== this && !(item instanceof WI.PinnedTabBarItem));
-        let contextMenu = WI.ContextMenu.createFromEvent(event);
-        contextMenu.appendItem(WI.UIString("Close Tab"), closeTab, this.isDefaultTab);
-        contextMenu.appendItem(WI.UIString("Close Other Tabs"), closeOtherTabs, !hasOtherNonPinnedTabs);
+            this._displayNameElement = null;
+        }
+
+        super.displayName = displayName;
     }
 };

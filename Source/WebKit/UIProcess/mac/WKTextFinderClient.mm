@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,7 +26,7 @@
 #import "config.h"
 #import "WKTextFinderClient.h"
 
-#if PLATFORM(MAC) && WK_API_ENABLED
+#if PLATFORM(MAC)
 
 #import "APIFindClient.h"
 #import "APIFindMatchesClient.h"
@@ -34,29 +34,30 @@
 #import "WebPageProxy.h"
 #import <algorithm>
 #import <pal/spi/mac/NSTextFinderSPI.h>
+#import <wtf/BlockPtr.h>
 #import <wtf/Deque.h>
+#import <wtf/NakedPtr.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
-// FIXME: Implement support for replace.
 // FIXME: Implement scrollFindMatchToVisible.
 // FIXME: The NSTextFinder overlay doesn't move with scrolling; we should have a mode where we manage the overlay.
-
-using namespace WebCore;
-using namespace WebKit;
 
 static const NSUInteger maximumFindMatches = 1000;
 
 @interface WKTextFinderClient ()
 
-- (void)didFindStringMatchesWithRects:(const Vector<Vector<IntRect>>&)rects didWrapAround:(BOOL)didWrapAround;
+- (void)didFindStringMatchesWithRects:(const Vector<Vector<WebCore::IntRect>>&)rects didWrapAround:(BOOL)didWrapAround;
 
 - (void)getImageForMatchResult:(id <NSTextFinderAsynchronousDocumentFindMatch>)findMatch completionHandler:(void (^)(NSImage *generatedImage))completionHandler;
-- (void)didGetImageForMatchResult:(WebImage *)string;
+- (void)didGetImageForMatchResult:(WebKit::WebImage *)string;
 
 @end
 
 namespace WebKit {
+using namespace WebCore;
 
 class TextFinderFindClient : public API::FindMatchesClient, public API::FindClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit TextFinderFindClient(WKTextFinderClient *textFinderClient)
         : m_textFinderClient(textFinderClient)
@@ -64,7 +65,7 @@ public:
     }
 
 private:
-    void didFindStringMatches(WebPageProxy* page, const String&, const Vector<Vector<IntRect>>& matchRects, int32_t) override
+    void didFindStringMatches(WebPageProxy* page, const String&, const Vector<Vector<WebCore::IntRect>>& matchRects, int32_t) override
     {
         [m_textFinderClient didFindStringMatchesWithRects:matchRects didWrapAround:NO];
     }
@@ -74,9 +75,21 @@ private:
         [m_textFinderClient didGetImageForMatchResult:image];
     }
 
-    void didFindString(WebPageProxy*, const String&, const Vector<IntRect>& matchRects, uint32_t, int32_t, bool didWrapAround) override
+    void didFindString(WebPageProxy*, const String&, const Vector<WebCore::IntRect>& matchRects, uint32_t matchCount, int32_t matchIndex, bool didWrapAround) override
     {
-        [m_textFinderClient didFindStringMatchesWithRects:{ matchRects } didWrapAround:didWrapAround];
+        Vector<Vector<WebCore::IntRect>> allMatches;
+        if (matchCount != static_cast<unsigned>(kWKMoreThanMaximumMatchCount)) {
+            // Synthesize a vector of match rects for all `matchCount` matches,
+            // filling in the actual rects for the one that we received.
+            // The rest will remain empty, but it's important to NSTextFinder
+            // that they at least exist.
+            allMatches.resize(matchCount);
+            // FIXME: Clean this up and figure out why we are getting a -1 index
+            if (matchIndex >= 0 && static_cast<uint32_t>(matchIndex) < matchCount)
+                allMatches[matchIndex].appendVector(matchRects);
+        }
+
+        [m_textFinderClient didFindStringMatchesWithRects:allMatches didWrapAround:didWrapAround];
     }
 
     void didFailToFindString(WebPageProxy*, const String& string) override
@@ -140,24 +153,26 @@ private:
 @end
 
 @implementation WKTextFinderClient {
-    WebPageProxy *_page;
+    NakedPtr<WebKit::WebPageProxy> _page;
     NSView *_view;
     Deque<WTF::Function<void(NSArray *, bool didWrap)>> _findReplyCallbacks;
     Deque<WTF::Function<void(NSImage *)>> _imageReplyCallbacks;
+    BOOL _usePlatformFindUI;
 }
 
-- (instancetype)initWithPage:(WebPageProxy&)page view:(NSView *)view
+- (instancetype)initWithPage:(NakedRef<WebKit::WebPageProxy>)page view:(NSView *)view usePlatformFindUI:(BOOL)usePlatformFindUI
 {
     self = [super init];
 
     if (!self)
         return nil;
 
-    _page = &page;
+    _page = page.ptr();
     _view = view;
+    _usePlatformFindUI = usePlatformFindUI;
     
-    _page->setFindMatchesClient(std::make_unique<TextFinderFindClient>(self));
-    _page->setFindClient(std::make_unique<TextFinderFindClient>(self));
+    _page->setFindMatchesClient(makeUnique<WebKit::TextFinderFindClient>(self));
+    _page->setFindClient(makeUnique<WebKit::TextFinderFindClient>(self));
 
     return self;
 }
@@ -173,6 +188,19 @@ private:
 
 #pragma mark - NSTextFinderClient SPI
 
+- (void)replaceMatches:(NSArray *)matches withString:(NSString *)replacementText inSelectionOnly:(BOOL)selectionOnly resultCollector:(void (^)(NSUInteger replacementCount))resultCollector
+{
+    Vector<uint32_t> matchIndices;
+    matchIndices.reserveInitialCapacity(matches.count);
+    for (id match in matches) {
+        if ([match isKindOfClass:WKTextFinderMatch.class])
+            matchIndices.uncheckedAppend([(WKTextFinderMatch *)match index]);
+    }
+    _page->replaceMatches(WTFMove(matchIndices), replacementText, selectionOnly, [collector = makeBlockPtr(resultCollector)] (uint64_t numberOfReplacements) {
+        collector(numberOfReplacements);
+    });
+}
+
 - (void)findMatchesForString:(NSString *)targetString relativeToMatch:(id <NSTextFinderAsynchronousDocumentFindMatch>)relativeMatch findOptions:(NSTextFinderAsynchronousDocumentFindOptions)findOptions maxResults:(NSUInteger)maxResults resultCollector:(void (^)(NSArray *matches, BOOL didWrap))resultCollector
 {
     // Limit the number of results, for performance reasons; NSTextFinder always
@@ -180,18 +208,24 @@ private:
     // proportional to document length.
     maxResults = std::min(maxResults, maximumFindMatches);
 
-    unsigned kitFindOptions = 0;
+    OptionSet<WebKit::FindOptions> kitFindOptions;
 
     if (findOptions & NSTextFinderAsynchronousDocumentFindOptionsBackwards)
-        kitFindOptions |= FindOptionsBackwards;
+        kitFindOptions.add(WebKit::FindOptions::Backwards);
     if (findOptions & NSTextFinderAsynchronousDocumentFindOptionsWrap)
-        kitFindOptions |= FindOptionsWrapAround;
+        kitFindOptions.add(WebKit::FindOptions::WrapAround);
     if (findOptions & NSTextFinderAsynchronousDocumentFindOptionsCaseInsensitive)
-        kitFindOptions |= FindOptionsCaseInsensitive;
+        kitFindOptions.add(WebKit::FindOptions::CaseInsensitive);
     if (findOptions & NSTextFinderAsynchronousDocumentFindOptionsStartsWith)
-        kitFindOptions |= FindOptionsAtWordStarts;
+        kitFindOptions.add(WebKit::FindOptions::AtWordStarts);
 
-    RetainPtr<NSProgress> progress = [NSProgress progressWithTotalUnitCount:1];
+    if (!_usePlatformFindUI) {
+        kitFindOptions.add(WebKit::FindOptions::ShowOverlay);
+        kitFindOptions.add(WebKit::FindOptions::ShowFindIndicator);
+        kitFindOptions.add(WebKit::FindOptions::DetermineMatchIndex);
+    }
+
+    RetainPtr progress = [NSProgress progressWithTotalUnitCount:1];
     auto copiedResultCollector = Block_copy(resultCollector);
     _findReplyCallbacks.append([progress, copiedResultCollector] (NSArray *matches, bool didWrap) {
         [progress setCompletedUnitCount:1];
@@ -200,16 +234,16 @@ private:
     });
 
     if (maxResults == 1)
-        _page->findString(targetString, static_cast<WebKit::FindOptions>(kitFindOptions), maxResults);
+        _page->findString(targetString, kitFindOptions, maxResults);
     else
-        _page->findStringMatches(targetString, static_cast<WebKit::FindOptions>(kitFindOptions), maxResults);
+        _page->findStringMatches(targetString, kitFindOptions, maxResults);
 }
 
 - (void)getSelectedText:(void (^)(NSString *selectedTextString))completionHandler
 {
     void (^copiedCompletionHandler)(NSString *) = Block_copy(completionHandler);
 
-    _page->getSelectionOrContentsAsString([copiedCompletionHandler] (const String& string, CallbackBase::Error) {
+    _page->getSelectionOrContentsAsString([copiedCompletionHandler] (const String& string) {
         copiedCompletionHandler(string);
         Block_release(copiedCompletionHandler);
     });
@@ -224,49 +258,62 @@ private:
     _page->selectFindMatch(textFinderMatch.index);
 }
 
-#pragma mark - FindMatchesClient
-
-static RetainPtr<NSArray> arrayFromRects(const Vector<IntRect>& matchRects)
+- (void)scrollFindMatchToVisible:(id <NSTextFinderAsynchronousDocumentFindMatch>)findMatch
 {
-    RetainPtr<NSMutableArray> nsMatchRects = adoptNS([[NSMutableArray alloc] initWithCapacity:matchRects.size()]);
-    for (auto& rect : matchRects)
-        [nsMatchRects addObject:[NSValue valueWithRect:rect]];
-    return nsMatchRects;
+    if (_usePlatformFindUI)
+        return;
+
+    ASSERT([findMatch isKindOfClass:[WKTextFinderMatch class]]);
+
+    WKTextFinderMatch *textFinderMatch = static_cast<WKTextFinderMatch *>(findMatch);
+    _page->indicateFindMatch(textFinderMatch.index);
 }
 
-- (void)didFindStringMatchesWithRects:(const Vector<Vector<IntRect>>&)rectsForMatches didWrapAround:(BOOL)didWrapAround
+#pragma mark - FindMatchesClient
+
+- (void)didFindStringMatchesWithRects:(const Vector<Vector<WebCore::IntRect>>&)rectsForMatches didWrapAround:(BOOL)didWrapAround
 {
     if (_findReplyCallbacks.isEmpty())
         return;
 
-    auto replyCallback = _findReplyCallbacks.takeFirst();
-    unsigned matchCount = rectsForMatches.size();
-    RetainPtr<NSMutableArray> matchObjects = adoptNS([[NSMutableArray alloc] initWithCapacity:matchCount]);
-    for (unsigned i = 0; i < matchCount; i++) {
-        RetainPtr<NSArray> nsMatchRects = arrayFromRects(rectsForMatches[i]);
-        RetainPtr<WKTextFinderMatch> match = adoptNS([[WKTextFinderMatch alloc] initWithClient:self view:_view index:i rects:nsMatchRects.get()]);
-        [matchObjects addObject:match.get()];
-    }
+    unsigned index = 0;
+    auto matchObjects = createNSArray(rectsForMatches, [&] (auto& rects) {
+        RetainPtr<NSArray> rectsArray;
+        if (_usePlatformFindUI)
+            rectsArray = createNSArray(rects);
+        else
+            rectsArray = @[];
+        return adoptNS([[WKTextFinderMatch alloc] initWithClient:self view:_view index:index++ rects:rectsArray.get()]);
+    });
 
-    replyCallback(matchObjects.get(), didWrapAround);
+    _findReplyCallbacks.takeFirst()(matchObjects.get(), didWrapAround);
 }
 
-- (void)didGetImageForMatchResult:(WebImage *)image
+- (void)didGetImageForMatchResult:(WebKit::WebImage *)image
 {
     if (_imageReplyCallbacks.isEmpty())
         return;
 
-    IntSize size = image->bitmap().size();
+    auto size = image->size();
     size.scale(1 / _page->deviceScaleFactor());
+    
+    auto nativeImage = image->copyNativeImage(WebCore::DontCopyBackingStore);
+    if (!nativeImage)
+        return;
 
     auto imageCallback = _imageReplyCallbacks.takeFirst();
-    imageCallback(adoptNS([[NSImage alloc] initWithCGImage:image->bitmap().makeCGImage().get() size:size]).get());
+    imageCallback(adoptNS([[NSImage alloc] initWithCGImage:nativeImage->platformImage().get() size:size]).get());
 }
 
 #pragma mark - WKTextFinderMatch callbacks
 
 - (void)getImageForMatchResult:(id <NSTextFinderAsynchronousDocumentFindMatch>)findMatch completionHandler:(void (^)(NSImage *generatedImage))completionHandler
 {
+    if (!_usePlatformFindUI) {
+        completionHandler(nil);
+        return;
+    }
+
     ASSERT([findMatch isKindOfClass:[WKTextFinderMatch class]]);
 
     WKTextFinderMatch *textFinderMatch = static_cast<WKTextFinderMatch *>(findMatch);

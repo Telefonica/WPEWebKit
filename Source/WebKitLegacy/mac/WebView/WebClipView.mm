@@ -28,6 +28,8 @@
 
 #import "WebClipView.h"
 
+#if !PLATFORM(IOS_FAMILY)
+
 #import "WebFrameInternal.h"
 #import "WebFrameView.h"
 #import "WebViewPrivate.h"
@@ -41,8 +43,6 @@
 // The "additional clip" is a clip for focus ring redrawing.
 
 // FIXME: Change terminology from "additional clip" to "focus ring clip".
-
-using namespace WebCore;
 
 @interface NSView (WebViewMethod)
 - (WebView *)_webView;
@@ -66,8 +66,7 @@ using namespace WebCore;
     if (!self)
         return nil;
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     // In WebHTMLView, we set a clip. This is not typical to do in an
     // NSView, and while correct for any one invocation of drawRect:,
     // it causes some bad problems if that clip is cached between calls.
@@ -78,7 +77,7 @@ using namespace WebCore;
     // See these bugs for more information:
     // <rdar://problem/3409315>: REGRESSSION (7B58-7B60)?: Safari draws blank frames on macosx.apple.com perf page
     [self releaseGState];
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
     return self;
 }
@@ -92,8 +91,8 @@ using namespace WebCore;
     if (![webFrameView isKindOfClass:[WebFrameView class]])
         return [super visibleRect];
 
-    if (Frame* coreFrame = core([webFrameView webFrame])) {
-        if (FrameView* frameView = coreFrame->view()) {
+    if (auto* coreFrame = core([webFrameView webFrame])) {
+        if (auto* frameView = coreFrame->view()) {
             if (frameView->isEnclosedInCompositingLayer())
                 return [self bounds];
         }
@@ -115,11 +114,11 @@ using namespace WebCore;
 
     // We may hit this immediate scrolling code during a layout operation trigged by an AppKit call. When
     // this happens, WebCore will not paint. So, we need to mark this region dirty so that it paints properly.
-    WebFrameView *webFrameView = (WebFrameView *)[[self superview] superview];
+    auto *webFrameView = (WebFrameView *)[[self superview] superview];
     if ([webFrameView isKindOfClass:[WebFrameView class]]) {
-        if (Frame* coreFrame = core([webFrameView webFrame])) {
-            if (FrameView* frameView = coreFrame->view()) {
-                if (!frameView->inPaintableState())
+        if (auto* coreFrame = core([webFrameView webFrame])) {
+            if (auto* frameView = coreFrame->view()) {
+                if (!frameView->layoutContext().inPaintableState())
                     [self setNeedsDisplay:YES];
             }
         }
@@ -166,25 +165,11 @@ using namespace WebCore;
 - (NSRect)_focusRingVisibleRect
 {
     NSRect rect = [self visibleRect];
-    if (_haveAdditionalClip) {
+    if (_haveAdditionalClip)
         rect = NSIntersectionRect(rect, _additionalClip);
-    }
     return rect;
 }
 
-- (void)scrollWheel:(NSEvent *)event
-{
-    NSView *docView = [self documentView];
-    if ([docView respondsToSelector:@selector(_webView)]) {
-#if ENABLE(DASHBOARD_SUPPORT)
-        WebView *wv = [docView _webView];
-        if ([wv _dashboardBehavior:WebDashboardBehaviorAllowWheelScrolling]) {
-            [super scrollWheel:event];
-        }
-#endif
-        return;
-    }
-    [super scrollWheel:event];
-}
-
 @end
+
+#endif

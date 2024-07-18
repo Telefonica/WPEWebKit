@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,50 +26,47 @@
 #ifndef ControlStates_h
 #define ControlStates_h
 
+#include <wtf/OptionSet.h>
 #include <wtf/RetainPtr.h>
-
-namespace WebCore {
+#include <wtf/Seconds.h>
 
 #if PLATFORM(COCOA)
 #ifndef __OBJC__
 typedef struct objc_object *id;
 #endif
+#endif
+
+namespace WebCore {
+
+#if PLATFORM(COCOA)
 typedef id PlatformControlInstance;
 #endif
 
 class ControlStates {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    enum {
-        HoverState = 1,
-        PressedState = 1 << 1,
-        FocusState = 1 << 2,
-        EnabledState = 1 << 3,
-        CheckedState = 1 << 4,
-        DefaultState = 1 << 5,
-        WindowInactiveState = 1 << 6,
-        IndeterminateState = 1 << 7,
-        SpinUpState = 1 << 8, // Sub-state for HoverState and PressedState.
-        AllStates = 0xffffffff
+    enum class States : uint16_t {
+        Hovered = 1 << 0,
+        Pressed = 1 << 1,
+        Focused = 1 << 2,
+        Enabled = 1 << 3,
+        Checked = 1 << 4,
+        Default = 1 << 5,
+        WindowInactive = 1 << 6,
+        Indeterminate = 1 << 7,
+        SpinUp = 1 << 8, // Sub-state for HoverState and PressedState.
+        Presenting = 1 << 9,
     };
 
-    typedef unsigned States;
-
-    ControlStates(States states)
+    ControlStates(OptionSet<States> states)
         : m_states(states)
     {
     }
 
-    ControlStates()
-        : ControlStates(0)
-    {
-    }
+    ControlStates() = default;
 
-    ~ControlStates()
-    {
-    }
-
-    States states() const { return m_states; }
-    void setStates(States newStates)
+    OptionSet<States> states() const { return m_states; }
+    void setStates(OptionSet<States> newStates)
     {
         if (newStates == m_states)
             return;
@@ -84,8 +81,8 @@ public:
     bool isDirty() const { return m_isDirty; }
     void setDirty(bool d) { m_isDirty = d; }
 
-    double timeSinceControlWasFocused() const { return m_timeSinceControlWasFocused; }
-    void setTimeSinceControlWasFocused(double time) { m_timeSinceControlWasFocused = time; }
+    Seconds timeSinceControlWasFocused() const { return m_timeSinceControlWasFocused; }
+    void setTimeSinceControlWasFocused(Seconds time) { m_timeSinceControlWasFocused = time; }
 
 #if PLATFORM(COCOA)
     PlatformControlInstance platformControl() const { return m_controlInstance.get(); }
@@ -93,11 +90,11 @@ public:
 #endif
 
 private:
-    States m_states;
+    OptionSet<States> m_states;
     bool m_initialized { false };
     bool m_needsRepaint { false };
     bool m_isDirty { false };
-    double m_timeSinceControlWasFocused { 0 };
+    Seconds m_timeSinceControlWasFocused { 0_s };
 #if PLATFORM(COCOA)
     RetainPtr<PlatformControlInstance> m_controlInstance;
 #endif

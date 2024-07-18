@@ -8,16 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AGC_STANDALONE_VAD_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_AGC_STANDALONE_VAD_H_
+#ifndef MODULES_AUDIO_PROCESSING_AGC_STANDALONE_VAD_H_
+#define MODULES_AUDIO_PROCESSING_AGC_STANDALONE_VAD_H_
 
-#include "webrtc/modules/audio_processing/vad/common.h"
-#include "webrtc/common_audio/vad/include/webrtc_vad.h"
-#include "webrtc/typedefs.h"
+#include <stddef.h>
+#include <stdint.h>
+
+#include "common_audio/vad/include/webrtc_vad.h"
+#include "modules/audio_processing/vad/common.h"
 
 namespace webrtc {
-
-class AudioFrame;
 
 class StandaloneVad {
  public:
@@ -26,12 +26,12 @@ class StandaloneVad {
 
   // Outputs
   //   p: a buffer where probabilities are written to.
-  //   length_p: number of elements of |p|.
+  //   length_p: number of elements of `p`.
   //
   // return value:
   //    -1: if no audio is stored or VAD returns error.
   //     0: in success.
-  // In case of error the content of |activity| is unchanged.
+  // In case of error the content of `activity` is unchanged.
   //
   // Note that due to a high false-positive (VAD decision is active while the
   // processed audio is just background noise) rate, stand-alone VAD is used as
@@ -66,4 +66,4 @@ class StandaloneVad {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AGC_STANDALONE_VAD_H_
+#endif  // MODULES_AUDIO_PROCESSING_AGC_STANDALONE_VAD_H_

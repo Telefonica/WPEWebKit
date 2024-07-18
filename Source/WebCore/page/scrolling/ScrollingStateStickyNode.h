@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if ENABLE(ASYNC_SCROLLING) || USE(COORDINATED_GRAPHICS)
+#if ENABLE(ASYNC_SCROLLING)
 
 #include "ScrollingConstraints.h"
 #include "ScrollingStateNode.h"
@@ -44,10 +44,6 @@ public:
 
     virtual ~ScrollingStateStickyNode();
 
-    enum {
-        ViewportConstraints = NumStateNodeBits
-    };
-
     WEBCORE_EXPORT void updateConstraints(const StickyPositionViewportConstraints&);
     const StickyPositionViewportConstraints& viewportConstraints() const { return m_constraints; }
 
@@ -55,9 +51,12 @@ private:
     ScrollingStateStickyNode(ScrollingStateTree&, ScrollingNodeID);
     ScrollingStateStickyNode(const ScrollingStateStickyNode&, ScrollingStateTree&);
 
-    void reconcileLayerPositionForViewportRect(const LayoutRect& viewportRect, ScrollingLayerPositionAction) override;
+    FloatPoint computeLayerPosition(const LayoutRect& viewportRect) const;
+    void reconcileLayerPositionForViewportRect(const LayoutRect& viewportRect, ScrollingLayerPositionAction) final;
+    FloatSize scrollDeltaSinceLastCommit(const LayoutRect& viewportRect) const;
 
-    void dumpProperties(WTF::TextStream&, ScrollingStateTreeAsTextBehavior) const override;
+    void dumpProperties(WTF::TextStream&, OptionSet<ScrollingStateTreeAsTextBehavior>) const final;
+    OptionSet<ScrollingStateNode::Property> applicableProperties() const final;
 
     StickyPositionViewportConstraints m_constraints;
 };
@@ -66,4 +65,4 @@ private:
 
 SPECIALIZE_TYPE_TRAITS_SCROLLING_STATE_NODE(ScrollingStateStickyNode, isStickyNode())
 
-#endif // ENABLE(ASYNC_SCROLLING) || USE(COORDINATED_GRAPHICS)
+#endif // ENABLE(ASYNC_SCROLLING)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2007, 2015 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006-2019 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,13 +34,13 @@
 CFDictionaryPropertyBag::CFDictionaryPropertyBag()
 {
     gClassCount++;
-    gClassNameCount().add("CFDictionaryPropertyBag");
+    gClassNameCount().add("CFDictionaryPropertyBag"_s);
 }
 
 CFDictionaryPropertyBag::~CFDictionaryPropertyBag()
 {
     gClassCount--;
-    gClassNameCount().remove("CFDictionaryPropertyBag");
+    gClassNameCount().remove("CFDictionaryPropertyBag"_s);
 }
 
 COMPtr<CFDictionaryPropertyBag> CFDictionaryPropertyBag::createInstance()
@@ -48,6 +48,7 @@ COMPtr<CFDictionaryPropertyBag> CFDictionaryPropertyBag::createInstance()
     return new CFDictionaryPropertyBag;
 }
 
+#if USE(CF)
 void CFDictionaryPropertyBag::setDictionary(CFMutableDictionaryRef dictionary)
 {
     m_dictionary = dictionary;
@@ -57,6 +58,7 @@ CFMutableDictionaryRef CFDictionaryPropertyBag::dictionary() const
 {
     return m_dictionary.get();
 }
+#endif
 
 // IUnknown -------------------------------------------------------------------
 
@@ -96,6 +98,7 @@ ULONG CFDictionaryPropertyBag::Release()
 
 static bool ConvertCFTypeToVariant(VARIANT* pVar, void* cfObj)
 {
+#if USE(CF)
     if (!cfObj) {
         V_VT(pVar) = VT_NULL;
         return true;
@@ -121,9 +124,11 @@ static bool ConvertCFTypeToVariant(VARIANT* pVar, void* cfObj)
             }
         }
     }
+#endif
     return false;
 }
 
+#if USE(CF)
 static bool ConvertVariantToCFType(VARIANT* pVar, void** cfObj)
 {
     if (V_VT(pVar) == VT_NULL) {
@@ -133,43 +138,45 @@ static bool ConvertVariantToCFType(VARIANT* pVar, void** cfObj)
     else {
         // if caller expects a string, retrieve BSTR from CFStringRef
         if (V_VT(pVar) == VT_BSTR) {
-            *cfObj = (void*) MarshallingHelpers::BSTRToCFStringRef(V_BSTR(pVar));
+            *cfObj = (void*) MarshallingHelpers::BSTRToCFStringRef(V_BSTR(pVar)).leakRef();
             return true;
         } else if (V_VT(pVar) == VT_I4) {
-            *cfObj = (void*) MarshallingHelpers::intToCFNumberRef(V_I4(pVar));
+            *cfObj = (void*) MarshallingHelpers::intToCFNumberRef(V_I4(pVar)).leakRef();
             return true;
         } else if (!!(V_VT(pVar)&VT_ARRAY)) {
             if ((V_VT(pVar)&~VT_ARRAY) == VT_BSTR) {
-                *cfObj = (void*) MarshallingHelpers::safeArrayToStringArray(V_ARRAY(pVar));
+                *cfObj = (void*) MarshallingHelpers::safeArrayToStringArray(V_ARRAY(pVar)).leakRef();
                 return true;
             } else if ((V_VT(pVar)&~VT_ARRAY) == VT_I4) {
-                *cfObj = (void*) MarshallingHelpers::safeArrayToIntArray(V_ARRAY(pVar));
+                *cfObj = (void*) MarshallingHelpers::safeArrayToIntArray(V_ARRAY(pVar)).leakRef();
                 return true;
             } else if ((V_VT(pVar)&~VT_ARRAY) == VT_UNKNOWN) {
-                *cfObj = (void*) MarshallingHelpers::safeArrayToIUnknownArray(V_ARRAY(pVar));
+                *cfObj = (void*) MarshallingHelpers::safeArrayToIUnknownArray(V_ARRAY(pVar)).leakRef();
                 return true;
             }
         }
     }
     return false;
 }
+#endif
 
 HRESULT CFDictionaryPropertyBag::Read(LPCOLESTR pszPropName, VARIANT *pVar, IErrorLog * /*pErrorLog*/)
 {
     if (!pszPropName)
         return E_POINTER;
+#if USE(CF)
     if (m_dictionary) {
         void* value;
-        CFStringRef key = MarshallingHelpers::LPCOLESTRToCFStringRef(pszPropName);
+        auto key = MarshallingHelpers::LPCOLESTRToCFStringRef(pszPropName);
         HRESULT hr = E_FAIL;
-        if (CFDictionaryGetValueIfPresent(m_dictionary.get(), key, (const void**) &value)) {
+        if (CFDictionaryGetValueIfPresent(m_dictionary.get(), key.get(), (const void**) &value)) {
             if (ConvertCFTypeToVariant(pVar, value))
                 hr = S_OK;
         } else
             hr = E_INVALIDARG;
-        CFRelease(key);
         return hr;
     }
+#endif
     return E_FAIL;
 }
         
@@ -177,17 +184,18 @@ HRESULT CFDictionaryPropertyBag::Write(_In_ LPCOLESTR pszPropName, _In_ VARIANT*
 {
     if (!pszPropName || !pVar)
         return E_POINTER;
+#if USE(CF)
     if (!m_dictionary) {
         m_dictionary = adoptCF(CFDictionaryCreateMutable(0, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
     }
     void* cfObj;
     if (ConvertVariantToCFType(pVar, &cfObj)) {
-        CFStringRef key = MarshallingHelpers::LPCOLESTRToCFStringRef(pszPropName);
-        CFDictionaryAddValue(m_dictionary.get(), key, cfObj);
+        auto key = MarshallingHelpers::LPCOLESTRToCFStringRef(pszPropName);
+        CFDictionaryAddValue(m_dictionary.get(), key.get(), cfObj);
         // CFDictionaryAddValue should automatically retain the CF objects passed in, so release them here
-        CFRelease(key);
         CFRelease(cfObj);
         return S_OK;
     }
+#endif
     return E_FAIL;
 }

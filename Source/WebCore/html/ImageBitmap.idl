@@ -24,14 +24,12 @@
  */
 
 [
-    EnabledAtRuntime=ImageBitmapOffscreenCanvas,
+    EnabledByDeprecatedGlobalSetting=ImageBitmapEnabled,
     Exposed=(Window,Worker),
-    ImplementationLacksVTable,
-    ReportExtraMemoryCost,
-    ReportExternalMemoryCost
+    ReportExtraMemoryCost
 ] interface ImageBitmap {
     readonly attribute unsigned long width;
     readonly attribute unsigned long height;
-    void close();
+    undefined close();
 };
 

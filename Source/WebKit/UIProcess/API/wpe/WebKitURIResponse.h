@@ -51,6 +51,7 @@ struct _WebKitURIResponse {
 struct _WebKitURIResponseClass {
     GObjectClass parent_class;
 
+    /*< private >*/
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
@@ -77,6 +78,9 @@ webkit_uri_response_get_suggested_filename (WebKitURIResponse    *response);
 
 WEBKIT_API SoupMessageHeaders *
 webkit_uri_response_get_http_headers       (WebKitURIResponse    *response);
+
+WEBKIT_API gboolean
+webkit_uri_response_is_main_frame       (WebKitURIResponse    *response);
 
 G_END_DECLS
 

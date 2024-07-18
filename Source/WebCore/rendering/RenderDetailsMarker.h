@@ -26,6 +26,7 @@
 namespace WebCore {
 
 class RenderDetailsMarker final : public RenderBlockFlow {
+    WTF_MAKE_ISO_ALLOCATED(RenderDetailsMarker);
 public:
     RenderDetailsMarker(DetailsMarkerControl&, RenderStyle&&);
     DetailsMarkerControl& element() const { return static_cast<DetailsMarkerControl&>(nodeForNonAnonymous()); }
@@ -34,7 +35,7 @@ public:
     Orientation orientation() const;
 
 private:
-    const char* renderName() const override { return "RenderDetailsMarker"; }
+    ASCIILiteral renderName() const override { return "RenderDetailsMarker"_s; }
     bool isDetailsMarker() const override { return true; }
     void paint(PaintInfo&, const LayoutPoint&) override;
 

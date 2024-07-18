@@ -23,8 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef CDMSessionAVContentKeySession_h
-#define CDMSessionAVContentKeySession_h
+#pragma once
 
 #include "CDMSessionMediaSourceAVFObjC.h"
 #include "SourceBufferPrivateAVFObjC.h"
@@ -41,17 +40,19 @@ namespace WebCore {
 class CDMPrivateMediaSourceAVFObjC;
 
 class CDMSessionAVContentKeySession : public CDMSessionMediaSourceAVFObjC {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    CDMSessionAVContentKeySession(const Vector<int>& protocolVersions, CDMPrivateMediaSourceAVFObjC&, CDMSessionClient*);
+    CDMSessionAVContentKeySession(Vector<int>&& protocolVersions, int cdmVersion, CDMPrivateMediaSourceAVFObjC&, LegacyCDMSessionClient&);
     virtual ~CDMSessionAVContentKeySession();
 
     static bool isAvailable();
 
-    // CDMSession
-    CDMSessionType type() override { return CDMSessionTypeAVContentKeySession; }
+    // LegacyCDMSession
+    LegacyCDMSessionType type() override { return CDMSessionTypeAVContentKeySession; }
     RefPtr<Uint8Array> generateKeyRequest(const String& mimeType, Uint8Array* initData, String& destinationURL, unsigned short& errorCode, uint32_t& systemCode) override;
     void releaseKeys() override;
     bool update(Uint8Array* key, RefPtr<Uint8Array>& nextMessage, unsigned short& errorCode, uint32_t& systemCode) override;
+    RefPtr<ArrayBuffer> cachedKeyForKeyID(const String&) const override;
 
     // CDMSessionMediaSourceAVFObjC
     void addParser(AVStreamDataParser *) override;
@@ -65,17 +66,28 @@ protected:
     bool hasContentKeySession() const { return m_contentKeySession; }
     AVContentKeySession* contentKeySession();
 
+#if !RELEASE_LOG_DISABLED
+    const char* logClassName() const { return "CDMSessionAVContentKeySession"; }
+#endif
+
     RetainPtr<AVContentKeySession> m_contentKeySession;
     RetainPtr<WebCDMSessionAVContentKeySessionDelegate> m_contentKeySessionDelegate;
     RetainPtr<AVContentKeyRequest> m_keyRequest;
-    RefPtr<Uint8Array> m_initData;
+    RefPtr<Uint8Array> m_identifier;
+    RefPtr<SharedBuffer> m_initData;
     RetainPtr<NSData> m_expiredSession;
     Vector<int> m_protocolVersions;
+    int m_cdmVersion;
     int32_t m_protectedTrackID { 1 };
     enum { Normal, KeyRelease } m_mode;
+
+#if !RELEASE_LOG_DISABLED
+    Ref<const Logger> m_logger;
+    const void* m_logIdentifier;
+#endif
 };
 
-inline CDMSessionAVContentKeySession* toCDMSessionAVContentKeySession(CDMSession* session)
+inline CDMSessionAVContentKeySession* toCDMSessionAVContentKeySession(LegacyCDMSession* session)
 {
     if (!session || session->type() != CDMSessionTypeAVContentKeySession)
         return nullptr;
@@ -85,5 +97,3 @@ inline CDMSessionAVContentKeySession* toCDMSessionAVContentKeySession(CDMSession
 }
 
 #endif
-
-#endif // CDMSessionAVContentKeySession_h

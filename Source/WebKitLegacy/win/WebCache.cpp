@@ -37,7 +37,7 @@
 #include <WebCore/CurlCacheManager.h>
 #elif USE(CFURLCONNECTION)
 #include <CFNetwork/CFURLCachePriv.h>
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
+#include <pal/spi/win/CFNetworkSPIWin.h>
 #endif
 
 using namespace WebCore;
@@ -47,13 +47,13 @@ using namespace WebCore;
 WebCache::WebCache()
 {
     gClassCount++;
-    gClassNameCount().add("WebCache");
+    gClassNameCount().add("WebCache"_s);
 }
 
 WebCache::~WebCache()
 {
     gClassCount--;
-    gClassNameCount().remove("WebCache");
+    gClassNameCount().remove("WebCache"_s);
 }
 
 WebCache* WebCache::createInstance()
@@ -108,6 +108,7 @@ HRESULT WebCache::statistics(_Inout_ int* count, _Inout_opt_ IPropertyBag** s)
 
     WebCore::MemoryCache::Statistics stat = WebCore::MemoryCache::singleton().getStatistics();
 
+#if USE(CF)
     static CFStringRef imagesKey = CFSTR("images");
     static CFStringRef stylesheetsKey = CFSTR("style sheets");
     static CFStringRef xslKey = CFSTR("xsl");
@@ -209,6 +210,9 @@ HRESULT WebCache::statistics(_Inout_ int* count, _Inout_opt_ IPropertyBag** s)
     s[3] = propBag.leakRef();
 
     return S_OK;
+#else
+    return E_FAIL;
+#endif
 }
 
 HRESULT WebCache::empty()
@@ -223,7 +227,7 @@ HRESULT WebCache::empty()
     WebApplicationCache::storage().empty();
 
     // Empty the Cross-Origin Preflight cache
-    WebCore::CrossOriginPreflightResultCache::singleton().empty();
+    WebCore::CrossOriginPreflightResultCache::singleton().clear();
 
     return S_OK;
 }
@@ -245,11 +249,12 @@ HRESULT WebCache::disabled(_Out_ BOOL* disabled)
 HRESULT WebCache::cacheFolder(__deref_out_opt BSTR* location)
 {
 #if USE(CURL)
-    String cacheFolder = WebCore::CurlCacheManager::getInstance().cacheDirectory();
+    String cacheFolder = WebCore::CurlCacheManager::singleton().cacheDirectory();
     *location = WebCore::BString(cacheFolder).release();
     return S_OK;
 #elif USE(CFURLCONNECTION)
-    RetainPtr<CFStringRef> cfurlCacheDirectory = adoptCF(wkCopyFoundationCacheDirectory(0));
+    RetainPtr<CFURLCacheRef> cache = adoptCF(CFURLCacheCopySharedURLCache());
+    RetainPtr<CFStringRef> cfurlCacheDirectory = adoptCF(_CFURLCacheCopyCacheDirectory(cache.get()));
     *location = BString(cfurlCacheDirectory.get()).release();
     return S_OK;
 #else
@@ -261,7 +266,7 @@ HRESULT WebCache::setCacheFolder(_In_ BSTR location)
 {
 #if USE(CURL)
     String cacheFolder(location, SysStringLen(location));
-    WebCore::CurlCacheManager::getInstance().setCacheDirectory(cacheFolder);
+    WebCore::CurlCacheManager::singleton().setCacheDirectory(cacheFolder);
     return S_OK;
 #elif USE(CFURLCONNECTION)
     RetainPtr<CFURLCacheRef> cache = adoptCF(CFURLCacheCopySharedURLCache());

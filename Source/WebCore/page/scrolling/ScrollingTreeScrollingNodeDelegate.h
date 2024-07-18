@@ -25,22 +25,24 @@
 
 #pragma once
 
-#if PLATFORM(IOS) && ENABLE(ASYNC_SCROLLING)
+#if ENABLE(ASYNC_SCROLLING)
+
+#include "ScrollingTreeScrollingNode.h"
 
 namespace WebCore {
-
-class FloatPoint;
-class FloatSize;
-class IntPoint;
-class ScrollingTreeScrollingNode;
-class ScrollingTree;
 
 class ScrollingTreeScrollingNodeDelegate {
 public:
     WEBCORE_EXPORT explicit ScrollingTreeScrollingNodeDelegate(ScrollingTreeScrollingNode&);
     WEBCORE_EXPORT virtual ~ScrollingTreeScrollingNodeDelegate();
+
     ScrollingTreeScrollingNode& scrollingNode() { return m_scrollingNode; }
     const ScrollingTreeScrollingNode& scrollingNode() const { return m_scrollingNode; }
+    
+    virtual bool startAnimatedScrollToPosition(FloatPoint) = 0;
+    virtual void stopAnimatedScroll() = 0;
+
+    virtual void serviceScrollAnimation(MonotonicTime) = 0;
 
 protected:
     WEBCORE_EXPORT ScrollingTree& scrollingTree() const;
@@ -49,10 +51,23 @@ protected:
     WEBCORE_EXPORT const FloatSize& reachableContentsSize();
     WEBCORE_EXPORT const IntPoint& scrollOrigin() const;
 
+    FloatPoint currentScrollPosition() const { return m_scrollingNode.currentScrollPosition(); }
+    FloatPoint minimumScrollPosition() const { return m_scrollingNode.minimumScrollPosition(); }
+    FloatPoint maximumScrollPosition() const { return m_scrollingNode.maximumScrollPosition(); }
+
+    FloatSize scrollableAreaSize() const { return m_scrollingNode.scrollableAreaSize(); }
+    FloatSize totalContentsSize() const { return m_scrollingNode.totalContentsSize(); }
+
+    bool allowsHorizontalScrolling() const { return m_scrollingNode.allowsHorizontalScrolling(); }
+    bool allowsVerticalScrolling() const { return m_scrollingNode.allowsVerticalScrolling(); }
+
+    ScrollElasticity horizontalScrollElasticity() const { return m_scrollingNode.horizontalScrollElasticity(); }
+    ScrollElasticity verticalScrollElasticity() const { return m_scrollingNode.verticalScrollElasticity(); }
+
 private:
     ScrollingTreeScrollingNode& m_scrollingNode;
 };
 
 } // namespace WebCore
 
-#endif // PLATFORM(IOS) && ENABLE(ASYNC_SCROLLING)
+#endif // ENABLE(ASYNC_SCROLLING)

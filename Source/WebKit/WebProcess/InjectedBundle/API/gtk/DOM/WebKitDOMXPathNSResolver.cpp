@@ -21,12 +21,14 @@
 
 #include "DOMObjectCache.h"
 #include "GObjectXPathNSResolver.h"
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
 #include "WebKitDOMObject.h"
 #include "WebKitDOMXPathNSResolverPrivate.h"
 #include "ConvertToUTF8String.h"
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 typedef WebKitDOMXPathNSResolverIface WebKitDOMXPathNSResolverInterface;
 
@@ -98,7 +100,7 @@ static char* webkitDOMNativeXPathNSResolverLookupNamespaceURI(WebKitDOMXPathNSRe
     WebCore::JSMainThreadNullState state;
     g_return_val_if_fail(WEBKIT_DOM_IS_NATIVE_XPATH_NS_RESOLVER(resolver), nullptr);
 
-    return convertToUTF8String(WebKit::core(resolver)->lookupNamespaceURI(WTF::String::fromUTF8(prefix)));
+    return convertToUTF8String(WebKit::core(resolver)->lookupNamespaceURI(WTF::AtomString::fromUTF8(prefix)));
 }
 
 static void webkitDOMXPathNSResolverIfaceInit(WebKitDOMXPathNSResolverIface* iface)
@@ -138,3 +140,4 @@ WebCore::XPathNSResolver* core(WebKitDOMNativeXPathNSResolver* xPathNSResolver)
 }
 
 } // namespace WebKit
+G_GNUC_END_IGNORE_DEPRECATIONS;

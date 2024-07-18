@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_DIFFER_BLOCK_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_DIFFER_BLOCK_H_
+#ifndef MODULES_DESKTOP_CAPTURE_DIFFER_BLOCK_H_
+#define MODULES_DESKTOP_CAPTURE_DIFFER_BLOCK_H_
 
 #include <stdint.h>
 
@@ -27,7 +27,7 @@ const int kBytesPerPixel = 4;
 bool VectorDifference(const uint8_t* image1, const uint8_t* image2);
 
 // Low level function to compare 2 blocks of pixels of size
-// (kBlockSize, |height|).  Returns whether the blocks differ.
+// (kBlockSize, `height`).  Returns whether the blocks differ.
 bool BlockDifference(const uint8_t* image1,
                      const uint8_t* image2,
                      int height,
@@ -35,10 +35,8 @@ bool BlockDifference(const uint8_t* image1,
 
 // Low level function to compare 2 blocks of pixels of size
 // (kBlockSize, kBlockSize).  Returns whether the blocks differ.
-bool BlockDifference(const uint8_t* image1,
-                     const uint8_t* image2,
-                     int stride);
+bool BlockDifference(const uint8_t* image1, const uint8_t* image2, int stride);
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_DIFFER_BLOCK_H_
+#endif  // MODULES_DESKTOP_CAPTURE_DIFFER_BLOCK_H_

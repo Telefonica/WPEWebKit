@@ -32,17 +32,12 @@ namespace WebCore {
 class ApplicationCacheStorage;
 }
 
-class DECLSPEC_UUID("1119E970-4B13-4B9A-A049-41096104B689") WebApplicationCache : public IWebApplicationCache {
+class DECLSPEC_UUID("1119E970-4B13-4B9A-A049-41096104B689") WebApplicationCache final : public IWebApplicationCache {
 public:
     static WebApplicationCache* createInstance();
 
     static WebCore::ApplicationCacheStorage& storage();
 
-protected:
-    WebApplicationCache();
-    ~WebApplicationCache();
-
-public:
     // IUnknown
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppvObject);
     virtual ULONG STDMETHODCALLTYPE AddRef();
@@ -62,7 +57,10 @@ public:
 
     virtual HRESULT STDMETHODCALLTYPE originsWithCache(/*[out, retval]*/ IPropertyBag**);
 
-protected:
+private:
+    WebApplicationCache();
+    ~WebApplicationCache();
+
     ULONG m_refCount;
 };
 

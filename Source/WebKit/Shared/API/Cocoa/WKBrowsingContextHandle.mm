@@ -26,23 +26,36 @@
 #import "config.h"
 #import "WKBrowsingContextHandleInternal.h"
 
-#if WK_API_ENABLED
+#import "WebPage.h"
+#import "WebPageProxy.h"
+#import <wtf/HashFunctions.h>
 
 @implementation WKBrowsingContextHandle
 
-- (id)_initWithPageID:(uint64_t)pageID
+- (id)_initWithPageProxy:(NakedRef<WebKit::WebPageProxy>)page
+{
+    return [self _initWithPageProxyID:page->identifier() andWebPageID:page->webPageID()];
+}
+
+- (id)_initWithPage:(NakedRef<WebKit::WebPage>)page
+{
+    return [self _initWithPageProxyID:page->webPageProxyIdentifier() andWebPageID:page->identifier()];
+}
+
+- (id)_initWithPageProxyID:(WebKit::WebPageProxyIdentifier)pageProxyID andWebPageID:(WebCore::PageIdentifier)webPageID
 {
     if (!(self = [super init]))
         return nil;
 
-    _pageID = pageID;
+    _pageProxyID = pageProxyID;
+    _webPageID = webPageID.toUInt64();
 
     return self;
 }
 
 - (NSUInteger)hash
 {
-    return _pageID;
+    return computeHash(_pageProxyID, _webPageID);
 }
 
 - (BOOL)isEqual:(id)object
@@ -50,22 +63,18 @@
     if (![object isKindOfClass:[WKBrowsingContextHandle class]])
         return NO;
 
-    return _pageID == static_cast<WKBrowsingContextHandle *>(object)->_pageID;
+    return _pageProxyID == static_cast<WKBrowsingContextHandle *>(object)->_pageProxyID && _webPageID == static_cast<WKBrowsingContextHandle *>(object)->_webPageID;
 }
 
 - (void)encodeWithCoder:(NSCoder *)coder
 {
-    [coder encodeInt64:_pageID forKey:@"pageID"];
+    [coder encodeInt64:_pageProxyID.toUInt64() forKey:@"pageProxyID"];
+    [coder encodeInt64:_webPageID forKey:@"webPageID"];
 }
 
 - (id)initWithCoder:(NSCoder *)coder
 {
-    if (!(self = [super init]))
-        return nil;
-
-    _pageID = [coder decodeInt64ForKey:@"pageID"];
-
-    return self;
+    return [self _initWithPageProxyID:makeObjectIdentifier<WebKit::WebPageProxyIdentifierType>([coder decodeInt64ForKey:@"pageProxyID"]) andWebPageID:makeObjectIdentifier<WebCore::PageIdentifierType>([coder decodeInt64ForKey:@"webPageID"])];
 }
 
 + (BOOL)supportsSecureCoding
@@ -73,6 +82,13 @@
     return YES;
 }
 
-@end
+- (id)copyWithZone:(NSZone *)zone
+{
+    return [[WKBrowsingContextHandle allocWithZone:zone] _initWithPageProxyID:_pageProxyID andWebPageID:makeObjectIdentifier<WebCore::PageIdentifierType>(_webPageID)];
+}
 
-#endif // WK_API_ENABLED
+- (NSString *)description
+{
+    return [NSString stringWithFormat:@"<%@: %p; pageProxyID = %llu; webPageID = %llu>", NSStringFromClass(self.class), self, _pageProxyID.toUInt64(), _webPageID];
+}
+@end

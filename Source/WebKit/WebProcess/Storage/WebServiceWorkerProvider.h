@@ -30,18 +30,31 @@
 #include <WebCore/ServiceWorkerProvider.h>
 #include <wtf/NeverDestroyed.h>
 
+namespace WebCore {
+class CachedResource;
+}
+
+namespace IPC {
+class Connection;
+class Decoder;
+};
+
 namespace WebKit {
 
-class WebServiceWorkerProvider : public WebCore::ServiceWorkerProvider {
+class WebServiceWorkerProvider final : public WebCore::ServiceWorkerProvider {
 public:
     static WebServiceWorkerProvider& singleton();
+
+    void didReceiveServiceWorkerClientRegistrationMatch(IPC::Connection&, IPC::Decoder&);
+    void updateThrottleState(bool isThrottleable);
 
 private:
     friend NeverDestroyed<WebServiceWorkerProvider>;
     WebServiceWorkerProvider();
 
-    WebCore::SWClientConnection& serviceWorkerConnectionForSession(const PAL::SessionID&) final;
-
+    WebCore::SWClientConnection& serviceWorkerConnection() final;
+    WebCore::SWClientConnection* existingServiceWorkerConnection() final;
+    void terminateWorkerForTesting(WebCore::ServiceWorkerIdentifier, CompletionHandler<void()>&&) final;
 }; // class WebServiceWorkerProvider
 
 } // namespace WebKit

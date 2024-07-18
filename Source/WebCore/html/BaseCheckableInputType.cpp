@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2010 Google Inc. All rights reserved.
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -32,6 +32,7 @@
 #include "config.h"
 #include "BaseCheckableInputType.h"
 
+#include "CommonAtomStrings.h"
 #include "DOMFormData.h"
 #include "FormController.h"
 #include "HTMLInputElement.h"
@@ -45,30 +46,36 @@ using namespace HTMLNames;
 
 FormControlState BaseCheckableInputType::saveFormControlState() const
 {
-    return FormControlState(element().checked() ? ASCIILiteral("on") : ASCIILiteral("off"));
+    ASSERT(element());
+    return { element()->checked() ? onAtom() : offAtom() };
 }
 
 void BaseCheckableInputType::restoreFormControlState(const FormControlState& state)
 {
-    element().setChecked(state[0] == "on");
+    ASSERT(element());
+    element()->setChecked(state[0] == onAtom());
 }
 
-bool BaseCheckableInputType::appendFormData(DOMFormData& formData, bool) const
+bool BaseCheckableInputType::appendFormData(DOMFormData& formData) const
 {
-    if (!element().checked())
+    ASSERT(element());
+    if (!element()->checked())
         return false;
-    formData.append(element().name(), element().value());
+    formData.append(element()->name(), element()->value());
     return true;
 }
 
-void BaseCheckableInputType::handleKeydownEvent(KeyboardEvent& event)
+auto BaseCheckableInputType::handleKeydownEvent(KeyboardEvent& event) -> ShouldCallBaseEventHandler
 {
     const String& key = event.keyIdentifier();
-    if (key == "U+0020") {
-        element().setActive(true, true);
+    if (key == "U+0020"_s) {
+        ASSERT(element());
+        element()->setActive(true);
         // No setDefaultHandled(), because IE dispatches a keypress in this case
         // and the caller will only dispatch a keypress if we don't call setDefaultHandled().
+        return ShouldCallBaseEventHandler::No;
     }
+    return ShouldCallBaseEventHandler::Yes;
 }
 
 void BaseCheckableInputType::handleKeypressEvent(KeyboardEvent& event)
@@ -85,17 +92,15 @@ bool BaseCheckableInputType::canSetStringValue() const
 }
 
 // FIXME: Could share this with BaseClickableWithKeyInputType and RangeInputType if we had a common base class.
-void BaseCheckableInputType::accessKeyAction(bool sendMouseEvents)
+bool BaseCheckableInputType::accessKeyAction(bool sendMouseEvents)
 {
-    InputType::accessKeyAction(sendMouseEvents);
-
-    element().dispatchSimulatedClick(0, sendMouseEvents ? SendMouseUpDownEvents : SendNoEvents);
+    ASSERT(element());
+    return InputType::accessKeyAction(sendMouseEvents) || element()->dispatchSimulatedClick(0, sendMouseEvents ? SendMouseUpDownEvents : SendNoEvents);
 }
 
 String BaseCheckableInputType::fallbackValue() const
 {
-    static NeverDestroyed<const AtomicString> on("on", AtomicString::ConstructFromLiteral);
-    return on.get();
+    return onAtom();
 }
 
 bool BaseCheckableInputType::storesValueSeparateFromAttribute()
@@ -103,14 +108,25 @@ bool BaseCheckableInputType::storesValueSeparateFromAttribute()
     return false;
 }
 
-void BaseCheckableInputType::setValue(const String& sanitizedValue, bool, TextFieldEventBehavior)
+void BaseCheckableInputType::setValue(const String& sanitizedValue, bool, TextFieldEventBehavior, TextControlSetValueSelection)
 {
-    element().setAttributeWithoutSynchronization(valueAttr, sanitizedValue);
+    ASSERT(element());
+    element()->setAttributeWithoutSynchronization(valueAttr, AtomString { sanitizedValue });
 }
 
-bool BaseCheckableInputType::isCheckable()
+void BaseCheckableInputType::fireInputAndChangeEvents()
 {
-    return true;
+    if (!element()->isConnected())
+        return;
+
+    if (!shouldSendChangeEventAfterCheckedChanged())
+        return;
+
+    Ref protectedThis { *this };
+    element()->setTextAsOfLastFormControlChangeEvent(String());
+    element()->dispatchInputEvent();
+    if (auto* element = this->element())
+        element->dispatchFormControlChangeEvent();
 }
 
 } // namespace WebCore

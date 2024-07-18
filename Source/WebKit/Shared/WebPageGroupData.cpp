@@ -34,29 +34,21 @@ void WebPageGroupData::encode(IPC::Encoder& encoder) const
 {
     encoder << identifier;
     encoder << pageGroupID;
-    encoder << visibleToInjectedBundle;
-    encoder << visibleToHistoryClient;
-    encoder << userContentControllerIdentifier;
 }
 
 std::optional<WebPageGroupData> WebPageGroupData::decode(IPC::Decoder& decoder)
 {
-    String id;
-    if (!decoder.decode(id))
+    std::optional<String> identifier;
+    decoder >> identifier;
+    if (!identifier)
         return std::nullopt;
-    uint64_t pageGroupID;
-    if (!decoder.decode(pageGroupID))
+    
+    std::optional<PageGroupIdentifier> pageGroupID;
+    decoder >> pageGroupID;
+    if (!pageGroupID)
         return std::nullopt;
-    bool visibleToInjectedBundle;
-    if (!decoder.decode(visibleToInjectedBundle))
-        return std::nullopt;
-    bool visibleToHistoryClient;
-    if (!decoder.decode(visibleToHistoryClient))
-        return std::nullopt;
-    uint64_t userContentControllerIdentifier;
-    if (!decoder.decode(userContentControllerIdentifier))
-        return std::nullopt;
-    return { { id, pageGroupID, visibleToInjectedBundle, visibleToHistoryClient, userContentControllerIdentifier } };
+        
+    return {{ WTFMove(*identifier), *pageGroupID }};
 }
 
 } // namespace WebKit

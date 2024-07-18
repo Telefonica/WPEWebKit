@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2021 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,60 +31,53 @@
 #include "EventTargetHeaders.h"
 #include "EventTargetInterfaces.h"
 #include "JSDOMWindow.h"
-#include "JSDOMWindowProxy.h"
 #include "JSEventListener.h"
+#include "JSWindowProxy.h"
 #include "JSWorkerGlobalScope.h"
 #include "WorkerGlobalScope.h"
 
-using namespace JSC;
+#if ENABLE(OFFSCREEN_CANVAS)
+#include "OffscreenCanvas.h"
+#endif
 
 namespace WebCore {
+using namespace JSC;
 
-#define TRY_TO_WRAP_WITH_INTERFACE(interfaceName) \
-    case interfaceName##EventTargetInterfaceType: \
-        return toJS(exec, globalObject, static_cast<interfaceName&>(target));
-
-JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, EventTarget& target)
+JSValue toJSNewlyCreated(JSGlobalObject*, JSDOMGlobalObject* globalObject, Ref<EventTarget>&& value)
 {
-    switch (target.eventTargetInterface()) {
-    DOM_EVENT_TARGET_INTERFACES_FOR_EACH(TRY_TO_WRAP_WITH_INTERFACE)
-    }
-
-    ASSERT_NOT_REACHED();
-    return jsNull();
+    return createWrapper<EventTarget>(globalObject, WTFMove(value));
 }
 
-#undef TRY_TO_WRAP_WITH_INTERFACE
-
-#define TRY_TO_UNWRAP_WITH_INTERFACE(interfaceName) \
-    if (value.inherits(vm, JS##interfaceName::info()))                      \
-        return &jsCast<JS##interfaceName*>(asObject(value))->wrapped();
-
-EventTarget* JSEventTarget::toWrapped(VM& vm, JSValue value)
+EventTarget* JSEventTarget::toWrapped(VM&, JSValue value)
 {
-    TRY_TO_UNWRAP_WITH_INTERFACE(DOMWindowProxy)
-    TRY_TO_UNWRAP_WITH_INTERFACE(DOMWindow)
-    TRY_TO_UNWRAP_WITH_INTERFACE(WorkerGlobalScope)
-    TRY_TO_UNWRAP_WITH_INTERFACE(EventTarget)
+    if (value.inherits<JSWindowProxy>())
+        return &jsCast<JSWindowProxy*>(asObject(value))->wrapped();
+    if (value.inherits<JSDOMWindow>())
+        return &jsCast<JSDOMWindow*>(asObject(value))->wrapped();
+    if (value.inherits<JSWorkerGlobalScope>())
+        return &jsCast<JSWorkerGlobalScope*>(asObject(value))->wrapped();
+    if (value.inherits<JSEventTarget>())
+        return &jsCast<JSEventTarget*>(asObject(value))->wrapped();
     return nullptr;
 }
-
-#undef TRY_TO_UNWRAP_WITH_INTERFACE
 
 std::unique_ptr<JSEventTargetWrapper> jsEventTargetCast(VM& vm, JSValue thisValue)
 {
-    if (auto* target = jsDynamicDowncast<JSEventTarget*>(vm, thisValue))
-        return std::make_unique<JSEventTargetWrapper>(target->wrapped(), *target);
-    if (auto* window = toJSDOMWindow(vm, thisValue))
-        return std::make_unique<JSEventTargetWrapper>(window->wrapped(), *window);
-    if (auto* scope = toJSWorkerGlobalScope(vm, thisValue))
-        return std::make_unique<JSEventTargetWrapper>(scope->wrapped(), *scope);
+    if (auto* target = jsDynamicCast<JSEventTarget*>(thisValue))
+        return makeUnique<JSEventTargetWrapper>(target->wrapped(), *target);
+    if (auto* window = toJSDOMGlobalObject<JSDOMWindow>(vm, thisValue))
+        return makeUnique<JSEventTargetWrapper>(window->wrapped(), *window);
+    if (auto* scope = toJSDOMGlobalObject<JSWorkerGlobalScope>(vm, thisValue))
+        return makeUnique<JSEventTargetWrapper>(scope->wrapped(), *scope);
     return nullptr;
 }
 
-void JSEventTarget::visitAdditionalChildren(SlotVisitor& visitor)
+template<typename Visitor>
+void JSEventTarget::visitAdditionalChildren(Visitor& visitor)
 {
     wrapped().visitJSEventListeners(visitor);
 }
+
+DEFINE_VISIT_ADDITIONAL_CHILDREN(JSEventTarget);
 
 } // namespace WebCore

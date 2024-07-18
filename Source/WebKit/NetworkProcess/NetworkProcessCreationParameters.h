@@ -25,16 +25,19 @@
 
 #pragma once
 
-#include "Attachment.h"
+#include "AuxiliaryProcessCreationParameters.h"
 #include "CacheModel.h"
 #include "SandboxExtension.h"
+#include <WebCore/Cookie.h>
+#include <WebCore/ProcessIdentifier.h>
+#include <WebCore/RegistrableDomain.h>
 #include <wtf/ProcessID.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
 #if USE(SOUP)
-#include "HTTPCookieAcceptPolicy.h"
-#include <WebCore/SoupNetworkProxySettings.h>
+#include <WebCore/HTTPCookieAcceptPolicy.h>
+#include <wtf/MemoryPressureHandler.h>
 #endif
 
 namespace IPC {
@@ -44,80 +47,49 @@ class Encoder;
 
 namespace WebKit {
 
+struct WebsiteDataStoreParameters;
+
 struct NetworkProcessCreationParameters {
     NetworkProcessCreationParameters();
+    NetworkProcessCreationParameters(NetworkProcessCreationParameters&&);
+    ~NetworkProcessCreationParameters();
+    NetworkProcessCreationParameters& operator=(NetworkProcessCreationParameters&&);
 
     void encode(IPC::Encoder&) const;
-    static bool decode(IPC::Decoder&, NetworkProcessCreationParameters&);
+    static WARN_UNUSED_RETURN bool decode(IPC::Decoder&, NetworkProcessCreationParameters&);
 
-    bool privateBrowsingEnabled { false };
-    CacheModel cacheModel { CacheModelDocumentViewer };
-    int64_t diskCacheSizeOverride { -1 };
-    bool canHandleHTTPSServerTrustEvaluation { true };
+    AuxiliaryProcessCreationParameters auxiliaryProcessParameters;
 
-    String cacheStorageDirectory;
-    SandboxExtension::Handle cacheStorageDirectoryExtensionHandle;
-    String diskCacheDirectory;
-    SandboxExtension::Handle diskCacheDirectoryExtensionHandle;
-#if ENABLE(NETWORK_CACHE)
-    bool shouldEnableNetworkCache { false };
-    bool shouldEnableNetworkCacheEfficacyLogging { false };
-#if ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
-    bool shouldEnableNetworkCacheSpeculativeRevalidation { false };
-#endif
-#endif
-#if PLATFORM(MAC)
+    CacheModel cacheModel { CacheModel::DocumentViewer };
+
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
     Vector<uint8_t> uiProcessCookieStorageIdentifier;
 #endif
-#if PLATFORM(IOS)
-    SandboxExtension::Handle cookieStorageDirectoryExtensionHandle;
-    SandboxExtension::Handle containerCachesDirectoryExtensionHandle;
-    SandboxExtension::Handle parentBundleDirectoryExtensionHandle;
-#endif
     bool shouldSuppressMemoryPressureHandler { false };
-    bool shouldUseTestingNetworkSession { false };
-    Seconds loadThrottleLatency;
 
     Vector<String> urlSchemesRegisteredForCustomProtocols;
-    ProcessID presentingApplicationPID { 0 };
 
 #if PLATFORM(COCOA)
-    String parentProcessName;
     String uiProcessBundleIdentifier;
-    uint64_t nsURLCacheMemoryCapacity;
-    uint64_t nsURLCacheDiskCapacity;
-    String sourceApplicationBundleIdentifier;
-    String sourceApplicationSecondaryIdentifier;
-    bool allowsCellularAccess { true };
-#if PLATFORM(IOS)
-    String ctDataConnectionServiceType;
-#endif
-    String httpProxy;
-    String httpsProxy;
-#if PLATFORM(COCOA)
     RetainPtr<CFDataRef> networkATSContext;
-#endif
-    bool cookieStoragePartitioningEnabled;
 #endif
 
 #if USE(SOUP)
-    String cookiePersistentStoragePath;
-    uint32_t cookiePersistentStorageType { 0 };
-    HTTPCookieAcceptPolicy cookieAcceptPolicy { HTTPCookieAcceptPolicyAlways };
-    uint64_t cookiesLimit { 0 };
-    bool ignoreTLSErrors { false };
+    WebCore::HTTPCookieAcceptPolicy cookieAcceptPolicy { WebCore::HTTPCookieAcceptPolicy::AlwaysAccept };
     Vector<String> languages;
-    WebCore::SoupNetworkProxySettings proxySettings;
+    std::optional<MemoryPressureHandler::Configuration> memoryPressureHandlerConfiguration;
+    uint32_t localStorageQuota;
 #endif
 
-#if OS(LINUX)
-    IPC::Attachment memoryPressureMonitorHandle;
-#endif
+    Vector<String> urlSchemesRegisteredAsSecure;
+    Vector<String> urlSchemesRegisteredAsBypassingContentSecurityPolicy;
+    Vector<String> urlSchemesRegisteredAsLocal;
+    Vector<String> urlSchemesRegisteredAsNoAccess;
 
-#if ENABLE(NETWORK_CAPTURE)
-    String recordReplayMode;
-    String recordReplayCacheLocation;
-#endif
+    bool enablePrivateClickMeasurement { true };
+    bool ftpEnabled { false };
+
+    Vector<WebsiteDataStoreParameters> websiteDataStoreParameters;
 };
 
 } // namespace WebKit

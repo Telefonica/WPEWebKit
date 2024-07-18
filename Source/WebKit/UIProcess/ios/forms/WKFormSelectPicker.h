@@ -23,10 +23,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "WKFormPeripheral.h"
 #import <UIKit/UIPickerView.h>
+
+#if USE(UICONTEXTMENU)
+#import <UIKit/UIContextMenuInteraction.h>
+#endif
 
 @class WKContentView;
 
@@ -38,4 +42,20 @@
 - (instancetype)initWithView:(WKContentView *)view;
 @end
 
-#endif // PLATFORM(IOS)
+#if ENABLE(IOS_FORM_CONTROL_REFRESH)
+
+@interface WKSelectPicker : NSObject <WKFormControl
+#if USE(UICONTEXTMENU)
+, UIContextMenuInteractionDelegate
+#endif
+>
+- (instancetype)initWithView:(WKContentView *)view;
+@end
+
+@interface WKSelectMultiplePicker : NSObject <WKFormControl>
+- (instancetype)initWithView:(WKContentView *)view;
+@end
+
+#endif
+
+#endif // PLATFORM(IOS_FAMILY)

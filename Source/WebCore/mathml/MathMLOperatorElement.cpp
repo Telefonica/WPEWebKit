@@ -29,10 +29,14 @@
 
 #if ENABLE(MATHML)
 
+#include "ElementInlines.h"
 #include "RenderMathMLOperator.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/unicode/CharacterNames.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(MathMLOperatorElement);
 
 using namespace MathMLNames;
 using namespace MathMLOperatorDictionary;
@@ -76,11 +80,11 @@ Property MathMLOperatorElement::computeDictionaryProperty()
     // We first determine the form attribute and use the default spacing and properties.
     const auto& value = attributeWithoutSynchronization(formAttr);
     bool explicitForm = true;
-    if (value == "prefix")
+    if (value == "prefix"_s)
         dictionaryProperty.form = Prefix;
-    else if (value == "infix")
+    else if (value == "infix"_s)
         dictionaryProperty.form = Infix;
-    else if (value == "postfix")
+    else if (value == "postfix"_s)
         dictionaryProperty.form = Postfix;
     else {
         // FIXME: We should use more advanced heuristics indicated in the specification to determine the operator form (https://bugs.webkit.org/show_bug.cgi?id=124829).
@@ -195,18 +199,7 @@ const MathMLElement::Length& MathMLOperatorElement::minSize()
 
 const MathMLElement::Length& MathMLOperatorElement::maxSize()
 {
-    if (m_maxSize)
-        return m_maxSize.value();
-
-    const AtomicString& value = attributeWithoutSynchronization(MathMLNames::maxsizeAttr);
-    if (value == "infinity") {
-        Length maxsize;
-        maxsize.type = LengthType::Infinity;
-        m_maxSize = maxsize;
-    } else
-        m_maxSize = parseMathMLLength(value);
-
-    return m_maxSize.value();
+    return cachedMathMLLength(MathMLNames::maxsizeAttr, m_maxSize);
 }
 
 void MathMLOperatorElement::childrenChanged(const ChildChange& change)
@@ -236,7 +229,7 @@ static std::optional<MathMLOperatorDictionary::Flag> attributeNameToPropertyFlag
     return std::nullopt;
 }
 
-void MathMLOperatorElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void MathMLOperatorElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == formAttr) {
         m_dictionaryProperty = std::nullopt;

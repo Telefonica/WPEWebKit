@@ -31,6 +31,21 @@
 
 #include <WebCore/RefPtrCairo.h>
 #include <gtk/gtk.h>
+#include <wtf/glib/GRefPtr.h>
+
+#if USE(WPE_RENDERER)
+#include <wpe/fdo.h>
+#endif
+
+typedef void* EGLImageKHR;
+typedef struct _GdkGLContext GdkGLContext;
+struct wpe_fdo_egl_exported_image;
+struct wpe_fdo_shm_exported_buffer;
+
+namespace WebCore {
+class GLContext;
+class IntSize;
+}
 
 namespace WebKit {
 
@@ -39,19 +54,56 @@ class WebPageProxy;
 class AcceleratedBackingStoreWayland final : public AcceleratedBackingStore {
     WTF_MAKE_NONCOPYABLE(AcceleratedBackingStoreWayland); WTF_MAKE_FAST_ALLOCATED;
 public:
+    static bool checkRequirements();
     static std::unique_ptr<AcceleratedBackingStoreWayland> create(WebPageProxy&);
     ~AcceleratedBackingStoreWayland();
-
-#if GTK_CHECK_VERSION(3, 16, 0)
-    bool canGdkUseGL() const;
-#endif
 
 private:
     AcceleratedBackingStoreWayland(WebPageProxy&);
 
+    void tryEnsureGLContext();
+#if USE(WPE_RENDERER)
+    void displayImage(struct wpe_fdo_egl_exported_image*);
+#if WPE_FDO_CHECK_VERSION(1,7,0)
+    void displayBuffer(struct wpe_fdo_shm_exported_buffer*);
+#endif
+#endif
+    bool tryEnsureTexture(unsigned&, WebCore::IntSize&);
+    void downloadTexture(unsigned, const WebCore::IntSize&);
+
+#if USE(GTK4)
+    void snapshot(GtkSnapshot*) override;
+#else
     bool paint(cairo_t*, const WebCore::IntRect&) override;
+#endif
+    void realize() override;
+    void unrealize() override;
+    bool makeContextCurrent() override;
+#if USE(WPE_RENDERER)
+    void update(const LayerTreeContext&) override;
+    int renderHostFileDescriptor() override;
+#endif
 
     RefPtr<cairo_surface_t> m_surface;
+    bool m_glContextInitialized { false };
+    GRefPtr<GdkGLContext> m_gdkGLContext;
+    std::unique_ptr<WebCore::GLContext> m_glContext;
+
+#if USE(WPE_RENDERER)
+    struct wpe_view_backend_exportable_fdo* m_exportable { nullptr };
+    uint64_t m_surfaceID { 0 };
+    struct {
+        unsigned viewTexture { 0 };
+        struct wpe_fdo_egl_exported_image* committedImage { nullptr };
+        struct wpe_fdo_egl_exported_image* pendingImage { nullptr };
+    } m_egl;
+
+#if WPE_FDO_CHECK_VERSION(1,7,0)
+    struct {
+        bool pendingFrame { false };
+    } m_shm;
+#endif
+#endif
 };
 
 } // namespace WebKit

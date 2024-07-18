@@ -13,8 +13,8 @@
  *
  */
 
-#include "webrtc/base/checks.h"
-#include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
+#include "rtc_base/checks.h"
+#include "common_audio/signal_processing/include/signal_processing_library.h"
 
 // Maximum number of samples in a low/high-band frame.
 enum
@@ -41,35 +41,39 @@ static const uint16_t WebRtcSpl_kAllPassFilter2[3] = {21333, 49062, 63010};
 //
 // Output:
 //    - out_data            : Output data sequence (Q10), length equal to
-//                            |data_length|
+//                            `data_length`
 //
 
-void WebRtcSpl_AllPassQMF(int32_t* in_data, size_t data_length,
-                          int32_t* out_data, const uint16_t* filter_coefficients,
-                          int32_t* filter_state)
+static void WebRtcSpl_AllPassQMF(int32_t* in_data,
+                                 size_t data_length,
+                                 int32_t* out_data,
+                                 const uint16_t* filter_coefficients,
+                                 int32_t* filter_state)
 {
-    // The procedure is to filter the input with three first order all pass filters
-    // (cascade operations).
+    // The procedure is to filter the input with three first order all pass
+    // filters (cascade operations).
     //
     //         a_3 + q^-1    a_2 + q^-1    a_1 + q^-1
     // y[n] =  -----------   -----------   -----------   x[n]
     //         1 + a_3q^-1   1 + a_2q^-1   1 + a_1q^-1
     //
-    // The input vector |filter_coefficients| includes these three filter coefficients.
-    // The filter state contains the in_data state, in_data[-1], followed by
-    // the out_data state, out_data[-1]. This is repeated for each cascade.
-    // The first cascade filter will filter the |in_data| and store the output in
-    // |out_data|. The second will the take the |out_data| as input and make an
-    // intermediate storage in |in_data|, to save memory. The third, and final, cascade
-    // filter operation takes the |in_data| (which is the output from the previous cascade
-    // filter) and store the output in |out_data|.
-    // Note that the input vector values are changed during the process.
+    // The input vector `filter_coefficients` includes these three filter
+    // coefficients. The filter state contains the in_data state, in_data[-1],
+    // followed by the out_data state, out_data[-1]. This is repeated for each
+    // cascade. The first cascade filter will filter the `in_data` and store
+    // the output in `out_data`. The second will the take the `out_data` as
+    // input and make an intermediate storage in `in_data`, to save memory. The
+    // third, and final, cascade filter operation takes the `in_data` (which is
+    // the output from the previous cascade filter) and store the output in
+    // `out_data`. Note that the input vector values are changed during the
+    // process.
     size_t k;
     int32_t diff;
     // First all-pass cascade; filter from in_data to out_data.
 
-    // Let y_i[n] indicate the output of cascade filter i (with filter coefficient a_i) at
-    // vector position n. Then the final output will be y[n] = y_3[n]
+    // Let y_i[n] indicate the output of cascade filter i (with filter
+    // coefficient a_i) at vector position n. Then the final output will be
+    // y[n] = y_3[n]
 
     // First loop, use the states stored in memory.
     // "diff" should be safe from wrap around since max values are 2^25
@@ -141,8 +145,8 @@ void WebRtcSpl_AnalysisQMF(const int16_t* in_data, size_t in_data_length,
     // Split even and odd samples. Also shift them to Q10.
     for (i = 0, k = 0; i < band_length; i++, k += 2)
     {
-        half_in2[i] = WEBRTC_SPL_LSHIFT_W32((int32_t)in_data[k], 10);
-        half_in1[i] = WEBRTC_SPL_LSHIFT_W32((int32_t)in_data[k + 1], 10);
+        half_in2[i] = ((int32_t)in_data[k]) * (1 << 10);
+        half_in1[i] = ((int32_t)in_data[k + 1]) * (1 << 10);
     }
 
     // All pass filter even and odd samples, independently.

@@ -43,7 +43,7 @@
 #include <WebCore/Document.h>
 #include <WebCore/Frame.h>
 #include <WebCore/FrameLoader.h>
-#include <WebCore/URL.h>
+#include <wtf/URL.h>
 
 using namespace WebCore;
 
@@ -57,7 +57,7 @@ WebDataSource::WebDataSource(WebDocumentLoader* loader)
 {
     WebDataSourceCount++;
     gClassCount++;
-    gClassNameCount().add("WebDataSource");
+    gClassNameCount().add("WebDataSource"_s);
 }
 
 WebDataSource::~WebDataSource()
@@ -66,7 +66,7 @@ WebDataSource::~WebDataSource()
         m_loader->detachDataSource();
     WebDataSourceCount--;
     gClassCount--;
-    gClassNameCount().remove("WebDataSource");
+    gClassNameCount().remove("WebDataSource"_s);
 }
 
 WebDataSource* WebDataSource::createInstance(WebDocumentLoader* loader)
@@ -175,7 +175,7 @@ HRESULT WebDataSource::data(_COM_Outptr_opt_ IStream** stream)
     if (!m_loader)
         return E_UNEXPECTED;
 
-    return MemoryStream::createInstance(m_loader->mainResourceData()).copyRefTo(stream);
+    return MemoryStream::createInstance(m_loader->mainResourceData()->makeContiguous()).copyRefTo(stream);
 }
 
 HRESULT WebDataSource::representation(_COM_Outptr_opt_ IWebDocumentRepresentation** rep)
@@ -349,7 +349,7 @@ HRESULT WebDataSource::subresourceForURL(_In_ BSTR url, _COM_Outptr_opt_ IWebRes
     if (!cachedResource)
         return E_FAIL;
 
-    *resource = WebResource::createInstance(cachedResource->resourceBuffer(), cachedResource->response());
+    *resource = WebResource::createInstance(cachedResource->resourceBuffer()->makeContiguous(), cachedResource->response());
     return S_OK;
 }
 

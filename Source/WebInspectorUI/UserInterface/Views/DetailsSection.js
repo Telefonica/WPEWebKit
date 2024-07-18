@@ -35,8 +35,11 @@ WI.DetailsSection = class DetailsSection extends WI.Object
         this._element.classList.add(identifier, "details-section");
 
         this._headerElement = document.createElement("div");
+        this._headerElement.addEventListener("mousedown", this._headerElementMouseDown.bind(this));
         this._headerElement.addEventListener("click", this._headerElementClicked.bind(this));
+        this._headerElement.addEventListener("keydown", this._handleHeaderElementKeyDown.bind(this));
         this._headerElement.className = "header";
+        this._headerElement.tabIndex = 0;
         this._element.appendChild(this._headerElement);
 
         if (optionsElement instanceof HTMLElement) {
@@ -60,20 +63,13 @@ WI.DetailsSection = class DetailsSection extends WI.Object
 
         this._collapsedSetting = new WI.Setting(identifier + "-details-section-collapsed", !!defaultCollapsedSettingValue);
         this.collapsed = this._collapsedSetting.value;
-        this._expandedByUser = false;
     }
 
     // Public
 
-    get element()
-    {
-        return this._element;
-    }
-
-    get identifier()
-    {
-        return this._identifier;
-    }
+    get element() { return this._element; }
+    get headerElement() { return this._headerElement; }
+    get identifier() { return this._identifier; }
 
     get title()
     {
@@ -82,6 +78,7 @@ WI.DetailsSection = class DetailsSection extends WI.Object
 
     set title(title)
     {
+        this._headerElement.toggleAttribute("hidden", !title);
         this._titleElement.textContent = title;
     }
 
@@ -130,23 +127,53 @@ WI.DetailsSection = class DetailsSection extends WI.Object
             this._contentElement.appendChild(this._groups[i].element);
     }
 
-    get expandedByUser()
-    {
-        return this._expandedByUser;
-    }
-
     // Private
+
+    _headerElementMouseDown(event)
+    {
+        if (this._optionsElement?.contains(event.target))
+            return;
+
+        // Don't lose focus if already focused.
+        if (document.activeElement === this._headerElement)
+            return;
+
+        event.preventDefault();
+    }
 
     _headerElementClicked(event)
     {
-        if (event.target.isSelfOrDescendant(this._optionsElement))
+        if (this._optionsElement?.contains(event.target))
             return;
 
-        var collapsed = this.collapsed;
+        let collapsed = this.collapsed;
         this.collapsed = !collapsed;
-        this._expandedByUser = collapsed;
 
         this._element.scrollIntoViewIfNeeded(false);
+    }
+
+    _handleHeaderElementKeyDown(event)
+    {
+        let isSpaceOrEnterKey = event.code === "Space" || event.code === "Enter";
+        if (!isSpaceOrEnterKey && event.code !== "ArrowLeft" && event.code !== "ArrowRight")
+            return;
+
+        if (this._optionsElement?.contains(event.target))
+            return;
+
+        event.preventDefault();
+
+        if (isSpaceOrEnterKey) {
+            this.collapsed = !this.collapsed;
+            return;
+        }
+
+        let collapsed = event.code === "ArrowLeft";
+
+        if (WI.resolveLayoutDirectionForElement(this._headerElement) === WI.LayoutDirection.RTL)
+            collapsed = !collapsed;
+
+        this.collapsed = collapsed;
     }
 
     _optionsElementMouseDown(event)

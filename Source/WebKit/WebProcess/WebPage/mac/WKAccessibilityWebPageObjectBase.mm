@@ -36,66 +36,99 @@
 #import "WKStringCF.h"
 #import <WebCore/AXObjectCache.h>
 #import <WebCore/Document.h>
+#import <WebCore/Frame.h>
 #import <WebCore/FrameView.h>
-#import <WebCore/MainFrame.h>
 #import <WebCore/Page.h>
 #import <WebCore/ScrollView.h>
 #import <WebCore/Scrollbar.h>
-#import <WebKitSystemInterface.h>
-#import <wtf/ObjcRuntimeExtras.h>
 
-using namespace WebCore;
-using namespace WebKit;
+namespace ax = WebCore::Accessibility;
 
 @implementation WKAccessibilityWebPageObjectBase
 
-- (id)accessibilityRootObjectWrapper
+- (NakedPtr<WebCore::AXObjectCache>)axObjectCache
 {
-    if (!WebCore::AXObjectCache::accessibilityEnabled())
-        WebCore::AXObjectCache::enableAccessibility();
+    ASSERT(isMainRunLoop());
 
     if (!m_page)
-        return nil;
-    
-    NSObject* mainFramePluginAccessibilityObjectWrapper = m_page->accessibilityObjectForMainFramePlugin();
-    if (mainFramePluginAccessibilityObjectWrapper)
-        return mainFramePluginAccessibilityObjectWrapper;
+        return nullptr;
 
-    WebCore::Page* page = m_page->corePage();
+    auto page = m_page->corePage();
     if (!page)
-        return nil;
-    
-    WebCore::Frame& core = page->mainFrame();
+        return nullptr;
+
+    auto& core = page->mainFrame();
     if (!core.document())
-        return nil;
-    
-    WebCore::AXObjectCache* cache = core.document()->axObjectCache();
-    if (!cache)
-        return nil;
-    
-    if (AccessibilityObject* root = cache->rootObject())
-        return root->wrapper();
-    
-    return nil;
+        return nullptr;
+
+    return core.document()->axObjectCache();
 }
 
-- (void)setWebPage:(WebPage*)page
+- (id)accessibilityPluginObject
 {
+    ASSERT(isMainRunLoop());
+    auto retrieveBlock = [&self]() -> id {
+        id axPlugin = nil;
+        callOnMainRunLoopAndWait([&axPlugin, &self] {
+            if (self->m_page)
+                axPlugin = self->m_page->accessibilityObjectForMainFramePlugin();
+        });
+        return axPlugin;
+    };
+    
+    return retrieveBlock();
+}
+
+- (id)accessibilityRootObjectWrapper
+{
+    return ax::retrieveAutoreleasedValueFromMainThread<id>([protectedSelf = retainPtr(self)] () -> RetainPtr<id> {
+        if (!WebCore::AXObjectCache::accessibilityEnabled())
+            WebCore::AXObjectCache::enableAccessibility();
+
+        if (protectedSelf.get()->m_hasMainFramePlugin)
+            return protectedSelf.get().accessibilityPluginObject;
+
+        if (auto cache = protectedSelf.get().axObjectCache) {
+            if (auto* root = cache->rootObject())
+                return root->wrapper();
+        }
+
+        return nil;
+    });
+}
+
+- (void)setWebPage:(NakedPtr<WebKit::WebPage>)page
+{
+    ASSERT(isMainRunLoop());
+
     m_page = page;
+
+    if (page) {
+        m_pageID = page->identifier();
+
+        auto* frame = page->mainFrame();
+        m_hasMainFramePlugin = frame && frame->document() ? frame->document()->isPluginDocument() : false;
+    } else {
+        m_pageID = { };
+        m_hasMainFramePlugin = false;
+    }
+}
+
+- (void)setHasMainFramePlugin:(bool)hasPlugin
+{
+    ASSERT(isMainRunLoop());
+    m_hasMainFramePlugin = hasPlugin;
 }
 
 - (void)setRemoteParent:(id)parent
 {
-    if (parent != m_parent) {
-        [m_parent release];
-        m_parent = [parent retain];
-    }
+    ASSERT(isMainRunLoop());
+    m_parent = parent;
 }
 
 - (id)accessibilityFocusedUIElement
 {
     return [[self accessibilityRootObjectWrapper] accessibilityFocusedUIElement];
 }
-
 
 @end

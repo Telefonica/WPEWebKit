@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2022 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,16 +33,26 @@
 #include "FindController.h"
 #include "FrameInfoData.h"
 #include "HangDetectionDisabler.h"
+#include "ImageBufferShareableBitmapBackend.h"
 #include "InjectedBundleNavigationAction.h"
 #include "InjectedBundleNodeHandle.h"
 #include "NavigationActionData.h"
+#include "NetworkConnectionToWebProcessMessages.h"
+#include "NetworkProcessConnection.h"
 #include "PageBanner.h"
+#include "PluginView.h"
+#include "RemoteGPUProxy.h"
+#include "RemoteRenderingBackendProxy.h"
+#include "SharedBufferReference.h"
 #include "UserData.h"
 #include "WebColorChooser.h"
 #include "WebCoreArgumentCoders.h"
+#include "WebDataListSuggestionPicker.h"
+#include "WebDateTimeChooser.h"
 #include "WebFrame.h"
 #include "WebFrameLoaderClient.h"
 #include "WebFullScreenManager.h"
+#include "WebGPUDowncastConvertToBackingContext.h"
 #include "WebHitTestResultData.h"
 #include "WebImage.h"
 #include "WebOpenPanelResultListener.h"
@@ -54,32 +64,50 @@
 #include "WebProcessPoolMessages.h"
 #include "WebProcessProxyMessages.h"
 #include "WebSearchPopupMenu.h"
-#include <JavaScriptCore/ConsoleTypes.h>
+#include <WebCore/AppHighlight.h>
 #include <WebCore/ApplicationCacheStorage.h>
 #include <WebCore/AXObjectCache.h>
 #include <WebCore/ColorChooser.h>
+#include <WebCore/ContentRuleListResults.h>
+#include <WebCore/DataListSuggestionPicker.h>
 #include <WebCore/DatabaseTracker.h>
 #include <WebCore/DocumentLoader.h>
+#include <WebCore/DocumentStorageAccess.h>
+#include <WebCore/ElementInlines.h>
 #include <WebCore/FileChooser.h>
 #include <WebCore/FileIconLoader.h>
-#include <WebCore/FrameLoadRequest.h>
+#include <WebCore/Frame.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/FrameView.h>
+#include <WebCore/FullscreenManager.h>
 #include <WebCore/HTMLInputElement.h>
 #include <WebCore/HTMLNames.h>
 #include <WebCore/HTMLParserIdioms.h>
 #include <WebCore/HTMLPlugInImageElement.h>
 #include <WebCore/Icon.h>
-#include <WebCore/MainFrame.h>
+#include <WebCore/ImageBuffer.h>
 #include <WebCore/NotImplemented.h>
-#include <WebCore/Page.h>
+#include <WebCore/RegistrableDomain.h>
 #include <WebCore/ScriptController.h>
 #include <WebCore/SecurityOrigin.h>
 #include <WebCore/SecurityOriginData.h>
 #include <WebCore/Settings.h>
+#include <WebCore/TextIndicator.h>
+#include <WebCore/TextRecognitionOptions.h>
 
-#if PLATFORM(IOS) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
+#if HAVE(WEBGPU_IMPLEMENTATION)
+#import <pal/graphics/WebGPU/Impl/WebGPUCreateImpl.h>
+#endif
+
+#if ENABLE(APPLE_PAY_AMS_UI)
+#include <WebCore/ApplePayAMSUIRequest.h>
+#endif
+
+#if PLATFORM(IOS_FAMILY) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
 #include "PlaybackSessionManager.h"
+#endif
+
+#if ENABLE(VIDEO_PRESENTATION_MODE)
 #include "VideoFullscreenManager.h"
 #endif
 
@@ -87,45 +115,49 @@
 #include "RemoteScrollingCoordinator.h"
 #endif
 
-#if PLATFORM(GTK)
-#include "PrinterListGtk.h"
+#if ENABLE(WEB_AUTHN)
+#include <WebCore/MockWebAuthenticationConfiguration.h>
 #endif
 
-using namespace WebCore;
-using namespace HTMLNames;
+#if ENABLE(WEBGL) && ENABLE(GPU_PROCESS)
+#include "RemoteGraphicsContextGLProxy.h"
+#endif
+
+#if ENABLE(WEBGL)
+#include <WebCore/GraphicsContextGL.h>
+#endif
+
+#if PLATFORM(MAC)
+#include "TiledCoreAnimationScrollingCoordinator.h"
+#endif
 
 namespace WebKit {
-
-static double area(WebFrame* frame)
-{
-    IntSize size = frame->visibleContentBoundsExcludingScrollbars().size();
-    return static_cast<double>(size.height()) * size.width();
-}
-
-static WebFrame* findLargestFrameInFrameSet(WebPage& page)
-{
-    // Approximate what a user could consider a default target frame for application menu operations.
-
-    WebFrame* mainFrame = page.mainWebFrame();
-    if (!mainFrame || !mainFrame->isFrameSet())
-        return nullptr;
-
-    WebFrame* largestSoFar = nullptr;
-
-    Ref<API::Array> frameChildren = mainFrame->childFrames();
-    size_t count = frameChildren->size();
-    for (size_t i = 0; i < count; ++i) {
-        auto* childFrame = frameChildren->at<WebFrame>(i);
-        if (!largestSoFar || area(childFrame) > area(largestSoFar))
-            largestSoFar = childFrame;
-    }
-
-    return largestSoFar;
-}
+using namespace WebCore;
+using namespace HTMLNames;
 
 WebChromeClient::WebChromeClient(WebPage& page)
     : m_page(page)
 {
+}
+
+void WebChromeClient::didInsertMenuElement(HTMLMenuElement& element)
+{
+    m_page.didInsertMenuElement(element);
+}
+
+void WebChromeClient::didRemoveMenuElement(HTMLMenuElement& element)
+{
+    m_page.didRemoveMenuElement(element);
+}
+
+void WebChromeClient::didInsertMenuItemElement(HTMLMenuItemElement& element)
+{
+    m_page.didInsertMenuItemElement(element);
+}
+
+void WebChromeClient::didRemoveMenuItemElement(HTMLMenuItemElement& element)
+{
+    m_page.didRemoveMenuItemElement(element);
 }
 
 inline WebChromeClient::~WebChromeClient()
@@ -144,7 +176,7 @@ void WebChromeClient::setWindowRect(const FloatRect& windowFrame)
 
 FloatRect WebChromeClient::windowRect()
 {
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     return FloatRect();
 #else
 #if PLATFORM(MAC)
@@ -154,7 +186,7 @@ FloatRect WebChromeClient::windowRect()
 
     FloatRect newWindowFrame;
 
-    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::GetWindowFrame(), Messages::WebPageProxy::GetWindowFrame::Reply(newWindowFrame), m_page.pageID()))
+    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::GetWindowFrame(), Messages::WebPageProxy::GetWindowFrame::Reply(newWindowFrame), m_page.identifier()))
         return FloatRect();
 
     return newWindowFrame;
@@ -178,19 +210,34 @@ void WebChromeClient::unfocus()
 
 #if PLATFORM(COCOA)
 
-void WebChromeClient::elementDidFocus(Element& element)
+void WebChromeClient::elementDidFocus(Element& element, const FocusOptions& options)
 {
-    m_page.elementDidFocus(&element);
+    m_page.elementDidFocus(element, options);
+}
+
+void WebChromeClient::elementDidRefocus(Element& element, const FocusOptions& options)
+{
+    m_page.elementDidRefocus(element, options);
 }
 
 void WebChromeClient::elementDidBlur(Element& element)
 {
-    m_page.elementDidBlur(&element);
+    m_page.elementDidBlur(element);
+}
+
+void WebChromeClient::focusedElementDidChangeInputMode(Element& element, InputMode mode)
+{
+    m_page.focusedElementDidChangeInputMode(element, mode);
 }
 
 void WebChromeClient::makeFirstResponder()
 {
     m_page.send(Messages::WebPageProxy::MakeFirstResponder());
+}
+
+void WebChromeClient::assistiveTechnologyMakeFirstResponder()
+{
+    m_page.send(Messages::WebPageProxy::AssistiveTechnologyMakeFirstResponder());
 }
 
 #endif    
@@ -203,35 +250,32 @@ bool WebChromeClient::canTakeFocus(FocusDirection)
 
 void WebChromeClient::takeFocus(FocusDirection direction)
 {
-    m_page.send(Messages::WebPageProxy::TakeFocus(direction));
+    m_page.send(Messages::WebPageProxy::TakeFocus(static_cast<uint8_t>(direction)));
 }
 
 void WebChromeClient::focusedElementChanged(Element* element)
 {
-    if (!is<HTMLInputElement>(element))
-        return;
-
-    HTMLInputElement& inputElement = downcast<HTMLInputElement>(*element);
-    if (!inputElement.isText())
+    auto* inputElement = dynamicDowncast<HTMLInputElement>(element);
+    if (!inputElement || !inputElement->isText())
         return;
 
     WebFrame* webFrame = WebFrame::fromCoreFrame(*element->document().frame());
     ASSERT(webFrame);
-    m_page.injectedBundleFormClient().didFocusTextField(&m_page, &inputElement, webFrame);
+    m_page.injectedBundleFormClient().didFocusTextField(&m_page, *inputElement, webFrame);
 }
 
 void WebChromeClient::focusedFrameChanged(Frame* frame)
 {
     WebFrame* webFrame = frame ? WebFrame::fromCoreFrame(*frame) : nullptr;
 
-    WebProcess::singleton().parentProcessConnection()->send(Messages::WebPageProxy::FocusedFrameChanged(webFrame ? webFrame->frameID() : 0), m_page.pageID());
+    WebProcess::singleton().parentProcessConnection()->send(Messages::WebPageProxy::FocusedFrameChanged(webFrame ? std::make_optional(webFrame->frameID()) : std::nullopt), m_page.identifier());
 }
 
-Page* WebChromeClient::createWindow(Frame& frame, const FrameLoadRequest& request, const WindowFeatures& windowFeatures, const NavigationAction& navigationAction)
+Page* WebChromeClient::createWindow(Frame& frame, const WindowFeatures& windowFeatures, const NavigationAction& navigationAction)
 {
 #if ENABLE(FULLSCREEN_API)
-    if (frame.document() && frame.document()->webkitCurrentFullScreenElement())
-        frame.document()->webkitCancelFullScreen();
+    if (frame.document() && frame.document()->fullscreenManager().currentFullscreenElement())
+        frame.document()->fullscreenManager().cancelFullscreen();
 #endif
 
     auto& webProcess = WebProcess::singleton();
@@ -243,22 +287,35 @@ Page* WebChromeClient::createWindow(Frame& frame, const FrameLoadRequest& reques
     navigationActionData.syntheticClickType = InjectedBundleNavigationAction::syntheticClickTypeForNavigationAction(navigationAction);
     navigationActionData.clickLocationInRootViewCoordinates = InjectedBundleNavigationAction::clickLocationInRootViewCoordinatesForNavigationAction(navigationAction);
     navigationActionData.userGestureTokenIdentifier = webProcess.userGestureTokenIdentifier(navigationAction.userGestureToken());
-    navigationActionData.canHandleRequest = m_page.canHandleRequest(request.resourceRequest());
+    navigationActionData.canHandleRequest = m_page.canHandleRequest(navigationAction.resourceRequest());
     navigationActionData.shouldOpenExternalURLsPolicy = navigationAction.shouldOpenExternalURLsPolicy();
     navigationActionData.downloadAttribute = navigationAction.downloadAttribute();
+    navigationActionData.privateClickMeasurement = navigationAction.privateClickMeasurement();
 
     WebFrame* webFrame = WebFrame::fromCoreFrame(frame);
 
-    uint64_t newPageID = 0;
-    WebPageCreationParameters parameters;
-    if (!webProcess.parentProcessConnection()->sendSync(Messages::WebPageProxy::CreateNewPage(webFrame->info(), webFrame->page()->pageID(), request.resourceRequest(), windowFeatures, navigationActionData), Messages::WebPageProxy::CreateNewPage::Reply(newPageID, parameters), m_page.pageID()))
+    std::optional<PageIdentifier> newPageID;
+    std::optional<WebPageCreationParameters> parameters;
+    if (!webProcess.parentProcessConnection()->sendSync(Messages::WebPageProxy::CreateNewPage(webFrame->info(), webFrame->page()->webPageProxyIdentifier(), navigationAction.resourceRequest(), windowFeatures, navigationActionData), Messages::WebPageProxy::CreateNewPage::Reply(newPageID, parameters), m_page.identifier(), IPC::Timeout::infinity(), IPC::SendSyncOption::MaintainOrderingWithAsyncMessages))
         return nullptr;
 
     if (!newPageID)
         return nullptr;
+    ASSERT(parameters);
 
-    webProcess.createWebPage(newPageID, WTFMove(parameters));
-    return webProcess.webPage(newPageID)->corePage();
+    parameters->oldPageID = m_page.identifier();
+
+    webProcess.createWebPage(*newPageID, WTFMove(*parameters));
+    return webProcess.webPage(*newPageID)->corePage();
+}
+
+bool WebChromeClient::testProcessIncomingSyncMessagesWhenWaitingForSyncReply()
+{
+    IPC::UnboundedSynchronousIPCScope unboundedSynchronousIPCScope;
+    bool handled = false;
+    if (!WebProcess::singleton().ensureNetworkProcessConnection().connection().sendSync(Messages::NetworkConnectionToWebProcess::TestProcessIncomingSyncMessagesWhenWaitingForSyncReply(m_page.webPageProxyIdentifier()), Messages::NetworkConnectionToWebProcess::TestProcessIncomingSyncMessagesWhenWaitingForSyncReply::Reply(handled), 0))
+        return false;
+    return handled;
 }
 
 void WebChromeClient::show()
@@ -293,7 +350,7 @@ bool WebChromeClient::toolbarsVisible()
         return toolbarsVisibility == API::InjectedBundle::PageUIClient::UIElementVisibility::Visible;
     
     bool toolbarsAreVisible = true;
-    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::GetToolbarsAreVisible(), Messages::WebPageProxy::GetToolbarsAreVisible::Reply(toolbarsAreVisible), m_page.pageID()))
+    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::GetToolbarsAreVisible(), Messages::WebPageProxy::GetToolbarsAreVisible::Reply(toolbarsAreVisible), m_page.identifier()))
         return true;
 
     return toolbarsAreVisible;
@@ -311,7 +368,7 @@ bool WebChromeClient::statusbarVisible()
         return statusbarVisibility == API::InjectedBundle::PageUIClient::UIElementVisibility::Visible;
 
     bool statusBarIsVisible = true;
-    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::GetStatusBarIsVisible(), Messages::WebPageProxy::GetStatusBarIsVisible::Reply(statusBarIsVisible), m_page.pageID()))
+    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::GetStatusBarIsVisible(), Messages::WebPageProxy::GetStatusBarIsVisible::Reply(statusBarIsVisible), m_page.identifier()))
         return true;
 
     return statusBarIsVisible;
@@ -340,7 +397,7 @@ bool WebChromeClient::menubarVisible()
         return menubarVisibility == API::InjectedBundle::PageUIClient::UIElementVisibility::Visible;
     
     bool menuBarIsVisible = true;
-    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::GetMenuBarIsVisible(), Messages::WebPageProxy::GetMenuBarIsVisible::Reply(menuBarIsVisible), m_page.pageID()))
+    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::GetMenuBarIsVisible(), Messages::WebPageProxy::GetMenuBarIsVisible::Reply(menuBarIsVisible), m_page.identifier()))
         return true;
 
     return menuBarIsVisible;
@@ -355,48 +412,11 @@ void WebChromeClient::addMessageToConsole(MessageSource source, MessageLevel lev
 {
     // Notify the bundle client.
     m_page.injectedBundleUIClient().willAddMessageToConsole(&m_page, source, level, message, lineNumber, columnNumber, sourceID);
+}
 
-    String src;
-    switch(source) {
-        case JSC::MessageSource::XML:
-            src = "XML"; break;
-        case JSC::MessageSource::JS:
-            src = "JS"; break;
-        case JSC::MessageSource::Network:
-            src = "Network"; break;
-        case JSC::MessageSource::ConsoleAPI:
-            src = "ConsoleAPI"; break;
-        case JSC::MessageSource::Storage:
-            src = "Storage"; break;
-        case JSC::MessageSource::AppCache:
-            src = "AppCache"; break;
-        case JSC::MessageSource::Rendering:
-            src = "Rendering"; break;
-        case JSC::MessageSource::CSS:
-            src = "CSS"; break;
-        case JSC::MessageSource::Security:
-            src = "Security"; break;
-        case JSC::MessageSource::ContentBlocker:
-            src = "ContentBlocker"; break;
-        case JSC::MessageSource::Other:
-            src = "Other"; break;
-    }
-
-    String lvl;
-    switch (level) {
-        case JSC::MessageLevel::Log:
-            lvl = "Log"; break;
-        case JSC::MessageLevel::Warning:
-            lvl = "Warning"; break;
-        case JSC::MessageLevel::Error:
-            lvl = "Error"; break;
-        case JSC::MessageLevel::Debug:
-            lvl = "Debug"; break;
-        case JSC::MessageLevel::Info:
-            lvl = "Info"; break;
-    }
-
-    m_page.send(Messages::WebPageProxy::WillAddDetailedMessageToConsole(src, lvl, lineNumber, columnNumber, message, sourceID));
+void WebChromeClient::addMessageWithArgumentsToConsole(MessageSource source, MessageLevel level, const String& message, Span<const String> messageArguments, unsigned lineNumber, unsigned columnNumber, const String& sourceID)
+{
+    m_page.injectedBundleUIClient().willAddMessageWithArgumentsToConsole(&m_page, source, level, message, messageArguments, lineNumber, columnNumber, sourceID);
 }
 
 bool WebChromeClient::canRunBeforeUnloadConfirmPanel()
@@ -412,13 +432,13 @@ bool WebChromeClient::runBeforeUnloadConfirmPanel(const String& message, Frame& 
 
     HangDetectionDisabler hangDetectionDisabler;
 
-    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::RunBeforeUnloadConfirmPanel(webFrame->frameID(), SecurityOriginData::fromFrame(&frame), message), Messages::WebPageProxy::RunBeforeUnloadConfirmPanel::Reply(shouldClose), m_page.pageID(), Seconds::infinity(), IPC::SendSyncOption::InformPlatformProcessWillSuspend))
+    if (!m_page.sendSyncWithDelayedReply(Messages::WebPageProxy::RunBeforeUnloadConfirmPanel(webFrame->frameID(), webFrame->info(), message), Messages::WebPageProxy::RunBeforeUnloadConfirmPanel::Reply(shouldClose)))
         return false;
 
     return shouldClose;
 }
 
-void WebChromeClient::closeWindowSoon()
+void WebChromeClient::closeWindow()
 {
     // FIXME: This code assumes that the client will respond to a close page
     // message by actually closing the page. Safari does this, but there is
@@ -429,10 +449,9 @@ void WebChromeClient::closeWindowSoon()
 
     m_page.corePage()->setGroupName(String());
 
-    if (WebFrame* frame = m_page.mainWebFrame()) {
-        if (Frame* coreFrame = frame->coreFrame())
-            coreFrame->loader().stopForUserCancel();
-    }
+    auto& frame = m_page.mainWebFrame();
+    if (auto* coreFrame = frame.coreFrame())
+        coreFrame->loader().stopForUserCancel();
 
     m_page.sendClose();
 }
@@ -455,10 +474,12 @@ void WebChromeClient::runJavaScriptAlert(Frame& frame, const String& alertText)
 
     // Notify the bundle client.
     m_page.injectedBundleUIClient().willRunJavaScriptAlert(&m_page, alertText, webFrame);
+    m_page.prepareToRunModalJavaScriptDialog();
 
     HangDetectionDisabler hangDetectionDisabler;
+    IPC::UnboundedSynchronousIPCScope unboundedSynchronousIPCScope;
 
-    WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::RunJavaScriptAlert(webFrame->frameID(), SecurityOriginData::fromFrame(&frame), alertText), Messages::WebPageProxy::RunJavaScriptAlert::Reply(), m_page.pageID(), Seconds::infinity(), IPC::SendSyncOption::InformPlatformProcessWillSuspend);
+    m_page.sendSyncWithDelayedReply(Messages::WebPageProxy::RunJavaScriptAlert(webFrame->frameID(), webFrame->info(), alertText), Messages::WebPageProxy::RunJavaScriptAlert::Reply(), IPC::SendSyncOption::MaintainOrderingWithAsyncMessages);
 }
 
 bool WebChromeClient::runJavaScriptConfirm(Frame& frame, const String& message)
@@ -471,11 +492,13 @@ bool WebChromeClient::runJavaScriptConfirm(Frame& frame, const String& message)
 
     // Notify the bundle client.
     m_page.injectedBundleUIClient().willRunJavaScriptConfirm(&m_page, message, webFrame);
+    m_page.prepareToRunModalJavaScriptDialog();
 
     HangDetectionDisabler hangDetectionDisabler;
+    IPC::UnboundedSynchronousIPCScope unboundedSynchronousIPCScope;
 
     bool result = false;
-    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::RunJavaScriptConfirm(webFrame->frameID(), SecurityOriginData::fromFrame(&frame), message), Messages::WebPageProxy::RunJavaScriptConfirm::Reply(result), m_page.pageID(), Seconds::infinity(), IPC::SendSyncOption::InformPlatformProcessWillSuspend))
+    if (!m_page.sendSyncWithDelayedReply(Messages::WebPageProxy::RunJavaScriptConfirm(webFrame->frameID(), webFrame->info(), message), Messages::WebPageProxy::RunJavaScriptConfirm::Reply(result), IPC::SendSyncOption::MaintainOrderingWithAsyncMessages))
         return false;
 
     return result;
@@ -491,10 +514,12 @@ bool WebChromeClient::runJavaScriptPrompt(Frame& frame, const String& message, c
 
     // Notify the bundle client.
     m_page.injectedBundleUIClient().willRunJavaScriptPrompt(&m_page, message, defaultValue, webFrame);
+    m_page.prepareToRunModalJavaScriptDialog();
 
     HangDetectionDisabler hangDetectionDisabler;
+    IPC::UnboundedSynchronousIPCScope unboundedSynchronousIPCScope;
 
-    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::RunJavaScriptPrompt(webFrame->frameID(), SecurityOriginData::fromFrame(&frame), message, defaultValue), Messages::WebPageProxy::RunJavaScriptPrompt::Reply(result), m_page.pageID(), Seconds::infinity(), IPC::SendSyncOption::InformPlatformProcessWillSuspend))
+    if (!m_page.sendSyncWithDelayedReply(Messages::WebPageProxy::RunJavaScriptPrompt(webFrame->frameID(), webFrame->info(), message, defaultValue), Messages::WebPageProxy::RunJavaScriptPrompt::Reply(result), IPC::SendSyncOption::MaintainOrderingWithAsyncMessages))
         return false;
 
     return !result.isNull();
@@ -511,6 +536,26 @@ void WebChromeClient::setStatusbarText(const String& statusbarText)
 KeyboardUIMode WebChromeClient::keyboardUIMode()
 {
     return m_page.keyboardUIMode();
+}
+
+bool WebChromeClient::hoverSupportedByPrimaryPointingDevice() const
+{
+    return m_page.hoverSupportedByPrimaryPointingDevice();
+}
+
+bool WebChromeClient::hoverSupportedByAnyAvailablePointingDevice() const
+{
+    return m_page.hoverSupportedByAnyAvailablePointingDevice();
+}
+
+std::optional<PointerCharacteristics> WebChromeClient::pointerCharacteristicsOfPrimaryPointingDevice() const
+{
+    return m_page.pointerCharacteristicsOfPrimaryPointingDevice();
+}
+
+OptionSet<PointerCharacteristics> WebChromeClient::pointerCharacteristicsOfAllAvailablePointingDevices() const
+{
+    return m_page.pointerCharacteristicsOfAllAvailablePointingDevices();
 }
 
 #if ENABLE(POINTER_LOCK)
@@ -567,13 +612,6 @@ void WebChromeClient::scroll(const IntSize& scrollDelta, const IntRect& scrollRe
     m_page.drawingArea()->scroll(intersection(scrollRect, clipRect), scrollDelta);
 }
 
-#if USE(COORDINATED_GRAPHICS)
-void WebChromeClient::delegatedScrollRequested(const IntPoint& scrollOffset)
-{
-    m_page.pageDidRequestScroll(scrollOffset);
-}
-#endif
-
 IntPoint WebChromeClient::screenToRootView(const IntPoint& point) const
 {
     return m_page.screenToRootView(point);
@@ -584,7 +622,6 @@ IntRect WebChromeClient::rootViewToScreen(const IntRect& rect) const
     return m_page.rootViewToScreen(rect);
 }
     
-#if PLATFORM(IOS)
 IntPoint WebChromeClient::accessibilityScreenToRootView(const IntPoint& point) const
 {
     return m_page.accessibilityScreenToRootView(point);
@@ -594,7 +631,11 @@ IntRect WebChromeClient::rootViewToAccessibilityScreen(const IntRect& rect) cons
 {
     return m_page.rootViewToAccessibilityScreen(rect);
 }
-#endif
+
+void WebChromeClient::didFinishLoadingImageForElement(HTMLImageElement& element)
+{
+    m_page.didFinishLoadingImageForElement(element);
+}
 
 PlatformPageClient WebChromeClient::platformPageClient() const
 {
@@ -602,15 +643,14 @@ PlatformPageClient WebChromeClient::platformPageClient() const
     return 0;
 }
 
+void WebChromeClient::intrinsicContentsSizeChanged(const IntSize& size) const
+{
+    m_page.scheduleIntrinsicContentSizeUpdate(size);
+}
+
 void WebChromeClient::contentsSizeChanged(Frame& frame, const IntSize& size) const
 {
-    if (m_page.corePage()->settings().frameFlattening() == FrameFlatteningDisabled) {
-        WebFrame* largestFrame = findLargestFrameInFrameSet(m_page);
-        if (largestFrame != m_cachedFrameSetLargestFrame.get()) {
-            m_cachedFrameSetLargestFrame = largestFrame;
-            m_page.send(Messages::WebPageProxy::FrameSetLargestFrameChanged(largestFrame ? largestFrame->frameID() : 0));
-        }
-    }
+    FrameView* frameView = frame.view();
 
     if (&frame.page()->mainFrame() != &frame)
         return;
@@ -619,7 +659,6 @@ void WebChromeClient::contentsSizeChanged(Frame& frame, const IntSize& size) con
 
     m_page.drawingArea()->mainFrameContentSizeChanged(size);
 
-    FrameView* frameView = frame.view();
     if (frameView && !frameView->delegatesScrolling())  {
         bool hasHorizontalScrollbar = frameView->horizontalScrollbar();
         bool hasVerticalScrollbar = frameView->verticalScrollbar();
@@ -633,7 +672,12 @@ void WebChromeClient::contentsSizeChanged(Frame& frame, const IntSize& size) con
     }
 }
 
-void WebChromeClient::scrollRectIntoView(const IntRect&) const
+void WebChromeClient::scrollMainFrameToRevealRect(const IntRect& rect) const
+{
+    m_page.send(Messages::WebPageProxy::RequestScrollToRect(rect, rect.center()));
+}
+
+void WebChromeClient::scrollContainingScrollViewsToRevealRect(const IntRect&) const
 {
     notImplemented();
 }
@@ -650,6 +694,8 @@ bool WebChromeClient::shouldUnavailablePluginMessageBeButton(RenderEmbeddedObjec
 
     case RenderEmbeddedObject::PluginCrashed:
     case RenderEmbeddedObject::PluginBlockedByContentSecurityPolicy:
+    case RenderEmbeddedObject::UnsupportedPlugin:
+    case RenderEmbeddedObject::PluginTooSmall:
         return false;
     }
 
@@ -659,97 +705,39 @@ bool WebChromeClient::shouldUnavailablePluginMessageBeButton(RenderEmbeddedObjec
     
 void WebChromeClient::unavailablePluginButtonClicked(Element& element, RenderEmbeddedObject::PluginUnavailabilityReason pluginUnavailabilityReason) const
 {
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    ASSERT(element.hasTagName(objectTag) || element.hasTagName(embedTag) || element.hasTagName(appletTag));
-    ASSERT(pluginUnavailabilityReason == RenderEmbeddedObject::PluginMissing || pluginUnavailabilityReason == RenderEmbeddedObject::InsecurePluginVersion || pluginUnavailabilityReason);
-
-    auto& pluginElement = downcast<HTMLPlugInImageElement>(element);
-
-    String frameURLString = pluginElement.document().frame()->loader().documentLoader()->responseURL().string();
-    String pageURLString = m_page.mainFrame()->loader().documentLoader()->responseURL().string();
-    String pluginURLString = pluginElement.document().completeURL(pluginElement.url()).string();
-    URL pluginspageAttributeURL = pluginElement.document().completeURL(stripLeadingAndTrailingHTMLSpaces(pluginElement.attributeWithoutSynchronization(pluginspageAttr)));
-    if (!pluginspageAttributeURL.protocolIsInHTTPFamily())
-        pluginspageAttributeURL = URL();
-    m_page.send(Messages::WebPageProxy::UnavailablePluginButtonClicked(pluginUnavailabilityReason, pluginElement.serviceType(), pluginURLString, pluginspageAttributeURL.string(), frameURLString, pageURLString));
-#else
     UNUSED_PARAM(element);
     UNUSED_PARAM(pluginUnavailabilityReason);
-#endif // ENABLE(NETSCAPE_PLUGIN_API)
 }
 
-void WebChromeClient::mouseDidMoveOverElement(const HitTestResult& hitTestResult, unsigned modifierFlags)
+void WebChromeClient::mouseDidMoveOverElement(const HitTestResult& hitTestResult, unsigned modifierFlags, const String& toolTip, TextDirection)
 {
     RefPtr<API::Object> userData;
 
     // Notify the bundle client.
-    m_page.injectedBundleUIClient().mouseDidMoveOverElement(&m_page, hitTestResult, static_cast<WebEvent::Modifiers>(modifierFlags), userData);
+    m_page.injectedBundleUIClient().mouseDidMoveOverElement(&m_page, hitTestResult, OptionSet<WebEvent::Modifier>::fromRaw(modifierFlags), userData);
 
     // Notify the UIProcess.
-    WebHitTestResultData webHitTestResultData(hitTestResult);
+    WebHitTestResultData webHitTestResultData(hitTestResult, toolTip);
     m_page.send(Messages::WebPageProxy::MouseDidMoveOverElement(webHitTestResultData, modifierFlags, UserData(WebProcess::singleton().transformObjectsToHandles(userData.get()).get())));
 }
 
-void WebChromeClient::setToolTip(const String& toolTip, TextDirection)
-{
-    // Only send a tool tip to the WebProcess if it has changed since the last time this function was called.
+static constexpr unsigned maxTitleLength = 1000; // Closest power of 10 above the W3C recommendation for Title length.
 
-    if (toolTip == m_cachedToolTip)
-        return;
-    m_cachedToolTip = toolTip;
-
-    m_page.send(Messages::WebPageProxy::SetToolTip(m_cachedToolTip));
-}
-
-void WebChromeClient::print(Frame& frame)
+void WebChromeClient::print(Frame& frame, const StringWithDirection& title)
 {
     WebFrame* webFrame = WebFrame::fromCoreFrame(frame);
     ASSERT(webFrame);
 
-#if PLATFORM(GTK) && HAVE(GTK_UNIX_PRINTING)
-    // When printing synchronously in GTK+ we need to make sure that we have a list of Printers before starting the print operation.
-    // Getting the list of printers is done synchronously by GTK+, but using a nested main loop that might process IPC messages
-    // comming from the UI process like EndPrinting. When the EndPriting message is received while the printer list is being populated,
-    // the print operation is finished unexpectely and the web process crashes, see https://bugs.webkit.org/show_bug.cgi?id=126979.
-    // The PrinterListGtk class gets the list of printers in the constructor so we just need to ensure there's an instance alive
-    // during the synchronous print operation.
-    RefPtr<PrinterListGtk> printerList = PrinterListGtk::getOrCreate();
-    if (!printerList) {
-        // PrinterListGtk::getOrCreate() returns nullptr when called while a printers enumeration is ongoing.
-        // This can happen if a synchronous print is started by a JavaScript and another one is inmeditaley started
-        // from a JavaScript event listener. The second print operation is handled by the nested main loop used by GTK+
-        // to enumerate the printers, and we end up here trying to get a reference of an object that is being constructed.
-        // It's very unlikely that the user wants to print twice in a row, and other browsers don't do two print operations
-        // in this particular case either. So, the safest solution is to return early here and ignore the second print.
-        // See https://bugs.webkit.org/show_bug.cgi?id=141035
-        return;
-    }
+    WebCore::FloatSize pdfFirstPageSize;
+#if ENABLE(PDFKIT_PLUGIN)
+    if (auto* pluginView = WebPage::pluginViewForFrame(&frame))
+        pdfFirstPageSize = pluginView->pdfDocumentSizeForPrinting();
 #endif
 
-    m_page.sendSync(Messages::WebPageProxy::PrintFrame(webFrame->frameID()), Messages::WebPageProxy::PrintFrame::Reply(), Seconds::infinity(), IPC::SendSyncOption::InformPlatformProcessWillSuspend);
-}
+    auto truncatedTitle = truncateFromEnd(title, maxTitleLength);
 
-void WebChromeClient::exceededDatabaseQuota(Frame& frame, const String& databaseName, DatabaseDetails details)
-{
-    WebFrame* webFrame = WebFrame::fromCoreFrame(frame);
-    ASSERT(webFrame);
-    
-    auto& origin = frame.document()->securityOrigin();
-    auto originData = SecurityOriginData::fromSecurityOrigin(origin);
-    auto& tracker = DatabaseTracker::singleton();
-    auto currentQuota = tracker.quota(originData);
-    auto currentOriginUsage = tracker.usage(originData);
-    uint64_t newQuota = 0;
-    RefPtr<API::SecurityOrigin> securityOrigin = API::SecurityOrigin::create(SecurityOriginData::fromDatabaseIdentifier(SecurityOriginData::fromSecurityOrigin(origin).databaseIdentifier())->securityOrigin());
-    newQuota = m_page.injectedBundleUIClient().didExceedDatabaseQuota(&m_page, securityOrigin.get(), databaseName, details.displayName(), currentQuota, currentOriginUsage, details.currentUsage(), details.expectedUsage());
-
-    if (!newQuota) {
-        WebProcess::singleton().parentProcessConnection()->sendSync(
-            Messages::WebPageProxy::ExceededDatabaseQuota(webFrame->frameID(), SecurityOriginData::fromSecurityOrigin(origin).databaseIdentifier(), databaseName, details.displayName(), currentQuota, currentOriginUsage, details.currentUsage(), details.expectedUsage()),
-            Messages::WebPageProxy::ExceededDatabaseQuota::Reply(newQuota), m_page.pageID(), Seconds::infinity(), IPC::SendSyncOption::InformPlatformProcessWillSuspend);
-    }
-
-    tracker.setQuota(originData, newQuota);
+    IPC::UnboundedSynchronousIPCScope unboundedSynchronousIPCScope;
+    m_page.sendSyncWithDelayedReply(Messages::WebPageProxy::PrintFrame(webFrame->frameID(), truncatedTitle.string, pdfFirstPageSize), Messages::WebPageProxy::PrintFrame::Reply());
 }
 
 void WebChromeClient::reachedMaxAppCacheSize(int64_t)
@@ -759,8 +747,8 @@ void WebChromeClient::reachedMaxAppCacheSize(int64_t)
 
 void WebChromeClient::reachedApplicationCacheOriginQuota(SecurityOrigin& origin, int64_t totalBytesNeeded)
 {
-    RefPtr<API::SecurityOrigin> securityOrigin = API::SecurityOrigin::createFromString(origin.toString());
-    if (m_page.injectedBundleUIClient().didReachApplicationCacheOriginQuota(&m_page, securityOrigin.get(), totalBytesNeeded))
+    auto securityOrigin = API::SecurityOrigin::createFromString(origin.toString());
+    if (m_page.injectedBundleUIClient().didReachApplicationCacheOriginQuota(&m_page, securityOrigin.ptr(), totalBytesNeeded))
         return;
 
     auto& cacheStorage = m_page.corePage()->applicationCacheStorage();
@@ -769,38 +757,43 @@ void WebChromeClient::reachedApplicationCacheOriginQuota(SecurityOrigin& origin,
         return;
 
     uint64_t newQuota = 0;
-    WebProcess::singleton().parentProcessConnection()->sendSync(
-        Messages::WebPageProxy::ReachedApplicationCacheOriginQuota(SecurityOriginData::fromSecurityOrigin(origin).databaseIdentifier(), currentQuota, totalBytesNeeded),
-        Messages::WebPageProxy::ReachedApplicationCacheOriginQuota::Reply(newQuota), m_page.pageID(), Seconds::infinity(), IPC::SendSyncOption::InformPlatformProcessWillSuspend);
+    m_page.sendSyncWithDelayedReply(Messages::WebPageProxy::ReachedApplicationCacheOriginQuota(origin.data().databaseIdentifier(), currentQuota, totalBytesNeeded), Messages::WebPageProxy::ReachedApplicationCacheOriginQuota::Reply(newQuota));
 
     cacheStorage.storeUpdatedQuotaForOrigin(&origin, newQuota);
-}
-
-#if ENABLE(DASHBOARD_SUPPORT)
-
-void WebChromeClient::annotatedRegionsChanged()
-{
-    notImplemented();
-}
-
-#endif
-
-bool WebChromeClient::shouldReplaceWithGeneratedFileForUpload(const String& path, String& generatedFilename)
-{
-    generatedFilename = m_page.injectedBundleUIClient().shouldGenerateFileForUpload(&m_page, path);
-    return !generatedFilename.isNull();
-}
-
-String WebChromeClient::generateReplacementFile(const String& path)
-{
-    return m_page.injectedBundleUIClient().generateFileForUpload(&m_page, path);
 }
 
 #if ENABLE(INPUT_TYPE_COLOR)
 
 std::unique_ptr<ColorChooser> WebChromeClient::createColorChooser(ColorChooserClient& client, const Color& initialColor)
 {
-    return std::make_unique<WebColorChooser>(&m_page, &client, initialColor);
+    return makeUnique<WebColorChooser>(&m_page, &client, initialColor);
+}
+
+#endif
+
+#if ENABLE(DATALIST_ELEMENT)
+
+std::unique_ptr<DataListSuggestionPicker> WebChromeClient::createDataListSuggestionPicker(DataListSuggestionsClient& client)
+{
+    return makeUnique<WebDataListSuggestionPicker>(m_page, client);
+}
+
+bool WebChromeClient::canShowDataListSuggestionLabels() const
+{
+#if PLATFORM(MAC)
+    return true;
+#else
+    return false;
+#endif
+}
+
+#endif
+
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+
+std::unique_ptr<DateTimeChooser> WebChromeClient::createDateTimeChooser(DateTimeChooserClient& client)
+{
+    return makeUnique<WebDateTimeChooser>(m_page, client);
 }
 
 #endif
@@ -814,15 +807,23 @@ void WebChromeClient::runOpenPanel(Frame& frame, FileChooser& fileChooser)
 
     auto* webFrame = WebFrame::fromCoreFrame(frame);
     ASSERT(webFrame);
-    m_page.send(Messages::WebPageProxy::RunOpenPanel(webFrame->frameID(), SecurityOriginData::fromFrame(&frame), fileChooser.settings()));
+    m_page.send(Messages::WebPageProxy::RunOpenPanel(webFrame->frameID(), webFrame->info(), fileChooser.settings()));
+}
+    
+void WebChromeClient::showShareSheet(ShareDataWithParsedURL& shareData, CompletionHandler<void(bool)>&& callback)
+{
+    m_page.showShareSheet(shareData, WTFMove(callback));
+}
+
+void WebChromeClient::showContactPicker(const WebCore::ContactsRequestData& requestData, WTF::CompletionHandler<void(std::optional<Vector<WebCore::ContactInfo>>&&)>&& callback)
+{
+    m_page.showContactPicker(requestData, WTFMove(callback));
 }
 
 void WebChromeClient::loadIconForFiles(const Vector<String>& filenames, FileIconLoader& loader)
 {
     loader.iconLoaded(createIconForFiles(filenames));
 }
-
-#if !PLATFORM(IOS)
 
 void WebChromeClient::setCursor(const Cursor& cursor)
 {
@@ -834,6 +835,8 @@ void WebChromeClient::setCursorHiddenUntilMouseMoves(bool hiddenUntilMouseMoves)
     m_page.send(Messages::WebPageProxy::SetCursorHiddenUntilMouseMoves(hiddenUntilMouseMoves));
 }
 
+#if !PLATFORM(IOS_FAMILY)
+
 RefPtr<Icon> WebChromeClient::createIconForFiles(const Vector<String>& filenames)
 {
     return Icon::createIconForFiles(filenames);
@@ -841,9 +844,11 @@ RefPtr<Icon> WebChromeClient::createIconForFiles(const Vector<String>& filenames
 
 #endif
 
-void WebChromeClient::didAssociateFormControls(const Vector<RefPtr<Element>>& elements)
+void WebChromeClient::didAssociateFormControls(const Vector<RefPtr<Element>>& elements, WebCore::Frame& frame)
 {
-    return m_page.injectedBundleFormClient().didAssociateFormControls(&m_page, elements);
+    WebFrame* webFrame = WebFrame::fromCoreFrame(frame);
+    ASSERT(webFrame);
+    return m_page.injectedBundleFormClient().didAssociateFormControls(&m_page, elements, webFrame);
 }
 
 bool WebChromeClient::shouldNotifyOnFormChanges()
@@ -878,14 +883,50 @@ GraphicsLayerFactory* WebChromeClient::graphicsLayerFactory() const
     return nullptr;
 }
 
-#if USE(REQUEST_ANIMATION_FRAME_DISPLAY_MONITOR)
-
-RefPtr<DisplayRefreshMonitor> WebChromeClient::createDisplayRefreshMonitor(PlatformDisplayID displayID) const
+WebCore::DisplayRefreshMonitorFactory* WebChromeClient::displayRefreshMonitorFactory() const
 {
-    return m_page.drawingArea()->createDisplayRefreshMonitor(displayID);
+    return m_page.drawingArea();
 }
 
+#if ENABLE(GPU_PROCESS)
+RefPtr<ImageBuffer> WebChromeClient::createImageBuffer(const FloatSize& size, RenderingMode renderingMode, RenderingPurpose purpose, float resolutionScale, const DestinationColorSpace& colorSpace, PixelFormat pixelFormat, bool avoidBackendSizeCheck) const
+{
+    if (!WebProcess::singleton().shouldUseRemoteRenderingFor(purpose)) {
+        if (purpose != RenderingPurpose::ShareableSnapshot)
+            return nullptr;
+
+        return ImageBuffer::create<ImageBufferShareableBitmapBackend>(size, resolutionScale, colorSpace, PixelFormat::BGRA8, RenderingPurpose::ShareableSnapshot, { });
+    }
+
+    return m_page.ensureRemoteRenderingBackendProxy().createImageBuffer(size, renderingMode, purpose, resolutionScale, colorSpace, pixelFormat, avoidBackendSizeCheck);
+}
 #endif
+
+#if ENABLE(WEBGL)
+RefPtr<GraphicsContextGL> WebChromeClient::createGraphicsContextGL(const GraphicsContextGLAttributes& attributes) const
+{
+#if ENABLE(GPU_PROCESS)
+    if (WebProcess::singleton().shouldUseRemoteRenderingForWebGL())
+        return RemoteGraphicsContextGLProxy::create(attributes, m_page.ensureRemoteRenderingBackendProxy().ensureBackendCreated());
+#endif
+    return WebCore::createWebProcessGraphicsContextGL(attributes);
+}
+#endif
+
+RefPtr<PAL::WebGPU::GPU> WebChromeClient::createGPUForWebGPU() const
+{
+#if HAVE(WEBGPU_IMPLEMENTATION)
+#if ENABLE(GPU_PROCESS)
+    return RemoteGPUProxy::create(WebProcess::singleton().ensureGPUProcessConnection(), WebGPU::DowncastConvertToBackingContext::create(), WebGPUIdentifier::generate(), m_page.ensureRemoteRenderingBackendProxy().ensureBackendCreated());
+#else
+    return PAL::WebGPU::create([](PAL::WebGPU::WorkItem&& workItem) {
+        callOnMainRunLoop(WTFMove(workItem));
+    });
+#endif
+#else
+    return nullptr;
+#endif
+}
 
 void WebChromeClient::attachRootGraphicsLayer(Frame&, GraphicsLayer* layer)
 {
@@ -895,10 +936,10 @@ void WebChromeClient::attachRootGraphicsLayer(Frame&, GraphicsLayer* layer)
         m_page.exitAcceleratedCompositingMode();
 }
 
-void WebChromeClient::attachViewOverlayGraphicsLayer(Frame& frame, GraphicsLayer* graphicsLayer)
+void WebChromeClient::attachViewOverlayGraphicsLayer(GraphicsLayer* graphicsLayer)
 {
     if (auto drawingArea = m_page.drawingArea())
-        drawingArea->attachViewOverlayGraphicsLayer(&frame, graphicsLayer);
+        drawingArea->attachViewOverlayGraphicsLayer(graphicsLayer);
 }
 
 void WebChromeClient::setNeedsOneShotDrawingSynchronization()
@@ -906,15 +947,27 @@ void WebChromeClient::setNeedsOneShotDrawingSynchronization()
     notImplemented();
 }
 
-void WebChromeClient::scheduleCompositingLayerFlush()
+bool WebChromeClient::shouldTriggerRenderingUpdate(unsigned rescheduledRenderingUpdateCount) const
 {
-    if (m_page.drawingArea())
-        m_page.drawingArea()->scheduleCompositingLayerFlush();
+    return m_page.shouldTriggerRenderingUpdate(rescheduledRenderingUpdateCount);
 }
 
-bool WebChromeClient::adjustLayerFlushThrottling(LayerFlushThrottleState::Flags flags)
+void WebChromeClient::triggerRenderingUpdate()
 {
-    return m_page.drawingArea() && m_page.drawingArea()->adjustLayerFlushThrottling(flags);
+    if (m_page.drawingArea())
+        m_page.drawingArea()->triggerRenderingUpdate();
+}
+
+unsigned WebChromeClient::remoteImagesCountForTesting() const
+{
+    return m_page.remoteImagesCountForTesting();
+}
+
+void WebChromeClient::contentRuleListNotification(const URL& url, const ContentRuleListResults& results)
+{
+#if ENABLE(CONTENT_EXTENSIONS)
+    m_page.send(Messages::WebPageProxy::ContentRuleListNotification(url, results));
+#endif
 }
 
 bool WebChromeClient::layerTreeStateIsFrozen() const
@@ -930,18 +983,61 @@ bool WebChromeClient::layerTreeStateIsFrozen() const
 RefPtr<ScrollingCoordinator> WebChromeClient::createScrollingCoordinator(Page& page) const
 {
     ASSERT_UNUSED(page, m_page.corePage() == &page);
-    if (m_page.drawingArea()->type() != DrawingAreaTypeRemoteLayerTree)
-        return nullptr;
-    return RemoteScrollingCoordinator::create(&m_page);
+#if PLATFORM(COCOA)
+    switch (m_page.drawingArea()->type()) {
+#if PLATFORM(MAC)
+    case DrawingAreaType::TiledCoreAnimation:
+        return TiledCoreAnimationScrollingCoordinator::create(&m_page);
+#endif
+    case DrawingAreaType::RemoteLayerTree:
+        return RemoteScrollingCoordinator::create(&m_page);
+    }
+#endif
+    return nullptr;
 }
 
 #endif
 
-#if (PLATFORM(IOS) && HAVE(AVKIT)) || (PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE))
+#if ENABLE(VIDEO_PRESENTATION_MODE)
+
+void WebChromeClient::prepareForVideoFullscreen()
+{
+    m_page.videoFullscreenManager();
+}
+
+bool WebChromeClient::canEnterVideoFullscreen(HTMLMediaElementEnums::VideoFullscreenMode mode) const
+{
+    return m_page.videoFullscreenManager().canEnterVideoFullscreen(mode);
+}
 
 bool WebChromeClient::supportsVideoFullscreen(HTMLMediaElementEnums::VideoFullscreenMode mode)
 {
     return m_page.videoFullscreenManager().supportsVideoFullscreen(mode);
+}
+
+bool WebChromeClient::supportsVideoFullscreenStandby()
+{
+    return m_page.videoFullscreenManager().supportsVideoFullscreenStandby();
+}
+
+void WebChromeClient::setMockVideoPresentationModeEnabled(bool enabled)
+{
+    m_page.send(Messages::WebPageProxy::SetMockVideoPresentationModeEnabled(enabled));
+}
+
+void WebChromeClient::enterVideoFullscreenForVideoElement(HTMLVideoElement& videoElement, HTMLMediaElementEnums::VideoFullscreenMode mode, bool standby)
+{
+#if ENABLE(FULLSCREEN_API) && PLATFORM(IOS_FAMILY)
+    ASSERT(standby || mode != HTMLMediaElementEnums::VideoFullscreenModeNone);
+#else
+    ASSERT(mode != HTMLMediaElementEnums::VideoFullscreenModeNone);
+#endif
+    m_page.videoFullscreenManager().enterVideoFullscreenForVideoElement(videoElement, mode, standby);
+}
+
+void WebChromeClient::exitVideoFullscreenForVideoElement(HTMLVideoElement& videoElement, CompletionHandler<void(bool)>&& completionHandler)
+{
+    m_page.videoFullscreenManager().exitVideoFullscreenForVideoElement(videoElement, WTFMove(completionHandler));
 }
 
 void WebChromeClient::setUpPlaybackControlsManager(HTMLMediaElement& mediaElement)
@@ -954,20 +1050,31 @@ void WebChromeClient::clearPlaybackControlsManager()
     m_page.playbackSessionManager().clearPlaybackControlsManager();
 }
 
-void WebChromeClient::enterVideoFullscreenForVideoElement(HTMLVideoElement& videoElement, HTMLMediaElementEnums::VideoFullscreenMode mode)
+void WebChromeClient::playbackControlsMediaEngineChanged()
 {
-    ASSERT(mode != HTMLMediaElementEnums::VideoFullscreenModeNone);
-    m_page.videoFullscreenManager().enterVideoFullscreenForVideoElement(videoElement, mode);
-}
-
-void WebChromeClient::exitVideoFullscreenForVideoElement(HTMLVideoElement& videoElement)
-{
-    m_page.videoFullscreenManager().exitVideoFullscreenForVideoElement(videoElement);
+    m_page.playbackSessionManager().mediaEngineChanged();
 }
 
 #endif
 
-#if PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE)
+#if ENABLE(MEDIA_USAGE)
+void WebChromeClient::addMediaUsageManagerSession(MediaSessionIdentifier identifier, const String& bundleIdentifier, const URL& pageURL)
+{
+    m_page.addMediaUsageManagerSession(identifier, bundleIdentifier, pageURL);
+}
+
+void WebChromeClient::updateMediaUsageManagerSessionState(MediaSessionIdentifier identifier, const MediaUsageInfo& usage)
+{
+    m_page.updateMediaUsageManagerSessionState(identifier, usage);
+}
+
+void WebChromeClient::removeMediaUsageManagerSession(MediaSessionIdentifier identifier)
+{
+    m_page.removeMediaUsageManagerSession(identifier);
+}
+#endif // ENABLE(MEDIA_USAGE)
+
+#if ENABLE(VIDEO_PRESENTATION_MODE)
 
 void WebChromeClient::exitVideoFullscreenToModeWithoutAnimation(HTMLVideoElement& videoElement, HTMLMediaElementEnums::VideoFullscreenMode targetMode)
 {
@@ -995,7 +1102,7 @@ void WebChromeClient::exitFullScreenForElement(Element* element)
 
 #endif
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 FloatSize WebChromeClient::screenSize() const
 {
@@ -1007,7 +1114,17 @@ FloatSize WebChromeClient::availableScreenSize() const
     return m_page.availableScreenSize();
 }
 
+FloatSize WebChromeClient::overrideScreenSize() const
+{
+    return m_page.overrideScreenSize();
+}
+
 #endif
+
+void WebChromeClient::dispatchDisabledAdaptationsDidChange(const OptionSet<DisabledAdaptations>& disabledAdaptations) const
+{
+    m_page.disabledAdaptationsDidChange(disabledAdaptations);
+}
 
 void WebChromeClient::dispatchViewportPropertiesDidChange(const ViewportArguments& viewportArguments) const
 {
@@ -1034,14 +1151,27 @@ Color WebChromeClient::underlayColor() const
     return m_page.underlayColor();
 }
 
-void WebChromeClient::pageExtendedBackgroundColorDidChange(Color backgroundColor) const
+void WebChromeClient::themeColorChanged() const
 {
-#if PLATFORM(MAC)
-    m_page.send(Messages::WebPageProxy::PageExtendedBackgroundColorDidChange(backgroundColor));
-#else
-    UNUSED_PARAM(backgroundColor);
-#endif
+    m_page.themeColorChanged();
 }
+
+void WebChromeClient::pageExtendedBackgroundColorDidChange() const
+{
+    m_page.pageExtendedBackgroundColorDidChange();
+}
+
+void WebChromeClient::sampledPageTopColorChanged() const
+{
+    m_page.sampledPageTopColorChanged();
+}
+
+#if ENABLE(APP_HIGHLIGHTS)
+WebCore::HighlightVisibility WebChromeClient::appHighlightsVisiblility() const
+{
+    return m_page.appHighlightsVisiblility();
+}
+#endif
 
 void WebChromeClient::wheelEventHandlersChanged(bool hasHandlers)
 {
@@ -1080,7 +1210,7 @@ void WebChromeClient::disableSuddenTermination()
 
 void WebChromeClient::didAddHeaderLayer(GraphicsLayer& headerParent)
 {
-#if ENABLE(RUBBER_BANDING)
+#if HAVE(RUBBER_BANDING)
     if (PageBanner* banner = m_page.headerPageBanner())
         banner->didAddParentLayer(&headerParent);
 #else
@@ -1090,7 +1220,7 @@ void WebChromeClient::didAddHeaderLayer(GraphicsLayer& headerParent)
 
 void WebChromeClient::didAddFooterLayer(GraphicsLayer& footerParent)
 {
-#if ENABLE(RUBBER_BANDING)
+#if HAVE(RUBBER_BANDING)
     if (PageBanner* banner = m_page.footerPageBanner())
         banner->didAddParentLayer(&footerParent);
 #else
@@ -1103,9 +1233,9 @@ bool WebChromeClient::shouldUseTiledBackingForFrameView(const FrameView& frameVi
     return m_page.drawingArea()->shouldUseTiledBackingForFrameView(frameView);
 }
 
-void WebChromeClient::isPlayingMediaDidChange(MediaProducer::MediaStateFlags state, uint64_t sourceElementID)
+void WebChromeClient::isPlayingMediaDidChange(MediaProducerMediaStateFlags state)
 {
-    m_page.send(Messages::WebPageProxy::IsPlayingMediaDidChange(state, sourceElementID));
+    m_page.isPlayingMediaDidChange(state);
 }
 
 void WebChromeClient::handleAutoplayEvent(AutoplayEvent event, OptionSet<AutoplayEventFlags> flags)
@@ -1113,31 +1243,12 @@ void WebChromeClient::handleAutoplayEvent(AutoplayEvent event, OptionSet<Autopla
     m_page.send(Messages::WebPageProxy::HandleAutoplayEvent(event, flags));
 }
 
-#if ENABLE(MEDIA_SESSION)
-
-void WebChromeClient::hasMediaSessionWithActiveMediaElementsDidChange(bool state)
-{
-    m_page.send(Messages::WebPageProxy::HasMediaSessionWithActiveMediaElementsDidChange(state));
-}
-
-void WebChromeClient::mediaSessionMetadataDidChange(const MediaSessionMetadata& metadata)
-{
-    m_page.send(Messages::WebPageProxy::MediaSessionMetadataDidChange(metadata));
-}
-
-void WebChromeClient::focusedContentMediaElementDidChange(uint64_t elementID)
-{
-    m_page.send(Messages::WebPageProxy::FocusedContentMediaElementDidChange(elementID));
-}
-
-#endif
-
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 bool WebChromeClient::wrapCryptoKey(const Vector<uint8_t>& key, Vector<uint8_t>& wrappedKey) const
 {
     bool succeeded;
-    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::WrapCryptoKey(key), Messages::WebPageProxy::WrapCryptoKey::Reply(succeeded, wrappedKey), m_page.pageID()))
+    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::WrapCryptoKey(key), Messages::WebPageProxy::WrapCryptoKey::Reply(succeeded, wrappedKey), m_page.identifier()))
         return false;
     return succeeded;
 }
@@ -1145,18 +1256,49 @@ bool WebChromeClient::wrapCryptoKey(const Vector<uint8_t>& key, Vector<uint8_t>&
 bool WebChromeClient::unwrapCryptoKey(const Vector<uint8_t>& wrappedKey, Vector<uint8_t>& key) const
 {
     bool succeeded;
-    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::UnwrapCryptoKey(wrappedKey), Messages::WebPageProxy::UnwrapCryptoKey::Reply(succeeded, key), m_page.pageID()))
+    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::UnwrapCryptoKey(wrappedKey), Messages::WebPageProxy::UnwrapCryptoKey::Reply(succeeded, key), m_page.identifier()))
         return false;
     return succeeded;
 }
 
 #endif
 
+#if ENABLE(APP_HIGHLIGHTS)
+void WebChromeClient::storeAppHighlight(WebCore::AppHighlight&& highlight) const
+{
+    highlight.isNewGroup = m_page.highlightIsNewGroup();
+    highlight.requestOriginatedInApp = m_page.highlightRequestOriginatedInApp();
+    m_page.send(Messages::WebPageProxy::StoreAppHighlight(highlight));
+}
+#endif
+
+void WebChromeClient::setTextIndicator(const WebCore::TextIndicatorData& indicatorData) const
+{
+    m_page.setTextIndicator(indicatorData);
+}
+
+String WebChromeClient::signedPublicKeyAndChallengeString(unsigned keySizeIndex, const String& challengeString, const URL& url) const
+{
+    String result;
+    if (!WebProcess::singleton().parentProcessConnection()->sendSync(Messages::WebPageProxy::SignedPublicKeyAndChallengeString(keySizeIndex, challengeString, url), Messages::WebPageProxy::SignedPublicKeyAndChallengeString::Reply(result), m_page.identifier()))
+        return emptyString();
+    return result;
+}
+
 #if ENABLE(TELEPHONE_NUMBER_DETECTION) && PLATFORM(MAC)
 
-void WebChromeClient::handleTelephoneNumberClick(const String& number, const IntPoint& point)
+void WebChromeClient::handleTelephoneNumberClick(const String& number, const IntPoint& point, const IntRect& rect)
 {
-    m_page.handleTelephoneNumberClick(number, point);
+    m_page.handleTelephoneNumberClick(number, point, rect);
+}
+
+#endif
+
+#if ENABLE(DATA_DETECTION)
+
+void WebChromeClient::handleClickForDataDetectionResult(const DataDetectorElementInfo& info, const IntPoint& clickLocation)
+{
+    m_page.handleClickForDataDetectionResult(info, clickLocation);
 }
 
 #endif
@@ -1171,6 +1313,16 @@ void WebChromeClient::handleSelectionServiceClick(FrameSelection& selection, con
 bool WebChromeClient::hasRelevantSelectionServices(bool isTextOnly) const
 {
     return (isTextOnly && WebProcess::singleton().hasSelectionServices()) || WebProcess::singleton().hasRichContentServices();
+}
+
+void WebChromeClient::handleImageServiceClick(const IntPoint& point, Image& image, HTMLImageElement& element)
+{
+    m_page.handleImageServiceClick(point, image, element);
+}
+
+void WebChromeClient::handlePDFServiceClick(const IntPoint& point, HTMLAttachmentElement& element)
+{
+    m_page.handlePDFServiceClick(point, element);
 }
 
 #endif
@@ -1192,26 +1344,38 @@ void WebChromeClient::handleAutoFillButtonClick(HTMLInputElement& inputElement)
     m_page.send(Messages::WebPageProxy::HandleAutoFillButtonClick(UserData(WebProcess::singleton().transformObjectsToHandles(userData.get()).get())));
 }
 
-#if ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS)
+void WebChromeClient::inputElementDidResignStrongPasswordAppearance(HTMLInputElement& inputElement)
+{
+    RefPtr<API::Object> userData;
 
-void WebChromeClient::addPlaybackTargetPickerClient(uint64_t contextId)
+    // Notify the bundle client.
+    auto nodeHandle = InjectedBundleNodeHandle::getOrCreate(inputElement);
+    m_page.injectedBundleUIClient().didResignInputElementStrongPasswordAppearance(m_page, nodeHandle.get(), userData);
+
+    // Notify the UIProcess.
+    m_page.send(Messages::WebPageProxy::DidResignInputElementStrongPasswordAppearance { UserData { WebProcess::singleton().transformObjectsToHandles(userData.get()).get() } });
+}
+
+#if ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS_FAMILY)
+
+void WebChromeClient::addPlaybackTargetPickerClient(PlaybackTargetClientContextIdentifier contextId)
 {
     m_page.send(Messages::WebPageProxy::AddPlaybackTargetPickerClient(contextId));
 }
 
-void WebChromeClient::removePlaybackTargetPickerClient(uint64_t contextId)
+void WebChromeClient::removePlaybackTargetPickerClient(PlaybackTargetClientContextIdentifier contextId)
 {
     m_page.send(Messages::WebPageProxy::RemovePlaybackTargetPickerClient(contextId));
 }
 
-void WebChromeClient::showPlaybackTargetPicker(uint64_t contextId, const IntPoint& position, bool isVideo)
+void WebChromeClient::showPlaybackTargetPicker(PlaybackTargetClientContextIdentifier contextId, const IntPoint& position, bool isVideo)
 {
     FrameView* frameView = m_page.mainFrame()->view();
     FloatRect rect(frameView->contentsToRootView(frameView->windowToContents(position)), FloatSize());
     m_page.send(Messages::WebPageProxy::ShowPlaybackTargetPicker(contextId, rect, isVideo));
 }
 
-void WebChromeClient::playbackTargetPickerClientStateDidChange(uint64_t contextId, MediaProducer::MediaStateFlags state)
+void WebChromeClient::playbackTargetPickerClientStateDidChange(PlaybackTargetClientContextIdentifier contextId, MediaProducerMediaStateFlags state)
 {
     m_page.send(Messages::WebPageProxy::PlaybackTargetPickerClientStateDidChange(contextId, state));
 }
@@ -1221,11 +1385,15 @@ void WebChromeClient::setMockMediaPlaybackTargetPickerEnabled(bool enabled)
     m_page.send(Messages::WebPageProxy::SetMockMediaPlaybackTargetPickerEnabled(enabled));
 }
 
-void WebChromeClient::setMockMediaPlaybackTargetPickerState(const String& name, MediaPlaybackTargetContext::State state)
+void WebChromeClient::setMockMediaPlaybackTargetPickerState(const String& name, MediaPlaybackTargetContext::MockState state)
 {
     m_page.send(Messages::WebPageProxy::SetMockMediaPlaybackTargetPickerState(name, state));
 }
 
+void WebChromeClient::mockMediaPlaybackTargetPickerDismissPopup()
+{
+    m_page.send(Messages::WebPageProxy::MockMediaPlaybackTargetPickerDismissPopup());
+}
 #endif
 
 void WebChromeClient::imageOrMediaDocumentSizeChanged(const IntSize& newSize)
@@ -1246,6 +1414,155 @@ void WebChromeClient::didInvalidateDocumentMarkerRects()
 {
     m_page.findController().didInvalidateDocumentMarkerRects();
 }
+
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+void WebChromeClient::hasStorageAccess(RegistrableDomain&& subFrameDomain, RegistrableDomain&& topFrameDomain, Frame& frame, CompletionHandler<void(bool)>&& completionHandler)
+{
+    auto* webFrame = WebFrame::fromCoreFrame(frame);
+    ASSERT(webFrame);
+    m_page.hasStorageAccess(WTFMove(subFrameDomain), WTFMove(topFrameDomain), *webFrame, WTFMove(completionHandler));
+}
+
+void WebChromeClient::requestStorageAccess(RegistrableDomain&& subFrameDomain, RegistrableDomain&& topFrameDomain, Frame& frame, StorageAccessScope scope, CompletionHandler<void(RequestStorageAccessResult)>&& completionHandler)
+{
+    auto* webFrame = WebFrame::fromCoreFrame(frame);
+    ASSERT(webFrame);
+    m_page.requestStorageAccess(WTFMove(subFrameDomain), WTFMove(topFrameDomain), *webFrame, scope, WTFMove(completionHandler));
+}
+
+bool WebChromeClient::hasPageLevelStorageAccess(const WebCore::RegistrableDomain& topLevelDomain, const WebCore::RegistrableDomain& resourceDomain) const
+{
+    return m_page.hasPageLevelStorageAccess(topLevelDomain, resourceDomain);
+}
+#endif
+
+#if ENABLE(DEVICE_ORIENTATION)
+void WebChromeClient::shouldAllowDeviceOrientationAndMotionAccess(Frame& frame, bool mayPrompt, CompletionHandler<void(DeviceOrientationOrMotionPermissionState)>&& callback)
+{
+    auto* webFrame = WebFrame::fromCoreFrame(frame);
+    ASSERT(webFrame);
+    m_page.shouldAllowDeviceOrientationAndMotionAccess(webFrame->frameID(), webFrame->info(), mayPrompt, WTFMove(callback));
+}
+#endif
+
+#if ENABLE(ORIENTATION_EVENTS) && !PLATFORM(IOS_FAMILY)
+int WebChromeClient::deviceOrientation() const
+{
+    notImplemented();
+    return 0;
+}
+#endif
+
+void WebChromeClient::configureLoggingChannel(const String& channelName, WTFLogChannelState state, WTFLogLevel level)
+{
+    m_page.configureLoggingChannel(channelName, state, level);
+}
+
+bool WebChromeClient::userIsInteracting() const
+{
+    return m_page.userIsInteracting();
+}
+
+void WebChromeClient::setUserIsInteracting(bool userIsInteracting)
+{
+    m_page.setUserIsInteracting(userIsInteracting);
+}
+
+#if ENABLE(WEB_AUTHN)
+void WebChromeClient::setMockWebAuthenticationConfiguration(const MockWebAuthenticationConfiguration& configuration)
+{
+    m_page.send(Messages::WebPageProxy::SetMockWebAuthenticationConfiguration(configuration));
+}
+#endif
+
+void WebChromeClient::animationDidFinishForElement(const Element& element)
+{
+    m_page.animationDidFinishForElement(element);
+}
+
+#if PLATFORM(MAC)
+void WebChromeClient::changeUniversalAccessZoomFocus(const WebCore::IntRect& viewRect, const WebCore::IntRect& selectionRect)
+{
+    m_page.send(Messages::WebPageProxy::ChangeUniversalAccessZoomFocus(viewRect, selectionRect));
+}
+#endif
+
+#if ENABLE(IMAGE_ANALYSIS)
+
+void WebChromeClient::requestTextRecognition(Element& element, TextRecognitionOptions&& options, CompletionHandler<void(RefPtr<Element>&&)>&& completion)
+{
+    m_page.requestTextRecognition(element, WTFMove(options), WTFMove(completion));
+}
+
+#endif
+
+#if ENABLE(TEXT_AUTOSIZING)
+
+void WebChromeClient::textAutosizingUsesIdempotentModeChanged()
+{
+    m_page.textAutosizingUsesIdempotentModeChanged();
+}
+
+#endif
+
+#if ENABLE(MEDIA_CONTROLS_CONTEXT_MENUS) && USE(UICONTEXTMENU)
+
+void WebChromeClient::showMediaControlsContextMenu(FloatRect&& targetFrame, Vector<MediaControlsContextMenuItem>&& items, CompletionHandler<void(MediaControlsContextMenuItem::ID)>&& completionHandler)
+{
+    m_page.showMediaControlsContextMenu(WTFMove(targetFrame), WTFMove(items), WTFMove(completionHandler));
+}
+
+#endif // ENABLE(MEDIA_CONTROLS_CONTEXT_MENUS) && USE(UICONTEXTMENU)
+
+#if ENABLE(WEBXR) && !USE(OPENXR)
+void WebChromeClient::enumerateImmersiveXRDevices(CompletionHandler<void(const PlatformXR::Instance::DeviceList&)>&& completionHandler)
+{
+    m_page.xrSystemProxy().enumerateImmersiveXRDevices(WTFMove(completionHandler));
+}
+
+void WebChromeClient::requestPermissionOnXRSessionFeatures(const SecurityOriginData& origin, PlatformXR::SessionMode mode, const PlatformXR::Device::FeatureList& granted, const PlatformXR::Device::FeatureList& consentRequired, const PlatformXR::Device::FeatureList& consentOptional, CompletionHandler<void(std::optional<PlatformXR::Device::FeatureList>&&)>&& completionHandler)
+{
+    m_page.xrSystemProxy().requestPermissionOnSessionFeatures(origin, mode, granted, consentRequired, consentOptional, WTFMove(completionHandler));
+}
+#endif
+
+#if ENABLE(APPLE_PAY_AMS_UI)
+
+void WebChromeClient::startApplePayAMSUISession(const URL& originatingURL, const ApplePayAMSUIRequest& request, CompletionHandler<void(std::optional<bool>&&)>&& completionHandler)
+{
+    m_page.sendWithAsyncReply(Messages::WebPageProxy::StartApplePayAMSUISession(originatingURL, request), WTFMove(completionHandler));
+}
+
+void WebChromeClient::abortApplePayAMSUISession()
+{
+    m_page.send(Messages::WebPageProxy::AbortApplePayAMSUISession());
+}
+
+#endif // ENABLE(APPLE_PAY_AMS_UI)
+
+void WebChromeClient::requestCookieConsent(CompletionHandler<void(CookieConsentDecisionResult)>&& completion)
+{
+    m_page.sendWithAsyncReply(Messages::WebPageProxy::RequestCookieConsent(), WTFMove(completion));
+}
+
+void WebChromeClient::classifyModalContainerControls(Vector<String>&& strings, CompletionHandler<void(Vector<ModalContainerControlType>&&)>&& completion)
+{
+    m_page.sendWithAsyncReply(Messages::WebPageProxy::ClassifyModalContainerControls(WTFMove(strings)), WTFMove(completion));
+}
+
+void WebChromeClient::decidePolicyForModalContainer(OptionSet<ModalContainerControlType> types, CompletionHandler<void(ModalContainerDecision)>&& completion)
+{
+    m_page.sendWithAsyncReply(Messages::WebPageProxy::DecidePolicyForModalContainer(types), WTFMove(completion));
+}
+
+#if USE(APPLE_INTERNAL_SDK)
+#include <WebKitAdditions/WebChromeClientAdditions.cpp>
+#else
+const AtomString& WebChromeClient::searchStringForModalContainerObserver() const
+{
+    return nullAtom();
+}
+#endif
 
 uint64_t WebChromeClient::nativeWindowID() const
 {

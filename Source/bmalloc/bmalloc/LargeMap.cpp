@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,8 @@
 #include "LargeMap.h"
 #include <utility>
 
+#if !BUSE(LIBPAS)
+
 namespace bmalloc {
 
 LargeRange LargeMap::remove(size_t alignment, size_t size)
@@ -34,6 +36,9 @@ LargeRange LargeMap::remove(size_t alignment, size_t size)
 
     LargeRange* candidate = m_free.end();
     for (LargeRange* it = m_free.begin(); it != m_free.end(); ++it) {
+        if (!it->isEligibile())
+            continue;
+
         if (it->size() < size)
             continue;
 
@@ -72,8 +77,17 @@ void LargeMap::add(const LargeRange& range)
 
         merged = merge(merged, m_free.pop(i--));
     }
-    
+
+    merged.setUsedSinceLastScavenge();
     m_free.push(merged);
 }
 
+void LargeMap::markAllAsEligibile()
+{
+    for (LargeRange& range : m_free)
+        range.setEligible(true);
+}
+
 } // namespace bmalloc
+
+#endif

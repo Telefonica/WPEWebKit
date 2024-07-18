@@ -8,14 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_TRANSIENT_TRANSIENT_DETECTOR_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_TRANSIENT_TRANSIENT_DETECTOR_H_
+#ifndef MODULES_AUDIO_PROCESSING_TRANSIENT_TRANSIENT_DETECTOR_H_
+#define MODULES_AUDIO_PROCESSING_TRANSIENT_TRANSIENT_DETECTOR_H_
+
+#include <stddef.h>
 
 #include <deque>
 #include <memory>
 
-#include "webrtc/modules/audio_processing/transient/moving_moments.h"
-#include "webrtc/modules/audio_processing/transient/wpd_tree.h"
+#include "modules/audio_processing/transient/moving_moments.h"
+#include "modules/audio_processing/transient/wpd_tree.h"
 
 namespace webrtc {
 
@@ -35,8 +37,8 @@ class TransientDetector {
 
   ~TransientDetector();
 
-  // Calculates the log-likelihood of the existence of a transient in |data|.
-  // |data_length| has to be equal to |samples_per_chunk_|.
+  // Calculates the log-likelihood of the existence of a transient in `data`.
+  // `data_length` has to be equal to `samples_per_chunk_`.
   // Returns a value between 0 and 1, as a non linear representation of this
   // likelihood.
   // Returns a negative value on error.
@@ -69,7 +71,7 @@ class TransientDetector {
   float last_second_moment_[kLeaves];
 
   // We keep track of the previous results from the previous chunks, so it can
-  // be used to effectively give results according to the |transient_length|.
+  // be used to effectively give results according to the `transient_length`.
   std::deque<float> previous_results_;
 
   // Number of chunks that are going to return only zeros at the beginning of
@@ -84,4 +86,4 @@ class TransientDetector {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_TRANSIENT_TRANSIENT_DETECTOR_H_
+#endif  // MODULES_AUDIO_PROCESSING_TRANSIENT_TRANSIENT_DETECTOR_H_

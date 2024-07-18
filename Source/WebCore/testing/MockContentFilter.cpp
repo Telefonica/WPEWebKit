@@ -62,9 +62,9 @@ bool MockContentFilter::enabled()
     return enabled;
 }
 
-std::unique_ptr<MockContentFilter> MockContentFilter::create()
+UniqueRef<MockContentFilter> MockContentFilter::create()
 {
-    return std::make_unique<MockContentFilter>();
+    return makeUniqueRef<MockContentFilter>();
 }
 
 void MockContentFilter::willSendRequest(ResourceRequest& request, const ResourceResponse& redirectResponse)
@@ -88,7 +88,7 @@ void MockContentFilter::willSendRequest(ResourceRequest& request, const Resource
 
     URL modifiedRequestURL { request.url(), modifiedRequestURLString };
     if (!modifiedRequestURL.isValid()) {
-        LOG(ContentFiltering, "MockContentFilter failed to convert %s to a WebCore::URL.\n", modifiedRequestURL.string().ascii().data());
+        LOG(ContentFiltering, "MockContentFilter failed to convert %s to a  URL.\n", modifiedRequestURL.string().ascii().data());
         return;
     }
 
@@ -100,7 +100,7 @@ void MockContentFilter::responseReceived(const ResourceResponse&)
     maybeDetermineStatus(DecisionPoint::AfterResponse);
 }
 
-void MockContentFilter::addData(const char*, int)
+void MockContentFilter::addData(const SharedBuffer&)
 {
     maybeDetermineStatus(DecisionPoint::AfterAddData);
 }
@@ -110,7 +110,7 @@ void MockContentFilter::finishedAddingData()
     maybeDetermineStatus(DecisionPoint::AfterFinishedAddingData);
 }
 
-Ref<SharedBuffer> MockContentFilter::replacementData() const
+Ref<FragmentedSharedBuffer> MockContentFilter::replacementData() const
 {
     ASSERT(didBlockData());
     return SharedBuffer::create(m_replacementData.data(), m_replacementData.size());
@@ -134,7 +134,7 @@ ContentFilterUnblockHandler MockContentFilter::unblockHandler() const
 
 String MockContentFilter::unblockRequestDeniedScript() const
 {
-    return ASCIILiteral("unblockRequestDenied()");
+    return "unblockRequestDenied()"_s;
 }
 
 void MockContentFilter::maybeDetermineStatus(DecisionPoint decisionPoint)

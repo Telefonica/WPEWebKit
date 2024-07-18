@@ -8,87 +8,188 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/api/video/i420_buffer.h"
-#include "webrtc/modules/video_coding/codecs/test/mock/mock_packet_manipulator.h"
-#include "webrtc/modules/video_coding/codecs/test/videoprocessor.h"
-#include "webrtc/modules/video_coding/include/mock/mock_video_codec_interface.h"
-#include "webrtc/modules/video_coding/include/video_coding.h"
-#include "webrtc/test/gmock.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/testsupport/mock/mock_frame_reader.h"
-#include "webrtc/test/testsupport/mock/mock_frame_writer.h"
-#include "webrtc/test/testsupport/packet_reader.h"
-#include "webrtc/test/testsupport/unittest_utils.h"
-#include "webrtc/typedefs.h"
+#include "modules/video_coding/codecs/test/videoprocessor.h"
+
+#include <memory>
+
+#include "api/scoped_refptr.h"
+#include "api/test/mock_video_decoder.h"
+#include "api/test/mock_video_encoder.h"
+#include "api/test/videocodec_test_fixture.h"
+#include "api/video/i420_buffer.h"
+#include "media/base/media_constants.h"
+#include "modules/video_coding/codecs/test/videocodec_test_stats_impl.h"
+#include "rtc_base/task_queue_for_test.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
+#include "test/testsupport/mock/mock_frame_reader.h"
 
 using ::testing::_;
-using ::testing::AtLeast;
+using ::testing::AllOf;
+using ::testing::Field;
+using ::testing::Property;
+using ::testing::ResultOf;
 using ::testing::Return;
 
 namespace webrtc {
 namespace test {
 
-// Very basic testing for VideoProcessor. It's mostly tested by running the
-// video_quality_measurement program.
-class VideoProcessorTest : public testing::Test {
- protected:
-  MockVideoEncoder encoder_mock_;
-  MockVideoDecoder decoder_mock_;
-  MockFrameReader frame_reader_mock_;
-  MockFrameWriter frame_writer_mock_;
-  MockPacketManipulator packet_manipulator_mock_;
-  Stats stats_;
-  TestConfig config_;
-  VideoCodec codec_settings_;
+namespace {
 
-  VideoProcessorTest() {}
-  virtual ~VideoProcessorTest() {}
-  void SetUp() {
-    // Get a codec configuration struct and configure it.
-    VideoCodingModule::Codec(kVideoCodecVP8, &codec_settings_);
-    config_.codec_settings = &codec_settings_;
-    config_.codec_settings->startBitrate = 100;
-    config_.codec_settings->width = 352;
-    config_.codec_settings->height = 288;
+const int kWidth = 352;
+const int kHeight = 288;
+
+}  // namespace
+
+class VideoProcessorTest : public ::testing::Test {
+ protected:
+  VideoProcessorTest() : q_("VP queue") {
+    config_.SetCodecSettings(cricket::kVp8CodecName, 1, 1, 1, false, false,
+                             false, kWidth, kHeight);
+
+    decoder_mock_ = new MockVideoDecoder();
+    decoders_.push_back(std::unique_ptr<VideoDecoder>(decoder_mock_));
+
+    ExpectInit();
+    q_.SendTask([this] {
+      video_processor_ = std::make_unique<VideoProcessor>(
+          &encoder_mock_, &decoders_, &frame_reader_mock_, config_, &stats_,
+          &encoded_frame_writers_, /*decoded_frame_writers=*/nullptr);
+    });
   }
-  void TearDown() {}
+
+  ~VideoProcessorTest() {
+    q_.SendTask([this] { video_processor_.reset(); });
+  }
 
   void ExpectInit() {
-    EXPECT_CALL(encoder_mock_, InitEncode(_, _, _)).Times(1);
-    EXPECT_CALL(encoder_mock_, RegisterEncodeCompleteCallback(_))
-        .Times(AtLeast(1));
-    EXPECT_CALL(decoder_mock_, InitDecode(_, _)).Times(1);
-    EXPECT_CALL(decoder_mock_, RegisterDecodeCompleteCallback(_))
-        .Times(AtLeast(1));
-    EXPECT_CALL(frame_reader_mock_, NumberOfFrames()).WillOnce(Return(1));
-    EXPECT_CALL(frame_reader_mock_, FrameLength()).WillOnce(Return(152064));
+    EXPECT_CALL(encoder_mock_, InitEncode(_, _));
+    EXPECT_CALL(encoder_mock_, RegisterEncodeCompleteCallback);
+    EXPECT_CALL(*decoder_mock_, Configure);
+    EXPECT_CALL(*decoder_mock_, RegisterDecodeCompleteCallback);
   }
+
+  void ExpectRelease() {
+    EXPECT_CALL(encoder_mock_, Release()).Times(1);
+    EXPECT_CALL(encoder_mock_, RegisterEncodeCompleteCallback(_)).Times(1);
+    EXPECT_CALL(*decoder_mock_, Release()).Times(1);
+    EXPECT_CALL(*decoder_mock_, RegisterDecodeCompleteCallback(_)).Times(1);
+  }
+
+  TaskQueueForTest q_;
+
+  VideoCodecTestFixture::Config config_;
+
+  MockVideoEncoder encoder_mock_;
+  MockVideoDecoder* decoder_mock_;
+  std::vector<std::unique_ptr<VideoDecoder>> decoders_;
+  MockFrameReader frame_reader_mock_;
+  VideoCodecTestStatsImpl stats_;
+  VideoProcessor::IvfFileWriterMap encoded_frame_writers_;
+  std::unique_ptr<VideoProcessor> video_processor_;
 };
 
-TEST_F(VideoProcessorTest, Init) {
-  ExpectInit();
-  VideoProcessorImpl video_processor(
-      &encoder_mock_, &decoder_mock_, &frame_reader_mock_, &frame_writer_mock_,
-      &packet_manipulator_mock_, config_, &stats_,
-      nullptr /* source_frame_writer */, nullptr /* encoded_frame_writer */,
-      nullptr /* decoded_frame_writer */);
-  ASSERT_TRUE(video_processor.Init());
+TEST_F(VideoProcessorTest, InitRelease) {
+  ExpectRelease();
 }
 
-TEST_F(VideoProcessorTest, ProcessFrame) {
-  ExpectInit();
-  EXPECT_CALL(encoder_mock_, Encode(_, _, _)).Times(1);
-  EXPECT_CALL(frame_reader_mock_, ReadFrame())
-      .WillOnce(Return(I420Buffer::Create(50, 50)));
-  // Since we don't return any callback from the mock, the decoder will not
-  // be more than initialized...
-  VideoProcessorImpl video_processor(
-      &encoder_mock_, &decoder_mock_, &frame_reader_mock_, &frame_writer_mock_,
-      &packet_manipulator_mock_, config_, &stats_,
-      nullptr /* source_frame_writer */, nullptr /* encoded_frame_writer */,
-      nullptr /* decoded_frame_writer */);
-  ASSERT_TRUE(video_processor.Init());
-  video_processor.ProcessFrame(0);
+TEST_F(VideoProcessorTest, ProcessFrames_FixedFramerate) {
+  const int kBitrateKbps = 456;
+  const int kFramerateFps = 31;
+  EXPECT_CALL(
+      encoder_mock_,
+      SetRates(Field(&VideoEncoder::RateControlParameters::framerate_fps,
+                     static_cast<double>(kFramerateFps))))
+      .Times(1);
+  q_.SendTask([=] { video_processor_->SetRates(kBitrateKbps, kFramerateFps); });
+
+  EXPECT_CALL(frame_reader_mock_, PullFrame(_, _, _))
+      .WillRepeatedly(Return(I420Buffer::Create(kWidth, kHeight)));
+  EXPECT_CALL(
+      encoder_mock_,
+      Encode(Property(&VideoFrame::timestamp, 1 * 90000 / kFramerateFps), _))
+      .Times(1);
+  q_.SendTask([this] { video_processor_->ProcessFrame(); });
+
+  EXPECT_CALL(
+      encoder_mock_,
+      Encode(Property(&VideoFrame::timestamp, 2 * 90000 / kFramerateFps), _))
+      .Times(1);
+  q_.SendTask([this] { video_processor_->ProcessFrame(); });
+
+  ExpectRelease();
+}
+
+TEST_F(VideoProcessorTest, ProcessFrames_VariableFramerate) {
+  const int kBitrateKbps = 456;
+  const int kStartFramerateFps = 27;
+  const int kStartTimestamp = 90000 / kStartFramerateFps;
+  EXPECT_CALL(
+      encoder_mock_,
+      SetRates(Field(&VideoEncoder::RateControlParameters::framerate_fps,
+                     static_cast<double>(kStartFramerateFps))))
+      .Times(1);
+  q_.SendTask(
+      [=] { video_processor_->SetRates(kBitrateKbps, kStartFramerateFps); });
+
+  EXPECT_CALL(frame_reader_mock_, PullFrame(_, _, _))
+      .WillRepeatedly(Return(I420Buffer::Create(kWidth, kHeight)));
+  EXPECT_CALL(encoder_mock_,
+              Encode(Property(&VideoFrame::timestamp, kStartTimestamp), _))
+      .Times(1);
+  q_.SendTask([this] { video_processor_->ProcessFrame(); });
+
+  const int kNewFramerateFps = 13;
+  EXPECT_CALL(
+      encoder_mock_,
+      SetRates(Field(&VideoEncoder::RateControlParameters::framerate_fps,
+                     static_cast<double>(kNewFramerateFps))))
+      .Times(1);
+  q_.SendTask(
+      [=] { video_processor_->SetRates(kBitrateKbps, kNewFramerateFps); });
+
+  EXPECT_CALL(encoder_mock_,
+              Encode(Property(&VideoFrame::timestamp,
+                              kStartTimestamp + 90000 / kNewFramerateFps),
+                     _))
+      .Times(1);
+  q_.SendTask([this] { video_processor_->ProcessFrame(); });
+
+  ExpectRelease();
+}
+
+TEST_F(VideoProcessorTest, SetRates) {
+  const uint32_t kBitrateKbps = 123;
+  const int kFramerateFps = 17;
+
+  EXPECT_CALL(
+      encoder_mock_,
+      SetRates(AllOf(ResultOf(
+                         [](const VideoEncoder::RateControlParameters& params) {
+                           return params.bitrate.get_sum_kbps();
+                         },
+                         kBitrateKbps),
+                     Field(&VideoEncoder::RateControlParameters::framerate_fps,
+                           static_cast<double>(kFramerateFps)))))
+      .Times(1);
+  q_.SendTask([=] { video_processor_->SetRates(kBitrateKbps, kFramerateFps); });
+
+  const uint32_t kNewBitrateKbps = 456;
+  const int kNewFramerateFps = 34;
+  EXPECT_CALL(
+      encoder_mock_,
+      SetRates(AllOf(ResultOf(
+                         [](const VideoEncoder::RateControlParameters& params) {
+                           return params.bitrate.get_sum_kbps();
+                         },
+                         kNewBitrateKbps),
+                     Field(&VideoEncoder::RateControlParameters::framerate_fps,
+                           static_cast<double>(kNewFramerateFps)))))
+      .Times(1);
+  q_.SendTask(
+      [=] { video_processor_->SetRates(kNewBitrateKbps, kNewFramerateFps); });
+
+  ExpectRelease();
 }
 
 }  // namespace test

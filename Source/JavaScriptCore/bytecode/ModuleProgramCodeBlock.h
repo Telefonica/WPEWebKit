@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2022 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Cameron Zwarich <cwzwarich@uwaterloo.ca>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,47 +34,50 @@
 
 namespace JSC {
 
-class ModuleProgramCodeBlock : public GlobalCodeBlock {
+class ModuleProgramCodeBlock final : public GlobalCodeBlock {
 public:
     typedef GlobalCodeBlock Base;
     DECLARE_INFO;
 
-    static ModuleProgramCodeBlock* create(VM* vm, CopyParsedBlockTag, ModuleProgramCodeBlock& other)
+    template<typename, SubspaceAccess>
+    static GCClient::IsoSubspace* subspaceFor(VM& vm)
     {
-        ModuleProgramCodeBlock* instance = new (NotNull, allocateCell<ModuleProgramCodeBlock>(vm->heap))
-            ModuleProgramCodeBlock(vm, vm->moduleProgramCodeBlockStructure.get(), CopyParsedBlock, other);
-        instance->finishCreation(*vm, CopyParsedBlock, other);
+        return &vm.codeBlockSpace();
+    }
+
+    static ModuleProgramCodeBlock* create(VM& vm, CopyParsedBlockTag, ModuleProgramCodeBlock& other)
+    {
+        ModuleProgramCodeBlock* instance = new (NotNull, allocateCell<ModuleProgramCodeBlock>(vm))
+            ModuleProgramCodeBlock(vm, vm.moduleProgramCodeBlockStructure.get(), CopyParsedBlock, other);
+        instance->finishCreation(vm, CopyParsedBlock, other);
         return instance;
     }
 
-    static ModuleProgramCodeBlock* create(VM* vm, ModuleProgramExecutable* ownerExecutable, UnlinkedModuleProgramCodeBlock* unlinkedCodeBlock,
-        JSScope* scope, RefPtr<SourceProvider>&& sourceProvider, unsigned firstLineColumnOffset)
+    static ModuleProgramCodeBlock* create(VM& vm, ModuleProgramExecutable* ownerExecutable, UnlinkedModuleProgramCodeBlock* unlinkedCodeBlock, JSScope* scope)
     {
-        ModuleProgramCodeBlock* instance = new (NotNull, allocateCell<ModuleProgramCodeBlock>(vm->heap))
-            ModuleProgramCodeBlock(vm, vm->moduleProgramCodeBlockStructure.get(), ownerExecutable, unlinkedCodeBlock, scope, WTFMove(sourceProvider), firstLineColumnOffset);
-        if (!instance->finishCreation(*vm, ownerExecutable, unlinkedCodeBlock, scope))
+        ModuleProgramCodeBlock* instance = new (NotNull, allocateCell<ModuleProgramCodeBlock>(vm))
+            ModuleProgramCodeBlock(vm, vm.moduleProgramCodeBlockStructure.get(), ownerExecutable, unlinkedCodeBlock, scope);
+        if (!instance->finishCreation(vm, ownerExecutable, unlinkedCodeBlock, scope))
             return nullptr;
         return instance;
     }
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(CellType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(CodeBlockType, StructureFlags), info());
     }
 
 private:
-    ModuleProgramCodeBlock(VM* vm, Structure* structure, CopyParsedBlockTag, ModuleProgramCodeBlock& other)
+    ModuleProgramCodeBlock(VM& vm, Structure* structure, CopyParsedBlockTag, ModuleProgramCodeBlock& other)
         : GlobalCodeBlock(vm, structure, CopyParsedBlock, other)
     {
     }
 
-    ModuleProgramCodeBlock(VM* vm, Structure* structure, ModuleProgramExecutable* ownerExecutable, UnlinkedModuleProgramCodeBlock* unlinkedCodeBlock,
-        JSScope* scope, RefPtr<SourceProvider>&& sourceProvider, unsigned firstLineColumnOffset)
-        : GlobalCodeBlock(vm, structure, ownerExecutable, unlinkedCodeBlock, scope, WTFMove(sourceProvider), 0, firstLineColumnOffset)
+    ModuleProgramCodeBlock(VM& vm, Structure* structure, ModuleProgramExecutable* ownerExecutable, UnlinkedModuleProgramCodeBlock* unlinkedCodeBlock, JSScope* scope)
+        : GlobalCodeBlock(vm, structure, ownerExecutable, unlinkedCodeBlock, scope)
     {
     }
-
-    static void destroy(JSCell*);
 };
+static_assert(sizeof(ModuleProgramCodeBlock) == sizeof(CodeBlock), "Subclasses of CodeBlock should be the same size to share IsoSubspace");
 
 } // namespace JSC

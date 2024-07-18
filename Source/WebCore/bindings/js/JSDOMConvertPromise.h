@@ -28,33 +28,43 @@
 #include "IDLTypes.h"
 #include "JSDOMConvertBase.h"
 #include "JSDOMPromise.h"
+#include "WorkerGlobalScope.h"
 
 namespace WebCore {
 
 template<typename T> struct Converter<IDLPromise<T>> : DefaultConverter<IDLPromise<T>> {
-    using ReturnType = JSC::JSPromise*;
+    using ReturnType = RefPtr<DOMPromise>;
 
-    // https://heycam.github.io/webidl/#es-promise
+    // https://webidl.spec.whatwg.org/#es-promise
     template<typename ExceptionThrower = DefaultExceptionThrower>
-    static ReturnType convert(JSC::ExecState& state, JSC::JSValue value, ExceptionThrower&& exceptionThrower = ExceptionThrower())
+    static ReturnType convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value, ExceptionThrower&& exceptionThrower = ExceptionThrower())
     {
-        JSC::VM& vm = state.vm();
+        JSC::VM& vm = JSC::getVM(&lexicalGlobalObject);
         auto scope = DECLARE_THROW_SCOPE(vm);
-        auto* globalObject = jsDynamicDowncast<JSDOMGlobalObject*>(vm, state.lexicalGlobalObject());
+        auto* globalObject = JSC::jsDynamicCast<JSDOMGlobalObject*>(&lexicalGlobalObject);
         if (!globalObject)
             return nullptr;
 
         // 1. Let resolve be the original value of %Promise%.resolve.
         // 2. Let promise be the result of calling resolve with %Promise% as the this value and V as the single argument value.
-        auto* promise = JSC::JSPromise::resolve(*globalObject, value);
+        auto* promise = JSC::JSPromise::resolvedPromise(globalObject, value);
         if (scope.exception()) {
-            exceptionThrower(state, scope);
+            auto* scriptExecutionContext = globalObject->scriptExecutionContext();
+            if (is<WorkerGlobalScope>(scriptExecutionContext)) {
+                auto* scriptController = downcast<WorkerGlobalScope>(*scriptExecutionContext).script();
+                bool terminatorCausedException = vm.isTerminationException(scope.exception());
+                if (terminatorCausedException || (scriptController && scriptController->isTerminatingExecution())) {
+                    scriptController->forbidExecution();
+                    return nullptr;
+                }
+            }
+            exceptionThrower(lexicalGlobalObject, scope);
             return nullptr;
         }
         ASSERT(promise);
 
         // 3. Return the IDL promise type value that is a reference to the same object as promise.
-        return promise;
+        return DOMPromise::create(*globalObject, *promise);
     }
 };
 
@@ -62,15 +72,15 @@ template<typename T> struct JSConverter<IDLPromise<T>> {
     static constexpr bool needsState = true;
     static constexpr bool needsGlobalObject = true;
 
-    static JSC::JSValue convert(JSC::ExecState&, JSDOMGlobalObject&, JSC::JSPromise& promise)
+    static JSC::JSValue convert(JSC::JSGlobalObject&, JSDOMGlobalObject&, DOMPromise& promise)
     {
-        return &promise;
+        return promise.promise();
     }
 
     template<template<typename> class U>
-    static JSC::JSValue convert(JSC::ExecState& state, JSDOMGlobalObject& globalObject, U<T>& promiseProxy)
+    static JSC::JSValue convert(JSC::JSGlobalObject& lexicalGlobalObject, JSDOMGlobalObject& globalObject, U<T>& promiseProxy)
     {
-        return promiseProxy.promise(state, globalObject);
+        return promiseProxy.promise(lexicalGlobalObject, globalObject);
     }
 };
 

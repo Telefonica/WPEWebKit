@@ -28,14 +28,36 @@
 
 #if ENABLE(SERVICE_WORKER)
 
+#include <wtf/CrossThreadCopier.h>
+
 namespace WebCore {
 
-ServiceWorkerRegistrationData ServiceWorkerRegistrationData::isolatedCopy() const
+ServiceWorkerRegistrationData ServiceWorkerRegistrationData::isolatedCopy() const &
 {
-    ServiceWorkerRegistrationData result;
-    result.key = key.isolatedCopy();
-    result.identifier = identifier;
-    return result;
+    return {
+        key.isolatedCopy(),
+        identifier,
+        scopeURL.isolatedCopy(),
+        updateViaCache,
+        lastUpdateTime,
+        crossThreadCopy(installingWorker),
+        crossThreadCopy(waitingWorker),
+        crossThreadCopy(activeWorker),
+    };
+}
+
+ServiceWorkerRegistrationData ServiceWorkerRegistrationData::isolatedCopy() &&
+{
+    return {
+        WTFMove(key).isolatedCopy(),
+        identifier,
+        WTFMove(scopeURL).isolatedCopy(),
+        updateViaCache,
+        lastUpdateTime,
+        crossThreadCopy(WTFMove(installingWorker)),
+        crossThreadCopy(WTFMove(waitingWorker)),
+        crossThreadCopy(WTFMove(activeWorker)),
+    };
 }
 
 } // namespace WTF

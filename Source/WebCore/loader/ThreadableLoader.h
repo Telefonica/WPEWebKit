@@ -33,7 +33,7 @@
 #include "ResourceLoaderOptions.h"
 #include <wtf/Noncopyable.h>
 #include <wtf/RefPtr.h>
-#include <wtf/text/AtomicString.h>
+#include <wtf/text/AtomString.h>
 
 namespace WebCore {
 
@@ -43,15 +43,9 @@ namespace WebCore {
     class ScriptExecutionContext;
     class ThreadableLoaderClient;
 
-    enum PreflightPolicy {
-        ConsiderPreflight,
-        ForcePreflight,
-        PreventPreflight
-    };
-
     enum class ContentSecurityPolicyEnforcement {
         DoNotEnforce,
-        EnforceChildSrcDirective,
+        EnforceWorkerSrcDirective,
         EnforceConnectSrcDirective,
         EnforceScriptSrcDirective,
     };
@@ -63,14 +57,14 @@ namespace WebCore {
 
     struct ThreadableLoaderOptions : ResourceLoaderOptions {
         ThreadableLoaderOptions();
-        ThreadableLoaderOptions(const ResourceLoaderOptions&, PreflightPolicy, ContentSecurityPolicyEnforcement, String&& initiator, ResponseFilteringPolicy);
+        explicit ThreadableLoaderOptions(FetchOptions&&);
+        ThreadableLoaderOptions(const ResourceLoaderOptions&, ContentSecurityPolicyEnforcement, String&& initiator, ResponseFilteringPolicy);
         ~ThreadableLoaderOptions();
 
         ThreadableLoaderOptions isolatedCopy() const;
 
-        PreflightPolicy preflightPolicy { ConsiderPreflight };
         ContentSecurityPolicyEnforcement contentSecurityPolicyEnforcement { ContentSecurityPolicyEnforcement::EnforceConnectSrcDirective };
-        String initiator; // This cannot be an AtomicString, as isolatedCopy() wouldn't create an object that's safe for passing to another thread.
+        String initiator; // This cannot be an AtomString, as isolatedCopy() wouldn't create an object that's safe for passing to another thread.
         ResponseFilteringPolicy filteringPolicy { ResponseFilteringPolicy::Disable };
     };
 
@@ -80,8 +74,9 @@ namespace WebCore {
         WTF_MAKE_NONCOPYABLE(ThreadableLoader);
     public:
         static void loadResourceSynchronously(ScriptExecutionContext&, ResourceRequest&&, ThreadableLoaderClient&, const ThreadableLoaderOptions&);
-        static RefPtr<ThreadableLoader> create(ScriptExecutionContext&, ThreadableLoaderClient&, ResourceRequest&&, const ThreadableLoaderOptions&, String&& referrer = String());
+        static RefPtr<ThreadableLoader> create(ScriptExecutionContext&, ThreadableLoaderClient&, ResourceRequest&&, const ThreadableLoaderOptions&, String&& referrer = String(), String&& taskMode = { });
 
+        virtual void computeIsDone() = 0;
         virtual void cancel() = 0;
         void ref() { refThreadableLoader(); }
         void deref() { derefThreadableLoader(); }
@@ -89,8 +84,8 @@ namespace WebCore {
         static void logError(ScriptExecutionContext&, const ResourceError&, const String&);
 
     protected:
-        ThreadableLoader() { }
-        virtual ~ThreadableLoader() { }
+        ThreadableLoader() = default;
+        virtual ~ThreadableLoader() = default;
         virtual void refThreadableLoader() = 0;
         virtual void derefThreadableLoader() = 0;
     };

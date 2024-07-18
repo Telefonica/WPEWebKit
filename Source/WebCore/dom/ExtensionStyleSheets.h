@@ -27,10 +27,11 @@
 
 #pragma once
 
+#include "UserStyleSheet.h"
 #include <memory>
 #include <wtf/FastMalloc.h>
-#include <wtf/HashMap.h>
 #include <wtf/RefPtr.h>
+#include <wtf/RobinHoodHashMap.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
@@ -72,6 +73,11 @@ public:
     void maybeAddContentExtensionSheet(const String& identifier, StyleSheetContents&);
 #endif
 
+    void injectPageSpecificUserStyleSheet(const UserStyleSheet&);
+    void removePageSpecificUserStyleSheet(const UserStyleSheet&);
+
+    String contentForInjectedStyleSheet(const RefPtr<CSSStyleSheet>&) const;
+
     void detachFromDocument();
 
 private:
@@ -81,14 +87,16 @@ private:
 
     mutable Vector<RefPtr<CSSStyleSheet>> m_injectedUserStyleSheets;
     mutable Vector<RefPtr<CSSStyleSheet>> m_injectedAuthorStyleSheets;
+    mutable HashMap<RefPtr<CSSStyleSheet>, String> m_injectedStyleSheetToSource;
     mutable bool m_injectedStyleSheetCacheValid { false };
 
     Vector<RefPtr<CSSStyleSheet>> m_userStyleSheets;
     Vector<RefPtr<CSSStyleSheet>> m_authorStyleSheetsForTesting;
+    Vector<UserStyleSheet> m_pageSpecificStyleSheets;
 
 #if ENABLE(CONTENT_EXTENSIONS)
-    HashMap<String, RefPtr<CSSStyleSheet>> m_contentExtensionSheets;
-    HashMap<String, RefPtr<ContentExtensions::ContentExtensionStyleSheet>> m_contentExtensionSelectorSheets;
+    MemoryCompactRobinHoodHashMap<String, RefPtr<CSSStyleSheet>> m_contentExtensionSheets;
+    MemoryCompactRobinHoodHashMap<String, RefPtr<ContentExtensions::ContentExtensionStyleSheet>> m_contentExtensionSelectorSheets;
 #endif
 };
 

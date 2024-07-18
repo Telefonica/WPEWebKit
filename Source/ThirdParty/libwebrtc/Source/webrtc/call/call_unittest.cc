@@ -8,706 +8,502 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "call/call.h"
+
 #include <list>
 #include <map>
 #include <memory>
 #include <utility>
 
-#include "webrtc/api/test/mock_audio_mixer.h"
-#include "webrtc/base/ptr_util.h"
-#include "webrtc/call/audio_state.h"
-#include "webrtc/call/call.h"
-#include "webrtc/call/fake_rtp_transport_controller_send.h"
-#include "webrtc/logging/rtc_event_log/rtc_event_log.h"
-#include "webrtc/modules/audio_device/include/mock_audio_device.h"
-#include "webrtc/modules/audio_mixer/audio_mixer_impl.h"
-#include "webrtc/modules/congestion_controller/include/mock/mock_send_side_congestion_controller.h"
-#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/mock_audio_decoder_factory.h"
-#include "webrtc/test/mock_transport.h"
-#include "webrtc/test/mock_voice_engine.h"
-
-namespace {
-
-struct CallHelper {
-  explicit CallHelper(
-      rtc::scoped_refptr<webrtc::AudioDecoderFactory> decoder_factory = nullptr)
-      : voice_engine_(decoder_factory) {
-    webrtc::AudioState::Config audio_state_config;
-    audio_state_config.voice_engine = &voice_engine_;
-    audio_state_config.audio_mixer = webrtc::AudioMixerImpl::Create();
-    EXPECT_CALL(voice_engine_, audio_device_module());
-    EXPECT_CALL(voice_engine_, audio_processing());
-    EXPECT_CALL(voice_engine_, audio_transport());
-    webrtc::Call::Config config(&event_log_);
-    config.audio_state = webrtc::AudioState::Create(audio_state_config);
-    call_.reset(webrtc::Call::Create(config));
-  }
-
-  webrtc::Call* operator->() { return call_.get(); }
-  webrtc::test::MockVoiceEngine* voice_engine() { return &voice_engine_; }
-
- private:
-  testing::NiceMock<webrtc::test::MockVoiceEngine> voice_engine_;
-  webrtc::RtcEventLogNullImpl event_log_;
-  std::unique_ptr<webrtc::Call> call_;
-};
-}  // namespace
+#include "absl/strings/string_view.h"
+#include "api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
+#include "api/media_types.h"
+#include "api/test/mock_audio_mixer.h"
+#include "api/test/video/function_video_encoder_factory.h"
+#include "api/units/timestamp.h"
+#include "api/video/builtin_video_bitrate_allocator_factory.h"
+#include "audio/audio_receive_stream.h"
+#include "audio/audio_send_stream.h"
+#include "call/adaptation/test/fake_resource.h"
+#include "call/adaptation/test/mock_resource_listener.h"
+#include "call/audio_state.h"
+#include "modules/audio_device/include/mock_audio_device.h"
+#include "modules/audio_processing/include/mock_audio_processing.h"
+#include "modules/rtp_rtcp/source/rtp_rtcp_interface.h"
+#include "test/fake_encoder.h"
+#include "test/gtest.h"
+#include "test/mock_audio_decoder_factory.h"
+#include "test/mock_transport.h"
+#include "test/run_loop.h"
 
 namespace webrtc {
+namespace {
+
+using ::testing::_;
+using ::testing::Contains;
+using ::testing::MockFunction;
+using ::testing::NiceMock;
+using ::testing::StrictMock;
+using ::webrtc::test::MockAudioDeviceModule;
+using ::webrtc::test::MockAudioMixer;
+using ::webrtc::test::MockAudioProcessing;
+using ::webrtc::test::RunLoop;
+
+struct CallHelper {
+  explicit CallHelper(bool use_null_audio_processing) {
+    AudioState::Config audio_state_config;
+    audio_state_config.audio_mixer = rtc::make_ref_counted<MockAudioMixer>();
+    audio_state_config.audio_processing =
+        use_null_audio_processing
+            ? nullptr
+            : rtc::make_ref_counted<NiceMock<MockAudioProcessing>>();
+    audio_state_config.audio_device_module =
+        rtc::make_ref_counted<MockAudioDeviceModule>();
+    CallConfig config(CreateEnvironment());
+    config.audio_state = AudioState::Create(audio_state_config);
+    call_ = Call::Create(config);
+  }
+
+  Call* operator->() { return call_.get(); }
+
+ private:
+  RunLoop loop_;
+  std::unique_ptr<Call> call_;
+};
+
+rtc::scoped_refptr<Resource> FindResourceWhoseNameContains(
+    const std::vector<rtc::scoped_refptr<Resource>>& resources,
+    absl::string_view name_contains) {
+  for (const auto& resource : resources) {
+    if (resource->Name().find(std::string(name_contains)) != std::string::npos)
+      return resource;
+  }
+  return nullptr;
+}
+
+}  // namespace
 
 TEST(CallTest, ConstructDestruct) {
-  CallHelper call;
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
+  }
 }
 
 TEST(CallTest, CreateDestroy_AudioSendStream) {
-  CallHelper call;
-  AudioSendStream::Config config(nullptr);
-  config.rtp.ssrc = 42;
-  config.voe_channel_id = 123;
-  AudioSendStream* stream = call->CreateAudioSendStream(config);
-  EXPECT_NE(stream, nullptr);
-  call->DestroyAudioSendStream(stream);
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
+    MockTransport send_transport;
+    AudioSendStream::Config config(&send_transport);
+    config.rtp.ssrc = 42;
+    AudioSendStream* stream = call->CreateAudioSendStream(config);
+    EXPECT_NE(stream, nullptr);
+    call->DestroyAudioSendStream(stream);
+  }
 }
 
 TEST(CallTest, CreateDestroy_AudioReceiveStream) {
-  rtc::scoped_refptr<webrtc::AudioDecoderFactory> decoder_factory(
-      new rtc::RefCountedObject<webrtc::MockAudioDecoderFactory>);
-  CallHelper call(decoder_factory);
-  AudioReceiveStream::Config config;
-  config.rtp.remote_ssrc = 42;
-  config.voe_channel_id = 123;
-  config.decoder_factory = decoder_factory;
-  AudioReceiveStream* stream = call->CreateAudioReceiveStream(config);
-  EXPECT_NE(stream, nullptr);
-  call->DestroyAudioReceiveStream(stream);
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
+    AudioReceiveStreamInterface::Config config;
+    MockTransport rtcp_send_transport;
+    config.rtp.remote_ssrc = 42;
+    config.rtcp_send_transport = &rtcp_send_transport;
+    config.decoder_factory =
+        rtc::make_ref_counted<webrtc::MockAudioDecoderFactory>();
+    AudioReceiveStreamInterface* stream =
+        call->CreateAudioReceiveStream(config);
+    EXPECT_NE(stream, nullptr);
+    call->DestroyAudioReceiveStream(stream);
+  }
 }
 
 TEST(CallTest, CreateDestroy_AudioSendStreams) {
-  CallHelper call;
-  AudioSendStream::Config config(nullptr);
-  config.voe_channel_id = 123;
-  std::list<AudioSendStream*> streams;
-  for (int i = 0; i < 2; ++i) {
-    for (uint32_t ssrc = 0; ssrc < 1234567; ssrc += 34567) {
-      config.rtp.ssrc = ssrc;
-      AudioSendStream* stream = call->CreateAudioSendStream(config);
-      EXPECT_NE(stream, nullptr);
-      if (ssrc & 1) {
-        streams.push_back(stream);
-      } else {
-        streams.push_front(stream);
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
+    MockTransport send_transport;
+    AudioSendStream::Config config(&send_transport);
+    std::list<AudioSendStream*> streams;
+    for (int i = 0; i < 2; ++i) {
+      for (uint32_t ssrc = 0; ssrc < 1234567; ssrc += 34567) {
+        config.rtp.ssrc = ssrc;
+        AudioSendStream* stream = call->CreateAudioSendStream(config);
+        EXPECT_NE(stream, nullptr);
+        if (ssrc & 1) {
+          streams.push_back(stream);
+        } else {
+          streams.push_front(stream);
+        }
       }
+      for (auto s : streams) {
+        call->DestroyAudioSendStream(s);
+      }
+      streams.clear();
     }
-    for (auto s : streams) {
-      call->DestroyAudioSendStream(s);
-    }
-    streams.clear();
   }
 }
 
 TEST(CallTest, CreateDestroy_AudioReceiveStreams) {
-  rtc::scoped_refptr<webrtc::AudioDecoderFactory> decoder_factory(
-      new rtc::RefCountedObject<webrtc::MockAudioDecoderFactory>);
-  CallHelper call(decoder_factory);
-  AudioReceiveStream::Config config;
-  config.voe_channel_id = 123;
-  config.decoder_factory = decoder_factory;
-  std::list<AudioReceiveStream*> streams;
-  for (int i = 0; i < 2; ++i) {
-    for (uint32_t ssrc = 0; ssrc < 1234567; ssrc += 34567) {
-      config.rtp.remote_ssrc = ssrc;
-      AudioReceiveStream* stream = call->CreateAudioReceiveStream(config);
-      EXPECT_NE(stream, nullptr);
-      if (ssrc & 1) {
-        streams.push_back(stream);
-      } else {
-        streams.push_front(stream);
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
+    AudioReceiveStreamInterface::Config config;
+    MockTransport rtcp_send_transport;
+    config.rtcp_send_transport = &rtcp_send_transport;
+    config.decoder_factory =
+        rtc::make_ref_counted<webrtc::MockAudioDecoderFactory>();
+    std::list<AudioReceiveStreamInterface*> streams;
+    for (int i = 0; i < 2; ++i) {
+      for (uint32_t ssrc = 0; ssrc < 1234567; ssrc += 34567) {
+        config.rtp.remote_ssrc = ssrc;
+        AudioReceiveStreamInterface* stream =
+            call->CreateAudioReceiveStream(config);
+        EXPECT_NE(stream, nullptr);
+        if (ssrc & 1) {
+          streams.push_back(stream);
+        } else {
+          streams.push_front(stream);
+        }
       }
+      for (auto s : streams) {
+        call->DestroyAudioReceiveStream(s);
+      }
+      streams.clear();
     }
-    for (auto s : streams) {
-      call->DestroyAudioReceiveStream(s);
-    }
-    streams.clear();
   }
 }
 
 TEST(CallTest, CreateDestroy_AssociateAudioSendReceiveStreams_RecvFirst) {
-  rtc::scoped_refptr<webrtc::AudioDecoderFactory> decoder_factory(
-      new rtc::RefCountedObject<webrtc::MockAudioDecoderFactory>);
-  CallHelper call(decoder_factory);
-  ::testing::NiceMock<MockRtpRtcp> mock_rtp_rtcp;
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
+    AudioReceiveStreamInterface::Config recv_config;
+    MockTransport rtcp_send_transport;
+    recv_config.rtp.remote_ssrc = 42;
+    recv_config.rtp.local_ssrc = 777;
+    recv_config.rtcp_send_transport = &rtcp_send_transport;
+    recv_config.decoder_factory =
+        rtc::make_ref_counted<webrtc::MockAudioDecoderFactory>();
+    AudioReceiveStreamInterface* recv_stream =
+        call->CreateAudioReceiveStream(recv_config);
+    EXPECT_NE(recv_stream, nullptr);
 
-  constexpr int kRecvChannelId = 101;
+    MockTransport send_transport;
+    AudioSendStream::Config send_config(&send_transport);
+    send_config.rtp.ssrc = 777;
+    AudioSendStream* send_stream = call->CreateAudioSendStream(send_config);
+    EXPECT_NE(send_stream, nullptr);
 
-  // Set up the mock to create a channel proxy which we know of, so that we can
-  // add our expectations to it.
-  test::MockVoEChannelProxy* recv_channel_proxy = nullptr;
-  EXPECT_CALL(*call.voice_engine(), ChannelProxyFactory(testing::_))
-      .WillRepeatedly(testing::Invoke([&](int channel_id) {
-        test::MockVoEChannelProxy* channel_proxy =
-            new testing::NiceMock<test::MockVoEChannelProxy>();
-        EXPECT_CALL(*channel_proxy, GetAudioDecoderFactory())
-            .WillRepeatedly(testing::ReturnRef(decoder_factory));
-        EXPECT_CALL(*channel_proxy, SetReceiveCodecs(testing::_))
-            .WillRepeatedly(testing::Invoke(
-                [](const std::map<int, SdpAudioFormat>& codecs) {
-                  EXPECT_THAT(codecs, testing::IsEmpty());
-                }));
-        EXPECT_CALL(*channel_proxy, GetRtpRtcp(testing::_, testing::_))
-            .WillRepeatedly(testing::SetArgPointee<0>(&mock_rtp_rtcp));
-        // If being called for the send channel, save a pointer to the channel
-        // proxy for later.
-        if (channel_id == kRecvChannelId) {
-          EXPECT_FALSE(recv_channel_proxy);
-          recv_channel_proxy = channel_proxy;
-        }
-        return channel_proxy;
-      }));
+    AudioReceiveStreamImpl* internal_recv_stream =
+        static_cast<AudioReceiveStreamImpl*>(recv_stream);
+    EXPECT_EQ(send_stream,
+              internal_recv_stream->GetAssociatedSendStreamForTesting());
 
-  AudioReceiveStream::Config recv_config;
-  recv_config.rtp.remote_ssrc = 42;
-  recv_config.rtp.local_ssrc = 777;
-  recv_config.voe_channel_id = kRecvChannelId;
-  recv_config.decoder_factory = decoder_factory;
-  AudioReceiveStream* recv_stream = call->CreateAudioReceiveStream(recv_config);
-  EXPECT_NE(recv_stream, nullptr);
+    call->DestroyAudioSendStream(send_stream);
+    EXPECT_EQ(nullptr,
+              internal_recv_stream->GetAssociatedSendStreamForTesting());
 
-  EXPECT_CALL(*recv_channel_proxy, AssociateSendChannel(testing::_)).Times(1);
-  AudioSendStream::Config send_config(nullptr);
-  send_config.rtp.ssrc = 777;
-  send_config.voe_channel_id = 123;
-  AudioSendStream* send_stream = call->CreateAudioSendStream(send_config);
-  EXPECT_NE(send_stream, nullptr);
-
-  EXPECT_CALL(*recv_channel_proxy, DisassociateSendChannel()).Times(1);
-  call->DestroyAudioSendStream(send_stream);
-
-  EXPECT_CALL(*recv_channel_proxy, DisassociateSendChannel()).Times(1);
-  call->DestroyAudioReceiveStream(recv_stream);
+    call->DestroyAudioReceiveStream(recv_stream);
+  }
 }
 
 TEST(CallTest, CreateDestroy_AssociateAudioSendReceiveStreams_SendFirst) {
-  rtc::scoped_refptr<webrtc::AudioDecoderFactory> decoder_factory(
-      new rtc::RefCountedObject<webrtc::MockAudioDecoderFactory>);
-  CallHelper call(decoder_factory);
-  ::testing::NiceMock<MockRtpRtcp> mock_rtp_rtcp;
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
+    MockTransport send_transport;
+    AudioSendStream::Config send_config(&send_transport);
+    send_config.rtp.ssrc = 777;
+    AudioSendStream* send_stream = call->CreateAudioSendStream(send_config);
+    EXPECT_NE(send_stream, nullptr);
 
-  constexpr int kRecvChannelId = 101;
+    AudioReceiveStreamInterface::Config recv_config;
+    MockTransport rtcp_send_transport;
+    recv_config.rtp.remote_ssrc = 42;
+    recv_config.rtp.local_ssrc = 777;
+    recv_config.rtcp_send_transport = &rtcp_send_transport;
+    recv_config.decoder_factory =
+        rtc::make_ref_counted<webrtc::MockAudioDecoderFactory>();
+    AudioReceiveStreamInterface* recv_stream =
+        call->CreateAudioReceiveStream(recv_config);
+    EXPECT_NE(recv_stream, nullptr);
 
-  // Set up the mock to create a channel proxy which we know of, so that we can
-  // add our expectations to it.
-  test::MockVoEChannelProxy* recv_channel_proxy = nullptr;
-  EXPECT_CALL(*call.voice_engine(), ChannelProxyFactory(testing::_))
-      .WillRepeatedly(testing::Invoke([&](int channel_id) {
-        test::MockVoEChannelProxy* channel_proxy =
-            new testing::NiceMock<test::MockVoEChannelProxy>();
-        EXPECT_CALL(*channel_proxy, GetAudioDecoderFactory())
-            .WillRepeatedly(testing::ReturnRef(decoder_factory));
-        EXPECT_CALL(*channel_proxy, SetReceiveCodecs(testing::_))
-            .WillRepeatedly(testing::Invoke(
-                [](const std::map<int, SdpAudioFormat>& codecs) {
-                  EXPECT_THAT(codecs, testing::IsEmpty());
-                }));
-        EXPECT_CALL(*channel_proxy, GetRtpRtcp(testing::_, testing::_))
-            .WillRepeatedly(testing::SetArgPointee<0>(&mock_rtp_rtcp));
-        // If being called for the send channel, save a pointer to the channel
-        // proxy for later.
-        if (channel_id == kRecvChannelId) {
-          EXPECT_FALSE(recv_channel_proxy);
-          recv_channel_proxy = channel_proxy;
-          // We need to set this expectation here since the channel proxy is
-          // created as a side effect of CreateAudioReceiveStream().
-          EXPECT_CALL(*recv_channel_proxy,
-                      AssociateSendChannel(testing::_)).Times(1);
-        }
-        return channel_proxy;
-      }));
+    AudioReceiveStreamImpl* internal_recv_stream =
+        static_cast<AudioReceiveStreamImpl*>(recv_stream);
+    EXPECT_EQ(send_stream,
+              internal_recv_stream->GetAssociatedSendStreamForTesting());
 
-  AudioSendStream::Config send_config(nullptr);
-  send_config.rtp.ssrc = 777;
-  send_config.voe_channel_id = 123;
-  AudioSendStream* send_stream = call->CreateAudioSendStream(send_config);
-  EXPECT_NE(send_stream, nullptr);
+    call->DestroyAudioReceiveStream(recv_stream);
 
-  AudioReceiveStream::Config recv_config;
-  recv_config.rtp.remote_ssrc = 42;
-  recv_config.rtp.local_ssrc = 777;
-  recv_config.voe_channel_id = kRecvChannelId;
-  recv_config.decoder_factory = decoder_factory;
-  AudioReceiveStream* recv_stream = call->CreateAudioReceiveStream(recv_config);
-  EXPECT_NE(recv_stream, nullptr);
-
-  EXPECT_CALL(*recv_channel_proxy, DisassociateSendChannel()).Times(1);
-  call->DestroyAudioReceiveStream(recv_stream);
-
-  call->DestroyAudioSendStream(send_stream);
+    call->DestroyAudioSendStream(send_stream);
+  }
 }
 
 TEST(CallTest, CreateDestroy_FlexfecReceiveStream) {
-  CallHelper call;
-  MockTransport rtcp_send_transport;
-  FlexfecReceiveStream::Config config(&rtcp_send_transport);
-  config.payload_type = 118;
-  config.remote_ssrc = 38837212;
-  config.protected_media_ssrcs = {27273};
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
+    MockTransport rtcp_send_transport;
+    FlexfecReceiveStream::Config config(&rtcp_send_transport);
+    config.payload_type = 118;
+    config.rtp.remote_ssrc = 38837212;
+    config.protected_media_ssrcs = {27273};
 
-  FlexfecReceiveStream* stream = call->CreateFlexfecReceiveStream(config);
-  EXPECT_NE(stream, nullptr);
-  call->DestroyFlexfecReceiveStream(stream);
+    FlexfecReceiveStream* stream = call->CreateFlexfecReceiveStream(config);
+    EXPECT_NE(stream, nullptr);
+    call->DestroyFlexfecReceiveStream(stream);
+  }
 }
 
 TEST(CallTest, CreateDestroy_FlexfecReceiveStreams) {
-  CallHelper call;
-  MockTransport rtcp_send_transport;
-  FlexfecReceiveStream::Config config(&rtcp_send_transport);
-  config.payload_type = 118;
-  std::list<FlexfecReceiveStream*> streams;
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
+    MockTransport rtcp_send_transport;
+    FlexfecReceiveStream::Config config(&rtcp_send_transport);
+    config.payload_type = 118;
+    std::list<FlexfecReceiveStream*> streams;
 
-  for (int i = 0; i < 2; ++i) {
-    for (uint32_t ssrc = 0; ssrc < 1234567; ssrc += 34567) {
-      config.remote_ssrc = ssrc;
-      config.protected_media_ssrcs = {ssrc + 1};
-      FlexfecReceiveStream* stream = call->CreateFlexfecReceiveStream(config);
-      EXPECT_NE(stream, nullptr);
-      if (ssrc & 1) {
-        streams.push_back(stream);
-      } else {
-        streams.push_front(stream);
+    for (int i = 0; i < 2; ++i) {
+      for (uint32_t ssrc = 0; ssrc < 1234567; ssrc += 34567) {
+        config.rtp.remote_ssrc = ssrc;
+        config.protected_media_ssrcs = {ssrc + 1};
+        FlexfecReceiveStream* stream = call->CreateFlexfecReceiveStream(config);
+        EXPECT_NE(stream, nullptr);
+        if (ssrc & 1) {
+          streams.push_back(stream);
+        } else {
+          streams.push_front(stream);
+        }
       }
+      for (auto s : streams) {
+        call->DestroyFlexfecReceiveStream(s);
+      }
+      streams.clear();
     }
-    for (auto s : streams) {
-      call->DestroyFlexfecReceiveStream(s);
-    }
-    streams.clear();
   }
 }
 
 TEST(CallTest, MultipleFlexfecReceiveStreamsProtectingSingleVideoStream) {
-  CallHelper call;
-  MockTransport rtcp_send_transport;
-  FlexfecReceiveStream::Config config(&rtcp_send_transport);
-  config.payload_type = 118;
-  config.protected_media_ssrcs = {1324234};
-  FlexfecReceiveStream* stream;
-  std::list<FlexfecReceiveStream*> streams;
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
+    MockTransport rtcp_send_transport;
+    FlexfecReceiveStream::Config config(&rtcp_send_transport);
+    config.payload_type = 118;
+    config.protected_media_ssrcs = {1324234};
+    FlexfecReceiveStream* stream;
+    std::list<FlexfecReceiveStream*> streams;
 
-  config.remote_ssrc = 838383;
-  stream = call->CreateFlexfecReceiveStream(config);
-  EXPECT_NE(stream, nullptr);
-  streams.push_back(stream);
+    config.rtp.remote_ssrc = 838383;
+    stream = call->CreateFlexfecReceiveStream(config);
+    EXPECT_NE(stream, nullptr);
+    streams.push_back(stream);
 
-  config.remote_ssrc = 424993;
-  stream = call->CreateFlexfecReceiveStream(config);
-  EXPECT_NE(stream, nullptr);
-  streams.push_back(stream);
+    config.rtp.remote_ssrc = 424993;
+    stream = call->CreateFlexfecReceiveStream(config);
+    EXPECT_NE(stream, nullptr);
+    streams.push_back(stream);
 
-  config.remote_ssrc = 99383;
-  stream = call->CreateFlexfecReceiveStream(config);
-  EXPECT_NE(stream, nullptr);
-  streams.push_back(stream);
+    config.rtp.remote_ssrc = 99383;
+    stream = call->CreateFlexfecReceiveStream(config);
+    EXPECT_NE(stream, nullptr);
+    streams.push_back(stream);
 
-  config.remote_ssrc = 5548;
-  stream = call->CreateFlexfecReceiveStream(config);
-  EXPECT_NE(stream, nullptr);
-  streams.push_back(stream);
+    config.rtp.remote_ssrc = 5548;
+    stream = call->CreateFlexfecReceiveStream(config);
+    EXPECT_NE(stream, nullptr);
+    streams.push_back(stream);
 
-  for (auto s : streams) {
-    call->DestroyFlexfecReceiveStream(s);
+    for (auto s : streams) {
+      call->DestroyFlexfecReceiveStream(s);
+    }
   }
 }
 
-namespace {
-struct CallBitrateHelper {
-  CallBitrateHelper() : CallBitrateHelper(Call::Config::BitrateConfig()) {}
+TEST(CallTest,
+     DeliverRtpPacketOfTypeAudioTriggerOnUndemuxablePacketHandlerIfNotDemuxed) {
+  CallHelper call(/*use_null_audio_processing=*/false);
+  MockFunction<bool(const RtpPacketReceived& parsed_packet)>
+      un_demuxable_packet_handler;
 
-  explicit CallBitrateHelper(const Call::Config::BitrateConfig& bitrate_config)
-      : mock_cc_(Clock::GetRealTimeClock(), &event_log_, &packet_router_) {
-    Call::Config config(&event_log_);
-    config.bitrate_config = bitrate_config;
-    call_.reset(
-        Call::Create(config, rtc::MakeUnique<FakeRtpTransportControllerSend>(
-                                 &packet_router_, &mock_cc_)));
-  }
-
-  webrtc::Call* operator->() { return call_.get(); }
-  testing::NiceMock<test::MockSendSideCongestionController>& mock_cc() {
-    return mock_cc_;
-  }
-
- private:
-  webrtc::RtcEventLogNullImpl event_log_;
-  PacketRouter packet_router_;
-  testing::NiceMock<test::MockSendSideCongestionController> mock_cc_;
-  std::unique_ptr<Call> call_;
-};
-}  // namespace
-
-TEST(CallBitrateTest, SetBitrateConfigWithValidConfigCallsSetBweBitrates) {
-  CallBitrateHelper call;
-
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.min_bitrate_bps = 1;
-  bitrate_config.start_bitrate_bps = 2;
-  bitrate_config.max_bitrate_bps = 3;
-
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(1, 2, 3));
-  call->SetBitrateConfig(bitrate_config);
+  RtpPacketReceived packet;
+  packet.set_arrival_time(Timestamp::Millis(1));
+  EXPECT_CALL(un_demuxable_packet_handler, Call);
+  call->Receiver()->DeliverRtpPacket(
+      MediaType::AUDIO, packet, un_demuxable_packet_handler.AsStdFunction());
 }
 
-TEST(CallBitrateTest, SetBitrateConfigWithDifferentMinCallsSetBweBitrates) {
-  CallBitrateHelper call;
+TEST(CallTest,
+     DeliverRtpPacketOfTypeVideoTriggerOnUndemuxablePacketHandlerIfNotDemuxed) {
+  CallHelper call(/*use_null_audio_processing=*/false);
+  MockFunction<bool(const RtpPacketReceived& parsed_packet)>
+      un_demuxable_packet_handler;
 
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.min_bitrate_bps = 10;
-  bitrate_config.start_bitrate_bps = 20;
-  bitrate_config.max_bitrate_bps = 30;
-  call->SetBitrateConfig(bitrate_config);
-
-  bitrate_config.min_bitrate_bps = 11;
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(11, -1, 30));
-  call->SetBitrateConfig(bitrate_config);
+  RtpPacketReceived packet;
+  packet.set_arrival_time(Timestamp::Millis(1));
+  EXPECT_CALL(un_demuxable_packet_handler, Call);
+  call->Receiver()->DeliverRtpPacket(
+      MediaType::VIDEO, packet, un_demuxable_packet_handler.AsStdFunction());
 }
 
-TEST(CallBitrateTest, SetBitrateConfigWithDifferentStartCallsSetBweBitrates) {
-  CallBitrateHelper call;
+TEST(CallTest,
+     DeliverRtpPacketOfTypeAnyDoesNotTriggerOnUndemuxablePacketHandler) {
+  CallHelper call(/*use_null_audio_processing=*/false);
+  MockFunction<bool(const RtpPacketReceived& parsed_packet)>
+      un_demuxable_packet_handler;
 
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.min_bitrate_bps = 10;
-  bitrate_config.start_bitrate_bps = 20;
-  bitrate_config.max_bitrate_bps = 30;
-  call->SetBitrateConfig(bitrate_config);
-
-  bitrate_config.start_bitrate_bps = 21;
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(10, 21, 30));
-  call->SetBitrateConfig(bitrate_config);
-}
-
-TEST(CallBitrateTest, SetBitrateConfigWithDifferentMaxCallsSetBweBitrates) {
-  CallBitrateHelper call;
-
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.min_bitrate_bps = 10;
-  bitrate_config.start_bitrate_bps = 20;
-  bitrate_config.max_bitrate_bps = 30;
-  call->SetBitrateConfig(bitrate_config);
-
-  bitrate_config.max_bitrate_bps = 31;
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(10, -1, 31));
-  call->SetBitrateConfig(bitrate_config);
-}
-
-TEST(CallBitrateTest, SetBitrateConfigWithSameConfigElidesSecondCall) {
-  CallBitrateHelper call;
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.min_bitrate_bps = 1;
-  bitrate_config.start_bitrate_bps = 2;
-  bitrate_config.max_bitrate_bps = 3;
-
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(1, 2, 3)).Times(1);
-  call->SetBitrateConfig(bitrate_config);
-  call->SetBitrateConfig(bitrate_config);
-}
-
-TEST(CallBitrateTest,
-     SetBitrateConfigWithSameMinMaxAndNegativeStartElidesSecondCall) {
-  CallBitrateHelper call;
-
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.min_bitrate_bps = 1;
-  bitrate_config.start_bitrate_bps = 2;
-  bitrate_config.max_bitrate_bps = 3;
-
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(1, 2, 3)).Times(1);
-  call->SetBitrateConfig(bitrate_config);
-
-  bitrate_config.start_bitrate_bps = -1;
-  call->SetBitrateConfig(bitrate_config);
+  RtpPacketReceived packet;
+  packet.set_arrival_time(Timestamp::Millis(1));
+  EXPECT_CALL(un_demuxable_packet_handler, Call).Times(0);
+  call->Receiver()->DeliverRtpPacket(
+      MediaType::ANY, packet, un_demuxable_packet_handler.AsStdFunction());
 }
 
 TEST(CallTest, RecreatingAudioStreamWithSameSsrcReusesRtpState) {
   constexpr uint32_t kSSRC = 12345;
-  testing::NiceMock<test::MockAudioDeviceModule> mock_adm;
-  // Reply with a 10ms timer every time TimeUntilNextProcess is called to
-  // avoid entering a tight loop on the process thread.
-  EXPECT_CALL(mock_adm, TimeUntilNextProcess())
-       .WillRepeatedly(testing::Return(10));
-  rtc::scoped_refptr<test::MockAudioMixer> mock_mixer(
-      new rtc::RefCountedObject<test::MockAudioMixer>);
+  for (bool use_null_audio_processing : {false, true}) {
+    CallHelper call(use_null_audio_processing);
 
-  // There's similar functionality in cricket::VoEWrapper but it's not reachable
-  // from here. Since we're working on removing VoE interfaces, I doubt it's
-  // worth making VoEWrapper more easily available.
-  struct ScopedVoiceEngine {
-    ScopedVoiceEngine()
-        : voe(VoiceEngine::Create()),
-          base(VoEBase::GetInterface(voe)) {}
-    ~ScopedVoiceEngine() {
-      base->Release();
-      EXPECT_TRUE(VoiceEngine::Delete(voe));
-    }
+    auto create_stream_and_get_rtp_state = [&](uint32_t ssrc) {
+      MockTransport send_transport;
+      AudioSendStream::Config config(&send_transport);
+      config.rtp.ssrc = ssrc;
+      AudioSendStream* stream = call->CreateAudioSendStream(config);
+      const RtpState rtp_state =
+          static_cast<internal::AudioSendStream*>(stream)->GetRtpState();
+      call->DestroyAudioSendStream(stream);
+      return rtp_state;
+    };
 
-    VoiceEngine* voe;
-    VoEBase* base;
-  };
-  ScopedVoiceEngine voice_engine;
+    const RtpState rtp_state1 = create_stream_and_get_rtp_state(kSSRC);
+    const RtpState rtp_state2 = create_stream_and_get_rtp_state(kSSRC);
 
-  voice_engine.base->Init(&mock_adm);
-  AudioState::Config audio_state_config;
-  audio_state_config.voice_engine = voice_engine.voe;
-  audio_state_config.audio_mixer = mock_mixer;
-  auto audio_state = AudioState::Create(audio_state_config);
-  RtcEventLogNullImpl event_log;
-  Call::Config call_config(&event_log);
-  call_config.audio_state = audio_state;
-  std::unique_ptr<Call> call(Call::Create(call_config));
-
-  auto create_stream_and_get_rtp_state = [&](uint32_t ssrc) {
-    AudioSendStream::Config config(nullptr);
-    config.rtp.ssrc = ssrc;
-    config.voe_channel_id = voice_engine.base->CreateChannel();
-    AudioSendStream* stream = call->CreateAudioSendStream(config);
-    VoiceEngineImpl* voe_impl = static_cast<VoiceEngineImpl*>(voice_engine.voe);
-    auto channel_proxy = voe_impl->GetChannelProxy(config.voe_channel_id);
-    RtpRtcp* rtp_rtcp = nullptr;
-    RtpReceiver* rtp_receiver = nullptr;  // Unused but required for call.
-    channel_proxy->GetRtpRtcp(&rtp_rtcp, &rtp_receiver);
-    const RtpState rtp_state = rtp_rtcp->GetRtpState();
-    call->DestroyAudioSendStream(stream);
-    voice_engine.base->DeleteChannel(config.voe_channel_id);
-    return rtp_state;
-  };
-
-  const RtpState rtp_state1 = create_stream_and_get_rtp_state(kSSRC);
-  const RtpState rtp_state2 = create_stream_and_get_rtp_state(kSSRC);
-
-  EXPECT_EQ(rtp_state1.sequence_number, rtp_state2.sequence_number);
-  EXPECT_EQ(rtp_state1.start_timestamp, rtp_state2.start_timestamp);
-  EXPECT_EQ(rtp_state1.timestamp, rtp_state2.timestamp);
-  EXPECT_EQ(rtp_state1.capture_time_ms, rtp_state2.capture_time_ms);
-  EXPECT_EQ(rtp_state1.last_timestamp_time_ms,
-            rtp_state2.last_timestamp_time_ms);
-  EXPECT_EQ(rtp_state1.media_has_been_sent, rtp_state2.media_has_been_sent);
-}
-TEST(CallBitrateTest, BiggerMaskMinUsed) {
-  CallBitrateHelper call;
-  Call::Config::BitrateConfigMask mask;
-  mask.min_bitrate_bps = rtc::Optional<int>(1234);
-
-  EXPECT_CALL(call.mock_cc(),
-              SetBweBitrates(*mask.min_bitrate_bps, testing::_, testing::_));
-  call->SetBitrateConfigMask(mask);
+    EXPECT_EQ(rtp_state1.sequence_number, rtp_state2.sequence_number);
+    EXPECT_EQ(rtp_state1.start_timestamp, rtp_state2.start_timestamp);
+    EXPECT_EQ(rtp_state1.timestamp, rtp_state2.timestamp);
+    EXPECT_EQ(rtp_state1.capture_time, rtp_state2.capture_time);
+    EXPECT_EQ(rtp_state1.last_timestamp_time, rtp_state2.last_timestamp_time);
+  }
 }
 
-TEST(CallBitrateTest, BiggerConfigMinUsed) {
-  CallBitrateHelper call;
-  Call::Config::BitrateConfigMask mask;
-  mask.min_bitrate_bps = rtc::Optional<int>(1000);
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(1000, testing::_, testing::_));
-  call->SetBitrateConfigMask(mask);
-
-  Call::Config::BitrateConfig config;
-  config.min_bitrate_bps = 1234;
-
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(1234, testing::_, testing::_));
-  call->SetBitrateConfig(config);
+TEST(CallTest, AddAdaptationResourceAfterCreatingVideoSendStream) {
+  CallHelper call(true);
+  // Create a VideoSendStream.
+  test::FunctionVideoEncoderFactory fake_encoder_factory([]() {
+    return std::make_unique<test::FakeEncoder>(Clock::GetRealTimeClock());
+  });
+  auto bitrate_allocator_factory = CreateBuiltinVideoBitrateAllocatorFactory();
+  MockTransport send_transport;
+  VideoSendStream::Config config(&send_transport);
+  config.rtp.payload_type = 110;
+  config.rtp.ssrcs = {42};
+  config.encoder_settings.encoder_factory = &fake_encoder_factory;
+  config.encoder_settings.bitrate_allocator_factory =
+      bitrate_allocator_factory.get();
+  VideoEncoderConfig encoder_config;
+  encoder_config.max_bitrate_bps = 1337;
+  VideoSendStream* stream1 =
+      call->CreateVideoSendStream(config.Copy(), encoder_config.Copy());
+  EXPECT_NE(stream1, nullptr);
+  config.rtp.ssrcs = {43};
+  VideoSendStream* stream2 =
+      call->CreateVideoSendStream(config.Copy(), encoder_config.Copy());
+  EXPECT_NE(stream2, nullptr);
+  // Add a fake resource.
+  auto fake_resource = FakeResource::Create("FakeResource");
+  call->AddAdaptationResource(fake_resource);
+  // An adapter resource mirroring the `fake_resource` should now be present on
+  // both streams.
+  auto injected_resource1 = FindResourceWhoseNameContains(
+      stream1->GetAdaptationResources(), fake_resource->Name());
+  EXPECT_TRUE(injected_resource1);
+  auto injected_resource2 = FindResourceWhoseNameContains(
+      stream2->GetAdaptationResources(), fake_resource->Name());
+  EXPECT_TRUE(injected_resource2);
+  // Overwrite the real resource listeners with mock ones to verify the signal
+  // gets through.
+  injected_resource1->SetResourceListener(nullptr);
+  StrictMock<MockResourceListener> resource_listener1;
+  EXPECT_CALL(resource_listener1, OnResourceUsageStateMeasured(_, _))
+      .Times(1)
+      .WillOnce([injected_resource1](rtc::scoped_refptr<Resource> resource,
+                                     ResourceUsageState usage_state) {
+        EXPECT_EQ(injected_resource1, resource);
+        EXPECT_EQ(ResourceUsageState::kOveruse, usage_state);
+      });
+  injected_resource1->SetResourceListener(&resource_listener1);
+  injected_resource2->SetResourceListener(nullptr);
+  StrictMock<MockResourceListener> resource_listener2;
+  EXPECT_CALL(resource_listener2, OnResourceUsageStateMeasured(_, _))
+      .Times(1)
+      .WillOnce([injected_resource2](rtc::scoped_refptr<Resource> resource,
+                                     ResourceUsageState usage_state) {
+        EXPECT_EQ(injected_resource2, resource);
+        EXPECT_EQ(ResourceUsageState::kOveruse, usage_state);
+      });
+  injected_resource2->SetResourceListener(&resource_listener2);
+  // The kOveruse signal should get to our resource listeners.
+  fake_resource->SetUsageState(ResourceUsageState::kOveruse);
+  call->DestroyVideoSendStream(stream1);
+  call->DestroyVideoSendStream(stream2);
 }
 
-// The last call to set start should be used.
-TEST(CallBitrateTest, LatestStartMaskPreferred) {
-  CallBitrateHelper call;
-  Call::Config::BitrateConfigMask mask;
-  mask.start_bitrate_bps = rtc::Optional<int>(1300);
-
-  EXPECT_CALL(call.mock_cc(),
-              SetBweBitrates(testing::_, *mask.start_bitrate_bps, testing::_));
-  call->SetBitrateConfigMask(mask);
-
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.start_bitrate_bps = 1200;
-
-  EXPECT_CALL(
-      call.mock_cc(),
-      SetBweBitrates(testing::_, bitrate_config.start_bitrate_bps, testing::_));
-  call->SetBitrateConfig(bitrate_config);
-}
-
-TEST(CallBitrateTest, SmallerMaskMaxUsed) {
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.max_bitrate_bps = bitrate_config.start_bitrate_bps + 2000;
-  CallBitrateHelper call(bitrate_config);
-
-  Call::Config::BitrateConfigMask mask;
-  mask.max_bitrate_bps =
-      rtc::Optional<int>(bitrate_config.start_bitrate_bps + 1000);
-
-  EXPECT_CALL(call.mock_cc(),
-              SetBweBitrates(testing::_, testing::_, *mask.max_bitrate_bps));
-  call->SetBitrateConfigMask(mask);
-}
-
-TEST(CallBitrateTest, SmallerConfigMaxUsed) {
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.max_bitrate_bps = bitrate_config.start_bitrate_bps + 1000;
-  CallBitrateHelper call(bitrate_config);
-
-  Call::Config::BitrateConfigMask mask;
-  mask.max_bitrate_bps =
-      rtc::Optional<int>(bitrate_config.start_bitrate_bps + 2000);
-
-  // Expect no calls because nothing changes
-  EXPECT_CALL(call.mock_cc(),
-              SetBweBitrates(testing::_, testing::_, testing::_))
-      .Times(0);
-  call->SetBitrateConfigMask(mask);
-}
-
-TEST(CallBitrateTest, MaskStartLessThanConfigMinClamped) {
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.min_bitrate_bps = 2000;
-  CallBitrateHelper call(bitrate_config);
-
-  Call::Config::BitrateConfigMask mask;
-  mask.start_bitrate_bps = rtc::Optional<int>(1000);
-
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(2000, 2000, testing::_));
-  call->SetBitrateConfigMask(mask);
-}
-
-TEST(CallBitrateTest, MaskStartGreaterThanConfigMaxClamped) {
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.start_bitrate_bps = 2000;
-  CallBitrateHelper call(bitrate_config);
-
-  Call::Config::BitrateConfigMask mask;
-  mask.max_bitrate_bps = rtc::Optional<int>(1000);
-
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(testing::_, -1, 1000));
-  call->SetBitrateConfigMask(mask);
-}
-
-TEST(CallBitrateTest, MaskMinGreaterThanConfigMaxClamped) {
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.min_bitrate_bps = 2000;
-  CallBitrateHelper call(bitrate_config);
-
-  Call::Config::BitrateConfigMask mask;
-  mask.max_bitrate_bps = rtc::Optional<int>(1000);
-
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(1000, testing::_, 1000));
-  call->SetBitrateConfigMask(mask);
-}
-
-TEST(CallBitrateTest, SettingMaskStartForcesUpdate) {
-  CallBitrateHelper call;
-
-  Call::Config::BitrateConfigMask mask;
-  mask.start_bitrate_bps = rtc::Optional<int>(1000);
-
-  // SetBweBitrates should be called twice with the same params since
-  // start_bitrate_bps is set.
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(testing::_, 1000, testing::_))
-      .Times(2);
-  call->SetBitrateConfigMask(mask);
-  call->SetBitrateConfigMask(mask);
-}
-
-TEST(CallBitrateTest, SetBitrateConfigWithNoChangesDoesNotCallSetBweBitrates) {
-  CallBitrateHelper call;
-
-  Call::Config::BitrateConfig config1;
-  config1.min_bitrate_bps = 0;
-  config1.start_bitrate_bps = 1000;
-  config1.max_bitrate_bps = -1;
-
-  Call::Config::BitrateConfig config2;
-  config2.min_bitrate_bps = 0;
-  config2.start_bitrate_bps = -1;
-  config2.max_bitrate_bps = -1;
-
-  // The second call should not call SetBweBitrates because it doesn't
-  // change any values.
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(0, 1000, -1));
-  call->SetBitrateConfig(config1);
-  call->SetBitrateConfig(config2);
-}
-
-// If SetBitrateConfig changes the max, but not the effective max,
-// SetBweBitrates shouldn't be called, to avoid unnecessary encoder
-// reconfigurations.
-TEST(CallBitrateTest, SetBweBitratesNotCalledWhenEffectiveMaxUnchanged) {
-  CallBitrateHelper call;
-
-  Call::Config::BitrateConfig config;
-  config.min_bitrate_bps = 0;
-  config.start_bitrate_bps = -1;
-  config.max_bitrate_bps = 2000;
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(testing::_, testing::_, 2000));
-  call->SetBitrateConfig(config);
-
-  // Reduce effective max to 1000 with the mask.
-  Call::Config::BitrateConfigMask mask;
-  mask.max_bitrate_bps = rtc::Optional<int>(1000);
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(testing::_, testing::_, 1000));
-  call->SetBitrateConfigMask(mask);
-
-  // This leaves the effective max unchanged, so SetBweBitrates shouldn't be
-  // called again.
-  config.max_bitrate_bps = 1000;
-  call->SetBitrateConfig(config);
-}
-
-// When the "start bitrate" mask is removed, SetBweBitrates shouldn't be called
-// again, since nothing's changing.
-TEST(CallBitrateTest, SetBweBitratesNotCalledWhenStartMaskRemoved) {
-  CallBitrateHelper call;
-
-  Call::Config::BitrateConfigMask mask;
-  mask.start_bitrate_bps = rtc::Optional<int>(1000);
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(0, 1000, -1));
-  call->SetBitrateConfigMask(mask);
-
-  mask.start_bitrate_bps.reset();
-  call->SetBitrateConfigMask(mask);
-}
-
-// Test that if SetBitrateConfig is called after SetBitrateConfigMask applies a
-// "start" value, the SetBitrateConfig call won't apply that start value a
-// second time.
-TEST(CallBitrateTest, SetBitrateConfigAfterSetBitrateConfigMaskWithStart) {
-  CallBitrateHelper call;
-
-  Call::Config::BitrateConfigMask mask;
-  mask.start_bitrate_bps = rtc::Optional<int>(1000);
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(0, 1000, -1));
-  call->SetBitrateConfigMask(mask);
-
-  Call::Config::BitrateConfig config;
-  config.min_bitrate_bps = 0;
-  config.start_bitrate_bps = -1;
-  config.max_bitrate_bps = 5000;
-  // The start value isn't changing, so SetBweBitrates should be called with
-  // -1.
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(0, -1, 5000));
-  call->SetBitrateConfig(config);
-}
-
-TEST(CallBitrateTest, SetBweBitratesNotCalledWhenClampedMinUnchanged) {
-  Call::Config::BitrateConfig bitrate_config;
-  bitrate_config.start_bitrate_bps = 500;
-  bitrate_config.max_bitrate_bps = 1000;
-  CallBitrateHelper call(bitrate_config);
-
-  // Set min to 2000; it is clamped to the max (1000).
-  Call::Config::BitrateConfigMask mask;
-  mask.min_bitrate_bps = rtc::Optional<int>(2000);
-  EXPECT_CALL(call.mock_cc(), SetBweBitrates(1000, -1, 1000));
-  call->SetBitrateConfigMask(mask);
-
-  // Set min to 3000; the clamped value stays the same so nothing happens.
-  mask.min_bitrate_bps = rtc::Optional<int>(3000);
-  call->SetBitrateConfigMask(mask);
+TEST(CallTest, AddAdaptationResourceBeforeCreatingVideoSendStream) {
+  CallHelper call(true);
+  // Add a fake resource.
+  auto fake_resource = FakeResource::Create("FakeResource");
+  call->AddAdaptationResource(fake_resource);
+  // Create a VideoSendStream.
+  test::FunctionVideoEncoderFactory fake_encoder_factory([]() {
+    return std::make_unique<test::FakeEncoder>(Clock::GetRealTimeClock());
+  });
+  auto bitrate_allocator_factory = CreateBuiltinVideoBitrateAllocatorFactory();
+  MockTransport send_transport;
+  VideoSendStream::Config config(&send_transport);
+  config.rtp.payload_type = 110;
+  config.rtp.ssrcs = {42};
+  config.encoder_settings.encoder_factory = &fake_encoder_factory;
+  config.encoder_settings.bitrate_allocator_factory =
+      bitrate_allocator_factory.get();
+  VideoEncoderConfig encoder_config;
+  encoder_config.max_bitrate_bps = 1337;
+  VideoSendStream* stream1 =
+      call->CreateVideoSendStream(config.Copy(), encoder_config.Copy());
+  EXPECT_NE(stream1, nullptr);
+  config.rtp.ssrcs = {43};
+  VideoSendStream* stream2 =
+      call->CreateVideoSendStream(config.Copy(), encoder_config.Copy());
+  EXPECT_NE(stream2, nullptr);
+  // An adapter resource mirroring the `fake_resource` should be present on both
+  // streams.
+  auto injected_resource1 = FindResourceWhoseNameContains(
+      stream1->GetAdaptationResources(), fake_resource->Name());
+  EXPECT_TRUE(injected_resource1);
+  auto injected_resource2 = FindResourceWhoseNameContains(
+      stream2->GetAdaptationResources(), fake_resource->Name());
+  EXPECT_TRUE(injected_resource2);
+  // Overwrite the real resource listeners with mock ones to verify the signal
+  // gets through.
+  injected_resource1->SetResourceListener(nullptr);
+  StrictMock<MockResourceListener> resource_listener1;
+  EXPECT_CALL(resource_listener1, OnResourceUsageStateMeasured(_, _))
+      .Times(1)
+      .WillOnce([injected_resource1](rtc::scoped_refptr<Resource> resource,
+                                     ResourceUsageState usage_state) {
+        EXPECT_EQ(injected_resource1, resource);
+        EXPECT_EQ(ResourceUsageState::kUnderuse, usage_state);
+      });
+  injected_resource1->SetResourceListener(&resource_listener1);
+  injected_resource2->SetResourceListener(nullptr);
+  StrictMock<MockResourceListener> resource_listener2;
+  EXPECT_CALL(resource_listener2, OnResourceUsageStateMeasured(_, _))
+      .Times(1)
+      .WillOnce([injected_resource2](rtc::scoped_refptr<Resource> resource,
+                                     ResourceUsageState usage_state) {
+        EXPECT_EQ(injected_resource2, resource);
+        EXPECT_EQ(ResourceUsageState::kUnderuse, usage_state);
+      });
+  injected_resource2->SetResourceListener(&resource_listener2);
+  // The kUnderuse signal should get to our resource listeners.
+  fake_resource->SetUsageState(ResourceUsageState::kUnderuse);
+  call->DestroyVideoSendStream(stream1);
+  call->DestroyVideoSendStream(stream2);
 }
 
 }  // namespace webrtc

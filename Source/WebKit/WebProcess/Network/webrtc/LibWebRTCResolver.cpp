@@ -36,52 +36,63 @@
 
 namespace WebKit {
 
-static inline void sendOnMainThread(Function<void(IPC::Connection&)>&& callback)
+void LibWebRTCResolver::sendOnMainThread(Function<void(IPC::Connection&)>&& callback)
 {
-    callOnMainThread([callback = WTFMove(callback)]() {
-        callback(WebProcess::singleton().networkConnection().connection());
+    callOnMainRunLoop([callback = WTFMove(callback)]() {
+        callback(WebProcess::singleton().ensureNetworkProcessConnection().connection());
     });
 }
 
-void LibWebRTCResolver::Start(const rtc::SocketAddress& address)
+void LibWebRTCResolver::Start(const rtc::SocketAddress& address,
+                     absl::AnyInvocable<void()> callback)
 {
     m_isResolving = true;
     m_addressToResolve = address;
     m_port = address.port();
-    auto identifier = m_identifier;
-    sendOnMainThread([identifier, address](IPC::Connection& connection) {
+
+    sendOnMainThread([identifier = m_identifier, address](IPC::Connection& connection) {
         auto addressString = address.HostAsURIString();
         connection.send(Messages::NetworkRTCProvider::CreateResolver(identifier, String(addressString.data(), addressString.length())), 0);
     });
 }
 
-bool LibWebRTCResolver::GetResolvedAddress(int family, rtc::SocketAddress* address) const
+void LibWebRTCResolver::Start(const rtc::SocketAddress& addr,
+                     int family,
+                     absl::AnyInvocable<void()> callback)
 {
-    ASSERT(address);
-    if (m_error || !m_addresses.size())
-        return false;
-
-    *address = m_addressToResolve;
-    for (auto& ipAddress : m_addresses) {
-        if (family == ipAddress.family()) {
-            address->SetResolvedIP(ipAddress);
-            address->SetPort(m_port);
-            return true;
-        }
-    }
-    return false;
+    // TBI
 }
 
-void LibWebRTCResolver::Destroy(bool)
+class MyAsyncDnsResolverResult: public webrtc::AsyncDnsResolverResult
 {
-    if (!isResolving())
-        return;
+public:
 
-    auto identifier = m_identifier;
-    sendOnMainThread([identifier](IPC::Connection& connection) {
-        connection.send(Messages::NetworkRTCProvider::StopResolver(identifier), 0);
-    });
+    int m_error = 0;
 
+    virtual bool GetResolvedAddress(int family,
+                                  rtc::SocketAddress* addr) const final
+    {
+        return true;
+    }
+
+    // Returns error from resolver.
+    virtual int GetError() const final
+    {
+        return m_error;
+    }
+
+
+};
+
+const webrtc::AsyncDnsResolverResult& LibWebRTCResolver::result() const
+{
+    // TBI
+    // ACF ??
+    return MyAsyncDnsResolverResult{};
+}
+
+void LibWebRTCResolver::doDestroy()
+{
     // Let's take the resolver so that it gets destroyed at the end of this function.
     auto resolver = WebProcess::singleton().libWebRTCNetwork().socketFactory().takeResolver(m_identifier);
     ASSERT(resolver);
@@ -90,13 +101,21 @@ void LibWebRTCResolver::Destroy(bool)
 void LibWebRTCResolver::setResolvedAddress(const Vector<rtc::IPAddress>& addresses)
 {
     m_addresses = addresses;
-    SignalDone(this);
+    m_isProvidingResults = true;
+    //SignalDone(this);
+    m_isProvidingResults = false;
+    if (m_shouldDestroy)
+        doDestroy();
 }
 
 void LibWebRTCResolver::setError(int error)
 {
     m_error = error;
-    SignalDone(this);
+    m_isProvidingResults = true;
+    //SignalDone(this);
+    m_isProvidingResults = false;
+    if (m_shouldDestroy)
+        doDestroy();
 }
 
 } // namespace WebKit

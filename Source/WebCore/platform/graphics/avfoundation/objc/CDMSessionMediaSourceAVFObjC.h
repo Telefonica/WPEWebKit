@@ -23,11 +23,11 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef CDMSessionMediaSourceAVFObjC_h
-#define CDMSessionMediaSourceAVFObjC_h
+#pragma once
 
 #include "LegacyCDMSession.h"
 #include "SourceBufferPrivateAVFObjC.h"
+#include <wtf/RefCounted.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/WeakPtr.h>
 
@@ -40,25 +40,23 @@ namespace WebCore {
 
 class CDMPrivateMediaSourceAVFObjC;
 
-class CDMSessionMediaSourceAVFObjC : public CDMSession, public SourceBufferPrivateAVFObjCErrorClient {
+class CDMSessionMediaSourceAVFObjC : public LegacyCDMSession, public SourceBufferPrivateAVFObjCErrorClient, public CanMakeWeakPtr<CDMSessionMediaSourceAVFObjC> {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    CDMSessionMediaSourceAVFObjC(CDMPrivateMediaSourceAVFObjC&, CDMSessionClient*);
+    CDMSessionMediaSourceAVFObjC(CDMPrivateMediaSourceAVFObjC&, LegacyCDMSessionClient&);
     virtual ~CDMSessionMediaSourceAVFObjC();
 
     virtual void addParser(AVStreamDataParser*) = 0;
     virtual void removeParser(AVStreamDataParser*) = 0;
 
-    // CDMSession
-    void setClient(CDMSessionClient* client) override { m_client = client; }
+    // LegacyCDMSession
     const String& sessionId() const override { return m_sessionId; }
 
     // SourceBufferPrivateAVFObjCErrorClient
     void layerDidReceiveError(AVSampleBufferDisplayLayer *, NSError *, bool& shouldIgnore) override;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunknown-pragmas"
-#pragma clang diagnostic ignored "-Wunguarded-availability-new"
+    ALLOW_NEW_API_WITHOUT_GUARDS_BEGIN
     void rendererDidReceiveError(AVSampleBufferAudioRenderer *, NSError *, bool& shouldIgnore) override;
-#pragma clang diagnostic pop
+    ALLOW_NEW_API_WITHOUT_GUARDS_END
 
     void addSourceBuffer(SourceBufferPrivateAVFObjC*);
     void removeSourceBuffer(SourceBufferPrivateAVFObjC*);
@@ -69,15 +67,26 @@ public:
 protected:
     String storagePath() const;
 
+#if !RELEASE_LOG_DISABLED
+    const Logger& logger() const { return m_logger; }
+    const void* logIdentifier() const { return m_logIdentifier; }
+    WTFLogChannel& logChannel() const;
+#endif
+
     CDMPrivateMediaSourceAVFObjC* m_cdm;
-    CDMSessionClient* m_client { nullptr };
+    WeakPtr<LegacyCDMSessionClient> m_client;
     Vector<RefPtr<SourceBufferPrivateAVFObjC>> m_sourceBuffers;
     RefPtr<Uint8Array> m_certificate;
     String m_sessionId;
     bool m_stopped { false };
+
+#if !RELEASE_LOG_DISABLED
+    Ref<const Logger> m_logger;
+    const void* m_logIdentifier;
+#endif
 };
 
-inline CDMSessionMediaSourceAVFObjC* toCDMSessionMediaSourceAVFObjC(CDMSession* session)
+inline CDMSessionMediaSourceAVFObjC* toCDMSessionMediaSourceAVFObjC(LegacyCDMSession* session)
 {
     if (!session || (session->type() != CDMSessionTypeAVStreamSession && session->type() != CDMSessionTypeAVContentKeySession))
         return nullptr;
@@ -87,5 +96,3 @@ inline CDMSessionMediaSourceAVFObjC* toCDMSessionMediaSourceAVFObjC(CDMSession* 
 }
 
 #endif // ENABLE(LEGACY_ENCRYPTED_MEDIA) && ENABLE(MEDIA_SOURCE)
-
-#endif // CDMSessionMediaSourceAVFObjC_h

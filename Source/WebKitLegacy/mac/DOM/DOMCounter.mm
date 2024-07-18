@@ -29,12 +29,12 @@
 #import "DOMInternal.h"
 #import "DOMNodeInternal.h"
 #import "ExceptionHandlers.h"
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL reinterpret_cast<WebCore::DeprecatedCSSOMCounter*>(_internal)
 
@@ -76,10 +76,12 @@ DOMCounter *kit(WebCore::DeprecatedCSSOMCounter* value)
     if (!value)
         return nil;
     if (DOMCounter *wrapper = getDOMWrapper(value))
-        return [[wrapper retain] autorelease];
-    DOMCounter *wrapper = [[DOMCounter alloc] _init];
+        return retainPtr(wrapper).autorelease();
+    auto wrapper = adoptNS([[DOMCounter alloc] _init]);
     wrapper->_internal = reinterpret_cast<DOMObjectInternal*>(value);
     value->ref();
-    addDOMWrapper(wrapper, value);
-    return [wrapper autorelease];
+    addDOMWrapper(wrapper.get(), value);
+    return wrapper.autorelease();
 }
+
+#undef IMPL

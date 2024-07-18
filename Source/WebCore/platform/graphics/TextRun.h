@@ -2,7 +2,7 @@
  * Copyright (C) 2000 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2006, 2007, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2022 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,9 +21,9 @@
  *
  */
 
-#ifndef TextRun_h
-#define TextRun_h
+#pragma once
 
+#include "TabSize.h"
 #include "TextFlags.h"
 #include "WritingMode.h"
 #include <wtf/text/StringView.h>
@@ -35,42 +35,82 @@ class FloatRect;
 class FontCascade;
 class GraphicsContext;
 class GlyphBuffer;
-class GlyphToPathTranslator;
 class Font;
 
 struct GlyphData;
-struct WidthIterator;
 
 class TextRun {
     WTF_MAKE_FAST_ALLOCATED;
+    friend void add(Hasher&, const TextRun&);
 public:
-    explicit TextRun(StringView text, float xpos = 0, float expansion = 0, ExpansionBehavior expansionBehavior = DefaultExpansion, TextDirection direction = LTR, bool directionalOverride = false, bool characterScanForCodePath = true)
+    explicit TextRun(const String& text, float xpos = 0, float expansion = 0, ExpansionBehavior expansionBehavior = ExpansionBehavior::defaultBehavior(), TextDirection direction = TextDirection::LTR, bool directionalOverride = false, bool characterScanForCodePath = true)
         : m_text(text)
-        , m_charactersLength(text.length())
         , m_tabSize(0)
         , m_xpos(xpos)
         , m_horizontalGlyphStretch(1)
         , m_expansion(expansion)
         , m_expansionBehavior(expansionBehavior)
         , m_allowTabs(false)
-        , m_direction(direction)
+        , m_direction(static_cast<unsigned>(direction))
         , m_directionalOverride(directionalOverride)
         , m_characterScanForCodePath(characterScanForCodePath)
         , m_disableSpacing(false)
     {
+        ASSERT(!m_text.isNull());
     }
+
+    explicit TextRun(StringView stringView, float xpos = 0, float expansion = 0, ExpansionBehavior expansionBehavior = ExpansionBehavior::defaultBehavior(), TextDirection direction = TextDirection::LTR, bool directionalOverride = false, bool characterScanForCodePath = true)
+        : TextRun(stringView.toStringWithoutCopying(), xpos, expansion, expansionBehavior, direction, directionalOverride, characterScanForCodePath)
+    {
+    }
+
+    explicit TextRun(WTF::HashTableDeletedValueType)
+        : m_text(WTF::HashTableDeletedValue)
+        , m_tabSize(0)
+        , m_xpos(0)
+        , m_horizontalGlyphStretch(0)
+        , m_expansion(0)
+        , m_expansionBehavior(ExpansionBehavior::defaultBehavior())
+        , m_allowTabs(0)
+        , m_direction(0)
+        , m_directionalOverride(0)
+        , m_characterScanForCodePath(0)
+        , m_disableSpacing(0)
+    {
+    }
+
+    explicit TextRun(WTF::HashTableEmptyValueType)
+        : m_text()
+        , m_tabSize(0)
+        , m_xpos(0)
+        , m_horizontalGlyphStretch(0)
+        , m_expansion(0)
+        , m_expansionBehavior(ExpansionBehavior::defaultBehavior())
+        , m_allowTabs(0)
+        , m_direction(0)
+        , m_directionalOverride(0)
+        , m_characterScanForCodePath(0)
+        , m_disableSpacing(0)
+    {
+    }
+
+    TextRun(const TextRun&) = default;
+    TextRun& operator=(const TextRun&) = default;
+    bool operator==(const TextRun&) const;
+
+    bool isHashTableEmptyValue() const { return m_text.isNull(); }
+    bool isHashTableDeletedValue() const { return m_text.isHashTableDeletedValue(); }
 
     TextRun subRun(unsigned startOffset, unsigned length) const
     {
-        ASSERT_WITH_SECURITY_IMPLICATION(startOffset < m_text.length());
+        ASSERT_WITH_SECURITY_IMPLICATION((startOffset + length) <= m_text.length());
 
-        TextRun result = *this;
+        auto result { *this };
 
-        if (is8Bit()) {
+        if (is8Bit())
             result.setText(data8(startOffset), length);
-            return result;
-        }
-        result.setText(data16(startOffset), length);
+        else
+            result.setText(data16(startOffset), length);
         return result;
     }
 
@@ -83,43 +123,41 @@ public:
 
     bool is8Bit() const { return m_text.is8Bit(); }
     unsigned length() const { return m_text.length(); }
-    unsigned charactersLength() const { return m_charactersLength; }
-    String string() const { return m_text.toString(); }
 
-    void setText(const LChar* c, unsigned len) { m_text = StringView(c, len); }
-    void setText(const UChar* c, unsigned len) { m_text = StringView(c, len); }
-    void setText(StringView stringView) { m_text = stringView; }
-    void setCharactersLength(unsigned charactersLength) { m_charactersLength = charactersLength; }
+    void setText(const LChar* text, unsigned length) { setText({ text, length }); }
+    void setText(const UChar* text, unsigned length) { setText({ text, length }); }
+    void setText(StringView text) { ASSERT(!text.isNull()); m_text = text.toStringWithoutCopying(); }
 
     float horizontalGlyphStretch() const { return m_horizontalGlyphStretch; }
     void setHorizontalGlyphStretch(float scale) { m_horizontalGlyphStretch = scale; }
 
     bool allowTabs() const { return m_allowTabs; }
-    unsigned tabSize() const { return m_tabSize; }
-    void setTabSize(bool, unsigned);
+    const TabSize& tabSize() const { return m_tabSize; }
+    void setTabSize(bool, const TabSize&);
 
     float xPos() const { return m_xpos; }
     void setXPos(float xPos) { m_xpos = xPos; }
     float expansion() const { return m_expansion; }
     ExpansionBehavior expansionBehavior() const { return m_expansionBehavior; }
     TextDirection direction() const { return static_cast<TextDirection>(m_direction); }
-    bool rtl() const { return m_direction == RTL; }
-    bool ltr() const { return m_direction == LTR; }
+    bool rtl() const { return static_cast<TextDirection>(m_direction) == TextDirection::RTL; }
+    bool ltr() const { return static_cast<TextDirection>(m_direction) == TextDirection::LTR; }
     bool directionalOverride() const { return m_directionalOverride; }
     bool characterScanForCodePath() const { return m_characterScanForCodePath; }
     bool spacingDisabled() const { return m_disableSpacing; }
 
     void disableSpacing() { m_disableSpacing = true; }
-    void setDirection(TextDirection direction) { m_direction = direction; }
+    void setDirection(TextDirection direction) { m_direction = static_cast<unsigned>(direction); }
     void setDirectionalOverride(bool override) { m_directionalOverride = override; }
     void setCharacterScanForCodePath(bool scan) { m_characterScanForCodePath = scan; }
     StringView text() const { return m_text; }
 
-private:
-    StringView m_text;
-    unsigned m_charactersLength; // Marks the end of the characters buffer. Default equals to length of m_text.
+    TextRun isolatedCopy() const;
 
-    unsigned m_tabSize;
+private:
+    String m_text;
+
+    TabSize m_tabSize;
 
     // m_xpos is the x position relative to the left start of the text line, not relative to the left
     // start of the containing block. In the case of right alignment or center alignment, left start of
@@ -129,7 +167,7 @@ private:
     float m_horizontalGlyphStretch;
 
     float m_expansion;
-    unsigned m_expansionBehavior : 4;
+    ExpansionBehavior m_expansionBehavior;
     unsigned m_allowTabs : 1;
     unsigned m_direction : 1;
     unsigned m_directionalOverride : 1; // Was this direction set by an override character.
@@ -137,12 +175,22 @@ private:
     unsigned m_disableSpacing : 1;
 };
 
-inline void TextRun::setTabSize(bool allow, unsigned size)
+inline void TextRun::setTabSize(bool allow, const TabSize& size)
 {
     m_allowTabs = allow;
     m_tabSize = size;
 }
 
+inline TextRun TextRun::isolatedCopy() const
+{
+    TextRun clone = *this;
+    if (clone.m_text.is8Bit())
+        clone.m_text = String(clone.m_text.characters8(), clone.m_text.length());
+    else
+        clone.m_text = String(clone.m_text.characters16(), clone.m_text.length());
+    return clone;
 }
 
-#endif
+TextStream& operator<<(TextStream&, const TextRun&);
+
+} // namespace WebCore

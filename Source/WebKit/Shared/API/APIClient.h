@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <array>
+#include <tuple>
 
 namespace API {
 
@@ -50,7 +51,7 @@ template<typename ClientInterface> class Client {
 public:
     Client()
     {
-#if !ASSERT_DISABLED
+#if ASSERT_ENABLED
         auto interfaceSizes = InterfaceSizes<ClientVersions>::sizes();
         ASSERT(std::is_sorted(interfaceSizes.begin(), interfaceSizes.end()));
 #endif

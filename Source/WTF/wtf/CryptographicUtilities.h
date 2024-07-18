@@ -23,16 +23,22 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WTF_CryptographicUtilities_h
-#define WTF_CryptographicUtilities_h
+#pragma once
+
+#include <string>
 
 namespace WTF {
 
 // Returns zero if arrays are equal, and non-zero otherwise. Execution time does not depend on array contents.
+#if HAVE(TIMINGSAFE_BCMP)
+inline int constantTimeMemcmp(const void* voidA, const void* voidB, size_t length)
+{
+    return timingsafe_bcmp(voidA, voidB, length);
+}
+#else
 WTF_EXPORT_PRIVATE int constantTimeMemcmp(const void*, const void*, size_t length);
+#endif
 
 }
 
 using WTF::constantTimeMemcmp;
-
-#endif

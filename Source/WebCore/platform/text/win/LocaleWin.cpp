@@ -36,14 +36,12 @@
 #include "LocalizedStrings.h"
 #include <limits>
 #include <windows.h>
-#include <wtf/CurrentTime.h>
 #include <wtf/DateMath.h>
 #include <wtf/HashMap.h>
 #include <wtf/Language.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/StringHash.h>
-
-using namespace std;
+#include <wtf/text/win/WCharStringExtras.h>
 
 namespace WebCore {
 
@@ -57,20 +55,20 @@ static String extractLanguageCode(const String& locale)
     return locale.left(dashPosition);
 }
 
-static LCID LCIDFromLocaleInternal(LCID userDefaultLCID, const String& userDefaultLanguageCode, String& locale)
+static LCID LCIDFromLocaleInternal(LCID userDefaultLCID, const String& userDefaultLanguageCode, const String& locale)
 {
     if (equalIgnoringASCIICase(extractLanguageCode(locale), userDefaultLanguageCode))
         return userDefaultLCID;
-    return LocaleNameToLCID(locale.charactersWithNullTermination().data(), 0);
+    return LocaleNameToLCID(locale.wideCharacters().data(), 0);
 }
 
-static LCID LCIDFromLocale(const AtomicString& locale)
+static LCID LCIDFromLocale(const AtomString& locale)
 {
     // According to MSDN, 9 is enough for LOCALE_SISO639LANGNAME.
     const size_t languageCodeBufferSize = 9;
     WCHAR lowercaseLanguageCode[languageCodeBufferSize];
     ::GetLocaleInfo(LOCALE_USER_DEFAULT, LOCALE_SISO639LANGNAME, lowercaseLanguageCode, languageCodeBufferSize);
-    String userDefaultLanguageCode = String(lowercaseLanguageCode);
+    String userDefaultLanguageCode(lowercaseLanguageCode);
 
     LCID lcid = LCIDFromLocaleInternal(LOCALE_USER_DEFAULT, userDefaultLanguageCode, String(locale));
     if (!lcid)
@@ -78,9 +76,9 @@ static LCID LCIDFromLocale(const AtomicString& locale)
     return lcid;
 }
 
-std::unique_ptr<Locale> Locale::create(const AtomicString& locale)
+std::unique_ptr<Locale> Locale::create(const AtomString& locale)
 {
-    return std::make_unique<LocaleWin>(LCIDFromLocale(locale));
+    return makeUnique<LocaleWin>(LCIDFromLocale(locale));
 }
 
 inline LocaleWin::LocaleWin(LCID lcid)
@@ -89,17 +87,15 @@ inline LocaleWin::LocaleWin(LCID lcid)
 {
 }
 
-LocaleWin::~LocaleWin()
-{
-}
+LocaleWin::~LocaleWin() = default;
 
 String LocaleWin::getLocaleInfoString(LCTYPE type)
 {
     int bufferSizeWithNUL = ::GetLocaleInfo(m_lcid, type, 0, 0);
     if (bufferSizeWithNUL <= 0)
         return String();
-    StringVector<UChar> buffer(bufferSizeWithNUL);
-    ::GetLocaleInfo(m_lcid, type, buffer.data(), bufferSizeWithNUL);
+    Vector<UChar> buffer(bufferSizeWithNUL);
+    ::GetLocaleInfo(m_lcid, type, wcharFrom(buffer.data()), bufferSizeWithNUL);
     buffer.shrink(bufferSizeWithNUL - 1);
     return String::adopt(WTFMove(buffer));
 }
@@ -306,7 +302,7 @@ String LocaleWin::monthFormat()
 String LocaleWin::shortMonthFormat()
 {
     if (m_shortMonthFormat.isNull())
-        m_shortMonthFormat = convertWindowsDateTimeFormat(getLocaleInfoString(LOCALE_SYEARMONTH)).replace("MMMM", "MMM");
+        m_shortMonthFormat = makeStringByReplacingAll(convertWindowsDateTimeFormat(getLocaleInfoString(LOCALE_SYEARMONTH)), "MMMM"_s, "MMM"_s);
     return m_shortMonthFormat;
 }
 
@@ -330,7 +326,7 @@ String LocaleWin::shortTimeFormat()
         builder.append("ss");
         size_t pos = format.reverseFind(builder.toString());
         if (pos != notFound)
-            format.remove(pos, builder.length());
+            format = makeStringByRemoving(format, pos, builder.length());
     }
     m_timeFormatWithoutSeconds = convertWindowsDateTimeFormat(format);
     return m_timeFormatWithoutSeconds;
@@ -402,16 +398,16 @@ void LocaleWin::initializeLocaleData()
     DWORD digitSubstitution = DigitSubstitution0to9;
     getLocaleInfo(LOCALE_IDIGITSUBSTITUTION, digitSubstitution);
     if (digitSubstitution == DigitSubstitution0to9) {
-        symbols.append("0");
-        symbols.append("1");
-        symbols.append("2");
-        symbols.append("3");
-        symbols.append("4");
-        symbols.append("5");
-        symbols.append("6");
-        symbols.append("7");
-        symbols.append("8");
-        symbols.append("9");
+        symbols.append("0"_s);
+        symbols.append("1"_s);
+        symbols.append("2"_s);
+        symbols.append("3"_s);
+        symbols.append("4"_s);
+        symbols.append("5"_s);
+        symbols.append("6"_s);
+        symbols.append("7"_s);
+        symbols.append("8"_s);
+        symbols.append("9"_s);
     } else {
         String digits = getLocaleInfoString(LOCALE_SNATIVEDIGITS);
         ASSERT(digits.length() >= 10);
@@ -438,8 +434,8 @@ void LocaleWin::initializeLocaleData()
     String negativeSuffix = emptyString();
     switch (negativeFormat) {
     case NegativeFormatParenthesis:
-        negativePrefix = "(";
-        negativeSuffix = ")";
+        negativePrefix = "("_s;
+        negativeSuffix = ")"_s;
         break;
     case NegativeFormatSignSpacePrefix:
         negativePrefix = negativeSign + " ";

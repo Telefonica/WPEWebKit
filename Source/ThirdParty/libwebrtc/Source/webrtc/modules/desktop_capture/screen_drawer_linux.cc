@@ -8,46 +8,25 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <semaphore.h>
-#include <string.h>
+#include <X11/X.h>
 #include <X11/Xlib.h>
+#include <string.h>
 
 #include <memory>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/desktop_capture/screen_drawer.h"
-#include "webrtc/modules/desktop_capture/x11/shared_x_display.h"
-#include "webrtc/system_wrappers/include/sleep.h"
+#include "api/scoped_refptr.h"
+#include "modules/desktop_capture/desktop_capture_types.h"
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/linux/x11/shared_x_display.h"
+#include "modules/desktop_capture/rgba_color.h"
+#include "modules/desktop_capture/screen_drawer.h"
+#include "modules/desktop_capture/screen_drawer_lock_posix.h"
+#include "rtc_base/checks.h"
+#include "system_wrappers/include/sleep.h"
 
 namespace webrtc {
 
 namespace {
-
-static constexpr char kSemaphoreName[] =
-    "/global-screen-drawer-linux-54fe5552-8047-11e6-a725-3f429a5b4fb4";
-
-class ScreenDrawerLockLinux : public ScreenDrawerLock {
- public:
-  ScreenDrawerLockLinux();
-  ~ScreenDrawerLockLinux() override;
-
- private:
-  sem_t* semaphore_;
-};
-
-ScreenDrawerLockLinux::ScreenDrawerLockLinux() {
-  semaphore_ =
-      sem_open(kSemaphoreName, O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO, 1);
-  sem_wait(semaphore_);
-}
-
-ScreenDrawerLockLinux::~ScreenDrawerLockLinux() {
-  sem_post(semaphore_);
-  sem_close(semaphore_);
-  // sem_unlink(kSemaphoreName);
-}
 
 // A ScreenDrawer implementation for X11.
 class ScreenDrawerLinux : public ScreenDrawer {
@@ -61,6 +40,7 @@ class ScreenDrawerLinux : public ScreenDrawer {
   void Clear() override;
   void WaitForPendingDraws() override;
   bool MayDrawIncompleteShapes() override;
+  WindowId window_id() const override;
 
  private:
   // Bring the window to the front, this can help to avoid the impact from other
@@ -83,7 +63,7 @@ ScreenDrawerLinux::ScreenDrawerLinux() {
   if (!XGetWindowAttributes(display_->display(),
                             RootWindow(display_->display(), screen_num_),
                             &root_attributes)) {
-    RTC_NOTREACHED() << "Failed to get root window size.";
+    RTC_DCHECK_NOTREACHED() << "Failed to get root window size.";
   }
   window_ = XCreateSimpleWindow(
       display_->display(), RootWindow(display_->display(), screen_num_), 0, 0,
@@ -105,7 +85,7 @@ ScreenDrawerLinux::ScreenDrawerLinux() {
   if (!XTranslateCoordinates(display_->display(), window_,
                              RootWindow(display_->display(), screen_num_), 0, 0,
                              &x, &y, &child)) {
-    RTC_NOTREACHED() << "Failed to get window position.";
+    RTC_DCHECK_NOTREACHED() << "Failed to get window position.";
   }
   // Some window manager does not allow a window to cover two or more monitors.
   // So if the window is on the first monitor of a two-monitor system, the
@@ -161,6 +141,10 @@ bool ScreenDrawerLinux::MayDrawIncompleteShapes() {
   return true;
 }
 
+WindowId ScreenDrawerLinux::window_id() const {
+  return window_;
+}
+
 void ScreenDrawerLinux::BringToFront() {
   Atom state_above = XInternAtom(display_->display(), "_NET_WM_STATE_ABOVE", 1);
   Atom window_state = XInternAtom(display_->display(), "_NET_WM_STATE", 1);
@@ -187,13 +171,13 @@ void ScreenDrawerLinux::BringToFront() {
 
 // static
 std::unique_ptr<ScreenDrawerLock> ScreenDrawerLock::Create() {
-  return std::unique_ptr<ScreenDrawerLock>(new ScreenDrawerLockLinux());
+  return std::make_unique<ScreenDrawerLockPosix>();
 }
 
 // static
 std::unique_ptr<ScreenDrawer> ScreenDrawer::Create() {
   if (SharedXDisplay::CreateDefault().get()) {
-    return std::unique_ptr<ScreenDrawer>(new ScreenDrawerLinux());
+    return std::make_unique<ScreenDrawerLinux>();
   }
   return nullptr;
 }

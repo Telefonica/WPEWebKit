@@ -31,11 +31,10 @@
 #include <WebCore/Cursor.h>
 #include <WebCore/DragActions.h>
 #include <WebCore/EventHandler.h>
+#include <WebCore/Frame.h>
 #include <WebCore/FrameView.h>
-#include <WebCore/MainFrame.h>
 #include <WebCore/Page.h>
 #include <WebCore/PlatformMouseEvent.h>
-#include <wtf/CurrentTime.h>
 
 #include <Windows.h>
 
@@ -54,13 +53,13 @@ WebDropSource::WebDropSource(WebView* webView)
     : m_webView(webView)
 {
     gClassCount++;
-    gClassNameCount().add("WebDropSource");
+    gClassNameCount().add("WebDropSource"_s);
 }
 
 WebDropSource::~WebDropSource()
 {
     gClassCount--;
-    gClassNameCount().remove("WebDropSource");
+    gClassNameCount().remove("WebDropSource"_s);
 }
 
 STDMETHODIMP WebDropSource::QueryInterface(_In_ REFIID riid, _COM_Outptr_ void** ppvObject)

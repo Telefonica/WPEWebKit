@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,16 +41,16 @@ namespace JSC {
 //
 // To speed allocation, this object will hold all of the arguments in-place. The arguments as well
 // as a table of flags saying which arguments were overridden.
-class DirectArguments : public GenericArguments<DirectArguments> {
+class DirectArguments final : public GenericArguments<DirectArguments> {
 private:
     DirectArguments(VM&, Structure*, unsigned length, unsigned capacity);
     
 public:
-    template<typename CellType>
-    static Subspace* subspaceFor(VM& vm)
+    template<typename CellType, SubspaceAccess>
+    static CompleteSubspace* subspaceFor(VM& vm)
     {
-        RELEASE_ASSERT(!CellType::needsDestruction);
-        return &vm.jsValueGigacageCellSpace;
+        static_assert(!CellType::needsDestruction);
+        return &vm.variableSizedCellSpace();
     }
 
     // Creates an arguments object but leaves it uninitialized. This is dangerous if we GC right
@@ -62,32 +62,31 @@ public:
     static DirectArguments* create(VM&, Structure*, unsigned length, unsigned capacity);
     
     // Creates an arguments object by copying the argumnets from the stack.
-    static DirectArguments* createByCopying(ExecState*);
+    static DirectArguments* createByCopying(JSGlobalObject*, CallFrame*);
 
-    static size_t estimatedSize(JSCell*);
-    static void visitChildren(JSCell*, SlotVisitor&);
+    static size_t estimatedSize(JSCell*, VM&);
+    DECLARE_VISIT_CHILDREN;
     
     uint32_t internalLength() const
     {
         return m_length;
     }
     
-    uint32_t length(ExecState* exec) const
+    uint32_t length(JSGlobalObject* globalObject) const
     {
         if (UNLIKELY(m_mappedArguments)) {
-            VM& vm = exec->vm();
+            VM& vm = getVM(globalObject);
             auto scope = DECLARE_THROW_SCOPE(vm);
-            JSValue value = get(exec, vm.propertyNames->length);
+            JSValue value = get(globalObject, vm.propertyNames->length);
             RETURN_IF_EXCEPTION(scope, 0);
-            scope.release();
-            return value.toUInt32(exec);
+            RELEASE_AND_RETURN(scope, value.toUInt32(globalObject));
         }
         return m_length;
     }
     
     bool isMappedArgument(uint32_t i) const
     {
-        return i < m_length && (!m_mappedArguments || !m_mappedArguments[i]);
+        return i < m_length && (!m_mappedArguments || !m_mappedArguments.at(i, m_length));
     }
 
     bool isMappedArgumentInDFG(uint32_t i) const
@@ -107,9 +106,14 @@ public:
         storage()[i].set(vm, this, value);
     }
     
-    WriteBarrier<JSFunction>& callee()
+    JSFunction* callee()
     {
-        return m_callee;
+        return m_callee.get();
+    }
+    
+    void setCallee(VM& vm, JSFunction* function)
+    {
+        m_callee.set(vm, this, function);
     }
     
     WriteBarrier<Unknown>& argument(DirectArgumentsOffset offset)
@@ -121,18 +125,18 @@ public:
     
     // Methods intended for use by the GenericArguments mixin.
     bool overrodeThings() const { return !!m_mappedArguments; }
-    void overrideThings(VM&);
-    void overrideThingsIfNecessary(VM&);
-    void unmapArgument(VM&, unsigned index);
+    void overrideThings(JSGlobalObject*);
+    void overrideThingsIfNecessary(JSGlobalObject*);
+    void unmapArgument(JSGlobalObject*, unsigned index);
 
-    void initModifiedArgumentsDescriptorIfNecessary(VM& vm)
+    void initModifiedArgumentsDescriptorIfNecessary(JSGlobalObject* globalObject)
     {
-        GenericArguments<DirectArguments>::initModifiedArgumentsDescriptorIfNecessary(vm, m_length);
+        GenericArguments<DirectArguments>::initModifiedArgumentsDescriptorIfNecessary(globalObject, m_length);
     }
 
-    void setModifiedArgumentDescriptor(VM& vm, unsigned index)
+    void setModifiedArgumentDescriptor(JSGlobalObject* globalObject, unsigned index)
     {
-        GenericArguments<DirectArguments>::setModifiedArgumentDescriptor(vm, index, m_length);
+        GenericArguments<DirectArguments>::setModifiedArgumentDescriptor(globalObject, index, m_length);
     }
 
     bool isModifiedArgumentDescriptor(unsigned index)
@@ -140,7 +144,7 @@ public:
         return GenericArguments<DirectArguments>::isModifiedArgumentDescriptor(index, m_length);
     }
 
-    void copyToArguments(ExecState*, VirtualRegister firstElementDest, unsigned offset, unsigned length);
+    void copyToArguments(JSGlobalObject*, JSValue* firstElementDest, unsigned offset, unsigned length);
 
     DECLARE_INFO;
     
@@ -159,7 +163,7 @@ public:
     
     static size_t offsetOfSlot(Checked<size_t> index)
     {
-        return (storageOffset() + sizeof(WriteBarrier<Unknown>) * index).unsafeGet();
+        return storageOffset() + sizeof(WriteBarrier<Unknown>) * index;
     }
     
     static size_t allocationSize(Checked<size_t> capacity)
@@ -170,7 +174,7 @@ public:
 private:
     WriteBarrier<Unknown>* storage()
     {
-        return bitwise_cast<WriteBarrier<Unknown>*>(bitwise_cast<char*>(Gigacage::caged(Gigacage::JSValue, this)) + storageOffset());
+        return bitwise_cast<WriteBarrier<Unknown>*>(bitwise_cast<char*>(this) + storageOffset());
     }
     
     unsigned mappedArgumentsSize();
@@ -178,7 +182,10 @@ private:
     WriteBarrier<JSFunction> m_callee;
     uint32_t m_length; // Always the actual length of captured arguments and never what was stored into the length property.
     uint32_t m_minCapacity; // The max of this and length determines the capacity of this object. It may be the actual capacity, or maybe something smaller. We arrange it this way to be kind to the JITs.
-    CagedBarrierPtr<Gigacage::Primitive, bool> m_mappedArguments; // If non-null, it means that length, callee, and caller are fully materialized properties.
+    using MappedArguments = CagedBarrierPtr<Gigacage::Primitive, bool>;
+    MappedArguments m_mappedArguments; // If non-null, it means that length, callee, and caller are fully materialized properties.
+
+    friend size_t cellSize(JSCell*);
 };
 
 } // namespace JSC

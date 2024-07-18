@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,10 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 #import "WebItemProviderPasteboard.h"
 
-#if ENABLE(DATA_INTERACTION)
+#if PLATFORM(IOS_FAMILY) && ENABLE(DRAG_SUPPORT)
 
 #import <Foundation/NSItemProvider.h>
 #import <Foundation/NSProgress.h>
@@ -34,52 +34,88 @@
 #import <UIKit/NSItemProvider+UIKitAdditions.h>
 #import <UIKit/UIColor.h>
 #import <UIKit/UIImage.h>
-#import <WebCore/FileSystem.h>
 #import <WebCore/Pasteboard.h>
+#import <pal/ios/UIKitSoftLink.h>
 #import <pal/spi/ios/UIKitSPI.h>
 #import <wtf/BlockPtr.h>
+#import <wtf/FileSystem.h>
 #import <wtf/OSObjectPtr.h>
 #import <wtf/RetainPtr.h>
-#import <wtf/SoftLinking.h>
-
-SOFT_LINK_FRAMEWORK(UIKit)
-SOFT_LINK_CLASS(UIKit, UIColor)
-SOFT_LINK_CLASS(UIKit, UIImage)
-SOFT_LINK_CLASS(UIKit, UIItemProvider)
-
-using namespace WebCore;
 
 typedef void(^ItemProviderDataLoadCompletionHandler)(NSData *, NSError *);
-typedef NSDictionary<NSString *, NSURL *> TypeToFileURLMap;
+typedef void(^ItemProviderFileLoadCompletionHandler)(NSURL *, BOOL, NSError *);
+typedef NSMutableDictionary<NSString *, NSURL *> TypeToFileURLMap;
 
-@interface WebItemProviderRegistrationInfo ()
+using WebCore::Pasteboard;
+using WebCore::PasteboardCustomData;
+
+static BOOL typeConformsToTypes(NSString *type, NSArray *conformsToTypes)
 {
-    RetainPtr<id <UIItemProviderWriting>> _representingObject;
+    for (NSString *conformsToType in conformsToTypes) {
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+        if (UTTypeConformsTo((__bridge CFStringRef)type, (__bridge CFStringRef)conformsToType))
+            return YES;
+ALLOW_DEPRECATED_DECLARATIONS_END
+    }
+    return NO;
+}
+
+@implementation NSItemProvider (WebCoreExtras)
+
+- (BOOL)web_containsFileURLAndFileUploadContent
+{
+    for (NSString *identifier in self.registeredTypeIdentifiers) {
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+        if (UTTypeConformsTo((__bridge CFStringRef)identifier, kUTTypeFileURL))
+            return self.web_fileUploadContentTypes.count;
+ALLOW_DEPRECATED_DECLARATIONS_END
+    }
+    return NO;
+}
+
+- (NSArray<NSString *> *)web_fileUploadContentTypes
+{
+    auto types = adoptNS([NSMutableArray new]);
+    for (NSString *identifier in self.registeredTypeIdentifiers) {
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+        if (UTTypeConformsTo((__bridge CFStringRef)identifier, kUTTypeURL))
+            continue;
+ALLOW_DEPRECATED_DECLARATIONS_END
+
+        if ([identifier isEqualToString:@"com.apple.mapkit.map-item"]) {
+            // This type conforms to "public.content", yet the corresponding data is only a serialization of MKMapItem and isn't suitable for file uploads.
+            // Ignore over this type representation for the purposes of file uploads, in favor of "public.vcard" data.
+            continue;
+        }
+
+        if (typeConformsToTypes(identifier, Pasteboard::supportedFileUploadPasteboardTypes()))
+            [types addObject:identifier];
+    }
+
+    return types.autorelease();
+}
+
+@end
+
+@interface WebItemProviderDataRegistrar : NSObject <WebItemProviderRegistrar>
+- (instancetype)initWithData:(NSData *)data type:(NSString *)utiType;
+@property (nonatomic, readonly) NSString *typeIdentifier;
+@property (nonatomic, readonly) NSData *data;
+@end
+
+@implementation WebItemProviderDataRegistrar {
     RetainPtr<NSString> _typeIdentifier;
     RetainPtr<NSData> _data;
 }
-@end
 
-@implementation WebItemProviderRegistrationInfo
-
-- (instancetype)initWithRepresentingObject:(id <UIItemProviderWriting>)representingObject typeIdentifier:(NSString *)typeIdentifier data:(NSData *)data
+- (instancetype)initWithData:(NSData *)data type:(NSString *)utiType
 {
-    if (representingObject)
-        ASSERT(!typeIdentifier && !data);
-    else
-        ASSERT(typeIdentifier && data);
+    if (!(self = [super init]))
+        return nil;
 
-    if (self = [super init]) {
-        _representingObject = representingObject;
-        _typeIdentifier = typeIdentifier;
-        _data = data;
-    }
+    _data = data;
+    _typeIdentifier = utiType;
     return self;
-}
-
-- (id <UIItemProviderWriting>)representingObject
-{
-    return _representingObject.get();
 }
 
 - (NSString *)typeIdentifier
@@ -90,6 +126,111 @@ typedef NSDictionary<NSString *, NSURL *> TypeToFileURLMap;
 - (NSData *)data
 {
     return _data.get();
+}
+
+- (NSString *)typeIdentifierForClient
+{
+    return self.typeIdentifier;
+}
+
+- (NSData *)dataForClient
+{
+    return self.data;
+}
+
+- (void)registerItemProvider:(NSItemProvider *)itemProvider
+{
+    [itemProvider registerDataRepresentationForTypeIdentifier:self.typeIdentifier visibility:NSItemProviderRepresentationVisibilityAll loadHandler:[itemData = _data] (ItemProviderDataLoadCompletionHandler completionHandler) -> NSProgress * {
+        completionHandler(itemData.get(), nil);
+        return nil;
+    }];
+}
+
+- (NSString *)description
+{
+    return [NSString stringWithFormat:@"(%@ => %tu bytes)", _typeIdentifier.get(), [_data length]];
+}
+
+@end
+
+@interface WebItemProviderWritableObjectRegistrar : NSObject <WebItemProviderRegistrar>
+- (instancetype)initWithObject:(id <NSItemProviderWriting>)representingObject;
+@property (nonatomic, readonly) id <NSItemProviderWriting> representingObject;
+@end
+
+@implementation WebItemProviderWritableObjectRegistrar {
+    RetainPtr<id <NSItemProviderWriting>> _representingObject;
+}
+
+- (instancetype)initWithObject:(id <NSItemProviderWriting>)representingObject
+{
+    if (!(self = [super init]))
+        return nil;
+
+    _representingObject = representingObject;
+    return self;
+}
+
+- (id <NSItemProviderWriting>)representingObject
+{
+    return _representingObject.get();
+}
+
+- (id <NSItemProviderWriting>)representingObjectForClient
+{
+    return self.representingObject;
+}
+
+- (void)registerItemProvider:(NSItemProvider *)itemProvider
+{
+    [itemProvider registerObject:self.representingObject visibility:NSItemProviderRepresentationVisibilityAll];
+}
+
+- (NSString *)description
+{
+    return [NSString stringWithFormat:@"(%@)", [_representingObject class]];
+}
+
+@end
+
+@interface WebItemProviderPromisedFileRegistrar : NSObject <WebItemProviderRegistrar>
+- (instancetype)initWithType:(NSString *)utiType callback:(void(^)(WebItemProviderFileCallback))callback;
+@property (nonatomic, readonly) NSString *typeIdentifier;
+@end
+
+@implementation WebItemProviderPromisedFileRegistrar {
+    RetainPtr<NSString> _typeIdentifier;
+    BlockPtr<void(WebItemProviderFileCallback)> _callback;
+}
+
+- (instancetype)initWithType:(NSString *)utiType callback:(void(^)(WebItemProviderFileCallback))callback
+{
+    if (!(self = [super init]))
+        return nil;
+
+    _typeIdentifier = utiType;
+    _callback = callback;
+    return self;
+}
+
+- (void)registerItemProvider:(NSItemProvider *)itemProvider
+{
+    [itemProvider registerFileRepresentationForTypeIdentifier:_typeIdentifier.get() fileOptions:0 visibility:NSItemProviderRepresentationVisibilityAll loadHandler:[callback = _callback] (ItemProviderFileLoadCompletionHandler completionHandler) -> NSProgress * {
+        callback([protectedCompletionHandler = makeBlockPtr(completionHandler)] (NSURL *fileURL, NSError *error) {
+            protectedCompletionHandler(fileURL, NO, error);
+        });
+        return nil;
+    }];
+}
+
+- (NSString *)typeIdentifier
+{
+    return _typeIdentifier.get();
+}
+
+- (NSString *)description
+{
+    return [NSString stringWithFormat:@"(file promise: %@)", _typeIdentifier.get()];
 }
 
 @end
@@ -116,18 +257,27 @@ typedef NSDictionary<NSString *, NSURL *> TypeToFileURLMap;
 - (void)dealloc
 {
     [_suggestedName release];
+    [_teamData release];
     [super dealloc];
 }
 
 - (void)addData:(NSData *)data forType:(NSString *)typeIdentifier
 {
-    [_representations addObject:[[[WebItemProviderRegistrationInfo alloc] initWithRepresentingObject:nil typeIdentifier:typeIdentifier data:data] autorelease]];
+    auto representation = adoptNS([[WebItemProviderDataRegistrar alloc] initWithData:data type:typeIdentifier]);
+    [_representations addObject:representation.get()];
 }
 
-- (void)addRepresentingObject:(id <UIItemProviderWriting>)object
+- (void)addRepresentingObject:(id <NSItemProviderWriting>)object
 {
-    ASSERT([object conformsToProtocol:@protocol(UIItemProviderWriting)]);
-    [_representations addObject:[[[WebItemProviderRegistrationInfo alloc] initWithRepresentingObject:object typeIdentifier:nil data:nil] autorelease]];
+    ASSERT([object conformsToProtocol:@protocol(NSItemProviderWriting)]);
+    auto representation = adoptNS([[WebItemProviderWritableObjectRegistrar alloc] initWithObject:object]);
+    [_representations addObject:representation.get()];
+}
+
+- (void)addPromisedType:(NSString *)typeIdentifier fileCallback:(void(^)(WebItemProviderFileCallback))callback
+{
+    auto representation = adoptNS([[WebItemProviderPromisedFileRegistrar alloc] initWithType:typeIdentifier callback:callback]);
+    [_representations addObject:representation.get()];
 }
 
 - (NSUInteger)numberOfItems
@@ -135,7 +285,7 @@ typedef NSDictionary<NSString *, NSURL *> TypeToFileURLMap;
     return [_representations count];
 }
 
-- (WebItemProviderRegistrationInfo *)itemAtIndex:(NSUInteger)index
+- (id <WebItemProviderRegistrar>)itemAtIndex:(NSUInteger)index
 {
     if (index >= self.numberOfItems)
         return nil;
@@ -143,12 +293,13 @@ typedef NSDictionary<NSString *, NSURL *> TypeToFileURLMap;
     return [_representations objectAtIndex:index];
 }
 
-- (void)enumerateItems:(void (^)(WebItemProviderRegistrationInfo *, NSUInteger))block
+- (void)enumerateItems:(void (^)(id <WebItemProviderRegistrar>, NSUInteger))block
 {
     for (NSUInteger index = 0; index < self.numberOfItems; ++index)
         block([self itemAtIndex:index], index);
 }
 
+#if !PLATFORM(MACCATALYST)
 static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPresentationStyle style)
 {
     switch (style) {
@@ -163,31 +314,22 @@ static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPre
         return UIPreferredPresentationStyleUnspecified;
     }
 }
+#endif
 
-- (UIItemProvider *)itemProvider
+- (NSItemProvider *)itemProvider
 {
     if (!self.numberOfItems)
         return nil;
 
-    auto itemProvider = adoptNS([allocUIItemProviderInstance() init]);
-    for (WebItemProviderRegistrationInfo *representation in _representations.get()) {
-        if (representation.representingObject) {
-            [itemProvider registerObject:representation.representingObject visibility:UIItemProviderRepresentationOptionsVisibilityAll];
-            continue;
-        }
-
-        if (!representation.typeIdentifier.length || !representation.data.length)
-            continue;
-
-        RetainPtr<NSData> itemData = representation.data;
-        [itemProvider registerDataRepresentationForTypeIdentifier:representation.typeIdentifier visibility:UIItemProviderRepresentationOptionsVisibilityAll loadHandler:[itemData] (ItemProviderDataLoadCompletionHandler completionHandler) -> NSProgress * {
-            completionHandler(itemData.get(), nil);
-            return nil;
-        }];
-    }
-    [itemProvider setPreferredPresentationSize:self.preferredPresentationSize];
+    auto itemProvider = adoptNS([NSItemProvider new]);
+    for (id <WebItemProviderRegistrar> representation in _representations.get())
+        [representation registerItemProvider:itemProvider.get()];
     [itemProvider setSuggestedName:self.suggestedName];
+#if !PLATFORM(MACCATALYST)
+    [itemProvider setPreferredPresentationSize:self.preferredPresentationSize];
     [itemProvider setPreferredPresentationStyle:uiPreferredPresentationStyle(self.preferredPresentationStyle)];
+    [itemProvider setTeamData:self.teamData];
+#endif
     return itemProvider.autorelease();
 }
 
@@ -195,14 +337,10 @@ static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPre
 {
     __block NSMutableString *description = [NSMutableString string];
     [description appendFormat:@"<%@: %p", [self class], self];
-    [self enumerateItems:^(WebItemProviderRegistrationInfo *item, NSUInteger index) {
+    [self enumerateItems:^(id <WebItemProviderRegistrar> item, NSUInteger index) {
         if (index)
-            [description appendString:@","];
-
-        if (item.representingObject)
-            [description appendFormat:@" (%@: %p)", [item.representingObject class], item.representingObject];
-        else
-            [description appendFormat:@" ('%@' => %tu bytes)", item.typeIdentifier, item.data.length];
+            [description appendString:@", "];
+        [description appendString:[item description]];
     }];
     [description appendString:@">"];
     return description;
@@ -212,44 +350,73 @@ static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPre
 
 @interface WebItemProviderLoadResult : NSObject
 
-+ (instancetype)loadResultWithFileURLMap:(TypeToFileURLMap *)fileURLs presentationStyle:(UIPreferredPresentationStyle)presentationStyle;
-+ (instancetype)emptyLoadResult;
-
+- (instancetype)initWithItemProvider:(NSItemProvider *)itemProvider typesToLoad:(NSArray<NSString *> *)typesToLoad;
 - (NSURL *)fileURLForType:(NSString *)type;
+- (void)setFileURL:(NSURL *)url forType:(NSString *)type;
 @property (nonatomic, readonly) NSArray<NSURL *> *loadedFileURLs;
 @property (nonatomic, readonly) NSArray<NSString *> *loadedTypeIdentifiers;
 @property (nonatomic, readonly) BOOL canBeRepresentedAsFileUpload;
+@property (nonatomic, readonly) NSItemProvider *itemProvider;
+@property (nonatomic, readonly) NSArray<NSString *> *typesToLoad;
 
 @end
 
 @implementation WebItemProviderLoadResult {
     RetainPtr<TypeToFileURLMap> _fileURLs;
+    RetainPtr<NSItemProvider> _itemProvider;
+    RetainPtr<NSArray<NSString *>> _typesToLoad;
 }
 
-+ (instancetype)emptyLoadResult
++ (instancetype)loadResultWithItemProvider:(NSItemProvider *)itemProvider typesToLoad:(NSArray<NSString *> *)typesToLoad
 {
-    return [[[self alloc] initWithFileURLMap:@{ } presentationStyle:UIPreferredPresentationStyleUnspecified] autorelease];
+    return adoptNS([[self alloc] initWithItemProvider:itemProvider typesToLoad:typesToLoad]).autorelease();
 }
 
-+ (instancetype)loadResultWithFileURLMap:(TypeToFileURLMap *)fileURLs presentationStyle:(UIPreferredPresentationStyle)presentationStyle
-{
-    return [[[self alloc] initWithFileURLMap:fileURLs presentationStyle:presentationStyle] autorelease];
-}
-
-- (instancetype)initWithFileURLMap:(TypeToFileURLMap *)fileURLs presentationStyle:(UIPreferredPresentationStyle)presentationStyle
+- (instancetype)initWithItemProvider:(NSItemProvider *)itemProvider typesToLoad:(NSArray<NSString *> *)typesToLoad
 {
     if (!(self = [super init]))
         return nil;
 
-    _fileURLs = fileURLs;
-    _canBeRepresentedAsFileUpload = presentationStyle != UIPreferredPresentationStyleInline;
+    _fileURLs = adoptNS([[NSMutableDictionary alloc] init]);
+    _itemProvider = itemProvider;
+    _typesToLoad = typesToLoad;
 
     return self;
+}
+
+- (BOOL)canBeRepresentedAsFileUpload
+{
+    if ([_itemProvider web_containsFileURLAndFileUploadContent])
+        return YES;
+
+    if ([_itemProvider preferredPresentationStyle] == UIPreferredPresentationStyleInline)
+        return NO;
+
+#if PLATFORM(MACCATALYST)
+    // On macCatalyst, -preferredPresentationStyle always returns UIPreferredPresentationStyleUnspecified,
+    // even when the preferredPresentationStyle is set to something other than unspecified using the setter.
+    // This means we're unable to avoid exposing item providers that have been marked as inline data as files
+    // to the page -- see <rdar://55002929> for more details. In the meantime, only expose item providers as
+    // files if they have explicitly been given a suggested file name.
+    return [_itemProvider suggestedName].length;
+#else
+    return YES;
+#endif
+}
+
+- (NSArray<NSString *> *)typesToLoad
+{
+    return _typesToLoad.get();
 }
 
 - (NSURL *)fileURLForType:(NSString *)type
 {
     return [_fileURLs objectForKey:type];
+}
+
+- (void)setFileURL:(NSURL *)url forType:(NSString *)type
+{
+    [_fileURLs setObject:url forKey:type];
 }
 
 - (NSArray<NSURL *> *)loadedFileURLs
@@ -260,6 +427,31 @@ static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPre
 - (NSArray<NSString *> *)loadedTypeIdentifiers
 {
     return [_fileURLs allKeys];
+}
+
+- (NSItemProvider *)itemProvider
+{
+    return _itemProvider.get();
+}
+
+- (NSString *)description
+{
+    __block NSMutableString *description = [NSMutableString string];
+    [description appendFormat:@"<%@: %p typesToLoad: [ ", [self class], self];
+    [_typesToLoad enumerateObjectsUsingBlock:^(NSString *type, NSUInteger index, BOOL *) {
+        [description appendString:type];
+        if (index + 1 < [_typesToLoad count])
+            [description appendString:@", "];
+    }];
+    [description appendFormat:@" ] fileURLs: { "];
+    __block NSUInteger index = 0;
+    [_fileURLs enumerateKeysAndObjectsUsingBlock:^(NSString *type, NSURL *url, BOOL *) {
+        [description appendFormat:@"%@ => \"%@\"", type, url.path];
+        if (++index < [_fileURLs count])
+            [description appendString:@", "];
+    }];
+    [description appendFormat:@" }>"];
+    return description;
 }
 
 @end
@@ -276,19 +468,19 @@ static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPre
     // FIXME: These ivars should be refactored to be Vector<RetainPtr<Type>> instead of generic NSArrays.
     RetainPtr<NSArray> _itemProviders;
     RetainPtr<NSArray> _supportedTypeIdentifiers;
-    RetainPtr<WebItemProviderRegistrationInfoList> _stagedRegistrationInfoList;
+    RetainPtr<NSArray<WebItemProviderRegistrationInfoList *>> _stagedRegistrationInfoLists;
 
     Vector<RetainPtr<WebItemProviderLoadResult>> _loadResults;
 }
 
 + (instancetype)sharedInstance
 {
-    static WebItemProviderPasteboard *sharedPasteboard = nil;
+    static NeverDestroyed<RetainPtr<WebItemProviderPasteboard>> sharedPasteboard;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^() {
-        sharedPasteboard = [[WebItemProviderPasteboard alloc] init];
+        sharedPasteboard.get() = adoptNS([[WebItemProviderPasteboard alloc] init]);
     });
-    return sharedPasteboard;
+    return sharedPasteboard.get().get();
 }
 
 - (instancetype)init
@@ -298,7 +490,7 @@ static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPre
         _changeCount = 0;
         _pendingOperationCount = 0;
         _supportedTypeIdentifiers = nil;
-        _stagedRegistrationInfoList = nil;
+        _stagedRegistrationInfoLists = nil;
         _loadResults = { };
     }
     return self;
@@ -309,16 +501,11 @@ static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPre
     _supportedTypeIdentifiers = types;
 }
 
-- (NSArray<NSString *> *)pasteboardTypesByFidelityForItemAtIndex:(NSUInteger)index
-{
-    return [self itemProviderAtIndex:index].registeredTypeIdentifiers ?: @[ ];
-}
-
 - (NSArray<NSString *> *)pasteboardTypes
 {
     NSMutableSet<NSString *> *allTypes = [NSMutableSet set];
     NSMutableArray<NSString *> *allTypesInOrder = [NSMutableArray array];
-    for (UIItemProvider *provider in _itemProviders.get()) {
+    for (NSItemProvider *provider in _itemProviders.get()) {
         for (NSString *typeIdentifier in provider.registeredTypeIdentifiers) {
             if ([allTypes containsObject:typeIdentifier])
                 continue;
@@ -337,12 +524,15 @@ static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPre
 
 - (void)setItemProviders:(NSArray<__kindof NSItemProvider *> *)itemProviders
 {
-    itemProviders = itemProviders ?: [NSArray array];
+    itemProviders = itemProviders ?: @[ ];
     if (_itemProviders == itemProviders || [_itemProviders isEqualToArray:itemProviders])
         return;
 
     _itemProviders = itemProviders;
     _changeCount++;
+
+    if (!itemProviders.count)
+        _loadResults = { };
 }
 
 - (NSInteger)numberOfItems
@@ -359,22 +549,32 @@ static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPre
 
     WebItemProviderLoadResult *loadResult = _loadResults[index].get();
     for (NSString *loadedType in loadResult.loadedTypeIdentifiers) {
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
         if (!UTTypeConformsTo((CFStringRef)loadedType, (CFStringRef)typeIdentifier))
             continue;
+ALLOW_DEPRECATED_DECLARATIONS_END
 
-        // We've already loaded data relevant for this UTI type onto disk, so there's no need to ask the UIItemProvider for the same data again.
+        // We've already loaded data relevant for this UTI type onto disk, so there's no need to ask the NSItemProvider for the same data again.
         if (NSData *result = [NSData dataWithContentsOfURL:[loadResult fileURLForType:loadedType] options:NSDataReadingMappedIfSafe error:nil])
             return result;
     }
     return nil;
 }
 
+- (NSData *)dataForPasteboardType:(NSString *)pasteboardType
+{
+    return [self dataForPasteboardType:pasteboardType inItemSet:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, self.numberOfItems)]].firstObject;
+}
+
 - (NSArray *)dataForPasteboardType:(NSString *)pasteboardType inItemSet:(NSIndexSet *)itemSet
 {
+    if (_loadResults.isEmpty())
+        return @[ ];
+
     auto values = adoptNS([[NSMutableArray alloc] init]);
     RetainPtr<WebItemProviderPasteboard> retainedSelf = self;
     [itemSet enumerateIndexesUsingBlock:[retainedSelf, pasteboardType, values] (NSUInteger index, BOOL *) {
-        UIItemProvider *provider = [retainedSelf itemProviderAtIndex:index];
+        NSItemProvider *provider = [retainedSelf itemProviderAtIndex:index];
         if (!provider)
             return;
 
@@ -384,38 +584,43 @@ static UIPreferredPresentationStyle uiPreferredPresentationStyle(WebPreferredPre
     return values.autorelease();
 }
 
-static NSArray<Class<UIItemProviderReading>> *allLoadableClasses()
+static NSArray<Class<NSItemProviderReading>> *allLoadableClasses()
 {
-    return @[ [getUIColorClass() class], [getUIImageClass() class], [NSURL class], [NSString class], [NSAttributedString class] ];
+    return @[ [PAL::getUIColorClass() class], [PAL::getUIImageClass() class], [NSURL class], [NSString class], [NSAttributedString class] ];
 }
 
 static Class classForTypeIdentifier(NSString *typeIdentifier, NSString *&outTypeIdentifierToLoad)
 {
     outTypeIdentifierToLoad = typeIdentifier;
 
-    // First, try to load a platform UIItemProviderReading-conformant object as-is.
-    for (Class<UIItemProviderReading> loadableClass in allLoadableClasses()) {
+    // First, try to load a platform NSItemProviderReading-conformant object as-is.
+    for (Class<NSItemProviderReading> loadableClass in allLoadableClasses()) {
         if ([[loadableClass readableTypeIdentifiersForItemProvider] containsObject:(NSString *)typeIdentifier])
             return loadableClass;
     }
 
     // If we were unable to load any object, check if the given type identifier is still something
     // WebKit knows how to handle.
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     if ([typeIdentifier isEqualToString:(NSString *)kUTTypeHTML]) {
         // Load kUTTypeHTML as a plain text HTML string.
         outTypeIdentifierToLoad = (NSString *)kUTTypePlainText;
         return [NSString class];
     }
+ALLOW_DEPRECATED_DECLARATIONS_END
 
     return nil;
 }
 
 - (NSArray *)valuesForPasteboardType:(NSString *)pasteboardType inItemSet:(NSIndexSet *)itemSet
 {
+    if (_loadResults.isEmpty())
+        return @[ ];
+
     auto values = adoptNS([[NSMutableArray alloc] init]);
     RetainPtr<WebItemProviderPasteboard> retainedSelf = self;
     [itemSet enumerateIndexesUsingBlock:[retainedSelf, pasteboardType, values] (NSUInteger index, BOOL *) {
-        UIItemProvider *provider = [retainedSelf itemProviderAtIndex:index];
+        NSItemProvider *provider = [retainedSelf itemProviderAtIndex:index];
         if (!provider)
             return;
 
@@ -440,40 +645,56 @@ static Class classForTypeIdentifier(NSString *typeIdentifier, NSString *&outType
     return _changeCount;
 }
 
-- (NSArray<NSURL *> *)droppedFileURLs
+- (NSArray<NSURL *> *)fileUploadURLsAtIndex:(NSUInteger)index fileTypes:(NSArray<NSString *> **)outFileTypes
+{
+    auto fileTypes = adoptNS([NSMutableArray new]);
+    auto fileURLs = adoptNS([NSMutableArray new]);
+
+    if (index >= _loadResults.size())
+        return @[ ];
+
+    auto result = _loadResults[index];
+    if (![result canBeRepresentedAsFileUpload])
+        return @[ ];
+
+    for (NSString *contentType in [result itemProvider].web_fileUploadContentTypes) {
+        if (NSURL *url = [result fileURLForType:contentType]) {
+            [fileTypes addObject:contentType];
+            [fileURLs addObject:url];
+        }
+    }
+
+    *outFileTypes = fileTypes.autorelease();
+    return fileURLs.autorelease();
+}
+
+- (NSArray<NSURL *> *)allDroppedFileURLs
 {
     NSMutableArray<NSURL *> *fileURLs = [NSMutableArray array];
-    for (auto loadResult : _loadResults) {
+    for (const auto& loadResult : _loadResults) {
         if ([loadResult canBeRepresentedAsFileUpload])
             [fileURLs addObjectsFromArray:[loadResult loadedFileURLs]];
     }
     return fileURLs;
 }
 
-static BOOL typeConformsToTypes(NSString *type, NSArray *conformsToTypes)
-{
-    // A type is considered appropriate to load if it conforms to one or more supported types.
-    for (NSString *conformsToType in conformsToTypes) {
-        if (UTTypeConformsTo((CFStringRef)type, (CFStringRef)conformsToType))
-            return YES;
-    }
-    return NO;
-}
-
 - (NSInteger)numberOfFiles
 {
-    NSArray *supportedFileTypes = Pasteboard::supportedFileUploadPasteboardTypes();
     NSInteger numberOfFiles = 0;
-    for (UIItemProvider *itemProvider in _itemProviders.get()) {
+    for (NSItemProvider *itemProvider in _itemProviders.get()) {
+#if !PLATFORM(MACCATALYST)
+        // First, check if the source has explicitly indicated that this item should or should not be treated as an attachment.
         if (itemProvider.preferredPresentationStyle == UIPreferredPresentationStyleInline)
             continue;
 
-        for (NSString *identifier in itemProvider.registeredTypeIdentifiers) {
-            if (!typeConformsToTypes(identifier, supportedFileTypes))
-                continue;
+        if (itemProvider.preferredPresentationStyle == UIPreferredPresentationStyleAttachment) {
             ++numberOfFiles;
-            break;
+            continue;
         }
+#endif
+        // Otherwise, fall back to examining the item's registered type identifiers.
+        if (itemProvider.web_fileUploadContentTypes.count)
+            ++numberOfFiles;
     }
     return numberOfFiles;
 }
@@ -482,39 +703,77 @@ static NSURL *linkTemporaryItemProviderFilesToDropStagingDirectory(NSURL *url, N
 {
     static NSString *defaultDropFolderName = @"folder";
     static NSString *defaultDropFileName = @"file";
-    static NSString *dataInteractionDirectoryPrefix = @"data-interaction";
+    static NSString *droppedDataDirectoryPrefix = @"dropped-data";
     if (!url)
         return nil;
 
-    NSString *temporaryDataInteractionDirectory = WebCore::createTemporaryDirectory(dataInteractionDirectoryPrefix);
-    if (!temporaryDataInteractionDirectory)
+    NSString *temporaryDropDataDirectory = FileSystem::createTemporaryDirectory(droppedDataDirectoryPrefix);
+    if (!temporaryDropDataDirectory)
         return nil;
 
     NSURL *destination = nil;
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     BOOL isFolder = UTTypeConformsTo((CFStringRef)typeIdentifier, kUTTypeFolder);
+ALLOW_DEPRECATED_DECLARATIONS_END
     NSFileManager *fileManager = [NSFileManager defaultManager];
 
     if (!suggestedName)
         suggestedName = url.lastPathComponent ?: (isFolder ? defaultDropFolderName : defaultDropFileName);
 
-    if (![suggestedName containsString:@"."] && !isFolder)
+    if ([suggestedName.pathExtension caseInsensitiveCompare:url.pathExtension] != NSOrderedSame && !isFolder)
         suggestedName = [suggestedName stringByAppendingPathExtension:url.pathExtension];
 
-    destination = [NSURL fileURLWithPath:[temporaryDataInteractionDirectory stringByAppendingPathComponent:suggestedName]];
+    destination = [NSURL fileURLWithPath:[temporaryDropDataDirectory stringByAppendingPathComponent:suggestedName]];
     return [fileManager linkItemAtURL:url toURL:destination error:nil] ? destination : nil;
 }
 
-- (NSString *)typeIdentifierToLoadForRegisteredTypeIdentfiers:(NSArray<NSString *> *)registeredTypeIdentifiers
+- (NSArray<NSString *> *)typeIdentifiersToLoad:(NSItemProvider *)itemProvider
 {
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+    auto typesToLoad = adoptNS([[NSMutableOrderedSet alloc] init]);
+    NSString *highestFidelitySupportedType = nil;
     NSString *highestFidelityContentType = nil;
+
+    NSArray<NSString *> *registeredTypeIdentifiers = itemProvider.registeredTypeIdentifiers;
+    BOOL containsFile = itemProvider.web_containsFileURLAndFileUploadContent;
+    BOOL containsFlatRTFD = [registeredTypeIdentifiers containsObject:(__bridge NSString *)kUTTypeFlatRTFD];
+    // First, search for the highest fidelity supported type or the highest fidelity generic content type.
     for (NSString *registeredTypeIdentifier in registeredTypeIdentifiers) {
-        if (typeConformsToTypes(registeredTypeIdentifier, _supportedTypeIdentifiers.get()))
-            return registeredTypeIdentifier;
+        if (containsFlatRTFD && [registeredTypeIdentifier isEqualToString:(__bridge NSString *)kUTTypeRTFD]) {
+            // In the case where attachments are enabled and we're accepting all types of content using attachment
+            // elements as a fallback representation, if the source writes attributed strings to the pasteboard with
+            // com.apple.rtfd at a higher fidelity than com.apple.flat-rtfd, we'll end up loading only com.apple.rtfd
+            // and dropping the text as an attachment element because we cannot convert the dropped content to markup.
+            // Instead, if flat RTFD is present in the item provider, always prefer that over RTFD so that dropping as
+            // regular web content isn't overridden by enabling attachment elements.
+            continue;
+        }
+
+        if (containsFile && UTTypeConformsTo((__bridge CFStringRef)registeredTypeIdentifier, kUTTypeURL))
+            continue;
+
+        if (!highestFidelitySupportedType && typeConformsToTypes(registeredTypeIdentifier, _supportedTypeIdentifiers.get()))
+            highestFidelitySupportedType = registeredTypeIdentifier;
 
         if (!highestFidelityContentType && UTTypeConformsTo((CFStringRef)registeredTypeIdentifier, kUTTypeContent))
             highestFidelityContentType = registeredTypeIdentifier;
     }
-    return highestFidelityContentType;
+
+    // For compatibility with DataTransfer APIs, additionally load web-exposed types. Since this is the only chance to
+    // fault in any data at all, we need to load up front any information that the page may ask for later down the line.
+    NSString *customPasteboardDataUTI = @(PasteboardCustomData::cocoaType().characters());
+    for (NSString *registeredTypeIdentifier in registeredTypeIdentifiers) {
+        if ([registeredTypeIdentifier isEqualToString:highestFidelityContentType]
+            || [registeredTypeIdentifier isEqualToString:highestFidelitySupportedType]
+            || [registeredTypeIdentifier isEqualToString:customPasteboardDataUTI]
+            || (!containsFile && UTTypeConformsTo((__bridge CFStringRef)registeredTypeIdentifier, kUTTypeURL))
+            || UTTypeConformsTo((__bridge CFStringRef)registeredTypeIdentifier, kUTTypeHTML)
+            || UTTypeConformsTo((__bridge CFStringRef)registeredTypeIdentifier, kUTTypePlainText))
+            [typesToLoad addObject:registeredTypeIdentifier];
+    }
+ALLOW_DEPRECATED_DECLARATIONS_END
+
+    return [typesToLoad array];
 }
 
 - (void)doAfterLoadingProvidedContentIntoFileURLs:(WebItemProviderFileLoadBlock)action
@@ -530,21 +789,15 @@ static NSURL *linkTemporaryItemProviderFilesToDropStagingDirectory(NSURL *url, N
     auto loadResults = adoptNS([[NSMutableArray alloc] initWithCapacity:[_itemProviders count]]);
 
     // First, figure out which item providers we want to try and load files from.
-    auto itemProvidersToLoad = adoptNS([[NSMutableArray alloc] init]);
-    auto typeIdentifiersToLoad = adoptNS([[NSMutableArray alloc] init]);
-    auto indicesOfitemProvidersToLoad = adoptNS([[NSMutableArray alloc] init]);
+    BOOL foundAnyDataToLoad = NO;
     RetainPtr<WebItemProviderPasteboard> protectedSelf = self;
-    [_itemProviders enumerateObjectsUsingBlock:[protectedSelf, itemProvidersToLoad, typeIdentifiersToLoad, indicesOfitemProvidersToLoad, loadResults] (UIItemProvider *itemProvider, NSUInteger index, BOOL *) {
-        NSString *typeIdentifierToLoad = [protectedSelf typeIdentifierToLoadForRegisteredTypeIdentfiers:itemProvider.registeredTypeIdentifiers];
-        if (typeIdentifierToLoad) {
-            [itemProvidersToLoad addObject:itemProvider];
-            [typeIdentifiersToLoad addObject:typeIdentifierToLoad];
-            [indicesOfitemProvidersToLoad addObject:@(index)];
-        }
-        [loadResults addObject:[WebItemProviderLoadResult emptyLoadResult]];
-    }];
+    for (NSItemProvider *itemProvider in _itemProviders.get()) {
+        NSArray<NSString *> *typeIdentifiersToLoad = [protectedSelf typeIdentifiersToLoad:itemProvider];
+        foundAnyDataToLoad |= typeIdentifiersToLoad.count;
+        [loadResults addObject:[WebItemProviderLoadResult loadResultWithItemProvider:itemProvider typesToLoad:typeIdentifiersToLoad]];
+    }
 
-    if (![itemProvidersToLoad count]) {
+    if (!foundAnyDataToLoad) {
         action(@[ ]);
         return;
     }
@@ -552,27 +805,23 @@ static NSURL *linkTemporaryItemProviderFilesToDropStagingDirectory(NSURL *url, N
     auto setFileURLsLock = adoptNS([[NSLock alloc] init]);
     auto synchronousFileLoadingGroup = adoptOSObject(dispatch_group_create());
     auto fileLoadingGroup = adoptOSObject(dispatch_group_create());
-    for (NSUInteger index = 0; index < [itemProvidersToLoad count]; ++index) {
-        RetainPtr<UIItemProvider> itemProvider = [itemProvidersToLoad objectAtIndex:index];
-        RetainPtr<NSString> typeIdentifier = [typeIdentifiersToLoad objectAtIndex:index];
-        NSUInteger indexInItemProviderArray = [[indicesOfitemProvidersToLoad objectAtIndex:index] unsignedIntegerValue];
-        RetainPtr<NSString> suggestedName = [itemProvider suggestedName];
-        auto presentationStyle = [itemProvider preferredPresentationStyle];
-        dispatch_group_enter(fileLoadingGroup.get());
-        dispatch_group_enter(synchronousFileLoadingGroup.get());
-        [itemProvider loadFileRepresentationForTypeIdentifier:typeIdentifier.get() completionHandler:[synchronousFileLoadingGroup, setFileURLsLock, indexInItemProviderArray, suggestedName, typeIdentifier, loadResults, fileLoadingGroup, presentationStyle] (NSURL *url, NSError *) {
-            // After executing this completion block, UIKit removes the file at the given URL. However, we need this data to persist longer for the web content process.
-            // To address this, we hard link the given URL to a new temporary file in the temporary directory. This follows the same flow as regular file upload, in
-            // WKFileUploadPanel.mm. The temporary files are cleaned up by the system at a later time.
-            if (NSURL *destination = linkTemporaryItemProviderFilesToDropStagingDirectory(url, suggestedName.get(), typeIdentifier.get())) {
-                WebItemProviderLoadResult *loadResult = [WebItemProviderLoadResult loadResultWithFileURLMap:@{ typeIdentifier.get() : destination } presentationStyle:presentationStyle];
-                [setFileURLsLock lock];
-                [loadResults setObject:loadResult atIndexedSubscript:indexInItemProviderArray];
-                [setFileURLsLock unlock];
-            }
-            dispatch_group_leave(fileLoadingGroup.get());
-            dispatch_group_leave(synchronousFileLoadingGroup.get());
-        }];
+    for (WebItemProviderLoadResult *loadResult in loadResults.get()) {
+        for (NSString *typeToLoad in loadResult.typesToLoad) {
+            dispatch_group_enter(fileLoadingGroup.get());
+            dispatch_group_enter(synchronousFileLoadingGroup.get());
+            [loadResult.itemProvider loadFileRepresentationForTypeIdentifier:typeToLoad completionHandler:[protectedLoadResult = retainPtr(loadResult), synchronousFileLoadingGroup, setFileURLsLock, protectedTypeToLoad = retainPtr(typeToLoad), fileLoadingGroup] (NSURL *url, NSError *) {
+                // After executing this completion block, UIKit removes the file at the given URL. However, we need this data to persist longer for the web content process.
+                // To address this, we hard link the given URL to a new temporary file in the temporary directory. This follows the same flow as regular file upload, in
+                // WKFileUploadPanel.mm. The temporary files are cleaned up by the system at a later time.
+                if (NSURL *destination = linkTemporaryItemProviderFilesToDropStagingDirectory(url, [protectedLoadResult itemProvider].suggestedName, protectedTypeToLoad.get())) {
+                    [setFileURLsLock lock];
+                    [protectedLoadResult setFileURL:destination forType:protectedTypeToLoad.get()];
+                    [setFileURLsLock unlock];
+                }
+                dispatch_group_leave(fileLoadingGroup.get());
+                dispatch_group_leave(synchronousFileLoadingGroup.get());
+            }];
+        }
     }
 
     RetainPtr<WebItemProviderPasteboard> retainedSelf = self;
@@ -582,7 +831,7 @@ static NSURL *linkTemporaryItemProviderFilesToDropStagingDirectory(NSURL *url, N
                 retainedSelf->_loadResults.append(loadResult);
         }
 
-        completionBlock([retainedSelf droppedFileURLs]);
+        completionBlock([retainedSelf allDroppedFileURLs]);
     };
 
     if (synchronousTimeout > 0 && !dispatch_group_wait(synchronousFileLoadingGroup.get(), dispatch_time(DISPATCH_TIME_NOW, synchronousTimeout * NSEC_PER_SEC))) {
@@ -593,7 +842,7 @@ static NSURL *linkTemporaryItemProviderFilesToDropStagingDirectory(NSURL *url, N
     dispatch_group_notify(fileLoadingGroup.get(), dispatch_get_main_queue(), itemLoadCompletion);
 }
 
-- (UIItemProvider *)itemProviderAtIndex:(NSUInteger)index
+- (NSItemProvider *)itemProviderAtIndex:(NSUInteger)index
 {
     return index < [_itemProviders count] ? [_itemProviders objectAtIndex:index] : nil;
 }
@@ -613,23 +862,27 @@ static NSURL *linkTemporaryItemProviderFilesToDropStagingDirectory(NSURL *url, N
     _pendingOperationCount--;
 }
 
-- (void)enumerateItemProvidersWithBlock:(void (^)(UIItemProvider *itemProvider, NSUInteger index, BOOL *stop))block
+- (void)enumerateItemProvidersWithBlock:(void (^)(__kindof NSItemProvider *itemProvider, NSUInteger index, BOOL *stop))block
 {
     [_itemProviders enumerateObjectsUsingBlock:block];
 }
 
-- (void)stageRegistrationList:(nullable WebItemProviderRegistrationInfoList *)info
+- (void)stageRegistrationLists:(NSArray<WebItemProviderRegistrationInfoList *> *)lists
 {
-    _stagedRegistrationInfoList = info.numberOfItems ? info : nil;
+    ASSERT(lists.count);
+    _stagedRegistrationInfoLists = lists;
 }
 
-- (WebItemProviderRegistrationInfoList *)takeRegistrationList
+- (void)clearRegistrationLists
 {
-    auto stagedRegistrationInfoList = _stagedRegistrationInfoList;
-    _stagedRegistrationInfoList = nil;
-    return stagedRegistrationInfoList.autorelease();
+    _stagedRegistrationInfoLists = nil;
+}
+
+- (NSArray<WebItemProviderRegistrationInfoList *> *)takeRegistrationLists
+{
+    return _stagedRegistrationInfoLists.autorelease();
 }
 
 @end
 
-#endif // ENABLE(DATA_INTERACTION)
+#endif // PLATFORM(IOS_FAMILY) && ENABLE(DRAG_SUPPORT)

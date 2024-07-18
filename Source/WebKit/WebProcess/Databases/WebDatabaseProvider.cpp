@@ -26,24 +26,23 @@
 #include "config.h"
 #include "WebDatabaseProvider.h"
 
+#include "NetworkProcessConnection.h"
+#include "WebIDBConnectionToServer.h"
 #include "WebProcess.h"
-#include "WebToStorageProcessConnection.h"
-#include <pal/SessionID.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 
+namespace WebKit {
 using namespace WebCore;
 
-namespace WebKit {
-
-static HashMap<uint64_t, WebDatabaseProvider*>& databaseProviders()
+static HashMap<PageGroupIdentifier, WebDatabaseProvider*>& databaseProviders()
 {
-    static NeverDestroyed<HashMap<uint64_t, WebDatabaseProvider*>> databaseProviders;
+    static NeverDestroyed<HashMap<PageGroupIdentifier, WebDatabaseProvider*>> databaseProviders;
 
     return databaseProviders;
 }
 
-Ref<WebDatabaseProvider> WebDatabaseProvider::getOrCreate(uint64_t identifier)
+Ref<WebDatabaseProvider> WebDatabaseProvider::getOrCreate(PageGroupIdentifier identifier)
 {
     auto& slot = databaseProviders().add(identifier, nullptr).iterator->value;
     if (slot)
@@ -55,7 +54,7 @@ Ref<WebDatabaseProvider> WebDatabaseProvider::getOrCreate(uint64_t identifier)
     return databaseProvider;
 }
 
-WebDatabaseProvider::WebDatabaseProvider(uint64_t identifier)
+WebDatabaseProvider::WebDatabaseProvider(PageGroupIdentifier identifier)
     : m_identifier(identifier)
 {
 }
@@ -67,22 +66,9 @@ WebDatabaseProvider::~WebDatabaseProvider()
     databaseProviders().remove(m_identifier);
 }
 
-#if ENABLE(INDEXED_DATABASE)
-
-WebCore::IDBClient::IDBConnectionToServer& WebDatabaseProvider::idbConnectionToServerForSession(const PAL::SessionID& sessionID)
+WebCore::IDBClient::IDBConnectionToServer& WebDatabaseProvider::idbConnectionToServerForSession(PAL::SessionID)
 {
-    if (sessionID.isEphemeral()) {
-        auto result = m_idbEphemeralConnectionMap.add(sessionID.sessionID(), nullptr);
-        if (result.isNewEntry)
-            result.iterator->value = WebCore::InProcessIDBServer::create();
-
-        return result.iterator->value->connectionToServer();
-    }
-
-    ASSERT(WebProcess::singleton().webToStorageProcessConnection());
-    return WebProcess::singleton().webToStorageProcessConnection()->idbConnectionToServerForSession(sessionID).coreConnectionToServer();
+    return WebProcess::singleton().ensureNetworkProcessConnection().idbConnectionToServer().coreConnectionToServer();
 }
-
-#endif
 
 }

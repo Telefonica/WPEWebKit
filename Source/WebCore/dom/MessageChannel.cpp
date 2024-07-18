@@ -28,19 +28,37 @@
 #include "MessageChannel.h"
 
 #include "MessagePort.h"
-#include "MessagePortChannel.h"
+#include "MessagePortChannelProvider.h"
+#include "ScriptExecutionContext.h"
 
 namespace WebCore {
 
-MessageChannel::MessageChannel(ScriptExecutionContext& context)
-    : m_port1(MessagePort::create(context))
-    , m_port2(MessagePort::create(context))
+static std::pair<Ref<MessagePort>, Ref<MessagePort>> generateMessagePorts(ScriptExecutionContext& context)
 {
-    MessagePortChannel::createChannel(m_port1.get(), m_port2.get());
+    MessagePortIdentifier id1 = { Process::identifier(), ObjectIdentifier<MessagePortIdentifier::PortIdentifierType>::generate() };
+    MessagePortIdentifier id2 = { Process::identifier(), ObjectIdentifier<MessagePortIdentifier::PortIdentifierType>::generate() };
+
+    return { MessagePort::create(context, id1, id2), MessagePort::create(context, id2, id1) };
 }
 
-MessageChannel::~MessageChannel()
+Ref<MessageChannel> MessageChannel::create(ScriptExecutionContext& context)
 {
+    return adoptRef(*new MessageChannel(context));
 }
+
+MessageChannel::MessageChannel(ScriptExecutionContext& context)
+    : m_ports(generateMessagePorts(context))
+{
+    if (!context.activeDOMObjectsAreStopped()) {
+        ASSERT(!port1().closed());
+        ASSERT(!port2().closed());
+        MessagePortChannelProvider::fromContext(context).createNewMessagePortChannel(port1().identifier(), port2().identifier());
+    } else {
+        ASSERT(port1().closed());
+        ASSERT(port2().closed());
+    }
+}
+
+MessageChannel::~MessageChannel() = default;
 
 } // namespace WebCore

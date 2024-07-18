@@ -8,19 +8,23 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_API_VIDEO_I420_BUFFER_H_
-#define WEBRTC_API_VIDEO_I420_BUFFER_H_
+#ifndef API_VIDEO_I420_BUFFER_H_
+#define API_VIDEO_I420_BUFFER_H_
+
+#include <stdint.h>
 
 #include <memory>
 
-#include "webrtc/api/video/video_rotation.h"
-#include "webrtc/api/video/video_frame_buffer.h"
-#include "webrtc/system_wrappers/include/aligned_malloc.h"
+#include "api/scoped_refptr.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video/video_rotation.h"
+#include "rtc_base/memory/aligned_malloc.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
 // Plain I420 buffer in standard memory.
-class I420Buffer : public I420BufferInterface {
+class RTC_EXPORT I420Buffer : public I420BufferInterface {
  public:
   static rtc::scoped_refptr<I420Buffer> Create(int width, int height);
   static rtc::scoped_refptr<I420Buffer> Create(int width,
@@ -36,13 +40,16 @@ class I420Buffer : public I420BufferInterface {
     return Copy(*buffer.GetI420());
   }
 
-  static rtc::scoped_refptr<I420Buffer> Copy(
-      int width, int height,
-      const uint8_t* data_y, int stride_y,
-      const uint8_t* data_u, int stride_u,
-      const uint8_t* data_v, int stride_v);
+  static rtc::scoped_refptr<I420Buffer> Copy(int width,
+                                             int height,
+                                             const uint8_t* data_y,
+                                             int stride_y,
+                                             const uint8_t* data_u,
+                                             int stride_u,
+                                             const uint8_t* data_v,
+                                             int stride_v);
 
-  // Returns a rotated copy of |src|.
+  // Returns a rotated copy of `src`.
   static rtc::scoped_refptr<I420Buffer> Rotate(const I420BufferInterface& src,
                                                VideoRotation rotation);
   // Deprecated.
@@ -58,8 +65,8 @@ class I420Buffer : public I420BufferInterface {
   // quirks in memory checkers
   // (https://bugs.chromium.org/p/libyuv/issues/detail?id=377) and
   // ffmpeg (http://crbug.com/390941).
-  // TODO(nisse): Deprecated. Should be deleted if/when those issues
-  // are resolved in a better way. Or in the mean time, use SetBlack.
+  // TODO(https://crbug.com/390941): Deprecated. Should be deleted if/when those
+  // issues are resolved in a better way. Or in the mean time, use SetBlack.
   void InitializeData();
 
   int width() const override;
@@ -76,8 +83,8 @@ class I420Buffer : public I420BufferInterface {
   uint8_t* MutableDataU();
   uint8_t* MutableDataV();
 
-  // Scale the cropped area of |src| to the size of |this| buffer, and
-  // write the result into |this|.
+  // Scale the cropped area of `src` to the size of `this` buffer, and
+  // write the result into `this`.
   void CropAndScaleFrom(const I420BufferInterface& src,
                         int offset_x,
                         int offset_y,
@@ -88,7 +95,7 @@ class I420Buffer : public I420BufferInterface {
   // aspect ratio without distorting the image.
   void CropAndScaleFrom(const I420BufferInterface& src);
 
-  // Scale all of |src| to the size of |this| buffer, with no cropping.
+  // Scale all of `src` to the size of `this` buffer, with no cropping.
   void ScaleFrom(const I420BufferInterface& src);
 
  protected:
@@ -108,4 +115,4 @@ class I420Buffer : public I420BufferInterface {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_VIDEO_I420_BUFFER_H_
+#endif  // API_VIDEO_I420_BUFFER_H_

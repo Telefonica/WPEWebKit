@@ -23,10 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "WebIconUtilities.h"
+#import "config.h"
+#import "WebIconUtilities.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "UIKitSPI.h"
 #import <AVFoundation/AVFoundation.h>
@@ -36,16 +36,9 @@
 #import <MobileCoreServices/MobileCoreServices.h>
 #import <wtf/MathExtras.h>
 #import <wtf/RetainPtr.h>
-#import <wtf/SoftLinking.h>
 
-SOFT_LINK_FRAMEWORK(AVFoundation);
-SOFT_LINK_CLASS(AVFoundation, AVAssetImageGenerator);
-SOFT_LINK_CLASS(AVFoundation, AVURLAsset);
-
-SOFT_LINK_FRAMEWORK(CoreMedia);
-SOFT_LINK_CONSTANT(CoreMedia, kCMTimeZero, CMTime);
-
-#define kCMTimeZero getkCMTimeZero()
+#import <pal/cf/CoreMediaSoftLink.h>
+#import <pal/cocoa/AVFoundationSoftLink.h>
 
 namespace WebKit {
 
@@ -78,7 +71,7 @@ static UIImage *squareImage(CGImageRef image)
     return [UIImage imageWithCGImage:squareImage.get()];
 }
 
-static UIImage *thumbnailSizedImageForImage(CGImageRef image)
+static RetainPtr<UIImage> thumbnailSizedImageForImage(CGImageRef image)
 {
     UIImage *squaredImage = squareImage(image);
     if (!squaredImage)
@@ -88,20 +81,22 @@ static UIImage *thumbnailSizedImageForImage(CGImageRef image)
     UIGraphicsBeginImageContext(destRect.size);
     CGContextSetInterpolationQuality(UIGraphicsGetCurrentContext(), kCGInterpolationHigh);
     [squaredImage drawInRect:destRect];
-    UIImage *resultImage = UIGraphicsGetImageFromCurrentImageContext();
+    RetainPtr<UIImage> resultImage = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
     return resultImage;
 }
 
-UIImage* fallbackIconForFile(NSURL *file)
+RetainPtr<UIImage> fallbackIconForFile(NSURL *file)
 {
     ASSERT_ARG(file, [file isFileURL]);
 
     UIDocumentInteractionController *interactionController = [UIDocumentInteractionController interactionControllerWithURL:file];
+    if (![interactionController.icons count])
+        return nil;
     return thumbnailSizedImageForImage(interactionController.icons[0].CGImage);
 }
 
-UIImage* iconForImageFile(NSURL *file)
+RetainPtr<UIImage> iconForImageFile(NSURL *file)
 {
     ASSERT_ARG(file, [file isFileURL]);
 
@@ -120,16 +115,16 @@ UIImage* iconForImageFile(NSURL *file)
     return thumbnailSizedImageForImage(thumbnail.get());
 }
 
-UIImage* iconForVideoFile(NSURL *file)
+RetainPtr<UIImage> iconForVideoFile(NSURL *file)
 {
     ASSERT_ARG(file, [file isFileURL]);
 
-    RetainPtr<AVURLAsset> asset = adoptNS([allocAVURLAssetInstance() initWithURL:file options:nil]);
-    RetainPtr<AVAssetImageGenerator> generator = adoptNS([allocAVAssetImageGeneratorInstance() initWithAsset:asset.get()]);
+    RetainPtr<AVURLAsset> asset = adoptNS([PAL::allocAVURLAssetInstance() initWithURL:file options:nil]);
+    RetainPtr<AVAssetImageGenerator> generator = adoptNS([PAL::allocAVAssetImageGeneratorInstance() initWithAsset:asset.get()]);
     [generator setAppliesPreferredTrackTransform:YES];
 
     NSError *error = nil;
-    RetainPtr<CGImageRef> imageRef = adoptCF([generator copyCGImageAtTime:kCMTimeZero actualTime:nil error:&error]);
+    RetainPtr<CGImageRef> imageRef = adoptCF([generator copyCGImageAtTime:PAL::kCMTimeZero actualTime:nil error:&error]);
     if (!imageRef) {
         LOG_ERROR("Error creating image for video '%@': %@", file, error);
         return fallbackIconForFile(file);
@@ -138,7 +133,7 @@ UIImage* iconForVideoFile(NSURL *file)
     return thumbnailSizedImageForImage(imageRef.get());
 }
 
-UIImage* iconForFile(NSURL *file)
+RetainPtr<UIImage> iconForFile(NSURL *file)
 {
     ASSERT_ARG(file, [file isFileURL]);
 
@@ -146,6 +141,7 @@ UIImage* iconForFile(NSURL *file)
     if (!fileExtension.length)
         return nil;
 
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     RetainPtr<CFStringRef> fileUTI = adoptCF(UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, (CFStringRef)fileExtension, 0));
 
     if (UTTypeConformsTo(fileUTI.get(), kUTTypeImage))
@@ -153,6 +149,7 @@ UIImage* iconForFile(NSURL *file)
 
     if (UTTypeConformsTo(fileUTI.get(), kUTTypeMovie))
         return iconForVideoFile(file);
+ALLOW_DEPRECATED_DECLARATIONS_END
 
     return fallbackIconForFile(file);
 }

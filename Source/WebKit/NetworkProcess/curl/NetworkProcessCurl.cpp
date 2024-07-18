@@ -26,31 +26,17 @@
 #include "config.h"
 #include "NetworkProcess.h"
 
-#include "NetworkCache.h"
 #include "NetworkProcessCreationParameters.h"
-#include "ResourceCachesToClear.h"
-#include "WebCookieManager.h"
-#include <WebCore/CertificateInfo.h>
-#include <WebCore/FileSystem.h>
+#include <WebCore/CurlContext.h>
 #include <WebCore/NetworkStorageSession.h>
 #include <WebCore/NotImplemented.h>
-#include <WebCore/ResourceHandle.h>
-#include <wtf/RAMSize.h>
-#include <wtf/text/CString.h>
-#include <wtf/text/StringBuilder.h>
-
-using namespace WebCore;
 
 namespace WebKit {
 
-void NetworkProcess::platformInitializeNetworkProcess(const NetworkProcessCreationParameters& parameters)
-{
-    notImplemented();
-}
+using namespace WebCore;
 
-void NetworkProcess::platformSetURLCacheSize(unsigned, uint64_t)
+void NetworkProcess::platformInitializeNetworkProcess(const NetworkProcessCreationParameters&)
 {
-    notImplemented();
 }
 
 void NetworkProcess::allowSpecificHTTPSCertificateForHost(const CertificateInfo& certificateInfo, const String& host)
@@ -58,19 +44,23 @@ void NetworkProcess::allowSpecificHTTPSCertificateForHost(const CertificateInfo&
     notImplemented();
 }
 
-void NetworkProcess::clearCacheForAllOrigins(uint32_t cachesToClear)
+void NetworkProcess::clearDiskCache(WallTime, CompletionHandler<void()>&& completionHandler)
 {
     notImplemented();
-}
-
-void NetworkProcess::clearDiskCache(std::chrono::system_clock::time_point, Function<void()>&&)
-{
-    notImplemented();
+    completionHandler();
 }
 
 void NetworkProcess::platformTerminate()
 {
     notImplemented();
+}
+
+void NetworkProcess::setNetworkProxySettings(PAL::SessionID sessionID, WebCore::CurlProxySettings&& settings)
+{
+    if (auto* networkStorageSession = storageSession(sessionID))
+        networkStorageSession->setProxySettings(settings);
+    else
+        ASSERT_NOT_REACHED();
 }
 
 } // namespace WebKit

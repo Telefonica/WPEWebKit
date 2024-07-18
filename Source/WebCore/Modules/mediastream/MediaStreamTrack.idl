@@ -32,26 +32,26 @@ enum MediaStreamTrackState { "live", "ended" };
     ExportToWrappedFunction,
     PrivateIdentifier,
     PublicIdentifier,
+    Exposed=Window
 ] interface MediaStreamTrack : EventTarget {
     readonly attribute DOMString kind;
     readonly attribute DOMString id;
     readonly attribute DOMString label;
     attribute boolean enabled;
-    readonly attribute boolean muted;
+    attribute DOMString contentHint;
+    [ImplementedAs=mutedForBindings] readonly attribute boolean muted;
     attribute EventHandler onmute;
     attribute EventHandler onunmute;
     readonly attribute MediaStreamTrackState readyState;
     attribute EventHandler onended;
 
     MediaStreamTrack clone();
-    [ImplementedAs=stopTrack] void stop();
+    [ImplementedAs=stopTrack] undefined stop();
 
     MediaTrackCapabilities getCapabilities();
     MediaTrackConstraints getConstraints();
-    [CallWith=Document] MediaTrackSettings getSettings();
-    Promise<void> applyConstraints(optional MediaTrackConstraints constraints);
-
-    attribute EventHandler onoverconstrained;
+    MediaTrackSettings getSettings();
+    Promise<undefined> applyConstraints(optional MediaTrackConstraints constraints);
 };
 
 [
@@ -71,6 +71,7 @@ enum MediaStreamTrackState { "live", "ended" };
     // FIXME 169871: add channelCount
     DOMString deviceId;
     DOMString groupId;
+    DOMString displaySurface;
 };
 
 [
@@ -90,4 +91,5 @@ enum MediaStreamTrackState { "live", "ended" };
     // FIXME 169871: add channelCount
     DOMString deviceId;
     DOMString groupId;
+    DOMString displaySurface;
 };

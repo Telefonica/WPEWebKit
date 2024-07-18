@@ -26,7 +26,7 @@
 #include "config.h"
 #include "ObjectPropertyCondition.h"
 
-#include "JSCInlines.h"
+#include "JSCJSValueInlines.h"
 #include "TrackedReferences.h"
 
 namespace JSC {
@@ -46,18 +46,12 @@ void ObjectPropertyCondition::dump(PrintStream& out) const
     dumpInContext(out, nullptr);
 }
 
-bool ObjectPropertyCondition::structureEnsuresValidityAssumingImpurePropertyWatchpoint(
-    Structure* structure) const
-{
-    return m_condition.isStillValidAssumingImpurePropertyWatchpoint(structure);
-}
-
-bool ObjectPropertyCondition::structureEnsuresValidityAssumingImpurePropertyWatchpoint() const
+bool ObjectPropertyCondition::structureEnsuresValidityAssumingImpurePropertyWatchpoint(Concurrency concurrency) const
 {
     if (!*this)
         return false;
     
-    return structureEnsuresValidityAssumingImpurePropertyWatchpoint(m_object->structure());
+    return m_condition.isStillValidAssumingImpurePropertyWatchpoint(concurrency, m_object->structure(), nullptr);
 }
 
 bool ObjectPropertyCondition::validityRequiresImpurePropertyWatchpoint(Structure* structure) const
@@ -73,44 +67,44 @@ bool ObjectPropertyCondition::validityRequiresImpurePropertyWatchpoint() const
     return validityRequiresImpurePropertyWatchpoint(m_object->structure());
 }
 
-bool ObjectPropertyCondition::isStillValidAssumingImpurePropertyWatchpoint(Structure* structure) const
+bool ObjectPropertyCondition::isStillValidAssumingImpurePropertyWatchpoint(Concurrency concurrency, Structure* structure) const
 {
-    return m_condition.isStillValidAssumingImpurePropertyWatchpoint(structure, m_object);
+    return m_condition.isStillValidAssumingImpurePropertyWatchpoint(concurrency, structure, m_object);
 }
 
-bool ObjectPropertyCondition::isStillValidAssumingImpurePropertyWatchpoint() const
-{
-    if (!*this)
-        return false;
-
-    return isStillValidAssumingImpurePropertyWatchpoint(m_object->structure());
-}
-
-
-bool ObjectPropertyCondition::isStillValid(Structure* structure) const
-{
-    return m_condition.isStillValid(structure, m_object);
-}
-
-bool ObjectPropertyCondition::isStillValid() const
+bool ObjectPropertyCondition::isStillValidAssumingImpurePropertyWatchpoint(Concurrency concurrency) const
 {
     if (!*this)
         return false;
-    
-    return isStillValid(m_object->structure());
+
+    return isStillValidAssumingImpurePropertyWatchpoint(concurrency, m_object->structure());
 }
 
-bool ObjectPropertyCondition::structureEnsuresValidity(Structure* structure) const
+
+bool ObjectPropertyCondition::isStillValid(Concurrency concurrency, Structure* structure) const
 {
-    return m_condition.isStillValid(structure);
+    return m_condition.isStillValid(concurrency, structure, m_object);
 }
 
-bool ObjectPropertyCondition::structureEnsuresValidity() const
+bool ObjectPropertyCondition::isStillValid(Concurrency concurrency) const
 {
     if (!*this)
         return false;
     
-    return structureEnsuresValidity(m_object->structure());
+    return isStillValid(concurrency, m_object->structure());
+}
+
+bool ObjectPropertyCondition::structureEnsuresValidity(Concurrency concurrency, Structure* structure) const
+{
+    return m_condition.isStillValid(concurrency, structure);
+}
+
+bool ObjectPropertyCondition::structureEnsuresValidity(Concurrency concurrency) const
+{
+    if (!*this)
+        return false;
+    
+    return structureEnsuresValidity(concurrency, m_object->structure());
 }
 
 bool ObjectPropertyCondition::isWatchableAssumingImpurePropertyWatchpoint(
@@ -142,15 +136,16 @@ bool ObjectPropertyCondition::isWatchable(PropertyCondition::WatchabilityEffort 
     return isWatchable(m_object->structure(), effort);
 }
 
-bool ObjectPropertyCondition::isStillLive() const
+bool ObjectPropertyCondition::isStillLive(VM& vm) const
 {
     if (!*this)
         return false;
     
-    if (!Heap::isMarked(m_object))
-        return false;
-    
-    return m_condition.isStillLive();
+    bool isStillLive = true;
+    forEachDependentCell([&](JSCell* cell) {
+        isStillLive &= vm.heap.isMarked(cell);
+    });
+    return isStillLive;
 }
 
 void ObjectPropertyCondition::validateReferences(const TrackedReferences& tracked) const
@@ -162,9 +157,17 @@ void ObjectPropertyCondition::validateReferences(const TrackedReferences& tracke
     m_condition.validateReferences(tracked);
 }
 
-ObjectPropertyCondition ObjectPropertyCondition::attemptToMakeEquivalenceWithoutBarrier(VM& vm) const
+ObjectPropertyCondition ObjectPropertyCondition::attemptToMakeEquivalenceWithoutBarrier() const
 {
-    PropertyCondition result = condition().attemptToMakeEquivalenceWithoutBarrier(vm, object());
+    PropertyCondition result = condition().attemptToMakeEquivalenceWithoutBarrier(object());
+    if (!result)
+        return ObjectPropertyCondition();
+    return ObjectPropertyCondition(object(), result);
+}
+
+ObjectPropertyCondition ObjectPropertyCondition::attemptToMakeReplacementWithoutBarrier() const
+{
+    PropertyCondition result = condition().attemptToMakeReplacementWithoutBarrier(object());
     if (!result)
         return ObjectPropertyCondition();
     return ObjectPropertyCondition(object(), result);

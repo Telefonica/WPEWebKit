@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -21,30 +21,45 @@
 #if ENABLE(MEDIA_STREAM)
 
 #include "UserMediaPermissionRequestManagerProxy.h"
+#include <WebCore/CaptureDevice.h>
+#include <WebCore/PageIdentifier.h>
+#include <WebCore/RealtimeMediaSourceCenter.h>
+#include <WebCore/UserMediaClient.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebKit {
 
 class WebProcessProxy;
 
-class UserMediaProcessManager {
+class UserMediaProcessManager : public WebCore::RealtimeMediaSourceCenter::Observer {
 public:
 
     static UserMediaProcessManager& singleton();
 
-    void addUserMediaPermissionRequestManagerProxy(UserMediaPermissionRequestManagerProxy&);
-    void removeUserMediaPermissionRequestManagerProxy(UserMediaPermissionRequestManagerProxy&);
+    UserMediaProcessManager();
 
-    void willCreateMediaStream(UserMediaPermissionRequestManagerProxy&, bool withAudio, bool withVideo);
-    void muteCaptureMediaStreamsExceptIn(WebPageProxy&);
+    bool willCreateMediaStream(UserMediaPermissionRequestManagerProxy&, bool withAudio, bool withVideo);
 
-    void startedCaptureSession(UserMediaPermissionRequestManagerProxy&);
-    void endedCaptureSession(UserMediaPermissionRequestManagerProxy&);
+    void revokeSandboxExtensionsIfNeeded(WebProcessProxy&);
 
     void setCaptureEnabled(bool);
     bool captureEnabled() const { return m_captureEnabled; }
 
+    void denyNextUserMediaRequest() { m_denyNextRequest = true; }
+
+    void beginMonitoringCaptureDevices();
+
 private:
+    enum class ShouldNotify : bool { No, Yes };
+    void updateCaptureDevices(ShouldNotify);
+    void captureDevicesChanged();
+
+    // RealtimeMediaSourceCenter::Observer
+    void devicesChanged() final;
+
+    Vector<WebCore::CaptureDevice> m_captureDevices;
     bool m_captureEnabled { true };
+    bool m_denyNextRequest { false };
 };
 
 } // namespace WebKit

@@ -31,38 +31,37 @@
 #include "config.h"
 #include "PerformanceEntry.h"
 
-#include "RuntimeEnabledFeatures.h"
+#include "DeprecatedGlobalSettings.h"
 
 namespace WebCore {
 
-PerformanceEntry::PerformanceEntry(Type type, const String& name, const String& entryType, double startTime, double finishTime)
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(PerformanceEntry);
+
+PerformanceEntry::PerformanceEntry(const String& name, double startTime, double finishTime)
     : m_name(name)
-    , m_entryType(entryType)
     , m_startTime(startTime)
     , m_duration(finishTime - startTime)
-    , m_type(type)
 {
 }
 
-PerformanceEntry::~PerformanceEntry()
-{
-}
+PerformanceEntry::~PerformanceEntry() = default;
 
 std::optional<PerformanceEntry::Type> PerformanceEntry::parseEntryTypeString(const String& entryType)
 {
-    if (entryType == "navigation")
+    if (entryType == "navigation"_s)
         return std::optional<Type>(Type::Navigation);
 
-    if (RuntimeEnabledFeatures::sharedFeatures().userTimingEnabled()) {
-        if (entryType == "mark")
-            return std::optional<Type>(Type::Mark);
-        if (entryType == "measure")
-            return std::optional<Type>(Type::Measure);
-    }
+    if (entryType == "mark"_s)
+        return std::optional<Type>(Type::Mark);
+    if (entryType == "measure"_s)
+        return std::optional<Type>(Type::Measure);
 
-    if (RuntimeEnabledFeatures::sharedFeatures().resourceTimingEnabled()) {
-        if (entryType == "resource")
-            return std::optional<Type>(Type::Resource);
+    if (entryType == "resource"_s)
+        return std::optional<Type>(Type::Resource);
+
+    if (DeprecatedGlobalSettings::paintTimingEnabled()) {
+        if (entryType == "paint"_s)
+            return std::optional<Type>(Type::Paint);
     }
 
     return std::nullopt;

@@ -1,13 +1,12 @@
 %{
 #include "HashTools.h"
 #include <string.h>
+#include <wtf/Compiler.h>
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunknown-pragmas"
-#pragma clang diagnostic ignored "-Wdeprecated-register"
-#pragma clang diagnostic ignored "-Wimplicit-fallthrough"
-#endif
+IGNORE_WARNINGS_BEGIN("implicit-fallthrough")
+
+// Older versions of gperf like to use the `register` keyword.
+#define register
 
 namespace WebCore {
 %}
@@ -24,6 +23,7 @@ struct NamedColor;
 %enum
 %%
 aliceblue, 0xfff0f8ff
+alpha, 0x00000000
 antiquewhite, 0xfffaebd7
 aqua, 0xff00ffff
 aquamarine, 0xff7fffd4
@@ -182,6 +182,4 @@ const struct NamedColor* findColor(const char* str, unsigned int len)
 
 } // namespace WebCore
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+IGNORE_WARNINGS_END

@@ -77,26 +77,14 @@ CSSPropertySourceData::CSSPropertySourceData(const CSSPropertySourceData& other)
 CSSPropertySourceData::CSSPropertySourceData()
     : name(emptyString())
     , value(emptyString())
-    , important(false)
-    , disabled(false)
-    , parsedOk(false)
-    , range(SourceRange(0, 0))
 {
 }
 
 String CSSPropertySourceData::toString() const
 {
-    if (!name && value == "e")
+    if (!name && value == "e"_s)
         return String();
-
-    StringBuilder result;
-    result.append(name);
-    result.appendLiteral(": ");
-    result.append(value);
-    if (important)
-        result.appendLiteral(" !important");
-    result.append(';');
-    return result.toString();
+    return makeString(name, ": ", value, important ? " !important" : "", ';');
 }
 
 unsigned CSSPropertySourceData::hash() const

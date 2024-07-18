@@ -8,12 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/app.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/app.h"
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/modules/rtp_rtcp/source/byte_io.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/common_header.h"
+#include <string.h>
+
+#include <cstdint>
+
+#include "modules/rtp_rtcp/source/byte_io.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/common_header.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
 namespace rtcp {
@@ -33,23 +37,23 @@ constexpr size_t App::kMaxDataSize;
 //  8 |                   application-dependent data                ...
 //    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-App::App() : sub_type_(0), ssrc_(0), name_(0) {}
+App::App() : sub_type_(0), name_(0) {}
 
 App::~App() = default;
 
 bool App::Parse(const CommonHeader& packet) {
   RTC_DCHECK_EQ(packet.type(), kPacketType);
   if (packet.payload_size_bytes() < kAppBaseLength) {
-    LOG(LS_WARNING) << "Packet is too small to be a valid APP packet";
+    RTC_LOG(LS_WARNING) << "Packet is too small to be a valid APP packet";
     return false;
   }
   if (packet.payload_size_bytes() % 4 != 0) {
-    LOG(LS_WARNING)
+    RTC_LOG(LS_WARNING)
         << "Packet payload must be 32 bits aligned to make a valid APP packet";
     return false;
   }
   sub_type_ = packet.fmt();
-  ssrc_ = ByteReader<uint32_t>::ReadBigEndian(&packet.payload()[0]);
+  SetSenderSsrc(ByteReader<uint32_t>::ReadBigEndian(&packet.payload()[0]));
   name_ = ByteReader<uint32_t>::ReadBigEndian(&packet.payload()[4]);
   data_.SetData(packet.payload() + kAppBaseLength,
                 packet.payload_size_bytes() - kAppBaseLength);
@@ -64,9 +68,9 @@ void App::SetSubType(uint8_t subtype) {
 void App::SetData(const uint8_t* data, size_t data_length) {
   RTC_DCHECK(data);
   RTC_DCHECK_EQ(data_length % 4, 0) << "Data must be 32 bits aligned.";
-  RTC_DCHECK_LE(data_length, kMaxDataSize) << "App data size " << data_length
-                                           << " exceed maximum of "
-                                           << kMaxDataSize << " bytes.";
+  RTC_DCHECK_LE(data_length, kMaxDataSize)
+      << "App data size " << data_length << " exceed maximum of "
+      << kMaxDataSize << " bytes.";
   data_.SetData(data, data_length);
 }
 
@@ -77,7 +81,7 @@ size_t App::BlockLength() const {
 bool App::Create(uint8_t* packet,
                  size_t* index,
                  size_t max_length,
-                 RtcpPacket::PacketReadyCallback* callback) const {
+                 PacketReadyCallback callback) const {
   while (*index + BlockLength() > max_length) {
     if (!OnBufferFull(packet, index, callback))
       return false;
@@ -85,9 +89,11 @@ bool App::Create(uint8_t* packet,
   const size_t index_end = *index + BlockLength();
   CreateHeader(sub_type_, kPacketType, HeaderLength(), packet, index);
 
-  ByteWriter<uint32_t>::WriteBigEndian(&packet[*index + 0], ssrc_);
+  ByteWriter<uint32_t>::WriteBigEndian(&packet[*index + 0], sender_ssrc());
   ByteWriter<uint32_t>::WriteBigEndian(&packet[*index + 4], name_);
-  memcpy(&packet[*index + 8], data_.data(), data_.size());
+  if (!data_.empty()) {
+    memcpy(&packet[*index + 8], data_.data(), data_.size());
+  }
   *index += (8 + data_.size());
   RTC_DCHECK_EQ(index_end, *index);
   return true;

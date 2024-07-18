@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,32 +23,65 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "RenderThemeCocoa.h"
+#import "config.h"
+#import "RenderThemeCocoa.h"
 
-#if ENABLE(APPLE_PAY)
-
-#include "RenderElement.h"
-#include "RenderStyle.h"
-#include "TranslateTransformOperation.h"
-#include <pal/spi/cocoa/PassKitSPI.h>
-#include <wtf/SoftLinking.h>
-
-#if PLATFORM(MAC)
-SOFT_LINK_PRIVATE_FRAMEWORK(PassKit);
-#else
-SOFT_LINK_FRAMEWORK(PassKit);
-#endif
-
-SOFT_LINK_MAY_FAIL(PassKit, PKDrawApplePayButton, void, (CGContextRef context, CGRect drawRect, CGFloat scale, PKPaymentButtonType type, PKPaymentButtonStyle style, NSString *languageCode), (context, drawRect, scale, type, style, languageCode));
-
-#endif // ENABLE(APPLE_PAY)
+#import "ApplePayLogoSystemImage.h"
+#import "FontCacheCoreText.h"
+#import "GraphicsContextCG.h"
+#import "HTMLInputElement.h"
+#import "ImageBuffer.h"
+#import "RenderText.h"
+#import "UserAgentScripts.h"
+#import "UserAgentStyleSheets.h"
+#import <algorithm>
+#import <pal/spi/cf/CoreTextSPI.h>
+#import <wtf/Language.h>
 
 #if ENABLE(VIDEO)
-#include "LocalizedStrings.h"
+#import "LocalizedStrings.h"
+#import <wtf/BlockObjCExceptions.h>
 #endif
 
+#if PLATFORM(MAC)
+#import <AppKit/NSFont.h>
+#else
+#import <UIKit/UIFont.h>
+#import <pal/ios/UIKitSoftLink.h>
+#endif
+
+#if ENABLE(APPLE_PAY)
+#import <pal/cocoa/PassKitSoftLink.h>
+#endif
+
+@interface WebCoreRenderThemeBundle : NSObject
+@end
+
+@implementation WebCoreRenderThemeBundle
+@end
+
 namespace WebCore {
+
+RenderThemeCocoa& RenderThemeCocoa::singleton()
+{
+    return static_cast<RenderThemeCocoa&>(RenderTheme::singleton());
+}
+
+void RenderThemeCocoa::purgeCaches()
+{
+#if ENABLE(VIDEO) && ENABLE(MODERN_MEDIA_CONTROLS)
+    m_mediaControlsLocalizedStringsScript.clearImplIfNotShared();
+    m_mediaControlsScript.clearImplIfNotShared();
+    m_mediaControlsStyleSheet.clearImplIfNotShared();
+#endif // ENABLE(VIDEO) && ENABLE(MODERN_MEDIA_CONTROLS)
+
+    RenderTheme::purgeCaches();
+}
+
+bool RenderThemeCocoa::shouldHaveCapsLockIndicator(const HTMLInputElement& element) const
+{
+    return element.isPasswordField();
+}
 
 #if ENABLE(APPLE_PAY)
 
@@ -56,67 +89,81 @@ static const auto applePayButtonMinimumWidth = 140;
 static const auto applePayButtonPlainMinimumWidth = 100;
 static const auto applePayButtonMinimumHeight = 30;
 
-void RenderThemeCocoa::adjustApplePayButtonStyle(StyleResolver&, RenderStyle& style, const Element*) const
+void RenderThemeCocoa::adjustApplePayButtonStyle(RenderStyle& style, const Element*) const
 {
     if (style.applePayButtonType() == ApplePayButtonType::Plain)
-        style.setMinWidth(Length(applePayButtonPlainMinimumWidth, Fixed));
+        style.setMinWidth(Length(applePayButtonPlainMinimumWidth, LengthType::Fixed));
     else
-        style.setMinWidth(Length(applePayButtonMinimumWidth, Fixed));
-    style.setMinHeight(Length(applePayButtonMinimumHeight, Fixed));
-}
+        style.setMinWidth(Length(applePayButtonMinimumWidth, LengthType::Fixed));
+    style.setMinHeight(Length(applePayButtonMinimumHeight, LengthType::Fixed));
 
-static PKPaymentButtonStyle toPKPaymentButtonStyle(ApplePayButtonStyle style)
-{
-    switch (style) {
-    case ApplePayButtonStyle::White:
-        return PKPaymentButtonStyleWhite;
-    case ApplePayButtonStyle::WhiteOutline:
-        return PKPaymentButtonStyleWhiteOutline;
-    case ApplePayButtonStyle::Black:
-        return PKPaymentButtonStyleBlack;
-    }
-}
-
-static PKPaymentButtonType toPKPaymentButtonType(ApplePayButtonType type)
-{
-    switch (type) {
-    case ApplePayButtonType::Plain:
-        return PKPaymentButtonTypePlain;
-    case ApplePayButtonType::Buy:
-        return PKPaymentButtonTypeBuy;
-    case ApplePayButtonType::SetUp:
-        return PKPaymentButtonTypeSetUp;
-    case ApplePayButtonType::Donate:
-        // FIXME: Use a named constant here.
-        return (PKPaymentButtonType)4;
+    if (!style.hasExplicitlySetBorderRadius()) {
+        auto cornerRadius = PKApplePayButtonDefaultCornerRadius;
+        style.setBorderRadius({ { cornerRadius, LengthType::Fixed }, { cornerRadius, LengthType::Fixed } });
     }
 }
 
 bool RenderThemeCocoa::paintApplePayButton(const RenderObject& renderer, const PaintInfo& paintInfo, const IntRect& paintRect)
 {
-    if (!canLoadPKDrawApplePayButton())
-        return false;
-
-    GraphicsContextStateSaver stateSaver(paintInfo.context());
-
-    paintInfo.context().setShouldSmoothFonts(true);
-    paintInfo.context().scale(FloatSize(1, -1));
-
-    PKDrawApplePayButton(paintInfo.context().platformContext(), CGRectMake(paintRect.x(), -paintRect.maxY(), paintRect.width(), paintRect.height()), 1.0, toPKPaymentButtonType(renderer.style().applePayButtonType()), toPKPaymentButtonStyle(renderer.style().applePayButtonStyle()), renderer.style().locale());
-
+    auto& style = renderer.style();
+    auto largestCornerRadius = std::max<CGFloat>({
+        floatValueForLength(style.borderTopLeftRadius().height, paintRect.height()),
+        floatValueForLength(style.borderTopLeftRadius().width, paintRect.width()),
+        floatValueForLength(style.borderTopRightRadius().height, paintRect.height()),
+        floatValueForLength(style.borderTopRightRadius().width, paintRect.width()),
+        floatValueForLength(style.borderBottomLeftRadius().height, paintRect.height()),
+        floatValueForLength(style.borderBottomLeftRadius().width, paintRect.width()),
+        floatValueForLength(style.borderBottomRightRadius().height, paintRect.height()),
+        floatValueForLength(style.borderBottomRightRadius().width, paintRect.width())
+    });
+    String locale = style.computedLocale();
+    if (locale.isEmpty())
+        locale = defaultLanguage(ShouldMinimizeLanguages::No);
+    paintInfo.context().drawSystemImage(ApplePayButtonSystemImage::create(style.applePayButtonType(), style.applePayButtonStyle(), locale, largestCornerRadius), paintRect);
     return false;
 }
 
 #endif // ENABLE(APPLE_PAY)
 
-#if ENABLE(VIDEO)
+#if ENABLE(VIDEO) && ENABLE(MODERN_MEDIA_CONTROLS)
+
+String RenderThemeCocoa::mediaControlsStyleSheet()
+{
+    if (m_mediaControlsStyleSheet.isEmpty())
+        m_mediaControlsStyleSheet = StringImpl::createWithoutCopying(ModernMediaControlsUserAgentStyleSheet, sizeof(ModernMediaControlsUserAgentStyleSheet));
+    return m_mediaControlsStyleSheet;
+}
+
+Vector<String, 2> RenderThemeCocoa::mediaControlsScripts()
+{
+    // FIXME: Localized strings are not worth having a script. We should make it JSON data etc. instead.
+    if (m_mediaControlsLocalizedStringsScript.isEmpty()) {
+        NSBundle *bundle = [NSBundle bundleForClass:[WebCoreRenderThemeBundle class]];
+        m_mediaControlsLocalizedStringsScript = [NSString stringWithContentsOfFile:[bundle pathForResource:@"modern-media-controls-localized-strings" ofType:@"js"] encoding:NSUTF8StringEncoding error:nil];
+    }
+
+    if (m_mediaControlsScript.isEmpty())
+        m_mediaControlsScript = StringImpl::createWithoutCopying(ModernMediaControlsJavaScript, sizeof(ModernMediaControlsJavaScript));
+
+    return {
+        m_mediaControlsLocalizedStringsScript,
+        m_mediaControlsScript,
+    };
+}
+
+String RenderThemeCocoa::mediaControlsBase64StringForIconNameAndType(const String& iconName, const String& iconType)
+{
+    NSString *directory = @"modern-media-controls/images";
+    NSBundle *bundle = [NSBundle bundleForClass:[WebCoreRenderThemeBundle class]];
+    return [[NSData dataWithContentsOfFile:[bundle pathForResource:iconName ofType:iconType inDirectory:directory]] base64EncodedStringWithOptions:0];
+}
 
 String RenderThemeCocoa::mediaControlsFormattedStringForDuration(const double durationInSeconds)
 {
-#if ENABLE(MEDIA_CONTROLS_SCRIPT)
     if (!std::isfinite(durationInSeconds))
         return WEB_UI_STRING("indefinite time", "accessibility help text for an indefinite media controller time value");
 
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
     if (!m_durationFormatter) {
         m_durationFormatter = adoptNS([NSDateComponentsFormatter new]);
         m_durationFormatter.get().unitsStyle = NSDateComponentsFormatterUnitsStyleFull;
@@ -124,12 +171,29 @@ String RenderThemeCocoa::mediaControlsFormattedStringForDuration(const double du
         m_durationFormatter.get().formattingContext = NSFormattingContextStandalone;
         m_durationFormatter.get().maximumUnitCount = 2;
     }
-    return [m_durationFormatter.get() stringFromTimeInterval:durationInSeconds];
-#else
-    return emptyString();
-#endif
+    return [m_durationFormatter stringFromTimeInterval:durationInSeconds];
+    END_BLOCK_OBJC_EXCEPTIONS
 }
 
-#endif // ENABLE(VIDEO)
+#endif // ENABLE(VIDEO) && ENABLE(MODERN_MEDIA_CONTROLS)
+
+static inline FontSelectionValue cssWeightOfSystemFont(CTFontRef font)
+{
+    auto resultRef = adoptCF(static_cast<CFNumberRef>(CTFontCopyAttribute(font, kCTFontCSSWeightAttribute)));
+    float result = 0;
+    if (resultRef && CFNumberGetValue(resultRef.get(), kCFNumberFloatType, &result))
+        return FontSelectionValue(result);
+
+    auto traits = adoptCF(CTFontCopyTraits(font));
+    resultRef = static_cast<CFNumberRef>(CFDictionaryGetValue(traits.get(), kCTFontWeightTrait));
+    CFNumberGetValue(resultRef.get(), kCFNumberFloatType, &result);
+    // These numbers were experimentally gathered from weights of the system font.
+    static constexpr float weightThresholds[] = { -0.6, -0.365, -0.115, 0.130, 0.235, 0.350, 0.5, 0.7 };
+    for (unsigned i = 0; i < WTF_ARRAY_LENGTH(weightThresholds); ++i) {
+        if (result < weightThresholds[i])
+            return FontSelectionValue((static_cast<int>(i) + 1) * 100);
+    }
+    return FontSelectionValue(900);
+}
 
 }

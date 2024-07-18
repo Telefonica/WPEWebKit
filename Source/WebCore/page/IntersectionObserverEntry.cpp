@@ -25,7 +25,6 @@
 
 #include "config.h"
 
-#if ENABLE(INTERSECTION_OBSERVER)
 #include "IntersectionObserverEntry.h"
 
 #include "Element.h"
@@ -34,14 +33,14 @@ namespace WebCore {
 
 IntersectionObserverEntry::IntersectionObserverEntry(const Init& init)
     : m_time(init.time)
-    , m_rootBounds(DOMRectReadOnly::fromRect(init.rootBounds))
     , m_boundingClientRect(DOMRectReadOnly::fromRect(init.boundingClientRect))
     , m_intersectionRect(DOMRectReadOnly::fromRect(init.intersectionRect))
+    , m_intersectionRatio(init.intersectionRatio)
     , m_target(init.target)
+    , m_isIntersecting(init.isIntersecting)
 {
+    if (init.rootBounds)
+        m_rootBounds = DOMRectReadOnly::fromRect(*init.rootBounds);
 }
 
-
 } // namespace WebCore
-
-#endif // ENABLE(INTERSECTION_OBSERVER)

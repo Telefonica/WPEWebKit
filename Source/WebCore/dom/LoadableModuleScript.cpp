@@ -28,24 +28,24 @@
 
 #include "Document.h"
 #include "Frame.h"
+#include "ModuleFetchParameters.h"
 #include "ScriptController.h"
 #include "ScriptElement.h"
 
 namespace WebCore {
 
-Ref<LoadableModuleScript> LoadableModuleScript::create(const String& nonce, const String& crossOriginMode, const String& charset, const AtomicString& initiatorName, bool isInUserAgentShadowTree)
+Ref<LoadableModuleScript> LoadableModuleScript::create(const AtomString& nonce, const AtomString& integrity, ReferrerPolicy policy, const AtomString& crossOriginMode, const String& charset, const AtomString& initiatorName, bool isInUserAgentShadowTree)
 {
-    return adoptRef(*new LoadableModuleScript(nonce, crossOriginMode, charset, initiatorName, isInUserAgentShadowTree));
+    return adoptRef(*new LoadableModuleScript(nonce, integrity, policy, crossOriginMode, charset, initiatorName, isInUserAgentShadowTree));
 }
 
-LoadableModuleScript::LoadableModuleScript(const String& nonce, const String& crossOriginMode, const String& charset, const AtomicString& initiatorName, bool isInUserAgentShadowTree)
-    : LoadableScript(nonce, crossOriginMode, charset, initiatorName, isInUserAgentShadowTree)
+LoadableModuleScript::LoadableModuleScript(const AtomString& nonce, const AtomString& integrity, ReferrerPolicy policy, const AtomString& crossOriginMode, const String& charset, const AtomString& initiatorName, bool isInUserAgentShadowTree)
+    : LoadableScript(nonce, policy, crossOriginMode, charset, initiatorName, isInUserAgentShadowTree)
+    , m_parameters(ModuleFetchParameters::create(integrity, /* isTopLevelModule */ true))
 {
 }
 
-LoadableModuleScript::~LoadableModuleScript()
-{
-}
+LoadableModuleScript::~LoadableModuleScript() = default;
 
 bool LoadableModuleScript::isLoaded() const
 {
@@ -86,18 +86,6 @@ void LoadableModuleScript::notifyLoadWasCanceled()
 void LoadableModuleScript::execute(ScriptElement& scriptElement)
 {
     scriptElement.executeModuleScript(*this);
-}
-
-void LoadableModuleScript::load(Document& document, const URL& rootURL)
-{
-    if (auto* frame = document.frame())
-        frame->script().loadModuleScript(*this, rootURL.string());
-}
-
-void LoadableModuleScript::load(Document& document, const ScriptSourceCode& sourceCode)
-{
-    if (auto* frame = document.frame())
-        frame->script().loadModuleScript(*this, sourceCode);
 }
 
 }

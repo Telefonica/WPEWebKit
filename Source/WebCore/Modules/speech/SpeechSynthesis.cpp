@@ -28,30 +28,51 @@
 
 #if ENABLE(SPEECH_SYNTHESIS)
 
+#include "Document.h"
 #include "EventNames.h"
+#include "Frame.h"
+#include "FrameDestructionObserverInlines.h"
+#include "Page.h"
 #include "PlatformSpeechSynthesisVoice.h"
 #include "PlatformSpeechSynthesizer.h"
-#include "ScriptController.h"
+#include "SpeechSynthesisErrorEvent.h"
 #include "SpeechSynthesisEvent.h"
 #include "SpeechSynthesisUtterance.h"
-#include <wtf/CurrentTime.h>
+#include "UserGestureIndicator.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
 
-Ref<SpeechSynthesis> SpeechSynthesis::create()
+WTF_MAKE_ISO_ALLOCATED_IMPL(SpeechSynthesis);
+
+Ref<SpeechSynthesis>SpeechSynthesis::create(ScriptExecutionContext& context)
 {
-    return adoptRef(*new SpeechSynthesis);
+    return adoptRef(*new SpeechSynthesis(context));
 }
 
-SpeechSynthesis::SpeechSynthesis()
-    : m_currentSpeechUtterance(nullptr)
+SpeechSynthesis::SpeechSynthesis(ScriptExecutionContext& context)
+    : ContextDestructionObserver(&context)
+    , m_currentSpeechUtterance(nullptr)
     , m_isPaused(false)
-#if PLATFORM(IOS)
-    , m_restrictions(RequireUserGestureForSpeechStartRestriction)
-#endif
+    , m_restrictions(NoRestrictions)
+    , m_speechSynthesisClient(nullptr)
 {
+    if (context.isDocument()) {
+#if PLATFORM(IOS_FAMILY)
+        if (downcast<Document>(context).audioPlaybackRequiresUserGesture())
+            m_restrictions = RequireUserGestureForSpeechStartRestriction;
+#endif
+        m_speechSynthesisClient = downcast<Document>(context).frame()->page()->speechSynthesisClient();
+    }
+
+    if (m_speechSynthesisClient) {
+        m_speechSynthesisClient->setObserver(*this);
+        m_speechSynthesisClient->resetState();
+    }
 }
+
+SpeechSynthesis::~SpeechSynthesis() = default;
 
 void SpeechSynthesis::setPlatformSynthesizer(std::unique_ptr<PlatformSpeechSynthesizer> synthesizer)
 {
@@ -60,25 +81,32 @@ void SpeechSynthesis::setPlatformSynthesizer(std::unique_ptr<PlatformSpeechSynth
     m_currentSpeechUtterance = nullptr;
     m_utteranceQueue.clear();
     m_isPaused = false;
+    m_speechSynthesisClient = nullptr;
 }
 
 void SpeechSynthesis::voicesDidChange()
 {
     m_voiceList.clear();
+    dispatchEvent(Event::create(eventNames().voiceschangedEvent, Event::CanBubble::No, Event::IsCancelable::No));
+}
+
+PlatformSpeechSynthesizer& SpeechSynthesis::ensurePlatformSpeechSynthesizer()
+{
+    if (!m_platformSpeechSynthesizer)
+        m_platformSpeechSynthesizer = makeUnique<PlatformSpeechSynthesizer>(this);
+    return *m_platformSpeechSynthesizer;
 }
 
 const Vector<Ref<SpeechSynthesisVoice>>& SpeechSynthesis::getVoices()
 {
-    if (m_voiceList.size())
+    if (!m_voiceList.isEmpty())
         return m_voiceList;
 
-    if (!m_platformSpeechSynthesizer)
-        m_platformSpeechSynthesizer = std::make_unique<PlatformSpeechSynthesizer>(this);
-
     // If the voiceList is empty, that's the cue to get the voices from the platform again.
-    for (auto& voice : m_platformSpeechSynthesizer->voiceList())
-        m_voiceList.append(SpeechSynthesisVoice::create(*voice));
-
+    auto& voiceList = m_speechSynthesisClient ? m_speechSynthesisClient->voiceList() : ensurePlatformSpeechSynthesizer().voiceList();
+    m_voiceList = voiceList.map([](auto& voice) {
+        return SpeechSynthesisVoice::create(*voice);
+    });
     return m_voiceList;
 }
 
@@ -103,34 +131,27 @@ bool SpeechSynthesis::paused() const
 
 void SpeechSynthesis::startSpeakingImmediately(SpeechSynthesisUtterance& utterance)
 {
-    ASSERT(!m_currentSpeechUtterance);
-    utterance.setStartTime(monotonicallyIncreasingTime());
+    utterance.setStartTime(MonotonicTime::now());
     m_currentSpeechUtterance = &utterance;
     m_isPaused = false;
 
-    // Zero lengthed strings should immediately notify that the event is complete.
-    if (utterance.text().isEmpty()) {
-        handleSpeakingCompleted(utterance, false);
-        return;
-    }
-
-    if (!m_platformSpeechSynthesizer)
-        m_platformSpeechSynthesizer = std::make_unique<PlatformSpeechSynthesizer>(this);
-    m_platformSpeechSynthesizer->speak(utterance.platformUtterance());
+    if (m_speechSynthesisClient)
+        m_speechSynthesisClient->speak(utterance.platformUtterance());
+    else
+        ensurePlatformSpeechSynthesizer().speak(utterance.platformUtterance());
 }
 
 void SpeechSynthesis::speak(SpeechSynthesisUtterance& utterance)
 {
     // Like Audio, we should require that the user interact to start a speech synthesis session.
-#if PLATFORM(IOS)
-    if (ScriptController::processingUserGesture())
+#if PLATFORM(IOS_FAMILY)
+    if (UserGestureIndicator::processingUserGesture())
         removeBehaviorRestriction(RequireUserGestureForSpeechStartRestriction);
     else if (userGestureRequiredForSpeechStart())
         return;
 #endif
 
     m_utteranceQueue.append(utterance);
-
     // If the queue was empty, speak this immediately and add it to the queue.
     if (m_utteranceQueue.size() == 1)
         startSpeakingImmediately(m_utteranceQueue.first());
@@ -142,40 +163,62 @@ void SpeechSynthesis::cancel()
     // Hold on to the current utterance so the platform synthesizer can have a chance to clean up.
     RefPtr<SpeechSynthesisUtterance> current = m_currentSpeechUtterance;
     m_utteranceQueue.clear();
-    if (m_platformSpeechSynthesizer)
+    if (m_speechSynthesisClient) {
+        m_speechSynthesisClient->cancel();
+        // If we wait for cancel to callback speakingErrorOccurred, then m_currentSpeechUtterance will be null
+        // and the event won't be processed. Instead we process the error immediately.
+        speakingErrorOccurred(SpeechSynthesisErrorCode::Canceled);
+        m_currentSpeechUtterance = nullptr;
+    } else if (m_platformSpeechSynthesizer) {
         m_platformSpeechSynthesizer->cancel();
+        // The platform should have called back immediately and cleared the current utterance.
+        ASSERT(!m_currentSpeechUtterance);
+    }
     current = nullptr;
-
-    // The platform should have called back immediately and cleared the current utterance.
-    ASSERT(!m_currentSpeechUtterance);
 }
 
 void SpeechSynthesis::pause()
 {
-    if (!m_isPaused && m_platformSpeechSynthesizer)
-        m_platformSpeechSynthesizer->pause();
+    if (!m_isPaused) {
+        if (m_speechSynthesisClient)
+            m_speechSynthesisClient->pause();
+        else if (m_platformSpeechSynthesizer)
+            m_platformSpeechSynthesizer->pause();
+    }
 }
 
 void SpeechSynthesis::resume()
 {
-    if (m_currentSpeechUtterance && m_platformSpeechSynthesizer)
-        m_platformSpeechSynthesizer->resume();
+    if (m_currentSpeechUtterance) {
+        if (m_speechSynthesisClient)
+            m_speechSynthesisClient->resume();
+        else if (m_platformSpeechSynthesizer)
+            m_platformSpeechSynthesizer->resume();
+    }
 }
 
-void SpeechSynthesis::fireEvent(const AtomicString& type, SpeechSynthesisUtterance& utterance, unsigned long charIndex, const String& name)
+void SpeechSynthesis::fireEvent(const AtomString& type, SpeechSynthesisUtterance& utterance, unsigned long charIndex, unsigned long charLength, const String& name) const
 {
-    utterance.dispatchEvent(SpeechSynthesisEvent::create(type, charIndex, (monotonicallyIncreasingTime() - utterance.startTime()), name));
+    utterance.dispatchEvent(SpeechSynthesisEvent::create(type, { &utterance, charIndex, charLength, static_cast<float>((MonotonicTime::now() - utterance.startTime()).seconds()), name }));
 }
 
-void SpeechSynthesis::handleSpeakingCompleted(SpeechSynthesisUtterance& utterance, bool errorOccurred)
+void SpeechSynthesis::fireErrorEvent(const AtomString& type, SpeechSynthesisUtterance& utterance, SpeechSynthesisErrorCode errorCode) const
+{
+    utterance.dispatchEvent(SpeechSynthesisErrorEvent::create(type, { { &utterance, 0, 0, static_cast<float>((MonotonicTime::now() - utterance.startTime()).seconds()), { } }, errorCode }));
+}
+
+void SpeechSynthesis::handleSpeakingCompleted(SpeechSynthesisUtterance& utterance, std::optional<SpeechSynthesisErrorCode> error)
 {
     ASSERT(m_currentSpeechUtterance);
     Ref<SpeechSynthesisUtterance> protect(utterance);
 
     m_currentSpeechUtterance = nullptr;
 
-    fireEvent(errorOccurred ? eventNames().errorEvent : eventNames().endEvent, utterance, 0, String());
-
+    if (!error)
+        fireEvent(eventNames().endEvent, utterance, 0, 0, String());
+    else
+        fireErrorEvent(eventNames().errorEvent, utterance, *error);
+    
     if (m_utteranceQueue.size()) {
         Ref<SpeechSynthesisUtterance> firstUtterance = m_utteranceQueue.takeFirst();
         ASSERT(&utterance == firstUtterance.ptr());
@@ -186,7 +229,7 @@ void SpeechSynthesis::handleSpeakingCompleted(SpeechSynthesisUtterance& utteranc
     }
 }
 
-void SpeechSynthesis::boundaryEventOccurred(PlatformSpeechSynthesisUtterance& utterance, SpeechBoundary boundary, unsigned charIndex)
+void SpeechSynthesis::boundaryEventOccurred(PlatformSpeechSynthesisUtterance& utterance, SpeechBoundary boundary, unsigned charIndex, unsigned charLength)
 {
     static NeverDestroyed<const String> wordBoundaryString(MAKE_STATIC_STRING_IMPL("word"));
     static NeverDestroyed<const String> sentenceBoundaryString(MAKE_STATIC_STRING_IMPL("sentence"));
@@ -194,47 +237,94 @@ void SpeechSynthesis::boundaryEventOccurred(PlatformSpeechSynthesisUtterance& ut
     ASSERT(utterance.client());
 
     switch (boundary) {
-    case SpeechWordBoundary:
-        fireEvent(eventNames().boundaryEvent, static_cast<SpeechSynthesisUtterance&>(*utterance.client()), charIndex, wordBoundaryString);
+    case SpeechBoundary::SpeechWordBoundary:
+        fireEvent(eventNames().boundaryEvent, static_cast<SpeechSynthesisUtterance&>(*utterance.client()), charIndex, charLength, wordBoundaryString);
         break;
-    case SpeechSentenceBoundary:
-        fireEvent(eventNames().boundaryEvent, static_cast<SpeechSynthesisUtterance&>(*utterance.client()), charIndex, sentenceBoundaryString);
+    case SpeechBoundary::SpeechSentenceBoundary:
+        fireEvent(eventNames().boundaryEvent, static_cast<SpeechSynthesisUtterance&>(*utterance.client()), charIndex, charLength, sentenceBoundaryString);
         break;
     default:
         ASSERT_NOT_REACHED();
     }
 }
 
+void SpeechSynthesis::didStartSpeaking()
+{
+    if (!m_currentSpeechUtterance)
+        return;
+    didStartSpeaking(*m_currentSpeechUtterance->platformUtterance());
+}
+
+void SpeechSynthesis::didFinishSpeaking()
+{
+    if (!m_currentSpeechUtterance)
+        return;
+    didFinishSpeaking(*m_currentSpeechUtterance->platformUtterance());
+}
+
+void SpeechSynthesis::didPauseSpeaking()
+{
+    if (!m_currentSpeechUtterance)
+        return;
+    didPauseSpeaking(*m_currentSpeechUtterance->platformUtterance());
+}
+
+void SpeechSynthesis::didResumeSpeaking()
+{
+    if (!m_currentSpeechUtterance)
+        return;
+    didResumeSpeaking(*m_currentSpeechUtterance->platformUtterance());
+}
+
+void SpeechSynthesis::speakingErrorOccurred(std::optional<SpeechSynthesisErrorCode> error)
+{
+    if (!m_currentSpeechUtterance)
+        return;
+    speakingErrorOccurred(*m_currentSpeechUtterance->platformUtterance(), error);
+}
+
+void SpeechSynthesis::boundaryEventOccurred(bool wordBoundary, unsigned charIndex, unsigned charLength)
+{
+    if (!m_currentSpeechUtterance)
+        return;
+    boundaryEventOccurred(*m_currentSpeechUtterance->platformUtterance(), wordBoundary ? SpeechBoundary::SpeechWordBoundary : SpeechBoundary::SpeechSentenceBoundary, charIndex, charLength);
+}
+
+void SpeechSynthesis::voicesChanged()
+{
+    voicesDidChange();
+}
+
 void SpeechSynthesis::didStartSpeaking(PlatformSpeechSynthesisUtterance& utterance)
 {
     if (utterance.client())
-        fireEvent(eventNames().startEvent, static_cast<SpeechSynthesisUtterance&>(*utterance.client()), 0, String());
+        fireEvent(eventNames().startEvent, static_cast<SpeechSynthesisUtterance&>(*utterance.client()), 0, 0, String());
 }
 
 void SpeechSynthesis::didPauseSpeaking(PlatformSpeechSynthesisUtterance& utterance)
 {
     m_isPaused = true;
     if (utterance.client())
-        fireEvent(eventNames().pauseEvent, static_cast<SpeechSynthesisUtterance&>(*utterance.client()), 0, String());
+        fireEvent(eventNames().pauseEvent, static_cast<SpeechSynthesisUtterance&>(*utterance.client()), 0, 0, String());
 }
 
 void SpeechSynthesis::didResumeSpeaking(PlatformSpeechSynthesisUtterance& utterance)
 {
     m_isPaused = false;
     if (utterance.client())
-        fireEvent(eventNames().resumeEvent, static_cast<SpeechSynthesisUtterance&>(*utterance.client()), 0, String());
+        fireEvent(eventNames().resumeEvent, static_cast<SpeechSynthesisUtterance&>(*utterance.client()), 0, 0, String());
 }
 
 void SpeechSynthesis::didFinishSpeaking(PlatformSpeechSynthesisUtterance& utterance)
 {
     if (utterance.client())
-        handleSpeakingCompleted(static_cast<SpeechSynthesisUtterance&>(*utterance.client()), false);
+        handleSpeakingCompleted(static_cast<SpeechSynthesisUtterance&>(*utterance.client()), std::nullopt);
 }
 
-void SpeechSynthesis::speakingErrorOccurred(PlatformSpeechSynthesisUtterance& utterance)
+void SpeechSynthesis::speakingErrorOccurred(PlatformSpeechSynthesisUtterance& utterance, std::optional<SpeechSynthesisErrorCode> error)
 {
     if (utterance.client())
-        handleSpeakingCompleted(static_cast<SpeechSynthesisUtterance&>(*utterance.client()), true);
+        handleSpeakingCompleted(static_cast<SpeechSynthesisUtterance&>(*utterance.client()), error);
 }
 
 } // namespace WebCore

@@ -40,11 +40,14 @@ namespace WebKit {
 class WebPage;
 
 class ViewGestureGeometryCollector : private IPC::MessageReceiver {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     ViewGestureGeometryCollector(WebPage&);
     ~ViewGestureGeometryCollector();
 
     void mainFrameDidLayout();
+
+    void computeZoomInformationForNode(WebCore::Node&, WebCore::FloatPoint& origin, WebCore::FloatRect& renderRect, bool& isReplaced, double& viewportMinimumScale, double& viewportMaximumScale);
 
 private:
     // IPC::MessageReceiver.
@@ -53,20 +56,26 @@ private:
     // Message handlers.
     void collectGeometryForSmartMagnificationGesture(WebCore::FloatPoint origin);
 
-#if PLATFORM(MAC)
+#if !PLATFORM(IOS_FAMILY)
     void collectGeometryForMagnificationGesture();
-    void setRenderTreeSizeNotificationThreshold(uint64_t size) { m_renderTreeSizeNotificationThreshold = size; }
 
-    void renderTreeSizeNotificationTimerFired();
+    void setRenderTreeSizeNotificationThreshold(uint64_t);
+    void sendDidHitRenderTreeSizeThresholdIfNeeded();
 #endif
 
-    void dispatchDidCollectGeometryForSmartMagnificationGesture(WebCore::FloatPoint origin, WebCore::FloatRect targetRect, WebCore::FloatRect visibleContentRect, bool isReplacedElement, double viewportMinimumScale, double viewportMaximumScale);
-    void computeZoomInformationForNode(WebCore::Node&, WebCore::FloatPoint& origin, WebCore::FloatRect& renderRect, bool& isReplaced, double& viewportMinimumScale, double& viewportMaximumScale);
+    void dispatchDidCollectGeometryForSmartMagnificationGesture(WebCore::FloatPoint origin, WebCore::FloatRect targetRect, WebCore::FloatRect visibleContentRect, bool fitEntireRect, double viewportMinimumScale, double viewportMaximumScale);
+    void computeMinimumAndMaximumViewportScales(double& viewportMinimumScale, double& viewportMaximumScale) const;
+
+#if PLATFORM(IOS_FAMILY)
+    std::optional<std::pair<double, double>> computeTextLegibilityScales(double& viewportMinimumScale, double& viewportMaximumScale);
+#endif
 
     WebPage& m_webPage;
 
-#if PLATFORM(MAC)
+#if !PLATFORM(IOS_FAMILY)
     uint64_t m_renderTreeSizeNotificationThreshold;
+#else
+    std::optional<std::pair<double, double>> m_cachedTextLegibilityScales;
 #endif
 };
 

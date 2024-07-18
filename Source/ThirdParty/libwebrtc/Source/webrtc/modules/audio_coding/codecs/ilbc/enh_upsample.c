@@ -16,8 +16,10 @@
 
 ******************************************************************/
 
-#include "defines.h"
-#include "constants.h"
+#include "modules/audio_coding/codecs/ilbc/enh_upsample.h"
+
+#include "modules/audio_coding/codecs/ilbc/constants.h"
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  * upsample finite array assuming zeros outside bounds

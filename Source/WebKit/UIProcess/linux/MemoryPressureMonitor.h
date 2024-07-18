@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Igalia S.L.
+ * Copyright (C) 2016, 2020 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@
 
 #include <wtf/NeverDestroyed.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/text/CString.h>
 
 namespace IPC {
 class Attachment;
@@ -38,19 +39,58 @@ namespace WebKit {
 
 class MemoryPressureMonitor {
     WTF_MAKE_NONCOPYABLE(MemoryPressureMonitor);
-    friend class NeverDestroyed<MemoryPressureMonitor>;
+    friend NeverDestroyed<MemoryPressureMonitor>;
 public:
     static MemoryPressureMonitor& singleton();
-    static bool isEnabled();
+    void start();
+    static bool disabled();
+    void performManualMemoryRelief();
 
     ~MemoryPressureMonitor();
 
-    IPC::Attachment createHandle() const;
+private:
+    enum MemReleaseType { NONE, GBC, FULL };
+
+    MemoryPressureMonitor() = default;
+
+    MemReleaseType m_memReleaseType { MemReleaseType::NONE };
+    bool m_started { false };
+    bool m_manualMemoryRelief { false };
+    static bool s_disabled;
+    int m_memoryPressurePercentageThreshold { 55 };
+    int m_memoryPressurePercentageThresholdCritical { 60 };
+};
+
+class CGroupMemoryController {
+public:
+    CGroupMemoryController() = default;
+    bool isActive() { return !m_cgroupMemoryControllerPath.isNull(); };
+
+    void setMemoryControllerPath(CString);
+
+    size_t getMemoryTotalWithCgroup();
+    size_t getMemoryUsageWithCgroup();
+
+    ~CGroupMemoryController()
+    {
+        disposeMemoryController();
+    }
 
 private:
-    MemoryPressureMonitor();
+    CString m_cgroupMemoryControllerPath;
 
-    int m_eventFD { -1 };
+    FILE* m_cgroupMemoryMemswLimitInBytesFile;
+    FILE* m_cgroupMemoryMemswUsageInBytesFile;
+    FILE* m_cgroupMemoryLimitInBytesFile;
+    FILE* m_cgroupMemoryUsageInBytesFile;
+
+    FILE* m_cgroupV2MemoryMemswMaxFile;
+    FILE* m_cgroupV2MemoryMaxFile;
+    FILE* m_cgroupV2MemoryHighFile;
+    FILE* m_cgroupV2MemoryCurrentFile;
+
+    void disposeMemoryController();
+    size_t getCgroupFileValue(FILE*);
 };
 
 } // namespace WebKit

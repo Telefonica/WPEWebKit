@@ -26,10 +26,14 @@
 #import "config.h"
 #import "WebNSAttributedStringExtras.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
+#if USE(APPLE_INTERNAL_SDK)
+#import <UIKit/NSTextAttachment.h>
+#else
 enum {
     NSAttachmentCharacter = 0xfffc    /* To denote attachments. */
 };
+#endif
 #endif
 
 namespace WebCore {
@@ -38,26 +42,20 @@ NSAttributedString *attributedStringByStrippingAttachmentCharacters(NSAttributed
 {
     NSRange attachmentRange;
     NSString *originalString = [attributedString string];
-    static NSString *attachmentCharString = nil;
-    
-    if (!attachmentCharString) {
-        unichar chars[2];
-        if (!attachmentCharString) {
-            chars[0] = NSAttachmentCharacter;
-            chars[1] = 0;
-            attachmentCharString = [[NSString alloc] initWithCharacters:chars length:1];
-        }
-    }
-    
-    attachmentRange = [originalString rangeOfString:attachmentCharString];
+    static NeverDestroyed attachmentCharString = [] {
+        unichar chars[2] = { NSAttachmentCharacter, 0 };
+        return adoptNS([[NSString alloc] initWithCharacters:chars length:1]);
+    }();
+
+    attachmentRange = [originalString rangeOfString:attachmentCharString.get().get()];
     if (attachmentRange.location != NSNotFound && attachmentRange.length > 0) {
-        NSMutableAttributedString *newAttributedString = [[attributedString mutableCopyWithZone:NULL] autorelease];
+        auto newAttributedString = adoptNS([attributedString mutableCopyWithZone:NULL]);
         
         while (attachmentRange.location != NSNotFound && attachmentRange.length > 0) {
             [newAttributedString replaceCharactersInRange:attachmentRange withString:@""];
-            attachmentRange = [[newAttributedString string] rangeOfString:attachmentCharString];
+            attachmentRange = [[newAttributedString string] rangeOfString:attachmentCharString.get().get()];
         }
-        return newAttributedString;
+        return newAttributedString.autorelease();
     }
     
     return attributedString;

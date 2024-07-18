@@ -24,7 +24,7 @@
  */
 
 [
-    Conditional=INDEXED_DATABASE,
+    EnabledBySetting=DatabasesEnabled
 ] enum IDBTransactionMode {
     "readonly",
     "readwrite",

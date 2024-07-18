@@ -23,92 +23,99 @@
 #include "JSDOMConvertStrings.h"
 
 #include "JSDOMExceptionHandling.h"
-#include <heap/HeapInlines.h>
-#include <runtime/JSCJSValueInlines.h>
+#include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/JSCJSValueInlines.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/unicode/CharacterNames.h>
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
-static inline String stringToByteString(ExecState& state, JSC::ThrowScope& scope, String&& string)
+String identifierToString(JSGlobalObject& lexicalGlobalObject, const Identifier& identifier)
 {
-    if (!string.containsOnlyLatin1()) {
-        throwTypeError(&state, scope);
+    if (UNLIKELY(identifier.isSymbol())) {
+        auto scope = DECLARE_THROW_SCOPE(lexicalGlobalObject.vm());
+        throwTypeError(&lexicalGlobalObject, scope, SymbolCoercionError);
         return { };
     }
 
-    return string;
+    return identifier.string();
 }
 
-String identifierToByteString(ExecState& state, const Identifier& identifier)
+static inline bool throwIfInvalidByteString(JSGlobalObject& lexicalGlobalObject, JSC::ThrowScope& scope, const String& string)
 {
-    VM& vm = state.vm();
-    auto scope = DECLARE_THROW_SCOPE(vm);
-
-    auto string = identifier.string();
-    return stringToByteString(state, scope, WTFMove(string));
-}
-
-String valueToByteString(ExecState& state, JSValue value)
-{
-    VM& vm = state.vm();
-    auto scope = DECLARE_THROW_SCOPE(vm);
-
-    auto string = value.toWTFString(&state);
-    RETURN_IF_EXCEPTION(scope, { });
-
-    return stringToByteString(state, scope, WTFMove(string));
-}
-
-static inline bool hasUnpairedSurrogate(StringView string)
-{
-    // Fast path for 8-bit strings; they can't have any surrogates.
-    if (string.is8Bit())
-        return false;
-    for (auto codePoint : string.codePoints()) {
-        if (U_IS_SURROGATE(codePoint))
-            return true;
+    if (UNLIKELY(!string.isAllLatin1())) {
+        throwTypeError(&lexicalGlobalObject, scope);
+        return true;
     }
     return false;
 }
 
-static inline String stringToUSVString(String&& string)
+String identifierToByteString(JSGlobalObject& lexicalGlobalObject, const Identifier& identifier)
 {
-    // Fast path for the case where there are no unpaired surrogates.
-    if (!hasUnpairedSurrogate(string))
-        return string;
-
-    // Slow path: http://heycam.github.io/webidl/#dfn-obtain-unicode
-    // Replaces unpaired surrogates with the replacement character.
-    StringBuilder result;
-    result.reserveCapacity(string.length());
-    StringView view { string };
-    for (auto codePoint : view.codePoints()) {
-        if (U_IS_SURROGATE(codePoint))
-            result.append(replacementCharacter);
-        else
-            result.append(codePoint);
-    }
-    return result.toString();
-}
-
-String identifierToUSVString(ExecState&, const Identifier& identifier)
-{
-    auto string = identifier.string();
-    return stringToUSVString(WTFMove(string));
-}
-
-String valueToUSVString(ExecState& state, JSValue value)
-{
-    VM& vm = state.vm();
+    VM& vm = lexicalGlobalObject.vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    auto string = value.toWTFString(&state);
+    auto string = identifierToString(lexicalGlobalObject, identifier);
+    RETURN_IF_EXCEPTION(scope, { });
+    if (UNLIKELY(throwIfInvalidByteString(lexicalGlobalObject, scope, string)))
+        return { };
+    return string;
+}
+
+String valueToByteString(JSGlobalObject& lexicalGlobalObject, JSValue value)
+{
+    VM& vm = lexicalGlobalObject.vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    auto string = value.toWTFString(&lexicalGlobalObject);
     RETURN_IF_EXCEPTION(scope, { });
 
-    return stringToUSVString(WTFMove(string));
+    if (UNLIKELY(throwIfInvalidByteString(lexicalGlobalObject, scope, string)))
+        return { };
+    return string;
+}
+
+AtomString valueToByteAtomString(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value)
+{
+    VM& vm = lexicalGlobalObject.vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    auto string = value.toString(&lexicalGlobalObject)->toAtomString(&lexicalGlobalObject);
+    RETURN_IF_EXCEPTION(scope, { });
+
+    if (UNLIKELY(throwIfInvalidByteString(lexicalGlobalObject, scope, string.string())))
+        return nullAtom();
+
+    return string;
+}
+
+String identifierToUSVString(JSGlobalObject& lexicalGlobalObject, const Identifier& identifier)
+{
+    return replaceUnpairedSurrogatesWithReplacementCharacter(identifierToString(lexicalGlobalObject, identifier));
+}
+
+String valueToUSVString(JSGlobalObject& lexicalGlobalObject, JSValue value)
+{
+    VM& vm = lexicalGlobalObject.vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    auto string = value.toWTFString(&lexicalGlobalObject);
+    RETURN_IF_EXCEPTION(scope, { });
+
+    return replaceUnpairedSurrogatesWithReplacementCharacter(WTFMove(string));
+}
+
+AtomString valueToUSVAtomString(JSGlobalObject& lexicalGlobalObject, JSValue value)
+{
+    VM& vm = lexicalGlobalObject.vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    auto string = value.toString(&lexicalGlobalObject)->toAtomString(&lexicalGlobalObject);
+    RETURN_IF_EXCEPTION(scope, { });
+
+    return replaceUnpairedSurrogatesWithReplacementCharacter(WTFMove(string));
 }
 
 } // namespace WebCore

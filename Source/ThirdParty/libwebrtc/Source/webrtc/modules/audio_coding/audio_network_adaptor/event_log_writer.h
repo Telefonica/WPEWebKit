@@ -8,11 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_EVENT_LOG_WRITER_H_
-#define WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_EVENT_LOG_WRITER_H_
+#ifndef MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_EVENT_LOG_WRITER_H_
+#define MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_EVENT_LOG_WRITER_H_
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor.h"
+#include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor_config.h"
 
 namespace webrtc {
 class RtcEventLog;
@@ -24,6 +23,10 @@ class EventLogWriter final {
                  float min_bitrate_change_fraction,
                  float min_packet_loss_change_fraction);
   ~EventLogWriter();
+
+  EventLogWriter(const EventLogWriter&) = delete;
+  EventLogWriter& operator=(const EventLogWriter&) = delete;
+
   void MaybeLogEncoderConfig(const AudioEncoderRuntimeConfig& config);
 
  private:
@@ -34,9 +37,8 @@ class EventLogWriter final {
   const float min_bitrate_change_fraction_;
   const float min_packet_loss_change_fraction_;
   AudioEncoderRuntimeConfig last_logged_config_;
-  RTC_DISALLOW_COPY_AND_ASSIGN(EventLogWriter);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_EVENT_LOG_WRITER_H_
+#endif  // MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_EVENT_LOG_WRITER_H_

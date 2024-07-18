@@ -26,10 +26,11 @@
 #import "config.h"
 #import "WKWebsiteDataRecordInternal.h"
 
-#if WK_API_ENABLED
-
 #import "_WKWebsiteDataSizeInternal.h"
+#import <WebCore/SecurityOriginData.h>
+#import <WebCore/WebCoreObjCExtras.h>
 
+NSString * const WKWebsiteDataTypeFetchCache = @"WKWebsiteDataTypeFetchCache";
 NSString * const WKWebsiteDataTypeDiskCache = @"WKWebsiteDataTypeDiskCache";
 NSString * const WKWebsiteDataTypeMemoryCache = @"WKWebsiteDataTypeMemoryCache";
 NSString * const WKWebsiteDataTypeOfflineWebApplicationCache = @"WKWebsiteDataTypeOfflineWebApplicationCache";
@@ -40,12 +41,18 @@ NSString * const WKWebsiteDataTypeSessionStorage = @"WKWebsiteDataTypeSessionSto
 NSString * const WKWebsiteDataTypeLocalStorage = @"WKWebsiteDataTypeLocalStorage";
 NSString * const WKWebsiteDataTypeWebSQLDatabases = @"WKWebsiteDataTypeWebSQLDatabases";
 NSString * const WKWebsiteDataTypeIndexedDBDatabases = @"WKWebsiteDataTypeIndexedDBDatabases";
+NSString * const WKWebsiteDataTypeServiceWorkerRegistrations = @"WKWebsiteDataTypeServiceWorkerRegistrations";
+NSString * const WKWebsiteDataTypeFileSystem = @"WKWebsiteDataTypeFileSystem";
 
 NSString * const _WKWebsiteDataTypeMediaKeys = @"_WKWebsiteDataTypeMediaKeys";
 NSString * const _WKWebsiteDataTypeHSTSCache = @"_WKWebsiteDataTypeHSTSCache";
 NSString * const _WKWebsiteDataTypeSearchFieldRecentSearches = @"_WKWebsiteDataTypeSearchFieldRecentSearches";
 NSString * const _WKWebsiteDataTypeResourceLoadStatistics = @"_WKWebsiteDataTypeResourceLoadStatistics";
 NSString * const _WKWebsiteDataTypeCredentials = @"_WKWebsiteDataTypeCredentials";
+NSString * const _WKWebsiteDataTypeAdClickAttributions = @"_WKWebsiteDataTypeAdClickAttributions";
+NSString * const _WKWebsiteDataTypePrivateClickMeasurements = @"_WKWebsiteDataTypePrivateClickMeasurements";
+NSString * const _WKWebsiteDataTypeAlternativeServices = @"_WKWebsiteDataTypeAlternativeServices";
+NSString * const _WKWebsiteDataTypeFileSystem = WKWebsiteDataTypeFileSystem;
 
 #if PLATFORM(MAC)
 NSString * const _WKWebsiteDataTypePlugInData = @"_WKWebsiteDataTypePlugInData";
@@ -55,6 +62,9 @@ NSString * const _WKWebsiteDataTypePlugInData = @"_WKWebsiteDataTypePlugInData";
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(WKWebsiteDataRecord.class, self))
+        return;
+
     _websiteDataRecord->API::WebsiteDataRecord::~WebsiteDataRecord();
 
     [super dealloc];
@@ -66,6 +76,8 @@ static NSString *dataTypesToString(NSSet *dataTypes)
 
     if ([dataTypes containsObject:WKWebsiteDataTypeDiskCache])
         [array addObject:@"Disk Cache"];
+    if ([dataTypes containsObject:WKWebsiteDataTypeFetchCache])
+        [array addObject:@"Fetch Cache"];
     if ([dataTypes containsObject:WKWebsiteDataTypeMemoryCache])
         [array addObject:@"Memory Cache"];
     if ([dataTypes containsObject:WKWebsiteDataTypeOfflineWebApplicationCache])
@@ -80,12 +92,16 @@ static NSString *dataTypesToString(NSSet *dataTypes)
         [array addObject:@"Web SQL"];
     if ([dataTypes containsObject:WKWebsiteDataTypeIndexedDBDatabases])
         [array addObject:@"IndexedDB"];
+    if ([dataTypes containsObject:WKWebsiteDataTypeServiceWorkerRegistrations])
+        [array addObject:@"Service Worker Registrations"];
     if ([dataTypes containsObject:_WKWebsiteDataTypeHSTSCache])
         [array addObject:@"HSTS Cache"];
     if ([dataTypes containsObject:_WKWebsiteDataTypeMediaKeys])
         [array addObject:@"Media Keys"];
     if ([dataTypes containsObject:_WKWebsiteDataTypeSearchFieldRecentSearches])
         [array addObject:@"Search Field Recent Searches"];
+    if ([dataTypes containsObject:WKWebsiteDataTypeFileSystem])
+        [array addObject:@"File System"];
 #if PLATFORM(MAC)
     if ([dataTypes containsObject:_WKWebsiteDataTypePlugInData])
         [array addObject:@"Plug-in Data"];
@@ -94,6 +110,12 @@ static NSString *dataTypesToString(NSSet *dataTypes)
         [array addObject:@"Resource Load Statistics"];
     if ([dataTypes containsObject:_WKWebsiteDataTypeCredentials])
         [array addObject:@"Credentials"];
+    if ([dataTypes containsObject:_WKWebsiteDataTypeAdClickAttributions] || [dataTypes containsObject:_WKWebsiteDataTypePrivateClickMeasurements])
+        [array addObject:@"Private Click Measurements"];
+    if ([dataTypes containsObject:_WKWebsiteDataTypeAlternativeServices])
+        [array addObject:@"Alternative Services"];
+    if ([dataTypes containsObject:_WKWebsiteDataTypeFileSystem])
+        [array addObject:@"File System"];
 
     return [array componentsJoinedByString:@", "];
 }
@@ -137,9 +159,14 @@ static NSString *dataTypesToString(NSSet *dataTypes)
     if (!size)
         return nil;
 
-    return [[[_WKWebsiteDataSize alloc] initWithSize:*size] autorelease];
+    return adoptNS([[_WKWebsiteDataSize alloc] initWithSize:*size]).autorelease();
+}
+
+- (NSArray<NSString *> *)_originsStrings
+{
+    return createNSArray(_websiteDataRecord->websiteDataRecord().origins, [] (auto& origin) -> NSString * {
+        return origin.toString();
+    }).autorelease();
 }
 
 @end
-
-#endif

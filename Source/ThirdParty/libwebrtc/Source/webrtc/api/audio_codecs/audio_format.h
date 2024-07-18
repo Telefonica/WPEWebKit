@@ -8,40 +8,40 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_API_AUDIO_CODECS_AUDIO_FORMAT_H_
-#define WEBRTC_API_AUDIO_CODECS_AUDIO_FORMAT_H_
+#ifndef API_AUDIO_CODECS_AUDIO_FORMAT_H_
+#define API_AUDIO_CODECS_AUDIO_FORMAT_H_
+
+#include <stddef.h>
 
 #include <map>
-#include <ostream>
 #include <string>
-#include <utility>
 
-#include "webrtc/base/optional.h"
+#include "absl/strings/string_view.h"
+#include "api/rtp_parameters.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
 // SDP specification for a single audio codec.
-// NOTE: This class is still under development and may change without notice.
-struct SdpAudioFormat {
-  using Parameters = std::map<std::string, std::string>;
+struct RTC_EXPORT SdpAudioFormat {
+  using Parameters [[deprecated(("Use webrtc::CodecParameterMap"))]] =
+      std::map<std::string, std::string>;
 
   SdpAudioFormat(const SdpAudioFormat&);
   SdpAudioFormat(SdpAudioFormat&&);
-  SdpAudioFormat(const char* name, int clockrate_hz, size_t num_channels);
-  SdpAudioFormat(const std::string& name,
-                 int clockrate_hz,
-                 size_t num_channels);
-  SdpAudioFormat(const char* name,
+  SdpAudioFormat(absl::string_view name, int clockrate_hz, size_t num_channels);
+  SdpAudioFormat(absl::string_view name,
                  int clockrate_hz,
                  size_t num_channels,
-                 const Parameters& param);
-  SdpAudioFormat(const std::string& name,
+                 const CodecParameterMap& param);
+  SdpAudioFormat(absl::string_view name,
                  int clockrate_hz,
                  size_t num_channels,
-                 const Parameters& param);
+                 CodecParameterMap&& param);
   ~SdpAudioFormat();
 
-  // Returns true if this format is compatible with |o|. In SDP terminology:
+  // Returns true if this format is compatible with `o`. In SDP terminology:
   // would it represent the same codec between an offer and an answer? As
   // opposed to operator==, this method disregards codec parameters.
   bool Matches(const SdpAudioFormat& o) const;
@@ -57,11 +57,8 @@ struct SdpAudioFormat {
   std::string name;
   int clockrate_hz;
   size_t num_channels;
-  Parameters parameters;
+  CodecParameterMap parameters;
 };
-
-void swap(SdpAudioFormat& a, SdpAudioFormat& b);
-std::ostream& operator<<(std::ostream& os, const SdpAudioFormat& saf);
 
 // Information about how an audio format is treated by the codec implementation.
 // Contains basic information, such as sample rate and number of channels, which
@@ -120,8 +117,6 @@ struct AudioCodecInfo {
                                            // network conditions.
 };
 
-std::ostream& operator<<(std::ostream& os, const AudioCodecInfo& aci);
-
 // AudioCodecSpec ties an audio format to specific information about the codec
 // and its implementation.
 struct AudioCodecSpec {
@@ -135,8 +130,6 @@ struct AudioCodecSpec {
   AudioCodecInfo info;
 };
 
-std::ostream& operator<<(std::ostream& os, const AudioCodecSpec& acs);
-
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_AUDIO_CODECS_AUDIO_FORMAT_H_
+#endif  // API_AUDIO_CODECS_AUDIO_FORMAT_H_

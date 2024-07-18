@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,8 @@
 #include "DFGHeapLocation.h"
 
 #if ENABLE(DFG_JIT)
+
+#include "JSCJSValueInlines.h"
 
 namespace JSC { namespace DFG {
 
@@ -60,14 +62,22 @@ void printInternal(PrintStream& out, LocationKind kind)
         out.print("InvalidationPointLoc");
         return;
         
-    case IsObjectOrNullLoc:
-        out.print("IsObjectOrNullLoc");
+    case TypeOfIsObjectLoc:
+        out.print("TypeOfIsObjectLoc");
         return;
 
-    case IsFunctionLoc:
-        out.print("IsFunctionLoc");
+    case TypeOfIsFunctionLoc:
+        out.print("TypeOfIsFunctionLoc");
+        return;
+
+    case IsCallableLoc:
+        out.print("IsCallableLoc");
         return;
         
+    case IsConstructorLoc:
+        out.print("IsConstructorLoc");
+        return;
+
     case GetterLoc:
         out.print("GetterLoc");
         return;
@@ -88,16 +98,16 @@ void printInternal(PrintStream& out, LocationKind kind)
         out.print("ArrayLengthLoc");
         return;
 
+    case ArrayMaskLoc:
+        out.print("ArrayMaskLoc");
+        return;
+
     case VectorLengthLoc:
         out.print("VectorLengthLoc");
         return;
         
     case ButterflyLoc:
         out.print("ButterflyLoc");
-        return;
-        
-    case ButterflyWithoutCagingLoc:
-        out.print("ButterflyWithoutCagingLoc");
         return;
         
     case CheckTypeInfoFlagsLoc:
@@ -128,6 +138,26 @@ void printInternal(PrintStream& out, LocationKind kind)
         out.print("IndexedPropertyDoubleLoc");
         return;
 
+    case IndexedPropertyDoubleSaneChainLoc:
+        out.print("IndexedPropertyDoubleSaneChainLoc");
+        return;
+
+    case IndexedPropertyDoubleOutOfBoundsSaneChainLoc:
+        out.print("IndexedPropertyDoubleOutOfBoundsSaneChainLoc");
+        return;
+
+    case IndexedPropertyDoubleOrOtherOutOfBoundsSaneChainLoc:
+        out.print("IndexedPropertyDoubleOrOtherOutOfBoundsSaneChainLoc");
+        return;
+
+    case IndexedPropertyInt32Loc:
+        out.print("IndexedPropertyInt32Loc");
+        return;
+
+    case IndexedPropertyInt32OutOfBoundsSaneChainLoc:
+        out.print("IndexedPropertyInt32OutOfBoundsSaneChainLoc");
+        return;
+
     case IndexedPropertyInt52Loc:
         out.print("IndexedPropertyInt52Loc");
         return;
@@ -136,12 +166,12 @@ void printInternal(PrintStream& out, LocationKind kind)
         out.print("IndexedPropertyJSLoc");
         return;
 
+    case IndexedPropertyJSOutOfBoundsSaneChainLoc:
+        out.print("IndexedPropertyJSOutOfBoundsSaneChainLoc");
+        return;
+
     case IndexedPropertyStorageLoc:
         out.print("IndexedPropertyStorageLoc");
-        return;
-        
-    case InstanceOfLoc:
-        out.print("InstanceOfLoc");
         return;
         
     case NamedPropertyLoc:
@@ -151,6 +181,18 @@ void printInternal(PrintStream& out, LocationKind kind)
     case TypedArrayByteOffsetLoc:
         out.print("TypedArrayByteOffsetLoc");
         return;
+
+    case TypedArrayByteOffsetInt52Loc:
+        out.print("TypedArrayByteOffsetInt52Loc");
+        return;
+
+    case TypedArrayLengthInt52Loc:
+        out.print("TypedArrayLengthInt52Loc");
+        return;
+
+    case PrototypeLoc:
+        out.print("PrototypeLoc");
+        return;
         
     case StructureLoc:
         out.print("StructureLoc");
@@ -158,6 +200,10 @@ void printInternal(PrintStream& out, LocationKind kind)
 
     case RegExpObjectLastIndexLoc:
         out.print("RegExpObjectLastIndexLoc");
+        return;
+
+    case DateFieldLoc:
+        out.print("DateFieldLoc");
         return;
 
     case MapBucketLoc:
@@ -176,16 +222,16 @@ void printInternal(PrintStream& out, LocationKind kind)
         out.print("MapBucketValueLoc");
         return;
 
-    case MapBucketMapNextLoc:
-        out.print("MapBucketMapNextLoc");
-        return;
-
-    case MapBucketSetNextLoc:
-        out.print("MapBucketSetNextLoc");
+    case MapBucketNextLoc:
+        out.print("MapBucketNextLoc");
         return;
 
     case WeakMapGetLoc:
         out.print("WeakMapGetLoc");
+        return;
+
+    case InternalFieldObjectLoc:
+        out.print("InternalFieldObjectLoc");
         return;
 
     case DOMStateLoc:

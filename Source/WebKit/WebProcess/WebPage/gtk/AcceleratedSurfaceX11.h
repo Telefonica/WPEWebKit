@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if USE(REDIRECTED_XCOMPOSITE_WINDOW)
+#if PLATFORM(X11)
 
 #include "AcceleratedSurface.h"
 #include <WebCore/XUniqueResource.h>
@@ -46,7 +46,7 @@ public:
 
     uint64_t window() const override { return m_window.get(); }
     uint64_t surfaceID() const override { return m_pixmap.get(); }
-    bool resize(const WebCore::IntSize&) override;
+    bool hostResize(const WebCore::IntSize&) override;
     bool shouldPaintMirrored() const override { return false; }
 
     void didRenderFrame() override;
@@ -56,7 +56,7 @@ private:
 
     void createPixmap();
 
-    Display* m_display { nullptr };
+    ::Display* m_display { nullptr };
     WebCore::XUniqueWindow m_window;
     WebCore::XUniqueWindow m_parentWindow;
     WebCore::XUniquePixmap m_pixmap;
@@ -64,4 +64,4 @@ private:
 
 } // namespace WebKit
 
-#endif // USE(REDIRECTED_XCOMPOSITE_WINDOW)
+#endif // PLATFORM(X11)

@@ -25,11 +25,13 @@
 
 #import "_WKDownload.h"
 
-#if WK_API_ENABLED
-
 #import "WKObject.h"
+#import <wtf/RetainPtr.h>
 
-@interface _WKDownload () <WKObject>
+@class WKDownload;
+
+@interface _WKDownload () <WKObject> {
+@package
+    RetainPtr<WKDownload> _download;
+}
 @end
-
-#endif // WK_API_ENABLED

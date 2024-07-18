@@ -26,6 +26,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import <Foundation/Foundation.h>
 #import <WebKitLegacy/WebDOMOperations.h>
 #import <JavaScriptCore/JSBase.h>
 
@@ -43,6 +44,9 @@
 @interface DOMHTMLInputElement (WebDOMHTMLInputElementOperationsPrivate)
 - (BOOL)_isAutofilled;
 - (void)_setAutofilled:(BOOL)autofilled;
+
+- (BOOL)_isAutoFilledAndViewable;
+- (void)_setAutoFilledAndViewable:(BOOL)autoFilledAndViewable;
 @end
 
 @interface DOMNode (WebDOMNodeOperationsPendingPublic)

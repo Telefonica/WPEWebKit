@@ -8,14 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_TEST_TESTSUPPORT_FRAME_WRITER_H_
-#define WEBRTC_TEST_TESTSUPPORT_FRAME_WRITER_H_
+#ifndef TEST_TESTSUPPORT_FRAME_WRITER_H_
+#define TEST_TESTSUPPORT_FRAME_WRITER_H_
 
 #include <stdio.h>
 
 #include <string>
 
-#include "webrtc/typedefs.h"
+#include "api/video/video_frame.h"
 
 namespace webrtc {
 namespace test {
@@ -32,7 +32,7 @@ class FrameWriter {
 
   // Writes a frame of the configured frame length to the output file.
   // Returns true if the write was successful, false otherwise.
-  virtual bool WriteFrame(uint8_t* frame_buffer) = 0;
+  virtual bool WriteFrame(const uint8_t* frame_buffer) = 0;
 
   // Closes the output file if open. Essentially makes this class impossible
   // to use anymore. Will also be invoked by the destructor.
@@ -54,7 +54,7 @@ class YuvFrameWriterImpl : public FrameWriter {
   YuvFrameWriterImpl(std::string output_filename, int width, int height);
   ~YuvFrameWriterImpl() override;
   bool Init() override;
-  bool WriteFrame(uint8_t* frame_buffer) override;
+  bool WriteFrame(const uint8_t* frame_buffer) override;
   void Close() override;
   size_t FrameLength() override;
 
@@ -76,13 +76,29 @@ class Y4mFrameWriterImpl : public YuvFrameWriterImpl {
                      int frame_rate);
   ~Y4mFrameWriterImpl() override;
   bool Init() override;
-  bool WriteFrame(uint8_t* frame_buffer) override;
+  bool WriteFrame(const uint8_t* frame_buffer) override;
 
  private:
   const int frame_rate_;
 };
 
+// LibJpeg is not available on iOS. This class will do nothing on iOS.
+class JpegFrameWriter {
+ public:
+  JpegFrameWriter(const std::string& output_filename);
+  // Quality can be from 0 (worst) to 100 (best). Best quality is still lossy.
+  // WriteFrame can be called only once. Subsequent calls will fail.
+  bool WriteFrame(const VideoFrame& input_frame, int quality);
+
+#if !defined(WEBRTC_IOS)
+ private:
+  bool frame_written_;
+  const std::string output_filename_;
+  FILE* output_file_;
+#endif
+};
+
 }  // namespace test
 }  // namespace webrtc
 
-#endif  // WEBRTC_TEST_TESTSUPPORT_FRAME_WRITER_H_
+#endif  // TEST_TESTSUPPORT_FRAME_WRITER_H_

@@ -23,15 +23,15 @@
 #include "WebKitSecurityManagerPrivate.h"
 #include "WebKitWebContextPrivate.h"
 #include "WebProcessPool.h"
-#include <WebCore/SchemeRegistry.h>
+#include <WebCore/LegacySchemeRegistry.h>
 #include <wtf/glib/WTFGType.h>
 
 using namespace WebKit;
 
 /**
- * SECTION: WebKitSecurityManager
- * @Short_description: Controls security settings in a #WebKitWebContext
- * @Title: WebKitSecurityManager
+ * WebKitSecurityManager:
+ *
+ * Controls security settings in a #WebKitWebContext.
  *
  * The #WebKitSecurityManager defines security settings for URI
  * schemes in a #WebKitWebContext. Get it from the context with
@@ -72,32 +72,32 @@ static void registerSecurityPolicyForURIScheme(WebKitSecurityManager* manager, c
     String urlScheme = String::fromUTF8(scheme);
     auto& processPool = webkitWebContextGetProcessPool(manager->priv->webContext);
 
-    // We keep the WebCore::SchemeRegistry of the UI process in sync with the
+    // We keep the WebCore::LegacySchemeRegistry of the UI process in sync with the
     // web process one, so that we can return the SecurityPolicy for
     // a given URI scheme synchronously without blocking.
     switch (policy) {
     case SecurityPolicyLocal:
-        WebCore::SchemeRegistry::registerURLSchemeAsLocal(urlScheme);
+        WebCore::LegacySchemeRegistry::registerURLSchemeAsLocal(urlScheme);
         processPool.registerURLSchemeAsLocal(urlScheme);
         break;
     case SecurityPolicyNoAccess:
-        WebCore::SchemeRegistry::registerURLSchemeAsNoAccess(urlScheme);
+        WebCore::LegacySchemeRegistry::registerURLSchemeAsNoAccess(urlScheme);
         processPool.registerURLSchemeAsNoAccess(urlScheme);
         break;
     case SecurityPolicyDisplayIsolated:
-        WebCore::SchemeRegistry::registerURLSchemeAsDisplayIsolated(urlScheme);
+        WebCore::LegacySchemeRegistry::registerURLSchemeAsDisplayIsolated(urlScheme);
         processPool.registerURLSchemeAsDisplayIsolated(urlScheme);
         break;
     case SecurityPolicySecure:
-        WebCore::SchemeRegistry::registerURLSchemeAsSecure(urlScheme);
+        WebCore::LegacySchemeRegistry::registerURLSchemeAsSecure(urlScheme);
         processPool.registerURLSchemeAsSecure(urlScheme);
         break;
     case SecurityPolicyCORSEnabled:
-        WebCore::SchemeRegistry::registerURLSchemeAsCORSEnabled(urlScheme);
+        WebCore::LegacySchemeRegistry::registerURLSchemeAsCORSEnabled(urlScheme);
         processPool.registerURLSchemeAsCORSEnabled(urlScheme);
         break;
     case SecurityPolicyEmptyDocument:
-        WebCore::SchemeRegistry::registerURLSchemeAsEmptyDocument(urlScheme);
+        WebCore::LegacySchemeRegistry::registerURLSchemeAsEmptyDocument(urlScheme);
         processPool.registerURLSchemeAsEmptyDocument(urlScheme);
         break;
     }
@@ -109,17 +109,17 @@ static bool checkSecurityPolicyForURIScheme(const char* scheme, SecurityPolicy p
 
     switch (policy) {
     case SecurityPolicyLocal:
-        return WebCore::SchemeRegistry::shouldTreatURLSchemeAsLocal(urlScheme);
+        return WebCore::LegacySchemeRegistry::shouldTreatURLSchemeAsLocal(urlScheme);
     case SecurityPolicyNoAccess:
-        return WebCore::SchemeRegistry::shouldTreatURLSchemeAsNoAccess(urlScheme);
+        return WebCore::LegacySchemeRegistry::shouldTreatURLSchemeAsNoAccess(urlScheme);
     case SecurityPolicyDisplayIsolated:
-        return WebCore::SchemeRegistry::shouldTreatURLSchemeAsDisplayIsolated(urlScheme);
+        return WebCore::LegacySchemeRegistry::shouldTreatURLSchemeAsDisplayIsolated(urlScheme);
     case SecurityPolicySecure:
-        return WebCore::SchemeRegistry::shouldTreatURLSchemeAsSecure(urlScheme);
+        return WebCore::LegacySchemeRegistry::shouldTreatURLSchemeAsSecure(urlScheme);
     case SecurityPolicyCORSEnabled:
-        return WebCore::SchemeRegistry::shouldTreatURLSchemeAsCORSEnabled(urlScheme);
+        return WebCore::LegacySchemeRegistry::shouldTreatURLSchemeAsCORSEnabled(urlScheme);
     case SecurityPolicyEmptyDocument:
-        return WebCore::SchemeRegistry::shouldLoadURLSchemeAsEmptyDocument(urlScheme);
+        return WebCore::LegacySchemeRegistry::shouldLoadURLSchemeAsEmptyDocument(urlScheme);
     }
 
     return false;
@@ -130,7 +130,9 @@ static bool checkSecurityPolicyForURIScheme(const char* scheme, SecurityPolicy p
  * @security_manager: a #WebKitSecurityManager
  * @scheme: a URI scheme
  *
- * Register @scheme as a local scheme. This means that other non-local pages
+ * Register @scheme as a local scheme.
+ *
+ * This means that other non-local pages
  * cannot link to or access URIs of this scheme.
  */
 void webkit_security_manager_register_uri_scheme_as_local(WebKitSecurityManager* manager, const char* scheme)
@@ -147,6 +149,7 @@ void webkit_security_manager_register_uri_scheme_as_local(WebKitSecurityManager*
  * @scheme: a URI scheme
  *
  * Whether @scheme is considered as a local scheme.
+ *
  * See also webkit_security_manager_register_uri_scheme_as_local().
  *
  * Returns: %TRUE if @scheme is a local scheme or %FALSE otherwise.
@@ -164,7 +167,9 @@ gboolean webkit_security_manager_uri_scheme_is_local(WebKitSecurityManager* mana
  * @security_manager: a #WebKitSecurityManager
  * @scheme: a URI scheme
  *
- * Register @scheme as a no-access scheme. This means that pages loaded
+ * Register @scheme as a no-access scheme.
+ *
+ * This means that pages loaded
  * with this URI scheme cannot access pages loaded with any other URI scheme.
  */
 void webkit_security_manager_register_uri_scheme_as_no_access(WebKitSecurityManager* manager, const char* scheme)
@@ -181,6 +186,7 @@ void webkit_security_manager_register_uri_scheme_as_no_access(WebKitSecurityMana
  * @scheme: a URI scheme
  *
  * Whether @scheme is considered as a no-access scheme.
+ *
  * See also webkit_security_manager_register_uri_scheme_as_no_access().
  *
  * Returns: %TRUE if @scheme is a no-access scheme or %FALSE otherwise.
@@ -198,7 +204,9 @@ gboolean webkit_security_manager_uri_scheme_is_no_access(WebKitSecurityManager* 
  * @security_manager: a #WebKitSecurityManager
  * @scheme: a URI scheme
  *
- * Register @scheme as a display isolated scheme. This means that pages cannot
+ * Register @scheme as a display isolated scheme.
+ *
+ * This means that pages cannot
  * display these URIs unless they are from the same scheme.
  */
 void webkit_security_manager_register_uri_scheme_as_display_isolated(WebKitSecurityManager* manager, const char* scheme)
@@ -215,6 +223,7 @@ void webkit_security_manager_register_uri_scheme_as_display_isolated(WebKitSecur
  * @scheme: a URI scheme
  *
  * Whether @scheme is considered as a display isolated scheme.
+ *
  * See also webkit_security_manager_register_uri_scheme_as_display_isolated().
  *
  * Returns: %TRUE if @scheme is a display isolated scheme or %FALSE otherwise.
@@ -232,7 +241,9 @@ gboolean webkit_security_manager_uri_scheme_is_display_isolated(WebKitSecurityMa
  * @security_manager: a #WebKitSecurityManager
  * @scheme: a URI scheme
  *
- * Register @scheme as a secure scheme. This means that mixed
+ * Register @scheme as a secure scheme.
+ *
+ * This means that mixed
  * content warnings won't be generated for this scheme when
  * included by an HTTPS page.
  */
@@ -250,6 +261,7 @@ void webkit_security_manager_register_uri_scheme_as_secure(WebKitSecurityManager
  * @scheme: a URI scheme
  *
  * Whether @scheme is considered as a secure scheme.
+ *
  * See also webkit_security_manager_register_uri_scheme_as_secure().
  *
  * Returns: %TRUE if @scheme is a secure scheme or %FALSE otherwise.
@@ -268,6 +280,7 @@ gboolean webkit_security_manager_uri_scheme_is_secure(WebKitSecurityManager* man
  * @scheme: a URI scheme
  *
  * Register @scheme as a CORS (Cross-origin resource sharing) enabled scheme.
+ *
  * This means that CORS requests are allowed. See W3C CORS specification
  * http://www.w3.org/TR/cors/.
  */
@@ -285,6 +298,7 @@ void webkit_security_manager_register_uri_scheme_as_cors_enabled(WebKitSecurityM
  * @scheme: a URI scheme
  *
  * Whether @scheme is considered as a CORS enabled scheme.
+ *
  * See also webkit_security_manager_register_uri_scheme_as_cors_enabled().
  *
  * Returns: %TRUE if @scheme is a CORS enabled scheme or %FALSE otherwise.
@@ -302,7 +316,9 @@ gboolean webkit_security_manager_uri_scheme_is_cors_enabled(WebKitSecurityManage
  * @security_manager: a #WebKitSecurityManager
  * @scheme: a URI scheme
  *
- * Register @scheme as an empty document scheme. This means that
+ * Register @scheme as an empty document scheme.
+ *
+ * This means that
  * they are allowed to commit synchronously.
  */
 void webkit_security_manager_register_uri_scheme_as_empty_document(WebKitSecurityManager* manager, const char* scheme)
@@ -319,6 +335,7 @@ void webkit_security_manager_register_uri_scheme_as_empty_document(WebKitSecurit
  * @scheme: a URI scheme
  *
  * Whether @scheme is considered as an empty document scheme.
+ *
  * See also webkit_security_manager_register_uri_scheme_as_empty_document().
  *
  * Returns: %TRUE if @scheme is an empty document scheme or %FALSE otherwise.

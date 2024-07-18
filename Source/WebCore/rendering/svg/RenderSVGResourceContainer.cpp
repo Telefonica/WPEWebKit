@@ -20,14 +20,20 @@
 #include "config.h"
 #include "RenderSVGResourceContainer.h"
 
+#include "LegacyRenderSVGRoot.h"
 #include "RenderLayer.h"
-#include "RenderSVGRoot.h"
 #include "RenderView.h"
+#include "SVGElementTypeHelpers.h"
+#include "SVGGraphicsElement.h"
 #include "SVGRenderingContext.h"
 #include "SVGResourcesCache.h"
+#include <wtf/IsoMallocInlines.h>
+#include <wtf/SetForScope.h>
 #include <wtf/StackStats.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderSVGResourceContainer);
 
 static inline SVGDocumentExtensions& svgExtensionsFromElement(SVGElement& element)
 {
@@ -40,16 +46,14 @@ RenderSVGResourceContainer::RenderSVGResourceContainer(SVGElement& element, Rend
 {
 }
 
-RenderSVGResourceContainer::~RenderSVGResourceContainer()
-{
-}
+RenderSVGResourceContainer::~RenderSVGResourceContainer() = default;
 
 void RenderSVGResourceContainer::layout()
 {
     StackStats::LayoutCheckPoint layoutCheckPoint;
     // Invalidate all resources if our layout changed.
     if (selfNeedsClientInvalidation())
-        RenderSVGRoot::addResourceForClientInvalidation(this);
+        LegacyRenderSVGRoot::addResourceForClientInvalidation(this);
 
     RenderSVGHiddenContainer::layout();
 }
@@ -88,12 +92,20 @@ void RenderSVGResourceContainer::idChanged()
     registerResource();
 }
 
+void RenderSVGResourceContainer::markAllClientsForRepaint()
+{
+    markAllClientsForInvalidation(RepaintInvalidation);
+}
+
 void RenderSVGResourceContainer::markAllClientsForInvalidation(InvalidationMode mode)
 {
+    // FIXME: Style invalidation should either be a pre-layout task or this function
+    // should never get called while in layout. See webkit.org/b/208903.
     if ((m_clients.isEmpty() && m_clientLayers.isEmpty()) || m_isInvalidating)
         return;
 
-    m_isInvalidating = true;
+    SetForScope isInvalidating(m_isInvalidating, true);
+
     bool needsLayout = mode == LayoutAndBoundariesInvalidation;
     bool markForInvalidation = mode != ParentOnlyInvalidation;
     auto* root = SVGRenderSupport::findTreeRootObject(*this);
@@ -115,14 +127,29 @@ void RenderSVGResourceContainer::markAllClientsForInvalidation(InvalidationMode 
     }
 
     markAllClientLayersForInvalidation();
-
-    m_isInvalidating = false;
 }
 
 void RenderSVGResourceContainer::markAllClientLayersForInvalidation()
 {
-    for (auto* clientLayer : m_clientLayers)
-        clientLayer->filterNeedsRepaint();
+    if (m_clientLayers.isEmpty())
+        return;
+
+    auto& document = (*m_clientLayers.begin())->renderer().document();
+    if (!document.view() || document.renderTreeBeingDestroyed())
+        return;
+
+    auto inLayout = document.view()->layoutContext().isInLayout();
+    for (auto* clientLayer : m_clientLayers) {
+        // FIXME: We should not get here while in layout. See webkit.org/b/208903.
+        // Repaint should also be triggered through some other means.
+        if (inLayout) {
+            clientLayer->renderer().repaint();
+            continue;
+        }
+        if (auto* enclosingElement = clientLayer->enclosingElement())
+            enclosingElement->invalidateStyleAndLayerComposition();
+        clientLayer->renderer().repaint();
+    }
 }
 
 void RenderSVGResourceContainer::markClientForInvalidation(RenderObject& client, InvalidationMode mode)
@@ -170,33 +197,32 @@ void RenderSVGResourceContainer::registerResource()
 {
     SVGDocumentExtensions& extensions = svgExtensionsFromElement(element());
     if (!extensions.isIdOfPendingResource(m_id)) {
-        extensions.addResource(m_id, this);
+        extensions.addResource(m_id, *this);
         return;
     }
 
-    std::unique_ptr<SVGDocumentExtensions::PendingElements> clients = extensions.removePendingResource(m_id);
+    auto elements = copyToVectorOf<Ref<Element>>(extensions.removePendingResource(m_id));
 
     // Cache us with the new id.
-    extensions.addResource(m_id, this);
+    extensions.addResource(m_id, *this);
 
     // Update cached resources of pending clients.
-    for (auto* client : *clients) {
+    for (auto& client : elements) {
         ASSERT(client->hasPendingResources());
         extensions.clearHasPendingResourcesIfPossible(client);
         auto* renderer = client->renderer();
         if (!renderer)
             continue;
-        SVGResourcesCache::clientStyleChanged(*renderer, StyleDifferenceLayout, renderer->style());
+        SVGResourcesCache::clientStyleChanged(*renderer, StyleDifference::Layout, nullptr, renderer->style());
         renderer->setNeedsLayout();
     }
 }
 
-bool RenderSVGResourceContainer::shouldTransformOnTextPainting(const RenderElement& renderer, AffineTransform& resourceTransform)
+float RenderSVGResourceContainer::computeTextPaintingScale(const RenderElement& renderer)
 {
 #if USE(CG)
     UNUSED_PARAM(renderer);
-    UNUSED_PARAM(resourceTransform);
-    return false;
+    return 1;
 #else
     // This method should only be called for RenderObjects that deal with text rendering. Cmp. RenderObject.h's is*() methods.
     ASSERT(renderer.isSVGText() || renderer.isSVGTextPath() || renderer.isSVGInline());
@@ -204,18 +230,14 @@ bool RenderSVGResourceContainer::shouldTransformOnTextPainting(const RenderEleme
     // In text drawing, the scaling part of the graphics context CTM is removed, compare SVGInlineTextBox::paintTextWithShadows.
     // So, we use that scaling factor here, too, and then push it down to pattern or gradient space
     // in order to keep the pattern or gradient correctly scaled.
-    float scalingFactor = SVGRenderingContext::calculateScreenFontSizeScalingFactor(renderer);
-    if (scalingFactor == 1)
-        return false;
-    resourceTransform.scale(scalingFactor);
-    return true;
+    return SVGRenderingContext::calculateScreenFontSizeScalingFactor(renderer);
 #endif
 }
 
 // FIXME: This does not belong here.
 AffineTransform RenderSVGResourceContainer::transformOnNonScalingStroke(RenderObject* object, const AffineTransform& resourceTransform)
 {
-    if (!object->isSVGShape())
+    if (!object->isSVGShapeOrLegacySVGShape())
         return resourceTransform;
 
     SVGGraphicsElement* element = downcast<SVGGraphicsElement>(object->node());

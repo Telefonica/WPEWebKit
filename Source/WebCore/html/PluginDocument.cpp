@@ -34,11 +34,15 @@
 #include "HTMLEmbedElement.h"
 #include "HTMLHtmlElement.h"
 #include "HTMLNames.h"
+#include "PluginViewBase.h"
 #include "RawDataDocumentParser.h"
 #include "RenderEmbeddedObject.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
-    
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(PluginDocument);
+
 using namespace HTMLNames;
 
 // FIXME: Share more code with MediaDocumentParser.
@@ -55,7 +59,7 @@ private:
     {
     }
 
-    void appendBytes(DocumentWriter&, const char*, size_t) final;
+    void appendBytes(DocumentWriter&, const uint8_t*, size_t) final;
     void createDocumentStructure();
 
     HTMLEmbedElement* m_embedElement { nullptr };
@@ -70,20 +74,20 @@ void PluginDocumentParser::createDocumentStructure()
     rootElement->insertedByParser();
 
     if (document.frame())
-        document.frame()->injectUserScripts(InjectAtDocumentStart);
+        document.frame()->injectUserScripts(UserScriptInjectionTime::DocumentStart);
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
     // Should not be able to zoom into standalone plug-in documents.
-    document.processViewport(ASCIILiteral("user-scalable=no"), ViewportArguments::PluginDocument);
+    document.processViewport("user-scalable=no"_s, ViewportArguments::PluginDocument);
 #endif
 
     auto body = HTMLBodyElement::create(document);
-    body->setAttributeWithoutSynchronization(marginwidthAttr, AtomicString("0", AtomicString::ConstructFromLiteral));
-    body->setAttributeWithoutSynchronization(marginheightAttr, AtomicString("0", AtomicString::ConstructFromLiteral));
-#if PLATFORM(IOS)
-    body->setAttribute(styleAttr, AtomicString("background-color: rgb(217,224,233)", AtomicString::ConstructFromLiteral));
+    body->setAttributeWithoutSynchronization(marginwidthAttr, "0"_s);
+    body->setAttributeWithoutSynchronization(marginheightAttr, "0"_s);
+#if PLATFORM(IOS_FAMILY)
+    body->setAttribute(styleAttr, "background-color: rgb(217,224,233)"_s);
 #else
-    body->setAttribute(styleAttr, AtomicString("background-color: rgb(38,38,38)", AtomicString::ConstructFromLiteral));
+    body->setAttribute(styleAttr, "background-color: rgb(38,38,38)"_s);
 #endif
 
     rootElement->appendChild(body);
@@ -91,29 +95,30 @@ void PluginDocumentParser::createDocumentStructure()
     auto embedElement = HTMLEmbedElement::create(document);
         
     m_embedElement = embedElement.ptr();
-    embedElement->setAttributeWithoutSynchronization(widthAttr, AtomicString("100%", AtomicString::ConstructFromLiteral));
-    embedElement->setAttributeWithoutSynchronization(heightAttr, AtomicString("100%", AtomicString::ConstructFromLiteral));
+    embedElement->setAttributeWithoutSynchronization(widthAttr, "100%"_s);
+    embedElement->setAttributeWithoutSynchronization(heightAttr, "100%"_s);
     
-    embedElement->setAttributeWithoutSynchronization(nameAttr, AtomicString("plugin", AtomicString::ConstructFromLiteral));
-    embedElement->setAttributeWithoutSynchronization(srcAttr, document.url().string());
+    embedElement->setAttributeWithoutSynchronization(nameAttr, "plugin"_s);
+    embedElement->setAttributeWithoutSynchronization(srcAttr, AtomString { document.url().string() });
     
     ASSERT(document.loader());
-    if (auto* loader = document.loader())
-        m_embedElement->setAttributeWithoutSynchronization(typeAttr, loader->writer().mimeType());
+    if (RefPtr loader = document.loader())
+        m_embedElement->setAttributeWithoutSynchronization(typeAttr, AtomString { loader->writer().mimeType() });
 
     document.setPluginElement(*m_embedElement);
 
     body->appendChild(embedElement);
+    document.setHasVisuallyNonEmptyCustomContent();
 }
 
-void PluginDocumentParser::appendBytes(DocumentWriter&, const char*, size_t)
+void PluginDocumentParser::appendBytes(DocumentWriter&, const uint8_t*, size_t)
 {
     if (m_embedElement)
         return;
 
     createDocumentStructure();
 
-    auto* frame = document()->frame();
+    RefPtr frame = document()->frame();
     if (!frame)
         return;
 
@@ -126,19 +131,21 @@ void PluginDocumentParser::appendBytes(DocumentWriter&, const char*, size_t)
     // can synchronously redirect data to the plugin.
     frame->view()->flushAnyPendingPostLayoutTasks();
 
-    if (RenderWidget* renderer = m_embedElement->renderWidget()) {
-        if (Widget* widget = renderer->widget()) {
+    if (auto renderer = m_embedElement->renderWidget()) {
+        if (RefPtr widget = renderer->widget()) {
             frame->loader().client().redirectDataToPlugin(*widget);
+
             // In a plugin document, the main resource is the plugin. If we have a null widget, that means
             // the loading of the plugin was cancelled, which gives us a null mainResourceLoader(), so we
             // need to have this call in a null check of the widget or of mainResourceLoader().
-            frame->loader().activeDocumentLoader()->setMainResourceDataBufferingPolicy(DoNotBufferData);
+            if (auto loader = frame->loader().activeDocumentLoader())
+                loader->setMainResourceDataBufferingPolicy(DataBufferingPolicy::DoNotBufferData);
         }
     }
 }
 
-PluginDocument::PluginDocument(Frame* frame, const URL& url)
-    : HTMLDocument(frame, url, PluginDocumentClass)
+PluginDocument::PluginDocument(Frame& frame, const URL& url)
+    : HTMLDocument(&frame, frame.settings(), url, { }, { DocumentClass::Plugin })
 {
     setCompatibilityMode(DocumentCompatibilityMode::QuirksMode);
     lockCompatibilityMode();
@@ -149,14 +156,14 @@ Ref<DocumentParser> PluginDocument::createParser()
     return PluginDocumentParser::create(*this);
 }
 
-Widget* PluginDocument::pluginWidget()
+PluginViewBase* PluginDocument::pluginWidget()
 {
     if (!m_pluginElement)
         return nullptr;
-    auto* renderer = m_pluginElement->renderer();
+    auto* renderer = dynamicDowncast<RenderEmbeddedObject>(m_pluginElement->renderer());
     if (!renderer)
         return nullptr;
-    return downcast<RenderEmbeddedObject>(*m_pluginElement->renderer()).widget();
+    return dynamicDowncast<PluginViewBase>(renderer->widget());
 }
 
 void PluginDocument::setPluginElement(HTMLPlugInElement& element)
@@ -178,8 +185,8 @@ void PluginDocument::cancelManualPluginLoad()
         return;
 
     auto& frameLoader = frame()->loader();
-    auto& documentLoader = *frameLoader.activeDocumentLoader();
-    documentLoader.cancelMainResourceLoad(frameLoader.cancelledError(documentLoader.request()));
+    if (auto documentLoader = frameLoader.activeDocumentLoader())
+        documentLoader->cancelMainResourceLoad(frameLoader.cancelledError(documentLoader->request()));
     m_shouldLoadPluginManually = false;
 }
 

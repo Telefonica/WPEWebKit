@@ -56,65 +56,53 @@ def constsList(ast)
     ast.filter(ConstExpr).uniq.sort
 end
 
-#
-# offsetsAndConfigurationIndex(ast, file) ->
-#     [[offsets, index], ...]
-#
-# Parses the offsets from a file and returns a list of offsets and the
-# index of the configuration that is valid in this build target.
-#
+def readInt(endianness, bytes)
+    if endianness == :little
+        # Little endian
+        number = (bytes[0] << 0  |
+                  bytes[1] << 8  |
+                  bytes[2] << 16 |
+                  bytes[3] << 24 |
+                  bytes[4] << 32 |
+                  bytes[5] << 40 |
+                  bytes[6] << 48 |
+                  bytes[7] << 56)
+    else
+        # Big endian
+        number = (bytes[0] << 56 |
+                  bytes[1] << 48 |
+                  bytes[2] << 40 |
+                  bytes[3] << 32 |
+                  bytes[4] << 24 |
+                  bytes[5] << 16 |
+                  bytes[6] << 8  |
+                  bytes[7] << 0)
+    end
+    if number > 0x7fffffff_ffffffff
+        number -= 1 << 64
+    end
+    number
+end
 
-def offsetsAndConfigurationIndex(file)
-    endiannessMarkerBytes = nil
-    result = {}
-    
-    def readInt(endianness, bytes)
-        if endianness == :little
-            # Little endian
-            number = (bytes[0] << 0  |
-                      bytes[1] << 8  |
-                      bytes[2] << 16 |
-                      bytes[3] << 24 |
-                      bytes[4] << 32 |
-                      bytes[5] << 40 |
-                      bytes[6] << 48 |
-                      bytes[7] << 56)
-        else
-            # Big endian
-            number = (bytes[0] << 56 |
-                      bytes[1] << 48 |
-                      bytes[2] << 40 |
-                      bytes[3] << 32 |
-                      bytes[4] << 24 |
-                      bytes[5] << 16 |
-                      bytes[6] << 8  |
-                      bytes[7] << 0)
-        end
-        if number > 0x7fffffff_ffffffff
-            number -= 1 << 64
-        end
-        number
-    end
-    
-    def prepareMagic(endianness, numbers)
-        magicBytes = []
-        numbers.each {
-            | number |
-            currentBytes = []
-            8.times {
-                currentBytes << (number & 0xff)
-                number >>= 8
-            }
-            if endianness == :big
-                currentBytes.reverse!
-            end
-            magicBytes += currentBytes
+def prepareMagic(endianness, numbers)
+    magicBytes = []
+    numbers.each {
+        | number |
+        currentBytes = []
+        8.times {
+            currentBytes << (number & 0xff)
+            number >>= 8
         }
-        magicBytes
-    end
-    
+        if endianness == :big
+            currentBytes.reverse!
+        end
+        magicBytes += currentBytes
+    }
+    magicBytes
+end
+
+def fileBytes(file)
     fileBytes = []
-    
     File.open(file, "rb") {
         | inp |
         loop {
@@ -123,36 +111,50 @@ def offsetsAndConfigurationIndex(file)
             fileBytes << byte
         }
     }
-    
-    def sliceByteArrays(byteArray, pattern)
-        result = []
-        lastSlicePoint = 0
-        (byteArray.length - pattern.length + 1).times {
-            | index |
-            foundOne = true
-            pattern.length.times {
-                | subIndex |
-                if byteArray[index + subIndex] != pattern[subIndex]
-                    foundOne = false
-                    break
-                end
-            }
-            if foundOne
-                result << byteArray[lastSlicePoint...index]
-                lastSlicePoint = index + pattern.length
+    fileBytes
+end
+
+def sliceByteArrays(byteArray, pattern)
+    result = []
+    lastSlicePoint = 0
+    (byteArray.length - pattern.length + 1).times {
+        | index |
+        foundOne = true
+        pattern.length.times {
+            | subIndex |
+            if byteArray[index + subIndex] != pattern[subIndex]
+                foundOne = false
+                break
             end
         }
-        
-        result << byteArray[lastSlicePoint...(byteArray.length)]
-        
-        result
-    end
-    
+        if foundOne
+            result << byteArray[lastSlicePoint...index]
+            lastSlicePoint = index + pattern.length
+        end
+    }
+
+    result << byteArray[lastSlicePoint...(byteArray.length)]
+
+    result
+end
+
+#
+# offsetsAndConfigurationIndex(file) ->
+#     [[offsets, index], ...]
+#
+# Parses the offsets from a file and returns a list of offsets and the
+# index of the configuration that is valid in this build target.
+#
+
+def offsetsAndConfigurationIndex(file)
+    fileBytes = fileBytes(file)
+    result = {}
+
     [:little, :big].each {
         | endianness |
         headerMagicBytes = prepareMagic(endianness, OFFSET_HEADER_MAGIC_NUMBERS)
         magicBytes = prepareMagic(endianness, OFFSET_MAGIC_NUMBERS)
-        
+
         bigArray = sliceByteArrays(fileBytes, headerMagicBytes)
         unless bigArray.size <= 1
             bigArray[1..-1].each {
@@ -168,15 +170,87 @@ def offsetsAndConfigurationIndex(file)
             }
         end
     }
-    
+
     raise MissingMagicValuesException unless result.length >= 1
-    
+
     # result is {index1=>offsets1, index2=>offsets2} but we want to return
     # [[offsets1, index1], [offsets2, index2]].
     return result.map {
         | pair |
         pair.reverse
     }
+end
+
+#
+# offsetsAndConfigurationIndex(file) ->
+#     [[offsets, index], ...]
+#
+# Parses the offsets from a file and all its variants and returns a list of
+# offsets and the index of the configuration that is valid in this build target.
+#
+
+def offsetsAndConfigurationIndexForVariants(file, variants)
+    results = []
+    variants.each {
+        | current_variant |
+        suffix = ""
+        unless current_variant == "normal"
+            suffix = "_" + current_variant
+        end
+        results << offsetsAndConfigurationIndex(file + suffix)
+    }
+    return results.flatten(1)
+end
+
+#
+# configurationIndices(file) ->
+#     [[offsets, index], ...]
+#
+# Parses the configurations from a file and returns a list of the indices of
+# the configurations that are valid in this build target.
+#
+
+def configurationIndices(file)
+    fileBytes = fileBytes(file)
+    result = []
+
+    [:little, :big].each {
+        | endianness |
+        headerMagicBytes = prepareMagic(endianness, OFFSET_HEADER_MAGIC_NUMBERS)
+
+        bigArray = sliceByteArrays(fileBytes, headerMagicBytes)
+        unless bigArray.size <= 1
+            bigArray[1..-1].each {
+                | configArray |
+                result << readInt(endianness, configArray)
+            }
+        end
+    }
+
+    raise MissingMagicValuesException unless result.length >= 1
+
+    return result
+end
+
+#
+# configurationIndicesForVariants(file, variants) ->
+#     [[offsets, index], ...]
+#
+# Parses the configurations from a file and all its variants and returns a list
+# of the indices of the configurations that are valid in this build target.
+#
+
+def configurationIndicesForVariants(file, variants)
+    results = []
+    variants.each {
+        | current_variant |
+        suffix = ""
+        unless current_variant == "normal"
+            suffix = "_" + current_variant
+        end
+        results << configurationIndices(file + suffix)
+    }
+    return results.flatten(1)
 end
 
 #

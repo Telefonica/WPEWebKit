@@ -96,7 +96,7 @@ WI.ContextSubMenuItem = class ContextSubMenuItem extends WI.ContextMenuItem
     appendItem(label, handler, disabled)
     {
         let item = new WI.ContextMenuItem(this._contextMenu, "item", label, disabled);
-        this._pushItem(item);
+        this.pushItem(item);
         this._contextMenu._setHandler(item.id(), handler);
         return item;
     }
@@ -104,16 +104,23 @@ WI.ContextSubMenuItem = class ContextSubMenuItem extends WI.ContextMenuItem
     appendSubMenuItem(label, disabled)
     {
         let item = new WI.ContextSubMenuItem(this._contextMenu, label, disabled);
-        this._pushItem(item);
+        this.pushItem(item);
         return item;
     }
 
     appendCheckboxItem(label, handler, checked, disabled)
     {
         let item = new WI.ContextMenuItem(this._contextMenu, "checkbox", label, disabled, checked);
-        this._pushItem(item);
+        this.pushItem(item);
         this._contextMenu._setHandler(item.id(), handler);
         return item;
+    }
+
+    appendHeader(label)
+    {
+        return this.appendItem(label, () => {
+            console.assert(false, "not reached");
+        }, true);
     }
 
     appendSeparator()
@@ -122,7 +129,7 @@ WI.ContextSubMenuItem = class ContextSubMenuItem extends WI.ContextMenuItem
             this._pendingSeparator = true;
     }
 
-    _pushItem(item)
+    pushItem(item)
     {
         if (this._pendingSeparator) {
             this._items.push(new WI.ContextMenuItem(this._contextMenu, "separator"));
@@ -136,9 +143,14 @@ WI.ContextSubMenuItem = class ContextSubMenuItem extends WI.ContextMenuItem
         return !this._items.length;
     }
 
+    // Private
+
     _buildDescriptor()
     {
-        let subItems = this._items.map((item) => item._buildDescriptor());
+        if (this.isEmpty())
+            return null;
+
+        let subItems = this._items.map((item) => item._buildDescriptor()).filter((item) => !!item);
         return {type: "subMenu", label: this._label, enabled: !this._disabled, subItems};
     }
 };
@@ -152,6 +164,8 @@ WI.ContextMenu = class ContextMenu extends WI.ContextSubMenuItem
         this._event = event;
         this._handlers = {};
         this._id = 0;
+
+        this._beforeShowCallbacks = [];
     }
 
     // Static
@@ -192,6 +206,8 @@ WI.ContextMenu = class ContextMenu extends WI.ContextSubMenuItem
             WI.ContextMenu._lastContextMenu = this;
 
             if (this._event.type !== "contextmenu" && typeof InspectorFrontendHost.dispatchEventAsContextMenuEvent === "function") {
+                console.assert(event.type !== "mousedown" || this._beforeShowCallbacks.length > 0, "Calling show() in a mousedown handler should have a before show callback to enable quick selection.");
+
                 this._menuObject = menuObject;
                 this._event.target.addEventListener("contextmenu", this, true);
                 InspectorFrontendHost.dispatchEventAsContextMenuEvent(this._event);
@@ -203,10 +219,20 @@ WI.ContextMenu = class ContextMenu extends WI.ContextSubMenuItem
             this._event.stopImmediatePropagation();
     }
 
+    addBeforeShowCallback(callback)
+    {
+        this._beforeShowCallbacks.push(callback);
+    }
+
     // Protected
 
     handleEvent(event)
     {
+        console.assert(event.type === "contextmenu");
+
+        for (let callback of this._beforeShowCallbacks)
+            callback(this);
+
         this._event.target.removeEventListener("contextmenu", this, true);
         InspectorFrontendHost.showContextMenu(event, this._menuObject);
         this._menuObject = null;
@@ -224,13 +250,17 @@ WI.ContextMenu = class ContextMenu extends WI.ContextSubMenuItem
 
     _buildDescriptor()
     {
-        return this._items.map((item) => item._buildDescriptor());
+        return this._items.map((item) => item._buildDescriptor()).filter((item) => !!item);
     }
 
     _itemSelected(id)
     {
-        if (this._handlers[id])
-            this._handlers[id].call(this);
+        try {
+            if (this._handlers[id])
+                this._handlers[id].call(this);
+        } catch (e) {
+            WI.reportInternalError(e);
+        }
     }
 };
 

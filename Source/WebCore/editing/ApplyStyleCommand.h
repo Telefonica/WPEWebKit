@@ -47,19 +47,19 @@ public:
     enum EAddStyledElement { AddStyledElement, DoNotAddStyledElement };
     typedef bool (*IsInlineElementToRemoveFunction)(const Element*);
 
-    static Ref<ApplyStyleCommand> create(Document& document, const EditingStyle* style, EditAction action = EditActionChangeAttributes, EPropertyLevel level = PropertyDefault)
+    static Ref<ApplyStyleCommand> create(Document& document, const EditingStyle* style, EditAction action = EditAction::ChangeAttributes, EPropertyLevel level = PropertyDefault)
     {
         return adoptRef(*new ApplyStyleCommand(document, style, action, level));
     }
-    static Ref<ApplyStyleCommand> create(Document& document, const EditingStyle* style, const Position& start, const Position& end, EditAction action = EditActionChangeAttributes, EPropertyLevel level = PropertyDefault)
+    static Ref<ApplyStyleCommand> create(Document& document, const EditingStyle* style, const Position& start, const Position& end, EditAction action = EditAction::ChangeAttributes, EPropertyLevel level = PropertyDefault)
     {
         return adoptRef(*new ApplyStyleCommand(document, style, start, end, action, level));
     }
-    static Ref<ApplyStyleCommand> create(Ref<Element>&& element, bool removeOnly = false, EditAction action = EditActionChangeAttributes)
+    static Ref<ApplyStyleCommand> create(Ref<Element>&& element, bool removeOnly = false, EditAction action = EditAction::ChangeAttributes)
     {
         return adoptRef(*new ApplyStyleCommand(WTFMove(element), removeOnly, action));
     }
-    static Ref<ApplyStyleCommand> create(Document& document, const EditingStyle* style, IsInlineElementToRemoveFunction isInlineElementToRemoveFunction, EditAction action = EditActionChangeAttributes)
+    static Ref<ApplyStyleCommand> create(Document& document, const EditingStyle* style, IsInlineElementToRemoveFunction isInlineElementToRemoveFunction, EditAction action = EditAction::ChangeAttributes)
     {
         return adoptRef(*new ApplyStyleCommand(document, style, isInlineElementToRemoveFunction, action));
     }
@@ -82,7 +82,7 @@ private:
     void replaceWithSpanOrRemoveIfWithoutAttributes(HTMLElement&);
     bool removeImplicitlyStyledElement(EditingStyle&, HTMLElement&, InlineStyleRemovalMode, EditingStyle* extractedStyle);
     bool removeCSSStyle(EditingStyle&, HTMLElement&, InlineStyleRemovalMode = RemoveIfNeeded, EditingStyle* extractedStyle = nullptr);
-    HTMLElement* highestAncestorWithConflictingInlineStyle(EditingStyle&, Node*);
+    RefPtr<HTMLElement> highestAncestorWithConflictingInlineStyle(EditingStyle&, Node*);
     void applyInlineStyleToPushDown(Node&, EditingStyle*);
     void pushDownInlineStyleAroundNode(EditingStyle&, Node*);
     void removeInlineStyle(EditingStyle&, const Position& start, const Position& end);
@@ -109,11 +109,11 @@ private:
     bool mergeEndWithNextIfIdentical(const Position& start, const Position& end);
     void cleanupUnstyledAppleStyleSpans(ContainerNode* dummySpanAncestor);
 
-    void surroundNodeRangeWithElement(Node& start, Node& end, Ref<Element>&&);
+    bool surroundNodeRangeWithElement(Node& start, Node& end, Ref<Element>&&);
     float computedFontSize(Node*);
     void joinChildTextNodes(Node*, const Position& start, const Position& end);
 
-    HTMLElement* splitAncestorsWithUnicodeBidi(Node*, bool before, WritingDirection allowedDirection);
+    RefPtr<HTMLElement> splitAncestorsWithUnicodeBidi(Node*, bool before, WritingDirection allowedDirection);
     void removeEmbeddingUpToEnclosingBlock(Node* node, Node* unsplitAncestor);
 
     void updateStartEnd(const Position& newStart, const Position& newEnd);

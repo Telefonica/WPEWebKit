@@ -25,14 +25,12 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
 /*! @constant WKErrorDomain Indicates a WebKit error. */
-WK_EXTERN NSString * const WKErrorDomain WK_API_AVAILABLE(macosx(10.10), ios(8.0));
+WK_EXTERN NSString * const WKErrorDomain WK_API_AVAILABLE(macos(10.10), ios(8.0));
 
 /*! @enum WKErrorCode
  @abstract Constants used by NSError to indicate errors in the WebKit domain.
@@ -45,19 +43,29 @@ WK_EXTERN NSString * const WKErrorDomain WK_API_AVAILABLE(macosx(10.10), ios(8.0
  @constant WKErrorContentRuleListStoreLookUpFailed     Indicates that looking up a WKUserContentRuleList failed.
  @constant WKErrorContentRuleListStoreRemoveFailed     Indicates that removing a WKUserContentRuleList failed.
  @constant WKErrorContentRuleListStoreVersionMismatch  Indicates that the WKUserContentRuleList version did not match the latest.
+ @constant WKErrorAttributedStringContentFailedToLoad  Indicates that the attributed string content failed to load.
+ @constant WKErrorAttributedStringContentLoadTimedOut  Indicates that loading attributed string content timed out.
+ @constant WKErrorNavigationAppBoundDomain  Indicates that a navigation failed due to an app-bound domain restriction.
+ @constant WKErrorJavaScriptAppBoundDomain  Indicates that JavaScript execution failed due to an app-bound domain restriction.
  */
 typedef NS_ENUM(NSInteger, WKErrorCode) {
     WKErrorUnknown = 1,
     WKErrorWebContentProcessTerminated,
     WKErrorWebViewInvalidated,
     WKErrorJavaScriptExceptionOccurred,
-    WKErrorJavaScriptResultTypeIsUnsupported WK_API_AVAILABLE(macosx(10.11), ios(9.0)),
-    WKErrorContentRuleListStoreCompileFailed WK_API_AVAILABLE(macosx(10.13), ios(11.0)),
-    WKErrorContentRuleListStoreLookUpFailed WK_API_AVAILABLE(macosx(10.13), ios(11.0)),
-    WKErrorContentRuleListStoreRemoveFailed WK_API_AVAILABLE(macosx(10.13), ios(11.0)),
-    WKErrorContentRuleListStoreVersionMismatch WK_API_AVAILABLE(macosx(10.13), ios(11.0)),
-} WK_API_AVAILABLE(macosx(10.10), ios(8.0));
+    WKErrorJavaScriptResultTypeIsUnsupported WK_API_AVAILABLE(macos(10.11), ios(9.0)),
+    WKErrorContentRuleListStoreCompileFailed WK_API_AVAILABLE(macos(10.13), ios(11.0)),
+    WKErrorContentRuleListStoreLookUpFailed WK_API_AVAILABLE(macos(10.13), ios(11.0)),
+    WKErrorContentRuleListStoreRemoveFailed WK_API_AVAILABLE(macos(10.13), ios(11.0)),
+    WKErrorContentRuleListStoreVersionMismatch WK_API_AVAILABLE(macos(10.13), ios(11.0)),
+    WKErrorAttributedStringContentFailedToLoad WK_API_AVAILABLE(macos(10.15), ios(13.0)),
+    WKErrorAttributedStringContentLoadTimedOut WK_API_AVAILABLE(macos(10.15), ios(13.0)),
+    WKErrorJavaScriptInvalidFrameTarget WK_API_AVAILABLE(macos(11.0), ios(14.0)),
+    WKErrorNavigationAppBoundDomain WK_API_AVAILABLE(macos(11.0), ios(14.0)),
+    WKErrorJavaScriptAppBoundDomain WK_API_AVAILABLE(macos(11.0), ios(14.0)),
+    WKErrorDuplicateCredential WK_API_AVAILABLE(macos(13.0), ios(16.0)),
+    WKErrorMalformedCredential WK_API_AVAILABLE(macos(13.0), ios(16.0)),
+    WKErrorCredentialNotFound WK_API_AVAILABLE(macos(13.0), ios(16.0)),
+} WK_API_AVAILABLE(macos(10.10), ios(8.0));
 
 NS_ASSUME_NONNULL_END
-
-#endif

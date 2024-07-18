@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 Google Inc. All rights reserved.
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -37,29 +38,26 @@ namespace WebCore {
 class SliderThumbElement;
 
 class RangeInputType final : public InputType {
+    template<typename DowncastedType> friend bool isInvalidInputType(const InputType&, const String&);
 public:
     explicit RangeInputType(HTMLInputElement&);
+    bool typeMismatchFor(const String&) const final;
 
 private:
-    bool isRangeControl() const final;
-    const AtomicString& formControlType() const final;
+    const AtomString& formControlType() const final;
     double valueAsDouble() const final;
     ExceptionOr<void> setValueAsDecimal(const Decimal&, TextFieldEventBehavior) const final;
-    bool typeMismatchFor(const String&) const final;
     bool supportsRequired() const final;
     StepRange createStepRange(AnyStepHandling) const final;
-    bool isSteppable() const final;
-#if !PLATFORM(IOS)
     void handleMouseDownEvent(MouseEvent&) final;
-#endif
-    void handleKeydownEvent(KeyboardEvent&) final;
+    ShouldCallBaseEventHandler handleKeydownEvent(KeyboardEvent&) final;
     RenderPtr<RenderElement> createInputRenderer(RenderStyle&&) final;
     void createShadowSubtree() final;
     Decimal parseToNumber(const String&, const Decimal&) const final;
     String serialize(const Decimal&) const final;
-    void accessKeyAction(bool sendMouseEvents) final;
-    void minOrMaxAttributeChanged() final;
-    void setValue(const String&, bool valueChanged, TextFieldEventBehavior) final;
+    bool accessKeyAction(bool sendMouseEvents) final;
+    void attributeChanged(const QualifiedName&) final;
+    void setValue(const String&, bool valueChanged, TextFieldEventBehavior, TextControlSetValueSelection) final;
     String fallbackValue() const final;
     String sanitizeValue(const String& proposedValue) const final;
     bool shouldRespectListAttribute() final;
@@ -69,7 +67,7 @@ private:
     SliderThumbElement& typedSliderThumbElement() const;
 
 #if ENABLE(DATALIST_ELEMENT)
-    void listAttributeTargetChanged() final;
+    void dataListMayHaveChanged() final;
     void updateTickMarkValues();
     std::optional<Decimal> findClosestTickMarkValue(const Decimal&) final;
 
@@ -81,11 +79,13 @@ private:
     void handleTouchEvent(TouchEvent&) final;
 #endif
 
-    void disabledAttributeChanged() final;
+    void disabledStateChanged() final;
 
-#if ENABLE(TOUCH_EVENTS) && !PLATFORM(IOS) && ENABLE(TOUCH_SLIDER)
+#if ENABLE(TOUCH_EVENTS) && !PLATFORM(IOS_FAMILY) && ENABLE(TOUCH_SLIDER)
     bool hasTouchEventHandler() const final;
 #endif
 };
 
 } // namespace WebCore
+
+SPECIALIZE_TYPE_TRAITS_INPUT_TYPE(RangeInputType, Type::Range)

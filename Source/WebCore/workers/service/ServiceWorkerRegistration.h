@@ -30,51 +30,104 @@
 #include "ActiveDOMObject.h"
 #include "EventTarget.h"
 #include "JSDOMPromiseDeferred.h"
+#include "Notification.h"
+#include "NotificationOptions.h"
+#include "PushPermissionState.h"
+#include "PushSubscription.h"
+#include "SWClientConnection.h"
 #include "ServiceWorkerRegistrationData.h"
+#include "Supplementable.h"
+#include "Timer.h"
+#include <wtf/ListHashSet.h>
+#include <wtf/Vector.h>
+#include <wtf/WeakHashSet.h>
 
 namespace WebCore {
 
+class DeferredPromise;
+class NavigationPreloadManager;
 class ScriptExecutionContext;
 class ServiceWorker;
+class ServiceWorkerContainer;
+class WebCoreOpaqueRoot;
 
-class ServiceWorkerRegistration final : public EventTargetWithInlineData, public ActiveDOMObject {
+class ServiceWorkerRegistration final : public RefCounted<ServiceWorkerRegistration>, public Supplementable<ServiceWorkerRegistration>, public EventTargetWithInlineData, public ActiveDOMObject {
+    WTF_MAKE_ISO_ALLOCATED_EXPORT(ServiceWorkerRegistration, WEBCORE_EXPORT);
 public:
-    enum class UpdateViaCache {
-        Imports,
-        All,
-        None,
-    };
+    static Ref<ServiceWorkerRegistration> getOrCreate(ScriptExecutionContext&, Ref<ServiceWorkerContainer>&&, ServiceWorkerRegistrationData&&);
 
-    static Ref<ServiceWorkerRegistration> create(ScriptExecutionContext& context, const ServiceWorkerRegistrationData& data)
-    {
-        return adoptRef(*new ServiceWorkerRegistration(context, data));
-    }
+    WEBCORE_EXPORT ~ServiceWorkerRegistration();
 
-    virtual ~ServiceWorkerRegistration() = default;
+    ServiceWorkerRegistrationIdentifier identifier() const { return m_registrationData.identifier; }
 
     ServiceWorker* installing();
     ServiceWorker* waiting();
     ServiceWorker* active();
 
+    ServiceWorker* getNewestWorker() const;
+
     const String& scope() const;
-    UpdateViaCache updateViaCache() const;
+
+    ServiceWorkerUpdateViaCache updateViaCache() const;
+    void setUpdateViaCache(ServiceWorkerUpdateViaCache);
+
+    WallTime lastUpdateTime() const;
+    void setLastUpdateTime(WallTime);
+
+    bool needsUpdate() const { return lastUpdateTime() && (WallTime::now() - lastUpdateTime()) > 86400_s; }
 
     void update(Ref<DeferredPromise>&&);
     void unregister(Ref<DeferredPromise>&&);
 
-private:
-    ServiceWorkerRegistration(ScriptExecutionContext&, const ServiceWorkerRegistrationData&);
+    void subscribeToPushService(const Vector<uint8_t>& applicationServerKey, DOMPromiseDeferred<IDLInterface<PushSubscription>>&&);
+    void unsubscribeFromPushService(PushSubscriptionIdentifier, DOMPromiseDeferred<IDLBoolean>&&);
+    void getPushSubscription(DOMPromiseDeferred<IDLNullable<IDLInterface<PushSubscription>>>&&);
+    void getPushPermissionState(DOMPromiseDeferred<IDLEnumeration<PushPermissionState>>&&);
 
-    virtual EventTargetInterface eventTargetInterface() const;
-    virtual ScriptExecutionContext* scriptExecutionContext() const;
+    using RefCounted::ref;
+    using RefCounted::deref;
+    
+    const ServiceWorkerRegistrationData& data() const { return m_registrationData; }
+
+    void updateStateFromServer(ServiceWorkerRegistrationState, RefPtr<ServiceWorker>&&);
+    void queueTaskToFireUpdateFoundEvent();
+
+    NavigationPreloadManager& navigationPreload();
+    ServiceWorkerContainer& container() { return m_container.get(); }
+
+#if ENABLE(NOTIFICATION_EVENT)
+    struct GetNotificationOptions {
+        String tag;
+    };
+
+    void showNotification(ScriptExecutionContext&, String&& title, NotificationOptions&&, Ref<DeferredPromise>&&);
+    void getNotifications(const GetNotificationOptions& filter, DOMPromiseDeferred<IDLSequence<IDLInterface<Notification>>>);
+#endif
+
+private:
+    ServiceWorkerRegistration(ScriptExecutionContext&, Ref<ServiceWorkerContainer>&&, ServiceWorkerRegistrationData&&);
+
+    EventTargetInterface eventTargetInterface() const final;
+    ScriptExecutionContext* scriptExecutionContext() const final;
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
 
-    const char* activeDOMObjectName() const { return "ServiceWorkerRegistration"; }
-    bool canSuspendForDocumentSuspension() const { return false; }
+    // ActiveDOMObject.
+    const char* activeDOMObjectName() const final;
+    void stop() final;
+    bool virtualHasPendingActivity() const final;
 
     ServiceWorkerRegistrationData m_registrationData;
+    Ref<ServiceWorkerContainer> m_container;
+
+    RefPtr<ServiceWorker> m_installingWorker;
+    RefPtr<ServiceWorker> m_waitingWorker;
+    RefPtr<ServiceWorker> m_activeWorker;
+
+    std::unique_ptr<NavigationPreloadManager> m_navigationPreload;
 };
+
+WebCoreOpaqueRoot root(ServiceWorkerRegistration*);
 
 } // namespace WebCore
 

@@ -32,11 +32,12 @@
 
 #pragma once
 
-#include <wtf/EnumTraits.h>
+#include <optional>
+#include <wtf/Forward.h>
 
 namespace WebCore {
 
-enum class ReferrerPolicy {
+enum class ReferrerPolicy : uint8_t {
     EmptyString,
     NoReferrer,
     NoReferrerWhenDowngrade,
@@ -45,8 +46,13 @@ enum class ReferrerPolicy {
     StrictOrigin,
     OriginWhenCrossOrigin,
     StrictOriginWhenCrossOrigin,
-    UnsafeUrl
+    UnsafeUrl,
+    Default = StrictOriginWhenCrossOrigin
 };
+
+enum class ReferrerPolicySource : uint8_t { MetaTag, HTTPHeader, ReferrerPolicyAttribute };
+std::optional<ReferrerPolicy> parseReferrerPolicy(StringView, ReferrerPolicySource);
+String referrerPolicyToString(const ReferrerPolicy&);
 
 }
 

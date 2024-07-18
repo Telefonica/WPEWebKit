@@ -35,16 +35,19 @@ namespace WTF {
 // read().unlock() if the work inside the critical section is short. The more cores participate in reading,
 // the longer the read critical section has to be for this locking scheme to be profitable.
 
-struct ReadWriteLockBase {
-    WTF_EXPORT_PRIVATE void construct();
-    
+class ReadWriteLock {
+    WTF_MAKE_NONCOPYABLE(ReadWriteLock);
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    ReadWriteLock() = default;
+
     // It's easiest to read lock like this:
     // 
-    //     auto locker = holdLock(rwLock.read());
+    //     Locker locker { rwLock.read() };
     //
     // It's easiest to write lock like this:
     // 
-    //     auto locker = holdLock(rwLock.write());
+    //     Locker locker { rwLock.write() };
     //
     WTF_EXPORT_PRIVATE void readLock();
     WTF_EXPORT_PRIVATE void readUnlock();
@@ -58,43 +61,30 @@ struct ReadWriteLockBase {
     WriteLock& write();
 
 private:
-    // These fields must work when zero-filled, so that StaticReadWriteLock works.
-    LockBase m_lock;
-    ConditionBase m_cond;
-    bool m_isWriteLocked;
-    unsigned m_numReaders;
-    unsigned m_numWaitingWriters;
+    Lock m_lock;
+    Condition m_cond;
+    bool m_isWriteLocked WTF_GUARDED_BY_LOCK(m_lock) { false };
+    unsigned m_numReaders WTF_GUARDED_BY_LOCK(m_lock) { 0 };
+    unsigned m_numWaitingWriters WTF_GUARDED_BY_LOCK(m_lock) { 0 };
 };
 
-class ReadWriteLockBase::ReadLock : public ReadWriteLockBase {
+class ReadWriteLock::ReadLock : public ReadWriteLock {
 public:
     bool tryLock() { return false; }
     void lock() { readLock(); }
     void unlock() { readUnlock(); }
 };
 
-class ReadWriteLockBase::WriteLock : public ReadWriteLockBase {
+class ReadWriteLock::WriteLock : public ReadWriteLock {
 public:
     bool tryLock() { return false; }
     void lock() { writeLock(); }
     void unlock() { writeUnlock(); }
 };
     
-inline ReadWriteLockBase::ReadLock& ReadWriteLockBase::read() { return *static_cast<ReadLock*>(this); }
-inline ReadWriteLockBase::WriteLock& ReadWriteLockBase::write() { return *static_cast<WriteLock*>(this); }
-
-class ReadWriteLock : public ReadWriteLockBase {
-public:
-    ReadWriteLock()
-    {
-        construct();
-    }
-};
-
-typedef ReadWriteLockBase StaticReadWriteLock;
+inline ReadWriteLock::ReadLock& ReadWriteLock::read() { return *static_cast<ReadLock*>(this); }
+inline ReadWriteLock::WriteLock& ReadWriteLock::write() { return *static_cast<WriteLock*>(this); }
 
 } // namespace WTF
 
 using WTF::ReadWriteLock;
-using WTF::StaticReadWriteLock;
-

@@ -28,21 +28,104 @@
 
 #if ENABLE(SERVICE_WORKER)
 
+#include "Document.h"
+#include "EventNames.h"
+#include "Logging.h"
+#include "MessagePort.h"
+#include "SWClientConnection.h"
+#include "ScriptExecutionContext.h"
+#include "SerializedScriptValue.h"
+#include "ServiceWorkerClientData.h"
+#include "ServiceWorkerContainer.h"
+#include "ServiceWorkerGlobalScope.h"
+#include "ServiceWorkerProvider.h"
+#include "ServiceWorkerThread.h"
+#include "StructuredSerializeOptions.h"
+#include "WorkerSWClientConnection.h"
+#include <JavaScriptCore/JSCJSValueInlines.h>
+#include <wtf/IsoMallocInlines.h>
+#include <wtf/NeverDestroyed.h>
+
+#define WORKER_RELEASE_LOG(fmt, ...) RELEASE_LOG(ServiceWorker, "%p - ServiceWorker::" fmt, this, ##__VA_ARGS__)
+#define WORKER_RELEASE_LOG_ERROR(fmt, ...) RELEASE_LOG_ERROR(ServiceWorker, "%p - ServiceWorker::" fmt, this, ##__VA_ARGS__)
+
 namespace WebCore {
 
-ExceptionOr<void> ServiceWorker::postMessage(JSC::ExecState&, JSC::JSValue, Vector<JSC::Strong<JSC::JSObject>>&&)
+WTF_MAKE_ISO_ALLOCATED_IMPL(ServiceWorker);
+
+Ref<ServiceWorker> ServiceWorker::getOrCreate(ScriptExecutionContext& context, ServiceWorkerData&& data)
 {
+    if (auto existingServiceWorker = context.serviceWorker(data.identifier))
+        return *existingServiceWorker;
+    auto serviceWorker = adoptRef(*new ServiceWorker(context, WTFMove(data)));
+    serviceWorker->suspendIfNeeded();
+    return serviceWorker;
+}
+
+ServiceWorker::ServiceWorker(ScriptExecutionContext& context, ServiceWorkerData&& data)
+    : ActiveDOMObject(&context)
+    , m_data(WTFMove(data))
+{
+    context.registerServiceWorker(*this);
+
+    relaxAdoptionRequirement();
+    updatePendingActivityForEventDispatch();
+
+    WORKER_RELEASE_LOG("serviceWorkerID=%llu, state=%hhu", identifier().toUInt64(), m_data.state);
+}
+
+ServiceWorker::~ServiceWorker()
+{
+    if (auto* context = scriptExecutionContext())
+        context->unregisterServiceWorker(*this);
+}
+
+void ServiceWorker::updateState(State state)
+{
+    WORKER_RELEASE_LOG("updateState: Updating service worker %llu state from %hhu to %hhu. registrationID=%llu", identifier().toUInt64(), m_data.state, state, registrationIdentifier().toUInt64());
+    m_data.state = state;
+    if (state != State::Installing && !m_isStopped) {
+        ASSERT(m_pendingActivityForEventDispatch);
+        dispatchEvent(Event::create(eventNames().statechangeEvent, Event::CanBubble::No, Event::IsCancelable::No));
+    }
+
+    updatePendingActivityForEventDispatch();
+}
+
+SWClientConnection& ServiceWorker::swConnection()
+{
+    ASSERT(scriptExecutionContext());
+    if (is<WorkerGlobalScope>(scriptExecutionContext()))
+        return downcast<WorkerGlobalScope>(scriptExecutionContext())->swClientConnection();
+    return ServiceWorkerProvider::singleton().serviceWorkerConnection();
+}
+
+ExceptionOr<void> ServiceWorker::postMessage(JSC::JSGlobalObject& globalObject, JSC::JSValue messageValue, StructuredSerializeOptions&& options)
+{
+    if (m_isStopped)
+        return Exception { InvalidStateError };
+
+    Vector<RefPtr<MessagePort>> ports;
+    auto messageData = SerializedScriptValue::create(globalObject, messageValue, WTFMove(options.transfer), ports, SerializationContext::WorkerPostMessage);
+    if (messageData.hasException())
+        return messageData.releaseException();
+
+    // Disentangle the port in preparation for sending it to the remote context.
+    auto portsOrException = MessagePort::disentanglePorts(WTFMove(ports));
+    if (portsOrException.hasException())
+        return portsOrException.releaseException();
+
+    auto& context = *scriptExecutionContext();
+    // FIXME: Maybe we could use a ScriptExecutionContextIdentifier for service workers too.
+    ServiceWorkerOrClientIdentifier sourceIdentifier;
+    if (is<ServiceWorkerGlobalScope>(context))
+        sourceIdentifier = downcast<ServiceWorkerGlobalScope>(context).thread().identifier();
+    else
+        sourceIdentifier = context.identifier();
+
+    MessageWithMessagePorts message { messageData.releaseReturnValue(), portsOrException.releaseReturnValue() };
+    swConnection().postMessageToServiceWorker(identifier(), WTFMove(message), sourceIdentifier);
     return { };
-}
-
-const String& ServiceWorker::scriptURL() const
-{
-    return emptyString();
-}
-
-ServiceWorker::State ServiceWorker::state() const
-{
-    return State::Redundant;
 }
 
 EventTargetInterface ServiceWorker::eventTargetInterface() const
@@ -52,7 +135,32 @@ EventTargetInterface ServiceWorker::eventTargetInterface() const
 
 ScriptExecutionContext* ServiceWorker::scriptExecutionContext() const
 {
-    return nullptr;
+    return ContextDestructionObserver::scriptExecutionContext();
+}
+
+const char* ServiceWorker::activeDOMObjectName() const
+{
+    return "ServiceWorker";
+}
+
+void ServiceWorker::stop()
+{
+    m_isStopped = true;
+    removeAllEventListeners();
+    scriptExecutionContext()->unregisterServiceWorker(*this);
+    updatePendingActivityForEventDispatch();
+}
+
+void ServiceWorker::updatePendingActivityForEventDispatch()
+{
+    // ServiceWorkers can dispatch events until they become redundant or they are stopped.
+    if (m_isStopped || state() == State::Redundant) {
+        m_pendingActivityForEventDispatch = nullptr;
+        return;
+    }
+    if (m_pendingActivityForEventDispatch)
+        return;
+    m_pendingActivityForEventDispatch = makePendingActivity(*this);
 }
 
 } // namespace WebCore

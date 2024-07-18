@@ -1,5 +1,6 @@
 /*
  * Copyright (C) Research In Motion Limited 2009-2010. All rights reserved.
+ * Copyright (C) 2022 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,18 +26,20 @@
 #include "FloatPoint.h"
 #include "Image.h"
 #include "IntRect.h"
+#include "RenderSVGResourceMaskerInlines.h"
 #include "SVGRenderingContext.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderSVGResourceMasker);
 
 RenderSVGResourceMasker::RenderSVGResourceMasker(SVGMaskElement& element, RenderStyle&& style)
     : RenderSVGResourceContainer(element, WTFMove(style))
 {
 }
 
-RenderSVGResourceMasker::~RenderSVGResourceMasker()
-{
-}
+RenderSVGResourceMasker::~RenderSVGResourceMasker() = default;
 
 void RenderSVGResourceMasker::removeAllClientsFromCache(bool markForInvalidation)
 {
@@ -56,36 +59,52 @@ void RenderSVGResourceMasker::removeClientFromCache(RenderElement& client, bool 
 bool RenderSVGResourceMasker::applyResource(RenderElement& renderer, const RenderStyle&, GraphicsContext*& context, OptionSet<RenderSVGResourceMode> resourceMode)
 {
     ASSERT(context);
-    ASSERT_UNUSED(resourceMode, resourceMode == RenderSVGResourceMode::ApplyToDefault);
+    ASSERT_UNUSED(resourceMode, !resourceMode);
 
     bool missingMaskerData = !m_masker.contains(&renderer);
     if (missingMaskerData)
-        m_masker.set(&renderer, std::make_unique<MaskerData>());
+        m_masker.set(&renderer, makeUnique<MaskerData>());
 
     MaskerData* maskerData = m_masker.get(&renderer);
     AffineTransform absoluteTransform = SVGRenderingContext::calculateTransformationToOutermostCoordinateSystem(renderer);
     FloatRect repaintRect = renderer.repaintRectInLocalCoordinates();
 
+    // Ignore 2D rotation, as it doesn't affect the size of the mask.
+    FloatSize scale(absoluteTransform.xScale(), absoluteTransform.yScale());
+
+    // Determine scale factor for the mask. The size of intermediate ImageBuffers shouldn't be bigger than kMaxFilterSize.
+    ImageBuffer::sizeNeedsClamping(repaintRect.size(), scale);
+
     if (!maskerData->maskImage && !repaintRect.isEmpty()) {
+        auto maskColorSpace = DestinationColorSpace::SRGB();
+        auto drawColorSpace = DestinationColorSpace::SRGB();
+
+#if ENABLE(DESTINATION_COLOR_SPACE_LINEAR_SRGB)
         const SVGRenderStyle& svgStyle = style().svgStyle();
-        ColorSpace colorSpace = svgStyle.colorInterpolation() == CI_LINEARRGB ? ColorSpaceLinearRGB : ColorSpaceSRGB;
+        if (svgStyle.colorInterpolation() == ColorInterpolation::LinearRGB) {
+#if USE(CG)
+            maskColorSpace = DestinationColorSpace::LinearSRGB();
+#endif      
+            drawColorSpace = DestinationColorSpace::LinearSRGB();
+        }
+#endif
         // FIXME (149470): This image buffer should not be unconditionally unaccelerated. Making it match the context breaks alpha masking, though.
-        maskerData->maskImage = SVGRenderingContext::createImageBuffer(repaintRect, absoluteTransform, colorSpace, Unaccelerated);
+        maskerData->maskImage = context->createScaledImageBuffer(repaintRect, scale, maskColorSpace, RenderingMode::Unaccelerated);
         if (!maskerData->maskImage)
             return false;
 
-        if (!drawContentIntoMaskImage(maskerData, colorSpace, &renderer))
-            maskerData->maskImage.reset();
+        if (!drawContentIntoMaskImage(maskerData, drawColorSpace, &renderer))
+            maskerData->maskImage = nullptr;
     }
 
     if (!maskerData->maskImage)
         return false;
 
-    SVGRenderingContext::clipToImageBuffer(*context, absoluteTransform, repaintRect, maskerData->maskImage, missingMaskerData);
+    SVGRenderingContext::clipToImageBuffer(*context, repaintRect, scale, maskerData->maskImage, missingMaskerData);
     return true;
 }
 
-bool RenderSVGResourceMasker::drawContentIntoMaskImage(MaskerData* maskerData, ColorSpace colorSpace, RenderObject* object)
+bool RenderSVGResourceMasker::drawContentIntoMaskImage(MaskerData* maskerData, const DestinationColorSpace& colorSpace, RenderObject* object)
 {
     GraphicsContext& maskImageContext = maskerData->maskImage->context();
 
@@ -106,19 +125,19 @@ bool RenderSVGResourceMasker::drawContentIntoMaskImage(MaskerData* maskerData, C
         if (renderer->needsLayout())
             return false;
         const RenderStyle& style = renderer->style();
-        if (style.display() == NONE || style.visibility() != VISIBLE)
+        if (style.display() == DisplayType::None || style.visibility() != Visibility::Visible)
             continue;
-        SVGRenderingContext::renderSubtreeToImageBuffer(maskerData->maskImage.get(), *renderer, maskContentTransformation);
+        SVGRenderingContext::renderSubtreeToContext(maskImageContext, *renderer, maskContentTransformation);
     }
 
 #if !USE(CG)
-    maskerData->maskImage->transformColorSpace(ColorSpaceDeviceRGB, colorSpace);
+    maskerData->maskImage->transformToColorSpace(colorSpace);
 #else
     UNUSED_PARAM(colorSpace);
 #endif
 
     // Create the luminance mask.
-    if (style().svgStyle().maskType() == MT_LUMINANCE)
+    if (style().svgStyle().maskType() == MaskType::Luminance)
         maskerData->maskImage->convertToLuminanceMask();
 
     return true;
@@ -131,7 +150,7 @@ void RenderSVGResourceMasker::calculateMaskContentRepaintRect()
         if (!childNode->isSVGElement() || !renderer)
             continue;
         const RenderStyle& style = renderer->style();
-        if (style.display() == NONE || style.visibility() != VISIBLE)
+        if (style.display() == DisplayType::None || style.visibility() != Visibility::Visible)
              continue;
         m_maskContentBoundaries.unite(renderer->localToParentTransform().mapRect(renderer->repaintRectInLocalCoordinates()));
     }

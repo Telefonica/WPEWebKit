@@ -31,61 +31,296 @@ WI.SpreadsheetCSSStyleDeclarationSection = class SpreadsheetCSSStyleDeclarationS
 
         let element = document.createElement("section");
         element.classList.add("spreadsheet-css-declaration");
+
         super(element);
 
         this._delegate = delegate || null;
         this._style = style;
+        this._propertiesEditor = null;
         this._selectorElements = [];
+        this._groupingElements = [];
+        this._filterText = null;
+        this._shouldFocusSelectorElement = false;
+        this._wasEditing = false;
+
+        this._isMousePressed = false;
+        this._mouseDownIndex = NaN;
+        this._mouseDownPoint = null;
+        this._boundHandleWindowMouseMove = null;
     }
 
     // Public
 
     get style() { return this._style; }
 
+    get editable()
+    {
+        return this._style.editable;
+    }
+
+    set propertyVisibilityMode(propertyVisibilityMode)
+    {
+        this._propertiesEditor.propertyVisibilityMode = propertyVisibilityMode;
+    }
+
     initialLayout()
     {
         super.initialLayout();
 
-        this._headerElement = document.createElement("span");
+        let iconClassName = null;
+        switch (this._style.type) {
+        case WI.CSSStyleDeclaration.Type.Rule:
+            console.assert(this._style.ownerRule);
+            if (this._style.inherited) {
+                iconClassName = "inherited-style-rule-icon";
+                break;
+            }
+
+            switch (this._style.ownerRule.type) {
+            case WI.CSSStyleSheet.Type.Author:
+                iconClassName = "author-style-rule-icon";
+                break;
+            case WI.CSSStyleSheet.Type.User:
+                iconClassName = "user-style-rule-icon";
+                break;
+            case WI.CSSStyleSheet.Type.UserAgent:
+                iconClassName = "user-agent-style-rule-icon";
+                break;
+            case WI.CSSStyleSheet.Type.Inspector:
+                iconClassName = "inspector-style-rule-icon";
+                break;
+            }
+            break;
+        case WI.CSSStyleDeclaration.Type.Inline:
+        case WI.CSSStyleDeclaration.Type.Attribute:
+            if (this._style.inherited)
+                iconClassName = "inherited-element-style-rule-icon";
+            else
+                iconClassName = WI.DOMTreeElementPathComponent.DOMElementIconStyleClassName;
+            break;
+        }
+        console.assert(iconClassName);
+        this._element.classList.add("has-icon", iconClassName);
+
+        let groupings = this._style.groupings.filter((grouping) => !grouping.isMedia || grouping.text !== "all").reverse();
+        if (groupings.length) {
+            let groupingsElement = this.element.appendChild(document.createElement("div"));
+            groupingsElement.classList.add("header-groupings");
+
+            let currentGroupingType = null;
+            let currentGroupingHadText = false;
+            let groupingTypeElement = null;
+            this._groupingElements = groupings.map((grouping) => {
+                if (grouping.type !== currentGroupingType || !grouping.text || !currentGroupingHadText) {
+                    groupingTypeElement = groupingsElement.appendChild(document.createElement("div"));
+                    groupingTypeElement.classList.add("grouping");
+                    groupingTypeElement.textContent = grouping.prefix + " ";
+                    currentGroupingType = grouping.type;
+                } else
+                    groupingTypeElement.append(grouping.isLayer && grouping.text ? "." : ", ");
+
+                currentGroupingHadText = !!grouping.text;
+                let span = groupingTypeElement.appendChild(document.createElement("span"));
+                span.textContent = grouping.text ?? "";
+                return span;
+            });
+        }
+
+        this._headerElement = this._element.appendChild(document.createElement("div"));
         this._headerElement.classList.add("header");
 
-        this._originElement = document.createElement("span");
-        this._originElement.classList.add("origin");
-        this._headerElement.append(this._originElement);
+        this._styleOriginView = new WI.StyleOriginView();
+        this._headerElement.append(this._styleOriginView.element);
 
         this._selectorElement = document.createElement("span");
         this._selectorElement.classList.add("selector");
+        this._selectorElement.addEventListener("mouseenter", this._highlightNodesWithSelector.bind(this));
+        this._selectorElement.addEventListener("mouseleave", this._hideDOMNodeHighlight.bind(this));
         this._headerElement.append(this._selectorElement);
+
+        this._openBrace = document.createElement("span");
+        this._openBrace.classList.add("open-brace");
+        this._openBrace.textContent = " {";
+        this._headerElement.append(this._openBrace);
+
+        if (this._style.selectorEditable) {
+            this._selectorTextField = new WI.SpreadsheetSelectorField(this, this._selectorElement);
+            this._selectorTextField.addEventListener(WI.SpreadsheetSelectorField.Event.StartedEditing, function(event) {
+                this._headerElement.classList.add("editing-selector");
+            }, this);
+            this._selectorTextField.addEventListener(WI.SpreadsheetSelectorField.Event.StoppedEditing, function(event) {
+                this._headerElement.classList.remove("editing-selector");
+            }, this);
+
+            this._selectorElement.tabIndex = 0;
+        }
 
         this._propertiesEditor = new WI.SpreadsheetCSSStyleDeclarationEditor(this, this._style);
         this._propertiesEditor.element.classList.add("properties");
+        this._propertiesEditor.addEventListener(WI.SpreadsheetCSSStyleDeclarationEditor.Event.FilterApplied, this._handleEditorFilterApplied, this);
 
-        let openBrace = document.createElement("span");
-        openBrace.classList.add("open-brace");
-        openBrace.textContent = " {";
+        this._closeBrace = document.createElement("span");
+        this._closeBrace.classList.add("close-brace");
+        this._closeBrace.textContent = "}";
 
-        let closeBrace = document.createElement("span");
-        closeBrace.classList.add("close-brace");
-        closeBrace.textContent = "}";
 
-        this._element.append(this._createMediaHeader(), this._headerElement, openBrace);
         this.addSubview(this._propertiesEditor);
         this._propertiesEditor.needsLayout();
-        this._element.append(closeBrace);
+        this._element.append(this._closeBrace);
 
         if (!this._style.editable)
             this._element.classList.add("locked");
         else if (!this._style.ownerRule)
             this._element.classList.add("selector-locked");
+
+        this.element.addEventListener("mousedown", this._handleMouseDown.bind(this));
+
+        if (this._style.editable) {
+            this.element.addEventListener("click", this._handleClick.bind(this));
+
+            if (WI.FileUtilities.canSave(WI.FileUtilities.SaveMode.SingleFile)) {
+                new WI.KeyboardShortcut(WI.KeyboardShortcut.Modifier.CommandOrControl, "S", this._save.bind(this), this._element);
+                new WI.KeyboardShortcut(WI.KeyboardShortcut.Modifier.CommandOrControl | WI.KeyboardShortcut.Modifier.Shift, "S", this._save.bind(this), this._element);
+            }
+        }
     }
 
     layout()
     {
         super.layout();
 
-        this._selectorElement.removeChildren();
-        this._originElement.removeChildren();
+        this._styleOriginView.update(this._style);
+        this._renderSelector();
 
+        if (this._shouldFocusSelectorElement)
+            this.startEditingRuleSelector();
+    }
+
+    startEditingRuleSelector()
+    {
+        if (!this._selectorElement) {
+            this._shouldFocusSelectorElement = true;
+            return;
+        }
+
+        this._shouldFocusSelectorElement = false;
+
+        if (this._style.selectorEditable)
+            this._selectorTextField.startEditing();
+        else
+            this._propertiesEditor.startEditingFirstProperty();
+    }
+
+    highlightProperty(property)
+    {
+        // When navigating from the Computed panel to the Styles panel, the latter
+        // could be empty. Layout all properties so they can be highlighted.
+        if (!this.didInitialLayout)
+            this.updateLayout();
+
+        if (this._propertiesEditor.highlightProperty(property)) {
+            this._element.scrollIntoView();
+            return true;
+        }
+
+        return false;
+    }
+
+    // SpreadsheetSelectorField delegate
+
+    spreadsheetSelectorFieldDidCommit(changed)
+    {
+        let selectorText = this._selectorElement.textContent.trim();
+        if (selectorText && changed) {
+            this.dispatchEventToListeners(WI.SpreadsheetCSSStyleDeclarationSection.Event.SelectorWillChange);
+            this._style.ownerRule.setSelectorText(selectorText).finally(this._renderSelector.bind(this));
+        } else
+            this._discardSelectorChange();
+    }
+
+    spreadsheetSelectorFieldWillNavigate(direction)
+    {
+        console.assert(direction);
+        if (direction === "forward")
+            this._propertiesEditor.startEditingFirstProperty();
+        else if (direction === "backward") {
+            if (this._delegate.spreadsheetCSSStyleDeclarationSectionStartEditingAdjacentRule) {
+                const delta = -1;
+                this._delegate.spreadsheetCSSStyleDeclarationSectionStartEditingAdjacentRule(this, delta);
+            } else
+                this._propertiesEditor.startEditingLastProperty();
+        }
+    }
+
+    spreadsheetSelectorFieldDidDiscard()
+    {
+        this._discardSelectorChange();
+    }
+
+    // SpreadsheetCSSStyleDeclarationEditor delegate
+
+    spreadsheetCSSStyleDeclarationEditorStartEditingRuleSelector()
+    {
+        this.startEditingRuleSelector();
+    }
+
+    spreadsheetCSSStyleDeclarationEditorStartEditingAdjacentRule(propertiesEditor, delta)
+    {
+        if (!this._delegate)
+            return;
+
+        if (this._delegate.spreadsheetCSSStyleDeclarationSectionStartEditingAdjacentRule)
+            this._delegate.spreadsheetCSSStyleDeclarationSectionStartEditingAdjacentRule(this, delta);
+    }
+
+    spreadsheetCSSStyleDeclarationEditorPropertyBlur(event, property)
+    {
+        if (!this._isMousePressed)
+            this._propertiesEditor.deselectProperties();
+    }
+
+    spreadsheetCSSStyleDeclarationEditorPropertyMouseEnter(event, property)
+    {
+        if (this._isMousePressed) {
+            let index = parseInt(property.element.dataset.propertyIndex);
+            this._propertiesEditor.selectProperties(this._mouseDownIndex, index);
+        }
+    }
+
+    spreadsheetCSSStyleDeclarationEditorSelectProperty(property)
+    {
+        if (this._delegate && this._delegate.spreadsheetCSSStyleDeclarationSectionSelectProperty)
+            this._delegate.spreadsheetCSSStyleDeclarationSectionSelectProperty(property);
+    }
+
+    spreadsheetCSSStyleDeclarationEditorSetAllPropertyVisibilityMode(editor, propertyVisibilityMode)
+    {
+        this._delegate?.spreadsheetCSSStyleDeclarationSectionSetAllPropertyVisibilityMode?.(this, propertyVisibilityMode);
+    }
+
+    applyFilter(filterText)
+    {
+        this._filterText = filterText;
+
+        if (!this.didInitialLayout)
+            return;
+
+        this._element.classList.remove(WI.GeneralStyleDetailsSidebarPanel.NoFilterMatchInSectionClassName);
+
+        this._propertiesEditor.applyFilter(this._filterText);
+    }
+
+    // Private
+
+    _discardSelectorChange()
+    {
+        // Re-render selector for syntax highlighting.
+        this._renderSelector();
+    }
+
+    _renderSelector()
+    {
+        this._selectorElement.removeChildren();
         this._selectorElements = [];
 
         let appendSelector = (selector, matched) => {
@@ -97,8 +332,8 @@ WI.SpreadsheetCSSStyleDeclarationSection = class SpreadsheetCSSStyleDeclarationS
             if (matched)
                 selectorElement.classList.add(WI.SpreadsheetCSSStyleDeclarationSection.MatchedSelectorElementStyleClassName);
 
-            let specificity = selector.specificity.map((number) => number.toLocaleString());
-            if (specificity) {
+            if (selector.specificity) {
+                let specificity = selector.specificity.map((number) => number.toLocaleString());
                 let tooltip = WI.UIString("Specificity: (%d, %d, %d)").format(...specificity);
                 if (selector.dynamic) {
                     tooltip += "\n";
@@ -124,131 +359,346 @@ WI.SpreadsheetCSSStyleDeclarationSection = class SpreadsheetCSSStyleDeclarationS
             selectorElement.classList.add(WI.SpreadsheetCSSStyleDeclarationSection.MatchedSelectorElementStyleClassName);
         };
 
+        if (!this._iconElement) {
+            this._iconElement = document.createElement("img");
+            this._iconElement.classList.add("icon");
+            WI.addMouseDownContextMenuHandlers(this._iconElement, this._populateIconElementContextMenu.bind(this));
+        }
+        this._selectorElement.appendChild(this._iconElement);
+
         switch (this._style.type) {
         case WI.CSSStyleDeclaration.Type.Rule:
             console.assert(this._style.ownerRule);
 
-            let selectors = this._style.ownerRule.selectors;
-            let matchedSelectorIndices = this._style.ownerRule.matchedSelectorIndices;
-            let alwaysMatch = !matchedSelectorIndices.length;
+            var hasMatchingPseudoSelector = false;
+
+            var selectors = this._style.ownerRule.selectors;
             if (selectors.length) {
-                let hasMatchingPseudoElementSelector = false;
                 for (let i = 0; i < selectors.length; ++i) {
-                    appendSelector(selectors[i], alwaysMatch || matchedSelectorIndices.includes(i));
+                    let matched = this._style.ownerRule.matchedSelectorIndices.includes(i);
+                    if (matched && selectors[i].isPseudoSelector())
+                        hasMatchingPseudoSelector = true;
+
+                    appendSelector(selectors[i], matched);
                     if (i < selectors.length - 1)
                         this._selectorElement.append(", ");
-
-                    if (matchedSelectorIndices.includes(i) && selectors[i].isPseudoElementSelector())
-                        hasMatchingPseudoElementSelector = true;
                 }
-                this._element.classList.toggle("pseudo-element-selector", hasMatchingPseudoElementSelector);
             } else
                 appendSelectorTextKnownToMatch(this._style.ownerRule.selectorText);
 
-            if (this._style.ownerRule.sourceCodeLocation) {
-                let options = {
-                    dontFloat: true,
-                    ignoreNetworkTab: true,
-                    ignoreSearchTab: true,
-                };
-
-                if (this._style.ownerStyleSheet.isInspectorStyleSheet()) {
-                    options.nameStyle = WI.SourceCodeLocation.NameStyle.None;
-                    options.prefix = WI.UIString("Inspector Style Sheet") + ":";
-                }
-
-                let sourceCodeLink = WI.createSourceCodeLocationLink(this._style.ownerRule.sourceCodeLocation, options);
-                this._originElement.appendChild(sourceCodeLink);
-            } else {
-                let originString = "";
-
-                switch (this._style.ownerRule.type) {
-                case WI.CSSStyleSheet.Type.Author:
-                    originString = WI.UIString("Author Stylesheet");
-                    break;
-
-                case WI.CSSStyleSheet.Type.User:
-                    originString = WI.UIString("User Stylesheet");
-                    break;
-
-                case WI.CSSStyleSheet.Type.UserAgent:
-                    originString = WI.UIString("User Agent Stylesheet");
-                    break;
-
-                case WI.CSSStyleSheet.Type.Inspector:
-                    originString = WI.UIString("Web Inspector");
-                    break;
-                }
-
-                console.assert(originString);
-                if (originString)
-                    this._originElement.append(originString);
-
-                if (!this._style.editable) {
-                    let styleTitle = "";
-                    if (this._style.ownerRule && this._style.ownerRule.type === WI.CSSStyleSheet.Type.UserAgent)
-                        styleTitle = WI.UIString("User Agent Stylesheet");
-                    else
-                        styleTitle = WI.UIString("Style rule");
-
-                    this._originElement.title = WI.UIString("%s cannot be modified").format(styleTitle);
-                }
-            }
-
+            this._element.classList.toggle("pseudo-selector", hasMatchingPseudoSelector);
             break;
 
-        case WI.CSSStyleDeclaration.Type.Inline:
-            this._selectorElement.textContent = WI.UIString("Style Attribute");
+        case WI.CSSStyleDeclaration.Type.Inline: {
             this._selectorElement.classList.add("style-attribute");
+            let wrapper = this._selectorElement.appendChild(document.createElement("span"));
+            wrapper.textContent = WI.UIString("Style Attribute", "CSS properties defined via HTML style attribute");
             break;
+        }
 
         case WI.CSSStyleDeclaration.Type.Attribute:
             appendSelectorTextKnownToMatch(this._style.node.displayName);
-            this._originElement.append(WI.UIString("HTML Attributes"));
             break;
+        }
+
+        if (this._filterText)
+            this.applyFilter(this._filterText);
+    }
+
+    _save(event)
+    {
+        event.stop();
+
+        if (this._style.type !== WI.CSSStyleDeclaration.Type.Rule) {
+            // FIXME: Can't save CSS inside <style></style> <https://webkit.org/b/150357>
+            InspectorFrontendHost.beep();
+            return;
+        }
+
+        console.assert(this._style.ownerRule instanceof WI.CSSRule);
+        console.assert(this._style.ownerRule.sourceCodeLocation instanceof WI.SourceCodeLocation);
+
+        let sourceCode = this._style.ownerRule.sourceCodeLocation.sourceCode;
+        if (sourceCode.type !== WI.Resource.Type.StyleSheet) {
+            // FIXME: Can't save CSS inside style="" <https://webkit.org/b/150357>
+            InspectorFrontendHost.beep();
+            return;
+        }
+
+        let url;
+        if (sourceCode.urlComponents.scheme === "data") {
+            let mainResource = WI.networkManager.mainFrame.mainResource;
+            if (mainResource.urlComponents.lastPathComponent.endsWith(".html"))
+                url = mainResource.url.replace(/\.html$/, "-data.css");
+            else {
+                let pathDirectory = mainResource.url.slice(0, -mainResource.urlComponents.lastPathComponent.length);
+                url = pathDirectory + "data.css";
+            }
+        } else
+            url = sourceCode.url;
+
+        let forceSaveAs = event.shiftKey;
+        WI.FileUtilities.save(WI.FileUtilities.SaveMode.SingleFile, {url, content: sourceCode.content}, forceSaveAs);
+    }
+
+    _handleMouseDown(event)
+    {
+        if (event.button !== 0)
+            return;
+
+        this._wasEditing = this._propertiesEditor.editing || document.activeElement === this._selectorElement;
+
+        let propertyElement = event.target.closest(".property");
+        if (!propertyElement)
+            return;
+
+        this._isMousePressed = true;
+
+        // Disable text selection on mousemove.
+        event.preventDefault();
+
+        // Canceling mousedown event prevents blur event from firing on the previously focused element.
+        if (this._wasEditing && document.activeElement)
+            document.activeElement.blur();
+
+        // Prevent name/value fields from editing when properties selected.
+        window.addEventListener("click", this._handleWindowClick.bind(this), {capture: true, once: true});
+
+        let propertyIndex = parseInt(propertyElement.dataset.propertyIndex);
+        if (event.shiftKey && this._propertiesEditor.hasSelectedProperties())
+            this._propertiesEditor.extendSelectedProperties(propertyIndex);
+        else {
+            this._propertiesEditor.deselectProperties();
+            this._mouseDownPoint = WI.Point.fromEvent(event);
+            if (!this._boundHandleWindowMouseMove)
+                this._boundHandleWindowMouseMove = this._handleWindowMouseMove.bind(this);
+            window.addEventListener("mousemove", this._boundHandleWindowMouseMove);
+        }
+
+        if (propertyElement.parentNode) {
+            this._mouseDownIndex = propertyIndex;
+            this._element.classList.add("selecting");
+        } else
+            this._stopSelection();
+    }
+
+    _populateIconElementContextMenu(contextMenu)
+    {
+        contextMenu.appendItem(WI.UIString("Copy Rule"), () => {
+            InspectorFrontendHost.copyText(this._style.generateFormattedText({includeGroupingsAndSelectors: true, multiline: true}));
+        });
+
+        if (this._style.editable && this._style.properties.length) {
+            let shouldDisable = this._style.properties.some((property) => property.enabled);
+            contextMenu.appendItem(shouldDisable ? WI.UIString("Disable Rule") : WI.UIString("Enable Rule"), () => {
+                for (let property of this._style.properties)
+                    property.commentOut(shouldDisable);
+            });
+        }
+
+        if (!this._style.inherited && InspectorBackend.hasCommand("CSS.addRule")) {
+            let generateSelector = () => {
+                if (this._style.type === WI.CSSStyleDeclaration.Type.Attribute)
+                    return this._style.node.displayName;
+                return this._style.selectorText;
+            };
+
+            let createNewRule = (selector, text) => {
+                if (this._delegate && this._delegate.spreadsheetCSSStyleDeclarationSectionAddNewRule)
+                    this._delegate.spreadsheetCSSStyleDeclarationSectionAddNewRule(this, selector, text);
+                else
+                    this._style.nodeStyles.addRule(selector, text);
+            };
+
+            contextMenu.appendSeparator();
+
+            contextMenu.appendItem(WI.UIString("Duplicate Selector"), () => {
+                createNewRule(generateSelector());
+            });
+
+            if (!WI.CSSManager.PseudoElementNames.some((className) => this._style.selectorText.includes(":" + className))) {
+                let addPseudoRule = (pseudoSelector, text) => {
+                    let selector = null;
+                    if (this._style.ownerRule)
+                        selector = this._style.ownerRule.selectors.map((selector) => selector.text + pseudoSelector).join(", ");
+                    else
+                        selector = generateSelector() + pseudoSelector;
+                    createNewRule(selector, text);
+                };
+
+                if (WI.cssManager.canForcePseudoClass() && Object.values(WI.CSSManager.ForceablePseudoClass).every((className) => !this._style.selectorText.includes(":" + className))) {
+                    contextMenu.appendSeparator();
+
+                    for (let pseudoClass of Object.values(WI.CSSManager.ForceablePseudoClass)) {
+                        if (!WI.cssManager.canForcePseudoClass(pseudoClass))
+                            continue;
+
+                        if (pseudoClass === WI.CSSManager.ForceablePseudoClass.Visited && this._style.node.nodeName() !== "A")
+                            continue;
+
+                        let pseudoClassSelector = ":" + pseudoClass;
+                        contextMenu.appendItem(WI.UIString("Add %s Rule").format(pseudoClassSelector), () => {
+                            this._style.node.setPseudoClassEnabled(pseudoClass, true);
+
+                            addPseudoRule(pseudoClassSelector);
+                        });
+                    }
+                }
+
+                if (this._style.type === WI.CSSStyleDeclaration.Type.Rule) {
+                    contextMenu.appendSeparator();
+
+                    for (let pseudoElement of WI.CSSManager.PseudoElementNames) {
+                        let pseudoElementSelector = "::" + pseudoElement;
+                        contextMenu.appendItem(WI.UIString("Create %s Rule").format(pseudoElementSelector), () => {
+                            addPseudoRule(pseudoElementSelector, "content: \"\";");
+                        });
+                    }
+                }
+            }
+        }
+
+        if (this._style.ownerRule && this._style.ownerRule.sourceCodeLocation) {
+            contextMenu.appendSeparator();
+
+            let label = null;
+            let sourceCode = this._style.ownerRule.sourceCodeLocation.displaySourceCode;
+            if (sourceCode instanceof WI.CSSStyleSheet || (sourceCode instanceof WI.Resource && sourceCode.type === WI.Resource.Type.StyleSheet))
+                label = WI.UIString("Reveal in Style Sheet");
+            else
+                label = WI.UIString("Reveal in Sources Tab");
+            contextMenu.appendItem(label, () => {
+                WI.showSourceCodeLocation(this._style.ownerRule.sourceCodeLocation, {
+                    ignoreNetworkTab: true,
+                    ignoreSearchTab: true,
+                    initiatorHint: WI.TabBrowser.TabNavigationInitiator.ContextMenu,
+                });
+            });
         }
     }
 
-    cssStyleDeclarationTextEditorFocused()
+    _handleWindowClick(event)
     {
-        if (this._delegate && typeof this._delegate.cssStyleDeclarationSectionEditorFocused === "function")
-            this._delegate.cssStyleDeclarationSectionEditorFocused(this);
+        if (this._propertiesEditor.hasSelectedProperties()) {
+            // Don't start editing name/value if there's selection.
+            event.stop();
+        }
+        this._stopSelection();
     }
 
-    get locked()
+    _handleWindowMouseMove(event)
     {
-        return !this._style.editable;
+        console.assert(this._mouseDownPoint);
+
+        if (this._mouseDownPoint.distance(WI.Point.fromEvent(event)) < 8)
+            return;
+
+        if (!this._propertiesEditor.hasSelectedProperties()) {
+            console.assert(!isNaN(this._mouseDownIndex));
+            this._propertiesEditor.selectProperties(this._mouseDownIndex, this._mouseDownIndex);
+        }
+
+        window.removeEventListener("mousemove", this._boundHandleWindowMouseMove);
+        this._mouseDownPoint = null;
     }
 
-    get selectorEditable()
+    _handleClick(event)
     {
-        return this._style.editable && this._style.ownerRule;
+        this._stopSelection();
+
+        if (this._wasEditing || this._propertiesEditor.hasSelectedProperties())
+            return;
+
+        if (window.getSelection().type === "Range")
+            return;
+
+        event.stop();
+
+        if (event.target.classList.contains(WI.SpreadsheetStyleProperty.StyleClassName)) {
+            let propertyIndex = parseInt(event.target.dataset.propertyIndex);
+            this._propertiesEditor.addBlankProperty(propertyIndex + 1);
+            return;
+        }
+
+        if (event.target === this._headerElement || event.target === this._openBrace) {
+            this._propertiesEditor.addBlankProperty(0);
+            return;
+        }
+
+        if (event.target === this._element || event.target === this._closeBrace) {
+            const appendAfterLast = -1;
+            this._propertiesEditor.addBlankProperty(appendAfterLast);
+        }
     }
 
-    // Private
-
-    _createMediaHeader()
+    _stopSelection()
     {
-        if (!this._style.ownerRule)
-            return "";
+        this._isMousePressed = false;
+        this._mouseDownIndex = NaN;
+        this._element.classList.remove("selecting");
 
-        console.assert(Array.isArray(this._style.ownerRule.mediaList));
+        // "copy" and "cut" events won't fire on SpreadsheetCSSStyleDeclarationEditor unless it has text selected.
+        // Placing a text caret inside of a property has no visible effects but it allows the events to fire.
+        this._propertiesEditor.placeTextCaretInFocusedProperty();
 
-        let mediaList = this._style.ownerRule.mediaList;
-        let mediaText = mediaList.map((media) => media.text).join(", ");
-        if (!mediaText || mediaText === "all" || mediaText === "screen")
-            return "";
-
-        let mediaElement = document.createElement("div");
-        mediaElement.classList.add("header-media");
-
-        let mediaLabel = mediaElement.appendChild(document.createElement("div"));
-        mediaLabel.className = "media-label";
-        mediaLabel.append("@media ", mediaText);
-        mediaElement.append(mediaLabel);
-
-        return mediaElement;
+        window.removeEventListener("mousemove", this._boundHandleWindowMouseMove);
+        this._mouseDownPoint = null;
     }
+
+    _highlightNodesWithSelector()
+    {
+        let node = this._style.node;
+
+        if (!this._style.ownerRule) {
+            node.highlight();
+            return;
+        }
+
+        let selectorText = this._selectorElement.textContent.trim();
+        if (node.frame)
+            WI.domManager.highlightSelector(selectorText, node.frame.id);
+        else
+            WI.domManager.highlightSelector(selectorText);
+    }
+
+    _hideDOMNodeHighlight()
+    {
+        WI.domManager.hideDOMNodeHighlight();
+    }
+
+    _handleEditorFilterApplied(event)
+    {
+        let matchesGrouping = false;
+        for (let groupingElement of this._groupingElements) {
+            groupingElement.classList.remove(WI.GeneralStyleDetailsSidebarPanel.FilterMatchSectionClassName);
+
+            if (groupingElement.textContent.includes(this._filterText)) {
+                groupingElement.classList.add(WI.GeneralStyleDetailsSidebarPanel.FilterMatchSectionClassName);
+                matchesGrouping = true;
+            }
+        }
+
+        let matchesSelector = false;
+        for (let selectorElement of this._selectorElements) {
+            selectorElement.classList.remove(WI.GeneralStyleDetailsSidebarPanel.FilterMatchSectionClassName);
+
+            if (selectorElement.textContent.includes(this._filterText)) {
+                selectorElement.classList.add(WI.GeneralStyleDetailsSidebarPanel.FilterMatchSectionClassName);
+                matchesSelector = true;
+            }
+        }
+
+        let matches = event.data.matches || matchesGrouping || matchesSelector;
+        if (!matches)
+            this._element.classList.add(WI.GeneralStyleDetailsSidebarPanel.NoFilterMatchInSectionClassName);
+
+        this.dispatchEventToListeners(WI.SpreadsheetCSSStyleDeclarationSection.Event.FilterApplied, {matches});
+    }
+};
+
+WI.SpreadsheetCSSStyleDeclarationSection.Event = {
+    FilterApplied: "spreadsheet-css-style-declaration-section-filter-applied",
+    SelectorWillChange: "spreadsheet-css-style-declaration-section-selector-will-change",
 };
 
 WI.SpreadsheetCSSStyleDeclarationSection.MatchedSelectorElementStyleClassName = "matched";

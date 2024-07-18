@@ -24,12 +24,17 @@
 #include "config.h"
 #include "HTMLFrameElement.h"
 
+#include "ElementInlines.h"
 #include "Frame.h"
 #include "HTMLFrameSetElement.h"
 #include "HTMLNames.h"
+#include "HTMLParserIdioms.h"
 #include "RenderFrame.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLFrameElement);
 
 using namespace HTMLNames;
 
@@ -48,7 +53,7 @@ Ref<HTMLFrameElement> HTMLFrameElement::create(const QualifiedName& tagName, Doc
 bool HTMLFrameElement::rendererIsNeeded(const RenderStyle&)
 {
     // For compatibility, frames render even when display: none is set.
-    return isURLAllowed();
+    return canLoad();
 }
 
 RenderPtr<RenderElement> HTMLFrameElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
@@ -64,17 +69,22 @@ bool HTMLFrameElement::noResize() const
 void HTMLFrameElement::didAttachRenderers()
 {
     HTMLFrameElementBase::didAttachRenderers();
-    const HTMLFrameSetElement* containingFrameSet = HTMLFrameSetElement::findContaining(this);
+    const auto containingFrameSet = HTMLFrameSetElement::findContaining(this);
     if (!containingFrameSet)
         return;
     if (!m_frameBorderSet)
         m_frameBorder = containingFrameSet->hasFrameBorder();
 }
 
-void HTMLFrameElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+int HTMLFrameElement::defaultTabIndex() const
+{
+    return 0;
+}
+
+void HTMLFrameElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == frameborderAttr) {
-        m_frameBorder = value.toInt();
+        m_frameBorder = parseHTMLInteger(value).value_or(0);
         m_frameBorderSet = !value.isNull();
         // FIXME: If we are already attached, this has no effect.
     } else if (name == noresizeAttr) {

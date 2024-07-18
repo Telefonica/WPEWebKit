@@ -23,71 +23,57 @@
 #include "Frame.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
+#include "RenderElement.h"
 #include "RenderStyle.h"
 #include "RenderView.h"
+#include "SVGRenderSupport.h"
 
 namespace WebCore {
 
-RenderSVGResourceSolidColor::RenderSVGResourceSolidColor()
-{
-}
+RenderSVGResourceSolidColor::RenderSVGResourceSolidColor() = default;
 
-RenderSVGResourceSolidColor::~RenderSVGResourceSolidColor()
-{
-}
+RenderSVGResourceSolidColor::~RenderSVGResourceSolidColor() = default;
 
 bool RenderSVGResourceSolidColor::applyResource(RenderElement& renderer, const RenderStyle& style, GraphicsContext*& context, OptionSet<RenderSVGResourceMode> resourceMode)
 {
     ASSERT(context);
-    ASSERT(resourceMode != RenderSVGResourceMode::ApplyToDefault);
+    ASSERT(!resourceMode.isEmpty());
 
     const SVGRenderStyle& svgStyle = style.svgStyle();
 
-    bool isRenderingMask = renderer.view().frameView().paintBehavior() & PaintBehaviorRenderingSVGMask;
+    bool isRenderingMask = renderer.view().frameView().paintBehavior().contains(PaintBehavior::RenderingSVGMask);
 
     if (resourceMode.contains(RenderSVGResourceMode::ApplyToFill)) {
         if (!isRenderingMask)
             context->setAlpha(svgStyle.fillOpacity());
         else
             context->setAlpha(1);
-        context->setFillColor(m_color);
+        context->setFillColor(style.colorByApplyingColorFilter(m_color));
         if (!isRenderingMask)
             context->setFillRule(svgStyle.fillRule());
 
         if (resourceMode.contains(RenderSVGResourceMode::ApplyToText))
-            context->setTextDrawingMode(TextModeFill);
+            context->setTextDrawingMode(TextDrawingMode::Fill);
     } else if (resourceMode.contains(RenderSVGResourceMode::ApplyToStroke)) {
         // When rendering the mask for a RenderSVGResourceClipper, the stroke code path is never hit.
         ASSERT(!isRenderingMask);
         context->setAlpha(svgStyle.strokeOpacity());
-        context->setStrokeColor(m_color);
+        context->setStrokeColor(style.colorByApplyingColorFilter(m_color));
 
-        SVGRenderSupport::applyStrokeStyleToContext(context, style, renderer);
+        SVGRenderSupport::applyStrokeStyleToContext(*context, style, renderer);
 
         if (resourceMode.contains(RenderSVGResourceMode::ApplyToText))
-            context->setTextDrawingMode(TextModeStroke);
+            context->setTextDrawingMode(TextDrawingMode::Stroke);
     }
 
     return true;
 }
 
-void RenderSVGResourceSolidColor::postApplyResource(RenderElement&, GraphicsContext*& context, OptionSet<RenderSVGResourceMode> resourceMode, const Path* path, const RenderSVGShape* shape)
+void RenderSVGResourceSolidColor::postApplyResource(RenderElement&, GraphicsContext*& context, OptionSet<RenderSVGResourceMode> resourceMode, const Path* path, const RenderElement* shape)
 {
     ASSERT(context);
-    ASSERT(resourceMode != RenderSVGResourceMode::ApplyToDefault);
-
-    if (resourceMode.contains(RenderSVGResourceMode::ApplyToFill)) {
-        if (path)
-            context->fillPath(*path);
-        else if (shape)
-            shape->fillShape(*context);
-    }
-    if (resourceMode.contains(RenderSVGResourceMode::ApplyToStroke)) {
-        if (path)
-            context->strokePath(*path);
-        else if (shape)
-            shape->strokeShape(*context);
-    }
+    ASSERT(!resourceMode.isEmpty());
+    fillAndStrokePathOrShape(*context, resourceMode, path, shape);
 }
 
 }

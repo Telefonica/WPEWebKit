@@ -25,11 +25,12 @@
 
 WI.FindBanner = class FindBanner extends WI.NavigationItem
 {
-    constructor(delegate, className, fixed = false)
+    constructor(delegate, className, alwaysShowing = false)
     {
         super();
 
         this._delegate = delegate || null;
+        this._alwaysShowing = alwaysShowing;
 
         this.element.classList.add("find-banner");
 
@@ -41,6 +42,7 @@ WI.FindBanner = class FindBanner extends WI.NavigationItem
 
         this._inputField = document.createElement("input");
         this._inputField.type = "search";
+        this._inputField.placeholder = " "; // This is necessary for :placeholder-shown.
         this._inputField.spellcheck = false;
         this._inputField.incremental = true;
         this._inputField.setAttribute("results", 5);
@@ -53,6 +55,7 @@ WI.FindBanner = class FindBanner extends WI.NavigationItem
         this._previousResultButton = document.createElement("button");
         this._previousResultButton.classList.add("segmented", "previous-result");
         this._previousResultButton.disabled = true;
+        this._previousResultButton.title = WI.UIString("Find Previous (%s)").format(WI.findPreviousKeyboardShortcut.displayName);
         this._previousResultButton.addEventListener("click", this._previousResultButtonClicked.bind(this));
         this.element.appendChild(this._previousResultButton);
 
@@ -63,6 +66,7 @@ WI.FindBanner = class FindBanner extends WI.NavigationItem
         this._nextResultButton = document.createElement("button");
         this._nextResultButton.classList.add("segmented", "next-result");
         this._nextResultButton.disabled = true;
+        this._nextResultButton.title = WI.UIString("Find Next (%s)").format(WI.findNextKeyboardShortcut.displayName);
         this._nextResultButton.addEventListener("click", this._nextResultButtonClicked.bind(this));
         this.element.appendChild(this._nextResultButton);
 
@@ -70,9 +74,10 @@ WI.FindBanner = class FindBanner extends WI.NavigationItem
         nextResultButtonGlyphElement.classList.add(WI.FindBanner.SegmentGlyphStyleClassName);
         this._nextResultButton.appendChild(nextResultButtonGlyphElement);
 
-        if (fixed)
-            this._clearAndBlurKeyboardShortcut = new WI.KeyboardShortcut(null, WI.KeyboardShortcut.Key.Escape, this._clearAndBlur.bind(this), this.element);
-        else {
+        if (this._alwaysShowing) {
+            this.element.classList.add(WI.FindBanner.ShowingStyleClassName);
+            this._clearAndBlurKeyboardShortcut = new WI.KeyboardShortcut(null, WI.KeyboardShortcut.Key.Escape, this.clearAndBlur.bind(this), this.element);
+        } else {
             let doneButtonElement = document.createElement("button");
             doneButtonElement.textContent = WI.UIString("Done");
             doneButtonElement.addEventListener("click", this._doneButtonClicked.bind(this));
@@ -102,7 +107,7 @@ WI.FindBanner = class FindBanner extends WI.NavigationItem
 
         this._numberOfResults = numberOfResults;
 
-        this._previousResultButton.disabled = this._nextResultButton.disabled = (numberOfResults <= 0);
+        this._previousResultButton.disabled = this._nextResultButton.disabled = numberOfResults <= 0;
 
         if (numberOfResults === null)
             this._resultCountLabel.textContent = "";
@@ -135,7 +140,9 @@ WI.FindBanner = class FindBanner extends WI.NavigationItem
             this._targetElement.classList.remove(WI.FindBanner.ShowingFindBannerStyleClassName);
 
             this.element.classList.add(WI.FindBanner.NoTransitionStyleClassName);
-            this.element.classList.remove(WI.FindBanner.ShowingStyleClassName);
+
+            if (!this._alwaysShowing)
+                this.element.classList.remove(WI.FindBanner.ShowingStyleClassName);
 
             // Delay so we can remove the no transition style class after the other style changes are committed.
             setTimeout(delayedWork.bind(this), 0);
@@ -161,7 +168,7 @@ WI.FindBanner = class FindBanner extends WI.NavigationItem
             this._inputField.select();
     }
 
-    _clearAndBlur()
+    clearAndBlur()
     {
         this.numberOfResults = null;
 
@@ -211,7 +218,9 @@ WI.FindBanner = class FindBanner extends WI.NavigationItem
         this._inputField.blur();
 
         this._targetElement.classList.remove(WI.FindBanner.ShowingFindBannerStyleClassName);
-        this.element.classList.remove(WI.FindBanner.ShowingStyleClassName);
+
+        if (!this._alwaysShowing)
+            this.element.classList.remove(WI.FindBanner.ShowingStyleClassName);
 
         this.dispatchEventToListeners(WI.FindBanner.Event.DidHide);
     }

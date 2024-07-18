@@ -8,40 +8,47 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include <iostream>
-#include <map>
 #include <memory>
+#include <set>
+#include <sstream>
+#include <string>
+#include <vector>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/flags.h"
-#include "webrtc/base/helpers.h"
-#include "webrtc/base/nethelpers.h"
-#include "webrtc/base/network.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/base/ssladapter.h"
-#include "webrtc/base/stringutils.h"
-#include "webrtc/base/thread.h"
-#include "webrtc/base/timeutils.h"
-#include "webrtc/p2p/base/basicpacketsocketfactory.h"
-#include "webrtc/p2p/stunprober/stunprober.h"
+#include "absl/flags/flag.h"
+#include "absl/flags/parse.h"
+#include "p2p/base/basic_packet_socket_factory.h"
+#include "p2p/stunprober/stun_prober.h"
+#include "rtc_base/helpers.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/network.h"
+#include "rtc_base/physical_socket_server.h"
+#include "rtc_base/socket_address.h"
+#include "rtc_base/ssl_adapter.h"
+#include "rtc_base/thread.h"
+#include "rtc_base/time_utils.h"
+#include "test/scoped_key_value_config.h"
 
-using stunprober::StunProber;
 using stunprober::AsyncCallback;
+using stunprober::StunProber;
 
-DEFINE_bool(help, false, "Prints this message");
-DEFINE_int(interval, 10, "Interval of consecutive stun pings in milliseconds");
-DEFINE_bool(shared_socket, false, "Share socket mode for different remote IPs");
-DEFINE_int(pings_per_ip,
-           10,
-           "Number of consecutive stun pings to send for each IP");
-DEFINE_int(timeout,
-           1000,
-           "Milliseconds of wait after the last ping sent before exiting");
-DEFINE_string(
+ABSL_FLAG(int,
+          interval,
+          10,
+          "Interval of consecutive stun pings in milliseconds");
+ABSL_FLAG(bool,
+          shared_socket,
+          false,
+          "Share socket mode for different remote IPs");
+ABSL_FLAG(int,
+          pings_per_ip,
+          10,
+          "Number of consecutive stun pings to send for each IP");
+ABSL_FLAG(int,
+          timeout,
+          1000,
+          "Milliseconds of wait after the last ping sent before exiting");
+ABSL_FLAG(
+    std::string,
     servers,
     "stun.l.google.com:19302,stun1.l.google.com:19302,stun2.l.google.com:19302",
     "Comma separated STUN server addresses with ports");
@@ -66,30 +73,32 @@ const char* PrintNatType(stunprober::NatType type) {
 void PrintStats(StunProber* prober) {
   StunProber::Stats stats;
   if (!prober->GetStats(&stats)) {
-    LOG(LS_WARNING) << "Results are inconclusive.";
+    RTC_LOG(LS_WARNING) << "Results are inconclusive.";
     return;
   }
 
-  LOG(LS_INFO) << "Shared Socket Mode: " << stats.shared_socket_mode;
-  LOG(LS_INFO) << "Requests sent: " << stats.num_request_sent;
-  LOG(LS_INFO) << "Responses received: " << stats.num_response_received;
-  LOG(LS_INFO) << "Target interval (ns): " << stats.target_request_interval_ns;
-  LOG(LS_INFO) << "Actual interval (ns): " << stats.actual_request_interval_ns;
-  LOG(LS_INFO) << "NAT Type: " << PrintNatType(stats.nat_type);
-  LOG(LS_INFO) << "Host IP: " << stats.host_ip;
-  LOG(LS_INFO) << "Server-reflexive ips: ";
+  RTC_LOG(LS_INFO) << "Shared Socket Mode: " << stats.shared_socket_mode;
+  RTC_LOG(LS_INFO) << "Requests sent: " << stats.num_request_sent;
+  RTC_LOG(LS_INFO) << "Responses received: " << stats.num_response_received;
+  RTC_LOG(LS_INFO) << "Target interval (ns): "
+                   << stats.target_request_interval_ns;
+  RTC_LOG(LS_INFO) << "Actual interval (ns): "
+                   << stats.actual_request_interval_ns;
+  RTC_LOG(LS_INFO) << "NAT Type: " << PrintNatType(stats.nat_type);
+  RTC_LOG(LS_INFO) << "Host IP: " << stats.host_ip;
+  RTC_LOG(LS_INFO) << "Server-reflexive ips: ";
   for (auto& ip : stats.srflx_addrs) {
-    LOG(LS_INFO) << "\t" << ip;
+    RTC_LOG(LS_INFO) << "\t" << ip;
   }
 
-  LOG(LS_INFO) << "Success Precent: " << stats.success_percent;
-  LOG(LS_INFO) << "Response Latency:" << stats.average_rtt_ms;
+  RTC_LOG(LS_INFO) << "Success Precent: " << stats.success_percent;
+  RTC_LOG(LS_INFO) << "Response Latency:" << stats.average_rtt_ms;
 }
 
 void StopTrial(rtc::Thread* thread, StunProber* prober, int result) {
   thread->Quit();
   if (prober) {
-    LOG(LS_INFO) << "Result: " << result;
+    RTC_LOG(LS_INFO) << "Result: " << result;
     if (result == StunProber::SUCCESS) {
       PrintStats(prober);
     }
@@ -98,20 +107,16 @@ void StopTrial(rtc::Thread* thread, StunProber* prober, int result) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
-  rtc::FlagList::SetFlagsFromCommandLine(&argc, argv, true);
-  if (FLAG_help) {
-    rtc::FlagList::Print(nullptr, false);
-    return 0;
-  }
+int main(int argc, char* argv[]) {
+  absl::ParseCommandLine(argc, argv);
 
   std::vector<rtc::SocketAddress> server_addresses;
-  std::istringstream servers(FLAG_servers);
+  std::istringstream servers(absl::GetFlag(FLAGS_servers));
   std::string server;
   while (getline(servers, server, ',')) {
     rtc::SocketAddress addr;
     if (!addr.FromString(server)) {
-      LOG(LS_ERROR) << "Parsing " << server << " failed.";
+      RTC_LOG(LS_ERROR) << "Parsing " << server << " failed.";
       return -1;
     }
     server_addresses.push_back(addr);
@@ -119,22 +124,23 @@ int main(int argc, char** argv) {
 
   rtc::InitializeSSL();
   rtc::InitRandom(rtc::Time32());
-  rtc::Thread* thread = rtc::ThreadManager::Instance()->WrapCurrentThread();
-  std::unique_ptr<rtc::BasicPacketSocketFactory> socket_factory(
-      new rtc::BasicPacketSocketFactory());
+  webrtc::test::ScopedKeyValueConfig field_trials;
+  rtc::PhysicalSocketServer socket_server;
+  rtc::AutoSocketServerThread thread(&socket_server);
+  auto socket_factory =
+      std::make_unique<rtc::BasicPacketSocketFactory>(&socket_server);
   std::unique_ptr<rtc::BasicNetworkManager> network_manager(
-      new rtc::BasicNetworkManager());
-  rtc::NetworkManager::NetworkList networks;
-  network_manager->GetNetworks(&networks);
-  StunProber* prober =
-      new StunProber(socket_factory.get(), rtc::Thread::Current(), networks);
-  auto finish_callback = [thread](StunProber* prober, int result) {
-    StopTrial(thread, prober, result);
+      new rtc::BasicNetworkManager(&socket_server, &field_trials));
+  std::vector<const rtc::Network*> networks = network_manager->GetNetworks();
+  auto prober = std::make_unique<StunProber>(socket_factory.get(),
+                                             rtc::Thread::Current(), networks);
+  auto finish_callback = [&thread](StunProber* prober, int result) {
+    StopTrial(&thread, prober, result);
   };
-  prober->Start(server_addresses, FLAG_shared_socket, FLAG_interval,
-                FLAG_pings_per_ip, FLAG_timeout,
+  prober->Start(server_addresses, absl::GetFlag(FLAGS_shared_socket),
+                absl::GetFlag(FLAGS_interval),
+                absl::GetFlag(FLAGS_pings_per_ip), absl::GetFlag(FLAGS_timeout),
                 AsyncCallback(finish_callback));
-  thread->Run();
-  delete prober;
+  thread.Run();
   return 0;
 }

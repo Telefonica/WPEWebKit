@@ -1,3 +1,643 @@
+================
+WebKitGTK 2.38.6
+================
+
+What's new in WebKitGTK 2.38.6?
+
+  - Enable the Asynchronous Clipboard API to make certain pages work
+    (e.g. GithHub started recently requiring it).
+  - Support :has() CSS selectors in content filters.
+  - Apply basic font properties as font variation settings.
+  - The Bubblewrap sandbox no longer requires setting an application
+    identifier via GApplication to operate correctly. Using GApplication
+    is still recommended, but optional.
+  - Improvements to the GStreamer multimedia playback, in particular
+    around MSE, WebRTC, and seeking.
+  - Fix the build with journald support enabled when using elogind
+    instead of the systemd libraries.
+  - Fix the build with Link-Time Optimization enabled (-flto=auto).
+  - Fix context menus not working in the remote Web Inspector.
+  - Fix usage of the remote Web Inspector over HTTP.
+  - Fix debug logs not being emitted in release builds.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.38.5
+================
+
+What's new in WebKitGTK 2.38.5?
+
+  - Fix large memory allocation when uploading content.
+  - Fix scrolling after a history navigation with PSON enabled.
+  - Always update the active uri of WebKitFrame.
+  - Fix the build on Ubuntu 20.04.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.38.4
+================
+
+What's new in WebKitGTK 2.38.4?
+
+  - Improve GStreamer multimedia playback across the board with improved
+    codec selection logic, better handling of latency, and improving
+    frame discard to avoid audio/video desynchronizationg, among other
+    fixes.
+  - Disable HLS media playback by default, which makes web sites use MSE
+    instead. If needed WEBKIT_GST_ENABLE_HLS_SUPPORT=1 can be set in the
+    environment to enable it back.
+  - Disable threaded rendering in GTK4 builds by default, as it was
+    causing crashes.
+  - Fix MediaSession API not showing artwork images.
+  - Fix MediaSession MPRIS usage when running inside a Flatpak sandbox.
+  - Fix input element controls to correctly scale when applying a zoom
+    factor different than the default.
+  - Fix leakage of Web processes in certain situations.
+  - Fix the injected bundle not being found when running inside a sandbox.
+  - Fix the build with ENABLE_INTROSPECTION when cross-compiling.
+  - FIx the build with ENABLE_WEBGL disabled.
+  - Fix the build with GStreamer-based WebRTC enabled.
+  - Fix the build with USE_GTK4 enabled.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.38.3
+================
+
+What's new in WebKitGTK 2.38.3?
+
+ - Fix runtime critical warnings from media player.
+ - Fix network process crash when fetching website data on ephemeral session.
+ - Fix the build with Ruby 3.2.
+ - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.38.2
+================
+
+What's new in WebKitGTK 2.38.2?
+
+  - Fix scrolling issues in some sites having fixed background.
+  - Fix prolonged buffering during progressive live playback.
+  - Fix the build with accessibility disabled.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.38.1
+================
+
+What's new in WebKitGTK 2.38.1?
+
+  - Make xdg-dbus-proxy work if host session bus address is an abstract socket.
+  - Use a single xdg-dbus-proxy process when sandbox is enabled.
+  - Fix high resolution video playback due to unimplemented changeType operation.
+  - Ensure GSubprocess uses posix_spawn() again and inherit file descriptors.
+  - Fix player stucking in buffering (paused) state for progressive streaming.
+  - Do not try to preconnect on link click when link preconnect setting is disabled.
+  - Fix close status code returned when the client closes a WebSocket in some cases.
+  - Fix media player duration calculation.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.38.0
+================
+
+What's new in WebKitGTK 2.38.0?
+
+  - Fix jumpy elements whewn scrolling gitlab with async scrolling.
+  - Fix web-process-terminated signal not being emitted for the first web view when sandbox is enabled.
+  - Fix build with CMake < 3.17.
+  - Fix the build with GStreamer < 1.18.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK 2.37.91
+=================
+
+What's new in WebKitGTK 2.37.91?
+
+  - Cache and reuse image-based backing stores to improve memory consumption.
+  - Fix printing with bubblewrap sandbox enabled
+  - Deprecate enable-frame-flattening setting because the functionality will be removed for 2.40.
+  - Fix deadlock when disposing player while handling rotation tag.
+  - Fix several crashes and rendering issues.
+  - Translation updates: Polish.
+
+=================
+WebKitGTK 2.37.90
+=================
+
+What's new in WebKitGTK 2.37.90?
+
+  - Remove libnotify dependency.
+  - Add support for service worker notifications.
+  - Add support for loading the notification icon.
+  - Add support for pac proxy type in WebDriver.
+  - Fix several crashes and rendering issues.
+  - Translation updates: Swedish.
+
+================
+WebKitGTK 2.37.1
+================
+
+What's new in WebKitGTK 2.37.1?
+
+  - Add initial implementation of WebRTC using GstWebRTC if GStreamer 1.20 is available,
+    disabled by default via web view settings.
+  - Add new API to set WebView's Content-Security-Policy for web extensions support.
+  - Add new API to run async JavaScript functions.
+  - Expose typed arrays in JavaScriptCore GLib API.
+  - Add support for PDF documents using PDF.js.
+  - Show font name and font variant settings in the inspector.
+  - MediaSession is enabled by default, allowing remote media control using MPRIS.
+  - Modernized media controls UI.
+  - Add Support Google Dynamic Ad Insertion (DAI).
+  - Add support for capturing encoded video streams from a webcam.
+  - Make it possible to use the remote inspector from other browsers using WEBKIT_INSPECTOR_HTTP_SERVER env var.
+  - Add support for IPv6 in the remote inspector.
+  - Update form elements style to match libadwaita.
+  - Fix canvas animations and images with threaded rendering enabled.
+  - Switch to use gi-docgen for API documentation instead of gtk-doc.
+  - Remove the ATK a11y implementation that has been replaced by AT-SPI DBus interfaces.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.35.3
+================
+
+What's new in WebKitGTK 2.35.3?
+
+  - Fix a crash at startup when bubblewrap sandbox is enabled.
+  - Fix a crash when starting a drag an drop on touchscreen.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.35.2
+================
+
+What's new in WebKitGTK 2.35.2?
+
+  - Add new accessibility implementation using ATSPI DBus interfaces instead of ATK.
+  - Use native GtkWidgets for form validation popups.
+  - Add support for requestVideoFrameCallback.
+  - Add support for accent colors.
+  - Fix pinch zooming from a link to not activate the link.
+  - Fix kinetic scrolling via touch screen.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.35.1
+================
+
+What's new in WebKitGTK 2.35.1?
+
+  - Make user interactive threads (event handler, scrolling, ...) real time in linux.
+  - Add new API to set HTTP response information to custom uri schemes.
+  - Add support for media session.
+  - Change hardware-acceleration-policy setting default value to always.
+  - Fix jsc_value_object_define_property_accessor() to work with objects not having a wrapped instance.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.33.3
+================
+
+What's new in WebKitGTK 2.33.3?
+
+  - Add support for display capture.
+  - Add new API to access/modify capture devices states.
+  - Add new API to configure the memory pressure handler.
+  - Add support for client side certifiates authentication.
+  - Add support color-schemes CSS property.
+  - Add support for dark scrollbars.
+  - Keep GtkSettings used by web processes in sync with the settings set in the UI process.
+  - Add support for drawing the scrollbars corner.
+  - Allow to opt-out of GL rendering at runtime for media player.
+  - Add support for A420 compositing in media player.
+  - Improve pinch to zoom gesture in accerlerated compositing mode.
+  - Fix cookies configuration after a network process crash.
+  - Fix touchscreen navigation swipe when the page scrolls horizontally.
+  - Fix rendering of elliptic radial gradients.
+  - Fix several crashes and rendering issues.
+  - Translation updates: Brazilian Portuguese, French, Swedish, Ukrainian
+
+================
+WebKitGTK 2.33.2
+================
+
+What's new in WebKitGTK 2.33.2?
+
+  - HTTP/2 support when building with libsoup3.
+  - Add API to disable CORS on a web view for particular domains.
+  - Fix rendering on HiDPI /4k screen and scaling.
+  - Improve calculation of initial WebKitWebView size.
+  - Fix rendering of VP9 with transparency.
+  - Remove dependency on glvideoflip and videoflip.
+  - Several fixes on scrolling when async scrolling is enabled.
+  - Ensure WebKitScriptWorld::window-object-cleared signal is always emitted.
+  - Translation updates: Danish, Swedish, Ukrainian.
+
+================
+WebKitGTK 2.33.1
+================
+
+What's new in WebKitGTK 2.33.1?
+
+  - Add support for CSS Scroll Snap.
+  - Add support for date and datetime-local input elements.
+  - Add support for ICC color management.
+  - Build with libsoup3 by default.
+  - Add new API to handle web process unresponsiveness.
+  - Add support for link preconnect when building with libsoup3.
+  - Refactored Media Source Extensions platform code to increase stability and ease support of more features in the future.
+
+================
+WebKitGTK 2.31.1
+================
+
+What's new in WebKitGTK 2.31.1?
+
+  - Remove support for NPAPI plugins.
+  - Enable the web process cache when PSON is enabled too.
+  - TLS errors and proxy settings APIs have been moved from WebKitContext to WebKitWebsiteDataManager.
+  - Add new API to remove individual scripts/stylesheets using WebKitUserContentManager.
+  - Correctly apply the system font scaling factor.
+  - Show main loop frames information in the web inspector.
+
+================
+WebKitGTK 2.29.4
+================
+
+What's new in WebKitGTK 2.29.4?
+
+  - Add support for backdrop filters.
+  - Add support for text-underline-offset and text-decoration-thickness.
+  - Add OpenCDM and AV1 support to media backend.
+  - Add new API to get ITP data summary.
+  - Use mobile user-agent on tablets.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.29.3
+================
+
+What's new in WebKitGTK 2.29.3?
+
+  - Add webkit_authentication_request_get_security_origin.
+  - Change the cookies accept policy to always when no-third-party is set and ITP is enabled.
+  - Fix web process hangs on large GitHub pages.
+  - Bubblewrap sandbox should not attempt to bind empty paths.
+  - Add support for sndio to bubblewrap sandbox.
+  - Also handle dark themes when the name ends with -Dark.
+  - Fix a race condition causing a crash in media player.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.29.2
+================
+
+What's new in WebKitGTK 2.29.2?
+
+  - Add Intelligent Tracking Prevention (ITP) support.
+  - Add support for video formats in img elements.
+  - Add API to handle video autoplay policy that now defaults to disallow autoplay videos with audio.
+  - Add API to mute a web view.
+  - Add API to allow applications to handle the HTTP authentication credential storage.
+  - Add a WebKitSetting to set the media content types requiring hardware support.
+  - Fix a crash during drag an drop due to a bug introduced in 2.29.1.
+  - Do not start page load during animation in back/forward gesture.
+  - Fix several crashes and rendering issues.
+  - Translation updates: Ukrainian.
+
+================
+WebKitGTK 2.29.1
+================
+
+What's new in WebKitGTK 2.29.1?
+
+  - Stop using GTK theming to render form controls.
+  - Add API to disable GTK theming for scrollbars too.
+  - Fix several race conditions and threading issues in the media player.
+  - Add USER_AGENT_BRANDING build option.
+  - Add paste as plain text option to the context menu for rich editable content.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.27.4
+================
+
+What's new in WebKitGTK 2.27.4?
+
+  - Add API for input methods.
+  - Add API to serialize/deserialize a JSCValue to/from a JSON string.
+  - Add support for strict secure cookies.
+  - Add support for saving data from remote inspector.
+  - Make ondemand hardware acceleration policy never leave accelerated compositing mode.
+  - Fix rendering of conic gradients in high resolution displays.
+  - Fix special combination characters not respecting the keystroke order when high CPU load.
+  - Honor the IndexedDB directory set in WebsiteDataManager.
+  - Fix rendering of text when there's an initial advance in the text run.
+  - Fix web process crash when displaying a KaTeX formula.
+  - Fix network process crash with PSON enabled.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.27.3
+================
+
+What's new in WebKitGTK 2.27.3?
+
+  - Add support for Pointer Lock API.
+  - Improve performance when falling back to system fonts.
+  - Stop using DBus for the remote inspector implementation to improve the performance of both
+    WebDriver and remote inspector.
+  - Implement support for new ARIA roles: code, strong, emphasis, generic.
+  - Fix handling of content type with new custom protocols implementation.
+  - Make image decoders fully thread safe.
+  - Add support for get page source command in WebDriver.
+  - Add support for network proxy capabilities in WebDriver.
+  - Add support for new window command in WebDriver.
+  - Fix several crashes and rendering issues.
+  - Translation updates: Brazilian Portuguese, Ukrainian.
+
+================
+WebKitGTK 2.27.2
+================
+
+What's new in WebKitGTK 2.27.2?
+
+  - Add user messages API for the communication with the web extension.
+  - Enable service workers by default.
+  - Add support for saving data in Web Inspector.
+  - More navigation gesture improvement.
+  - Fix the build with WebDriver disabled.
+  - Show also client EGL extensions in about:gpu.
+  - Disable accelerated compositing when we fail to initialize the EGL dispaly under Wayland.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.27.1
+================
+
+What's new in WebKitGTK+ 2.27.1?
+
+  - Enable async scrolling when accelerating compositing policy is 'always'.
+  - Add about:gpu to show information about the graphics stack.
+  - Add API to enable Process Swap on (Cross-site) Navigation, that is now disabled by default.
+  - Add WebKitWebView:page-id property.
+  - Improve swipe navigation gesture style.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.25.4
+================
+
+What's new in WebKitGTK+ 2.25.4?
+
+  - Switch to use libsoup WebSockets API.
+  - Add support for permessage-deflate WebSocket extension.
+  - Add support for datalist element in text input fields.
+  - Fix a crash with empty video source.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.25.3
+================
+
+What's new in WebKitGTK+ 2.25.3?
+
+  - Remove support for GTK2 NPAPI plugins.
+  - Fix web view updates after swapping web process if accelerated compositing mode is forced.
+  - Make kinetic scrolling work again.
+  - Fix position of emoji chooser when page is scrolled.
+  - Fix web process deadlock when scrolling twitter timeline which contains HLS videos.
+  - Make navigation gesture use dark fallback background color color on dark themes.
+  - Make Previous/Next gesture work in RTL mode.
+  - Support cancelling touchscreen back/forward gesture.
+  - Add user agent quirk to make github work in FreeBSD.
+  - Fix content disappearing when using CSS transforms.
+  - Fix some radio streams that could not be played.
+  - Fix video pause that sometimes caused to skip to finish.
+  - Fix volume level changes when playing a video.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.25.2
+================
+
+What's new in WebKitGTK+ 2.25.2?
+
+  - Enable process switch on cross site navigation.
+  - Use libwpe with fdo backend to implement accelerated compositing under wayland.
+  - Fix rendering artifacts in youtube volume button.
+  - Fix trapezoid artifact in github comment box.
+  - Ensure web extensions directory is readable when sandbox is enabled.
+  - Fix the executable name of WebDriver process, renamed by mistake in 2.25.1.
+  - Enable hyperlink auditing setting by default.
+  - Remove the option to build without using the redirected XComposite window.
+  - Fix HLS streams being slow to start.
+  - Make accessibility work when sandbox is enabled.
+  - Fix several crashes and rendering issues.
+
+================
+WebKitGTK 2.25.1
+================
+
+What's new in WebKitGTK+ 2.25.1?
+
+  - Add support for subprocess sandboxing.
+  - Add API to get the web process unique identifier of a WebKitFrame.
+  - Add WebKitWebPage::did-associate-form-controls-for-frame signal and deprecate did-associate-form-controls.
+  - Implement AtkComponentIface scroll_to methods.
+  - Improve rendering of form controls when GTK theme is dark and enable prefers-color-scheme media query.
+  - Show the emoji chooser popover for editable content.
+  - Fix touch capabilities detection for websites checking touch events properties present in window or pointer media queries.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK+ 2.23.3
+=================
+
+What's new in WebKitGTK+ 2.23.3?
+
+  - Fix rendering of emoji sequences containing zero with joiner.
+  - Fallback to a colored font when rendering emojis.
+  - Fix rendering artifacts on Youtube while scrolling under X11.
+  - Remove DConf permissions from sandbox.
+  - Fix build from release tarball with gtkdoc enabled.
+  - Fix several crashes and rendering issues.
+  - Translation updates: Swedish
+
+=================
+WebKitGTK+ 2.23.2
+=================
+
+What's new in WebKitGTK+ 2.23.2?
+
+  - Fix rendering artifacts in some websites with accelerated compositing enabled.
+  - Add initial support for variation fonts.
+  - Add new API to convert a URI to a format for display.
+  - Make scrollbars follow gtk-primary-button-warps-slider setting.
+  - Fix crashes when closing the WebDriver session.
+  - Fix the build with OpenGL disabled.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK+ 2.23.1
+=================
+
+What's new in WebKitGTK+ 2.23.1?
+
+  - Add initial support for subprocess sandboxing in Linux.
+  - Add new permission request type for media device information.
+  - Make scrollbars follow gtk-primary-button-warps-slider setting.
+  - Script dialogs are now modal to the current web view only.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK+ 2.21.5
+=================
+
+What's new in WebKitGTK+ 2.21.5?
+
+  - Add API to evaluate code in a new object to JavaScriptCore GLib API.
+  - Add API to check for syntax errors in given code to JavaScriptCore GLib API.
+  - Update jsc_context_evaluate_with_source_uri() to receive also a starting line number.
+  - Add API to allow creating variadic functions to JavaScriptCore GLib API.
+  - Add --host option to WebDriver process.
+  - Handle acceptInsecureCertificates capability in WebDriver.
+  - Fix video freezes when GStreamerGL is not installed.
+  - Fix several crashes and rendering issues.
+  - Translation updates: Ukrainian.
+
+=================
+WebKitGTK+ 2.21.4
+=================
+
+What's new in WebKitGTK+ 2.21.4?
+
+  - Switch to use a popup window with a tree view instead of a menu for option menu default implementation.
+  - Add API to run javascript from a WebKitWebView in an isolated world.
+  - Fix UI process crash in WebKitFaviconDatabase when pageURL is unset.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK+ 2.21.3
+=================
+
+What's new in WebKitGTK+ 2.21.3?
+
+  - Ensure memory monitor properly notifies all child processes.
+  - Add maximize, minimize and fullscreen window commands to WebDriver.
+  - Fix a network process crash when trying to get cookies of about:blank page.
+  - Fix UI process crash when closing the window under Wayland.
+  - Disable Gigacage if mmap fails to allocate in Linux.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK+ 2.21.2
+=================
+
+What's new in WebKitGTK+ 2.21.2?
+
+  - Remove resource load statistics API, it's not ready yet.
+  - Add initial implementation of WebDriver advance user insteraction commands.
+  - Add introspectable alternatives for functions using vargars to JavaScriptCore GLib API.
+  - Implement MouseEvent.buttons.
+  - Do TLS error checking on GTlsConnection::accept-certificate to finish the load earlier in case of errors.
+  - Fix downloads started by context menu failing in some websites due to missing user agent HTTP header.
+  - Avoid painting backing stores for zero-opacity layers.
+  - Fix the installation path of API documentation.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK+ 2.21.1
+=================
+
+What's new in WebKitGTK+ 2.21.1?
+
+  - Add initial JavaScriptCore GLib API.
+  - Use JavaScriptCore GLib API in WebKit layer and deprecate most of the DOM bindings API as well as
+    methods using the JavaScriptCore C API.
+  - Switch to use complex text code path unconditionally.
+  - Properly close the connection to the Wayland nested compositor in the WebProcess.
+  - Implement support for Graphics ARIA roles.
+  - Add playbin3 support to GStreamer media backend.
+  - Fix a deadlock when destroying the media player in non accelerated compositing mode.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK+ 2.19.6
+=================
+
+What's new in WebKitGTK+ 2.19.6?
+
+  - Fix crashes due to duplicated symbols in libjavascriptcoregtk and libwebkit2gtk.
+  - Fix parsing of timeout values in WebDriver.
+  - Implement get timeouts command in WebDriver.
+  - Fix deadlock in GStreamer video sink during shutdown when accelerated compositing is disabled.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK+ 2.19.5
+=================
+
+What's new in WebKitGTK+ 2.19.5?
+
+  - This is a follow up release to export webkit_dom_dom_window_webkit_message_handlers_post_message() symbol that
+    was hidden in 2.19.4 by mistake.
+
+=================
+WebKitGTK+ 2.19.4
+=================
+
+What's new in WebKitGTK+ 2.19.4?
+
+  - Add web process API to detect when form is submitted via JavaScript.
+  - Add new API to replace webkit_form_submission_request_get_text_fields() that is now deprecated.
+  - Add WebKitWebView::web-process-terminated signal and deprecate web-process-crashed.
+  - Fix rendering issues when editing text areas.
+  - Use FastMalloc based GstAllocator for GStreamer.
+  - Fix several crashes and rendering issues.
+  - Translation updates: Swedish.
+
+=================
+WebKitGTK+ 2.19.3
+=================
+
+What's new in WebKitGTK+ 2.19.3?
+
+  - Fix web process crash at startup in bmalloc.
+  - Fix several memory leaks in GStreamer media backend.
+  - WebKitWebDriver process no longer links to libjavascriptcoregtk.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK+ 2.19.2
+=================
+
+What's new in WebKitGTK+ 2.19.2?
+
+  - Add new API to add, retrieve and delete cookies via WebKitCookieManager.
+  - Add functions to WebSettings to convert font sizes between points and pixels.
+  - Ensure cookie operations take effect when they happen before a web process has been spawned.
+  - Automatically adjust font size when GtkSettings:gtk-xft-dpi changes.
+  - Fix several crashes and rendering issues.
+
+=================
+WebKitGTK+ 2.19.1
+=================
+
+What's new in WebKitGTK+ 2.19.1?
+
+  - Add initial resource load statistics support.
+  - Add API to expose availability of certain editing commands in WebKitEditorState.
+  - Add API to query whether a WebKitNavigationAction is a redirect or not.
+  - Improve complex text rendering.
+  - Add support for the "system" CSS font family.
+  - Implement low power mode.
+  - Fix several crashes and rendering issues.
+
 =================
 WebKitGTK+ 2.17.5
 =================

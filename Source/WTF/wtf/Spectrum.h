@@ -23,8 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef Spectrum_h
-#define Spectrum_h
+#pragma once
 
 #include <wtf/HashMap.h>
 #include <wtf/Vector.h>
@@ -34,6 +33,7 @@ namespace WTF {
 
 template<typename T, typename CounterType = unsigned>
 class Spectrum {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     typedef typename HashMap<T, CounterType>::iterator iterator;
     typedef typename HashMap<T, CounterType>::const_iterator const_iterator;
@@ -42,6 +42,7 @@ public:
     
     void add(const T& key, CounterType count = 1)
     {
+        Locker locker(m_lock);
         if (!count)
             return;
         typename HashMap<T, CounterType>::AddResult result = m_map.add(key, count);
@@ -58,6 +59,7 @@ public:
     
     CounterType get(const T& key) const
     {
+        Locker locker(m_lock);
         const_iterator iter = m_map.find(key);
         if (iter == m_map.end())
             return 0;
@@ -66,16 +68,15 @@ public:
     
     size_t size() const { return m_map.size(); }
     
-    iterator begin() { return m_map.begin(); }
-    iterator end() { return m_map.end(); }
     const_iterator begin() const { return m_map.begin(); }
     const_iterator end() const { return m_map.end(); }
     
     struct KeyAndCount {
+        WTF_MAKE_STRUCT_FAST_ALLOCATED;
         KeyAndCount() { }
         
         KeyAndCount(const T& key, CounterType count)
-            : key(key)
+            : key(&key)
             , count(count)
         {
         }
@@ -87,40 +88,46 @@ public:
             // This causes lower-ordered keys being returned first; this is really just
             // here to make sure that the order is somewhat deterministic rather than being
             // determined by hashing.
-            return key > other.key;
+            return *key > *other.key;
         }
 
-        T key;
+        const T* key;
         CounterType count;
     };
+
+    Lock& getLock() { return m_lock; }
     
     // Returns a list ordered from lowest-count to highest-count.
-    Vector<KeyAndCount> buildList() const
+    Vector<KeyAndCount> buildList(AbstractLocker&) const
     {
         Vector<KeyAndCount> list;
-        for (const_iterator iter = begin(); iter != end(); ++iter)
-            list.append(KeyAndCount(iter->key, iter->value));
+        for (const auto& entry : *this)
+            list.append(KeyAndCount(entry.key, entry.value));
         
         std::sort(list.begin(), list.end());
         return list;
     }
     
-    void clear() { m_map.clear(); }
+    void clear()
+    {
+        Locker locker(m_lock);
+        m_map.clear();
+    }
     
     template<typename Functor>
     void removeIf(const Functor& functor)
     {
+        Locker locker(m_lock);
         m_map.removeIf([&functor] (typename HashMap<T, CounterType>::KeyValuePairType& pair) {
                 return functor(KeyAndCount(pair.key, pair.value));
             });
     }
     
 private:
+    mutable Lock m_lock;
     HashMap<T, CounterType> m_map;
 };
 
 } // namespace WTF
 
 using WTF::Spectrum;
-
-#endif // Spectrum_h

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2022 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Cameron Zwarich <cwzwarich@uwaterloo.ca>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,47 +34,50 @@
 
 namespace JSC {
 
-class FunctionCodeBlock : public CodeBlock {
+class FunctionCodeBlock final : public CodeBlock {
 public:
     typedef CodeBlock Base;
     DECLARE_INFO;
 
-    static FunctionCodeBlock* create(VM* vm, CopyParsedBlockTag, FunctionCodeBlock& other)
+    template<typename, SubspaceAccess>
+    static GCClient::IsoSubspace* subspaceFor(VM& vm)
     {
-        FunctionCodeBlock* instance = new (NotNull, allocateCell<FunctionCodeBlock>(vm->heap))
-            FunctionCodeBlock(vm, vm->functionCodeBlockStructure.get(), CopyParsedBlock, other);
-        instance->finishCreation(*vm, CopyParsedBlock, other);
+        return &vm.codeBlockSpace();
+    }
+
+    static FunctionCodeBlock* create(VM& vm, CopyParsedBlockTag, FunctionCodeBlock& other)
+    {
+        FunctionCodeBlock* instance = new (NotNull, allocateCell<FunctionCodeBlock>(vm))
+            FunctionCodeBlock(vm, vm.functionCodeBlockStructure.get(), CopyParsedBlock, other);
+        instance->finishCreation(vm, CopyParsedBlock, other);
         return instance;
     }
 
-    static FunctionCodeBlock* create(VM* vm, FunctionExecutable* ownerExecutable, UnlinkedFunctionCodeBlock* unlinkedCodeBlock, JSScope* scope,
-        RefPtr<SourceProvider>&& sourceProvider, unsigned sourceOffset, unsigned firstLineColumnOffset)
+    static FunctionCodeBlock* create(VM& vm, FunctionExecutable* ownerExecutable, UnlinkedFunctionCodeBlock* unlinkedCodeBlock, JSScope* scope)
     {
-        FunctionCodeBlock* instance = new (NotNull, allocateCell<FunctionCodeBlock>(vm->heap))
-            FunctionCodeBlock(vm, vm->functionCodeBlockStructure.get(), ownerExecutable, unlinkedCodeBlock, scope, WTFMove(sourceProvider), sourceOffset, firstLineColumnOffset);
-        if (!instance->finishCreation(*vm, ownerExecutable, unlinkedCodeBlock, scope))
+        FunctionCodeBlock* instance = new (NotNull, allocateCell<FunctionCodeBlock>(vm))
+            FunctionCodeBlock(vm, vm.functionCodeBlockStructure.get(), ownerExecutable, unlinkedCodeBlock, scope);
+        if (!instance->finishCreation(vm, ownerExecutable, unlinkedCodeBlock, scope))
             return nullptr;
         return instance;
     }
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(CellType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(CodeBlockType, StructureFlags), info());
     }
 
 private:
-    FunctionCodeBlock(VM* vm, Structure* structure, CopyParsedBlockTag, FunctionCodeBlock& other)
+    FunctionCodeBlock(VM& vm, Structure* structure, CopyParsedBlockTag, FunctionCodeBlock& other)
         : CodeBlock(vm, structure, CopyParsedBlock, other)
     {
     }
 
-    FunctionCodeBlock(VM* vm, Structure* structure, FunctionExecutable* ownerExecutable, UnlinkedFunctionCodeBlock* unlinkedCodeBlock, JSScope* scope,
-        RefPtr<SourceProvider>&& sourceProvider, unsigned sourceOffset, unsigned firstLineColumnOffset)
-        : CodeBlock(vm, structure, ownerExecutable, unlinkedCodeBlock, scope, WTFMove(sourceProvider), sourceOffset, firstLineColumnOffset)
+    FunctionCodeBlock(VM& vm, Structure* structure, FunctionExecutable* ownerExecutable, UnlinkedFunctionCodeBlock* unlinkedCodeBlock, JSScope* scope)
+        : CodeBlock(vm, structure, ownerExecutable, unlinkedCodeBlock, scope)
     {
     }
-    
-    static void destroy(JSCell*);
 };
+static_assert(sizeof(FunctionCodeBlock) == sizeof(CodeBlock), "Subclasses of CodeBlock should be the same size to share IsoSubspace");
 
 } // namespace JSC

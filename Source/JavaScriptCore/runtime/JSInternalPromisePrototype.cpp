@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,23 +26,18 @@
 #include "config.h"
 #include "JSInternalPromisePrototype.h"
 
-#include "Error.h"
-#include "JSCBuiltins.h"
 #include "JSCInlines.h"
-#include "JSGlobalObject.h"
-#include "JSInternalPromise.h"
-#include "Microtask.h"
 
 namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(JSInternalPromisePrototype);
 
-const ClassInfo JSInternalPromisePrototype::s_info = { "InternalPromisePrototype", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSInternalPromisePrototype) };
+const ClassInfo JSInternalPromisePrototype::s_info = { "InternalPromisePrototype"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSInternalPromisePrototype) };
 
-JSInternalPromisePrototype* JSInternalPromisePrototype::create(VM& vm, JSGlobalObject*, Structure* structure)
+JSInternalPromisePrototype* JSInternalPromisePrototype::create(VM& vm, JSGlobalObject* globalObject, Structure* structure)
 {
-    JSInternalPromisePrototype* object = new (NotNull, allocateCell<JSInternalPromisePrototype>(vm.heap)) JSInternalPromisePrototype(vm, structure);
-    object->finishCreation(vm, structure);
+    JSInternalPromisePrototype* object = new (NotNull, allocateCell<JSInternalPromisePrototype>(vm)) JSInternalPromisePrototype(vm, structure);
+    object->finishCreation(vm, globalObject);
     return object;
 }
 

@@ -8,12 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/aec3/render_delay_controller_metrics.h"
+#include "modules/audio_processing/aec3/render_delay_controller_metrics.h"
 
 #include <algorithm>
 
-#include "webrtc/modules/audio_processing/aec3/aec3_common.h"
-#include "webrtc/system_wrappers/include/metrics.h"
+#include "modules/audio_processing/aec3/aec3_common.h"
+#include "rtc_base/checks.h"
+#include "system_wrappers/include/metrics.h"
 
 namespace webrtc {
 
@@ -38,31 +39,44 @@ enum class DelayChangesCategory {
 
 }  // namespace
 
-void RenderDelayControllerMetrics::Update(rtc::Optional<size_t> delay_samples,
-                                          size_t buffer_delay_blocks) {
+RenderDelayControllerMetrics::RenderDelayControllerMetrics() = default;
+
+void RenderDelayControllerMetrics::Update(
+    absl::optional<size_t> delay_samples,
+    absl::optional<size_t> buffer_delay_blocks,
+    ClockdriftDetector::Level clockdrift) {
   ++call_counter_;
 
   if (!initial_update) {
+    size_t delay_blocks;
     if (delay_samples) {
       ++reliable_delay_estimate_counter_;
-      size_t delay_blocks = (*delay_samples) / kBlockSize;
-
-      if (delay_blocks != delay_blocks_) {
-        ++delay_change_counter_;
-        delay_blocks_ = delay_blocks;
-      }
+      // Add an offset by 1 (metric is halved before reporting) to reserve 0 for
+      // absent delay.
+      delay_blocks = (*delay_samples) / kBlockSize + 2;
+    } else {
+      delay_blocks = 0;
     }
+
+    if (delay_blocks != delay_blocks_) {
+      ++delay_change_counter_;
+      delay_blocks_ = delay_blocks;
+    }
+
   } else if (++initial_call_counter_ == 5 * kNumBlocksPerSecond) {
     initial_update = false;
   }
 
   if (call_counter_ == kMetricsReportingIntervalBlocks) {
     int value_to_report = static_cast<int>(delay_blocks_);
-    value_to_report = std::min(124, value_to_report);
+    // Divide by 2 to compress metric range.
+    value_to_report = std::min(124, value_to_report >> 1);
     RTC_HISTOGRAM_COUNTS_LINEAR("WebRTC.Audio.EchoCanceller.EchoPathDelay",
                                 value_to_report, 0, 124, 125);
 
-    value_to_report = static_cast<int>(buffer_delay_blocks);
+    // Divide by 2 to compress metric range.
+    // Offset by 1 to reserve 0 for absent delay.
+    value_to_report = buffer_delay_blocks ? (*buffer_delay_blocks + 2) >> 1 : 0;
     value_to_report = std::min(124, value_to_report);
     RTC_HISTOGRAM_COUNTS_LINEAR("WebRTC.Audio.EchoCanceller.BufferDelay",
                                 value_to_report, 0, 124, 125);
@@ -101,11 +115,12 @@ void RenderDelayControllerMetrics::Update(rtc::Optional<size_t> delay_samples,
         static_cast<int>(delay_changes),
         static_cast<int>(DelayChangesCategory::kNumCategories));
 
-    metrics_reported_ = true;
+    RTC_HISTOGRAM_ENUMERATION(
+        "WebRTC.Audio.EchoCanceller.Clockdrift", static_cast<int>(clockdrift),
+        static_cast<int>(ClockdriftDetector::Level::kNumCategories));
+
     call_counter_ = 0;
     ResetMetrics();
-  } else {
-    metrics_reported_ = false;
   }
 }
 

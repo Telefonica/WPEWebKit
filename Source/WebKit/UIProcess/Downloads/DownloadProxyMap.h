@@ -23,12 +23,17 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef DownloadProxyMap_h
-#define DownloadProxyMap_h
+#pragma once
 
 #include "DownloadID.h"
 #include <wtf/HashMap.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/RetainPtr.h>
+#include <wtf/WeakPtr.h>
+
+#if PLATFORM(IOS_FAMILY)
+#include <objc/objc.h>
+#endif
 
 namespace WebCore {
 class ResourceRequest;
@@ -36,29 +41,38 @@ class ResourceRequest;
 
 namespace WebKit {
 
-class ChildProcessProxy;
 class DownloadProxy;
+class NetworkProcessProxy;
+class ProcessAssertion;
+class WebPageProxy;
 class WebProcessPool;
+class WebsiteDataStore;
+struct FrameInfoData;
 
-class DownloadProxyMap {
+class DownloadProxyMap : public CanMakeWeakPtr<DownloadProxyMap> {
+    WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(DownloadProxyMap);
 
 public:
-    explicit DownloadProxyMap(ChildProcessProxy*);
+    explicit DownloadProxyMap(NetworkProcessProxy&);
     ~DownloadProxyMap();
 
-    DownloadProxy* createDownloadProxy(WebProcessPool&, const WebCore::ResourceRequest&);
-    void downloadFinished(DownloadProxy*);
+    DownloadProxy& createDownloadProxy(WebsiteDataStore&, WebProcessPool&, const WebCore::ResourceRequest&, const FrameInfoData&, WebPageProxy* originatingPage);
+    void downloadFinished(DownloadProxy&);
 
     bool isEmpty() const { return m_downloads.isEmpty(); }
-
-    void processDidClose();
+    void invalidate();
 
 private:
-    ChildProcessProxy* m_process;
+    void platformCreate();
+    void platformDestroy();
+
+    NetworkProcessProxy& m_process;
     HashMap<DownloadID, RefPtr<DownloadProxy>> m_downloads;
+
+    bool m_shouldTakeAssertion { false };
+    RefPtr<ProcessAssertion> m_downloadUIAssertion;
+    RefPtr<ProcessAssertion> m_downloadNetworkingAssertion;
 };
 
 } // namespace WebKit
-
-#endif // DownloadProxyMap_h

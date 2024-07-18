@@ -25,14 +25,30 @@
 
 WI.CanvasTreeElement = class CanvasTreeElement extends WI.FolderizedTreeElement
 {
-    constructor(representedObject)
+    constructor(representedObject, showRecordings = true)
     {
         console.assert(representedObject instanceof WI.Canvas);
 
-        const subtitle = null;
+        let subtitle = WI.Canvas.displayNameForContextType(representedObject.contextType);
         super(["canvas", representedObject.contextType], representedObject.displayName, subtitle, representedObject);
 
         this.registerFolderizeSettings("shader-programs", WI.UIString("Shader Programs"), this.representedObject.shaderProgramCollection, WI.ShaderProgramTreeElement);
+
+        this.representedObject.addEventListener(WI.Canvas.Event.RecordingStarted, this._updateStatus, this);
+        this.representedObject.addEventListener(WI.Canvas.Event.RecordingStopped, this._updateStatus, this);
+        this.representedObject.shaderProgramCollection.addEventListener(WI.Collection.Event.ItemAdded, this._handleItemAdded, this);
+        this.representedObject.shaderProgramCollection.addEventListener(WI.Collection.Event.ItemRemoved, this._handleItemRemoved, this);
+
+        this._showRecordings = showRecordings;
+        if (this._showRecordings) {
+            function createRecordingTreeElement(recording) {
+                return new WI.GeneralTreeElement(["recording"], recording.displayName, null, recording);
+            }
+            this.registerFolderizeSettings("recordings", WI.UIString("Recordings"), this.representedObject.recordingCollection, createRecordingTreeElement);
+
+            this.representedObject.recordingCollection.addEventListener(WI.Collection.Event.ItemAdded, this._handleItemAdded, this);
+            this.representedObject.recordingCollection.addEventListener(WI.Collection.Event.ItemRemoved, this._handleItemRemoved, this);
+        }
     }
 
     // Protected
@@ -41,21 +57,10 @@ WI.CanvasTreeElement = class CanvasTreeElement extends WI.FolderizedTreeElement
     {
         super.onattach();
 
-        this.representedObject.shaderProgramCollection.addEventListener(WI.Collection.Event.ItemAdded, this._shaderProgramAdded, this);
-        this.representedObject.shaderProgramCollection.addEventListener(WI.Collection.Event.ItemRemoved, this._shaderProgramRemoved, this);
-
         this.element.addEventListener("mouseover", this._handleMouseOver.bind(this));
         this.element.addEventListener("mouseout", this._handleMouseOut.bind(this));
 
         this.onpopulate();
-    }
-
-    ondetach()
-    {
-        this.representedObject.shaderProgramCollection.removeEventListener(WI.Collection.Event.ItemAdded, this._shaderProgramAdded, this);
-        this.representedObject.shaderProgramCollection.removeEventListener(WI.Collection.Event.ItemRemoved, this._shaderProgramRemoved, this);
-
-        super.ondetach();
     }
 
     onpopulate()
@@ -69,8 +74,13 @@ WI.CanvasTreeElement = class CanvasTreeElement extends WI.FolderizedTreeElement
 
         this.removeChildren();
 
-        for (let program of this.representedObject.shaderProgramCollection.items)
+        for (let program of this.representedObject.shaderProgramCollection)
             this.addChildForRepresentedObject(program);
+
+        if (this._showRecordings) {
+            for (let recording of this.representedObject.recordingCollection)
+                this.addChildForRepresentedObject(recording);
+        }
     }
 
     populateContextMenu(contextMenu, event)
@@ -93,34 +103,48 @@ WI.CanvasTreeElement = class CanvasTreeElement extends WI.FolderizedTreeElement
 
     // Private
 
-    _shaderProgramAdded(event)
+    _handleItemAdded(event)
     {
-        this.addRepresentedObjectToNewChildQueue(event.data.item);
+        this.addChildForRepresentedObject(event.data.item);
     }
 
-    _shaderProgramRemoved(event)
+    _handleItemRemoved(event)
     {
         this.removeChildForRepresentedObject(event.data.item);
     }
 
     _handleMouseOver(event)
     {
-        if (this.representedObject.cssCanvasName) {
-            this.representedObject.requestCSSCanvasClientNodes((cssCanvasClientNodes) => {
-                WI.domTreeManager.highlightDOMNodeList(cssCanvasClientNodes.map((node) => node.id), "all");
+        if (this.representedObject.cssCanvasName || this.representedObject.contextType === WI.Canvas.ContextType.WebGPU) {
+            this.representedObject.requestClientNodes((clientNodes) => {
+                WI.domManager.highlightDOMNodeList(clientNodes);
             });
         } else {
             this.representedObject.requestNode((node) => {
                 if (!node || !node.ownerDocument)
                     return;
 
-                WI.domTreeManager.highlightDOMNode(node.id, "all");
+                node.highlight();
             });
         }
     }
 
     _handleMouseOut(event)
     {
-        WI.domTreeManager.hideDOMNodeHighlight();
+        WI.domManager.hideDOMNodeHighlight();
+    }
+
+    _updateStatus()
+    {
+        if (this.representedObject.recordingActive) {
+            if (!this.status || !this.status.__showingSpinner) {
+                let spinner = new WI.IndeterminateProgressSpinner;
+                this.status = spinner.element;
+                this.status.__showingSpinner = true;
+            }
+        } else {
+            if (this.status && this.status.__showingSpinner)
+                this.status = "";
+        }
     }
 };

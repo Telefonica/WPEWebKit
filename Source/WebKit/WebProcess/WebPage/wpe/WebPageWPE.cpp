@@ -26,70 +26,23 @@
 #include "config.h"
 #include "WebPage.h"
 
-#include "NotImplemented.h"
-#include "RuntimeEnabledFeatures.h"
-#include "WebPreferencesKeys.h"
-#include "WebPreferencesStore.h"
-#include "WindowsKeyboardCodes.h"
-#include <WebCore/Settings.h>
-#include <WebCore/SharedBuffer.h>
-
-using namespace WebCore;
+#include "WebPageProxy.h"
+#include "WebPageProxyMessages.h"
+#include <WebCore/NotImplemented.h>
+#include <WebCore/PlatformScreen.h>
+#include <WebCore/PointerCharacteristics.h>
 
 namespace WebKit {
+using namespace WebCore;
 
-void WebPage::platformInitialize()
+void WebPage::platformReinitialize()
 {
 }
 
-void WebPage::platformDetach()
-{
-}
-
-void WebPage::platformEditorState(Frame&, EditorState&, IncludePostLayoutDataHint) const
-{
-    notImplemented();
-}
-
-void WebPage::platformPreferencesDidChange(const WebPreferencesStore& store)
-{
-    m_page->settings().setAllowRunningOfInsecureContent(store.getBoolValueForKey(WebPreferencesKey::allowRunningOfInsecureContentKey()));
-    m_page->settings().setAllowDisplayOfInsecureContent(store.getBoolValueForKey(WebPreferencesKey::allowDisplayOfInsecureContentKey()));
-    m_page->settings().setScrollToFocusedElementEnabled(store.getBoolValueForKey(WebPreferencesKey::scrollToFocusedElementEnabledKey()));
-#if ENABLE(INDEXED_DATABASE)
-    RuntimeEnabledFeatures::sharedFeatures().setIndexedDBEnabled(store.getBoolValueForKey(WebPreferencesKey::databasesEnabledKey()));
-#endif
-}
-
-bool WebPage::performDefaultBehaviorForKeyEvent(const WebKeyboardEvent& keyboardEvent)
-{
-    if (keyboardEvent.type() != WebEvent::KeyDown && keyboardEvent.type() != WebEvent::RawKeyDown)
-        return false;
-
-    switch (keyboardEvent.windowsVirtualKeyCode()) {
-    case VK_PRIOR:
-        scroll(m_page.get(), ScrollUp, ScrollByPage);
-        break;
-    case VK_NEXT:
-        scroll(m_page.get(), ScrollDown, ScrollByPage);
-        break;
-    default:
-        return false;
-    }
-
-    return true;
-}
-
-bool WebPage::platformHasLocalDataForURL(const URL&)
+bool WebPage::performDefaultBehaviorForKeyEvent(const WebKeyboardEvent&)
 {
     notImplemented();
     return false;
-}
-
-String WebPage::cachedResponseMIMETypeForURL(const URL&)
-{
-    notImplemented();
-    return String();
 }
 
 bool WebPage::platformCanHandleRequest(const ResourceRequest&)
@@ -98,22 +51,40 @@ bool WebPage::platformCanHandleRequest(const ResourceRequest&)
     return false;
 }
 
-String WebPage::cachedSuggestedFilenameForURL(const URL&)
+bool WebPage::hoverSupportedByPrimaryPointingDevice() const
 {
-    notImplemented();
-    return String();
+#if ENABLE(TOUCH_EVENTS)
+    return !screenIsTouchPrimaryInputDevice();
+#else
+    return true;
+#endif
 }
 
-RefPtr<SharedBuffer> WebPage::cachedResponseDataForURL(const URL&)
+bool WebPage::hoverSupportedByAnyAvailablePointingDevice() const
 {
-    notImplemented();
-    return nullptr;
+#if ENABLE(TOUCH_EVENTS)
+    return !screenHasTouchDevice();
+#else
+    return true;
+#endif
 }
 
-String WebPage::platformUserAgent(const URL&) const
+std::optional<PointerCharacteristics> WebPage::pointerCharacteristicsOfPrimaryPointingDevice() const
 {
-    notImplemented();
-    return String();
+#if ENABLE(TOUCH_EVENTS)
+    if (screenIsTouchPrimaryInputDevice())
+        return PointerCharacteristics::Coarse;
+#endif
+    return PointerCharacteristics::Fine;
+}
+
+OptionSet<PointerCharacteristics> WebPage::pointerCharacteristicsOfAllAvailablePointingDevices() const
+{
+#if ENABLE(TOUCH_EVENTS)
+    if (screenHasTouchDevice())
+        return PointerCharacteristics::Coarse;
+#endif
+    return PointerCharacteristics::Fine;
 }
 
 } // namespace WebKit

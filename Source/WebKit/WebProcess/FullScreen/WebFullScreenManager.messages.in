@@ -22,6 +22,7 @@
 
 #if ENABLE(FULLSCREEN_API)
 messages -> WebFullScreenManager LegacyReceiver {
+    RequestEnterFullScreen()
     RequestExitFullScreen()
     WillEnterFullScreen()
     DidEnterFullScreen()
@@ -30,5 +31,8 @@ messages -> WebFullScreenManager LegacyReceiver {
     SetAnimatingFullScreen(bool animating)
     SaveScrollPosition()
     RestoreScrollPosition()
+    SetFullscreenInsets(WebCore::RectEdges<float> insets)
+    SetFullscreenAutoHideDuration(Seconds duration)
+    SetFullscreenControlsHidden(bool hidden)
 }
 #endif

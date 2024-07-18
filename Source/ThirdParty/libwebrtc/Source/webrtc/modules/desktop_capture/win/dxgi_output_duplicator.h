@@ -8,26 +8,26 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_DXGI_OUTPUT_DUPLICATOR_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_DXGI_OUTPUT_DUPLICATOR_H_
+#ifndef MODULES_DESKTOP_CAPTURE_WIN_DXGI_OUTPUT_DUPLICATOR_H_
+#define MODULES_DESKTOP_CAPTURE_WIN_DXGI_OUTPUT_DUPLICATOR_H_
 
 #include <comdef.h>
+#include <dxgi.h>
+#include <dxgi1_2.h>
 #include <wrl/client.h>
-#include <DXGI.h>
-#include <DXGI1_2.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/thread_annotations.h"
-#include "webrtc/modules/desktop_capture/desktop_geometry.h"
-#include "webrtc/modules/desktop_capture/desktop_region.h"
-#include "webrtc/modules/desktop_capture/desktop_frame_rotation.h"
-#include "webrtc/modules/desktop_capture/shared_desktop_frame.h"
-#include "webrtc/modules/desktop_capture/win/d3d_device.h"
-#include "webrtc/modules/desktop_capture/win/dxgi_context.h"
-#include "webrtc/modules/desktop_capture/win/dxgi_texture.h"
+#include "modules/desktop_capture/desktop_frame_rotation.h"
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/desktop_region.h"
+#include "modules/desktop_capture/shared_desktop_frame.h"
+#include "modules/desktop_capture/win/d3d_device.h"
+#include "modules/desktop_capture/win/dxgi_context.h"
+#include "modules/desktop_capture/win/dxgi_texture.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
@@ -54,19 +54,27 @@ class DxgiOutputDuplicator {
   // Initializes duplication_ object.
   bool Initialize();
 
-  // Copies the content of current IDXGIOutput to the |target|. To improve the
+  // Copies the content of current IDXGIOutput to the `target`. To improve the
   // performance, this function copies only regions merged from
-  // |context|->updated_region and DetectUpdatedRegion(). The |offset| decides
-  // the offset in the |target| where the content should be copied to. i.e. this
+  // `context`->updated_region and DetectUpdatedRegion(). The `offset` decides
+  // the offset in the `target` where the content should be copied to. i.e. this
   // function copies the content to the rectangle of (offset.x(), offset.y()) to
   // (offset.x() + desktop_rect_.width(), offset.y() + desktop_rect_.height()).
   // Returns false in case of a failure.
+  // May retain a reference to `target` so that a "captured" frame can be
+  // returned in the event that a new frame is not ready to be captured yet.
+  // (Or in other words, if the call to IDXGIOutputDuplication::AcquireNextFrame
+  // indicates that there is not yet a new frame, this is usually because no
+  // updates have occurred to the frame).
   bool Duplicate(Context* context,
                  DesktopVector offset,
                  SharedDesktopFrame* target);
 
   // Returns the desktop rect covered by this DxgiOutputDuplicator.
   DesktopRect desktop_rect() const { return desktop_rect_; }
+
+  // Returns the device name from DXGI_OUTPUT_DESC in utf8 encoding.
+  const std::string& device_name() const { return device_name_; }
 
   void Setup(Context* context);
 
@@ -75,12 +83,12 @@ class DxgiOutputDuplicator {
   // How many frames have been captured by this DxigOutputDuplicator.
   int64_t num_frames_captured() const;
 
-  // Moves |desktop_rect_|. See DxgiDuplicatorController::TranslateRect().
+  // Moves `desktop_rect_`. See DxgiDuplicatorController::TranslateRect().
   void TranslateRect(const DesktopVector& position);
 
  private:
   // Calls DoDetectUpdatedRegion(). If it fails, this function sets the
-  // |updated_region| as entire UntranslatedDesktopRect().
+  // `updated_region` as entire UntranslatedDesktopRect().
   void DetectUpdatedRegion(const DXGI_OUTDUPL_FRAME_INFO& frame_info,
                            DesktopRegion* updated_region);
 
@@ -88,6 +96,11 @@ class DxgiOutputDuplicator {
   // APIs. Returns false in case of a failure.
   bool DoDetectUpdatedRegion(const DXGI_OUTDUPL_FRAME_INFO& frame_info,
                              DesktopRegion* updated_region);
+
+  // Returns true if the mouse cursor is embedded in the captured frame and
+  // false if not. Also logs the same boolean as
+  // WebRTC.DesktopCapture.Win.DirectXCursorEmbedded UMA.
+  bool ContainsMouseCursor(const DXGI_OUTDUPL_FRAME_INFO& frame_info);
 
   bool ReleaseFrame();
 
@@ -103,7 +116,7 @@ class DxgiOutputDuplicator {
   // (0, 0).
   DesktopRect GetUntranslatedDesktopRect() const;
 
-  // Spreads changes from |context| to other registered Context(s) in
+  // Spreads changes from `context` to other registered Context(s) in
   // contexts_.
   void SpreadContextChange(const Context* const context);
 
@@ -112,6 +125,7 @@ class DxgiOutputDuplicator {
 
   const D3dDevice device_;
   const Microsoft::WRL::ComPtr<IDXGIOutput1> output_;
+  const std::string device_name_;
   DesktopRect desktop_rect_;
   Microsoft::WRL::ComPtr<IDXGIOutputDuplication> duplication_;
   DXGI_OUTDUPL_DESC desc_;
@@ -128,7 +142,7 @@ class DxgiOutputDuplicator {
 
   // The last full frame of this output and its offset. If on AcquireNextFrame()
   // failed because of timeout, i.e. no update, we can copy content from
-  // |last_frame_|.
+  // `last_frame_`.
   std::unique_ptr<SharedDesktopFrame> last_frame_;
   DesktopVector last_frame_offset_;
 
@@ -137,4 +151,4 @@ class DxgiOutputDuplicator {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_DXGI_OUTPUT_DUPLICATOR_H_
+#endif  // MODULES_DESKTOP_CAPTURE_WIN_DXGI_OUTPUT_DUPLICATOR_H_

@@ -53,6 +53,7 @@ struct _WebKitNavigationPolicyDecision {
 struct _WebKitNavigationPolicyDecisionClass {
     WebKitPolicyDecisionClass parent_class;
 
+    /*< private >*/
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
@@ -64,18 +65,6 @@ webkit_navigation_policy_decision_get_type            (void);
 
 WEBKIT_API WebKitNavigationAction *
 webkit_navigation_policy_decision_get_navigation_action (WebKitNavigationPolicyDecision *decision);
-
-WEBKIT_DEPRECATED_FOR(webkit_navigation_policy_decision_get_navigation_action) WebKitNavigationType
-webkit_navigation_policy_decision_get_navigation_type   (WebKitNavigationPolicyDecision *decision);
-
-WEBKIT_DEPRECATED_FOR(webkit_navigation_policy_decision_get_navigation_action) guint
-webkit_navigation_policy_decision_get_mouse_button      (WebKitNavigationPolicyDecision *decision);
-
-WEBKIT_DEPRECATED_FOR(webkit_navigation_policy_decision_get_navigation_action) guint
-webkit_navigation_policy_decision_get_modifiers         (WebKitNavigationPolicyDecision *decision);
-
-WEBKIT_DEPRECATED_FOR(webkit_navigation_policy_decision_get_navigation_action) WebKitURIRequest *
-webkit_navigation_policy_decision_get_request           (WebKitNavigationPolicyDecision *decision);
 
 WEBKIT_API const gchar *
 webkit_navigation_policy_decision_get_frame_name        (WebKitNavigationPolicyDecision *decision);

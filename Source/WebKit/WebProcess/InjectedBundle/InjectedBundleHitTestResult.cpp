@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,17 +29,18 @@
 #include "InjectedBundleNodeHandle.h"
 #include "WebFrame.h"
 #include "WebFrameLoaderClient.h"
+#include "WebImage.h"
+#include <WebCore/BitmapImage.h>
 #include <WebCore/Document.h>
-#include <WebCore/Element.h>
 #include <WebCore/Frame.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/FrameView.h>
-#include <WebCore/URL.h>
-#include <wtf/text/WTFString.h>
-
-using namespace WebCore;
+#include <WebCore/GraphicsContext.h>
+#include <WebCore/HTMLMediaElement.h>
+#include <wtf/URL.h>
 
 namespace WebKit {
+using namespace WebCore;
 
 Ref<InjectedBundleHitTestResult> InjectedBundleHitTestResult::create(const HitTestResult& hitTestResult)
 {
@@ -118,14 +119,9 @@ BundleHitTestResultMediaType InjectedBundleHitTestResult::mediaType() const
 #if !ENABLE(VIDEO)
     return BundleHitTestResultMediaTypeNone;
 #else
-    Node* node = m_hitTestResult.innerNonSharedNode();
-    if (!is<Element>(*node))
+    if (!is<HTMLMediaElement>(m_hitTestResult.innerNonSharedNode()))
         return BundleHitTestResultMediaTypeNone;
-    
-    if (!downcast<Element>(*node).isMediaElement())
-        return BundleHitTestResultMediaTypeNone;
-    
-    return m_hitTestResult.mediaIsVideo() ? BundleHitTestResultMediaTypeVideo : BundleHitTestResultMediaTypeAudio;    
+    return m_hitTestResult.mediaIsVideo() ? BundleHitTestResultMediaTypeVideo : BundleHitTestResultMediaTypeAudio;
 #endif
 }
 
@@ -165,6 +161,26 @@ IntRect InjectedBundleHitTestResult::imageRect() const
         return imageRect;
     
     return view->contentsToRootView(imageRect);
+}
+
+RefPtr<WebImage> InjectedBundleHitTestResult::image() const
+{
+    Image* image = m_hitTestResult.image();
+    // For now, we only handle bitmap images.
+    if (!is<BitmapImage>(image))
+        return nullptr;
+
+    BitmapImage& bitmapImage = downcast<BitmapImage>(*image);
+    IntSize size(bitmapImage.size());
+    auto webImage = WebImage::create(size, static_cast<ImageOptions>(0), DestinationColorSpace::SRGB());
+    if (!webImage)
+        return nullptr;
+
+    // FIXME: need to handle EXIF rotation.
+    auto& graphicsContext = webImage->context();
+    graphicsContext.drawImage(bitmapImage, { { }, size });
+
+    return webImage;
 }
 
 bool InjectedBundleHitTestResult::isSelected() const

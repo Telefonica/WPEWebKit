@@ -28,6 +28,7 @@
 #include "AXTextStateChangeIntent.h"
 #include "EditAction.h"
 #include "VisibleSelection.h"
+#include <wtf/WeakPtr.h>
 
 #ifndef NDEBUG
 #include <wtf/HashSet.h>
@@ -38,9 +39,8 @@ namespace WebCore {
 class CompositeEditCommand;
 class Document;
 class Element;
-class Frame;
 
-String inputTypeNameForEditingAction(EditAction);
+ASCIILiteral inputTypeNameForEditingAction(EditAction);
 
 class EditCommand : public RefCounted<EditCommand> {
 public:
@@ -61,14 +61,12 @@ public:
     virtual void doApply() = 0;
 
 protected:
-    explicit EditCommand(Document&, EditAction = EditActionUnspecified);
+    explicit EditCommand(Document&, EditAction = EditAction::Unspecified);
     EditCommand(Document&, const VisibleSelection&, const VisibleSelection&);
 
-    const Frame& frame() const;
-    Frame& frame();
     const Document& document() const { return m_document; }
     Document& document() { return m_document; }
-    CompositeEditCommand* parent() const { return m_parent; }
+    CompositeEditCommand* parent() const { return m_parent.get(); }
     void setStartingSelection(const VisibleSelection&);
     WEBCORE_EXPORT void setEndingSelection(const VisibleSelection&);
 
@@ -81,8 +79,8 @@ private:
     Ref<Document> m_document;
     VisibleSelection m_startingSelection;
     VisibleSelection m_endingSelection;
-    CompositeEditCommand* m_parent { nullptr };
-    EditAction m_editingAction { EditActionUnspecified };
+    WeakPtr<CompositeEditCommand> m_parent;
+    EditAction m_editingAction { EditAction::Unspecified };
 };
 
 enum ShouldAssumeContentIsAlwaysEditable {
@@ -96,14 +94,14 @@ public:
     virtual void doReapply(); // calls doApply()
 
 #ifndef NDEBUG
-    virtual void getNodesInCommand(HashSet<Node*>&) = 0;
+    virtual void getNodesInCommand(HashSet<Ref<Node>>&) = 0;
 #endif
 
 protected:
-    explicit SimpleEditCommand(Document&, EditAction = EditActionUnspecified);
+    explicit SimpleEditCommand(Document&, EditAction = EditAction::Unspecified);
 
 #ifndef NDEBUG
-    void addNodeAndDescendants(Node*, HashSet<Node*>&);
+    void addNodeAndDescendants(Node*, HashSet<Ref<Node>>&);
 #endif
 
 private:

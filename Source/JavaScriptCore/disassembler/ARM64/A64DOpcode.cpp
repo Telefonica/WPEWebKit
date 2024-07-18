@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,13 +25,23 @@
 
 #include "config.h"
 
-#if USE(ARM64_DISASSEMBLER)
+#if ENABLE(ARM64_DISASSEMBLER)
 
 #include "A64DOpcode.h"
 
+#include "Disassembler.h"
+#include "ExecutableAllocator.h"
+#include "GPRInfo.h"
+#include "Integrity.h"
+#include "JSCJSValue.h"
+#include "LLIntPCRanges.h"
+#include "PureNaN.h"
+#include "VMInspector.h"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <wtf/PtrTag.h>
+#include <wtf/Range.h>
 
 namespace JSC { namespace ARM64Disassembler {
 
@@ -47,7 +57,7 @@ const char* const A64DOpcode::s_optionName[8] = {
 };
 
 const char* const A64DOpcode::s_shiftNames[4] = {
-    "lsl", "lsr", "asl", "ror"
+    "lsl", "lsr", "asr", "ror"
 };
 
 const char A64DOpcode::s_FPRegisterPrefix[5] = {
@@ -64,13 +74,16 @@ struct OpcodeGroupInitializer {
 #define OPCODE_GROUP_ENTRY(groupIndex, groupClass) \
 { groupIndex, groupClass::mask, groupClass::pattern, groupClass::format }
 
-static OpcodeGroupInitializer opcodeGroupList[] = {
+static const OpcodeGroupInitializer opcodeGroupList[] = {
+    OPCODE_GROUP_ENTRY(0x08, A64DOpcodeCAS),
     OPCODE_GROUP_ENTRY(0x08, A64DOpcodeLoadStoreRegisterPair),
     OPCODE_GROUP_ENTRY(0x08, A64DOpcodeLoadStoreExclusive),
     OPCODE_GROUP_ENTRY(0x09, A64DOpcodeLoadStoreRegisterPair),
     OPCODE_GROUP_ENTRY(0x0a, A64DOpcodeLogicalShiftedRegister),
     OPCODE_GROUP_ENTRY(0x0b, A64DOpcodeAddSubtractExtendedRegister),
     OPCODE_GROUP_ENTRY(0x0b, A64DOpcodeAddSubtractShiftedRegister),
+    OPCODE_GROUP_ENTRY(0x0c, A64DOpcodeLoadStoreRegisterPair),
+    OPCODE_GROUP_ENTRY(0x0d, A64DOpcodeLoadStoreRegisterPair),
     OPCODE_GROUP_ENTRY(0x11, A64DOpcodeAddSubtractImmediate),
     OPCODE_GROUP_ENTRY(0x12, A64DOpcodeMoveWide),
     OPCODE_GROUP_ENTRY(0x12, A64DOpcodeLogicalImmediate),
@@ -95,6 +108,9 @@ static OpcodeGroupInitializer opcodeGroupList[] = {
     OPCODE_GROUP_ENTRY(0x17, A64DOpcodeTestAndBranchImmediate),
     OPCODE_GROUP_ENTRY(0x18, A64DOpcodeLoadStoreImmediate),
     OPCODE_GROUP_ENTRY(0x18, A64DOpcodeLoadStoreRegisterOffset),
+    OPCODE_GROUP_ENTRY(0x18, A64DOpcodeLoadStoreAuthenticated),
+    OPCODE_GROUP_ENTRY(0x18, A64DOpcodeLoadAtomic),
+    OPCODE_GROUP_ENTRY(0x18, A64DOpcodeSwapAtomic),
     OPCODE_GROUP_ENTRY(0x19, A64DOpcodeLoadStoreUnsignedImmediate),
     OPCODE_GROUP_ENTRY(0x1a, A64DOpcodeConditionalSelect),
     OPCODE_GROUP_ENTRY(0x1a, A64DOpcodeDataProcessing1Source),
@@ -179,6 +195,28 @@ const char* A64DOpcode::format()
 {
     bufferPrintf("   .long  %08x", m_opcode);
     return m_formatBuffer;
+}
+
+void A64DOpcode::appendPCRelativeOffset(uint32_t* pc, int32_t immediate)
+{
+    uint32_t* targetPC = pc + immediate;
+    constexpr size_t bufferSize = 101;
+    char buffer[bufferSize];
+    const char* targetInfo = buffer;
+    if (!m_startPC)
+        targetInfo = "";
+    else if (targetPC >= m_startPC && targetPC < m_endPC)
+        snprintf(buffer, bufferSize - 1, " -> <%u>", static_cast<unsigned>((targetPC - m_startPC) * sizeof(uint32_t)));
+    else if (const char* label = labelFor(targetPC))
+        snprintf(buffer, bufferSize - 1, " -> %s", label);
+    else if (isJITPC(targetPC))
+        targetInfo = " -> JIT PC";
+    else if (LLInt::isLLIntPC(targetPC))
+        targetInfo = " -> LLInt PC";
+    else
+        targetInfo = " -> <unknown>";
+
+    bufferPrintf("0x%" PRIxPTR "%s", bitwise_cast<uintptr_t>(targetPC),  targetInfo);
 }
 
 void A64DOpcode::appendRegisterName(unsigned registerNumber, bool is64Bit)
@@ -406,7 +444,7 @@ const char* A64DOpcodeCompareAndBranchImmediate::format()
 
 const char* A64DOpcodeConditionalBranchImmediate::format()
 {
-    bufferPrintf("   b.%-5.5s", conditionName(condition()));
+    bufferPrintf("   b.%-7.7s", conditionName(condition()));
     appendPCRelativeOffset(m_currentPC, static_cast<int32_t>(immediate19()));
     return m_formatBuffer;
 }
@@ -455,11 +493,30 @@ const char* A64DOpcodeConditionalSelect::format()
 const char* const A64DOpcodeDataProcessing1Source::s_opNames[8] = {
     "rbit", "rev16", "rev32", "rev", "clz", "cls", 0, 0
 };
+    
+const char* const A64DOpcodeDataProcessing1Source::s_pacAutOpNames[18] = {
+    "pacia", "pacib", "pacda", "pacdb", "autia", "autib", "autda", "autdb",
+    "paciza", "pacizb", "pacdza", "pacdzb", "autiza", "autizb", "autdza", "autdzb",
+    "xpaci", "xpacd"
+};
 
 const char* A64DOpcodeDataProcessing1Source::format()
 {
     if (sBit())
         return A64DOpcode::format();
+
+    if (opCode2() == 1 && is64Bit() && opCode() <= 0x1001) {
+        if (opCode() <= 0x00111 || rt() == 0x11111) {
+            appendInstructionName(s_pacAutOpNames[opCode()]);
+            appendZROrRegisterName(rd(), is64Bit());
+            if (opCode() <= 0x00111) {
+                appendSeparator();
+                appendZROrRegisterName(rn(), is64Bit());
+            }
+            return m_formatBuffer;
+        }
+        return A64DOpcode::format();
+    }
 
     if (opCode2())
         return A64DOpcode::format();
@@ -484,8 +541,10 @@ const char* A64DOpcodeDataProcessing1Source::format()
     return m_formatBuffer;
 }
 
-const char* const A64DOpcodeDataProcessing2Source::s_opNames[8] = {
-    0, 0, "udiv", "sdiv", "lsl", "lsr", "asr", "ror" // We use the pseudo-op names for the shift/rotate instructions
+const char* const A64DOpcodeDataProcessing2Source::s_opNames[16] = {
+    // We use the pseudo-op names for the shift/rotate instructions
+    0, 0, "udiv", "sdiv", 0, 0, 0, 0,
+    "lsl", "lsr", "asr", "ror", 0, "pacga", 0, 0
 };
 
 const char* A64DOpcodeDataProcessing2Source::format()
@@ -499,10 +558,14 @@ const char* A64DOpcodeDataProcessing2Source::format()
     if (opCode() & 0x30)
         return A64DOpcode::format();
 
-    if ((opCode() & 0x34) == 0x4)
+    if ((opCode() & 0x3c) == 0x4)
         return A64DOpcode::format();
 
-    appendInstructionName(opName());
+    const char* opcodeName = opName();
+    if (!opcodeName)
+        return A64DOpcode::format();
+
+    appendInstructionName(opcodeName);
     appendZROrRegisterName(rd(), is64Bit());
     appendSeparator();
     appendZROrRegisterName(rn(), is64Bit());
@@ -542,7 +605,7 @@ const char* A64DOpcodeDataProcessing3Source::format()
     appendInstructionName(opName());
     appendZROrRegisterName(rd(), is64Bit());
     appendSeparator();
-    bool srcOneAndTwoAre64Bit = is64Bit() & !(opNum() & 0x2);
+    bool srcOneAndTwoAre64Bit = is64Bit() && !(opNum() & 0x2);
     appendZROrRegisterName(rn(), srcOneAndTwoAre64Bit);
     appendSeparator();
     appendZROrRegisterName(rm(), srcOneAndTwoAre64Bit);
@@ -601,7 +664,7 @@ const char* A64OpcodeExceptionGeneration::format()
         return A64DOpcode::format();
 
     appendInstructionName(opname);
-    appendUnsignedImmediate(immediate16());
+    appendUnsignedHexImmediate(immediate16());
     return m_formatBuffer;
 }
 
@@ -818,7 +881,7 @@ const char* const A64DOpcodeFloatingPointIntegerConversions::s_opNames[32] = {
     "fcvtns", "fcvtnu", "scvtf", "ucvtf", "fcvtas", "fcvtau", "fmov", "fmov",
     "fcvtps", "fcvtpu", 0, 0, 0, 0, "fmov", "fmov",
     "fcvtms", "fcvtmu", 0, 0, 0, 0, 0, 0,
-    "fcvtzs", "fcvtzu", 0, 0, 0, 0, 0, 0
+    "fcvtzs", "fcvtzu", 0, 0, 0, 0, "fjcvtzs", 0
 };
 
 const char* A64DOpcodeFloatingPointIntegerConversions::format()
@@ -958,18 +1021,30 @@ const char* A64DOpcodeMSROrMRSRegister::format()
     return m_formatBuffer;
 }
 
-const char* const A64DOpcodeHint::s_opNames[6] = {
-    "nop", "yield", "wfe", "wfi", "sev", "sevl"
+const char* const A64DOpcodeHint::s_opNames[32] = {
+    "nop", "yield", "wfe", "wfi", "sev", "sevl", 0, "xpaclri",
+    "pacia1716", 0, "pacib1716", 0, "autia1716", 0, "autib1716", 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    "paciaz", "paciasp", "pacibz", "pacibsp", "autiaz", "autiasp", "autibz", "autibsp"
 };
 
 const char* A64DOpcodeHint::format()
 {
     appendInstructionName(opName());
 
-    if (immediate7() > 5)
+    if (immediate7() >= 32 || !s_opNames[immediate7()])
         appendUnsignedImmediate(immediate7());
 
     return m_formatBuffer;
+}
+
+const char* A64DOpcodeHint::opName()
+{
+    const char* opName = (immediate7() < 32 ? s_opNames[immediate7()] : 0);
+    if (!opName)
+        return "hint";
+
+    return opName;
 }
 
 const char* const A64DOpcodeSystemSync::s_opNames[8] = {
@@ -1193,6 +1268,110 @@ const char* A64DOpcodeLoadStoreRegisterOffset::format()
     return m_formatBuffer;
 }
 
+const char* const A64DOpcodeLoadStoreAuthenticated::s_opNames[2] = {
+    "ldraa", "ldrab"
+};
+
+const char* A64DOpcodeLoadStoreAuthenticated::format()
+{
+    appendInstructionName(opName());
+    appendRegisterName(rt());
+    appendSeparator();
+    appendCharacter('[');
+    appendSPOrRegisterName(rn());
+
+    if (wBit() || immediate10()) {
+        appendSeparator();
+        appendSignedImmediate(immediate10() << size());
+    }
+    appendCharacter(']');
+
+    if (wBit())
+        appendCharacter('!');
+    
+    return m_formatBuffer;
+}
+
+const char* const A64DOpcodeLoadAtomic::s_opNames[64] = {
+    "ldaddb", "ldaddlb", "ldaddab", "ldaddalb",
+    "ldaddh", "ldaddlh", "ldaddah", "ldaddalh",
+    "ldadd", "ldaddl", "ldadda", "ldaddal",
+    "ldadd", "ldaddl", "ldadda", "ldaddal",
+
+    "ldclrb", "ldclrlb", "ldclrab", "ldclralb",
+    "ldclrh", "ldclrlh", "ldclrah", "ldclralh",
+    "ldclr", "ldclrl", "ldclra", "ldclral",
+    "ldclr", "ldclrl", "ldclra", "ldclral",
+
+    "ldeorb", "ldeorlb", "ldeorab", "ldeoralb",
+    "ldeorh", "ldeorlh", "ldeorah", "ldeoralh",
+    "ldeor", "ldeorl", "ldeora", "ldeoral",
+    "ldeor", "ldeorl", "ldeora", "ldeoral",
+
+    "ldsetb", "ldsetlb", "ldsetab", "ldsetalb",
+    "ldseth", "ldsetlh", "ldsetah", "ldsetalh",
+    "ldset", "ldsetl", "ldseta", "ldsetal",
+    "ldset", "ldsetl", "ldseta", "ldsetal",
+};
+
+const char* A64DOpcodeLoadAtomic::format()
+{
+    const auto* name = opName();
+    if (!name)
+        return A64DOpcode::format();
+    appendInstructionName(name);
+    appendSPOrRegisterName(rs(), is64Bit());
+    appendSeparator();
+    appendSPOrRegisterName(rt(), is64Bit());
+    appendSeparator();
+    appendCharacter('[');
+    appendSPOrRegisterName(rn(), is64Bit());
+    appendCharacter(']');
+    return m_formatBuffer;
+}
+
+const char* const A64DOpcodeSwapAtomic::s_opNames[16] = {
+    "swpb", "swplb", "swpab", "swpalb",
+    "swph", "swplh", "swpah", "swpalh",
+    "swp", "swpl", "swpa", "swpal",
+    "swp", "swpl", "swpa", "swpal",
+};
+
+const char* A64DOpcodeSwapAtomic::format()
+{
+    const auto* name = opName();
+    appendInstructionName(name);
+    appendSPOrRegisterName(rs(), is64Bit());
+    appendSeparator();
+    appendSPOrRegisterName(rt(), is64Bit());
+    appendSeparator();
+    appendCharacter('[');
+    appendSPOrRegisterName(rn(), is64Bit());
+    appendCharacter(']');
+    return m_formatBuffer;
+}
+
+const char* const A64DOpcodeCAS::s_opNames[16] = {
+    "casb", "caslb", "casab", "casalb",
+    "cash", "caslh", "casah", "casalh",
+    "cas", "casl", "casa", "casal",
+    "cas", "casl", "casa", "casal",
+};
+
+const char* A64DOpcodeCAS::format()
+{
+    const auto* name = opName();
+    appendInstructionName(name);
+    appendSPOrRegisterName(rs(), is64Bit());
+    appendSeparator();
+    appendSPOrRegisterName(rt(), is64Bit());
+    appendSeparator();
+    appendCharacter('[');
+    appendSPOrRegisterName(rn(), is64Bit());
+    appendCharacter(']');
+    return m_formatBuffer;
+}
+
 const char* A64DOpcodeLoadStoreRegisterPair::opName()
 {
     if (!vBit() && lBit() && size() == 0x1)
@@ -1218,9 +1397,9 @@ const char* A64DOpcodeLoadStoreRegisterPair::format()
     appendInstructionName(thisOpName);
     unsigned offsetShift;
     if (vBit()) {
-        appendFPRegisterName(rt(), size());
+        appendFPRegisterName(rt(), size() + 2);
         appendSeparator();
-        appendFPRegisterName(rt2(), size());
+        appendFPRegisterName(rt2(), size() + 2);
         offsetShift = size() + 2;
     } else {
         if (!lBit())
@@ -1397,12 +1576,127 @@ const char* A64DOpcodeLogicalImmediate::format()
 
 const char* const A64DOpcodeMoveWide::s_opNames[4] = { "movn", 0, "movz", "movk" };
 
-const char* A64DOpcodeMoveWide::format()
+class MoveWideFormatTrait {
+public:
+    using ResultType = const char*;
+    static constexpr bool returnEarlyIfAccepted = false;
+
+    ALWAYS_INLINE static const char* rejectedResult(A64DOpcodeMoveWide* opcode) { return opcode->baseFormat(); }
+    ALWAYS_INLINE static const char* acceptedResult(A64DOpcodeMoveWide* opcode) { return opcode->formatBuffer(); }
+};
+
+class MoveWideIsValidTrait {
+public:
+    using ResultType = bool;
+    static constexpr bool returnEarlyIfAccepted = true;
+
+    static constexpr bool rejectedResult(A64DOpcodeMoveWide*) { return false; }
+    static constexpr bool acceptedResult(A64DOpcodeMoveWide*) { return true; }
+};
+
+bool A64DOpcodeMoveWide::handlePotentialDataPointer(void* ptr)
+{
+    ASSERT(Integrity::isSanePointer(ptr));
+
+    bool handled = false;
+    VMInspector::forEachVM([&] (VM& vm) {
+        if (ptr == &vm) {
+            bufferPrintf(" vm");
+            handled = true;
+            return IterationStatus::Done;
+        }
+
+        if (!vm.isInService())
+            return IterationStatus::Continue;
+
+        auto* vmStart = reinterpret_cast<uint8_t*>(&vm);
+        auto* vmEnd = vmStart + sizeof(VM);
+        auto* u8Ptr = reinterpret_cast<uint8_t*>(ptr);
+        Range vmRange(vmStart, vmEnd);
+        if (vmRange.contains(u8Ptr)) {
+            unsigned offset = u8Ptr - vmStart;
+            bufferPrintf(" vm +%u", offset);
+
+            const char* description = nullptr;
+            if (ptr == &vm.topCallFrame)
+                description = "vm.topCallFrame";
+            else if (offset == VM::topEntryFrameOffset())
+                description = "vm.topEntryFrame";
+            else if (offset == VM::exceptionOffset())
+                description = "vm.m_exception";
+            else if (offset == VM::offsetOfHeapBarrierThreshold())
+                description = "vm.heap.m_barrierThreshold";
+            else if (offset == VM::callFrameForCatchOffset())
+                description = "vm.callFrameForCatch";
+            else if (ptr == vm.addressOfSoftStackLimit())
+                description = "vm.m_softStackLimit";
+            else if (ptr == &vm.osrExitIndex)
+                description = "vm.osrExitIndex";
+            else if (ptr == &vm.osrExitJumpDestination)
+                description = "vm.osrExitJumpDestination";
+            else if (ptr == vm.smallStrings.singleCharacterStrings())
+                description = "vm.smallStrings.m_singleCharacterStrings";
+            else if (ptr == &vm.targetMachinePCForThrow)
+                description = "vm.targetMachinePCForThrow";
+            else if (ptr == vm.traps().trapBitsAddress())
+                description = "vm.m_traps.m_trapBits";
+#if ENABLE(DFG_DOES_GC_VALIDATION)
+            else if (ptr == vm.addressOfDoesGC())
+                description = "vm.m_doesGC";
+#endif
+            if (description)
+                bufferPrintf(": %s", description);
+
+            handled = true;
+            return IterationStatus::Done;
+        }
+
+        if (vm.isScratchBuffer(ptr)) {
+            bufferPrintf(" vm scratchBuffer.m_buffer");
+            handled = true;
+            return IterationStatus::Done;
+        }
+        return IterationStatus::Continue;
+    });
+    return handled;
+}
+
+#if CPU(ARM64E)
+bool A64DOpcodeMoveWide::handlePotentialPtrTag(uintptr_t value)
+{
+    if (!value || value > 0xffff)
+        return false;
+
+    PtrTag tag = static_cast<PtrTag>(value);
+#if ENABLE(PTRTAG_DEBUGGING)
+    const char* name = WTF::ptrTagName(tag);
+    if (name[0] == '<')
+        return false; // Only result that starts with '<' is "<unknown>".
+#else
+    // Without ENABLE(PTRTAG_DEBUGGING), not all PtrTags are registeredf for
+    // printing. So, we'll just do the minimum with only the JSC specific tags.
+    const char* name = ptrTagName(tag);
+    if (!name)
+        return false;
+#endif
+
+    // Also print '?' to indicate that this is a maybe. We do not know for certain
+    // if the constant is meant to be used as a PtrTag.
+    bufferPrintf(" -> %p %s ?", reinterpret_cast<void*>(value), name);
+    return true;
+}
+#endif
+
+template<typename Trait>
+typename Trait::ResultType A64DOpcodeMoveWide::parse()
 {
     if (opc() == 1)
-        return A64DOpcode::format();
+        return Trait::rejectedResult(this);
     if (!is64Bit() && hw() >= 2)
-        return A64DOpcode::format();
+        return Trait::rejectedResult(this);
+
+    if constexpr (Trait::returnEarlyIfAccepted)
+        return Trait::acceptedResult(this);
 
     if (!opc() && (!immediate16() || !hw()) && (is64Bit() || immediate16() != 0xffff)) {
         // MOV pseudo op for MOVN
@@ -1414,10 +1708,12 @@ const char* A64DOpcodeMoveWide::format()
             int64_t amount = immediate16() << (hw() * 16);
             amount = ~amount;
             appendSignedImmediate64(amount);
+            m_builtConstant = static_cast<intptr_t>(amount);
         } else {
             int32_t amount = immediate16() << (hw() * 16);
             amount = ~amount;
             appendSignedImmediate(amount);
+            m_builtConstant = static_cast<intptr_t>(amount);
         }
     } else {
         appendInstructionName(opName());
@@ -1428,10 +1724,69 @@ const char* A64DOpcodeMoveWide::format()
             appendSeparator();
             appendShiftAmount(hw());
         }
+
+        if (opc() == 2) // Encoding for movz
+            m_builtConstant = 0;
+
+        unsigned shift = hw() * 16;
+        uintptr_t value = static_cast<uintptr_t>(immediate16()) << shift;
+        uintptr_t mask = ~(static_cast<uintptr_t>(0xffff) << shift);
+        m_builtConstant &= mask;
+        m_builtConstant |= value;
     }
 
-    return m_formatBuffer;
+    auto dumpConstantData = [&] {
+        uint32_t* nextPC = m_currentPC + 1;
+        bool doneBuildingConstant = false;
+
+        if (nextPC >= m_endPC)
+            doneBuildingConstant = true;
+        else {
+            A64DOpcode nextOpcodeBase(m_startPC, m_endPC);
+            A64DOpcodeMoveWide& nextOpcode = *reinterpret_cast<A64DOpcodeMoveWide*>(&nextOpcodeBase);
+            nextOpcode.setPCAndOpcode(nextPC, *nextPC);
+
+            bool nextIsMoveWideGroup = opcodeGroupNumber(m_opcode) == opcodeGroupNumber(*nextPC);
+
+            if (!nextIsMoveWideGroup || !nextOpcode.isValid() || nextOpcode.rd() != rd())
+                doneBuildingConstant = true;
+        }
+        if (!doneBuildingConstant)
+            return;
+
+        void* ptr = removeCodePtrTag(bitwise_cast<void*>(m_builtConstant));
+        if (!ptr)
+            return;
+
+        if (Integrity::isSanePointer(ptr)) {
+            bufferPrintf(" -> %p", ptr);
+            if (const char* label = labelFor(ptr))
+                return bufferPrintf(" %s", label);
+            if (isJITPC(ptr))
+                return bufferPrintf(" JIT PC");
+            if (LLInt::isLLIntPC(ptr))
+                return bufferPrintf(" LLInt PC");
+            handlePotentialDataPointer(ptr);
+            return;
+        }
+#if CPU(ARM64E)
+        if (handlePotentialPtrTag(m_builtConstant))
+            return;
+#endif
+        if (m_builtConstant < 0x10000)
+            bufferPrintf(" -> %u", static_cast<unsigned>(m_builtConstant));
+        else
+            bufferPrintf(" -> %p", reinterpret_cast<void*>(m_builtConstant));
+    };
+
+    if (m_startPC)
+        dumpConstantData();
+
+    return Trait::acceptedResult(this);
 }
+
+const char* A64DOpcodeMoveWide::format() { return parse<MoveWideFormatTrait>(); }
+bool A64DOpcodeMoveWide::isValid() { return parse<MoveWideIsValidTrait>(); }
 
 const char* A64DOpcodeTestAndBranchImmediate::format()
 {
@@ -1452,10 +1807,40 @@ const char* A64DOpcodeUnconditionalBranchImmediate::format()
 }
 
 const char* const A64DOpcodeUnconditionalBranchRegister::s_opNames[8] = { "br", "blr", "ret", "", "eret", "drps", "", "" };
+const char* const A64DOpcodeUnconditionalBranchRegister::s_AuthOpNames[20] = {
+    "braaz", "brabz", "blraaz", "blrabz", "retaa", "retab", 0, 0,
+    "eretaa", "eretab", 0, 0, 0, 0, 0, 0,
+    "braa", "brab", "blraa", "blrab"
+};
+
+const char* A64DOpcodeUnconditionalBranchRegister::authOpName()
+{
+    unsigned opCode = authOpCode();
+    if (opCode >= 20)
+        return 0;
+    return s_AuthOpNames[opCode];
+}
 
 const char* A64DOpcodeUnconditionalBranchRegister::format()
 {
     unsigned opcValue = opc();
+    if (op2() == 0x1f && (op3() & 0x3e) == 0x2) {
+        const char* opName = authOpName();
+        if (!opName)
+            return A64DOpcode::format();
+        if (rn() != 0x1f && (opcValue == 0x2 || opcValue == 0x4))
+            return A64DOpcode::format();
+
+        appendInstructionName(opName);
+        if ((opcValue & 0x7) <= 0x1)
+            appendRegisterName(rn());
+        if (opcValue & 0x8) {
+            appendSeparator();
+            appendRegisterName(rm());
+        }
+
+        return m_formatBuffer;
+    }
     if (opcValue == 3 || opcValue > 5)
         return A64DOpcode::format();
     if (((opcValue & 0xe) == 0x4) && rn() != 0x1f)
@@ -1468,4 +1853,4 @@ const char* A64DOpcodeUnconditionalBranchRegister::format()
 
 } } // namespace JSC::ARM64Disassembler
 
-#endif // USE(ARM64_DISASSEMBLER)
+#endif // ENABLE(ARM64_DISASSEMBLER)

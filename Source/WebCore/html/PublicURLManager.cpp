@@ -26,44 +26,51 @@
 
 #include "config.h"
 #include "PublicURLManager.h"
-#include "URL.h"
+
+#include "ScriptExecutionContext.h"
+#include "SecurityOrigin.h"
 #include "URLRegistry.h"
+#include <wtf/URL.h>
 #include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
 std::unique_ptr<PublicURLManager> PublicURLManager::create(ScriptExecutionContext* context)
 {
-    auto publicURLManager = std::make_unique<PublicURLManager>(context);
+    auto publicURLManager = makeUnique<PublicURLManager>(context);
     publicURLManager->suspendIfNeeded();
     return publicURLManager;
 }
 
 PublicURLManager::PublicURLManager(ScriptExecutionContext* context)
     : ActiveDOMObject(context)
-    , m_isStopped(false)
 {
 }
 
-void PublicURLManager::registerURL(SecurityOrigin* origin, const URL& url, URLRegistrable& registrable)
+void PublicURLManager::registerURL(const URL& url, URLRegistrable& registrable)
 {
-    if (m_isStopped)
+    if (m_isStopped || !scriptExecutionContext())
         return;
 
-    RegistryURLMap::iterator found = m_registryToURL.add(&registrable.registry(), URLSet()).iterator;
-    found->key->registerURL(origin, url, registrable);
-    found->value.add(url.string());
+    registrable.registry().registerURL(*scriptExecutionContext(), url, registrable);
 }
 
 void PublicURLManager::revoke(const URL& url)
 {
-    for (auto& registry : m_registryToURL) {
-        if (registry.value.contains(url.string())) {
-            registry.key->unregisterURL(url);
-            registry.value.remove(url.string());
-            break;
-        }
-    }
+    if (m_isStopped || !scriptExecutionContext())
+        return;
+
+    auto* contextOrigin = scriptExecutionContext()->securityOrigin();
+    if (!contextOrigin)
+        return;
+
+    auto urlOrigin = SecurityOrigin::create(url);
+    if (!urlOrigin->isSameOriginAs(*contextOrigin))
+        return;
+
+    URLRegistry::forEach([&](auto& registry) {
+        registry.unregisterURL(url);
+    });
 }
 
 void PublicURLManager::stop()
@@ -72,18 +79,11 @@ void PublicURLManager::stop()
         return;
 
     m_isStopped = true;
-    for (auto& registry : m_registryToURL) {
-        for (auto& url : registry.value)
-            registry.key->unregisterURL(URL(ParsedURLString, url));
+    if (auto* context = scriptExecutionContext()) {
+        URLRegistry::forEach([&](auto& registry) {
+            registry.unregisterURLsForContext(*context);
+        });
     }
-
-    m_registryToURL.clear();
-}
-
-bool PublicURLManager::canSuspendForDocumentSuspension() const
-{
-    // Suspending an PublicURLManager is safe as it does not cause any JS to be executed.
-    return true;
 }
 
 const char* PublicURLManager::activeDOMObjectName() const

@@ -28,6 +28,7 @@
 
 #include "ArgumentCoders.h"
 #include "WebCoreArgumentCoders.h"
+#include "WebsiteDataStoreParameters.h"
 
 #if PLATFORM(COCOA)
 #include "ArgumentCodersCF.h"
@@ -35,185 +36,99 @@
 
 namespace WebKit {
 
-NetworkProcessCreationParameters::NetworkProcessCreationParameters()
-{
-}
+NetworkProcessCreationParameters::NetworkProcessCreationParameters() = default;
+NetworkProcessCreationParameters::~NetworkProcessCreationParameters() = default;
+NetworkProcessCreationParameters::NetworkProcessCreationParameters(NetworkProcessCreationParameters&&) = default;
+NetworkProcessCreationParameters& NetworkProcessCreationParameters::operator=(NetworkProcessCreationParameters&&) = default;
 
 void NetworkProcessCreationParameters::encode(IPC::Encoder& encoder) const
 {
-    encoder << privateBrowsingEnabled;
-    encoder.encodeEnum(cacheModel);
-    encoder << diskCacheSizeOverride;
-    encoder << canHandleHTTPSServerTrustEvaluation;
-    encoder << cacheStorageDirectory;
-    encoder << cacheStorageDirectoryExtensionHandle;
-    encoder << diskCacheDirectory;
-    encoder << diskCacheDirectoryExtensionHandle;
-#if ENABLE(NETWORK_CACHE)
-    encoder << shouldEnableNetworkCache;
-    encoder << shouldEnableNetworkCacheEfficacyLogging;
-#if ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
-    encoder << shouldEnableNetworkCacheSpeculativeRevalidation;
-#endif
-#endif
-#if PLATFORM(MAC)
+    encoder << auxiliaryProcessParameters;
+    encoder << cacheModel;
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
     encoder << uiProcessCookieStorageIdentifier;
 #endif
-#if PLATFORM(IOS)
-    encoder << cookieStorageDirectoryExtensionHandle;
-    encoder << containerCachesDirectoryExtensionHandle;
-    encoder << parentBundleDirectoryExtensionHandle;
-#endif
     encoder << shouldSuppressMemoryPressureHandler;
-    encoder << shouldUseTestingNetworkSession;
-    encoder << loadThrottleLatency;
     encoder << urlSchemesRegisteredForCustomProtocols;
-    encoder << presentingApplicationPID;
 #if PLATFORM(COCOA)
-    encoder << parentProcessName;
     encoder << uiProcessBundleIdentifier;
-    encoder << nsURLCacheMemoryCapacity;
-    encoder << nsURLCacheDiskCapacity;
-    encoder << sourceApplicationBundleIdentifier;
-    encoder << sourceApplicationSecondaryIdentifier;
-    encoder << allowsCellularAccess;
-#if PLATFORM(IOS)
-    encoder << ctDataConnectionServiceType;
-#endif
-    encoder << httpProxy;
-    encoder << httpsProxy;
-#if PLATFORM(COCOA)
-    IPC::encode(encoder, networkATSContext.get());
-#endif
-    encoder << cookieStoragePartitioningEnabled;
+    encoder << networkATSContext;
 #endif
 #if USE(SOUP)
-    encoder << cookiePersistentStoragePath;
-    encoder << cookiePersistentStorageType;
-    encoder.encodeEnum(cookieAcceptPolicy);
-    encoder << cookiesLimit;
-    encoder << ignoreTLSErrors;
+    encoder << cookieAcceptPolicy;
     encoder << languages;
-    encoder << proxySettings;
+    encoder << memoryPressureHandlerConfiguration;
+    encoder << localStorageQuota;
 #endif
-#if OS(LINUX)
-    encoder << memoryPressureMonitorHandle;
-#endif
-#if ENABLE(NETWORK_CAPTURE)
-    encoder << recordReplayMode;
-    encoder << recordReplayCacheLocation;
-#endif
+
+    encoder << urlSchemesRegisteredAsSecure;
+    encoder << urlSchemesRegisteredAsBypassingContentSecurityPolicy;
+    encoder << urlSchemesRegisteredAsLocal;
+    encoder << urlSchemesRegisteredAsNoAccess;
+
+    encoder << enablePrivateClickMeasurement;
+    encoder << ftpEnabled;
+    encoder << websiteDataStoreParameters;
 }
 
 bool NetworkProcessCreationParameters::decode(IPC::Decoder& decoder, NetworkProcessCreationParameters& result)
 {
-    if (!decoder.decode(result.privateBrowsingEnabled))
+    if (!decoder.decode(result.auxiliaryProcessParameters))
         return false;
-    if (!decoder.decodeEnum(result.cacheModel))
+
+    if (!decoder.decode(result.cacheModel))
         return false;
-    if (!decoder.decode(result.diskCacheSizeOverride))
-        return false;
-    if (!decoder.decode(result.canHandleHTTPSServerTrustEvaluation))
-        return false;
-    if (!decoder.decode(result.cacheStorageDirectory))
-        return false;
-    if (!decoder.decode(result.cacheStorageDirectoryExtensionHandle))
-        return false;
-    if (!decoder.decode(result.diskCacheDirectory))
-        return false;
-    if (!decoder.decode(result.diskCacheDirectoryExtensionHandle))
-        return false;
-#if ENABLE(NETWORK_CACHE)
-    if (!decoder.decode(result.shouldEnableNetworkCache))
-        return false;
-    if (!decoder.decode(result.shouldEnableNetworkCacheEfficacyLogging))
-        return false;
-#if ENABLE(NETWORK_CACHE_SPECULATIVE_REVALIDATION)
-    if (!decoder.decode(result.shouldEnableNetworkCacheSpeculativeRevalidation))
-        return false;
-#endif
-#endif
-#if PLATFORM(MAC)
+
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
     if (!decoder.decode(result.uiProcessCookieStorageIdentifier))
-        return false;
-#endif
-#if PLATFORM(IOS)
-    if (!decoder.decode(result.cookieStorageDirectoryExtensionHandle))
-        return false;
-    if (!decoder.decode(result.containerCachesDirectoryExtensionHandle))
-        return false;
-    if (!decoder.decode(result.parentBundleDirectoryExtensionHandle))
         return false;
 #endif
     if (!decoder.decode(result.shouldSuppressMemoryPressureHandler))
         return false;
-    if (!decoder.decode(result.shouldUseTestingNetworkSession))
-        return false;
-    if (!decoder.decode(result.loadThrottleLatency))
-        return false;
     if (!decoder.decode(result.urlSchemesRegisteredForCustomProtocols))
         return false;
-    if (!decoder.decode(result.presentingApplicationPID))
-        return false;
 #if PLATFORM(COCOA)
-    if (!decoder.decode(result.parentProcessName))
-        return false;
     if (!decoder.decode(result.uiProcessBundleIdentifier))
         return false;
-    if (!decoder.decode(result.nsURLCacheMemoryCapacity))
-        return false;
-    if (!decoder.decode(result.nsURLCacheDiskCapacity))
-        return false;
-    if (!decoder.decode(result.sourceApplicationBundleIdentifier))
-        return false;
-    if (!decoder.decode(result.sourceApplicationSecondaryIdentifier))
-        return false;
-    if (!decoder.decode(result.allowsCellularAccess))
-        return false;
-#if PLATFORM(IOS)
-    if (!decoder.decode(result.ctDataConnectionServiceType))
-        return false;
-#endif
-    if (!decoder.decode(result.httpProxy))
-        return false;
-    if (!decoder.decode(result.httpsProxy))
-        return false;
-#if PLATFORM(COCOA)
-    if (!IPC::decode(decoder, result.networkATSContext))
-        return false;
-#endif
-    if (!decoder.decode(result.cookieStoragePartitioningEnabled))
+    if (!decoder.decode(result.networkATSContext))
         return false;
 #endif
 
 #if USE(SOUP)
-    if (!decoder.decode(result.cookiePersistentStoragePath))
-        return false;
-    if (!decoder.decode(result.cookiePersistentStorageType))
-        return false;
-    if (!decoder.decodeEnum(result.cookieAcceptPolicy))
-        return false;
-    if (!decoder.decode(result.cookiesLimit))
-        return false;
-    if (!decoder.decode(result.ignoreTLSErrors))
+    if (!decoder.decode(result.cookieAcceptPolicy))
         return false;
     if (!decoder.decode(result.languages))
         return false;
-    if (!decoder.decode(result.proxySettings))
+
+    std::optional<std::optional<MemoryPressureHandler::Configuration>> memoryPressureHandlerConfiguration;
+    decoder >> memoryPressureHandlerConfiguration;
+    if (!memoryPressureHandlerConfiguration)
+        return false;
+    result.memoryPressureHandlerConfiguration = WTFMove(*memoryPressureHandlerConfiguration);
+
+    if (!decoder.decode(result.localStorageQuota))
         return false;
 #endif
 
-#if OS(LINUX)
-    if (!decoder.decode(result.memoryPressureMonitorHandle))
+    if (!decoder.decode(result.urlSchemesRegisteredAsSecure))
         return false;
-#endif
+    if (!decoder.decode(result.urlSchemesRegisteredAsBypassingContentSecurityPolicy))
+        return false;
+    if (!decoder.decode(result.urlSchemesRegisteredAsLocal))
+        return false;
+    if (!decoder.decode(result.urlSchemesRegisteredAsNoAccess))
+        return false;
 
-#if ENABLE(NETWORK_CAPTURE)
-    if (!decoder.decode(result.recordReplayMode))
+    if (!decoder.decode(result.enablePrivateClickMeasurement))
         return false;
-    if (!decoder.decode(result.recordReplayCacheLocation))
+    if (!decoder.decode(result.ftpEnabled))
         return false;
-#endif
+
+    std::optional<Vector<WebsiteDataStoreParameters>> websiteDataStoreParameters;
+    decoder >> websiteDataStoreParameters;
+    if (!websiteDataStoreParameters)
+        return false;
+    result.websiteDataStoreParameters = WTFMove(*websiteDataStoreParameters);
 
     return true;
 }

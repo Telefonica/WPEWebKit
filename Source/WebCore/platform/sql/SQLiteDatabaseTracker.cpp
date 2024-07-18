@@ -33,24 +33,21 @@ namespace WebCore {
 
 namespace SQLiteDatabaseTracker {
 
-static SQLiteDatabaseTrackerClient* s_staticSQLiteDatabaseTrackerClient = nullptr;
-static unsigned s_transactionInProgressCounter = 0;
-
-static StaticLock transactionInProgressMutex;
+static Lock transactionInProgressLock;
+static SQLiteDatabaseTrackerClient* s_staticSQLiteDatabaseTrackerClient WTF_GUARDED_BY_LOCK(transactionInProgressLock) { nullptr };
+static unsigned s_transactionInProgressCounter WTF_GUARDED_BY_LOCK(transactionInProgressLock) { 0 };
 
 void setClient(SQLiteDatabaseTrackerClient* client)
 {
-    ASSERT(client);
-    ASSERT(!s_staticSQLiteDatabaseTrackerClient || s_staticSQLiteDatabaseTrackerClient == client);
+    Locker locker { transactionInProgressLock };
     s_staticSQLiteDatabaseTrackerClient = client;
 }
 
 void incrementTransactionInProgressCount()
 {
+    Locker locker { transactionInProgressLock };
     if (!s_staticSQLiteDatabaseTrackerClient)
         return;
-
-    std::lock_guard<StaticLock> lock(transactionInProgressMutex);
 
     s_transactionInProgressCounter++;
     if (s_transactionInProgressCounter == 1)
@@ -59,10 +56,9 @@ void incrementTransactionInProgressCount()
 
 void decrementTransactionInProgressCount()
 {
+    Locker locker { transactionInProgressLock };
     if (!s_staticSQLiteDatabaseTrackerClient)
         return;
-
-    std::lock_guard<StaticLock> lock(transactionInProgressMutex);
 
     ASSERT(s_transactionInProgressCounter);
     s_transactionInProgressCounter--;
@@ -71,12 +67,11 @@ void decrementTransactionInProgressCount()
         s_staticSQLiteDatabaseTrackerClient->didFinishLastTransaction();
 }
 
-#if !ASSERT_DISABLED
 bool hasTransactionInProgress()
 {
+    Locker locker { transactionInProgressLock };
     return !s_staticSQLiteDatabaseTrackerClient || s_transactionInProgressCounter > 0;
 }
-#endif
 
 } // namespace SQLiteDatabaseTracker
 

@@ -29,10 +29,9 @@
 #include "WebCoreArgumentCoders.h"
 #include "WebProcessPool.h"
 
+namespace API {
 using namespace WebCore;
 using namespace WebKit;
-
-namespace API {
 
 URLRequest::URLRequest(const ResourceRequest& request)
     : m_request(request)
@@ -49,7 +48,7 @@ void URLRequest::setDefaultTimeoutInterval(double timeoutInterval)
 {
     ResourceRequest::setDefaultTimeoutInterval(timeoutInterval);
 
-    for (auto* processPool : WebProcessPool::allProcessPools())
+    for (auto& processPool : WebProcessPool::allProcessPools())
         processPool->setDefaultRequestTimeoutInterval(timeoutInterval);
 }
 
@@ -66,11 +65,6 @@ bool URLRequest::decode(IPC::Decoder& decoder, RefPtr<Object>& result)
     
     result = create(request);
     return true;
-}
-
-void URLRequest::setHTTPHeaderField(const WTF::String& key, const WTF::String& value)
-{
-    m_request.setHTTPHeaderField(key, value);
 }
 
 } // namespace API

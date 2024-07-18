@@ -25,7 +25,7 @@
 
 #import "WebChromeClientIOS.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "DOMNodeInternal.h"
 #import "PopupMenuIOS.h"
@@ -37,7 +37,6 @@
 #import "WebFrameIOS.h"
 #import "WebFrameInternal.h"
 #import "WebHistoryItemInternal.h"
-#import "WebKitSystemInterface.h"
 #import "WebOpenPanelResultListener.h"
 #import "WebUIDelegate.h"
 #import "WebUIDelegatePrivate.h"
@@ -45,6 +44,8 @@
 #import "WebView.h"
 #import "WebViewInternal.h"
 #import "WebViewPrivate.h"
+#import <WebCore/ContentChangeObserver.h>
+#import <WebCore/DisabledAdaptations.h>
 #import <WebCore/FileChooser.h>
 #import <WebCore/FloatRect.h>
 #import <WebCore/Frame.h>
@@ -62,6 +63,7 @@
 #import <WebCore/WebCoreThreadMessage.h>
 #import <wtf/HashMap.h>
 #import <wtf/RefPtr.h>
+#import <wtf/cocoa/VectorCocoa.h>
 
 NSString * const WebOpenPanelConfigurationAllowMultipleFilesKey = @"WebOpenPanelConfigurationAllowMultipleFilesKey";
 NSString * const WebOpenPanelConfigurationMediaCaptureTypeKey = @"WebOpenPanelConfigurationMediaCaptureTypeKey";
@@ -131,11 +133,7 @@ void WebChromeClientIOS::runOpenPanel(Frame&, FileChooser& chooser)
 {
     auto& settings = chooser.settings();
     BOOL allowMultipleFiles = settings.allowsMultipleFiles;
-    WebOpenPanelResultListener *listener = [[WebOpenPanelResultListener alloc] initWithChooser:chooser];
-
-    NSMutableArray *mimeTypes = [NSMutableArray arrayWithCapacity:settings.acceptMIMETypes.size()];
-    for (auto& type : settings.acceptMIMETypes)
-        [mimeTypes addObject:type];
+    auto listener = adoptNS([[WebOpenPanelResultListener alloc] initWithChooser:chooser]);
 
     WebMediaCaptureType captureType = WebMediaCaptureTypeNone;
 #if ENABLE(MEDIA_CAPTURE)
@@ -143,18 +141,20 @@ void WebChromeClientIOS::runOpenPanel(Frame&, FileChooser& chooser)
 #endif
     NSDictionary *configuration = @{
         WebOpenPanelConfigurationAllowMultipleFilesKey: @(allowMultipleFiles),
-        WebOpenPanelConfigurationMimeTypesKey: mimeTypes,
+        WebOpenPanelConfigurationMimeTypesKey: createNSArray(settings.acceptMIMETypes).get(),
         WebOpenPanelConfigurationMediaCaptureTypeKey: @(captureType)
     };
 
     if (WebThreadIsCurrent()) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [[webView() _UIKitDelegateForwarder] webView:webView() runOpenPanelForFileButtonWithResultListener:listener configuration:configuration];
+        RunLoop::main().dispatch([this, listener = WTFMove(listener), configuration = retainPtr(configuration)] {
+            [[webView() _UIKitDelegateForwarder] webView:webView() runOpenPanelForFileButtonWithResultListener:listener.get() configuration:configuration.get()];
         });
     } else
-        [[webView() _UIKitDelegateForwarder] webView:webView() runOpenPanelForFileButtonWithResultListener:listener configuration:configuration];
+        [[webView() _UIKitDelegateForwarder] webView:webView() runOpenPanelForFileButtonWithResultListener:listener.get() configuration:configuration];
+}
 
-    [listener release];
+void WebChromeClientIOS::showShareSheet(ShareDataWithParsedURL&, CompletionHandler<void(bool)>&&)
+{
 }
 
 #if ENABLE(IOS_TOUCH_EVENTS)
@@ -177,18 +177,11 @@ void WebChromeClientIOS::setNeedsScrollNotifications(WebCore::Frame& frame, bool
     [[webView() _UIKitDelegateForwarder] webView:webView() needsScrollNotifications:[NSNumber numberWithBool:flag] forFrame:kit(&frame)];
 }
 
-void WebChromeClientIOS::observedContentChange(WebCore::Frame& frame)
+void WebChromeClientIOS::didFinishContentChangeObserving(WebCore::Frame& frame, WKContentChange observedContentChange)
 {
-    [[webView() _UIKitDelegateForwarder] webView:webView() didObserveDeferredContentChange:WKObservedContentChange() forFrame:kit(&frame)];
-}
-
-void WebChromeClientIOS::clearContentChangeObservers(WebCore::Frame& frame)
-{
-    ASSERT(WebThreadCountOfObservedContentModifiers() > 0);
-    if (WebThreadCountOfObservedContentModifiers() > 0) {
-        WebThreadClearObservedContentModifiers();
-        observedContentChange(frame);
-    }
+    if (!frame.document())
+        return;
+    [[webView() _UIKitDelegateForwarder] webView:webView() didObserveDeferredContentChange:observedContentChange forFrame:kit(&frame)];
 }
 
 static inline NSString *nameForViewportFitValue(ViewportFit value)
@@ -228,9 +221,18 @@ FloatSize WebChromeClientIOS::availableScreenSize() const
     return FloatSize();
 }
 
+FloatSize WebChromeClientIOS::overrideScreenSize() const
+{
+    return screenSize();
+}
+
 void WebChromeClientIOS::dispatchViewportPropertiesDidChange(const WebCore::ViewportArguments& arguments) const
 {
     [[webView() _UIKitDelegateForwarder] webView:webView() didReceiveViewportArguments:dictionaryForViewportArguments(arguments)];
+}
+
+void WebChromeClientIOS::dispatchDisabledAdaptationsDidChange(const OptionSet<WebCore::DisabledAdaptations>&) const
+{
 }
 
 void WebChromeClientIOS::notifyRevealedSelectionByScrollingFrame(WebCore::Frame& frame)
@@ -271,7 +273,7 @@ void WebChromeClientIOS::restoreFormNotifications()
         m_formNotificationSuppressions = 0;
 }
 
-void WebChromeClientIOS::elementDidFocus(WebCore::Element& element)
+void WebChromeClientIOS::elementDidFocus(WebCore::Element& element, const WebCore::FocusOptions&)
 {
     if (m_formNotificationSuppressions <= 0)
         [[webView() _UIKitDelegateForwarder] webView:webView() elementDidFocusNode:kit(&element)];
@@ -327,7 +329,7 @@ bool WebChromeClientIOS::fetchCustomFixedPositionLayoutRect(IntRect& rect)
     return false;
 }
 
-void WebChromeClientIOS::updateViewportConstrainedLayers(HashMap<PlatformLayer*, std::unique_ptr<ViewportConstraints>>& layerMap, HashMap<PlatformLayer*, PlatformLayer*>& stickyContainers)
+void WebChromeClientIOS::updateViewportConstrainedLayers(HashMap<PlatformLayer*, std::unique_ptr<ViewportConstraints>>& layerMap, const HashMap<PlatformLayer*, PlatformLayer*>& stickyContainers)
 {
     [[webView() _fixedPositionContent] setViewportConstrainedLayers:layerMap stickyContainerMap:stickyContainers];
 }
@@ -363,7 +365,7 @@ void WebChromeClientIOS::focusedElementChanged(Element* element)
     CallFormDelegate(webView(), @selector(didFocusTextField:inFrame:), kit(&inputElement), kit(inputElement.document().frame()));
 }
 
-void WebChromeClientIOS::showPlaybackTargetPicker(bool hasVideo)
+void WebChromeClientIOS::showPlaybackTargetPicker(bool hasVideo, WebCore::RouteSharingPolicy, const String&)
 {
     CGPoint point = [[webView() _UIKitDelegateForwarder] interactionLocation];
     CGRect elementRect = [[webView() mainFrame] elementRectAtPoint:point];
@@ -382,4 +384,4 @@ int WebChromeClientIOS::deviceOrientation() const
 }
 #endif
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

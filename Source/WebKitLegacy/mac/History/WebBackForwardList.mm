@@ -37,21 +37,20 @@
 #import "WebKitVersionChecks.h"
 #import "WebNSObjectExtras.h"
 #import "WebPreferencesPrivate.h"
-#import "WebTypesInternal.h"
 #import "WebViewPrivate.h"
+#import <JavaScriptCore/InitializeThreading.h>
+#import <WebCore/BackForwardCache.h>
 #import <WebCore/HistoryItem.h>
-#import <WebCore/PageCache.h>
 #import <WebCore/Settings.h>
 #import <WebCore/ThreadCheck.h>
+#import <WebCore/WebCoreJITOperations.h>
 #import <WebCore/WebCoreObjCExtras.h>
-#import <runtime/InitializeThreading.h>
 #import <wtf/Assertions.h>
 #import <wtf/MainThread.h>
 #import <wtf/NeverDestroyed.h>
 #import <wtf/RunLoop.h>
 #import <wtf/StdLibExtras.h>
-
-using namespace WebCore;
+#import <wtf/cocoa/VectorCocoa.h>
 
 typedef HashMap<BackForwardList*, WebBackForwardList*> BackForwardListMap;
 
@@ -81,7 +80,7 @@ WebBackForwardList *kit(BackForwardList* backForwardList)
     if (WebBackForwardList *webBackForwardList = backForwardLists().get(backForwardList))
         return webBackForwardList;
 
-    return [[[WebBackForwardList alloc] initWithBackForwardList:*backForwardList] autorelease];
+    return adoptNS([[WebBackForwardList alloc] initWithBackForwardList:*backForwardList]).autorelease();
 }
 
 - (id)initWithBackForwardList:(Ref<BackForwardList>&&)backForwardList
@@ -98,16 +97,16 @@ WebBackForwardList *kit(BackForwardList* backForwardList)
 
 + (void)initialize
 {
-#if !PLATFORM(IOS)
-    JSC::initializeThreading();
-    WTF::initializeMainThreadToProcessMainThread();
-    RunLoop::initializeMainRunLoop();
+#if !PLATFORM(IOS_FAMILY)
+    JSC::initialize();
+    WTF::initializeMainThread();
+    WebCore::populateJITOperations();
 #endif
 }
 
 - (id)init
 {
-    return [self initWithBackForwardList:BackForwardList::create(0)];
+    return [self initWithBackForwardList:BackForwardList::create(nullptr)];
 }
 
 - (void)dealloc
@@ -139,7 +138,7 @@ WebBackForwardList *kit(BackForwardList* backForwardList)
     // Since the assumed contract with WebBackForwardList is that it retains its WebHistoryItems,
     // the following line prevents a whole class of problems where a history item will be created in
     // a function, added to the BFlist, then used in the rest of that function.
-    [[entry retain] autorelease];
+    retainPtr(entry).autorelease();
 }
 
 - (void)removeItem:(WebHistoryItem *)item
@@ -150,54 +149,43 @@ WebBackForwardList *kit(BackForwardList* backForwardList)
     core(self)->removeItem(*core(item));
 }
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 // FIXME: Move into WebCore the code that deals directly with WebCore::BackForwardList.
 
-#define WebBackForwardListDictionaryEntriesKey @"entries"
-#define WebBackForwardListDictionaryCapacityKey @"capacity"
-#define WebBackForwardListDictionaryCurrentKey @"current"
+constexpr auto WebBackForwardListDictionaryEntriesKey = @"entries";
+constexpr auto WebBackForwardListDictionaryCapacityKey = @"capacity";
+constexpr auto WebBackForwardListDictionaryCurrentKey = @"current";
 
 - (NSDictionary *)dictionaryRepresentation
 {
-    BackForwardList *coreBFList = core(self);
-    
-    auto& historyItems = coreBFList->entries();
-    unsigned size = historyItems.size();
-    NSMutableArray *entriesArray = [[NSMutableArray alloc] initWithCapacity:size];
-    for (unsigned i = 0; i < size; ++i)
-        [entriesArray addObject:[kit(const_cast<HistoryItem*>(historyItems[i].ptr())) dictionaryRepresentationIncludingChildren:NO]];
-    
-    NSDictionary *dictionary = [NSDictionary dictionaryWithObjectsAndKeys:
-        entriesArray, WebBackForwardListDictionaryEntriesKey,
-        [NSNumber numberWithUnsignedInt:coreBFList->current()], WebBackForwardListDictionaryCurrentKey,
-        [NSNumber numberWithInt:coreBFList->capacity()], WebBackForwardListDictionaryCapacityKey,
-        nil];
-        
-    [entriesArray release];
-    
-    return dictionary;
+    auto& list = *core(self);
+    auto entries = createNSArray(list.entries(), [] (auto& item) {
+        return [kit(const_cast<WebCore::HistoryItem*>(item.ptr())) dictionaryRepresentationIncludingChildren:NO];
+    });
+    return @{
+        WebBackForwardListDictionaryEntriesKey: entries.get(),
+        WebBackForwardListDictionaryCurrentKey: @(list.current()),
+        WebBackForwardListDictionaryCapacityKey: @(list.capacity()),
+    };
 }
 
 - (void)setToMatchDictionaryRepresentation:(NSDictionary *)dictionary
 {
-    BackForwardList *coreBFList = core(self);
-    
-    coreBFList->setCapacity([[dictionary objectForKey:WebBackForwardListDictionaryCapacityKey] intValue]);
-    
-    for (NSDictionary *itemDictionary in [dictionary objectForKey:WebBackForwardListDictionaryEntriesKey]) {
-        WebHistoryItem *item = [[WebHistoryItem alloc] initFromDictionaryRepresentation:itemDictionary];
-        coreBFList->addItem(*core(item));
-        [item release];
-    }
+    auto& list = *core(self);
+
+    list.setCapacity([[dictionary objectForKey:WebBackForwardListDictionaryCapacityKey] unsignedIntValue]);
+    for (NSDictionary *itemDictionary in [dictionary objectForKey:WebBackForwardListDictionaryEntriesKey])
+        list.addItem(*core(adoptNS([[WebHistoryItem alloc] initFromDictionaryRepresentation:itemDictionary]).get()));
 
     unsigned currentIndex = [[dictionary objectForKey:WebBackForwardListDictionaryCurrentKey] unsignedIntValue];
-    size_t listSize = coreBFList->entries().size();
+    size_t listSize = list.entries().size();
     if (currentIndex >= listSize)
         currentIndex = listSize - 1;
-    coreBFList->setCurrent(currentIndex);
+    list.setCurrent(currentIndex);
 }
-#endif // PLATFORM(IOS)
+
+#endif // PLATFORM(IOS_FAMILY)
 
 - (BOOL)containsItem:(WebHistoryItem *)item
 {
@@ -219,40 +207,30 @@ WebBackForwardList *kit(BackForwardList* backForwardList)
 
 - (void)goToItem:(WebHistoryItem *)item
 {
-    core(self)->goToItem(core(item));
+    if (item)
+        core(self)->goToItem(*core(item));
 }
 
 - (WebHistoryItem *)backItem
 {
-    return [[kit(core(self)->backItem()) retain] autorelease];
+    return retainPtr(kit(core(self)->backItem().get())).autorelease();
 }
 
 - (WebHistoryItem *)currentItem
 {
-    return [[kit(core(self)->currentItem()) retain] autorelease];
+    return retainPtr(kit(core(self)->currentItem().get())).autorelease();
 }
 
 - (WebHistoryItem *)forwardItem
 {
-    return [[kit(core(self)->forwardItem()) retain] autorelease];
+    return retainPtr(kit(core(self)->forwardItem().get())).autorelease();
 }
 
-static NSArray* vectorToNSArray(Vector<Ref<HistoryItem>>& list)
+static bool bumperCarBackForwardHackNeeded()
 {
-    unsigned size = list.size();
-    NSMutableArray *result = [[[NSMutableArray alloc] initWithCapacity:size] autorelease];
-    for (unsigned i = 0; i < size; ++i)
-        [result addObject:kit(list[i].ptr())];
-
-    return result;
-}
-
-static bool bumperCarBackForwardHackNeeded() 
-{
-#if !PLATFORM(IOS)
-    static bool hackNeeded = [[[NSBundle mainBundle] bundleIdentifier] isEqualToString:@"com.freeverse.bumpercar"] && 
-        !WebKitLinkedOnOrAfter(WEBKIT_FIRST_VERSION_WITHOUT_BUMPERCAR_BACK_FORWARD_QUIRK);
-
+#if !PLATFORM(IOS_FAMILY)
+    static bool hackNeeded = [[[NSBundle mainBundle] bundleIdentifier] isEqualToString:@"com.freeverse.bumpercar"]
+        && !WebKitLinkedOnOrAfter(WEBKIT_FIRST_VERSION_WITHOUT_BUMPERCAR_BACK_FORWARD_QUIRK);
     return hackNeeded;
 #else
     return false;
@@ -261,32 +239,30 @@ static bool bumperCarBackForwardHackNeeded()
 
 - (NSArray *)backListWithLimit:(int)limit
 {
-    Vector<Ref<HistoryItem>> list;
+    Vector<Ref<WebCore::HistoryItem>> list;
     core(self)->backListWithLimit(limit, list);
-    NSArray *result = vectorToNSArray(list);
-    
+    auto result = createNSArray(list, [] (auto& item) {
+        return kit(item.ptr());
+    });
     if (bumperCarBackForwardHackNeeded()) {
-        static NSArray *lastBackListArray = nil;
-        [lastBackListArray release];
-        lastBackListArray = [result retain];
+        static NeverDestroyed<RetainPtr<NSArray>> lastBackListArray;
+        lastBackListArray.get() = result;
     }
-    
-    return result;
+    return result.autorelease();
 }
 
 - (NSArray *)forwardListWithLimit:(int)limit
 {
-    Vector<Ref<HistoryItem>> list;
+    Vector<Ref<WebCore::HistoryItem>> list;
     core(self)->forwardListWithLimit(limit, list);
-    NSArray *result = vectorToNSArray(list);
-    
+    auto result = createNSArray(list, [] (auto& item) {
+        return kit(item.ptr());
+    });
     if (bumperCarBackForwardHackNeeded()) {
-        static NSArray *lastForwardListArray = nil;
-        [lastForwardListArray release];
-        lastForwardListArray = [result retain];
+        static NeverDestroyed<RetainPtr<NSArray>> lastForwardListArray;
+        lastForwardListArray.get() = result;
     }
-    
-    return result;
+    return result.autorelease();
 }
 
 - (int)capacity
@@ -320,7 +296,7 @@ static bool bumperCarBackForwardHackNeeded()
         }   
         [result appendFormat:@"%2d) ", i];
         int currPos = [result length];
-        [result appendString:[kit(const_cast<HistoryItem*>(entries[i].ptr())) description]];
+        [result appendString:[kit(const_cast<WebCore::HistoryItem*>(entries[i].ptr())) description]];
 
         // shift all the contents over.  a bit slow, but this is for debugging
         NSRange replRange = { static_cast<NSUInteger>(currPos), [result length] - currPos };
@@ -341,7 +317,7 @@ static bool bumperCarBackForwardHackNeeded()
 
 - (NSUInteger)pageCacheSize
 {
-    return [core(self)->webView() usesPageCache] ? PageCache::singleton().maxSize() : 0;
+    return [core(self)->webView() usesPageCache] ? WebCore::BackForwardCache::singleton().maxSize() : 0;
 }
 
 - (int)backListCount
@@ -356,7 +332,7 @@ static bool bumperCarBackForwardHackNeeded()
 
 - (WebHistoryItem *)itemAtIndex:(int)index
 {
-    return [[kit(core(self)->itemAtIndex(index)) retain] autorelease];
+    return retainPtr(kit(core(self)->itemAtIndex(index).get())).autorelease();
 }
 
 @end

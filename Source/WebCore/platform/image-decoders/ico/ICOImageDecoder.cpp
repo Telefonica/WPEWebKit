@@ -50,11 +50,9 @@ ICOImageDecoder::ICOImageDecoder(AlphaOption alphaOption, GammaAndColorProfileOp
 {
 }
 
-ICOImageDecoder::~ICOImageDecoder()
-{
-}
+ICOImageDecoder::~ICOImageDecoder() = default;
 
-void ICOImageDecoder::setData(SharedBuffer& data, bool allDataReceived)
+void ICOImageDecoder::setData(const FragmentedSharedBuffer& data, bool allDataReceived)
 {
     if (failed())
         return;
@@ -63,7 +61,7 @@ void ICOImageDecoder::setData(SharedBuffer& data, bool allDataReceived)
 
     for (BMPReaders::iterator i(m_bmpReaders.begin()); i != m_bmpReaders.end(); ++i) {
         if (*i)
-            (*i)->setData(&data);
+            (*i)->setData(*m_data);
     }
     for (size_t i = 0; i < m_pngDecoders.size(); ++i)
         setDataForPNGDecoderAtIndex(i);
@@ -92,13 +90,13 @@ size_t ICOImageDecoder::frameCount() const
     return m_frameBufferCache.size();
 }
 
-ImageFrame* ICOImageDecoder::frameBufferAtIndex(size_t index)
+ScalableImageDecoderFrame* ICOImageDecoder::frameBufferAtIndex(size_t index)
 {
     // Ensure |index| is valid.
     if (index >= frameCount())
         return 0;
 
-    ImageFrame* buffer = &m_frameBufferCache[index];
+    auto* buffer = &m_frameBufferCache[index];
     if (!buffer->isComplete())
         decode(index, false, isAllDataReceived());
     return buffer;
@@ -146,8 +144,8 @@ void ICOImageDecoder::setDataForPNGDecoderAtIndex(size_t index)
     // Copy out PNG data to a separate vector and send to the PNG decoder.
     // FIXME: Save this copy by making the PNG decoder able to take an
     // optional offset.
-    RefPtr<SharedBuffer> pngData(SharedBuffer::create(&m_data->data()[dirEntry.m_imageOffset], m_data->size() - dirEntry.m_imageOffset));
-    m_pngDecoders[index]->setData(*pngData, isAllDataReceived());
+    auto pngData = SharedBuffer::create(&m_data->data()[dirEntry.m_imageOffset], m_data->size() - dirEntry.m_imageOffset);
+    m_pngDecoders[index]->setData(pngData.get(), isAllDataReceived());
 }
 
 void ICOImageDecoder::decode(size_t index, bool onlySize, bool allDataReceived)
@@ -197,8 +195,8 @@ bool ICOImageDecoder::decodeAtIndex(size_t index)
             // We need to have already sized m_frameBufferCache before this, and
             // we must not resize it again later (see caution in frameCount()).
             ASSERT(m_frameBufferCache.size() == m_dirEntries.size());
-            m_bmpReaders[index] = std::make_unique<BMPImageReader>(this, dirEntry.m_imageOffset, 0, true);
-            m_bmpReaders[index]->setData(m_data.get());
+            m_bmpReaders[index] = makeUnique<BMPImageReader>(this, dirEntry.m_imageOffset, 0, true);
+            m_bmpReaders[index]->setData(*m_data);
             m_bmpReaders[index]->setBuffer(&m_frameBufferCache[index]);
         }
         m_frameSize = dirEntry.m_size;
@@ -317,7 +315,7 @@ ICOImageDecoder::ImageType ICOImageDecoder::imageTypeAtIndex(size_t index)
     const uint32_t imageOffset = m_dirEntries[index].m_imageOffset;
     if ((imageOffset > m_data->size()) || ((m_data->size() - imageOffset) < 4))
         return Unknown;
-    return strncmp(&m_data->data()[imageOffset], "\x89PNG", 4) ? BMP : PNG;
+    return memcmp(&m_data->data()[imageOffset], "\x89PNG", 4) ? BMP : PNG;
 }
 
 }

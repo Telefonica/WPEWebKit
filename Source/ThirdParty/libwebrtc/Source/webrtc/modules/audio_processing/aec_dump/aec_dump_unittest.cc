@@ -8,56 +8,70 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <array>
 #include <utility>
 
-#include "webrtc/modules/audio_processing/aec_dump/aec_dump_factory.h"
+#include "modules/audio_processing/aec_dump/aec_dump_factory.h"
+#include "rtc_base/task_queue_for_test.h"
+#include "test/gtest.h"
+#include "test/testsupport/file_utils.h"
 
-#include "webrtc/base/task_queue.h"
-#include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/testsupport/fileutils.h"
+namespace webrtc {
 
 TEST(AecDumper, APICallsDoNotCrash) {
   // Note order of initialization: Task queue has to be initialized
   // before AecDump.
-  rtc::TaskQueue file_writer_queue("file_writer_queue");
+  webrtc::TaskQueueForTest file_writer_queue("file_writer_queue");
 
   const std::string filename =
       webrtc::test::TempFilename(webrtc::test::OutputPath(), "aec_dump");
 
   {
     std::unique_ptr<webrtc::AecDump> aec_dump =
-        webrtc::AecDumpFactory::Create(filename, -1, &file_writer_queue);
+        webrtc::AecDumpFactory::Create(filename, -1, file_writer_queue.Get());
 
-    const webrtc::AudioFrame frame;
-    aec_dump->WriteRenderStreamMessage(frame);
+    constexpr int kNumChannels = 1;
+    constexpr int kNumSamplesPerChannel = 160;
+    std::array<int16_t, kNumSamplesPerChannel * kNumChannels> frame;
+    frame.fill(0.f);
+    aec_dump->WriteRenderStreamMessage(frame.data(), kNumChannels,
+                                       kNumSamplesPerChannel);
 
-    aec_dump->AddCaptureStreamInput(frame);
-    aec_dump->AddCaptureStreamOutput(frame);
+    aec_dump->AddCaptureStreamInput(frame.data(), kNumChannels,
+                                    kNumSamplesPerChannel);
+    aec_dump->AddCaptureStreamOutput(frame.data(), kNumChannels,
+                                     kNumSamplesPerChannel);
 
     aec_dump->WriteCaptureStreamMessage();
 
     webrtc::InternalAPMConfig apm_config;
     aec_dump->WriteConfig(apm_config);
 
-    webrtc::InternalAPMStreamsConfig streams_config;
-    aec_dump->WriteInitMessage(streams_config);
+    webrtc::ProcessingConfig api_format;
+    constexpr int64_t kTimeNowMs = 123456789ll;
+    aec_dump->WriteInitMessage(api_format, kTimeNowMs);
   }
   // Remove file after the AecDump d-tor has finished.
   ASSERT_EQ(0, remove(filename.c_str()));
 }
 
 TEST(AecDumper, WriteToFile) {
-  rtc::TaskQueue file_writer_queue("file_writer_queue");
+  webrtc::TaskQueueForTest file_writer_queue("file_writer_queue");
 
   const std::string filename =
       webrtc::test::TempFilename(webrtc::test::OutputPath(), "aec_dump");
 
   {
     std::unique_ptr<webrtc::AecDump> aec_dump =
-        webrtc::AecDumpFactory::Create(filename, -1, &file_writer_queue);
-    const webrtc::AudioFrame frame;
-    aec_dump->WriteRenderStreamMessage(frame);
+        webrtc::AecDumpFactory::Create(filename, -1, file_writer_queue.Get());
+
+    constexpr int kNumChannels = 1;
+    constexpr int kNumSamplesPerChannel = 160;
+    std::array<int16_t, kNumSamplesPerChannel * kNumChannels> frame;
+    frame.fill(0.f);
+
+    aec_dump->WriteRenderStreamMessage(frame.data(), kNumChannels,
+                                       kNumSamplesPerChannel);
   }
 
   // Verify the file has been written after the AecDump d-tor has
@@ -69,3 +83,5 @@ TEST(AecDumper, WriteToFile) {
   ASSERT_EQ(0, fclose(fid));
   ASSERT_EQ(0, remove(filename.c_str()));
 }
+
+}  // namespace webrtc

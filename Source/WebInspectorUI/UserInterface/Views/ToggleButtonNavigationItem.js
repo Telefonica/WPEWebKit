@@ -43,6 +43,14 @@ WI.ToggleButtonNavigationItem = class ToggleButtonNavigationItem extends WI.Butt
         return this._defaultToolTip;
     }
 
+    set defaultToolTip(toolTip)
+    {
+        this._defaultToolTip = toolTip;
+
+        if (!this._toggled)
+            this.tooltip = this._defaultToolTip;
+    }
+
     get alternateToolTip()
     {
         return this._alternateToolTip;
@@ -53,7 +61,7 @@ WI.ToggleButtonNavigationItem = class ToggleButtonNavigationItem extends WI.Butt
         this._alternateToolTip = toolTip;
 
         if (this._toggled)
-            this.toolTip = this._alternateToolTip;
+            this.tooltip = this._alternateToolTip;
     }
 
     get defaultImage()
@@ -89,12 +97,15 @@ WI.ToggleButtonNavigationItem = class ToggleButtonNavigationItem extends WI.Butt
         this._toggled = flag;
 
         if (this._toggled) {
-            this.toolTip = this._alternateToolTip;
+            this.tooltip = this._alternateToolTip;
             this.image = this._alternateImage;
         } else {
-            this.toolTip = this._defaultToolTip;
+            this.tooltip = this._defaultToolTip;
             this.image = this._defaultImage;
         }
+
+        if (this.buttonStyle === WI.ButtonNavigationItem.Style.Text || this.buttonStyle === WI.ButtonNavigationItem.Style.ImageAndText)
+            this.label = this.tooltip;
     }
 
     // Protected

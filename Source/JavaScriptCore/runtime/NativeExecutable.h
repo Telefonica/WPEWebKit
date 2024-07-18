@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2010, 2013-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,29 +26,33 @@
 #pragma once
 
 #include "ExecutableBase.h"
+#include "ImplementationVisibility.h"
 
 namespace JSC {
-namespace DOMJIT {
-class Signature;
-}
 
 class NativeExecutable final : public ExecutableBase {
     friend class JIT;
     friend class LLIntOffsetsExtractor;
 public:
     typedef ExecutableBase Base;
-    static const unsigned StructureFlags = Base::StructureFlags | StructureIsImmortal;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | StructureIsImmortal;
 
-    static NativeExecutable* create(VM&, Ref<JITCode>&& callThunk, NativeFunction function, Ref<JITCode>&& constructThunk, NativeFunction constructor, Intrinsic, const DOMJIT::Signature*, const String& name);
+    static NativeExecutable* create(VM&, Ref<JITCode>&& callThunk, TaggedNativeFunction, Ref<JITCode>&& constructThunk, TaggedNativeFunction constructor, ImplementationVisibility, const String& name);
 
     static void destroy(JSCell*);
+    
+    template<typename CellType, SubspaceAccess>
+    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    {
+        return &vm.nativeExecutableSpace();
+    }
 
     CodeBlockHash hashFor(CodeSpecializationKind) const;
 
-    NativeFunction function() { return m_function; }
-    NativeFunction constructor() { return m_constructor; }
+    TaggedNativeFunction function() const { return m_function; }
+    TaggedNativeFunction constructor() const { return m_constructor; }
         
-    NativeFunction nativeFunctionFor(CodeSpecializationKind kind)
+    TaggedNativeFunction nativeFunctionFor(CodeSpecializationKind kind)
     {
         if (kind == CodeForCall)
             return function();
@@ -64,33 +68,40 @@ public:
         return OBJECT_OFFSETOF(NativeExecutable, m_constructor);
     }
 
+    DECLARE_VISIT_CHILDREN;
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue proto);
         
     DECLARE_INFO;
 
     const String& name() const { return m_name; }
-    const DOMJIT::Signature* signature() const { return m_signature; }
 
-    const DOMJIT::Signature* signatureFor(CodeSpecializationKind kind) const
+    const DOMJIT::Signature* signatureFor(CodeSpecializationKind) const;
+    ImplementationVisibility implementationVisibility() const { return static_cast<ImplementationVisibility>(m_implementationVisibility); }
+    Intrinsic intrinsic() const;
+
+    JSString* toString(JSGlobalObject* globalObject)
     {
-        if (isCall(kind))
-            return signature();
-        return nullptr;
+        if (!m_asString)
+            return toStringSlow(globalObject);
+        return m_asString.get();
     }
 
-protected:
-    void finishCreation(VM&, Ref<JITCode>&& callThunk, Ref<JITCode>&& constructThunk, const String& name);
+    JSString* asStringConcurrently() const { return m_asString.get(); }
+    static inline ptrdiff_t offsetOfAsString() { return OBJECT_OFFSETOF(NativeExecutable, m_asString); }
 
 private:
-    friend class ExecutableBase;
+    NativeExecutable(VM&, TaggedNativeFunction, TaggedNativeFunction constructor, ImplementationVisibility);
+    void finishCreation(VM&, Ref<JITCode>&& callThunk, Ref<JITCode>&& constructThunk, const String& name);
 
-    NativeExecutable(VM&, NativeFunction function, NativeFunction constructor, Intrinsic, const DOMJIT::Signature*);
+    JSString* toStringSlow(JSGlobalObject*);
 
-    NativeFunction m_function;
-    NativeFunction m_constructor;
-    const DOMJIT::Signature* m_signature;
+    TaggedNativeFunction m_function;
+    TaggedNativeFunction m_constructor;
+
+    unsigned m_implementationVisibility : bitWidthOfImplementationVisibility;
 
     String m_name;
+    WriteBarrier<JSString> m_asString;
 };
 
 } // namespace JSC

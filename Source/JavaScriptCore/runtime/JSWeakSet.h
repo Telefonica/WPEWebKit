@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple, Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,13 +26,13 @@
 #pragma once
 
 #include "JSObject.h"
-#include "WeakMapBase.h"
+#include "WeakMapImpl.h"
 
 namespace JSC {
 
-class JSWeakSet final : public WeakMapBase {
+class JSWeakSet final : public WeakMapImpl<WeakMapBucket<WeakMapBucketDataKey>> {
 public:
-    using Base = WeakMapBase;
+    using Base = WeakMapImpl<WeakMapBucket<WeakMapBucketDataKey>>;
 
     DECLARE_EXPORT_INFO;
 
@@ -43,14 +43,9 @@ public:
 
     static JSWeakSet* create(VM& vm, Structure* structure)
     {
-        JSWeakSet* instance = new (NotNull, allocateCell<JSWeakSet>(vm.heap)) JSWeakSet(vm, structure);
+        JSWeakSet* instance = new (NotNull, allocateCell<JSWeakSet>(vm)) JSWeakSet(vm, structure);
         instance->finishCreation(vm);
         return instance;
-    }
-
-    static JSWeakSet* create(ExecState* exec, Structure* structure)
-    {
-        return create(exec->vm(), structure);
     }
 
 private:
@@ -58,20 +53,8 @@ private:
         : Base(vm, structure)
     {
     }
-
-    static String toStringName(const JSObject*, ExecState*);
 };
 
-inline bool isJSWeakSet(JSCell* from)
-{
-    static_assert(std::is_final<JSWeakSet>::value, "");
-    return from->type() == JSWeakSetType;
-}
-
-inline bool isJSWeakSet(JSValue from)
-{
-    static_assert(std::is_final<JSWeakSet>::value, "");
-    return from.isCell() && from.asCell()->type() == JSWeakSetType;
-}
+static_assert(std::is_final<JSWeakSet>::value, "Required for JSType based casting");
 
 } // namespace JSC

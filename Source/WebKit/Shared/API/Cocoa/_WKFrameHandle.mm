@@ -26,16 +26,16 @@
 #import "config.h"
 #import "_WKFrameHandleInternal.h"
 
-#if WK_API_ENABLED
+#import <WebCore/FrameIdentifier.h>
+#import <WebCore/WebCoreObjCExtras.h>
 
-using namespace WebKit;
-
-@implementation _WKFrameHandle {
-    API::ObjectStorage<API::FrameHandle> _frameHandle;
-}
+@implementation _WKFrameHandle
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(_WKFrameHandle.class, self))
+        return;
+
     _frameHandle->~FrameHandle();
 
     [super dealloc];
@@ -46,7 +46,7 @@ using namespace WebKit;
     if (object == self)
         return YES;
 
-    if (![object isKindOfClass:[_WKFrameHandle self]])
+    if (![object isKindOfClass:[_WKFrameHandle class]])
         return NO;
 
     return _frameHandle->frameID() == ((_WKFrameHandle *)object)->_frameHandle->frameID();
@@ -54,12 +54,12 @@ using namespace WebKit;
 
 - (NSUInteger)hash
 {
-    return _frameHandle->frameID();
+    return _frameHandle->frameID().toUInt64();
 }
 
-- (uint64_t)_frameID
+- (uint64_t)frameID
 {
-    return _frameHandle->frameID();
+    return _frameHandle->frameID().toUInt64();
 }
 
 #pragma mark NSCopying protocol implementation
@@ -81,20 +81,20 @@ using namespace WebKit;
     if (!(self = [super init]))
         return nil;
 
-    NSNumber *frameID = [decoder decodeObjectOfClass:[NSNumber self] forKey:@"frameID"];
-    if (![frameID isKindOfClass:[NSNumber self]]) {
+    NSNumber *frameID = [decoder decodeObjectOfClass:[NSNumber class] forKey:@"frameID"];
+    if (![frameID isKindOfClass:[NSNumber class]]) {
         [self release];
         return nil;
     }
 
-    API::Object::constructInWrapper<API::FrameHandle>(self, frameID.unsignedLongLongValue, false);
+    API::Object::constructInWrapper<API::FrameHandle>(self, makeObjectIdentifier<WebCore::FrameIdentifierType>(frameID.unsignedLongLongValue), false);
 
     return self;
 }
 
 - (void)encodeWithCoder:(NSCoder *)coder
 {
-    [coder encodeObject:@(_frameHandle->frameID()) forKey:@"frameID"];
+    [coder encodeObject:@(self.frameID) forKey:@"frameID"];
 }
 
 #pragma mark WKObject protocol implementation
@@ -105,5 +105,3 @@ using namespace WebKit;
 }
 
 @end
-
-#endif // WK_API_ENABLED

@@ -31,57 +31,53 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
 
         super(representedObject);
 
+        let isCanvas2D = this.representedObject.type === WI.Recording.Type.Canvas2D;
+        let isCanvasBitmapRenderer = this.representedObject.type === WI.Recording.Type.CanvasBitmapRenderer;
+        let isCanvasWebGL = this.representedObject.type === WI.Recording.Type.CanvasWebGL;
+        let isCanvasWebGL2 = this.representedObject.type === WI.Recording.Type.CanvasWebGL2;
+
         this._index = NaN;
+        this._action = null;
         this._snapshots = [];
         this._initialContent = null;
+        this._generateContentThrottler = new Throttler(() => {
+            if (isCanvas2D)
+                this._generateContentCanvas2D(this._index);
+            else if (isCanvasBitmapRenderer || isCanvasWebGL || isCanvasWebGL2)
+                this._generateContentFromSnapshot(this._index);
+        }, 200);
 
         this.element.classList.add("recording", this.representedObject.type);
 
-        let isCanvas2D = this.representedObject.type === WI.Recording.Type.Canvas2D;
-        let isCanvasWebGL = this.representedObject.type === WI.Recording.Type.CanvasWebGL;
-        if (isCanvas2D || isCanvasWebGL) {
-            if (isCanvas2D && WI.RecordingContentView.supportsCanvasPathDebugging()) {
+        if (isCanvas2D || isCanvasBitmapRenderer || isCanvasWebGL || isCanvasWebGL2) {
+            if (isCanvas2D) {
                 this._pathContext = null;
 
                 this._showPathButtonNavigationItem = new WI.ActivateButtonNavigationItem("show-path", WI.UIString("Show Path"), WI.UIString("Hide Path"), "Images/Path.svg", 16, 16);
+                this._showPathButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.High;
                 this._showPathButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._showPathButtonClicked, this);
                 this._showPathButtonNavigationItem.activated = !!WI.settings.showCanvasPath.value;
             }
 
-            this._showGridButtonNavigationItem = new WI.ActivateButtonNavigationItem("show-grid", WI.UIString("Show Grid"), WI.UIString("Hide Grid"), "Images/NavigationItemCheckers.svg", 13, 13);
-            this._showGridButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
+            this._showGridButtonNavigationItem = new WI.ActivateButtonNavigationItem("show-grid", WI.repeatedUIString.showTransparencyGridTooltip(), WI.UIString("Hide transparency grid"), "Images/NavigationItemCheckers.svg", 13, 13);
+            this._showGridButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.High;
             this._showGridButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._showGridButtonClicked, this);
             this._showGridButtonNavigationItem.activated = !!WI.settings.showImageGrid.value;
+
+            if (isCanvas2D && WI.FileUtilities.canSave(WI.FileUtilities.SaveMode.FileVariants))
+                this._saveMode = WI.FileUtilities.SaveMode.FileVariants;
+            else if (WI.FileUtilities.canSave(WI.FileUtilities.SaveMode.SingleFile))
+                this._saveMode = WI.FileUtilities.SaveMode.SingleFile;
+            else
+                this._saveMode = null;
+
+            this._exportButtonNavigationItem = new WI.ButtonNavigationItem("export", WI.UIString("Export"), "Images/Export.svg", 15, 15);
+            this._exportButtonNavigationItem.tooltip = WI.UIString("Export (%s)").format(WI.saveKeyboardShortcut.displayName);
+            this._exportButtonNavigationItem.buttonStyle = WI.ButtonNavigationItem.Style.ImageAndText;
+            this._exportButtonNavigationItem.enabled = this._saveMode;
+            this._exportButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._handleExportNavigationItemClicked, this);
+            this._updateExportButton();
         }
-
-        this._previewContainer = this.element.appendChild(document.createElement("div"));
-        this._previewContainer.classList.add("preview-container");
-    }
-
-    // Static
-
-    static supportsCanvasPathDebugging()
-    {
-        return "currentX" in CanvasRenderingContext2D.prototype && "currentY" in CanvasRenderingContext2D.prototype;
-    }
-
-    static _actionModifiesPath(recordingAction)
-    {
-        switch (recordingAction.name) {
-        case "arc":
-        case "arcTo":
-        case "beginPath":
-        case "bezierCurveTo":
-        case "closePath":
-        case "ellipse":
-        case "lineTo":
-        case "moveTo":
-        case "quadraticCurveTo":
-        case "rect":
-            return true;
-        }
-
-        return false;
     }
 
     // Public
@@ -89,82 +85,181 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
     get navigationItems()
     {
         let isCanvas2D = this.representedObject.type === WI.Recording.Type.Canvas2D;
+        let isCanvasBitmapRenderer = this.representedObject.type === WI.Recording.Type.CanvasBitmapRenderer;
         let isCanvasWebGL = this.representedObject.type === WI.Recording.Type.CanvasWebGL;
-        if (isCanvas2D || isCanvasWebGL) {
-            let navigationItems = [this._showGridButtonNavigationItem];
-            if (isCanvas2D && WI.RecordingContentView.supportsCanvasPathDebugging())
-                navigationItems.unshift(this._showPathButtonNavigationItem);
-            return navigationItems;
-        }
-        return [];
+        let isCanvasWebGL2 = this.representedObject.type === WI.Recording.Type.CanvasWebGL2;
+        if (!isCanvas2D && !isCanvasBitmapRenderer && !isCanvasWebGL && !isCanvasWebGL2)
+            return [];
+
+        let navigationItems = [this._exportButtonNavigationItem, new WI.DividerNavigationItem];
+        if (isCanvas2D)
+            navigationItems.push(this._showPathButtonNavigationItem);
+
+        navigationItems.push(this._showGridButtonNavigationItem);
+        return navigationItems;
     }
 
-    updateActionIndex(index, options = {})
+    get supplementalRepresentedObjects()
+    {
+        return this._action ? [this._action] : [];
+    }
+
+    updateActionIndex(index)
     {
         if (!this.representedObject)
             return;
 
-        this.representedObject.actions.then((actions) => {
-            console.assert(index >= 0 && index < actions.length);
-            if (index < 0 || index >= actions.length || index === this._index)
-                return;
+        if (this._index === index)
+            return;
 
-            this._index = index;
+        console.assert(index >= 0 && index < this.representedObject.actions.length);
+        if (index < 0 || index >= this.representedObject.actions.length)
+            return;
 
-            if (this.representedObject.type === WI.Recording.Type.Canvas2D)
-                this._generateContentCanvas2D(index, actions, options);
-            else if (this.representedObject.type === WI.Recording.Type.CanvasWebGL)
-                this._generateContentCanvasWebGL(index, actions, options);
-        });
+        this._index = index;
+
+        this._updateSliderValue();
+
+        if (this.didInitialLayout)
+            this._generateContentThrottler.fire();
+
+        this._action = this.representedObject.actions[this._index];
+
+        this.dispatchEventToListeners(WI.ContentView.Event.SupplementalRepresentedObjectsDidChange);
     }
 
-    // Protected
-
-    shown()
+    attached()
     {
-        super.shown();
+        super.attached();
 
         let isCanvas2D = this.representedObject.type === WI.Recording.Type.Canvas2D;
+        let isCanvasBitmapRenderer = this.representedObject.type === WI.Recording.Type.CanvasBitmapRenderer;
         let isCanvasWebGL = this.representedObject.type === WI.Recording.Type.CanvasWebGL;
-        if (isCanvas2D || isCanvasWebGL) {
+        let isCanvasWebGL2 = this.representedObject.type === WI.Recording.Type.CanvasWebGL2;
+        if (isCanvas2D || isCanvasBitmapRenderer || isCanvasWebGL || isCanvasWebGL2) {
             if (isCanvas2D)
                 this._updateCanvasPath();
             this._updateImageGrid();
         }
     }
 
-    get supplementalRepresentedObjects()
+    detached()
     {
-        let supplementalRepresentedObjects = super.supplementalRepresentedObjects;
-        if (this.representedObject)
-            supplementalRepresentedObjects.push(this.representedObject);
-        return supplementalRepresentedObjects;
+        this._generateContentThrottler.cancel();
+
+        super.detached();
     }
+
+    // Protected
 
     get supportsSave()
     {
-        return true;
+        return !!this._saveMode;
+    }
+
+    get saveMode()
+    {
+        return this._saveMode;
     }
 
     get saveData()
     {
-        return {
-            url: "web-inspector:///Recording.json",
-            content: JSON.stringify(this.representedObject.toJSON()),
-            forceSaveAs: true,
-        };
+        return {customSaveHandler: () => { this._export(); }};
+    }
+
+    initialLayout()
+    {
+        let previewHeader = this.element.appendChild(document.createElement("header"));
+
+        let sliderContainer = previewHeader.appendChild(document.createElement("div"));
+        sliderContainer.className = "slider-container";
+
+        this._previewContainer = this.element.appendChild(document.createElement("div"));
+        this._previewContainer.className = "preview-container";
+
+        this._sliderValueElement = sliderContainer.appendChild(document.createElement("div"));
+        this._sliderValueElement.className = "slider-value";
+
+        this._sliderElement = sliderContainer.appendChild(document.createElement("input"));
+        this._sliderElement.addEventListener("input", this._sliderChanged.bind(this));
+        this._sliderElement.type = "range";
+        this._sliderElement.min = 0;
+        this._sliderElement.max = 0;
+
+        if (!this.representedObject.ready) {
+            this.representedObject.addEventListener(WI.Recording.Event.ProcessedAction, this._handleRecordingProcessedAction, this);
+
+            if (!this.representedObject.processing)
+                this.representedObject.startProcessing();
+        }
+
+        this._updateSliderValue();
+
+        if (!isNaN(this._index))
+            this._generateContentThrottler.fire();
     }
 
     // Private
 
-    async _generateContentCanvas2D(index, actions, options = {})
+    _export()
+    {
+        if (this._saveMode === WI.FileUtilities.SaveMode.SingleFile) {
+            this._exportRecording();
+            return;
+        }
+
+        let filename = this.representedObject.displayName;
+
+        let data = [];
+        data.push({
+            displayType: WI.UIString("Recording"),
+            content: JSON.stringify(this.representedObject.toJSON()),
+            suggestedName: filename + ".recording",
+        });
+        if (this.representedObject.type === WI.Recording.Type.Canvas2D && this.representedObject.ready) {
+            data.push({
+                displayType: WI.UIString("Reduction"),
+                content: this.representedObject.toHTML(),
+                suggestedName: filename + ".html",
+            });
+        }
+
+        const forceSaveAs = true;
+        WI.FileUtilities.save(WI.FileUtilities.SaveMode.FileVariants, data, forceSaveAs);
+    }
+
+    _exportRecording()
+    {
+        let filename = this.representedObject.displayName;
+
+        const forceSaveAs = true;
+        WI.FileUtilities.save(WI.FileUtilities.SaveMode.SingleFile, {
+            content: JSON.stringify(this.representedObject.toJSON()),
+            suggestedName: filename + ".recording",
+        }, forceSaveAs);
+    }
+
+    _exportReduction()
+    {
+        console.assert(this.representedObject.ready);
+
+        let filename = this.representedObject.displayName;
+
+        const forceSaveAs = true;
+        WI.FileUtilities.save(WI.FileUtilities.SaveMode.SingleFile, {
+            content: this.representedObject.toHTML(),
+            suggestedName: filename + ".html",
+        }, forceSaveAs);
+    }
+
+    _generateContentCanvas2D(index)
     {
         let imageLoad = (event) => {
             // Loading took too long and the current action index has already changed.
             if (index !== this._index)
                 return;
 
-            this._generateContentCanvas2D(index, actions, options);
+            this._generateContentCanvas2D(index);
         };
 
         let initialState = this.representedObject.initialState;
@@ -178,34 +273,44 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
         let snapshotIndex = Math.floor(index / WI.RecordingContentView.SnapshotInterval);
         let snapshot = this._snapshots[snapshotIndex];
 
-        let showCanvasPath = WI.RecordingContentView.supportsCanvasPathDebugging() && WI.settings.showCanvasPath.value;
         let indexOfLastBeginPathAction = Infinity;
+
+        let actions = this.representedObject.actions;
 
         let applyActions = (from, to, callback) => {
             let saveCount = 0;
             snapshot.context.save();
+
+            for (let attribute in snapshot.attributes)
+                snapshot.element[attribute] = snapshot.attributes[attribute];
 
             if (snapshot.content) {
                 snapshot.context.clearRect(0, 0, snapshot.element.width, snapshot.element.height);
                 snapshot.context.drawImage(snapshot.content, 0, 0);
             }
 
-            for (let name in snapshot.state) {
-                if (!(name in snapshot.context))
-                    continue;
+            for (let state of snapshot.states) {
+                state.apply(this.representedObject.type, snapshot.context);
 
-                try {
-                    if (WI.RecordingAction.isFunctionForType(this.representedObject.type, name))
-                        snapshot.context[name](...snapshot.state[name]);
-                    else
-                        snapshot.context[name] = snapshot.state[name];
-                } catch (e) {
-                    delete snapshot.state[name];
-                }
+                ++saveCount;
+                snapshot.context.save();
             }
 
-            let shouldDrawCanvasPath = showCanvasPath && indexOfLastBeginPathAction <= to;
-            if (shouldDrawCanvasPath) {
+            let lastPathPoint = {};
+            let subPathStartPoint = {};
+
+            for (let i = from; i <= to; ++i) {
+                if (actions[i].name === "save")
+                    ++saveCount;
+                else if (actions[i].name === "restore") {
+                    if (!saveCount) // Only attempt to restore if save has been called.
+                        continue;
+                }
+
+                actions[i].apply(snapshot.context);
+            }
+
+            if (WI.settings.showCanvasPath.value && indexOfLastBeginPathAction <= to) {
                 if (!this._pathContext) {
                     let pathCanvas = document.createElement("canvas");
                     pathCanvas.classList.add("path");
@@ -220,23 +325,29 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
 
                 this._pathContext.fillStyle = "hsla(0, 0%, 100%, 0.75)";
                 this._pathContext.fillRect(0, 0, snapshot.element.width, snapshot.element.height);
-            }
 
-            let lastPathPoint = {};
-            let subPathStartPoint = {};
+                function actionModifiesPath(action) {
+                    switch (action.name) {
+                    case "arc":
+                    case "arcTo":
+                    case "beginPath":
+                    case "bezierCurveTo":
+                    case "closePath":
+                    case "ellipse":
+                    case "lineTo":
+                    case "moveTo":
+                    case "quadraticCurveTo":
+                    case "rect":
+                        return true;
+                    }
 
-            for (let i = from; i <= to; ++i) {
-                if (actions[i].name === "save")
-                    ++saveCount;
-                else if (actions[i].name === "restore") {
-                    if (!saveCount) // Only attempt to restore if save has been called.
-                        continue;
-                    --saveCount;
+                    return false;
                 }
 
-                this._applyAction(snapshot.context, actions[i]);
+                for (let i = indexOfLastBeginPathAction; i <= to; ++i) {
+                    if (!actionModifiesPath(actions[i]))
+                        continue;
 
-                if (shouldDrawCanvasPath && i >= indexOfLastBeginPathAction && WI.RecordingContentView._actionModifiesPath(actions[i])) {
                     lastPathPoint = {x: this._pathContext.currentX, y: this._pathContext.currentY};
 
                     if (i === indexOfLastBeginPathAction)
@@ -255,22 +366,18 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
                         this._pathContext.lineTo(subPathStartPoint.x, subPathStartPoint.y);
                         subPathStartPoint = {};
                     } else {
-                        this._applyAction(this._pathContext, actions[i], {nameOverride: isMoveTo ? "lineTo" : null});
+                        actions[i].apply(this._pathContext, {nameOverride: isMoveTo ? "lineTo" : null});
                         if (isMoveTo)
                             subPathStartPoint = {x: this._pathContext.currentX, y: this._pathContext.currentY};
                     }
 
                     this._pathContext.stroke();
                 }
-            }
 
-            if (shouldDrawCanvasPath) {
                 this._pathContext.restore();
                 this._previewContainer.appendChild(this._pathContext.canvas);
             } else if (this._pathContext)
                 this._pathContext.canvas.remove();
-
-            callback();
 
             snapshot.context.restore();
             while (saveCount-- > 0)
@@ -283,12 +390,8 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
             while (snapshot.index && actions[snapshot.index].name !== "beginPath")
                 --snapshot.index;
 
-            snapshot.element = document.createElement("canvas");
-            snapshot.context = snapshot.element.getContext("2d", ...initialState.parameters);
-            if ("width" in initialState.attributes)
-                snapshot.element.width = initialState.attributes.width;
-            if ("height" in initialState.attributes)
-                snapshot.element.height = initialState.attributes.height;
+            snapshot.context = this.representedObject.createContext();
+            snapshot.element = snapshot.context.canvas;
 
             let lastSnapshotIndex = snapshotIndex;
             while (--lastSnapshotIndex >= 0) {
@@ -299,88 +402,22 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
             let startIndex = 0;
             if (lastSnapshotIndex < 0) {
                 snapshot.content = this._initialContent;
-                snapshot.state = {};
-
-                for (let key in initialState.attributes) {
-                    let value = initialState.attributes[key];
-
-                    switch (key) {
-                    case "setTransform":
-                        value = [await this.representedObject.swizzle(value, WI.Recording.Swizzle.DOMMatrix)];
-                        break;
-
-                    case "fillStyle":
-                    case "strokeStyle":
-                        if (Array.isArray(value)) {
-                            let canvasStyle = await this.representedObject.swizzle(value[0], WI.Recording.Swizzle.String);
-                            if (canvasStyle.includes("gradient"))
-                                value = await this.representedObject.swizzle(value, WI.Recording.Swizzle.CanvasGradient);
-                            else if (canvasStyle === "pattern")
-                                value = await this.representedObject.swizzle(value, WI.Recording.Swizzle.CanvasPattern);
-                        } else
-                            value = await this.representedObject.swizzle(value, WI.Recording.Swizzle.String);
-                        break;
-
-                    case "direction":
-                    case "font":
-                    case "globalCompositeOperation":
-                    case "imageSmoothingEnabled":
-                    case "imageSmoothingQuality":
-                    case "lineCap":
-                    case "lineJoin":
-                    case "shadowColor":
-                    case "textAlign":
-                    case "textBaseline":
-                        value = await this.representedObject.swizzle(value, WI.Recording.Swizzle.String);
-                        break;
-
-                    case "setPath":
-                        value = [await this.representedObject.swizzle(value[0], WI.Recording.Swizzle.Path2D)];
-                        break;
-                    }
-
-                    if (value === undefined || (Array.isArray(value) && value.includes(undefined)))
-                        continue;
-
-                    snapshot.state[key] = value;
-                }
+                snapshot.states = actions[0].states;
+                snapshot.attributes = Object.shallowCopy(initialState.attributes);
             } else {
-                snapshot.content = this._snapshots[lastSnapshotIndex].content;
-                snapshot.state = this._snapshots[lastSnapshotIndex].state;
-                startIndex = this._snapshots[lastSnapshotIndex].index;
+                let lastSnapshot = this._snapshots[lastSnapshotIndex];
+                snapshot.content = lastSnapshot.content;
+                snapshot.states = lastSnapshot.states;
+                snapshot.attributes = {};
+                for (let attribute in initialState.attributes)
+                    snapshot.attributes[attribute] = lastSnapshot.element[attribute];
+
+                startIndex = lastSnapshot.index;
             }
 
-            applyActions(startIndex, snapshot.index - 1, () => {
-                snapshot.state = {
-                    direction: snapshot.context.direction,
-                    fillStyle: snapshot.context.fillStyle,
-                    font: snapshot.context.font,
-                    globalAlpha: snapshot.context.globalAlpha,
-                    globalCompositeOperation: snapshot.context.globalCompositeOperation,
-                    imageSmoothingEnabled: snapshot.context.imageSmoothingEnabled,
-                    imageSmoothingQuality: snapshot.context.imageSmoothingQuality,
-                    lineCap: snapshot.context.lineCap,
-                    lineDashOffset: snapshot.context.lineDashOffset,
-                    lineJoin: snapshot.context.lineJoin,
-                    lineWidth: snapshot.context.lineWidth,
-                    miterLimit: snapshot.context.miterLimit,
-                    setLineDash: [snapshot.context.getLineDash()],
-                    setTransform: [snapshot.context.getTransform()],
-                    shadowBlur: snapshot.context.shadowBlur,
-                    shadowColor: snapshot.context.shadowColor,
-                    shadowOffsetX: snapshot.context.shadowOffsetX,
-                    shadowOffsetY: snapshot.context.shadowOffsetY,
-                    strokeStyle: snapshot.context.strokeStyle,
-                    textAlign: snapshot.context.textAlign,
-                    textBaseline: snapshot.context.textBaseline,
-                    webkitImageSmoothingEnabled: snapshot.context.webkitImageSmoothingEnabled,
-                    webkitLineDash: snapshot.context.webkitLineDash,
-                    webkitLineDashOffset: snapshot.context.webkitLineDashOffset,
-                };
-
-                if (WI.RecordingContentView.supportsCanvasPathDebugging())
-                    snapshot.state.setPath = [snapshot.context.getPath()];
-            });
+            applyActions(startIndex, snapshot.index - 1);
+            if (snapshot.index > 0)
+                snapshot.states = actions[snapshot.index - 1].states;
 
             snapshot.content = new Image;
             snapshot.content.src = snapshot.element.toDataURL();
@@ -390,29 +427,26 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
 
         this._previewContainer.removeChildren();
 
-        if (showCanvasPath) {
+        if (WI.settings.showCanvasPath.value) {
             indexOfLastBeginPathAction = this._index;
             while (indexOfLastBeginPathAction > snapshot.index && actions[indexOfLastBeginPathAction].name !== "beginPath")
                 --indexOfLastBeginPathAction;
         }
 
-        applyActions(snapshot.index, this._index, () => {
-            if (options.actionCompletedCallback)
-                options.actionCompletedCallback(actions[this._index], snapshot.context);
-        });
+        applyActions(snapshot.index, this._index);
 
-        this._previewContainer.appendChild(snapshot.element);
+        this._previewContainer.insertAdjacentElement("afterbegin", snapshot.element);
         this._updateImageGrid();
     }
 
-    async _generateContentCanvasWebGL(index, actions, options = {})
+    _generateContentFromSnapshot(index)
     {
         let imageLoad = (event) => {
             // Loading took too long and the current action index has already changed.
             if (index !== this._index)
                 return;
 
-            this._generateContentCanvasWebGL(index, actions, options);
+            this._generateContentFromSnapshot(index);
         };
 
         let initialState = this.representedObject.initialState;
@@ -422,6 +456,8 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
             this._initialContent.addEventListener("load", imageLoad);
             return;
         }
+
+        let actions = this.representedObject.actions;
 
         let visualIndex = index;
         while (!actions[visualIndex].isVisual && !(actions[visualIndex] instanceof WI.RecordingInitialStateAction))
@@ -446,41 +482,25 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
 
             this._updateImageGrid();
         }
-
-        if (options.actionCompletedCallback)
-            options.actionCompletedCallback(actions[this._index]);
     }
 
-    _applyAction(context, action, options = {})
+    _updateExportButton()
     {
-        if (!action.valid)
+        if (this._saveMode !== WI.FileUtilities.SaveMode.SingleFile)
             return;
 
-        try {
-            let name = options.nameOverride || action.name;
-            if (action.isFunction)
-                context[name](...action.parameters);
-            else {
-                if (action.isGetter)
-                    context[name];
-                else
-                    context[name] = action.parameters[0];
-            }
-        } catch (e) {
-            WI.Recording.synthesizeError(WI.UIString("“%s” threw an error.").format(action.name));
-
-            action.valid = false;
-        }
+        if (this.representedObject.type === WI.Recording.Type.Canvas2D && this.representedObject.ready)
+            this._exportButtonNavigationItem.tooltip = WI.UIString("Export recording (%s)\nShift-click to export a HTML reduction").format(WI.saveKeyboardShortcut.displayName);
+        else
+            this._exportButtonNavigationItem.tooltip = WI.UIString("Export recording (%s)").format(WI.saveKeyboardShortcut.displayName);
     }
 
     _updateCanvasPath()
     {
         let activated = WI.settings.showCanvasPath.value;
-        if (this._showPathButtonNavigationItem.activated !== activated) {
-            this.representedObject.actions.then((actions) => {
-                this._generateContentCanvas2D(this._index, actions);
-            });
-        }
+
+        if (this._showPathButtonNavigationItem.activated !== activated)
+            this._generateContentCanvas2D(this._index);
 
         this._showPathButtonNavigationItem.activated = activated;
     }
@@ -490,9 +510,25 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
         let activated = WI.settings.showImageGrid.value;
         this._showGridButtonNavigationItem.activated = activated;
 
-        let snapshotIndex = Math.floor(this._index / WI.RecordingContentView.SnapshotInterval);
-        if (!isNaN(this._index) && this._snapshots[snapshotIndex])
-            this._snapshots[snapshotIndex].element.classList.toggle("show-grid", activated);
+        if (this.didInitialLayout && !isNaN(this._index))
+            this._previewContainer.firstElementChild.classList.toggle("show-grid", activated);
+    }
+
+    _updateSliderValue()
+    {
+        if (!this._sliderElement)
+            return;
+
+        let visualActionIndexes = this.representedObject.visualActionIndexes;
+        let visualActionIndex = 0;
+        if (this._index > 0) {
+            while (visualActionIndex < visualActionIndexes.length && visualActionIndexes[visualActionIndex] <= this._index)
+                visualActionIndex++;
+        }
+
+        this._sliderElement.value = visualActionIndex;
+        this._sliderElement.max = visualActionIndexes.length;
+        this._sliderValueElement.textContent = WI.UIString("%d of %d").format(visualActionIndex, visualActionIndexes.length);
     }
 
     _showPathButtonClicked(event)
@@ -507,6 +543,37 @@ WI.RecordingContentView = class RecordingContentView extends WI.ContentView
         WI.settings.showImageGrid.value = !this._showGridButtonNavigationItem.activated;
 
         this._updateImageGrid();
+    }
+
+    _handleExportNavigationItemClicked(event)
+    {
+        if (this._saveMode === WI.FileUtilities.SaveMode.SingleFile && this.representedObject.type === WI.Recording.Type.Canvas2D && this.representedObject.ready && event.data.nativeEvent.shiftKey) {
+            this._exportReduction();
+            return;
+        }
+
+        this._export();
+    }
+
+    _sliderChanged()
+    {
+        let index = 0;
+
+        let visualActionIndex = parseInt(this._sliderElement.value) - 1;
+        if (visualActionIndex !== -1)
+            index = this.representedObject.visualActionIndexes[visualActionIndex];
+
+        this.updateActionIndex(index);
+    }
+
+    _handleRecordingProcessedAction(event)
+    {
+        this._updateExportButton();
+
+        this._updateSliderValue();
+
+        if (this.representedObject.ready)
+            this.representedObject.removeEventListener(WI.Recording.Event.ProcessedAction, this._handleRecordingProcessedAction, this);
     }
 };
 

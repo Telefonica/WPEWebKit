@@ -8,31 +8,27 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_SCOPED_GDI_HANDLE_H_
-#define WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_SCOPED_GDI_HANDLE_H_
+#ifndef MODULES_DESKTOP_CAPTURE_WIN_SCOPED_GDI_HANDLE_H_
+#define MODULES_DESKTOP_CAPTURE_WIN_SCOPED_GDI_HANDLE_H_
 
 #include <windows.h>
-
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/typedefs.h"
 
 namespace webrtc {
 namespace win {
 
 // Scoper for GDI objects.
-template<class T, class Traits>
+template <class T, class Traits>
 class ScopedGDIObject {
  public:
   ScopedGDIObject() : handle_(NULL) {}
   explicit ScopedGDIObject(T object) : handle_(object) {}
 
-  ~ScopedGDIObject() {
-    Traits::Close(handle_);
-  }
+  ~ScopedGDIObject() { Traits::Close(handle_); }
 
-  T Get() {
-    return handle_;
-  }
+  ScopedGDIObject(const ScopedGDIObject&) = delete;
+  ScopedGDIObject& operator=(const ScopedGDIObject&) = delete;
+
+  T Get() { return handle_; }
 
   void Set(T object) {
     if (handle_ && object != handle_)
@@ -55,35 +51,35 @@ class ScopedGDIObject {
 
  private:
   T handle_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(ScopedGDIObject);
 };
 
 // The traits class that uses DeleteObject() to close a handle.
 template <typename T>
 class DeleteObjectTraits {
  public:
+  DeleteObjectTraits() = delete;
+  DeleteObjectTraits(const DeleteObjectTraits&) = delete;
+  DeleteObjectTraits& operator=(const DeleteObjectTraits&) = delete;
+
   // Closes the handle.
   static void Close(T handle) {
     if (handle)
       DeleteObject(handle);
   }
-
- private:
-  RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(DeleteObjectTraits);
 };
 
 // The traits class that uses DestroyCursor() to close a handle.
 class DestroyCursorTraits {
  public:
+  DestroyCursorTraits() = delete;
+  DestroyCursorTraits(const DestroyCursorTraits&) = delete;
+  DestroyCursorTraits& operator=(const DestroyCursorTraits&) = delete;
+
   // Closes the handle.
   static void Close(HCURSOR handle) {
     if (handle)
       DestroyCursor(handle);
   }
-
- private:
-  RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(DestroyCursorTraits);
 };
 
 typedef ScopedGDIObject<HBITMAP, DeleteObjectTraits<HBITMAP> > ScopedBitmap;
@@ -92,4 +88,4 @@ typedef ScopedGDIObject<HCURSOR, DestroyCursorTraits> ScopedCursor;
 }  // namespace win
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_DESKTOP_CAPTURE_WIN_SCOPED_GDI_HANDLE_H_
+#endif  // MODULES_DESKTOP_CAPTURE_WIN_SCOPED_GDI_HANDLE_H_

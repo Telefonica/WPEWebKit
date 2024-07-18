@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -59,6 +59,9 @@ void MediaPlaybackTargetPicker::pendingActionTimerFired()
 
     if (pendingActions & OutputDeviceAvailabilityChanged)
         m_client->externalOutputDeviceAvailableDidChange(externalOutputDeviceAvailable());
+
+    if (pendingActions & PlaybackTargetPickerWasDismissed)
+        m_client->playbackTargetPickerWasDismissed();
 }
 
 void MediaPlaybackTargetPicker::addPendingAction(PendingActionFlags action)
@@ -70,7 +73,7 @@ void MediaPlaybackTargetPicker::addPendingAction(PendingActionFlags action)
     m_pendingActionTimer.startOneShot(pendingActionInterval);
 }
 
-void MediaPlaybackTargetPicker::showPlaybackTargetPicker(const FloatRect&, bool)
+void MediaPlaybackTargetPicker::showPlaybackTargetPicker(PlatformView*, const FloatRect&, bool, bool)
 {
     ASSERT_NOT_REACHED();
 }

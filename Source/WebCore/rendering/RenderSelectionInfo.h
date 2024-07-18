@@ -34,17 +34,17 @@ class RenderSelectionInfoBase {
     WTF_MAKE_NONCOPYABLE(RenderSelectionInfoBase); WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit RenderSelectionInfoBase(RenderObject& renderer);
-    RenderLayerModelObject* repaintContainer() const { return m_repaintContainer; }
-    RenderObject::SelectionState state() const { return m_state; }
+    const RenderLayerModelObject* repaintContainer() const { return m_repaintContainer; }
+    RenderObject::HighlightState state() const { return m_state; }
 
 protected:
     void repaintRectangle(const LayoutRect& repaintRect);
 
     RenderObject& m_renderer;
-    RenderLayerModelObject* m_repaintContainer;
+    const RenderLayerModelObject* m_repaintContainer;
 
 private:
-    RenderObject::SelectionState m_state;
+    RenderObject::HighlightState m_state;
 };
 
 // This struct is used when the selection changes to cache the old and new state of the selection for each RenderObject.
@@ -53,11 +53,11 @@ public:
     RenderSelectionInfo(RenderObject& renderer, bool clipToVisibleContent);
 
     void repaint();
-    const Vector<LayoutRect>& collectedSelectionRects() const { return m_collectedSelectionRects; }
+    const Vector<FloatQuad>& collectedSelectionQuads() const { return m_collectedSelectionQuads; }
     LayoutRect rect() const { return m_rect; }
 
 private:
-    Vector<LayoutRect> m_collectedSelectionRects; // relative to repaint container
+    Vector<FloatQuad> m_collectedSelectionQuads; // relative to repaint container
     LayoutRect m_rect; // relative to repaint container
 };
 

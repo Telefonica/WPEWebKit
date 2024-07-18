@@ -8,14 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AGC_LOUDNESS_HISTOGRAM_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_AGC_LOUDNESS_HISTOGRAM_H_
+#ifndef MODULES_AUDIO_PROCESSING_AGC_LOUDNESS_HISTOGRAM_H_
+#define MODULES_AUDIO_PROCESSING_AGC_LOUDNESS_HISTOGRAM_H_
 
-#include <string.h>
+#include <stdint.h>
 
 #include <memory>
-
-#include "webrtc/typedefs.h"
 
 namespace webrtc {
 
@@ -27,7 +25,7 @@ class LoudnessHistogram {
   static LoudnessHistogram* Create();
 
   // Create a sliding LoudnessHistogram, i.e. the histogram represents the last
-  // |window_size| samples.
+  // `window_size` samples.
   static LoudnessHistogram* Create(int window_size);
   ~LoudnessHistogram();
 
@@ -51,7 +49,7 @@ class LoudnessHistogram {
   LoudnessHistogram();
   explicit LoudnessHistogram(int window);
 
-  // Find the histogram bin associated with the given |rms|.
+  // Find the histogram bin associated with the given `rms`.
   int GetBinIndex(double rms);
 
   void RemoveOldestEntryAndUpdate();
@@ -65,10 +63,10 @@ class LoudnessHistogram {
   // Number of times the histogram is updated
   int num_updates_;
   // Audio content, this should be equal to the sum of the components of
-  // |bin_count_q10_|.
+  // `bin_count_q10_`.
   int64_t audio_content_q10_;
 
-  // LoudnessHistogram of input RMS in Q10 with |kHistSize_| bins. In each
+  // LoudnessHistogram of input RMS in Q10 with `kHistSize_` bins. In each
   // 'Update(),' we increment the associated histogram-bin with the given
   // probability. The increment is implemented in Q10 to avoid rounding errors.
   int64_t bin_count_q10_[kHistSize];
@@ -89,4 +87,4 @@ class LoudnessHistogram {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AGC_LOUDNESS_HISTOGRAM_H_
+#endif  // MODULES_AUDIO_PROCESSING_AGC_LOUDNESS_HISTOGRAM_H_

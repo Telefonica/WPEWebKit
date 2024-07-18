@@ -8,18 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_RTP_RTCP_MOCKS_MOCK_RTCP_RTT_STATS_H_
-#define WEBRTC_MODULES_RTP_RTCP_MOCKS_MOCK_RTCP_RTT_STATS_H_
+#ifndef MODULES_RTP_RTCP_MOCKS_MOCK_RTCP_RTT_STATS_H_
+#define MODULES_RTP_RTCP_MOCKS_MOCK_RTCP_RTT_STATS_H_
 
-#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
-#include "webrtc/test/gmock.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "test/gmock.h"
 
 namespace webrtc {
 
 class MockRtcpRttStats : public RtcpRttStats {
  public:
-  MOCK_METHOD1(OnRttUpdate, void(int64_t rtt));
-  MOCK_CONST_METHOD0(LastProcessedRtt, int64_t());
+  MOCK_METHOD(void, OnRttUpdate, (int64_t rtt), (override));
+  MOCK_METHOD(int64_t, LastProcessedRtt, (), (const, override));
 };
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_RTP_RTCP_MOCKS_MOCK_RTCP_RTT_STATS_H_
+#endif  // MODULES_RTP_RTCP_MOCKS_MOCK_RTCP_RTT_STATS_H_

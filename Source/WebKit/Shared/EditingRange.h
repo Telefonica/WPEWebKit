@@ -23,10 +23,16 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef EditingRange_h
-#define EditingRange_h
+#pragma once
 
 #include "ArgumentCoders.h"
+#include <wtf/EnumTraits.h>
+#include <wtf/RefPtr.h>
+
+namespace WebCore {
+class Frame;
+struct SimpleRange;
+}
 
 namespace WebKit {
 
@@ -35,6 +41,7 @@ enum class EditingRangeIsRelativeTo : uint8_t {
     Paragraph,
 };
 
+// FIXME: Replace this with std::optional<CharacterRange>.
 struct EditingRange {
     EditingRange()
         : location(notFound)
@@ -50,6 +57,9 @@ struct EditingRange {
 
     // (notFound, 0) is notably valid.
     bool isValid() const { return location + length >= location; }
+
+    static std::optional<WebCore::SimpleRange> toRange(WebCore::Frame&, const EditingRange&, EditingRangeIsRelativeTo = EditingRangeIsRelativeTo::EditableRoot);
+    static EditingRange fromRange(WebCore::Frame&, const std::optional<WebCore::SimpleRange>&, EditingRangeIsRelativeTo = EditingRangeIsRelativeTo::EditableRoot);
 
 #if defined(__OBJC__)
     EditingRange(NSRange range)
@@ -78,7 +88,14 @@ struct EditingRange {
 }
 
 namespace IPC {
-template<> struct ArgumentCoder<WebKit::EditingRange> : SimpleArgumentCoder<WebKit::EditingRange> { };
+template<> struct ArgumentCoder<WebKit::EditingRange> {
+    static void encode(Encoder&, const WebKit::EditingRange&);
+    static std::optional<WebKit::EditingRange> decode(Decoder&);
+};
 }
 
-#endif // EditingRange_h
+namespace WTF {
+template<> struct EnumTraits<WebKit::EditingRangeIsRelativeTo> {
+    using values = EnumValues<WebKit::EditingRangeIsRelativeTo, WebKit::EditingRangeIsRelativeTo::EditableRoot, WebKit::EditingRangeIsRelativeTo::Paragraph>;
+};
+}

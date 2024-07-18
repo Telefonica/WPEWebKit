@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,19 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
 
-#if USE(APPLE_INTERNAL_SDK)
+#import <Foundation/Foundation.h>
 
-#include <Foundation/NSPrivateDecls.h>
+@interface NSTextCheckingResult ()
+- (NSDictionary *)detail;
+@end
 
-#endif
-
-typedef void* NSAutoreleasePoolMark;
-
-WTF_EXTERN_C_BEGIN
-
-NSAutoreleasePoolMark NSPushAutoreleasePool(NSUInteger capacity);
-void NSPopAutoreleasePool(NSAutoreleasePoolMark);
-
-WTF_EXTERN_C_END

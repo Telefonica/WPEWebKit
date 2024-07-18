@@ -681,8 +681,11 @@ Decimal Decimal::floor() const
 
 Decimal Decimal::fromDouble(double doubleValue)
 {
-    if (std::isfinite(doubleValue))
-        return fromString(String::numberToStringECMAScript(doubleValue));
+    if (std::isfinite(doubleValue)) {
+        // FIXME: Change fromString to take a StringView instead of a String and then
+        // use a fixed size stack buffer instead of allocating and deallocating a string.
+        return fromString(String::number(doubleValue));
+    }
 
     if (std::isinf(doubleValue))
         return infinity(doubleValue < 0 ? Negative : Positive);
@@ -690,7 +693,7 @@ Decimal Decimal::fromDouble(double doubleValue)
     return nan();
 }
 
-Decimal Decimal::fromString(const String& str)
+Decimal Decimal::fromString(StringView str)
 {
     int exponent = 0;
     Sign exponentSign = Positive;
@@ -949,10 +952,10 @@ String Decimal::toString() const
 {
     switch (m_data.formatClass()) {
     case EncodedData::ClassInfinity:
-        return sign() ? ASCIILiteral("-Infinity") : ASCIILiteral("Infinity");
+        return sign() ? "-Infinity"_s : "Infinity"_s;
 
     case EncodedData::ClassNaN:
-        return ASCIILiteral("NaN");
+        return "NaN"_s;
 
     case EncodedData::ClassNormal:
     case EncodedData::ClassZero:
@@ -1006,12 +1009,11 @@ String Decimal::toString() const
             return builder.toString();
         }
 
-        builder.appendLiteral("0.");
+        builder.append("0.");
         for (int i = adjustedExponent + 1; i < 0; ++i)
             builder.append('0');
 
         builder.append(digits);
-
     } else {
         builder.append(digits[0]);
         while (coefficientLength >= 2 && digits[coefficientLength - 1] == '0')
@@ -1022,10 +1024,8 @@ String Decimal::toString() const
                 builder.append(digits[i]);
         }
 
-        if (adjustedExponent) {
-            builder.append(adjustedExponent < 0 ? "e" : "e+");
-            builder.appendNumber(adjustedExponent);
-        }
+        if (adjustedExponent)
+            builder.append(adjustedExponent < 0 ? "e" : "e+", adjustedExponent);
     }
     return builder.toString();
 }

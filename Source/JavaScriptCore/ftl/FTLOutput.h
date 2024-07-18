@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,7 +31,6 @@
 
 #include "B3BasicBlockInlines.h"
 #include "B3CCallValue.h"
-#include "B3Compilation.h"
 #include "B3FrequentedBlock.h"
 #include "B3Procedure.h"
 #include "B3SwitchValue.h"
@@ -39,6 +38,7 @@
 #include "FTLAbbreviatedTypes.h"
 #include "FTLAbstractHeapRepository.h"
 #include "FTLCommonValues.h"
+#include "FTLSelectPredictability.h"
 #include "FTLState.h"
 #include "FTLSwitchCase.h"
 #include "FTLTypedPointer.h"
@@ -46,15 +46,13 @@
 #include "FTLWeight.h"
 #include "FTLWeightedTarget.h"
 #include "HeapCell.h"
+#include "JITCompilation.h"
 #include <wtf/OrderMaker.h>
 #include <wtf/StringPrintStream.h>
 
 // FIXME: remove this once everything can be generated through B3.
-#if COMPILER(GCC_OR_CLANG)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmissing-noreturn"
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#endif // COMPILER(GCC_OR_CLANG)
+IGNORE_WARNINGS_BEGIN("missing-noreturn")
+ALLOW_UNUSED_PARAMETERS_BEGIN
 
 namespace JSC {
 
@@ -102,27 +100,23 @@ public:
 
     LValue framePointer();
 
-    B3::SlotBaseValue* lockedStackSlot(size_t bytes);
+    B3::SlotBaseValue* lockedStackSlot(uint64_t bytes);
 
     LValue constBool(bool value);
     LValue constInt32(int32_t value);
 
-    LValue weakPointer(DFG::Graph& graph, JSCell* cell)
+    LValue alreadyRegisteredWeakPointer(DFG::Graph& graph, JSCell* cell)
     {
-        ASSERT(graph.m_plan.weakReferences.contains(cell));
+        ASSERT(graph.m_plan.weakReferences().contains(cell));
 
-        if (sizeof(void*) == 8)
-            return constInt64(bitwise_cast<intptr_t>(cell));
-        return constInt32(bitwise_cast<intptr_t>(cell));
+        return constIntPtr(bitwise_cast<intptr_t>(cell));
     }
 
-    LValue weakPointer(DFG::FrozenValue* value)
+    LValue alreadyRegisteredFrozenPointer(DFG::FrozenValue* value)
     {
         RELEASE_ASSERT(value->value().isCell());
 
-        if (sizeof(void*) == 8)
-            return constInt64(bitwise_cast<intptr_t>(value->cell()));
-        return constInt32(bitwise_cast<intptr_t>(value->cell()));
+        return constIntPtr(bitwise_cast<intptr_t>(value->cell()));
     }
 
     template<typename T>
@@ -151,6 +145,8 @@ public:
     void addIncomingToPhi(LValue phi, ValueFromBlock);
     template<typename... Params>
     void addIncomingToPhi(LValue phi, ValueFromBlock, Params... theRest);
+    template<typename... Params>
+    void addIncomingToPhiIfSet(LValue phi, Params... theRest);
     
     LValue opaque(LValue);
 
@@ -187,7 +183,7 @@ public:
 
     LValue doubleUnary(DFG::Arith::UnaryType, LValue);
 
-    LValue doublePow(LValue base, LValue exponent);
+    LValue doubleStdPow(LValue base, LValue exponent);
     LValue doublePowi(LValue base, LValue exponent);
 
     LValue doubleSqrt(LValue);
@@ -195,6 +191,7 @@ public:
     LValue doubleLog(LValue);
 
     LValue doubleToInt(LValue);
+    LValue doubleToInt64(LValue);
     LValue doubleToUInt(LValue);
 
     LValue signExt32To64(LValue);
@@ -303,9 +300,9 @@ public:
     {
         return TypedPointer(heap, baseIndex(base, index, scale, offset));
     }
-    TypedPointer baseIndex(IndexedAbstractHeap& heap, LValue base, LValue index, JSValue indexAsConstant = JSValue(), ptrdiff_t offset = 0)
+    TypedPointer baseIndex(IndexedAbstractHeap& heap, LValue base, LValue index, JSValue indexAsConstant = JSValue(), ptrdiff_t offset = 0, LValue mask = nullptr)
     {
-        return heap.baseIndex(*this, base, index, indexAsConstant, offset);
+        return heap.baseIndex(*this, base, index, indexAsConstant, offset, mask);
     }
 
     TypedPointer absolute(const void* address);
@@ -318,6 +315,8 @@ public:
     LValue load64(LValue base, const AbstractHeap& field) { return load64(address(base, field)); }
     LValue loadPtr(LValue base, const AbstractHeap& field) { return loadPtr(address(base, field)); }
     LValue loadDouble(LValue base, const AbstractHeap& field) { return loadDouble(address(base, field)); }
+    void store32As8(LValue value, LValue base, const AbstractHeap& field) { store32As8(value, address(base, field)); }
+    void store32As16(LValue value, LValue base, const AbstractHeap& field) { store32As16(value, address(base, field)); }
     void store32(LValue value, LValue base, const AbstractHeap& field) { store32(value, address(base, field)); }
     void store64(LValue value, LValue base, const AbstractHeap& field) { store64(value, address(base, field)); }
     void storePtr(LValue value, LValue base, const AbstractHeap& field) { storePtr(value, address(base, field)); }
@@ -330,6 +329,7 @@ public:
     LValue nonNegative32(LValue loadInstruction) { return loadInstruction; }
     LValue load32NonNegative(TypedPointer pointer) { return load32(pointer); }
     LValue load32NonNegative(LValue base, const AbstractHeap& field) { return load32(base, field); }
+    LValue load64NonNegative(LValue base, const AbstractHeap& field) { return load64(base, field); }
 
     LValue equal(LValue, LValue);
     LValue notEqual(LValue, LValue);
@@ -369,7 +369,7 @@ public:
     LValue testIsZeroPtr(LValue value, LValue mask) { return isNull(bitAnd(value, mask)); }
     LValue testNonZeroPtr(LValue value, LValue mask) { return notNull(bitAnd(value, mask)); }
 
-    LValue select(LValue value, LValue taken, LValue notTaken);
+    LValue select(LValue value, LValue taken, LValue notTaken, SelectPredictability = SelectPredictability::NotPredictable);
     
     // These are relaxed atomics by default. Use AbstractHeapRepository::decorateFencedAccess() with a
     // non-null heap to make them seq_cst fenced.
@@ -385,7 +385,7 @@ public:
     LValue call(LType type, LValue function, const VectorType& vector)
     {
         B3::CCallValue* result = m_block->appendNew<B3::CCallValue>(m_proc, type, origin(), function);
-        result->children().appendVector(vector);
+        result->appendArgs(vector);
         return result;
     }
     LValue call(LType type, LValue function) { return m_block->appendNew<B3::CCallValue>(m_proc, type, origin(), function); }
@@ -396,12 +396,16 @@ public:
     template<typename Function, typename... Args>
     LValue callWithoutSideEffects(B3::Type type, Function function, LValue arg1, Args... args)
     {
+        static_assert(!std::is_same<Function, LValue>::value);
         return m_block->appendNew<B3::CCallValue>(m_proc, type, origin(), B3::Effects::none(),
-            constIntPtr(bitwise_cast<void*>(function)), arg1, args...);
+            constIntPtr(tagCFunctionPtr<void*, OperationPtrTag>(function)), arg1, args...);
     }
 
+    // FIXME: Consider enhancing this to allow the client to choose the target PtrTag to use.
+    // https://bugs.webkit.org/show_bug.cgi?id=184324
     template<typename FunctionType>
-    LValue operation(FunctionType function) { return constIntPtr(bitwise_cast<void*>(function)); }
+    LValue operation(FunctionType function) { return constIntPtr(tagCFunctionPtr<void*, OperationPtrTag>(function)); }
+    LValue operation(FunctionPtr<OperationPtrTag> function) { return constIntPtr(function.executableAddress()); }
 
     void jump(LBasicBlock);
     void branch(LValue condition, LBasicBlock taken, Weight takenWeight, LBasicBlock notTaken, Weight notTakenWeight);
@@ -492,9 +496,8 @@ inline void Output::addIncomingToPhi(LValue phi, ValueFromBlock value, Params...
     addIncomingToPhi(phi, theRest...);
 }
 
-#if COMPILER(GCC_OR_CLANG)
-#pragma GCC diagnostic pop
-#endif // COMPILER(GCC_OR_CLANG)
+ALLOW_UNUSED_PARAMETERS_END
+IGNORE_WARNINGS_END
 
 } } // namespace JSC::FTL
 

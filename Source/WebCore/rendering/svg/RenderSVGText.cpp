@@ -33,12 +33,15 @@
 #include "HitTestRequest.h"
 #include "HitTestResult.h"
 #include "LayoutRepainter.h"
+#include "LegacyRenderSVGRoot.h"
 #include "PointerEventsHitRules.h"
 #include "RenderIterator.h"
+#include "RenderSVGBlockInlines.h"
 #include "RenderSVGInline.h"
 #include "RenderSVGInlineText.h"
 #include "RenderSVGResource.h"
 #include "RenderSVGRoot.h"
+#include "SVGElementTypeHelpers.h"
 #include "SVGLengthList.h"
 #include "SVGResourcesCache.h"
 #include "SVGRootInlineBox.h"
@@ -46,16 +49,15 @@
 #include "SVGURIReference.h"
 #include "TransformState.h"
 #include "VisiblePosition.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/StackStats.h>
 
 namespace WebCore {
 
+WTF_MAKE_ISO_ALLOCATED_IMPL(RenderSVGText);
+
 RenderSVGText::RenderSVGText(SVGTextElement& element, RenderStyle&& style)
     : RenderSVGBlock(element, WTFMove(style))
-    , m_needsReordering(false)
-    , m_needsPositioningValuesUpdate(false)
-    , m_needsTransformUpdate(true)
-    , m_needsTextMetricsUpdate(false)
 {
 }
 
@@ -82,31 +84,6 @@ RenderSVGText* RenderSVGText::locateRenderSVGTextAncestor(RenderObject& start)
 const RenderSVGText* RenderSVGText::locateRenderSVGTextAncestor(const RenderObject& start)
 {
     return lineageOfType<RenderSVGText>(start).first();
-}
-
-LayoutRect RenderSVGText::clippedOverflowRectForRepaint(const RenderLayerModelObject* repaintContainer) const
-{
-    return SVGRenderSupport::clippedOverflowRectForRepaint(*this, repaintContainer);
-}
-
-LayoutRect RenderSVGText::computeRectForRepaint(const LayoutRect& rect, const RenderLayerModelObject* repaintContainer, RepaintContext context) const
-{
-    return enclosingLayoutRect(computeFloatRectForRepaint(rect, repaintContainer, context.m_hasPositionFixedDescendant));
-}
-
-FloatRect RenderSVGText::computeFloatRectForRepaint(const FloatRect& repaintRect, const RenderLayerModelObject* repaintContainer, bool fixed) const
-{
-    return SVGRenderSupport::computeFloatRectForRepaint(*this, repaintRect, repaintContainer, fixed);
-}
-
-void RenderSVGText::mapLocalToContainer(const RenderLayerModelObject* repaintContainer, TransformState& transformState, MapCoordinatesFlags, bool* wasFixed) const
-{
-    SVGRenderSupport::mapLocalToContainer(*this, repaintContainer, transformState, wasFixed);
-}
-
-const RenderObject* RenderSVGText::pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap& geometryMap) const
-{
-    return SVGRenderSupport::pushMappingToContainer(*this, ancestorToStopAt, geometryMap);
 }
 
 static inline void collectLayoutAttributes(RenderObject* text, Vector<SVGTextLayoutAttributes*>& attributes)
@@ -331,15 +308,28 @@ static inline void updateFontInAllDescendants(RenderObject* start, SVGTextLayout
 
 void RenderSVGText::layout()
 {
+    auto isLayerBasedSVGEngineEnabled = [&]() {
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+        return document().settings().layerBasedSVGEngineEnabled();
+#else
+        return false;
+#endif
+    };
+
     StackStats::LayoutCheckPoint layoutCheckPoint;
     ASSERT(needsLayout());
-    LayoutRepainter repainter(*this, SVGRenderSupport::checkForSVGRepaintDuringLayout(*this));
+    LayoutRepainter repainter(*this, isLayerBasedSVGEngineEnabled() ? checkForRepaintDuringLayout() : SVGRenderSupport::checkForSVGRepaintDuringLayout(*this));
+
+    // FIXME: [LBSE] Upstream SVGLengthContext changes
+    // textElement().updateLengthContext();
 
     bool updateCachedBoundariesInParents = false;
-    if (m_needsTransformUpdate) {
-        m_localTransform = textElement().animatedLocalTransform();
-        m_needsTransformUpdate = false;
-        updateCachedBoundariesInParents = true;
+    if (!isLayerBasedSVGEngineEnabled()) {
+        if (m_needsTransformUpdate) {
+            m_localTransform = textElement().animatedLocalTransform();
+            m_needsTransformUpdate = false;
+            updateCachedBoundariesInParents = true;
+        }
     }
 
     if (!everHadLayout()) {
@@ -366,15 +356,25 @@ void RenderSVGText::layout()
         m_needsReordering = true;
         m_needsPositioningValuesUpdate = false;
         updateCachedBoundariesInParents = true;
-    } else if (m_needsTextMetricsUpdate || SVGRenderSupport::findTreeRootObject(*this)->isLayoutSizeChanged()) {
-        // If the root layout size changed (eg. window size changes) or the transform to the root
-        // context has changed then recompute the on-screen font size.
-        updateFontInAllDescendants(this, &m_layoutAttributesBuilder);
+    } else {
+        bool isLayoutSizeChanged = false;
+        if (auto* legacyRootObject = lineageOfType<LegacyRenderSVGRoot>(*this).first())
+            isLayoutSizeChanged = legacyRootObject->isLayoutSizeChanged();
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+        else if (auto* rootObject = lineageOfType<RenderSVGRoot>(*this).first())
+            isLayoutSizeChanged = rootObject->isLayoutSizeChanged();
+#endif
 
-        ASSERT(!m_needsReordering);
-        ASSERT(!m_needsPositioningValuesUpdate);
-        m_needsTextMetricsUpdate = false;
-        updateCachedBoundariesInParents = true;
+        if (m_needsTextMetricsUpdate || isLayoutSizeChanged) {
+            // If the root layout size changed (eg. window size changes) or the transform to the root
+            // context has changed then recompute the on-screen font size.
+            updateFontInAllDescendants(this, &m_layoutAttributesBuilder);
+
+            ASSERT(!m_needsReordering);
+            ASSERT(!m_needsPositioningValuesUpdate);
+            m_needsTextMetricsUpdate = false;
+            updateCachedBoundariesInParents = true;
+        }
     }
 
     checkLayoutAttributesConsistency(this, m_layoutAttributes);
@@ -382,33 +382,44 @@ void RenderSVGText::layout()
     // Reduced version of RenderBlock::layoutBlock(), which only takes care of SVG text.
     // All if branches that could cause early exit in RenderBlocks layoutBlock() method are turned into assertions.
     ASSERT(!isInline());
-    ASSERT(!simplifiedLayout());
     ASSERT(!scrollsOverflow());
     ASSERT(!hasControlClip());
-    ASSERT(!multiColumnFlowThread());
+    ASSERT(!multiColumnFlow());
     ASSERT(!positionedObjects());
-    ASSERT(!m_overflow);
     ASSERT(!isAnonymousBlock());
-
-    if (!firstChild())
-        setChildrenInline(true);
+    if (!isLayerBasedSVGEngineEnabled()) {
+        ASSERT(!simplifiedLayout());
+        ASSERT(!m_overflow);
+    }
 
     // FIXME: We need to find a way to only layout the child boxes, if needed.
-    FloatRect oldBoundaries = objectBoundingBox();
+    auto layoutChanged = everHadLayout() && selfNeedsLayout();
+    auto oldBoundaries = objectBoundingBox();
+
+    if (!firstChild()) {
+        updatePositionAndOverflow({ });
+        setChildrenInline(true);
+    }
+
     ASSERT(childrenInline());
-    LayoutUnit repaintLogicalTop = 0;
-    LayoutUnit repaintLogicalBottom = 0;
+
+    LayoutUnit repaintLogicalTop;
+    LayoutUnit repaintLogicalBottom;
     rebuildFloatingObjectSetFromIntrudingFloats();
     layoutInlineChildren(true, repaintLogicalTop, repaintLogicalBottom);
 
+    // updatePositionAndOverflow() is called by SVGRootInlineBox, after forceLayoutInlineChildren() ran, before this point is reached.
     if (m_needsReordering)
         m_needsReordering = false;
 
-    if (!updateCachedBoundariesInParents)
+    if (isLayerBasedSVGEngineEnabled()) {
+        updateLayerTransform();
+        updateCachedBoundariesInParents = false; // No longer needed for LBSE.
+    } else if (!updateCachedBoundariesInParents)
         updateCachedBoundariesInParents = oldBoundaries != objectBoundingBox();
 
     // Invalidate all resources of this client if our layout changed.
-    if (everHadLayout() && selfNeedsLayout())
+    if (layoutChanged)
         SVGResourcesCache::clientLayoutChanged(*this);
 
     // If our bounds changed, notify the parents.
@@ -419,24 +430,22 @@ void RenderSVGText::layout()
     clearNeedsLayout();
 }
 
-std::unique_ptr<RootInlineBox> RenderSVGText::createRootInlineBox()
-{
-    auto box = std::make_unique<SVGRootInlineBox>(*this);
-    box->setHasVirtualLogicalHeight();
-    return WTFMove(box);
-}
-
 bool RenderSVGText::nodeAtFloatPoint(const HitTestRequest& request, HitTestResult& result, const FloatPoint& pointInParent, HitTestAction hitTestAction)
 {
-    PointerEventsHitRules hitRules(PointerEventsHitRules::SVG_TEXT_HITTESTING, request, style().pointerEvents());
-    bool isVisible = (style().visibility() == VISIBLE);
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    ASSERT(!document().settings().layerBasedSVGEngineEnabled());
+#endif
+    PointerEventsHitRules hitRules(PointerEventsHitRules::SVG_TEXT_HITTESTING, request, style().effectivePointerEvents());
+    bool isVisible = (style().visibility() == Visibility::Visible);
     if (isVisible || !hitRules.requireVisible) {
         if ((hitRules.canHitStroke && (style().svgStyle().hasStroke() || !hitRules.requireStroke))
             || (hitRules.canHitFill && (style().svgStyle().hasFill() || !hitRules.requireFill))) {
-            FloatPoint localPoint = localToParentTransform().inverse().value_or(AffineTransform()).mapPoint(pointInParent);
+            FloatPoint localPoint = valueOrDefault(localToParentTransform().inverse()).mapPoint(pointInParent);
 
             if (!SVGRenderSupport::pointInClippingArea(*this, localPoint))
-                return false;       
+                return false;
+
+            SVGHitTestCycleDetectionScope hitTestScope(*this);
 
             HitTestLocation hitTestLocation(LayoutPoint(flooredIntPoint(localPoint)));
             return RenderBlock::nodeAtPoint(request, result, hitTestLocation, LayoutPoint(), hitTestAction);
@@ -446,41 +455,98 @@ bool RenderSVGText::nodeAtFloatPoint(const HitTestRequest& request, HitTestResul
     return false;
 }
 
-bool RenderSVGText::nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation&, const LayoutPoint&, HitTestAction)
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+bool RenderSVGText::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction)
 {
-    ASSERT_NOT_REACHED();
+    ASSERT(document().settings().layerBasedSVGEngineEnabled());
+    auto adjustedLocation = accumulatedOffset + location();
+
+    PointerEventsHitRules hitRules(PointerEventsHitRules::SVG_TEXT_HITTESTING, request, style().pointerEvents());
+    bool isVisible = (style().visibility() == Visibility::Visible);
+    if (isVisible || !hitRules.requireVisible) {
+        if ((hitRules.canHitStroke && (style().svgStyle().hasStroke() || !hitRules.requireStroke))
+        || (hitRules.canHitFill && (style().svgStyle().hasFill() || !hitRules.requireFill))) {
+            auto localPoint = locationInContainer.point();
+            auto coordinateSystemOriginTranslation = nominalSVGLayoutLocation() - adjustedLocation;
+            localPoint.move(coordinateSystemOriginTranslation);
+
+            if (!SVGRenderSupport::pointInClippingArea(*this, localPoint))
+                return false;
+
+            SVGHitTestCycleDetectionScope hitTestScope(*this);
+            return RenderBlock::nodeAtPoint(request, result, locationInContainer, accumulatedOffset, hitTestAction);
+        }
+    }
+
     return false;
 }
+#endif
 
-VisiblePosition RenderSVGText::positionForPoint(const LayoutPoint& pointInContents, const RenderRegion* region)
+VisiblePosition RenderSVGText::positionForPoint(const LayoutPoint& pointInContents, const RenderFragmentContainer* fragment)
 {
-    RootInlineBox* rootBox = firstRootBox();
+    LegacyRootInlineBox* rootBox = firstRootBox();
     if (!rootBox)
-        return createVisiblePosition(0, DOWNSTREAM);
+        return createVisiblePosition(0, Affinity::Downstream);
 
     ASSERT(!rootBox->nextRootBox());
     ASSERT(childrenInline());
 
-    InlineBox* closestBox = downcast<SVGRootInlineBox>(*rootBox).closestLeafChildForPosition(pointInContents);
+    LegacyInlineBox* closestBox = downcast<SVGRootInlineBox>(*rootBox).closestLeafChildForPosition(pointInContents);
     if (!closestBox)
-        return createVisiblePosition(0, DOWNSTREAM);
+        return createVisiblePosition(0, Affinity::Downstream);
 
-    return closestBox->renderer().positionForPoint(LayoutPoint(pointInContents.x(), closestBox->y()), region);
+    return closestBox->renderer().positionForPoint({ pointInContents.x(), LayoutUnit(closestBox->y()) }, fragment);
 }
 
-void RenderSVGText::absoluteQuads(Vector<FloatQuad>& quads, bool* wasFixed) const
-{
-    quads.append(localToAbsoluteQuad(strokeBoundingBox(), UseTransforms, wasFixed));
-}
-
-void RenderSVGText::paint(PaintInfo& paintInfo, const LayoutPoint&)
+void RenderSVGText::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     if (paintInfo.context().paintingDisabled())
         return;
 
-    if (paintInfo.phase != PaintPhaseForeground
-     && paintInfo.phase != PaintPhaseSelection)
-         return;
+    if (paintInfo.phase != PaintPhase::ClippingMask && paintInfo.phase != PaintPhase::Mask && paintInfo.phase != PaintPhase::Foreground && paintInfo.phase != PaintPhase::Outline && paintInfo.phase != PaintPhase::SelfOutline)
+        return;
+
+    if (!paintInfo.shouldPaintWithinRoot(*this))
+        return;
+
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    if (document().settings().layerBasedSVGEngineEnabled()) {
+        if (style().visibility() == Visibility::Hidden || style().display() == DisplayType::None)
+            return;
+
+        // FIXME: [LBSE] Upstream SVGRenderSupport changes
+        // if (!SVGRenderSupport::shouldPaintHiddenRenderer(*this))
+        //     return;
+
+        if (paintInfo.phase == PaintPhase::ClippingMask) {
+            // FIXME: [LBSE] Upstream SVGRenderSupport changes
+            // SVGRenderSupport::paintSVGClippingMask(*this, paintInfo);
+            return;
+        }
+
+        auto adjustedPaintOffset = paintOffset + location();
+        if (paintInfo.phase == PaintPhase::Mask) {
+            // FIXME: [LBSE] Upstream SVGRenderSupport changes
+            // SVGRenderSupport::paintSVGMask(*this, paintInfo, adjustedPaintOffset);
+            return;
+        }
+
+        if (paintInfo.phase == PaintPhase::Outline || paintInfo.phase == PaintPhase::SelfOutline) {
+            RenderBlock::paint(paintInfo, paintOffset);
+            return;
+        }
+
+        GraphicsContextStateSaver stateSaver(paintInfo.context());
+
+        auto coordinateSystemOriginTranslation = adjustedPaintOffset - nominalSVGLayoutLocation();
+        paintInfo.context().translate(coordinateSystemOriginTranslation.width(), coordinateSystemOriginTranslation.height());
+
+        RenderBlock::paint(paintInfo, paintOffset);
+        return;
+    }
+#else
+    UNUSED_PARAM(paintOffset);
+#endif
 
     PaintInfo blockInfo(paintInfo);
     GraphicsContextStateSaver stateSaver(blockInfo.context());
@@ -488,8 +554,8 @@ void RenderSVGText::paint(PaintInfo& paintInfo, const LayoutPoint&)
     RenderBlock::paint(blockInfo, LayoutPoint());
 
     // Paint the outlines, if any
-    if (paintInfo.phase == PaintPhaseForeground) {
-        blockInfo.phase = PaintPhaseSelfOutline;
+    if (paintInfo.phase == PaintPhase::Foreground) {
+        blockInfo.phase = PaintPhase::SelfOutline;
         RenderBlock::paint(blockInfo, LayoutPoint());
     }
 }
@@ -508,6 +574,11 @@ FloatRect RenderSVGText::strokeBoundingBox() const
 
 FloatRect RenderSVGText::repaintRectInLocalCoordinates() const
 {
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    if (document().settings().layerBasedSVGEngineEnabled())
+        return SVGBoundingBoxComputation::computeRepaintBoundingBox(*this);
+#endif
+
     FloatRect repaintRect = strokeBoundingBox();
     SVGRenderSupport::intersectRepaintRectWithResources(*this, repaintRect);
 
@@ -517,29 +588,32 @@ FloatRect RenderSVGText::repaintRectInLocalCoordinates() const
     return repaintRect;
 }
 
-void RenderSVGText::addChild(RenderObject* child, RenderObject* beforeChild)
+void RenderSVGText::updatePositionAndOverflow(const FloatRect& boundaries)
 {
-    RenderSVGBlock::addChild(child, beforeChild);
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    if (document().settings().layerBasedSVGEngineEnabled()) {
+        clearOverflow();
 
-    SVGResourcesCache::clientWasAddedToTree(*child);
-    subtreeChildWasAdded(child);
-}
+        m_objectBoundingBox = boundaries;
 
-void RenderSVGText::removeChild(RenderObject& child)
-{
-    SVGResourcesCache::clientWillBeRemovedFromTree(child);
+        auto boundingRect = enclosingLayoutRect(m_objectBoundingBox);
+        setLocation(boundingRect.location());
+        setSize(boundingRect.size());
 
-    Vector<SVGTextLayoutAttributes*, 2> affectedAttributes;
-    subtreeChildWillBeRemoved(&child, affectedAttributes);
-    RenderSVGBlock::removeChild(child);
-    subtreeChildWasRemoved(affectedAttributes);
-}
+        auto overflowRect = visualOverflowRectEquivalent();
+        if (const auto* textShadow = style().textShadow())
+            textShadow->adjustRectForShadow(overflowRect);
 
-// Fix for <rdar://problem/8048875>. We should not render :first-line CSS Style
-// in a SVG text element context.
-RenderBlock* RenderSVGText::firstLineBlock() const
-{
-    return 0;
+        addVisualOverflow(overflowRect);
+        return;
+    }
+#endif
+
+    auto boundingRect = enclosingLayoutRect(boundaries);
+    setLocation(boundingRect.location());
+    setSize(boundingRect.size());
+    m_objectBoundingBox = boundingRect;
+    ASSERT(m_objectBoundingBox == frameRect());
 }
 
 }

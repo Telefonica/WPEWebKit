@@ -11,10 +11,10 @@
 // This file contains codec dependent definitions that are needed in
 // order to compile the WebRTC codebase, even if this codec is not used.
 
-#ifndef WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_INCLUDE_VP8_GLOBALS_H_
-#define WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_INCLUDE_VP8_GLOBALS_H_
+#ifndef MODULES_VIDEO_CODING_CODECS_VP8_INCLUDE_VP8_GLOBALS_H_
+#define MODULES_VIDEO_CODING_CODECS_VP8_INCLUDE_VP8_GLOBALS_H_
 
-#include "webrtc/modules/video_coding/codecs/interface/common_constants.h"
+#include "modules/video_coding/codecs/interface/common_constants.h"
 
 namespace webrtc {
 
@@ -28,6 +28,21 @@ struct RTPVideoHeaderVP8 {
     keyIdx = kNoKeyIdx;
     partitionId = 0;
     beginningOfPartition = false;
+  }
+
+  friend bool operator==(const RTPVideoHeaderVP8& lhs,
+                         const RTPVideoHeaderVP8& rhs) {
+    return lhs.nonReference == rhs.nonReference &&
+           lhs.pictureId == rhs.pictureId && lhs.tl0PicIdx == rhs.tl0PicIdx &&
+           lhs.temporalIdx == rhs.temporalIdx &&
+           lhs.layerSync == rhs.layerSync && lhs.keyIdx == rhs.keyIdx &&
+           lhs.partitionId == rhs.partitionId &&
+           lhs.beginningOfPartition == rhs.beginningOfPartition;
+  }
+
+  friend bool operator!=(const RTPVideoHeaderVP8& lhs,
+                         const RTPVideoHeaderVP8& rhs) {
+    return !(lhs == rhs);
   }
 
   bool nonReference;          // Frame is discardable.
@@ -46,4 +61,4 @@ struct RTPVideoHeaderVP8 {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_INCLUDE_VP8_GLOBALS_H_
+#endif  // MODULES_VIDEO_CODING_CODECS_VP8_INCLUDE_VP8_GLOBALS_H_

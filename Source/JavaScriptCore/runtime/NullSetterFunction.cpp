@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,15 +27,14 @@
 #include "NullSetterFunction.h"
 
 #include "CodeBlock.h"
-#include "Error.h"
 #include "JSCInlines.h"
-#include "JSCJSValueInlines.h"
-#include "StackVisitor.h"
 
 namespace JSC {
 
-const ClassInfo NullSetterFunction::s_info = { "Function", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(NullSetterFunction) };
+const ClassInfo NullSetterFunction::s_info = { "Function"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(NullSetterFunction) };
 
+
+#if ASSERT_ENABLED
 
 class GetCallerStrictnessFunctor {
 public:
@@ -45,15 +44,17 @@ public:
     {
     }
 
-    StackVisitor::Status operator()(StackVisitor& visitor) const
+    IterationStatus operator()(StackVisitor& visitor) const
     {
         ++m_iterations;
         if (m_iterations < 2)
-            return StackVisitor::Continue;
+            return IterationStatus::Continue;
 
         CodeBlock* codeBlock = visitor->codeBlock();
-        m_callerIsStrict = codeBlock && codeBlock->isStrictMode();
-        return StackVisitor::Done;
+        // This does not take into account that we might have an strict opcode in a non-strict context, but that's
+        // ok since we assert below that this function should never be called from any kind strict context.
+        m_callerIsStrict = codeBlock && codeBlock->ownerExecutable()->isInStrictContext();
+        return IterationStatus::Done;
     }
 
     bool callerIsStrict() const { return m_callerIsStrict; }
@@ -63,34 +64,45 @@ private:
     mutable bool m_callerIsStrict;
 };
 
-static bool callerIsStrict(ExecState* exec)
+static bool callerIsStrict(VM& vm, CallFrame* callFrame)
 {
     GetCallerStrictnessFunctor iter;
-    exec->iterate(iter);
+    callFrame->iterate(vm, iter);
     return iter.callerIsStrict();
 }
 
-namespace NullSetterFunctionInternal {
-static EncodedJSValue JSC_HOST_CALL callReturnUndefined(ExecState* exec)
-{
-    VM& vm = exec->vm();
-    auto scope = DECLARE_THROW_SCOPE(vm);
+#endif // ASSERT_ENABLED
 
-    if (callerIsStrict(exec))
-        return JSValue::encode(throwTypeError(exec, scope, ASCIILiteral("Setting a property that has only a getter")));
+namespace NullSetterFunctionInternal {
+
+static JSC_DECLARE_HOST_FUNCTION(callReturnUndefined);
+static JSC_DECLARE_HOST_FUNCTION(callThrowError);
+
+JSC_DEFINE_HOST_FUNCTION(callReturnUndefined, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+#if !ASSERT_ENABLED
+    UNUSED_PARAM(globalObject);
+    UNUSED_PARAM(callFrame);
+#endif
+    ASSERT(!callerIsStrict(globalObject->vm(), callFrame));
     return JSValue::encode(jsUndefined());
 }
+
+JSC_DEFINE_HOST_FUNCTION(callThrowError, (JSGlobalObject* globalObject, CallFrame*))
+{
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    // This function is only called from IC. And we do not want to include this frame in Error's stack.
+    constexpr bool useCurrentFrame = false;
+    throwException(globalObject, scope, ErrorInstance::create(globalObject, vm, globalObject->errorStructure(ErrorType::TypeError), ReadonlyPropertyWriteError, JSValue(), nullptr, TypeNothing, ErrorType::TypeError, useCurrentFrame));
+    return { };
 }
 
-CallType NullSetterFunction::getCallData(JSCell*, CallData& callData)
-{
-    callData.native.function = NullSetterFunctionInternal::callReturnUndefined;
-    return CallType::Host;
 }
 
-ConstructType NullSetterFunction::getConstructData(JSCell*, ConstructData&)
+NullSetterFunction::NullSetterFunction(VM& vm, Structure* structure, ECMAMode ecmaMode)
+    : Base(vm, structure, ecmaMode.isStrict() ? NullSetterFunctionInternal::callThrowError : NullSetterFunctionInternal::callReturnUndefined, nullptr)
 {
-    return ConstructType::None;
 }
 
 }

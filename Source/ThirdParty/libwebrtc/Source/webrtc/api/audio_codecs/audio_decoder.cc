@@ -8,16 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/api/audio_codecs/audio_decoder.h"
+#include "api/audio_codecs/audio_decoder.h"
 
-#include <assert.h>
 #include <memory>
 #include <utility>
 
-#include "webrtc/base/array_view.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/base/sanitizer.h"
-#include "webrtc/base/trace_event.h"
+#include "api/array_view.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/sanitizer.h"
+#include "rtc_base/trace_event.h"
 
 namespace webrtc {
 
@@ -33,14 +32,14 @@ class OldStyleEncodedFrame final : public AudioDecoder::EncodedAudioFrame {
     return ret < 0 ? 0 : static_cast<size_t>(ret);
   }
 
-  rtc::Optional<DecodeResult> Decode(
+  absl::optional<DecodeResult> Decode(
       rtc::ArrayView<int16_t> decoded) const override {
     auto speech_type = AudioDecoder::kSpeech;
     const int ret = decoder_->Decode(
         payload_.data(), payload_.size(), decoder_->SampleRateHz(),
         decoded.size() * sizeof(int16_t), decoded.data(), &speech_type);
-    return ret < 0 ? rtc::Optional<DecodeResult>()
-                   : rtc::Optional<DecodeResult>(
+    return ret < 0 ? absl::nullopt
+                   : absl::optional<DecodeResult>(
                          {static_cast<size_t>(ret), speech_type});
   }
 
@@ -50,6 +49,10 @@ class OldStyleEncodedFrame final : public AudioDecoder::EncodedAudioFrame {
 };
 
 }  // namespace
+
+bool AudioDecoder::EncodedAudioFrame::IsDtxPacket() const {
+  return false;
+}
 
 AudioDecoder::ParseResult::ParseResult() = default;
 AudioDecoder::ParseResult::ParseResult(ParseResult&& b) = default;
@@ -126,13 +129,9 @@ size_t AudioDecoder::DecodePlc(size_t num_frames, int16_t* decoded) {
   return 0;
 }
 
-int AudioDecoder::IncomingPacket(const uint8_t* payload,
-                                 size_t payload_len,
-                                 uint16_t rtp_sequence_number,
-                                 uint32_t rtp_timestamp,
-                                 uint32_t arrival_timestamp) {
-  return 0;
-}
+// TODO(bugs.webrtc.org/9676): Remove default implementation.
+void AudioDecoder::GeneratePlc(size_t /*requested_samples_per_channel*/,
+                               rtc::BufferT<int16_t>* /*concealment_audio*/) {}
 
 int AudioDecoder::ErrorCode() {
   return 0;
@@ -161,9 +160,10 @@ AudioDecoder::SpeechType AudioDecoder::ConvertSpeechType(int16_t type) {
     case 2:
       return kComfortNoise;
     default:
-      assert(false);
+      RTC_DCHECK_NOTREACHED();
       return kSpeech;
   }
 }
 
+constexpr int AudioDecoder::kMaxNumberOfChannels;
 }  // namespace webrtc

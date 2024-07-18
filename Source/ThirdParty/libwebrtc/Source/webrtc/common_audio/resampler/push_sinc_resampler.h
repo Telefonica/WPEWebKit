@@ -8,14 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_COMMON_AUDIO_RESAMPLER_PUSH_SINC_RESAMPLER_H_
-#define WEBRTC_COMMON_AUDIO_RESAMPLER_PUSH_SINC_RESAMPLER_H_
+#ifndef COMMON_AUDIO_RESAMPLER_PUSH_SINC_RESAMPLER_H_
+#define COMMON_AUDIO_RESAMPLER_PUSH_SINC_RESAMPLER_H_
+
+#include <stddef.h>
+#include <stdint.h>
 
 #include <memory>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/common_audio/resampler/sinc_resampler.h"
-#include "webrtc/typedefs.h"
+#include "common_audio/resampler/sinc_resampler.h"
 
 namespace webrtc {
 
@@ -31,13 +32,18 @@ class PushSincResampler : public SincResamplerCallback {
   PushSincResampler(size_t source_frames, size_t destination_frames);
   ~PushSincResampler() override;
 
-  // Perform the resampling. |source_frames| must always equal the
-  // |source_frames| provided at construction. |destination_capacity| must be
-  // at least as large as |destination_frames|. Returns the number of samples
+  PushSincResampler(const PushSincResampler&) = delete;
+  PushSincResampler& operator=(const PushSincResampler&) = delete;
+
+  // Perform the resampling. `source_frames` must always equal the
+  // `source_frames` provided at construction. `destination_capacity` must be
+  // at least as large as `destination_frames`. Returns the number of samples
   // provided in destination (for convenience, since this will always be equal
-  // to |destination_frames|).
-  size_t Resample(const int16_t* source, size_t source_frames,
-                  int16_t* destination, size_t destination_capacity);
+  // to `destination_frames`).
+  size_t Resample(const int16_t* source,
+                  size_t source_frames,
+                  int16_t* destination,
+                  size_t destination_capacity);
   size_t Resample(const float* source,
                   size_t source_frames,
                   float* destination,
@@ -68,10 +74,8 @@ class PushSincResampler : public SincResamplerCallback {
 
   // Used to assert we are only requested for as much data as is available.
   size_t source_available_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(PushSincResampler);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_COMMON_AUDIO_RESAMPLER_PUSH_SINC_RESAMPLER_H_
+#endif  // COMMON_AUDIO_RESAMPLER_PUSH_SINC_RESAMPLER_H_

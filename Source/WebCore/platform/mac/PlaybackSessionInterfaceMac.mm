@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,12 +37,10 @@
 #import <pal/avfoundation/MediaTimeAVFoundation.h>
 #import <pal/spi/cocoa/AVKitSPI.h>
 
-#import "CoreMediaSoftLink.h"
+#import <pal/cf/CoreMediaSoftLink.h>
 
-SOFT_LINK_FRAMEWORK_OPTIONAL(AVKit)
+SOFTLINK_AVKIT_FRAMEWORK()
 SOFT_LINK_CLASS_OPTIONAL(AVKit, AVValueTiming)
-
-using namespace WebCore;
 
 namespace WebCore {
 
@@ -54,13 +52,18 @@ Ref<PlaybackSessionInterfaceMac> PlaybackSessionInterfaceMac::create(PlaybackSes
 }
 
 PlaybackSessionInterfaceMac::PlaybackSessionInterfaceMac(PlaybackSessionModel& model)
-    : m_playbackSessionModel(&model)
+    : m_playbackSessionModel(model)
 {
 }
 
 PlaybackSessionInterfaceMac::~PlaybackSessionInterfaceMac()
 {
     invalidate();
+}
+
+PlaybackSessionModel* PlaybackSessionInterfaceMac::playbackSessionModel() const
+{
+    return m_playbackSessionModel.get();
 }
 
 void PlaybackSessionInterfaceMac::durationChanged(double duration)
@@ -89,11 +92,13 @@ void PlaybackSessionInterfaceMac::currentTimeChanged(double currentTime, double 
 #endif
 }
 
-void PlaybackSessionInterfaceMac::rateChanged(bool isPlaying, float playbackRate)
+void PlaybackSessionInterfaceMac::rateChanged(OptionSet<PlaybackSessionModel::PlaybackState> playbackState, double playbackRate, double defaultPlaybackRate)
 {
 #if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
+    auto isPlaying = playbackState.contains(PlaybackSessionModel::PlaybackState::Playing);
     WebPlaybackControlsManager* controlsManager = playBackControlsManager();
-    [controlsManager setRate:isPlaying ? playbackRate : 0.];
+    [controlsManager setDefaultPlaybackRate:defaultPlaybackRate fromJavaScript:YES];
+    [controlsManager setRate:isPlaying ? playbackRate : 0. fromJavaScript:YES];
     [controlsManager setPlaying:isPlaying];
     updatePlaybackControlsManagerTiming(m_playbackSessionModel ? m_playbackSessionModel->currentTime() : 0, [[NSProcessInfo processInfo] systemUptime], playbackRate, isPlaying);
 #else
@@ -102,17 +107,24 @@ void PlaybackSessionInterfaceMac::rateChanged(bool isPlaying, float playbackRate
 #endif
 }
 
-void PlaybackSessionInterfaceMac::beginScrubbing()
+void PlaybackSessionInterfaceMac::willBeginScrubbing()
 {
 #if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
     updatePlaybackControlsManagerTiming(m_playbackSessionModel ? m_playbackSessionModel->currentTime() : 0, [[NSProcessInfo processInfo] systemUptime], 0, false);
 #endif
-    playbackSessionModel()->beginScrubbing();
+}
+
+void PlaybackSessionInterfaceMac::beginScrubbing()
+{
+    willBeginScrubbing();
+    if (auto* model = playbackSessionModel())
+        model->beginScrubbing();
 }
 
 void PlaybackSessionInterfaceMac::endScrubbing()
 {
-    playbackSessionModel()->endScrubbing();
+    if (auto* model = playbackSessionModel())
+        model->endScrubbing();
 }
 
 #if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
@@ -122,7 +134,7 @@ static RetainPtr<NSMutableArray> timeRangesToArray(const TimeRanges& timeRanges)
 
     for (unsigned i = 0; i < timeRanges.length(); i++) {
         const PlatformTimeRanges& ranges = timeRanges.ranges();
-        CMTimeRange range = CMTimeRangeMake(PAL::toCMTime(ranges.start(i)), PAL::toCMTime(ranges.end(i)));
+        CMTimeRange range = PAL::CMTimeRangeMake(PAL::toCMTime(ranges.start(i)), PAL::toCMTime(ranges.end(i)));
         [rangeArray addObject:[NSValue valueWithCMTimeRange:range]];
     }
 
@@ -177,12 +189,17 @@ void PlaybackSessionInterfaceMac::legibleMediaSelectionIndexChanged(uint64_t sel
 #endif
 }
 
-void PlaybackSessionInterfaceMac::externalPlaybackChanged(bool enabled, PlaybackSessionModel::ExternalPlaybackTargetType, const String&)
+void PlaybackSessionInterfaceMac::isPictureInPictureSupportedChanged(bool)
 {
 #if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
-    [playBackControlsManager() setCanTogglePictureInPicture:!enabled];
-#else
-    UNUSED_PARAM(enabled);
+    updatePlaybackControlsManagerCanTogglePictureInPicture();
+#endif
+}
+
+void PlaybackSessionInterfaceMac::externalPlaybackChanged(bool, PlaybackSessionModel::ExternalPlaybackTargetType, const String&)
+{
+#if ENABLE(WEB_PLAYBACK_CONTROLS_MANAGER)
+    updatePlaybackControlsManagerCanTogglePictureInPicture();
 #endif
 }
 
@@ -206,7 +223,7 @@ void PlaybackSessionInterfaceMac::ensureControlsManager()
 
 WebPlaybackControlsManager *PlaybackSessionInterfaceMac::playBackControlsManager()
 {
-    return m_playbackControlsManager;
+    return m_playbackControlsManager.getAutoreleased();
 }
 
 void PlaybackSessionInterfaceMac::setPlayBackControlsManager(WebPlaybackControlsManager *manager)
@@ -222,12 +239,24 @@ void PlaybackSessionInterfaceMac::setPlayBackControlsManager(WebPlaybackControls
     manager.contentDuration = duration;
     manager.hasEnabledAudio = duration > 0;
     manager.hasEnabledVideo = duration > 0;
+    manager.defaultPlaybackRate = m_playbackSessionModel->defaultPlaybackRate();
     manager.rate = m_playbackSessionModel->isPlaying() ? m_playbackSessionModel->playbackRate() : 0.;
     manager.seekableTimeRanges = timeRangesToArray(m_playbackSessionModel->seekableRanges()).get();
     manager.canTogglePlayback = YES;
     manager.playing = m_playbackSessionModel->isPlaying();
     [manager setAudioMediaSelectionOptions:m_playbackSessionModel->audioMediaSelectionOptions() withSelectedIndex:static_cast<NSUInteger>(m_playbackSessionModel->audioMediaSelectedIndex())];
     [manager setLegibleMediaSelectionOptions:m_playbackSessionModel->legibleMediaSelectionOptions() withSelectedIndex:static_cast<NSUInteger>(m_playbackSessionModel->legibleMediaSelectedIndex())];
+}
+
+void PlaybackSessionInterfaceMac::updatePlaybackControlsManagerCanTogglePictureInPicture()
+{
+    PlaybackSessionModel* model = playbackSessionModel();
+    if (!model) {
+        [playBackControlsManager() setCanTogglePictureInPicture:NO];
+        return;
+    }
+
+    [playBackControlsManager() setCanTogglePictureInPicture:model->isPictureInPictureSupported() && !model->externalPlaybackEnabled()];
 }
 
 void PlaybackSessionInterfaceMac::updatePlaybackControlsManagerTiming(double currentTime, double anchorTime, double playbackRate, bool isPlaying)

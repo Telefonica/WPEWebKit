@@ -23,11 +23,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
+#import "config.h"
 #import "PlatformCAAnimationRemote.h"
 
 #import "ArgumentCoders.h"
 #import "RemoteLayerTreeHost.h"
+#import "WKAnimationDelegate.h"
 #import "WebCoreArgumentCoders.h"
 #import <QuartzCore/QuartzCore.h>
 #import <WebCore/GraphicsLayer.h>
@@ -36,32 +37,23 @@
 #import <WebCore/TimingFunction.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
 #import <wtf/BlockObjCExceptions.h>
-#import <wtf/CurrentTime.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/text/TextStream.h>
 
-using namespace WTF;
-using namespace WebCore;
-
-static double mediaTimeToCurrentTime(CFTimeInterval t)
+static MonotonicTime mediaTimeToCurrentTime(CFTimeInterval t)
 {
-    return monotonicallyIncreasingTime() + t - CACurrentMediaTime();
+    return WTF::MonotonicTime::now() + Seconds(t - CACurrentMediaTime());
 }
 
 static NSString * const WKExplicitBeginTimeFlag = @"WKPlatformCAAnimationExplicitBeginTimeFlag";
 
-@interface WKAnimationDelegate : NSObject <CAAnimationDelegate> {
-    GraphicsLayer::PlatformLayerID _layerID;
-    WebKit::RemoteLayerTreeHost* _layerTreeHost;
-}
-
-- (instancetype)initWithLayerID:(GraphicsLayer::PlatformLayerID)layerID layerTreeHost:(WebKit::RemoteLayerTreeHost*)layerTreeHost;
-- (void)invalidate;
+@interface WKAnimationDelegate () <CAAnimationDelegate>
 @end
 
 @implementation WKAnimationDelegate
 
-- (instancetype)initWithLayerID:(GraphicsLayer::PlatformLayerID)layerID layerTreeHost:(WebKit::RemoteLayerTreeHost*)layerTreeHost
+- (instancetype)initWithLayerID:(WebCore::GraphicsLayer::PlatformLayerID)layerID layerTreeHost:(WebKit::RemoteLayerTreeHost*)layerTreeHost
 {
     if ((self = [super init])) {
         _layerID = layerID;
@@ -81,7 +73,7 @@ static NSString * const WKExplicitBeginTimeFlag = @"WKPlatformCAAnimationExplici
         return;
 
     bool hasExplicitBeginTime = [[animation valueForKey:WKExplicitBeginTimeFlag] boolValue];
-    CFTimeInterval startTime;
+    MonotonicTime startTime;
 
     if (hasExplicitBeginTime) {
         // We don't know what time CA used to commit the animation, so just use the current time
@@ -104,66 +96,76 @@ static NSString * const WKExplicitBeginTimeFlag = @"WKPlatformCAAnimationExplici
 @end
 
 namespace WebKit {
+using namespace WebCore;
 
-void PlatformCAAnimationRemote::KeyframeValue::encode(IPC::Encoder& encoder) const
+template<typename T> static Vector<PlatformCAAnimationRemote::KeyframeValue> toKeyframeValueVector(const Vector<T>& values)
 {
-    encoder.encodeEnum(keyType);
+    return values.map([](auto& value) {
+        return PlatformCAAnimationRemote::KeyframeValue { value };
+    });
+}
 
-    switch (keyType) {
-    case NumberKeyType:
-        encoder << number;
+static void encodeTimingFunction(IPC::Encoder& encoder, TimingFunction* timingFunction)
+{
+    switch (timingFunction->type()) {
+    case TimingFunction::LinearFunction:
+        encoder << *static_cast<LinearTimingFunction*>(timingFunction);
         break;
-    case ColorKeyType:
-        encoder << color;
+
+    case TimingFunction::CubicBezierFunction:
+        encoder << *static_cast<CubicBezierTimingFunction*>(timingFunction);
         break;
-    case PointKeyType:
-        encoder << point;
+
+    case TimingFunction::StepsFunction:
+        encoder << *static_cast<StepsTimingFunction*>(timingFunction);
         break;
-    case TransformKeyType:
-        encoder << transform;
-        break;
-    case FilterKeyType:
-        encoder << *filter.get();
+
+    case TimingFunction::SpringFunction:
+        encoder << *static_cast<SpringTimingFunction*>(timingFunction);
         break;
     }
 }
 
-std::optional<PlatformCAAnimationRemote::KeyframeValue> PlatformCAAnimationRemote::KeyframeValue::decode(IPC::Decoder& decoder)
+static std::optional<RefPtr<TimingFunction>> decodeTimingFunction(IPC::Decoder& decoder)
 {
-    PlatformCAAnimationRemote::KeyframeValue value;
-    if (!decoder.decodeEnum(value.keyType))
+    TimingFunction::TimingFunctionType type;
+    if (!decoder.decode(type))
         return std::nullopt;
 
-    switch (value.keyType) {
-    case NumberKeyType:
-        if (!decoder.decode(value.number))
+    RefPtr<TimingFunction> timingFunction;
+    switch (type) {
+    case TimingFunction::LinearFunction:
+        timingFunction = LinearTimingFunction::create();
+        if (!decoder.decode(*static_cast<LinearTimingFunction*>(timingFunction.get())))
             return std::nullopt;
         break;
-    case ColorKeyType:
-        if (!decoder.decode(value.color))
+
+    case TimingFunction::CubicBezierFunction:
+        timingFunction = CubicBezierTimingFunction::create();
+        if (!decoder.decode(*static_cast<CubicBezierTimingFunction*>(timingFunction.get())))
             return std::nullopt;
         break;
-    case PointKeyType:
-        if (!decoder.decode(value.point))
+
+    case TimingFunction::StepsFunction:
+        timingFunction = StepsTimingFunction::create();
+        if (!decoder.decode(*static_cast<StepsTimingFunction*>(timingFunction.get())))
             return std::nullopt;
         break;
-    case TransformKeyType:
-        if (!decoder.decode(value.transform))
-            return std::nullopt;
-        break;
-    case FilterKeyType:
-        if (!decodeFilterOperation(decoder, value.filter))
+
+    case TimingFunction::SpringFunction:
+        timingFunction = SpringTimingFunction::create();
+        if (!decoder.decode(*static_cast<SpringTimingFunction*>(timingFunction.get())))
             return std::nullopt;
         break;
     }
 
-    return WTFMove(value);
+    return timingFunction;
 }
 
 void PlatformCAAnimationRemote::Properties::encode(IPC::Encoder& encoder) const
 {
     encoder << keyPath;
-    encoder.encodeEnum(animationType);
+    encoder << animationType;
 
     encoder << beginTime;
     encoder << duration;
@@ -171,8 +173,13 @@ void PlatformCAAnimationRemote::Properties::encode(IPC::Encoder& encoder) const
     encoder << repeatCount;
     encoder << speed;
 
-    encoder.encodeEnum(fillMode);
-    encoder.encodeEnum(valueFunction);
+    encoder << fillMode;
+    encoder << valueFunction;
+    
+    bool hasTimingFunction = !!timingFunction;
+    encoder << hasTimingFunction;
+    if (hasTimingFunction)
+        encodeTimingFunction(encoder, timingFunction.get());
 
     encoder << autoReverses;
     encoder << removedOnCompletion;
@@ -184,25 +191,10 @@ void PlatformCAAnimationRemote::Properties::encode(IPC::Encoder& encoder) const
     encoder << keyTimes;
     
     encoder << static_cast<uint64_t>(timingFunctions.size());
-    for (const auto& timingFunction : timingFunctions) {
-        switch (timingFunction->type()) {
-        case TimingFunction::LinearFunction:
-            encoder << *static_cast<LinearTimingFunction*>(timingFunction.get());
-            break;
-            
-        case TimingFunction::CubicBezierFunction:
-            encoder << *static_cast<CubicBezierTimingFunction*>(timingFunction.get());
-            break;
-        
-        case TimingFunction::StepsFunction:
-            encoder << *static_cast<StepsTimingFunction*>(timingFunction.get());
-            break;
+    for (const auto& timingFunction : timingFunctions)
+        encodeTimingFunction(encoder, timingFunction.get());
 
-        case TimingFunction::SpringFunction:
-            encoder << *static_cast<SpringTimingFunction*>(timingFunction.get());
-            break;
-        }
-    }
+    encoder << animations;
 }
 
 std::optional<PlatformCAAnimationRemote::Properties> PlatformCAAnimationRemote::Properties::decode(IPC::Decoder& decoder)
@@ -211,7 +203,7 @@ std::optional<PlatformCAAnimationRemote::Properties> PlatformCAAnimationRemote::
     if (!decoder.decode(properties.keyPath))
         return std::nullopt;
 
-    if (!decoder.decodeEnum(properties.animationType))
+    if (!decoder.decode(properties.animationType))
         return std::nullopt;
 
     if (!decoder.decode(properties.beginTime))
@@ -229,11 +221,22 @@ std::optional<PlatformCAAnimationRemote::Properties> PlatformCAAnimationRemote::
     if (!decoder.decode(properties.speed))
         return std::nullopt;
 
-    if (!decoder.decodeEnum(properties.fillMode))
+    if (!decoder.decode(properties.fillMode))
         return std::nullopt;
 
-    if (!decoder.decodeEnum(properties.valueFunction))
+    if (!decoder.decode(properties.valueFunction))
         return std::nullopt;
+
+    bool hasTimingFunction;
+    if (!decoder.decode(hasTimingFunction))
+        return std::nullopt;
+
+    if (hasTimingFunction) {
+        if (auto timingFunction = decodeTimingFunction(decoder))
+            properties.timingFunction = WTFMove(*timingFunction);
+        else
+            return std::nullopt;
+    }
 
     if (!decoder.decode(properties.autoReverses))
         return std::nullopt;
@@ -264,41 +267,15 @@ std::optional<PlatformCAAnimationRemote::Properties> PlatformCAAnimationRemote::
         properties.timingFunctions.reserveInitialCapacity(numTimingFunctions);
 
         for (size_t i = 0; i < numTimingFunctions; ++i) {
-        
-            TimingFunction::TimingFunctionType type;
-            if (!decoder.decodeEnum(type))
+            if (auto timingFunction = decodeTimingFunction(decoder))
+                properties.timingFunctions.uncheckedAppend(WTFMove(*timingFunction));
+            else
                 return std::nullopt;
-
-            RefPtr<TimingFunction> timingFunction;
-            switch (type) {
-            case TimingFunction::LinearFunction:
-                timingFunction = LinearTimingFunction::create();
-                if (!decoder.decode(*static_cast<LinearTimingFunction*>(timingFunction.get())))
-                    return std::nullopt;
-                break;
-                
-            case TimingFunction::CubicBezierFunction:
-                timingFunction = CubicBezierTimingFunction::create();
-                if (!decoder.decode(*static_cast<CubicBezierTimingFunction*>(timingFunction.get())))
-                    return std::nullopt;
-                break;
-            
-            case TimingFunction::StepsFunction:
-                timingFunction = StepsTimingFunction::create();
-                if (!decoder.decode(*static_cast<StepsTimingFunction*>(timingFunction.get())))
-                    return std::nullopt;
-                break;
-
-            case TimingFunction::SpringFunction:
-                timingFunction = SpringTimingFunction::create();
-                if (!decoder.decode(*static_cast<SpringTimingFunction*>(timingFunction.get())))
-                    return std::nullopt;
-                break;
-            }
-            
-            properties.timingFunctions.uncheckedAppend(WTFMove(timingFunction));
         }
     }
+
+    if (!decoder.decode(properties.animations))
+        return std::nullopt;
 
     return WTFMove(properties);
 }
@@ -335,7 +312,9 @@ Ref<PlatformCAAnimation> PlatformCAAnimationRemote::copy() const
         animation->copyFromValueFrom(*this);
         animation->copyToValueFrom(*this);
     }
-    
+
+    animation->copyAnimationsFrom(*this);
+
     return animation;
 }
 
@@ -428,18 +407,16 @@ void PlatformCAAnimationRemote::setFillMode(FillModeType value)
     m_properties.fillMode = value;
 }
 
-void PlatformCAAnimationRemote::setTimingFunction(const TimingFunction* value, bool reverse)
+void PlatformCAAnimationRemote::setTimingFunction(const TimingFunction* value, bool)
 {
-    Vector<RefPtr<TimingFunction>> timingFunctions;
-    timingFunctions.append(value->clone());
-
-    m_properties.timingFunctions = WTFMove(timingFunctions);
-    m_properties.reverseTimingFunctions = reverse;
+    RefPtr<TimingFunction> timingFunction = value->clone();
+    m_properties.timingFunction = WTFMove(timingFunction);
 }
 
 void PlatformCAAnimationRemote::copyTimingFunctionFrom(const PlatformCAAnimation& value)
 {
-    copyTimingFunctionsFrom(value);
+    const PlatformCAAnimationRemote& other = downcast<PlatformCAAnimationRemote>(value);
+    m_properties.timingFunction = other.m_properties.timingFunction;
 }
 
 bool PlatformCAAnimationRemote::isRemovedOnCompletion() const
@@ -591,13 +568,7 @@ void PlatformCAAnimationRemote::setValues(const Vector<float>& values)
     if (animationType() != Keyframe)
         return;
 
-    Vector<KeyframeValue> keyframes;
-    keyframes.reserveInitialCapacity(values.size());
-    
-    for (size_t i = 0; i < values.size(); ++i)
-        keyframes.uncheckedAppend(KeyframeValue(values[i]));
-    
-    m_properties.keyValues = WTFMove(keyframes);
+    m_properties.keyValues = toKeyframeValueVector(values);
 }
 
 void PlatformCAAnimationRemote::setValues(const Vector<TransformationMatrix>& values)
@@ -605,13 +576,7 @@ void PlatformCAAnimationRemote::setValues(const Vector<TransformationMatrix>& va
     if (animationType() != Keyframe)
         return;
 
-    Vector<KeyframeValue> keyframes;
-    keyframes.reserveInitialCapacity(values.size());
-    
-    for (size_t i = 0; i < values.size(); ++i)
-        keyframes.uncheckedAppend(KeyframeValue(values[i]));
-    
-    m_properties.keyValues = WTFMove(keyframes);
+    m_properties.keyValues = toKeyframeValueVector(values);
 }
 
 void PlatformCAAnimationRemote::setValues(const Vector<FloatPoint3D>& values)
@@ -619,13 +584,7 @@ void PlatformCAAnimationRemote::setValues(const Vector<FloatPoint3D>& values)
     if (animationType() != Keyframe)
         return;
 
-    Vector<KeyframeValue> keyframes;
-    keyframes.reserveInitialCapacity(values.size());
-    
-    for (size_t i = 0; i < values.size(); ++i)
-        keyframes.uncheckedAppend(KeyframeValue(values[i]));
-    
-    m_properties.keyValues = WTFMove(keyframes);
+    m_properties.keyValues = toKeyframeValueVector(values);
 }
 
 void PlatformCAAnimationRemote::setValues(const Vector<Color>& values)
@@ -633,13 +592,7 @@ void PlatformCAAnimationRemote::setValues(const Vector<Color>& values)
     if (animationType() != Keyframe)
         return;
 
-    Vector<KeyframeValue> keyframes;
-    keyframes.reserveInitialCapacity(values.size());
-    
-    for (size_t i = 0; i < values.size(); ++i)
-        keyframes.uncheckedAppend(KeyframeValue(values[i]));
-    
-    m_properties.keyValues = WTFMove(keyframes);
+    m_properties.keyValues = toKeyframeValueVector(values);
 }
 
 void PlatformCAAnimationRemote::setValues(const Vector<RefPtr<FilterOperation>>& values, int internalFilterPropertyIndex)
@@ -649,13 +602,7 @@ void PlatformCAAnimationRemote::setValues(const Vector<RefPtr<FilterOperation>>&
     if (animationType() != Keyframe)
         return;
 
-    Vector<KeyframeValue> keyframes;
-    keyframes.reserveInitialCapacity(values.size());
-    
-    for (auto& value : values)
-        keyframes.uncheckedAppend(KeyframeValue { value.copyRef() });
-    
-    m_properties.keyValues = WTFMove(keyframes);
+    m_properties.keyValues = toKeyframeValueVector(values);
 }
 
 void PlatformCAAnimationRemote::copyValuesFrom(const PlatformCAAnimation& value)
@@ -675,13 +622,9 @@ void PlatformCAAnimationRemote::copyKeyTimesFrom(const PlatformCAAnimation& valu
 
 void PlatformCAAnimationRemote::setTimingFunctions(const Vector<const TimingFunction*>& values, bool reverse)
 {
-    Vector<RefPtr<WebCore::TimingFunction>> timingFunctions;
-    timingFunctions.reserveInitialCapacity(values.size());
-    
-    for (size_t i = 0; i < values.size(); ++i)
-        timingFunctions.uncheckedAppend(values[i]->clone());
-    
-    m_properties.timingFunctions = WTFMove(timingFunctions);
+    m_properties.timingFunctions = values.map([](auto& value) -> RefPtr<WebCore::TimingFunction> {
+        return value->clone();
+    });
     m_properties.reverseTimingFunctions = reverse;
 }
 
@@ -693,88 +636,104 @@ void PlatformCAAnimationRemote::copyTimingFunctionsFrom(const PlatformCAAnimatio
     m_properties.reverseTimingFunctions = other.m_properties.reverseTimingFunctions;
 }
 
-static NSObject* animationValueFromKeyframeValue(const PlatformCAAnimationRemote::KeyframeValue& keyframeValue)
+void PlatformCAAnimationRemote::setAnimations(const Vector<RefPtr<PlatformCAAnimation>>& values)
 {
-    switch (keyframeValue.keyframeType()) {
-    case PlatformCAAnimationRemote::KeyframeValue::NumberKeyType:
-        return @(keyframeValue.numberValue());
-            
-    case PlatformCAAnimationRemote::KeyframeValue::ColorKeyType: {
-        Color color = keyframeValue.colorValue();
-        return @[ @(color.red()), @(color.green()), @(color.blue()), @(color.alpha()) ];
-    }
-
-    case PlatformCAAnimationRemote::KeyframeValue::PointKeyType: {
-        FloatPoint3D point = keyframeValue.pointValue();
-        return @[ @(point.x()), @(point.y()), @(point.z()) ];
-    }
-    case PlatformCAAnimationRemote::KeyframeValue::TransformKeyType:
-        return [NSValue valueWithCATransform3D:keyframeValue.transformValue()];
-            
-    case PlatformCAAnimationRemote::KeyframeValue::FilterKeyType:
-        return PlatformCAFilters::filterValueForOperation(keyframeValue.filterValue(), 0 /* unused */).autorelease();
-    }
+    m_properties.animations = values.map([](auto& value) {
+        return downcast<PlatformCAAnimationRemote>(value.get())->properties();
+    });
 }
 
-static void addAnimationToLayer(CALayer *layer, RemoteLayerTreeHost* layerTreeHost, const String& key, const PlatformCAAnimationRemote::Properties& properties)
+void PlatformCAAnimationRemote::copyAnimationsFrom(const PlatformCAAnimation& value)
 {
-    RetainPtr<CAPropertyAnimation> caAnimation;
+    const PlatformCAAnimationRemote& other = downcast<PlatformCAAnimationRemote>(value);
+    m_properties.animations = other.m_properties.animations;
+}
+
+static RetainPtr<NSObject> animationValueFromKeyframeValue(const PlatformCAAnimationRemote::KeyframeValue& keyframeValue)
+{
+    return WTF::switchOn(keyframeValue,
+        [&](const float number) -> RetainPtr<NSObject> { return @(number); },
+        [&](const WebCore::Color color) -> RetainPtr<NSObject> {
+            auto [r, g, b, a] =  color.toColorTypeLossy<SRGBA<uint8_t>>().resolved();
+            return @[ @(r), @(g), @(b), @(a) ];
+        },
+        [&](const WebCore::FloatPoint3D point) -> RetainPtr<NSObject> {
+            return @[ @(point.x()), @(point.y()), @(point.z()) ];
+        },
+        [&](const WebCore::TransformationMatrix matrix) -> RetainPtr<NSObject> {
+            return [NSValue valueWithCATransform3D:matrix];
+        },
+        [&](const RefPtr<WebCore::FilterOperation> filter) -> RetainPtr<NSObject> {
+            return PlatformCAFilters::filterValueForOperation(filter.get(), 0 /* unused */);
+        }
+    );
+}
+
+static RetainPtr<CAAnimation> createAnimation(CALayer *layer, RemoteLayerTreeHost* layerTreeHost, const PlatformCAAnimationRemote::Properties& properties)
+{
+    RetainPtr<CAAnimation> caAnimation;
     switch (properties.animationType) {
     case PlatformCAAnimation::Basic: {
-        RetainPtr<CABasicAnimation> basicAnimation;
-        basicAnimation = [CABasicAnimation animationWithKeyPath:properties.keyPath];
-        
+        auto basicAnimation = [CABasicAnimation animationWithKeyPath:properties.keyPath];
+
         if (properties.keyValues.size() > 1) {
-            [basicAnimation setFromValue:animationValueFromKeyframeValue(properties.keyValues[0])];
-            [basicAnimation setToValue:animationValueFromKeyframeValue(properties.keyValues[1])];
+            [basicAnimation setFromValue:animationValueFromKeyframeValue(properties.keyValues[0]).get()];
+            [basicAnimation setToValue:animationValueFromKeyframeValue(properties.keyValues[1]).get()];
         }
-        
+
         if (properties.timingFunctions.size())
             [basicAnimation setTimingFunction:toCAMediaTimingFunction(properties.timingFunctions[0].get(), properties.reverseTimingFunctions)];
-        
+
         caAnimation = basicAnimation;
         break;
     }
+    case PlatformCAAnimation::Group: {
+        auto animationGroup = [CAAnimationGroup animation];
+
+        if (properties.animations.size()) {
+            [animationGroup setAnimations:createNSArray(properties.animations, [&] (auto& animationProperties) {
+                return createAnimation(layer, layerTreeHost, animationProperties).get();
+            }).get()];
+        }
+
+        caAnimation = animationGroup;
+        break;
+    }
     case PlatformCAAnimation::Keyframe: {
-        RetainPtr<CAKeyframeAnimation> keyframeAnimation;
-        keyframeAnimation = [CAKeyframeAnimation animationWithKeyPath:properties.keyPath];
+        auto keyframeAnimation = [CAKeyframeAnimation animationWithKeyPath:properties.keyPath];
 
         if (properties.keyValues.size()) {
-            RetainPtr<NSMutableArray> keyframes = adoptNS([[NSMutableArray alloc] initWithCapacity:properties.keyValues.size()]);
-            for (const auto& value : properties.keyValues)
-                [keyframes addObject:animationValueFromKeyframeValue(value)];
-            
-            [keyframeAnimation setValues:keyframes.get()];
+            [keyframeAnimation setValues:createNSArray(properties.keyValues, [] (auto& value) {
+                return animationValueFromKeyframeValue(value);
+            }).get()];
         }
 
         if (properties.keyTimes.size()) {
-            RetainPtr<NSMutableArray> keyTimes = adoptNS([[NSMutableArray alloc] initWithCapacity:properties.keyTimes.size()]);
-            for (auto keyTime : properties.keyTimes)
-                [keyTimes addObject:@(keyTime)];
-            
-            [keyframeAnimation setKeyTimes:keyTimes.get()];
+            [keyframeAnimation setKeyTimes:createNSArray(properties.keyTimes, [] (auto& time) {
+                return @(time);
+            }).get()];
         }
 
+        if (properties.timingFunction)
+            [keyframeAnimation setTimingFunction:toCAMediaTimingFunction(properties.timingFunction.get(), false)]; // FIXME: handle reverse.
+
         if (properties.timingFunctions.size()) {
-            RetainPtr<NSMutableArray> timingFunctions = adoptNS([[NSMutableArray alloc] initWithCapacity:properties.timingFunctions.size()]);
-            for (const auto& timingFunction : properties.timingFunctions)
-                [timingFunctions addObject:toCAMediaTimingFunction(timingFunction.get(), properties.reverseTimingFunctions)];
-            
-            [keyframeAnimation setTimingFunctions:timingFunctions.get()];
+            [keyframeAnimation setTimingFunctions:createNSArray(properties.timingFunctions, [&] (auto& function) {
+                return toCAMediaTimingFunction(function.get(), properties.reverseTimingFunctions);
+            }).get()];
         }
-        
+
         caAnimation = keyframeAnimation;
         break;
     }
     case PlatformCAAnimation::Spring: {
-        RetainPtr<CASpringAnimation> springAnimation;
-        springAnimation = [CASpringAnimation animationWithKeyPath:properties.keyPath];
-        
+        auto springAnimation = [CASpringAnimation animationWithKeyPath:properties.keyPath];
+
         if (properties.keyValues.size() > 1) {
-            [springAnimation setFromValue:animationValueFromKeyframeValue(properties.keyValues[0])];
-            [springAnimation setToValue:animationValueFromKeyframeValue(properties.keyValues[1])];
+            [springAnimation setFromValue:animationValueFromKeyframeValue(properties.keyValues[0]).get()];
+            [springAnimation setToValue:animationValueFromKeyframeValue(properties.keyValues[1]).get()];
         }
-        
+
         if (properties.timingFunctions.size()) {
             auto& timingFunction = properties.timingFunctions[0];
             if (timingFunction->isSpringTimingFunction()) {
@@ -789,7 +748,7 @@ static void addAnimationToLayer(CALayer *layer, RemoteLayerTreeHost* layerTreeHo
         break;
     }
     }
-    
+
     [caAnimation setBeginTime:properties.beginTime];
     [caAnimation setDuration:properties.duration];
     [caAnimation setTimeOffset:properties.timeOffset];
@@ -797,33 +756,40 @@ static void addAnimationToLayer(CALayer *layer, RemoteLayerTreeHost* layerTreeHo
     [caAnimation setSpeed:properties.speed];
     [caAnimation setAutoreverses:properties.autoReverses];
     [caAnimation setRemovedOnCompletion:properties.removedOnCompletion];
-    [caAnimation setAdditive:properties.additive];
-    
+
+    if ([caAnimation isKindOfClass:[CAPropertyAnimation class]]) {
+        [(CAPropertyAnimation *)caAnimation setAdditive:properties.additive];
+        if (properties.valueFunction != PlatformCAAnimation::NoValueFunction)
+            [(CAPropertyAnimation *)caAnimation setValueFunction:[CAValueFunction functionWithName:toCAValueFunctionType(properties.valueFunction)]];
+    }
+
     if (properties.fillMode != PlatformCAAnimation::NoFillMode)
         [caAnimation setFillMode:toCAFillModeType(properties.fillMode)];
 
-    if (properties.valueFunction != PlatformCAAnimation::NoValueFunction)
-        [caAnimation setValueFunction:[CAValueFunction functionWithName:toCAValueFunctionType(properties.valueFunction)]];
-    
     if (properties.hasExplicitBeginTime)
         [caAnimation setValue:@YES forKey:WKExplicitBeginTimeFlag];
-    
+
     if (layerTreeHost) {
-        GraphicsLayer::PlatformLayerID layerID = RemoteLayerTreeHost::layerID(layer);
-    
+        GraphicsLayer::PlatformLayerID layerID = RemoteLayerTreeNode::layerID(layer);
+
         RetainPtr<WKAnimationDelegate>& delegate = layerTreeHost->animationDelegates().add(layerID, nullptr).iterator->value;
         if (!delegate)
             delegate = adoptNS([[WKAnimationDelegate alloc] initWithLayerID:layerID layerTreeHost:layerTreeHost]);
 
         [caAnimation setDelegate:delegate.get()];
     }
-    
-    [layer addAnimation:caAnimation.get() forKey:key];
+
+    return caAnimation;
+}
+
+static void addAnimationToLayer(CALayer *layer, RemoteLayerTreeHost* layerTreeHost, const String& key, const PlatformCAAnimationRemote::Properties& properties)
+{
+    [layer addAnimation:createAnimation(layer, layerTreeHost, properties).get() forKey:key];
 }
 
 void PlatformCAAnimationRemote::updateLayerAnimations(CALayer *layer, RemoteLayerTreeHost* layerTreeHost, const AnimationsList& animationsToAdd, const HashSet<String>& animationsToRemove)
 {
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
 
     for (const auto& value : animationsToRemove)
         [layer removeAnimationForKey:value];
@@ -831,36 +797,7 @@ void PlatformCAAnimationRemote::updateLayerAnimations(CALayer *layer, RemoteLaye
     for (const auto& keyAnimationPair : animationsToAdd)
         addAnimationToLayer(layer, layerTreeHost, keyAnimationPair.first, keyAnimationPair.second);
 
-    END_BLOCK_OBJC_EXCEPTIONS;
-}
-
-TextStream& operator<<(TextStream&ts, const PlatformCAAnimationRemote::KeyframeValue& value)
-{
-    switch (value.keyframeType()) {
-    case PlatformCAAnimationRemote::KeyframeValue::NumberKeyType:
-        ts << "number=" << value.numberValue();
-        break;
-    case PlatformCAAnimationRemote::KeyframeValue::ColorKeyType:
-        ts << "color=";
-        ts << value.colorValue();
-        break;
-    case PlatformCAAnimationRemote::KeyframeValue::PointKeyType:
-        ts << "point=";
-        ts << value.pointValue();
-        break;
-    case PlatformCAAnimationRemote::KeyframeValue::TransformKeyType:
-        ts << "transform=";
-        ts << value.transformValue();
-        break;
-    case PlatformCAAnimationRemote::KeyframeValue::FilterKeyType:
-        ts << "filter=";
-        if (value.filterValue())
-            ts << *value.filterValue();
-        else
-            ts << "null";
-        break;
-    }
-    return ts;
+    END_BLOCK_OBJC_EXCEPTIONS
 }
 
 TextStream& operator<<(TextStream& ts, const PlatformCAAnimationRemote::Properties& animation)
@@ -886,6 +823,8 @@ TextStream& operator<<(TextStream& ts, const PlatformCAAnimationRemote::Properti
 
     ts.dumpProperty("fillMode", animation.fillMode);
     ts.dumpProperty("valueFunction", animation.valueFunction);
+    if (animation.timingFunction)
+        ts.dumpProperty<const TimingFunction&>("timing function", *animation.timingFunction);
 
     if (animation.autoReverses)
         ts.dumpProperty("autoReverses", animation.autoReverses);
@@ -921,14 +860,41 @@ TextStream& operator<<(TextStream& ts, const PlatformCAAnimationRemote::Properti
         if (i < animation.timingFunctions.size() && animation.timingFunctions[i])
             ts.dumpProperty<const TimingFunction&>("timing function", *animation.timingFunctions[i]);
 
-        if (i < animation.keyValues.size())
-            ts.dumpProperty("value", animation.keyValues[i]);
-
+        if (i < animation.keyValues.size()) {
+            ts.startGroup();
+            ts << "value ";
+            WTF::switchOn(animation.keyValues[i],
+                [&](const float number) { ts << "number=" << number; },
+                [&](const WebCore::Color color) { ts << "color=" << color; },
+                [&](const WebCore::FloatPoint3D point) { ts << "point=" << point; },
+                [&](const WebCore::TransformationMatrix matrix) { ts << "transform=" << matrix; },
+                [&](const RefPtr<WebCore::FilterOperation> filter) { ts << "filter=" << ValueOrNull(filter.get()); }
+            );
+            ts.endGroup();
+        }
         ts << ")";
     }
 
     ts.decreaseIndent();
     ts.decreaseIndent();
+
+    if (!animation.animations.isEmpty()) {
+        ts << "\n";
+        ts.increaseIndent();
+        ts.writeIndent();
+        ts << "(" << "animations";
+        ts.increaseIndent();
+
+        for (auto& childAnimation : animation.animations) {
+            ts << "\n";
+            ts.writeIndent();
+            ts << "(animation " << childAnimation;
+            ts << ")";
+        }
+
+        ts.decreaseIndent();
+        ts.decreaseIndent();
+    }
 
     return ts;
 }

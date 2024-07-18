@@ -8,14 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_NETEQ_DTMF_BUFFER_H_
-#define WEBRTC_MODULES_AUDIO_CODING_NETEQ_DTMF_BUFFER_H_
+#ifndef MODULES_AUDIO_CODING_NETEQ_DTMF_BUFFER_H_
+#define MODULES_AUDIO_CODING_NETEQ_DTMF_BUFFER_H_
+
+#include <stddef.h>
+#include <stdint.h>
 
 #include <list>
-#include <string>  // size_t
-
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/typedefs.h"
 
 namespace webrtc {
 
@@ -28,19 +27,9 @@ struct DtmfEvent {
 
   // Constructors
   DtmfEvent()
-      : timestamp(0),
-        event_no(0),
-        volume(0),
-        duration(0),
-        end_bit(false) {
-  }
+      : timestamp(0), event_no(0), volume(0), duration(0), end_bit(false) {}
   DtmfEvent(uint32_t ts, int ev, int vol, int dur, bool end)
-      : timestamp(ts),
-        event_no(ev),
-        volume(vol),
-        duration(dur),
-        end_bit(end) {
-  }
+      : timestamp(ts), event_no(ev), volume(vol), duration(dur), end_bit(end) {}
 };
 
 // This is the buffer holding DTMF events while waiting for them to be played.
@@ -54,29 +43,32 @@ class DtmfBuffer {
     kInvalidSampleRate
   };
 
-  // Set up the buffer for use at sample rate |fs_hz|.
+  // Set up the buffer for use at sample rate `fs_hz`.
   explicit DtmfBuffer(int fs_hz);
 
   virtual ~DtmfBuffer();
 
+  DtmfBuffer(const DtmfBuffer&) = delete;
+  DtmfBuffer& operator=(const DtmfBuffer&) = delete;
+
   // Flushes the buffer.
   virtual void Flush();
 
-  // Static method to parse 4 bytes from |payload| as a DTMF event (RFC 4733)
-  // and write the parsed information into the struct |event|. Input variable
-  // |rtp_timestamp| is simply copied into the struct.
+  // Static method to parse 4 bytes from `payload` as a DTMF event (RFC 4733)
+  // and write the parsed information into the struct `event`. Input variable
+  // `rtp_timestamp` is simply copied into the struct.
   static int ParseEvent(uint32_t rtp_timestamp,
                         const uint8_t* payload,
                         size_t payload_length_bytes,
                         DtmfEvent* event);
 
-  // Inserts |event| into the buffer. The method looks for a matching event and
+  // Inserts `event` into the buffer. The method looks for a matching event and
   // merges the two if a match is found.
   virtual int InsertEvent(const DtmfEvent& event);
 
-  // Checks if a DTMF event should be played at time |current_timestamp|. If so,
+  // Checks if a DTMF event should be played at time `current_timestamp`. If so,
   // the method returns true; otherwise false. The parameters of the event to
-  // play will be written to |event|.
+  // play will be written to `event`.
   virtual bool GetEvent(uint32_t current_timestamp, DtmfEvent* event);
 
   // Number of events in the buffer.
@@ -96,7 +88,7 @@ class DtmfBuffer {
   // Compares two events and returns true if they are the same.
   static bool SameEvent(const DtmfEvent& a, const DtmfEvent& b);
 
-  // Merges |event| to the event pointed out by |it|. The method checks that
+  // Merges `event` to the event pointed out by `it`. The method checks that
   // the two events are the same (using the SameEvent method), and merges them
   // if that was the case, returning true. If the events are not the same, false
   // is returned.
@@ -106,9 +98,7 @@ class DtmfBuffer {
   static bool CompareEvents(const DtmfEvent& a, const DtmfEvent& b);
 
   DtmfList buffer_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(DtmfBuffer);
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_DTMF_BUFFER_H_
+#endif  // MODULES_AUDIO_CODING_NETEQ_DTMF_BUFFER_H_

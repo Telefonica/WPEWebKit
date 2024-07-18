@@ -32,76 +32,95 @@
 #include "config.h"
 #include "LinkRelAttribute.h"
 
+#include "Document.h"
 #include "LinkIconType.h"
-#include "RuntimeEnabledFeatures.h"
+#include "Settings.h"
 #include <wtf/text/StringView.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 LinkRelAttribute::LinkRelAttribute()
+    : iconType()
+    , isStyleSheet(false)
+    , isAlternate(false)
+    , isDNSPrefetch(false)
+    , isLinkPreload(false)
+    , isLinkPreconnect(false)
+    , isLinkPrefetch(false)
+#if ENABLE(APPLICATION_MANIFEST)
+    , isApplicationManifest(false)
+#endif
 {
 }
 
 // Keep LinkRelAttribute::isSupported() in sync when updating this constructor.
-LinkRelAttribute::LinkRelAttribute(const String& rel)
+LinkRelAttribute::LinkRelAttribute(Document& document, const String& rel)
+    : LinkRelAttribute()
 {
-    if (equalLettersIgnoringASCIICase(rel, "stylesheet"))
+    if (equalLettersIgnoringASCIICase(rel, "stylesheet"_s))
         isStyleSheet = true;
-    else if (equalLettersIgnoringASCIICase(rel, "icon") || equalLettersIgnoringASCIICase(rel, "shortcut icon"))
+    else if (equalLettersIgnoringASCIICase(rel, "icon"_s) || equalLettersIgnoringASCIICase(rel, "shortcut icon"_s))
         iconType = LinkIconType::Favicon;
-    else if (equalLettersIgnoringASCIICase(rel, "apple-touch-icon"))
+    else if (equalLettersIgnoringASCIICase(rel, "apple-touch-icon"_s))
         iconType = LinkIconType::TouchIcon;
-    else if (equalLettersIgnoringASCIICase(rel, "apple-touch-icon-precomposed"))
+    else if (equalLettersIgnoringASCIICase(rel, "apple-touch-icon-precomposed"_s))
         iconType = LinkIconType::TouchPrecomposedIcon;
-    else if (equalLettersIgnoringASCIICase(rel, "dns-prefetch"))
+    else if (equalLettersIgnoringASCIICase(rel, "dns-prefetch"_s))
         isDNSPrefetch = true;
-    else if (RuntimeEnabledFeatures::sharedFeatures().linkPreloadEnabled() && equalLettersIgnoringASCIICase(rel, "preload"))
+    else if (document.settings().linkPreconnectEnabled() && equalLettersIgnoringASCIICase(rel, "preconnect"_s))
+        isLinkPreconnect = true;
+    else if (document.settings().linkPreloadEnabled() && equalLettersIgnoringASCIICase(rel, "preload"_s))
         isLinkPreload = true;
-    else if (equalLettersIgnoringASCIICase(rel, "alternate stylesheet") || equalLettersIgnoringASCIICase(rel, "stylesheet alternate")) {
+    else if (document.settings().linkPrefetchEnabled() && equalLettersIgnoringASCIICase(rel, "prefetch"_s))
+        isLinkPrefetch = true;
+    else if (equalLettersIgnoringASCIICase(rel, "alternate stylesheet"_s) || equalLettersIgnoringASCIICase(rel, "stylesheet alternate"_s)) {
         isStyleSheet = true;
         isAlternate = true;
+#if ENABLE(APPLICATION_MANIFEST)
+    } else if (equalLettersIgnoringASCIICase(rel, "manifest"_s)) {
+        isApplicationManifest = true;
+#endif
     } else {
         // Tokenize the rel attribute and set bits based on specific keywords that we find.
-        String relCopy = rel;
-        relCopy.replace('\n', ' ');
+        String relCopy = makeStringByReplacingAll(rel, '\n', ' ');
         for (auto word : StringView(relCopy).split(' ')) {
-            if (equalLettersIgnoringASCIICase(word, "stylesheet"))
+            if (equalLettersIgnoringASCIICase(word, "stylesheet"_s))
                 isStyleSheet = true;
-            else if (equalLettersIgnoringASCIICase(word, "alternate"))
+            else if (equalLettersIgnoringASCIICase(word, "alternate"_s))
                 isAlternate = true;
-            else if (equalLettersIgnoringASCIICase(word, "icon"))
+            else if (equalLettersIgnoringASCIICase(word, "icon"_s))
                 iconType = LinkIconType::Favicon;
-            else if (equalLettersIgnoringASCIICase(word, "apple-touch-icon"))
+            else if (equalLettersIgnoringASCIICase(word, "apple-touch-icon"_s))
                 iconType = LinkIconType::TouchIcon;
-            else if (equalLettersIgnoringASCIICase(word, "apple-touch-icon-precomposed"))
+            else if (equalLettersIgnoringASCIICase(word, "apple-touch-icon-precomposed"_s))
                 iconType = LinkIconType::TouchPrecomposedIcon;
-#if ENABLE(LINK_PREFETCH)
-            else if (equalLettersIgnoringASCIICase(word, "prefetch"))
-                isLinkPrefetch = true;
-            else if (equalLettersIgnoringASCIICase(word, "subresource"))
-                isLinkSubresource = true;
-#endif
         }
     }
 }
 
 // https://html.spec.whatwg.org/#linkTypes
-bool LinkRelAttribute::isSupported(StringView attribute)
+bool LinkRelAttribute::isSupported(Document& document, StringView attribute)
 {
-    static const char* const supportedAttributes[] = {
-        "alternate", "dns-prefetch", "icon", "stylesheet", "apple-touch-icon", "apple-touch-icon-precomposed",
-#if ENABLE(LINK_PREFETCH)
-        "prefetch", "subresource",
+    static constexpr ASCIILiteral supportedAttributes[] = {
+        "alternate"_s, "dns-prefetch"_s, "icon"_s, "stylesheet"_s, "apple-touch-icon"_s, "apple-touch-icon-precomposed"_s,
+#if ENABLE(APPLICATION_MANIFEST)
+        "manifest"_s,
 #endif
     };
 
-    for (auto* supportedAttribute : supportedAttributes) {
+    for (auto supportedAttribute : supportedAttributes) {
         if (equalIgnoringASCIICase(attribute, supportedAttribute))
             return true;
     }
 
-    if (RuntimeEnabledFeatures::sharedFeatures().linkPreloadEnabled() && equalIgnoringASCIICase(attribute, "preload"))
+    if (document.settings().linkPreconnectEnabled() && equalLettersIgnoringASCIICase(attribute, "preconnect"_s))
+        return true;
+
+    if (document.settings().linkPreloadEnabled() && equalLettersIgnoringASCIICase(attribute, "preload"_s))
+        return true;
+
+    if (document.settings().linkPrefetchEnabled() && equalLettersIgnoringASCIICase(attribute, "prefetch"_s))
         return true;
 
     return false;

@@ -25,7 +25,6 @@
 
 #include "config.h"
 #include "Nodes.h"
-#include "NodeConstructors.h"
 
 #include "JSCJSValueInlines.h"
 #include "JSModuleRecord.h"
@@ -52,9 +51,11 @@ void ImportDeclarationNode::analyzeModule(ModuleAnalyzer& analyzer)
     analyzer.moduleRecord()->appendRequestedModule(m_moduleName->moduleName());
     for (auto* specifier : m_specifierList->specifiers()) {
         analyzer.moduleRecord()->addImportEntry(JSModuleRecord::ImportEntry {
+            specifier->importedName() == analyzer.vm().propertyNames->timesIdentifier
+                ? JSModuleRecord::ImportEntryType::Namespace : JSModuleRecord::ImportEntryType::Single,
             m_moduleName->moduleName(),
             specifier->importedName(),
-            specifier->localName()
+            specifier->localName(),
         });
     }
 }
@@ -84,7 +85,14 @@ void ExportNamedDeclarationNode::analyzeModule(ModuleAnalyzer& analyzer)
             //
             // In this case, no local variable names are imported into the current module.
             // "v" indirectly points the binding in "mod".
-            analyzer.moduleRecord()->addExportEntry(JSModuleRecord::ExportEntry::createIndirect(specifier->exportedName(), specifier->localName(), m_moduleName->moduleName()));
+            //
+            // export * as v from "mod"
+            //
+            // If it is namespace export, we should use createNamespace.
+            if (specifier->localName() == analyzer.vm().propertyNames->starNamespacePrivateName)
+                analyzer.moduleRecord()->addExportEntry(JSModuleRecord::ExportEntry::createNamespace(specifier->exportedName(), m_moduleName->moduleName()));
+            else
+                analyzer.moduleRecord()->addExportEntry(JSModuleRecord::ExportEntry::createIndirect(specifier->exportedName(), specifier->localName(), m_moduleName->moduleName()));
         }
     }
 }

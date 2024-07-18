@@ -26,44 +26,19 @@
 #include "config.h"
 #include "WKApplicationCacheManager.h"
 
-#include "APIArray.h"
-#include "APIWebsiteDataStore.h"
-#include "WKAPICast.h"
-#include "WebsiteDataRecord.h"
-
-using namespace WebKit;
-
 WKTypeID WKApplicationCacheManagerGetTypeID()
 {
-    return toAPI(API::WebsiteDataStore::APIType);
+    return 0;
 }
 
-void WKApplicationCacheManagerGetApplicationCacheOrigins(WKApplicationCacheManagerRef applicationCacheManager, void* context, WKApplicationCacheManagerGetApplicationCacheOriginsFunction callback)
+void WKApplicationCacheManagerGetApplicationCacheOrigins(WKApplicationCacheManagerRef, void*, WKApplicationCacheManagerGetApplicationCacheOriginsFunction)
 {
-    auto& websiteDataStore = toImpl(reinterpret_cast<WKWebsiteDataStoreRef>(applicationCacheManager))->websiteDataStore();
-    websiteDataStore.fetchData(WebsiteDataType::OfflineWebApplicationCache, { }, [context, callback](auto dataRecords) {
-        Vector<RefPtr<API::Object>> securityOrigins;
-        for (const auto& dataRecord : dataRecords) {
-            for (const auto& origin : dataRecord.origins)
-                securityOrigins.append(API::SecurityOrigin::create(origin.securityOrigin()));
-        }
-
-        callback(toAPI(API::Array::create(WTFMove(securityOrigins)).ptr()), nullptr, context);
-    });
 }
 
-void WKApplicationCacheManagerDeleteEntriesForOrigin(WKApplicationCacheManagerRef applicationCacheManager, WKSecurityOriginRef origin)
+void WKApplicationCacheManagerDeleteEntriesForOrigin(WKApplicationCacheManagerRef, WKSecurityOriginRef)
 {
-    auto& websiteDataStore = toImpl(reinterpret_cast<WKWebsiteDataStoreRef>(applicationCacheManager))->websiteDataStore();
-
-    WebsiteDataRecord dataRecord;
-    dataRecord.add(WebsiteDataType::OfflineWebApplicationCache, WebCore::SecurityOriginData::fromSecurityOrigin(toImpl(origin)->securityOrigin()));
-
-    websiteDataStore.removeData(WebsiteDataType::OfflineWebApplicationCache, { dataRecord }, [] { });
 }
 
-void WKApplicationCacheManagerDeleteAllEntries(WKApplicationCacheManagerRef applicationCacheManager)
+void WKApplicationCacheManagerDeleteAllEntries(WKApplicationCacheManagerRef)
 {
-    auto& websiteDataStore = toImpl(reinterpret_cast<WKWebsiteDataStoreRef>(applicationCacheManager))->websiteDataStore();
-    websiteDataStore.removeData(WebsiteDataType::OfflineWebApplicationCache, std::chrono::system_clock::time_point::min(), [] { });
 }

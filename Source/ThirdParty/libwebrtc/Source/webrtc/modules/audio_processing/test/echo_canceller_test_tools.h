@@ -8,20 +8,24 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_TEST_ECHO_CANCELLER_TEST_TOOLS_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_TEST_ECHO_CANCELLER_TEST_TOOLS_H_
+#ifndef MODULES_AUDIO_PROCESSING_TEST_ECHO_CANCELLER_TEST_TOOLS_H_
+#define MODULES_AUDIO_PROCESSING_TEST_ECHO_CANCELLER_TEST_TOOLS_H_
 
 #include <algorithm>
 #include <vector>
 
-#include "webrtc/base/array_view.h"
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/random.h"
+#include "api/array_view.h"
+#include "rtc_base/random.h"
 
 namespace webrtc {
 
 // Randomizes the elements in a vector with values -32767.f:32767.f.
 void RandomizeSampleVector(Random* random_generator, rtc::ArrayView<float> v);
+
+// Randomizes the elements in a vector with values -amplitude:amplitude.
+void RandomizeSampleVector(Random* random_generator,
+                           rtc::ArrayView<float> v,
+                           float amplitude);
 
 // Class for delaying a signal a fixed number of samples.
 template <typename T>
@@ -36,9 +40,8 @@ class DelayBuffer {
  private:
   std::vector<T> buffer_;
   size_t next_insert_index_ = 0;
-  RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(DelayBuffer);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_TEST_ECHO_CANCELLER_TEST_TOOLS_H_
+#endif  // MODULES_AUDIO_PROCESSING_TEST_ECHO_CANCELLER_TEST_TOOLS_H_

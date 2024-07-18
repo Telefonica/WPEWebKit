@@ -31,12 +31,13 @@
 
 #pragma once
 
+#include "InspectorAgentBase.h"
 #include "InspectorBackendDispatchers.h"
-#include "inspector/InspectorAgentBase.h"
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
 
 namespace JSC {
+class Debugger;
 class VM;
 }
 
@@ -44,43 +45,48 @@ namespace Inspector {
 
 class InjectedScript;
 class InjectedScriptManager;
-class ScriptDebugServer;
-typedef String ErrorString;
 
 class JS_EXPORT_PRIVATE InspectorRuntimeAgent : public InspectorAgentBase, public RuntimeBackendDispatcherHandler {
     WTF_MAKE_NONCOPYABLE(InspectorRuntimeAgent);
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    virtual ~InspectorRuntimeAgent();
+    ~InspectorRuntimeAgent() override;
 
-    void willDestroyFrontendAndBackend(DisconnectReason) override;
+    // InspectorAgentBase
+    void didCreateFrontendAndBackend(Inspector::FrontendRouter*, Inspector::BackendDispatcher*) final;
+    void willDestroyFrontendAndBackend(DisconnectReason) final;
 
-    void enable(ErrorString&) override { m_enabled = true; }
-    void disable(ErrorString&) override { m_enabled = false; }
-    void parse(ErrorString&, const String& expression, Inspector::Protocol::Runtime::SyntaxErrorType* result, Inspector::Protocol::OptOutput<String>* message, RefPtr<Inspector::Protocol::Runtime::ErrorRange>&) final;
-    void evaluate(ErrorString&, const String& expression, const String* const objectGroup, const bool* const includeCommandLineAPI, const bool* const doNotPauseOnExceptionsAndMuteConsole, const int* const executionContextId, const bool* const returnByValue, const bool* const generatePreview, const bool* const saveResult, RefPtr<Inspector::Protocol::Runtime::RemoteObject>& result, Inspector::Protocol::OptOutput<bool>* wasThrown, Inspector::Protocol::OptOutput<int>* savedResultIndex) final;
-    void callFunctionOn(ErrorString&, const String& objectId, const String& expression, const JSON::Array* optionalArguments, const bool* const doNotPauseOnExceptionsAndMuteConsole, const bool* const returnByValue, const bool* const generatePreview, RefPtr<Inspector::Protocol::Runtime::RemoteObject>& result, Inspector::Protocol::OptOutput<bool>* wasThrown) final;
-    void releaseObject(ErrorString&, const ErrorString& objectId) final;
-    void getPreview(ErrorString&, const String& objectId, RefPtr<Inspector::Protocol::Runtime::ObjectPreview>&) final;
-    void getProperties(ErrorString&, const String& objectId, const bool* const ownProperties, const bool* const generatePreview, RefPtr<JSON::ArrayOf<Inspector::Protocol::Runtime::PropertyDescriptor>>& result, RefPtr<JSON::ArrayOf<Inspector::Protocol::Runtime::InternalPropertyDescriptor>>& internalProperties) final;
-    void getDisplayableProperties(ErrorString&, const String& objectId, const bool* const generatePreview, RefPtr<JSON::ArrayOf<Inspector::Protocol::Runtime::PropertyDescriptor>>& result, RefPtr<JSON::ArrayOf<Inspector::Protocol::Runtime::InternalPropertyDescriptor>>& internalProperties) final;
-    void getCollectionEntries(ErrorString&, const String& objectId, const String* const objectGroup, const int* const startIndex, const int* const numberToFetch, RefPtr<JSON::ArrayOf<Inspector::Protocol::Runtime::CollectionEntry>>& entries) final;
-    void saveResult(ErrorString&, const JSON::Object& callArgument, const int* const executionContextId, Inspector::Protocol::OptOutput<int>* savedResultIndex) final;
-    void releaseObjectGroup(ErrorString&, const String& objectGroup) final;
-    void getRuntimeTypesForVariablesAtOffsets(ErrorString&, const JSON::Array& locations, RefPtr<JSON::ArrayOf<Inspector::Protocol::Runtime::TypeDescription>>&) override;
-    void enableTypeProfiler(ErrorString&) override;
-    void disableTypeProfiler(ErrorString&) override;
-    void enableControlFlowProfiler(ErrorString&) override;
-    void disableControlFlowProfiler(ErrorString&) override;
-    void getBasicBlocks(ErrorString&, const String& in_sourceID, RefPtr<JSON::ArrayOf<Inspector::Protocol::Runtime::BasicBlock>>& out_basicBlocks) override;
-
-    bool enabled() const { return m_enabled; }
+    // RuntimeBackendDispatcherHandler
+    Protocol::ErrorStringOr<void> enable() override;
+    Protocol::ErrorStringOr<void> disable() override;
+    Protocol::ErrorStringOr<std::tuple<Protocol::Runtime::SyntaxErrorType, String /* message */, RefPtr<Protocol::Runtime::ErrorRange>>> parse(const String& expression) final;
+    Protocol::ErrorStringOr<std::tuple<Ref<Protocol::Runtime::RemoteObject>, std::optional<bool> /* wasThrown */, std::optional<int> /* savedResultIndex */>> evaluate(const String& expression, const String& objectGroup, std::optional<bool>&& includeCommandLineAPI, std::optional<bool>&& doNotPauseOnExceptionsAndMuteConsole, std::optional<Protocol::Runtime::ExecutionContextId>&&, std::optional<bool>&& returnByValue, std::optional<bool>&& generatePreview, std::optional<bool>&& saveResult, std::optional<bool>&& emulateUserGesture) override;
+    void awaitPromise(const Protocol::Runtime::RemoteObjectId&, std::optional<bool>&& returnByValue, std::optional<bool>&& generatePreview, std::optional<bool>&& saveResult, Ref<AwaitPromiseCallback>&&) final;
+    Protocol::ErrorStringOr<std::tuple<Ref<Protocol::Runtime::RemoteObject>, std::optional<bool> /* wasThrown */>> callFunctionOn(const Protocol::Runtime::RemoteObjectId&, const String& functionDeclaration, RefPtr<JSON::Array>&& arguments, std::optional<bool>&& doNotPauseOnExceptionsAndMuteConsole, std::optional<bool>&& returnByValue, std::optional<bool>&& generatePreview, std::optional<bool>&& emulateUserGesture) override;
+    Protocol::ErrorStringOr<void> releaseObject(const Protocol::Runtime::RemoteObjectId&) final;
+    Protocol::ErrorStringOr<Ref<Protocol::Runtime::ObjectPreview>> getPreview(const Protocol::Runtime::RemoteObjectId&) final;
+    Protocol::ErrorStringOr<std::tuple<Ref<JSON::ArrayOf<Protocol::Runtime::PropertyDescriptor>>, RefPtr<JSON::ArrayOf<Protocol::Runtime::InternalPropertyDescriptor>>>> getProperties(const Protocol::Runtime::RemoteObjectId&, std::optional<bool>&& ownProperties, std::optional<int>&& fetchStart, std::optional<int>&& fetchCount, std::optional<bool>&& generatePreview) final;
+    Protocol::ErrorStringOr<std::tuple<Ref<JSON::ArrayOf<Protocol::Runtime::PropertyDescriptor>>, RefPtr<JSON::ArrayOf<Protocol::Runtime::InternalPropertyDescriptor>>>> getDisplayableProperties(const Protocol::Runtime::RemoteObjectId&, std::optional<int>&& fetchStart, std::optional<int>&& fetchCount, std::optional<bool>&& generatePreview) final;
+    Protocol::ErrorStringOr<Ref<JSON::ArrayOf<Protocol::Runtime::CollectionEntry>>> getCollectionEntries(const Protocol::Runtime::RemoteObjectId&, const String& objectGroup, std::optional<int>&& fetchStart, std::optional<int>&& fetchCount) final;
+    Protocol::ErrorStringOr<std::optional<int> /* saveResultIndex */> saveResult(Ref<JSON::Object>&& callArgument, std::optional<Protocol::Runtime::ExecutionContextId>&&) final;
+    Protocol::ErrorStringOr<void> setSavedResultAlias(const String&) final;
+    Protocol::ErrorStringOr<void> releaseObjectGroup(const String&) final;
+    Protocol::ErrorStringOr<Ref<JSON::ArrayOf<Protocol::Runtime::TypeDescription>>> getRuntimeTypesForVariablesAtOffsets(Ref<JSON::Array>&& locations) final;
+    Protocol::ErrorStringOr<void> enableTypeProfiler() final;
+    Protocol::ErrorStringOr<void> disableTypeProfiler() final;
+    Protocol::ErrorStringOr<void> enableControlFlowProfiler() final;
+    Protocol::ErrorStringOr<void> disableControlFlowProfiler() final;
+    Protocol::ErrorStringOr<Ref<JSON::ArrayOf<Protocol::Runtime::BasicBlock>>> getBasicBlocks(const String& sourceID) final;
 
 protected:
     InspectorRuntimeAgent(AgentContext&);
 
+    Protocol::ErrorStringOr<std::tuple<Ref<Protocol::Runtime::RemoteObject>, std::optional<bool> /* wasThrown */, std::optional<int> /* savedResultIndex */>> evaluate(InjectedScript&, const String& expression, const String& objectGroup, std::optional<bool>&& includeCommandLineAPI, std::optional<bool>&& doNotPauseOnExceptionsAndMuteConsole, std::optional<bool>&& returnByValue, std::optional<bool>&& generatePreview, std::optional<bool>&& saveResult, std::optional<bool>&& emulateUserGesture);
+    Protocol::ErrorStringOr<std::tuple<Ref<Protocol::Runtime::RemoteObject>, std::optional<bool> /* wasThrown */>> callFunctionOn(InjectedScript&, const Protocol::Runtime::RemoteObjectId&, const String& functionDeclaration, RefPtr<JSON::Array>&& arguments, std::optional<bool>&& doNotPauseOnExceptionsAndMuteConsole, std::optional<bool>&& returnByValue, std::optional<bool>&& generatePreview, std::optional<bool>&& emulateUserGesture);
+
     InjectedScriptManager& injectedScriptManager() { return m_injectedScriptManager; }
 
-    virtual InjectedScript injectedScriptForEval(ErrorString&, const int* executionContextId) = 0;
+    virtual InjectedScript injectedScriptForEval(Protocol::ErrorString&, std::optional<Protocol::Runtime::ExecutionContextId>&&) = 0;
 
     virtual void muteConsole() = 0;
     virtual void unmuteConsole() = 0;
@@ -90,7 +96,7 @@ private:
     void setControlFlowProfilerEnabledState(bool);
 
     InjectedScriptManager& m_injectedScriptManager;
-    ScriptDebugServer& m_scriptDebugServer;
+    JSC::Debugger& m_debugger;
     JSC::VM& m_vm;
     bool m_enabled {false};
     bool m_isTypeProfilingEnabled {false};

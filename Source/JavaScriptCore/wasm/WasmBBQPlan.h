@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,15 +25,15 @@
 
 #pragma once
 
-#if ENABLE(WEBASSEMBLY)
+#if ENABLE(WEBASSEMBLY_B3JIT)
 
 #include "CompilationResult.h"
-#include "VM.h"
 #include "WasmB3IRGenerator.h"
+#include "WasmEntryPlan.h"
 #include "WasmModuleInformation.h"
-#include "WasmPlan.h"
 #include "WasmTierUpCount.h"
 #include <wtf/Bag.h>
+#include <wtf/Function.h>
 #include <wtf/SharedTask.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/Vector.h>
@@ -41,119 +41,63 @@
 namespace JSC {
 
 class CallLinkInfo;
-class JSGlobalObject;
-class JSPromiseDeferred;
 
 namespace Wasm {
 
-class BBQPlan final : public Plan {
+class BBQCallee;
+class CalleeGroup;
+class EmbedderEntrypointCallee;
+
+class BBQPlan final : public EntryPlan {
 public:
-    using Base = Plan;
-    enum AsyncWork : uint8_t { FullCompile, Validation };
-    // Note: CompletionTask should not hold a reference to the Plan otherwise there will be a reference cycle.
-    BBQPlan(VM*, Ref<ModuleInformation>, AsyncWork, CompletionTask&&);
-    JS_EXPORT_PRIVATE BBQPlan(VM*, Vector<uint8_t>&&, AsyncWork, CompletionTask&&);
-    // Note: This constructor should only be used if you are not actually building a module e.g. validation/function tests
-    // FIXME: When we get rid of function tests we should remove AsyncWork from this constructor.
-    JS_EXPORT_PRIVATE BBQPlan(VM*, const uint8_t*, size_t, AsyncWork, CompletionTask&&);
+    using Base = EntryPlan;
 
-    bool parseAndValidateModule();
+    using Base::Base;
 
-    JS_EXPORT_PRIVATE void prepare();
-    void compileFunctions(CompilationEffort);
+    BBQPlan(VM&, Ref<ModuleInformation>, uint32_t functionIndex, std::optional<bool> hasExceptionHandlers, CalleeGroup*, CompletionTask&&);
 
-    template<typename Functor>
-    void initializeCallees(const Functor&);
-
-    Vector<Export>& exports() const
+    bool hasWork() const final
     {
-        RELEASE_ASSERT(!failed() && !hasWork());
-        return m_moduleInformation->exports;
-    }
-
-    size_t internalFunctionCount() const
-    {
-        RELEASE_ASSERT(!failed() && !hasWork());
-        return m_moduleInformation->internalFunctionCount();
-    }
-
-    Ref<ModuleInformation>&& takeModuleInformation()
-    {
-        RELEASE_ASSERT(!failed() && !hasWork());
-        return WTFMove(m_moduleInformation);
-    }
-
-    Bag<CallLinkInfo>&& takeCallLinkInfos()
-    {
-        RELEASE_ASSERT(!failed() && !hasWork());
-        return WTFMove(m_callLinkInfos);
-    }
-
-    Vector<MacroAssemblerCodeRef>&& takeWasmToWasmExitStubs()
-    {
-        RELEASE_ASSERT(!failed() && !hasWork());
-        return WTFMove(m_wasmToWasmExitStubs);
-    }
-
-    Vector<Vector<UnlinkedWasmToWasmCall>> takeWasmToWasmCallsites()
-    {
-        RELEASE_ASSERT(!failed() && !hasWork());
-        return WTFMove(m_unlinkedWasmToWasmCalls);
-    }
-
-    Vector<TierUpCount> takeTierUpCounts()
-    {
-        RELEASE_ASSERT(!failed() && !hasWork());
-        return WTFMove(m_tierUpCounts);
-    }
-
-    enum class State : uint8_t {
-        Initial,
-        Validated,
-        Prepared,
-        Compiled,
-        Completed // We should only move to Completed if we are holding the lock.
-    };
-
-    bool hasWork() const override
-    {
-        if (m_asyncWork == AsyncWork::Validation)
+        if (m_compilerMode == CompilerMode::Validation)
             return m_state < State::Validated;
         return m_state < State::Compiled;
     }
-    void work(CompilationEffort) override;
-    bool hasBeenPrepared() const { return m_state >= State::Prepared; }
-    bool multiThreaded() const override { return hasBeenPrepared(); }
+
+    void work(CompilationEffort) final;
+
+    using CalleeInitializer = Function<void(uint32_t, RefPtr<EmbedderEntrypointCallee>&&, Ref<BBQCallee>&&)>;
+    void initializeCallees(const CalleeInitializer&);
+
+    bool didReceiveFunctionData(unsigned, const FunctionData&) final;
+
+    bool parseAndValidateModule()
+    {
+        return Base::parseAndValidateModule(m_source.data(), m_source.size());
+    }
+
+    static bool planGeneratesLoopOSREntrypoints(const ModuleInformation&);
 
 private:
-    class ThreadCountHolder;
-    friend class ThreadCountHolder;
-    // For some reason friendship doesn't extend to parent classes...
-    using Base::m_lock;
+    bool prepareImpl() final;
+    void compileFunction(uint32_t functionIndex) final;
+    void didCompleteCompilation() WTF_REQUIRES_LOCK(m_lock) final;
 
-    void moveToState(State);
-    bool isComplete() const override { return m_state == State::Completed; }
-    void complete(const AbstractLocker&) override;
+    std::unique_ptr<InternalFunction> compileFunction(uint32_t functionIndex, CompilationContext&, Vector<UnlinkedWasmToWasmCall>&, TierUpCount*);
 
-    const char* stateString(State);
-    
-    Bag<CallLinkInfo> m_callLinkInfos;
-    Vector<MacroAssemblerCodeRef> m_wasmToWasmExitStubs;
     Vector<std::unique_ptr<InternalFunction>> m_wasmInternalFunctions;
-    HashSet<uint32_t, typename DefaultHash<uint32_t>::Hash, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_exportedFunctionIndices;
-    HashMap<uint32_t, std::unique_ptr<InternalFunction>, typename DefaultHash<uint32_t>::Hash, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_jsToWasmInternalFunctions;
+    Vector<std::unique_ptr<LinkBuffer>> m_wasmInternalFunctionLinkBuffers;
+    Vector<Vector<CodeLocationLabel<ExceptionHandlerPtrTag>>> m_exceptionHandlerLocations;
+    HashMap<uint32_t, std::pair<std::unique_ptr<LinkBuffer>, std::unique_ptr<InternalFunction>>, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_embedderToWasmInternalFunctions;
     Vector<CompilationContext> m_compilationContexts;
-    Vector<TierUpCount> m_tierUpCounts;
+    Vector<std::unique_ptr<TierUpCount>> m_tierUpCounts;
+    Vector<Vector<CodeLocationLabel<WasmEntryPtrTag>>> m_allLoopEntrypoints;
 
-    Vector<Vector<UnlinkedWasmToWasmCall>> m_unlinkedWasmToWasmCalls;
-    State m_state;
-
-    const AsyncWork m_asyncWork;
-    uint8_t m_numberOfActiveThreads { 0 };
-    uint32_t m_currentIndex { 0 };
+    RefPtr<CalleeGroup> m_calleeGroup { nullptr };
+    uint32_t m_functionIndex;
+    std::optional<bool> m_hasExceptionHandlers;
 };
 
 
 } } // namespace JSC::Wasm
 
-#endif // ENABLE(WEBASSEMBLY)
+#endif // ENABLE(WEBASSEMBLY_B3JIT)

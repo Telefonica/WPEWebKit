@@ -38,11 +38,13 @@ class HTMLDocumentParser;
 class ScriptElement;
 
 struct CustomElementConstructionData {
-    CustomElementConstructionData(Ref<JSCustomElementInterface>&&, const AtomicString& name, Vector<Attribute>&&);
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+
+    CustomElementConstructionData(Ref<JSCustomElementInterface>&&, const AtomString& name, Vector<Attribute>&&);
     ~CustomElementConstructionData();
 
     Ref<JSCustomElementInterface> elementInterface;
-    AtomicString name;
+    AtomString name;
     Vector<Attribute> attributes;
 };
 
@@ -57,16 +59,17 @@ public:
 
     bool isParsingFragment() const;
 
-    void constructTree(AtomicHTMLToken&&);
+    void constructTree(AtomHTMLToken&&);
 
     bool isParsingTemplateContents() const;
     bool hasParserBlockingScriptWork() const;
 
     // Must be called to take the parser-blocking script before calling the parser again.
     RefPtr<ScriptElement> takeScriptToProcess(TextPosition& scriptStartPosition);
+    const ScriptElement* scriptToProcess() const { return m_scriptToProcess.get(); }
 
     std::unique_ptr<CustomElementConstructionData> takeCustomElementConstructionData() { return WTFMove(m_customElementToConstruct); }
-    void didCreateCustomOrCallbackElement(Ref<Element>&&, CustomElementConstructionData&);
+    void didCreateCustomOrFallbackElement(Ref<Element>&&, CustomElementConstructionData&);
 
     // Done, close any open tags, etc.
     void finished();
@@ -104,50 +107,50 @@ private:
 
     bool isParsingFragmentOrTemplateContents() const;
 
-#if ENABLE(TELEPHONE_NUMBER_DETECTION) && PLATFORM(IOS)
+#if ENABLE(TELEPHONE_NUMBER_DETECTION) && PLATFORM(IOS_FAMILY)
     void insertPhoneNumberLink(const String&);
-    void linkifyPhoneNumbers(const String&);
+    void linkifyPhoneNumbers(const String&, WhitespaceMode);
 #endif
 
-    void processToken(AtomicHTMLToken&&);
+    void processToken(AtomHTMLToken&&);
 
-    void processDoctypeToken(AtomicHTMLToken&&);
-    void processStartTag(AtomicHTMLToken&&);
-    void processEndTag(AtomicHTMLToken&&);
-    void processComment(AtomicHTMLToken&&);
-    void processCharacter(AtomicHTMLToken&&);
-    void processEndOfFile(AtomicHTMLToken&&);
+    void processDoctypeToken(AtomHTMLToken&&);
+    void processStartTag(AtomHTMLToken&&);
+    void processEndTag(AtomHTMLToken&&);
+    void processComment(AtomHTMLToken&&);
+    void processCharacter(AtomHTMLToken&&);
+    void processEndOfFile(AtomHTMLToken&&);
 
-    bool processStartTagForInHead(AtomicHTMLToken&&);
-    void processStartTagForInBody(AtomicHTMLToken&&);
-    void processStartTagForInTable(AtomicHTMLToken&&);
-    void processEndTagForInBody(AtomicHTMLToken&&);
-    void processEndTagForInTable(AtomicHTMLToken&&);
-    void processEndTagForInTableBody(AtomicHTMLToken&&);
-    void processEndTagForInRow(AtomicHTMLToken&&);
-    void processEndTagForInCell(AtomicHTMLToken&&);
+    bool processStartTagForInHead(AtomHTMLToken&&);
+    void processStartTagForInBody(AtomHTMLToken&&);
+    void processStartTagForInTable(AtomHTMLToken&&);
+    void processEndTagForInBody(AtomHTMLToken&&);
+    void processEndTagForInTable(AtomHTMLToken&&);
+    void processEndTagForInTableBody(AtomHTMLToken&&);
+    void processEndTagForInRow(AtomHTMLToken&&);
+    void processEndTagForInCell(AtomHTMLToken&&);
 
-    void processHtmlStartTagForInBody(AtomicHTMLToken&&);
-    bool processBodyEndTagForInBody(AtomicHTMLToken&&);
+    void processHtmlStartTagForInBody(AtomHTMLToken&&);
+    bool processBodyEndTagForInBody(AtomHTMLToken&&);
     bool processTableEndTagForInTable();
     bool processCaptionEndTagForInCaption();
     bool processColgroupEndTagForInColumnGroup();
     bool processTrEndTagForInRow();
 
-    void processAnyOtherEndTagForInBody(AtomicHTMLToken&&);
+    void processAnyOtherEndTagForInBody(AtomHTMLToken&&);
 
     void processCharacterBuffer(ExternalCharacterTokenBuffer&);
     inline void processCharacterBufferForInBody(ExternalCharacterTokenBuffer&);
 
     void processFakeStartTag(const QualifiedName&, Vector<Attribute>&& attributes = Vector<Attribute>());
     void processFakeEndTag(const QualifiedName&);
-    void processFakeEndTag(const AtomicString&);
+    void processFakeEndTag(const AtomString&);
     void processFakeCharacters(const String&);
     void processFakePEndTagIfPInButtonScope();
 
-    void processGenericRCDATAStartTag(AtomicHTMLToken&&);
-    void processGenericRawTextStartTag(AtomicHTMLToken&&);
-    void processScriptStartTag(AtomicHTMLToken&&);
+    void processGenericRCDATAStartTag(AtomHTMLToken&&);
+    void processGenericRawTextStartTag(AtomHTMLToken&&);
+    void processScriptStartTag(AtomHTMLToken&&);
 
     // Default processing for the different insertion modes.
     void defaultForInitial();
@@ -158,26 +161,26 @@ private:
     void defaultForAfterHead();
     void defaultForInTableText();
 
-    bool shouldProcessTokenInForeignContent(const AtomicHTMLToken&);
-    void processTokenInForeignContent(AtomicHTMLToken&&);
+    bool shouldProcessTokenInForeignContent(const AtomHTMLToken&);
+    void processTokenInForeignContent(AtomHTMLToken&&);
     
-    HTMLStackItem& adjustedCurrentStackItem() const;
+    HTMLStackItem& adjustedCurrentStackItem();
 
-    void callTheAdoptionAgency(AtomicHTMLToken&);
+    void callTheAdoptionAgency(AtomHTMLToken&);
 
     void closeTheCell();
 
-    template <bool shouldClose(const HTMLStackItem&)> void processCloseWhenNestedTag(AtomicHTMLToken&&);
+    template <bool shouldClose(const HTMLStackItem&)> void processCloseWhenNestedTag(AtomHTMLToken&&);
 
-    void parseError(const AtomicHTMLToken&);
+    void parseError(const AtomHTMLToken&);
 
     void resetInsertionModeAppropriately();
 
-    void insertGenericHTMLElement(AtomicHTMLToken&&);
+    void insertGenericHTMLElement(AtomHTMLToken&&);
 
-    void processTemplateStartTag(AtomicHTMLToken&&);
-    bool processTemplateEndTag(AtomicHTMLToken&&);
-    bool processEndOfFileForInTemplateContents(AtomicHTMLToken&&);
+    void processTemplateStartTag(AtomHTMLToken&&);
+    bool processTemplateEndTag(AtomHTMLToken&&);
+    bool processEndOfFileForInTemplateContents(AtomHTMLToken&&);
 
     class FragmentParsingContext {
     public:
@@ -185,17 +188,17 @@ private:
         FragmentParsingContext(DocumentFragment&, Element& contextElement);
 
         DocumentFragment* fragment() const;
-        Element& contextElement() const;
-        HTMLStackItem& contextElementStackItem() const;
+        Element& contextElement();
+        HTMLStackItem& contextElementStackItem();
 
     private:
         DocumentFragment* m_fragment { nullptr };
-        RefPtr<HTMLStackItem> m_contextElementStackItem;
+        HTMLStackItem m_contextElementStackItem;
     };
 
     HTMLDocumentParser& m_parser;
     const HTMLParserOptions m_options;
-    const FragmentParsingContext m_fragmentContext;
+    FragmentParsingContext m_fragmentContext;
 
     HTMLConstructionSite m_tree;
 
@@ -216,7 +219,7 @@ private:
 
     bool m_framesetOk { true };
 
-#if !ASSERT_DISABLED
+#if ASSERT_ENABLED
     bool m_destroyed { false };
     bool m_destructionProhibited { true };
 #endif
@@ -224,7 +227,7 @@ private:
 
 inline HTMLTreeBuilder::~HTMLTreeBuilder()
 {
-#if !ASSERT_DISABLED
+#if ASSERT_ENABLED
     ASSERT(!m_destroyed);
     ASSERT(!m_destructionProhibited);
     m_destroyed = true;

@@ -34,11 +34,11 @@
 #import <WebCore/HTMLElement.h>
 #import <WebCore/HTMLNames.h>
 #import <WebCore/HitTestResult.h>
-#import <WebCore/JSMainThreadExecState.h>
+#import <WebCore/JSExecState.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/URL.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <wtf/GetPtr.h>
+#import <wtf/URL.h>
 
 #define IMPL static_cast<WebCore::HTMLElement*>(reinterpret_cast<WebCore::Node*>(_internal))
 
@@ -95,13 +95,13 @@
 - (int)tabIndex
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->tabIndex();
+    return IMPL->tabIndexForBindings();
 }
 
 - (void)setTabIndex:(int)newTabIndex
 {
     WebCore::JSMainThreadNullState state;
-    IMPL->setTabIndex(newTabIndex);
+    IMPL->setTabIndexForBindings(newTabIndex);
 }
 
 - (BOOL)draggable
@@ -256,7 +256,7 @@
     IMPL->click();
 }
 
-#if ENABLE(IOS_AUTOCORRECT_AND_AUTOCAPITALIZE)
+#if ENABLE(AUTOCORRECT)
 
 - (BOOL)autocorrect
 {
@@ -269,6 +269,10 @@
     WebCore::JSMainThreadNullState state;
     IMPL->setAutocorrect(newAutocorrect);
 }
+
+#endif
+
+#if ENABLE(AUTOCAPITALIZE)
 
 - (NSString *)autocapitalize
 {
@@ -296,3 +300,5 @@ DOMHTMLElement *kit(WebCore::HTMLElement* value)
     WebCoreThreadViolationCheckRoundOne();
     return static_cast<DOMHTMLElement*>(kit(static_cast<WebCore::Node*>(value)));
 }
+
+#undef IMPL

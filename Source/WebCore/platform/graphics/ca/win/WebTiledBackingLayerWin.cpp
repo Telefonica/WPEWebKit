@@ -28,14 +28,13 @@
 
 #if USE(CA)
 
-#include "GraphicsContext.h"
+#include "GraphicsContextCG.h"
 #include "PlatformCALayer.h"
 #include "TileController.h"
 #include "TiledBacking.h"
 #include <QuartzCore/CACFLayer.h>
 #include <wtf/MainThread.h>
 
-using namespace std;
 using namespace WebCore;
 
 WebTiledBackingLayerWin::WebTiledBackingLayerWin(PlatformCALayer* owner)
@@ -43,9 +42,7 @@ WebTiledBackingLayerWin::WebTiledBackingLayerWin(PlatformCALayer* owner)
 {
 }
 
-WebTiledBackingLayerWin::~WebTiledBackingLayerWin()
-{
-}
+WebTiledBackingLayerWin::~WebTiledBackingLayerWin() = default;
 
 struct DisplayOnMainThreadContext {
     RetainPtr<CACFLayerRef> layer;
@@ -89,7 +86,7 @@ void WebTiledBackingLayerWin::displayCallback(CACFLayerRef caLayer, CGContextRef
     PlatformCALayerClient* client = owner()->owner();
     GraphicsLayer::CompositingCoordinatesOrientation orientation = client->platformCALayerContentsOrientation();
 
-    GraphicsContext graphicsContext(context);
+    GraphicsContextCG graphicsContext(context);
 
     // It's important to get the clip from the context, because it may be significantly
     // smaller than the layer bounds (e.g. tiled layers)
@@ -167,7 +164,7 @@ void WebTiledBackingLayerWin::setBorderColor(const Color& value)
 TileController* WebTiledBackingLayerWin::createTileController(PlatformCALayer* rootLayer)
 {
     ASSERT(!m_tileController);
-    m_tileController = std::make_unique<TileController>(rootLayer);
+    m_tileController = makeUnique<TileController>(rootLayer);
     return m_tileController.get();
 }
 

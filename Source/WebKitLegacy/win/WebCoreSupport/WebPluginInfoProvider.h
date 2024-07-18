@@ -28,20 +28,14 @@
 #include <WebCore/PluginInfoProvider.h>
 
 class WebPluginInfoProvider final : public WebCore::PluginInfoProvider {
-    friend class NeverDestroyed<WebPluginInfoProvider>;
-
 public:
     static WebPluginInfoProvider& singleton();
     virtual ~WebPluginInfoProvider();
 
 private:
-    void refreshPlugins() override;
-    void getPluginInfo(WebCore::Page&, Vector<WebCore::PluginInfo>&) override;
-    void getWebVisiblePluginInfo(WebCore::Page&, Vector<WebCore::PluginInfo>&) override;
-#if PLATFORM(MAC)
-    void setPluginLoadClientPolicy(WebCore::PluginLoadClientPolicy, const String& host, const String& bundleIdentifier, const String& versionString) override;
-    void clearPluginClientPolicies() override;
-#endif
+    void refreshPlugins() final;
+    Vector<WebCore::PluginInfo> pluginInfo(WebCore::Page&, std::optional<Vector<WebCore::SupportedPluginIdentifier>>&) final;
+    Vector<WebCore::PluginInfo> webVisiblePluginInfo(WebCore::Page&i, const URL&) final;
 
     WebPluginInfoProvider();
 };

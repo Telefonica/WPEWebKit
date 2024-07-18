@@ -30,6 +30,7 @@
 #include "IntRect.h"
 #include "Timer.h"
 #include <wtf/RefCounted.h>
+#include <wtf/WallTime.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
@@ -47,7 +48,7 @@ class PageOverlay final : public RefCounted<PageOverlay> {
 public:
     class Client {
     protected:
-        virtual ~Client() { }
+        virtual ~Client() = default;
     
     public:
         virtual void willMoveToPage(PageOverlay&, Page*) = 0;
@@ -66,7 +67,12 @@ public:
         Document, // Scales and scrolls with the document.
     };
 
-    WEBCORE_EXPORT static Ref<PageOverlay> create(Client&, OverlayType = OverlayType::View);
+    enum class AlwaysTileOverlayLayer : bool {
+        Yes,
+        No,
+    };
+
+    WEBCORE_EXPORT static Ref<PageOverlay> create(Client&, OverlayType = OverlayType::View, AlwaysTileOverlayLayer = AlwaysTileOverlayLayer::No);
     WEBCORE_EXPORT virtual ~PageOverlay();
 
     WEBCORE_EXPORT PageOverlayController* controller() const;
@@ -98,6 +104,7 @@ public:
     enum class FadeMode { DoNotFade, Fade };
 
     OverlayType overlayType() { return m_overlayType; }
+    AlwaysTileOverlayLayer alwaysTileOverlayLayer() { return m_alwaysTileOverlayLayer; }
 
     WEBCORE_EXPORT IntRect bounds() const;
     WEBCORE_EXPORT IntRect frame() const;
@@ -117,7 +124,7 @@ public:
     void setNeedsSynchronousScrolling(bool needsSynchronousScrolling) { m_needsSynchronousScrolling = needsSynchronousScrolling; }
 
 private:
-    explicit PageOverlay(Client&, OverlayType);
+    explicit PageOverlay(Client&, OverlayType, AlwaysTileOverlayLayer);
 
     void startFadeAnimation();
     void fadeAnimationTimerFired();
@@ -126,8 +133,8 @@ private:
     Page* m_page { nullptr };
 
     Timer m_fadeAnimationTimer;
-    double m_fadeAnimationStartTime { 0 };
-    double m_fadeAnimationDuration;
+    WallTime m_fadeAnimationStartTime;
+    Seconds m_fadeAnimationDuration;
 
     enum FadeAnimationType {
         NoAnimation,
@@ -141,9 +148,10 @@ private:
     bool m_needsSynchronousScrolling;
 
     OverlayType m_overlayType;
+    AlwaysTileOverlayLayer m_alwaysTileOverlayLayer;
     IntRect m_overrideFrame;
 
-    Color m_backgroundColor { Color::transparent };
+    Color m_backgroundColor { Color::transparentBlack };
     PageOverlayID m_pageOverlayID;
 
     bool m_shouldIgnoreMouseEventsOutsideBounds { true };

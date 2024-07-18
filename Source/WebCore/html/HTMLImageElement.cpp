@@ -26,46 +26,60 @@
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
 #include "CachedImage.h"
+#include "Chrome.h"
+#include "ChromeClient.h"
+#include "CommonAtomStrings.h"
+#include "Editor.h"
+#include "ElementIterator.h"
+#include "ElementRareData.h"
+#include "EventLoop.h"
+#include "EventNames.h"
 #include "FrameView.h"
+#include "HTMLAnchorElement.h"
+#include "HTMLAttachmentElement.h"
 #include "HTMLDocument.h"
 #include "HTMLFormElement.h"
+#include "HTMLImageLoader.h"
+#include "HTMLMapElement.h"
 #include "HTMLParserIdioms.h"
 #include "HTMLPictureElement.h"
 #include "HTMLSourceElement.h"
 #include "HTMLSrcsetParser.h"
+#include "LazyLoadImageObserver.h"
 #include "Logging.h"
 #include "MIMETypeRegistry.h"
 #include "MediaList.h"
 #include "MediaQueryEvaluator.h"
+#include "MouseEvent.h"
 #include "NodeTraversal.h"
+#include "PlatformMouseEvent.h"
 #include "RenderImage.h"
 #include "RenderView.h"
+#include "ScriptController.h"
 #include "Settings.h"
 #include "ShadowRoot.h"
 #include "SizesAttributeParser.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/text/StringBuilder.h>
 
 #if ENABLE(SERVICE_CONTROLS)
-#include "ImageControlsRootElement.h"
+#include "ImageControlsMac.h"
 #endif
 
 namespace WebCore {
 
-using namespace HTMLNames;
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLImageElement);
 
-typedef HashMap<const HTMLImageElement*, WeakPtr<HTMLPictureElement>> PictureOwnerMap;
-static PictureOwnerMap* gPictureOwnerMap = nullptr;
+using namespace HTMLNames;
 
 HTMLImageElement::HTMLImageElement(const QualifiedName& tagName, Document& document, HTMLFormElement* form)
     : HTMLElement(tagName, document)
-    , m_imageLoader(*this)
+    , ActiveDOMObject(document)
+    , m_imageLoader(makeUnique<HTMLImageLoader>(*this))
     , m_form(nullptr)
     , m_formSetByParser(form)
-    , m_compositeOperator(CompositeSourceOver)
+    , m_compositeOperator(CompositeOperator::SourceOver)
     , m_imageDevicePixelRatio(1.0f)
-#if ENABLE(SERVICE_CONTROLS)
-    , m_experimentalImageMenuEnabled(false)
-#endif
 {
     ASSERT(hasTagName(imgTag));
     setHasCustomStyleResolveCallbacks();
@@ -73,45 +87,53 @@ HTMLImageElement::HTMLImageElement(const QualifiedName& tagName, Document& docum
 
 Ref<HTMLImageElement> HTMLImageElement::create(Document& document)
 {
-    return adoptRef(*new HTMLImageElement(imgTag, document));
+    auto image = adoptRef(*new HTMLImageElement(imgTag, document));
+    image->suspendIfNeeded();
+    return image;
 }
 
 Ref<HTMLImageElement> HTMLImageElement::create(const QualifiedName& tagName, Document& document, HTMLFormElement* form)
 {
-    return adoptRef(*new HTMLImageElement(tagName, document, form));
+    auto image = adoptRef(*new HTMLImageElement(tagName, document, form));
+    image->suspendIfNeeded();
+    return image;
 }
 
 HTMLImageElement::~HTMLImageElement()
 {
+    document().removeDynamicMediaQueryDependentImage(*this);
+
     if (m_form)
         m_form->removeImgElement(this);
-    setPictureElement(nullptr);
 }
 
-Ref<HTMLImageElement> HTMLImageElement::createForJSConstructor(Document& document, std::optional<unsigned> width, std::optional<unsigned> height)
+Ref<HTMLImageElement> HTMLImageElement::createForLegacyFactoryFunction(Document& document, std::optional<unsigned> width, std::optional<unsigned> height)
 {
     auto image = adoptRef(*new HTMLImageElement(imgTag, document));
     if (width)
         image->setWidth(width.value());
     if (height)
         image->setHeight(height.value());
+    image->suspendIfNeeded();
     return image;
 }
 
-bool HTMLImageElement::isPresentationAttribute(const QualifiedName& name) const
+bool HTMLImageElement::hasPresentationalHintsForAttribute(const QualifiedName& name) const
 {
-    if (name == widthAttr || name == heightAttr || name == borderAttr || name == vspaceAttr || name == hspaceAttr || name == alignAttr || name == valignAttr)
+    if (name == widthAttr || name == heightAttr || name == borderAttr || name == vspaceAttr || name == hspaceAttr || name == valignAttr)
         return true;
-    return HTMLElement::isPresentationAttribute(name);
+    return HTMLElement::hasPresentationalHintsForAttribute(name);
 }
 
-void HTMLImageElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStyleProperties& style)
+void HTMLImageElement::collectPresentationalHintsForAttribute(const QualifiedName& name, const AtomString& value, MutableStyleProperties& style)
 {
-    if (name == widthAttr)
-        addHTMLLengthToStyle(style, CSSPropertyWidth, value);
-    else if (name == heightAttr)
-        addHTMLLengthToStyle(style, CSSPropertyHeight, value);
-    else if (name == borderAttr)
+    if (name == widthAttr) {
+        addHTMLMultiLengthToStyle(style, CSSPropertyWidth, value);
+        applyAspectRatioFromWidthAndHeightAttributesToStyle(value, attributeWithoutSynchronization(heightAttr), style);
+    } else if (name == heightAttr) {
+        addHTMLMultiLengthToStyle(style, CSSPropertyHeight, value);
+        applyAspectRatioFromWidthAndHeightAttributesToStyle(attributeWithoutSynchronization(widthAttr), value, style);
+    } else if (name == borderAttr)
         applyBorderAttributeToStyle(value, style);
     else if (name == vspaceAttr) {
         addHTMLLengthToStyle(style, CSSPropertyMarginTop, value);
@@ -122,34 +144,71 @@ void HTMLImageElement::collectStyleForPresentationAttribute(const QualifiedName&
     } else if (name == alignAttr)
         applyAlignmentAttributeToStyle(value, style);
     else if (name == valignAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyVerticalAlign, value);
+        addPropertyToPresentationalHintStyle(style, CSSPropertyVerticalAlign, value);
     else
-        HTMLElement::collectStyleForPresentationAttribute(name, value, style);
+        HTMLElement::collectPresentationalHintsForAttribute(name, value, style);
 }
 
-const AtomicString& HTMLImageElement::imageSourceURL() const
+void HTMLImageElement::collectExtraStyleForPresentationalHints(MutableStyleProperties& style)
+{
+    if (!sourceElement())
+        return;
+    auto& widthAttrFromSource = sourceElement()->attributeWithoutSynchronization(widthAttr);
+    auto& heightAttrFromSource = sourceElement()->attributeWithoutSynchronization(heightAttr);
+    // If both width and height attributes of <source> is undefined, the style's value should not
+    // be overwritten. Otherwise, <souce> will overwrite it. I.e., if <source> only has one attribute
+    // defined, the other one and aspect-ratio shouldn't be set to auto.
+    if (widthAttrFromSource.isNull() && heightAttrFromSource.isNull())
+        return;
+
+    if (!widthAttrFromSource.isNull())
+        addHTMLLengthToStyle(style, CSSPropertyWidth, widthAttrFromSource);
+    else
+        addPropertyToPresentationalHintStyle(style, CSSPropertyWidth, CSSValueAuto);
+
+    if (!heightAttrFromSource.isNull())
+        addHTMLLengthToStyle(style, CSSPropertyHeight, heightAttrFromSource);
+    else
+        addPropertyToPresentationalHintStyle(style, CSSPropertyHeight, CSSValueAuto);
+
+    if (!widthAttrFromSource.isNull() && !heightAttrFromSource.isNull())
+        applyAspectRatioFromWidthAndHeightAttributesToStyle(widthAttrFromSource, heightAttrFromSource, style);
+    else
+        addPropertyToPresentationalHintStyle(style, CSSPropertyAspectRatio, CSSValueAuto);
+}
+
+const AtomString& HTMLImageElement::imageSourceURL() const
 {
     return m_bestFitImageURL.isEmpty() ? attributeWithoutSynchronization(srcAttr) : m_bestFitImageURL;
 }
 
 void HTMLImageElement::setBestFitURLAndDPRFromImageCandidate(const ImageCandidate& candidate)
 {
-    m_bestFitImageURL = candidate.string.toAtomicString();
-    m_currentSrc = AtomicString(document().completeURL(imageSourceURL()).string());
+    m_bestFitImageURL = candidate.string.toAtomString();
+    m_currentSrc = AtomString(document().completeURL(imageSourceURL()).string());
     if (candidate.density >= 0)
         m_imageDevicePixelRatio = 1 / candidate.density;
     if (is<RenderImage>(renderer()))
         downcast<RenderImage>(*renderer()).setImageDevicePixelRatio(m_imageDevicePixelRatio);
 }
 
+static String extractMIMETypeFromTypeAttributeForLookup(const String& typeAttribute)
+{
+    auto semicolonIndex = typeAttribute.find(';');
+    if (semicolonIndex == notFound)
+        return stripLeadingAndTrailingHTMLSpaces(typeAttribute);
+    return StringView(typeAttribute).left(semicolonIndex).stripLeadingAndTrailingMatchedCharacters(isHTMLSpace<UChar>).toStringWithoutCopying();
+}
+
 ImageCandidate HTMLImageElement::bestFitSourceFromPictureElement()
 {
-    auto* picture = pictureElement();
+    RefPtr picture = pictureElement();
     if (!picture)
         return { };
-    picture->clearViewportDependentResults();
-    document().removeViewportDependentPicture(*picture);
-    for (Node* child = picture->firstChild(); child && child != this; child = child->nextSibling()) {
+
+    ImageCandidate candidate;
+
+    for (RefPtr<Node> child = picture->firstChild(); child && child != this; child = child->nextSibling()) {
         if (!is<HTMLSourceElement>(*child))
             continue;
         auto& source = downcast<HTMLSourceElement>(*child);
@@ -160,75 +219,127 @@ ImageCandidate HTMLImageElement::bestFitSourceFromPictureElement()
 
         auto& typeAttribute = source.attributeWithoutSynchronization(typeAttr);
         if (!typeAttribute.isNull()) {
-            String type = typeAttribute.string();
-            type.truncate(type.find(';'));
-            type = stripLeadingAndTrailingHTMLSpaces(type);
-            if (!type.isEmpty() && !MIMETypeRegistry::isSupportedImageOrSVGMIMEType(type))
+            auto type = extractMIMETypeFromTypeAttributeForLookup(typeAttribute);
+            if (!type.isEmpty() && !MIMETypeRegistry::isSupportedImageVideoOrSVGMIMEType(type))
                 continue;
         }
 
-        auto* documentElement = document().documentElement();
-        MediaQueryEvaluator evaluator { document().printing() ? "print" : "screen", document(), documentElement ? documentElement->computedStyle() : nullptr };
-        auto* queries = source.parsedMediaAttribute();
+        RefPtr documentElement = document().documentElement();
+        MediaQueryEvaluator evaluator { document().printing() ? "print"_s : "screen"_s, document(), documentElement ? documentElement->computedStyle() : nullptr };
+        auto* queries = source.parsedMediaAttribute(document());
         LOG(MediaQueries, "HTMLImageElement %p bestFitSourceFromPictureElement evaluating media queries", this);
-        auto evaluation = !queries || evaluator.evaluate(*queries, picture->viewportDependentResults());
-        if (picture->hasViewportDependentResults())
-            document().addViewportDependentPicture(*picture);
+
+        auto evaluation = !queries || evaluator.evaluate(*queries, &m_mediaQueryDynamicResults);
         if (!evaluation)
             continue;
 
-        auto sourceSize = SizesAttributeParser(source.attributeWithoutSynchronization(sizesAttr).string(), document()).length();
-        auto candidate = bestFitSourceForImageAttributes(document().deviceScaleFactor(), nullAtom(), srcset, sourceSize);
-        if (!candidate.isEmpty())
-            return candidate;
+        SizesAttributeParser sizesParser(source.attributeWithoutSynchronization(sizesAttr).string(), document(), &m_mediaQueryDynamicResults);
+        auto sourceSize = sizesParser.length();
+
+        candidate = bestFitSourceForImageAttributes(document().deviceScaleFactor(), nullAtom(), srcset, sourceSize);
+        if (!candidate.isEmpty()) {
+            setSourceElement(&source);
+            break;
+        }
     }
-    return { };
+
+    return candidate;
 }
 
-void HTMLImageElement::selectImageSource()
+void HTMLImageElement::evaluateDynamicMediaQueryDependencies()
 {
+    RefPtr documentElement = document().documentElement();
+    MediaQueryEvaluator evaluator { document().printing() ? "print"_s : "screen"_s, document(), documentElement ? documentElement->computedStyle() : nullptr };
+
+    if (!evaluator.evaluateForChanges(m_mediaQueryDynamicResults))
+        return;
+
+    selectImageSource(RelevantMutation::No);
+}
+
+void HTMLImageElement::selectImageSource(RelevantMutation relevantMutation)
+{
+    m_mediaQueryDynamicResults = { };
+    document().removeDynamicMediaQueryDependentImage(*this);
+
     // First look for the best fit source from our <picture> parent if we have one.
     ImageCandidate candidate = bestFitSourceFromPictureElement();
     if (candidate.isEmpty()) {
+        setSourceElement(nullptr);
         // If we don't have a <picture> or didn't find a source, then we use our own attributes.
-        auto sourceSize = SizesAttributeParser(attributeWithoutSynchronization(sizesAttr).string(), document()).length();
+        SizesAttributeParser sizesParser(attributeWithoutSynchronization(sizesAttr).string(), document(), &m_mediaQueryDynamicResults);
+        auto sourceSize = sizesParser.length();
         candidate = bestFitSourceForImageAttributes(document().deviceScaleFactor(), attributeWithoutSynchronization(srcAttr), attributeWithoutSynchronization(srcsetAttr), sourceSize);
     }
     setBestFitURLAndDPRFromImageCandidate(candidate);
-    m_imageLoader.updateFromElementIgnoringPreviousError();
+    m_imageLoader->updateFromElementIgnoringPreviousError(relevantMutation);
+
+    if (!m_mediaQueryDynamicResults.isEmpty())
+        document().addDynamicMediaQueryDependentImage(*this);
 }
 
-void HTMLImageElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+bool HTMLImageElement::hasLazyLoadableAttributeValue(const AtomString& attributeValue)
+{
+    return equalLettersIgnoringASCIICase(attributeValue, "lazy"_s);
+}
+
+enum CrossOriginState { NotSet, UseCredentials, Anonymous };
+static CrossOriginState parseCrossoriginState(const AtomString& crossoriginValue)
+{
+    if (crossoriginValue.isNull())
+        return NotSet;
+    return equalLettersIgnoringASCIICase(crossoriginValue, "use-credentials"_s) ? UseCredentials : Anonymous;
+}
+
+void HTMLImageElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason reason)
+{
+    HTMLElement::attributeChanged(name, oldValue, newValue, reason);
+
+    if (name == referrerpolicyAttr && document().settings().referrerPolicyAttributeEnabled()) {
+        auto oldReferrerPolicy = parseReferrerPolicy(oldValue, ReferrerPolicySource::ReferrerPolicyAttribute).value_or(ReferrerPolicy::EmptyString);
+        auto newReferrerPolicy = parseReferrerPolicy(newValue, ReferrerPolicySource::ReferrerPolicyAttribute).value_or(ReferrerPolicy::EmptyString);
+        if (oldReferrerPolicy != newReferrerPolicy)
+            m_imageLoader->updateFromElementIgnoringPreviousError(RelevantMutation::Yes);
+    } else if (name == crossoriginAttr) {
+        if (parseCrossoriginState(oldValue) != parseCrossoriginState(newValue))
+            m_imageLoader->updateFromElementIgnoringPreviousError(RelevantMutation::Yes);
+    }
+}
+
+void HTMLImageElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == altAttr) {
         if (is<RenderImage>(renderer()))
             downcast<RenderImage>(*renderer()).updateAltText();
     } else if (name == srcAttr || name == srcsetAttr || name == sizesAttr)
-        selectImageSource();
+        selectImageSource(RelevantMutation::Yes);
     else if (name == usemapAttr) {
-        if (isConnected() && !m_parsedUsemap.isNull())
-            document().removeImageElementByUsemap(*m_parsedUsemap.impl(), *this);
+        if (isInTreeScope() && !m_parsedUsemap.isNull())
+            treeScope().removeImageElementByUsemap(*m_parsedUsemap.impl(), *this);
 
         m_parsedUsemap = parseHTMLHashNameReference(value);
 
-        if (isConnected() && !m_parsedUsemap.isNull())
-            document().addImageElementByUsemap(*m_parsedUsemap.impl(), *this);
+        if (isInTreeScope() && !m_parsedUsemap.isNull())
+            treeScope().addImageElementByUsemap(*m_parsedUsemap.impl(), *this);
     } else if (name == compositeAttr) {
         // FIXME: images don't support blend modes in their compositing attribute.
-        BlendMode blendOp = BlendModeNormal;
+        BlendMode blendOp = BlendMode::Normal;
         if (!parseCompositeAndBlendOperator(value, m_compositeOperator, blendOp))
-            m_compositeOperator = CompositeSourceOver;
+            m_compositeOperator = CompositeOperator::SourceOver;
 #if ENABLE(SERVICE_CONTROLS)
-    } else if (name == webkitimagemenuAttr) {
-        m_experimentalImageMenuEnabled = !value.isNull();
-        updateImageControls();
+    } else if (isImageMenuEnabled()) {
+        ImageControlsMac::updateImageControls(*this);
 #endif
+    } else if (name == loadingAttr) {
+        // No action needed for eager to lazy transition.
+        if (!hasLazyLoadableAttributeValue(value))
+            loadDeferredImage();
     } else {
         if (name == nameAttr) {
-            bool willHaveName = !value.isNull();
+            bool willHaveName = !value.isEmpty();
             if (m_hadNameBeforeAttributeChanged != willHaveName && isConnected() && !isInShadowTree() && is<HTMLDocument>(document())) {
                 HTMLDocument& document = downcast<HTMLDocument>(this->document());
-                const AtomicString& id = getIdAttribute();
+                const AtomString& id = getIdAttribute();
                 if (!id.isEmpty() && id != getNameAttribute()) {
                     if (willHaveName)
                         document.addDocumentNamedItem(*id.impl(), *this);
@@ -242,12 +353,17 @@ void HTMLImageElement::parseAttribute(const QualifiedName& name, const AtomicStr
     }
 }
 
-const AtomicString& HTMLImageElement::altText() const
+void HTMLImageElement::loadDeferredImage()
+{
+    m_imageLoader->loadDeferredImage();
+}
+
+const AtomString& HTMLImageElement::altText() const
 {
     // lets figure out the alt text.. magic stuff
     // http://www.w3.org/TR/1998/REC-html40-19980424/appendix/notes.html#altgen
     // also heavily discussed by Hixie on bugzilla
-    const AtomicString& alt = attributeWithoutSynchronization(altAttr);
+    const AtomString& alt = attributeWithoutSynchronization(altAttr);
     if (!alt.isNull())
         return alt;
     // fall back to title attribute
@@ -270,34 +386,38 @@ bool HTMLImageElement::canStartSelection() const
     return false;
 }
 
+bool HTMLImageElement::isInteractiveContent() const
+{
+    return hasAttributeWithoutSynchronization(usemapAttr);
+}
+
 void HTMLImageElement::didAttachRenderers()
 {
     if (!is<RenderImage>(renderer()))
         return;
-    if (m_imageLoader.hasPendingBeforeLoadEvent())
+    if (m_imageLoader->hasPendingBeforeLoadEvent())
         return;
 
 #if ENABLE(SERVICE_CONTROLS)
-    updateImageControls();
+    ImageControlsMac::updateImageControls(*this);
 #endif
 
     auto& renderImage = downcast<RenderImage>(*renderer());
     RenderImageResource& renderImageResource = renderImage.imageResource();
     if (renderImageResource.cachedImage())
         return;
-    renderImageResource.setCachedImage(m_imageLoader.image());
+    renderImageResource.setCachedImage(m_imageLoader->image());
 
     // If we have no image at all because we have no src attribute, set
     // image height and width for the alt text instead.
-    if (!m_imageLoader.image() && !renderImageResource.cachedImage())
+    if (!m_imageLoader->image() && !renderImageResource.cachedImage())
         renderImage.setImageSizeForAltText();
 }
 
-Node::InsertionNotificationRequest HTMLImageElement::insertedInto(ContainerNode& insertionPoint)
+Node::InsertedIntoAncestorResult HTMLImageElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
     if (m_formSetByParser) {
-        m_form = m_formSetByParser;
-        m_formSetByParser = nullptr;
+        m_form = WTFMove(m_formSetByParser);
         m_form->registerImgElement(this);
     }
 
@@ -307,66 +427,61 @@ Node::InsertionNotificationRequest HTMLImageElement::insertedInto(ContainerNode&
     }
 
     if (!m_form) {
-        m_form = HTMLFormElement::findClosestFormAncestor(*this);
-        if (m_form)
-            m_form->registerImgElement(this);
+        if (auto* newForm = HTMLFormElement::findClosestFormAncestor(*this)) {
+            m_form = newForm;
+            newForm->registerImgElement(this);
+        }
     }
+
     // Insert needs to complete first, before we start updating the loader. Loader dispatches events which could result
     // in callbacks back to this node.
-    Node::InsertionNotificationRequest insertNotificationRequest = HTMLElement::insertedInto(insertionPoint);
+    Node::InsertedIntoAncestorResult insertNotificationRequest = HTMLElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
 
-    if (insertionPoint.isConnected() && !m_parsedUsemap.isNull())
-        document().addImageElementByUsemap(*m_parsedUsemap.impl(), *this);
+    if (insertionType.treeScopeChanged && !m_parsedUsemap.isNull())
+        treeScope().addImageElementByUsemap(*m_parsedUsemap.impl(), *this);
 
-    if (is<HTMLPictureElement>(parentNode())) {
-        setPictureElement(&downcast<HTMLPictureElement>(*parentNode()));
-        selectImageSource();
+    if (is<HTMLPictureElement>(&parentOfInsertedTree) && &parentOfInsertedTree == parentElement()) {
+        // FIXME: When the hack in HTMLConstructionSite::createHTMLElementOrFindCustomElementInterface to eagerly call setPictureElement is removed, we can just assert !pictureElement().
+        ASSERT(!pictureElement() || pictureElement() == &parentOfInsertedTree);
+        setPictureElement(&downcast<HTMLPictureElement>(parentOfInsertedTree));
+        selectImageSource(RelevantMutation::Yes);
+        return insertNotificationRequest;
     }
 
     // If we have been inserted from a renderer-less document,
     // our loader may have not fetched the image, so do it now.
-    if (insertionPoint.isConnected() && !m_imageLoader.image())
-        m_imageLoader.updateFromElement();
+    if (insertionType.connectedToDocument && !m_imageLoader->image())
+        m_imageLoader->updateFromElement();
 
     return insertNotificationRequest;
 }
 
-void HTMLImageElement::removedFrom(ContainerNode& insertionPoint)
+void HTMLImageElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
 {
     if (m_form)
         m_form->removeImgElement(this);
 
-    if (insertionPoint.isConnected() && !m_parsedUsemap.isNull())
-        document().removeImageElementByUsemap(*m_parsedUsemap.impl(), *this);
-    
-    if (is<HTMLPictureElement>(parentNode()))
+    if (removalType.treeScopeChanged && !m_parsedUsemap.isNull())
+        oldParentOfRemovedTree.treeScope().removeImageElementByUsemap(*m_parsedUsemap.impl(), *this);
+
+    if (is<HTMLPictureElement>(oldParentOfRemovedTree) && !parentElement()) {
+        ASSERT(pictureElement() == &oldParentOfRemovedTree);
         setPictureElement(nullptr);
-    
+        selectImageSource(RelevantMutation::Yes);
+    }
+
     m_form = nullptr;
-    HTMLElement::removedFrom(insertionPoint);
+    HTMLElement::removedFromAncestor(removalType, oldParentOfRemovedTree);
 }
 
 HTMLPictureElement* HTMLImageElement::pictureElement() const
 {
-    if (!gPictureOwnerMap || !gPictureOwnerMap->contains(this))
-        return nullptr;
-    HTMLPictureElement* result = gPictureOwnerMap->get(this).get();
-    if (!result)
-        gPictureOwnerMap->remove(this);
-    return result;
+    return m_pictureElement.get();
 }
     
 void HTMLImageElement::setPictureElement(HTMLPictureElement* pictureElement)
 {
-    if (!pictureElement) {
-        if (gPictureOwnerMap)
-            gPictureOwnerMap->remove(this);
-        return;
-    }
-    
-    if (!gPictureOwnerMap)
-        gPictureOwnerMap = new PictureOwnerMap();
-    gPictureOwnerMap->add(this, pictureElement->createWeakPtr());
+    m_pictureElement = pictureElement;
 }
     
 unsigned HTMLImageElement::width(bool ignorePendingStylesheets)
@@ -378,8 +493,8 @@ unsigned HTMLImageElement::width(bool ignorePendingStylesheets)
             return optionalWidth.value();
 
         // if the image is available, use its width
-        if (m_imageLoader.image())
-            return m_imageLoader.image()->imageSizeForRenderer(renderer(), 1.0f).width().toUnsigned();
+        if (m_imageLoader->image())
+            return m_imageLoader->image()->imageSizeForRenderer(renderer(), 1.0f).width().toUnsigned();
     }
 
     if (ignorePendingStylesheets)
@@ -403,8 +518,8 @@ unsigned HTMLImageElement::height(bool ignorePendingStylesheets)
             return optionalHeight.value();
 
         // if the image is available, use its height
-        if (m_imageLoader.image())
-            return m_imageLoader.image()->imageSizeForRenderer(renderer(), 1.0f).height().toUnsigned();
+        if (m_imageLoader->image())
+            return m_imageLoader->image()->imageSizeForRenderer(renderer(), 1.0f).height().toUnsigned();
     }
 
     if (ignorePendingStylesheets)
@@ -419,20 +534,33 @@ unsigned HTMLImageElement::height(bool ignorePendingStylesheets)
     return adjustForAbsoluteZoom(snappedIntRect(contentRect).height(), *box);
 }
 
+float HTMLImageElement::effectiveImageDevicePixelRatio() const
+{
+    if (!m_imageLoader->image())
+        return 1.0f;
+
+    auto* image = m_imageLoader->image()->image();
+
+    if (image && image->drawsSVGImage())
+        return 1.0f;
+
+    return m_imageDevicePixelRatio;
+}
+
 int HTMLImageElement::naturalWidth() const
 {
-    if (!m_imageLoader.image())
+    if (!m_imageLoader->image())
         return 0;
 
-    return m_imageLoader.image()->imageSizeForRenderer(renderer(), 1.0f).width();
+    return m_imageLoader->image()->unclampedImageSizeForRenderer(renderer(), effectiveImageDevicePixelRatio()).width();
 }
 
 int HTMLImageElement::naturalHeight() const
 {
-    if (!m_imageLoader.image())
+    if (!m_imageLoader->image())
         return 0;
 
-    return m_imageLoader.image()->imageSizeForRenderer(renderer(), 1.0f).height();
+    return m_imageLoader->image()->unclampedImageSizeForRenderer(renderer(), effectiveImageDevicePixelRatio()).height();
 }
 
 bool HTMLImageElement::isURLAttribute(const Attribute& attribute) const
@@ -450,45 +578,59 @@ bool HTMLImageElement::attributeContainsURL(const Attribute& attribute) const
         || HTMLElement::attributeContainsURL(attribute);
 }
 
-String HTMLImageElement::completeURLsInAttributeValue(const URL& base, const Attribute& attribute) const
+String HTMLImageElement::completeURLsInAttributeValue(const URL& base, const Attribute& attribute, ResolveURLs resolveURLs) const
 {
     if (attribute.name() == srcsetAttr) {
+        if (resolveURLs == ResolveURLs::No)
+            return attribute.value();
+
         Vector<ImageCandidate> imageCandidates = parseImageCandidatesFromSrcsetAttribute(StringView(attribute.value()));
+
+        if (resolveURLs == ResolveURLs::NoExcludingURLsForPrivacy) {
+            bool needsToResolveURLs = false;
+            for (const auto& candidate : imageCandidates) {
+                auto urlString = candidate.string.toString();
+                auto completeURL = base.isNull() ? document().completeURL(urlString) : URL(base, urlString);
+                if (document().shouldMaskURLForBindings(completeURL)) {
+                    needsToResolveURLs = true;
+                    break;
+                }
+            }
+
+            if (!needsToResolveURLs)
+                return attribute.value();
+        }
+
         StringBuilder result;
         for (const auto& candidate : imageCandidates) {
             if (&candidate != &imageCandidates[0])
-                result.appendLiteral(", ");
-            result.append(URL(base, candidate.string.toString()).string());
-            if (candidate.density != UninitializedDescriptor) {
-                result.append(' ');
-                result.appendNumber(candidate.density);
-                result.append('x');
-            }
-            if (candidate.resourceWidth != UninitializedDescriptor) {
-                result.append(' ');
-                result.appendNumber(candidate.resourceWidth);
-                result.append('w');
-            }
+                result.append(", ");
+            result.append(resolveURLStringIfNeeded(candidate.string.toString(), resolveURLs, base));
+            if (candidate.density != UninitializedDescriptor)
+                result.append(' ', candidate.density, 'x');
+            if (candidate.resourceWidth != UninitializedDescriptor)
+                result.append(' ', candidate.resourceWidth, 'w');
         }
+
         return result.toString();
     }
-    return HTMLElement::completeURLsInAttributeValue(base, attribute);
+
+    return HTMLElement::completeURLsInAttributeValue(base, attribute, resolveURLs);
 }
 
-bool HTMLImageElement::matchesUsemap(const AtomicStringImpl& name) const
+bool HTMLImageElement::matchesUsemap(const AtomStringImpl& name) const
 {
     return m_parsedUsemap.impl() == &name;
 }
 
-const AtomicString& HTMLImageElement::alt() const
+HTMLMapElement* HTMLImageElement::associatedMapElement() const
 {
-    return attributeWithoutSynchronization(altAttr);
+    return treeScope().getImageMap(m_parsedUsemap);
 }
 
-bool HTMLImageElement::draggable() const
+const AtomString& HTMLImageElement::alt() const
 {
-    // Image elements are draggable by default.
-    return !equalLettersIgnoringASCIICase(attributeWithoutSynchronization(draggableAttr), "false");
+    return attributeWithoutSynchronization(altAttr);
 }
 
 void HTMLImageElement::setHeight(unsigned value)
@@ -501,7 +643,7 @@ URL HTMLImageElement::src() const
     return document().completeURL(attributeWithoutSynchronization(srcAttr));
 }
 
-void HTMLImageElement::setSrc(const String& value)
+void HTMLImageElement::setSrc(const AtomString& value)
 {
     setAttributeWithoutSynchronization(srcAttr, value);
 }
@@ -535,12 +677,40 @@ int HTMLImageElement::y() const
 
 bool HTMLImageElement::complete() const
 {
-    return m_imageLoader.imageComplete();
+    return m_imageLoader->imageComplete();
 }
 
+void HTMLImageElement::setDecoding(AtomString&& decodingMode)
+{
+    setAttributeWithoutSynchronization(decodingAttr, WTFMove(decodingMode));
+}
+
+String HTMLImageElement::decoding() const
+{
+    switch (decodingMode()) {
+    case DecodingMode::Synchronous:
+        return "sync"_s;
+    case DecodingMode::Asynchronous:
+        return "async"_s;
+    case DecodingMode::Auto:
+        break;
+    }
+    return autoAtom();
+}
+
+DecodingMode HTMLImageElement::decodingMode() const
+{
+    const AtomString& decodingMode = attributeWithoutSynchronization(decodingAttr);
+    if (equalLettersIgnoringASCIICase(decodingMode, "sync"_s))
+        return DecodingMode::Synchronous;
+    if (equalLettersIgnoringASCIICase(decodingMode, "async"_s))
+        return DecodingMode::Asynchronous;
+    return DecodingMode::Auto;
+}
+    
 void HTMLImageElement::decode(Ref<DeferredPromise>&& promise)
 {
-    return m_imageLoader.decode(WTFMove(promise));
+    return m_imageLoader->decode(WTFMove(promise));
 }
 
 void HTMLImageElement::addSubresourceAttributeURLs(ListHashSet<URL>& urls) const
@@ -554,8 +724,13 @@ void HTMLImageElement::addSubresourceAttributeURLs(ListHashSet<URL>& urls) const
 
 void HTMLImageElement::didMoveToNewDocument(Document& oldDocument, Document& newDocument)
 {
-    m_imageLoader.elementDidMoveToNewDocument();
+    oldDocument.removeDynamicMediaQueryDependentImage(*this);
+
+    selectImageSource(RelevantMutation::No);
+    m_imageLoader->elementDidMoveToNewDocument(oldDocument);
     HTMLElement::didMoveToNewDocument(oldDocument, newDocument);
+    if (RefPtr element = pictureElement())
+        element->sourcesChanged();
 }
 
 bool HTMLImageElement::isServerMap() const
@@ -563,7 +738,7 @@ bool HTMLImageElement::isServerMap() const
     if (!hasAttributeWithoutSynchronization(ismapAttr))
         return false;
 
-    const AtomicString& usemap = attributeWithoutSynchronization(usemapAttr);
+    const AtomString& usemap = attributeWithoutSynchronization(usemapAttr);
 
     // If the usemap attribute starts with '#', it refers to a map element in the document.
     if (usemap.string()[0] == '#')
@@ -572,7 +747,7 @@ bool HTMLImageElement::isServerMap() const
     return document().completeURL(stripLeadingAndTrailingHTMLSpaces(usemap)).isEmpty();
 }
 
-void HTMLImageElement::setCrossOrigin(const AtomicString& value)
+void HTMLImageElement::setCrossOrigin(const AtomString& value)
 {
     setAttributeWithoutSynchronization(crossoriginAttr, value);
 }
@@ -582,85 +757,205 @@ String HTMLImageElement::crossOrigin() const
     return parseCORSSettingsAttribute(attributeWithoutSynchronization(crossoriginAttr));
 }
 
+bool HTMLImageElement::allowsOrientationOverride() const
+{
+    auto* cachedImage = this->cachedImage();
+    if (!cachedImage)
+        return true;
+
+    auto image = cachedImage->image();
+    return !image || image->sourceURL().protocolIsData() || cachedImage->isCORSSameOrigin();
+}
+
+#if ENABLE(ATTACHMENT_ELEMENT)
+
+void HTMLImageElement::setAttachmentElement(Ref<HTMLAttachmentElement>&& attachment)
+{
+    if (auto existingAttachment = attachmentElement())
+        existingAttachment->remove();
+
+    attachment->setInlineStyleProperty(CSSPropertyDisplay, CSSValueNone, true);
+    ensureUserAgentShadowRoot().appendChild(WTFMove(attachment));
 #if ENABLE(SERVICE_CONTROLS)
-void HTMLImageElement::updateImageControls()
-{
-    // If this image element is inside a shadow tree then it is part of an image control.
-    if (isInShadowTree())
-        return;
-
-    if (!document().settings().imageControlsEnabled())
-        return;
-
-    bool hasControls = hasImageControls();
-    if (!m_experimentalImageMenuEnabled && hasControls)
-        destroyImageControls();
-    else if (m_experimentalImageMenuEnabled && !hasControls)
-        tryCreateImageControls();
+    setImageMenuEnabled(true);
+#endif
 }
 
-void HTMLImageElement::tryCreateImageControls()
+RefPtr<HTMLAttachmentElement> HTMLImageElement::attachmentElement() const
 {
-    ASSERT(m_experimentalImageMenuEnabled);
-    ASSERT(!hasImageControls());
+    if (auto shadowRoot = userAgentShadowRoot())
+        return childrenOfType<HTMLAttachmentElement>(*shadowRoot).first();
 
-    auto imageControls = ImageControlsRootElement::tryCreate(document());
-    if (!imageControls)
-        return;
-
-    ensureUserAgentShadowRoot().appendChild(*imageControls);
-
-    auto* renderObject = renderer();
-    if (!renderObject)
-        return;
-
-    downcast<RenderImage>(*renderObject).setHasShadowControls(true);
+    return nullptr;
 }
 
-void HTMLImageElement::destroyImageControls()
+const String& HTMLImageElement::attachmentIdentifier() const
 {
-    ShadowRoot* shadowRoot = userAgentShadowRoot();
-    if (!shadowRoot)
-        return;
+    if (!m_pendingClonedAttachmentID.isEmpty())
+        return m_pendingClonedAttachmentID;
 
-    if (Node* node = shadowRoot->firstChild()) {
-        ASSERT_WITH_SECURITY_IMPLICATION(node->isImageControlsRootElement());
-        shadowRoot->removeChild(*node);
-    }
+    if (auto attachment = attachmentElement())
+        return attachment->uniqueIdentifier();
 
-    auto* renderObject = renderer();
-    if (!renderObject)
-        return;
-
-    downcast<RenderImage>(*renderObject).setHasShadowControls(false);
+    return nullAtom();
 }
 
-bool HTMLImageElement::hasImageControls() const
-{
-    if (ShadowRoot* shadowRoot = userAgentShadowRoot()) {
-        Node* node = shadowRoot->firstChild();
-        ASSERT_WITH_SECURITY_IMPLICATION(!node || node->isImageControlsRootElement());
-        return node;
-    }
+#endif // ENABLE(ATTACHMENT_ELEMENT)
 
-    return false;
-}
-
+#if ENABLE(SERVICE_CONTROLS)
 bool HTMLImageElement::childShouldCreateRenderer(const Node& child) const
 {
     return hasShadowRootParent(child) && HTMLElement::childShouldCreateRenderer(child);
 }
-#endif // ENABLE(SERVICE_CONTROLS)
+#endif
 
-#if PLATFORM(IOS)
-// FIXME: This is a workaround for <rdar://problem/7725158>. We should find a better place for the touchCalloutEnabled() logic.
-bool HTMLImageElement::willRespondToMouseClickEvents()
+#if PLATFORM(IOS_FAMILY)
+// FIXME: We should find a better place for the touch callout logic. See rdar://problem/48937767.
+bool HTMLImageElement::willRespondToMouseClickEventsWithEditability(Editability editability, IgnoreTouchCallout ignoreTouchCallout) const
 {
     auto renderer = this->renderer();
-    if (!renderer || renderer->style().touchCalloutEnabled())
+    if (ignoreTouchCallout == IgnoreTouchCallout::No && (!renderer || renderer->style().touchCalloutEnabled()))
         return true;
-    return HTMLElement::willRespondToMouseClickEvents();
+    return HTMLElement::willRespondToMouseClickEventsWithEditability(editability);
+}
+
+bool HTMLImageElement::willRespondToMouseClickEventsWithEditability(Editability editability) const
+{
+    return willRespondToMouseClickEventsWithEditability(editability, IgnoreTouchCallout::No);
 }
 #endif
+
+#if USE(SYSTEM_PREVIEW)
+bool HTMLImageElement::isSystemPreviewImage() const
+{
+    if (!document().settings().systemPreviewEnabled())
+        return false;
+
+    auto* parent = parentElement();
+    if (is<HTMLAnchorElement>(parent))
+        return downcast<HTMLAnchorElement>(parent)->isSystemPreviewLink();
+    if (is<HTMLPictureElement>(parent))
+        return downcast<HTMLPictureElement>(parent)->isSystemPreviewImage();
+    return false;
+}
+#endif
+
+void HTMLImageElement::copyNonAttributePropertiesFromElement(const Element& source)
+{
+    auto& sourceImage = static_cast<const HTMLImageElement&>(source);
+#if ENABLE(ATTACHMENT_ELEMENT)
+    m_pendingClonedAttachmentID = !sourceImage.m_pendingClonedAttachmentID.isEmpty() ? sourceImage.m_pendingClonedAttachmentID : sourceImage.attachmentIdentifier();
+#else
+    UNUSED_PARAM(sourceImage);
+#endif
+    Element::copyNonAttributePropertiesFromElement(source);
+}
+
+CachedImage* HTMLImageElement::cachedImage() const
+{
+    return m_imageLoader->image();
+}
+
+void HTMLImageElement::setLoadManually(bool loadManually)
+{
+    m_imageLoader->setLoadManually(loadManually);
+}
+
+const char* HTMLImageElement::activeDOMObjectName() const
+{
+    return "HTMLImageElement";
+}
+
+bool HTMLImageElement::virtualHasPendingActivity() const
+{
+    return m_imageLoader->hasPendingActivity();
+}
+
+size_t HTMLImageElement::pendingDecodePromisesCountForTesting() const
+{
+    return m_imageLoader->pendingDecodePromisesCountForTesting();
+}
+
+AtomString HTMLImageElement::srcsetForBindings() const
+{
+    return getAttributeForBindings(srcsetAttr);
+}
+
+void HTMLImageElement::setSrcsetForBindings(const AtomString& value)
+{
+    setAttributeWithoutSynchronization(srcsetAttr, value);
+}
+
+const AtomString& HTMLImageElement::loadingForBindings() const
+{
+    auto& attributeValue = attributeWithoutSynchronization(HTMLNames::loadingAttr);
+    return hasLazyLoadableAttributeValue(attributeValue) ? lazyAtom() : eagerAtom();
+}
+
+void HTMLImageElement::setLoadingForBindings(const AtomString& value)
+{
+    setAttributeWithoutSynchronization(loadingAttr, value);
+}
+
+bool HTMLImageElement::isDeferred() const
+{
+    return m_imageLoader->isDeferred();
+}
+
+bool HTMLImageElement::isLazyLoadable() const
+{
+    if (!document().frame() || !document().frame()->script().canExecuteScripts(NotAboutToExecuteScript))
+        return false;
+    return hasLazyLoadableAttributeValue(attributeWithoutSynchronization(HTMLNames::loadingAttr));
+}
+
+void HTMLImageElement::setReferrerPolicyForBindings(const AtomString& value)
+{
+    setAttributeWithoutSynchronization(referrerpolicyAttr, value);
+}
+
+String HTMLImageElement::referrerPolicyForBindings() const
+{
+    return referrerPolicyToString(referrerPolicy());
+}
+
+ReferrerPolicy HTMLImageElement::referrerPolicy() const
+{
+    if (document().settings().referrerPolicyAttributeEnabled())
+        return parseReferrerPolicy(attributeWithoutSynchronization(referrerpolicyAttr), ReferrerPolicySource::ReferrerPolicyAttribute).value_or(ReferrerPolicy::EmptyString);
+    return ReferrerPolicy::EmptyString;
+}
+
+HTMLSourceElement* HTMLImageElement::sourceElement() const
+{
+    return m_sourceElement.get();
+}
+
+void HTMLImageElement::setSourceElement(HTMLSourceElement* sourceElement)
+{
+    if (m_sourceElement == sourceElement)
+        return;
+    m_sourceElement = sourceElement;
+    invalidateAttributeMapping();
+}
+
+void HTMLImageElement::invalidateAttributeMapping()
+{
+    ensureUniqueElementData().setPresentationalHintStyleIsDirty(true);
+    invalidateStyle();
+}
+
+Ref<Element> HTMLImageElement::cloneElementWithoutAttributesAndChildren(Document& targetDocument)
+{
+    auto clone = create(targetDocument);
+#if ENABLE(ATTACHMENT_ELEMENT)
+    if (auto attachment = attachmentElement()) {
+        auto attachmentClone = attachment->cloneElementWithoutChildren(targetDocument);
+        RELEASE_ASSERT(is<HTMLAttachmentElement>(attachmentClone));
+        clone->setAttachmentElement(downcast<HTMLAttachmentElement>(attachmentClone.get()));
+    }
+#endif
+    return clone;
+}
 
 }

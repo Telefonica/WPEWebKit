@@ -23,7 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
+#if PLATFORM(MAC)
 
 #if USE(APPLE_INTERNAL_SDK)
 #import <PIP/PIPViewControllerPrivate.h>
@@ -49,6 +49,7 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol PIPViewControllerDelegate <NSObject>
 @optional
 - (BOOL)pipShouldClose:(PIPViewController *)pip;
+- (void)pipWillClose:(PIPViewController *)pip;
 - (void)pipDidClose:(PIPViewController *)pip;
 - (void)pipActionPlay:(PIPViewController *)pip;
 - (void)pipActionPause:(PIPViewController *)pip;
@@ -59,4 +60,4 @@ NS_ASSUME_NONNULL_END
 
 #endif
 
-#endif // PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
+#endif // PLATFORM(MAC)

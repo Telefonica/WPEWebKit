@@ -13,12 +13,13 @@ declare_args() {
 config("libsrtp_config") {
   defines = [
     # Package identity
-    "PACKAGE_STRING=\"libsrtp2 2.0.0-pre\"",
-    "PACKAGE_VERSION=\"2.0.0-pre\"",
+    "PACKAGE_STRING=\"860492290f7d1f25e2bd45da6471bfd4cd4d7add\"",
+    "PACKAGE_VERSION=\"860492290f7d1f25e2bd45da6471bfd4cd4d7add\"",
 
     # Config
     "HAVE_CONFIG_H",
     "OPENSSL",
+    "GCM",
 
     # Platform properties
     "HAVE_STDLIB_H",
@@ -33,7 +34,8 @@ config("libsrtp_config") {
     "HAVE_UINT64_T",
     "HAVE_UINT8_T",
   ]
-  if (is_posix) {
+
+  if (is_posix || is_fuchsia) {
     defines += [
       "HAVE_ARPA_INET_H",
       "HAVE_NETINET_IN_H",
@@ -70,17 +72,18 @@ static_library("libsrtp") {
   sources = [
     # includes
     "include/ekt.h",
-    "include/rtp.h",
     "include/srtp.h",
 
     # headers
     "crypto/include/aes.h",
-    "crypto/include/aes_gcm_ossl.h",
+    "crypto/include/aes_gcm.h",
+    "crypto/include/cipher_priv.h",
     "crypto/include/aes_icm.h",
-    "crypto/include/aes_icm_ossl.h",
+    "crypto/include/aes_icm_ext.h",
     "crypto/include/alloc.h",
     "crypto/include/auth.h",
     "crypto/include/cipher.h",
+    "crypto/include/cipher_types.h",
     "crypto/include/crypto_kernel.h",
     "crypto/include/crypto_types.h",
     "crypto/include/datatypes.h",
@@ -92,7 +95,6 @@ static_library("libsrtp") {
     "crypto/include/rdb.h",
     "crypto/include/rdbx.h",
     "crypto/include/stat.h",
-    "include/rtp_priv.h",
     "include/srtp_priv.h",
     "include/ut_sim.h",
 
@@ -114,7 +116,23 @@ static_library("libsrtp") {
     "crypto/replay/rdbx.c",
     "srtp/ekt.c",
     "srtp/srtp.c",
+
+    # TODO(bugs.webrtc.org/11915): The following files are not needed by
+    # WebRTC and they are not part of the build and the checkout.
+    # Adding them to the build, requires the addition of some conditionals
+    # since these files include duplicated symbols and cannot be built
+    # together.
+    #
+    # "crypto/include/hmac.h",
+    # "crypto/include/sha1.h",
+    # "crypto/cipher/aes.c",
+    # "crypto/cipher/aes_icm.c",
+    # "crypto/hash/hmac.c",
+    # "crypto/hash/sha1.c",
+    # "crypto/cipher/aes_gcm_nss.c",
+    # "crypto/cipher/aes_icm_nss.c",
   ]
+
   public_deps = [
     "//third_party/boringssl:boringssl",
   ]
@@ -143,35 +161,40 @@ if (build_libsrtp_tests) {
         "test/getopt_s.c",
         "test/util.c",
         "test/util.h",
-        invoker.source,
-      ]
+      ] + invoker.sources
       testonly = true
     }
   }
 
   srtp_test("dtls_srtp_driver") {
-    source = "test/dtls_srtp_driver.c"
+    sources = [ "test/dtls_srtp_driver.c" ]
   }
   srtp_test("rdbx_driver") {
-    source = "test/rdbx_driver.c"
+    sources = [ "test/rdbx_driver.c" ]
   }
   srtp_test("replay_driver") {
-    source = "test/replay_driver.c"
+    sources = [ "test/replay_driver.c" ]
   }
   srtp_test("roc_driver") {
-    source = "test/roc_driver.c"
+    sources = [ "test/roc_driver.c" ]
   }
   srtp_test("srtp_driver") {
-    source = "test/srtp_driver.c"
+    sources = [ "test/srtp_driver.c" ]
+  }
+  srtp_test("test_srtp") {
+    sources = [
+      "test/cutest.h",
+      "test/test_srtp.c",
+    ]
   }
   srtp_test("cipher_driver") {
-    source = "crypto/test/cipher_driver.c"
+    sources = [ "crypto/test/cipher_driver.c" ]
   }
   srtp_test("datatypes_driver") {
-    source = "crypto/test/datatypes_driver.c"
+    sources = [ "crypto/test/datatypes_driver.c" ]
   }
   srtp_test("kernel_driver") {
-    source = "crypto/test/kernel_driver.c"
+    sources = [ "crypto/test/kernel_driver.c" ]
   }
 
   executable("rtpw") {
@@ -186,6 +209,7 @@ if (build_libsrtp_tests) {
       "include/getopt_s.h",
       "test/getopt_s.c",
       "test/rtp.c",
+      "test/rtp.h",
       "test/rtpw.c",
       "test/util.c",
       "test/util.h",
@@ -210,6 +234,16 @@ if (build_libsrtp_tests) {
     testonly = true
   }
 
+  copy("test_data") {
+    sources = [
+      "test/words.txt",
+    ]
+    outputs = [
+      "${root_out_dir}/srtp_tests/{{source_file_part}}",
+    ]
+    testonly = true
+  }
+
   group("srtp_tests") {
     deps = [
       ":cipher_driver",
@@ -221,7 +255,9 @@ if (build_libsrtp_tests) {
       ":roc_driver",
       ":rtpw",
       ":srtp_driver",
+      ":test_srtp",
       ":test_scripts",
+      ":test_data",
     ]
     testonly = true
   }

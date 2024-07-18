@@ -8,13 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/codecs/tools/audio_codec_speed_test.h"
+#include "modules/audio_coding/codecs/tools/audio_codec_speed_test.h"
 
-#include "webrtc/base/format_macros.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/testsupport/fileutils.h"
+#include "rtc_base/checks.h"
+#include "test/gtest.h"
+#include "test/testsupport/file_utils.h"
 
-using ::std::tr1::get;
+using ::std::get;
 
 namespace webrtc {
 
@@ -34,8 +34,7 @@ AudioCodecSpeedTest::AudioCodecSpeedTest(int block_duration_ms,
       encoded_bytes_(0),
       encoding_time_ms_(0.0),
       decoding_time_ms_(0.0),
-      out_file_(NULL) {
-}
+      out_file_(NULL) {}
 
 void AudioCodecSpeedTest::SetUp() {
   channels_ = get<0>(GetParam());
@@ -44,7 +43,7 @@ void AudioCodecSpeedTest::SetUp() {
   save_out_data_ = get<4>(GetParam());
 
   FILE* fp = fopen(in_filename_.c_str(), "rb");
-  assert(fp != NULL);
+  RTC_DCHECK(fp);
 
   // Obtain file size.
   fseek(fp, 0, SEEK_END);
@@ -52,8 +51,8 @@ void AudioCodecSpeedTest::SetUp() {
   rewind(fp);
 
   // Allocate memory to contain the whole file.
-  in_data_.reset(new int16_t[loop_length_samples_ +
-      input_length_sample_ * channels_]);
+  in_data_.reset(
+      new int16_t[loop_length_samples_ + input_length_sample_ * channels_]);
 
   data_pointer_ = 0;
 
@@ -84,7 +83,7 @@ void AudioCodecSpeedTest::SetUp() {
     out_filename = test::OutputPath() + out_filename + ".pcm";
 
     out_file_ = fopen(out_filename.c_str(), "wb");
-    assert(out_file_ != NULL);
+    RTC_DCHECK(out_file_);
 
     printf("Output to be saved in %s.\n", out_filename.c_str());
   }
@@ -100,7 +99,7 @@ void AudioCodecSpeedTest::EncodeDecode(size_t audio_duration_sec) {
   size_t time_now_ms = 0;
   float time_ms;
 
-  printf("Coding %d kHz-sampled %" PRIuS "-channel audio at %d bps ...\n",
+  printf("Coding %d kHz-sampled %zu-channel audio at %d bps ...\n",
          input_sampling_khz_, channels_, bit_rate_);
 
   while (time_now_ms < audio_duration_sec * 1000) {
@@ -111,11 +110,11 @@ void AudioCodecSpeedTest::EncodeDecode(size_t audio_duration_sec) {
     time_ms = DecodeABlock(&bit_stream_[0], encoded_bytes_, &out_data_[0]);
     decoding_time_ms_ += time_ms;
     if (save_out_data_) {
-      fwrite(&out_data_[0], sizeof(int16_t),
-             output_length_sample_ * channels_, out_file_);
+      fwrite(&out_data_[0], sizeof(int16_t), output_length_sample_ * channels_,
+             out_file_);
     }
     data_pointer_ = (data_pointer_ + input_length_sample_ * channels_) %
-        loop_length_samples_;
+                    loop_length_samples_;
     time_now_ms += block_duration_ms_;
   }
 

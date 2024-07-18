@@ -8,17 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_TEST_PROTOBUF_UTILS_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_TEST_PROTOBUF_UTILS_H_
+#ifndef MODULES_AUDIO_PROCESSING_TEST_PROTOBUF_UTILS_H_
+#define MODULES_AUDIO_PROCESSING_TEST_PROTOBUF_UTILS_H_
 
 #include <memory>
+#include <sstream>  // no-presubmit-check TODO(webrtc:8982)
 
-#include "webrtc/base/ignore_wundef.h"
-#include "webrtc/base/protobuf_utils.h"
+#include "rtc_base/protobuf_utils.h"
 
-RTC_PUSH_IGNORING_WUNDEF()
-#include "webrtc/modules/audio_processing/debug.pb.h"
-RTC_POP_IGNORING_WUNDEF()
+// Generated at build-time by the protobuf compiler.
+#include "modules/audio_processing/debug.pb.h"
 
 namespace webrtc {
 
@@ -29,6 +28,11 @@ size_t ReadMessageBytesFromFile(FILE* file, std::unique_ptr<uint8_t[]>* bytes);
 // Returns true on success, false on error or end-of-file.
 bool ReadMessageFromFile(FILE* file, MessageLite* msg);
 
+// Returns true on success, false on error or end of string stream.
+bool ReadMessageFromString(
+    std::stringstream* input,  // no-presubmit-check TODO(webrtc:8982)
+    MessageLite* msg);
+
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_TEST_PROTOBUF_UTILS_H_
+#endif  // MODULES_AUDIO_PROCESSING_TEST_PROTOBUF_UTILS_H_

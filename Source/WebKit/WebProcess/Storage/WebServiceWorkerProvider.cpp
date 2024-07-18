@@ -28,19 +28,20 @@
 
 #if ENABLE(SERVICE_WORKER)
 
+#include "NetworkProcessConnection.h"
 #include "WebProcess.h"
+#include "WebSWClientConnection.h"
 #include "WebSWServerConnection.h"
-#include "WebToStorageProcessConnection.h"
+#include <WebCore/CachedResource.h>
 #include <WebCore/Exception.h>
 #include <WebCore/ExceptionCode.h>
+#include <WebCore/LegacySchemeRegistry.h>
 #include <WebCore/ServiceWorkerJob.h>
-#include <pal/SessionID.h>
 #include <wtf/text/WTFString.h>
 
+namespace WebKit {
 using namespace PAL;
 using namespace WebCore;
-
-namespace WebKit {
 
 WebServiceWorkerProvider& WebServiceWorkerProvider::singleton()
 {
@@ -52,10 +53,33 @@ WebServiceWorkerProvider::WebServiceWorkerProvider()
 {
 }
 
-WebCore::SWClientConnection& WebServiceWorkerProvider::serviceWorkerConnectionForSession(const SessionID& sessionID)
+WebCore::SWClientConnection& WebServiceWorkerProvider::serviceWorkerConnection()
 {
-    ASSERT(WebProcess::singleton().webToStorageProcessConnection());
-    return WebProcess::singleton().webToStorageProcessConnection()->serviceWorkerConnectionForSession(sessionID);
+    return WebProcess::singleton().ensureNetworkProcessConnection().serviceWorkerConnection();
+}
+
+WebCore::SWClientConnection* WebServiceWorkerProvider::existingServiceWorkerConnection()
+{
+    auto* networkProcessConnection = WebProcess::singleton().existingNetworkProcessConnection();
+    if (!networkProcessConnection)
+        return nullptr;
+
+    return &networkProcessConnection->serviceWorkerConnection();
+}
+
+void WebServiceWorkerProvider::updateThrottleState(bool isThrottleable)
+{
+    auto* networkProcessConnection = WebProcess::singleton().existingNetworkProcessConnection();
+    if (!networkProcessConnection)
+        return;
+    auto& connection = networkProcessConnection->serviceWorkerConnection();
+    if (isThrottleable != connection.isThrottleable())
+        connection.updateThrottleState();
+}
+
+void WebServiceWorkerProvider::terminateWorkerForTesting(WebCore::ServiceWorkerIdentifier identifier, CompletionHandler<void()>&& callback)
+{
+    WebProcess::singleton().ensureNetworkProcessConnection().serviceWorkerConnection().terminateWorkerForTesting(identifier, WTFMove(callback));
 }
 
 } // namespace WebKit

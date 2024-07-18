@@ -26,9 +26,10 @@
 #pragma once
 
 #include "MessageReceiver.h"
+#include "StorageAreaImplIdentifier.h"
 #include <WebCore/StorageArea.h>
-#include <wtf/HashCountedSet.h>
 #include <wtf/HashMap.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 class SecurityOrigin;
@@ -40,31 +41,30 @@ class StorageAreaMap;
 
 class StorageAreaImpl final : public WebCore::StorageArea {
 public:
-    static Ref<StorageAreaImpl> create(Ref<StorageAreaMap>&&);
+    using Identifier = StorageAreaImplIdentifier;
+
+    static Ref<StorageAreaImpl> create(StorageAreaMap&);
     virtual ~StorageAreaImpl();
 
-    uint64_t storageAreaID() const { return m_storageAreaID; }
+    Identifier identifier() const { return m_identifier; }
 
 private:
-    StorageAreaImpl(Ref<StorageAreaMap>&&);
+    StorageAreaImpl(StorageAreaMap&);
 
     // WebCore::StorageArea.
     unsigned length() override;
     String key(unsigned index) override;
     String item(const String& key) override;
-    void setItem(WebCore::Frame* sourceFrame, const String& key, const String& value, bool& quotaException) override;
-    void removeItem(WebCore::Frame* sourceFrame, const String& key) override;
-    void clear(WebCore::Frame* sourceFrame) override;
+    void setItem(WebCore::Frame& sourceFrame, const String& key, const String& value, bool& quotaException) override;
+    void removeItem(WebCore::Frame& sourceFrame, const String& key) override;
+    void clear(WebCore::Frame& sourceFrame) override;
     bool contains(const String& key) override;
     WebCore::StorageType storageType() const override;
     size_t memoryBytesUsedByCache() override;
-    void incrementAccessCount() override;
-    void decrementAccessCount() override;
-    void closeDatabaseIfIdle() override;
-    WebCore::SecurityOriginData securityOrigin() const override;
+    void prewarm() final;
 
-    uint64_t m_storageAreaID;
-    Ref<StorageAreaMap> m_storageAreaMap;
+    Identifier m_identifier;
+    WeakPtr<StorageAreaMap> m_storageAreaMap;
 };
 
 } // namespace WebKit

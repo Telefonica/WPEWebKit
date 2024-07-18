@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,11 +24,10 @@
  */
 
 #include "config.h"
-#include "PrintStream.h"
+#include <wtf/PrintStream.h>
 
-#include <stdio.h>
+#include <wtf/text/AtomString.h>
 #include <wtf/text/CString.h>
-#include <wtf/text/UniquedStringImpl.h>
 #include <wtf/text/WTFString.h>
 
 namespace WTF {
@@ -46,22 +45,14 @@ void PrintStream::printf(const char* format, ...)
 
 void PrintStream::printfVariableFormat(const char* format, ...)
 {
-#if COMPILER(CLANG)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wformat-nonliteral"
-#elif COMPILER(GCC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsuggest-attribute=format"
-#endif
+    ALLOW_NONLITERAL_FORMAT_BEGIN
+    IGNORE_GCC_WARNINGS_BEGIN("suggest-attribute=format")
     va_list argList;
     va_start(argList, format);
     vprintf(format, argList);
     va_end(argList);
-#if COMPILER(CLANG)
-#pragma clang diagnostic pop
-#elif COMPILER(GCC)
-#pragma GCC diagnostic pop
-#endif
+    IGNORE_GCC_WARNINGS_END
+    ALLOW_NONLITERAL_FORMAT_END
 }
 
 void PrintStream::flush()
@@ -82,28 +73,50 @@ void printInternal(PrintStream& out, const char* string)
     out.printf("%s", string);
 }
 
-void printInternal(PrintStream& out, const StringView& string)
+static void printExpectedCStringHelper(PrintStream& out, const char* type, Expected<CString, UTF8ConversionError> expectedCString)
 {
-    out.print(string.utf8());
+    if (UNLIKELY(!expectedCString)) {
+        if (expectedCString.error() == UTF8ConversionError::OutOfMemory) {
+            printInternal(out, "(Out of memory while converting ");
+            printInternal(out, type);
+            printInternal(out, " to utf8)");
+        } else {
+            printInternal(out, "(failed to convert ");
+            printInternal(out, type);
+            printInternal(out, " to utf8)");
+        }
+        return;
+    }
+    printInternal(out, expectedCString.value());
+}
+
+void printInternal(PrintStream& out, StringView string)
+{
+    printExpectedCStringHelper(out, "StringView", string.tryGetUtf8());
 }
 
 void printInternal(PrintStream& out, const CString& string)
 {
-    out.print(string.data());
+    printInternal(out, string.data());
 }
 
 void printInternal(PrintStream& out, const String& string)
 {
-    out.print(string.utf8());
+    printExpectedCStringHelper(out, "String", string.tryGetUtf8());
+}
+
+void printInternal(PrintStream& out, const AtomString& string)
+{
+    printExpectedCStringHelper(out, "String", string.string().tryGetUtf8());
 }
 
 void printInternal(PrintStream& out, const StringImpl* string)
 {
     if (!string) {
-        out.print("(null StringImpl*)");
+        printInternal(out, "(null StringImpl*)");
         return;
     }
-    out.print(string->utf8());
+    printExpectedCStringHelper(out, "StringImpl*", string->tryGetUtf8());
 }
 
 void printInternal(PrintStream& out, bool value)
@@ -163,7 +176,7 @@ void printInternal(PrintStream& out, unsigned long long value)
 
 void printInternal(PrintStream& out, float value)
 {
-    out.print(static_cast<double>(value));
+    printInternal(out, static_cast<double>(value));
 }
 
 void printInternal(PrintStream& out, double value)
@@ -171,9 +184,25 @@ void printInternal(PrintStream& out, double value)
     out.printf("%lf", value);
 }
 
+void printInternal(PrintStream& out, RawHex value)
+{
+#if !CPU(ADDRESS64)
+    if (value.is64Bit()) {
+        out.printf("0x%" PRIx64, value.u64());
+        return;
+    }
+#endif
+    out.printf("%p", value.ptr());
+}
+
 void printInternal(PrintStream& out, RawPointer value)
 {
     out.printf("%p", value.value());
+}
+
+void printInternal(PrintStream& out, FixedWidthDouble value)
+{
+    out.printf("%*.*lf", value.width(), value.precision(), value.value());
 }
 
 void dumpCharacter(PrintStream& out, char value)

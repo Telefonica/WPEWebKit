@@ -24,11 +24,15 @@
 #include "HTMLBaseElement.h"
 
 #include "Document.h"
+#include "ElementInlines.h"
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
 #include "TextResourceDecoder.h"
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLBaseElement);
 
 using namespace HTMLNames;
 
@@ -43,7 +47,7 @@ Ref<HTMLBaseElement> HTMLBaseElement::create(const QualifiedName& tagName, Docum
     return adoptRef(*new HTMLBaseElement(tagName, document));
 }
 
-void HTMLBaseElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLBaseElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == hrefAttr || name == targetAttr)
         document().processBaseElement();
@@ -51,18 +55,18 @@ void HTMLBaseElement::parseAttribute(const QualifiedName& name, const AtomicStri
         HTMLElement::parseAttribute(name, value);
 }
 
-Node::InsertionNotificationRequest HTMLBaseElement::insertedInto(ContainerNode& insertionPoint)
+Node::InsertedIntoAncestorResult HTMLBaseElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    HTMLElement::insertedInto(insertionPoint);
-    if (insertionPoint.isConnected())
+    HTMLElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    if (insertionType.connectedToDocument)
         document().processBaseElement();
-    return InsertionDone;
+    return InsertedIntoAncestorResult::Done;
 }
 
-void HTMLBaseElement::removedFrom(ContainerNode& insertionPoint)
+void HTMLBaseElement::removedFromAncestor(RemovalType removalType, ContainerNode& oldParentOfRemovedTree)
 {
-    HTMLElement::removedFrom(insertionPoint);
-    if (insertionPoint.isConnected())
+    HTMLElement::removedFromAncestor(removalType, oldParentOfRemovedTree);
+    if (removalType.disconnectedFromDocument)
         document().processBaseElement();
 }
 
@@ -71,32 +75,28 @@ bool HTMLBaseElement::isURLAttribute(const Attribute& attribute) const
     return attribute.name().localName() == hrefAttr || HTMLElement::isURLAttribute(attribute);
 }
 
-String HTMLBaseElement::target() const
+AtomString HTMLBaseElement::target() const
 {
     return attributeWithoutSynchronization(targetAttr);
 }
 
-URL HTMLBaseElement::href() const
+// https://html.spec.whatwg.org/#dom-base-href
+String HTMLBaseElement::href() const
 {
-    // This does not use the getURLAttribute function because that will resolve relative to the document's base URL;
-    // base elements like this one can be used to set that base URL. Thus we need to resolve relative to the document's
-    // URL and ignore the base URL.
+    AtomString url = attributeWithoutSynchronization(hrefAttr);
+    if (url.isNull())
+        url = emptyAtom();
 
-    const AtomicString& attributeValue = attributeWithoutSynchronization(hrefAttr);
-    if (attributeValue.isNull())
-        return document().url();
+    // Same logic as openFunc() in XMLDocumentParserLibxml2.cpp. Keep them in sync.
+    auto* encoding = document().decoder() ? document().decoder()->encodingForURLParsing() : nullptr;
+    URL urlRecord(document().fallbackBaseURL(), stripLeadingAndTrailingHTMLSpaces(url), encoding);
+    if (!urlRecord.isValid())
+        return url;
 
-    URL url = !document().decoder() ?
-        URL(document().url(), stripLeadingAndTrailingHTMLSpaces(attributeValue)) :
-        URL(document().url(), stripLeadingAndTrailingHTMLSpaces(attributeValue), document().decoder()->encoding());
-
-    if (!url.isValid())
-        return URL();
-
-    return url;
+    return urlRecord.string();
 }
 
-void HTMLBaseElement::setHref(const AtomicString& value)
+void HTMLBaseElement::setHref(const AtomString& value)
 {
     setAttributeWithoutSynchronization(hrefAttr, value);
 }

@@ -23,21 +23,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef TextureMapperPlatformLayerProxy_h
-#define TextureMapperPlatformLayerProxy_h
+#pragma once
 
-#if USE(COORDINATED_GRAPHICS_THREADED)
+#if USE(COORDINATED_GRAPHICS)
 
-#include "TextureMapperGLHeaders.h"
-#include <wtf/Function.h>
 #include <wtf/Lock.h>
-#include <wtf/RunLoop.h>
 #include <wtf/ThreadSafeRefCounted.h>
-#include <wtf/Vector.h>
-
-#ifndef NDEBUG
-#include <wtf/Threading.h>
-#endif
 
 namespace WebCore {
 
@@ -52,55 +43,33 @@ public:
     class Compositor {
     public:
         virtual void onNewBufferAvailable() = 0;
-        virtual TextureMapperGL* texmapGL() = 0;
     };
 
     TextureMapperPlatformLayerProxy();
     virtual ~TextureMapperPlatformLayerProxy();
 
-    // To avoid multiple lock/release situation to update a single frame,
-    // the implementation of TextureMapperPlatformLayerProxyProvider should
-    // aquire / release the lock explicitly to use below methods.
-    Lock& lock() { return m_lock; }
-    std::unique_ptr<TextureMapperPlatformLayerBuffer> getAvailableBuffer(const IntSize&, GLint internalFormat);
-    void pushNextBuffer(std::unique_ptr<TextureMapperPlatformLayerBuffer>);
+    virtual bool isGLBased() const { return false; }
+    virtual bool isDMABufBased() const { return false; }
+    virtual bool isEmpty() const = 0;
+
+    Lock& lock() WTF_RETURNS_LOCK(m_lock) { return m_lock; }
     bool isActive();
 
-    WEBCORE_EXPORT void activateOnCompositingThread(Compositor*, TextureMapperLayer*);
-    WEBCORE_EXPORT void invalidate();
+    virtual void activateOnCompositingThread(Compositor*, TextureMapperLayer*) = 0;
+    virtual void invalidate() = 0;
+    virtual void swapBuffer() = 0;
 
-    WEBCORE_EXPORT void swapBuffer();
-    void dropCurrentBufferWhilePreservingTexture();
-
-    bool scheduleUpdateOnCompositorThread(WTF::Function<void()>&&);
-
-private:
-    void appendToUnusedBuffers(std::unique_ptr<TextureMapperPlatformLayerBuffer>);
-    void scheduleReleaseUnusedBuffers();
-    void releaseUnusedBuffersTimerFired();
-
-    Compositor* m_compositor;
-    TextureMapperLayer* m_targetLayer;
-
-    std::unique_ptr<TextureMapperPlatformLayerBuffer> m_currentBuffer;
-    std::unique_ptr<TextureMapperPlatformLayerBuffer> m_pendingBuffer;
-
+protected:
     Lock m_lock;
-
-    Vector<std::unique_ptr<TextureMapperPlatformLayerBuffer>> m_usedBuffers;
-    std::unique_ptr<RunLoop::Timer<TextureMapperPlatformLayerProxy>> m_releaseUnusedBuffersTimer;
-
-#ifndef NDEBUG
-    ThreadIdentifier m_compositorThreadID { 0 };
-#endif
-
-    void compositorThreadUpdateTimerFired();
-    std::unique_ptr<RunLoop::Timer<TextureMapperPlatformLayerProxy>> m_compositorThreadUpdateTimer;
-    WTF::Function<void()> m_compositorThreadUpdateFunction;
+    Compositor* m_compositor { nullptr };
+    TextureMapperLayer* m_targetLayer { nullptr };
 };
 
 } // namespace WebCore
 
-#endif // USE(COORDINATED_GRAPHICS_THREADED)
+#define SPECIALIZE_TYPE_TRAITS_TEXTUREMAPPER_PLATFORMLAYERPROXY(ToClassName, predicate) \
+    SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::ToClassName) \
+    static bool isType(const WebCore::TextureMapperPlatformLayerProxy& proxy) { return proxy.predicate; } \
+    SPECIALIZE_TYPE_TRAITS_END()
 
-#endif // TextureMapperPlatformLayerProxy_h
+#endif // USE(COORDINATED_GRAPHICS)

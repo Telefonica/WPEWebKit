@@ -19,693 +19,778 @@
 #include <openssl/type_check.h>
 
 
-OPENSSL_COMPILE_ASSERT(ERR_LIB_NONE == 1, library_values_changed_1);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_SYS == 2, library_values_changed_2);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_BN == 3, library_values_changed_3);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_RSA == 4, library_values_changed_4);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_DH == 5, library_values_changed_5);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_EVP == 6, library_values_changed_6);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_BUF == 7, library_values_changed_7);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_OBJ == 8, library_values_changed_8);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_PEM == 9, library_values_changed_9);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_DSA == 10, library_values_changed_10);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_X509 == 11, library_values_changed_11);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_ASN1 == 12, library_values_changed_12);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_CONF == 13, library_values_changed_13);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_CRYPTO == 14, library_values_changed_14);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_EC == 15, library_values_changed_15);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_SSL == 16, library_values_changed_16);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_BIO == 17, library_values_changed_17);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_PKCS7 == 18, library_values_changed_18);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_PKCS8 == 19, library_values_changed_19);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_X509V3 == 20, library_values_changed_20);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_RAND == 21, library_values_changed_21);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_ENGINE == 22, library_values_changed_22);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_OCSP == 23, library_values_changed_23);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_UI == 24, library_values_changed_24);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_COMP == 25, library_values_changed_25);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_ECDSA == 26, library_values_changed_26);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_ECDH == 27, library_values_changed_27);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_HMAC == 28, library_values_changed_28);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_DIGEST == 29, library_values_changed_29);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_CIPHER == 30, library_values_changed_30);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_HKDF == 31, library_values_changed_31);
-OPENSSL_COMPILE_ASSERT(ERR_LIB_USER == 32, library_values_changed_32);
-OPENSSL_COMPILE_ASSERT(ERR_NUM_LIBS == 33, library_values_changed_num);
+OPENSSL_STATIC_ASSERT(ERR_LIB_NONE == 1, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_SYS == 2, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_BN == 3, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_RSA == 4, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_DH == 5, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_EVP == 6, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_BUF == 7, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_OBJ == 8, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_PEM == 9, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_DSA == 10, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_X509 == 11, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_ASN1 == 12, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_CONF == 13, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_CRYPTO == 14, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_EC == 15, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_SSL == 16, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_BIO == 17, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_PKCS7 == 18, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_PKCS8 == 19, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_X509V3 == 20, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_RAND == 21, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_ENGINE == 22, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_OCSP == 23, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_UI == 24, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_COMP == 25, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_ECDSA == 26, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_ECDH == 27, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_HMAC == 28, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_DIGEST == 29, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_CIPHER == 30, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_HKDF == 31, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_TRUST_TOKEN == 32, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_LIB_USER == 33, "library value changed");
+OPENSSL_STATIC_ASSERT(ERR_NUM_LIBS == 34, "number of libraries changed");
 
 const uint32_t kOpenSSLReasonValues[] = {
-    0xc320838,
-    0xc328852,
-    0xc330861,
-    0xc338871,
-    0xc340880,
-    0xc348899,
-    0xc3508a5,
-    0xc3588c2,
-    0xc3608d4,
-    0xc3688e2,
-    0xc3708f2,
-    0xc3788ff,
-    0xc38090f,
-    0xc38891a,
-    0xc390930,
-    0xc39893f,
-    0xc3a0953,
-    0xc3a8845,
-    0xc3b00ea,
-    0x10320845,
-    0x1032943b,
-    0x10331447,
-    0x10339460,
-    0x10341473,
-    0x10348eb4,
-    0x10350c42,
-    0x10359486,
-    0x1036149b,
-    0x103694ae,
-    0x103714cd,
-    0x103794e6,
-    0x103814fb,
-    0x10389519,
-    0x10391528,
-    0x10399544,
-    0x103a155f,
-    0x103a956e,
-    0x103b158a,
-    0x103b95a5,
-    0x103c15bc,
-    0x103c80ea,
-    0x103d15cd,
-    0x103d95e1,
-    0x103e1600,
-    0x103e960f,
-    0x103f1626,
-    0x103f9639,
-    0x10400c06,
-    0x1040964c,
-    0x1041166a,
-    0x1041967d,
-    0x10421697,
-    0x104296a7,
-    0x104316bb,
-    0x104396d1,
-    0x104416e9,
-    0x104496fe,
-    0x10451712,
-    0x10459724,
-    0x104605fb,
-    0x1046893f,
-    0x10471739,
-    0x10479750,
-    0x10481765,
-    0x10489773,
-    0x14320be9,
-    0x14328bf7,
-    0x14330c06,
-    0x14338c18,
-    0x143400ac,
-    0x143480ea,
-    0x18320083,
-    0x18328f0a,
-    0x183300ac,
-    0x18338f20,
-    0x18340f34,
-    0x183480ea,
-    0x18350f49,
-    0x18358f61,
-    0x18360f76,
-    0x18368f8a,
-    0x18370fae,
-    0x18378fc4,
-    0x18380fd8,
-    0x18388fe8,
-    0x18390a57,
-    0x18398ff8,
-    0x183a100d,
-    0x183a9021,
-    0x183b0c4e,
-    0x183b902e,
-    0x183c1040,
-    0x183c904b,
-    0x183d105b,
-    0x183d906c,
-    0x183e107d,
-    0x183e908f,
-    0x183f10b8,
-    0x183f90d1,
-    0x184010e9,
-    0x184086d3,
-    0x20321110,
-    0x2432111c,
-    0x24328985,
-    0x2433112e,
-    0x2433913b,
-    0x24341148,
-    0x2434915a,
-    0x24351169,
-    0x24359186,
-    0x24361193,
-    0x243691a1,
-    0x243711af,
-    0x243791bd,
-    0x243811c6,
-    0x243891d3,
-    0x243911e6,
-    0x28320c36,
-    0x28328c4e,
-    0x28330c06,
-    0x28338c61,
-    0x28340c42,
-    0x283480ac,
-    0x283500ea,
-    0x2c322af1,
-    0x2c32aaff,
-    0x2c332b11,
-    0x2c33ab23,
-    0x2c342b37,
-    0x2c34ab49,
-    0x2c352b64,
-    0x2c35ab76,
-    0x2c362b89,
-    0x2c36832d,
-    0x2c372b96,
-    0x2c37aba8,
-    0x2c382bbb,
-    0x2c38abd2,
-    0x2c392be0,
-    0x2c39abf0,
-    0x2c3a2c02,
-    0x2c3aac16,
-    0x2c3b2c27,
-    0x2c3bac46,
-    0x2c3c2c5a,
-    0x2c3cac70,
-    0x2c3d2c89,
-    0x2c3daca6,
-    0x2c3e2cb7,
-    0x2c3eacc5,
-    0x2c3f2cdd,
-    0x2c3facf5,
-    0x2c402d02,
-    0x2c409110,
-    0x2c412d13,
-    0x2c41ad26,
-    0x2c4210e9,
-    0x2c42ad37,
-    0x2c430720,
-    0x2c43ac38,
+    0xc320847,
+    0xc328861,
+    0xc330870,
+    0xc338880,
+    0xc34088f,
+    0xc3488a8,
+    0xc3508b4,
+    0xc3588d1,
+    0xc3608f1,
+    0xc3688ff,
+    0xc37090f,
+    0xc37891c,
+    0xc38092c,
+    0xc388937,
+    0xc39094d,
+    0xc39895c,
+    0xc3a0970,
+    0xc3a8854,
+    0xc3b00f7,
+    0xc3b88e3,
+    0x10320854,
+    0x103295ca,
+    0x103315d6,
+    0x103395ef,
+    0x10341602,
+    0x10348f34,
+    0x10350c6d,
+    0x10359615,
+    0x1036163f,
+    0x10369652,
+    0x10371671,
+    0x1037968a,
+    0x1038169f,
+    0x103896bd,
+    0x103916cc,
+    0x103996e8,
+    0x103a1703,
+    0x103a9712,
+    0x103b172e,
+    0x103b9749,
+    0x103c176f,
+    0x103c80f7,
+    0x103d1780,
+    0x103d9794,
+    0x103e17b3,
+    0x103e97c2,
+    0x103f17d9,
+    0x103f97ec,
+    0x10400c31,
+    0x104097ff,
+    0x1041181d,
+    0x10419830,
+    0x1042184a,
+    0x1042985a,
+    0x1043186e,
+    0x10439884,
+    0x1044189c,
+    0x104498b1,
+    0x104518c5,
+    0x104598d7,
+    0x1046060a,
+    0x1046895c,
+    0x104718ec,
+    0x10479903,
+    0x10481918,
+    0x10489926,
+    0x10490e80,
+    0x10499760,
+    0x104a162a,
+    0x14320c14,
+    0x14328c22,
+    0x14330c31,
+    0x14338c43,
+    0x143400b9,
+    0x143480f7,
+    0x18320090,
+    0x18328f8a,
+    0x183300b9,
+    0x18338fa0,
+    0x18340fb4,
+    0x183480f7,
+    0x18350fd3,
+    0x18358feb,
+    0x18361000,
+    0x18369014,
+    0x1837104c,
+    0x18379062,
+    0x18381076,
+    0x18389086,
+    0x18390a82,
+    0x18399096,
+    0x183a10bc,
+    0x183a90e2,
+    0x183b0c8c,
+    0x183b9131,
+    0x183c1143,
+    0x183c914e,
+    0x183d115e,
+    0x183d916f,
+    0x183e1180,
+    0x183e9192,
+    0x183f11bb,
+    0x183f91d4,
+    0x184011ec,
+    0x184086e2,
+    0x18411105,
+    0x184190d0,
+    0x184210ef,
+    0x18428c79,
+    0x184310ab,
+    0x18439117,
+    0x18440fc9,
+    0x18449038,
+    0x20321226,
+    0x20329213,
+    0x24321232,
+    0x243289a2,
+    0x24331244,
+    0x24339251,
+    0x2434125e,
+    0x24349270,
+    0x2435127f,
+    0x2435929c,
+    0x243612a9,
+    0x243692b7,
+    0x243712c5,
+    0x243792d3,
+    0x243812dc,
+    0x243892e9,
+    0x243912fc,
+    0x28320c61,
+    0x28328c8c,
+    0x28330c31,
+    0x28338c9f,
+    0x28340c6d,
+    0x283480b9,
+    0x283500f7,
+    0x28358c79,
+    0x2c3231de,
+    0x2c329313,
+    0x2c3331ec,
+    0x2c33b1fe,
+    0x2c343212,
+    0x2c34b224,
+    0x2c35323f,
+    0x2c35b251,
+    0x2c363281,
+    0x2c36833a,
+    0x2c37328e,
+    0x2c37b2ba,
+    0x2c3832df,
+    0x2c38b2f6,
+    0x2c393314,
+    0x2c39b324,
+    0x2c3a3336,
+    0x2c3ab34a,
+    0x2c3b335b,
+    0x2c3bb37a,
+    0x2c3c1325,
+    0x2c3c933b,
+    0x2c3d338e,
+    0x2c3d9354,
+    0x2c3e33ab,
+    0x2c3eb3b9,
+    0x2c3f33d1,
+    0x2c3fb3e9,
+    0x2c403413,
+    0x2c409226,
+    0x2c413424,
+    0x2c41b437,
+    0x2c4211ec,
+    0x2c42b448,
+    0x2c43072f,
+    0x2c43b36c,
+    0x2c4432cd,
+    0x2c44b3f6,
+    0x2c453264,
+    0x2c45b2a0,
+    0x2c463304,
     0x30320000,
     0x30328015,
     0x3033001f,
     0x30338038,
-    0x3034004a,
-    0x30348064,
-    0x3035006b,
-    0x30358083,
-    0x30360094,
-    0x303680ac,
-    0x303700b9,
-    0x303780c8,
-    0x303800ea,
-    0x303880f7,
-    0x3039010a,
-    0x30398125,
-    0x303a013a,
-    0x303a814e,
-    0x303b0162,
-    0x303b8173,
-    0x303c018c,
-    0x303c81a9,
-    0x303d01b7,
-    0x303d81cb,
-    0x303e01db,
-    0x303e81f4,
-    0x303f0204,
-    0x303f8217,
-    0x30400226,
-    0x30408232,
-    0x30410247,
-    0x30418257,
-    0x3042026e,
-    0x3042827b,
-    0x3043028e,
-    0x3043829d,
-    0x304402b2,
-    0x304482d3,
-    0x304502e6,
-    0x304582f9,
-    0x30460312,
-    0x3046832d,
-    0x3047034a,
-    0x30478363,
-    0x30480371,
-    0x30488382,
-    0x30490391,
-    0x304983a9,
-    0x304a03bb,
-    0x304a83cf,
-    0x304b03ee,
-    0x304b8401,
-    0x304c040c,
-    0x304c841d,
-    0x304d0429,
-    0x304d843f,
-    0x304e044d,
-    0x304e8463,
-    0x304f0475,
-    0x304f8487,
-    0x3050049a,
-    0x305084ad,
-    0x305104be,
-    0x305184ce,
-    0x305204e6,
-    0x305284fb,
-    0x30530513,
-    0x30538527,
-    0x3054053f,
-    0x30548558,
-    0x30550571,
-    0x3055858e,
-    0x30560599,
-    0x305685b1,
-    0x305705c1,
-    0x305785d2,
-    0x305805e5,
-    0x305885fb,
-    0x30590604,
-    0x30598619,
-    0x305a062c,
-    0x305a863b,
-    0x305b065b,
-    0x305b866a,
-    0x305c068b,
-    0x305c86a7,
-    0x305d06b3,
-    0x305d86d3,
-    0x305e06ef,
-    0x305e8700,
-    0x305f0716,
-    0x305f8720,
-    0x34320b47,
-    0x34328b5b,
-    0x34330b78,
-    0x34338b8b,
-    0x34340b9a,
-    0x34348bd3,
-    0x34350bb7,
-    0x3c320083,
-    0x3c328c8b,
-    0x3c330ca4,
-    0x3c338cbf,
-    0x3c340cdc,
-    0x3c348d06,
-    0x3c350d21,
-    0x3c358d47,
-    0x3c360d60,
-    0x3c368d78,
-    0x3c370d89,
-    0x3c378d97,
-    0x3c380da4,
-    0x3c388db8,
-    0x3c390c4e,
-    0x3c398dcc,
-    0x3c3a0de0,
-    0x3c3a88ff,
-    0x3c3b0df0,
-    0x3c3b8e0b,
-    0x3c3c0e1d,
-    0x3c3c8e33,
-    0x3c3d0e3d,
-    0x3c3d8e51,
-    0x3c3e0e5f,
-    0x3c3e8e84,
-    0x3c3f0c77,
-    0x3c3f8e6d,
-    0x3c4000ac,
-    0x3c4080ea,
-    0x3c410cf7,
-    0x3c418d36,
-    0x403217a6,
-    0x403297bc,
-    0x403317ea,
-    0x403397f4,
-    0x4034180b,
-    0x40349829,
-    0x40351839,
-    0x4035984b,
-    0x40361858,
-    0x40369864,
-    0x40371879,
-    0x4037988b,
-    0x40381896,
-    0x403898a8,
-    0x40390eb4,
-    0x403998b8,
-    0x403a18cb,
-    0x403a98ec,
-    0x403b18fd,
-    0x403b990d,
-    0x403c0064,
-    0x403c8083,
-    0x403d1991,
-    0x403d99a7,
-    0x403e19b6,
-    0x403e99ee,
-    0x403f1a08,
-    0x403f9a16,
-    0x40401a2b,
-    0x40409a58,
-    0x40411a75,
-    0x40419a90,
-    0x40421aa9,
-    0x40429abc,
-    0x40431ad0,
-    0x40439ae8,
-    0x40441aff,
-    0x404480ac,
-    0x40451b14,
-    0x40459b26,
-    0x40461b4a,
-    0x40469b6a,
-    0x40471b78,
-    0x40479b9f,
-    0x40481bdc,
-    0x40489bf5,
-    0x40491c0c,
-    0x40499c26,
-    0x404a1c3d,
-    0x404a9c5b,
-    0x404b1c73,
-    0x404b9c8a,
-    0x404c1ca0,
-    0x404c9cb2,
-    0x404d1cd3,
-    0x404d9cf5,
-    0x404e1d09,
-    0x404e9d16,
-    0x404f1d43,
-    0x404f9d6c,
-    0x40501da7,
-    0x40509dbb,
-    0x40511dd6,
-    0x40521de6,
-    0x40529e0a,
-    0x40531e22,
-    0x40539e35,
-    0x40541e4a,
-    0x40549e6d,
-    0x40551e7b,
-    0x40559e98,
-    0x40561ea5,
-    0x40569ebe,
-    0x40571ed6,
-    0x40579ee9,
-    0x40581efe,
-    0x40589f25,
-    0x40591f54,
-    0x40599f81,
-    0x405a1f95,
-    0x405a9fa5,
-    0x405b1fbd,
-    0x405b9fce,
-    0x405c1fe1,
-    0x405ca002,
-    0x405d200f,
-    0x405da026,
-    0x405e2064,
-    0x405e8a95,
-    0x405f2085,
-    0x405fa092,
-    0x406020a0,
-    0x4060a0c2,
-    0x40612106,
-    0x4061a13e,
-    0x40622155,
-    0x4062a166,
-    0x40632177,
-    0x4063a18c,
-    0x406421a3,
-    0x4064a1cf,
-    0x406521ea,
-    0x4065a201,
-    0x40662219,
-    0x4066a243,
-    0x4067226e,
-    0x4067a28f,
-    0x406822b6,
-    0x4068a2d7,
-    0x40692309,
-    0x4069a337,
-    0x406a2358,
-    0x406aa378,
-    0x406b2500,
-    0x406ba523,
-    0x406c2539,
-    0x406ca7b4,
-    0x406d27e3,
-    0x406da80b,
-    0x406e2839,
-    0x406ea86d,
-    0x406f288c,
-    0x406fa8a1,
-    0x407028b4,
-    0x4070a8d1,
-    0x40710800,
-    0x4071a8e3,
-    0x407228f6,
-    0x4072a90f,
-    0x40732927,
-    0x407393aa,
-    0x4074293b,
-    0x4074a955,
-    0x40752966,
-    0x4075a97a,
-    0x40762988,
-    0x407691d3,
-    0x407729ad,
-    0x4077a9cf,
-    0x407829ea,
-    0x4078aa23,
-    0x40792a3a,
-    0x4079aa50,
-    0x407a2a5c,
-    0x407aaa6f,
-    0x407b2a84,
-    0x407baa96,
-    0x407c2ac7,
-    0x407caad0,
-    0x407d22f2,
-    0x407d9d7c,
-    0x407e29ff,
-    0x407e9f35,
-    0x407f1b8c,
-    0x407f9933,
-    0x40801d53,
-    0x40809bb4,
-    0x40811df8,
-    0x40819d2d,
-    0x40822824,
-    0x40829919,
-    0x40831f10,
-    0x4083a1b4,
-    0x40841bc8,
-    0x40849f6d,
-    0x40851ff2,
-    0x4085a0ea,
-    0x40862046,
-    0x40869d96,
-    0x40872851,
-    0x4087a11b,
-    0x4088197a,
-    0x4088a2a2,
-    0x408919c9,
-    0x40899956,
-    0x408a2559,
-    0x408a978a,
-    0x408b2aab,
-    0x408b9a3f,
-    0x41f4242b,
-    0x41f924bd,
-    0x41fe23b0,
-    0x41fea5a5,
-    0x41ff2696,
-    0x42032444,
-    0x42082466,
-    0x4208a4a2,
-    0x42092394,
-    0x4209a4dc,
-    0x420a23eb,
-    0x420aa3cb,
-    0x420b240b,
-    0x420ba484,
-    0x420c26b2,
-    0x420ca572,
-    0x420d258c,
-    0x420da5c3,
-    0x421225dd,
-    0x42172679,
-    0x4217a61f,
-    0x421c2641,
-    0x421f25fc,
-    0x422126c9,
-    0x4226265c,
-    0x422b2798,
-    0x422ba746,
-    0x422c2780,
-    0x422ca705,
-    0x422d26e4,
-    0x422da765,
-    0x422e272b,
-    0x4432072b,
-    0x4432873a,
-    0x44330746,
-    0x44338754,
-    0x44340767,
-    0x44348778,
-    0x4435077f,
-    0x44358789,
-    0x4436079c,
-    0x443687b2,
-    0x443707c4,
-    0x443787d1,
-    0x443807e0,
-    0x443887e8,
-    0x44390800,
-    0x4439880e,
-    0x443a0821,
-    0x4c321211,
-    0x4c329221,
-    0x4c331234,
-    0x4c339254,
-    0x4c3400ac,
-    0x4c3480ea,
-    0x4c351260,
-    0x4c35926e,
-    0x4c36128a,
-    0x4c36929d,
-    0x4c3712ac,
-    0x4c3792ba,
-    0x4c3812cf,
-    0x4c3892db,
-    0x4c3912fb,
-    0x4c399325,
-    0x4c3a133e,
-    0x4c3a9357,
-    0x4c3b05fb,
-    0x4c3b9370,
-    0x4c3c1382,
-    0x4c3c9391,
-    0x4c3d13aa,
-    0x4c3d8c29,
-    0x4c3e1403,
-    0x4c3e93b9,
-    0x4c3f1425,
-    0x4c3f91d3,
-    0x4c4013cf,
-    0x4c4091fd,
-    0x4c4113f3,
-    0x50322d49,
-    0x5032ad58,
-    0x50332d63,
-    0x5033ad73,
-    0x50342d8c,
-    0x5034ada6,
-    0x50352db4,
-    0x5035adca,
-    0x50362ddc,
-    0x5036adf2,
-    0x50372e0b,
-    0x5037ae1e,
-    0x50382e36,
-    0x5038ae47,
-    0x50392e5c,
-    0x5039ae70,
-    0x503a2e90,
-    0x503aaea6,
-    0x503b2ebe,
-    0x503baed0,
-    0x503c2eec,
-    0x503caf03,
-    0x503d2f1c,
-    0x503daf32,
-    0x503e2f3f,
-    0x503eaf55,
-    0x503f2f67,
-    0x503f8382,
-    0x50402f7a,
-    0x5040af8a,
-    0x50412fa4,
-    0x5041afb3,
-    0x50422fcd,
-    0x5042afea,
-    0x50432ffa,
-    0x5043b00a,
-    0x50443019,
-    0x5044843f,
-    0x5045302d,
-    0x5045b04b,
-    0x5046305e,
-    0x5046b074,
-    0x50473086,
-    0x5047b09b,
-    0x504830c1,
-    0x5048b0cf,
-    0x504930e2,
-    0x5049b0f7,
-    0x504a310d,
-    0x504ab11d,
-    0x504b313d,
-    0x504bb150,
-    0x504c3173,
-    0x504cb1a1,
-    0x504d31b3,
-    0x504db1d0,
-    0x504e31eb,
-    0x504eb207,
-    0x504f3219,
-    0x504fb230,
-    0x5050323f,
-    0x505086ef,
-    0x50513252,
-    0x58320ef2,
-    0x68320eb4,
-    0x68328c4e,
-    0x68330c61,
-    0x68338ec2,
-    0x68340ed2,
-    0x683480ea,
-    0x6c320e90,
-    0x6c328c18,
-    0x6c330e9b,
-    0x74320a0b,
-    0x743280ac,
-    0x74330c29,
-    0x78320970,
-    0x78328985,
-    0x78330991,
-    0x78338083,
-    0x783409a0,
-    0x783489b5,
-    0x783509d4,
-    0x783589f6,
-    0x78360a0b,
-    0x78368a21,
-    0x78370a31,
-    0x78378a44,
-    0x78380a57,
-    0x78388a69,
-    0x78390a76,
-    0x78398a95,
-    0x783a0aaa,
-    0x783a8ab8,
-    0x783b0ac2,
-    0x783b8ad6,
-    0x783c0aed,
-    0x783c8b02,
-    0x783d0b19,
-    0x783d8b2e,
-    0x783e0a84,
-    0x7c3210ff,
+    0x30340057,
+    0x30348071,
+    0x30350078,
+    0x30358090,
+    0x303600a1,
+    0x303680b9,
+    0x303700c6,
+    0x303780d5,
+    0x303800f7,
+    0x30388104,
+    0x30390117,
+    0x30398132,
+    0x303a0147,
+    0x303a815b,
+    0x303b016f,
+    0x303b8180,
+    0x303c0199,
+    0x303c81b6,
+    0x303d01c4,
+    0x303d81d8,
+    0x303e01e8,
+    0x303e8201,
+    0x303f0211,
+    0x303f8224,
+    0x30400233,
+    0x3040823f,
+    0x30410254,
+    0x30418264,
+    0x3042027b,
+    0x30428288,
+    0x3043029b,
+    0x304382aa,
+    0x304402bf,
+    0x304482e0,
+    0x304502f3,
+    0x30458306,
+    0x3046031f,
+    0x3046833a,
+    0x30470357,
+    0x30478369,
+    0x30480377,
+    0x30488388,
+    0x30490397,
+    0x304983af,
+    0x304a03c1,
+    0x304a83d5,
+    0x304b03ed,
+    0x304b8400,
+    0x304c040b,
+    0x304c841c,
+    0x304d0428,
+    0x304d843e,
+    0x304e044c,
+    0x304e8462,
+    0x304f0474,
+    0x304f8486,
+    0x305004a9,
+    0x305084bc,
+    0x305104cd,
+    0x305184dd,
+    0x305204f5,
+    0x3052850a,
+    0x30530522,
+    0x30538536,
+    0x3054054e,
+    0x30548567,
+    0x30550580,
+    0x3055859d,
+    0x305605a8,
+    0x305685c0,
+    0x305705d0,
+    0x305785e1,
+    0x305805f4,
+    0x3058860a,
+    0x30590613,
+    0x30598628,
+    0x305a063b,
+    0x305a864a,
+    0x305b066a,
+    0x305b8679,
+    0x305c069a,
+    0x305c86b6,
+    0x305d06c2,
+    0x305d86e2,
+    0x305e06fe,
+    0x305e870f,
+    0x305f0725,
+    0x305f872f,
+    0x30600499,
+    0x3060804a,
+    0x34320b72,
+    0x34328b86,
+    0x34330ba3,
+    0x34338bb6,
+    0x34340bc5,
+    0x34348bfe,
+    0x34350be2,
+    0x3c320090,
+    0x3c328cc9,
+    0x3c330ce2,
+    0x3c338cfd,
+    0x3c340d1a,
+    0x3c348d44,
+    0x3c350d5f,
+    0x3c358d85,
+    0x3c360d9e,
+    0x3c368db6,
+    0x3c370dc7,
+    0x3c378dd5,
+    0x3c380de2,
+    0x3c388df6,
+    0x3c390c8c,
+    0x3c398e19,
+    0x3c3a0e2d,
+    0x3c3a891c,
+    0x3c3b0e3d,
+    0x3c3b8e58,
+    0x3c3c0e6a,
+    0x3c3c8e9d,
+    0x3c3d0ea7,
+    0x3c3d8ebb,
+    0x3c3e0ec9,
+    0x3c3e8eee,
+    0x3c3f0cb5,
+    0x3c3f8ed7,
+    0x3c4000b9,
+    0x3c4080f7,
+    0x3c410d35,
+    0x3c418d74,
+    0x3c420e80,
+    0x3c428e0a,
+    0x403219b8,
+    0x403299ce,
+    0x403319fc,
+    0x40339a06,
+    0x40341a1d,
+    0x40349a3b,
+    0x40351a4b,
+    0x40359a5d,
+    0x40361a6a,
+    0x40369a76,
+    0x40371a8b,
+    0x40379a9d,
+    0x40381aa8,
+    0x40389aba,
+    0x40390f34,
+    0x40399aca,
+    0x403a1add,
+    0x403a9afe,
+    0x403b1b0f,
+    0x403b9b1f,
+    0x403c0071,
+    0x403c8090,
+    0x403d1b80,
+    0x403d9b96,
+    0x403e1ba5,
+    0x403e9bdd,
+    0x403f1bf7,
+    0x403f9c1f,
+    0x40401c34,
+    0x40409c48,
+    0x40411c83,
+    0x40419c9e,
+    0x40421cb7,
+    0x40429cca,
+    0x40431cde,
+    0x40439d0c,
+    0x40441d23,
+    0x404480b9,
+    0x40451d38,
+    0x40459d4a,
+    0x40461d6e,
+    0x40469d8e,
+    0x40471d9c,
+    0x40479dc3,
+    0x40481e34,
+    0x40489ee1,
+    0x40491ef8,
+    0x40499f12,
+    0x404a1f29,
+    0x404a9f47,
+    0x404b1f5f,
+    0x404b9f8c,
+    0x404c1fa2,
+    0x404c9fb4,
+    0x404d1fd5,
+    0x404da00e,
+    0x404e2022,
+    0x404ea02f,
+    0x404f20ac,
+    0x404fa0f2,
+    0x40502149,
+    0x4050a15d,
+    0x40512190,
+    0x405221a0,
+    0x4052a1c4,
+    0x405321dc,
+    0x4053a1ef,
+    0x40542204,
+    0x4054a227,
+    0x40552252,
+    0x4055a28f,
+    0x405622b4,
+    0x4056a2cd,
+    0x405722e5,
+    0x4057a2f8,
+    0x4058230d,
+    0x4058a334,
+    0x40592363,
+    0x4059a390,
+    0x405a23a4,
+    0x405aa3b4,
+    0x405b23cc,
+    0x405ba3dd,
+    0x405c23f0,
+    0x405ca42f,
+    0x405d243c,
+    0x405da461,
+    0x405e249f,
+    0x405e8ac0,
+    0x405f24c0,
+    0x405fa4cd,
+    0x406024db,
+    0x4060a4fd,
+    0x4061255e,
+    0x4061a596,
+    0x406225ad,
+    0x4062a5be,
+    0x4063260b,
+    0x4063a620,
+    0x40642637,
+    0x4064a663,
+    0x4065267e,
+    0x4065a695,
+    0x406626ad,
+    0x4066a6d7,
+    0x40672702,
+    0x4067a747,
+    0x4068278f,
+    0x4068a7b0,
+    0x406927e2,
+    0x4069a810,
+    0x406a2831,
+    0x406aa851,
+    0x406b29d9,
+    0x406ba9fc,
+    0x406c2a12,
+    0x406cad03,
+    0x406d2d32,
+    0x406dad5a,
+    0x406e2d88,
+    0x406eadd5,
+    0x406f2e2e,
+    0x406fae66,
+    0x40702e79,
+    0x4070ae96,
+    0x4071080f,
+    0x4071aea8,
+    0x40722ebb,
+    0x4072aef1,
+    0x40732f09,
+    0x40739525,
+    0x40742f1d,
+    0x4074af37,
+    0x40752f48,
+    0x4075af5c,
+    0x40762f6a,
+    0x407692e9,
+    0x40772f8f,
+    0x4077afcf,
+    0x40782fea,
+    0x4078b023,
+    0x4079303a,
+    0x4079b050,
+    0x407a307c,
+    0x407ab08f,
+    0x407b30a4,
+    0x407bb0b6,
+    0x407c30e7,
+    0x407cb0f0,
+    0x407d27cb,
+    0x407da102,
+    0x407e2fff,
+    0x407ea344,
+    0x407f1db0,
+    0x407f9f76,
+    0x408020bc,
+    0x40809dd8,
+    0x408121b2,
+    0x4081a060,
+    0x40822d73,
+    0x40829b2b,
+    0x4083231f,
+    0x4083a648,
+    0x40841dec,
+    0x4084a37c,
+    0x40852401,
+    0x4085a525,
+    0x40862481,
+    0x4086a11c,
+    0x40872db9,
+    0x4087a573,
+    0x40881b69,
+    0x4088a75a,
+    0x40891bb8,
+    0x40899b45,
+    0x408a2a4a,
+    0x408a993d,
+    0x408b30cb,
+    0x408bae43,
+    0x408c2411,
+    0x408c9975,
+    0x408d1ec7,
+    0x408d9e1e,
+    0x408e1ff7,
+    0x408ea26f,
+    0x408f276e,
+    0x408fa541,
+    0x40902723,
+    0x4090a453,
+    0x40912a32,
+    0x4091999b,
+    0x40921c05,
+    0x4092adf4,
+    0x40932ed4,
+    0x4093a12d,
+    0x40941e00,
+    0x4094aa63,
+    0x409525cf,
+    0x4095b05c,
+    0x40962da0,
+    0x4096a0d5,
+    0x40972178,
+    0x4097a046,
+    0x40981c65,
+    0x4098a5e3,
+    0x40992e10,
+    0x4099a29c,
+    0x409a2235,
+    0x409a9959,
+    0x409b1e4d,
+    0x409b9e78,
+    0x409c2fb1,
+    0x409c9ea0,
+    0x409d2091,
+    0x409da076,
+    0x409e1cf6,
+    0x41f42904,
+    0x41f92996,
+    0x41fe2889,
+    0x41feab3f,
+    0x41ff2c54,
+    0x4203291d,
+    0x4208293f,
+    0x4208a97b,
+    0x4209286d,
+    0x4209a9b5,
+    0x420a28c4,
+    0x420aa8a4,
+    0x420b28e4,
+    0x420ba95d,
+    0x420c2c70,
+    0x420caa73,
+    0x420d2b26,
+    0x420dab5d,
+    0x42122b77,
+    0x42172c37,
+    0x4217abb9,
+    0x421c2bdb,
+    0x421f2b96,
+    0x42212ce8,
+    0x42262c1a,
+    0x422b2cc6,
+    0x422bab01,
+    0x422c2ca8,
+    0x422caab4,
+    0x422d2a8d,
+    0x422dac87,
+    0x422e2ae0,
+    0x42302bf6,
+    0x4432073a,
+    0x44328749,
+    0x44330755,
+    0x44338763,
+    0x44340776,
+    0x44348787,
+    0x4435078e,
+    0x44358798,
+    0x443607ab,
+    0x443687c1,
+    0x443707d3,
+    0x443787e0,
+    0x443807ef,
+    0x443887f7,
+    0x4439080f,
+    0x4439881d,
+    0x443a0830,
+    0x48321313,
+    0x48329325,
+    0x4833133b,
+    0x48339354,
+    0x4c321379,
+    0x4c329389,
+    0x4c33139c,
+    0x4c3393bc,
+    0x4c3400b9,
+    0x4c3480f7,
+    0x4c3513c8,
+    0x4c3593d6,
+    0x4c3613f2,
+    0x4c369418,
+    0x4c371427,
+    0x4c379435,
+    0x4c38144a,
+    0x4c389456,
+    0x4c391476,
+    0x4c3994a0,
+    0x4c3a14b9,
+    0x4c3a94d2,
+    0x4c3b060a,
+    0x4c3b94eb,
+    0x4c3c14fd,
+    0x4c3c950c,
+    0x4c3d1525,
+    0x4c3d8c54,
+    0x4c3e1592,
+    0x4c3e9534,
+    0x4c3f15b4,
+    0x4c3f92e9,
+    0x4c40154a,
+    0x4c409365,
+    0x4c411582,
+    0x4c419405,
+    0x4c42156e,
+    0x5032345a,
+    0x5032b469,
+    0x50333474,
+    0x5033b484,
+    0x5034349d,
+    0x5034b4b7,
+    0x503534c5,
+    0x5035b4db,
+    0x503634ed,
+    0x5036b503,
+    0x5037351c,
+    0x5037b52f,
+    0x50383547,
+    0x5038b558,
+    0x5039356d,
+    0x5039b581,
+    0x503a35a1,
+    0x503ab5b7,
+    0x503b35cf,
+    0x503bb5e1,
+    0x503c35fd,
+    0x503cb614,
+    0x503d362d,
+    0x503db643,
+    0x503e3650,
+    0x503eb666,
+    0x503f3678,
+    0x503f8388,
+    0x5040368b,
+    0x5040b69b,
+    0x504136b5,
+    0x5041b6c4,
+    0x504236de,
+    0x5042b6fb,
+    0x5043370b,
+    0x5043b71b,
+    0x5044372a,
+    0x5044843e,
+    0x5045373e,
+    0x5045b75c,
+    0x5046376f,
+    0x5046b785,
+    0x50473797,
+    0x5047b7ac,
+    0x504837d2,
+    0x5048b7e0,
+    0x504937f3,
+    0x5049b808,
+    0x504a381e,
+    0x504ab82e,
+    0x504b384e,
+    0x504bb861,
+    0x504c3884,
+    0x504cb8b2,
+    0x504d38c4,
+    0x504db8e1,
+    0x504e38fc,
+    0x504eb918,
+    0x504f392a,
+    0x504fb941,
+    0x50503950,
+    0x505086fe,
+    0x50513963,
+    0x58320f72,
+    0x68320f34,
+    0x68328c8c,
+    0x68330c9f,
+    0x68338f42,
+    0x68340f52,
+    0x683480f7,
+    0x6c320efa,
+    0x6c328c43,
+    0x6c330f05,
+    0x6c338f1e,
+    0x74320a28,
+    0x743280b9,
+    0x74330c54,
+    0x7832098d,
+    0x783289a2,
+    0x783309ae,
+    0x78338090,
+    0x783409bd,
+    0x783489d2,
+    0x783509f1,
+    0x78358a13,
+    0x78360a28,
+    0x78368a3e,
+    0x78370a4e,
+    0x78378a6f,
+    0x78380a82,
+    0x78388a94,
+    0x78390aa1,
+    0x78398ac0,
+    0x783a0ad5,
+    0x783a8ae3,
+    0x783b0aed,
+    0x783b8b01,
+    0x783c0b18,
+    0x783c8b2d,
+    0x783d0b44,
+    0x783d8b59,
+    0x783e0aaf,
+    0x783e8a61,
+    0x7c321202,
+    0x80321418,
+    0x80328090,
+    0x803331ad,
+    0x803380b9,
+    0x803431bc,
+    0x8034b124,
+    0x80353142,
+    0x8035b1d0,
+    0x80363184,
+    0x8036b133,
+    0x80373176,
+    0x8037b111,
+    0x80383197,
+    0x8038b153,
+    0x80393168,
 };
 
 const size_t kOpenSSLReasonValuesLen = sizeof(kOpenSSLReasonValues) / sizeof(kOpenSSLReasonValues[0]);
@@ -715,6 +800,7 @@ const char kOpenSSLReasonStringData[] =
     "AUX_ERROR\0"
     "BAD_GET_ASN1_OBJECT_CALL\0"
     "BAD_OBJECT_HEADER\0"
+    "BAD_TEMPLATE\0"
     "BMPSTRING_IS_WRONG_LENGTH\0"
     "BN_LIB\0"
     "BOOLEAN_IS_WRONG_LENGTH\0"
@@ -753,14 +839,14 @@ const char kOpenSSLReasonStringData[] =
     "INTEGER_NOT_ASCII_FORMAT\0"
     "INTEGER_TOO_LARGE_FOR_LONG\0"
     "INVALID_BIT_STRING_BITS_LEFT\0"
-    "INVALID_BMPSTRING_LENGTH\0"
+    "INVALID_BMPSTRING\0"
     "INVALID_DIGIT\0"
     "INVALID_MODIFIER\0"
     "INVALID_NUMBER\0"
     "INVALID_OBJECT_ENCODING\0"
     "INVALID_SEPARATOR\0"
     "INVALID_TIME_FORMAT\0"
-    "INVALID_UNIVERSALSTRING_LENGTH\0"
+    "INVALID_UNIVERSALSTRING\0"
     "INVALID_UTF8STRING\0"
     "LIST_ERROR\0"
     "MISSING_ASN1_EOS\0"
@@ -771,6 +857,7 @@ const char kOpenSSLReasonStringData[] =
     "MSTRING_WRONG_TAG\0"
     "NESTED_ASN1_ERROR\0"
     "NESTED_ASN1_STRING\0"
+    "NESTED_TOO_DEEP\0"
     "NON_HEX_CHARACTERS\0"
     "NOT_ASCII_FORMAT\0"
     "NOT_ENOUGH_DATA\0"
@@ -829,6 +916,7 @@ const char kOpenSSLReasonStringData[] =
     "DIV_BY_ZERO\0"
     "EXPAND_ON_STATIC_BIGNUM_DATA\0"
     "INPUT_NOT_REDUCED\0"
+    "INVALID_INPUT\0"
     "INVALID_RANGE\0"
     "NEGATIVE_NUMBER\0"
     "NOT_A_SQUARE\0"
@@ -848,6 +936,7 @@ const char kOpenSSLReasonStringData[] =
     "INPUT_NOT_INITIALIZED\0"
     "INVALID_AD_SIZE\0"
     "INVALID_KEY_LENGTH\0"
+    "INVALID_NONCE\0"
     "INVALID_NONCE_SIZE\0"
     "INVALID_OPERATION\0"
     "IV_TOO_LARGE\0"
@@ -876,6 +965,7 @@ const char kOpenSSLReasonStringData[] =
     "UNKNOWN_HASH\0"
     "BAD_Q_VALUE\0"
     "BAD_VERSION\0"
+    "INVALID_PARAMETERS\0"
     "MISSING_PARAMETERS\0"
     "NEED_NEW_SETUP_VALUES\0"
     "BIGNUM_OUT_OF_RANGE\0"
@@ -894,11 +984,13 @@ const char kOpenSSLReasonStringData[] =
     "INVALID_FORM\0"
     "INVALID_GROUP_ORDER\0"
     "INVALID_PRIVATE_KEY\0"
+    "INVALID_SCALAR\0"
     "MISSING_PRIVATE_KEY\0"
     "NON_NAMED_CURVE\0"
     "PKPARAMETERS2GROUP_FAILURE\0"
     "POINT_AT_INFINITY\0"
     "POINT_IS_NOT_ON_CURVE\0"
+    "PUBLIC_KEY_VALIDATION_FAILED\0"
     "SLOT_FULL\0"
     "UNDEFINED_GENERATOR\0"
     "UNKNOWN_GROUP\0"
@@ -907,6 +999,7 @@ const char kOpenSSLReasonStringData[] =
     "WRONG_ORDER\0"
     "KDF_FAILED\0"
     "POINT_ARITHMETIC_FAILURE\0"
+    "UNKNOWN_DIGEST_LENGTH\0"
     "BAD_SIGNATURE\0"
     "NOT_IMPLEMENTED\0"
     "RANDOM_NUMBER_GENERATION_FAILED\0"
@@ -914,17 +1007,24 @@ const char kOpenSSLReasonStringData[] =
     "COMMAND_NOT_SUPPORTED\0"
     "DIFFERENT_KEY_TYPES\0"
     "DIFFERENT_PARAMETERS\0"
+    "EMPTY_PSK\0"
     "EXPECTING_AN_EC_KEY_KEY\0"
     "EXPECTING_AN_RSA_KEY\0"
     "EXPECTING_A_DSA_KEY\0"
     "ILLEGAL_OR_UNSUPPORTED_PADDING_MODE\0"
+    "INVALID_BUFFER_SIZE\0"
     "INVALID_DIGEST_LENGTH\0"
     "INVALID_DIGEST_TYPE\0"
     "INVALID_KEYBITS\0"
     "INVALID_MGF1_MD\0"
     "INVALID_PADDING_MODE\0"
+    "INVALID_PEER_KEY\0"
     "INVALID_PSS_SALTLEN\0"
+    "INVALID_SIGNATURE\0"
     "KEYS_NOT_SET\0"
+    "MEMORY_LIMIT_EXCEEDED\0"
+    "NOT_A_PRIVATE_KEY\0"
+    "NOT_XOF_OR_INVALID_LENGTH\0"
     "NO_DEFAULT_DIGEST\0"
     "NO_KEY_SET\0"
     "NO_MDC2_SUPPORT\0"
@@ -936,6 +1036,7 @@ const char kOpenSSLReasonStringData[] =
     "UNKNOWN_PUBLIC_KEY_TYPE\0"
     "UNSUPPORTED_ALGORITHM\0"
     "OUTPUT_TOO_LARGE\0"
+    "INVALID_OID_STRING\0"
     "UNKNOWN_NID\0"
     "BAD_BASE64_DECODE\0"
     "BAD_END_LINE\0"
@@ -951,6 +1052,10 @@ const char kOpenSSLReasonStringData[] =
     "SHORT_HEADER\0"
     "UNSUPPORTED_CIPHER\0"
     "UNSUPPORTED_ENCRYPTION\0"
+    "BAD_PKCS7_VERSION\0"
+    "NOT_PKCS7_SIGNED_DATA\0"
+    "NO_CERTIFICATES_INCLUDED\0"
+    "NO_CRLS_INCLUDED\0"
     "BAD_ITERATION_COUNT\0"
     "BAD_PKCS12_DATA\0"
     "BAD_PKCS12_VERSION\0"
@@ -959,6 +1064,7 @@ const char kOpenSSLReasonStringData[] =
     "ENCRYPT_ERROR\0"
     "ERROR_SETTING_CIPHER_PARAMS\0"
     "INCORRECT_PASSWORD\0"
+    "INVALID_CHARACTERS\0"
     "KEYGEN_FAILURE\0"
     "KEY_GEN_ERROR\0"
     "METHOD_NOT_SUPPORTED\0"
@@ -974,6 +1080,7 @@ const char kOpenSSLReasonStringData[] =
     "UNKNOWN_DIGEST\0"
     "UNSUPPORTED_KEYLENGTH\0"
     "UNSUPPORTED_KEY_DERIVATION_FUNCTION\0"
+    "UNSUPPORTED_OPTIONS\0"
     "UNSUPPORTED_PRF\0"
     "UNSUPPORTED_PRIVATE_KEY_ALGORITHM\0"
     "UNSUPPORTED_SALT_TYPE\0"
@@ -982,6 +1089,7 @@ const char kOpenSSLReasonStringData[] =
     "BAD_PAD_BYTE_COUNT\0"
     "BAD_RSA_PARAMETERS\0"
     "BLOCK_TYPE_IS_NOT_01\0"
+    "BLOCK_TYPE_IS_NOT_02\0"
     "BN_NOT_INITIALIZED\0"
     "CANNOT_RECOVER_MULTI_PRIME_KEY\0"
     "CRT_PARAMS_ALREADY_GIVEN\0"
@@ -994,6 +1102,7 @@ const char kOpenSSLReasonStringData[] =
     "DATA_TOO_SMALL_FOR_KEY_SIZE\0"
     "DIGEST_TOO_BIG_FOR_RSA_KEY\0"
     "D_E_NOT_CONGRUENT_TO_1\0"
+    "D_OUT_OF_RANGE\0"
     "EMPTY_PUBLIC_KEY\0"
     "FIRST_OCTET_INVALID\0"
     "INCONSISTENT_SET_OF_CRT_VALUES\0"
@@ -1017,6 +1126,9 @@ const char kOpenSSLReasonStringData[] =
     "VALUE_MISSING\0"
     "WRONG_SIGNATURE_LENGTH\0"
     "ALPN_MISMATCH_ON_EARLY_DATA\0"
+    "ALPS_MISMATCH_ON_EARLY_DATA\0"
+    "APPLICATION_DATA_INSTEAD_OF_HANDSHAKE\0"
+    "APPLICATION_DATA_ON_SHUTDOWN\0"
     "APP_DATA_IN_HANDSHAKE\0"
     "ATTEMPT_TO_REUSE_SESSION_IN_DIFFERENT_CONTEXT\0"
     "BAD_ALERT\0"
@@ -1037,7 +1149,6 @@ const char kOpenSSLReasonStringData[] =
     "BAD_WRITE_RETRY\0"
     "BIO_NOT_SET\0"
     "BLOCK_CIPHER_PAD_IS_WRONG\0"
-    "BUFFERED_MESSAGES_ON_CIPHER_CHANGE\0"
     "CANNOT_HAVE_BOTH_PRIVKEY_AND_METHOD\0"
     "CANNOT_PARSE_LEAF_CERT\0"
     "CA_DN_LENGTH_MISMATCH\0"
@@ -1046,15 +1157,17 @@ const char kOpenSSLReasonStringData[] =
     "CERTIFICATE_AND_PRIVATE_KEY_MISMATCH\0"
     "CERTIFICATE_VERIFY_FAILED\0"
     "CERT_CB_ERROR\0"
+    "CERT_DECOMPRESSION_FAILED\0"
     "CERT_LENGTH_MISMATCH\0"
     "CHANNEL_ID_NOT_P256\0"
-    "CHANNEL_ID_ON_EARLY_DATA\0"
     "CHANNEL_ID_SIGNATURE_INVALID\0"
+    "CIPHER_MISMATCH_ON_EARLY_DATA\0"
     "CIPHER_OR_HASH_UNAVAILABLE\0"
     "CLIENTHELLO_PARSE_FAILED\0"
     "CLIENTHELLO_TLSEXT\0"
     "CONNECTION_REJECTED\0"
     "CONNECTION_TYPE_NOT_SET\0"
+    "COULD_NOT_PARSE_HINTS\0"
     "CUSTOM_EXTENSION_ERROR\0"
     "DATA_LENGTH_TOO_LONG\0"
     "DECRYPTION_FAILED\0"
@@ -1066,28 +1179,42 @@ const char kOpenSSLReasonStringData[] =
     "DTLS_MESSAGE_TOO_BIG\0"
     "DUPLICATE_EXTENSION\0"
     "DUPLICATE_KEY_SHARE\0"
+    "DUPLICATE_SIGNATURE_ALGORITHM\0"
+    "EARLY_DATA_NOT_IN_USE\0"
     "ECC_CERT_NOT_FOR_SIGNING\0"
+    "ECH_SERVER_CONFIG_AND_PRIVATE_KEY_MISMATCH\0"
+    "ECH_SERVER_CONFIG_UNSUPPORTED_EXTENSION\0"
+    "ECH_SERVER_WOULD_HAVE_NO_RETRY_CONFIGS\0"
+    "EMPTY_HELLO_RETRY_REQUEST\0"
     "EMS_STATE_INCONSISTENT\0"
     "ENCRYPTED_LENGTH_TOO_LONG\0"
     "ERROR_ADDING_EXTENSION\0"
     "ERROR_IN_RECEIVED_CIPHER_LIST\0"
     "ERROR_PARSING_EXTENSION\0"
     "EXCESSIVE_MESSAGE_SIZE\0"
+    "EXCESS_HANDSHAKE_DATA\0"
     "EXTRA_DATA_IN_MESSAGE\0"
     "FRAGMENT_MISMATCH\0"
     "GOT_NEXT_PROTO_WITHOUT_EXTENSION\0"
     "HANDSHAKE_FAILURE_ON_CLIENT_HELLO\0"
+    "HANDSHAKE_NOT_COMPLETE\0"
     "HTTPS_PROXY_REQUEST\0"
     "HTTP_REQUEST\0"
     "INAPPROPRIATE_FALLBACK\0"
+    "INCONSISTENT_CLIENT_HELLO\0"
     "INVALID_ALPN_PROTOCOL\0"
+    "INVALID_ALPN_PROTOCOL_LIST\0"
+    "INVALID_CLIENT_HELLO_INNER\0"
     "INVALID_COMMAND\0"
     "INVALID_COMPRESSION_LIST\0"
+    "INVALID_DELEGATED_CREDENTIAL\0"
     "INVALID_MESSAGE\0"
     "INVALID_OUTER_RECORD_TYPE\0"
     "INVALID_SCT_LIST\0"
+    "INVALID_SIGNATURE_ALGORITHM\0"
     "INVALID_SSL_SESSION\0"
     "INVALID_TICKET_KEYS_LENGTH\0"
+    "KEY_USAGE_BIT_INCORRECT\0"
     "LENGTH_MISMATCH\0"
     "MISSING_EXTENSION\0"
     "MISSING_KEY_SHARE\0"
@@ -1096,8 +1223,11 @@ const char kOpenSSLReasonStringData[] =
     "MISSING_TMP_ECDH_KEY\0"
     "MIXED_SPECIAL_OPERATOR_WITH_GROUPS\0"
     "MTU_TOO_SMALL\0"
+    "NEGOTIATED_ALPS_WITHOUT_ALPN\0"
     "NEGOTIATED_BOTH_NPN_AND_ALPN\0"
+    "NEGOTIATED_TB_WITHOUT_EMS_OR_RI\0"
     "NESTED_GROUP\0"
+    "NO_APPLICATION_PROTOCOL\0"
     "NO_CERTIFICATES_RETURNED\0"
     "NO_CERTIFICATE_ASSIGNED\0"
     "NO_CERTIFICATE_SET\0"
@@ -1115,8 +1245,10 @@ const char kOpenSSLReasonStringData[] =
     "NO_REQUIRED_DIGEST\0"
     "NO_SHARED_CIPHER\0"
     "NO_SHARED_GROUP\0"
+    "NO_SUPPORTED_VERSIONS_ENABLED\0"
     "NULL_SSL_CTX\0"
     "NULL_SSL_METHOD_PASSED\0"
+    "OCSP_CB_ERROR\0"
     "OLD_SESSION_CIPHER_NOT_RETURNED\0"
     "OLD_SESSION_PRF_HASH_MISMATCH\0"
     "OLD_SESSION_VERSION_NOT_RETURNED\0"
@@ -1125,11 +1257,14 @@ const char kOpenSSLReasonStringData[] =
     "PEER_DID_NOT_RETURN_A_CERTIFICATE\0"
     "PEER_ERROR_UNSUPPORTED_CERTIFICATE_TYPE\0"
     "PRE_SHARED_KEY_MUST_BE_LAST\0"
+    "PRIVATE_KEY_OPERATION_FAILED\0"
     "PROTOCOL_IS_SHUTDOWN\0"
     "PSK_IDENTITY_BINDER_COUNT_MISMATCH\0"
     "PSK_IDENTITY_NOT_FOUND\0"
     "PSK_NO_CLIENT_CB\0"
     "PSK_NO_SERVER_CB\0"
+    "QUIC_INTERNAL_ERROR\0"
+    "QUIC_TRANSPORT_PARAMETERS_MISCONFIGURED\0"
     "READ_TIMEOUT_EXPIRED\0"
     "RECORD_LENGTH_MISMATCH\0"
     "RECORD_TOO_LARGE\0"
@@ -1140,8 +1275,10 @@ const char kOpenSSLReasonStringData[] =
     "RESUMED_EMS_SESSION_WITHOUT_EMS_EXTENSION\0"
     "RESUMED_NON_EMS_SESSION_WITH_EMS_EXTENSION\0"
     "SCSV_RECEIVED_WHEN_RENEGOTIATING\0"
+    "SECOND_SERVERHELLO_VERSION_MISMATCH\0"
     "SERVERHELLO_TLSEXT\0"
     "SERVER_CERT_CHANGED\0"
+    "SERVER_ECHOED_INVALID_SESSION_ID\0"
     "SESSION_ID_CONTEXT_UNINITIALIZED\0"
     "SESSION_MAY_NOT_BE_CREATED\0"
     "SHUTDOWN_WHILE_IN_INIT\0"
@@ -1164,8 +1301,14 @@ const char kOpenSSLReasonStringData[] =
     "SSL_CTX_HAS_NO_DEFAULT_SSL_VERSION\0"
     "SSL_HANDSHAKE_FAILURE\0"
     "SSL_SESSION_ID_CONTEXT_TOO_LONG\0"
+    "SSL_SESSION_ID_TOO_LONG\0"
     "TICKET_ENCRYPTION_FAILED\0"
+    "TLS13_DOWNGRADE\0"
     "TLSV1_ALERT_ACCESS_DENIED\0"
+    "TLSV1_ALERT_BAD_CERTIFICATE_HASH_VALUE\0"
+    "TLSV1_ALERT_BAD_CERTIFICATE_STATUS_RESPONSE\0"
+    "TLSV1_ALERT_CERTIFICATE_REQUIRED\0"
+    "TLSV1_ALERT_CERTIFICATE_UNOBTAINABLE\0"
     "TLSV1_ALERT_DECODE_ERROR\0"
     "TLSV1_ALERT_DECRYPTION_FAILED\0"
     "TLSV1_ALERT_DECRYPT_ERROR\0"
@@ -1173,31 +1316,33 @@ const char kOpenSSLReasonStringData[] =
     "TLSV1_ALERT_INAPPROPRIATE_FALLBACK\0"
     "TLSV1_ALERT_INSUFFICIENT_SECURITY\0"
     "TLSV1_ALERT_INTERNAL_ERROR\0"
+    "TLSV1_ALERT_NO_APPLICATION_PROTOCOL\0"
     "TLSV1_ALERT_NO_RENEGOTIATION\0"
     "TLSV1_ALERT_PROTOCOL_VERSION\0"
     "TLSV1_ALERT_RECORD_OVERFLOW\0"
     "TLSV1_ALERT_UNKNOWN_CA\0"
+    "TLSV1_ALERT_UNKNOWN_PSK_IDENTITY\0"
+    "TLSV1_ALERT_UNRECOGNIZED_NAME\0"
+    "TLSV1_ALERT_UNSUPPORTED_EXTENSION\0"
     "TLSV1_ALERT_USER_CANCELLED\0"
-    "TLSV1_BAD_CERTIFICATE_HASH_VALUE\0"
-    "TLSV1_BAD_CERTIFICATE_STATUS_RESPONSE\0"
-    "TLSV1_CERTIFICATE_REQUIRED\0"
-    "TLSV1_CERTIFICATE_UNOBTAINABLE\0"
-    "TLSV1_UNKNOWN_PSK_IDENTITY\0"
-    "TLSV1_UNRECOGNIZED_NAME\0"
-    "TLSV1_UNSUPPORTED_EXTENSION\0"
     "TLS_PEER_DID_NOT_RESPOND_WITH_CERTIFICATE_LIST\0"
     "TLS_RSA_ENCRYPTED_VALUE_LENGTH_IS_WRONG\0"
     "TOO_MANY_EMPTY_FRAGMENTS\0"
     "TOO_MANY_KEY_UPDATES\0"
     "TOO_MANY_WARNING_ALERTS\0"
+    "TOO_MUCH_READ_EARLY_DATA\0"
     "TOO_MUCH_SKIPPED_EARLY_DATA\0"
     "UNABLE_TO_FIND_ECDH_PARAMETERS\0"
+    "UNCOMPRESSED_CERT_TOO_LARGE\0"
+    "UNEXPECTED_COMPATIBILITY_MODE\0"
     "UNEXPECTED_EXTENSION\0"
+    "UNEXPECTED_EXTENSION_ON_EARLY_DATA\0"
     "UNEXPECTED_MESSAGE\0"
     "UNEXPECTED_OPERATOR_IN_GROUP\0"
     "UNEXPECTED_RECORD\0"
     "UNKNOWN_ALERT_TYPE\0"
     "UNKNOWN_CERTIFICATE_TYPE\0"
+    "UNKNOWN_CERT_COMPRESSION_ALG\0"
     "UNKNOWN_CIPHER_RETURNED\0"
     "UNKNOWN_CIPHER_TYPE\0"
     "UNKNOWN_KEY_EXCHANGE_TYPE\0"
@@ -1206,12 +1351,14 @@ const char kOpenSSLReasonStringData[] =
     "UNKNOWN_STATE\0"
     "UNSAFE_LEGACY_RENEGOTIATION_DISABLED\0"
     "UNSUPPORTED_COMPRESSION_ALGORITHM\0"
+    "UNSUPPORTED_ECH_SERVER_CONFIG\0"
     "UNSUPPORTED_ELLIPTIC_CURVE\0"
     "UNSUPPORTED_PROTOCOL\0"
     "UNSUPPORTED_PROTOCOL_FOR_CUSTOM_KEY\0"
     "WRONG_CERTIFICATE_TYPE\0"
     "WRONG_CIPHER_RETURNED\0"
     "WRONG_CURVE\0"
+    "WRONG_ENCRYPTION_LEVEL_RECEIVED\0"
     "WRONG_MESSAGE_TYPE\0"
     "WRONG_SIGNATURE_TYPE\0"
     "WRONG_SSL_VERSION\0"
@@ -1219,19 +1366,34 @@ const char kOpenSSLReasonStringData[] =
     "WRONG_VERSION_ON_EARLY_DATA\0"
     "X509_LIB\0"
     "X509_VERIFICATION_SETUP_PROBLEMS\0"
+    "BAD_VALIDITY_CHECK\0"
+    "DECODE_FAILURE\0"
+    "INVALID_KEY_ID\0"
+    "INVALID_METADATA\0"
+    "INVALID_METADATA_KEY\0"
+    "INVALID_PROOF\0"
+    "INVALID_TOKEN\0"
+    "NO_KEYS_CONFIGURED\0"
+    "NO_SRR_KEY_CONFIGURED\0"
+    "OVER_BATCHSIZE\0"
+    "SRR_SIGNATURE_ERROR\0"
+    "TOO_MANY_KEYS\0"
     "AKID_MISMATCH\0"
-    "BAD_PKCS7_VERSION\0"
     "BAD_X509_FILETYPE\0"
     "BASE64_DECODE_ERROR\0"
     "CANT_CHECK_DH_KEY\0"
     "CERT_ALREADY_IN_HASH_TABLE\0"
     "CRL_ALREADY_DELTA\0"
     "CRL_VERIFY_FAILURE\0"
+    "DELTA_CRL_WITHOUT_CRL_NUMBER\0"
     "IDP_MISMATCH\0"
     "INVALID_DIRECTORY\0"
+    "INVALID_FIELD_FOR_VERSION\0"
     "INVALID_FIELD_NAME\0"
+    "INVALID_PARAMETER\0"
     "INVALID_PSS_PARAMETERS\0"
     "INVALID_TRUST\0"
+    "INVALID_VERSION\0"
     "ISSUER_MISMATCH\0"
     "KEY_TYPE_MISMATCH\0"
     "KEY_VALUES_MISMATCH\0"
@@ -1239,14 +1401,12 @@ const char kOpenSSLReasonStringData[] =
     "LOADING_DEFAULTS\0"
     "NAME_TOO_LONG\0"
     "NEWER_CRL_NOT_NEWER\0"
-    "NOT_PKCS7_SIGNED_DATA\0"
-    "NO_CERTIFICATES_INCLUDED\0"
     "NO_CERT_SET_FOR_US_TO_VERIFY\0"
-    "NO_CRLS_INCLUDED\0"
     "NO_CRL_NUMBER\0"
     "PUBLIC_KEY_DECODE_ERROR\0"
     "PUBLIC_KEY_ENCODE_ERROR\0"
     "SHOULD_RETRY\0"
+    "SIGNATURE_ALGORITHM_MISMATCH\0"
     "UNKNOWN_KEY_TYPE\0"
     "UNKNOWN_PURPOSE_ID\0"
     "UNKNOWN_TRUST_ID\0"

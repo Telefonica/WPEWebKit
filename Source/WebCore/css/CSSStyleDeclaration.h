@@ -23,9 +23,6 @@
 #include "CSSPropertyNames.h"
 #include "ExceptionOr.h"
 #include "ScriptWrappable.h"
-#include <wtf/Forward.h>
-#include <wtf/Optional.h>
-#include <wtf/Variant.h>
 
 namespace WebCore {
 
@@ -39,9 +36,10 @@ class StyleProperties;
 class StyledElement;
 
 class CSSStyleDeclaration : public ScriptWrappable {
-    WTF_MAKE_NONCOPYABLE(CSSStyleDeclaration); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(CSSStyleDeclaration);
+    WTF_MAKE_ISO_ALLOCATED(CSSStyleDeclaration);
 public:
-    virtual ~CSSStyleDeclaration() { }
+    virtual ~CSSStyleDeclaration() = default;
 
     virtual void ref() = 0;
     virtual void deref() = 0;
@@ -60,24 +58,47 @@ public:
     virtual ExceptionOr<void> setProperty(const String& propertyName, const String& value, const String& priority) = 0;
     virtual ExceptionOr<String> removeProperty(const String& propertyName) = 0;
 
+    String cssFloat();
+    ExceptionOr<void> setCssFloat(const String&);
+
     // CSSPropertyID versions of the CSSOM functions to support bindings and editing.
     // Use the non-virtual methods in the concrete subclasses when possible.
     // The CSSValue returned by this function should not be exposed to the web as it may be used by multiple documents at the same time.
     virtual RefPtr<CSSValue> getPropertyCSSValueInternal(CSSPropertyID) = 0;
     virtual String getPropertyValueInternal(CSSPropertyID) = 0;
-    virtual ExceptionOr<bool> setPropertyInternal(CSSPropertyID, const String& value, bool important) = 0;
+    virtual ExceptionOr<void> setPropertyInternal(CSSPropertyID, const String& value, bool important) = 0;
 
     virtual Ref<MutableStyleProperties> copyProperties() const = 0;
 
     virtual CSSStyleSheet* parentStyleSheet() const { return nullptr; }
 
-    // Bindings support.
-    std::optional<Variant<String, double>> namedItem(const AtomicString&);
-    ExceptionOr<void> setNamedItem(const AtomicString& name, String value, bool& propertySupported);
-    Vector<AtomicString> supportedPropertyNames() const;
+    virtual const Settings* settings() const;
+
+    // FIXME: It would be more efficient, by virtue of avoiding the text transformation and hash lookup currently
+    // required in the implementation, if we could could smuggle the CSSPropertyID through the bindings, perhaps
+    // by encoding it into the HashTableValue and then passing it together with the PropertyName.
+
+    // Shared implementation for all properties that match https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-camel_cased_attribute.
+    String propertyValueForCamelCasedIDLAttribute(const AtomString&);
+    ExceptionOr<void> setPropertyValueForCamelCasedIDLAttribute(const AtomString&, const String&);
+
+    // Shared implementation for all properties that match https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-webkit_cased_attribute.
+    String propertyValueForWebKitCasedIDLAttribute(const AtomString&);
+    ExceptionOr<void> setPropertyValueForWebKitCasedIDLAttribute(const AtomString&, const String&);
+
+    // Shared implementation for all properties that match https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-dashed_attribute.
+    String propertyValueForDashedIDLAttribute(const AtomString&);
+    ExceptionOr<void> setPropertyValueForDashedIDLAttribute(const AtomString&, const String&);
+
+    // Shared implementation for all properties that match non-standard Epub-cased.
+    String propertyValueForEpubCasedIDLAttribute(const AtomString&);
+    ExceptionOr<void> setPropertyValueForEpubCasedIDLAttribute(const AtomString&, const String&);
+
+    // FIXME: This needs to pass in a Settings& to work correctly.
+    static CSSPropertyID getCSSPropertyIDFromJavaScriptPropertyName(const AtomString&);
 
 protected:
-    CSSStyleDeclaration() { }
+    CSSStyleDeclaration() = default;
 };
 
 } // namespace WebCore

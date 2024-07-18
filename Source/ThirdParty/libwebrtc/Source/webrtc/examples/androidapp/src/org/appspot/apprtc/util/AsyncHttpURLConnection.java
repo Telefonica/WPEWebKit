@@ -50,14 +50,10 @@ public class AsyncHttpURLConnection {
   }
 
   public void send() {
-    Runnable runHttp = new Runnable() {
-      public void run() {
-        sendHttpMessage();
-      }
-    };
-    new Thread(runHttp).start();
+    new Thread(this ::sendHttpMessage).start();
   }
 
+  @SuppressWarnings("UseNetworkAnnotations")
   private void sendHttpMessage() {
     try {
       HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
@@ -113,7 +109,7 @@ public class AsyncHttpURLConnection {
 
   // Return the contents of an InputStream as a String.
   private static String drainStream(InputStream in) {
-    Scanner s = new Scanner(in).useDelimiter("\\A");
+    Scanner s = new Scanner(in, "UTF-8").useDelimiter("\\A");
     return s.hasNext() ? s.next() : "";
   }
 }

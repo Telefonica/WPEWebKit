@@ -26,32 +26,29 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import "WebScriptDebugDelegate.h"
 #import "WebDataSource.h"
 #import "WebDataSourceInternal.h"
 #import "WebFrameInternal.h"
-#import "WebScriptDebugDelegate.h"
 #import "WebScriptDebugger.h"
 #import "WebViewInternal.h"
+#import <JavaScriptCore/CallFrame.h>
+#import <JavaScriptCore/Completion.h>
+#import <JavaScriptCore/Debugger.h>
+#import <JavaScriptCore/JSFunction.h>
+#import <JavaScriptCore/JSGlobalObject.h>
+#import <JavaScriptCore/JSLock.h>
 #import <WebCore/Frame.h>
 #import <WebCore/ScriptController.h>
 #import <WebCore/WebScriptObjectPrivate.h>
 #import <WebCore/runtime_root.h>
-#import <debugger/Debugger.h>
-#import <interpreter/CallFrame.h>
-#import <runtime/Completion.h>
-#import <runtime/JSFunction.h>
-#import <runtime/JSGlobalObject.h>
-#import <runtime/JSLock.h>
-
-using namespace JSC;
-using namespace WebCore;
 
 // FIXME: these error strings should be public for future use by WebScriptObject and in WebScriptObject.h
 NSString * const WebScriptErrorDomain = @"WebScriptErrorDomain";
 NSString * const WebScriptErrorDescriptionKey = @"WebScriptErrorDescription";
 NSString * const WebScriptErrorLineNumberKey = @"WebScriptErrorLineNumber";
 
-@interface WebScriptCallFrame (WebScriptDebugDelegateInternal)
+@interface WebScriptCallFrame (WebScriptDebugDelegateInternalForDelegate)
 
 - (id)_convertValueToObjcValue:(JSC::JSValue)value;
 
@@ -103,11 +100,11 @@ NSString * const WebScriptErrorLineNumberKey = @"WebScriptErrorLineNumber";
     if (value == [globalObject _imp])
         return globalObject;
 
-    Bindings::RootObject* root1 = [globalObject _originRootObject];
+    JSC::Bindings::RootObject* root1 = [globalObject _originRootObject];
     if (!root1)
         return nil;
 
-    Bindings::RootObject* root2 = [globalObject _rootObject];
+    JSC::Bindings::RootObject* root2 = [globalObject _rootObject];
     if (!root2)
         return nil;
 

@@ -1,17 +1,11 @@
-deadbeef@webrtc.org
-honghaiz@webrtc.org
+hbos@webrtc.org
 hta@webrtc.org
-jiayl@webrtc.org
-juberti@webrtc.org
 perkj@webrtc.org
-pthatcher@webrtc.org
-sergeyu@chromium.org
 tommi@webrtc.org
+deadbeef@webrtc.org
+orphis@webrtc.org
 
-per-file rtcstats*=hbos@webrtc.org
-per-file rtcstats*=hta@webrtc.org
-
-# These are for the common case of adding or renaming files. If you're doing
-# structural changes, please get a review from a reviewer in this file.
-per-file *.gn=*
-per-file *.gni=*
+# Adding features via SDP munging requires approval from SDP owners
+per-file webrtc_sdp.cc = set noparent
+per-file webrtc_sdp.cc = hta@webrtc.org
+per-file webrtc_sdp.cc = hbos@webrtc.org

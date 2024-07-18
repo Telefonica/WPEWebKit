@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,9 +31,11 @@ namespace JSC {
 
 class DirectEvalExecutable final : public EvalExecutable {
 public:
-    static DirectEvalExecutable* create(ExecState*, const SourceCode&, bool isInStrictContext, DerivedContextType, bool isArrowFunctionContext, EvalContextType, const VariableEnvironment*);
+    static DirectEvalExecutable* create(JSGlobalObject*, const SourceCode&, DerivedContextType, NeedsClassFieldInitializer, PrivateBrandRequirement, bool isArrowFunctionContext, bool isInsideOrdinaryFunction, EvalContextType, const TDZEnvironment* parentScopeTDZVariables, const PrivateNameEnvironment*, ECMAMode);
 private:
-    DirectEvalExecutable(ExecState*, const SourceCode&, bool inStrictContext, DerivedContextType, bool isArrowFunctionContext, EvalContextType);
+    DirectEvalExecutable(JSGlobalObject*, const SourceCode&, bool inStrictContext, DerivedContextType, NeedsClassFieldInitializer, PrivateBrandRequirement, bool isArrowFunctionContext, bool isInsideOrdinaryFunction, EvalContextType);
 };
+
+static_assert(sizeof(DirectEvalExecutable) == sizeof(EvalExecutable));
 
 } // namespace JSC

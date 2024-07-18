@@ -26,35 +26,35 @@
 #include "MediaDescription.h"
 
 #include <gst/gst.h>
-#include <wtf/text/AtomicString.h>
+#include <wtf/text/AtomString.h>
 
 namespace WebCore {
 
 class GStreamerMediaDescription : public MediaDescription {
 public:
-    static Ref<GStreamerMediaDescription> create(GstCaps* caps)
+    static Ref<GStreamerMediaDescription> create(const GRefPtr<GstCaps>& caps)
     {
         return adoptRef(*new GStreamerMediaDescription(caps));
     }
 
     virtual ~GStreamerMediaDescription() = default;
 
-    AtomicString codec() const override;
+    AtomString codec() const override;
     bool isVideo() const override;
     bool isAudio() const override;
     bool isText() const override;
 
 private:
-    GStreamerMediaDescription(GstCaps* caps)
+    GStreamerMediaDescription(const GRefPtr<GstCaps>& caps)
         : MediaDescription()
         , m_caps(caps)
     {
         m_codecName = extractCodecName();
     }
 
-    AtomicString extractCodecName();
+    AtomString extractCodecName();
     GRefPtr<GstCaps> m_caps;
-    AtomicString m_codecName;
+    AtomString m_codecName;
 };
 
 } // namespace WebCore.

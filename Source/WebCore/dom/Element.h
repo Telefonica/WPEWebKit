@@ -25,58 +25,98 @@
 #pragma once
 
 #include "AXTextStateChangeIntent.h"
-#include "Document.h"
-#include "ElementData.h"
-#include "HTMLNames.h"
-#include "ScrollToOptions.h"
+#include "ContainerNode.h"
+#include "ElementIdentifier.h"
+#include "EventOptions.h"
+#include "FocusOptions.h"
+#include "HitTestRequest.h"
+#include "QualifiedName.h"
+#include "RenderPtr.h"
 #include "ScrollTypes.h"
 #include "ShadowRootMode.h"
 #include "SimulatedClickOptions.h"
-#include "StyleChange.h"
+#include "WebAnimationTypes.h"
+#include <JavaScriptCore/Forward.h>
+
+#define DUMP_NODE_STATISTICS 0
+
+namespace JSC {
+class JSGlobalObject;
+}
 
 namespace WebCore {
 
+class Attr;
+class Attribute;
+class AttributeIteratorAccessor;
 class CustomElementReactionQueue;
 class DatasetDOMStringMap;
 class DOMRect;
 class DOMRectList;
 class DOMTokenList;
+class Document;
+class ElementAnimationRareData;
+class ElementData;
 class ElementRareData;
+class Frame;
 class HTMLDocument;
 class IntSize;
 class JSCustomElementInterface;
+class KeyframeEffectStack;
 class KeyboardEvent;
 class Locale;
 class PlatformKeyboardEvent;
 class PlatformMouseEvent;
 class PlatformWheelEvent;
 class PseudoElement;
+class RenderStyle;
 class RenderTreePosition;
+class SpaceSplitString;
+class StylePropertyMap;
+class StylePropertyMapReadOnly;
+class Text;
+class UniqueElementData;
 class WebAnimation;
+
+enum class AnimationImpact;
+enum class EventHandling : uint8_t;
+enum class EventProcessing : uint8_t;
+enum class IsSyntheticClick : bool { No, Yes };
+enum class ResolveURLs : uint8_t { No, NoExcludingURLsForPrivacy, Yes, YesExcludingURLsForPrivacy };
+enum class SelectionRestorationMode : uint8_t;
+
+struct GetAnimationsOptions;
+struct IntersectionObserverData;
+struct KeyframeAnimationOptions;
+struct ResizeObserverData;
+struct ScrollIntoViewOptions;
+struct ScrollToOptions;
+struct SecurityPolicyViolationEventInit;
+struct ShadowRootInit;
+
+using ExplicitlySetAttrElementsMap = HashMap<QualifiedName, Vector<WeakPtr<Element>>>;
+
+namespace Style {
+class Resolver;
+enum class Change : uint8_t;
 struct ElementStyle;
-
-enum SpellcheckAttributeState {
-    SpellcheckAttributeTrue,
-    SpellcheckAttributeFalse,
-    SpellcheckAttributeDefault
-};
-
-enum class SelectionRevealMode {
-    Reveal,
-    RevealUpToMainFrame, // Scroll overflow and iframes, but not the main frame.
-    DoNotReveal
-};
+struct ResolutionContext;
+}
 
 class Element : public ContainerNode {
+    WTF_MAKE_ISO_ALLOCATED(Element);
 public:
     static Ref<Element> create(const QualifiedName&, Document&);
     virtual ~Element();
 
     WEBCORE_EXPORT bool hasAttribute(const QualifiedName&) const;
-    WEBCORE_EXPORT const AtomicString& getAttribute(const QualifiedName&) const;
-    WEBCORE_EXPORT void setAttribute(const QualifiedName&, const AtomicString& value);
-    WEBCORE_EXPORT void setAttributeWithoutSynchronization(const QualifiedName&, const AtomicString& value);
-    void setSynchronizedLazyAttribute(const QualifiedName&, const AtomicString& value);
+    WEBCORE_EXPORT const AtomString& getAttribute(const QualifiedName&) const;
+    AtomString getAttributeForBindings(const QualifiedName&, ResolveURLs = ResolveURLs::NoExcludingURLsForPrivacy) const;
+    template<typename... QualifiedNames>
+    inline const AtomString& getAttribute(const QualifiedName&, const QualifiedNames&...) const;
+    WEBCORE_EXPORT void setAttribute(const QualifiedName&, const AtomString& value);
+    WEBCORE_EXPORT void setAttributeWithoutSynchronization(const QualifiedName&, const AtomString& value);
+    void setSynchronizedLazyAttribute(const QualifiedName&, const AtomString& value);
     bool removeAttribute(const QualifiedName&);
     Vector<String> getAttributeNames() const;
 
@@ -85,82 +125,93 @@ public:
     WEBCORE_EXPORT void setIntegralAttribute(const QualifiedName& attributeName, int value);
     WEBCORE_EXPORT unsigned getUnsignedIntegralAttribute(const QualifiedName& attributeName) const;
     WEBCORE_EXPORT void setUnsignedIntegralAttribute(const QualifiedName& attributeName, unsigned value);
+    WEBCORE_EXPORT Element* getElementAttribute(const QualifiedName& attributeName) const;
+    WEBCORE_EXPORT void setElementAttribute(const QualifiedName& attributeName, Element* value);
+    WEBCORE_EXPORT std::optional<Vector<RefPtr<Element>>> getElementsArrayAttribute(const QualifiedName& attributeName) const;
+    WEBCORE_EXPORT void setElementsArrayAttribute(const QualifiedName& attributeName, std::optional<Vector<RefPtr<Element>>>&& value);
 
     // Call this to get the value of an attribute that is known not to be the style
     // attribute or one of the SVG animatable attributes.
-    bool hasAttributeWithoutSynchronization(const QualifiedName&) const;
-    const AtomicString& attributeWithoutSynchronization(const QualifiedName&) const;
-#ifndef NDEBUG
-    WEBCORE_EXPORT bool fastAttributeLookupAllowed(const QualifiedName&) const;
-#endif
+    inline bool hasAttributeWithoutSynchronization(const QualifiedName&) const;
+    inline const AtomString& attributeWithoutSynchronization(const QualifiedName&) const;
 
-#ifdef DUMP_NODE_STATISTICS
+#if DUMP_NODE_STATISTICS
     bool hasNamedNodeMap() const;
 #endif
+
     WEBCORE_EXPORT bool hasAttributes() const;
+
     // This variant will not update the potentially invalid attributes. To be used when not interested
     // in style attribute or one of the SVG animation attributes.
     bool hasAttributesWithoutUpdate() const;
 
-    WEBCORE_EXPORT bool hasAttribute(const AtomicString& name) const;
-    WEBCORE_EXPORT bool hasAttributeNS(const AtomicString& namespaceURI, const AtomicString& localName) const;
+    WEBCORE_EXPORT bool hasAttribute(const AtomString& qualifiedName) const;
+    WEBCORE_EXPORT bool hasAttributeNS(const AtomString& namespaceURI, const AtomString& localName) const;
 
-    WEBCORE_EXPORT const AtomicString& getAttribute(const AtomicString& name) const;
-    WEBCORE_EXPORT const AtomicString& getAttributeNS(const AtomicString& namespaceURI, const AtomicString& localName) const;
+    WEBCORE_EXPORT const AtomString& getAttribute(const AtomString& qualifiedName) const;
+    WEBCORE_EXPORT const AtomString& getAttributeNS(const AtomString& namespaceURI, const AtomString& localName) const;
+    AtomString getAttributeForBindings(const AtomString& qualifiedName, ResolveURLs = ResolveURLs::NoExcludingURLsForPrivacy) const;
+    inline AtomString getAttributeNSForBindings(const AtomString& namespaceURI, const AtomString& localName, ResolveURLs = ResolveURLs::NoExcludingURLsForPrivacy) const;
 
-    WEBCORE_EXPORT ExceptionOr<void> setAttribute(const AtomicString& name, const AtomicString& value);
-    static ExceptionOr<QualifiedName> parseAttributeName(const AtomicString& namespaceURI, const AtomicString& qualifiedName);
-    WEBCORE_EXPORT ExceptionOr<void> setAttributeNS(const AtomicString& namespaceURI, const AtomicString& qualifiedName, const AtomicString& value);
+    WEBCORE_EXPORT ExceptionOr<void> setAttribute(const AtomString& qualifiedName, const AtomString& value);
+    static ExceptionOr<QualifiedName> parseAttributeName(const AtomString& namespaceURI, const AtomString& qualifiedName);
+    WEBCORE_EXPORT ExceptionOr<void> setAttributeNS(const AtomString& namespaceURI, const AtomString& qualifiedName, const AtomString& value);
 
-    const AtomicString& getIdAttribute() const;
-    void setIdAttribute(const AtomicString&);
+    ExceptionOr<bool> toggleAttribute(const AtomString& qualifiedName, std::optional<bool> force);
 
-    const AtomicString& getNameAttribute() const;
+    inline const AtomString& getIdAttribute() const;
+    inline void setIdAttribute(const AtomString&);
+
+    inline const AtomString& getNameAttribute() const;
 
     // Call this to get the value of the id attribute for style resolution purposes.
     // The value will already be lowercased if the document is in compatibility mode,
     // so this function is not suitable for non-style uses.
-    const AtomicString& idForStyleResolution() const;
+    inline const AtomString& idForStyleResolution() const;
 
     // Internal methods that assume the existence of attribute storage, one should use hasAttributes()
     // before calling them.
-    AttributeIteratorAccessor attributesIterator() const { return elementData()->attributesIterator(); }
-    unsigned attributeCount() const;
-    const Attribute& attributeAt(unsigned index) const;
-    const Attribute* findAttributeByName(const QualifiedName&) const;
-    unsigned findAttributeIndexByName(const QualifiedName& name) const { return elementData()->findAttributeIndexByName(name); }
-    unsigned findAttributeIndexByName(const AtomicString& name, bool shouldIgnoreAttributeCase) const { return elementData()->findAttributeIndexByName(name, shouldIgnoreAttributeCase); }
+    inline AttributeIteratorAccessor attributesIterator() const;
+    inline unsigned attributeCount() const;
+    inline const Attribute& attributeAt(unsigned index) const;
+    inline const Attribute* findAttributeByName(const QualifiedName&) const;
+    inline unsigned findAttributeIndexByName(const QualifiedName&) const;
+    inline unsigned findAttributeIndexByName(const AtomString&, bool shouldIgnoreAttributeCase) const;
 
+    WEBCORE_EXPORT void scrollIntoView(std::optional<std::variant<bool, ScrollIntoViewOptions>>&& arg);
     WEBCORE_EXPORT void scrollIntoView(bool alignToTop = true);
     WEBCORE_EXPORT void scrollIntoViewIfNeeded(bool centerIfNeeded = true);
     WEBCORE_EXPORT void scrollIntoViewIfNotVisible(bool centerIfNotVisible = true);
 
     void scrollBy(const ScrollToOptions&);
     void scrollBy(double x, double y);
-    virtual void scrollTo(const ScrollToOptions&);
+    virtual void scrollTo(const ScrollToOptions&, ScrollClamping = ScrollClamping::Clamped, ScrollSnapPointSelectionMethod = ScrollSnapPointSelectionMethod::Closest);
     void scrollTo(double x, double y);
 
+    // These are only used by WebKitLegacy DOM API.
     WEBCORE_EXPORT void scrollByLines(int lines);
     WEBCORE_EXPORT void scrollByPages(int pages);
 
-    WEBCORE_EXPORT double offsetLeft();
-    WEBCORE_EXPORT double offsetTop();
-    WEBCORE_EXPORT double offsetWidth();
-    WEBCORE_EXPORT double offsetHeight();
+    WEBCORE_EXPORT int offsetLeftForBindings();
+    WEBCORE_EXPORT int offsetLeft();
+    WEBCORE_EXPORT int offsetTopForBindings();
+    WEBCORE_EXPORT int offsetTop();
+    WEBCORE_EXPORT int offsetWidth();
+    WEBCORE_EXPORT int offsetHeight();
 
     bool mayCauseRepaintInsideViewport(const IntRect* visibleRect = nullptr) const;
 
     // FIXME: Replace uses of offsetParent in the platform with calls
     // to the render layer and merge bindingsOffsetParent and offsetParent.
-    WEBCORE_EXPORT Element* bindingsOffsetParent();
+    WEBCORE_EXPORT Element* offsetParentForBindings();
 
-    const Element* rootElement() const;
+    inline const Element* rootElement() const;
 
     Element* offsetParent();
-    WEBCORE_EXPORT double clientLeft();
-    WEBCORE_EXPORT double clientTop();
-    WEBCORE_EXPORT double clientWidth();
-    WEBCORE_EXPORT double clientHeight();
+    WEBCORE_EXPORT int clientLeft();
+    WEBCORE_EXPORT int clientTop();
+    WEBCORE_EXPORT int clientWidth();
+    WEBCORE_EXPORT int clientHeight();
 
     virtual int scrollLeft();
     virtual int scrollTop();
@@ -169,31 +220,36 @@ public:
     virtual int scrollWidth();
     virtual int scrollHeight();
 
+    // This updates layout, and has custom handling for SVG.
     WEBCORE_EXPORT IntRect boundsInRootViewSpace();
+    // This does not update layout, and uses absoluteBoundingBoxRect().
+    WEBCORE_EXPORT IntRect boundingBoxInRootViewCoordinates() const;
+
+    WEBCORE_EXPORT std::optional<std::pair<RenderObject*, FloatRect>> boundingAbsoluteRectWithoutLayout() const;
 
     WEBCORE_EXPORT FloatRect boundingClientRect();
 
     WEBCORE_EXPORT Ref<DOMRectList> getClientRects();
     Ref<DOMRect> getBoundingClientRect();
 
-    // Returns the absolute bounding box translated into client coordinates.
-    WEBCORE_EXPORT IntRect clientRect() const;
     // Returns the absolute bounding box translated into screen coordinates.
     WEBCORE_EXPORT IntRect screenRect() const;
 
-    WEBCORE_EXPORT bool removeAttribute(const AtomicString& name);
-    WEBCORE_EXPORT bool removeAttributeNS(const AtomicString& namespaceURI, const AtomicString& localName);
+    WEBCORE_EXPORT bool removeAttribute(const AtomString& qualifiedName);
+    WEBCORE_EXPORT bool removeAttributeNS(const AtomString& namespaceURI, const AtomString& localName);
+    void removeAttributeForBindings(const AtomString& qualifiedName) { removeAttribute(qualifiedName); }
+    void removeAttributeNSForBindings(const AtomString& namespaceURI, const AtomString& localName) { removeAttributeNS(namespaceURI, localName); }
 
     Ref<Attr> detachAttribute(unsigned index);
 
-    WEBCORE_EXPORT RefPtr<Attr> getAttributeNode(const AtomicString& name);
-    WEBCORE_EXPORT RefPtr<Attr> getAttributeNodeNS(const AtomicString& namespaceURI, const AtomicString& localName);
+    WEBCORE_EXPORT RefPtr<Attr> getAttributeNode(const AtomString& qualifiedName);
+    WEBCORE_EXPORT RefPtr<Attr> getAttributeNodeNS(const AtomString& namespaceURI, const AtomString& localName);
     WEBCORE_EXPORT ExceptionOr<RefPtr<Attr>> setAttributeNode(Attr&);
     WEBCORE_EXPORT ExceptionOr<RefPtr<Attr>> setAttributeNodeNS(Attr&);
     WEBCORE_EXPORT ExceptionOr<Ref<Attr>> removeAttributeNode(Attr&);
 
     RefPtr<Attr> attrIfExists(const QualifiedName&);
-    RefPtr<Attr> attrIfExists(const AtomicString& localName, bool shouldIgnoreAttributeCase);
+    RefPtr<Attr> attrIfExists(const AtomString& localName, bool shouldIgnoreAttributeCase);
     Ref<Attr> ensureAttr(const QualifiedName&);
 
     const Vector<RefPtr<Attr>>& attrNodeList();
@@ -201,21 +257,20 @@ public:
     const QualifiedName& tagQName() const { return m_tagName; }
 #if ENABLE(JIT)
     static ptrdiff_t tagQNameMemoryOffset() { return OBJECT_OFFSETOF(Element, m_tagName); }
-#endif // ENABLE(JIT)
+#endif
     String tagName() const { return nodeName(); }
     bool hasTagName(const QualifiedName& tagName) const { return m_tagName.matches(tagName); }
     bool hasTagName(const HTMLQualifiedName& tagName) const { return ContainerNode::hasTagName(tagName); }
     bool hasTagName(const MathMLQualifiedName& tagName) const { return ContainerNode::hasTagName(tagName); }
-    bool hasTagName(const SVGQualifiedName& tagName) const { return ContainerNode::hasTagName(tagName); }
+    inline bool hasTagName(const SVGQualifiedName& tagName) const;
 
-    // A fast function for checking the local name against another atomic string.
-    bool hasLocalName(const AtomicString& other) const { return m_tagName.localName() == other; }
+    bool hasLocalName(const AtomString& other) const { return m_tagName.localName() == other; }
 
-    const AtomicString& localName() const final { return m_tagName.localName(); }
-    const AtomicString& prefix() const final { return m_tagName.prefix(); }
-    const AtomicString& namespaceURI() const final { return m_tagName.namespaceURI(); }
+    const AtomString& localName() const final { return m_tagName.localName(); }
+    const AtomString& prefix() const final { return m_tagName.prefix(); }
+    const AtomString& namespaceURI() const final { return m_tagName.namespaceURI(); }
 
-    ExceptionOr<void> setPrefix(const AtomicString&) final;
+    ExceptionOr<void> setPrefix(const AtomString&) final;
 
     String nodeName() const override;
 
@@ -235,19 +290,22 @@ public:
         ModifiedByCloning
     };
 
-    // This method is called whenever an attribute is added, changed or removed.
-    virtual void attributeChanged(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue, AttributeModificationReason = ModifiedDirectly);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) { }
+    // These functions are called whenever an attribute is added, changed or removed.
+    virtual void attributeChanged(const QualifiedName&, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason = ModifiedDirectly);
+    virtual void parseAttribute(const QualifiedName&, const AtomString&) { }
 
     // Only called by the parser immediately after element construction.
     void parserSetAttributes(const Vector<Attribute>&);
+
+    bool isEventHandlerAttribute(const Attribute&) const;
+    virtual bool attributeContainsJavaScriptURL(const Attribute&) const;
 
     // Remove attributes that might introduce scripting from the vector leaving the element unchanged.
     void stripScriptingAttributes(Vector<Attribute>&) const;
 
     const ElementData* elementData() const { return m_elementData.get(); }
     static ptrdiff_t elementDataMemoryOffset() { return OBJECT_OFFSETOF(Element, m_elementData); }
-    UniqueElementData& ensureUniqueElementData();
+    inline UniqueElementData& ensureUniqueElementData();
 
     void synchronizeAllAttributes() const;
 
@@ -257,113 +315,138 @@ public:
     // Clones all attribute-derived data, including subclass specifics (through copyNonAttributeProperties.)
     void cloneDataFromElement(const Element&);
 
-    bool hasEquivalentAttributes(const Element* other) const;
+    virtual void didMoveToNewDocument(Document& oldDocument, Document& newDocument);
+
+    bool hasEquivalentAttributes(const Element& other) const;
 
     virtual void copyNonAttributePropertiesFromElement(const Element&) { }
 
     virtual RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&);
     virtual bool rendererIsNeeded(const RenderStyle&);
+    virtual bool rendererIsEverNeeded() { return true; }
 
-    WEBCORE_EXPORT ShadowRoot* shadowRoot() const;
-    ShadowRoot* shadowRootForBindings(JSC::ExecState&) const;
+    inline ShadowRoot* shadowRoot() const; // Defined in ElementRareData.h
+    ShadowRoot* shadowRootForBindings(JSC::JSGlobalObject&) const;
 
-    struct ShadowRootInit {
-        ShadowRootMode mode;
-    };
-    ExceptionOr<ShadowRoot&> attachShadow(const ShadowRootInit&);
+    WEBCORE_EXPORT ExceptionOr<ShadowRoot&> attachShadow(const ShadowRootInit&);
 
-    ShadowRoot* userAgentShadowRoot() const;
+    RefPtr<ShadowRoot> userAgentShadowRoot() const;
     WEBCORE_EXPORT ShadowRoot& ensureUserAgentShadowRoot();
+    WEBCORE_EXPORT ShadowRoot& createUserAgentShadowRoot();
 
     void setIsDefinedCustomElement(JSCustomElementInterface&);
-    void setIsFailedCustomElement(JSCustomElementInterface&);
+    void setIsFailedCustomElement();
+    void setIsFailedCustomElementWithoutClearingReactionQueue();
+    void clearReactionQueueFromFailedCustomElement();
     void setIsCustomElementUpgradeCandidate();
     void enqueueToUpgrade(JSCustomElementInterface&);
     CustomElementReactionQueue* reactionQueue() const;
 
-    // FIXME: this should not be virtual, do not override this.
-    virtual const AtomicString& shadowPseudoId() const;
+    // FIXME: This should not be virtual. Please do not add additional overrides of this function.
+    virtual const AtomString& shadowPseudoId() const;
 
-    bool inActiveChain() const { return isUserActionElement() && isUserActionElementInActiveChain(); }
+    bool isInActiveChain() const { return isUserActionElement() && isUserActionElementInActiveChain(); }
     bool active() const { return isUserActionElement() && isUserActionElementActive(); }
     bool hovered() const { return isUserActionElement() && isUserActionElementHovered(); }
     bool focused() const { return isUserActionElement() && isUserActionElementFocused(); }
-    bool hasFocusWithin() const { return getFlag(HasFocusWithin); };
+    bool isBeingDragged() const { return isUserActionElement() && isUserActionElementDragged(); }
+    bool hasFocusVisible() const { return isUserActionElement() && isUserActionElementHasFocusVisible(); }
+    bool hasFocusWithin() const { return isUserActionElement() && isUserActionElementHasFocusWithin(); };
 
-    virtual void setActive(bool flag = true, bool pause = false);
-    virtual void setHovered(bool flag = true);
-    virtual void setFocus(bool flag);
-    void setHasFocusWithin(bool flag);
+    virtual void setActive(bool = true, Style::InvalidationScope = Style::InvalidationScope::All);
+    virtual void setHovered(bool = true, Style::InvalidationScope = Style::InvalidationScope::All, HitTestRequest = {});
+    virtual void setFocus(bool, FocusVisibility = FocusVisibility::Invisible);
+    void setBeingDragged(bool);
+    void setHasFocusVisible(bool);
+    void setHasFocusWithin(bool);
 
-    bool tabIndexSetExplicitly() const;
+    std::optional<int> tabIndexSetExplicitly() const;
+    bool shouldBeIgnoredInSequentialFocusNavigation() const { return defaultTabIndex() < 0 && !supportsFocus(); }
     virtual bool supportsFocus() const;
     virtual bool isFocusable() const;
-    virtual bool isKeyboardFocusable(KeyboardEvent&) const;
+    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
     virtual bool isMouseFocusable() const;
 
     virtual bool shouldUseInputMethod();
 
-    virtual int tabIndex() const;
-    WEBCORE_EXPORT void setTabIndex(int);
-    virtual Element* focusDelegate();
+    virtual int tabIndexForBindings() const;
+    WEBCORE_EXPORT void setTabIndexForBindings(int);
+
+    // Used by the HTMLElement and SVGElement IDLs.
+    WEBCORE_EXPORT const AtomString& nonce() const;
+    WEBCORE_EXPORT void setNonce(const AtomString&);
+    void hideNonce();
+
+    ExceptionOr<void> insertAdjacentHTML(const String& where, const String& html, NodeVector* addedNodes);
 
     WEBCORE_EXPORT ExceptionOr<Element*> insertAdjacentElement(const String& where, Element& newChild);
     WEBCORE_EXPORT ExceptionOr<void> insertAdjacentHTML(const String& where, const String& html);
-    WEBCORE_EXPORT ExceptionOr<void> insertAdjacentText(const String& where, const String& text);
+    WEBCORE_EXPORT ExceptionOr<void> insertAdjacentText(const String& where, String&& text);
 
-    const RenderStyle* computedStyle(PseudoId = NOPSEUDO) override;
+    const RenderStyle* computedStyle(PseudoId = PseudoId::None) override;
 
     bool needsStyleInvalidation() const;
 
+    bool hasValidStyle() const;
+    bool isFocusableWithoutResolvingFullStyle() const;
+
     // Methods for indicating the style is affected by dynamic updates (e.g., children changing, our position changing in our sibling list, etc.)
-    bool styleAffectedByActive() const { return hasRareData() && rareDataStyleAffectedByActive(); }
-    bool styleAffectedByEmpty() const { return hasRareData() && rareDataStyleAffectedByEmpty(); }
-    bool styleAffectedByFocusWithin() const { return hasRareData() && rareDataStyleAffectedByFocusWithin(); }
-    bool childrenAffectedByHover() const { return getFlag(ChildrenAffectedByHoverRulesFlag); }
-    bool childrenAffectedByDrag() const { return hasRareData() && rareDataChildrenAffectedByDrag(); }
-    bool childrenAffectedByFirstChildRules() const { return getFlag(ChildrenAffectedByFirstChildRulesFlag); }
-    bool childrenAffectedByLastChildRules() const { return getFlag(ChildrenAffectedByLastChildRulesFlag); }
-    bool childrenAffectedByBackwardPositionalRules() const { return hasRareData() && rareDataChildrenAffectedByBackwardPositionalRules(); }
-    bool childrenAffectedByPropertyBasedBackwardPositionalRules() const { return hasRareData() && rareDataChildrenAffectedByPropertyBasedBackwardPositionalRules(); }
-    bool affectsNextSiblingElementStyle() const { return getFlag(AffectsNextSiblingElementStyle); }
+    bool styleAffectedByEmpty() const { return hasStyleFlag(NodeStyleFlag::StyleAffectedByEmpty); }
+    bool descendantsAffectedByPreviousSibling() const { return hasStyleFlag(NodeStyleFlag::DescendantsAffectedByPreviousSibling); }
+    bool childrenAffectedByFirstChildRules() const { return hasStyleFlag(NodeStyleFlag::ChildrenAffectedByFirstChildRules); }
+    bool childrenAffectedByLastChildRules() const { return hasStyleFlag(NodeStyleFlag::ChildrenAffectedByLastChildRules); }
+    bool childrenAffectedByForwardPositionalRules() const { return hasStyleFlag(NodeStyleFlag::ChildrenAffectedByForwardPositionalRules); }
+    bool descendantsAffectedByForwardPositionalRules() const { return hasStyleFlag(NodeStyleFlag::DescendantsAffectedByForwardPositionalRules); }
+    bool childrenAffectedByBackwardPositionalRules() const { return hasStyleFlag(NodeStyleFlag::ChildrenAffectedByBackwardPositionalRules); }
+    bool descendantsAffectedByBackwardPositionalRules() const { return hasStyleFlag(NodeStyleFlag::DescendantsAffectedByBackwardPositionalRules); }
+    bool childrenAffectedByPropertyBasedBackwardPositionalRules() const { return hasStyleFlag(NodeStyleFlag::ChildrenAffectedByPropertyBasedBackwardPositionalRules); }
+    bool affectsNextSiblingElementStyle() const { return hasStyleFlag(NodeStyleFlag::AffectsNextSiblingElementStyle); }
+    bool styleIsAffectedByPreviousSibling() const { return hasStyleFlag(NodeStyleFlag::StyleIsAffectedByPreviousSibling); }
     unsigned childIndex() const { return hasRareData() ? rareDataChildIndex() : 0; }
 
     bool hasFlagsSetDuringStylingOfChildren() const;
 
-    void setStyleAffectedByEmpty();
-    void setStyleAffectedByFocusWithin();
-    void setChildrenAffectedByHover() { setFlag(ChildrenAffectedByHoverRulesFlag); }
-    void setStyleAffectedByActive();
-    void setChildrenAffectedByDrag();
-    void setChildrenAffectedByFirstChildRules() { setFlag(ChildrenAffectedByFirstChildRulesFlag); }
-    void setChildrenAffectedByLastChildRules() { setFlag(ChildrenAffectedByLastChildRulesFlag); }
-    void setChildrenAffectedByBackwardPositionalRules();
-    void setChildrenAffectedByPropertyBasedBackwardPositionalRules();
-    void setAffectsNextSiblingElementStyle() { setFlag(AffectsNextSiblingElementStyle); }
-    void setStyleIsAffectedByPreviousSibling() { setFlag(StyleIsAffectedByPreviousSibling); }
+    void setStyleAffectedByEmpty() { setStyleFlag(NodeStyleFlag::StyleAffectedByEmpty); }
+    void setDescendantsAffectedByPreviousSibling() { setStyleFlag(NodeStyleFlag::DescendantsAffectedByPreviousSibling); }
+    void setChildrenAffectedByFirstChildRules() { setStyleFlag(NodeStyleFlag::ChildrenAffectedByFirstChildRules); }
+    void setChildrenAffectedByLastChildRules() { setStyleFlag(NodeStyleFlag::ChildrenAffectedByLastChildRules); }
+    void setChildrenAffectedByForwardPositionalRules() { setStyleFlag(NodeStyleFlag::ChildrenAffectedByForwardPositionalRules); }
+    void setDescendantsAffectedByForwardPositionalRules() { setStyleFlag(NodeStyleFlag::DescendantsAffectedByForwardPositionalRules); }
+    void setChildrenAffectedByBackwardPositionalRules() { setStyleFlag(NodeStyleFlag::ChildrenAffectedByBackwardPositionalRules); }
+    void setDescendantsAffectedByBackwardPositionalRules() { setStyleFlag(NodeStyleFlag::DescendantsAffectedByBackwardPositionalRules); }
+    void setChildrenAffectedByPropertyBasedBackwardPositionalRules() { setStyleFlag(NodeStyleFlag::ChildrenAffectedByPropertyBasedBackwardPositionalRules); }
+    void setAffectsNextSiblingElementStyle() { setStyleFlag(NodeStyleFlag::AffectsNextSiblingElementStyle); }
+    void setStyleIsAffectedByPreviousSibling() { setStyleFlag(NodeStyleFlag::StyleIsAffectedByPreviousSibling); }
     void setChildIndex(unsigned);
 
-    AtomicString computeInheritedLanguage() const;
+    WEBCORE_EXPORT AtomString computeInheritedLanguage() const;
     Locale& locale() const;
 
-    virtual void accessKeyAction(bool /*sendToAnyEvent*/) { }
+    virtual bool accessKeyAction(bool /*sendToAnyEvent*/) { return false; }
 
     virtual bool isURLAttribute(const Attribute&) const { return false; }
     virtual bool attributeContainsURL(const Attribute& attribute) const { return isURLAttribute(attribute); }
-    virtual String completeURLsInAttributeValue(const URL& base, const Attribute&) const;
+    String resolveURLStringIfNeeded(const String& urlString, ResolveURLs = ResolveURLs::Yes, const URL& base = URL()) const;
+    virtual String completeURLsInAttributeValue(const URL& base, const Attribute&, ResolveURLs = ResolveURLs::Yes) const;
     virtual bool isHTMLContentAttribute(const Attribute&) const { return false; }
 
     WEBCORE_EXPORT URL getURLAttribute(const QualifiedName&) const;
+    inline URL getURLAttributeForBindings(const QualifiedName&) const;
     URL getNonEmptyURLAttribute(const QualifiedName&) const;
 
-    virtual const AtomicString& imageSourceURL() const;
-    virtual String target() const { return String(); }
+    virtual const AtomString& imageSourceURL() const;
+    virtual AtomString target() const { return nullAtom(); }
+
+    RefPtr<Element> findFocusDelegate();
 
     static AXTextStateChangeIntent defaultFocusTextStateChangeIntent() { return AXTextStateChangeIntent(AXTextStateChangeTypeSelectionMove, AXTextSelection { AXTextSelectionDirectionDiscontiguous, AXTextSelectionGranularityUnknown, true }); }
-    void updateFocusAppearanceAfterAttachIfNeeded();
-    virtual void focus(bool restorePreviousSelection = true, FocusDirection = FocusDirectionNone);
+    virtual void focus(const FocusOptions& = { });
+    virtual void focusForBindings(FocusOptions&&);
+    void findTargetAndUpdateFocusAppearance(SelectionRestorationMode, SelectionRevealMode = SelectionRevealMode::Reveal);
+    virtual RefPtr<Element> focusAppearanceUpdateTarget();
     virtual void updateFocusAppearance(SelectionRestorationMode, SelectionRevealMode = SelectionRevealMode::Reveal);
     virtual void blur();
+    virtual void runFocusingStepsForAutofocus();
 
     WEBCORE_EXPORT String innerHTML() const;
     WEBCORE_EXPORT String outerHTML() const;
@@ -374,35 +457,24 @@ public:
  
     virtual String title() const;
 
-    const AtomicString& pseudo() const;
-    WEBCORE_EXPORT void setPseudo(const AtomicString&);
-
-    LayoutSize minimumSizeForResizing() const;
-    void setMinimumSizeForResizing(const LayoutSize&);
+    const AtomString& pseudo() const;
+    WEBCORE_EXPORT void setPseudo(const AtomString&);
 
     // Use Document::registerForDocumentActivationCallbacks() to subscribe to these
     virtual void prepareForDocumentSuspension() { }
     virtual void resumeFromDocumentSuspension() { }
 
-    // Use Document::registerForMediaVolumeCallbacks() to subscribe to this
-    virtual void mediaVolumeDidChange() { }
-
-    // Use Document::registerForPrivateBrowsingStateChangedCallbacks() to subscribe to this.
-    virtual void privateBrowsingStateDidChange() { }
-
     virtual void willBecomeFullscreenElement();
     virtual void ancestorWillEnterFullscreen() { }
     virtual void didBecomeFullscreenElement() { }
     virtual void willStopBeingFullscreenElement() { }
-
-#if ENABLE(VIDEO_TRACK)
-    virtual void captionPreferencesChanged() { }
-#endif
+    virtual void didStopBeingFullscreenElement() { }
 
     bool isFinishedParsingChildren() const { return isParsingChildrenFinished(); }
     void finishParsingChildren() override;
     void beginParsingChildren() final;
 
+    PseudoElement& ensurePseudoElement(PseudoId);
     WEBCORE_EXPORT PseudoElement* beforePseudoElement() const;
     WEBCORE_EXPORT PseudoElement* afterPseudoElement() const;
     bool childNeedsShadowWalker() const;
@@ -419,6 +491,9 @@ public:
 
     WEBCORE_EXPORT DOMTokenList& classList();
 
+    SpaceSplitString partNames() const;
+    DOMTokenList& part();
+
     DatasetDOMStringMap& dataset();
 
 #if ENABLE(VIDEO)
@@ -426,15 +501,19 @@ public:
 #endif
 
     virtual bool isFormControlElement() const { return false; }
+    virtual bool isFormControlElementWithState() const { return false; }
     virtual bool isSpinButtonElement() const { return false; }
-    virtual bool isTextFormControl() const { return false; }
+    virtual bool isTextFormControlElement() const { return false; }
+    virtual bool isTextField() const { return false; }
+    virtual bool isTextPlaceholderElement() const { return false; }
     virtual bool isOptionalFormControl() const { return false; }
     virtual bool isRequiredFormControl() const { return false; }
     virtual bool isInRange() const { return false; }
     virtual bool isOutOfRange() const { return false; }
-    virtual bool isFrameElementBase() const { return false; }
     virtual bool isUploadButton() const { return false; }
     virtual bool isSliderContainerElement() const { return false; }
+    virtual bool isSliderThumbElement() const { return false; }
+    virtual bool isHTMLTablePartElement() const { return false; }
 
     bool canContainRangeEndPoint() const override;
 
@@ -444,17 +523,47 @@ public:
 
     virtual bool childShouldCreateRenderer(const Node&) const;
 
-    bool hasPendingResources() const;
-    void setHasPendingResources();
-    void clearHasPendingResources();
+    bool hasPendingResources() const { return hasNodeFlag(NodeFlag::HasPendingResources); }
+    void setHasPendingResources() { setNodeFlag(NodeFlag::HasPendingResources); }
+    void clearHasPendingResources() { clearNodeFlag(NodeFlag::HasPendingResources); }
     virtual void buildPendingResource() { };
 
+    KeyframeEffectStack* keyframeEffectStack(PseudoId) const;
+    KeyframeEffectStack& ensureKeyframeEffectStack(PseudoId);
+    bool hasKeyframeEffects(PseudoId) const;
+
+    const AnimationCollection* animations(PseudoId) const;
+    bool hasCompletedTransitionForProperty(PseudoId, CSSPropertyID) const;
+    bool hasRunningTransitionForProperty(PseudoId, CSSPropertyID) const;
+    bool hasRunningTransitions(PseudoId) const;
+    AnimationCollection& ensureAnimations(PseudoId);
+
+    PropertyToTransitionMap& ensureCompletedTransitionsByProperty(PseudoId);
+    PropertyToTransitionMap& ensureRunningTransitionsByProperty(PseudoId);
+    CSSAnimationCollection& animationsCreatedByMarkup(PseudoId);
+    void setAnimationsCreatedByMarkup(PseudoId, CSSAnimationCollection&&);
+
+    const RenderStyle* lastStyleChangeEventStyle(PseudoId) const;
+    void setLastStyleChangeEventStyle(PseudoId, std::unique_ptr<const RenderStyle>&&);
+
+    void cssAnimationsDidUpdate(PseudoId);
+    void keyframesRuleDidChange(PseudoId);
+    bool hasPendingKeyframesUpdate(PseudoId) const;
+
+    bool isInTopLayer() const { return hasNodeFlag(NodeFlag::IsInTopLayer); }
+    void addToTopLayer();
+    void removeFromTopLayer();
+
 #if ENABLE(FULLSCREEN_API)
-    WEBCORE_EXPORT bool containsFullScreenElement() const;
+    bool containsFullScreenElement() const { return hasNodeFlag(NodeFlag::ContainsFullScreenElement); }
     void setContainsFullScreenElement(bool);
     void setContainsFullScreenElementOnAncestorsCrossingFrameBoundaries(bool);
-    WEBCORE_EXPORT void webkitRequestFullscreen();
+    WEBCORE_EXPORT virtual void webkitRequestFullscreen();
 #endif
+
+    ExceptionOr<void> setPointerCapture(int32_t);
+    ExceptionOr<void> releasePointerCapture(int32_t);
+    bool hasPointerCapture(int32_t);
 
 #if ENABLE(POINTER_LOCK)
     WEBCORE_EXPORT void requestPointerLock();
@@ -462,25 +571,29 @@ public:
 
     bool isSpellCheckingEnabled() const;
 
-    bool hasID() const;
-    bool hasClass() const;
-    bool hasName() const;
-    const SpaceSplitString& classNames() const;
+    inline bool hasID() const;
+    inline bool hasClass() const;
+    inline bool hasName() const;
+    inline const SpaceSplitString& classNames() const;
 
     IntPoint savedLayerScrollPosition() const;
     void setSavedLayerScrollPosition(const IntPoint&);
 
-    bool dispatchMouseEvent(const PlatformMouseEvent&, const AtomicString& eventType, int clickCount = 0, Element* relatedTarget = nullptr);
-    bool dispatchWheelEvent(const PlatformWheelEvent&);
+    bool dispatchMouseEvent(const PlatformMouseEvent&, const AtomString& eventType, int clickCount = 0, Element* relatedTarget = nullptr, IsSyntheticClick isSyntethicClick = IsSyntheticClick::No);
+    bool dispatchWheelEvent(const PlatformWheelEvent&, OptionSet<EventHandling>&, EventIsCancelable = EventIsCancelable::Yes);
     bool dispatchKeyEvent(const PlatformKeyboardEvent&);
-    void dispatchSimulatedClick(Event* underlyingEvent, SimulatedClickMouseEventOptions = SendNoEvents, SimulatedClickVisualOptions = ShowPressedLook);
-    void dispatchFocusInEvent(const AtomicString& eventType, RefPtr<Element>&& oldFocusedElement);
-    void dispatchFocusOutEvent(const AtomicString& eventType, RefPtr<Element>&& newFocusedElement);
-    virtual void dispatchFocusEvent(RefPtr<Element>&& oldFocusedElement, FocusDirection);
+    bool dispatchSimulatedClick(Event* underlyingEvent, SimulatedClickMouseEventOptions = SendNoEvents, SimulatedClickVisualOptions = ShowPressedLook);
+
+    // FIXME: Consider changing signature to accept Element* because all callers perform copyRef().
+    void dispatchFocusInEventIfNeeded(RefPtr<Element>&& oldFocusedElement);
+    void dispatchFocusOutEventIfNeeded(RefPtr<Element>&& newFocusedElement);
+    virtual void dispatchFocusEvent(RefPtr<Element>&& oldFocusedElement, const FocusOptions&);
     virtual void dispatchBlurEvent(RefPtr<Element>&& newFocusedElement);
     void dispatchWebKitImageReadyEventForTesting();
 
     WEBCORE_EXPORT bool dispatchMouseForceWillBegin();
+
+    void enqueueSecurityPolicyViolationEvent(SecurityPolicyViolationEventInit&&);
 
     virtual void willRecalcStyle(Style::Change);
     virtual void didRecalcStyle(Style::Change);
@@ -489,19 +602,19 @@ public:
     virtual void didAttachRenderers();
     virtual void willDetachRenderers();
     virtual void didDetachRenderers();
-    virtual std::optional<ElementStyle> resolveCustomStyle(const RenderStyle& parentStyle, const RenderStyle* shadowHostStyle);
+    virtual std::optional<Style::ElementStyle> resolveCustomStyle(const Style::ResolutionContext&, const RenderStyle* shadowHostStyle);
 
     LayoutRect absoluteEventHandlerBounds(bool& includesFixedPositionElements) override;
 
     const RenderStyle* existingComputedStyle() const;
+    WEBCORE_EXPORT const RenderStyle* renderOrDisplayContentsStyle(PseudoId = PseudoId::None) const;
 
-    void setBeforePseudoElement(Ref<PseudoElement>&&);
-    void setAfterPseudoElement(Ref<PseudoElement>&&);
     void clearBeforePseudoElement();
     void clearAfterPseudoElement();
     void resetComputedStyle();
     void resetStyleRelations();
-    void clearStyleDerivedDataBeforeDetachingRenderer();
+    void resetChildStyleRelations();
+    void resetAllDescendantStyleRelations();
     void clearHoverAndActiveStatusBeforeDetachingRenderer();
 
     WEBCORE_EXPORT URL absoluteLinkURL() const;
@@ -510,15 +623,15 @@ public:
     bool allowsDoubleTapGesture() const override;
 #endif
 
-    StyleResolver& styleResolver();
-    ElementStyle resolveStyle(const RenderStyle* parentStyle);
+    Style::Resolver& styleResolver();
+    Style::ElementStyle resolveStyle(const Style::ResolutionContext&);
 
     // Invalidates the style of a single element. Style is resolved lazily.
     // Descendant elements are resolved as needed, for example if an inherited property changes.
     // This should be called whenever an element changes in a manner that can affect its style.
     void invalidateStyle();
 
-    // As above but also call RenderElement::setStyle with StyleDifferenceRecompositeLayer flag for
+    // As above but also call RenderElement::setStyle with StyleDifference::RecompositeLayer flag for
     // the element even when the style doesn't change. This is mostly needed by the animation code.
     WEBCORE_EXPORT void invalidateStyleAndLayerComposition();
 
@@ -533,75 +646,116 @@ public:
     // Elements newly added to the tree are also in this state.
     void invalidateStyleAndRenderersForSubtree();
 
+    void invalidateStyleInternal();
+    void invalidateStyleForSubtreeInternal();
+    void invalidateForQueryContainerSizeChange();
+
+    bool needsUpdateQueryContainerDependentStyle() const;
+    void clearNeedsUpdateQueryContainerDependentStyle();
+
+    void invalidateEventListenerRegions();
+
     bool hasDisplayContents() const;
     void storeDisplayContentsStyle(std::unique_ptr<RenderStyle>);
 
     using ContainerNode::setAttributeEventListener;
-    void setAttributeEventListener(const AtomicString& eventType, const QualifiedName& attributeName, const AtomicString& value);
+    void setAttributeEventListener(const AtomString& eventType, const QualifiedName& attributeName, const AtomString& value);
 
-#if ENABLE(WEB_ANIMATIONS)
-    Vector<WebAnimation*> getAnimations();
-#endif
+    IntersectionObserverData& ensureIntersectionObserverData();
+    IntersectionObserverData* intersectionObserverDataIfExists();
+
+    ResizeObserverData& ensureResizeObserverData();
+    ResizeObserverData* resizeObserverData();
 
     Element* findAnchorElementForLink(String& outAnchorName);
+
+    ExceptionOr<Ref<WebAnimation>> animate(JSC::JSGlobalObject&, JSC::Strong<JSC::JSObject>&&, std::optional<std::variant<double, KeyframeAnimationOptions>>&&);
+    Vector<RefPtr<WebAnimation>> getAnimations(std::optional<GetAnimationsOptions>);
+
+    WEBCORE_EXPORT ElementIdentifier identifier() const;
+    WEBCORE_EXPORT static Element* fromIdentifier(ElementIdentifier);
+
+    String description() const override;
+    String debugDescription() const override;
+
+    bool hasDuplicateAttribute() const { return m_hasDuplicateAttribute; };
+    void setHasDuplicateAttribute(bool hasDuplicateAttribute) { m_hasDuplicateAttribute = hasDuplicateAttribute; };
+
+    virtual void updateUserAgentShadowTree() { }
+
+#if ENABLE(CSS_TYPED_OM)
+    StylePropertyMapReadOnly* computedStyleMap();
+#endif
+
+    ExplicitlySetAttrElementsMap& explicitlySetAttrElementsMap();
+    ExplicitlySetAttrElementsMap* explicitlySetAttrElementsMapIfExists() const;
+
+    bool displayContentsChanged() const { return m_displayContentsChanged; }
+    void setDisplayContentsChanged(bool changed = true) { m_displayContentsChanged = changed; }
 
 protected:
     Element(const QualifiedName&, Document&, ConstructionType);
 
-    InsertionNotificationRequest insertedInto(ContainerNode&) override;
-    void removedFrom(ContainerNode&) override;
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode&) override;
+    void removedFromAncestor(RemovalType, ContainerNode&) override;
     void childrenChanged(const ChildChange&) override;
     void removeAllEventListeners() final;
     virtual void parserDidSetAttributes();
-    void didMoveToNewDocument(Document& oldDocument, Document& newDocument) override;
 
-    void clearTabIndexExplicitlyIfNeeded();
-    void setTabIndexExplicitly(int);
+    void setTabIndexExplicitly(std::optional<int>);
 
-    // classAttributeChanged() exists to share code between
-    // parseAttribute (called via setAttribute()) and
-    // svgAttributeChanged (called when element.className.baseValue is set)
-    void classAttributeChanged(const AtomicString& newClassString);
+    void classAttributeChanged(const AtomString& newClassString);
+    void partAttributeChanged(const AtomString& newValue);
 
     void addShadowRoot(Ref<ShadowRoot>&&);
 
     static ExceptionOr<void> mergeWithNextTextNode(Text&);
 
+#if ENABLE(CSS_TYPED_OM)
+    StylePropertyMap* attributeStyleMap();
+    void setAttributeStyleMap(Ref<StylePropertyMap>&&);
+#endif
+
+    void updateLabel(TreeScope&, const AtomString& oldForAttributeValue, const AtomString& newForAttributeValue);
+
 private:
+    Frame* documentFrameWithNonNullView() const;
+
     bool isTextNode() const;
 
     bool isUserActionElementInActiveChain() const;
     bool isUserActionElementActive() const;
     bool isUserActionElementFocused() const;
     bool isUserActionElementHovered() const;
+    bool isUserActionElementDragged() const;
+    bool isUserActionElementHasFocusVisible() const;
+    bool isUserActionElementHasFocusWithin() const;
 
-    virtual void didAddUserAgentShadowRoot(ShadowRoot*) { }
-    virtual bool alwaysCreateUserAgentShadowRoot() const { return false; }
+    bool isNonceable() const;
 
-    // FIXME: Remove the need for Attr to call willModifyAttribute/didModifyAttribute.
-    friend class Attr;
+    virtual void didAddUserAgentShadowRoot(ShadowRoot&) { }
 
-    enum SynchronizationOfLazyAttribute { NotInSynchronizationOfLazyAttribute = 0, InSynchronizationOfLazyAttribute };
-
-    void didAddAttribute(const QualifiedName&, const AtomicString&);
-    void willModifyAttribute(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue);
-    void didModifyAttribute(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue);
-    void didRemoveAttribute(const QualifiedName&, const AtomicString& oldValue);
+    void didAddAttribute(const QualifiedName&, const AtomString&);
+    void willModifyAttribute(const QualifiedName&, const AtomString& oldValue, const AtomString& newValue);
+    void didModifyAttribute(const QualifiedName&, const AtomString& oldValue, const AtomString& newValue);
+    void didRemoveAttribute(const QualifiedName&, const AtomString& oldValue);
 
     void synchronizeAttribute(const QualifiedName&) const;
-    void synchronizeAttribute(const AtomicString& localName) const;
+    void synchronizeAttribute(const AtomString& localName) const;
 
-    void updateName(const AtomicString& oldName, const AtomicString& newName);
-    void updateNameForTreeScope(TreeScope&, const AtomicString& oldName, const AtomicString& newName);
-    void updateNameForDocument(HTMLDocument&, const AtomicString& oldName, const AtomicString& newName);
+    inline const Attribute* getAttributeInternal(const QualifiedName&) const;
+    inline const Attribute* getAttributeInternal(const AtomString& qualifiedName) const;
+
+    void updateName(const AtomString& oldName, const AtomString& newName);
+    void updateNameForTreeScope(TreeScope&, const AtomString& oldName, const AtomString& newName);
+    void updateNameForDocument(HTMLDocument&, const AtomString& oldName, const AtomString& newName);
 
     enum class NotifyObservers { No, Yes };
-    void updateId(const AtomicString& oldId, const AtomicString& newId, NotifyObservers = NotifyObservers::Yes);
-    void updateIdForTreeScope(TreeScope&, const AtomicString& oldId, const AtomicString& newId, NotifyObservers = NotifyObservers::Yes);
+    void updateId(const AtomString& oldId, const AtomString& newId, NotifyObservers = NotifyObservers::Yes);
+    void updateIdForTreeScope(TreeScope&, const AtomString& oldId, const AtomString& newId, NotifyObservers = NotifyObservers::Yes);
 
     enum HTMLDocumentNamedItemMapsUpdatingCondition { AlwaysUpdateHTMLDocumentNamedItemMaps, UpdateHTMLDocumentNamedItemMapsOnlyIfDiffersFromNameAttribute };
-    void updateIdForDocument(HTMLDocument&, const AtomicString& oldId, const AtomicString& newId, HTMLDocumentNamedItemMapsUpdatingCondition);
-    void updateLabel(TreeScope&, const AtomicString& oldForAttributeValue, const AtomicString& newForAttributeValue);
+    void updateIdForDocument(HTMLDocument&, const AtomString& oldId, const AtomString& newId, HTMLDocumentNamedItemMapsUpdatingCondition);
 
     ExceptionOr<Node*> insertAdjacent(const String& where, Ref<Node>&& newChild);
 
@@ -610,16 +764,21 @@ private:
     NodeType nodeType() const final;
     bool childTypeAllowed(NodeType) const final;
 
-    void setAttributeInternal(unsigned index, const QualifiedName&, const AtomicString& value, SynchronizationOfLazyAttribute);
-    void addAttributeInternal(const QualifiedName&, const AtomicString& value, SynchronizationOfLazyAttribute);
+    enum SynchronizationOfLazyAttribute { NotInSynchronizationOfLazyAttribute, InSynchronizationOfLazyAttribute };
+    void setAttributeInternal(unsigned index, const QualifiedName&, const AtomString& value, SynchronizationOfLazyAttribute);
+    void addAttributeInternal(const QualifiedName&, const AtomString& value, SynchronizationOfLazyAttribute);
     void removeAttributeInternal(unsigned index, SynchronizationOfLazyAttribute);
+
+    void setSavedLayerScrollPositionSlow(const IntPoint&);
+    void clearBeforePseudoElementSlow();
+    void clearAfterPseudoElementSlow();
 
     LayoutRect absoluteEventBounds(bool& boundsIncludeAllDescendantElements, bool& includesFixedPositionElements);
     LayoutRect absoluteEventBoundsOfElementAndDescendants(bool& includesFixedPositionElements);
-    
-#if ENABLE(TREE_DEBUGGING)
-    void formatForDebugger(char* buffer, unsigned length) const override;
-#endif
+
+    void disconnectFromIntersectionObservers();
+
+    void disconnectFromResizeObservers();
 
     // The cloneNode function is private so that non-virtual cloneElementWith/WithoutChildren are used instead.
     Ref<Node> cloneNodeInternal(Document&, CloningOperation) override;
@@ -627,175 +786,67 @@ private:
 
     void removeShadowRoot();
 
-    const RenderStyle& resolveComputedStyle();
+    enum class ResolveComputedStyleMode { Normal, RenderedOnly };
+    const RenderStyle* resolveComputedStyle(ResolveComputedStyleMode = ResolveComputedStyleMode::Normal);
     const RenderStyle& resolvePseudoElementStyle(PseudoId);
 
-    bool rareDataStyleAffectedByEmpty() const;
-    bool rareDataStyleAffectedByFocusWithin() const;
-    bool rareDataChildrenAffectedByHover() const;
-    bool rareDataStyleAffectedByActive() const;
-    bool rareDataChildrenAffectedByDrag() const;
-    bool rareDataChildrenAffectedByLastChildRules() const;
-    bool rareDataChildrenAffectedByBackwardPositionalRules() const;
-    bool rareDataChildrenAffectedByPropertyBasedBackwardPositionalRules() const;
     unsigned rareDataChildIndex() const;
-
-    SpellcheckAttributeState spellcheckAttributeState() const;
 
     void createUniqueElementData();
 
-    ElementRareData* elementRareData() const;
+    inline ElementRareData* elementRareData() const;
     ElementRareData& ensureElementRareData();
 
-    void detachAllAttrNodesFromElement();
-    void detachAttrNodeFromElementWithValue(Attr*, const AtomicString& value);
+    ElementAnimationRareData* animationRareData(PseudoId) const;
+    ElementAnimationRareData& ensureAnimationRareData(PseudoId);
 
-    bool isJavaScriptURLAttribute(const Attribute&) const;
+    virtual int defaultTabIndex() const;
+
+    void detachAllAttrNodesFromElement();
+    void detachAttrNodeFromElementWithValue(Attr*, const AtomString& value);
 
     // Anyone thinking of using this should call document instead of ownerDocument.
     void ownerDocument() const = delete;
     
     void attachAttributeNodeIfNeeded(Attr&);
+    
+#if ASSERT_ENABLED
+    WEBCORE_EXPORT bool fastAttributeLookupAllowed(const QualifiedName&) const;
+#endif
 
     QualifiedName m_tagName;
     RefPtr<ElementData> m_elementData;
+
+    // FIXME: these flags should move somewhere else and then we should have a static assert on
+    // Element size and ideally stick to that size.
+    bool m_hasDuplicateAttribute { false };
+    bool m_displayContentsChanged { false };
 };
 
-inline bool Node::hasAttributes() const
+inline void Element::setSavedLayerScrollPosition(const IntPoint& position)
 {
-    return is<Element>(*this) && downcast<Element>(*this).hasAttributes();
-}
-
-inline NamedNodeMap* Node::attributes() const
-{
-    return is<Element>(*this) ? &downcast<Element>(*this).attributes() : nullptr;
-}
-
-inline Element* Node::parentElement() const
-{
-    ContainerNode* parent = parentNode();
-    return is<Element>(parent) ? downcast<Element>(parent) : nullptr;
-}
-
-inline const Element* Element::rootElement() const
-{
-    if (isConnected())
-        return document().documentElement();
-
-    const Element* highest = this;
-    while (highest->parentElement())
-        highest = highest->parentElement();
-    return highest;
-}
-
-inline bool Element::hasAttributeWithoutSynchronization(const QualifiedName& name) const
-{
-    ASSERT(fastAttributeLookupAllowed(name));
-    return elementData() && findAttributeByName(name);
-}
-
-inline const AtomicString& Element::attributeWithoutSynchronization(const QualifiedName& name) const
-{
-    ASSERT(fastAttributeLookupAllowed(name));
-    if (elementData()) {
-        if (const Attribute* attribute = findAttributeByName(name))
-            return attribute->value();
-    }
-    return nullAtom();
-}
-
-inline bool Element::hasAttributesWithoutUpdate() const
-{
-    return elementData() && !elementData()->isEmpty();
-}
-
-inline const AtomicString& Element::idForStyleResolution() const
-{
-    return hasID() ? elementData()->idForStyleResolution() : nullAtom();
-}
-
-inline const AtomicString& Element::getIdAttribute() const
-{
-    if (hasID())
-        return elementData()->findAttributeByName(HTMLNames::idAttr)->value();
-    return nullAtom();
-}
-
-inline const AtomicString& Element::getNameAttribute() const
-{
-    if (hasName())
-        return elementData()->findAttributeByName(HTMLNames::nameAttr)->value();
-    return nullAtom();
-}
-
-inline void Element::setIdAttribute(const AtomicString& value)
-{
-    setAttributeWithoutSynchronization(HTMLNames::idAttr, value);
-}
-
-inline const SpaceSplitString& Element::classNames() const
-{
-    ASSERT(hasClass());
-    ASSERT(elementData());
-    return elementData()->classNames();
-}
-
-inline unsigned Element::attributeCount() const
-{
-    ASSERT(elementData());
-    return elementData()->length();
-}
-
-inline const Attribute& Element::attributeAt(unsigned index) const
-{
-    ASSERT(elementData());
-    return elementData()->attributeAt(index);
-}
-
-inline const Attribute* Element::findAttributeByName(const QualifiedName& name) const
-{
-    ASSERT(elementData());
-    return elementData()->findAttributeByName(name);
-}
-
-inline bool Element::hasID() const
-{
-    return elementData() && elementData()->hasID();
-}
-
-inline bool Element::hasClass() const
-{
-    return elementData() && elementData()->hasClass();
-}
-
-inline bool Element::hasName() const
-{
-    return elementData() && elementData()->hasName();
-}
-
-inline UniqueElementData& Element::ensureUniqueElementData()
-{
-    if (!elementData() || !elementData()->isUnique())
-        createUniqueElementData();
-    return static_cast<UniqueElementData&>(*m_elementData);
-}
-
-inline bool shouldIgnoreAttributeCase(const Element& element)
-{
-    return element.isHTMLElement() && element.document().isHTMLDocument();
-}
-
-inline void Element::setHasFocusWithin(bool flag)
-{
-    if (hasFocusWithin() == flag)
+    if (position.isZero() && !hasRareData())
         return;
-    setFlag(flag, HasFocusWithin);
-    if (styleAffectedByFocusWithin())
-        invalidateStyleForSubtree();
+    setSavedLayerScrollPositionSlow(position);
 }
+
+inline void Element::clearBeforePseudoElement()
+{
+    if (hasRareData())
+        clearBeforePseudoElementSlow();
+}
+
+inline void Element::clearAfterPseudoElement()
+{
+    if (hasRareData())
+        clearAfterPseudoElementSlow();
+}
+
+void invalidateForSiblingCombinators(Element* sibling);
 
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::Element)
     static bool isType(const WebCore::Node& node) { return node.isElementNode(); }
+    static bool isType(const WebCore::EventTarget& target) { return is<WebCore::Node>(target) && isType(downcast<WebCore::Node>(target)); }
 SPECIALIZE_TYPE_TRAITS_END()

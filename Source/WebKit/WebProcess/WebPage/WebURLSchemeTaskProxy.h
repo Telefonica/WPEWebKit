@@ -25,24 +25,28 @@
 
 #pragma once
 
+#include <WebCore/ResourceLoaderIdentifier.h>
 #include <WebCore/ResourceRequest.h>
+#include <wtf/Deque.h>
 #include <wtf/RefCounted.h>
 
 namespace WebCore {
 class ResourceError;
 class ResourceLoader;
 class ResourceResponse;
+class SharedBuffer;
 }
 
 namespace WebKit {
 
+class WebFrame;
 class WebURLSchemeHandlerProxy;
 
 class WebURLSchemeTaskProxy : public RefCounted<WebURLSchemeTaskProxy> {
 public:
-    static Ref<WebURLSchemeTaskProxy> create(WebURLSchemeHandlerProxy& handler, WebCore::ResourceLoader& loader)
+    static Ref<WebURLSchemeTaskProxy> create(WebURLSchemeHandlerProxy& handler, WebCore::ResourceLoader& loader, WebFrame& webFrame)
     {
-        return adoptRef(*new WebURLSchemeTaskProxy(handler, loader));
+        return adoptRef(*new WebURLSchemeTaskProxy(handler, loader, webFrame));
     }
     
     const WebCore::ResourceRequest& request() const { return m_request; }
@@ -50,22 +54,27 @@ public:
     void startLoading();
     void stopLoading();
 
-    void didPerformRedirection(WebCore::ResourceResponse&&, WebCore::ResourceRequest&&);
+    void didPerformRedirection(WebCore::ResourceResponse&&, WebCore::ResourceRequest&&, CompletionHandler<void(WebCore::ResourceRequest&&)>&&);
     void didReceiveResponse(const WebCore::ResourceResponse&);
-    void didReceiveData(size_t, const uint8_t* data);
+    void didReceiveData(const WebCore::SharedBuffer&);
     void didComplete(const WebCore::ResourceError&);
 
-    unsigned long identifier() const { return m_identifier; }
+    WebCore::ResourceLoaderIdentifier identifier() const { return m_identifier; }
 
 private:
-    WebURLSchemeTaskProxy(WebURLSchemeHandlerProxy&, WebCore::ResourceLoader&);
+    WebURLSchemeTaskProxy(WebURLSchemeHandlerProxy&, WebCore::ResourceLoader&, WebFrame&);
     bool hasLoader();
+
+    void queueTask(Function<void()>&& task) { m_queuedTasks.append(WTFMove(task)); }
+    void processNextPendingTask();
 
     WebURLSchemeHandlerProxy& m_urlSchemeHandler;
     RefPtr<WebCore::ResourceLoader> m_coreLoader;
+    RefPtr<WebFrame> m_frame;
     WebCore::ResourceRequest m_request;
-    unsigned long m_identifier;
-    bool m_waitingForRedirectCompletionHandler { };
+    WebCore::ResourceLoaderIdentifier m_identifier;
+    bool m_waitingForCompletionHandler { false };
+    Deque<Function<void()>> m_queuedTasks;
 };
 
 } // namespace WebKit

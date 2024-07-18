@@ -23,14 +23,10 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef APIString_h
-#define APIString_h
+#pragma once
 
 #include "APIObject.h"
-#include <wtf/Ref.h>
 #include <wtf/text/StringView.h>
-#include <wtf/text/WTFString.h>
-#include <wtf/unicode/UTF8.h>
 
 namespace API {
 
@@ -43,7 +39,7 @@ public:
 
     static Ref<String> create(WTF::String&& string)
     {
-        return adoptRef(*new String(string.isNull() ? WTF::String(StringImpl::empty()) : string.isolatedCopy()));
+        return adoptRef(*new String(string.isNull() ? WTF::String(StringImpl::empty()) : WTFMove(string).isolatedCopy()));
     }
 
     static Ref<String> create(const WTF::String& string)
@@ -75,5 +71,3 @@ private:
 };
 
 } // namespace WebKit
-
-#endif // APIString_h

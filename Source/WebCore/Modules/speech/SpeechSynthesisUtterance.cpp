@@ -28,7 +28,11 @@
 
 #if ENABLE(SPEECH_SYNTHESIS)
 
+#include <wtf/IsoMallocInlines.h>
+
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(SpeechSynthesisUtterance);
     
 Ref<SpeechSynthesisUtterance> SpeechSynthesisUtterance::create(ScriptExecutionContext& context, const String& text)
 {
@@ -36,8 +40,8 @@ Ref<SpeechSynthesisUtterance> SpeechSynthesisUtterance::create(ScriptExecutionCo
 }
 
 SpeechSynthesisUtterance::SpeechSynthesisUtterance(ScriptExecutionContext& context, const String& text)
-    : ContextDestructionObserver(&context)
-    , m_platformUtterance(PlatformSpeechSynthesisUtterance::create(*this))
+    : m_platformUtterance(PlatformSpeechSynthesisUtterance::create(*this))
+    , m_scriptExecutionContext(context)
 {
     m_platformUtterance->setText(text);
 }

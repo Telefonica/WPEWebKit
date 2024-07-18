@@ -29,8 +29,8 @@
 
 #include "CSSParserIdioms.h"
 #include <wtf/HexNumber.h>
-#include <wtf/text/StringBuffer.h>
 #include <wtf/text/StringBuilder.h>
+#include <wtf/unicode/CharacterNames.h>
 
 namespace WebCore {
 
@@ -73,14 +73,12 @@ static bool isCSSTokenizerIdentifier(const String& string)
 static void serializeCharacter(UChar32 c, StringBuilder& appendTo)
 {
     appendTo.append('\\');
-    appendTo.append(c);
+    appendTo.appendCharacter(c);
 }
 
 static void serializeCharacterAsCodePoint(UChar32 c, StringBuilder& appendTo)
 {
-    appendTo.append('\\');
-    appendUnsignedAsHex(c, appendTo, Lowercase);
-    appendTo.append(' ');
+    appendTo.append('\\', hex(c, Lowercase), ' ');
 }
 
 void serializeIdentifier(const String& identifier, StringBuilder& appendTo, bool skipStartChecks)
@@ -99,71 +97,27 @@ void serializeIdentifier(const String& identifier, StringBuilder& appendTo, bool
         index += U16_LENGTH(c);
 
         if (!c)
-            appendTo.append(0xfffd);
-        else if (c <= 0x1f || c == 0x7f || (0x30 <= c && c <= 0x39 && (isFirst || (isSecond && isFirstCharHyphen))))
+            appendTo.append(replacementCharacter);
+        else if (c <= 0x1f || c == deleteCharacter || (0x30 <= c && c <= 0x39 && (isFirst || (isSecond && isFirstCharHyphen))))
             serializeCharacterAsCodePoint(c, appendTo);
-        else if (c == 0x2d && isFirst && index == identifier.length())
+        else if (c == hyphenMinus && isFirst && index == identifier.length())
             serializeCharacter(c, appendTo);
-        else if (0x80 <= c || c == 0x2d || c == 0x5f || (0x30 <= c && c <= 0x39) || (0x41 <= c && c <= 0x5a) || (0x61 <= c && c <= 0x7a))
-            appendTo.append(c);
+        else if (0x80 <= c || c == hyphenMinus || c == lowLine || (0x30 <= c && c <= 0x39) || (0x41 <= c && c <= 0x5a) || (0x61 <= c && c <= 0x7a))
+            appendTo.appendCharacter(c);
         else
             serializeCharacter(c, appendTo);
 
         if (isFirst) {
             isFirst = false;
             isSecond = true;
-            isFirstCharHyphen = (c == 0x2d);
+            isFirstCharHyphen = (c == hyphenMinus);
         } else if (isSecond)
             isSecond = false;
     }
 }
 
-template <typename CharacterType>
-static inline bool isCSSTokenizerURL(const CharacterType* characters, unsigned length)
-{
-    const CharacterType* end = characters + length;
-    
-    for (; characters != end; ++characters) {
-        CharacterType c = characters[0];
-        switch (c) {
-        case '!':
-        case '#':
-        case '$':
-        case '%':
-        case '&':
-            break;
-        default:
-            if (c < '*')
-                return false;
-            if (c <= '~')
-                break;
-            if (c < 128)
-                return false;
-        }
-    }
-    
-    return true;
-}
-
-// "url" from the CSS tokenizer, minus backslash-escape sequences
-static bool isCSSTokenizerURL(const String& string)
-{
-    unsigned length = string.length();
-    
-    if (!length)
-        return true;
-    
-    if (string.is8Bit())
-        return isCSSTokenizerURL(string.characters8(), length);
-    return isCSSTokenizerURL(string.characters16(), length);
-}
-
 void serializeString(const String& string, StringBuilder& appendTo)
 {
-    // FIXME: From the CSS OM draft:
-    // To serialize a string means to create a string represented by '"' (U+0022).
-    // We need to switch to using " instead of ', but this involves patching a large
-    // number of tests and changing editing code to not get confused by double quotes.
     appendTo.append('"');
 
     unsigned index = 0;
@@ -171,12 +125,12 @@ void serializeString(const String& string, StringBuilder& appendTo)
         UChar32 c = string.characterStartingAt(index);
         index += U16_LENGTH(c);
 
-        if (c <= 0x1f || c == 0x7f)
+        if (c <= 0x1f || c == deleteCharacter)
             serializeCharacterAsCodePoint(c, appendTo);
-        else if (c == 0x22 || c == 0x5c)
+        else if (c == quotationMark || c == reverseSolidus)
             serializeCharacter(c, appendTo);
         else
-            appendTo.append(c);
+            appendTo.appendCharacter(c);
     }
 
     appendTo.append('"');
@@ -191,24 +145,9 @@ String serializeString(const String& string)
 
 String serializeURL(const String& string)
 {
-    // FIXME: URLS must always be double quoted. From the CSS OM draft:
-    // To serialize a URL means to create a string represented by "url(", followed by
-    // the serialization of the URL as a string, followed by ")".
-    // To keep backwards compatibility with existing tests, for now we only quote if needed and
-    // we use a single quote.
-    return "url(" + (isCSSTokenizerURL(string) ? string : serializeString(string)) + ")";
+    return "url(" + serializeString(string) + ")";
 }
 
-String serializeAsStringOrCustomIdent(const String& string)
-{
-    if (isCSSTokenizerIdentifier(string)) {
-        StringBuilder builder;
-        serializeIdentifier(string, builder);
-        return builder.toString();
-    }
-    return serializeString(string);
-}
-    
 String serializeFontFamily(const String& string)
 {
     return isCSSTokenizerIdentifier(string) ? string : serializeString(string);

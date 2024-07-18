@@ -25,24 +25,30 @@
 
 #pragma once
 
-#if ENABLE(MEDIA_STREAM) && PLATFORM(IOS)
+#if ENABLE(MEDIA_STREAM) && PLATFORM(IOS_FAMILY)
 
+#include "AudioSession.h"
 #include "CoreAudioCaptureSource.h"
+#include <wtf/WeakHashSet.h>
 
 OBJC_CLASS WebCoreAudioCaptureSourceIOSListener;
 
 namespace WebCore {
 
-class CoreAudioCaptureSourceIOS final : public CoreAudioCaptureSource {
-private:
-    friend class CoreAudioCaptureSource;
+class CoreAudioCaptureSourceFactoryIOS final : public CoreAudioCaptureSourceFactory  {
+public:
+    CoreAudioCaptureSourceFactoryIOS();
+    ~CoreAudioCaptureSourceFactoryIOS();
 
-    CoreAudioCaptureSourceIOS(const String& deviceID, const String& label);
-    ~CoreAudioCaptureSourceIOS();
+private:
+    CaptureSourceOrError createAudioCaptureSource(const CaptureDevice&, String&&, const MediaConstraints*, PageIdentifier) final;
+    void addExtensiveObserver(ExtensiveObserver&) final;
+    void removeExtensiveObserver(ExtensiveObserver&) final;
 
     RetainPtr<WebCoreAudioCaptureSourceIOSListener> m_listener;
+    WeakHashSet<ExtensiveObserver> m_observers;
 };
 
 } // namespace WebCore
 
-#endif // ENABLE(MEDIA_STREAM)
+#endif // ENABLE(MEDIA_STREAM) && PLATFORM(IOS_FAMILY)

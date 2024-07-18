@@ -32,6 +32,7 @@
 
 #include "AssemblerBuffer.h"
 #include "JITCompilationEffort.h"
+#include "MIPSRegisters.h"
 #include <limits.h>
 #include <wtf/Assertions.h>
 #include <wtf/SegmentedVector.h>
@@ -40,116 +41,28 @@ namespace JSC {
 
 typedef uint32_t MIPSWord;
 
-namespace MIPSRegisters {
-typedef enum {
-    r0 = 0,
-    r1,
-    r2,
-    r3,
-    r4,
-    r5,
-    r6,
-    r7,
-    r8,
-    r9,
-    r10,
-    r11,
-    r12,
-    r13,
-    r14,
-    r15,
-    r16,
-    r17,
-    r18,
-    r19,
-    r20,
-    r21,
-    r22,
-    r23,
-    r24,
-    r25,
-    r26,
-    r27,
-    r28,
-    r29,
-    r30,
-    r31,
-    zero = r0,
-    at = r1,
-    v0 = r2,
-    v1 = r3,
-    a0 = r4,
-    a1 = r5,
-    a2 = r6,
-    a3 = r7,
-    t0 = r8,
-    t1 = r9,
-    t2 = r10,
-    t3 = r11,
-    t4 = r12,
-    t5 = r13,
-    t6 = r14,
-    t7 = r15,
-    s0 = r16,
-    s1 = r17,
-    s2 = r18,
-    s3 = r19,
-    s4 = r20,
-    s5 = r21,
-    s6 = r22,
-    s7 = r23,
-    t8 = r24,
-    t9 = r25,
-    k0 = r26,
-    k1 = r27,
-    gp = r28,
-    sp = r29,
-    fp = r30,
-    ra = r31
+namespace RegisterNames {
+typedef enum : int8_t {
+#define REGISTER_ID(id, name, r, cs) id,
+    FOR_EACH_GP_REGISTER(REGISTER_ID)
+#undef REGISTER_ID
+#define REGISTER_ALIAS(id, alias) id = alias,
+    FOR_EACH_REGISTER_ALIAS(REGISTER_ALIAS)
+#undef REGISTER_ALIAS
+    InvalidGPRReg = -1,
 } RegisterID;
 
-typedef enum {
-    fir = 0,
-    fccr = 25,
-    fexr = 26,
-    fenr = 28,
-    fcsr = 31,
-    pc
+typedef enum : int8_t {
+#define REGISTER_ID(id, name, idx) id = idx,
+    FOR_EACH_SP_REGISTER(REGISTER_ID)
+#undef REGISTER_ID
 } SPRegisterID;
 
-typedef enum {
-    f0,
-    f1,
-    f2,
-    f3,
-    f4,
-    f5,
-    f6,
-    f7,
-    f8,
-    f9,
-    f10,
-    f11,
-    f12,
-    f13,
-    f14,
-    f15,
-    f16,
-    f17,
-    f18,
-    f19,
-    f20,
-    f21,
-    f22,
-    f23,
-    f24,
-    f25,
-    f26,
-    f27,
-    f28,
-    f29,
-    f30,
-    f31
+typedef enum : int8_t {
+#define REGISTER_ID(id, name, r, cs) id,
+    FOR_EACH_FP_REGISTER(REGISTER_ID)
+#undef REGISTER_ID
+    InvalidFPRReg = -1,
 } FPRegisterID;
 
 } // namespace MIPSRegisters
@@ -177,46 +90,31 @@ public:
     {
         ASSERT(id >= firstRegister() && id <= lastRegister());
         static const char* const nameForRegister[numberOfRegisters()] = {
-            "zero", "at", "v0", "v1",
-            "a0", "a1", "a2", "a3",
-            "t0", "t1", "t2", "t3",
-            "t4", "t5", "t6", "t7"
+#define REGISTER_NAME(id, name, r, c) name,
+        FOR_EACH_GP_REGISTER(REGISTER_NAME)
+#undef REGISTER_NAME
         };
         return nameForRegister[id];
     }
 
     static const char* sprName(SPRegisterID id)
     {
-        switch (id) {
-        case MIPSRegisters::fir:
-            return "fir";
-        case MIPSRegisters::fccr:
-            return "fccr";
-        case MIPSRegisters::fexr:
-            return "fexr";
-        case MIPSRegisters::fenr:
-            return "fenr";
-        case MIPSRegisters::fcsr:
-            return "fcsr";
-        case MIPSRegisters::pc:
-            return "pc";
-        default:
-            RELEASE_ASSERT_NOT_REACHED();
-        }
+        ASSERT(id >= firstSPRegister() && id <= lastSPRegister());
+        static const char* const nameForRegister[numberOfSPRegisters()] = {
+#define REGISTER_NAME(id, name, idx) name,
+        FOR_EACH_SP_REGISTER(REGISTER_NAME)
+#undef REGISTER_NAME
+        };
+        return nameForRegister[id];
     }
 
     static const char* fprName(FPRegisterID id)
     {
         ASSERT(id >= firstFPRegister() && id <= lastFPRegister());
         static const char* const nameForRegister[numberOfFPRegisters()] = {
-            "f0", "f1", "f2", "f3",
-            "f4", "f5", "f6", "f7",
-            "f8", "f9", "f10", "f11",
-            "f12", "f13", "f14", "f15"
-            "f16", "f17", "f18", "f19"
-            "f20", "f21", "f22", "f23"
-            "f24", "f25", "f26", "f27"
-            "f28", "f29", "f30", "f31"
+#define REGISTER_NAME(id, name, r, cs) name,
+        FOR_EACH_FP_REGISTER(REGISTER_NAME)
+#undef REGISTER_NAME
         };
         return nameForRegister[id];
     }
@@ -238,7 +136,9 @@ public:
         OP_SH_CODE = 16,
         OP_SH_FD = 6,
         OP_SH_FS = 11,
-        OP_SH_FT = 16
+        OP_SH_FT = 16,
+        OP_SH_MSB = 11,
+        OP_SH_LSB = 6
     };
 
     // FCSR Bits
@@ -262,9 +162,12 @@ public:
         emitInst(0x00000000);
     }
     
-    static void fillNops(void* base, size_t size, bool isCopyingToExecutableMemory)
+    using CopyFunction = void*(&)(void*, const void*, size_t);
+
+    template <CopyFunction copy>
+    ALWAYS_INLINE static void fillNops(void* base, size_t size)
     {
-        UNUSED_PARAM(isCopyingToExecutableMemory);
+        UNUSED_PARAM(copy);
         RELEASE_ASSERT(!(size % sizeof(int32_t)));
 
         int32_t* ptr = static_cast<int32_t*>(base);
@@ -317,6 +220,17 @@ public:
             if (imm & 0xffff)
                 ori(dest, dest, imm);
         }
+    }
+
+    void ext(RegisterID rt, RegisterID rs, int pos, int size)
+    {
+        int msb = size - 1;
+        emitInst(0x7c000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (pos << OP_SH_LSB) | (msb << OP_SH_MSB));
+    }
+
+    void mfhc1(RegisterID rt, FPRegisterID fs)
+    {
+        emitInst(0x4460000 | (rt << OP_SH_RT) | (fs << OP_SH_FS));
     }
 
     void lui(RegisterID rt, int imm)
@@ -417,6 +331,11 @@ public:
     void sltu(RegisterID rd, RegisterID rs, RegisterID rt)
     {
         emitInst(0x0000002b | (rd << OP_SH_RD) | (rs << OP_SH_RS) | (rt << OP_SH_RT));
+    }
+
+    void slti(RegisterID rt, RegisterID rs, int imm)
+    {
+        emitInst(0x28000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (imm & 0xffff));
     }
 
     void sltiu(RegisterID rt, RegisterID rs, int imm)
@@ -755,17 +674,17 @@ public:
     AssemblerLabel labelForWatchpoint()
     {
         AssemblerLabel result = m_buffer.label();
-        if (static_cast<int>(result.m_offset) != m_indexOfLastWatchpoint)
+        if (static_cast<int>(result.offset()) != m_indexOfLastWatchpoint)
             result = label();
-        m_indexOfLastWatchpoint = result.m_offset;
-        m_indexOfTailOfLastWatchpoint = result.m_offset + maxJumpReplacementSize();
+        m_indexOfLastWatchpoint = result.offset();
+        m_indexOfTailOfLastWatchpoint = result.offset() + maxJumpReplacementSize();
         return result;
     }
 
     AssemblerLabel label()
     {
         AssemblerLabel result = m_buffer.label();
-        while (UNLIKELY(static_cast<int>(result.m_offset) < m_indexOfTailOfLastWatchpoint)) {
+        while (UNLIKELY(static_cast<int>(result.offset()) < m_indexOfTailOfLastWatchpoint)) {
             nop();
             result = m_buffer.label();
         }
@@ -782,12 +701,12 @@ public:
 
     static void* getRelocatedAddress(void* code, AssemblerLabel label)
     {
-        return reinterpret_cast<void*>(reinterpret_cast<char*>(code) + label.m_offset);
+        return reinterpret_cast<void*>(reinterpret_cast<char*>(code) + label.offset());
     }
 
     static int getDifferenceBetweenLabels(AssemblerLabel a, AssemblerLabel b)
     {
-        return b.m_offset - a.m_offset;
+        return b.offset() - a.offset();
     }
 
     // Assembler admin methods:
@@ -825,7 +744,7 @@ public:
     static unsigned getCallReturnOffset(AssemblerLabel call)
     {
         // The return address is after a call and a delay slot instruction
-        return call.m_offset;
+        return call.offset();
     }
 
     // Linking & patching:
@@ -869,8 +788,8 @@ public:
     {
         ASSERT(to.isSet());
         ASSERT(from.isSet());
-        MIPSWord* insn = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(m_buffer.data()) + from.m_offset);
-        MIPSWord* toPos = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(m_buffer.data()) + to.m_offset);
+        MIPSWord* insn = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(m_buffer.data()) + from.offset());
+        MIPSWord* toPos = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(m_buffer.data()) + to.offset());
 
         ASSERT(!(*(insn - 1)) && !(*(insn - 2)) && !(*(insn - 3)) && !(*(insn - 5)));
         insn = insn - 6;
@@ -880,7 +799,7 @@ public:
     static void linkJump(void* code, AssemblerLabel from, void* to)
     {
         ASSERT(from.isSet());
-        MIPSWord* insn = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(code) + from.m_offset);
+        MIPSWord* insn = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(code) + from.offset());
 
         ASSERT(!(*(insn - 1)) && !(*(insn - 2)) && !(*(insn - 3)) && !(*(insn - 5)));
         insn = insn - 6;
@@ -889,13 +808,13 @@ public:
 
     static void linkCall(void* code, AssemblerLabel from, void* to)
     {
-        MIPSWord* insn = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(code) + from.m_offset);
+        MIPSWord* insn = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(code) + from.offset());
         linkCallInternal(insn, to);
     }
 
     static void linkPointer(void* code, AssemblerLabel from, void* to)
     {
-        MIPSWord* insn = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(code) + from.m_offset);
+        MIPSWord* insn = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(code) + from.offset());
         ASSERT((*insn & 0xffe00000) == 0x3c000000); // lui
         *insn = (*insn & 0xffff0000) | ((reinterpret_cast<intptr_t>(to) >> 16) & 0xffff);
         insn++;
@@ -914,11 +833,6 @@ public:
         cacheFlush(insn, flushSize);
     }
 
-    static void relinkJumpToNop(void* from)
-    {
-        relinkJump(from, from);
-    }
-
     static void relinkCall(void* from, void* to)
     {
         void* start;
@@ -931,6 +845,11 @@ public:
         cacheFlush(start, size);
     }
 
+    static void relinkTailCall(void* from, void* to)
+    {
+        relinkJump(from, to);
+    }
+
     static void repatchInt32(void* from, int32_t to)
     {
         MIPSWord* insn = reinterpret_cast<MIPSWord*>(from);
@@ -939,8 +858,7 @@ public:
         insn++;
         ASSERT((*insn & 0xfc000000) == 0x34000000); // ori
         *insn = (*insn & 0xffff0000) | (to & 0xffff);
-        insn--;
-        cacheFlush(insn, 2 * sizeof(MIPSWord));
+        cacheFlush(from, 2 * sizeof(MIPSWord));
     }
 
     static int32_t readInt32(void* from)
@@ -954,11 +872,6 @@ public:
         return result;
     }
     
-    static void repatchCompact(void* where, int32_t value)
-    {
-        repatchInt32(where, value);
-    }
-
     static void repatchPointer(void* from, void* to)
     {
         repatchInt32(from, reinterpret_cast<int32_t>(to));
@@ -1013,7 +926,7 @@ public:
             *insn = 0x00000000;
             codeSize += sizeof(MIPSWord);
         }
-        cacheFlush(insn, codeSize);
+        cacheFlush(instructionStart, codeSize);
     }
 
     static void replaceWithJump(void* instructionStart, void* to)
@@ -1051,7 +964,7 @@ public:
     {
         // Check each jump
         for (Jumps::Iterator iter = m_jumps.begin(); iter != m_jumps.end(); ++iter) {
-            int pos = iter->m_offset;
+            int pos = iter->offset();
             MIPSWord* insn = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(newBase) + pos);
             insn = insn + 2;
             // Need to make sure we have 5 valid instructions after pos

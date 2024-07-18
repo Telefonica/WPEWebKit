@@ -31,13 +31,13 @@ class SystemSleepListener {
 public:
     class Client {
     public:
-        virtual ~Client() { }
+        virtual ~Client() = default;
         virtual void systemWillSleep() = 0;
         virtual void systemDidWake() = 0;
     };
 
-    static std::unique_ptr<SystemSleepListener> create(Client&);
-    virtual ~SystemSleepListener() { }
+    PAL_EXPORT static std::unique_ptr<SystemSleepListener> create(Client&);
+    virtual ~SystemSleepListener() = default;
 
     Client& client() { return m_client; }
 

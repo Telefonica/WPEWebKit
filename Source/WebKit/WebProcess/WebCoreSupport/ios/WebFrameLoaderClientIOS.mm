@@ -26,15 +26,15 @@
 #import "config.h"
 #import "WebFrameLoaderClient.h"
 
+#import "WebFrame.h"
+#import "WebPage.h"
 #import <WebCore/Frame.h>
 #import <WebCore/FrameView.h>
 #import <WebCore/HistoryController.h>
 #import <WebCore/HistoryItem.h>
 #import <WebCore/Page.h>
-#import <WebFrame.h>
-#import <WebPage.h>
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import <WebCore/NotImplemented.h>
 
@@ -45,28 +45,27 @@
 #import <WebCore/QuickLook.h>
 #endif
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 void WebFrameLoaderClient::didRestoreFrameHierarchyForCachedFrame()
 {
     notImplemented();
 }
 
-bool WebFrameLoaderClient::forceLayoutOnRestoreFromPageCache()
+bool WebFrameLoaderClient::forceLayoutOnRestoreFromBackForwardCache()
 {
     return false;
 }
 
-RetainPtr<CFDictionaryRef> WebFrameLoaderClient::connectionProperties(DocumentLoader*, unsigned long identifier)
+RetainPtr<CFDictionaryRef> WebFrameLoaderClient::connectionProperties(DocumentLoader*, WebCore::ResourceLoaderIdentifier)
 {
     notImplemented();
     return nullptr;
 }
 
 #if USE(QUICK_LOOK)
-RefPtr<PreviewLoaderClient> WebFrameLoaderClient::createPreviewLoaderClient(const String& fileName, const String& uti)
+RefPtr<LegacyPreviewLoaderClient> WebFrameLoaderClient::createPreviewLoaderClient(const String& fileName, const String& uti)
 {
     if (!m_frame->isMainFrame())
         return nullptr;
@@ -75,10 +74,10 @@ RefPtr<PreviewLoaderClient> WebFrameLoaderClient::createPreviewLoaderClient(cons
     if (!webPage)
         return nullptr;
 
-    return WebPreviewLoaderClient::create(fileName, uti, webPage->pageID());
+    return WebPreviewLoaderClient::create(fileName, uti, webPage->identifier());
 }
 #endif
 
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

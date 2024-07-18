@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014, 2015 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2014-2019 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,9 +26,8 @@
 #include "config.h"
 #include "TypeSet.h"
 
+#include "HeapInlines.h"
 #include "InspectorProtocolObjects.h"
-#include "JSCInlines.h"
-#include <wtf/text/CString.h>
 #include <wtf/text/WTFString.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/Vector.h>
@@ -41,14 +40,17 @@ TypeSet::TypeSet()
 {
 }
 
-void TypeSet::addTypeInformation(RuntimeType type, RefPtr<StructureShape>&& passedNewShape, Structure* structure)
+void TypeSet::addTypeInformation(RuntimeType type, RefPtr<StructureShape>&& passedNewShape, Structure* structure, bool sawPolyProtoStructure)
 {
     m_seenTypes = m_seenTypes | type;
 
     if (structure && passedNewShape && !runtimeTypeIsPrimitive(type)) {
         Ref<StructureShape> newShape = passedNewShape.releaseNonNull();
-        if (!m_structureSet.contains(structure)) {
-            {
+        // FIXME: TypeSet should be able to cache poly proto chains
+        // just by caching the prototype chain:
+        // https://bugs.webkit.org/show_bug.cgi?id=177627
+        if (sawPolyProtoStructure || !m_structureSet.contains(structure)) {
+            if (!sawPolyProtoStructure) {
                 ConcurrentJSLocker locker(m_lock);
                 m_structureSet.add(structure);
             }
@@ -76,57 +78,53 @@ void TypeSet::addTypeInformation(RuntimeType type, RefPtr<StructureShape>&& pass
     }
 }
 
-void TypeSet::invalidateCache()
+void TypeSet::invalidateCache(VM& vm)
 {
     ConcurrentJSLocker locker(m_lock);
-    auto keepMarkedStructuresFilter = [] (Structure* structure) -> bool { return Heap::isMarked(structure); };
+    auto keepMarkedStructuresFilter = [&] (Structure* structure) -> bool {
+        return vm.heap.isMarked(structure);
+    };
     m_structureSet.genericFilter(keepMarkedStructuresFilter);
 }
 
 String TypeSet::dumpTypes() const
 {
     if (m_seenTypes == TypeNothing)
-        return ASCIILiteral("(Unreached Statement)");
+        return "(Unreached Statement)"_s;
 
     StringBuilder seen;
 
     if (m_seenTypes & TypeFunction)
-        seen.appendLiteral("Function ");
+        seen.append("Function ");
     if (m_seenTypes & TypeUndefined)
-        seen.appendLiteral("Undefined ");
+        seen.append("Undefined ");
     if (m_seenTypes & TypeNull)
-        seen.appendLiteral("Null ");
+        seen.append("Null ");
     if (m_seenTypes & TypeBoolean)
-        seen.appendLiteral("Boolean ");
+        seen.append("Boolean ");
     if (m_seenTypes & TypeAnyInt)
-        seen.appendLiteral("AnyInt ");
+        seen.append("AnyInt ");
     if (m_seenTypes & TypeNumber)
-        seen.appendLiteral("Number ");
+        seen.append("Number ");
     if (m_seenTypes & TypeString)
-        seen.appendLiteral("String ");
+        seen.append("String ");
     if (m_seenTypes & TypeObject)
-        seen.appendLiteral("Object ");
+        seen.append("Object ");
     if (m_seenTypes & TypeSymbol)
-        seen.appendLiteral("Symbol ");
+        seen.append("Symbol ");
 
-    for (const auto& shape : m_structureHistory) {
-        seen.append(shape->m_constructorName);
-        seen.append(' ');
-    }
+    for (const auto& shape : m_structureHistory)
+        seen.append(shape->m_constructorName, ' ');
 
     if (m_structureHistory.size()) 
-        seen.appendLiteral("\nStructures:[ ");
-    for (const auto& shape : m_structureHistory) {
-        seen.append(shape->stringRepresentation());
-        seen.append(' ');
-    }
+        seen.append("\nStructures:[ ");
+    for (const auto& shape : m_structureHistory)
+        seen.append(shape->stringRepresentation(), ' ');
     if (m_structureHistory.size())
         seen.append(']');
 
-    if (m_structureHistory.size()) {
-        seen.appendLiteral("\nLeast Common Ancestor: ");
-        seen.append(leastCommonAncestor());
-    }
+    if (m_structureHistory.size())
+        seen.append("\nLeast Common Ancestor: ", leastCommonAncestor());
 
     return seen.toString();
 }
@@ -169,44 +167,48 @@ String TypeSet::displayName() const
     // Therefore, more specific types must be checked first.
 
     if (doesTypeConformTo(TypeFunction))
-        return ASCIILiteral("Function");
+        return "Function"_s;
     if (doesTypeConformTo(TypeUndefined))
-        return ASCIILiteral("Undefined");
+        return "Undefined"_s;
     if (doesTypeConformTo(TypeNull))
-        return ASCIILiteral("Null");
+        return "Null"_s;
     if (doesTypeConformTo(TypeBoolean))
-        return ASCIILiteral("Boolean");
+        return "Boolean"_s;
     if (doesTypeConformTo(TypeAnyInt))
-        return ASCIILiteral("Integer");
+        return "Integer"_s;
     if (doesTypeConformTo(TypeNumber | TypeAnyInt))
-        return ASCIILiteral("Number");
+        return "Number"_s;
     if (doesTypeConformTo(TypeString))
-        return ASCIILiteral("String");
+        return "String"_s;
     if (doesTypeConformTo(TypeSymbol))
-        return ASCIILiteral("Symbol");
+        return "Symbol"_s;
+    if (doesTypeConformTo(TypeBigInt))
+        return "BigInt"_s;
 
     if (doesTypeConformTo(TypeNull | TypeUndefined))
-        return ASCIILiteral("(?)");
+        return "(?)"_s;
 
     if (doesTypeConformTo(TypeFunction | TypeNull | TypeUndefined))
-        return ASCIILiteral("Function?");
+        return "Function?"_s;
     if (doesTypeConformTo(TypeBoolean | TypeNull | TypeUndefined))
-        return ASCIILiteral("Boolean?");
+        return "Boolean?"_s;
     if (doesTypeConformTo(TypeAnyInt | TypeNull | TypeUndefined))
-        return ASCIILiteral("Integer?");
+        return "Integer?"_s;
     if (doesTypeConformTo(TypeNumber | TypeAnyInt | TypeNull | TypeUndefined))
-        return ASCIILiteral("Number?");
+        return "Number?"_s;
     if (doesTypeConformTo(TypeString | TypeNull | TypeUndefined))
-        return ASCIILiteral("String?");
+        return "String?"_s;
     if (doesTypeConformTo(TypeSymbol | TypeNull | TypeUndefined))
-        return ASCIILiteral("Symbol?");
+        return "Symbol?"_s;
+    if (doesTypeConformTo(TypeBigInt | TypeNull | TypeUndefined))
+        return "BigInt?"_s;
    
     if (doesTypeConformTo(TypeObject | TypeFunction | TypeString))
-        return ASCIILiteral("Object");
+        return "Object"_s;
     if (doesTypeConformTo(TypeObject | TypeFunction | TypeString | TypeNull | TypeUndefined))
-        return ASCIILiteral("Object?");
+        return "Object?"_s;
 
-    return ASCIILiteral("(many)");
+    return "(many)"_s;
 }
 
 String TypeSet::leastCommonAncestor() const
@@ -236,6 +238,7 @@ Ref<Inspector::Protocol::Runtime::TypeSet> TypeSet::inspectorTypeSet() const
         .setIsString((m_seenTypes & TypeString) != TypeNothing)
         .setIsObject((m_seenTypes & TypeObject) != TypeNothing)
         .setIsSymbol((m_seenTypes & TypeSymbol) != TypeNothing)
+        .setIsBigInt((m_seenTypes & TypeBigInt) != TypeNothing)
         .release();
 }
 
@@ -249,61 +252,57 @@ String TypeSet::toJSONString() const
     StringBuilder json;
     json.append('{');
 
-    json.appendLiteral("\"displayTypeName\":");
-    json.append('"');
-    json.append(displayName());
-    json.append('"');
+    json.append("\"displayTypeName\":");
+    json.appendQuotedJSONString(displayName());
     json.append(',');
 
-    json.appendLiteral("\"primitiveTypeNames\":");
-    json.append('[');
+    json.append("\"primitiveTypeNames\":[");
     bool hasAnItem = false;
     if (m_seenTypes & TypeUndefined) {
         hasAnItem = true;
-        json.appendLiteral("\"Undefined\"");
+        json.append("\"Undefined\"");
     }
     if (m_seenTypes & TypeNull) {
         if (hasAnItem)
             json.append(',');
         hasAnItem = true;
-        json.appendLiteral("\"Null\"");
+        json.append("\"Null\"");
     }
     if (m_seenTypes & TypeBoolean) {
         if (hasAnItem)
             json.append(',');
         hasAnItem = true;
-        json.appendLiteral("\"Boolean\"");
+        json.append("\"Boolean\"");
     }
     if (m_seenTypes & TypeAnyInt) {
         if (hasAnItem)
             json.append(',');
         hasAnItem = true;
-        json.appendLiteral("\"Integer\"");
+        json.append("\"Integer\"");
     }
     if (m_seenTypes & TypeNumber) {
         if (hasAnItem)
             json.append(',');
         hasAnItem = true;
-        json.appendLiteral("\"Number\"");
+        json.append("\"Number\"");
     }
     if (m_seenTypes & TypeString) {
         if (hasAnItem)
             json.append(',');
         hasAnItem = true;
-        json.appendLiteral("\"String\"");
+        json.append("\"String\"");
     }
     if (m_seenTypes & TypeSymbol) {
         if (hasAnItem)
             json.append(',');
         hasAnItem = true;
-        json.appendLiteral("\"Symbol\"");
+        json.append("\"Symbol\"");
     }
     json.append(']');
 
     json.append(',');
 
-    json.appendLiteral("\"structures\":");
-    json.append('[');
+    json.append("\"structures\":[");
     hasAnItem = false;
     for (size_t i = 0; i < m_structureHistory.size(); i++) {
         if (hasAnItem)
@@ -318,10 +317,10 @@ String TypeSet::toJSONString() const
 }
 
 StructureShape::StructureShape()
-    : m_proto(nullptr)
-    , m_propertyHash(nullptr)
-    , m_final(false)
+    : m_final(false)
     , m_isInDictionaryMode(false)
+    , m_proto(nullptr)
+    , m_propertyHash(nullptr)
 {
 }
 
@@ -348,18 +347,15 @@ String StructureShape::propertyHash()
     builder.append(m_constructorName);
     builder.append(':');
     for (auto& key : m_fields) {
-        String property = key.get();
-        property.replace(":", "\\:"); // Ensure that hash({"foo:", "bar"}) != hash({"foo", ":bar"}) because we're using colons as a separator and colons are legal characters in field names in JS.
+        // Ensure that hash({"foo:", "bar"}) != hash({"foo", ":bar"}) because we're using colons as a separator and colons are legal characters in field names in JS.
+        String property = makeStringByReplacingAll(key.get(), ':', "\\:"_s);
         builder.append(property);
     }
 
-    if (m_proto) {
-        builder.append(':');
-        builder.appendLiteral("__proto__");
-        builder.append(m_proto->propertyHash());
-    }
+    if (m_proto)
+        builder.append(":__proto__", m_proto->propertyHash());
 
-    m_propertyHash = std::make_unique<String>(builder.toString());
+    m_propertyHash = makeUnique<String>(builder.toString());
     return *m_propertyHash;
 }
 
@@ -385,12 +381,12 @@ String StructureShape::leastCommonAncestor(const Vector<Ref<StructureShape>>& sh
                 // This is unlikely to happen, because we usually bottom out at "Object", but there are some sets of Objects
                 // that may cause this behavior. We fall back to "Object" because it's our version of Top.
                 if (!origin->m_proto)
-                    return ASCIILiteral("Object");
+                    return "Object"_s;
                 origin = origin->m_proto.get();
             }
         }
 
-        if (origin->m_constructorName == "Object")
+        if (origin->m_constructorName == "Object"_s)
             break;
     }
 
@@ -404,23 +400,15 @@ String StructureShape::stringRepresentation()
 
     representation.append('{');
     while (curShape) {
-        for (auto it = curShape->m_fields.begin(), end = curShape->m_fields.end(); it != end; ++it) {
-            String prop((*it).get());
-            representation.append(prop);
-            representation.appendLiteral(", ");
-        }
-
-        if (curShape->m_proto) {
-            representation.appendLiteral("__proto__ [");
-            representation.append(curShape->m_proto->m_constructorName);
-            representation.appendLiteral("], ");
-        }
-
+        for (auto& field : curShape->m_fields)
+            representation.append(StringView { field.get() }, ", ");
+        if (curShape->m_proto)
+            representation.append("__proto__ [", curShape->m_proto->m_constructorName, "], ");
         curShape = curShape->m_proto;
     }
 
     if (representation.length() >= 3)
-        representation.resize(representation.length() - 2);
+        representation.shrink(representation.length() - 2);
 
     representation.append('}');
 
@@ -438,56 +426,47 @@ String StructureShape::toJSONString() const
     StringBuilder json;
     json.append('{');
 
-    json.appendLiteral("\"constructorName\":");
-    json.append('"');
-    json.append(m_constructorName);
-    json.append('"');
+    json.append("\"constructorName\":");
+    json.appendQuotedJSONString(m_constructorName);
     json.append(',');
 
-    json.appendLiteral("\"isInDictionaryMode\":");
+    json.append("\"isInDictionaryMode\":");
     if (m_isInDictionaryMode)
-        json.appendLiteral("true");
+        json.append("true");
     else
-        json.appendLiteral("false");
+        json.append("false");
     json.append(',');
 
-    json.appendLiteral("\"fields\":");
-    json.append('[');
+    json.append("\"fields\":[");
     bool hasAnItem = false;
-    for (auto it = m_fields.begin(), end = m_fields.end(); it != end; ++it) {
+    for (auto& field : m_fields) {
         if (hasAnItem)
             json.append(',');
         hasAnItem = true;
 
-        String fieldName((*it).get());
-        json.append('"');
-        json.append(fieldName);
-        json.append('"');
+        String fieldName(field.get());
+        json.appendQuotedJSONString(fieldName);
     }
-    json.append(']');
-    json.append(',');
+    json.append("],");
 
-    json.appendLiteral("\"optionalFields\":");
-    json.append('[');
+    json.append("\"optionalFields\":[");
     hasAnItem = false;
-    for (auto it = m_optionalFields.begin(), end = m_optionalFields.end(); it != end; ++it) {
+    for (auto& field : m_optionalFields) {
         if (hasAnItem)
             json.append(',');
         hasAnItem = true;
 
-        String fieldName((*it).get());
-        json.append('"');
-        json.append(fieldName);
-        json.append('"');
+        String fieldName(field.get());
+        json.appendQuotedJSONString(fieldName);
     }
     json.append(']');
     json.append(',');
 
-    json.appendLiteral("\"proto\":");
+    json.append("\"proto\":");
     if (m_proto)
         json.append(m_proto->toJSONString());
     else
-        json.appendLiteral("null");
+        json.append("null");
 
     json.append('}');
 
@@ -503,19 +482,19 @@ Ref<Inspector::Protocol::Runtime::StructureDescription> StructureShape::inspecto
     while (currentShape) {
         auto fields = JSON::ArrayOf<String>::create();
         auto optionalFields = JSON::ArrayOf<String>::create();
-        for (auto field : currentShape->m_fields)
+        for (const auto& field : currentShape->m_fields)
             fields->addItem(field.get());
-        for (auto field : currentShape->m_optionalFields)
+        for (const auto& field : currentShape->m_optionalFields)
             optionalFields->addItem(field.get());
 
-        currentObject->setFields(&fields.get());
-        currentObject->setOptionalFields(&optionalFields.get());
+        currentObject->setFields(WTFMove(fields));
+        currentObject->setOptionalFields(WTFMove(optionalFields));
         currentObject->setConstructorName(currentShape->m_constructorName);
         currentObject->setIsImprecise(currentShape->m_isInDictionaryMode);
 
         if (currentShape->m_proto) {
             auto nextObject = Inspector::Protocol::Runtime::StructureDescription::create().release();
-            currentObject->setPrototypeStructure(&nextObject.get());
+            currentObject->setPrototypeStructure(nextObject.copyRef());
             currentObject = WTFMove(nextObject);
         }
 
@@ -544,23 +523,23 @@ Ref<StructureShape> StructureShape::merge(Ref<StructureShape>&& a, Ref<Structure
     ASSERT(a->hasSamePrototypeChain(b.get()));
 
     auto merged = StructureShape::create();
-    for (auto field : a->m_fields) {
+    for (const auto& field : a->m_fields) {
         if (b->m_fields.contains(field))
             merged->m_fields.add(field);
         else
             merged->m_optionalFields.add(field);
     }
 
-    for (auto field : b->m_fields) {
+    for (const auto& field : b->m_fields) {
         if (!merged->m_fields.contains(field)) {
             auto addResult = merged->m_optionalFields.add(field);
             ASSERT_UNUSED(addResult, addResult.isNewEntry);
         }
     }
 
-    for (auto field : a->m_optionalFields)
+    for (const auto& field : a->m_optionalFields)
         merged->m_optionalFields.add(field);
-    for (auto field : b->m_optionalFields)
+    for (const auto& field : b->m_optionalFields)
         merged->m_optionalFields.add(field);
 
     ASSERT(a->m_constructorName == b->m_constructorName);

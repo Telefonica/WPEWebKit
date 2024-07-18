@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2021 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,56 +22,76 @@
 #include "FontCustomPlatformData.h"
 
 #include "FontCache.h"
+#include "FontCacheCoreText.h"
+#include "FontCreationContext.h"
 #include "FontDescription.h"
 #include "FontPlatformData.h"
 #include "SharedBuffer.h"
+#include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <CoreText/CoreText.h>
+#include <pal/spi/cf/CoreTextSPI.h>
 
 namespace WebCore {
 
-FontCustomPlatformData::~FontCustomPlatformData()
-{
-}
+FontCustomPlatformData::~FontCustomPlatformData() = default;
 
-FontPlatformData FontCustomPlatformData::fontPlatformData(const FontDescription& fontDescription, bool bold, bool italic, const FontFeatureSettings& fontFaceFeatures, const FontVariantSettings& fontFaceVariantSettings, FontSelectionSpecifiedCapabilities fontFaceCapabilities)
+FontPlatformData FontCustomPlatformData::fontPlatformData(const FontDescription& fontDescription, bool bold, bool italic, const FontCreationContext& fontCreationContext)
 {
+    auto attributes = adoptCF(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+    addAttributesForWebFonts(attributes.get(), fontDescription.shouldAllowUserInstalledFonts());
+    auto modifiedFontDescriptor = adoptCF(CTFontDescriptorCreateCopyWithAttributes(fontDescriptor.get(), attributes.get()));
+    ASSERT(modifiedFontDescriptor);
+
     int size = fontDescription.computedPixelSize();
     FontOrientation orientation = fontDescription.orientation();
     FontWidthVariant widthVariant = fontDescription.widthVariant();
-    RetainPtr<CTFontRef> font = adoptCF(CTFontCreateWithFontDescriptor(m_fontDescriptor.get(), size, nullptr));
-    font = preparePlatformFont(font.get(), fontDescription, &fontFaceFeatures, &fontFaceVariantSettings, fontFaceCapabilities, fontDescription.computedSize());
+    auto font = adoptCF(CTFontCreateWithFontDescriptor(modifiedFontDescriptor.get(), size, nullptr));
+    font = preparePlatformFont(font.get(), fontDescription, fontCreationContext);
     ASSERT(font);
-    return FontPlatformData(font.get(), size, bold, italic, orientation, widthVariant, fontDescription.textRenderingMode());
+    return FontPlatformData(font.get(), size, bold, italic, orientation, widthVariant, fontDescription.textRenderingMode(), &creationData);
 }
 
-std::unique_ptr<FontCustomPlatformData> createFontCustomPlatformData(SharedBuffer& buffer)
+std::unique_ptr<FontCustomPlatformData> createFontCustomPlatformData(SharedBuffer& buffer, const String& itemInCollection)
 {
     RetainPtr<CFDataRef> bufferData = buffer.createCFData();
 
-    RetainPtr<CTFontDescriptorRef> fontDescriptor = adoptCF(CTFontManagerCreateFontDescriptorFromData(bufferData.get()));
-    if (!fontDescriptor)
+    RetainPtr<CTFontDescriptorRef> fontDescriptor;
+    auto array = adoptCF(CTFontManagerCreateFontDescriptorsFromData(bufferData.get()));
+    if (!array)
         return nullptr;
+    auto length = CFArrayGetCount(array.get());
+    if (length <= 0)
+        return nullptr;
+    if (!itemInCollection.isNull()) {
+        if (auto desiredName = itemInCollection.createCFString()) {
+            for (CFIndex i = 0; i < length; ++i) {
+                auto candidate = static_cast<CTFontDescriptorRef>(CFArrayGetValueAtIndex(array.get(), i));
+                auto postScriptName = adoptCF(static_cast<CFStringRef>(CTFontDescriptorCopyAttribute(candidate, kCTFontNameAttribute)));
+                if (CFStringCompare(postScriptName.get(), desiredName.get(), 0) == kCFCompareEqualTo) {
+                    fontDescriptor = candidate;
+                    break;
+                }
+            }
+        }
+    }
+    if (!fontDescriptor)
+        fontDescriptor = static_cast<CTFontDescriptorRef>(CFArrayGetValueAtIndex(array.get(), 0));
 
-    return std::make_unique<FontCustomPlatformData>(fontDescriptor.get());
+    FontPlatformData::CreationData creationData = { buffer, itemInCollection };
+    return makeUnique<FontCustomPlatformData>(fontDescriptor.get(), WTFMove(creationData));
 }
 
 bool FontCustomPlatformData::supportsFormat(const String& format)
 {
-    return equalLettersIgnoringASCIICase(format, "truetype")
-        || equalLettersIgnoringASCIICase(format, "opentype")
-#if PLATFORM(IOS) || (PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200)
-        || equalLettersIgnoringASCIICase(format, "woff2")
-#if ENABLE(VARIATION_FONTS)
-        || equalLettersIgnoringASCIICase(format, "woff2-variations")
-#endif
-#endif
-#if ENABLE(VARIATION_FONTS)
-        || equalLettersIgnoringASCIICase(format, "woff-variations")
-        || equalLettersIgnoringASCIICase(format, "truetype-variations")
-        || equalLettersIgnoringASCIICase(format, "opentype-variations")
-#endif
-        || equalLettersIgnoringASCIICase(format, "woff");
+    return equalLettersIgnoringASCIICase(format, "truetype"_s)
+        || equalLettersIgnoringASCIICase(format, "opentype"_s)
+        || equalLettersIgnoringASCIICase(format, "woff2"_s)
+        || equalLettersIgnoringASCIICase(format, "woff2-variations"_s)
+        || equalLettersIgnoringASCIICase(format, "woff-variations"_s)
+        || equalLettersIgnoringASCIICase(format, "truetype-variations"_s)
+        || equalLettersIgnoringASCIICase(format, "opentype-variations"_s)
+        || equalLettersIgnoringASCIICase(format, "woff"_s);
 }
 
 }

@@ -8,23 +8,24 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_FEC_CONTROLLER_PLR_BASED_H_
-#define WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_FEC_CONTROLLER_PLR_BASED_H_
+#ifndef MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_FEC_CONTROLLER_PLR_BASED_H_
+#define MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_FEC_CONTROLLER_PLR_BASED_H_
 
 #include <memory>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/common_audio/smoothing_filter.h"
-#include "webrtc/modules/audio_coding/audio_network_adaptor/controller.h"
-#include "webrtc/modules/audio_coding/audio_network_adaptor/util/threshold_curve.h"
+#include "absl/types/optional.h"
+#include "common_audio/smoothing_filter.h"
+#include "modules/audio_coding/audio_network_adaptor/controller.h"
+#include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor_config.h"
+#include "modules/audio_coding/audio_network_adaptor/util/threshold_curve.h"
 
 namespace webrtc {
 
 class FecControllerPlrBased final : public Controller {
  public:
   struct Config {
-    // |fec_enabling_threshold| defines a curve, above which FEC should be
-    // enabled. |fec_disabling_threshold| defines a curve, under which FEC
+    // `fec_enabling_threshold` defines a curve, above which FEC should be
+    // enabled. `fec_disabling_threshold` defines a curve, under which FEC
     // should be disabled. See below
     //
     // packet-loss ^   |  |
@@ -51,22 +52,23 @@ class FecControllerPlrBased final : public Controller {
 
   ~FecControllerPlrBased() override;
 
+  FecControllerPlrBased(const FecControllerPlrBased&) = delete;
+  FecControllerPlrBased& operator=(const FecControllerPlrBased&) = delete;
+
   void UpdateNetworkMetrics(const NetworkMetrics& network_metrics) override;
 
   void MakeDecision(AudioEncoderRuntimeConfig* config) override;
 
  private:
-  bool FecEnablingDecision(const rtc::Optional<float>& packet_loss) const;
-  bool FecDisablingDecision(const rtc::Optional<float>& packet_loss) const;
+  bool FecEnablingDecision(const absl::optional<float>& packet_loss) const;
+  bool FecDisablingDecision(const absl::optional<float>& packet_loss) const;
 
   const Config config_;
   bool fec_enabled_;
-  rtc::Optional<int> uplink_bandwidth_bps_;
+  absl::optional<int> uplink_bandwidth_bps_;
   const std::unique_ptr<SmoothingFilter> packet_loss_smoother_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(FecControllerPlrBased);
 };
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_FEC_CONTROLLER_PLR_BASED_H_
+#endif  // MODULES_AUDIO_CODING_AUDIO_NETWORK_ADAPTOR_FEC_CONTROLLER_PLR_BASED_H_

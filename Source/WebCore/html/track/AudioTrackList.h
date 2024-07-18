@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
 
 #include "TrackListBase.h"
 
@@ -35,25 +35,35 @@ class AudioTrack;
 
 class AudioTrackList final : public TrackListBase {
 public:
-    static Ref<AudioTrackList> create(HTMLMediaElement* owner, ScriptExecutionContext* context)
+    static Ref<AudioTrackList> create(ScriptExecutionContext* context)
     {
-        return adoptRef(*new AudioTrackList(owner, context));
+        auto list = adoptRef(*new AudioTrackList(context));
+        list->suspendIfNeeded();
+        return list;
     }
     virtual ~AudioTrackList();
 
-    AudioTrack* getTrackById(const AtomicString&) const;
+    AudioTrack* getTrackById(const AtomString&) const;
 
     AudioTrack* item(unsigned index) const;
     AudioTrack* lastItem() const { return item(length() - 1); }
     void append(Ref<AudioTrack>&&);
+    void remove(TrackBase&, bool scheduleEvent = true) final;
 
     // EventTarget
     EventTargetInterface eventTargetInterface() const override;
 
 private:
-    AudioTrackList(HTMLMediaElement*, ScriptExecutionContext*);
+    AudioTrackList(ScriptExecutionContext*);
+
+    const char* activeDOMObjectName() const final;
 };
+static_assert(sizeof(AudioTrackList) == sizeof(TrackListBase));
 
 } // namespace WebCore
 
-#endif // ENABLE(VIDEO_TRACK)
+SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::AudioTrackList)
+    static bool isType(const WebCore::TrackListBase& trackList) { return trackList.type() == WebCore::TrackListBase::AudioTrackList; }
+SPECIALIZE_TYPE_TRAITS_END()
+
+#endif // ENABLE(VIDEO)

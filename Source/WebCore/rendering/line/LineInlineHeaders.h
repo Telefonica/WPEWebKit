@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "LineInfo.h"
 #include "RenderLayer.h"
 
 namespace WebCore {
@@ -34,11 +35,11 @@ inline bool hasInlineDirectionBordersPaddingOrMargin(const RenderInline& flow)
 {
     // Where an empty inline is split across anonymous blocks we should only give lineboxes to the 'sides' of the
     // inline that have borders, padding or margin.
-    bool shouldApplyStartBorderPaddingOrMargin = !flow.parent()->isAnonymousBlock() || !flow.isInlineElementContinuation();
+    bool shouldApplyStartBorderPaddingOrMargin = !flow.parent()->isAnonymousBlock() || !flow.isContinuation();
     if (shouldApplyStartBorderPaddingOrMargin && (flow.borderStart() || flow.marginStart() || flow.paddingStart()))
         return true;
 
-    bool shouldApplyEndBorderPaddingOrMargin = !flow.parent()->isAnonymousBlock() || flow.isInlineElementContinuation() || !flow.inlineElementContinuation();
+    bool shouldApplyEndBorderPaddingOrMargin = !flow.parent()->isAnonymousBlock() || flow.isContinuation() || !flow.inlineContinuation();
     return shouldApplyEndBorderPaddingOrMargin && (flow.borderEnd() || flow.marginEnd() || flow.paddingEnd());
 }
 
@@ -55,7 +56,7 @@ inline bool requiresLineBoxForContent(const RenderInline& flow, const LineInfo& 
         const RenderStyle& parentStyle = lineStyle(*parent, lineInfo);
         if (flowStyle.lineHeight() != parentStyle.lineHeight()
             || flowStyle.verticalAlign() != parentStyle.verticalAlign()
-            || !parentStyle.fontCascade().fontMetrics().hasIdenticalAscentDescentAndLineGap(flowStyle.fontCascade().fontMetrics()))
+            || !parentStyle.fontCascade().metricsOfPrimaryFont().hasIdenticalAscentDescentAndLineGap(flowStyle.fontCascade().metricsOfPrimaryFont()))
         return true;
     }
     return false;
@@ -68,12 +69,12 @@ inline bool shouldCollapseWhiteSpace(const RenderStyle* style, const LineInfo& l
     // If a space (U+0020) at the end of a line has 'white-space' set to 'normal', 'nowrap', or 'pre-line', it is also removed.
     // If spaces (U+0020) or tabs (U+0009) at the end of a line have 'white-space' set to 'pre-wrap', UAs may visually collapse them.
     return style->collapseWhiteSpace()
-        || (whitespacePosition == TrailingWhitespace && style->whiteSpace() == PRE_WRAP && (!lineInfo.isEmpty() || !lineInfo.previousLineBrokeCleanly()));
+        || (whitespacePosition == TrailingWhitespace && style->whiteSpace() == WhiteSpace::PreWrap && (!lineInfo.isEmpty() || !lineInfo.previousLineBrokeCleanly()));
 }
 
-inline bool skipNonBreakingSpace(const InlineIterator& it, const LineInfo& lineInfo)
+inline bool skipNonBreakingSpace(const LegacyInlineIterator& it, const LineInfo& lineInfo)
 {
-    if (it.renderer()->style().nbspMode() != SPACE || it.current() != noBreakSpace)
+    if (it.renderer()->style().nbspMode() != NBSPMode::Space || it.current() != noBreakSpace)
         return false;
 
     // FIXME: This is bad. It makes nbsp inconsistent with space and won't work correctly
@@ -95,7 +96,7 @@ inline bool alwaysRequiresLineBox(const RenderInline& flow)
     return isEmptyInline(flow) && hasInlineDirectionBordersPaddingOrMargin(flow);
 }
 
-inline bool requiresLineBox(const InlineIterator& it, const LineInfo& lineInfo = LineInfo(), WhitespacePosition whitespacePosition = LeadingWhitespace)
+inline bool requiresLineBox(const LegacyInlineIterator& it, const LineInfo& lineInfo = LineInfo(), WhitespacePosition whitespacePosition = LeadingWhitespace)
 {
     if (it.renderer()->isFloatingOrOutOfFlowPositioned())
         return false;

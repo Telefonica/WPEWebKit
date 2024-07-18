@@ -26,6 +26,7 @@
 #import "WebDeviceOrientationProviderMockInternal.h"
 
 #import "WebDeviceOrientationInternal.h"
+#import <wtf/RetainPtr.h>
 
 using namespace WebCore;
 
@@ -36,7 +37,7 @@ using namespace WebCore;
     self = [super init];
     if (!self)
         return nil;
-    m_core = std::make_unique<DeviceOrientationClientMock>();
+    m_core = makeUnique<DeviceOrientationClientMock>();
     return self;
 }
 
@@ -62,16 +63,7 @@ using namespace WebCore;
 
 - (WebDeviceOrientation*)lastOrientation
 {
-    return [[[WebDeviceOrientation alloc] initWithCoreDeviceOrientation:m_core->lastOrientation()] autorelease];
-}
-
-@end
-
-@implementation WebDeviceOrientationProviderMock (Internal)
-
-- (void)setController:(WebCore::DeviceOrientationController*)controller
-{
-   [m_internal setController:controller];
+    return adoptNS([[WebDeviceOrientation alloc] initWithCoreDeviceOrientation:m_core->lastOrientation()]).autorelease();
 }
 
 @end
@@ -117,6 +109,11 @@ using namespace WebCore;
 - (WebDeviceOrientation*)lastOrientation
 {
     return [m_internal lastOrientation];
+}
+
+- (void)setController:(WebCore::DeviceOrientationController*)controller
+{
+   [m_internal setController:controller];
 }
 
 @end

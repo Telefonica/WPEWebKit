@@ -29,24 +29,24 @@
 #pragma once
 
 #include <wtf/ThreadSafeRefCounted.h>
-#include <wtf/text/WTFString.h>
+#include <wtf/text/StringConcatenateNumbers.h>
 
 namespace WebCore {
 
 class SQLError : public ThreadSafeRefCounted<SQLError> {
 public:
-    static Ref<SQLError> create(unsigned code, const String& message) { return adoptRef(*new SQLError(code, message)); }
+    static Ref<SQLError> create(unsigned code, String&& message) { return adoptRef(*new SQLError(code, WTFMove(message))); }
     static Ref<SQLError> create(unsigned code, const char* message, int sqliteCode)
     {
-        return create(code, String::format("%s (%d)", message, sqliteCode));
+        return create(code, makeString(message, " (", sqliteCode, ')'));
     }
     static Ref<SQLError> create(unsigned code, const char* message, int sqliteCode, const char* sqliteMessage)
     {
-        return create(code, String::format("%s (%d %s)", message, sqliteCode, sqliteMessage));
+        return create(code, makeString(message, " (", sqliteCode, ' ', sqliteMessage, ')'));
     }
 
     unsigned code() const { return m_code; }
-    String message() const { return m_message.isolatedCopy(); }
+    String messageIsolatedCopy() const { return m_message.isolatedCopy(); }
 
     enum SQLErrorCode {
         UNKNOWN_ERR = 0,
@@ -60,7 +60,7 @@ public:
     };
 
 private:
-    SQLError(unsigned code, const String& message) : m_code(code), m_message(message.isolatedCopy()) { }
+    SQLError(unsigned code, String&& message) : m_code(code), m_message(WTFMove(message).isolatedCopy()) { }
     unsigned m_code;
     String m_message;
 };

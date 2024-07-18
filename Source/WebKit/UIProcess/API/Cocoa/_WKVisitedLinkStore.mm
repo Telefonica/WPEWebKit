@@ -26,10 +26,9 @@
 #import "config.h"
 #import "_WKVisitedLinkStoreInternal.h"
 
-#if WK_API_ENABLED
-
 #import "VisitedLinkStore.h"
-#import <WebCore/LinkHash.h>
+#import <WebCore/SharedStringHash.h>
+#import <WebCore/WebCoreObjCExtras.h>
 
 @implementation _WKVisitedLinkStore
 
@@ -45,6 +44,9 @@
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(_WKVisitedLinkStore.class, self))
+        return;
+
     _visitedLinkStore->~VisitedLinkStore();
 
     [super dealloc];
@@ -52,14 +54,33 @@
 
 - (void)addVisitedLinkWithURL:(NSURL *)URL
 {
-    auto linkHash = WebCore::visitedLinkHash(URL.absoluteString);
+    auto linkHash = WebCore::computeSharedStringHash(URL.absoluteString);
 
     _visitedLinkStore->addVisitedLinkHash(linkHash);
+}
+
+- (void)addVisitedLinkWithString:(NSString *)string
+{
+    _visitedLinkStore->addVisitedLinkHash(WebCore::computeSharedStringHash(string));
 }
 
 - (void)removeAll
 {
     _visitedLinkStore->removeAll();
+}
+
+- (BOOL)containsVisitedLinkWithURL:(NSURL *)URL
+{
+    auto linkHash = WebCore::computeSharedStringHash(URL.absoluteString);
+
+    return _visitedLinkStore->containsVisitedLinkHash(linkHash);
+}
+
+- (void)removeVisitedLinkWithURL:(NSURL *)URL
+{
+    auto linkHash = WebCore::computeSharedStringHash(URL.absoluteString);
+
+    _visitedLinkStore->removeVisitedLinkHash(linkHash);
 }
 
 #pragma mark WKObject protocol implementation
@@ -70,5 +91,3 @@
 }
 
 @end
-
-#endif

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011 Google Inc. All rights reserved.
- * Copyright (C) 2011-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,70 +26,77 @@
 
 #pragma once
 
-#if ENABLE(VIDEO_TRACK)
+#if ENABLE(VIDEO)
 
-#include "AudioTrackPrivate.h"
+#include "AudioTrackPrivateClient.h"
 #include "TrackBase.h"
+#include <wtf/WeakHashSet.h>
 
 namespace WebCore {
 
-class AudioTrack;
-
-class AudioTrackClient {
-public:
-    virtual ~AudioTrackClient() { }
-    virtual void audioTrackEnabledChanged(AudioTrack&) = 0;
-};
+class AudioTrackClient;
+class AudioTrackConfiguration;
+class AudioTrackList;
 
 class AudioTrack final : public MediaTrackBase, private AudioTrackPrivateClient {
 public:
-    static Ref<AudioTrack> create(AudioTrackClient& client, AudioTrackPrivate& trackPrivate)
+    static Ref<AudioTrack> create(ScriptExecutionContext* context, AudioTrackPrivate& trackPrivate)
     {
-        return adoptRef(*new AudioTrack(client, trackPrivate));
+        return adoptRef(*new AudioTrack(context, trackPrivate));
     }
     virtual ~AudioTrack();
 
-    static const AtomicString& alternativeKeyword();
-    static const AtomicString& descriptionKeyword();
-    static const AtomicString& mainKeyword();
-    static const AtomicString& mainDescKeyword();
-    static const AtomicString& translationKeyword();
-    static const AtomicString& commentaryKeyword();
+    static const AtomString& descriptionKeyword();
+    static const AtomString& mainDescKeyword();
+    static const AtomString& translationKeyword();
 
     bool enabled() const final { return m_enabled; }
     void setEnabled(const bool);
 
-    void clearClient() final { m_client = nullptr; }
-    AudioTrackClient* client() const { return m_client; }
+    void addClient(AudioTrackClient&);
+    void clearClient(AudioTrackClient&);
 
     size_t inbandTrackIndex() const;
 
+    const AudioTrackPrivate& privateTrack() const { return m_private; }
     void setPrivate(AudioTrackPrivate&);
-    void setMediaElement(HTMLMediaElement*) override;
+
+    void setLanguage(const AtomString&) final;
+
+    AudioTrackConfiguration& configuration() const { return m_configuration; }
+
+#if !RELEASE_LOG_DISABLED
+    void setLogger(const Logger&, const void*) final;
+#endif
 
 private:
-    AudioTrack(AudioTrackClient&, AudioTrackPrivate&);
+    AudioTrack(ScriptExecutionContext*, AudioTrackPrivate&);
 
-    bool isValidKind(const AtomicString&) const final;
+    bool isValidKind(const AtomString&) const final;
 
     // AudioTrackPrivateClient
     void enabledChanged(bool) final;
+    void configurationChanged(const PlatformAudioTrackConfiguration&) final;
 
     // TrackPrivateBaseClient
-    void idChanged(const AtomicString&) final;
-    void labelChanged(const AtomicString&) final;
-    void languageChanged(const AtomicString&) final;
+    void idChanged(const AtomString&) final;
+    void labelChanged(const AtomString&) final;
+    void languageChanged(const AtomString&) final;
     void willRemove() final;
 
     void updateKindFromPrivate();
+    void updateConfigurationFromPrivate();
 
 #if !RELEASE_LOG_DISABLED
     const char* logClassName() const final { return "AudioTrack"; }
 #endif
 
-    AudioTrackClient* m_client { nullptr };
+    WeakPtr<AudioTrackList> m_audioTrackList;
+    WeakHashSet<AudioTrackClient> m_clients;
     Ref<AudioTrackPrivate> m_private;
     bool m_enabled { false };
+    
+    Ref<AudioTrackConfiguration> m_configuration;
 };
 
 } // namespace WebCore

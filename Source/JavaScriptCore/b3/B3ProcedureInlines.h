@@ -27,16 +27,28 @@
 
 #if ENABLE(B3_JIT)
 
+#include "AirCode.h"
 #include "B3BasicBlock.h"
 #include "B3Procedure.h"
+#include "B3Value.h"
 
 namespace JSC { namespace B3 {
-
+    
 template<typename ValueType, typename... Arguments>
 ValueType* Procedure::add(Arguments... arguments)
 {
-    return static_cast<ValueType*>(addValueImpl(new ValueType(arguments...)));
+    return static_cast<ValueType*>(addValueImpl(Value::allocate<ValueType>(arguments...)));
 }
+
+inline Type Procedure::extractFromTuple(Type tuple, unsigned index) const
+{
+    ASSERT(tuple.tupleIndex() < m_tuples.size());
+    ASSERT(index < m_tuples[tuple.tupleIndex()].size());
+    return m_tuples[tuple.tupleIndex()][index];
+}
+
+inline SparseCollection<Air::StackSlot>& Procedure::stackSlots() { return m_code->stackSlots(); }
+inline const SparseCollection<Air::StackSlot>& Procedure::stackSlots() const { return m_code->stackSlots(); }
 
 } } // namespace JSC::B3
 

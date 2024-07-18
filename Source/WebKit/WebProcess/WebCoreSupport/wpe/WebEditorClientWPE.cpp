@@ -26,19 +26,19 @@
 #include "config.h"
 #include "WebEditorClient.h"
 
-#include "PlatformKeyboardEvent.h"
 #include <WebCore/Document.h>
 #include <WebCore/Editor.h>
 #include <WebCore/EventNames.h>
 #include <WebCore/Frame.h>
+#include <WebCore/FrameDestructionObserverInlines.h>
 #include <WebCore/KeyboardEvent.h>
 #include <WebCore/Node.h>
+#include <WebCore/PlatformKeyboardEvent.h>
 #include <WebCore/WindowsKeyboardCodes.h>
 #include <wtf/NeverDestroyed.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 // The idea for the array/map below comes from Blink's EditingBehavior.cpp.
 
@@ -169,7 +169,7 @@ static const char* interpretKeyEvent(const KeyboardEvent& event)
 
 static void handleKeyPress(Frame& frame, KeyboardEvent& event, const PlatformKeyboardEvent& platformEvent)
 {
-    String commandName = interpretKeyEvent(event);
+    auto commandName = String::fromLatin1(interpretKeyEvent(event));
 
     if (!commandName.isEmpty()) {
         frame.editor().command(commandName).execute();
@@ -182,7 +182,7 @@ static void handleKeyPress(Frame& frame, KeyboardEvent& event, const PlatformKey
         return;
 
     // Don't insert anything if a modifier is pressed and it has not been handled yet
-    if (platformEvent.ctrlKey() || platformEvent.altKey())
+    if (platformEvent.controlKey() || platformEvent.altKey())
         return;
 
     if (frame.editor().insertText(platformEvent.text(), &event))
@@ -191,7 +191,7 @@ static void handleKeyPress(Frame& frame, KeyboardEvent& event, const PlatformKey
 
 static void handleKeyDown(Frame& frame, KeyboardEvent& event, const PlatformKeyboardEvent&)
 {
-    String commandName = interpretKeyEvent(event);
+    auto commandName = String::fromLatin1(interpretKeyEvent(event));
     if (commandName.isEmpty())
         return;
 
@@ -206,16 +206,15 @@ static void handleKeyDown(Frame& frame, KeyboardEvent& event, const PlatformKeyb
     event.setDefaultHandled();
 }
 
-void WebEditorClient::handleKeyboardEvent(WebCore::KeyboardEvent* event)
+void WebEditorClient::handleKeyboardEvent(WebCore::KeyboardEvent& event)
 {
-    Node* node = event->target()->toNode();
-    ASSERT(node);
-    Frame* frame = node->document().frame();
+    ASSERT(event.target());
+    auto* frame = downcast<Node>(event.target())->document().frame();
     ASSERT(frame);
 
     // FIXME: Reorder the checks in a more sensible way.
 
-    const PlatformKeyboardEvent* platformEvent = event->keyEvent();
+    auto* platformEvent = event.underlyingPlatformEvent();
     if (!platformEvent)
         return;
 
@@ -230,17 +229,10 @@ void WebEditorClient::handleKeyboardEvent(WebCore::KeyboardEvent* event)
     // This is just a normal text insertion, so wait to execute the insertion
     // until a keypress event happens. This will ensure that the insertion will not
     // be reflected in the contents of the field until the keyup DOM event.
-    if (event->type() == eventNames().keypressEvent)
-        return handleKeyPress(*frame, *event, *platformEvent);
-    if (event->type() == eventNames().keydownEvent)
-        return handleKeyDown(*frame, *event, *platformEvent);
-}
-
-void WebEditorClient::handleInputMethodKeydown(WebCore::KeyboardEvent* event)
-{
-    const PlatformKeyboardEvent* platformEvent = event->keyEvent();
-    if (platformEvent && platformEvent->windowsVirtualKeyCode() == VK_PROCESSKEY)
-        event->preventDefault();
+    if (event.type() == eventNames().keypressEvent)
+        return handleKeyPress(*frame, event, *platformEvent);
+    if (event.type() == eventNames().keydownEvent)
+        return handleKeyDown(*frame, event, *platformEvent);
 }
 
 } // namespace WebKit

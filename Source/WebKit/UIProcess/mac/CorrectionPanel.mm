@@ -30,19 +30,18 @@
 
 #import "WebPageProxy.h"
 #import "WebViewImpl.h"
+#import <wtf/cocoa/VectorCocoa.h>
 
-using namespace WebCore;
-
-static inline NSCorrectionIndicatorType correctionIndicatorType(AlternativeTextType alternativeTextType)
+static inline NSCorrectionIndicatorType correctionIndicatorType(WebCore::AlternativeTextType alternativeTextType)
 {
     switch (alternativeTextType) {
-    case AlternativeTextTypeCorrection:
+    case WebCore::AlternativeTextTypeCorrection:
         return NSCorrectionIndicatorTypeDefault;
-    case AlternativeTextTypeReversion:
+    case WebCore::AlternativeTextTypeReversion:
         return NSCorrectionIndicatorTypeReversion;
-    case AlternativeTextTypeSpellingSuggestions:
+    case WebCore::AlternativeTextTypeSpellingSuggestions:
         return NSCorrectionIndicatorTypeGuesses;
-    case AlternativeTextTypeDictationAlternatives:
+    case WebCore::AlternativeTextTypeDictationAlternatives:
         ASSERT_NOT_REACHED();
         break;
     }
@@ -51,6 +50,7 @@ static inline NSCorrectionIndicatorType correctionIndicatorType(AlternativeTextT
 }
 
 namespace WebKit {
+using namespace WebCore;
 
 CorrectionPanel::CorrectionPanel()
     : m_wasDismissedExternally(false)
@@ -66,28 +66,25 @@ CorrectionPanel::~CorrectionPanel()
 void CorrectionPanel::show(NSView *view, WebViewImpl& webViewImpl, AlternativeTextType type, const FloatRect& boundingBoxOfReplacedString, const String& replacedString, const String& replacementString, const Vector<String>& alternativeReplacementStrings)
 {
     dismissInternal(ReasonForDismissingAlternativeTextIgnored, false);
-    
+
     if (!view)
         return;
 
     NSInteger spellCheckerDocumentTag = webViewImpl.spellCheckerDocumentTag();
 
-    NSString* replacedStringAsNSString = replacedString;
-    NSString* replacementStringAsNSString = replacementString;
+    NSString *replacedStringAsNSString = replacedString;
+    NSString *replacementStringAsNSString = replacementString;
+
     m_view = view;
     m_spellCheckerDocumentTag = spellCheckerDocumentTag;
     NSCorrectionIndicatorType indicatorType = correctionIndicatorType(type);
     
-    NSMutableArray* alternativeStrings = 0;
-    if (!alternativeReplacementStrings.isEmpty()) {
-        size_t size = alternativeReplacementStrings.size();
-        alternativeStrings = [NSMutableArray arrayWithCapacity:size];
-        for (size_t i = 0; i < size; ++i)
-            [alternativeStrings addObject:(NSString*)alternativeReplacementStrings[i]];
-    }
+    RetainPtr<NSArray> alternativeStrings;
+    if (!alternativeReplacementStrings.isEmpty())
+        alternativeStrings = createNSArray(alternativeReplacementStrings);
 
     NSSpellChecker* spellChecker = [NSSpellChecker sharedSpellChecker];
-    [spellChecker showCorrectionIndicatorOfType:indicatorType primaryString:replacementStringAsNSString alternativeStrings:alternativeStrings forStringInRect:boundingBoxOfReplacedString view:m_view.get() completionHandler:^(NSString* acceptedString) {
+    [spellChecker showCorrectionIndicatorOfType:indicatorType primaryString:replacementStringAsNSString alternativeStrings:alternativeStrings.get() forStringInRect:boundingBoxOfReplacedString view:m_view.get() completionHandler:^(NSString* acceptedString) {
         handleAcceptedReplacement(webViewImpl, acceptedString, replacedStringAsNSString, replacementStringAsNSString, indicatorType);
     }];
 }
@@ -109,8 +106,11 @@ String CorrectionPanel::dismissInternal(ReasonForDismissingAlternativeText reaso
     return m_resultForDismissal.get();
 }
 
-void CorrectionPanel::recordAutocorrectionResponse(NSInteger spellCheckerDocumentTag, NSCorrectionResponse response, const String& replacedString, const String& replacementString)
+void CorrectionPanel::recordAutocorrectionResponse(WebViewImpl& webViewImpl, NSInteger spellCheckerDocumentTag, NSCorrectionResponse response, const String& replacedString, const String& replacementString)
 {
+    if (webViewImpl.page().sessionID().isEphemeral())
+        return;
+
     [[NSSpellChecker sharedSpellChecker] recordResponse:response toCorrection:replacementString forWord:replacedString language:nil inSpellDocumentWithTag:spellCheckerDocumentTag];
 }
 
@@ -122,21 +122,21 @@ void CorrectionPanel::handleAcceptedReplacement(WebViewImpl& webViewImpl, NSStri
     switch (correctionIndicatorType) {
     case NSCorrectionIndicatorTypeDefault:
         if (acceptedReplacement)
-            recordAutocorrectionResponse(m_spellCheckerDocumentTag, NSCorrectionResponseAccepted, replaced, acceptedReplacement);
+            recordAutocorrectionResponse(webViewImpl, m_spellCheckerDocumentTag, NSCorrectionResponseAccepted, replaced, acceptedReplacement);
         else {
             if (!m_wasDismissedExternally || m_reasonForDismissing == ReasonForDismissingAlternativeTextCancelled)
-                recordAutocorrectionResponse(m_spellCheckerDocumentTag, NSCorrectionResponseRejected, replaced, proposedReplacement);
+                recordAutocorrectionResponse(webViewImpl, m_spellCheckerDocumentTag, NSCorrectionResponseRejected, replaced, proposedReplacement);
             else
-                recordAutocorrectionResponse(m_spellCheckerDocumentTag, NSCorrectionResponseIgnored, replaced, proposedReplacement);
+                recordAutocorrectionResponse(webViewImpl, m_spellCheckerDocumentTag, NSCorrectionResponseIgnored, replaced, proposedReplacement);
         }
         break;
     case NSCorrectionIndicatorTypeReversion:
         if (acceptedReplacement)
-            recordAutocorrectionResponse(m_spellCheckerDocumentTag, NSCorrectionResponseReverted, replaced, acceptedReplacement);
+            recordAutocorrectionResponse(webViewImpl, m_spellCheckerDocumentTag, NSCorrectionResponseReverted, replaced, acceptedReplacement);
         break;
     case NSCorrectionIndicatorTypeGuesses:
         if (acceptedReplacement)
-            recordAutocorrectionResponse(m_spellCheckerDocumentTag, NSCorrectionResponseAccepted, replaced, acceptedReplacement);
+            recordAutocorrectionResponse(webViewImpl, m_spellCheckerDocumentTag, NSCorrectionResponseAccepted, replaced, acceptedReplacement);
         break;
     }
 

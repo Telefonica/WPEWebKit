@@ -27,15 +27,18 @@
 #include "config.h"
 #include "Logging.h"
 
-namespace WebKit {
-
 #if !LOG_DISABLED || !RELEASE_LOG_DISABLED
+
+#include <wtf/LogInitialization.h>
+
+namespace WebKit {
 
 String logLevelString()
 {
-    return getenv("WEBKIT_DEBUG");
+    return WTF::logLevelString();
 }
+
+} // namespace WebKit
 
 #endif // !LOG_DISABLED || !RELEASE_LOG_DISABLED
 
-}

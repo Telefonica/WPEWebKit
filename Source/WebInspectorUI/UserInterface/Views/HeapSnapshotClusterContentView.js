@@ -58,10 +58,12 @@ WI.HeapSnapshotClusterContentView = class HeapSnapshotClusterContentView extends
 
     // Static
 
-    static iconStyleClassNameForClassName(className, internal)
+    static iconStyleClassNameForClassName(className, internal, isObjectType)
     {
         if (internal)
             return "native";
+        if (isObjectType)
+            return "object";
 
         switch (className) {
         case "Object":
@@ -93,6 +95,9 @@ WI.HeapSnapshotClusterContentView = class HeapSnapshotClusterContentView extends
         case "Symbol":
         case "symbol":
             return "symbol";
+        case "BigInt":
+        case "bigint":
+            return "bigint";
         }
 
         if (className.endsWith("Prototype"))
@@ -134,9 +139,9 @@ WI.HeapSnapshotClusterContentView = class HeapSnapshotClusterContentView extends
         return components.concat(currentContentView.selectionPathComponents);
     }
 
-    shown()
+    attached()
     {
-        super.shown();
+        super.attached();
 
         if (this._shownInitialContent)
             return;
@@ -171,6 +176,12 @@ WI.HeapSnapshotClusterContentView = class HeapSnapshotClusterContentView extends
     {
         this._shownInitialContent = true;
         return this._showContentViewForIdentifier(WI.HeapSnapshotClusterContentView.ObjectGraphIdentifier);
+    }
+
+    updateFilter(filters)
+    {
+        console.assert(this._contentViewContainer.currentContentView);
+        this._contentViewContainer.currentContentView.updateFilter(filters);
     }
 
     // Private

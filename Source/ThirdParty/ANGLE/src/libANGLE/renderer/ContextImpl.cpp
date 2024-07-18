@@ -9,105 +9,80 @@
 
 #include "libANGLE/renderer/ContextImpl.h"
 
+#include "common/third_party/base/anglebase/no_destructor.h"
+#include "libANGLE/Context.h"
+
 namespace rx
 {
+ContextImpl::ContextImpl(const gl::State &state, gl::ErrorSet *errorSet)
+    : mState(state), mMemoryProgramCache(nullptr), mErrors(errorSet)
+{}
 
-ContextImpl::ContextImpl(const gl::ContextState &state) : mState(state)
-{
-}
+ContextImpl::~ContextImpl() {}
 
-ContextImpl::~ContextImpl()
-{
-}
-
-void ContextImpl::stencilFillPath(const gl::Path *path, GLenum fillMode, GLuint mask)
+void ContextImpl::invalidateTexture(gl::TextureType target)
 {
     UNREACHABLE();
 }
 
-void ContextImpl::stencilStrokePath(const gl::Path *path, GLint reference, GLuint mask)
+angle::Result ContextImpl::onUnMakeCurrent(const gl::Context *context)
 {
-    UNREACHABLE();
+    return angle::Result::Continue;
 }
 
-void ContextImpl::coverFillPath(const gl::Path *path, GLenum coverMode)
+angle::Result ContextImpl::handleNoopDrawEvent()
 {
-    UNREACHABLE();
+    return angle::Result::Continue;
 }
 
-void ContextImpl::coverStrokePath(const gl::Path *path, GLenum coverMode)
+void ContextImpl::setMemoryProgramCache(gl::MemoryProgramCache *memoryProgramCache)
 {
-    UNREACHABLE();
+    mMemoryProgramCache = memoryProgramCache;
 }
 
-void ContextImpl::stencilThenCoverFillPath(const gl::Path *path,
-                                           GLenum fillMode,
-                                           GLuint mask,
-                                           GLenum coverMode)
+void ContextImpl::handleError(GLenum errorCode,
+                              const char *message,
+                              const char *file,
+                              const char *function,
+                              unsigned int line)
 {
-    UNREACHABLE();
+    std::stringstream errorStream;
+    errorStream << "Internal error: " << gl::FmtHex(errorCode) << ": " << message;
+    mErrors->handleError(errorCode, errorStream.str().c_str(), file, function, line);
 }
 
-void ContextImpl::stencilThenCoverStrokePath(const gl::Path *path,
-                                             GLint reference,
-                                             GLuint mask,
-                                             GLenum coverMode)
+egl::ContextPriority ContextImpl::getContextPriority() const
 {
-    UNREACHABLE();
+    return egl::ContextPriority::Medium;
 }
 
-void ContextImpl::coverFillPathInstanced(const std::vector<gl::Path *> &paths,
-                                         GLenum coverMode,
-                                         GLenum transformType,
-                                         const GLfloat *transformValues)
+egl::Error ContextImpl::releaseHighPowerGPU(gl::Context *)
 {
-    UNREACHABLE();
+    return egl::NoError();
 }
 
-void ContextImpl::coverStrokePathInstanced(const std::vector<gl::Path *> &paths,
-                                           GLenum coverMode,
-                                           GLenum transformType,
-                                           const GLfloat *transformValues)
+egl::Error ContextImpl::reacquireHighPowerGPU(gl::Context *)
 {
-    UNREACHABLE();
+    return egl::NoError();
 }
 
-void ContextImpl::stencilFillPathInstanced(const std::vector<gl::Path *> &paths,
-                                           GLenum fillMode,
-                                           GLuint mask,
-                                           GLenum transformType,
-                                           const GLfloat *transformValues)
+angle::Result ContextImpl::acquireTextures(const gl::Context *context,
+                                           const gl::TextureBarrierVector &textureBarriers)
 {
     UNREACHABLE();
+    return angle::Result::Stop;
 }
 
-void ContextImpl::stencilStrokePathInstanced(const std::vector<gl::Path *> &paths,
-                                             GLint reference,
-                                             GLuint mask,
-                                             GLenum transformType,
-                                             const GLfloat *transformValues)
+angle::Result ContextImpl::releaseTextures(const gl::Context *context,
+                                           gl::TextureBarrierVector *textureBarriers)
 {
     UNREACHABLE();
+    return angle::Result::Stop;
 }
 
-void ContextImpl::stencilThenCoverFillPathInstanced(const std::vector<gl::Path *> &paths,
-                                                    GLenum coverMode,
-                                                    GLenum fillMode,
-                                                    GLuint mask,
-                                                    GLenum transformType,
-                                                    const GLfloat *transformValues)
+const angle::PerfMonitorCounterGroups &ContextImpl::getPerfMonitorCounters()
 {
-    UNREACHABLE();
+    static angle::base::NoDestructor<angle::PerfMonitorCounterGroups> sCounters;
+    return *sCounters;
 }
-
-void ContextImpl::stencilThenCoverStrokePathInstanced(const std::vector<gl::Path *> &paths,
-                                                      GLenum coverMode,
-                                                      GLint reference,
-                                                      GLuint mask,
-                                                      GLenum transformType,
-                                                      const GLfloat *transformValues)
-{
-    UNREACHABLE();
-}
-
 }  // namespace rx

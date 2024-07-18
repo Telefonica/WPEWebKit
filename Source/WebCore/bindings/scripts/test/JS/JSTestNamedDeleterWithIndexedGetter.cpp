@@ -21,38 +21,54 @@
 #include "config.h"
 #include "JSTestNamedDeleterWithIndexedGetter.h"
 
+#include "ActiveDOMObject.h"
+#include "ExtendedDOMClientIsoSubspaces.h"
+#include "ExtendedDOMIsoSubspaces.h"
 #include "JSDOMAbstractOperations.h"
 #include "JSDOMBinding.h"
 #include "JSDOMConstructorNotConstructable.h"
 #include "JSDOMConvertStrings.h"
 #include "JSDOMExceptionHandling.h"
+#include "JSDOMGlobalObjectInlines.h"
 #include "JSDOMWrapperCache.h"
-#include "URL.h"
-#include <runtime/FunctionPrototype.h>
-#include <runtime/JSCInlines.h>
-#include <runtime/PropertyNameArray.h>
+#include "ScriptExecutionContext.h"
+#include "WebCoreJSClientData.h"
+#include <JavaScriptCore/FunctionPrototype.h>
+#include <JavaScriptCore/HeapAnalyzer.h>
+#include <JavaScriptCore/JSCInlines.h>
+#include <JavaScriptCore/JSDestructibleObjectHeapCellType.h>
+#include <JavaScriptCore/PropertyNameArray.h>
+#include <JavaScriptCore/SlotVisitorMacros.h>
+#include <JavaScriptCore/SubspaceInlines.h>
 #include <wtf/GetPtr.h>
+#include <wtf/PointerPreparations.h>
+#include <wtf/URL.h>
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 // Attributes
 
-JSC::EncodedJSValue jsTestNamedDeleterWithIndexedGetterConstructor(JSC::ExecState*, JSC::EncodedJSValue, JSC::PropertyName);
-bool setJSTestNamedDeleterWithIndexedGetterConstructor(JSC::ExecState*, JSC::EncodedJSValue, JSC::EncodedJSValue);
+static JSC_DECLARE_CUSTOM_GETTER(jsTestNamedDeleterWithIndexedGetterConstructor);
 
-class JSTestNamedDeleterWithIndexedGetterPrototype : public JSC::JSNonFinalObject {
+class JSTestNamedDeleterWithIndexedGetterPrototype final : public JSC::JSNonFinalObject {
 public:
     using Base = JSC::JSNonFinalObject;
     static JSTestNamedDeleterWithIndexedGetterPrototype* create(JSC::VM& vm, JSDOMGlobalObject* globalObject, JSC::Structure* structure)
     {
-        JSTestNamedDeleterWithIndexedGetterPrototype* ptr = new (NotNull, JSC::allocateCell<JSTestNamedDeleterWithIndexedGetterPrototype>(vm.heap)) JSTestNamedDeleterWithIndexedGetterPrototype(vm, globalObject, structure);
+        JSTestNamedDeleterWithIndexedGetterPrototype* ptr = new (NotNull, JSC::allocateCell<JSTestNamedDeleterWithIndexedGetterPrototype>(vm)) JSTestNamedDeleterWithIndexedGetterPrototype(vm, globalObject, structure);
         ptr->finishCreation(vm);
         return ptr;
     }
 
     DECLARE_INFO;
+    template<typename CellType, JSC::SubspaceAccess>
+    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    {
+        STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestNamedDeleterWithIndexedGetterPrototype, Base);
+        return &vm.plainObjectSpace();
+    }
     static JSC::Structure* createStructure(JSC::VM& vm, JSC::JSGlobalObject* globalObject, JSC::JSValue prototype)
     {
         return JSC::Structure::create(vm, globalObject, prototype, JSC::TypeInfo(JSC::ObjectType, StructureFlags), info());
@@ -66,40 +82,44 @@ private:
 
     void finishCreation(JSC::VM&);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestNamedDeleterWithIndexedGetterPrototype, JSTestNamedDeleterWithIndexedGetterPrototype::Base);
 
-using JSTestNamedDeleterWithIndexedGetterConstructor = JSDOMConstructorNotConstructable<JSTestNamedDeleterWithIndexedGetter>;
+using JSTestNamedDeleterWithIndexedGetterDOMConstructor = JSDOMConstructorNotConstructable<JSTestNamedDeleterWithIndexedGetter>;
 
-template<> JSValue JSTestNamedDeleterWithIndexedGetterConstructor::prototypeForStructure(JSC::VM& vm, const JSDOMGlobalObject& globalObject)
+template<> const ClassInfo JSTestNamedDeleterWithIndexedGetterDOMConstructor::s_info = { "TestNamedDeleterWithIndexedGetter"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSTestNamedDeleterWithIndexedGetterDOMConstructor) };
+
+template<> JSValue JSTestNamedDeleterWithIndexedGetterDOMConstructor::prototypeForStructure(JSC::VM& vm, const JSDOMGlobalObject& globalObject)
 {
     UNUSED_PARAM(vm);
     return globalObject.functionPrototype();
 }
 
-template<> void JSTestNamedDeleterWithIndexedGetterConstructor::initializeProperties(VM& vm, JSDOMGlobalObject& globalObject)
+template<> void JSTestNamedDeleterWithIndexedGetterDOMConstructor::initializeProperties(VM& vm, JSDOMGlobalObject& globalObject)
 {
-    putDirect(vm, vm.propertyNames->prototype, JSTestNamedDeleterWithIndexedGetter::prototype(vm, globalObject), JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
-    putDirect(vm, vm.propertyNames->name, jsNontrivialString(&vm, String(ASCIILiteral("TestNamedDeleterWithIndexedGetter"))), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
     putDirect(vm, vm.propertyNames->length, jsNumber(0), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
+    JSString* nameString = jsNontrivialString(vm, "TestNamedDeleterWithIndexedGetter"_s);
+    m_originalName.set(vm, this, nameString);
+    putDirect(vm, vm.propertyNames->name, nameString, JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum);
+    putDirect(vm, vm.propertyNames->prototype, JSTestNamedDeleterWithIndexedGetter::prototype(vm, globalObject), JSC::PropertyAttribute::ReadOnly | JSC::PropertyAttribute::DontEnum | JSC::PropertyAttribute::DontDelete);
 }
-
-template<> const ClassInfo JSTestNamedDeleterWithIndexedGetterConstructor::s_info = { "TestNamedDeleterWithIndexedGetter", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSTestNamedDeleterWithIndexedGetterConstructor) };
 
 /* Hash table for prototype */
 
 static const HashTableValue JSTestNamedDeleterWithIndexedGetterPrototypeTableValues[] =
 {
-    { "constructor", static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestNamedDeleterWithIndexedGetterConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(setJSTestNamedDeleterWithIndexedGetterConstructor) } },
+    { "constructor"_s, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum), NoIntrinsic, { (intptr_t)static_cast<PropertySlot::GetValueFunc>(jsTestNamedDeleterWithIndexedGetterConstructor), (intptr_t) static_cast<PutPropertySlot::PutValueFunc>(0) } },
 };
 
-const ClassInfo JSTestNamedDeleterWithIndexedGetterPrototype::s_info = { "TestNamedDeleterWithIndexedGetterPrototype", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSTestNamedDeleterWithIndexedGetterPrototype) };
+const ClassInfo JSTestNamedDeleterWithIndexedGetterPrototype::s_info = { "TestNamedDeleterWithIndexedGetter"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSTestNamedDeleterWithIndexedGetterPrototype) };
 
 void JSTestNamedDeleterWithIndexedGetterPrototype::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
     reifyStaticProperties(vm, JSTestNamedDeleterWithIndexedGetter::info(), JSTestNamedDeleterWithIndexedGetterPrototypeTableValues, *this);
+    JSC_TO_STRING_TAG_WITHOUT_TRANSITION();
 }
 
-const ClassInfo JSTestNamedDeleterWithIndexedGetter::s_info = { "TestNamedDeleterWithIndexedGetter", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSTestNamedDeleterWithIndexedGetter) };
+const ClassInfo JSTestNamedDeleterWithIndexedGetter::s_info = { "TestNamedDeleterWithIndexedGetter"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSTestNamedDeleterWithIndexedGetter) };
 
 JSTestNamedDeleterWithIndexedGetter::JSTestNamedDeleterWithIndexedGetter(Structure* structure, JSDOMGlobalObject& globalObject, Ref<TestNamedDeleterWithIndexedGetter>&& impl)
     : JSDOMWrapper<TestNamedDeleterWithIndexedGetter>(structure, globalObject, WTFMove(impl))
@@ -109,7 +129,9 @@ JSTestNamedDeleterWithIndexedGetter::JSTestNamedDeleterWithIndexedGetter(Structu
 void JSTestNamedDeleterWithIndexedGetter::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
+
+    static_assert(!std::is_base_of<ActiveDOMObject, TestNamedDeleterWithIndexedGetter>::value, "Interface is not marked as [ActiveDOMObject] even though implementation class subclasses ActiveDOMObject.");
 
 }
 
@@ -125,7 +147,7 @@ JSObject* JSTestNamedDeleterWithIndexedGetter::prototype(VM& vm, JSDOMGlobalObje
 
 JSValue JSTestNamedDeleterWithIndexedGetter::getConstructor(VM& vm, const JSGlobalObject* globalObject)
 {
-    return getDOMConstructor<JSTestNamedDeleterWithIndexedGetterConstructor>(vm, *jsCast<const JSDOMGlobalObject*>(globalObject));
+    return getDOMConstructor<JSTestNamedDeleterWithIndexedGetterDOMConstructor, DOMConstructorID::TestNamedDeleterWithIndexedGetter>(vm, *jsCast<const JSDOMGlobalObject*>(globalObject));
 }
 
 void JSTestNamedDeleterWithIndexedGetter::destroy(JSC::JSCell* cell)
@@ -134,118 +156,129 @@ void JSTestNamedDeleterWithIndexedGetter::destroy(JSC::JSCell* cell)
     thisObject->JSTestNamedDeleterWithIndexedGetter::~JSTestNamedDeleterWithIndexedGetter();
 }
 
-bool JSTestNamedDeleterWithIndexedGetter::getOwnPropertySlot(JSObject* object, ExecState* state, PropertyName propertyName, PropertySlot& slot)
+bool JSTestNamedDeleterWithIndexedGetter::getOwnPropertySlot(JSObject* object, JSGlobalObject* lexicalGlobalObject, PropertyName propertyName, PropertySlot& slot)
 {
+    auto throwScope = DECLARE_THROW_SCOPE(JSC::getVM(lexicalGlobalObject));
     auto* thisObject = jsCast<JSTestNamedDeleterWithIndexedGetter*>(object);
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
     if (auto index = parseIndex(propertyName)) {
         if (index.value() < thisObject->wrapped().length()) {
-            auto value = toJS<IDLDOMString>(*state, thisObject->wrapped().item(index.value()));
+            auto value = toJS<IDLDOMString>(*lexicalGlobalObject, throwScope, thisObject->wrapped().item(index.value()));
+            RETURN_IF_EXCEPTION(throwScope, false);
             slot.setValue(thisObject, static_cast<unsigned>(JSC::PropertyAttribute::ReadOnly), value);
             return true;
         }
-        return JSObject::getOwnPropertySlot(object, state, propertyName, slot);
+        return JSObject::getOwnPropertySlot(object, lexicalGlobalObject, propertyName, slot);
     }
     using GetterIDLType = IDLDOMString;
-    auto getterFunctor = [] (auto& thisObject, auto propertyName) -> std::optional<typename GetterIDLType::ImplementationType> {
-        auto result = thisObject.wrapped().namedItem(propertyNameToAtomicString(propertyName));
-        if (!GetterIDLType::isNullValue(result))
-            return typename GetterIDLType::ImplementationType { GetterIDLType::extractValueFromNullable(result) };
-        return std::nullopt;
-    };
-    if (auto namedProperty = accessVisibleNamedProperty<OverrideBuiltins::No>(*state, *thisObject, propertyName, getterFunctor)) {
-        auto value = toJS<IDLDOMString>(*state, WTFMove(namedProperty.value()));
+    auto getterFunctor = visibleNamedPropertyItemAccessorFunctor<GetterIDLType, JSTestNamedDeleterWithIndexedGetter>([] (JSTestNamedDeleterWithIndexedGetter& thisObject, PropertyName propertyName) -> decltype(auto) {
+        return thisObject.wrapped().namedItem(propertyNameToAtomString(propertyName));
+    });
+    if (auto namedProperty = accessVisibleNamedProperty<LegacyOverrideBuiltIns::No>(*lexicalGlobalObject, *thisObject, propertyName, getterFunctor)) {
+        auto value = toJS<IDLDOMString>(*lexicalGlobalObject, throwScope, WTFMove(namedProperty.value()));
+        RETURN_IF_EXCEPTION(throwScope, false);
         slot.setValue(thisObject, static_cast<unsigned>(JSC::PropertyAttribute::ReadOnly), value);
         return true;
     }
-    return JSObject::getOwnPropertySlot(object, state, propertyName, slot);
+    return JSObject::getOwnPropertySlot(object, lexicalGlobalObject, propertyName, slot);
 }
 
-bool JSTestNamedDeleterWithIndexedGetter::getOwnPropertySlotByIndex(JSObject* object, ExecState* state, unsigned index, PropertySlot& slot)
+bool JSTestNamedDeleterWithIndexedGetter::getOwnPropertySlotByIndex(JSObject* object, JSGlobalObject* lexicalGlobalObject, unsigned index, PropertySlot& slot)
 {
+    VM& vm = JSC::getVM(lexicalGlobalObject);
+    auto throwScope = DECLARE_THROW_SCOPE(vm);
     auto* thisObject = jsCast<JSTestNamedDeleterWithIndexedGetter*>(object);
     ASSERT_GC_OBJECT_INHERITS(thisObject, info());
     if (LIKELY(index <= MAX_ARRAY_INDEX)) {
         if (index < thisObject->wrapped().length()) {
-            auto value = toJS<IDLDOMString>(*state, thisObject->wrapped().item(index));
+            auto value = toJS<IDLDOMString>(*lexicalGlobalObject, throwScope, thisObject->wrapped().item(index));
+            RETURN_IF_EXCEPTION(throwScope, false);
             slot.setValue(thisObject, static_cast<unsigned>(JSC::PropertyAttribute::ReadOnly), value);
             return true;
         }
-        return JSObject::getOwnPropertySlotByIndex(object, state, index, slot);
+        return JSObject::getOwnPropertySlotByIndex(object, lexicalGlobalObject, index, slot);
     }
-    auto propertyName = Identifier::from(state, index);
+    auto propertyName = Identifier::from(vm, index);
     using GetterIDLType = IDLDOMString;
-    auto getterFunctor = [] (auto& thisObject, auto propertyName) -> std::optional<typename GetterIDLType::ImplementationType> {
-        auto result = thisObject.wrapped().namedItem(propertyNameToAtomicString(propertyName));
-        if (!GetterIDLType::isNullValue(result))
-            return typename GetterIDLType::ImplementationType { GetterIDLType::extractValueFromNullable(result) };
-        return std::nullopt;
-    };
-    if (auto namedProperty = accessVisibleNamedProperty<OverrideBuiltins::No>(*state, *thisObject, propertyName, getterFunctor)) {
-        auto value = toJS<IDLDOMString>(*state, WTFMove(namedProperty.value()));
+    auto getterFunctor = visibleNamedPropertyItemAccessorFunctor<GetterIDLType, JSTestNamedDeleterWithIndexedGetter>([] (JSTestNamedDeleterWithIndexedGetter& thisObject, PropertyName propertyName) -> decltype(auto) {
+        return thisObject.wrapped().namedItem(propertyNameToAtomString(propertyName));
+    });
+    if (auto namedProperty = accessVisibleNamedProperty<LegacyOverrideBuiltIns::No>(*lexicalGlobalObject, *thisObject, propertyName, getterFunctor)) {
+        auto value = toJS<IDLDOMString>(*lexicalGlobalObject, throwScope, WTFMove(namedProperty.value()));
+        RETURN_IF_EXCEPTION(throwScope, false);
         slot.setValue(thisObject, static_cast<unsigned>(JSC::PropertyAttribute::ReadOnly), value);
         return true;
     }
-    return JSObject::getOwnPropertySlotByIndex(object, state, index, slot);
+    return JSObject::getOwnPropertySlotByIndex(object, lexicalGlobalObject, index, slot);
 }
 
-void JSTestNamedDeleterWithIndexedGetter::getOwnPropertyNames(JSObject* object, ExecState* state, PropertyNameArray& propertyNames, EnumerationMode mode)
+void JSTestNamedDeleterWithIndexedGetter::getOwnPropertyNames(JSObject* object, JSGlobalObject* lexicalGlobalObject, PropertyNameArray& propertyNames, DontEnumPropertiesMode mode)
 {
+    VM& vm = JSC::getVM(lexicalGlobalObject);
     auto* thisObject = jsCast<JSTestNamedDeleterWithIndexedGetter*>(object);
     ASSERT_GC_OBJECT_INHERITS(object, info());
     for (unsigned i = 0, count = thisObject->wrapped().length(); i < count; ++i)
-        propertyNames.add(Identifier::from(state, i));
+        propertyNames.add(Identifier::from(vm, i));
     for (auto& propertyName : thisObject->wrapped().supportedPropertyNames())
-        propertyNames.add(Identifier::fromString(state, propertyName));
-    JSObject::getOwnPropertyNames(object, state, propertyNames, mode);
+        propertyNames.add(Identifier::fromString(vm, propertyName));
+    JSObject::getOwnPropertyNames(object, lexicalGlobalObject, propertyNames, mode);
 }
 
-bool JSTestNamedDeleterWithIndexedGetter::deleteProperty(JSCell* cell, ExecState* state, PropertyName propertyName)
+bool JSTestNamedDeleterWithIndexedGetter::deleteProperty(JSCell* cell, JSGlobalObject* lexicalGlobalObject, PropertyName propertyName, DeletePropertySlot& slot)
 {
     auto& thisObject = *jsCast<JSTestNamedDeleterWithIndexedGetter*>(cell);
     auto& impl = thisObject.wrapped();
     if (auto index = parseIndex(propertyName))
         return !impl.isSupportedPropertyIndex(index.value());
-    if (isVisibleNamedProperty<OverrideBuiltins::No>(*state, thisObject, propertyName)) {
-        return impl.deleteNamedProperty(propertyNameToString(propertyName));
+    if (isVisibleNamedProperty<LegacyOverrideBuiltIns::No>(*lexicalGlobalObject, thisObject, propertyName)) {
+        using ReturnType = decltype(impl.deleteNamedProperty(propertyNameToString(propertyName)));
+        static_assert(std::is_same_v<ReturnType, ExceptionOr<bool>> || std::is_same_v<ReturnType, bool>, "The implementation of named deleters without an identifier must return either bool or ExceptionOr<bool>.");
+        return performLegacyPlatformObjectDeleteOperation(*lexicalGlobalObject, [&] { return impl.deleteNamedProperty(propertyNameToString(propertyName)); });
     }
-    return JSObject::deleteProperty(cell, state, propertyName);
+    return JSObject::deleteProperty(cell, lexicalGlobalObject, propertyName, slot);
 }
 
-bool JSTestNamedDeleterWithIndexedGetter::deletePropertyByIndex(JSCell* cell, ExecState* state, unsigned index)
+bool JSTestNamedDeleterWithIndexedGetter::deletePropertyByIndex(JSCell* cell, JSGlobalObject* lexicalGlobalObject, unsigned index)
 {
     auto& thisObject = *jsCast<JSTestNamedDeleterWithIndexedGetter*>(cell);
     auto& impl = thisObject.wrapped();
     return !impl.isSupportedPropertyIndex(index);
 }
 
-EncodedJSValue jsTestNamedDeleterWithIndexedGetterConstructor(ExecState* state, EncodedJSValue thisValue, PropertyName)
+JSC_DEFINE_CUSTOM_GETTER(jsTestNamedDeleterWithIndexedGetterConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName))
 {
-    VM& vm = state->vm();
+    VM& vm = JSC::getVM(lexicalGlobalObject);
     auto throwScope = DECLARE_THROW_SCOPE(vm);
-    auto* prototype = jsDynamicDowncast<JSTestNamedDeleterWithIndexedGetterPrototype*>(vm, JSValue::decode(thisValue));
+    auto* prototype = jsDynamicCast<JSTestNamedDeleterWithIndexedGetterPrototype*>(JSValue::decode(thisValue));
     if (UNLIKELY(!prototype))
-        return throwVMTypeError(state, throwScope);
-    return JSValue::encode(JSTestNamedDeleterWithIndexedGetter::getConstructor(state->vm(), prototype->globalObject()));
+        return throwVMTypeError(lexicalGlobalObject, throwScope);
+    return JSValue::encode(JSTestNamedDeleterWithIndexedGetter::getConstructor(JSC::getVM(lexicalGlobalObject), prototype->globalObject()));
 }
 
-bool setJSTestNamedDeleterWithIndexedGetterConstructor(ExecState* state, EncodedJSValue thisValue, EncodedJSValue encodedValue)
+JSC::GCClient::IsoSubspace* JSTestNamedDeleterWithIndexedGetter::subspaceForImpl(JSC::VM& vm)
 {
-    VM& vm = state->vm();
-    auto throwScope = DECLARE_THROW_SCOPE(vm);
-    auto* prototype = jsDynamicDowncast<JSTestNamedDeleterWithIndexedGetterPrototype*>(vm, JSValue::decode(thisValue));
-    if (UNLIKELY(!prototype)) {
-        throwVMTypeError(state, throwScope);
-        return false;
-    }
-    // Shadowing a built-in constructor
-    return prototype->putDirect(vm, vm.propertyNames->constructor, JSValue::decode(encodedValue));
+    return WebCore::subspaceForImpl<JSTestNamedDeleterWithIndexedGetter, UseCustomHeapCellType::No>(vm,
+        [] (auto& spaces) { return spaces.m_clientSubspaceForTestNamedDeleterWithIndexedGetter.get(); },
+        [] (auto& spaces, auto&& space) { spaces.m_clientSubspaceForTestNamedDeleterWithIndexedGetter = WTFMove(space); },
+        [] (auto& spaces) { return spaces.m_subspaceForTestNamedDeleterWithIndexedGetter.get(); },
+        [] (auto& spaces, auto&& space) { spaces.m_subspaceForTestNamedDeleterWithIndexedGetter = WTFMove(space); }
+    );
 }
 
-bool JSTestNamedDeleterWithIndexedGetterOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor)
+void JSTestNamedDeleterWithIndexedGetter::analyzeHeap(JSCell* cell, HeapAnalyzer& analyzer)
+{
+    auto* thisObject = jsCast<JSTestNamedDeleterWithIndexedGetter*>(cell);
+    analyzer.setWrappedObjectForCell(cell, &thisObject->wrapped());
+    if (thisObject->scriptExecutionContext())
+        analyzer.setLabelForCell(cell, "url " + thisObject->scriptExecutionContext()->url().string());
+    Base::analyzeHeap(cell, analyzer);
+}
+
+bool JSTestNamedDeleterWithIndexedGetterOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, AbstractSlotVisitor& visitor, const char** reason)
 {
     UNUSED_PARAM(handle);
     UNUSED_PARAM(visitor);
+    UNUSED_PARAM(reason);
     return false;
 }
 
@@ -265,38 +298,36 @@ extern "C" { extern void* _ZTVN7WebCore33TestNamedDeleterWithIndexedGetterE[]; }
 #endif
 #endif
 
-JSC::JSValue toJSNewlyCreated(JSC::ExecState*, JSDOMGlobalObject* globalObject, Ref<TestNamedDeleterWithIndexedGetter>&& impl)
+JSC::JSValue toJSNewlyCreated(JSC::JSGlobalObject*, JSDOMGlobalObject* globalObject, Ref<TestNamedDeleterWithIndexedGetter>&& impl)
 {
 
+    if constexpr (std::is_polymorphic_v<TestNamedDeleterWithIndexedGetter>) {
 #if ENABLE(BINDING_INTEGRITY)
-    void* actualVTablePointer = *(reinterpret_cast<void**>(impl.ptr()));
+        const void* actualVTablePointer = getVTablePointer(impl.ptr());
 #if PLATFORM(WIN)
-    void* expectedVTablePointer = reinterpret_cast<void*>(__identifier("??_7TestNamedDeleterWithIndexedGetter@WebCore@@6B@"));
+        void* expectedVTablePointer = __identifier("??_7TestNamedDeleterWithIndexedGetter@WebCore@@6B@");
 #else
-    void* expectedVTablePointer = &_ZTVN7WebCore33TestNamedDeleterWithIndexedGetterE[2];
+        void* expectedVTablePointer = &_ZTVN7WebCore33TestNamedDeleterWithIndexedGetterE[2];
 #endif
 
-    // If this fails TestNamedDeleterWithIndexedGetter does not have a vtable, so you need to add the
-    // ImplementationLacksVTable attribute to the interface definition
-    static_assert(std::is_polymorphic<TestNamedDeleterWithIndexedGetter>::value, "TestNamedDeleterWithIndexedGetter is not polymorphic");
-
-    // If you hit this assertion you either have a use after free bug, or
-    // TestNamedDeleterWithIndexedGetter has subclasses. If TestNamedDeleterWithIndexedGetter has subclasses that get passed
-    // to toJS() we currently require TestNamedDeleterWithIndexedGetter you to opt out of binding hardening
-    // by adding the SkipVTableValidation attribute to the interface IDL definition
-    RELEASE_ASSERT(actualVTablePointer == expectedVTablePointer);
+        // If you hit this assertion you either have a use after free bug, or
+        // TestNamedDeleterWithIndexedGetter has subclasses. If TestNamedDeleterWithIndexedGetter has subclasses that get passed
+        // to toJS() we currently require TestNamedDeleterWithIndexedGetter you to opt out of binding hardening
+        // by adding the SkipVTableValidation attribute to the interface IDL definition
+        RELEASE_ASSERT(actualVTablePointer == expectedVTablePointer);
 #endif
+    }
     return createWrapper<TestNamedDeleterWithIndexedGetter>(globalObject, WTFMove(impl));
 }
 
-JSC::JSValue toJS(JSC::ExecState* state, JSDOMGlobalObject* globalObject, TestNamedDeleterWithIndexedGetter& impl)
+JSC::JSValue toJS(JSC::JSGlobalObject* lexicalGlobalObject, JSDOMGlobalObject* globalObject, TestNamedDeleterWithIndexedGetter& impl)
 {
-    return wrap(state, globalObject, impl);
+    return wrap(lexicalGlobalObject, globalObject, impl);
 }
 
-TestNamedDeleterWithIndexedGetter* JSTestNamedDeleterWithIndexedGetter::toWrapped(JSC::VM& vm, JSC::JSValue value)
+TestNamedDeleterWithIndexedGetter* JSTestNamedDeleterWithIndexedGetter::toWrapped(JSC::VM&, JSC::JSValue value)
 {
-    if (auto* wrapper = jsDynamicDowncast<JSTestNamedDeleterWithIndexedGetter*>(vm, value))
+    if (auto* wrapper = jsDynamicCast<JSTestNamedDeleterWithIndexedGetter*>(value))
         return &wrapper->wrapped();
     return nullptr;
 }

@@ -7,9 +7,13 @@ endif ()
 
 add_subdirectory(WTF)
 
+if (USE_CAPSTONE)
+    add_subdirectory(ThirdParty/capstone)
+endif ()
+
 add_subdirectory(JavaScriptCore)
 
-if (WIN32 AND ENABLE_GRAPHICS_CONTEXT_3D)
+if (ENABLE_WEBGL OR USE_ANGLE_EGL)
     add_subdirectory(ThirdParty/ANGLE)
 endif ()
 
@@ -17,13 +21,17 @@ if (ENABLE_API_TESTS)
     add_subdirectory(ThirdParty/gtest)
 endif ()
 
-if (USE_WOFF2)
-    add_subdirectory(ThirdParty/brotli)
-    add_subdirectory(ThirdParty/woff2)
-endif ()
-
 if (USE_XDGMIME)
     add_subdirectory(ThirdParty/xdgmime)
+endif ()
+
+if (USE_LIBWEBRTC)
+    add_subdirectory(ThirdParty/libwebrtc)
+    include_directories(${CMAKE_CURRENT_BINARY_DIR}/ThirdParty/libwebrtc)
+endif ()
+
+if (ENABLE_WEBINSPECTORUI)
+    add_subdirectory(WebInspectorUI)
 endif ()
 
 if (ENABLE_WEBCORE)

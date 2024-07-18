@@ -25,27 +25,22 @@
 
 WI.TextContentView = class TextContentView extends WI.ContentView
 {
-    constructor(string, mimeType)
+    constructor(string, mimeType, representedObject)
     {
-        super(string);
+        super(representedObject || string);
 
         this.element.classList.add("text");
 
         this._textEditor = new WI.TextEditor;
         this._textEditor.addEventListener(WI.TextEditor.Event.NumberOfSearchResultsDidChange, this._numberOfSearchResultsDidChange, this);
         this._textEditor.addEventListener(WI.TextEditor.Event.FormattingDidChange, this._textEditorFormattingDidChange, this);
-
+        this._textEditor.addEventListener(WI.TextEditor.Event.MIMETypeChanged, this._handleTextEditorMIMETypeChanged, this);
         this.addSubview(this._textEditor);
-
-        this._textEditor.readOnly = true;
-        this._textEditor.mimeType = mimeType;
-        this._textEditor.string = string;
 
         var toolTip = WI.UIString("Pretty print");
         var activatedToolTip = WI.UIString("Original formatting");
         this._prettyPrintButtonNavigationItem = new WI.ActivateButtonNavigationItem("pretty-print", toolTip, activatedToolTip, "Images/NavigationItemCurleyBraces.svg", 13, 13);
         this._prettyPrintButtonNavigationItem.addEventListener(WI.ButtonNavigationItem.Event.Clicked, this._togglePrettyPrint, this);
-        this._prettyPrintButtonNavigationItem.enabled = this._textEditor.canBeFormatted();
         this._prettyPrintButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
 
         var toolTipTypes = WI.UIString("Show type information");
@@ -59,6 +54,11 @@ WI.TextContentView = class TextContentView extends WI.ContentView
         this._codeCoverageButtonNavigationItem = new WI.ActivateButtonNavigationItem("code-coverage", toolTipCodeCoverage, activatedToolTipCodeCoverage, "Images/NavigationItemCodeCoverage.svg", 13, 14);
         this._codeCoverageButtonNavigationItem.enabled = false;
         this._codeCoverageButtonNavigationItem.visibilityPriority = WI.NavigationItem.VisibilityPriority.Low;
+
+        this._textEditor.readOnly = true;
+        this._textEditor.mimeType = mimeType;
+        this._textEditor.string = string;
+        this._prettyPrintButtonNavigationItem.enabled = this._textEditor.canBeFormatted();
     }
 
     // Public
@@ -73,30 +73,9 @@ WI.TextContentView = class TextContentView extends WI.ContentView
         return [this._prettyPrintButtonNavigationItem, this._showTypesButtonNavigationItem, this._codeCoverageButtonNavigationItem];
     }
 
-    revealPosition(position, textRangeToSelect, forceUnformatted)
+    revealPosition(position, options = {})
     {
-        this._textEditor.revealPosition(position, textRangeToSelect, forceUnformatted);
-    }
-
-    shown()
-    {
-        super.shown();
-
-        this._textEditor.shown();
-    }
-
-    hidden()
-    {
-        super.hidden();
-
-        this._textEditor.hidden();
-    }
-
-    closed()
-    {
-        super.closed();
-
-        this._textEditor.close();
+        this._textEditor.revealPosition(position, options);
     }
 
     get supportsSave()
@@ -104,10 +83,18 @@ WI.TextContentView = class TextContentView extends WI.ContentView
         return true;
     }
 
+    get saveMode()
+    {
+        return WI.FileUtilities.SaveMode.SingleFile;
+    }
+
     get saveData()
     {
-        var url = "web-inspector:///" + encodeURI(WI.UIString("Untitled")) + ".txt";
-        return {url, content: this._textEditor.string, forceSaveAs: true};
+        return {
+            content: this._textEditor.string,
+            suggestedName: WI.UIString("Untitled") + ".txt",
+            forceSaveAs: true,
+        };
     }
 
     get supportsSearch()
@@ -166,6 +153,11 @@ WI.TextContentView = class TextContentView extends WI.ContentView
     _textEditorFormattingDidChange(event)
     {
         this._prettyPrintButtonNavigationItem.activated = this._textEditor.formatted;
+    }
+
+    _handleTextEditorMIMETypeChanged(event)
+    {
+        this._prettyPrintButtonNavigationItem.enabled = this._textEditor.canBeFormatted();
     }
 
     _numberOfSearchResultsDidChange(event)

@@ -25,59 +25,70 @@
 
 WI.NetworkTabContentView = class NetworkTabContentView extends WI.TabContentView
 {
-    constructor(identifier)
+    constructor()
     {
-        let {image, title} = WI.NetworkTabContentView.tabInfo();
-        let tabBarItem = new WI.GeneralTabBarItem(image, title);
-
-        super(identifier || "network", "network", tabBarItem);
+        super(NetworkTabContentView.tabInfo());
 
         this._networkTableContentView = new WI.NetworkTableContentView;
 
-        const disableBackForward = true;
-        const disableFindBanner = true;
-        this._contentBrowser = new WI.ContentBrowser(null, this, disableBackForward, disableFindBanner);
+        this._contentBrowser = new WI.ContentBrowser(null, this, {hideBackForwardButtons: true, disableFindBanner: true});
         this._contentBrowser.showContentView(this._networkTableContentView);
 
+        let filterNavigationItems = this._networkTableContentView.filterNavigationItems;
+        for (let i = 0; i < filterNavigationItems.length; ++i)
+            this._contentBrowser.navigationBar.insertNavigationItem(filterNavigationItems[i], i);
+
         this.addSubview(this._contentBrowser);
+
+        WI.networkManager.addEventListener(WI.NetworkManager.Event.EmulatedConditionChanged, this._handleEmulatedConditionChanged, this);
     }
 
     // Static
 
     static tabInfo()
     {
+        let hasEmulatedCondition = WI.networkManager.emulatedCondition !== WI.NetworkManager.EmulatedCondition.None;
+
         return {
-            image: "Images/Network.svg",
-            title: WI.UIString("Network"),
+            identifier: NetworkTabContentView.Type,
+            image: hasEmulatedCondition ? "Images/Warning.svg" : "Images/Network.svg",
+            title: hasEmulatedCondition ? WI.UIString("Network throttling is enabled") : "",
+            displayName: WI.UIString("Network", "Network Tab Name", "Name of Network Tab"),
         };
     }
 
     static isTabAllowed()
     {
-        return !!window.NetworkAgent && !!window.PageAgent && WI.settings.experimentalEnableNewNetworkTab.value;
+        return InspectorBackend.hasDomain("Network");
     }
 
     // Protected
-
-    shown()
-    {
-        super.shown();
-
-        this._contentBrowser.shown();
-    }
-
-    hidden()
-    {
-        this._contentBrowser.hidden();
-
-        super.hidden();
-    }
 
     closed()
     {
         this._contentBrowser.contentViewContainer.closeAllContentViews();
 
         super.closed();
+    }
+
+    initialLayout()
+    {
+        super.initialLayout();
+
+        let dropZoneView = new WI.DropZoneView(this);
+        dropZoneView.text = WI.UIString("Import HAR");
+        dropZoneView.targetElement = this.element;
+        this.addSubview(dropZoneView);
+    }
+
+    get canHandleFindEvent()
+    {
+        return this._networkTableContentView.canFocusFilterBar;
+    }
+
+    handleFindEvent()
+    {
+        this._networkTableContentView.focusFilterBar();
     }
 
     // Public
@@ -94,11 +105,44 @@ WI.NetworkTabContentView = class NetworkTabContentView extends WI.TabContentView
         return representedObject instanceof WI.Resource;
     }
 
+    showRepresentedObject(representedObject, cookie)
+    {
+        console.assert(this._contentBrowser.currentContentView === this._networkTableContentView);
+        this._networkTableContentView.showRepresentedObject(representedObject, cookie);
+    }
+
     get supportsSplitContentBrowser()
     {
         return true;
     }
+
+    // DropZoneView delegate
+
+    dropZoneShouldAppearForDragEvent(dropZone, event)
+    {
+        return event.dataTransfer.types.includes("Files");
+    }
+
+    dropZoneHandleDrop(dropZone, event)
+    {
+        let files = event.dataTransfer.files;
+        if (files.length !== 1) {
+            InspectorFrontendHost.beep();
+            return;
+        }
+
+        WI.FileUtilities.readJSON(files, (result) => this._networkTableContentView.processHAR(result));
+    }
+
+    // Private
+
+    _handleEmulatedConditionChanged(event)
+    {
+        let hasEmulatedCondition = WI.networkManager.emulatedCondition !== WI.NetworkManager.EmulatedCondition.None;
+
+        this.tabBarItem.image = hasEmulatedCondition ? "Images/Warning.svg" : "Images/Network.svg";
+        this.tabBarItem.title = hasEmulatedCondition ? WI.UIString("Network throttling is enabled") : "";
+    }
 };
 
-// FIXME: When removing LegacyNetworkTabContentView this should move back to just "network".
-WI.NetworkTabContentView.Type = "new-network";
+WI.NetworkTabContentView.Type = "network";

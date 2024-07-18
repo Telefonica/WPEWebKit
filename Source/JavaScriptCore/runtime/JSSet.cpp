@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,22 +27,31 @@
 #include "JSSet.h"
 
 #include "JSCInlines.h"
-#include "SetPrototype.h"
 
 namespace JSC {
 
-const ClassInfo JSSet::s_info = { "Set", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSSet) };
+const ClassInfo JSSet::s_info = { "Set"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSSet) };
 
-String JSSet::toStringName(const JSObject*, ExecState*)
+JSSet* JSSet::clone(JSGlobalObject* globalObject, VM& vm, Structure* structure)
 {
-    return ASCIILiteral("Object");
+    JSSet* instance = new (NotNull, allocateCell<JSSet>(vm)) JSSet(vm, structure);
+    instance->finishCreation(globalObject, vm, this);
+    return instance;
 }
 
-JSSet* JSSet::clone(ExecState* exec, VM& vm, Structure* structure)
+bool JSSet::isAddFastAndNonObservable(Structure* structure)
 {
-    JSSet* instance = new (NotNull, allocateCell<JSSet>(vm.heap)) JSSet(vm, structure);
-    instance->finishCreation(exec, vm, this);
-    return instance;
+    JSGlobalObject* globalObject = structure->globalObject();
+    if (!globalObject->isSetPrototypeAddFastAndNonObservable())
+        return false;
+
+    if (structure->hasPolyProto())
+        return false;
+
+    if (structure->storedPrototype() != globalObject->jsSetPrototype())
+        return false;
+
+    return true;
 }
 
 bool JSSet::isIteratorProtocolFastAndNonObservable()
@@ -51,35 +60,19 @@ bool JSSet::isIteratorProtocolFastAndNonObservable()
     if (!globalObject->isSetPrototypeIteratorProtocolFastAndNonObservable())
         return false;
 
+    VM& vm = globalObject->vm();
     Structure* structure = this->structure();
     // This is the fast case. Many sets will be an original set.
     if (structure == globalObject->setStructure())
         return true;
 
-    if (structure->storedPrototype() != globalObject->jsSetPrototype())
+    if (getPrototypeDirect() != globalObject->jsSetPrototype())
         return false;
 
-    VM& vm = globalObject->vm();
     if (getDirectOffset(vm, vm.propertyNames->iteratorSymbol) != invalidOffset)
         return false;
 
     return true;
-}
-
-bool JSSet::canCloneFastAndNonObservable(Structure* structure)
-{
-    auto addFastAndNonObservable = [&] (Structure* structure) {
-        JSGlobalObject* globalObject = structure->globalObject();
-        if (!globalObject->isSetPrototypeAddFastAndNonObservable())
-            return false;
-
-        if (structure->storedPrototype() != globalObject->jsSetPrototype())
-            return false;
-
-        return true;
-    };
-
-    return isIteratorProtocolFastAndNonObservable() && addFastAndNonObservable(structure);
 }
 
 }

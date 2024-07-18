@@ -24,7 +24,7 @@
  */
 
 #include "config.h"
-#include "LockedPrintStream.h"
+#include <wtf/LockedPrintStream.h>
 
 namespace WTF {
 
@@ -39,13 +39,13 @@ LockedPrintStream::~LockedPrintStream()
 
 void LockedPrintStream::vprintf(const char* format, va_list args)
 {
-    auto locker = holdLock(m_lock);
+    Locker locker { m_lock };
     m_target->vprintf(format, args);
 }
 
 void LockedPrintStream::flush()
 {
-    auto locker = holdLock(m_lock);
+    Locker locker { m_lock };
     m_target->flush();
 }
 

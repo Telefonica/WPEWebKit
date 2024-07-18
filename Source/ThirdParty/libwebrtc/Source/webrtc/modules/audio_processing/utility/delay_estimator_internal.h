@@ -10,11 +10,12 @@
 
 // Header file including the delay estimator handle used for testing.
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_UTILITY_DELAY_ESTIMATOR_INTERNAL_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_UTILITY_DELAY_ESTIMATOR_INTERNAL_H_
+#ifndef MODULES_AUDIO_PROCESSING_UTILITY_DELAY_ESTIMATOR_INTERNAL_H_
+#define MODULES_AUDIO_PROCESSING_UTILITY_DELAY_ESTIMATOR_INTERNAL_H_
 
-#include "webrtc/modules/audio_processing/utility/delay_estimator.h"
-#include "webrtc/typedefs.h"
+#include "modules/audio_processing/utility/delay_estimator.h"
+
+namespace webrtc {
 
 typedef union {
   float float_;
@@ -24,7 +25,7 @@ typedef union {
 typedef struct {
   // Pointers to mean values of spectrum.
   SpectrumType* mean_far_spectrum;
-  // |mean_far_spectrum| initialization indicator.
+  // `mean_far_spectrum` initialization indicator.
   int far_spectrum_initialized;
 
   int spectrum_size;
@@ -36,7 +37,7 @@ typedef struct {
 typedef struct {
   // Pointers to mean values of spectrum.
   SpectrumType* mean_near_spectrum;
-  // |mean_near_spectrum| initialization indicator.
+  // `mean_near_spectrum` initialization indicator.
   int near_spectrum_initialized;
 
   int spectrum_size;
@@ -45,4 +46,6 @@ typedef struct {
   BinaryDelayEstimator* binary_handle;
 } DelayEstimator;
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_UTILITY_DELAY_ESTIMATOR_INTERNAL_H_
+}  // namespace webrtc
+
+#endif  // MODULES_AUDIO_PROCESSING_UTILITY_DELAY_ESTIMATOR_INTERNAL_H_

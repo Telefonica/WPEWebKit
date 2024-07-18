@@ -7,15 +7,15 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#include "webrtc/test/win/d3d_renderer.h"
+#include "test/win/d3d_renderer.h"
 
-#include "webrtc/base/checks.h"
-#include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
+#include "common_video/libyuv/include/webrtc_libyuv.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 namespace test {
 
-#define D3DFVF_CUSTOMVERTEX (D3DFVF_XYZ|D3DFVF_TEX1)
+#define D3DFVF_CUSTOMVERTEX (D3DFVF_XYZ | D3DFVF_TEX1)
 
 struct D3dCustomVertex {
   float x, y, z;
@@ -34,17 +34,21 @@ D3dRenderer::D3dRenderer(size_t width, size_t height)
     : width_(width),
       height_(height),
       hwnd_(NULL),
-      d3d_(NULL),
-      d3d_device_(NULL),
-      texture_(NULL),
-      vertex_buffer_(NULL) {
+      d3d_(nullptr),
+      d3d_device_(nullptr),
+      texture_(nullptr),
+      vertex_buffer_(nullptr) {
   RTC_DCHECK_GT(width, 0);
   RTC_DCHECK_GT(height, 0);
 }
 
-D3dRenderer::~D3dRenderer() { Destroy(); }
+D3dRenderer::~D3dRenderer() {
+  Destroy();
+}
 
-LRESULT WINAPI D3dRenderer::WindowProc(HWND hwnd, UINT msg, WPARAM wparam,
+LRESULT WINAPI D3dRenderer::WindowProc(HWND hwnd,
+                                       UINT msg,
+                                       WPARAM wparam,
                                        LPARAM lparam) {
   if (msg == WM_DESTROY || (msg == WM_CHAR && wparam == VK_RETURN)) {
     PostQuitMessage(0);
@@ -55,10 +59,10 @@ LRESULT WINAPI D3dRenderer::WindowProc(HWND hwnd, UINT msg, WPARAM wparam,
 }
 
 void D3dRenderer::Destroy() {
-  texture_ = NULL;
-  vertex_buffer_ = NULL;
-  d3d_device_ = NULL;
-  d3d_ = NULL;
+  texture_ = nullptr;
+  vertex_buffer_ = nullptr;
+  d3d_device_ = nullptr;
+  d3d_ = nullptr;
 
   if (hwnd_ != NULL) {
     DestroyWindow(hwnd_);
@@ -68,17 +72,9 @@ void D3dRenderer::Destroy() {
 }
 
 bool D3dRenderer::Init(const char* window_title) {
-  hwnd_ = CreateWindowA(kD3DClassName,
-                        window_title,
-                        WS_OVERLAPPEDWINDOW,
-                        0,
-                        0,
-                        static_cast<int>(width_),
-                        static_cast<int>(height_),
-                        NULL,
-                        NULL,
-                        NULL,
-                        NULL);
+  hwnd_ = CreateWindowA(kD3DClassName, window_title, WS_OVERLAPPEDWINDOW, 0, 0,
+                        static_cast<int>(width_), static_cast<int>(height_),
+                        NULL, NULL, NULL, NULL);
 
   if (hwnd_ == NULL) {
     Destroy();
@@ -86,7 +82,7 @@ bool D3dRenderer::Init(const char* window_title) {
   }
 
   d3d_ = Direct3DCreate9(D3D_SDK_VERSION);
-  if (d3d_ == NULL) {
+  if (d3d_ == nullptr) {
     Destroy();
     return false;
   }
@@ -97,11 +93,8 @@ bool D3dRenderer::Init(const char* window_title) {
   d3d_params.SwapEffect = D3DSWAPEFFECT_COPY;
 
   IDirect3DDevice9* d3d_device;
-  if (d3d_->CreateDevice(D3DADAPTER_DEFAULT,
-                         D3DDEVTYPE_HAL,
-                         hwnd_,
-                         D3DCREATE_SOFTWARE_VERTEXPROCESSING,
-                         &d3d_params,
+  if (d3d_->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd_,
+                         D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3d_params,
                          &d3d_device) != D3D_OK) {
     Destroy();
     return false;
@@ -112,11 +105,8 @@ bool D3dRenderer::Init(const char* window_title) {
   IDirect3DVertexBuffer9* vertex_buffer;
   const int kRectVertices = 4;
   if (d3d_device_->CreateVertexBuffer(kRectVertices * sizeof(D3dCustomVertex),
-                                      0,
-                                      D3DFVF_CUSTOMVERTEX,
-                                      D3DPOOL_MANAGED,
-                                      &vertex_buffer,
-                                      NULL) != D3D_OK) {
+                                      0, D3DFVF_CUSTOMVERTEX, D3DPOOL_MANAGED,
+                                      &vertex_buffer, NULL) != D3D_OK) {
     Destroy();
     return false;
   }
@@ -148,13 +138,13 @@ D3dRenderer* D3dRenderer::Create(const char* window_title,
 
     wc_atom = RegisterClassA(&wc);
     if (wc_atom == 0)
-      return false;
+      return nullptr;
   }
 
   D3dRenderer* d3d_renderer = new D3dRenderer(width, height);
   if (!d3d_renderer->Init(window_title)) {
     delete d3d_renderer;
-    return NULL;
+    return nullptr;
   }
 
   return d3d_renderer;
@@ -166,22 +156,17 @@ void D3dRenderer::Resize(size_t width, size_t height) {
   IDirect3DTexture9* texture;
 
   d3d_device_->CreateTexture(static_cast<UINT>(width_),
-                             static_cast<UINT>(height_),
-                             1,
-                             0,
-                             D3DFMT_A8R8G8B8,
-                             D3DPOOL_MANAGED,
-                             &texture,
-                             NULL);
+                             static_cast<UINT>(height_), 1, 0, D3DFMT_A8R8G8B8,
+                             D3DPOOL_MANAGED, &texture, NULL);
   texture_ = texture;
   texture->Release();
 
   // Vertices for the video frame to be rendered to.
   static const D3dCustomVertex rect[] = {
-    {-1.0f, -1.0f, 0.0f, 0.0f, 1.0f},
-    {-1.0f, 1.0f, 0.0f, 0.0f, 0.0f},
-    {1.0f, -1.0f, 0.0f, 1.0f, 1.0f},
-    {1.0f, 1.0f, 0.0f, 1.0f, 0.0f},
+      {-1.0f, -1.0f, 0.0f, 0.0f, 1.0f},
+      {-1.0f, 1.0f, 0.0f, 0.0f, 0.0f},
+      {1.0f, -1.0f, 0.0f, 1.0f, 1.0f},
+      {1.0f, 1.0f, 0.0f, 1.0f, 0.0f},
   };
 
   void* buf_data;
@@ -209,8 +194,9 @@ void D3dRenderer::OnFrame(const webrtc::VideoFrame& frame) {
 
   d3d_device_->BeginScene();
   d3d_device_->SetFVF(D3DFVF_CUSTOMVERTEX);
-  d3d_device_->SetStreamSource(0, vertex_buffer_, 0, sizeof(D3dCustomVertex));
-  d3d_device_->SetTexture(0, texture_);
+  d3d_device_->SetStreamSource(0, vertex_buffer_.get(), 0,
+                               sizeof(D3dCustomVertex));
+  d3d_device_->SetTexture(0, texture_.get());
   d3d_device_->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2);
   d3d_device_->EndScene();
 

@@ -61,7 +61,7 @@ void MediaPlayerPrivateFullscreenWindow::createWindow(HWND parentHwnd)
     static ATOM windowAtom;
     static LPCWSTR windowClassName = L"MediaPlayerPrivateFullscreenWindowClass";
     if (!windowAtom) {
-        WNDCLASSEX wcex = {0};
+        WNDCLASSEX wcex { };
         wcex.cbSize = sizeof(wcex);
         wcex.style = CS_HREDRAW | CS_VREDRAW;
         wcex.lpfnWndProc = staticWndProc;
@@ -72,7 +72,7 @@ void MediaPlayerPrivateFullscreenWindow::createWindow(HWND parentHwnd)
 
     ASSERT(!m_hwnd);
 
-    MONITORINFO mi = {0};
+    MONITORINFO mi { };
     mi.cbSize = sizeof(MONITORINFO);
     if (!GetMonitorInfo(MonitorFromWindow(parentHwnd, MONITOR_DEFAULTTONEAREST), &mi))
         return;
@@ -116,12 +116,11 @@ void MediaPlayerPrivateFullscreenWindow::setRootChildLayer(Ref<PlatformCALayer>&
     CGRect rootBounds = m_rootChild->rootLayer()->bounds();
     m_rootChild->setPosition(rootBounds.origin);
     m_rootChild->setBounds(FloatRect(FloatPoint(), FloatSize(rootBounds.size)));
-    m_rootChild->setBackgroundColor(CGColorGetConstantColor(kCGColorBlack));
+    m_rootChild->setBackgroundColor(Color::black);
 #ifndef NDEBUG
-    RetainPtr<CGColorRef> redColor = adoptCF(CGColorCreateGenericRGB(1, 0, 0, 1));
-    rootLayer->setBackgroundColor(redColor.get());
+    rootLayer->setBackgroundColor(Color::red);
 #else
-    rootLayer->setBackgroundColor(CGColorGetConstantColor(kCGColorBlack));
+    rootLayer->setBackgroundColor(Color::black);
 #endif
 }
 #endif

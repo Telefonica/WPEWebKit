@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,46 +26,49 @@
 #include "config.h"
 #include "ProcessAssertion.h"
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
+
+#include "WKBase.h"
+#include <wtf/RunLoop.h>
 
 namespace WebKit {
 
-ProcessAssertion::ProcessAssertion(ProcessID, AssertionState assertionState, Function<void()>&&)
-    : m_assertionState(assertionState)
+ProcessAssertion::ProcessAssertion(ProcessID pid, const String& reason, ProcessAssertionType assertionType)
+    : m_assertionType(assertionType)
+    , m_pid(pid)
+    , m_reason(reason)
 {
 }
 
-ProcessAssertion::~ProcessAssertion()
+ProcessAssertion::~ProcessAssertion() = default;
+
+double ProcessAssertion::remainingRunTimeInSeconds(ProcessID)
+{
+    return 0;
+}
+
+bool ProcessAssertion::isValid() const
+{
+    return true;
+}
+
+void ProcessAssertion::acquireAsync(CompletionHandler<void()>&& completionHandler)
+{
+    if (completionHandler)
+        RunLoop::main().dispatch(WTFMove(completionHandler));
+}
+
+void ProcessAssertion::acquireSync()
 {
 }
 
-void ProcessAssertion::setState(AssertionState assertionState)
-{
-    if (m_assertionState == assertionState)
-        return;
-
-    m_assertionState = assertionState;
-}
-
-ProcessAndUIAssertion::ProcessAndUIAssertion(ProcessID pid, AssertionState assertionState)
-    : ProcessAssertion(pid, assertionState)
+ProcessAndUIAssertion::ProcessAndUIAssertion(ProcessID pid, const String& reason, ProcessAssertionType assertionType)
+    : ProcessAssertion(pid, reason, assertionType)
 {
 }
 
-ProcessAndUIAssertion::~ProcessAndUIAssertion()
-{
-}
+ProcessAndUIAssertion::~ProcessAndUIAssertion() = default;
 
-void ProcessAndUIAssertion::setState(AssertionState assertionState)
-{
-    ProcessAssertion::setState(assertionState);
-}
+} // namespace WebKit
 
-void ProcessAndUIAssertion::setClient(ProcessAssertionClient& client)
-{
-    ProcessAssertion::setClient(client);
-}
-
-}
-
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)

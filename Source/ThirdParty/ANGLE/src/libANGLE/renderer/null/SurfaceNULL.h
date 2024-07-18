@@ -21,14 +21,22 @@ class SurfaceNULL : public SurfaceImpl
     SurfaceNULL(const egl::SurfaceState &surfaceState);
     ~SurfaceNULL() override;
 
-    egl::Error initialize(const DisplayImpl *displayImpl) override;
-    FramebufferImpl *createDefaultFramebuffer(const gl::FramebufferState &state) override;
-    egl::Error swap(const DisplayImpl *displayImpl) override;
-    egl::Error postSubBuffer(EGLint x, EGLint y, EGLint width, EGLint height) override;
+    egl::Error initialize(const egl::Display *display) override;
+    FramebufferImpl *createDefaultFramebuffer(const gl::Context *context,
+                                              const gl::FramebufferState &state) override;
+    egl::Error swap(const gl::Context *context) override;
+    egl::Error postSubBuffer(const gl::Context *context,
+                             EGLint x,
+                             EGLint y,
+                             EGLint width,
+                             EGLint height) override;
     egl::Error querySurfacePointerANGLE(EGLint attribute, void **value) override;
-    egl::Error bindTexImage(gl::Texture *texture, EGLint buffer) override;
-    egl::Error releaseTexImage(EGLint buffer) override;
+    egl::Error bindTexImage(const gl::Context *context,
+                            gl::Texture *texture,
+                            EGLint buffer) override;
+    egl::Error releaseTexImage(const gl::Context *context, EGLint buffer) override;
     egl::Error getSyncValues(EGLuint64KHR *ust, EGLuint64KHR *msc, EGLuint64KHR *sbc) override;
+    egl::Error getMscRate(EGLint *numerator, EGLint *denominator) override;
     void setSwapInterval(EGLint interval) override;
 
     // width and height can change with client window resizing
@@ -37,6 +45,10 @@ class SurfaceNULL : public SurfaceImpl
 
     EGLint isPostSubBufferSupported() const override;
     EGLint getSwapBehavior() const override;
+
+    angle::Result initializeContents(const gl::Context *context,
+                                     GLenum binding,
+                                     const gl::ImageIndex &imageIndex) override;
 };
 
 }  // namespace rx

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,66 +31,89 @@
 // these #if's will disappear...
 #if ENABLE(DFG_JIT)
 
+#include "BytecodeIndex.h"
+#include "CodeOrigin.h"
 #include "GPRInfo.h"
+#include "Operands.h"
+#include "TagRegistersMode.h"
 
 namespace JSC {
 
+class UnaryArithProfile;
+class BinaryArithProfile;
 class CCallHelpers;
 class CodeBlock;
-class LazyOperandValueProfileKey;
-struct ArithProfile;
 struct ValueProfile;
 
 class MethodOfGettingAValueProfile {
 public:
     MethodOfGettingAValueProfile()
-        : m_kind(None)
+        : m_kind(Kind::None)
     {
     }
-    
-    MethodOfGettingAValueProfile(ValueProfile* profile)
+
+    static MethodOfGettingAValueProfile unaryArithProfile(CodeOrigin codeOrigin)
     {
-        if (profile) {
-            m_kind = Ready;
-            u.profile = profile;
-        } else
-            m_kind = None;
+        MethodOfGettingAValueProfile result;
+        result.m_kind = Kind::UnaryArithProfile;
+        result.m_codeOrigin = codeOrigin;
+        return result;
     }
-    
-    MethodOfGettingAValueProfile(ArithProfile* profile)
+
+    static MethodOfGettingAValueProfile binaryArithProfile(CodeOrigin codeOrigin)
     {
-        if (profile) {
-            m_kind = ArithProfileReady;
-            u.arithProfile = profile;
-        } else
-            m_kind = None;
+        MethodOfGettingAValueProfile result;
+        result.m_kind = Kind::BinaryArithProfile;
+        result.m_codeOrigin = codeOrigin;
+        return result;
     }
-    
-    static MethodOfGettingAValueProfile fromLazyOperand(
-        CodeBlock*, const LazyOperandValueProfileKey&);
-    
-    explicit operator bool() const { return m_kind != None; }
-    
-    void emitReportValue(CCallHelpers&, JSValueRegs) const;
-    
+
+    static MethodOfGettingAValueProfile argumentValueProfile(CodeOrigin codeOrigin, Operand operand)
+    {
+        MethodOfGettingAValueProfile result;
+        result.m_kind = Kind::ArgumentValueProfile;
+        result.m_codeOrigin = codeOrigin;
+        result.m_rawOperand = operand.asBits();
+        return result;
+    }
+
+    static MethodOfGettingAValueProfile bytecodeValueProfile(CodeOrigin codeOrigin)
+    {
+        MethodOfGettingAValueProfile result;
+        result.m_kind = Kind::BytecodeValueProfile;
+        result.m_codeOrigin = codeOrigin;
+        return result;
+    }
+
+    static MethodOfGettingAValueProfile lazyOperandValueProfile(CodeOrigin codeOrigin, Operand operand)
+    {
+        MethodOfGettingAValueProfile result;
+        result.m_kind = Kind::LazyOperandValueProfile;
+        result.m_codeOrigin = codeOrigin;
+        result.m_rawOperand = operand.asBits();
+        return result;
+    }
+
+    explicit operator bool() const { return m_kind != Kind::None; }
+
+    // The temporary register is only needed on 64-bits builds (for testing BigInt32).
+    void emitReportValue(CCallHelpers&, CodeBlock* optimizedCodeBlock, JSValueRegs, GPRReg tempGPR, TagRegistersMode = HaveTagRegisters) const;
+
 private:
-    enum Kind {
+    enum class Kind : uint8_t {
         None,
-        Ready,
-        ArithProfileReady,
-        LazyOperand
+        UnaryArithProfile,
+        BinaryArithProfile,
+        BytecodeValueProfile,
+        ArgumentValueProfile,
+        LazyOperandValueProfile,
     };
-    
-    Kind m_kind;
-    union {
-        ValueProfile* profile;
-        ArithProfile* arithProfile;
-        struct {
-            CodeBlock* codeBlock;
-            unsigned bytecodeOffset;
-            int operand;
-        } lazyOperand;
-    } u;
+    static constexpr unsigned bitsOfKind = 3;
+    static_assert(static_cast<unsigned>(Kind::LazyOperandValueProfile) <= ((1U << bitsOfKind) - 1));
+
+    CodeOrigin m_codeOrigin;
+    uint64_t m_rawOperand : Operand::maxBits { 0 };
+    Kind m_kind : bitsOfKind;
 };
 
 } // namespace JSC

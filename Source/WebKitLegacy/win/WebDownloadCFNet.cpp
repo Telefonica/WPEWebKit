@@ -28,6 +28,7 @@
 
 #include "DefaultDownloadDelegate.h"
 #include "MarshallingHelpers.h"
+#include "NetworkStorageSessionMap.h"
 #include "WebError.h"
 #include "WebKit.h"
 #include "WebKitLogging.h"
@@ -47,11 +48,11 @@
 #include <WebCore/CredentialStorage.h>
 #include <WebCore/DownloadBundle.h>
 #include <WebCore/LoaderRunLoopCF.h>
+#include <WebCore/NetworkStorageSession.h>
 #include <WebCore/ResourceError.h>
 #include <WebCore/ResourceHandle.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
-#include <wtf/CurrentTime.h>
 
 using namespace WebCore;
 
@@ -159,14 +160,14 @@ HRESULT WebDownload::initToResumeWithBundle(_In_ BSTR bundlePath, _In_opt_ IWebD
 {
     LOG(Download, "Attempting resume of download bundle %s", String(bundlePath, SysStringLen(bundlePath)).ascii().data());
 
-    Vector<char> buffer;
+    Vector<uint8_t> buffer;
     if (!DownloadBundle::extractResumeData(String(bundlePath, SysStringLen(bundlePath)), buffer))
         return E_FAIL;
 
     // It is possible by some twist of fate the bundle magic number was naturally at the end of the file and its not actually a valid bundle.
     // That, or someone engineered it that way to try to attack us. In that cause, this CFData will successfully create but when we actually
     // try to start the CFURLDownload using this bogus data, it will fail and we will handle that gracefully.
-    RetainPtr<CFDataRef> resumeData = adoptCF(CFDataCreate(0, reinterpret_cast<const UInt8*>(buffer.data()), buffer.size()));
+    auto resumeData = adoptCF(CFDataCreate(0, buffer.data(), buffer.size()));
 
     if (!delegate)
         return E_FAIL;
@@ -177,7 +178,7 @@ HRESULT WebDownload::initToResumeWithBundle(_In_ BSTR bundlePath, _In_opt_ IWebD
                                   didReceiveResponseCallback, willResumeWithResponseCallback, didReceiveDataCallback, shouldDecodeDataOfMIMETypeCallback, 
                                   decideDestinationWithSuggestedObjectNameCallback, didCreateDestinationCallback, didFinishCallback, didFailCallback};
     
-    RetainPtr<CFURLRef> pathURL = adoptCF(MarshallingHelpers::PathStringToFileCFURLRef(String(bundlePath, SysStringLen(bundlePath))));
+    auto pathURL = MarshallingHelpers::PathStringToFileCFURLRef(String(bundlePath, SysStringLen(bundlePath)));
     ASSERT(pathURL);
 
     m_download = adoptCF(CFURLDownloadCreateWithResumeData(0, resumeData.get(), pathURL.get(), &client));
@@ -190,9 +191,8 @@ HRESULT WebDownload::initToResumeWithBundle(_In_ BSTR bundlePath, _In_opt_ IWebD
     m_bundlePath = String(bundlePath, SysStringLen(bundlePath));
     // Attempt to remove the ".download" extension from the bundle for the final file destination
     // Failing that, we clear m_destination and will ask the delegate later once the download starts
-    if (m_bundlePath.endsWith(DownloadBundle::fileExtension(), false)) {
-        m_destination = m_bundlePath.isolatedCopy();
-        m_destination.truncate(m_destination.length() - DownloadBundle::fileExtension().length());
+    if (m_bundlePath.endsWithIgnoringASCIICase(DownloadBundle::fileExtension())) {
+        m_destination = StringView(m_bundlePath).left(m_destination.length() - DownloadBundle::fileExtension().length()).toString().isolatedCopy();
     } else
         m_destination = String();
     
@@ -235,11 +235,11 @@ HRESULT WebDownload::cancelForResume()
     if (!m_download)
         return E_FAIL;
 
-    HRESULT hr = S_OK;
     RetainPtr<CFDataRef> resumeData;
     if (m_destination.isEmpty()) {
         CFURLDownloadCancel(m_download.get());
-        goto exit;
+        m_download = nullptr;
+        return S_OK;
     }
 
     CFURLDownloadSetDeletesUponFailure(m_download.get(), false);
@@ -248,16 +248,16 @@ HRESULT WebDownload::cancelForResume()
     resumeData = adoptCF(CFURLDownloadCopyResumeData(m_download.get()));
     if (!resumeData) {
         LOG(Download, "WebDownload - Unable to create resume data for download (%p)", this);
-        goto exit;
+        m_download = nullptr;
+        return S_OK;
     }
 
-    const char* resumeBytes = reinterpret_cast<const char*>(CFDataGetBytePtr(resumeData.get()));
+    auto* resumeBytes = reinterpret_cast<const uint8_t*>(CFDataGetBytePtr(resumeData.get()));
     uint32_t resumeLength = CFDataGetLength(resumeData.get());
     DownloadBundle::appendResumeData(resumeBytes, resumeLength, m_bundlePath);
 
-exit:
     m_download = nullptr;
-    return hr;
+    return S_OK;
 }
 
 HRESULT WebDownload::deletesFileUponFailure(_Out_ BOOL* result)
@@ -287,9 +287,8 @@ HRESULT WebDownload::setDestination(_In_ BSTR path, BOOL allowOverwrite)
     m_destination = String(path, SysStringLen(path));
     m_bundlePath = m_destination + DownloadBundle::fileExtension();
 
-    CFURLRef pathURL = MarshallingHelpers::PathStringToFileCFURLRef(m_bundlePath);
-    CFURLDownloadSetDestination(m_download.get(), pathURL, !!allowOverwrite);
-    CFRelease(pathURL);
+    auto pathURL = MarshallingHelpers::PathStringToFileCFURLRef(m_bundlePath);
+    CFURLDownloadSetDestination(m_download.get(), pathURL.get(), !!allowOverwrite);
 
     LOG(Download, "WebDownload - Set destination to %s", m_bundlePath.ascii().data());
 
@@ -306,7 +305,7 @@ HRESULT WebDownload::cancelAuthenticationChallenge(_In_opt_ IWebURLAuthenticatio
     }
 
     // FIXME: Do we need a URL or description for this error code?
-    ResourceError error(String(WebURLErrorDomain), WebURLErrorUserCancelledAuthentication, URL(), "");
+    ResourceError error(String(WebURLErrorDomain), WebURLErrorUserCancelledAuthentication, URL(), emptyString());
     COMPtr<WebError> webError(AdoptCOM, WebError::createInstance(error));
     m_delegate->didFailWithError(this, webError.get());
 
@@ -334,7 +333,7 @@ HRESULT WebDownload::useCredential(_In_opt_ IWebURLCredential* credential, _In_o
     if (!webCredential)
         return E_NOINTERFACE;
 
-    RetainPtr<CFURLCredentialRef> cfCredential = adoptCF(createCF(webCredential->credential()));
+    auto cfCredential = createCF(webCredential->credential());
 
     if (m_download)
         CFURLDownloadUseCredential(m_download.get(), cfCredential.get(), webChallenge->authenticationChallenge().cfURLAuthChallengeRef());
@@ -345,9 +344,9 @@ HRESULT WebDownload::useCredential(_In_opt_ IWebURLCredential* credential, _In_o
 void WebDownload::didStart()
 {
 #ifndef NDEBUG
-    m_startTime = m_dataTime = currentTime();
+    m_startTime = m_dataTime = WallTime::now();
     m_received = 0;
-    LOG(Download, "DOWNLOAD - Started %p at %.3f seconds", this, m_startTime);
+    LOG(Download, "DOWNLOAD - Started %p at %.3f seconds", this, m_startTime.secondsSinceEpoch().seconds());
 #endif
     if (FAILED(m_delegate->didBegin(this)))
         LOG_ERROR("DownloadDelegate->didBegin failed");
@@ -367,18 +366,16 @@ CFURLRequestRef WebDownload::willSendRequest(CFURLRequestRef request, CFURLRespo
 
     COMPtr<WebMutableURLRequest> finalWebRequest(AdoptCOM, WebMutableURLRequest::createInstance(finalRequest.get()));
     m_request = finalWebRequest.get();
-    CFURLRequestRef result = finalWebRequest->resourceRequest().cfURLRequest(UpdateHTTPBody);
-    CFRetain(result);
-    return result;
+    return retainPtr(finalWebRequest->resourceRequest().cfURLRequest(UpdateHTTPBody)).leakRef();
 }
 
 void WebDownload::didReceiveAuthenticationChallenge(CFURLAuthChallengeRef challenge)
 {
     // Try previously stored credential first.
     if (!CFURLAuthChallengeGetPreviousFailureCount(challenge)) {
-        Credential credential = CredentialStorage::defaultCredentialStorage().get(emptyString(), core(CFURLAuthChallengeGetProtectionSpace(challenge)));
+        Credential credential = NetworkStorageSessionMap::defaultStorageSession().credentialStorage().get(emptyString(), core(CFURLAuthChallengeGetProtectionSpace(challenge)));
         if (!credential.isEmpty()) {
-            RetainPtr<CFURLCredentialRef> cfCredential = adoptCF(createCF(credential));
+            auto cfCredential = createCF(credential);
             CFURLDownloadUseCredential(m_download.get(), cfCredential.get(), challenge);
             return;
         }
@@ -411,9 +408,9 @@ void WebDownload::didReceiveData(CFIndex length)
 {
 #ifndef NDEBUG
     m_received += length;
-    double current = currentTime();
-    if (current - m_dataTime > 2.0)
-        LOG(Download, "DOWNLOAD - %p hanged for %.3f seconds - Received %i bytes for a total of %i", this, current - m_dataTime, length, m_received);
+    WallTime current = WallTime::now();
+    if ((current - m_dataTime) > 2_s)
+        LOG(Download, "DOWNLOAD - %p hanged for %.3f seconds - Received %i bytes for a total of %i", this, (current - m_dataTime).seconds(), length, m_received);
     m_dataTime = current;
 #endif
     if (FAILED(m_delegate->didReceiveDataOfLength(this, length)))
@@ -458,7 +455,7 @@ void WebDownload::didCreateDestination(CFURLRef destination)
 void WebDownload::didFinish()
 {
 #ifndef NDEBUG
-    LOG(Download, "DOWNLOAD - Finished %p after %i bytes and %.3f seconds", this, m_received, currentTime() - m_startTime);
+    LOG(Download, "DOWNLOAD - Finished %p after %i bytes and %.3f seconds", this, m_received, (WallTime::now() - m_startTime).seconds());
 #endif
 
     ASSERT(!m_bundlePath.isEmpty() && !m_destination.isEmpty());
@@ -466,7 +463,7 @@ void WebDownload::didFinish()
 
     // We try to rename the bundle to the final file name.  If that fails, we give the delegate one more chance to chose
     // the final file name, then we just leave it
-    if (!MoveFileEx(m_bundlePath.charactersWithNullTermination().data(), m_destination.charactersWithNullTermination().data(), 0)) {
+    if (!MoveFileEx(m_bundlePath.wideCharacters().data(), m_destination.wideCharacters().data(), 0)) {
         LOG_ERROR("Failed to move bundle %s to %s on completion\nError - %i", m_bundlePath.ascii().data(), m_destination.ascii().data(), GetLastError());
         
         bool reportBundlePathAsFinalPath = true;
@@ -478,7 +475,7 @@ void WebDownload::didFinish()
         // The call to m_delegate->decideDestinationWithSuggestedFilename() should have changed our destination, so we'll try the move
         // one last time.
         if (!m_destination.isEmpty())
-            if (MoveFileEx(m_bundlePath.charactersWithNullTermination().data(), m_destination.charactersWithNullTermination().data(), 0))
+            if (MoveFileEx(m_bundlePath.wideCharacters().data(), m_destination.wideCharacters().data(), 0))
                 reportBundlePathAsFinalPath = false;
 
         // We either need to tell the delegate our final filename is the bundle filename, or is the file name they just told us to use

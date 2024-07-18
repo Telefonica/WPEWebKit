@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2014, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,13 +27,30 @@
 
 namespace JSC {
 
-ALWAYS_INLINE bool isIOS()
+ALWAYS_INLINE constexpr bool isDarwin()
 {
-#if PLATFORM(IOS)
+#if OS(DARWIN)
     return true;
 #else
     return false;
 #endif
+}
+
+ALWAYS_INLINE constexpr bool isIOS()
+{
+#if PLATFORM(IOS_FAMILY)
+    return true;
+#else
+    return false;
+#endif
+}
+
+template<size_t bits, typename Type>
+ALWAYS_INLINE constexpr bool isInt(Type t)
+{
+    constexpr size_t shift = sizeof(Type) * CHAR_BIT - bits;
+    static_assert(sizeof(Type) * CHAR_BIT > shift, "shift is larger than the size of the value");
+    return ((t << shift) >> shift) == t;
 }
 
 ALWAYS_INLINE bool isInt9(int32_t value)
@@ -63,6 +80,15 @@ ALWAYS_INLINE bool isValidScaledUImm12(int32_t offset)
 ALWAYS_INLINE bool isValidSignedImm9(int32_t value)
 {
     return isInt9(value);
+}
+
+ALWAYS_INLINE bool isValidSignedImm7(int32_t value, int alignmentShiftAmount)
+{
+    constexpr int32_t disallowedHighBits = 32 - 7;
+    int32_t shiftedValue = value >> alignmentShiftAmount;
+    bool fitsIn7Bits = shiftedValue == ((shiftedValue << disallowedHighBits) >> disallowedHighBits);
+    bool hasCorrectAlignment = value == (shiftedValue << alignmentShiftAmount);
+    return fitsIn7Bits && hasCorrectAlignment;
 }
 
 class ARM64LogicalImmediate {
@@ -282,7 +308,7 @@ private:
         return immN << 12 | immr << 6 | imms;
     }
 
-    static const int InvalidLogicalImmediate = -1;
+    static constexpr int InvalidLogicalImmediate = -1;
 
     int m_value;
 };

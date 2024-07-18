@@ -40,13 +40,7 @@
 
 namespace WebKit {
 
-static uint64_t generatePageGroupID()
-{
-    static uint64_t uniquePageGroupID = 1;
-    return uniquePageGroupID++;
-}
-
-typedef HashMap<uint64_t, WebPageGroup*> WebPageGroupMap;
+typedef HashMap<PageGroupIdentifier, WebPageGroup*> WebPageGroupMap;
 
 static WebPageGroupMap& webPageGroupMap()
 {
@@ -54,47 +48,52 @@ static WebPageGroupMap& webPageGroupMap()
     return map;
 }
 
-Ref<WebPageGroup> WebPageGroup::create(const String& identifier, bool visibleToInjectedBundle, bool visibleToHistoryClient)
+Ref<WebPageGroup> WebPageGroup::create(const String& identifier)
 {
-    return adoptRef(*new WebPageGroup(identifier, visibleToInjectedBundle, visibleToHistoryClient));
+    return adoptRef(*new WebPageGroup(identifier));
 }
 
-Ref<WebPageGroup> WebPageGroup::createNonNull(const String& identifier, bool visibleToInjectedBundle, bool visibleToHistoryClient)
-{
-    return adoptRef(*new WebPageGroup(identifier, visibleToInjectedBundle, visibleToHistoryClient));
-}
-
-WebPageGroup* WebPageGroup::get(uint64_t pageGroupID)
+WebPageGroup* WebPageGroup::get(PageGroupIdentifier pageGroupID)
 {
     return webPageGroupMap().get(pageGroupID);
 }
 
-static WebPageGroupData pageGroupData(const String& identifier, bool visibleToInjectedBundle, bool visibleToHistoryClient)
+void WebPageGroup::forEach(Function<void(WebPageGroup&)>&& function)
+{
+    auto allGroups = copyToVectorOf<RefPtr<WebPageGroup>>(webPageGroupMap().values());
+    for (auto& group : allGroups) {
+        if (group)
+            function(*group);
+    }
+}
+
+static WebPageGroupData pageGroupData(const String& identifier)
 {
     WebPageGroupData data;
 
-    data.pageGroupID = generatePageGroupID();
+    static NeverDestroyed<HashMap<String, PageGroupIdentifier>> map;
+    if (HashMap<String, PageGroupIdentifier>::isValidKey(identifier)) {
+        data.pageGroupID = map.get().ensure(identifier, [] {
+            return PageGroupIdentifier::generate();
+        }).iterator->value;
+    } else
+        data.pageGroupID = PageGroupIdentifier::generate();
 
     if (!identifier.isEmpty())
         data.identifier = identifier;
     else
-        data.identifier = makeString("__uniquePageGroupID-", String::number(data.pageGroupID));
-
-    data.visibleToInjectedBundle = visibleToInjectedBundle;
-    data.visibleToHistoryClient = visibleToHistoryClient;
+        data.identifier = makeString("__uniquePageGroupID-", data.pageGroupID.toUInt64());
 
     return data;
 }
 
 // FIXME: Why does the WebPreferences object here use ".WebKit2" instead of "WebKit2." which all the other constructors use.
 // If it turns out that it's wrong, we can change it to to "WebKit2." and get rid of the globalDebugKeyPrefix from WebPreferences.
-WebPageGroup::WebPageGroup(const String& identifier, bool visibleToInjectedBundle, bool visibleToHistoryClient)
-    : m_data(pageGroupData(identifier, visibleToInjectedBundle, visibleToHistoryClient))
-    , m_preferences(WebPreferences::createWithLegacyDefaults(m_data.identifier, ".WebKit2", "WebKit2."))
+WebPageGroup::WebPageGroup(const String& identifier)
+    : m_data(pageGroupData(identifier))
+    , m_preferences(WebPreferences::createWithLegacyDefaults(m_data.identifier, ".WebKit2"_s, "WebKit2."_s))
     , m_userContentController(WebUserContentControllerProxy::create())
 {
-    m_data.userContentControllerIdentifier = m_userContentController->identifier();
-
     webPageGroupMap().set(m_data.pageGroupID, this);
 }
 
@@ -103,12 +102,12 @@ WebPageGroup::~WebPageGroup()
     webPageGroupMap().remove(pageGroupID());
 }
 
-void WebPageGroup::addPage(WebPageProxy* page)
+void WebPageGroup::addPage(WebPageProxy& page)
 {
     m_pages.add(page);
 }
 
-void WebPageGroup::removePage(WebPageProxy* page)
+void WebPageGroup::removePage(WebPageProxy& page)
 {
     m_pages.remove(page);
 }
@@ -121,7 +120,7 @@ void WebPageGroup::setPreferences(WebPreferences* preferences)
     m_preferences = preferences;
 
     for (auto& webPageProxy : m_pages)
-        webPageProxy->setPreferences(*m_preferences);
+        webPageProxy.setPreferences(*m_preferences);
 }
 
 WebPreferences& WebPageGroup::preferences() const
@@ -129,17 +128,9 @@ WebPreferences& WebPageGroup::preferences() const
     return *m_preferences;
 }
 
-void WebPageGroup::preferencesDidChange()
-{
-    for (HashSet<WebPageProxy*>::iterator it = m_pages.begin(), end = m_pages.end(); it != end; ++it) {
-        WebPageProxy* page = *it;
-        page->preferencesDidChange();
-    }
-}
-
 WebUserContentControllerProxy& WebPageGroup::userContentController()
 {
-    return *m_userContentController;
+    return m_userContentController;
 }
 
 } // namespace WebKit

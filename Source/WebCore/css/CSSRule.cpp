@@ -1,7 +1,7 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2005, 2006, 2007, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2002-2021 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -34,11 +34,7 @@ struct SameSizeAsCSSRule : public RefCounted<SameSizeAsCSSRule> {
     void* pointerUnion;
 };
 
-COMPILE_ASSERT(sizeof(CSSRule) == sizeof(SameSizeAsCSSRule), CSSRule_should_stay_small);
-
-#if ENABLE(CSS_DEVICE_ADAPTATION)
-COMPILE_ASSERT(StyleRuleBase::Viewport == static_cast<StyleRuleBase::Type>(CSSRule::WEBKIT_VIEWPORT_RULE), enums_should_match);
-#endif
+static_assert(sizeof(CSSRule) == sizeof(SameSizeAsCSSRule), "CSSRule should stay small");
 
 ExceptionOr<void> CSSRule::setCssText(const String&)
 {

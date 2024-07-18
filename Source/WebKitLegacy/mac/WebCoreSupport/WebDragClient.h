@@ -30,6 +30,7 @@
 @class WebView;
 
 class WebDragClient : public WebCore::DragClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebDragClient(WebView*);
 
@@ -37,17 +38,14 @@ public:
 
     void willPerformDragDestinationAction(WebCore::DragDestinationAction, const WebCore::DragData&) override;
     void willPerformDragSourceAction(WebCore::DragSourceAction, const WebCore::IntPoint&, WebCore::DataTransfer&) override;
-    void dragControllerDestroyed() override;
-    WebCore::DragSourceAction dragSourceActionMaskForPoint(const WebCore::IntPoint& windowPoint) override;
+    OptionSet<WebCore::DragSourceAction> dragSourceActionMaskForPoint(const WebCore::IntPoint& windowPoint) override;
     void startDrag(WebCore::DragItem, WebCore::DataTransfer&, WebCore::Frame&) override;
 
     void beginDrag(WebCore::DragItem, WebCore::Frame&, const WebCore::IntPoint& mouseDownPosition, const WebCore::IntPoint& mouseDraggedPosition, WebCore::DataTransfer&, WebCore::DragSourceAction) override;
 
-    void declareAndWriteDragImage(const String& pasteboardName, WebCore::Element&, const WebCore::URL&, const String&, WebCore::Frame*) override;
-#if ENABLE(ATTACHMENT_ELEMENT)
-    void declareAndWriteAttachment(const String& pasteboardName, WebCore::Element&, const WebCore::URL&, const String& path, WebCore::Frame*) override;
-#endif
+    void declareAndWriteDragImage(const String& pasteboardName, WebCore::Element&, const URL&, const String&, WebCore::Frame*) override;
     void didConcludeEditDrag() override;
+
 private:
     WebView* m_webView;
 };

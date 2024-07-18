@@ -8,10 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_AUDIO_DEVICE_FILE_AUDIO_DEVICE_FACTORY_H
-#define WEBRTC_AUDIO_DEVICE_FILE_AUDIO_DEVICE_FACTORY_H
+#ifndef AUDIO_DEVICE_FILE_AUDIO_DEVICE_FACTORY_H_
+#define AUDIO_DEVICE_FILE_AUDIO_DEVICE_FACTORY_H_
 
-#include "webrtc/common_types.h"
+#include <stdint.h>
+
+#include "absl/strings/string_view.h"
 
 namespace webrtc {
 
@@ -23,15 +25,15 @@ class FileAudioDevice;
 // intended for test tools which use the audio device module.
 class FileAudioDeviceFactory {
  public:
-  static FileAudioDevice* CreateFileAudioDevice(const int32_t id);
+  static FileAudioDevice* CreateFileAudioDevice();
 
   // The input file must be a readable 48k stereo raw file. The output
   // file must be writable. The strings will be copied.
-  static void SetFilenamesToUse(const char* inputAudioFilename,
-                                const char* outputAudioFilename);
+  static void SetFilenamesToUse(absl::string_view inputAudioFilename,
+                                absl::string_view outputAudioFilename);
 
  private:
-  static const uint32_t MAX_FILENAME_LEN = 512;
+  enum : uint32_t { MAX_FILENAME_LEN = 512 };
   static bool _isConfigured;
   static char _inputAudioFilename[MAX_FILENAME_LEN];
   static char _outputAudioFilename[MAX_FILENAME_LEN];
@@ -39,4 +41,4 @@ class FileAudioDeviceFactory {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_AUDIO_DEVICE_FILE_AUDIO_DEVICE_FACTORY_H
+#endif  // AUDIO_DEVICE_FILE_AUDIO_DEVICE_FACTORY_H_

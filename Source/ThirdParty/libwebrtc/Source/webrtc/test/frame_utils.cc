@@ -8,12 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "test/frame_utils.h"
+
 #include <stdio.h>
 #include <string.h>
 
-#include "webrtc/api/video/i420_buffer.h"
-#include "webrtc/api/video/video_frame.h"
-#include "webrtc/test/frame_utils.h"
+#include "api/video/i420_buffer.h"
+#include "api/video/nv12_buffer.h"
+#include "api/video/video_frame.h"
 
 namespace webrtc {
 namespace test {
@@ -59,18 +61,17 @@ bool FrameBufsEqual(const rtc::scoped_refptr<webrtc::VideoFrameBuffer>& f1,
 
   rtc::scoped_refptr<webrtc::I420BufferInterface> f1_i420 = f1->ToI420();
   rtc::scoped_refptr<webrtc::I420BufferInterface> f2_i420 = f2->ToI420();
-  return EqualPlane(f1_i420->DataY(), f2_i420->DataY(),
-                    f1_i420->StrideY(), f2_i420->StrideY(),
-                    f1_i420->width(), f1_i420->height()) &&
-         EqualPlane(f1_i420->DataU(), f2_i420->DataU(),
-                    f1_i420->StrideU(), f2_i420->StrideU(),
-                    f1_i420->ChromaWidth(), f1_i420->ChromaHeight()) &&
-         EqualPlane(f1_i420->DataV(), f2_i420->DataV(),
-                    f1_i420->StrideV(), f2_i420->StrideV(),
-                    f1_i420->ChromaWidth(), f1_i420->ChromaHeight());
+  return EqualPlane(f1_i420->DataY(), f2_i420->DataY(), f1_i420->StrideY(),
+                    f2_i420->StrideY(), f1_i420->width(), f1_i420->height()) &&
+         EqualPlane(f1_i420->DataU(), f2_i420->DataU(), f1_i420->StrideU(),
+                    f2_i420->StrideU(), f1_i420->ChromaWidth(),
+                    f1_i420->ChromaHeight()) &&
+         EqualPlane(f1_i420->DataV(), f2_i420->DataV(), f1_i420->StrideV(),
+                    f2_i420->StrideV(), f1_i420->ChromaWidth(),
+                    f1_i420->ChromaHeight());
 }
 
-rtc::scoped_refptr<I420Buffer> ReadI420Buffer(int width, int height, FILE *f) {
+rtc::scoped_refptr<I420Buffer> ReadI420Buffer(int width, int height, FILE* f) {
   int half_width = (width + 1) / 2;
   rtc::scoped_refptr<I420Buffer> buffer(
       // Explicit stride, no padding between rows.
@@ -83,6 +84,18 @@ rtc::scoped_refptr<I420Buffer> ReadI420Buffer(int width, int height, FILE *f) {
   if (fread(buffer->MutableDataU(), 1, size_uv, f) < size_uv)
     return nullptr;
   if (fread(buffer->MutableDataV(), 1, size_uv, f) < size_uv)
+    return nullptr;
+  return buffer;
+}
+
+rtc::scoped_refptr<NV12Buffer> ReadNV12Buffer(int width, int height, FILE* f) {
+  rtc::scoped_refptr<NV12Buffer> buffer(NV12Buffer::Create(width, height));
+  size_t size_y = static_cast<size_t>(width) * height;
+  size_t size_uv = static_cast<size_t>(width + width % 2) * ((height + 1) / 2);
+
+  if (fread(buffer->MutableDataY(), 1, size_y, f) < size_y)
+    return nullptr;
+  if (fread(buffer->MutableDataUV(), 1, size_uv, f) < size_uv)
     return nullptr;
   return buffer;
 }

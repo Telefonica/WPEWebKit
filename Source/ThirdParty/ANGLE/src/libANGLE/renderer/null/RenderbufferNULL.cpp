@@ -14,30 +14,39 @@
 namespace rx
 {
 
-RenderbufferNULL::RenderbufferNULL() : RenderbufferImpl()
+RenderbufferNULL::RenderbufferNULL(const gl::RenderbufferState &state) : RenderbufferImpl(state) {}
+
+RenderbufferNULL::~RenderbufferNULL() {}
+
+angle::Result RenderbufferNULL::setStorage(const gl::Context *context,
+                                           GLenum internalformat,
+                                           GLsizei width,
+                                           GLsizei height)
 {
+    return angle::Result::Continue;
 }
 
-RenderbufferNULL::~RenderbufferNULL()
+angle::Result RenderbufferNULL::setStorageMultisample(const gl::Context *context,
+                                                      GLsizei samples,
+                                                      GLenum internalformat,
+                                                      GLsizei width,
+                                                      GLsizei height,
+                                                      gl::MultisamplingMode mode)
 {
+    return angle::Result::Continue;
 }
 
-gl::Error RenderbufferNULL::setStorage(GLenum internalformat, size_t width, size_t height)
+angle::Result RenderbufferNULL::setStorageEGLImageTarget(const gl::Context *context,
+                                                         egl::Image *image)
 {
-    return gl::NoError();
+    return angle::Result::Continue;
 }
 
-gl::Error RenderbufferNULL::setStorageMultisample(size_t samples,
-                                                  GLenum internalformat,
-                                                  size_t width,
-                                                  size_t height)
+angle::Result RenderbufferNULL::initializeContents(const gl::Context *context,
+                                                   GLenum binding,
+                                                   const gl::ImageIndex &imageIndex)
 {
-    return gl::NoError();
-}
-
-gl::Error RenderbufferNULL::setStorageEGLImageTarget(egl::Image *image)
-{
-    return gl::NoError();
+    return angle::Result::Continue;
 }
 
 }  // namespace rx

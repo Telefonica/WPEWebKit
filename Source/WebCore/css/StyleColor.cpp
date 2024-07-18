@@ -37,25 +37,48 @@
 
 namespace WebCore {
 
-Color StyleColor::colorFromKeyword(CSSValueID keyword)
+Color StyleColor::colorFromKeyword(CSSValueID keyword, OptionSet<StyleColorOptions> options)
 {
     if (const char* valueName = getValueName(keyword)) {
         if (const NamedColor* namedColor = findColor(valueName, strlen(valueName)))
-            return Color(namedColor->ARGBValue);
+            return asSRGBA(PackedColor::ARGB { namedColor->ARGBValue });
     }
-    return RenderTheme::singleton().systemColor(keyword);
+
+    ASSERT(!isAbsoluteColorKeyword(keyword));
+    return RenderTheme::singleton().systemColor(keyword, options);
 }
 
-bool StyleColor::isColorKeyword(CSSValueID id)
+static bool isVGAPaletteColor(CSSValueID id)
 {
-    return (id >= CSSValueAlpha && id <= CSSValueWebkitText)
-        || (id >= CSSValueAliceblue && id <= CSSValueYellowgreen)
-        || id == CSSValueMenu || isSystemColor(id);
+    // https://drafts.csswg.org/css-color-4/#named-colors
+    // "16 of CSS’s named colors come from the VGA palette originally, and were then adopted into HTML"
+    return (id >= CSSValueAqua && id <= CSSValueYellow) || id == CSSValueGrey;
 }
 
-bool StyleColor::isSystemColor(CSSValueID id)
+static bool isNonVGANamedColor(CSSValueID id)
 {
-    return (id >= CSSValueActiveborder && id <= CSSValueAppleSystemYellow) || id == CSSValueMenu || id == CSSValueWebkitFocusRingColor;
+    // https://drafts.csswg.org/css-color-4/#named-colors
+    return id >= CSSValueAliceblue && id <= CSSValueYellowgreen;
+}
+
+bool StyleColor::isAbsoluteColorKeyword(CSSValueID id)
+{
+    // https://drafts.csswg.org/css-color-4/#typedef-absolute-color
+    return isVGAPaletteColor(id) || isNonVGANamedColor(id) || id == CSSValueAlpha || id == CSSValueTransparent;
+}
+
+bool StyleColor::isSystemColorKeyword(CSSValueID id)
+{
+    // https://drafts.csswg.org/css-color-4/#css-system-colors
+    // https://drafts.csswg.org/css-color-4/#deprecated-system-colors
+    return (id >= CSSValueWebkitLink && id <= CSSValueWebkitFocusRingColor) || id == CSSValueWebkitText || id == CSSValueMenu || id == CSSValueText;
+}
+
+bool StyleColor::isColorKeyword(CSSValueID id, OptionSet<CSSColorType> allowedColorTypes)
+{
+    return (allowedColorTypes.contains(CSSColorType::Absolute) && isAbsoluteColorKeyword(id))
+        || (allowedColorTypes.contains(CSSColorType::Current) && id == CSSValueCurrentcolor)
+        || (allowedColorTypes.contains(CSSColorType::System) && isSystemColorKeyword(id));
 }
 
 } // namespace WebCore

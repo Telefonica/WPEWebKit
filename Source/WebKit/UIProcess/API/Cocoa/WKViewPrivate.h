@@ -26,10 +26,11 @@
 #if !TARGET_OS_IPHONE
 
 #import <WebKit/WKBase.h>
-#import <WebKit/WKImmediateActionTypes.h>
 #import <WebKit/WKLayoutMode.h>
 #import <WebKit/WKView.h>
 #import <WebKit/_WKOverlayScrollbarStyle.h>
+
+@class _WKLinkIconParameters;
 
 @interface WKView (Private)
 
@@ -57,6 +58,7 @@
 + (void)hideWordDefinitionWindow;
 
 @property (readwrite) NSSize minimumSizeForAutoLayout;
+@property (readwrite) NSSize sizeToContentAutoSizeMaximumSize;
 @property (readwrite) BOOL shouldClipToVisibleRect;
 @property (readwrite) BOOL shouldExpandToViewHeightForAutoLayout;
 @property (readonly, getter=isUsingUISideCompositing) BOOL usingUISideCompositing;
@@ -76,18 +78,16 @@
 
 @property (nonatomic, setter=_setViewScale:) CGFloat _viewScale;
 
-@property (nonatomic, setter=_setOverrideDeviceScaleFactor:) CGFloat _overrideDeviceScaleFactor WK_API_AVAILABLE(macosx(10.11));
+@property (nonatomic, setter=_setOverrideDeviceScaleFactor:) CGFloat _overrideDeviceScaleFactor WK_API_AVAILABLE(macos(10.11));
 
 @property (nonatomic, setter=_setAutomaticallyAdjustsContentInsets:) BOOL _automaticallyAdjustsContentInsets;
 
 @property (readonly) NSColor *_pageExtendedBackgroundColor;
 @property (copy, nonatomic) NSColor *underlayColor;
 
-#if WK_API_ENABLED
-@property (strong, nonatomic, setter=_setInspectorAttachmentView:) NSView *_inspectorAttachmentView WK_API_AVAILABLE(macosx(10.11));
-#endif
+@property (nonatomic, setter=_setBackgroundColor:) NSColor *_backgroundColor WK_API_AVAILABLE(macos(10.14));
 
-@property (nonatomic, readwrite, setter=_setRequiresUserActionForEditingControlsManager:) BOOL _requiresUserActionForEditingControlsManager;
+@property (strong, nonatomic, setter=_setInspectorAttachmentView:) NSView *_inspectorAttachmentView WK_API_AVAILABLE(macos(10.11));
 
 - (NSView*)fullScreenPlaceholderView;
 - (NSWindow*)createFullScreenWindow;
@@ -131,13 +131,25 @@
 - (void)_didChangeContentSize:(NSSize)newSize;
 
 - (void)_gestureEventWasNotHandledByWebCore:(NSEvent *)event;
+- (void)_simulateMouseMove:(NSEvent *)event;
+
+- (void)_setShouldSuppressFirstResponderChanges:(BOOL)shouldSuppress WK_API_AVAILABLE(macos(10.13.4));
 
 @property (nonatomic, readwrite, setter=_setWantsMediaPlaybackControlsView:) BOOL _wantsMediaPlaybackControlsView;
 @property (nonatomic, readonly)  id _mediaPlaybackControlsView;
 - (void)_addMediaPlaybackControlsView:(id)mediaPlaybackControlsView;
 - (void)_removeMediaPlaybackControlsView;
 
-- (void)_doAfterNextPresentationUpdate:(void (^)(void))updateBlock WK_API_AVAILABLE(macosx(WK_MAC_TBA));
+- (void)_doAfterNextPresentationUpdate:(void (^)(void))updateBlock WK_API_AVAILABLE(macos(10.13.4));
+
+@property (nonatomic, readwrite, setter=_setUseSystemAppearance:) BOOL _useSystemAppearance WK_API_AVAILABLE(macos(10.14));
+
+@end
+
+@interface WKView (PrivateForSubclassToDefine)
+
+// This a method that subclasses can define and WKView itself does not define. WKView will call the method if it is present.
+- (void)_shouldLoadIconWithParameters:(_WKLinkIconParameters *)parameters completionHandler:(void (^)(void (^)(NSData *)))completionHandler;
 
 @end
 

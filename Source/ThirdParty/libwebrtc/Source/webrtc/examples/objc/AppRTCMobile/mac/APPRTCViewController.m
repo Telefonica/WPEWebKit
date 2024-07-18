@@ -12,9 +12,8 @@
 
 #import <AVFoundation/AVFoundation.h>
 
-#import "WebRTC/RTCMTLNSVideoView.h"
-#import "WebRTC/RTCNSGLVideoView.h"
-#import "WebRTC/RTCVideoTrack.h"
+#import "sdk/objc/api/peerconnection/RTCVideoTrack.h"
+#import "sdk/objc/components/renderer/metal/RTCMTLNSVideoView.h"
 
 #import "ARDAppClient.h"
 #import "ARDCaptureController.h"
@@ -37,14 +36,15 @@ static NSUInteger const kBottomViewHeight = 200;
 @interface APPRTCMainView : NSView
 
 @property(nonatomic, weak) id<APPRTCMainViewDelegate> delegate;
-@property(nonatomic, readonly) NSView<RTCVideoRenderer>* localVideoView;
-@property(nonatomic, readonly) NSView<RTCVideoRenderer>* remoteVideoView;
+@property(nonatomic, readonly) NSView<RTC_OBJC_TYPE(RTCVideoRenderer)>* localVideoView;
+@property(nonatomic, readonly) NSView<RTC_OBJC_TYPE(RTCVideoRenderer)>* remoteVideoView;
+@property(nonatomic, readonly) NSTextView* logView;
 
 - (void)displayLogMessage:(NSString*)message;
 
 @end
 
-@interface APPRTCMainView () <NSTextFieldDelegate, RTCNSGLVideoViewDelegate>
+@interface APPRTCMainView () <NSTextFieldDelegate, RTC_OBJC_TYPE (RTCVideoViewDelegate)>
 @end
 @implementation APPRTCMainView  {
   NSScrollView* _scrollView;
@@ -52,7 +52,6 @@ static NSUInteger const kBottomViewHeight = 200;
   NSButton* _connectButton;
   NSButton* _loopbackButton;
   NSTextField* _roomField;
-  NSTextView* _logView;
   CGSize _localVideoSize;
   CGSize _remoteVideoSize;
 }
@@ -60,14 +59,13 @@ static NSUInteger const kBottomViewHeight = 200;
 @synthesize delegate = _delegate;
 @synthesize localVideoView = _localVideoView;
 @synthesize remoteVideoView = _remoteVideoView;
-
+@synthesize logView = _logView;
 
 - (void)displayLogMessage:(NSString *)message {
   dispatch_async(dispatch_get_main_queue(), ^{
-    _logView.string =
-        [NSString stringWithFormat:@"%@%@\n", _logView.string, message];
-    NSRange range = NSMakeRange(_logView.string.length, 0);
-    [_logView scrollRangeToVisible:range];
+    self.logView.string = [NSString stringWithFormat:@"%@%@\n", self.logView.string, message];
+    NSRange range = NSMakeRange(self.logView.string.length, 0);
+    [self.logView scrollRangeToVisible:range];
   });
 }
 
@@ -179,10 +177,9 @@ static NSUInteger const kBottomViewHeight = 200;
   [self setNeedsUpdateConstraints:YES];
 }
 
-#pragma mark - RTCNSGLVideoViewDelegate
+#pragma mark - RTCVideoViewDelegate
 
-- (void)videoView:(RTCNSGLVideoView*)videoView
-    didChangeVideoSize:(NSSize)size {
+- (void)videoView:(id<RTC_OBJC_TYPE(RTCVideoRenderer)>)videoView didChangeVideoSize:(CGSize)size {
   if (videoView == _remoteVideoView) {
     _remoteVideoSize = size;
   } else if (videoView == _localVideoView) {
@@ -218,37 +215,8 @@ static NSUInteger const kBottomViewHeight = 200;
   [_scrollView setDocumentView:_logView];
   [self addSubview:_scrollView];
 
-// NOTE (daniela): Ignoring Clang diagonstic here.
-// We're performing run time check to make sure class is available on runtime.
-// If not we're providing sensible default.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpartial-availability"
-  if ([RTCMTLNSVideoView class] && [RTCMTLNSVideoView isMetalAvailable]) {
-    _remoteVideoView = [[RTCMTLNSVideoView alloc] initWithFrame:NSZeroRect];
-    _localVideoView = [[RTCMTLNSVideoView alloc] initWithFrame:NSZeroRect];
-  }
-#pragma clang diagnostic pop
-  if (_remoteVideoView == nil) {
-    NSOpenGLPixelFormatAttribute attributes[] = {
-      NSOpenGLPFADoubleBuffer,
-      NSOpenGLPFADepthSize, 24,
-      NSOpenGLPFAOpenGLProfile,
-      NSOpenGLProfileVersion3_2Core,
-      0
-    };
-    NSOpenGLPixelFormat* pixelFormat =
-    [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
-
-    RTCNSGLVideoView* remote =
-        [[RTCNSGLVideoView alloc] initWithFrame:NSZeroRect pixelFormat:pixelFormat];
-    remote.delegate = self;
-    _remoteVideoView = remote;
-
-    RTCNSGLVideoView* local =
-        [[RTCNSGLVideoView alloc] initWithFrame:NSZeroRect pixelFormat:pixelFormat];
-    local.delegate = self;
-    _localVideoView = local;
-  }
+  _remoteVideoView = [[RTC_OBJC_TYPE(RTCMTLNSVideoView) alloc] initWithFrame:NSZeroRect];
+  _localVideoView = [[RTC_OBJC_TYPE(RTCMTLNSVideoView) alloc] initWithFrame:NSZeroRect];
 
   [_remoteVideoView setTranslatesAutoresizingMaskIntoConstraints:NO];
   [self addSubview:_remoteVideoView];
@@ -270,7 +238,7 @@ static NSUInteger const kBottomViewHeight = 200;
   _connectButton = [[NSButton alloc] initWithFrame:NSZeroRect];
   [_connectButton setTranslatesAutoresizingMaskIntoConstraints:NO];
   _connectButton.title = @"Start call";
-  _connectButton.bezelStyle = NSRoundedBezelStyle;
+  _connectButton.bezelStyle = NSBezelStyleSmallSquare;
   _connectButton.target = self;
   _connectButton.action = @selector(startCall:);
   [_actionItemsView addSubview:_connectButton];
@@ -278,7 +246,7 @@ static NSUInteger const kBottomViewHeight = 200;
   _loopbackButton = [[NSButton alloc] initWithFrame:NSZeroRect];
   [_loopbackButton setTranslatesAutoresizingMaskIntoConstraints:NO];
   _loopbackButton.title = @"Loopback";
-  [_loopbackButton setButtonType:NSSwitchButton];
+  [_loopbackButton setButtonType:NSButtonTypeSwitch];
   [_actionItemsView addSubview:_loopbackButton];
 }
 
@@ -300,8 +268,8 @@ static NSUInteger const kBottomViewHeight = 200;
 
 @implementation APPRTCViewController {
   ARDAppClient* _client;
-  RTCVideoTrack* _localVideoTrack;
-  RTCVideoTrack* _remoteVideoTrack;
+  RTC_OBJC_TYPE(RTCVideoTrack) * _localVideoTrack;
+  RTC_OBJC_TYPE(RTCVideoTrack) * _remoteVideoTrack;
   ARDCaptureController* _captureController;
 }
 
@@ -358,21 +326,21 @@ static NSUInteger const kBottomViewHeight = 200;
 }
 
 - (void)appClient:(ARDAppClient*)client
-    didCreateLocalCapturer:(RTCCameraVideoCapturer*)localCapturer {
+    didCreateLocalCapturer:(RTC_OBJC_TYPE(RTCCameraVideoCapturer) *)localCapturer {
   _captureController =
       [[ARDCaptureController alloc] initWithCapturer:localCapturer
                                             settings:[[ARDSettingsModel alloc] init]];
   [_captureController startCapture];
 }
 
-- (void)appClient:(ARDAppClient *)client
-    didReceiveLocalVideoTrack:(RTCVideoTrack *)localVideoTrack {
+- (void)appClient:(ARDAppClient*)client
+    didReceiveLocalVideoTrack:(RTC_OBJC_TYPE(RTCVideoTrack) *)localVideoTrack {
   _localVideoTrack = localVideoTrack;
   [_localVideoTrack addRenderer:self.mainView.localVideoView];
 }
 
-- (void)appClient:(ARDAppClient *)client
-    didReceiveRemoteVideoTrack:(RTCVideoTrack *)remoteVideoTrack {
+- (void)appClient:(ARDAppClient*)client
+    didReceiveRemoteVideoTrack:(RTC_OBJC_TYPE(RTCVideoTrack) *)remoteVideoTrack {
   _remoteVideoTrack = remoteVideoTrack;
   [_remoteVideoTrack addRenderer:self.mainView.remoteVideoView];
 }

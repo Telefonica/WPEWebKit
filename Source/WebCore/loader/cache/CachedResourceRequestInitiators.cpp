@@ -29,10 +29,12 @@
 namespace WebCore {
 
 CachedResourceRequestInitiators::CachedResourceRequestInitiators()
-    : css("css", AtomicString::ConstructFromLiteral)
-    , fetch("fetch", AtomicString::ConstructFromLiteral)
-    , icon("icon", AtomicString::ConstructFromLiteral)
-    , xmlhttprequest("xmlhttprequest", AtomicString::ConstructFromLiteral)
+    : css("css"_s)
+    , eventsource("eventsource"_s)
+    , fetch("fetch"_s)
+    , icon("icon"_s)
+    , navigation("navigation"_s)
+    , xmlhttprequest("xmlhttprequest"_s)
 {
 }
 

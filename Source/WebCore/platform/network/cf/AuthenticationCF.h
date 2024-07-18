@@ -28,6 +28,7 @@
 #if USE(CFURLCONNECTION)
 
 #include <CFNetwork/CFURLCredentialPriv.h>
+#include <wtf/Forward.h>
 
 typedef struct _CFURLAuthChallenge* CFURLAuthChallengeRef;
 typedef struct _CFURLProtectionSpace* CFURLProtectionSpaceRef;
@@ -38,19 +39,11 @@ class AuthenticationChallenge;
 class Credential;
 class ProtectionSpace;
 
-CFURLAuthChallengeRef createCF(const AuthenticationChallenge&);
-#if PLATFORM(WIN)
-CFURLCredentialRef createCF(const Credential&);
-CFURLProtectionSpaceRef createCF(const ProtectionSpace&);
-#endif
-
-#if PLATFORM(COCOA)
-AuthenticationChallenge core(CFURLAuthChallengeRef);
-#endif
-#if PLATFORM(WIN)
+RetainPtr<CFURLAuthChallengeRef> createCF(const AuthenticationChallenge&);
+RetainPtr<CFURLCredentialRef> createCF(const Credential&);
+RetainPtr<CFURLProtectionSpaceRef> createCF(const ProtectionSpace&);
 Credential core(CFURLCredentialRef);
 ProtectionSpace core(CFURLProtectionSpaceRef);
-#endif
 }
 
 #endif // USE(CFURLCONNECTION)

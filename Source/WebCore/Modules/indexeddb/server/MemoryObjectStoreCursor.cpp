@@ -26,8 +26,6 @@
 #include "config.h"
 #include "MemoryObjectStoreCursor.h"
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBGetResult.h"
 #include "Logging.h"
 #include "MemoryObjectStore.h"
@@ -194,7 +192,7 @@ void MemoryObjectStoreCursor::currentData(IDBGetResult& data)
         data = { m_currentPositionKey, m_currentPositionKey };
     else {
         IDBValue value = { m_objectStore.valueForKeyRange(m_currentPositionKey), { }, { } };
-        data = { m_currentPositionKey, m_currentPositionKey, WTFMove(value) };
+        data = { m_currentPositionKey, m_currentPositionKey, WTFMove(value), m_objectStore.info().keyPath() };
     }
 }
 
@@ -270,7 +268,7 @@ void MemoryObjectStoreCursor::incrementReverseIterator(IDBKeyDataSet& set, const
         didResetIterator = true;
     }
 
-    if (*m_iterator == set.end())
+    if (!m_iterator || *m_iterator == set.end())
         return;
 
     if (key.isValid()) {
@@ -352,5 +350,3 @@ void MemoryObjectStoreCursor::iterate(const IDBKeyData& key, const IDBKeyData& p
 
 } // namespace IDBServer
 } // namespace WebCore
-
-#endif // ENABLE(INDEXED_DATABASE)

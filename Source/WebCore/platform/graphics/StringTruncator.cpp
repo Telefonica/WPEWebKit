@@ -65,12 +65,12 @@ static unsigned centerTruncateToBuffer(const String& string, unsigned length, un
     ASSERT_WITH_SECURITY_IMPLICATION(keepCount < STRING_BUFFER_SIZE);
     
     unsigned omitStart = (keepCount + 1) / 2;
-    NonSharedCharacterBreakIterator it(StringView(string).substring(0, length));
+    NonSharedCharacterBreakIterator it(StringView(string).left(length));
     unsigned omitEnd = boundedTextBreakFollowing(it, omitStart + (length - keepCount) - 1, length);
     omitStart = textBreakAtOrPreceding(it, omitStart);
 
-#if PLATFORM(IOS)
-    // FIXME: We should guard this code behind an editing behavior. Then we can remove the PLATFORM(IOS)-guard.
+#if PLATFORM(IOS_FAMILY)
+    // FIXME: We should guard this code behind an editing behavior. Then we can remove the PLATFORM(IOS_FAMILY)-guard.
     // Or just turn it on for all platforms. It seems like good behavior everywhere. Might be better to generalize
     // it to handle all whitespace, not just "space".
 
@@ -93,7 +93,7 @@ static unsigned centerTruncateToBuffer(const String& string, unsigned length, un
     unsigned truncatedLength = omitStart + shouldInsertEllipsis + (length - omitEnd);
     ASSERT(truncatedLength <= length);
 
-    StringView(string).substring(0, omitStart).getCharactersWithUpconvert(buffer);
+    StringView(string).left(omitStart).getCharactersWithUpconvert(buffer);
     if (shouldInsertEllipsis)
         buffer[omitStart++] = horizontalEllipsis;
     StringView(string).substring(omitEnd, length - omitEnd).getCharactersWithUpconvert(&buffer[omitStart]);
@@ -105,8 +105,8 @@ static unsigned rightTruncateToBuffer(const String& string, unsigned length, uns
     ASSERT_WITH_SECURITY_IMPLICATION(keepCount < length);
     ASSERT_WITH_SECURITY_IMPLICATION(keepCount < STRING_BUFFER_SIZE);
 
-#if PLATFORM(IOS)
-    // FIXME: We should guard this code behind an editing behavior. Then we can remove the PLATFORM(IOS)-guard.
+#if PLATFORM(IOS_FAMILY)
+    // FIXME: We should guard this code behind an editing behavior. Then we can remove the PLATFORM(IOS_FAMILY)-guard.
     // Or just turn it on for all platforms. It seems like good behavior everywhere. Might be better to generalize
     // it to handle all whitespace, not just "space".
 
@@ -119,11 +119,11 @@ static unsigned rightTruncateToBuffer(const String& string, unsigned length, uns
         --keepCount;
 #endif
 
-    NonSharedCharacterBreakIterator it(StringView(string).substring(0, length));
+    NonSharedCharacterBreakIterator it(StringView(string).left(length));
     unsigned keepLength = textBreakAtOrPreceding(it, keepCount);
     unsigned truncatedLength = shouldInsertEllipsis ? keepLength + 1 : keepLength;
 
-    StringView(string).substring(0, keepLength).getCharactersWithUpconvert(buffer);
+    StringView(string).left(keepLength).getCharactersWithUpconvert(buffer);
     if (shouldInsertEllipsis)
         buffer[keepLength] = horizontalEllipsis;
 
@@ -135,9 +135,9 @@ static unsigned rightClipToCharacterBuffer(const String& string, unsigned length
     ASSERT(keepCount < length);
     ASSERT(keepCount < STRING_BUFFER_SIZE);
 
-    NonSharedCharacterBreakIterator it(StringView(string).substring(0, length));
+    NonSharedCharacterBreakIterator it(StringView(string).left(length));
     unsigned keepLength = textBreakAtOrPreceding(it, keepCount);
-    StringView(string).substring(0, keepLength).getCharactersWithUpconvert(buffer);
+    StringView(string).left(keepLength).getCharactersWithUpconvert(buffer);
 
     return keepLength;
 }
@@ -147,12 +147,12 @@ static unsigned rightClipToWordBuffer(const String& string, unsigned length, uns
     ASSERT(keepCount < length);
     ASSERT(keepCount < STRING_BUFFER_SIZE);
 
-    UBreakIterator* it = wordBreakIterator(StringView(string).substring(0, length));
+    UBreakIterator* it = wordBreakIterator(StringView(string).left(length));
     unsigned keepLength = textBreakAtOrPreceding(it, keepCount);
-    StringView(string).substring(0, keepLength).getCharactersWithUpconvert(buffer);
+    StringView(string).left(keepLength).getCharactersWithUpconvert(buffer);
 
-#if PLATFORM(IOS)
-    // FIXME: We should guard this code behind an editing behavior. Then we can remove the PLATFORM(IOS)-guard.
+#if PLATFORM(IOS_FAMILY)
+    // FIXME: We should guard this code behind an editing behavior. Then we can remove the PLATFORM(IOS_FAMILY)-guard.
     // Or just turn it on for all platforms. It seems like good behavior everywhere. Might be better to generalize
     // it to handle all whitespace, not just "space".
 

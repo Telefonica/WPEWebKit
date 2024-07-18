@@ -23,12 +23,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WI.RuntimeObserver = class RuntimeObserver
+WI.RuntimeObserver = class RuntimeObserver extends InspectorBackend.Dispatcher
 {
     // Events defined by the "Runtime" domain.
 
     executionContextCreated(contextPayload)
     {
-        WI.frameResourceManager.executionContextCreated(contextPayload);
+        WI.networkManager.executionContextCreated(contextPayload);
     }
 };

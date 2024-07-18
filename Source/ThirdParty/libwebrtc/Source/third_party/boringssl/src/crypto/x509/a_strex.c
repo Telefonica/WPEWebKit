@@ -56,6 +56,7 @@
 
 #include <openssl/x509.h>
 
+#include <inttypes.h>
 #include <string.h>
 
 #include <openssl/asn1.h>
@@ -63,6 +64,7 @@
 #include <openssl/obj.h>
 
 #include "charmap.h"
+#include "../asn1/asn1_locl.h"
 
 /*
  * ASN1_STRING_print_ex() and X509_NAME_print_ex(). Enhanced string and name
@@ -105,22 +107,20 @@ typedef int char_io (void *arg, const void *buf, int len);
 
 #define HEX_SIZE(type) (sizeof(type)*2)
 
-static int do_esc_char(unsigned long c, unsigned char flags, char *do_quotes,
+static int do_esc_char(uint32_t c, unsigned char flags, char *do_quotes,
                        char_io *io_ch, void *arg)
 {
     unsigned char chflgs, chtmp;
-    char tmphex[HEX_SIZE(long) + 3];
+    char tmphex[HEX_SIZE(uint32_t) + 3];
 
-    if (c > 0xffffffffL)
-        return -1;
     if (c > 0xffff) {
-        BIO_snprintf(tmphex, sizeof tmphex, "\\W%08lX", c);
+        BIO_snprintf(tmphex, sizeof tmphex, "\\W%08" PRIX32, c);
         if (!io_ch(arg, tmphex, 10))
             return -1;
         return 10;
     }
     if (c > 0xff) {
-        BIO_snprintf(tmphex, sizeof tmphex, "\\U%04lX", c);
+        BIO_snprintf(tmphex, sizeof tmphex, "\\U%04" PRIX32, c);
         if (!io_ch(arg, tmphex, 6))
             return -1;
         return 6;
@@ -178,27 +178,46 @@ static int do_buf(unsigned char *buf, int buflen,
                   int type, unsigned char flags, char *quotes, char_io *io_ch,
                   void *arg)
 {
-    int i, outlen, len;
+    int i, outlen, len, charwidth;
     unsigned char orflags, *p, *q;
-    unsigned long c;
+    uint32_t c;
     p = buf;
     q = buf + buflen;
     outlen = 0;
+    charwidth = type & BUF_TYPE_WIDTH_MASK;
+
+    switch (charwidth) {
+    case 4:
+        if (buflen & 3) {
+            OPENSSL_PUT_ERROR(ASN1, ASN1_R_INVALID_UNIVERSALSTRING);
+            return -1;
+        }
+        break;
+    case 2:
+        if (buflen & 1) {
+            OPENSSL_PUT_ERROR(ASN1, ASN1_R_INVALID_BMPSTRING);
+            return -1;
+        }
+        break;
+    default:
+        break;
+    }
+
     while (p != q) {
         if (p == buf && flags & ASN1_STRFLGS_ESC_2253)
             orflags = CHARTYPE_FIRST_ESC_2253;
         else
             orflags = 0;
-        switch (type & BUF_TYPE_WIDTH_MASK) {
+        switch (charwidth) {
         case 4:
-            c = ((unsigned long)*p++) << 24;
-            c |= ((unsigned long)*p++) << 16;
-            c |= ((unsigned long)*p++) << 8;
+            c = ((uint32_t)*p++) << 24;
+            c |= ((uint32_t)*p++) << 16;
+            c |= ((uint32_t)*p++) << 8;
             c |= *p++;
             break;
 
         case 2:
-            c = ((unsigned long)*p++) << 8;
+            c = ((uint32_t)*p++) << 8;
             c |= *p++;
             break;
 
@@ -210,6 +229,7 @@ static int do_buf(unsigned char *buf, int buflen,
             i = UTF8_getc(p, buflen, &c);
             if (i < 0)
                 return -1;      /* Invalid UTF8String */
+            buflen -= i;
             p += i;
             break;
         default:
@@ -276,7 +296,7 @@ static int do_hex_dump(char_io *io_ch, void *arg, unsigned char *buf,
  */
 
 static int do_dump(unsigned long lflags, char_io *io_ch, void *arg,
-                   ASN1_STRING *str)
+                   const ASN1_STRING *str)
 {
     /*
      * Placing the ASN1_STRING in a temp ASN1_TYPE allows the DER encoding to
@@ -334,7 +354,7 @@ static const signed char tag2nbyte[] = {
  */
 
 static int do_print_ex(char_io *io_ch, void *arg, unsigned long lflags,
-                       ASN1_STRING *str)
+                       const ASN1_STRING *str)
 {
     int outlen, len;
     int type;
@@ -426,7 +446,7 @@ static int do_indent(char_io *io_ch, void *arg, int indent)
 #define FN_WIDTH_LN     25
 #define FN_WIDTH_SN     10
 
-static int do_name_ex(char_io *io_ch, void *arg, X509_NAME *n,
+static int do_name_ex(char_io *io_ch, void *arg, const X509_NAME *n,
                       int indent, unsigned long flags)
 {
     int i, prev = -1, orflags, cnt;
@@ -564,7 +584,7 @@ static int do_name_ex(char_io *io_ch, void *arg, X509_NAME *n,
 
 /* Wrappers round the main functions */
 
-int X509_NAME_print_ex(BIO *out, X509_NAME *nm, int indent,
+int X509_NAME_print_ex(BIO *out, const X509_NAME *nm, int indent,
                        unsigned long flags)
 {
     if (flags == XN_FLAG_COMPAT)
@@ -573,7 +593,7 @@ int X509_NAME_print_ex(BIO *out, X509_NAME *nm, int indent,
 }
 
 #ifndef OPENSSL_NO_FP_API
-int X509_NAME_print_ex_fp(FILE *fp, X509_NAME *nm, int indent,
+int X509_NAME_print_ex_fp(FILE *fp, const X509_NAME *nm, int indent,
                           unsigned long flags)
 {
     if (flags == XN_FLAG_COMPAT) {
@@ -590,13 +610,13 @@ int X509_NAME_print_ex_fp(FILE *fp, X509_NAME *nm, int indent,
 }
 #endif
 
-int ASN1_STRING_print_ex(BIO *out, ASN1_STRING *str, unsigned long flags)
+int ASN1_STRING_print_ex(BIO *out, const ASN1_STRING *str, unsigned long flags)
 {
     return do_print_ex(send_bio_chars, out, flags, str);
 }
 
 #ifndef OPENSSL_NO_FP_API
-int ASN1_STRING_print_ex_fp(FILE *fp, ASN1_STRING *str, unsigned long flags)
+int ASN1_STRING_print_ex_fp(FILE *fp, const ASN1_STRING *str, unsigned long flags)
 {
     return do_print_ex(send_fp_chars, fp, flags, str);
 }

@@ -26,12 +26,12 @@
 #pragma once
 
 #include "WebsiteDataType.h"
+#include <WebCore/RegistrableDomain.h>
 #include <WebCore/SecurityOriginData.h>
 #include <WebCore/SecurityOriginHash.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/OptionSet.h>
-#include <wtf/Optional.h>
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
 
@@ -43,17 +43,23 @@ namespace WebKit {
 
 struct WebsiteDataRecord {
     static String displayNameForCookieHostName(const String& hostName);
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    static String displayNameForPluginDataHostName(const String& hostName);
-#endif
+    static String displayNameForHostName(const String& hostName);
+
     static String displayNameForOrigin(const WebCore::SecurityOriginData&);
 
     void add(WebsiteDataType, const WebCore::SecurityOriginData&);
     void addCookieHostName(const String& hostName);
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    void addPluginDataHostName(const String& hostName);
+    void addHSTSCacheHostname(const String& hostName);
+    void addAlternativeServicesHostname(const String& hostName);
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+    void addResourceLoadStatisticsRegistrableDomain(const WebCore::RegistrableDomain&);
 #endif
-    void addOriginWithCredential(const String&);
+
+    bool matches(const WebCore::RegistrableDomain&) const;
+    String topPrivatelyControlledDomain();
+
+    WebsiteDataRecord isolatedCopy() const &;
+    WebsiteDataRecord isolatedCopy() &&;
 
     String displayName;
     OptionSet<WebsiteDataType> types;
@@ -66,13 +72,11 @@ struct WebsiteDataRecord {
 
     HashSet<WebCore::SecurityOriginData> origins;
     HashSet<String> cookieHostNames;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    HashSet<String> pluginDataHostNames;
+    HashSet<String> HSTSCacheHostNames;
+    HashSet<String> alternativeServicesHostNames;
+#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
+    HashSet<WebCore::RegistrableDomain> resourceLoadStatisticsRegistrableDomains;
 #endif
-    HashSet<String> originsWithCredentials;
-
-    bool matchesTopPrivatelyControlledDomain(const String&) const;
-    String topPrivatelyControlledDomain();
 };
 
 }

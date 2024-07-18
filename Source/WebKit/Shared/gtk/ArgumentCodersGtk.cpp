@@ -35,14 +35,13 @@
 #include <gtk/gtk.h>
 #include <wtf/glib/GUniquePtr.h>
 
+namespace IPC {
 using namespace WebCore;
 using namespace WebKit;
 
-namespace IPC {
-
 static void encodeImage(Encoder& encoder, Image& image)
 {
-    RefPtr<ShareableBitmap> bitmap = ShareableBitmap::createShareable(IntSize(image.size()), { });
+    RefPtr<ShareableBitmap> bitmap = ShareableBitmap::create(IntSize(image.size()), { });
     bitmap->createGraphicsContext()->drawImage(image, IntPoint());
 
     ShareableBitmap::Handle handle;
@@ -51,7 +50,7 @@ static void encodeImage(Encoder& encoder, Image& image)
     encoder << handle;
 }
 
-static bool decodeImage(Decoder& decoder, RefPtr<Image>& image)
+static WARN_UNUSED_RETURN bool decodeImage(Decoder& decoder, RefPtr<Image>& image)
 {
     ShareableBitmap::Handle handle;
     if (!decoder.decode(handle))
@@ -93,88 +92,85 @@ void ArgumentCoder<SelectionData>::encode(Encoder& encoder, const SelectionData&
     if (hasImage)
         encodeImage(encoder, *selection.image());
 
-    bool hasUnknownTypeData = selection.hasUnknownTypeData();
-    encoder << hasUnknownTypeData;
-    if (hasUnknownTypeData)
-        encoder << selection.unknownTypes();
+    bool hasCustomData = selection.hasCustomData();
+    encoder << hasCustomData;
+    if (hasCustomData)
+        encoder << RefPtr<FragmentedSharedBuffer>(selection.customData());
 
     bool canSmartReplace = selection.canSmartReplace();
     encoder << canSmartReplace;
 }
 
-bool ArgumentCoder<SelectionData>::decode(Decoder& decoder, SelectionData& selection)
+std::optional<SelectionData> ArgumentCoder<SelectionData>::decode(Decoder& decoder)
 {
-    selection.clearAll();
+    SelectionData selection;
 
     bool hasText;
     if (!decoder.decode(hasText))
-        return false;
+        return std::nullopt;
     if (hasText) {
         String text;
         if (!decoder.decode(text))
-            return false;
+            return std::nullopt;
         selection.setText(text);
     }
 
     bool hasMarkup;
     if (!decoder.decode(hasMarkup))
-        return false;
+        return std::nullopt;
     if (hasMarkup) {
         String markup;
         if (!decoder.decode(markup))
-            return false;
+            return std::nullopt;
         selection.setMarkup(markup);
     }
 
     bool hasURL;
     if (!decoder.decode(hasURL))
-        return false;
+        return std::nullopt;
     if (hasURL) {
         String url;
         if (!decoder.decode(url))
-            return false;
-        selection.setURL(URL(URL(), url), String());
+            return std::nullopt;
+        selection.setURL(URL { url }, String());
     }
 
     bool hasURIList;
     if (!decoder.decode(hasURIList))
-        return false;
+        return std::nullopt;
     if (hasURIList) {
         String uriList;
         if (!decoder.decode(uriList))
-            return false;
+            return std::nullopt;
         selection.setURIList(uriList);
     }
 
     bool hasImage;
     if (!decoder.decode(hasImage))
-        return false;
+        return std::nullopt;
     if (hasImage) {
         RefPtr<Image> image;
         if (!decodeImage(decoder, image))
-            return false;
+            return std::nullopt;
         selection.setImage(image.get());
     }
 
-    bool hasUnknownTypeData;
-    if (!decoder.decode(hasUnknownTypeData))
-        return false;
-    if (hasUnknownTypeData) {
-        HashMap<String, String> unknownTypes;
-        if (!decoder.decode(unknownTypes))
-            return false;
-
-        auto end = unknownTypes.end();
-        for (auto it = unknownTypes.begin(); it != end; ++it)
-            selection.setUnknownTypeData(it->key, it->value);
+    bool hasCustomData;
+    if (!decoder.decode(hasCustomData))
+        return std::nullopt;
+    if (hasCustomData) {
+        RefPtr<SharedBuffer> buffer;
+        if (!decoder.decode(buffer))
+            return std::nullopt;
+        selection.setCustomData(Ref<SharedBuffer>(*buffer));
     }
 
     bool canSmartReplace;
     if (!decoder.decode(canSmartReplace))
-        return false;
+        return std::nullopt;
     selection.setCanSmartReplace(canSmartReplace);
 
-    return true;
+    return selection;
 }
 
 static void encodeGKeyFile(Encoder& encoder, GKeyFile* keyFile)
@@ -184,7 +180,7 @@ static void encodeGKeyFile(Encoder& encoder, GKeyFile* keyFile)
     encoder << DataReference(reinterpret_cast<uint8_t*>(data.get()), dataSize);
 }
 
-static bool decodeGKeyFile(Decoder& decoder, GUniquePtr<GKeyFile>& keyFile)
+static WARN_UNUSED_RETURN bool decodeGKeyFile(Decoder& decoder, GUniquePtr<GKeyFile>& keyFile)
 {
     DataReference dataReference;
     if (!decoder.decode(dataReference))
@@ -202,10 +198,11 @@ static bool decodeGKeyFile(Decoder& decoder, GUniquePtr<GKeyFile>& keyFile)
     return true;
 }
 
-void encode(Encoder& encoder, GtkPrintSettings* printSettings)
+void encode(Encoder& encoder, GtkPrintSettings* settings)
 {
+    GRefPtr<GtkPrintSettings> printSettings = settings ? settings : adoptGRef(gtk_print_settings_new());
     GUniquePtr<GKeyFile> keyFile(g_key_file_new());
-    gtk_print_settings_to_key_file(printSettings, keyFile.get(), "Print Settings");
+    gtk_print_settings_to_key_file(printSettings.get(), keyFile.get(), "Print Settings");
     encodeGKeyFile(encoder, keyFile.get());
 }
 
@@ -219,16 +216,17 @@ bool decode(Decoder& decoder, GRefPtr<GtkPrintSettings>& printSettings)
     if (!keyFile)
         return true;
 
-    if (!gtk_print_settings_load_key_file(printSettings.get(), keyFile.get(), "Print Settings", 0))
-        printSettings = 0;
+    if (!gtk_print_settings_load_key_file(printSettings.get(), keyFile.get(), "Print Settings", nullptr))
+        printSettings = nullptr;
 
     return printSettings;
 }
 
-void encode(Encoder& encoder, GtkPageSetup* pageSetup)
+void encode(Encoder& encoder, GtkPageSetup* setup)
 {
+    GRefPtr<GtkPageSetup> pageSetup = setup ? setup : adoptGRef(gtk_page_setup_new());
     GUniquePtr<GKeyFile> keyFile(g_key_file_new());
-    gtk_page_setup_to_key_file(pageSetup, keyFile.get(), "Page Setup");
+    gtk_page_setup_to_key_file(pageSetup.get(), keyFile.get(), "Page Setup");
     encodeGKeyFile(encoder, keyFile.get());
 }
 
@@ -242,8 +240,8 @@ bool decode(Decoder& decoder, GRefPtr<GtkPageSetup>& pageSetup)
     if (!keyFile)
         return true;
 
-    if (!gtk_page_setup_load_key_file(pageSetup.get(), keyFile.get(), "Page Setup", 0))
-        pageSetup = 0;
+    if (!gtk_page_setup_load_key_file(pageSetup.get(), keyFile.get(), "Page Setup", nullptr))
+        pageSetup = nullptr;
 
     return pageSetup;
 }

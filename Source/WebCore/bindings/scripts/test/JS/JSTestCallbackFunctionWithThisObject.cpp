@@ -21,17 +21,18 @@
 #include "config.h"
 #include "JSTestCallbackFunctionWithThisObject.h"
 
+#include "JSDOMConvertBase.h"
 #include "JSDOMConvertInterface.h"
 #include "JSDOMConvertSequences.h"
 #include "JSDOMExceptionHandling.h"
 #include "JSDOMGlobalObject.h"
 #include "JSTestNode.h"
 #include "ScriptExecutionContext.h"
-#include <runtime/JSArray.h>
+#include <JavaScriptCore/JSArray.h>
 
-using namespace JSC;
 
 namespace WebCore {
+using namespace JSC;
 
 JSTestCallbackFunctionWithThisObject::JSTestCallbackFunctionWithThisObject(JSObject* callback, JSDOMGlobalObject* globalObject)
     : TestCallbackFunctionWithThisObject(globalObject->scriptExecutionContext())
@@ -53,7 +54,7 @@ JSTestCallbackFunctionWithThisObject::~JSTestCallbackFunctionWithThisObject()
 #endif
 }
 
-CallbackResult<typename IDLVoid::ImplementationType> JSTestCallbackFunctionWithThisObject::handleEvent(typename IDLInterface<TestNode>::ParameterType thisObject, typename IDLSequence<IDLInterface<TestNode>>::ParameterType parameter)
+CallbackResult<typename IDLUndefined::ImplementationType> JSTestCallbackFunctionWithThisObject::handleEvent(typename IDLInterface<TestNode>::ParameterType thisObject, typename IDLSequence<IDLInterface<TestNode>>::ParameterType parameter)
 {
     if (!canInvokeCallback())
         return CallbackResultType::UnableToExecute;
@@ -64,15 +65,16 @@ CallbackResult<typename IDLVoid::ImplementationType> JSTestCallbackFunctionWithT
     auto& vm = globalObject.vm();
 
     JSLockHolder lock(vm);
-    auto& state = *globalObject.globalExec();
-    JSValue thisValue = toJS<IDLInterface<TestNode>>(state, globalObject, thisObject);
+    auto& lexicalGlobalObject = globalObject;
+    JSValue thisValue = toJS<IDLInterface<TestNode>>(lexicalGlobalObject, globalObject, thisObject);
     MarkedArgumentBuffer args;
-    args.append(toJS<IDLSequence<IDLInterface<TestNode>>>(state, globalObject, parameter));
+    args.append(toJS<IDLSequence<IDLInterface<TestNode>>>(lexicalGlobalObject, globalObject, parameter));
+    ASSERT(!args.hasOverflowed());
 
     NakedPtr<JSC::Exception> returnedException;
     m_data->invokeCallback(thisValue, args, JSCallbackData::CallbackType::Function, Identifier(), returnedException);
     if (returnedException) {
-        reportException(&state, returnedException);
+        reportException(&lexicalGlobalObject, returnedException);
         return CallbackResultType::ExceptionThrown;
      }
 

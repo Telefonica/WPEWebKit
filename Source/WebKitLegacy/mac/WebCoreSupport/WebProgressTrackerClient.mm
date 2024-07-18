@@ -28,7 +28,7 @@
 #import "WebFramePrivate.h"
 #import "WebViewInternal.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 #import <WebCore/WebCoreThreadMessage.h>
 #endif
 
@@ -39,12 +39,7 @@ WebProgressTrackerClient::WebProgressTrackerClient(WebView *webView)
 {
 }
 
-void WebProgressTrackerClient::progressTrackerDestroyed()
-{
-    delete this;
-}
-
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 void WebProgressTrackerClient::willChangeEstimatedProgress()
 {
     [m_webView _willChangeValueForKey:_WebEstimatedProgressKey];
@@ -58,7 +53,7 @@ void WebProgressTrackerClient::didChangeEstimatedProgress()
 
 void WebProgressTrackerClient::progressStarted(WebCore::Frame& originatingProgressFrame)
 {
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     [[NSNotificationCenter defaultCenter] postNotificationName:WebViewProgressStartedNotification object:m_webView];
 #else
     WebThreadPostNotification(WebViewProgressStartedNotification, m_webView, nil);
@@ -67,7 +62,7 @@ void WebProgressTrackerClient::progressStarted(WebCore::Frame& originatingProgre
 
 void WebProgressTrackerClient::progressEstimateChanged(WebCore::Frame&)
 {
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     [[NSNotificationCenter defaultCenter] postNotificationName:WebViewProgressEstimateChangedNotification object:m_webView];
 #else
     NSNumber *progress = [NSNumber numberWithFloat:[m_webView estimatedProgress]];
@@ -75,19 +70,18 @@ void WebProgressTrackerClient::progressEstimateChanged(WebCore::Frame&)
     
     // Use a CFDictionary so we can add the CGColorRef without compile errors. And then thanks to
     // toll-free bridging we can pass the CFDictionary as an NSDictionary to postNotification.
-    CFMutableDictionaryRef userInfo = CFDictionaryCreateMutable(kCFAllocatorDefault, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    CFDictionaryAddValue(userInfo, WebViewProgressEstimatedProgressKey, progress);
+    auto userInfo = adoptCF(CFDictionaryCreateMutable(kCFAllocatorDefault, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+    CFDictionaryAddValue(userInfo.get(), WebViewProgressEstimatedProgressKey, progress);
     if (bodyBackgroundColor)
-        CFDictionaryAddValue(userInfo, WebViewProgressBackgroundColorKey, bodyBackgroundColor);
+        CFDictionaryAddValue(userInfo.get(), WebViewProgressBackgroundColorKey, bodyBackgroundColor);
     
-    WebThreadPostNotification(WebViewProgressEstimateChangedNotification, m_webView, (NSDictionary *) userInfo);
-    CFRelease(userInfo);
+    WebThreadPostNotification(WebViewProgressEstimateChangedNotification, m_webView, (NSDictionary *)userInfo.get());
 #endif
 }
 
 void WebProgressTrackerClient::progressFinished(Frame&)
 {
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     [[NSNotificationCenter defaultCenter] postNotificationName:WebViewProgressFinishedNotification object:m_webView];
 #endif
 }

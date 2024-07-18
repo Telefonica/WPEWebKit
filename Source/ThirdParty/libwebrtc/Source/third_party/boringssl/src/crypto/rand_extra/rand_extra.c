@@ -18,14 +18,14 @@
 
 
 void RAND_seed(const void *buf, int num) {
-  /* OpenSSH calls |RAND_seed| before jailing on the assumption that any needed
-   * file descriptors etc will be opened. */
+  // OpenSSH calls |RAND_seed| before jailing on the assumption that any needed
+  // file descriptors etc will be opened.
   uint8_t unused;
   RAND_bytes(&unused, sizeof(unused));
 }
 
 int RAND_load_file(const char *path, long num) {
-  if (num < 0) {  /* read the "whole file" */
+  if (num < 0) {  // read the "whole file"
     return 1;
   } else if (num <= INT_MAX) {
     return (int) num;
@@ -63,6 +63,12 @@ RAND_METHOD *RAND_SSLeay(void) {
   return (RAND_METHOD*) &kSSLeayMethod;
 }
 
-void RAND_set_rand_method(const RAND_METHOD *method) {}
+RAND_METHOD *RAND_OpenSSL(void) {
+  return RAND_SSLeay();
+}
+
+const RAND_METHOD *RAND_get_rand_method(void) { return RAND_SSLeay(); }
+
+int RAND_set_rand_method(const RAND_METHOD *method) { return 1; }
 
 void RAND_cleanup(void) {}

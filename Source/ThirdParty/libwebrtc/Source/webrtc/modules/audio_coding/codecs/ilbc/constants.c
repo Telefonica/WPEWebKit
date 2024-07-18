@@ -16,8 +16,9 @@
 
 ******************************************************************/
 
-#include "defines.h"
-#include "constants.h"
+#include "modules/audio_coding/codecs/ilbc/constants.h"
+
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /* HP Filters {b[0] b[1] b[2] -a[1] -a[2]} */
 

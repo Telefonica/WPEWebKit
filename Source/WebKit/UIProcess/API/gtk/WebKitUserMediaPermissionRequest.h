@@ -49,6 +49,7 @@ struct _WebKitUserMediaPermissionRequest {
 struct _WebKitUserMediaPermissionRequestClass {
     GObjectClass parent_class;
 
+    /*< private >*/
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
@@ -63,6 +64,9 @@ webkit_user_media_permission_is_for_audio_device (WebKitUserMediaPermissionReque
 
 WEBKIT_API gboolean
 webkit_user_media_permission_is_for_video_device (WebKitUserMediaPermissionRequest *request);
+
+WEBKIT_API gboolean
+webkit_user_media_permission_is_for_display_device (WebKitUserMediaPermissionRequest *request);
 
 G_END_DECLS
 

@@ -27,15 +27,9 @@
 #include "JSWeakSet.h"
 
 #include "JSCInlines.h"
-#include "WeakMapBase.h"
 
 namespace JSC {
 
-const ClassInfo JSWeakSet::s_info = { "WeakSet", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSWeakSet) };
-
-String JSWeakSet::toStringName(const JSC::JSObject*, ExecState*)
-{
-    return ASCIILiteral("Object");
-}
+const ClassInfo JSWeakSet::s_info = { "WeakSet"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSWeakSet) };
 
 }

@@ -9,27 +9,30 @@
  *
  */
 
-#ifndef WEBRTC_TEST_RTCP_PACKET_PARSER_H_
-#define WEBRTC_TEST_RTCP_PACKET_PARSER_H_
+#ifndef TEST_RTCP_PACKET_PARSER_H_
+#define TEST_RTCP_PACKET_PARSER_H_
 
-#include "webrtc/base/array_view.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/app.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/bye.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/common_header.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/extended_jitter_report.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/extended_reports.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/fir.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/nack.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/pli.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/rapid_resync_request.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/remb.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/sdes.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/sender_report.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/tmmbn.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/tmmbr.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
+#include <stddef.h>
+#include <stdint.h>
+
+#include "api/array_view.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/app.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/bye.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/common_header.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/extended_reports.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/fir.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/loss_notification.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/nack.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/pli.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/rapid_resync_request.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/remb.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/sdes.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/sender_report.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/tmmbn.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/tmmbr.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 namespace test {
@@ -59,12 +62,14 @@ class RtcpPacketParser {
       if (TypedRtcpPacket::Parse(header))
         ++num_packets_;
     }
-    void Parse(const rtcp::CommonHeader& header, uint32_t* sender_ssrc) {
-      if (TypedRtcpPacket::Parse(header)) {
+    bool Parse(const rtcp::CommonHeader& header, uint32_t* sender_ssrc) {
+      const bool result = TypedRtcpPacket::Parse(header);
+      if (result) {
         ++num_packets_;
         if (*sender_ssrc == 0)  // Use first sender ssrc in compound packet.
           *sender_ssrc = TypedRtcpPacket::sender_ssrc();
       }
+      return result;
     }
 
    private:
@@ -74,11 +79,10 @@ class RtcpPacketParser {
   RtcpPacketParser();
   ~RtcpPacketParser();
 
-  bool Parse(const void* packet, size_t packet_len);
+  bool Parse(rtc::ArrayView<const uint8_t> packet);
 
   PacketCounter<rtcp::App>* app() { return &app_; }
   PacketCounter<rtcp::Bye>* bye() { return &bye_; }
-  PacketCounter<rtcp::ExtendedJitterReport>* ij() { return &ij_; }
   PacketCounter<rtcp::ExtendedReports>* xr() { return &xr_; }
   PacketCounter<rtcp::Fir>* fir() { return &fir_; }
   PacketCounter<rtcp::Nack>* nack() { return &nack_; }
@@ -86,6 +90,9 @@ class RtcpPacketParser {
   PacketCounter<rtcp::RapidResyncRequest>* rrr() { return &rrr_; }
   PacketCounter<rtcp::ReceiverReport>* receiver_report() {
     return &receiver_report_;
+  }
+  PacketCounter<rtcp::LossNotification>* loss_notification() {
+    return &loss_notification_;
   }
   PacketCounter<rtcp::Remb>* remb() { return &remb_; }
   PacketCounter<rtcp::Sdes>* sdes() { return &sdes_; }
@@ -96,17 +103,18 @@ class RtcpPacketParser {
     return &transport_feedback_;
   }
   uint32_t sender_ssrc() const { return sender_ssrc_; }
+  size_t processed_rtcp_packets() const { return processed_rtcp_packets_; }
 
  private:
   PacketCounter<rtcp::App> app_;
   PacketCounter<rtcp::Bye> bye_;
-  PacketCounter<rtcp::ExtendedJitterReport> ij_;
   PacketCounter<rtcp::ExtendedReports> xr_;
   PacketCounter<rtcp::Fir> fir_;
   PacketCounter<rtcp::Nack> nack_;
   PacketCounter<rtcp::Pli> pli_;
   PacketCounter<rtcp::RapidResyncRequest> rrr_;
   PacketCounter<rtcp::ReceiverReport> receiver_report_;
+  PacketCounter<rtcp::LossNotification> loss_notification_;
   PacketCounter<rtcp::Remb> remb_;
   PacketCounter<rtcp::Sdes> sdes_;
   PacketCounter<rtcp::SenderReport> sender_report_;
@@ -114,8 +122,9 @@ class RtcpPacketParser {
   PacketCounter<rtcp::Tmmbr> tmmbr_;
   PacketCounter<rtcp::TransportFeedback> transport_feedback_;
   uint32_t sender_ssrc_ = 0;
+  size_t processed_rtcp_packets_ = 0;
 };
 
 }  // namespace test
 }  // namespace webrtc
-#endif  // WEBRTC_TEST_RTCP_PACKET_PARSER_H_
+#endif  // TEST_RTCP_PACKET_PARSER_H_

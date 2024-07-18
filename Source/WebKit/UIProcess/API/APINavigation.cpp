@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,30 +26,96 @@
 #include "config.h"
 #include "APINavigation.h"
 
+#include "WebBackForwardListItem.h"
 #include "WebNavigationState.h"
+#include <WebCore/ResourceRequest.h>
+#include <WebCore/ResourceResponse.h>
+#include <wtf/DebugUtilities.h>
+#include <wtf/HexNumber.h>
 
 namespace API {
+using namespace WebCore;
+using namespace WebKit;
 
-Navigation::Navigation(WebKit::WebNavigationState& state)
-    : m_navigationID(state.generateNavigationID())
+static constexpr Seconds navigationActivityTimeout { 30_s };
+
+SubstituteData::SubstituteData(Vector<uint8_t>&& content, const ResourceResponse& response, WebCore::SubstituteData::SessionHistoryVisibility sessionHistoryVisibility)
+    : SubstituteData(WTFMove(content), response.mimeType(), response.textEncodingName(), response.url().string(), nullptr, sessionHistoryVisibility)
 {
 }
 
-Navigation::Navigation(WebKit::WebNavigationState& state, WebCore::ResourceRequest&& request)
+
+Navigation::Navigation(WebNavigationState& state)
     : m_navigationID(state.generateNavigationID())
-    , m_request(WTFMove(request))
+    , m_clientNavigationActivity(navigationActivityTimeout)
 {
-    m_redirectChain.append(m_request.url());
+}
+
+Navigation::Navigation(WebNavigationState& state, WebBackForwardListItem* currentAndTargetItem)
+    : m_navigationID(state.generateNavigationID())
+    , m_reloadItem(currentAndTargetItem)
+    , m_clientNavigationActivity(navigationActivityTimeout)
+{
+}
+
+Navigation::Navigation(WebNavigationState& state, WebCore::ResourceRequest&& request, WebBackForwardListItem* fromItem)
+    : m_navigationID(state.generateNavigationID())
+    , m_originalRequest(WTFMove(request))
+    , m_currentRequest(m_originalRequest)
+    , m_redirectChain { m_originalRequest.url() }
+    , m_fromItem(fromItem)
+    , m_clientNavigationActivity(navigationActivityTimeout)
+{
+}
+
+Navigation::Navigation(WebNavigationState& state, WebBackForwardListItem& targetItem, WebBackForwardListItem* fromItem, FrameLoadType backForwardFrameLoadType)
+    : m_navigationID(state.generateNavigationID())
+    , m_originalRequest(targetItem.url())
+    , m_currentRequest(m_originalRequest)
+    , m_targetItem(&targetItem)
+    , m_fromItem(fromItem)
+    , m_backForwardFrameLoadType(backForwardFrameLoadType)
+    , m_clientNavigationActivity(navigationActivityTimeout)
+{
+}
+
+Navigation::Navigation(WebKit::WebNavigationState& state, std::unique_ptr<SubstituteData>&& substituteData)
+    : Navigation(state)
+{
+    ASSERT(substituteData);
+    m_substituteData = WTFMove(substituteData);
+}
+
+Navigation::Navigation(WebKit::WebNavigationState& state, WebCore::ResourceRequest&& simulatedRequest, std::unique_ptr<SubstituteData>&& substituteData, WebKit::WebBackForwardListItem* fromItem)
+    : Navigation(state, WTFMove(simulatedRequest), fromItem)
+{
+    ASSERT(substituteData);
+    m_substituteData = WTFMove(substituteData);
 }
 
 Navigation::~Navigation()
 {
 }
 
-void Navigation::appendRedirectionURL(const WebCore::URL& url)
+void Navigation::setCurrentRequest(ResourceRequest&& request, ProcessIdentifier processIdentifier)
+{
+    m_currentRequest = WTFMove(request);
+    m_currentRequestProcessIdentifier = processIdentifier;
+}
+
+void Navigation::appendRedirectionURL(const WTF::URL& url)
 {
     if (m_redirectChain.isEmpty() || m_redirectChain.last() != url)
         m_redirectChain.append(url);
 }
 
-} // namespace WebKit
+#if !LOG_DISABLED
+
+const char* Navigation::loggingString() const
+{
+    return debugString("Most recent URL: ", m_currentRequest.url().string(), " Back/forward list item URL: '", m_targetItem ? m_targetItem->url() : WTF::String { }, "' (0x", hex(reinterpret_cast<uintptr_t>(m_targetItem.get())), ')');
+}
+
+#endif
+
+} // namespace API

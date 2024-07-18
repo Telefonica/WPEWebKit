@@ -3,7 +3,7 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann (hausmann@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2021 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -29,17 +29,20 @@
 #include "CSSValueKeywords.h"
 #include "DOMWindow.h"
 #include "DOMWrapperWorld.h"
+#include "ElementInlines.h"
 #include "EventNames.h"
-#include "Frame.h"
-#include "FrameView.h"
 #include "HTMLFrameElement.h"
 #include "HTMLIFrameElement.h"
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
+#include "JSHTMLBodyElement.h"
 #include "StyleProperties.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLBodyElement);
 
 using namespace HTMLNames;
 
@@ -47,13 +50,6 @@ HTMLBodyElement::HTMLBodyElement(const QualifiedName& tagName, Document& documen
     : HTMLElement(tagName, document)
 {
     ASSERT(hasTagName(bodyTag));
-}
-
-bool HTMLBodyElement::isFirstBodyElementOfDocument() const
-{
-    // By spec http://dev.w3.org/csswg/cssom-view/#the-html-body-element
-    // "The HTML body element is the first body HTML element child of the root HTML element html."
-    return document().body() == this;
 }
 
 Ref<HTMLBodyElement> HTMLBodyElement::create(Document& document)
@@ -66,23 +62,21 @@ Ref<HTMLBodyElement> HTMLBodyElement::create(const QualifiedName& tagName, Docum
     return adoptRef(*new HTMLBodyElement(tagName, document));
 }
 
-HTMLBodyElement::~HTMLBodyElement()
-{
-}
+HTMLBodyElement::~HTMLBodyElement() = default;
 
-bool HTMLBodyElement::isPresentationAttribute(const QualifiedName& name) const
+bool HTMLBodyElement::hasPresentationalHintsForAttribute(const QualifiedName& name) const
 {
     if (name == backgroundAttr || name == marginwidthAttr || name == leftmarginAttr || name == marginheightAttr || name == topmarginAttr || name == bgcolorAttr || name == textAttr || name == bgpropertiesAttr)
         return true;
-    return HTMLElement::isPresentationAttribute(name);
+    return HTMLElement::hasPresentationalHintsForAttribute(name);
 }
 
-void HTMLBodyElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStyleProperties& style)
+void HTMLBodyElement::collectPresentationalHintsForAttribute(const QualifiedName& name, const AtomString& value, MutableStyleProperties& style)
 {
     if (name == backgroundAttr) {
         String url = stripLeadingAndTrailingHTMLSpaces(value);
         if (!url.isEmpty()) {
-            auto imageValue = CSSImageValue::create(document().completeURL(url));
+            auto imageValue = CSSImageValue::create(document().completeURL(url), LoadedFromOpaqueSource::No);
             imageValue.get().setInitiator(localName());
             style.setProperty(CSSProperty(CSSPropertyBackgroundImage, WTFMove(imageValue)));
         }
@@ -97,82 +91,54 @@ void HTMLBodyElement::collectStyleForPresentationAttribute(const QualifiedName& 
     } else if (name == textAttr) {
         addHTMLColorToStyle(style, CSSPropertyColor, value);
     } else if (name == bgpropertiesAttr) {
-        if (equalLettersIgnoringASCIICase(value, "fixed"))
-           addPropertyToPresentationAttributeStyle(style, CSSPropertyBackgroundAttachment, CSSValueFixed);
+        if (equalLettersIgnoringASCIICase(value, "fixed"_s))
+            addPropertyToPresentationalHintStyle(style, CSSPropertyBackgroundAttachment, CSSValueFixed);
     } else
-        HTMLElement::collectStyleForPresentationAttribute(name, value, style);
+        HTMLElement::collectPresentationalHintsForAttribute(name, value, style);
 }
 
-HTMLElement::EventHandlerNameMap HTMLBodyElement::createWindowEventHandlerNameMap()
+const AtomString& HTMLBodyElement::eventNameForWindowEventHandlerAttribute(const QualifiedName& attributeName)
 {
-    static const QualifiedName* const table[] = {
-        &onbeforeunloadAttr,
-        &onblurAttr,
-        &onerrorAttr,
-        &onfocusAttr,
-        &onfocusinAttr,
-        &onfocusoutAttr,
-        &onhashchangeAttr,
-        &onlanguagechangeAttr,
-        &onloadAttr,
-        &onmessageAttr,
-        &onofflineAttr,
-        &ononlineAttr,
-        &onorientationchangeAttr,
-        &onpagehideAttr,
-        &onpageshowAttr,
-        &onpopstateAttr,
-        &onresizeAttr,
-        &onscrollAttr,
-        &onstorageAttr,
-        &onunloadAttr,
-        &onwebkitmouseforcechangedAttr,
-        &onwebkitmouseforcedownAttr,
-        &onwebkitmouseforceupAttr,
-        &onwebkitmouseforcewillbeginAttr,
-        &onwebkitwillrevealbottomAttr,
-        &onwebkitwillrevealleftAttr,
-        &onwebkitwillrevealrightAttr,
-        &onwebkitwillrevealtopAttr,
-    };
-
-    EventHandlerNameMap map;
-    populateEventHandlerNameMap(map, table);
-    return map;
+    static NeverDestroyed map = [] {
+        EventHandlerNameMap map;
+        JSHTMLBodyElement::forEachWindowEventHandlerContentAttribute([&] (const AtomString& attributeName, const AtomString& eventName) {
+            // FIXME: Remove these special cases. These have has an [WindowEventHandler] line in the IDL but were not in this map before, so this preserves behavior.
+            if (attributeName == onrejectionhandledAttr.get().localName() || attributeName == onunhandledrejectionAttr.get().localName())
+                return;
+            map.add(attributeName.impl(), eventName);
+        });
+        return map;
+    }();
+    return eventNameForEventHandlerAttribute(attributeName, map);
 }
 
-const AtomicString& HTMLBodyElement::eventNameForWindowEventHandlerAttribute(const QualifiedName& attributeName)
-{
-    static NeverDestroyed<EventHandlerNameMap> map = createWindowEventHandlerNameMap();
-    return eventNameForEventHandlerAttribute(attributeName, map.get());
-}
-
-void HTMLBodyElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLBodyElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == vlinkAttr || name == alinkAttr || name == linkAttr) {
-        if (value.isNull()) {
-            if (name == linkAttr)
+        auto parsedColor = parseLegacyColorValue(value);
+        if (name == linkAttr) {
+            if (parsedColor)
+                document().setLinkColor(*parsedColor);
+            else
                 document().resetLinkColor();
-            else if (name == vlinkAttr)
+        } else if (name == vlinkAttr) {
+            if (parsedColor)
+                document().setVisitedLinkColor(*parsedColor);
+            else
                 document().resetVisitedLinkColor();
+        } else {
+            ASSERT(name == alinkAttr);
+            if (parsedColor)
+                document().setActiveLinkColor(*parsedColor);
             else
                 document().resetActiveLinkColor();
-        } else {
-            Color color = CSSParser::parseColor(value, !document().inQuirksMode());
-            if (color.isValid()) {
-                if (name == linkAttr)
-                    document().setLinkColor(color);
-                else if (name == vlinkAttr)
-                    document().setVisitedLinkColor(color);
-                else
-                    document().setActiveLinkColor(color);
-            }
         }
-
         invalidateStyleForSubtree();
         return;
     }
 
+    // FIXME: Emit "selectionchange" event at <input> / <textarea> elements and remove this special-case.
+    // https://bugs.webkit.org/show_bug.cgi?id=234348
     if (name == onselectionchangeAttr) {
         document().setAttributeEventListener(eventNames().selectionchangeEvent, name, value, mainThreadNormalWorld());
         return;
@@ -187,32 +153,32 @@ void HTMLBodyElement::parseAttribute(const QualifiedName& name, const AtomicStri
     HTMLElement::parseAttribute(name, value);
 }
 
-Node::InsertionNotificationRequest HTMLBodyElement::insertedInto(ContainerNode& insertionPoint)
+Node::InsertedIntoAncestorResult HTMLBodyElement::insertedIntoAncestor(InsertionType insertionType, ContainerNode& parentOfInsertedTree)
 {
-    HTMLElement::insertedInto(insertionPoint);
-    if (!insertionPoint.isConnected())
-        return InsertionDone;
+    HTMLElement::insertedIntoAncestor(insertionType, parentOfInsertedTree);
+    if (!insertionType.connectedToDocument)
+        return InsertedIntoAncestorResult::Done;
+    if (!is<HTMLFrameElementBase>(document().ownerElement()))
+        return InsertedIntoAncestorResult::Done;
+    return InsertedIntoAncestorResult::NeedsPostInsertionCallback;
+}
 
-    // FIXME: It's surprising this is web compatible since it means a marginwidth and marginheight attribute can
-    // magically appear on the <body> of all documents embedded through <iframe> or <frame>.
-    // FIXME: Perhaps this code should be in attach() instead of here.
-    auto* ownerElement = document().ownerElement();
-    if (!is<HTMLFrameElementBase>(ownerElement))
-        return InsertionDone;
-    
-    auto& ownerFrameElement = downcast<HTMLFrameElementBase>(*ownerElement);
+void HTMLBodyElement::didFinishInsertingNode()
+{
+    ASSERT(is<HTMLFrameElementBase>(document().ownerElement()));
+    Ref ownerElement = *document().ownerElement();
 
-    // Read values from the owner before setting any attributes, since setting an attribute can run arbitrary
-    // JavaScript, which might delete the owner element.
-    int marginWidth = ownerFrameElement.marginWidth();
-    int marginHeight = ownerFrameElement.marginHeight();
-
-    if (marginWidth != -1)
-        setIntegralAttribute(marginwidthAttr, marginWidth);
-    if (marginHeight != -1)
-        setIntegralAttribute(marginheightAttr, marginHeight);
-
-    return InsertionDone;
+    // FIXME: It's surprising this is web compatible since it means marginwidth and marginheight attributes
+    // appear or get overwritten on body elements of a document embedded through <iframe> or <frame>.
+    // Better to find a way to do addHTMLLengthToStyle based on the attributes from the frame element,
+    // without modifying the body element's attributes. Could also add code so we can respond to updates
+    // to the frame element attributes.
+    auto marginWidth = ownerElement->attributeWithoutSynchronization(marginwidthAttr);
+    if (!marginWidth.isNull())
+        setAttributeWithoutSynchronization(marginwidthAttr, marginWidth);
+    auto marginHeight = ownerElement->attributeWithoutSynchronization(marginheightAttr);
+    if (!marginHeight.isNull())
+        setAttributeWithoutSynchronization(marginheightAttr, marginHeight);
 }
 
 bool HTMLBodyElement::isURLAttribute(const Attribute& attribute) const
@@ -223,126 +189,6 @@ bool HTMLBodyElement::isURLAttribute(const Attribute& attribute) const
 bool HTMLBodyElement::supportsFocus() const
 {
     return hasEditableStyle() || HTMLElement::supportsFocus();
-}
-
-static int adjustForZoom(int value, const Frame& frame)
-{
-    double zoomFactor = frame.pageZoomFactor() * frame.frameScaleFactor();
-    if (zoomFactor == 1)
-        return value;
-    // Needed because of truncation (rather than rounding) when scaling up.
-    if (zoomFactor > 1)
-        value++;
-    return static_cast<int>(value / zoomFactor);
-}
-
-int HTMLBodyElement::scrollLeft()
-{
-    if (isFirstBodyElementOfDocument()) {
-        document().updateLayoutIgnorePendingStylesheets();
-        Frame* frame = document().frame();
-        if (!frame)
-            return 0;
-        FrameView* view = frame->view();
-        if (!view)
-            return 0;
-        return adjustForZoom(view->contentsScrollPosition().x(), *frame);
-    }
-    return HTMLElement::scrollLeft();
-}
-
-void HTMLBodyElement::setScrollLeft(int scrollLeft)
-{
-    if (isFirstBodyElementOfDocument()) {
-        document().updateLayoutIgnorePendingStylesheets();
-        Frame* frame = document().frame();
-        if (!frame)
-            return;
-        FrameView* view = frame->view();
-        if (!view)
-            return;
-        view->setScrollPosition(IntPoint(static_cast<int>(scrollLeft * frame->pageZoomFactor() * frame->frameScaleFactor()), view->scrollY()));
-    }
-    HTMLElement::setScrollLeft(scrollLeft);
-}
-
-int HTMLBodyElement::scrollTop()
-{
-    if (isFirstBodyElementOfDocument()) {
-        document().updateLayoutIgnorePendingStylesheets();
-        Frame* frame = document().frame();
-        if (!frame)
-            return 0;
-        FrameView* view = frame->view();
-        if (!view)
-            return 0;
-        return adjustForZoom(view->contentsScrollPosition().y(), *frame);
-    }
-    return HTMLElement::scrollTop();
-}
-
-void HTMLBodyElement::setScrollTop(int scrollTop)
-{
-    if (isFirstBodyElementOfDocument()) {
-        document().updateLayoutIgnorePendingStylesheets();
-        Frame* frame = document().frame();
-        if (!frame)
-            return;
-        FrameView* view = frame->view();
-        if (!view)
-            return;
-        view->setScrollPosition(IntPoint(view->scrollX(), static_cast<int>(scrollTop * frame->pageZoomFactor() * frame->frameScaleFactor())));
-    }
-    return HTMLElement::setScrollTop(scrollTop);
-}
-
-void HTMLBodyElement::scrollTo(const ScrollToOptions& options)
-{
-    if (isFirstBodyElementOfDocument()) {
-        // If the element is the HTML body element, document is in quirks mode, and the element is not potentially scrollable,
-        // invoke scroll() on window with options as the only argument, and terminate these steps.
-        // Note that WebKit always uses quirks mode document scrolling behavior. See Document::scrollingElement().
-        // FIXME: Scrolling an independently scrollable body is broken: webkit.org/b/161612.
-        auto* window = document().domWindow();
-        if (!window)
-            return;
-
-        window->scrollTo(options);
-        return;
-    }
-    return HTMLElement::scrollTo(options);
-}
-
-int HTMLBodyElement::scrollHeight()
-{
-    if (isFirstBodyElementOfDocument()) {
-        // Update the document's layout.
-        document().updateLayoutIgnorePendingStylesheets();
-        Frame* frame = document().frame();
-        if (!frame)
-            return 0;
-        FrameView* view = frame->view();
-        if (!view)
-            return 0;
-        return adjustForZoom(view->contentsHeight(), *frame);
-    }
-    return HTMLElement::scrollHeight();
-}
-
-int HTMLBodyElement::scrollWidth()
-{
-    if (isFirstBodyElementOfDocument()) {
-        // Update the document's layout.
-        document().updateLayoutIgnorePendingStylesheets();
-        Frame* frame = document().frame();
-        if (!frame)
-            return 0;
-        FrameView* view = frame->view();
-        if (!view)
-            return 0;
-        return adjustForZoom(view->contentsWidth(), *frame);
-    }
-    return HTMLElement::scrollWidth();
 }
 
 void HTMLBodyElement::addSubresourceAttributeURLs(ListHashSet<URL>& urls) const

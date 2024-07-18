@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2022 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Cameron Zwarich <cwzwarich@uwaterloo.ca>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,55 +33,52 @@
 
 namespace JSC {
 
-class EvalCodeBlock : public GlobalCodeBlock {
+class EvalCodeBlock final : public GlobalCodeBlock {
 public:
     typedef GlobalCodeBlock Base;
     DECLARE_INFO;
 
-    static EvalCodeBlock* create(VM* vm, CopyParsedBlockTag, EvalCodeBlock& other)
+    template<typename, SubspaceAccess>
+    static GCClient::IsoSubspace* subspaceFor(VM& vm)
     {
-        EvalCodeBlock* instance = new (NotNull, allocateCell<EvalCodeBlock>(vm->heap))
-            EvalCodeBlock(vm, vm->evalCodeBlockStructure.get(), CopyParsedBlock, other);
-        instance->finishCreation(*vm, CopyParsedBlock, other);
+        return &vm.codeBlockSpace();
+    }
+
+    static EvalCodeBlock* create(VM& vm, CopyParsedBlockTag, EvalCodeBlock& other)
+    {
+        EvalCodeBlock* instance = new (NotNull, allocateCell<EvalCodeBlock>(vm))
+            EvalCodeBlock(vm, vm.evalCodeBlockStructure.get(), CopyParsedBlock, other);
+        instance->finishCreation(vm, CopyParsedBlock, other);
         return instance;
     }
 
-    static EvalCodeBlock* create(VM* vm, EvalExecutable* ownerExecutable, UnlinkedEvalCodeBlock* unlinkedCodeBlock,
-        JSScope* scope, RefPtr<SourceProvider>&& sourceProvider)
+    static EvalCodeBlock* create(VM& vm, EvalExecutable* ownerExecutable, UnlinkedEvalCodeBlock* unlinkedCodeBlock, JSScope* scope)
     {
-        EvalCodeBlock* instance = new (NotNull, allocateCell<EvalCodeBlock>(vm->heap))
-            EvalCodeBlock(vm, vm->evalCodeBlockStructure.get(), ownerExecutable, unlinkedCodeBlock, scope, WTFMove(sourceProvider));
-        if (!instance->finishCreation(*vm, ownerExecutable, unlinkedCodeBlock, scope))
+        EvalCodeBlock* instance = new (NotNull, allocateCell<EvalCodeBlock>(vm))
+            EvalCodeBlock(vm, vm.evalCodeBlockStructure.get(), ownerExecutable, unlinkedCodeBlock, scope);
+        if (!instance->finishCreation(vm, ownerExecutable, unlinkedCodeBlock, scope))
             return nullptr;
         return instance;
     }
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(CellType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(CodeBlockType, StructureFlags), info());
     }
 
-    const Identifier& variable(unsigned index) { return unlinkedEvalCodeBlock()->variable(index); }
-    unsigned numVariables() { return unlinkedEvalCodeBlock()->numVariables(); }
-    const Identifier& functionHoistingCandidate(unsigned index) { return unlinkedEvalCodeBlock()->functionHoistingCandidate(index); }
-    unsigned numFunctionHoistingCandidates() { return unlinkedEvalCodeBlock()->numFunctionHoistingCandidates(); }
-    
+    UnlinkedEvalCodeBlock* unlinkedEvalCodeBlock() const { return jsCast<UnlinkedEvalCodeBlock*>(unlinkedCodeBlock()); }
+
 private:
-    EvalCodeBlock(VM* vm, Structure* structure, CopyParsedBlockTag, EvalCodeBlock& other)
+    EvalCodeBlock(VM& vm, Structure* structure, CopyParsedBlockTag, EvalCodeBlock& other)
         : GlobalCodeBlock(vm, structure, CopyParsedBlock, other)
     {
     }
         
-    EvalCodeBlock(VM* vm, Structure* structure, EvalExecutable* ownerExecutable, UnlinkedEvalCodeBlock* unlinkedCodeBlock,
-        JSScope* scope, RefPtr<SourceProvider>&& sourceProvider)
-        : GlobalCodeBlock(vm, structure, ownerExecutable, unlinkedCodeBlock, scope, WTFMove(sourceProvider), 0, 1)
+    EvalCodeBlock(VM& vm, Structure* structure, EvalExecutable* ownerExecutable, UnlinkedEvalCodeBlock* unlinkedCodeBlock, JSScope* scope)
+        : GlobalCodeBlock(vm, structure, ownerExecutable, unlinkedCodeBlock, scope)
     {
     }
-    
-    static void destroy(JSCell*);
-
-private:
-    UnlinkedEvalCodeBlock* unlinkedEvalCodeBlock() const { return jsCast<UnlinkedEvalCodeBlock*>(unlinkedCodeBlock()); }
 };
+static_assert(sizeof(EvalCodeBlock) == sizeof(CodeBlock), "Subclasses of CodeBlock should be the same size to share IsoSubspace");
 
 } // namespace JSC

@@ -34,16 +34,15 @@
 #include "WebProcess.h"
 #include <WebCore/ColorChooserClient.h>
 
-using namespace WebCore;
-
 namespace WebKit {
+using namespace WebCore;
 
 WebColorChooser::WebColorChooser(WebPage* page, ColorChooserClient* client, const Color& initialColor)
     : m_colorChooserClient(client)
     , m_page(page)
 {
     m_page->setActiveColorChooser(this);
-    WebProcess::singleton().parentProcessConnection()->send(Messages::WebPageProxy::ShowColorPicker(initialColor, client->elementRectRelativeToRootView()), m_page->pageID());
+    WebProcess::singleton().parentProcessConnection()->send(Messages::WebPageProxy::ShowColorPicker(initialColor, client->elementRectRelativeToRootView(), client->suggestedColors()), m_page->identifier());
 }
 
 WebColorChooser::~WebColorChooser()
@@ -75,7 +74,7 @@ void WebColorChooser::reattachColorChooser(const Color& color)
     m_page->setActiveColorChooser(this);
 
     ASSERT(m_colorChooserClient);
-    WebProcess::singleton().parentProcessConnection()->send(Messages::WebPageProxy::ShowColorPicker(color, m_colorChooserClient->elementRectRelativeToRootView()), m_page->pageID());
+    WebProcess::singleton().parentProcessConnection()->send(Messages::WebPageProxy::ShowColorPicker(color, m_colorChooserClient->elementRectRelativeToRootView(), m_colorChooserClient->suggestedColors()), m_page->identifier());
 }
 
 void WebColorChooser::setSelectedColor(const Color& color)
@@ -86,7 +85,7 @@ void WebColorChooser::setSelectedColor(const Color& color)
     if (m_page->activeColorChooser() != this)
         return;
 
-    WebProcess::singleton().parentProcessConnection()->send(Messages::WebPageProxy::SetColorPickerColor(color), m_page->pageID());
+    WebProcess::singleton().parentProcessConnection()->send(Messages::WebPageProxy::SetColorPickerColor(color), m_page->identifier());
 }
 
 void WebColorChooser::endChooser()
@@ -94,7 +93,7 @@ void WebColorChooser::endChooser()
     if (!m_page)
         return;
 
-    WebProcess::singleton().parentProcessConnection()->send(Messages::WebPageProxy::EndColorPicker(), m_page->pageID());
+    WebProcess::singleton().parentProcessConnection()->send(Messages::WebPageProxy::EndColorPicker(), m_page->identifier());
 }
 
 } // namespace WebKit

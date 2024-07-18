@@ -8,35 +8,42 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_TEST_TESTREDFEC_H_
-#define WEBRTC_MODULES_AUDIO_CODING_TEST_TESTREDFEC_H_
+#ifndef MODULES_AUDIO_CODING_TEST_TESTREDFEC_H_
+#define MODULES_AUDIO_CODING_TEST_TESTREDFEC_H_
 
 #include <memory>
 #include <string>
 
-#include "webrtc/modules/audio_coding/test/ACMTest.h"
-#include "webrtc/modules/audio_coding/test/Channel.h"
-#include "webrtc/modules/audio_coding/test/PCMFile.h"
+#include "api/audio_codecs/audio_decoder_factory.h"
+#include "api/audio_codecs/audio_encoder_factory.h"
+#include "common_audio/vad/include/vad.h"
+#include "modules/audio_coding/acm2/acm_receiver.h"
+#include "modules/audio_coding/test/Channel.h"
+#include "modules/audio_coding/test/PCMFile.h"
+#include "test/scoped_key_value_config.h"
 
 namespace webrtc {
 
-class TestRedFec : public ACMTest {
+class TestRedFec final {
  public:
   explicit TestRedFec();
   ~TestRedFec();
 
   void Perform();
+
  private:
-  // The default value of '-1' indicates that the registration is based only on
-  // codec name and a sampling frequency matching is not required. This is
-  // useful for codecs which support several sampling frequency.
-  int16_t RegisterSendCodec(char side, const char* codecName,
-                            int32_t sampFreqHz = -1);
+  void RegisterSendCodec(const std::unique_ptr<AudioCodingModule>& acm,
+                         const SdpAudioFormat& codec_format,
+                         absl::optional<Vad::Aggressiveness> vad_mode,
+                         bool use_red);
   void Run();
   void OpenOutFile(int16_t testNumber);
-  int32_t SetVAD(bool enableDTX, bool enableVAD, ACMVADMode vadMode);
+
+  test::ScopedKeyValueConfig field_trials_;
+  const rtc::scoped_refptr<AudioEncoderFactory> encoder_factory_;
+  const rtc::scoped_refptr<AudioDecoderFactory> decoder_factory_;
   std::unique_ptr<AudioCodingModule> _acmA;
-  std::unique_ptr<AudioCodingModule> _acmB;
+  std::unique_ptr<acm2::AcmReceiver> _acm_receiver;
 
   Channel* _channelA2B;
 
@@ -47,4 +54,4 @@ class TestRedFec : public ACMTest {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_TEST_TESTREDFEC_H_
+#endif  // MODULES_AUDIO_CODING_TEST_TESTREDFEC_H_

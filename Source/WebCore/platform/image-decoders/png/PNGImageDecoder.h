@@ -30,6 +30,10 @@
 #include <png.h>
 #endif
 
+#if USE(LCMS)
+#include "LCMSUniquePtr.h"
+#endif
+
 namespace WebCore {
 
     class PNGImageReader;
@@ -45,13 +49,12 @@ namespace WebCore {
         virtual ~PNGImageDecoder();
 
         // ScalableImageDecoder
-        String filenameExtension() const override { return ASCIILiteral("png"); }
+        String filenameExtension() const override { return "png"_s; }
 #if ENABLE(APNG)
         size_t frameCount() const override { return m_frameCount; }
         RepetitionCount repetitionCount() const override;
 #endif
-        bool setSize(const IntSize&) override;
-        ImageFrame* frameBufferAtIndex(size_t index) override;
+        ScalableImageDecoderFrame* frameBufferAtIndex(size_t index) override;
         // CAUTION: setFailed() deletes |m_reader|.  Be careful to avoid
         // accessing deleted memory, especially when calling this from inside
         // PNGImageReader!
@@ -103,6 +106,8 @@ namespace WebCore {
         void fallbackNotAnimated();
 #endif
 
+        void clear();
+
         std::unique_ptr<PNGImageReader> m_reader;
         bool m_doNothingOnFailure;
         unsigned m_currentFrame;
@@ -132,6 +137,10 @@ namespace WebCore {
         png_byte m_dataPLTE[12 + 256 * 3];
         png_byte m_datatRNS[12 + 256];
 #endif
+#if USE(LCMS)
+    LCMSTransformPtr m_iccTransform;
+#endif
+
     };
 
 } // namespace WebCore

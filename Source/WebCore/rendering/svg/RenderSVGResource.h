@@ -19,8 +19,8 @@
 
 #pragma once
 
-#include "RenderSVGShape.h"
 #include "RenderStyleConstants.h"
+#include <wtf/OptionSet.h>
 #include <wtf/TypeCasts.h>
 
 namespace WebCore {
@@ -38,30 +38,30 @@ enum RenderSVGResourceType {
 
 // If this enum changes change the unsigned bitfields using it.
 enum class RenderSVGResourceMode {
-    ApplyToDefault = 1 << 0, // used for all resources except gradient/pattern
-    ApplyToFill    = 1 << 1,
-    ApplyToStroke  = 1 << 2,
-    ApplyToText    = 1 << 3 // used in combination with ApplyTo{Fill|Stroke}Mode
+    ApplyToFill    = 1 << 0,
+    ApplyToStroke  = 1 << 1,
+    ApplyToText    = 1 << 2 // used in combination with ApplyTo{Fill|Stroke}Mode
 };
 
 class Color;
 class FloatRect;
 class GraphicsContext;
 class Path;
+class RenderElement;
 class RenderObject;
-class RenderStyle;
 class RenderSVGResourceSolidColor;
+class RenderStyle;
 
 class RenderSVGResource {
 public:
-    RenderSVGResource() { }
-    virtual ~RenderSVGResource() { }
+    RenderSVGResource() = default;
+    virtual ~RenderSVGResource() = default;
 
     virtual void removeAllClientsFromCache(bool markForInvalidation = true) = 0;
     virtual void removeClientFromCache(RenderElement&, bool markForInvalidation = true) = 0;
 
     virtual bool applyResource(RenderElement&, const RenderStyle&, GraphicsContext*&, OptionSet<RenderSVGResourceMode>) = 0;
-    virtual void postApplyResource(RenderElement&, GraphicsContext*&, OptionSet<RenderSVGResourceMode>, const Path*, const RenderSVGShape*) { }
+    virtual void postApplyResource(RenderElement&, GraphicsContext*&, OptionSet<RenderSVGResourceMode>, const Path*, const RenderElement* /* shape */) { }
     virtual FloatRect resourceBoundingBox(const RenderObject&) = 0;
 
     virtual RenderSVGResourceType resourceType() const = 0;
@@ -72,6 +72,9 @@ public:
     static RenderSVGResourceSolidColor* sharedSolidPaintingResource();
 
     static void markForLayoutAndParentResourceInvalidation(RenderObject&, bool needsLayout = true);
+
+protected:
+    void fillAndStrokePathOrShape(GraphicsContext&, OptionSet<RenderSVGResourceMode>, const Path*, const RenderElement* shape) const;
 };
 
 } // namespace WebCore

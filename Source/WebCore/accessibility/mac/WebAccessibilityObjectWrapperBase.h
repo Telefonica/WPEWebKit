@@ -26,15 +26,16 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WebAccessibilityObjectWrapperBase_h
-#define WebAccessibilityObjectWrapperBase_h
-
-#include "AccessibilityObject.h"
-#include <CoreGraphics/CoreGraphics.h>
+#import "AccessibilityObjectInterface.h"
+#import "FontPlatformData.h"
+#import <CoreGraphics/CoreGraphics.h>
+#import <variant>
+#import <wtf/RefPtr.h>
+#import <wtf/WeakPtr.h>
 
 namespace WebCore {
-class AccessibilityObject;
 struct AccessibilitySearchCriteria;
+class Document;
 class IntRect;
 class FloatPoint;
 class HTMLTextFormControlElement;
@@ -42,19 +43,65 @@ class Path;
 class VisiblePosition;
 }
 
+// Tokens used to denote attributes in NSAttributedStrings.
+static NSString * const UIAccessibilityTokenBlockquoteLevel = @"UIAccessibilityTokenBlockquoteLevel";
+static NSString * const UIAccessibilityTokenHeadingLevel = @"UIAccessibilityTokenHeadingLevel";
+static NSString * const UIAccessibilityTokenFontName = @"UIAccessibilityTokenFontName";
+static NSString * const UIAccessibilityTokenFontFamily = @"UIAccessibilityTokenFontFamily";
+static NSString * const UIAccessibilityTokenFontSize = @"UIAccessibilityTokenFontSize";
+static NSString * const UIAccessibilityTokenBold = @"UIAccessibilityTokenBold";
+static NSString * const UIAccessibilityTokenItalic = @"UIAccessibilityTokenItalic";
+static NSString * const UIAccessibilityTokenUnderline = @"UIAccessibilityTokenUnderline";
+static NSString * const UIAccessibilityTokenLanguage = @"UIAccessibilityTokenLanguage";
+static NSString * const UIAccessibilityTokenAttachment = @"UIAccessibilityTokenAttachment";
+
+static NSString * const UIAccessibilityTextAttributeContext = @"UIAccessibilityTextAttributeContext";
+static NSString * const UIAccessibilityTextualContextSourceCode = @"UIAccessibilityTextualContextSourceCode";
+
+bool AXAttributedStringRangeIsValid(NSAttributedString *, const NSRange&);
+void AXAttributedStringSetFont(NSMutableAttributedString *, CTFontRef, const NSRange&);
+
 @interface WebAccessibilityObjectWrapperBase : NSObject {
-    WebCore::AccessibilityObject* m_object;
+    WebCore::AXCoreObject* m_axObject;
+
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    WebCore::AXCoreObject* m_isolatedObject;
+    // To be accessed only on the main thread.
+    bool m_isolatedObjectInitialized;
+#endif
+
+    WebCore::AXID _identifier;
 }
- 
-- (id)initWithAccessibilityObject:(WebCore::AccessibilityObject*)axObject;
+
+- (id)initWithAccessibilityObject:(WebCore::AXCoreObject*)axObject;
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+- (void)attachIsolatedObject:(WebCore::AXCoreObject*)isolatedObject;
+#endif
+
 - (void)detach;
-- (WebCore::AccessibilityObject*)accessibilityObject;
-- (BOOL)updateObjectBackingStore;
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+- (void)detachIsolatedObject:(WebCore::AccessibilityDetachmentType)detachmentType;
+#endif
+
+@property (nonatomic, assign) WebCore::AXID identifier;
+
+// FIXME: unified these two methods into one.
+#if PLATFORM(MAC)
+// Updates the underlying object and accessibility hierarchy , and returns the
+// corresponding AXCoreObject.
+- (WebCore::AXCoreObject*)updateObjectBackingStore;
+#else
+- (BOOL)_prepareAccessibilityCall;
+#endif
+
+// This can be either an AccessibilityObject or an AXIsolatedObject
+- (WebCore::AXCoreObject*)axBackingObject;
+
+- (NSArray<NSDictionary *> *)lineRectsAndText;
 
 // These are pre-fixed with base so that AppKit does not end up calling into these directly (bypassing safety checks).
-- (NSString *)baseAccessibilityTitle;
-- (NSString *)baseAccessibilityDescription;
 - (NSString *)baseAccessibilityHelpText;
+- (NSArray<NSString *> *)baseAccessibilitySpeechHint;
 
 - (NSString *)ariaLandmarkRoleDescription;
 
@@ -63,16 +110,27 @@ class VisiblePosition;
 - (void)accessibilityPostedNotification:(NSString *)notificationName;
 - (void)accessibilityPostedNotification:(NSString *)notificationName userInfo:(NSDictionary *)userInfo;
 
-- (CGPathRef)convertPathToScreenSpace:(WebCore::Path &)path;
-- (CGPoint)convertPointToScreenSpace:(WebCore::FloatPoint &)point;
+- (CGPathRef)convertPathToScreenSpace:(const WebCore::Path&)path;
+
+- (CGRect)convertRectToSpace:(const WebCore::FloatRect&)rect space:(WebCore::AccessibilityConversionSpace)space;
+- (NSArray *)contentForSimpleRange:(const WebCore::SimpleRange&)range attributed:(BOOL)attributed;
 
 // Math related functions
 - (NSArray *)accessibilityMathPostscriptPairs;
 - (NSArray *)accessibilityMathPrescriptPairs;
 
+- (NSRange)accessibilityVisibleCharacterRange;
+
+- (NSDictionary<NSString *, id> *)baseAccessibilityResolvedEditingStyles;
+
 extern WebCore::AccessibilitySearchCriteria accessibilitySearchCriteriaForSearchPredicateParameterizedAttribute(const NSDictionary *);
-extern NSArray *convertToNSArray(const WebCore::AccessibilityObject::AccessibilityChildrenVector&);
+
+extern NSArray *makeNSArray(const WebCore::AXCoreObject::AccessibilityChildrenVector&);
+extern NSRange makeNSRange(std::optional<WebCore::SimpleRange>);
+extern std::optional<WebCore::SimpleRange> makeDOMRange(WebCore::Document*, NSRange);
+
+#if PLATFORM(IOS_FAMILY)
+- (id)_accessibilityWebDocumentView;
+#endif
 
 @end
-
-#endif // WebAccessibilityObjectWrapperBase_h

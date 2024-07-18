@@ -23,19 +23,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WKAccessibilityWebPageObjectIOS_h
-#define WKAccessibilityWebPageObjectIOS_h
+#if PLATFORM(IOS_FAMILY)
 
-#if PLATFORM(IOS)
-
-#include "WKAccessibilityWebPageObjectBase.h"
+#import "WKAccessibilityWebPageObjectBase.h"
 
 @interface WKAccessibilityWebPageObject : WKAccessibilityWebPageObjectBase
-
 @property(nonatomic, retain) NSData *remoteTokenData;
-
 @end
 
-#endif // PLATFORM(IOS)
-
-#endif // WKAccessibilityWebPageObjectIOS_h
+#endif // PLATFORM(IOS_FAMILY)

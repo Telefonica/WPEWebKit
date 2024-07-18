@@ -26,12 +26,15 @@
 #import "config.h"
 #import "_WKExperimentalFeatureInternal.h"
 
-#if WK_API_ENABLED
+#import <WebCore/WebCoreObjCExtras.h>
 
 @implementation _WKExperimentalFeature
 
 - (void)dealloc
 {
+    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(_WKExperimentalFeature.class, self))
+        return;
+
     _experimentalFeature->API::ExperimentalFeature::~ExperimentalFeature();
 
     [super dealloc];
@@ -62,6 +65,11 @@
     return _experimentalFeature->defaultValue();
 }
 
+- (BOOL)isHidden
+{
+    return _experimentalFeature->isHidden();
+}
+
 #pragma mark WKObject protocol implementation
 
 - (API::Object&)_apiObject
@@ -70,5 +78,3 @@
 }
 
 @end
-
-#endif

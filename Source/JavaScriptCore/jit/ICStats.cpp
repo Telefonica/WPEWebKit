@@ -40,13 +40,18 @@ bool ICEvent::operator<(const ICEvent& other) const
     
     if (m_propertyName != other.m_propertyName)
         return codePointCompare(m_propertyName.string(), other.m_propertyName.string()) < 0;
-    
-    return m_kind < other.m_kind;
+
+    if (m_kind != other.m_kind)
+        return m_kind < other.m_kind;
+
+    return m_propertyLocation < other.m_propertyLocation;
 }
 
 void ICEvent::dump(PrintStream& out) const
 {
     out.print(m_kind, "(", m_classInfo ? m_classInfo->className : "<null>", ", ", m_propertyName, ")");
+    if (m_propertyLocation != Unknown)
+        out.print(m_propertyLocation == BaseObject ? " self" : " proto lookup");
 }
 
 void ICEvent::log() const
@@ -61,7 +66,7 @@ ICStats::ICStats()
     m_thread = Thread::create(
         "JSC ICStats",
         [this] () {
-            LockHolder locker(m_lock);
+            Locker locker { m_lock };
             for (;;) {
                 m_condition.waitFor(
                     m_lock, Seconds(1), [this] () -> bool { return m_shouldStop; });
@@ -69,9 +74,12 @@ ICStats::ICStats()
                     break;
                 
                 dataLog("ICStats:\n");
-                auto list = m_spectrum.buildList();
-                for (unsigned i = list.size(); i--;)
-                    dataLog("    ", list[i].key, ": ", list[i].count, "\n");
+                {
+                    Locker spectrumLocker { m_spectrum.getLock() };
+                    auto list = m_spectrum.buildList(spectrumLocker);
+                    for (unsigned i = list.size(); i--;)
+                        dataLog("    ", *list[i].key, ": ", list[i].count, "\n");
+                }
             }
         });
 }
@@ -79,7 +87,7 @@ ICStats::ICStats()
 ICStats::~ICStats()
 {
     {
-        LockHolder locker(m_lock);
+        Locker locker { m_lock };
         m_shouldStop = true;
         m_condition.notifyAll();
     }

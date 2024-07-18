@@ -8,13 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_REMB_H_
-#define WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_REMB_H_
+#ifndef MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_REMB_H_
+#define MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_REMB_H_
 
 #include <vector>
 
-#include "webrtc/base/basictypes.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/psfb.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/psfb.h"
 
 namespace webrtc {
 namespace rtcp {
@@ -23,19 +22,19 @@ class CommonHeader;
 // Receiver Estimated Max Bitrate (REMB) (draft-alvestrand-rmcat-remb).
 class Remb : public Psfb {
  public:
-  static constexpr uint8_t kFeedbackMessageType = 15;
   static constexpr size_t kMaxNumberOfSsrcs = 0xff;
 
   Remb();
+  Remb(const Remb&);
   ~Remb() override;
 
   // Parse assumes header is already parsed and validated.
   bool Parse(const CommonHeader& packet);
 
   bool SetSsrcs(std::vector<uint32_t> ssrcs);
-  void SetBitrateBps(uint64_t bitrate_bps) { bitrate_bps_ = bitrate_bps; }
+  void SetBitrateBps(int64_t bitrate_bps) { bitrate_bps_ = bitrate_bps; }
 
-  uint64_t bitrate_bps() const { return bitrate_bps_; }
+  int64_t bitrate_bps() const { return bitrate_bps_; }
   const std::vector<uint32_t>& ssrcs() const { return ssrcs_; }
 
   size_t BlockLength() const override;
@@ -43,7 +42,7 @@ class Remb : public Psfb {
   bool Create(uint8_t* packet,
               size_t* index,
               size_t max_length,
-              RtcpPacket::PacketReadyCallback* callback) const override;
+              PacketReadyCallback callback) const override;
 
  private:
   static constexpr uint32_t kUniqueIdentifier = 0x52454D42;  // 'R' 'E' 'M' 'B'.
@@ -52,9 +51,9 @@ class Remb : public Psfb {
   void SetMediaSsrc(uint32_t);
   uint32_t media_ssrc() const;
 
-  uint64_t bitrate_bps_;
+  int64_t bitrate_bps_;
   std::vector<uint32_t> ssrcs_;
 };
 }  // namespace rtcp
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_REMB_H_
+#endif  // MODULES_RTP_RTCP_SOURCE_RTCP_PACKET_REMB_H_

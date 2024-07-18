@@ -33,17 +33,15 @@
 #include "B3MemoryValue.h"
 #include "B3PatchpointValue.h"
 #include "B3ValueInlines.h"
+#include "DateInstance.h"
 #include "DirectArguments.h"
 #include "FTLState.h"
 #include "GetterSetter.h"
 #include "JSPropertyNameEnumerator.h"
-#include "JSScope.h"
-#include "JSCInlines.h"
-#include "RegExpConstructor.h"
 #include "RegExpObject.h"
 #include "ScopedArguments.h"
-#include "ScopedArgumentsTable.h"
 #include "ShadowChicken.h"
+#include "StructureChain.h"
 
 namespace JSC { namespace FTL {
 
@@ -59,6 +57,8 @@ AbstractHeapRepository::AbstractHeapRepository()
 #undef ABSTRACT_FIELD_INITIALIZATION
     
     , JSCell_freeListNext(JSCell_header)
+    , ArrayStorage_publicLength(Butterfly_publicLength)
+    , ArrayStorage_vectorLength(Butterfly_vectorLength)
     
 #define INDEXED_ABSTRACT_HEAP_INITIALIZATION(name, offset, size) , name(&root, #name, offset, size)
     FOR_EACH_INDEXED_ABSTRACT_HEAP(INDEXED_ABSTRACT_HEAP_INITIALIZATION)
@@ -68,9 +68,15 @@ AbstractHeapRepository::AbstractHeapRepository()
     FOR_EACH_NUMBERED_ABSTRACT_HEAP(NUMBERED_ABSTRACT_HEAP_INITIALIZATION)
 #undef NUMBERED_ABSTRACT_HEAP_INITIALIZATION
 
+    , JSString_value(JSRopeString_fiber0)
+    , JSWrapperObject_internalValue(const_cast<AbstractHeap&>(JSInternalFieldObjectImpl_internalFields[static_cast<unsigned>(JSWrapperObject::Field::WrappedValue)]))
+
     , absolute(&root, "absolute")
 {
-    // Make sure that our explicit assumptions about the StructureIDBlob match reality.
+    JSCell_header.changeParent(&JSCellHeaderAndNamedProperties);
+    properties.atAnyNumber().changeParent(&JSCellHeaderAndNamedProperties);
+
+    // Make sure that our explicit assumptions about the TypeInfoBlob match reality.
     RELEASE_ASSERT(!(JSCell_indexingTypeAndMisc.offset() & (sizeof(int32_t) - 1)));
     RELEASE_ASSERT(JSCell_indexingTypeAndMisc.offset() + 1 == JSCell_typeInfoType.offset());
     RELEASE_ASSERT(JSCell_indexingTypeAndMisc.offset() + 2 == JSCell_typeInfoFlags.offset());
@@ -82,6 +88,8 @@ AbstractHeapRepository::AbstractHeapRepository()
     JSCell_typeInfoType.changeParent(&JSCell_usefulBytes);
     JSCell_typeInfoFlags.changeParent(&JSCell_usefulBytes);
     JSCell_cellState.changeParent(&JSCell_usefulBytes);
+    JSRopeString_flags.changeParent(&JSRopeString_fiber0);
+    JSRopeString_length.changeParent(&JSRopeString_fiber1);
 
     RELEASE_ASSERT(!JSCell_freeListNext.offset());
 }

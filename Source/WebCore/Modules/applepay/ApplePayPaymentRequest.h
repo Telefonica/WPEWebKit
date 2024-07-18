@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,29 +27,21 @@
 
 #if ENABLE(APPLE_PAY)
 
+#include "ApplePayAutomaticReloadPaymentRequest.h"
 #include "ApplePayLineItem.h"
 #include "ApplePayPaymentContact.h"
+#include "ApplePayPaymentTokenContext.h"
+#include "ApplePayRecurringPaymentRequest.h"
+#include "ApplePayRequestBase.h"
 #include "ApplePaySessionPaymentRequest.h"
 #include "ApplePayShippingMethod.h"
 
 namespace WebCore {
 
-struct ApplePayPaymentRequest {
-    enum class MerchantCapability { Supports3DS, SupportsEMV, SupportsCredit, SupportsDebit };
-    enum class ContactField { Email, Name, PhoneticName, Phone, PostalAddress };
-
+struct ApplePayPaymentRequest : ApplePayRequestBase {
     using ShippingType = ApplePaySessionPaymentRequest::ShippingType;
 
-    Vector<MerchantCapability> merchantCapabilities;
-    Vector<String> supportedNetworks;
-    String countryCode;
     String currencyCode;
-
-    std::optional<Vector<ContactField>> requiredBillingContactFields;
-    std::optional<ApplePayPaymentContact> billingContact;
-
-    std::optional<Vector<ContactField>>  requiredShippingContactFields;
-    std::optional<ApplePayPaymentContact> shippingContact;
 
     ShippingType shippingType { ShippingType::Shipping };
     std::optional<Vector<ApplePayShippingMethod>> shippingMethods;
@@ -57,8 +49,17 @@ struct ApplePayPaymentRequest {
     ApplePayLineItem total;
     std::optional<Vector<ApplePayLineItem>> lineItems;
 
-    String applicationData;
-    Vector<String> supportedCountries;
+#if ENABLE(APPLE_PAY_RECURRING_PAYMENTS)
+    std::optional<ApplePayRecurringPaymentRequest> recurringPaymentRequest;
+#endif
+
+#if ENABLE(APPLE_PAY_AUTOMATIC_RELOAD_PAYMENTS)
+    std::optional<ApplePayAutomaticReloadPaymentRequest> automaticReloadPaymentRequest;
+#endif
+
+#if ENABLE(APPLE_PAY_MULTI_MERCHANT_PAYMENTS)
+    std::optional<Vector<ApplePayPaymentTokenContext>> multiTokenContexts;
+#endif
 };
 
 }

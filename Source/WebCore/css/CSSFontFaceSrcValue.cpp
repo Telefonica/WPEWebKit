@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,29 +25,32 @@
 
 #include "config.h"
 #include "CSSFontFaceSrcValue.h"
+#include "CSSMarkup.h"
 #include "CachedFont.h"
+#include "CachedFontLoadRequest.h"
 #include "CachedResourceLoader.h"
 #include "CachedResourceRequest.h"
 #include "CachedResourceRequestInitiators.h"
-#include "Document.h"
 #include "FontCustomPlatformData.h"
+#include "FontLoadRequest.h"
 #include "Node.h"
 #include "SVGFontFaceElement.h"
+#include "ScriptExecutionContext.h"
 #include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
-#if ENABLE(SVG_FONTS)
+CSSFontFaceSrcValue::~CSSFontFaceSrcValue() = default;
+
 bool CSSFontFaceSrcValue::isSVGFontFaceSrc() const
 {
-    return equalLettersIgnoringASCIICase(m_format, "svg");
+    return equalLettersIgnoringASCIICase(m_format, "svg"_s);
 }
 
 bool CSSFontFaceSrcValue::isSVGFontTarget() const
 {
     return isSVGFontFaceSrc() || svgFontFaceElement();
 }
-#endif
 
 bool CSSFontFaceSrcValue::isSupportedFormat() const
 {
@@ -55,54 +58,50 @@ bool CSSFontFaceSrcValue::isSupportedFormat() const
     // we will also check to see if the URL ends with .eot. If so, we'll assume that we shouldn't load it.
     if (m_format.isEmpty()) {
         // Check for .eot.
-        if (!m_resource.startsWith("data:", false) && m_resource.endsWith(".eot", false))
+        if (!protocolIs(m_resource, "data"_s) && m_resource.endsWithIgnoringASCIICase(".eot"_s))
             return false;
         return true;
     }
 
-    return FontCustomPlatformData::supportsFormat(m_format)
-#if ENABLE(SVG_FONTS)
-           || isSVGFontFaceSrc()
-#endif
-           ;
+    return FontCustomPlatformData::supportsFormat(m_format) || isSVGFontFaceSrc();
+}
+
+SVGFontFaceElement* CSSFontFaceSrcValue::svgFontFaceElement() const
+{
+    return m_svgFontFaceElement.get();
+}
+
+void CSSFontFaceSrcValue::setSVGFontFaceElement(SVGFontFaceElement* element)
+{
+    m_svgFontFaceElement = element;
 }
 
 String CSSFontFaceSrcValue::customCSSText() const
 {
-    StringBuilder result;
-    if (isLocal())
-        result.appendLiteral("local(");
-    else
-        result.appendLiteral("url(");
-    result.append(m_resource);
-    result.append(')');
-    if (!m_format.isEmpty()) {
-        result.appendLiteral(" format(");
-        result.append(m_format);
-        result.append(')');
-    }
-    return result.toString();
+    // FIXME: URLs should not be absolutized, but instead should be serialized exactly as they were specified.
+    const char* prefix = isLocal() ? "local(" : "url(";
+    if (m_format.isEmpty())
+        return makeString(prefix, serializeString(m_resource), ")");
+    return makeString(prefix, serializeString(m_resource), ")", " format(", serializeString(m_format), ")");
 }
 
-bool CSSFontFaceSrcValue::traverseSubresources(const WTF::Function<bool (const CachedResource&)>& handler) const
+bool CSSFontFaceSrcValue::traverseSubresources(const Function<bool(const CachedResource&)>& handler) const
 {
     if (!m_cachedFont)
         return false;
     return handler(*m_cachedFont);
 }
 
-CachedFont* CSSFontFaceSrcValue::cachedFont(Document* document, bool isSVG, bool isInitiatingElementInUserAgentShadowTree)
+std::unique_ptr<FontLoadRequest> CSSFontFaceSrcValue::fontLoadRequest(ScriptExecutionContext* context, bool isSVG, bool isInitiatingElementInUserAgentShadowTree)
 {
     if (m_cachedFont)
-        return m_cachedFont.get();
+        return makeUnique<CachedFontLoadRequest>(*m_cachedFont);
 
-    ResourceLoaderOptions options = CachedResourceLoader::defaultCachedResourceOptions();
-    options.contentSecurityPolicyImposition = isInitiatingElementInUserAgentShadowTree ? ContentSecurityPolicyImposition::SkipPolicyCheck : ContentSecurityPolicyImposition::DoPolicyCheck;
+    auto request = context->fontLoadRequest(m_resource, isSVG, isInitiatingElementInUserAgentShadowTree, m_loadedFromOpaqueSource);
+    if (is<CachedFontLoadRequest>(request))
+        m_cachedFont = &downcast<CachedFontLoadRequest>(request.get())->cachedFont();
 
-    CachedResourceRequest request(ResourceRequest(document->completeURL(m_resource)), options);
-    request.setInitiator(cachedResourceRequestInitiators().css);
-    m_cachedFont = document->cachedResourceLoader().requestFont(WTFMove(request), isSVG).valueOr(nullptr);
-    return m_cachedFont.get();
+    return request;
 }
 
 bool CSSFontFaceSrcValue::equals(const CSSFontFaceSrcValue& other) const

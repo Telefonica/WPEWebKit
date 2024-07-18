@@ -26,7 +26,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
 
 #import "WebURLsWithTitles.h"
 
@@ -41,7 +41,7 @@
     static NSArray *cannedArray = nil;
 
     if (cannedArray == nil) {
-        cannedArray = [[NSArray arrayWithObject:WebURLsWithTitlesPboardType] retain];
+        cannedArray = [@[WebURLsWithTitlesPboardType] retain];
     }
 
     return cannedArray;
@@ -73,7 +73,7 @@
         [titlesOrEmptyStrings addObject:(titles == nil) ? @"" : [[titles objectAtIndex:index] _webkit_stringByTrimmingWhitespace]];
     }
 
-    [pasteboard setPropertyList:[NSArray arrayWithObjects:URLStrings, titlesOrEmptyStrings, nil]
+    [pasteboard setPropertyList:@[URLStrings, titlesOrEmptyStrings]
                         forType:WebURLsWithTitlesPboardType];
 }
 
@@ -108,4 +108,4 @@
 
 @end
 
-#endif // !PLATFORM(IOS)
+#endif // !PLATFORM(IOS_FAMILY)

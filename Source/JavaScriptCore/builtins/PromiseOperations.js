@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2015 Yusuke Suzuki <utatane.tea@gmail.com>.
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,42 +26,41 @@
 
 // @internal
 
-@globalPrivate
-function isPromise(promise)
+@linkTimeConstant
+function pushNewPromiseReaction(thenable, existingReactions, promiseOrCapability, onFulfilled, onRejected)
 {
     "use strict";
 
-    return @isObject(promise) && !!promise.@promiseState;
+    if (!existingReactions) {
+        existingReactions = {
+            @promiseOrCapability: promiseOrCapability,
+            @onFulfilled: onFulfilled,
+            @onRejected: onRejected,
+            // This is 3x then number of out of line reactions (promise, fulfill callback, reject callback).
+            @outOfLineReactionCounts: 0,
+        };
+        @putPromiseInternalField(thenable, @promiseFieldReactionsOrResult, existingReactions);
+    } else {
+        var outOfLineReactionCounts = existingReactions.@outOfLineReactionCounts;
+        @putByValDirect(existingReactions, outOfLineReactionCounts++, promiseOrCapability);
+        @putByValDirect(existingReactions, outOfLineReactionCounts++, onFulfilled);
+        @putByValDirect(existingReactions, outOfLineReactionCounts++, onRejected);
+        existingReactions.@outOfLineReactionCounts = outOfLineReactionCounts;
+    }
 }
 
-@globalPrivate
-function newPromiseReaction(capability, onFulfilled, onRejected)
+@linkTimeConstant
+function newPromiseCapabilitySlow(constructor)
 {
     "use strict";
-
-    return {
-        @capabilities: capability,
-        @onFulfilled: onFulfilled,
-        @onRejected: onRejected,
-    };
-}
-
-@globalPrivate
-function newPromiseCapability(constructor)
-{
-    "use strict";
-
-    if (!@isConstructor(constructor))
-        @throwTypeError("promise capability requires a constructor function");
 
     var promiseCapability = {
-        @promise: @undefined,
         @resolve: @undefined,
-        @reject: @undefined
+        @reject: @undefined,
+        @promise: @undefined,
     };
 
-    function @executor(resolve, reject)
-    {
+    var promise = new constructor((resolve, reject) => {
         if (promiseCapability.@resolve !== @undefined)
             @throwTypeError("resolve function is already set");
         if (promiseCapability.@reject !== @undefined)
@@ -69,14 +68,12 @@ function newPromiseCapability(constructor)
 
         promiseCapability.@resolve = resolve;
         promiseCapability.@reject = reject;
-    }
+    });
 
-    var promise = new constructor(@executor);
-
-    if (typeof promiseCapability.@resolve !== "function")
+    if (!@isCallable(promiseCapability.@resolve))
         @throwTypeError("executor did not take a resolve function");
 
-    if (typeof promiseCapability.@reject !== "function")
+    if (!@isCallable(promiseCapability.@reject))
         @throwTypeError("executor did not take a reject function");
 
     promiseCapability.@promise = promise;
@@ -84,124 +81,452 @@ function newPromiseCapability(constructor)
     return promiseCapability;
 }
 
-@globalPrivate
+@linkTimeConstant
+function newPromiseCapability(constructor)
+{
+    "use strict";
+
+    if (constructor === @Promise) {
+        var promise = @newPromise();
+        var capturedPromise = promise;
+        function @resolve(resolution) {
+            return @resolvePromiseWithFirstResolvingFunctionCallCheck(capturedPromise, resolution);
+        }
+        function @reject(reason) {
+            return @rejectPromiseWithFirstResolvingFunctionCallCheck(capturedPromise, reason);
+        }
+        return { @resolve, @reject, @promise: promise };
+    }
+
+    return @newPromiseCapabilitySlow(constructor);
+}
+
+@linkTimeConstant
+function promiseResolve(constructor, value)
+{
+    "use strict";
+
+    if (@isPromise(value) && value.constructor === constructor)
+        return value;
+
+    if (constructor === @Promise) {
+        var promise = @newPromise();
+        @resolvePromiseWithFirstResolvingFunctionCallCheck(promise, value);
+        return promise;
+    }
+
+    return @promiseResolveSlow(constructor, value);
+}
+
+@linkTimeConstant
+function promiseResolveSlow(constructor, value)
+{
+    "use strict";
+
+    @assert(constructor !== @Promise);
+    var promiseCapability = @newPromiseCapabilitySlow(constructor);
+    promiseCapability.@resolve.@call(@undefined, value);
+    return promiseCapability.@promise;
+}
+
+@linkTimeConstant
+function promiseRejectSlow(constructor, reason)
+{
+    "use strict";
+
+    @assert(constructor !== @Promise);
+    var promiseCapability = @newPromiseCapabilitySlow(constructor);
+    promiseCapability.@reject.@call(@undefined, reason);
+    return promiseCapability.@promise;
+}
+
+@linkTimeConstant
 function newHandledRejectedPromise(error)
 {
-    let promise = @Promise.@reject(error);
-    promise.@promiseIsHandled = true;
+    "use strict";
+    var promise = @newPromise();
+    @rejectPromiseWithFirstResolvingFunctionCallCheck(promise, error);
+    @putPromiseInternalField(promise, @promiseFieldFlags, @getPromiseInternalField(promise, @promiseFieldFlags) | @promiseFlagsIsHandled);
     return promise;
 }
 
-@globalPrivate
+@linkTimeConstant
 function triggerPromiseReactions(state, reactions, argument)
 {
     "use strict";
 
-    for (var index = 0, length = reactions.length; index < length; ++index)
-        @enqueueJob(@promiseReactionJob, [state, reactions[index], argument]);
+    if (!reactions)
+        return;
+
+    var isResolved = state === @promiseStateFulfilled;
+
+    @enqueueJob(@promiseReactionJob, state, reactions.@promiseOrCapability, isResolved ? reactions.@onFulfilled : reactions.@onRejected, argument);
+
+    for (var i = 0, count = reactions.@outOfLineReactionCounts; i < count; i += 3) {
+        var promise = reactions[i];
+        var handler = isResolved ? reactions[i + 1] : reactions[i + 2];
+        @enqueueJob(@promiseReactionJob, state, promise, handler, argument);
+    }
+    @assert(i === count);
 }
 
-@globalPrivate
+@linkTimeConstant
+function resolvePromise(promise, resolution)
+{
+    "use strict";
+
+    @assert(@isPromise(promise));
+
+    if (resolution === promise)
+        return @rejectPromise(promise, @makeTypeError("Cannot resolve a promise with itself"));
+
+    if (!@isObject(resolution))
+        return @fulfillPromise(promise, resolution);
+
+    var then;
+    try {
+        then = resolution.then;
+    } catch (error) {
+        return @rejectPromise(promise, error);
+    }
+
+    if (@isPromise(resolution) && then === @defaultPromiseThen) {
+        @enqueueJob(@promiseResolveThenableJobFast, resolution, promise);
+        return;
+    }
+
+    if (!@isCallable(then))
+        return @fulfillPromise(promise, resolution);
+
+    @enqueueJob(@promiseResolveThenableJob, resolution, then, @createResolvingFunctions(promise));
+}
+
+// Keep in sync with JSPromise::rejectedPromise.
+@linkTimeConstant
 function rejectPromise(promise, reason)
 {
     "use strict";
 
-    var reactions = promise.@promiseReactions;
-    promise.@promiseResult = reason;
-    promise.@promiseReactions = @undefined;
-    promise.@promiseState = @promiseStateRejected;
+    @assert(@isPromise(promise));
+    @assert((@getPromiseInternalField(promise, @promiseFieldFlags) & @promiseStateMask) == @promiseStatePending);
 
-    @InspectorInstrumentation.promiseRejected(promise, reason, reactions);
+    var flags = @getPromiseInternalField(promise, @promiseFieldFlags);
+    var reactions = @getPromiseInternalField(promise, @promiseFieldReactionsOrResult);
+    @putPromiseInternalField(promise, @promiseFieldReactionsOrResult, reason);
+    @putPromiseInternalField(promise, @promiseFieldFlags, flags | @promiseStateRejected);
 
-    if (!promise.@promiseIsHandled)
+    if (!(flags & @promiseFlagsIsHandled))
         @hostPromiseRejectionTracker(promise, @promiseRejectionReject);
 
     @triggerPromiseReactions(@promiseStateRejected, reactions, reason);
 }
 
-@globalPrivate
+@linkTimeConstant
 function fulfillPromise(promise, value)
 {
     "use strict";
 
-    var reactions = promise.@promiseReactions;
-    promise.@promiseResult = value;
-    promise.@promiseReactions = @undefined;
-    promise.@promiseState = @promiseStateFulfilled;
+    @assert(@isPromise(promise));
+    @assert((@getPromiseInternalField(promise, @promiseFieldFlags) & @promiseStateMask) == @promiseStatePending);
 
-    @InspectorInstrumentation.promiseFulfilled(promise, value, reactions);
+    var flags = @getPromiseInternalField(promise, @promiseFieldFlags);
+    var reactions = @getPromiseInternalField(promise, @promiseFieldReactionsOrResult);
+    @putPromiseInternalField(promise, @promiseFieldReactionsOrResult, value);
+    @putPromiseInternalField(promise, @promiseFieldFlags, flags | @promiseStateFulfilled);
 
     @triggerPromiseReactions(@promiseStateFulfilled, reactions, value);
 }
 
-@globalPrivate
-function createResolvingFunctions(promise)
+@linkTimeConstant
+function resolvePromiseWithFirstResolvingFunctionCallCheck(promise, value)
 {
     "use strict";
 
+    @assert(@isPromise(promise));
+    var flags = @getPromiseInternalField(promise, @promiseFieldFlags);
+    if (flags & @promiseFlagsIsFirstResolvingFunctionCalled)
+        return;
+    @putPromiseInternalField(promise, @promiseFieldFlags, flags | @promiseFlagsIsFirstResolvingFunctionCalled);
+    return @resolvePromise(promise, value);
+}
+
+@linkTimeConstant
+function fulfillPromiseWithFirstResolvingFunctionCallCheck(promise, value)
+{
+    "use strict";
+
+    @assert(@isPromise(promise));
+    var flags = @getPromiseInternalField(promise, @promiseFieldFlags);
+    if (flags & @promiseFlagsIsFirstResolvingFunctionCalled)
+        return;
+    @putPromiseInternalField(promise, @promiseFieldFlags, flags | @promiseFlagsIsFirstResolvingFunctionCalled);
+    return @fulfillPromise(promise, value);
+}
+
+@linkTimeConstant
+function rejectPromiseWithFirstResolvingFunctionCallCheck(promise, reason)
+{
+    "use strict";
+
+    @assert(@isPromise(promise));
+    var flags = @getPromiseInternalField(promise, @promiseFieldFlags);
+    if (flags & @promiseFlagsIsFirstResolvingFunctionCalled)
+        return;
+    @putPromiseInternalField(promise, @promiseFieldFlags, flags | @promiseFlagsIsFirstResolvingFunctionCalled);
+    return @rejectPromise(promise, reason);
+}
+
+@linkTimeConstant
+function createResolvingFunctions(promise)
+{
+    "use strict";
+    @assert(@isPromise(promise));
+
     var alreadyResolved = false;
 
-    function @resolve(resolution) {
+    var resolve = (0, /* prevent function name inference */ (resolution) => {
         if (alreadyResolved)
             return @undefined;
         alreadyResolved = true;
 
-        if (resolution === promise)
-            return @rejectPromise(promise, new @TypeError("Resolve a promise with itself"));
+        return @resolvePromise(promise, resolution);
+    });
 
-        if (!@isObject(resolution))
-            return @fulfillPromise(promise, resolution);
-
-        var then;
-        try {
-            then = resolution.then;
-        } catch (error) {
-            return @rejectPromise(promise, error);
-        }
-
-        if (typeof then !== 'function')
-            return @fulfillPromise(promise, resolution);
-
-        @enqueueJob(@promiseResolveThenableJob, [promise, resolution, then]);
-
-        return @undefined;
-    }
-
-    function @reject(reason) {
+    var reject = (0, /* prevent function name inference */ (reason) => {
         if (alreadyResolved)
             return @undefined;
         alreadyResolved = true;
 
         return @rejectPromise(promise, reason);
-    }
+    });
 
-    return { @resolve, @reject };
+    return { @resolve: resolve, @reject: reject };
 }
 
-@globalPrivate
-function promiseReactionJob(state, reaction, argument)
+@linkTimeConstant
+function promiseReactionJobWithoutPromise(handler, argument)
 {
     "use strict";
 
-    var promiseCapability = reaction.@capabilities;
+    try {
+        handler(argument);
+    } catch {
+        // This is user-uncatchable promise. We just ignore the error here.
+    }
+}
 
+// This function has strong guarantee that each handler function (onFulfilled and onRejected) will be called at most once.
+@linkTimeConstant
+function resolveWithoutPromise(resolution, onFulfilled, onRejected)
+{
+    "use strict";
+
+    if (!@isObject(resolution)) {
+        @fulfillWithoutPromise(resolution, onFulfilled, onRejected);
+        return;
+    }
+
+    var then;
+    try {
+        then = resolution.then;
+    } catch (error) {
+        @rejectWithoutPromise(error, onFulfilled, onRejected);
+        return;
+    }
+
+    if (@isPromise(resolution) && then === @defaultPromiseThen) {
+        @enqueueJob(@promiseResolveThenableJobWithoutPromiseFast, resolution, onFulfilled, onRejected);
+        return;
+    }
+
+    if (!@isCallable(then)) {
+        @fulfillWithoutPromise(resolution, onFulfilled, onRejected);
+        return;
+    }
+
+    // Wrap onFulfilled and onRejected with @createResolvingFunctionsWithoutPromise to ensure that each function will be called at most once.
+    @enqueueJob(@promiseResolveThenableJob, resolution, then, @createResolvingFunctionsWithoutPromise(onFulfilled, onRejected));
+}
+
+// This function has strong guarantee that each handler function (onFulfilled and onRejected) will be called at most once.
+@linkTimeConstant
+function rejectWithoutPromise(reason, onFulfilled, onRejected)
+{
+    "use strict";
+
+    @enqueueJob(@promiseReactionJobWithoutPromise, onRejected, reason);
+}
+
+// This function has strong guarantee that each handler function (onFulfilled and onRejected) will be called at most once.
+@linkTimeConstant
+function fulfillWithoutPromise(value, onFulfilled, onRejected)
+{
+    "use strict";
+
+    @enqueueJob(@promiseReactionJobWithoutPromise, onFulfilled, value);
+}
+
+// This function has strong guarantee that each handler function (onFulfilled and onRejected) will be called at most once.
+// This is special version of resolveWithoutPromise which skips resolution's then handling.
+// https://github.com/tc39/ecma262/pull/1250
+@linkTimeConstant
+function resolveWithoutPromiseForAsyncAwait(resolution, onFulfilled, onRejected)
+{
+    "use strict";
+
+    if (@isPromise(resolution)) {
+        var constructor = resolution.constructor;
+        if (constructor === @Promise || constructor === @InternalPromise)
+            return @performPromiseThen(resolution, onFulfilled, onRejected);
+    }
+
+    return @resolveWithoutPromise(resolution, onFulfilled, onRejected);
+}
+
+@linkTimeConstant
+function createResolvingFunctionsWithoutPromise(onFulfilled, onRejected)
+{
+    "use strict";
+
+    var alreadyResolved = false;
+
+    var resolve = (0, /* prevent function name inference */ (resolution) => {
+        if (alreadyResolved)
+            return @undefined;
+        alreadyResolved = true;
+
+        @resolveWithoutPromise(resolution, onFulfilled, onRejected);
+    });
+
+    var reject = (0, /* prevent function name inference */ (reason) => {
+        if (alreadyResolved)
+            return @undefined;
+        alreadyResolved = true;
+
+        @rejectWithoutPromise(reason, onFulfilled, onRejected);
+    });
+
+    return { @resolve: resolve, @reject: reject };
+}
+
+@linkTimeConstant
+function promiseReactionJob(state, promiseOrCapability, handler, argument)
+{
+    // Promise Reaction has four types.
+    // 1. @promiseOrCapability is PromiseCapability, and having handlers.
+    //     The most generic one.
+    // 2. @promiseOrCapability is Promise, and having handlers.
+    //     We just have promise.
+    // 3. @promiseOrCapability is Promise, and not having handlers.
+    //     It only has promise. Just resolving it with the value.
+    // 4. Only having @onFulfilled and @onRejected
+    //     It does not have promise capability. Just handlers are passed.
+    "use strict";
+
+    // Case (3).
+    if (@isUndefinedOrNull(handler)) {
+        try {
+            @assert(@isPromise(promiseOrCapability));
+            if (state === @promiseStateFulfilled)
+                @resolvePromise(promiseOrCapability, argument);
+            else
+                @rejectPromise(promiseOrCapability, argument);
+        } catch {
+            // This is user-uncatchable promise. We just ignore the error here.
+        }
+        return;
+    }
+
+    // Case (4).
+    if (!promiseOrCapability) {
+        @promiseReactionJobWithoutPromise(handler, argument);
+        return;
+    }
+
+    // Case (1), or (2).
     var result;
-    var handler = (state === @promiseStateFulfilled) ? reaction.@onFulfilled: reaction.@onRejected;
     try {
         result = handler(argument);
     } catch (error) {
-        return promiseCapability.@reject.@call(@undefined, error);
+        if (@isPromise(promiseOrCapability)) {
+            @rejectPromise(promiseOrCapability, error);
+            return;
+        }
+        promiseOrCapability.@reject.@call(@undefined, error);
+        return;
     }
 
-    return promiseCapability.@resolve.@call(@undefined, result);
+    if (@isPromise(promiseOrCapability)) {
+        @resolvePromise(promiseOrCapability, result);
+        return;
+    }
+    promiseOrCapability.@resolve.@call(@undefined, result);
 }
 
-@globalPrivate
-function promiseResolveThenableJob(promiseToResolve, thenable, then)
+@linkTimeConstant
+function promiseResolveThenableJobFast(thenable, promiseToResolve)
 {
     "use strict";
 
-    var resolvingFunctions = @createResolvingFunctions(promiseToResolve);
+    @assert(@isPromise(thenable));
+    @assert(@isPromise(promiseToResolve));
+
+    // Even if we are using @defaultPromiseThen, still thenable.constructor access is observable, and if it is not returning @Promise,
+    // we need to call this constructor.
+    var constructor = @speciesConstructor(thenable, @Promise);
+    if (constructor !== @Promise && constructor !== @InternalPromise) {
+        @promiseResolveThenableJobWithDerivedPromise(thenable, constructor, @createResolvingFunctions(promiseToResolve));
+        return;
+    }
+
+    var flags = @getPromiseInternalField(thenable, @promiseFieldFlags);
+    var state = flags & @promiseStateMask;
+    var reactionsOrResult = @getPromiseInternalField(thenable, @promiseFieldReactionsOrResult);
+    if (state === @promiseStatePending)
+        @pushNewPromiseReaction(thenable, reactionsOrResult, promiseToResolve, @undefined, @undefined);
+    else {
+        if (state === @promiseStateRejected && !(flags & @promiseFlagsIsHandled))
+            @hostPromiseRejectionTracker(thenable, @promiseRejectionHandle);
+        @enqueueJob(@promiseReactionJob, state, promiseToResolve, @undefined, reactionsOrResult);
+    }
+    @putPromiseInternalField(thenable, @promiseFieldFlags, @getPromiseInternalField(thenable, @promiseFieldFlags) | @promiseFlagsIsHandled);
+}
+
+@linkTimeConstant
+function promiseResolveThenableJobWithoutPromiseFast(thenable, onFulfilled, onRejected)
+{
+    "use strict";
+
+    @assert(@isPromise(thenable));
+
+    // Even if we are using @defaultPromiseThen, still thenable.constructor access is observable, and if it is not returning @Promise,
+    // we need to call this constructor.
+    var constructor = @speciesConstructor(thenable, @Promise);
+    if (constructor !== @Promise && constructor !== @InternalPromise) {
+        @promiseResolveThenableJobWithDerivedPromise(thenable, constructor, @createResolvingFunctionsWithoutPromise(onFulfilled, onRejected));
+        return;
+    }
+
+    var flags = @getPromiseInternalField(thenable, @promiseFieldFlags);
+    var state = flags & @promiseStateMask;
+    var reactionsOrResult = @getPromiseInternalField(thenable, @promiseFieldReactionsOrResult);
+    if (state === @promiseStatePending)
+        @pushNewPromiseReaction(thenable, reactionsOrResult, @undefined, onFulfilled, onRejected);
+    else {
+        if (state === @promiseStateRejected) {
+            if (!(flags & @promiseFlagsIsHandled))
+                @hostPromiseRejectionTracker(thenable, @promiseRejectionHandle);
+            @rejectWithoutPromise(reactionsOrResult, onFulfilled, onRejected);
+        } else
+            @fulfillWithoutPromise(reactionsOrResult, onFulfilled, onRejected);
+    }
+    @putPromiseInternalField(thenable, @promiseFieldFlags, @getPromiseInternalField(thenable, @promiseFieldFlags) | @promiseFlagsIsHandled);
+}
+
+@linkTimeConstant
+function promiseResolveThenableJob(thenable, then, resolvingFunctions)
+{
+    "use strict";
 
     try {
         return then.@call(thenable, resolvingFunctions.@resolve, resolvingFunctions.@reject);
@@ -210,24 +535,62 @@ function promiseResolveThenableJob(promiseToResolve, thenable, then)
     }
 }
 
-@globalPrivate
-function initializePromise(executor)
+@linkTimeConstant
+function promiseResolveThenableJobWithDerivedPromise(thenable, constructor, resolvingFunctions)
 {
     "use strict";
 
-    if (typeof executor !== 'function')
-        @throwTypeError("Promise constructor takes a function argument");
-
-    this.@promiseState = @promiseStatePending;
-    this.@promiseReactions = [];
-    this.@promiseIsHandled = false;
-
-    var resolvingFunctions = @createResolvingFunctions(this);
     try {
-        executor(resolvingFunctions.@resolve, resolvingFunctions.@reject);
+        var promiseOrCapability = @newPromiseCapabilitySlow(constructor);
+        @performPromiseThen(thenable, resolvingFunctions.@resolve, resolvingFunctions.@reject, promiseOrCapability);
+        return promiseOrCapability.@promise;
     } catch (error) {
         return resolvingFunctions.@reject.@call(@undefined, error);
     }
+}
 
-    return this;
+@linkTimeConstant
+function promiseEmptyOnFulfilled(argument)
+{
+    "use strict";
+
+    return argument;
+}
+
+@linkTimeConstant
+function promiseEmptyOnRejected(argument)
+{
+    "use strict";
+
+    throw argument;
+}
+
+@linkTimeConstant
+function performPromiseThen(promise, onFulfilled, onRejected, promiseOrCapability)
+{
+    "use strict";
+
+    if (!@isCallable(onFulfilled))
+        onFulfilled = @promiseEmptyOnFulfilled;
+
+    if (!@isCallable(onRejected))
+        onRejected = @promiseEmptyOnRejected;
+
+    var reactionsOrResult = @getPromiseInternalField(promise, @promiseFieldReactionsOrResult);
+    var flags = @getPromiseInternalField(promise, @promiseFieldFlags);
+    var state = flags & @promiseStateMask;
+    if (state === @promiseStatePending)
+        @pushNewPromiseReaction(promise, reactionsOrResult, promiseOrCapability, onFulfilled, onRejected);
+    else {
+        var handler;
+
+        if (state === @promiseStateRejected) {
+            handler = onRejected;
+            if (!(flags & @promiseFlagsIsHandled))
+                @hostPromiseRejectionTracker(promise, @promiseRejectionHandle);
+        } else
+            handler = onFulfilled;
+        @enqueueJob(@promiseReactionJob, state, promiseOrCapability, handler, reactionsOrResult);
+    }
+    @putPromiseInternalField(promise, @promiseFieldFlags, @getPromiseInternalField(promise, @promiseFieldFlags) | @promiseFlagsIsHandled);
 }

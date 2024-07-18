@@ -25,37 +25,42 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
-#import <JavaScriptCore/JSContext.h>
+#import <JavaScriptCore/JavaScriptCore.h>
 
 @class _WKFrameHandle;
+@class WKWebProcessPlugInCSSStyleDeclarationHandle;
 @class WKWebProcessPlugInHitTestResult;
 @class WKWebProcessPlugInNodeHandle;
 @class WKWebProcessPlugInRangeHandle;
 @class WKWebProcessPlugInScriptWorld;
 
-WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
+typedef NS_OPTIONS(NSUInteger, WKHitTestOptions) {
+    WKHitTestOptionAllowUserAgentShadowRootContent = 1 << 0,
+} WK_API_AVAILABLE(macos(12.0), ios(15.0));
+
+WK_CLASS_AVAILABLE(macos(10.10), ios(8.0))
 @interface WKWebProcessPlugInFrame : NSObject
 
 @property (nonatomic, readonly) NSURL *URL;
 @property (nonatomic, readonly) NSArray *childFrames;
 @property (nonatomic, readonly) BOOL containsAnyFormElements;
+@property (nonatomic, readonly) BOOL isMainFrame;
 
 @property (nonatomic, readonly) _WKFrameHandle *handle;
 
 // Returns URLs ordered by resolution in descending order.
 // FIXME: These should be tagged nonnull.
-@property (nonatomic, readonly) NSArray<NSURL *> *appleTouchIconURLs WK_API_AVAILABLE(macosx(10.12), ios(10.0));
-@property (nonatomic, readonly) NSArray<NSURL *> *faviconURLs WK_API_AVAILABLE(macosx(10.12), ios(10.0));
+@property (nonatomic, readonly) NSArray<NSURL *> *appleTouchIconURLs WK_API_AVAILABLE(macos(10.12), ios(10.0));
+@property (nonatomic, readonly) NSArray<NSURL *> *faviconURLs WK_API_AVAILABLE(macos(10.12), ios(10.0));
 
 - (JSContext *)jsContextForWorld:(WKWebProcessPlugInScriptWorld *)world;
+- (JSContext *)jsContextForServiceWorkerWorld:(WKWebProcessPlugInScriptWorld *)world;
 - (WKWebProcessPlugInHitTestResult *)hitTest:(CGPoint)point;
+- (WKWebProcessPlugInHitTestResult *)hitTest:(CGPoint)point options:(WKHitTestOptions)options WK_API_AVAILABLE(macos(12.0), ios(15.0));
+- (JSValue *)jsCSSStyleDeclarationForCSSStyleDeclarationHandle:(WKWebProcessPlugInCSSStyleDeclarationHandle *)cssStyleDeclarationHandle inWorld:(WKWebProcessPlugInScriptWorld *)world WK_API_AVAILABLE(macos(13.0), ios(16.0));
 - (JSValue *)jsNodeForNodeHandle:(WKWebProcessPlugInNodeHandle *)nodeHandle inWorld:(WKWebProcessPlugInScriptWorld *)world;
-- (JSValue *)jsRangeForRangeHandle:(WKWebProcessPlugInRangeHandle *)rangeHandle inWorld:(WKWebProcessPlugInScriptWorld *)world WK_API_AVAILABLE(macosx(10.12.3), ios(10.3));
+- (JSValue *)jsRangeForRangeHandle:(WKWebProcessPlugInRangeHandle *)rangeHandle inWorld:(WKWebProcessPlugInScriptWorld *)world WK_API_AVAILABLE(macos(10.12.3), ios(10.3));
 
 @end
-
-#endif // WK_API_ENABLED

@@ -31,29 +31,31 @@
 #if ENABLE(ENCRYPTED_MEDIA)
 
 #include "Event.h"
-#include "MediaKeyMessageEventInit.h"
 #include "MediaKeyMessageType.h"
-#include <runtime/ArrayBuffer.h>
+#include <JavaScriptCore/Forward.h>
 
 namespace WebCore {
 
+struct MediaKeyMessageEventInit;
+
 class MediaKeyMessageEvent final : public Event {
+    WTF_MAKE_ISO_ALLOCATED(MediaKeyMessageEvent);
 public:
     using Type = MediaKeyMessageType;
     using Init = MediaKeyMessageEventInit;
 
     virtual ~MediaKeyMessageEvent();
 
-    static Ref<MediaKeyMessageEvent> create(const AtomicString& type, const MediaKeyMessageEventInit& initializer, IsTrusted isTrusted = IsTrusted::No)
+    static Ref<MediaKeyMessageEvent> create(const AtomString& type, const MediaKeyMessageEventInit& initializer, IsTrusted isTrusted = IsTrusted::No)
     {
         return adoptRef(*new MediaKeyMessageEvent(type, initializer, isTrusted));
     }
 
     Type messageType() const { return m_messageType; }
-    RefPtr<JSC::ArrayBuffer> message() const { return m_message; }
+    RefPtr<JSC::ArrayBuffer> message() const;
 
 private:
-    MediaKeyMessageEvent(const AtomicString&, const MediaKeyMessageEventInit&, IsTrusted);
+    MediaKeyMessageEvent(const AtomString&, const MediaKeyMessageEventInit&, IsTrusted);
 
     // Event
     EventInterface eventInterface() const override;

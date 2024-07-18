@@ -26,7 +26,7 @@
 #import "config.h"
 #import "WKFormSelectPopover.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
 #import "UIKitSPI.h"
 #import "WKContentView.h"
@@ -36,6 +36,7 @@
 #import "WebPageProxy.h"
 #import <UIKit/UIPickerView.h>
 #import <WebCore/LocalizedStrings.h>
+#import <pal/spi/cocoa/IOKitSPI.h>
 #import <wtf/RetainPtr.h>
 
 using namespace WebKit;
@@ -47,6 +48,7 @@ static NSString* WKPopoverTableViewCellReuseIdentifier  = @"WKPopoverTableViewCe
 - (CGRect)contentRectForBounds:(CGRect)bounds;
 @end
 
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
 static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirection writingDirection, bool override)
 {
     if (![string length] || writingDirection == UITextWritingDirectionNatural)
@@ -73,10 +75,11 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
     
     return [NSString stringWithFormat:@"%C%@%C", directionalFormattingCharacter, string, popDirectionalFormatting];
 }
+ALLOW_DEPRECATED_DECLARATIONS_END
 
 @class WKSelectPopover;
 
-@interface WKSelectTableViewController : UITableViewController <UIKeyInput>
+@interface WKSelectTableViewController : UITableViewController
 {
     NSUInteger _singleSelectionIndex;
     NSUInteger _singleSelectionSection;
@@ -91,7 +94,8 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
     WKContentView *_contentView;
 }
 
-@property(nonatomic,assign) WKSelectPopover *popover;
+@property (nonatomic, readonly) BOOL shouldDismissWithAnimation;
+@property (nonatomic, assign) WKSelectPopover *popover;
 @end
 
 @implementation WKSelectTableViewController
@@ -102,8 +106,8 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
         return nil;
     
     _contentView = view;
-    Vector<OptionItem>& selectOptions = [_contentView assistedNodeSelectOptions];
-    _allowsMultipleSelection = _contentView.assistedNodeInformation.isMultiSelect;
+    Vector<OptionItem>& selectOptions = [_contentView focusedSelectElementOptions];
+    _allowsMultipleSelection = _contentView.focusedElementInformation.isMultiSelect;
     
     // Even if the select is empty, there is at least one tableview section.
     _numberOfSections = 1;
@@ -122,8 +126,9 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
         }
         currentIndex++;
     }
-    
-    UITextWritingDirection writingDirection = _contentView.assistedNodeInformation.isRTL ? UITextWritingDirectionRightToLeft : UITextWritingDirectionLeftToRight;
+
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+    UITextWritingDirection writingDirection = _contentView.focusedElementInformation.isRTL ? UITextWritingDirectionRightToLeft : UITextWritingDirectionLeftToRight;
     BOOL override = NO;
     _textAlignment = (writingDirection == UITextWritingDirectionLeftToRight) ? NSTextAlignmentLeft : NSTextAlignmentRight;
 
@@ -132,8 +137,9 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
     // For that reason we have to override what the system thinks.
     if (writingDirection == UITextWritingDirectionRightToLeft)
         self.view.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
-    [self setTitle:stringWithWritingDirection(_contentView.assistedNodeInformation.title, writingDirection, override)];
-    
+    [self setTitle:stringWithWritingDirection(_contentView.focusedElementInformation.title, writingDirection, override)];
+    ALLOW_DEPRECATED_DECLARATIONS_END
+
     return self;
 }
 
@@ -163,12 +169,12 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    if ([_contentView assistedNodeSelectOptions].isEmpty())
+    if ([_contentView focusedSelectElementOptions].isEmpty())
         return 1;
     
     int rowCount = 0;
-    for (size_t i = 0; i < [_contentView assistedNodeSelectOptions].size(); ++i) {
-        const OptionItem& item = [_contentView assistedNodeSelectOptions][i];
+    for (size_t i = 0; i < [_contentView focusedSelectElementOptions].size(); ++i) {
+        const OptionItem& item = [_contentView focusedSelectElementOptions][i];
         if (item.isGroup)
             continue;
         if (item.parentGroupID == section)
@@ -186,8 +192,8 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
         return nil;
     
     int groupCount = 0;
-    for (size_t i = 0; i < [_contentView assistedNodeSelectOptions].size(); ++i) {
-        const OptionItem& item = [_contentView assistedNodeSelectOptions][i];
+    for (size_t i = 0; i < [_contentView focusedSelectElementOptions].size(); ++i) {
+        const OptionItem& item = [_contentView focusedSelectElementOptions][i];
         if (!item.isGroup)
             continue;
         groupCount++;
@@ -212,8 +218,8 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
     
     int optionIndex = 0;
     int rowIndex = 0;
-    for (size_t i = 0; i < [_contentView assistedNodeSelectOptions].size(); ++i) {
-        const OptionItem& item = [_contentView assistedNodeSelectOptions][i];
+    for (size_t i = 0; i < [_contentView focusedSelectElementOptions].size(); ++i) {
+        const OptionItem& item = [_contentView focusedSelectElementOptions][i];
         if (item.isGroup) {
             rowIndex = 0;
             continue;
@@ -232,8 +238,8 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
     ASSERT(indexPath.section <= _numberOfSections);
 
     int index = 0;
-    for (size_t i = 0; i < [_contentView assistedNodeSelectOptions].size(); ++i) {
-        OptionItem& item = [_contentView assistedNodeSelectOptions][i];
+    for (size_t i = 0; i < [_contentView focusedSelectElementOptions].size(); ++i) {
+        OptionItem& item = [_contentView focusedSelectElementOptions][i];
         if (item.isGroup || item.parentGroupID != indexPath.section)
             continue;
         if (index == indexPath.row)
@@ -245,46 +251,46 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:WKPopoverTableViewCellReuseIdentifier];
+    auto cell = retainPtr([tableView dequeueReusableCellWithIdentifier:WKPopoverTableViewCellReuseIdentifier]);
     if (!cell)
-        cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:WKPopoverTableViewCellReuseIdentifier] autorelease];
+        cell = adoptNS([[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:WKPopoverTableViewCellReuseIdentifier]);
     
-    cell.semanticContentAttribute = self.view.semanticContentAttribute;
-    cell.textLabel.textAlignment = _textAlignment;
+    [cell setSemanticContentAttribute:self.view.semanticContentAttribute];
+    [cell textLabel].textAlignment = _textAlignment;
     
-    if (_contentView.assistedNodeInformation.selectOptions.isEmpty()) {
-        cell.textLabel.enabled = NO;
-        cell.textLabel.text = WEB_UI_STRING_KEY("No Options", "No Options Select Popover", "Empty select list");
-        cell.accessoryType = UITableViewCellAccessoryNone;
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        return cell;
+    if (_contentView.focusedElementInformation.selectOptions.isEmpty()) {
+        [cell textLabel].enabled = NO;
+        [cell textLabel].text = WEB_UI_STRING_KEY("No Options", "No Options Select Popover", "Empty select list");
+        [cell setAccessoryType:UITableViewCellAccessoryNone];
+        [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+        return cell.autorelease();
     }
     
     CGRect textRect = [cell textRectForContentRect:[cell contentRectForBounds:[cell bounds]]];
-    ASSERT(textRect.size.width > 0.0);
+    ASSERT_IMPLIES(CGRectGetWidth(tableView.bounds) > 0, textRect.size.width > 0);
     
     // Assume all cells have the same available text width.
-    CGFloat initialFontSize = _UIApplicationUsesLegacyUI() ? UITableViewCellDefaultFontSize : cell.textLabel.font.pointSize;
-    UIFont *font = _UIApplicationUsesLegacyUI() ? [UIFont boldSystemFontOfSize:initialFontSize] : cell.textLabel.font;
+    UIFont *font = [cell textLabel].font;
+    CGFloat initialFontSize = font.pointSize;
     ASSERT(initialFontSize);
     if (textRect.size.width != _maximumTextWidth || _fontSize == 0) {
         _maximumTextWidth = textRect.size.width;
-        _fontSize = adjustedFontSize(_maximumTextWidth, font, initialFontSize, _contentView.assistedNodeInformation.selectOptions);
+        _fontSize = adjustedFontSize(_maximumTextWidth, font, initialFontSize, _contentView.focusedElementInformation.selectOptions);
     }
     
     const OptionItem* item = [self findItemAt:indexPath];
     ASSERT(item);
     
-    [self populateCell:cell withItem:*item];
-    [cell.textLabel setFont:[font fontWithSize:_fontSize]];
-    [cell.textLabel setLineBreakMode:NSLineBreakByWordWrapping];
-    [cell.textLabel setNumberOfLines:2];
-    return cell;
+    [self populateCell:cell.get() withItem:*item];
+    [[cell textLabel] setFont:[font fontWithSize:_fontSize]];
+    [[cell textLabel] setLineBreakMode:NSLineBreakByWordWrapping];
+    [[cell textLabel] setNumberOfLines:2];
+    return cell.autorelease();
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    if (_contentView.assistedNodeInformation.selectOptions.isEmpty())
+    if (_contentView.focusedElementInformation.selectOptions.isEmpty())
         return;
     
     NSInteger itemIndex = [self findItemIndexAt:indexPath];
@@ -306,9 +312,8 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
         // To trigger onchange events programmatically we need to go through this
         // SPI which mimics a user action on the <select>. Normally programmatic
         // changes do not trigger "change" events on such selects.
-    
-        [_contentView page]->setAssistedNodeSelectedIndex(itemIndex, true);
-        OptionItem& item = [_contentView assistedNodeSelectOptions][itemIndex];
+        [_contentView updateFocusedElementSelectedIndex:itemIndex allowsMultipleSelection:true];
+        OptionItem& item = [_contentView focusedSelectElementOptions][itemIndex];
         item.isSelected = newStateIsSelected;
     } else {
         [tableView deselectRowAtIndexPath:indexPath animated:NO];
@@ -339,9 +344,9 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
             
             _singleSelectionIndex = indexPath.row;
             _singleSelectionSection = indexPath.section;
- 
-            [_contentView page]->setAssistedNodeSelectedIndex(itemIndex);
-            OptionItem& newItem = [_contentView assistedNodeSelectOptions][itemIndex];
+
+            [_contentView updateFocusedElementSelectedIndex:itemIndex allowsMultipleSelection:false];
+            OptionItem& newItem = [_contentView focusedSelectElementOptions][itemIndex];
             newItem.isSelected = true;
         }
         
@@ -355,19 +360,9 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
     }
 }
 
-#pragma mark UIKeyInput delegate methods
-
-- (BOOL)hasText
+- (BOOL)shouldDismissWithAnimation
 {
-    return NO;
-}
-
-- (void)insertText:(NSString *)text
-{
-}
-
-- (void)deleteBackward
-{
+    return _contentView._shouldUseLegacySelectPopoverDismissalBehavior;
 }
 
 @end
@@ -380,40 +375,24 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
 {
     if (!(self = [super initWithView:view]))
         return nil;
-    
-    CGRect frame;
-    frame.origin = CGPointZero;
-    frame.size = [UIKeyboard defaultSizeForInterfaceOrientation:[UIApp interfaceOrientation]];
 
     _tableViewController = adoptNS([[WKSelectTableViewController alloc] initWithView:view hasGroups:hasGroups]);
     [_tableViewController setPopover:self];
-    UIViewController *popoverViewController = _tableViewController.get();
-    UINavigationController *navController = nil;
-    NSString *title = view.assistedNodeInformation.title;
-    BOOL needsNavigationController = (self.view && _UIApplicationUsesLegacyUI()) || [title length];
-    if (needsNavigationController) {
-        navController = [[UINavigationController alloc] initWithRootViewController:_tableViewController.get()];
-        popoverViewController = navController;
-        
-        if (self.view.assistedNodeInformation.isMultiSelect && _UIApplicationUsesLegacyUI())
-            _tableViewController.get().navigationItem.rightBarButtonItem = [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(_userActionDismissedPopover:)] autorelease];
-    }
+    RetainPtr<UIViewController> popoverViewController = _tableViewController.get();
+    BOOL needsNavigationController = !view.focusedElementInformation.title.isEmpty();
+    if (needsNavigationController)
+        popoverViewController = adoptNS([[UINavigationController alloc] initWithRootViewController:_tableViewController.get()]);
     
     CGSize popoverSize = [_tableViewController.get().tableView sizeThatFits:CGSizeMake(320, CGFLOAT_MAX)];
     if (needsNavigationController)
         [(UINavigationController *)popoverViewController topViewController].preferredContentSize = popoverSize;
     else
-        popoverViewController.preferredContentSize = popoverSize;
+        [popoverViewController setPreferredContentSize: popoverSize];
     
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    self.popoverController = [[[UIPopoverController alloc] initWithContentViewController:popoverViewController] autorelease];
-#pragma clang diagnostic pop
+    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+    self.popoverController = adoptNS([[UIPopoverController alloc] initWithContentViewController:popoverViewController.get()]).get();
+    ALLOW_DEPRECATED_DECLARATIONS_END
 
-    [navController release];
-    
-    [[UIKeyboardImpl sharedInstance] setDelegate:_tableViewController.get()];
-    
     return self;
 }
 
@@ -438,11 +417,17 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
 
 - (void)controlEndEditing
 {
+    [self dismissPopoverAnimated:[_tableViewController shouldDismissWithAnimation]];
 }
 
 - (void)_userActionDismissedPopover:(id)sender
 {
     [self accessoryDone];
+}
+
+- (UITableViewController *)tableViewController
+{
+    return _tableViewController.get();
 }
 
 @end
@@ -459,4 +444,4 @@ static NSString *stringWithWritingDirection(NSString *string, UITextWritingDirec
 
 @end
 
-#endif  // PLATFORM(IOS)
+#endif  // PLATFORM(IOS_FAMILY)

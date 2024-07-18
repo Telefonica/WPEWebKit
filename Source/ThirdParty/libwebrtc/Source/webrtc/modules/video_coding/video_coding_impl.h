@@ -8,30 +8,27 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_VIDEO_CODING_VIDEO_CODING_IMPL_H_
-#define WEBRTC_MODULES_VIDEO_CODING_VIDEO_CODING_IMPL_H_
+#ifndef MODULES_VIDEO_CODING_VIDEO_CODING_IMPL_H_
+#define MODULES_VIDEO_CODING_VIDEO_CODING_IMPL_H_
 
-#include "webrtc/modules/video_coding/include/video_coding.h"
-
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "webrtc/base/onetimeevent.h"
-#include "webrtc/base/sequenced_task_checker.h"
-#include "webrtc/base/thread_annotations.h"
-#include "webrtc/base/thread_checker.h"
-#include "webrtc/common_video/include/frame_callback.h"
-#include "webrtc/modules/video_coding/codec_database.h"
-#include "webrtc/modules/video_coding/frame_buffer.h"
-#include "webrtc/modules/video_coding/generic_decoder.h"
-#include "webrtc/modules/video_coding/generic_encoder.h"
-#include "webrtc/modules/video_coding/jitter_buffer.h"
-#include "webrtc/modules/video_coding/media_optimization.h"
-#include "webrtc/modules/video_coding/qp_parser.h"
-#include "webrtc/modules/video_coding/receiver.h"
-#include "webrtc/modules/video_coding/timing.h"
-#include "webrtc/system_wrappers/include/clock.h"
+#include "absl/types/optional.h"
+#include "api/field_trials_view.h"
+#include "api/sequence_checker.h"
+#include "modules/video_coding/deprecated/frame_buffer.h"
+#include "modules/video_coding/deprecated/jitter_buffer.h"
+#include "modules/video_coding/deprecated/receiver.h"
+#include "modules/video_coding/generic_decoder.h"
+#include "modules/video_coding/include/video_coding.h"
+#include "modules/video_coding/timing/timing.h"
+#include "rtc_base/one_time_event.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 
@@ -58,178 +55,125 @@ class VCMProcessTimer {
   int64_t _latestMs;
 };
 
-class VideoSender : public Module {
+class DEPRECATED_VCMDecoderDataBase {
  public:
-  typedef VideoCodingModule::SenderNackMode SenderNackMode;
+  DEPRECATED_VCMDecoderDataBase();
+  DEPRECATED_VCMDecoderDataBase(const DEPRECATED_VCMDecoderDataBase&) = delete;
+  DEPRECATED_VCMDecoderDataBase& operator=(
+      const DEPRECATED_VCMDecoderDataBase&) = delete;
+  ~DEPRECATED_VCMDecoderDataBase() = default;
 
-  VideoSender(Clock* clock,
-              EncodedImageCallback* post_encode_callback,
-              VCMSendStatisticsCallback* send_stats_callback);
+  // Returns a pointer to the previously registered decoder or nullptr if none
+  // was registered for the `payload_type`.
+  VideoDecoder* DeregisterExternalDecoder(uint8_t payload_type);
+  void RegisterExternalDecoder(uint8_t payload_type,
+                               VideoDecoder* external_decoder);
+  bool IsExternalDecoderRegistered(uint8_t payload_type) const;
 
-  ~VideoSender();
+  void RegisterReceiveCodec(uint8_t payload_type,
+                            const VideoDecoder::Settings& settings);
+  bool DeregisterReceiveCodec(uint8_t payload_type);
 
-  // Register the send codec to be used.
-  // This method must be called on the construction thread.
-  int32_t RegisterSendCodec(const VideoCodec* sendCodec,
-                            uint32_t numberOfCores,
-                            uint32_t maxPayloadSize);
-
-  void RegisterExternalEncoder(VideoEncoder* externalEncoder,
-                               uint8_t payloadType,
-                               bool internalSource);
-
-  int Bitrate(unsigned int* bitrate) const;
-  int FrameRate(unsigned int* framerate) const;
-
-  // Update the channel parameters based on new rates and rtt. This will also
-  // cause an immediate call to VideoEncoder::SetRateAllocation().
-  int32_t SetChannelParameters(
-      uint32_t target_bitrate_bps,
-      uint8_t loss_rate,
-      int64_t rtt,
-      VideoBitrateAllocator* bitrate_allocator,
-      VideoBitrateAllocationObserver* bitrate_updated_callback);
-
-  // Updates the channel parameters with a new bitrate allocation, but using the
-  // current targit_bitrate, loss rate and rtt. That is, the distribution or
-  // caps may be updated to a change to a new VideoCodec or allocation mode.
-  // The new parameters will be stored as pending EncoderParameters, and the
-  // encoder will only be updated on the next frame.
-  void UpdateChannelParemeters(
-      VideoBitrateAllocator* bitrate_allocator,
-      VideoBitrateAllocationObserver* bitrate_updated_callback);
-
-  // Deprecated:
-  // TODO(perkj): Remove once no projects use it.
-  int32_t RegisterProtectionCallback(VCMProtectionCallback* protection);
-
-  int32_t AddVideoFrame(const VideoFrame& videoFrame,
-                        const CodecSpecificInfo* codecSpecificInfo);
-
-  int32_t IntraFrameRequest(size_t stream_index);
-  int32_t EnableFrameDropper(bool enable);
-
-  int64_t TimeUntilNextProcess() override;
-  void Process() override;
+  // Returns a decoder specified by frame.PayloadType. The decoded frame
+  // callback of the decoder is set to `decoded_frame_callback`. If no such
+  // decoder already exists an instance will be created and initialized.
+  // nullptr is returned if no decoder with the specified payload type was found
+  // and the function failed to create one.
+  VCMGenericDecoder* GetDecoder(
+      const VCMEncodedFrame& frame,
+      VCMDecodedFrameCallback* decoded_frame_callback);
 
  private:
-  EncoderParameters UpdateEncoderParameters(
-      const EncoderParameters& params,
-      VideoBitrateAllocator* bitrate_allocator,
-      uint32_t target_bitrate_bps);
-  void SetEncoderParameters(EncoderParameters params, bool has_internal_source)
-      EXCLUSIVE_LOCKS_REQUIRED(encoder_crit_);
+  void CreateAndInitDecoder(const VCMEncodedFrame& frame)
+      RTC_RUN_ON(decoder_sequence_checker_);
 
-  Clock* const clock_;
+  SequenceChecker decoder_sequence_checker_;
 
-  rtc::CriticalSection encoder_crit_;
-  VCMGenericEncoder* _encoder;
-  media_optimization::MediaOptimization _mediaOpt;
-  VCMEncodedFrameCallback _encodedFrameCallback GUARDED_BY(encoder_crit_);
-  EncodedImageCallback* const post_encode_callback_;
-  VCMSendStatisticsCallback* const send_stats_callback_;
-  VCMCodecDataBase _codecDataBase GUARDED_BY(encoder_crit_);
-  bool frame_dropper_enabled_ GUARDED_BY(encoder_crit_);
-  VCMProcessTimer _sendStatsTimer;
-
-  // Must be accessed on the construction thread of VideoSender.
-  VideoCodec current_codec_;
-  rtc::SequencedTaskChecker sequenced_checker_;
-
-  rtc::CriticalSection params_crit_;
-  EncoderParameters encoder_params_ GUARDED_BY(params_crit_);
-  bool encoder_has_internal_source_ GUARDED_BY(params_crit_);
-  std::vector<FrameType> next_frame_types_ GUARDED_BY(params_crit_);
+  absl::optional<uint8_t> current_payload_type_;
+  absl::optional<VCMGenericDecoder> current_decoder_
+      RTC_GUARDED_BY(decoder_sequence_checker_);
+  // Initialization paramaters for decoders keyed by payload type.
+  std::map<uint8_t, VideoDecoder::Settings> decoder_settings_;
+  // Decoders keyed by payload type.
+  std::map<uint8_t, VideoDecoder*> decoders_
+      RTC_GUARDED_BY(decoder_sequence_checker_);
 };
 
-class VideoReceiver : public Module {
+class VideoReceiver {
  public:
   VideoReceiver(Clock* clock,
-                EventFactory* event_factory,
-                EncodedImageCallback* pre_decode_image_callback,
                 VCMTiming* timing,
-                NackSender* nack_sender = nullptr,
-                KeyFrameRequestSender* keyframe_request_sender = nullptr);
+                const FieldTrialsView& field_trials);
   ~VideoReceiver();
 
-  int32_t RegisterReceiveCodec(const VideoCodec* receiveCodec,
-                               int32_t numberOfCores,
-                               bool requireKeyFrame);
+  void RegisterReceiveCodec(uint8_t payload_type,
+                            const VideoDecoder::Settings& settings);
 
   void RegisterExternalDecoder(VideoDecoder* externalDecoder,
                                uint8_t payloadType);
   int32_t RegisterReceiveCallback(VCMReceiveCallback* receiveCallback);
-  int32_t RegisterReceiveStatisticsCallback(
-      VCMReceiveStatisticsCallback* receiveStats);
   int32_t RegisterFrameTypeCallback(VCMFrameTypeCallback* frameTypeCallback);
   int32_t RegisterPacketRequestCallback(VCMPacketRequestCallback* callback);
 
   int32_t Decode(uint16_t maxWaitTimeMs);
 
-  int32_t Decode(const webrtc::VCMEncodedFrame* frame);
-
-  // Called on the decoder thread when thread is exiting.
-  void DecodingStopped();
-
   int32_t IncomingPacket(const uint8_t* incomingPayload,
                          size_t payloadLength,
-                         const WebRtcRTPHeader& rtpInfo);
-  int32_t SetMinimumPlayoutDelay(uint32_t minPlayoutDelayMs);
-  int32_t SetRenderDelay(uint32_t timeMS);
-  int32_t Delay() const;
-
-  // DEPRECATED.
-  int SetReceiverRobustnessMode(
-      VideoCodingModule::ReceiverRobustness robustnessMode,
-      VCMDecodeErrorMode errorMode);
+                         const RTPHeader& rtp_header,
+                         const RTPVideoHeader& video_header);
 
   void SetNackSettings(size_t max_nack_list_size,
                        int max_packet_age_to_nack,
                        int max_incomplete_time_ms);
 
-  void SetDecodeErrorMode(VCMDecodeErrorMode decode_error_mode);
-  int SetMinReceiverDelay(int desired_delay_ms);
-
-  int32_t SetReceiveChannelParameters(int64_t rtt);
-  int32_t SetVideoProtection(VCMVideoProtection videoProtection, bool enable);
-
-  int64_t TimeUntilNextProcess() override;
-  void Process() override;
-
-  void TriggerDecoderShutdown();
+  void Process();
 
  protected:
-  int32_t Decode(const webrtc::VCMEncodedFrame& frame)
-      EXCLUSIVE_LOCKS_REQUIRED(receive_crit_);
+  int32_t Decode(const webrtc::VCMEncodedFrame& frame);
   int32_t RequestKeyFrame();
 
  private:
-  rtc::ThreadChecker construction_thread_;
+  // Used for DCHECKing thread correctness.
+  // In build where DCHECKs are enabled, will return false before
+  // DecoderThreadStarting is called, then true until DecoderThreadStopped
+  // is called.
+  // In builds where DCHECKs aren't enabled, it will return true.
+  bool IsDecoderThreadRunning();
+
+  SequenceChecker construction_thread_checker_;
+  SequenceChecker decoder_thread_checker_;
+  SequenceChecker module_thread_checker_;
   Clock* const clock_;
-  rtc::CriticalSection process_crit_;
-  rtc::CriticalSection receive_crit_;
+  Mutex process_mutex_;
   VCMTiming* _timing;
   VCMReceiver _receiver;
   VCMDecodedFrameCallback _decodedFrameCallback;
-  VCMFrameTypeCallback* _frameTypeCallback GUARDED_BY(process_crit_);
-  VCMReceiveStatisticsCallback* _receiveStatsCallback GUARDED_BY(process_crit_);
-  VCMPacketRequestCallback* _packetRequestCallback GUARDED_BY(process_crit_);
 
-  VCMFrameBuffer _frameFromFile;
-  bool _scheduleKeyRequest GUARDED_BY(process_crit_);
-  bool drop_frames_until_keyframe_ GUARDED_BY(process_crit_);
-  size_t max_nack_list_size_ GUARDED_BY(process_crit_);
+  // These callbacks are set on the construction thread before being attached
+  // to the module thread or decoding started, so a lock is not required.
+  VCMFrameTypeCallback* _frameTypeCallback;
+  VCMPacketRequestCallback* _packetRequestCallback;
 
-  VCMCodecDataBase _codecDataBase GUARDED_BY(receive_crit_);
-  EncodedImageCallback* pre_decode_image_callback_;
+  // Used on both the module and decoder thread.
+  bool _scheduleKeyRequest RTC_GUARDED_BY(process_mutex_);
+  bool drop_frames_until_keyframe_ RTC_GUARDED_BY(process_mutex_);
 
-  VCMProcessTimer _receiveStatsTimer;
-  VCMProcessTimer _retransmissionTimer;
-  VCMProcessTimer _keyRequestTimer;
-  QpParser qp_parser_;
-  ThreadUnsafeOneTimeEvent first_frame_received_;
+  // Modified on the construction thread while not attached to the process
+  // thread.  Once attached to the process thread, its value is only read
+  // so a lock is not required.
+  size_t max_nack_list_size_;
+
+  // Callbacks are set before the decoder thread starts.
+  // Once the decoder thread has been started, usage of `_codecDataBase` moves
+  // over to the decoder thread.
+  DEPRECATED_VCMDecoderDataBase _codecDataBase;
+
+  VCMProcessTimer _retransmissionTimer RTC_GUARDED_BY(module_thread_checker_);
+  VCMProcessTimer _keyRequestTimer RTC_GUARDED_BY(module_thread_checker_);
+  ThreadUnsafeOneTimeEvent first_frame_received_
+      RTC_GUARDED_BY(decoder_thread_checker_);
 };
 
 }  // namespace vcm
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_VIDEO_CODING_VIDEO_CODING_IMPL_H_
+#endif  // MODULES_VIDEO_CODING_VIDEO_CODING_IMPL_H_

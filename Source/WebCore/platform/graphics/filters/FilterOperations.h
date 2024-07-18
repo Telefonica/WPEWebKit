@@ -26,13 +26,11 @@
 #pragma once
 
 #include "FilterOperation.h"
-#include "IntRectExtent.h"
+#include "LengthBox.h"
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {
-
-using FilterOutsets = IntRectExtent;
 
 class FilterOperations {
     WTF_MAKE_FAST_ALLOCATED;
@@ -51,14 +49,17 @@ public:
 
     bool operationsMatch(const FilterOperations&) const;
 
-    bool hasOutsets() const;
-    FilterOutsets outsets() const;
+    bool hasOutsets() const { return !outsets().isZero(); }
+    IntOutsets outsets() const;
 
     bool hasFilterThatAffectsOpacity() const;
     bool hasFilterThatMovesPixels() const;
     bool hasFilterThatShouldBeRestrictedBySecurityOrigin() const;
 
     bool hasReferenceFilter() const;
+
+    bool transformColor(Color&) const;
+    bool inverseTransformColor(Color&) const;
 
 private:
     Vector<RefPtr<FilterOperation>> m_operations;

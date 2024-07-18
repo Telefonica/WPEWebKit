@@ -29,7 +29,8 @@
 #include <WebCore/CSSImportRule.h>
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/Element.h>
+#include <WebCore/JSExecState.h>
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
 
@@ -38,6 +39,8 @@
 typedef struct _WebKitDOMNamedNodeMapPrivate {
     RefPtr<WebCore::NamedNodeMap> coreObject;
 } WebKitDOMNamedNodeMapPrivate;
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 namespace WebKit {
 
@@ -68,8 +71,8 @@ WebKitDOMNamedNodeMap* wrapNamedNodeMap(WebCore::NamedNodeMap* coreObject)
 G_DEFINE_TYPE(WebKitDOMNamedNodeMap, webkit_dom_named_node_map, WEBKIT_DOM_TYPE_OBJECT)
 
 enum {
-    PROP_0,
-    PROP_LENGTH,
+    DOM_NAMED_NODE_MAP_PROP_0,
+    DOM_NAMED_NODE_MAP_PROP_LENGTH,
 };
 
 static void webkit_dom_named_node_map_finalize(GObject* object)
@@ -87,7 +90,7 @@ static void webkit_dom_named_node_map_get_property(GObject* object, guint proper
     WebKitDOMNamedNodeMap* self = WEBKIT_DOM_NAMED_NODE_MAP(object);
 
     switch (propertyId) {
-    case PROP_LENGTH:
+    case DOM_NAMED_NODE_MAP_PROP_LENGTH:
         g_value_set_ulong(value, webkit_dom_named_node_map_get_length(self));
         break;
     default:
@@ -117,7 +120,7 @@ static void webkit_dom_named_node_map_class_init(WebKitDOMNamedNodeMapClass* req
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_LENGTH,
+        DOM_NAMED_NODE_MAP_PROP_LENGTH,
         g_param_spec_ulong(
             "length",
             "NamedNodeMap:length",
@@ -139,8 +142,7 @@ WebKitDOMNode* webkit_dom_named_node_map_get_named_item(WebKitDOMNamedNodeMap* s
     g_return_val_if_fail(WEBKIT_DOM_IS_NAMED_NODE_MAP(self), 0);
     g_return_val_if_fail(name, 0);
     WebCore::NamedNodeMap* item = WebKit::core(self);
-    WTF::String convertedName = WTF::String::fromUTF8(name);
-    RefPtr<WebCore::Node> gobjectResult = WTF::getPtr(item->getNamedItem(convertedName));
+    RefPtr<WebCore::Node> gobjectResult = WTF::getPtr(item->getNamedItem(WTF::AtomString::fromUTF8(name)));
     return WebKit::kit(gobjectResult.get());
 }
 
@@ -173,8 +175,7 @@ WebKitDOMNode* webkit_dom_named_node_map_remove_named_item(WebKitDOMNamedNodeMap
     g_return_val_if_fail(name, 0);
     g_return_val_if_fail(!error || !*error, 0);
     WebCore::NamedNodeMap* item = WebKit::core(self);
-    WTF::String convertedName = WTF::String::fromUTF8(name);
-    auto result = item->removeNamedItem(convertedName);
+    auto result = item->removeNamedItem(WTF::AtomString::fromUTF8(name));
     if (result.hasException()) {
         auto description = WebCore::DOMException::description(result.releaseException().code());
         g_set_error_literal(error, g_quark_from_string("WEBKIT_DOM"), description.legacyCode, description.name);
@@ -199,8 +200,8 @@ WebKitDOMNode* webkit_dom_named_node_map_get_named_item_ns(WebKitDOMNamedNodeMap
     g_return_val_if_fail(namespaceURI, 0);
     g_return_val_if_fail(localName, 0);
     WebCore::NamedNodeMap* item = WebKit::core(self);
-    WTF::String convertedNamespaceURI = WTF::String::fromUTF8(namespaceURI);
-    WTF::String convertedLocalName = WTF::String::fromUTF8(localName);
+    auto convertedNamespaceURI = WTF::AtomString::fromUTF8(namespaceURI);
+    auto convertedLocalName = WTF::AtomString::fromUTF8(localName);
     RefPtr<WebCore::Node> gobjectResult = WTF::getPtr(item->getNamedItemNS(convertedNamespaceURI, convertedLocalName));
     return WebKit::kit(gobjectResult.get());
 }
@@ -218,8 +219,8 @@ WebKitDOMNode* webkit_dom_named_node_map_remove_named_item_ns(WebKitDOMNamedNode
     g_return_val_if_fail(localName, 0);
     g_return_val_if_fail(!error || !*error, 0);
     WebCore::NamedNodeMap* item = WebKit::core(self);
-    WTF::String convertedNamespaceURI = WTF::String::fromUTF8(namespaceURI);
-    WTF::String convertedLocalName = WTF::String::fromUTF8(localName);
+    auto convertedNamespaceURI = WTF::AtomString::fromUTF8(namespaceURI);
+    auto convertedLocalName = WTF::AtomString::fromUTF8(localName);
     auto result = item->removeNamedItemNS(convertedNamespaceURI, convertedLocalName);
     if (result.hasException()) {
         auto description = WebCore::DOMException::description(result.releaseException().code());
@@ -238,3 +239,4 @@ gulong webkit_dom_named_node_map_get_length(WebKitDOMNamedNodeMap* self)
     return result;
 }
 
+G_GNUC_END_IGNORE_DEPRECATIONS;

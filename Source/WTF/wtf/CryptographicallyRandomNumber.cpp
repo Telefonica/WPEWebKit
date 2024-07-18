@@ -28,18 +28,19 @@
  */
 
 #include "config.h"
-#include "CryptographicallyRandomNumber.h"
+#include <wtf/CryptographicallyRandomNumber.h>
 
-#include "NeverDestroyed.h"
-#include "OSRandomSource.h"
 #include <mutex>
 #include <wtf/Lock.h>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/OSRandomSource.h>
 
 namespace WTF {
 
 namespace {
 
 class ARC4Stream {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     ARC4Stream();
 
@@ -58,14 +59,14 @@ public:
 
 private:
     inline void addRandomData(unsigned char *data, int length);
-    void stir();
-    void stirIfNeeded();
+    void stir() WTF_REQUIRES_LOCK(m_lock);
+    void stirIfNeeded() WTF_REQUIRES_LOCK(m_lock);
     inline uint8_t getByte();
     inline uint32_t getWord();
 
+    Lock m_lock;
     ARC4Stream m_stream;
     int m_count;
-    Lock m_mutex;
 };
 
 ARC4Stream::ARC4Stream()
@@ -137,7 +138,7 @@ uint32_t ARC4RandomNumberGenerator::getWord()
 
 uint32_t ARC4RandomNumberGenerator::randomNumber()
 {
-    std::lock_guard<Lock> lock(m_mutex);
+    Locker locker { m_lock };
 
     m_count -= 4;
     stirIfNeeded();
@@ -146,9 +147,9 @@ uint32_t ARC4RandomNumberGenerator::randomNumber()
 
 void ARC4RandomNumberGenerator::randomValues(void* buffer, size_t length)
 {
-    std::lock_guard<Lock> lock(m_mutex);
+    Locker locker { m_lock };
 
-    unsigned char* result = reinterpret_cast<unsigned char*>(buffer);
+    auto result = static_cast<unsigned char*>(buffer);
     stirIfNeeded();
     while (length--) {
         m_count--;
@@ -159,7 +160,13 @@ void ARC4RandomNumberGenerator::randomValues(void* buffer, size_t length)
 
 ARC4RandomNumberGenerator& sharedRandomNumberGenerator()
 {
-    static NeverDestroyed<ARC4RandomNumberGenerator> randomNumberGenerator;
+    static LazyNeverDestroyed<ARC4RandomNumberGenerator> randomNumberGenerator;
+    static std::once_flag onceFlag;
+    std::call_once(
+        onceFlag,
+        [] {
+            randomNumberGenerator.construct();
+        });
 
     return randomNumberGenerator;
 }

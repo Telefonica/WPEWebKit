@@ -52,12 +52,13 @@
 #include <string.h>
 
 #include "internal.h"
+#include "../../internal.h"
 
 
-/* NOTE: the IV/counter CTR mode is big-endian.  The code itself
- * is endian-neutral. */
+// NOTE: the IV/counter CTR mode is big-endian.  The code itself
+// is endian-neutral.
 
-/* increment counter (128-bit int) by 1 */
+// increment counter (128-bit int) by 1
 static void ctr128_inc(uint8_t *counter) {
   uint32_t n = 16, c = 1;
 
@@ -69,20 +70,21 @@ static void ctr128_inc(uint8_t *counter) {
   } while (n);
 }
 
-OPENSSL_COMPILE_ASSERT((16 % sizeof(size_t)) == 0, bad_size_t_size_ctr);
+OPENSSL_STATIC_ASSERT(16 % sizeof(crypto_word_t) == 0,
+                      "block cannot be divided into crypto_word_t");
 
-/* The input encrypted as though 128bit counter mode is being used.  The extra
- * state information to record how much of the 128bit block we have used is
- * contained in *num, and the encrypted counter is kept in ecount_buf.  Both
- * *num and ecount_buf must be initialised with zeros before the first call to
- * CRYPTO_ctr128_encrypt().
- *
- * This algorithm assumes that the counter is in the x lower bits of the IV
- * (ivec), and that the application has full control over overflow and the rest
- * of the IV.  This implementation takes NO responsibility for checking that
- * the counter doesn't overflow into the rest of the IV when incremented. */
+// The input encrypted as though 128bit counter mode is being used.  The extra
+// state information to record how much of the 128bit block we have used is
+// contained in *num, and the encrypted counter is kept in ecount_buf.  Both
+// *num and ecount_buf must be initialised with zeros before the first call to
+// CRYPTO_ctr128_encrypt().
+//
+// This algorithm assumes that the counter is in the x lower bits of the IV
+// (ivec), and that the application has full control over overflow and the rest
+// of the IV.  This implementation takes NO responsibility for checking that
+// the counter doesn't overflow into the rest of the IV when incremented.
 void CRYPTO_ctr128_encrypt(const uint8_t *in, uint8_t *out, size_t len,
-                           const void *key, uint8_t ivec[16],
+                           const AES_KEY *key, uint8_t ivec[16],
                            uint8_t ecount_buf[16], unsigned int *num,
                            block128_f block) {
   unsigned int n;
@@ -98,31 +100,12 @@ void CRYPTO_ctr128_encrypt(const uint8_t *in, uint8_t *out, size_t len,
     --len;
     n = (n + 1) % 16;
   }
-
-#if STRICT_ALIGNMENT
-  if (((size_t)in | (size_t)out | (size_t)ecount_buf) % sizeof(size_t) != 0) {
-    size_t l = 0;
-    while (l < len) {
-      if (n == 0) {
-        (*block)(ivec, ecount_buf, key);
-        ctr128_inc(ivec);
-      }
-      out[l] = in[l] ^ ecount_buf[n];
-      ++l;
-      n = (n + 1) % 16;
-    }
-
-    *num = n;
-    return;
-  }
-#endif
-
   while (len >= 16) {
     (*block)(ivec, ecount_buf, key);
     ctr128_inc(ivec);
-    for (n = 0; n < 16; n += sizeof(size_t)) {
-      *(size_t *)(out + n) = *(const size_t *)(in + n) ^
-                             *(const size_t *)(ecount_buf + n);
+    for (n = 0; n < 16; n += sizeof(crypto_word_t)) {
+      CRYPTO_store_word_le(out + n, CRYPTO_load_word_le(in + n) ^
+                                        CRYPTO_load_word_le(ecount_buf + n));
     }
     len -= 16;
     out += 16;
@@ -140,7 +123,7 @@ void CRYPTO_ctr128_encrypt(const uint8_t *in, uint8_t *out, size_t len,
   *num = n;
 }
 
-/* increment upper 96 bits of 128-bit counter by 1 */
+// increment upper 96 bits of 128-bit counter by 1
 static void ctr96_inc(uint8_t *counter) {
   uint32_t n = 12, c = 1;
 
@@ -152,11 +135,10 @@ static void ctr96_inc(uint8_t *counter) {
   } while (n);
 }
 
-void CRYPTO_ctr128_encrypt_ctr32(const uint8_t *in, uint8_t *out,
-                                 size_t len, const void *key,
-                                 uint8_t ivec[16],
-                                 uint8_t ecount_buf[16],
-                                 unsigned int *num, ctr128_f func) {
+void CRYPTO_ctr128_encrypt_ctr32(const uint8_t *in, uint8_t *out, size_t len,
+                                 const AES_KEY *key, uint8_t ivec[16],
+                                 uint8_t ecount_buf[16], unsigned int *num,
+                                 ctr128_f func) {
   unsigned int n, ctr32;
 
   assert(key && ecount_buf && num);
@@ -171,28 +153,28 @@ void CRYPTO_ctr128_encrypt_ctr32(const uint8_t *in, uint8_t *out,
     n = (n + 1) % 16;
   }
 
-  ctr32 = GETU32(ivec + 12);
+  ctr32 = CRYPTO_load_u32_be(ivec + 12);
   while (len >= 16) {
     size_t blocks = len / 16;
-    /* 1<<28 is just a not-so-small yet not-so-large number...
-     * Below condition is practically never met, but it has to
-     * be checked for code correctness. */
+    // 1<<28 is just a not-so-small yet not-so-large number...
+    // Below condition is practically never met, but it has to
+    // be checked for code correctness.
     if (sizeof(size_t) > sizeof(unsigned int) && blocks > (1U << 28)) {
       blocks = (1U << 28);
     }
-    /* As (*func) operates on 32-bit counter, caller
-     * has to handle overflow. 'if' below detects the
-     * overflow, which is then handled by limiting the
-     * amount of blocks to the exact overflow point... */
+    // As (*func) operates on 32-bit counter, caller
+    // has to handle overflow. 'if' below detects the
+    // overflow, which is then handled by limiting the
+    // amount of blocks to the exact overflow point...
     ctr32 += (uint32_t)blocks;
     if (ctr32 < blocks) {
       blocks -= ctr32;
       ctr32 = 0;
     }
     (*func)(in, out, blocks, key, ivec);
-    /* (*func) does not update ivec, caller does: */
-    PUTU32(ivec + 12, ctr32);
-    /* ... overflow was detected, propogate carry. */
+    // (*func) does not update ivec, caller does:
+    CRYPTO_store_u32_be(ivec + 12, ctr32);
+    // ... overflow was detected, propogate carry.
     if (ctr32 == 0) {
       ctr96_inc(ivec);
     }
@@ -205,7 +187,7 @@ void CRYPTO_ctr128_encrypt_ctr32(const uint8_t *in, uint8_t *out,
     OPENSSL_memset(ecount_buf, 0, 16);
     (*func)(ecount_buf, ecount_buf, 1, key, ivec);
     ++ctr32;
-    PUTU32(ivec + 12, ctr32);
+    CRYPTO_store_u32_be(ivec + 12, ctr32);
     if (ctr32 == 0) {
       ctr96_inc(ivec);
     }

@@ -25,6 +25,7 @@
 #include "Event.h"
 #include "EventNames.h"
 #include "HTMLParserIdioms.h"
+#include "SVGElementTypeHelpers.h"
 #include "SVGImageElement.h"
 
 namespace WebCore {
@@ -34,26 +35,22 @@ SVGImageLoader::SVGImageLoader(SVGImageElement& element)
 {
 }
 
-SVGImageLoader::~SVGImageLoader()
-{
-}
+SVGImageLoader::~SVGImageLoader() = default;
 
 void SVGImageLoader::dispatchLoadEvent()
 {
     if (image()->errorOccurred())
-        element().dispatchEvent(Event::create(eventNames().errorEvent, false, false));
-    else {
-        if (downcast<SVGImageElement>(element()).externalResourcesRequiredBaseValue())
-            downcast<SVGImageElement>(ImageLoader::element()).sendSVGLoadEventIfPossible(true);
-    }
+        element().dispatchEvent(Event::create(eventNames().errorEvent, Event::CanBubble::No, Event::IsCancelable::No));
+    else
+        downcast<SVGImageElement>(ImageLoader::element()).sendLoadEventIfPossible();
 }
 
-String SVGImageLoader::sourceURI(const AtomicString& attribute) const
+String SVGImageLoader::sourceURI(const AtomString& attribute) const
 {
     URL base = element().baseURI();
-    if (base != blankURL())
+    if (base != aboutBlankURL())
         return URL(base, stripLeadingAndTrailingHTMLSpaces(attribute)).string();
-    return element().document().completeURL(stripLeadingAndTrailingHTMLSpaces(attribute));
+    return element().document().completeURL(stripLeadingAndTrailingHTMLSpaces(attribute)).string();
 }
 
 }

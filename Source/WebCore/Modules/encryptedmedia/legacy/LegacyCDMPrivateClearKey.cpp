@@ -32,35 +32,36 @@
 #include "LegacyCDMSessionClearKey.h"
 #include "ContentType.h"
 #include "MediaPlayer.h"
+#include "PlatformMediaResourceLoader.h"
 
 namespace WebCore {
 
-bool CDMPrivateClearKey::supportsKeySystem(const String& keySystem)
+bool LegacyCDMPrivateClearKey::supportsKeySystem(const String& keySystem)
 {
-    if (!equalLettersIgnoringASCIICase(keySystem, "org.w3c.clearkey"))
+    if (!equalLettersIgnoringASCIICase(keySystem, "org.w3c.clearkey"_s))
         return false;
 
     // The MediaPlayer must also support the key system:
     return MediaPlayer::supportsKeySystem(keySystem, emptyString());
 }
 
-bool CDMPrivateClearKey::supportsKeySystemAndMimeType(const String& keySystem, const String& mimeType)
+bool LegacyCDMPrivateClearKey::supportsKeySystemAndMimeType(const String& keySystem, const String& mimeType)
 {
-    if (!equalLettersIgnoringASCIICase(keySystem, "org.w3c.clearkey"))
+    if (!equalLettersIgnoringASCIICase(keySystem, "org.w3c.clearkey"_s))
         return false;
 
     // The MediaPlayer must also support the key system:
     return MediaPlayer::supportsKeySystem(keySystem, mimeType);
 }
 
-bool CDMPrivateClearKey::supportsMIMEType(const String& mimeType)
+bool LegacyCDMPrivateClearKey::supportsMIMEType(const String& mimeType)
 {
     return MediaPlayer::supportsKeySystem(m_cdm->keySystem(), mimeType);
 }
 
-std::unique_ptr<CDMSession> CDMPrivateClearKey::createSession(CDMSessionClient* client)
+std::unique_ptr<LegacyCDMSession> LegacyCDMPrivateClearKey::createSession(LegacyCDMSessionClient& client)
 {
-    return std::make_unique<CDMSessionClearKey>(client);
+    return makeUnique<CDMSessionClearKey>(client);
 }
 
 }

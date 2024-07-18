@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 
-DECLARE_LHASH_OF(CRYPTO_BUFFER);
+DECLARE_LHASH_OF(CRYPTO_BUFFER)
 
 struct crypto_buffer_st {
   CRYPTO_BUFFER_POOL *pool;
@@ -39,7 +39,7 @@ struct crypto_buffer_pool_st {
 
 
 #if defined(__cplusplus)
-} /* extern C */
+}  // extern C
 #endif
 
-#endif /* OPENSSL_HEADER_POOL_INTERNAL_H */
+#endif  // OPENSSL_HEADER_POOL_INTERNAL_H

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2016 Caitlin Potter <caitp@igalia.com>.
+ * Copyright (C) 2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,19 +27,11 @@
 #include "config.h"
 #include "AsyncFunctionPrototype.h"
 
-#include "BuiltinExecutables.h"
-#include "BuiltinNames.h"
-#include "Error.h"
-#include "JSArray.h"
 #include "JSCInlines.h"
-#include "JSFunction.h"
-#include "JSString.h"
-#include "JSStringBuilder.h"
-#include "Lexer.h"
 
 namespace JSC {
 
-const ClassInfo AsyncFunctionPrototype::s_info = { "AsyncFunction", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(AsyncFunctionPrototype) };
+const ClassInfo AsyncFunctionPrototype::s_info = { "AsyncFunction"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(AsyncFunctionPrototype) };
 
 AsyncFunctionPrototype::AsyncFunctionPrototype(VM& vm, Structure* structure)
     : JSC::JSNonFinalObject(vm, structure)
@@ -48,10 +41,8 @@ AsyncFunctionPrototype::AsyncFunctionPrototype(VM& vm, Structure* structure)
 void AsyncFunctionPrototype::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
-    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(0), PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
-    putDirectWithoutTransition(vm, vm.propertyNames->toStringTagSymbol, jsString(&vm, "AsyncFunction"), PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly);
-    vm.prototypeMap.addPrototype(this);
+    ASSERT(inherits(info()));
+    JSC_TO_STRING_TAG_WITHOUT_TRANSITION();
 }
 
 } // namespace JSC

@@ -57,7 +57,7 @@ WI.RenderingFrameTimelineOverviewGraph = class RenderingFrameTimelineOverviewGra
             return Math.max(previousValue, currentValue.duration);
         }, 0);
 
-        this._graphHeightSeconds = maximumFrameDuration * 1.1;  // Add 10% margin above frames.
+        this._graphHeightSeconds = maximumFrameDuration * 1.1; // Add 10% margin above frames.
         this._graphHeightSeconds = Math.min(this._graphHeightSeconds, WI.RenderingFrameTimelineOverviewGraph.MaximumGraphHeightSeconds);
         this._graphHeightSeconds = Math.max(this._graphHeightSeconds, WI.RenderingFrameTimelineOverviewGraph.MinimumGraphHeightSeconds);
         return this._graphHeightSeconds;
@@ -102,7 +102,9 @@ WI.RenderingFrameTimelineOverviewGraph = class RenderingFrameTimelineOverviewGra
 
     layout()
     {
-        if (!this.visible)
+        super.layout();
+
+        if (this.hidden)
             return;
 
         if (!this._renderingFrameTimeline.records.length)
@@ -194,7 +196,7 @@ WI.RenderingFrameTimelineOverviewGraph = class RenderingFrameTimelineOverviewGra
 
                 var label = document.createElement("div");
                 label.classList.add("label");
-                label.innerText = WI.UIString("%d fps").format(framesPerSecond);
+                label.innerText = WI.UIString("%d FPS").format(framesPerSecond);
                 divider.appendChild(label);
 
                 this.element.appendChild(divider);
@@ -222,7 +224,7 @@ WI.RenderingFrameTimelineOverviewGraph = class RenderingFrameTimelineOverviewGra
             return;
         }
 
-        var frameWidth = (1 / this.timelineOverview.secondsPerPixel);
+        var frameWidth = 1 / this.timelineOverview.secondsPerPixel;
         this._selectedFrameMarker.style.width = frameWidth + "px";
 
         var markerLeftPosition = this.selectedRecord.frameIndex - this.startTime;
@@ -260,6 +262,9 @@ WI.RenderingFrameTimelineOverviewGraph = class RenderingFrameTimelineOverviewGra
         var newSelectedRecord = this._renderingFrameTimeline.records[frameIndex];
         if (newSelectedRecord[WI.RenderingFrameTimelineOverviewGraph.RecordWasFilteredSymbol])
             return;
+
+        // Ensure that the container "click" listener added by `WI.TimelineOverview` isn't called.
+        event.__timelineRecordClickEventHandled = true;
 
         if (this.selectedRecord === newSelectedRecord)
             return;

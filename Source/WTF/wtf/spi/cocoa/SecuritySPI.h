@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,7 +27,11 @@
 
 #if USE(APPLE_INTERNAL_SDK)
 
+#include <Security/SecAccessControlPriv.h>
 #include <Security/SecCertificatePriv.h>
+#include <Security/SecIdentityPriv.h>
+#include <Security/SecItemPriv.h>
+#include <Security/SecKeyPriv.h>
 #include <Security/SecTask.h>
 #include <Security/SecTrustPriv.h>
 
@@ -36,6 +40,8 @@
 #endif
 
 #else
+
+#include <Security/SecBase.h>
 
 typedef uint32_t SecSignatureHashAlgorithm;
 enum {
@@ -52,33 +58,54 @@ enum {
 
 WTF_EXTERN_C_BEGIN
 
+#if PLATFORM(MAC)
+OSStatus SecTrustedApplicationCreateFromPath(const char* path, SecTrustedApplicationRef*);
+#endif
+
 SecSignatureHashAlgorithm SecCertificateGetSignatureHashAlgorithm(SecCertificateRef);
+extern const CFStringRef kSecAttrNoLegacy;
 
 WTF_EXTERN_C_END
 
-#endif
+#endif // USE(APPLE_INTERNAL_SDK)
 
 typedef struct __SecTask *SecTaskRef;
+typedef struct __SecTrust *SecTrustRef;
 
 WTF_EXTERN_C_BEGIN
 
 SecTaskRef SecTaskCreateWithAuditToken(CFAllocatorRef, audit_token_t);
 SecTaskRef SecTaskCreateFromSelf(CFAllocatorRef);
-CFTypeRef SecTaskCopyValueForEntitlement(SecTaskRef, CFStringRef entitlement, CFErrorRef *);
-
-#if PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
 CFStringRef SecTaskCopySigningIdentifier(SecTaskRef, CFErrorRef *);
-#endif
+CFTypeRef SecTaskCopyValueForEntitlement(SecTaskRef, CFStringRef entitlement, CFErrorRef*);
+uint32_t SecTaskGetCodeSignStatus(SecTaskRef);
+SecIdentityRef SecIdentityCreate(CFAllocatorRef, SecCertificateRef, SecKeyRef);
+SecAccessControlRef SecAccessControlCreateFromData(CFAllocatorRef, CFDataRef, CFErrorRef*);
+CFDataRef SecAccessControlCopyData(SecAccessControlRef);
+
+CFDataRef SecKeyCopySubjectPublicKeyInfo(SecKeyRef);
 
 #if PLATFORM(MAC)
 #include <Security/SecAsn1Types.h>
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
 extern const SecAsn1Template kSecAsn1AlgorithmIDTemplate[];
 extern const SecAsn1Template kSecAsn1SubjectPublicKeyInfoTemplate[];
+ALLOW_DEPRECATED_DECLARATIONS_END
 #endif
 
 #if HAVE(SEC_TRUST_SERIALIZATION)
 CF_RETURNS_RETAINED CFDataRef SecTrustSerialize(SecTrustRef, CFErrorRef *);
 CF_RETURNS_RETAINED SecTrustRef SecTrustDeserialize(CFDataRef serializedTrust, CFErrorRef *);
 #endif
+
+CF_RETURNS_RETAINED CFDictionaryRef SecTrustCopyInfo(SecTrustRef);
+
+#if HAVE(SEC_TRUST_SET_CLIENT_AUDIT_TOKEN)
+OSStatus SecTrustSetClientAuditToken(SecTrustRef, CFDataRef);
+#endif
+
+extern const CFStringRef kSecTrustInfoExtendedValidationKey;
+extern const CFStringRef kSecTrustInfoCompanyNameKey;
+extern const CFStringRef kSecTrustInfoRevocationKey;
 
 WTF_EXTERN_C_END

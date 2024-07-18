@@ -48,9 +48,6 @@ WI.FrameTreeElement = class FrameTreeElement extends WI.ResourceTreeElement
         this.registerFolderizeSettings("frames", WI.UIString("Frames"), this._frame.childFrameCollection, WI.FrameTreeElement);
         this.registerFolderizeSettings("extra-scripts", WI.UIString("Extra Scripts"), this._frame.extraScriptCollection, WI.ScriptTreeElement);
 
-        if (window.CanvasAgent && WI.settings.experimentalShowCanvasContextsInResources.value)
-            this.registerFolderizeSettings("canvases", WI.UIString("Canvases"), this._frame.canvasCollection, WI.CanvasTreeElement);
-
         function forwardingConstructor(representedObject, ...extraArguments) {
             if (representedObject instanceof WI.CSSStyleSheet)
                 return new WI.CSSStyleSheetTreeElement(representedObject, ...extraArguments);
@@ -118,22 +115,14 @@ WI.FrameTreeElement = class FrameTreeElement extends WI.ResourceTreeElement
         // Immediate superclasses are skipped, since Frames handle their own SourceMapResources.
         WI.GeneralTreeElement.prototype.onattach.call(this);
 
-        WI.cssStyleManager.addEventListener(WI.CSSStyleManager.Event.StyleSheetAdded, this._styleSheetAdded, this);
-
-        if (window.CanvasAgent && WI.settings.experimentalShowCanvasContextsInResources.value) {
-            this._frame.canvasCollection.addEventListener(WI.Collection.Event.ItemAdded, this._canvasWasAdded, this);
-            this._frame.canvasCollection.addEventListener(WI.Collection.Event.ItemRemoved, this._canvasWasRemoved, this);
-        }
+        WI.cssManager.addEventListener(WI.CSSManager.Event.StyleSheetAdded, this._styleSheetAdded, this);
+        WI.cssManager.addEventListener(WI.CSSManager.Event.StyleSheetRemoved, this._styleSheetRemoved, this);
     }
 
     ondetach()
     {
-        WI.cssStyleManager.removeEventListener(WI.CSSStyleManager.Event.StyleSheetAdded, this._styleSheetAdded, this);
-
-        if (window.CanvasAgent && WI.settings.experimentalShowCanvasContextsInResources.value) {
-            this._frame.canvasCollection.removeEventListener(WI.Collection.Event.ItemAdded, this._canvasWasAdded, this);
-            this._frame.canvasCollection.removeEventListener(WI.Collection.Event.ItemRemoved, this._canvasWasRemoved, this);
-        }
+        WI.cssManager.removeEventListener(WI.CSSManager.Event.StyleSheetAdded, this._styleSheetAdded, this);
+        WI.cssManager.removeEventListener(WI.CSSManager.Event.StyleSheetRemoved, this._styleSheetRemoved, this);
 
         super.ondetach();
     }
@@ -173,10 +162,10 @@ WI.FrameTreeElement = class FrameTreeElement extends WI.ResourceTreeElement
         this.updateParentStatus();
         this.prepareToPopulate();
 
-        for (let frame of this._frame.childFrameCollection.items)
+        for (let frame of this._frame.childFrameCollection)
             this.addChildForRepresentedObject(frame);
 
-        for (let resource of this._frame.resourceCollection.items)
+        for (let resource of this._frame.resourceCollection)
             this.addChildForRepresentedObject(resource);
 
         var sourceMaps = this.resource && this.resource.sourceMaps;
@@ -186,18 +175,13 @@ WI.FrameTreeElement = class FrameTreeElement extends WI.ResourceTreeElement
                 this.addChildForRepresentedObject(sourceMap.resources[j]);
         }
 
-        for (let extraScript of this._frame.extraScriptCollection.items) {
+        for (let extraScript of this._frame.extraScriptCollection) {
             if (extraScript.sourceURL || extraScript.sourceMappingURL)
                 this.addChildForRepresentedObject(extraScript);
         }
 
-        if (window.CanvasAgent && WI.settings.experimentalShowCanvasContextsInResources.value) {
-            for (let canvas of this._frame.canvasCollection.items)
-                this.addChildForRepresentedObject(canvas);
-        }
-
-        const doNotCreateIfMissing = true;
-        WI.cssStyleManager.preferredInspectorStyleSheetForFrame(this._frame, this.addRepresentedObjectToNewChildQueue.bind(this), doNotCreateIfMissing);
+        for (let styleSheet of WI.cssManager.inspectorStyleSheetsForFrame(this._frame))
+            this.addChildForRepresentedObject(styleSheet);
     }
 
     onexpand()
@@ -211,6 +195,16 @@ WI.FrameTreeElement = class FrameTreeElement extends WI.ResourceTreeElement
         // and we only care about user triggered collapses.
         if (this.hasChildren)
             this._expandedSetting.value = false;
+    }
+
+    // Protected
+
+    get mainTitleText()
+    {
+        // We can't assume that `this._frame` exists since this may be called before that is set.
+        if (this.resource.parentFrame.name)
+            return WI.UIString("%s (%s)").format(this.resource.parentFrame.name, super.mainTitleText);
+        return super.mainTitleText;
     }
 
     // Private
@@ -267,19 +261,19 @@ WI.FrameTreeElement = class FrameTreeElement extends WI.ResourceTreeElement
 
     _styleSheetAdded(event)
     {
-        if (!event.data.styleSheet.isInspectorStyleSheet())
+        let {styleSheet} = event.data;
+        if (styleSheet.origin === WI.CSSStyleSheet.Type.Author || styleSheet.injected || styleSheet.anonymous)
             return;
 
-        this.addRepresentedObjectToNewChildQueue(event.data.styleSheet);
+        this.addRepresentedObjectToNewChildQueue(styleSheet);
     }
 
-    _canvasWasAdded(event)
+    _styleSheetRemoved(event)
     {
-        this.addRepresentedObjectToNewChildQueue(event.data.item);
-    }
+        let {styleSheet} = event.data;
+        if (styleSheet.origin === WI.CSSStyleSheet.Type.Author || styleSheet.injected || styleSheet.anonymous)
+            return;
 
-    _canvasWasRemoved(event)
-    {
-        this.removeChildForRepresentedObject(event.data.item);
+        this.removeChildForRepresentedObject(styleSheet);
     }
 };

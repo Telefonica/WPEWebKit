@@ -23,13 +23,16 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
+#if ENABLE(ACCESSIBILITY) && PLATFORM(IOS_FAMILY)
 
-#if HAVE(ACCESSIBILITY) && PLATFORM(IOS)
+#import "AXObjectCache.h"
+#import "AccessibilityObject.h"
+#import "WebAccessibilityObjectWrapperBase.h"
+#import "WAKView.h"
 
-#include "AXObjectCache.h"
-#include "AccessibilityObject.h"
-#include "WebAccessibilityObjectWrapperBase.h"
+@interface WAKView (iOSAccessibility)
+- (BOOL)accessibilityIsIgnored;
+@end
 
 @interface WebAccessibilityObjectWrapper : WebAccessibilityObjectWrapperBase {
     // Cached data to avoid frequent re-computation.
@@ -52,18 +55,7 @@
 
 - (BOOL)isAttachment;
 
-- (void)postFocusChangeNotification;
-- (void)postSelectedTextChangeNotification;
-- (void)postLayoutChangeNotification;
-- (void)postLiveRegionChangeNotification;
-- (void)postLoadCompleteNotification;
-- (void)postChildrenChangedNotification;
-- (void)postInvalidStatusChangedNotification;
-- (void)postLiveRegionCreatedNotification;
-- (void)postScrollStatusChangeNotification;
-- (void)postValueChangedNotification;
-- (void)postExpandedChangedNotification;
-
+- (void)postNotification:(NSString *)notificationName;
 @end
 
-#endif // HAVE(ACCESSIBILITY) && PLATFORM(IOS)
+#endif // ENABLE(ACCESSIBILITY) && PLATFORM(IOS_FAMILY)

@@ -24,10 +24,10 @@
  */
 
 #include "config.h"
-#include "UTextProviderLatin1.h"
+#include <wtf/text/icu/UTextProviderLatin1.h>
 
-#include "UTextProvider.h"
 #include <wtf/text/StringImpl.h>
+#include <wtf/text/icu/UTextProvider.h>
 
 namespace WTF {
 
@@ -65,7 +65,7 @@ static UText* uTextLatin1Clone(UText* destination, const UText* source, UBool de
     ASSERT_UNUSED(deep, !deep);
 
     if (U_FAILURE(*status))
-        return 0;
+        return nullptr;
 
     UText* result = utext_setup(destination, sizeof(UChar) * UTextWithBufferInlineCapacity, status);
     if (U_FAILURE(*status))
@@ -100,23 +100,23 @@ static UBool uTextLatin1Access(UText* uText, int64_t index, UBool forward)
         if (index < uText->chunkNativeLimit && index >= uText->chunkNativeStart) {
             // Already inside the buffer. Set the new offset.
             uText->chunkOffset = static_cast<int32_t>(index - uText->chunkNativeStart);
-            return TRUE;
+            return true;
         }
         if (index >= length && uText->chunkNativeLimit == length) {
             // Off the end of the buffer, but we can't get it.
             uText->chunkOffset = static_cast<int32_t>(index - uText->chunkNativeStart);
-            return FALSE;
+            return false;
         }
     } else {
         if (index <= uText->chunkNativeLimit && index > uText->chunkNativeStart) {
             // Already inside the buffer. Set the new offset.
             uText->chunkOffset = static_cast<int32_t>(index - uText->chunkNativeStart);
-            return TRUE;
+            return true;
         }
         if (!index && !uText->chunkNativeStart) {
             // Already at the beginning; can't go any farther.
             uText->chunkOffset = 0;
-            return FALSE;
+            return false;
         }
     }
     
@@ -140,11 +140,11 @@ static UBool uTextLatin1Access(UText* uText, int64_t index, UBool forward)
     }
     uText->chunkLength = static_cast<int32_t>(uText->chunkNativeLimit - uText->chunkNativeStart);
 
-    StringImpl::copyChars(const_cast<UChar*>(uText->chunkContents), static_cast<const LChar*>(uText->context) + uText->chunkNativeStart, static_cast<unsigned>(uText->chunkLength));
+    StringImpl::copyCharacters(const_cast<UChar*>(uText->chunkContents), static_cast<const LChar*>(uText->context) + uText->chunkNativeStart, static_cast<unsigned>(uText->chunkLength));
 
     uText->nativeIndexingLimit = uText->chunkLength;
 
-    return TRUE;
+    return true;
 }
 
 static int32_t uTextLatin1Extract(UText* uText, int64_t start, int64_t limit, UChar* dest, int32_t destCapacity, UErrorCode* status)
@@ -173,16 +173,17 @@ static int32_t uTextLatin1Extract(UText* uText, int64_t start, int64_t limit, UC
     if (!length)
         return 0;
 
-    if (destCapacity > 0 && !dest) {
+    if (dest) {
         int32_t trimmedLength = static_cast<int32_t>(length);
         if (trimmedLength > destCapacity)
             trimmedLength = destCapacity;
 
-        StringImpl::copyChars(dest, static_cast<const LChar*>(uText->context) + start, static_cast<unsigned>(trimmedLength));
+        StringImpl::copyCharacters(dest, static_cast<const LChar*>(uText->context) + start, static_cast<unsigned>(trimmedLength));
     }
 
     if (length < destCapacity) {
-        dest[length] = 0;
+        if (dest)
+            dest[length] = 0;
         if (*status == U_STRING_NOT_TERMINATED_WARNING)
             *status = U_ZERO_ERROR;
     } else if (length == destCapacity)
@@ -290,7 +291,7 @@ static void textLatin1ContextAwareMoveInPrimaryContext(UText* text, int64_t nati
     text->chunkLength = length < std::numeric_limits<int32_t>::max() ? static_cast<int32_t>(length) : 0;
     text->nativeIndexingLimit = text->chunkLength;
     text->chunkOffset = forward ? 0 : text->chunkLength;
-    StringImpl::copyChars(const_cast<UChar*>(text->chunkContents), static_cast<const LChar*>(text->p) + (text->chunkNativeStart - text->b), static_cast<unsigned>(text->chunkLength));
+    StringImpl::copyCharacters(const_cast<UChar*>(text->chunkContents), static_cast<const LChar*>(text->p) + (text->chunkNativeStart - text->b), static_cast<unsigned>(text->chunkLength));
 }
 
 static void textLatin1ContextAwareSwitchToPrimaryContext(UText* text, int64_t nativeIndex, int64_t nativeLength, UBool forward)
@@ -336,7 +337,7 @@ static int64_t uTextLatin1ContextAwareNativeLength(UText* text)
 static UBool uTextLatin1ContextAwareAccess(UText* text, int64_t nativeIndex, UBool forward)
 {
     if (!text->context)
-        return FALSE;
+        return false;
     int64_t nativeLength = uTextLatin1ContextAwareNativeLength(text);
     UBool isAccessible;
     if (uTextAccessInChunkOrOutOfRange(text, nativeIndex, nativeLength, forward, isAccessible))
@@ -356,7 +357,7 @@ static UBool uTextLatin1ContextAwareAccess(UText* text, int64_t nativeIndex, UBo
         ASSERT(newContext == UTextProviderContext::PriorContext);
         textLatin1ContextAwareSwitchToPriorContext(text, nativeIndex, nativeLength, forward);
     }
-    return TRUE;
+    return true;
 }
 
 static int32_t uTextLatin1ContextAwareExtract(UText*, int64_t, int64_t, UChar*, int32_t, UErrorCode* errorCode)
@@ -376,15 +377,15 @@ static void uTextLatin1ContextAwareClose(UText* text)
 UText* openLatin1ContextAwareUTextProvider(UTextWithBuffer* utWithBuffer, const LChar* string, unsigned length, const UChar* priorContext, int priorContextLength, UErrorCode* status)
 {
     if (U_FAILURE(*status))
-        return 0;
+        return nullptr;
     if (!string || length > static_cast<unsigned>(std::numeric_limits<int32_t>::max())) {
         *status = U_ILLEGAL_ARGUMENT_ERROR;
-        return 0;
+        return nullptr;
     }
     UText* text = utext_setup(&utWithBuffer->text, sizeof(utWithBuffer->buffer), status);
     if (U_FAILURE(*status)) {
         ASSERT(!text);
-        return 0;
+        return nullptr;
     }
 
     initializeContextAwareUTextProvider(text, &textLatin1ContextAwareFuncs, string, length, priorContext, priorContextLength);

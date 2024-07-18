@@ -24,13 +24,15 @@
  */
 
 [
-    Conditional=VIDEO_TRACK,
-    GenerateIsReachable=ImplElementRoot,
-    JSCustomMarkFunction,
+    ActiveDOMObject,
+    Conditional=VIDEO,
+    GenerateIsReachable,
+    GenerateAddOpaqueRoot,
+    Exposed=Window
 ] interface AudioTrackList : EventTarget {
     readonly attribute unsigned long length;
     getter AudioTrack item(unsigned long index);
-    AudioTrack getTrackById(DOMString id);
+    AudioTrack getTrackById([AtomString] DOMString id);
 
     attribute EventHandler onchange;
     attribute EventHandler onaddtrack;

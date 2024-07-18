@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2009, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,70 +31,84 @@
 
 #include "Document.h"
 #include "JSDOMBinding.h"
-#include "JSMainThreadExecState.h"
-#include "JSMainThreadExecStateInstrumentation.h"
-#include <runtime/Exception.h>
+#include "JSExecState.h"
+#include "JSExecStateInstrumentation.h"
+#include <JavaScriptCore/Exception.h>
 
-using namespace JSC;
-    
 namespace WebCore {
+using namespace JSC;
 
+// https://webidl.spec.whatwg.org/#call-a-user-objects-operation
 JSValue JSCallbackData::invokeCallback(JSDOMGlobalObject& globalObject, JSObject* callback, JSValue thisValue, MarkedArgumentBuffer& args, CallbackType method, PropertyName functionName, NakedPtr<JSC::Exception>& returnedException)
 {
     ASSERT(callback);
 
-    ExecState* exec = globalObject.globalExec();
-    VM& vm = exec->vm();
+    JSGlobalObject* lexicalGlobalObject = &globalObject;
+    VM& vm = lexicalGlobalObject->vm();
+
+    auto scope = DECLARE_CATCH_SCOPE(vm);
+
     JSValue function;
     CallData callData;
-    CallType callType = CallType::None;
 
     if (method != CallbackType::Object) {
         function = callback;
-        callType = callback->methodTable(vm)->getCallData(callback, callData);
+        callData = JSC::getCallData(callback);
     }
-    if (callType == CallType::None) {
+    if (callData.type == CallData::Type::None) {
         if (method == CallbackType::Function) {
-            returnedException = JSC::Exception::create(vm, createTypeError(exec));
+            returnedException = JSC::Exception::create(vm, createTypeError(lexicalGlobalObject));
             return JSValue();
         }
 
         ASSERT(!functionName.isNull());
-        function = callback->get(exec, functionName);
-        callType = getCallData(function, callData);
-        if (callType == CallType::None) {
-            returnedException = JSC::Exception::create(vm, createTypeError(exec));
+        function = callback->get(lexicalGlobalObject, functionName);
+        if (UNLIKELY(scope.exception())) {
+            returnedException = scope.exception();
+            scope.clearException();
             return JSValue();
         }
+
+        callData = JSC::getCallData(function);
+        if (callData.type == CallData::Type::None) {
+            returnedException = JSC::Exception::create(vm, createTypeError(lexicalGlobalObject, makeString("'", String(functionName.uid()), "' property of callback interface should be callable")));
+            return JSValue();
+        }
+
+        thisValue = callback;
     }
 
     ASSERT(!function.isEmpty());
-    ASSERT(callType != CallType::None);
+    ASSERT(callData.type != CallData::Type::None);
 
     ScriptExecutionContext* context = globalObject.scriptExecutionContext();
     // We will fail to get the context if the frame has been detached.
     if (!context)
         return JSValue();
 
-    InspectorInstrumentationCookie cookie = JSMainThreadExecState::instrumentFunctionCall(context, callType, callData);
+    JSExecState::instrumentFunction(context, callData);
 
     returnedException = nullptr;
-    JSValue result = context->isDocument()
-        ? JSMainThreadExecState::profiledCall(exec, JSC::ProfilingReason::Other, function, callType, callData, thisValue, args, returnedException)
-        : JSC::profiledCall(exec, JSC::ProfilingReason::Other, function, callType, callData, thisValue, args, returnedException);
+    JSValue result = JSExecState::profiledCall(lexicalGlobalObject, JSC::ProfilingReason::Other, function, callData, thisValue, args, returnedException);
 
-    InspectorInstrumentation::didCallFunction(cookie, context);
+    InspectorInstrumentation::didCallFunction(context);
 
     return result;
 }
 
-void JSCallbackDataWeak::visitJSFunction(JSC::SlotVisitor& vistor)
+template<typename Visitor>
+void JSCallbackDataWeak::visitJSFunction(Visitor& visitor)
 {
-    vistor.append(m_callback);
+    visitor.append(m_callback);
 }
 
-bool JSCallbackDataWeak::WeakOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, SlotVisitor& visitor)
+template void JSCallbackDataWeak::visitJSFunction(JSC::AbstractSlotVisitor&);
+template void JSCallbackDataWeak::visitJSFunction(JSC::SlotVisitor&);
+
+bool JSCallbackDataWeak::WeakOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, AbstractSlotVisitor& visitor, const char** reason)
 {
+    if (UNLIKELY(reason))
+        *reason = "Context is opaque root"; // FIXME: what is the context.
     return visitor.containsOpaqueRoot(context);
 }
 

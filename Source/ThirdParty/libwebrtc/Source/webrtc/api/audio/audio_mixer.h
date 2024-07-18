@@ -8,13 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_API_AUDIO_AUDIO_MIXER_H_
-#define WEBRTC_API_AUDIO_AUDIO_MIXER_H_
+#ifndef API_AUDIO_AUDIO_MIXER_H_
+#define API_AUDIO_AUDIO_MIXER_H_
 
 #include <memory>
 
-#include "webrtc/base/refcount.h"
-#include "webrtc/modules/include/module_common_types.h"
+#include "api/audio/audio_frame.h"
+#include "rtc_base/ref_count.h"
 
 namespace webrtc {
 
@@ -35,9 +35,9 @@ class AudioMixer : public rtc::RefCountInterface {
       kError,   // The audio_frame will not be used.
     };
 
-    // Overwrites |audio_frame|. The data_ field is overwritten with
+    // Overwrites `audio_frame`. The data_ field is overwritten with
     // 10 ms of new audio (either 1 or 2 interleaved channels) at
-    // |sample_rate_hz|. All fields in |audio_frame| must be updated.
+    // `sample_rate_hz`. All fields in `audio_frame` must be updated.
     virtual AudioFrameInfo GetAudioFrameWithInfo(int sample_rate_hz,
                                                  AudioFrame* audio_frame) = 0;
 
@@ -66,7 +66,7 @@ class AudioMixer : public rtc::RefCountInterface {
   // should mix at a rate that doesn't cause quality loss of the
   // sources' audio. The mixing rate is one of the rates listed in
   // AudioProcessing::NativeRate. All fields in
-  // |audio_frame_for_mixing| must be updated.
+  // `audio_frame_for_mixing` must be updated.
   virtual void Mix(size_t number_of_channels,
                    AudioFrame* audio_frame_for_mixing) = 0;
 
@@ -77,4 +77,4 @@ class AudioMixer : public rtc::RefCountInterface {
 };
 }  // namespace webrtc
 
-#endif  // WEBRTC_API_AUDIO_AUDIO_MIXER_H_
+#endif  // API_AUDIO_AUDIO_MIXER_H_

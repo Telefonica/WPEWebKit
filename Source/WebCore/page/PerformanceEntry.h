@@ -32,35 +32,33 @@
 #pragma once
 
 #include "Performance.h"
-#include <wtf/Optional.h>
 #include <wtf/RefCounted.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
+DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(PerformanceEntry);
 class PerformanceEntry : public RefCounted<PerformanceEntry> {
+    WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(PerformanceEntry);
 public:
     virtual ~PerformanceEntry();
 
-    String name() const { return m_name; }
-    String entryType() const { return m_entryType; }
-    double startTime() const { return m_startTime; }
-    double duration() const { return m_duration; }
+    const String& name() const { return m_name; }
+    virtual double startTime() const { return m_startTime; }
+    virtual double duration() const { return m_duration; }
 
-    enum class Type {
-        Navigation = 1 << 0,
-        Mark = 1 << 1,
-        Measure = 1 << 2,
-        Resource = 1 << 3,
+    enum class Type : uint8_t {
+        Navigation  = 1 << 0,
+        Mark        = 1 << 1,
+        Measure     = 1 << 2,
+        Resource    = 1 << 3,
+        Paint       = 1 << 4
     };
 
-    Type type() const { return m_type; }
+    virtual Type performanceEntryType() const = 0;
+    virtual ASCIILiteral entryType() const = 0;
 
     static std::optional<Type> parseEntryTypeString(const String& entryType);
-
-    bool isResource() const { return m_type == Type::Resource; }
-    bool isMark() const { return m_type == Type::Mark; }
-    bool isMeasure() const { return m_type == Type::Measure; }
 
     static bool startTimeCompareLessThan(const RefPtr<PerformanceEntry>& a, const RefPtr<PerformanceEntry>& b)
     {
@@ -68,14 +66,12 @@ public:
     }
 
 protected:
-    PerformanceEntry(Type, const String& name, const String& entryType, double startTime, double finishTime);
+    PerformanceEntry(const String& name, double startTime, double finishTime);
 
 private:
     const String m_name;
-    const String m_entryType;
     const double m_startTime;
     const double m_duration;
-    const Type m_type;
 };
 
 } // namespace WebCore

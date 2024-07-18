@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2022 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Cameron Zwarich <cwzwarich@uwaterloo.ca>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,32 +30,32 @@
 #pragma once
 
 #include "ArrayProfile.h"
-#include "ByValInfo.h"
 #include "BytecodeConventions.h"
 #include "CallLinkInfo.h"
 #include "CodeBlockHash.h"
 #include "CodeOrigin.h"
 #include "CodeType.h"
-#include "CompactJITCodeMap.h"
 #include "CompilationResult.h"
 #include "ConcurrentJSLock.h"
+#include "DFGCodeOriginPool.h"
 #include "DFGCommon.h"
-#include "DFGExitProfile.h"
 #include "DirectEvalCodeCache.h"
 #include "EvalExecutable.h"
 #include "ExecutionCounter.h"
 #include "ExpressionRangeInfo.h"
 #include "FunctionExecutable.h"
 #include "HandlerInfo.h"
+#include "ICStatusMap.h"
 #include "Instruction.h"
+#include "InstructionStream.h"
 #include "JITCode.h"
+#include "JITCodeMap.h"
 #include "JITMathICForwards.h"
-#include "JSCell.h"
+#include "JSCast.h"
 #include "JSGlobalObject.h"
 #include "JumpTable.h"
-#include "LLIntCallLinkInfo.h"
-#include "LLIntPrototypeLoadAdaptiveStructureWatchpoint.h"
 #include "LazyOperandValueProfile.h"
+#include "MetadataTable.h"
 #include "ModuleProgramExecutable.h"
 #include "ObjectAllocationProfile.h"
 #include "Options.h"
@@ -63,13 +63,13 @@
 #include "ProfilerJettisonReason.h"
 #include "ProgramExecutable.h"
 #include "PutPropertySlot.h"
-#include "UnconditionalFinalizer.h"
+#include "RegisterAtOffsetList.h"
 #include "ValueProfile.h"
 #include "VirtualRegister.h"
 #include "Watchpoint.h"
-#include <wtf/Bag.h>
 #include <wtf/FastMalloc.h>
-#include <wtf/RefCountedArray.h>
+#include <wtf/FixedVector.h>
+#include <wtf/HashSet.h>
 #include <wtf/RefPtr.h>
 #include <wtf/SegmentedVector.h>
 #include <wtf/Vector.h>
@@ -77,20 +77,31 @@
 
 namespace JSC {
 
+#if ENABLE(DFG_JIT)
+namespace DFG {
+class JITData;
+} // namespace DFG
+#endif
+
+class UnaryArithProfile;
+class BinaryArithProfile;
 class BytecodeLivenessAnalysis;
 class CodeBlockSet;
-class ExecState;
 class JSModuleEnvironment;
 class LLIntOffsetsExtractor;
-class PCToCodeOriginMap;
+class LLIntPrototypeLoadAdaptiveStructureWatchpoint;
+class MetadataTable;
 class RegisterAtOffsetList;
+class ScriptExecutable;
 class StructureStubInfo;
+class BaselineJITCode;
+class BaselineJITData;
+
+DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(CodeBlockRareData);
 
 enum class AccessType : int8_t;
 
-struct ArithProfile;
-
-typedef HashMap<CodeOrigin, StructureStubInfo*, CodeOriginApproximateHash> StubInfoMap;
+struct OpCatch;
 
 enum ReoptimizationMode { DontCountReoptimization, CountReoptimization };
 
@@ -100,24 +111,26 @@ class CodeBlock : public JSCell {
     friend class JIT;
     friend class LLIntOffsetsExtractor;
 
-    class UnconditionalFinalizer : public JSC::UnconditionalFinalizer { 
-        void finalizeUnconditionally() override;
-    };
-
-    class WeakReferenceHarvester : public JSC::WeakReferenceHarvester {
-        void visitWeakReferences(SlotVisitor&) override;
-    };
-
 public:
+
     enum CopyParsedBlockTag { CopyParsedBlock };
 
-    static const unsigned StructureFlags = Base::StructureFlags | StructureIsImmortal;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | StructureIsImmortal;
+    static constexpr bool needsDestruction = true;
+
+    template<typename, SubspaceAccess>
+    static void subspaceFor(VM&)
+    {
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+    // GC strongly assumes CodeBlock is not a PreciseAllocation for now.
+    static constexpr uint8_t numberOfLowerTierCells = 0;
 
     DECLARE_INFO;
 
 protected:
-    CodeBlock(VM*, Structure*, CopyParsedBlockTag, CodeBlock& other);
-    CodeBlock(VM*, Structure*, ScriptExecutable* ownerExecutable, UnlinkedCodeBlock*, JSScope*, RefPtr<SourceProvider>&&, unsigned sourceOffset, unsigned firstLineColumnOffset);
+    CodeBlock(VM&, Structure*, CopyParsedBlockTag, CodeBlock& other);
+    CodeBlock(VM&, Structure*, ScriptExecutable* ownerExecutable, UnlinkedCodeBlock*, JSScope*);
 
     void finishCreation(VM&, CopyParsedBlockTag, CodeBlock& other);
     bool finishCreation(VM&, ScriptExecutable* ownerExecutable, UnlinkedCodeBlock*, JSScope*);
@@ -136,17 +149,23 @@ public:
     CString hashAsStringIfPossible() const;
     CString sourceCodeForTools() const; // Not quite the actual source we parsed; this will do things like prefix the source for a function with a reified signature.
     CString sourceCodeOnOneLine() const; // As sourceCodeForTools(), but replaces all whitespace runs with a single space.
-    void dumpAssumingJITType(PrintStream&, JITCode::JITType) const;
+    void dumpAssumingJITType(PrintStream&, JITType) const;
     JS_EXPORT_PRIVATE void dump(PrintStream&) const;
 
-    int numParameters() const { return m_numParameters; }
-    void setNumParameters(int newValue);
+    MetadataTable* metadataTable() const { return m_metadata.get(); }
 
-    int numberOfArgumentsToSkip() const { return m_numberOfArgumentsToSkip; }
+    unsigned numParameters() const { return m_numParameters; }
+private:
+    void setNumParameters(unsigned newValue);
+public:
 
-    int numCalleeLocals() const { return m_numCalleeLocals; }
+    unsigned numberOfArgumentsToSkip() const { return m_numberOfArgumentsToSkip; }
 
-    int* addressOfNumParameters() { return &m_numParameters; }
+    unsigned numCalleeLocals() const { return m_numCalleeLocals; }
+
+    unsigned numVars() const { return m_numVars; }
+    unsigned numTmps() const { return m_unlinkedCode->hasCheckpoints() * maxNumCheckpointTmps; }
+
     static ptrdiff_t offsetOfNumParameters() { return OBJECT_OFFSETOF(CodeBlock, m_numParameters); }
 
     CodeBlock* alternative() const { return static_cast<CodeBlock*>(m_alternative.get()); }
@@ -171,7 +190,7 @@ public:
     
     CodeSpecializationKind specializationKind() const
     {
-        return specializationFromIsConstruct(m_isConstructor);
+        return specializationFromIsConstruct(isConstructor());
     }
 
     CodeBlock* alternativeForJettison();    
@@ -181,165 +200,152 @@ public:
     // https://bugs.webkit.org/show_bug.cgi?id=123677
     CodeBlock* baselineVersion();
 
-    static size_t estimatedSize(JSCell*);
-    static void visitChildren(JSCell*, SlotVisitor&);
-    void visitChildren(SlotVisitor&);
-    void visitWeakly(SlotVisitor&);
-    void clearVisitWeaklyHasBeenCalled();
+    DECLARE_VISIT_CHILDREN;
+
+    static size_t estimatedSize(JSCell*, VM&);
+    static void destroy(JSCell*);
+    void finalizeUnconditionally(VM&);
+
+    void notifyLexicalBindingUpdate();
 
     void dumpSource();
     void dumpSource(PrintStream&);
 
     void dumpBytecode();
     void dumpBytecode(PrintStream&);
-    void dumpBytecode(PrintStream& out, const Instruction* begin, const Instruction*& it, const StubInfoMap& = StubInfoMap(), const CallLinkInfoMap& = CallLinkInfoMap());
-    void dumpBytecode(PrintStream& out, unsigned bytecodeOffset, const StubInfoMap& = StubInfoMap(), const CallLinkInfoMap& = CallLinkInfoMap());
+    void dumpBytecode(PrintStream& out, const JSInstructionStream::Ref& it, const ICStatusMap& = ICStatusMap());
+    void dumpBytecode(PrintStream& out, unsigned bytecodeOffset, const ICStatusMap& = ICStatusMap());
 
     void dumpExceptionHandlers(PrintStream&);
-    void printStructures(PrintStream&, const Instruction*);
-    void printStructure(PrintStream&, const char* name, const Instruction*, int operand);
+    void printStructures(PrintStream&, const JSInstruction*);
+    void printStructure(PrintStream&, const char* name, const JSInstruction*, int operand);
 
     void dumpMathICStats();
 
-    bool isStrictMode() const { return m_isStrictMode; }
-    ECMAMode ecmaMode() const { return isStrictMode() ? StrictMode : NotStrictMode; }
+    bool isConstructor() const { return m_unlinkedCode->isConstructor(); }
+    CodeType codeType() const { return m_unlinkedCode->codeType(); }
 
-    bool hasInstalledVMTrapBreakpoints() const;
+    JSParserScriptMode scriptMode() const { return m_unlinkedCode->scriptMode(); }
+
+    bool hasInstalledVMTrapsBreakpoints() const;
+    bool canInstallVMTrapBreakpoints() const;
     bool installVMTrapBreakpoints();
 
-    inline bool isKnownNotImmediate(int index)
+    ALWAYS_INLINE bool isTemporaryRegister(VirtualRegister reg)
     {
-        if (index == m_thisRegister.offset() && !m_isStrictMode)
-            return true;
-
-        if (isConstantRegisterIndex(index))
-            return getConstant(index).isCell();
-
-        return false;
+        return reg.offset() >= static_cast<int>(m_numVars);
     }
 
-    ALWAYS_INLINE bool isTemporaryRegisterIndex(int index)
-    {
-        return index >= m_numVars;
-    }
-
-    HandlerInfo* handlerForBytecodeOffset(unsigned bytecodeOffset, RequiredHandler = RequiredHandler::AnyHandler);
+    HandlerInfo* handlerForBytecodeIndex(BytecodeIndex, RequiredHandler = RequiredHandler::AnyHandler);
     HandlerInfo* handlerForIndex(unsigned, RequiredHandler = RequiredHandler::AnyHandler);
-    void removeExceptionHandlerForCallSite(CallSiteIndex);
-    unsigned lineNumberForBytecodeOffset(unsigned bytecodeOffset);
-    unsigned columnNumberForBytecodeOffset(unsigned bytecodeOffset);
-    void expressionRangeForBytecodeOffset(unsigned bytecodeOffset, int& divot,
+    void removeExceptionHandlerForCallSite(DisposableCallSiteIndex);
+    unsigned lineNumberForBytecodeIndex(BytecodeIndex);
+    unsigned columnNumberForBytecodeIndex(BytecodeIndex);
+    void expressionRangeForBytecodeIndex(BytecodeIndex, int& divot,
         int& startOffset, int& endOffset, unsigned& line, unsigned& column) const;
 
-    std::optional<unsigned> bytecodeOffsetFromCallSiteIndex(CallSiteIndex);
+    std::optional<BytecodeIndex> bytecodeIndexFromCallSiteIndex(CallSiteIndex);
 
-    void getStubInfoMap(const ConcurrentJSLocker&, StubInfoMap& result);
-    void getStubInfoMap(StubInfoMap& result);
-    
-    void getCallLinkInfoMap(const ConcurrentJSLocker&, CallLinkInfoMap& result);
-    void getCallLinkInfoMap(CallLinkInfoMap& result);
-
-    void getByValInfoMap(const ConcurrentJSLocker&, ByValInfoMap& result);
-    void getByValInfoMap(ByValInfoMap& result);
+    // Because we might throw out baseline JIT code and all its baseline JIT data (m_jitData),
+    // you need to be careful about the lifetime of when you use the return value of this function.
+    // The return value may have raw pointers into this data structure that gets thrown away.
+    // Specifically, you need to ensure that no GC can be finalized (typically that means no
+    // allocations) between calling this and the last use of it.
+    void getICStatusMap(const ConcurrentJSLocker&, ICStatusMap& result);
+    void getICStatusMap(ICStatusMap& result);
     
 #if ENABLE(JIT)
-    StructureStubInfo* addStubInfo(AccessType);
-    JITAddIC* addJITAddIC(ArithProfile*);
-    JITMulIC* addJITMulIC(ArithProfile*);
-    JITNegIC* addJITNegIC(ArithProfile*);
-    JITSubIC* addJITSubIC(ArithProfile*);
-    Bag<StructureStubInfo>::iterator stubInfoBegin() { return m_stubInfos.begin(); }
-    Bag<StructureStubInfo>::iterator stubInfoEnd() { return m_stubInfos.end(); }
-    
-    // O(n) operation. Use getStubInfoMap() unless you really only intend to get one
-    // stub info.
+    void setupWithUnlinkedBaselineCode(Ref<BaselineJITCode>);
+
+    static ptrdiff_t offsetOfJITData() { return OBJECT_OFFSETOF(CodeBlock, m_jitData); }
+
+    // O(n) operation. Use getICStatusMap() unless you really only intend to get one stub info.
     StructureStubInfo* findStubInfo(CodeOrigin);
-
-    ByValInfo* addByValInfo();
-
-    CallLinkInfo* addCallLinkInfo();
-    Bag<CallLinkInfo>::iterator callLinkInfosBegin() { return m_callLinkInfos.begin(); }
-    Bag<CallLinkInfo>::iterator callLinkInfosEnd() { return m_callLinkInfos.end(); }
 
     // This is a slow function call used primarily for compiling OSR exits in the case
     // that there had been inlining. Chances are if you want to use this, you're really
     // looking for a CallLinkInfoMap to amortize the cost of calling this.
-    CallLinkInfo* getCallLinkInfoForBytecodeIndex(unsigned bytecodeIndex);
+    CallLinkInfo* getCallLinkInfoForBytecodeIndex(const ConcurrentJSLocker&, BytecodeIndex);
     
+    const JITCodeMap& jitCodeMap();
+
+    std::optional<CodeOrigin> findPC(void* pc);
+
     // We call this when we want to reattempt compiling something with the baseline JIT. Ideally
     // the baseline JIT would not add data to CodeBlock, but instead it would put its data into
     // a newly created JITCode, which could be thrown away if we bail on JIT compilation. Then we
     // would be able to get rid of this silly function.
     // FIXME: https://bugs.webkit.org/show_bug.cgi?id=159061
-    void resetJITData();
+    void resetBaselineJITData();
 #endif // ENABLE(JIT)
 
     void unlinkIncomingCalls();
-
+    void linkIncomingCall(CallFrame* callerFrame, CallLinkInfo*);
 #if ENABLE(JIT)
-    void linkIncomingCall(ExecState* callerFrame, CallLinkInfo*);
-    void linkIncomingPolymorphicCall(ExecState* callerFrame, PolymorphicCallNode*);
+    void linkIncomingPolymorphicCall(CallFrame* callerFrame, PolymorphicCallNode*);
 #endif // ENABLE(JIT)
 
-    void linkIncomingCall(ExecState* callerFrame, LLIntCallLinkInfo*);
-
-    void setJITCodeMap(std::unique_ptr<CompactJITCodeMap> jitCodeMap)
+    const JSInstruction* outOfLineJumpTarget(const JSInstruction* pc);
+    int outOfLineJumpOffset(JSInstructionStream::Offset offset)
     {
-        m_jitCodeMap = WTFMove(jitCodeMap);
+        return m_unlinkedCode->outOfLineJumpOffset(offset);
     }
-    CompactJITCodeMap* jitCodeMap()
+    int outOfLineJumpOffset(const JSInstruction* pc);
+    int outOfLineJumpOffset(const JSInstructionStream::Ref& instruction)
     {
-        return m_jitCodeMap.get();
-    }
-    
-    static void clearLLIntGetByIdCache(Instruction*);
-
-    unsigned bytecodeOffset(Instruction* returnAddress)
-    {
-        RELEASE_ASSERT(returnAddress >= instructions().begin() && returnAddress < instructions().end());
-        return static_cast<Instruction*>(returnAddress) - instructions().begin();
+        return outOfLineJumpOffset(instruction.ptr());
     }
 
-    typedef JSC::Instruction Instruction;
-    typedef RefCountedArray<Instruction>& UnpackedInstructions;
+    inline unsigned bytecodeOffset(const JSInstruction* returnAddress)
+    {
+        const auto* instructionsBegin = instructions().at(0).ptr();
+        const auto* instructionsEnd = reinterpret_cast<const JSInstruction*>(reinterpret_cast<uintptr_t>(instructionsBegin) + instructions().size());
+        RELEASE_ASSERT(returnAddress >= instructionsBegin && returnAddress < instructionsEnd);
+        return returnAddress - instructionsBegin;
+    }
 
-    unsigned numberOfInstructions() const { return m_instructions.size(); }
-    RefCountedArray<Instruction>& instructions() { return m_instructions; }
-    const RefCountedArray<Instruction>& instructions() const { return m_instructions; }
+    inline BytecodeIndex bytecodeIndex(const JSInstruction* returnAddress)
+    {
+        return BytecodeIndex(bytecodeOffset(returnAddress));
+    }
+
+    const JSInstructionStream& instructions() const { return m_unlinkedCode->instructions(); }
+    const JSInstruction* instructionAt(BytecodeIndex index) const { return instructions().at(index).ptr(); }
 
     size_t predictedMachineCodeSize();
 
-    bool usesOpcode(OpcodeID);
-
-    unsigned instructionCount() const { return m_instructions.size(); }
+    unsigned instructionsSize() const { return instructions().size(); }
+    unsigned bytecodeCost() const { return m_bytecodeCost; }
 
     // Exactly equivalent to codeBlock->ownerExecutable()->newReplacementCodeBlockFor(codeBlock->specializationKind())
     CodeBlock* newReplacement();
     
     void setJITCode(Ref<JITCode>&& code)
     {
-        ASSERT(heap()->isDeferred());
-        heap()->reportExtraMemoryAllocated(code->size());
+        if (!code->isShared())
+            heap()->reportExtraMemoryAllocated(code->size());
+
         ConcurrentJSLocker locker(m_lock);
         WTF::storeStoreFence(); // This is probably not needed because the lock will also do something similar, but it's good to be paranoid.
         m_jitCode = WTFMove(code);
     }
+
     RefPtr<JITCode> jitCode() { return m_jitCode; }
     static ptrdiff_t jitCodeOffset() { return OBJECT_OFFSETOF(CodeBlock, m_jitCode); }
-    JITCode::JITType jitType() const
+    JITType jitType() const
     {
         JITCode* jitCode = m_jitCode.get();
-        WTF::loadLoadFence();
-        JITCode::JITType result = JITCode::jitTypeFor(jitCode);
-        WTF::loadLoadFence(); // This probably isn't needed. Oh well, paranoia is good.
+        JITType result = JITCode::jitTypeFor(jitCode);
         return result;
     }
 
     bool hasBaselineJITProfiling() const
     {
-        return jitType() == JITCode::BaselineJIT;
+        return jitType() == JITType::BaselineJIT;
     }
-    
+
+    bool useDataIC() const;
+
 #if ENABLE(JIT)
     CodeBlock* replacement();
 
@@ -347,21 +353,21 @@ public:
     DFG::CapabilityLevel capabilityLevel();
     DFG::CapabilityLevel capabilityLevelState() { return static_cast<DFG::CapabilityLevel>(m_capabilityLevelState); }
 
-    bool hasOptimizedReplacement(JITCode::JITType typeToReplace);
+    CodeBlock* optimizedReplacement(JITType typeToReplace);
+    CodeBlock* optimizedReplacement(); // the typeToReplace is my JITType
+    bool hasOptimizedReplacement(JITType typeToReplace);
     bool hasOptimizedReplacement(); // the typeToReplace is my JITType
 #endif
 
     void jettison(Profiler::JettisonReason, ReoptimizationMode = DontCountReoptimization, const FireDetail* = nullptr);
     
-    ExecutableBase* ownerExecutable() const { return m_ownerExecutable.get(); }
-    ScriptExecutable* ownerScriptExecutable() const { return jsCast<ScriptExecutable*>(m_ownerExecutable.get()); }
+    ScriptExecutable* ownerExecutable() const { return m_ownerExecutable.get(); }
+    
+    VM& vm() const { return *m_vm; }
 
-    VM* vm() const { return m_vm; }
+    VirtualRegister thisRegister() const { return m_unlinkedCode->thisRegister(); }
 
-    void setThisRegister(VirtualRegister thisRegister) { m_thisRegister = thisRegister; }
-    VirtualRegister thisRegister() const { return m_thisRegister; }
-
-    bool usesEval() const { return m_unlinkedCode->usesEval(); }
+    bool usesCallEval() const { return m_unlinkedCode->usesCallEval(); }
 
     void setScopeRegister(VirtualRegister scopeRegister)
     {
@@ -374,11 +380,6 @@ public:
         return m_scopeRegister;
     }
     
-    CodeType codeType() const
-    {
-        return static_cast<CodeType>(m_codeType);
-    }
-
     PutPropertySlot::Context putByIdContext() const
     {
         if (codeType() == EvalCode)
@@ -386,84 +387,46 @@ public:
         return PutPropertySlot::PutById;
     }
 
-    SourceProvider* source() const { return m_source.get(); }
-    unsigned sourceOffset() const { return m_sourceOffset; }
-    unsigned firstLineColumnOffset() const { return m_firstLineColumnOffset; }
+    const SourceCode& source() const { return m_ownerExecutable->source(); }
+    unsigned sourceOffset() const { return m_ownerExecutable->source().startOffset(); }
+    unsigned firstLineColumnOffset() const { return m_ownerExecutable->startColumn(); }
 
     size_t numberOfJumpTargets() const { return m_unlinkedCode->numberOfJumpTargets(); }
     unsigned jumpTarget(int index) const { return m_unlinkedCode->jumpTarget(index); }
 
     String nameForRegister(VirtualRegister);
 
+    static ptrdiff_t offsetOfArgumentValueProfiles() { return OBJECT_OFFSETOF(CodeBlock, m_argumentValueProfiles); }
     unsigned numberOfArgumentValueProfiles()
     {
-        ASSERT(m_numParameters >= 0);
-        ASSERT(m_argumentValueProfiles.size() == static_cast<unsigned>(m_numParameters));
+        ASSERT(m_argumentValueProfiles.size() == static_cast<unsigned>(m_numParameters) || !Options::useJIT());
         return m_argumentValueProfiles.size();
     }
+
     ValueProfile& valueProfileForArgument(unsigned argumentIndex)
     {
+        ASSERT(Options::useJIT()); // This is only called from the various JIT compilers or places that first check numberOfArgumentValueProfiles before calling this.
         ValueProfile& result = m_argumentValueProfiles[argumentIndex];
-        ASSERT(result.m_bytecodeOffset == -1);
         return result;
     }
 
-    unsigned numberOfValueProfiles() { return m_valueProfiles.size(); }
-    ValueProfile& valueProfile(int index) { return m_valueProfiles[index]; }
-    ValueProfile& valueProfileForBytecodeOffset(int bytecodeOffset);
-    ValueProfile* tryGetValueProfileForBytecodeOffset(int bytecodeOffset);
-    SpeculatedType valueProfilePredictionForBytecodeOffset(const ConcurrentJSLocker& locker, int bytecodeOffset)
-    {
-        if (ValueProfile* valueProfile = tryGetValueProfileForBytecodeOffset(bytecodeOffset))
-            return valueProfile->computeUpdatedPrediction(locker);
-        return SpecNone;
-    }
+    ValueProfile& valueProfileForBytecodeIndex(BytecodeIndex);
+    SpeculatedType valueProfilePredictionForBytecodeIndex(const ConcurrentJSLocker&, BytecodeIndex);
 
-    unsigned totalNumberOfValueProfiles()
-    {
-        return numberOfArgumentValueProfiles() + numberOfValueProfiles();
-    }
-    ValueProfile& getFromAllValueProfiles(unsigned index)
-    {
-        if (index < numberOfArgumentValueProfiles())
-            return valueProfileForArgument(index);
-        return valueProfile(index - numberOfArgumentValueProfiles());
-    }
+    template<typename Functor> void forEachValueProfile(const Functor&);
+    template<typename Functor> void forEachArrayAllocationProfile(const Functor&);
+    template<typename Functor> void forEachObjectAllocationProfile(const Functor&);
+    template<typename Functor> void forEachLLIntOrBaselineCallLinkInfo(const Functor&);
 
-    RareCaseProfile* addRareCaseProfile(int bytecodeOffset);
-    unsigned numberOfRareCaseProfiles() { return m_rareCaseProfiles.size(); }
-    RareCaseProfile* rareCaseProfileForBytecodeOffset(int bytecodeOffset);
-    unsigned rareCaseProfileCountForBytecodeOffset(int bytecodeOffset);
+    BinaryArithProfile* binaryArithProfileForBytecodeIndex(BytecodeIndex);
+    UnaryArithProfile* unaryArithProfileForBytecodeIndex(BytecodeIndex);
+    BinaryArithProfile* binaryArithProfileForPC(const JSInstruction*);
+    UnaryArithProfile* unaryArithProfileForPC(const JSInstruction*);
 
-    bool likelyToTakeSlowCase(int bytecodeOffset)
-    {
-        if (!hasBaselineJITProfiling())
-            return false;
-        unsigned value = rareCaseProfileCountForBytecodeOffset(bytecodeOffset);
-        return value >= Options::likelyToTakeSlowCaseMinimumCount();
-    }
+    bool couldTakeSpecialArithFastCase(BytecodeIndex bytecodeOffset);
 
-    bool couldTakeSlowCase(int bytecodeOffset)
-    {
-        if (!hasBaselineJITProfiling())
-            return false;
-        unsigned value = rareCaseProfileCountForBytecodeOffset(bytecodeOffset);
-        return value >= Options::couldTakeSlowCaseMinimumCount();
-    }
-
-    ArithProfile* arithProfileForBytecodeOffset(int bytecodeOffset);
-    ArithProfile* arithProfileForPC(Instruction*);
-
-    bool couldTakeSpecialFastCase(int bytecodeOffset);
-
-    unsigned numberOfArrayProfiles() const { return m_arrayProfiles.size(); }
-    const ArrayProfileVector& arrayProfiles() { return m_arrayProfiles; }
-    ArrayProfile* addArrayProfile(const ConcurrentJSLocker&, unsigned bytecodeOffset);
-    ArrayProfile* addArrayProfile(unsigned bytecodeOffset);
-    ArrayProfile* getArrayProfile(const ConcurrentJSLocker&, unsigned bytecodeOffset);
-    ArrayProfile* getArrayProfile(unsigned bytecodeOffset);
-    ArrayProfile* getOrAddArrayProfile(const ConcurrentJSLocker&, unsigned bytecodeOffset);
-    ArrayProfile* getOrAddArrayProfile(unsigned bytecodeOffset);
+    ArrayProfile* getArrayProfile(const ConcurrentJSLocker&, BytecodeIndex);
+    ArrayProfile* getArrayProfile(BytecodeIndex);
 
     // Exception handling support
 
@@ -473,7 +436,7 @@ public:
     bool hasExpressionInfo() { return m_unlinkedCode->hasExpressionInfo(); }
 
 #if ENABLE(DFG_JIT)
-    Vector<CodeOrigin, 0, UnsafeVectorOverflow>& codeOrigins();
+    DFG::CodeOriginPool& codeOrigins();
     
     // Having code origins implies that there has been some inlining.
     bool hasCodeOrigins()
@@ -490,29 +453,10 @@ public:
 
     CodeOrigin codeOrigin(CallSiteIndex index)
     {
-        return codeOrigins()[index.bits()];
+        return codeOrigins().get(index.bits());
     }
 
-    bool addFrequentExitSite(const DFG::FrequentExitSite& site)
-    {
-        ASSERT(JITCode::isBaselineCode(jitType()));
-        ConcurrentJSLocker locker(m_lock);
-        return m_exitProfile.add(locker, this, site);
-    }
-
-    bool hasExitSite(const ConcurrentJSLocker& locker, const DFG::FrequentExitSite& site) const
-    {
-        return m_exitProfile.hasExitSite(locker, site);
-    }
-    bool hasExitSite(const DFG::FrequentExitSite& site) const
-    {
-        ConcurrentJSLocker locker(m_lock);
-        return hasExitSite(locker, site);
-    }
-
-    DFG::ExitProfile& exitProfile() { return m_exitProfile; }
-
-    CompressedLazyOperandValueProfileHolder& lazyOperandValueProfiles()
+    CompressedLazyOperandValueProfileHolder& lazyOperandValueProfiles(const ConcurrentJSLocker&)
     {
         return m_lazyOperandValueProfiles;
     }
@@ -527,135 +471,127 @@ public:
     size_t numberOfIdentifiers() const { return m_unlinkedCode->numberOfIdentifiers(); }
     const Identifier& identifier(int index) const { return m_unlinkedCode->identifier(index); }
 #endif
+#if ASSERT_ENABLED
+    bool hasIdentifier(UniquedStringImpl*);
+#endif
 
     Vector<WriteBarrier<Unknown>>& constants() { return m_constantRegisters; }
-    Vector<SourceCodeRepresentation>& constantsSourceCodeRepresentation() { return m_constantsSourceCodeRepresentation; }
-    unsigned addConstant(JSValue v)
+    unsigned addConstant(const ConcurrentJSLocker&, JSValue v)
     {
         unsigned result = m_constantRegisters.size();
         m_constantRegisters.append(WriteBarrier<Unknown>());
         m_constantRegisters.last().set(*m_vm, this, v);
-        m_constantsSourceCodeRepresentation.append(SourceCodeRepresentation::Other);
         return result;
     }
 
-    unsigned addConstantLazily()
+    unsigned addConstantLazily(const ConcurrentJSLocker&)
     {
         unsigned result = m_constantRegisters.size();
         m_constantRegisters.append(WriteBarrier<Unknown>());
-        m_constantsSourceCodeRepresentation.append(SourceCodeRepresentation::Other);
         return result;
     }
 
     const Vector<WriteBarrier<Unknown>>& constantRegisters() { return m_constantRegisters; }
-    WriteBarrier<Unknown>& constantRegister(int index) { return m_constantRegisters[index - FirstConstantRegisterIndex]; }
-    static ALWAYS_INLINE bool isConstantRegisterIndex(int index) { return index >= FirstConstantRegisterIndex; }
-    ALWAYS_INLINE JSValue getConstant(int index) const { return m_constantRegisters[index - FirstConstantRegisterIndex].get(); }
-    ALWAYS_INLINE SourceCodeRepresentation constantSourceCodeRepresentation(int index) const { return m_constantsSourceCodeRepresentation[index - FirstConstantRegisterIndex]; }
+    WriteBarrier<Unknown>& constantRegister(VirtualRegister reg) { return m_constantRegisters[reg.toConstantIndex()]; }
+    ALWAYS_INLINE JSValue getConstant(VirtualRegister reg) const { return m_constantRegisters[reg.toConstantIndex()].get(); }
+    bool isConstantOwnedByUnlinkedCodeBlock(VirtualRegister) const;
+    ALWAYS_INLINE SourceCodeRepresentation constantSourceCodeRepresentation(VirtualRegister reg) const { return m_unlinkedCode->constantSourceCodeRepresentation(reg); }
+    ALWAYS_INLINE SourceCodeRepresentation constantSourceCodeRepresentation(unsigned index) const { return m_unlinkedCode->constantSourceCodeRepresentation(index); }
+    static ptrdiff_t offsetOfConstantsVectorBuffer() { return OBJECT_OFFSETOF(CodeBlock, m_constantRegisters) + decltype(m_constantRegisters)::dataMemoryOffset(); }
 
     FunctionExecutable* functionDecl(int index) { return m_functionDecls[index].get(); }
     int numberOfFunctionDecls() { return m_functionDecls.size(); }
     FunctionExecutable* functionExpr(int index) { return m_functionExprs[index].get(); }
     
-    RegExp* regexp(int index) const { return m_unlinkedCode->regexp(index); }
-    unsigned numberOfRegExps() const { return m_unlinkedCode->numberOfRegExps(); }
-
-    const Vector<BitVector>& bitVectors() const { return m_unlinkedCode->bitVectors(); }
     const BitVector& bitVector(size_t i) { return m_unlinkedCode->bitVector(i); }
-
-    unsigned numberOfConstantBuffers() const
-    {
-        if (!m_rareData)
-            return 0;
-        return m_rareData->m_constantBuffers.size();
-    }
-    unsigned addConstantBuffer(const Vector<JSValue>& buffer)
-    {
-        createRareDataIfNecessary();
-        unsigned size = m_rareData->m_constantBuffers.size();
-        m_rareData->m_constantBuffers.append(buffer);
-        return size;
-    }
-
-    Vector<JSValue>& constantBufferAsVector(unsigned index)
-    {
-        ASSERT(m_rareData);
-        return m_rareData->m_constantBuffers[index];
-    }
-    JSValue* constantBuffer(unsigned index)
-    {
-        return constantBufferAsVector(index).data();
-    }
 
     Heap* heap() const { return &m_vm->heap; }
     JSGlobalObject* globalObject() { return m_globalObject.get(); }
+
+    static ptrdiff_t offsetOfGlobalObject() { return OBJECT_OFFSETOF(CodeBlock, m_globalObject); }
 
     JSGlobalObject* globalObjectFor(CodeOrigin);
 
     BytecodeLivenessAnalysis& livenessAnalysis()
     {
-        {
-            ConcurrentJSLocker locker(m_lock);
-            if (!!m_livenessAnalysis)
-                return *m_livenessAnalysis;
-        }
-        return livenessAnalysisSlow();
+        return m_unlinkedCode->livenessAnalysis(this);
     }
     
     void validate();
 
     // Jump Tables
 
-    size_t numberOfSwitchJumpTables() const { return m_rareData ? m_rareData->m_switchJumpTables.size() : 0; }
-    SimpleJumpTable& addSwitchJumpTable() { createRareDataIfNecessary(); m_rareData->m_switchJumpTables.append(SimpleJumpTable()); return m_rareData->m_switchJumpTables.last(); }
-    SimpleJumpTable& switchJumpTable(int tableIndex) { RELEASE_ASSERT(m_rareData); return m_rareData->m_switchJumpTables[tableIndex]; }
-    void clearSwitchJumpTables()
+#if ENABLE(JIT)
+    SimpleJumpTable& baselineSwitchJumpTable(int tableIndex);
+    StringJumpTable& baselineStringSwitchJumpTable(int tableIndex);
+    BaselineJITData* baselineJITData()
     {
-        if (!m_rareData)
-            return;
-        m_rareData->m_switchJumpTables.clear();
+        if (!JITCode::isOptimizingJIT(jitType()))
+            return bitwise_cast<BaselineJITData*>(m_jitData);
+        return nullptr;
     }
 
-    size_t numberOfStringSwitchJumpTables() const { return m_rareData ? m_rareData->m_stringSwitchJumpTables.size() : 0; }
-    StringJumpTable& addStringSwitchJumpTable() { createRareDataIfNecessary(); m_rareData->m_stringSwitchJumpTables.append(StringJumpTable()); return m_rareData->m_stringSwitchJumpTables.last(); }
-    StringJumpTable& stringSwitchJumpTable(int tableIndex) { RELEASE_ASSERT(m_rareData); return m_rareData->m_stringSwitchJumpTables[tableIndex]; }
+#if ENABLE(DFG_JIT)
+    void setDFGJITData(std::unique_ptr<DFG::JITData>&& jitData)
+    {
+        ASSERT(!m_jitData);
+        m_jitData = jitData.release();
+    }
+
+    DFG::JITData* dfgJITData()
+    {
+        if (JITCode::isOptimizingJIT(jitType()))
+            return bitwise_cast<DFG::JITData*>(m_jitData);
+        return nullptr;
+    }
+#endif
+#endif
+    size_t numberOfUnlinkedSwitchJumpTables() const { return m_unlinkedCode->numberOfUnlinkedSwitchJumpTables(); }
+    const UnlinkedSimpleJumpTable& unlinkedSwitchJumpTable(int tableIndex) { return m_unlinkedCode->unlinkedSwitchJumpTable(tableIndex); }
+
+#if ENABLE(DFG_JIT)
+    StringJumpTable& dfgStringSwitchJumpTable(int tableIndex);
+    SimpleJumpTable& dfgSwitchJumpTable(int tableIndex);
+#endif
+
+    size_t numberOfUnlinkedStringSwitchJumpTables() const { return m_unlinkedCode->numberOfUnlinkedStringSwitchJumpTables(); }
+    const UnlinkedStringJumpTable& unlinkedStringSwitchJumpTable(int tableIndex) { return m_unlinkedCode->unlinkedStringSwitchJumpTable(tableIndex); }
 
     DirectEvalCodeCache& directEvalCodeCache() { createRareDataIfNecessary(); return m_rareData->m_directEvalCodeCache; }
 
-    enum ShrinkMode {
+    enum class ShrinkMode {
         // Shrink prior to generating machine code that may point directly into vectors.
         EarlyShrink,
 
         // Shrink after generating machine code, and after possibly creating new vectors
         // and appending to others. At this time it is not safe to shrink certain vectors
         // because we would have generated machine code that references them directly.
-        LateShrink
+        LateShrink,
     };
-    void shrinkToFit(ShrinkMode);
+    void shrinkToFit(const ConcurrentJSLocker&, ShrinkMode);
 
     // Functions for controlling when JITting kicks in, in a mixed mode
     // execution world.
 
     bool checkIfJITThresholdReached()
     {
-        return m_llintExecuteCounter.checkIfThresholdCrossedAndSet(this);
+        return m_unlinkedCode->llintExecuteCounter().checkIfThresholdCrossedAndSet(this);
     }
 
     void dontJITAnytimeSoon()
     {
-        m_llintExecuteCounter.deferIndefinitely();
+        m_unlinkedCode->llintExecuteCounter().deferIndefinitely();
     }
 
-    int32_t thresholdForJIT(int32_t threshold);
-    void jitAfterWarmUp();
     void jitSoon();
+    void jitNextInvocation();
 
     const BaselineExecutionCounter& llintExecuteCounter() const
     {
-        return m_llintExecuteCounter;
+        return m_unlinkedCode->llintExecuteCounter();
     }
 
-    typedef HashMap<Structure*, Bag<LLIntPrototypeLoadAdaptiveStructureWatchpoint>> StructureWatchpointMap;
+    typedef HashMap<std::tuple<StructureID, BytecodeIndex>, FixedVector<LLIntPrototypeLoadAdaptiveStructureWatchpoint>> StructureWatchpointMap;
     StructureWatchpointMap& llintGetByIdWatchpointMap() { return m_llintGetByIdWatchpointMap; }
 
     // Functions for controlling when tiered compilation kicks in. This
@@ -681,21 +617,23 @@ public:
     // to avoid thrashing.
     JS_EXPORT_PRIVATE unsigned reoptimizationRetryCounter() const;
     void countReoptimization();
-#if ENABLE(JIT)
+
+#if !ENABLE(C_LOOP)
     static unsigned numberOfLLIntBaselineCalleeSaveRegisters() { return RegisterSet::llintBaselineCalleeSaveRegisters().numberOfSetRegisters(); }
     static size_t llintBaselineCalleeSaveSpaceAsVirtualRegisters();
-    size_t calleeSaveSpaceAsVirtualRegisters();
+    static size_t calleeSaveSpaceAsVirtualRegisters(const RegisterAtOffsetList&);
+#else
+    static unsigned numberOfLLIntBaselineCalleeSaveRegisters() { return 0; }
+    static size_t llintBaselineCalleeSaveSpaceAsVirtualRegisters() { return 1; };
+    static size_t calleeSaveSpaceAsVirtualRegisters(const RegisterAtOffsetList&) { return 0; }
+#endif
 
+#if ENABLE(JIT)
     unsigned numberOfDFGCompiles();
 
     int32_t codeTypeThresholdMultiplier() const;
 
     int32_t adjustedCounterValue(int32_t desiredThreshold);
-
-    int32_t* addressOfJITExecuteCounter()
-    {
-        return &m_jitExecuteCounter.m_counter;
-    }
 
     static ptrdiff_t offsetOfJITExecuteCounter() { return OBJECT_OFFSETOF(CodeBlock, m_jitExecuteCounter) + OBJECT_OFFSETOF(BaselineExecutionCounter, m_counter); }
     static ptrdiff_t offsetOfJITExecutionActiveThreshold() { return OBJECT_OFFSETOF(CodeBlock, m_jitExecuteCounter) + OBJECT_OFFSETOF(BaselineExecutionCounter, m_activeThreshold); }
@@ -736,7 +674,7 @@ public:
 
     // Call this to cause an optimization trigger to fire soon, but
     // not necessarily the next one. This makes sense if optimization
-    // succeeds. Successfuly optimization means that all calls are
+    // succeeds. Successful optimization means that all calls are
     // relinked to the optimized code, so this only affects call
     // frames that are still executing this CodeBlock. The value here
     // is tuned to strike a balance between the cost of OSR entry
@@ -758,11 +696,10 @@ public:
 
     void setOptimizationThresholdBasedOnCompilationResult(CompilationResult);
     
+    BytecodeIndex bytecodeIndexForExit(BytecodeIndex) const;
     uint32_t osrExitCounter() const { return m_osrExitCounter; }
 
     void countOSRExit() { m_osrExitCounter++; }
-
-    uint32_t* addressOfOSRExitCounter() { return &m_osrExitCounter; }
 
     static ptrdiff_t offsetOfOSRExitCounter() { return OBJECT_OFFSETOF(CodeBlock, m_osrExitCounter); }
 
@@ -772,29 +709,24 @@ public:
     bool shouldReoptimizeNow();
     bool shouldReoptimizeFromLoopNow();
 
-    void setCalleeSaveRegisters(RegisterSet);
-    void setCalleeSaveRegisters(std::unique_ptr<RegisterAtOffsetList>);
-    
-    RegisterAtOffsetList* calleeSaveRegisters() const { return m_calleeSaveRegisters.get(); }
 #else // No JIT
-    static unsigned numberOfLLIntBaselineCalleeSaveRegisters() { return 0; }
-    static size_t llintBaselineCalleeSaveSpaceAsVirtualRegisters() { return 0; };
     void optimizeAfterWarmUp() { }
     unsigned numberOfDFGCompiles() { return 0; }
 #endif
 
     bool shouldOptimizeNow();
     void updateAllValueProfilePredictions();
+    void updateAllArrayProfilePredictions(const ConcurrentJSLocker&);
     void updateAllArrayPredictions();
     void updateAllPredictions();
 
     unsigned frameRegisterCount();
     int stackPointerOffset();
 
-    bool hasOpDebugForLineAndColumn(unsigned line, unsigned column);
+    bool hasOpDebugForLineAndColumn(unsigned line, std::optional<unsigned> column);
 
     bool hasDebuggerRequests() const { return m_debuggerRequests; }
-    void* debuggerRequestsAddress() { return &m_debuggerRequests; }
+    static ptrdiff_t offsetOfDebuggerRequests() { return OBJECT_OFFSETOF(CodeBlock, m_debuggerRequests); }
 
     void addBreakpoint(unsigned numBreakpoints);
     void removeBreakpoint(unsigned numBreakpoints)
@@ -802,6 +734,8 @@ public:
         ASSERT(m_numBreakpoints >= numBreakpoints);
         m_numBreakpoints -= numBreakpoints;
     }
+
+    bool isJettisoned() const { return m_isJettisoned; }
 
     enum SteppingMode {
         SteppingModeDisabled,
@@ -816,11 +750,6 @@ public:
     }
 
     bool wasCompiledWithDebuggingOpcodes() const { return m_unlinkedCode->wasCompiledWithDebuggingOpcodes(); }
-    
-    // FIXME: Make these remaining members private.
-
-    int m_numCalleeLocals;
-    int m_numVars;
     
     // This is intentionally public; it's the responsibility of anyone doing any
     // of the following to hold the lock:
@@ -840,22 +769,19 @@ public:
     // concurrent compilation threads finish what they're doing.
     mutable ConcurrentJSLock m_lock;
 
-    bool m_visitWeaklyHasBeenCalled;
-
     bool m_shouldAlwaysBeInlined; // Not a bitfield because the JIT wants to store to it.
+    static ptrdiff_t offsetOfShouldAlwaysBeInlined() { return OBJECT_OFFSETOF(CodeBlock, m_shouldAlwaysBeInlined); }
 
 #if ENABLE(JIT)
     unsigned m_capabilityLevelState : 2; // DFG::CapabilityLevel
 #endif
 
-    bool m_allTransitionsHaveBeenMarked : 1; // Initialized and used on every GC.
-
     bool m_didFailJITCompilation : 1;
     bool m_didFailFTLCompilation : 1;
     bool m_hasBeenCompiledWithFTL : 1;
-    bool m_isConstructor : 1;
-    bool m_isStrictMode : 1;
-    unsigned m_codeType : 2; // CodeType
+    bool m_isJettisoned : 1;
+
+    bool m_visitChildrenSkippedDueToOldAge { false };
 
     // Internal methods for use by validation code. It would be private if it wasn't
     // for the fact that we use it from anonymous namespaces.
@@ -863,16 +789,9 @@ public:
     NO_RETURN_DUE_TO_CRASH void endValidationDidFail();
 
     struct RareData {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_STRUCT_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(CodeBlockRareData);
     public:
         Vector<HandlerInfo> m_exceptionHandlers;
-
-        // Buffers used for large array literals
-        Vector<Vector<JSValue>> m_constantBuffers;
-
-        // Jump Tables
-        Vector<SimpleJumpTable> m_switchJumpTables;
-        Vector<StringJumpTable> m_stringSwitchJumpTables;
 
         DirectEvalCodeCache m_directEvalCodeCache;
     };
@@ -889,37 +808,44 @@ public:
         m_rareData->m_exceptionHandlers.append(handler);
     }
 
-    CallSiteIndex newExceptionHandlingCallSiteIndex(CallSiteIndex originalCallSite);
+    DisposableCallSiteIndex newExceptionHandlingCallSiteIndex(CallSiteIndex originalCallSite);
 
-    void ensureCatchLivenessIsComputedForBytecodeOffset(unsigned bytecodeOffset)
+    void ensureCatchLivenessIsComputedForBytecodeIndex(BytecodeIndex);
+
+    bool hasTailCalls() const { return m_unlinkedCode->hasTailCalls(); }
+
+    template<typename Metadata>
+    Metadata& metadata(OpcodeID opcodeID, unsigned metadataID)
     {
-        if (!!m_instructions[bytecodeOffset + 3].u.pointer) {
-#if !ASSERT_DISABLED
-            ConcurrentJSLocker locker(m_lock);
-            bool found = false;
-            for (auto& profile : m_catchProfiles) {
-                if (profile.get() == m_instructions[bytecodeOffset + 3].u.pointer) {
-                    found = true;
-                    break;
-                }
-            }
-            ASSERT(found);
-#endif
-            return;
-        }
-
-        ensureCatchLivenessIsComputedForBytecodeOffsetSlow(bytecodeOffset);
+        ASSERT(m_metadata);
+        ASSERT_UNUSED(opcodeID, opcodeID == Metadata::opcodeID);
+        return m_metadata->get<Metadata>()[metadataID];
     }
 
-#if ENABLE(JIT)
-    void setPCToCodeOriginMap(std::unique_ptr<PCToCodeOriginMap>&&);
-    std::optional<CodeOrigin> findPC(void* pc);
-#endif
+    template<typename Metadata>
+    ptrdiff_t offsetInMetadataTable(Metadata* metadata)
+    {
+        return bitwise_cast<uint8_t*>(metadata) - bitwise_cast<uint8_t*>(metadataTable());
+    }
+
+    size_t metadataSizeInBytes()
+    {
+        return m_unlinkedCode->metadataSizeInBytes();
+    }
+
+    MetadataTable* metadataTable() { return m_metadata.get(); }
+    const void* instructionsRawPointer() { return m_instructionsRawPointer; }
+
+    static ptrdiff_t offsetOfMetadataTable() { return OBJECT_OFFSETOF(CodeBlock, m_metadata); }
+    static ptrdiff_t offsetOfInstructionsRawPointer() { return OBJECT_OFFSETOF(CodeBlock, m_instructionsRawPointer); }
+
+    bool loopHintsAreEligibleForFuzzingEarlyReturn() { return m_unlinkedCode->loopHintsAreEligibleForFuzzingEarlyReturn(); }
 
 protected:
     void finalizeLLIntInlineCaches();
-    void finalizeBaselineJITInlineCaches();
-
+#if ENABLE(JIT)
+    void finalizeJITInlineCaches();
+#endif
 #if ENABLE(DFG_JIT)
     void tallyFrequentExitSites();
 #else
@@ -928,56 +854,70 @@ protected:
 
 private:
     friend class CodeBlockSet;
+    friend class FunctionExecutable;
+    friend class ScriptExecutable;
+
+    template<typename Visitor> ALWAYS_INLINE void visitChildren(Visitor&);
 
     BytecodeLivenessAnalysis& livenessAnalysisSlow();
     
     CodeBlock* specialOSREntryBlockOrNull();
     
-    void noticeIncomingCall(ExecState* callerFrame);
+    void noticeIncomingCall(CallFrame* callerFrame);
     
     double optimizationThresholdScalingFactor();
 
-    void updateAllPredictionsAndCountLiveness(unsigned& numberOfLiveNonArgumentValueProfiles, unsigned& numberOfSamplesInProfiles);
+    void updateAllValueProfilePredictionsAndCountLiveness(unsigned& numberOfLiveNonArgumentValueProfiles, unsigned& numberOfSamplesInProfiles);
 
-    void setConstantIdentifierSetRegisters(VM&, const Vector<ConstantIndentifierSetEntry>& constants);
+    Vector<unsigned> setConstantRegisters(const FixedVector<WriteBarrier<Unknown>>& constants, const FixedVector<SourceCodeRepresentation>& constantsSourceCodeRepresentation);
+    void initializeTemplateObjects(ScriptExecutable* topLevelExecutable, const Vector<unsigned>& templateObjectIndices);
 
-    void setConstantRegisters(const Vector<WriteBarrier<Unknown>>& constants, const Vector<SourceCodeRepresentation>& constantsSourceCodeRepresentation);
-
-    void replaceConstant(int index, JSValue value)
+    void replaceConstant(VirtualRegister reg, JSValue value)
     {
-        ASSERT(isConstantRegisterIndex(index) && static_cast<size_t>(index - FirstConstantRegisterIndex) < m_constantRegisters.size());
-        m_constantRegisters[index - FirstConstantRegisterIndex].set(*m_vm, this, value);
+        ASSERT(reg.isConstant() && static_cast<size_t>(reg.toConstantIndex()) < m_constantRegisters.size());
+        m_constantRegisters[reg.toConstantIndex()].set(*m_vm, this, value);
     }
 
-    bool shouldVisitStrongly(const ConcurrentJSLocker&);
-    bool shouldJettisonDueToWeakReference();
-    bool shouldJettisonDueToOldAge(const ConcurrentJSLocker&);
+    template<typename Visitor> bool shouldVisitStrongly(const ConcurrentJSLocker&, Visitor&);
+    bool shouldJettisonDueToWeakReference(VM&);
+    template<typename Visitor> bool shouldJettisonDueToOldAge(const ConcurrentJSLocker&, Visitor&);
     
-    void propagateTransitions(const ConcurrentJSLocker&, SlotVisitor&);
-    void determineLiveness(const ConcurrentJSLocker&, SlotVisitor&);
+    template<typename Visitor> void propagateTransitions(const ConcurrentJSLocker&, Visitor&);
+    template<typename Visitor> void determineLiveness(const ConcurrentJSLocker&, Visitor&);
         
-    void stronglyVisitStrongReferences(const ConcurrentJSLocker&, SlotVisitor&);
-    void stronglyVisitWeakReferences(const ConcurrentJSLocker&, SlotVisitor&);
-    void visitOSRExitTargets(const ConcurrentJSLocker&, SlotVisitor&);
+    template<typename Visitor> void stronglyVisitStrongReferences(const ConcurrentJSLocker&, Visitor&);
+    template<typename Visitor> void stronglyVisitWeakReferences(const ConcurrentJSLocker&, Visitor&);
+    template<typename Visitor> void visitOSRExitTargets(const ConcurrentJSLocker&, Visitor&);
 
-    std::chrono::milliseconds timeSinceCreation()
+    unsigned numberOfNonArgumentValueProfiles() { return totalNumberOfValueProfiles() - numberOfArgumentValueProfiles(); }
+    unsigned totalNumberOfValueProfiles() { return m_unlinkedCode->numberOfValueProfiles(); }
+    ValueProfile* tryGetValueProfileForBytecodeIndex(BytecodeIndex);
+
+    Seconds timeSinceCreation()
     {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - m_creationTime);
+        return MonotonicTime::now() - m_creationTime;
     }
 
     void createRareDataIfNecessary()
     {
-        if (!m_rareData)
-            m_rareData = std::make_unique<RareData>();
+        if (!m_rareData) {
+            auto rareData = makeUnique<RareData>();
+            WTF::storeStoreFence();
+            m_rareData = WTFMove(rareData);
+        }
     }
 
-    void insertBasicBlockBoundariesForControlFlowProfiler(RefCountedArray<Instruction>&);
-    void ensureCatchLivenessIsComputedForBytecodeOffsetSlow(unsigned);
+    void insertBasicBlockBoundariesForControlFlowProfiler();
+    void ensureCatchLivenessIsComputedForBytecodeIndexSlow(const OpCatch&, BytecodeIndex);
 
-    WriteBarrier<UnlinkedCodeBlock> m_unlinkedCode;
-    int m_numParameters;
-    int m_numberOfArgumentsToSkip { 0 };
+    template<typename Func>
+    void forEachStructureStubInfo(Func);
+
+    const unsigned m_numCalleeLocals;
+    const unsigned m_numVars;
+    unsigned m_numParameters;
+    unsigned m_numberOfArgumentsToSkip { 0 };
+    uint32_t m_osrExitCounter { 0 };
     union {
         unsigned m_debuggerRequests;
         struct {
@@ -986,128 +926,91 @@ private:
             unsigned m_numBreakpoints : 30;
         };
     };
-    WriteBarrier<ExecutableBase> m_ownerExecutable;
-    VM* m_vm;
-
-    RefCountedArray<Instruction> m_instructions;
-    VirtualRegister m_thisRegister;
+    unsigned m_bytecodeCost { 0 };
     VirtualRegister m_scopeRegister;
     mutable CodeBlockHash m_hash;
 
-    RefPtr<SourceProvider> m_source;
-    unsigned m_sourceOffset;
-    unsigned m_firstLineColumnOffset;
+    WriteBarrier<UnlinkedCodeBlock> m_unlinkedCode;
+    WriteBarrier<ScriptExecutable> m_ownerExecutable;
+    // m_vm must be a pointer (instead of a reference) because the JSCLLIntOffsetsExtractor
+    // cannot handle it being a reference.
+    VM* const m_vm;
 
-    RefCountedArray<LLIntCallLinkInfo> m_llintCallLinkInfos;
-    SentinelLinkedList<LLIntCallLinkInfo, BasicRawSentinelNode<LLIntCallLinkInfo>> m_incomingLLIntCalls;
+    const void* const m_instructionsRawPointer { nullptr };
+    SentinelLinkedList<CallLinkInfo, PackedRawSentinelNode<CallLinkInfo>> m_incomingCalls;
+#if ENABLE(JIT)
+    SentinelLinkedList<PolymorphicCallNode, PackedRawSentinelNode<PolymorphicCallNode>> m_incomingPolymorphicCalls;
+#endif
     StructureWatchpointMap m_llintGetByIdWatchpointMap;
     RefPtr<JITCode> m_jitCode;
 #if ENABLE(JIT)
-    std::unique_ptr<RegisterAtOffsetList> m_calleeSaveRegisters;
-    Bag<StructureStubInfo> m_stubInfos;
-    Bag<JITAddIC> m_addICs;
-    Bag<JITMulIC> m_mulICs;
-    Bag<JITNegIC> m_negICs;
-    Bag<JITSubIC> m_subICs;
-    Bag<ByValInfo> m_byValInfos;
-    Bag<CallLinkInfo> m_callLinkInfos;
-    SentinelLinkedList<CallLinkInfo, BasicRawSentinelNode<CallLinkInfo>> m_incomingCalls;
-    SentinelLinkedList<PolymorphicCallNode, BasicRawSentinelNode<PolymorphicCallNode>> m_incomingPolymorphicCalls;
-    std::unique_ptr<PCToCodeOriginMap> m_pcToCodeOriginMap;
+public:
+    void* m_jitData { nullptr };
+private:
 #endif
-    std::unique_ptr<CompactJITCodeMap> m_jitCodeMap;
 #if ENABLE(DFG_JIT)
     // This is relevant to non-DFG code blocks that serve as the profiled code block
     // for DFG code blocks.
-    DFG::ExitProfile m_exitProfile;
     CompressedLazyOperandValueProfileHolder m_lazyOperandValueProfiles;
 #endif
-    RefCountedArray<ValueProfile> m_argumentValueProfiles;
-    RefCountedArray<ValueProfile> m_valueProfiles;
-    Vector<std::unique_ptr<ValueProfileAndOperandBuffer>> m_catchProfiles;
-    SegmentedVector<RareCaseProfile, 8> m_rareCaseProfiles;
-    RefCountedArray<ArrayAllocationProfile> m_arrayAllocationProfiles;
-    ArrayProfileVector m_arrayProfiles;
-    RefCountedArray<ObjectAllocationProfile> m_objectAllocationProfiles;
+    FixedVector<ValueProfile> m_argumentValueProfiles;
 
     // Constant Pool
-    COMPILE_ASSERT(sizeof(Register) == sizeof(WriteBarrier<Unknown>), Register_must_be_same_size_as_WriteBarrier_Unknown);
+    static_assert(sizeof(Register) == sizeof(WriteBarrier<Unknown>), "Register must be same size as WriteBarrier Unknown");
     // TODO: This could just be a pointer to m_unlinkedCodeBlock's data, but the DFG mutates
     // it, so we're stuck with it for now.
     Vector<WriteBarrier<Unknown>> m_constantRegisters;
-    Vector<SourceCodeRepresentation> m_constantsSourceCodeRepresentation;
-    RefCountedArray<WriteBarrier<FunctionExecutable>> m_functionDecls;
-    RefCountedArray<WriteBarrier<FunctionExecutable>> m_functionExprs;
+    FixedVector<WriteBarrier<FunctionExecutable>> m_functionDecls;
+    FixedVector<WriteBarrier<FunctionExecutable>> m_functionExprs;
 
     WriteBarrier<CodeBlock> m_alternative;
-    
-    BaselineExecutionCounter m_llintExecuteCounter;
 
     BaselineExecutionCounter m_jitExecuteCounter;
-    uint32_t m_osrExitCounter;
-    uint16_t m_optimizationDelayCounter;
-    uint16_t m_reoptimizationRetryCounter;
 
-    std::chrono::steady_clock::time_point m_creationTime;
+    uint16_t m_optimizationDelayCounter { 0 };
+    uint16_t m_reoptimizationRetryCounter { 0 };
 
-    std::unique_ptr<BytecodeLivenessAnalysis> m_livenessAnalysis;
+    RefPtr<MetadataTable> m_metadata;
+
+    MonotonicTime m_creationTime;
+    double m_previousCounter { 0 };
 
     std::unique_ptr<RareData> m_rareData;
 
-    UnconditionalFinalizer m_unconditionalFinalizer;
-    WeakReferenceHarvester m_weakReferenceHarvester;
+#if ASSERT_ENABLED
+    Lock m_cachedIdentifierUidsLock;
+    HashSet<UniquedStringImpl*> m_cachedIdentifierUids;
+#endif
 };
-
-inline Register& ExecState::r(int index)
-{
-    CodeBlock* codeBlock = this->codeBlock();
-    if (codeBlock->isConstantRegisterIndex(index))
-        return *reinterpret_cast<Register*>(&codeBlock->constantRegister(index));
-    return this[index];
-}
-
-inline Register& ExecState::r(VirtualRegister reg)
-{
-    return r(reg.offset());
-}
-
-inline Register& ExecState::uncheckedR(int index)
-{
-    RELEASE_ASSERT(index < FirstConstantRegisterIndex);
-    return this[index];
-}
-
-inline Register& ExecState::uncheckedR(VirtualRegister reg)
-{
-    return uncheckedR(reg.offset());
-}
-
-inline void CodeBlock::clearVisitWeaklyHasBeenCalled()
-{
-    m_visitWeaklyHasBeenCalled = false;
-}
+#if !ASSERT_ENABLED && COMPILER(GCC_COMPATIBLE)
+static_assert(sizeof(CodeBlock) <= 240, "Keep it small for memory saving");
+#endif
 
 template <typename ExecutableType>
-JSObject* ScriptExecutable::prepareForExecution(VM& vm, JSFunction* function, JSScope* scope, CodeSpecializationKind kind, CodeBlock*& resultCodeBlock)
+void ScriptExecutable::prepareForExecution(VM& vm, JSFunction* function, JSScope* scope, CodeSpecializationKind kind, CodeBlock*& resultCodeBlock)
 {
     if (hasJITCodeFor(kind)) {
-        if (std::is_same<ExecutableType, EvalExecutable>::value)
-            resultCodeBlock = jsCast<CodeBlock*>(jsCast<EvalExecutable*>(this)->codeBlock());
-        else if (std::is_same<ExecutableType, ProgramExecutable>::value)
-            resultCodeBlock = jsCast<CodeBlock*>(jsCast<ProgramExecutable*>(this)->codeBlock());
-        else if (std::is_same<ExecutableType, ModuleProgramExecutable>::value)
-            resultCodeBlock = jsCast<CodeBlock*>(jsCast<ModuleProgramExecutable*>(this)->codeBlock());
-        else if (std::is_same<ExecutableType, FunctionExecutable>::value)
-            resultCodeBlock = jsCast<CodeBlock*>(jsCast<FunctionExecutable*>(this)->codeBlockFor(kind));
-        else
-            RELEASE_ASSERT_NOT_REACHED();
-        return nullptr;
+        if constexpr (std::is_same<ExecutableType, EvalExecutable>::value)
+            resultCodeBlock = jsCast<CodeBlock*>(jsCast<ExecutableType*>(this)->codeBlock());
+        else if constexpr (std::is_same<ExecutableType, ProgramExecutable>::value)
+            resultCodeBlock = jsCast<CodeBlock*>(jsCast<ExecutableType*>(this)->codeBlock());
+        else if constexpr (std::is_same<ExecutableType, ModuleProgramExecutable>::value)
+            resultCodeBlock = jsCast<CodeBlock*>(jsCast<ExecutableType*>(this)->codeBlock());
+        else {
+            static_assert(std::is_same<ExecutableType, FunctionExecutable>::value);
+            resultCodeBlock = jsCast<CodeBlock*>(jsCast<ExecutableType*>(this)->codeBlockFor(kind));
+        }
+        return;
     }
-    return prepareForExecutionImpl(vm, function, scope, kind, resultCodeBlock);
+
+    prepareForExecutionImpl(vm, function, scope, kind, resultCodeBlock);
 }
 
 #define CODEBLOCK_LOG_EVENT(codeBlock, summary, details) \
-    (codeBlock->vm()->logEvent(codeBlock, summary, [&] () { return toCString details; }))
+    do { \
+        if (codeBlock) \
+            (codeBlock->vm().logEvent(codeBlock, summary, [&] () { return toCString details; })); \
+    } while (0)
 
 
 void setPrinter(Printer::PrintRecord&, CodeBlock*);

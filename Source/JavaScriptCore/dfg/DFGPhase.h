@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 
 #if ENABLE(DFG_JIT)
 
+#include "CompilerTimingScope.h"
 #include "DFGCommon.h"
 #include "DFGGraph.h"
 
@@ -52,6 +53,8 @@ public:
     
     // Each phase must have a run() method.
     
+    Prefix prefix;
+
 protected:
     // Things you need to have a DFG compiler phase.
     Graph& m_graph;
@@ -76,26 +79,19 @@ private:
 template<typename PhaseType>
 bool runAndLog(PhaseType& phase)
 {
-    double before = 0;
-
-    if (UNLIKELY(Options::reportDFGPhaseTimes()))
-        before = monotonicallyIncreasingTimeMS();
-
+    CompilerTimingScope timingScope("DFG", phase.name());
+    
     bool result = phase.run();
 
-    if (UNLIKELY(Options::reportDFGPhaseTimes())) {
-        double after = monotonicallyIncreasingTimeMS();
-        dataLogF("Phase %s took %.4f ms\n", phase.name(), after - before);
-    }
-    if (result && logCompilationChanges(phase.graph().m_plan.mode))
-        dataLogF("Phase %s changed the IR.\n", phase.name());
+    if (result && logCompilationChanges(phase.graph().m_plan.mode()))
+        dataLogLn(phase.graph().prefix(), "Phase ", phase.name(), " changed the IR.\n");
     return result;
 }
 
-template<typename PhaseType>
-bool runPhase(Graph& graph)
+template<typename PhaseType, typename... Args>
+bool runPhase(Graph& graph, Args... args)
 {
-    PhaseType phase(graph);
+    PhaseType phase(graph, args...);
     return runAndLog(phase);
 }
 

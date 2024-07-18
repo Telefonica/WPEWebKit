@@ -31,89 +31,90 @@
 #include "CDMMessageType.h"
 #include "CDMSessionType.h"
 #include <utility>
+#include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
-#include <wtf/Optional.h>
 #include <wtf/RefCounted.h>
+#include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/TypeCasts.h>
-#include <wtf/Vector.h>
+#include <wtf/WeakPtr.h>
+
+#if !RELEASE_LOG_DISABLED
+namespace WTF {
+class Logger;
+}
+#endif
 
 namespace WebCore {
 
+class CDMInstanceSession;
+struct CDMKeySystemConfiguration;
 class SharedBuffer;
 
-struct CDMKeySystemConfiguration;
-
-class CDMInstanceClient {
+class CDMInstanceClient : public CanMakeWeakPtr<CDMInstanceClient> {
 public:
     virtual ~CDMInstanceClient() = default;
 
-    using KeyStatus = CDMKeyStatus;
-    using MessageType = CDMMessageType;
-    using KeyStatusVector = Vector<std::pair<Ref<SharedBuffer>, KeyStatus>>;
-    virtual void updateKeyStatuses(KeyStatusVector&&) = 0;
-    virtual void enqueueMessageWithTask(MessageType, Ref<SharedBuffer>&&) = 0;
+    virtual void unrequestedInitializationDataReceived(const String&, Ref<SharedBuffer>&&) = 0;
+
+#if !RELEASE_LOG_DISABLED
+    virtual const Logger& logger() const = 0;
+    virtual const void* logIdentifier() const = 0;
+#endif
 };
 
+// JavaScript's handle to a CDMInstance, must be used from the
+// main-thread only!
 class CDMInstance : public RefCounted<CDMInstance> {
 public:
-    virtual ~CDMInstance() { }
+    virtual ~CDMInstance() = default;
+
+    virtual void setClient(WeakPtr<CDMInstanceClient>&&) { }
+    virtual void clearClient() { }
+
+#if !RELEASE_LOG_DISABLED
+    virtual void setLogIdentifier(const void*) { }
+#endif
 
     enum class ImplementationType {
         Mock,
-#if USE(OPENCDM)
-        OpenCDM,
-#else
         ClearKey,
+        FairPlayStreaming,
+        Remote,
+#if ENABLE(THUNDER)
+        Thunder,
 #endif
     };
-
     virtual ImplementationType implementationType() const = 0;
 
-    enum SuccessValue {
+    enum SuccessValue : bool {
         Failed,
         Succeeded,
     };
+    using SuccessCallback = CompletionHandler<void(SuccessValue)>;
 
-    using KeyStatus = CDMKeyStatus;
-    using LicenseType = CDMSessionType;
-    using MessageType = CDMMessageType;
-
-    virtual SuccessValue initializeWithConfiguration(const CDMKeySystemConfiguration&) = 0;
-    virtual SuccessValue setDistinctiveIdentifiersAllowed(bool) = 0;
-    virtual SuccessValue setPersistentStateAllowed(bool) = 0;
-    virtual SuccessValue setServerCertificate(Ref<SharedBuffer>&&) = 0;
-
-    using LicenseCallback = Function<void(Ref<SharedBuffer>&& message, const String& sessionId, bool needsIndividualization, SuccessValue succeeded)>;
-    virtual void requestLicense(LicenseType, const AtomicString& initDataType, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback) = 0;
-
-    using KeyStatusVector = CDMInstanceClient::KeyStatusVector;
-    using Message = std::pair<MessageType, Ref<SharedBuffer>>;
-    using LicenseUpdateCallback = Function<void(bool sessionWasClosed, std::optional<KeyStatusVector>&& changedKeys, std::optional<double>&& changedExpiration, std::optional<Message>&& message, SuccessValue succeeded)>;
-    virtual void updateLicense(const String& sessionId, LicenseType, const SharedBuffer& response, LicenseUpdateCallback) = 0;
-
-    enum class SessionLoadFailure {
-        None,
-        NoSessionData,
-        MismatchedSessionType,
-        QuotaExceeded,
-        Other,
+    enum class AllowDistinctiveIdentifiers : bool {
+        No,
+        Yes,
     };
 
-    virtual void setClient(CDMInstanceClient&) { }
-    virtual void clearClient() { }
+    enum class AllowPersistentState : bool {
+        No,
+        Yes,
+    };
 
-    using LoadSessionCallback = Function<void(std::optional<KeyStatusVector>&&, std::optional<double>&&, std::optional<Message>&&, SuccessValue, SessionLoadFailure)>;
-    virtual void loadSession(LicenseType, const String& sessionId, const String& origin, LoadSessionCallback) = 0;
-
-    using CloseSessionCallback = Function<void()>;
-    virtual void closeSession(const String& sessionId, CloseSessionCallback) = 0;
-
-    using RemoveSessionDataCallback = Function<void(KeyStatusVector&&, std::optional<Ref<SharedBuffer>>&&, SuccessValue)>;
-    virtual void removeSessionData(const String& sessionId, LicenseType, RemoveSessionDataCallback) = 0;
-
-    virtual void storeRecordOfKeyUsage(const String& sessionId) = 0;
-
+    virtual void initializeWithConfiguration(const CDMKeySystemConfiguration&, AllowDistinctiveIdentifiers, AllowPersistentState, SuccessCallback&&) = 0;
+    virtual void setServerCertificate(Ref<SharedBuffer>&&, SuccessCallback&&) = 0;
+    virtual void setStorageDirectory(const String&) = 0;
     virtual const String& keySystem() const = 0;
+    virtual RefPtr<CDMInstanceSession> createSession() = 0;
+
+    enum class HDCPStatus : uint8_t {
+        Unknown,
+        Valid,
+        OutputRestricted,
+        OutputDownscaled,
+    };
+    virtual SuccessValue setHDCPStatus(HDCPStatus) { return Failed; }
 };
 
 } // namespace WebCore

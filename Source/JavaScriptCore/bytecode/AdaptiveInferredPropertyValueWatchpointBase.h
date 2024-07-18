@@ -32,38 +32,51 @@
 
 namespace JSC {
 
+// FIXME: This isn't actually a Watchpoint. We should probably have a name which better reflects that:
+// https://bugs.webkit.org/show_bug.cgi?id=202381
 class AdaptiveInferredPropertyValueWatchpointBase {
     WTF_MAKE_NONCOPYABLE(AdaptiveInferredPropertyValueWatchpointBase);
     WTF_MAKE_FAST_ALLOCATED;
 
 public:
     AdaptiveInferredPropertyValueWatchpointBase(const ObjectPropertyCondition&);
+    AdaptiveInferredPropertyValueWatchpointBase() = default;
 
     const ObjectPropertyCondition& key() const { return m_key; }
 
-    void install();
+    void initialize(const ObjectPropertyCondition&);
+    void install(VM&);
 
     virtual ~AdaptiveInferredPropertyValueWatchpointBase() = default;
 
+    class StructureWatchpoint final : public Watchpoint {
+    public:
+        StructureWatchpoint()
+            : Watchpoint(Watchpoint::Type::AdaptiveInferredPropertyValueStructure)
+        { }
+
+        void fireInternal(VM&, const FireDetail&);
+    };
+    // Own destructor may not be called. Keep members trivially destructible.
+    static_assert(sizeof(StructureWatchpoint) == sizeof(Watchpoint));
+
+    class PropertyWatchpoint final : public Watchpoint {
+    public:
+        PropertyWatchpoint()
+            : Watchpoint(Watchpoint::Type::AdaptiveInferredPropertyValueProperty)
+        { }
+
+        void fireInternal(VM&, const FireDetail&);
+    };
+    // Own destructor may not be called. Keep members trivially destructible.
+    static_assert(sizeof(PropertyWatchpoint) == sizeof(Watchpoint));
+
 protected:
     virtual bool isValid() const;
-    virtual void handleFire(const FireDetail&) = 0;
+    virtual void handleFire(VM&, const FireDetail&) = 0;
 
 private:
-    class StructureWatchpoint : public Watchpoint {
-    public:
-        StructureWatchpoint() { }
-    protected:
-        void fireInternal(const FireDetail&) override;
-    };
-    class PropertyWatchpoint : public Watchpoint {
-    public:
-        PropertyWatchpoint() { }
-    protected:
-        void fireInternal(const FireDetail&) override;
-    };
-
-    void fire(const FireDetail&);
+    void fire(VM&, const FireDetail&);
 
     ObjectPropertyCondition m_key;
     StructureWatchpoint m_structureWatchpoint;

@@ -3,7 +3,7 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
- * Copyright (C) 2004-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2020 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Google Inc. All rights reserved.
  * Copyright (C) 2011 Motorola Mobility, Inc.  All rights reserved.
  *
@@ -27,7 +27,10 @@
 #include "config.h"
 #include "HTMLOptionElement.h"
 
+#include "AXObjectCache.h"
 #include "Document.h"
+#include "DocumentInlines.h"
+#include "ElementAncestorIterator.h"
 #include "HTMLDataListElement.h"
 #include "HTMLNames.h"
 #include "HTMLOptGroupElement.h"
@@ -35,21 +38,23 @@
 #include "HTMLSelectElement.h"
 #include "NodeRenderStyle.h"
 #include "NodeTraversal.h"
+#include "PseudoClassChangeInvalidation.h"
 #include "RenderMenuList.h"
 #include "RenderTheme.h"
 #include "ScriptElement.h"
 #include "StyleResolver.h"
 #include "Text.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/Ref.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLOptionElement);
 
 using namespace HTMLNames;
 
 HTMLOptionElement::HTMLOptionElement(const QualifiedName& tagName, Document& document)
     : HTMLElement(tagName, document)
-    , m_disabled(false)
-    , m_isSelected(false)
 {
     ASSERT(hasTagName(optionTag));
     setHasCustomStyleResolveCallbacks();
@@ -65,12 +70,12 @@ Ref<HTMLOptionElement> HTMLOptionElement::create(const QualifiedName& tagName, D
     return adoptRef(*new HTMLOptionElement(tagName, document));
 }
 
-ExceptionOr<Ref<HTMLOptionElement>> HTMLOptionElement::createForJSConstructor(Document& document, const String& text, const String& value, bool defaultSelected, bool selected)
+ExceptionOr<Ref<HTMLOptionElement>> HTMLOptionElement::createForLegacyFactoryFunction(Document& document, String&& text, const AtomString& value, bool defaultSelected, bool selected)
 {
     auto element = create(document);
 
     if (!text.isEmpty()) {
-        auto appendResult = element->appendChild(Text::create(document, text));
+        auto appendResult = element->appendChild(Text::create(document, WTFMove(text)));
         if (appendResult.hasException())
             return appendResult.releaseException();
     }
@@ -81,7 +86,7 @@ ExceptionOr<Ref<HTMLOptionElement>> HTMLOptionElement::createForJSConstructor(Do
         element->setAttributeWithoutSynchronization(selectedAttr, emptyAtom());
     element->setSelected(selected);
 
-    return WTFMove(element);
+    return element;
 }
 
 bool HTMLOptionElement::isFocusable() const
@@ -90,12 +95,12 @@ bool HTMLOptionElement::isFocusable() const
         return false;
     // Option elements do not have a renderer.
     auto* style = const_cast<HTMLOptionElement&>(*this).computedStyle();
-    return style && style->display() != NONE;
+    return style && style->display() != DisplayType::None;
 }
 
 bool HTMLOptionElement::matchesDefaultPseudoClass() const
 {
-    return hasAttributeWithoutSynchronization(selectedAttr);
+    return m_isDefault;
 }
 
 String HTMLOptionElement::text() const
@@ -104,45 +109,48 @@ String HTMLOptionElement::text() const
 
     // FIXME: Is displayStringModifiedByEncoding helpful here?
     // If it's correct here, then isn't it needed in the value and label functions too?
-    return document().displayStringModifiedByEncoding(text).stripWhiteSpace(isHTMLSpace).simplifyWhiteSpace(isHTMLSpace);
+    return stripLeadingAndTrailingHTMLSpaces(document().displayStringModifiedByEncoding(text)).simplifyWhiteSpace(isHTMLSpace);
 }
 
-void HTMLOptionElement::setText(const String &text)
+void HTMLOptionElement::setText(String&& text)
 {
-    Ref<HTMLOptionElement> protectedThis(*this);
+    Ref protectedThis { *this };
 
     // Changing the text causes a recalc of a select's items, which will reset the selected
     // index to the first item if the select is single selection with a menu list. We attempt to
     // preserve the selected item.
-    RefPtr<HTMLSelectElement> select = ownerSelectElement();
+    RefPtr select = ownerSelectElement();
     bool selectIsMenuList = select && select->usesMenuList();
     int oldSelectedIndex = selectIsMenuList ? select->selectedIndex() : -1;
 
     // Handle the common special case where there's exactly 1 child node, and it's a text node.
-    Node* child = firstChild();
+    RefPtr child = firstChild();
     if (is<Text>(child) && !child->nextSibling())
-        downcast<Text>(*child).setData(text);
+        downcast<Text>(*child).setData(WTFMove(text));
     else {
         removeChildren();
-        appendChild(Text::create(document(), text));
+        appendChild(Text::create(document(), WTFMove(text)));
     }
     
     if (selectIsMenuList && select->selectedIndex() != oldSelectedIndex)
         select->setSelectedIndex(oldSelectedIndex);
 }
 
-void HTMLOptionElement::accessKeyAction(bool)
+bool HTMLOptionElement::accessKeyAction(bool)
 {
-    HTMLSelectElement* select = ownerSelectElement();
-    if (select)
+    RefPtr select = ownerSelectElement();
+    if (select) {
         select->accessKeySetSelectedIndex(index());
+        return true;
+    }
+    return false;
 }
 
 int HTMLOptionElement::index() const
 {
     // It would be faster to cache the index, but harder to get it right in all cases.
 
-    HTMLSelectElement* selectElement = ownerSelectElement();
+    RefPtr selectElement = ownerSelectElement();
     if (!selectElement)
         return 0;
 
@@ -159,53 +167,53 @@ int HTMLOptionElement::index() const
     return 0;
 }
 
-void HTMLOptionElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLOptionElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
 #if ENABLE(DATALIST_ELEMENT)
     if (name == valueAttr) {
-        if (HTMLDataListElement* dataList = ownerDataListElement())
-            dataList->optionElementChildrenChanged();
+        for (auto& dataList : ancestorsOfType<HTMLDataListElement>(*this))
+            dataList.optionElementChildrenChanged();
     } else
 #endif
     if (name == disabledAttr) {
-        bool oldDisabled = m_disabled;
-        m_disabled = !value.isNull();
-        if (oldDisabled != m_disabled) {
-            invalidateStyleForSubtree();
-            if (renderer() && renderer()->style().hasAppearance())
-                renderer()->theme().stateChanged(*renderer(), ControlStates::EnabledState);
+        bool newDisabled = !value.isNull();
+        if (m_disabled != newDisabled) {
+            Style::PseudoClassChangeInvalidation disabledInvalidation(*this, { { CSSSelector::PseudoClassDisabled, newDisabled },  { CSSSelector::PseudoClassEnabled, !newDisabled } });
+            m_disabled = newDisabled;
+            if (renderer() && renderer()->style().hasEffectiveAppearance())
+                renderer()->theme().stateChanged(*renderer(), ControlStates::States::Enabled);
         }
     } else if (name == selectedAttr) {
-        invalidateStyleForSubtree();
+        // FIXME: Use PseudoClassChangeInvalidation in other elements that implement matchesDefaultPseudoClass().
+        Style::PseudoClassChangeInvalidation defaultInvalidation(*this, CSSSelector::PseudoClassDefault, !value.isNull());
+        m_isDefault = !value.isNull();
 
         // FIXME: This doesn't match what the HTML specification says.
         // The specification implies that removing the selected attribute or
         // changing the value of a selected attribute that is already present
-        // has no effect on whether the element is selected. Further, it seems
-        // that we need to do more than just set m_isSelected to select in that
-        // case; we'd need to do the other work from the setSelected function.
-        m_isSelected = !value.isNull();
+        // has no effect on whether the element is selected.
+        setSelectedState(!value.isNull());
     } else
         HTMLElement::parseAttribute(name, value);
 }
 
 String HTMLOptionElement::value() const
 {
-    const AtomicString& value = attributeWithoutSynchronization(valueAttr);
+    const AtomString& value = attributeWithoutSynchronization(valueAttr);
     if (!value.isNull())
         return value;
-    return collectOptionInnerText().stripWhiteSpace(isHTMLSpace).simplifyWhiteSpace(isHTMLSpace);
+    return stripLeadingAndTrailingHTMLSpaces(collectOptionInnerText()).simplifyWhiteSpace(isHTMLSpace);
 }
 
-void HTMLOptionElement::setValue(const String& value)
+void HTMLOptionElement::setValue(const AtomString& value)
 {
     setAttributeWithoutSynchronization(valueAttr, value);
 }
 
-bool HTMLOptionElement::selected()
+bool HTMLOptionElement::selected(AllowStyleInvalidation allowStyleInvalidation) const
 {
-    if (HTMLSelectElement* select = ownerSelectElement())
-        select->updateListItemSelectedStates();
+    if (RefPtr select = ownerSelectElement())
+        select->updateListItemSelectedStates(allowStyleInvalidation);
     return m_isSelected;
 }
 
@@ -216,74 +224,69 @@ void HTMLOptionElement::setSelected(bool selected)
 
     setSelectedState(selected);
 
-    if (HTMLSelectElement* select = ownerSelectElement())
+    if (RefPtr select = ownerSelectElement())
         select->optionSelectionStateChanged(*this, selected);
 }
 
-void HTMLOptionElement::setSelectedState(bool selected)
+void HTMLOptionElement::setSelectedState(bool selected, AllowStyleInvalidation allowStyleInvalidation)
 {
     if (m_isSelected == selected)
         return;
 
-    m_isSelected = selected;
-    invalidateStyleForSubtree();
+    std::optional<Style::PseudoClassChangeInvalidation> checkedInvalidation;
+    if (allowStyleInvalidation == AllowStyleInvalidation::Yes)
+        emplace(checkedInvalidation, *this, { { CSSSelector::PseudoClassChecked, selected } });
 
-    if (HTMLSelectElement* select = ownerSelectElement())
-        select->invalidateSelectedItems();
+    m_isSelected = selected;
+
+#if USE(ATSPI)
+    if (auto* cache = document().existingAXObjectCache())
+        cache->postNotification(this, AXObjectCache::AXSelectedStateChanged);
+#endif
 }
 
 void HTMLOptionElement::childrenChanged(const ChildChange& change)
 {
 #if ENABLE(DATALIST_ELEMENT)
-    if (HTMLDataListElement* dataList = ownerDataListElement())
+    Vector<Ref<HTMLDataListElement>> ancestors;
+    for (auto& dataList : ancestorsOfType<HTMLDataListElement>(*this))
+        ancestors.append(dataList);
+    for (auto& dataList : ancestors)
         dataList->optionElementChildrenChanged();
-    else
 #endif
-    if (HTMLSelectElement* select = ownerSelectElement())
+    if (RefPtr select = ownerSelectElement())
         select->optionElementChildrenChanged();
     HTMLElement::childrenChanged(change);
 }
 
-#if ENABLE(DATALIST_ELEMENT)
-HTMLDataListElement* HTMLOptionElement::ownerDataListElement() const
-{
-    for (ContainerNode* parent = parentNode(); parent ; parent = parent->parentNode()) {
-        if (is<HTMLDataListElement>(*parent))
-            return downcast<HTMLDataListElement>(parent);
-    }
-    return nullptr;
-}
-#endif
-
 HTMLSelectElement* HTMLOptionElement::ownerSelectElement() const
 {
-    ContainerNode* select = parentNode();
-    while (select && !is<HTMLSelectElement>(*select))
-        select = select->parentNode();
-
-    if (!select)
-        return nullptr;
-
-    return downcast<HTMLSelectElement>(select);
+    if (auto* parent = parentElement()) {
+        if (is<HTMLSelectElement>(*parent))
+            return downcast<HTMLSelectElement>(parent);
+        if (is<HTMLOptGroupElement>(*parent))
+            return downcast<HTMLOptGroupElement>(*parent).ownerSelectElement();
+    }
+    return nullptr;
 }
 
 String HTMLOptionElement::label() const
 {
     String label = attributeWithoutSynchronization(labelAttr);
     if (!label.isNull())
-        return label.stripWhiteSpace(isHTMLSpace);
-    return collectOptionInnerText().stripWhiteSpace(isHTMLSpace).simplifyWhiteSpace(isHTMLSpace);
+        return stripLeadingAndTrailingHTMLSpaces(label);
+    return stripLeadingAndTrailingHTMLSpaces(collectOptionInnerText()).simplifyWhiteSpace(isHTMLSpace);
 }
 
 // Same as label() but ignores the label content attribute in quirks mode for compatibility with other browsers.
 String HTMLOptionElement::displayLabel() const
 {
     if (document().inQuirksMode())
-        return collectOptionInnerText().stripWhiteSpace(isHTMLSpace).simplifyWhiteSpace(isHTMLSpace);
+        return stripLeadingAndTrailingHTMLSpaces(collectOptionInnerText()).simplifyWhiteSpace(isHTMLSpace);
     return label();
 }
 
-void HTMLOptionElement::setLabel(const String& label)
+void HTMLOptionElement::setLabel(const AtomString& label)
 {
     setAttributeWithoutSynchronization(labelAttr, label);
 }
@@ -300,7 +303,7 @@ void HTMLOptionElement::willResetComputedStyle()
 
 String HTMLOptionElement::textIndentedToRespectGroupLabel() const
 {
-    ContainerNode* parent = parentNode();
+    RefPtr parent = parentNode();
     if (is<HTMLOptGroupElement>(parent))
         return "    " + displayLabel();
     return displayLabel();
@@ -317,27 +320,10 @@ bool HTMLOptionElement::isDisabledFormControl() const
     return downcast<HTMLOptGroupElement>(*parentNode()).isDisabledFormControl();
 }
 
-Node::InsertionNotificationRequest HTMLOptionElement::insertedInto(ContainerNode& insertionPoint)
-{
-    if (HTMLSelectElement* select = ownerSelectElement()) {
-        select->setRecalcListItems();
-        select->updateValidity();
-        // Do not call selected() since calling updateListItemSelectedStates()
-        // at this time won't do the right thing. (Why, exactly?)
-        // FIXME: Might be better to call this unconditionally, always passing m_isSelected,
-        // rather than only calling it if we are selected.
-        if (m_isSelected)
-            select->optionSelectionStateChanged(*this, true);
-        select->scrollToSelection();
-    }
-
-    return HTMLElement::insertedInto(insertionPoint);
-}
-
 String HTMLOptionElement::collectOptionInnerText() const
 {
     StringBuilder text;
-    for (Node* node = firstChild(); node; ) {
+    for (RefPtr node = firstChild(); node; ) {
         if (is<Text>(*node))
             text.append(node->nodeValue());
         // Text nodes inside script elements are not part of the option text.

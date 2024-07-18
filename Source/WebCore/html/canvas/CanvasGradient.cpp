@@ -27,36 +27,58 @@
 #include "config.h"
 #include "CanvasGradient.h"
 
+#include "CanvasRenderingContext.h"
 #include "CanvasStyle.h"
+#include "Gradient.h"
 
 namespace WebCore {
 
-CanvasGradient::CanvasGradient(const FloatPoint& p0, const FloatPoint& p1)
-    : m_gradient(Gradient::create(p0, p1))
+CanvasGradient::CanvasGradient(const FloatPoint& p0, const FloatPoint& p1, CanvasRenderingContext& context)
+    : m_gradient(Gradient::create(Gradient::LinearData { p0, p1 }, { ColorInterpolationMethod::SRGB { }, AlphaPremultiplication::Unpremultiplied }))
+    , m_context(context)
 {
 }
 
-CanvasGradient::CanvasGradient(const FloatPoint& p0, float r0, const FloatPoint& p1, float r1)
-    : m_gradient(Gradient::create(p0, r0, p1, r1))
+CanvasGradient::CanvasGradient(const FloatPoint& p0, float r0, const FloatPoint& p1, float r1, CanvasRenderingContext& context)
+    : m_gradient(Gradient::create(Gradient::RadialData { p0, p1, r0, r1, 1 }, { ColorInterpolationMethod::SRGB { }, AlphaPremultiplication::Unpremultiplied }))
+    , m_context(context)
 {
 }
 
-ExceptionOr<void> CanvasGradient::addColorStop(float value, const String& colorString)
+CanvasGradient::CanvasGradient(const FloatPoint& centerPoint, float angleInRadians, CanvasRenderingContext& context)
+    : m_gradient(Gradient::create(Gradient::ConicData { centerPoint, angleInRadians }, { ColorInterpolationMethod::SRGB { }, AlphaPremultiplication::Unpremultiplied }))
+    , m_context(context)
+{
+}
+
+Ref<CanvasGradient> CanvasGradient::create(const FloatPoint& p0, const FloatPoint& p1, CanvasRenderingContext& context)
+{
+    return adoptRef(*new CanvasGradient(p0, p1, context));
+}
+
+Ref<CanvasGradient> CanvasGradient::create(const FloatPoint& p0, float r0, const FloatPoint& p1, float r1, CanvasRenderingContext& context)
+{
+    return adoptRef(*new CanvasGradient(p0, r0, p1, r1, context));
+}
+
+Ref<CanvasGradient> CanvasGradient::create(const FloatPoint& centerPoint, float angleInRadians, CanvasRenderingContext& context)
+{
+    return adoptRef(*new CanvasGradient(centerPoint, angleInRadians, context));
+}
+
+CanvasGradient::~CanvasGradient() = default;
+
+ExceptionOr<void> CanvasGradient::addColorStop(double value, const String& colorString)
 {
     if (!(value >= 0 && value <= 1))
         return Exception { IndexSizeError };
 
-    // FIXME: Passing null for canvas means this won't work for current color. Is that OK?
-    Color color = parseColorOrCurrentColor(colorString, nullptr /*canvas*/);
-    if (!color.isValid()) {
-#if ENABLE(DASHBOARD_SUPPORT)
-        if (m_dashboardCompatibilityMode)
-            return { };
-#endif
+    // Treat currentColor as black, as required by the standard.
+    Color color = isCurrentColorString(colorString) ? Color::black : parseColor(colorString, m_context->canvasBase());
+    if (!color.isValid())
         return Exception { SyntaxError };
-    }
 
-    m_gradient->addColorStop(value, color);
+    m_gradient->addColorStop({ static_cast<float>(value), WTFMove(color) });
     return { };
 }
 

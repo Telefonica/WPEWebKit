@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2007, 2015 Apple Inc.  All rights reserved.
- * Copyright (C) 2011 Google Inc.  All rights reserved.
+ * Copyright (C) 2007-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2011 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <optional>
 #include <wtf/Forward.h>
 
 namespace Inspector {
@@ -41,9 +42,10 @@ class Page;
 
 class InspectorClient {
 public:
-    virtual ~InspectorClient() { }
+    virtual ~InspectorClient() = default;
 
     virtual void inspectedPageDestroyed() = 0;
+    virtual void frontendCountChanged(unsigned) { }
 
     virtual Inspector::FrontendChannel* openLocalFrontend(InspectorController*) = 0;
     virtual void bringFrontendToFront() = 0;
@@ -58,10 +60,38 @@ public:
     virtual bool overridesShowPaintRects() const { return false; }
     virtual void setShowPaintRects(bool) { }
     virtual void showPaintRect(const FloatRect&) { }
+    virtual unsigned paintRectCount() const { return 0; }
     virtual void didSetSearchingForNode(bool) { }
     virtual void elementSelectionChanged(bool) { }
+    virtual void timelineRecordingChanged(bool) { }
 
-    WEBCORE_EXPORT static void doDispatchMessageOnFrontendPage(Page* frontendPage, const String& message);
+    enum class DeveloperPreference {
+        PrivateClickMeasurementDebugModeEnabled,
+        ITPDebugModeEnabled,
+        MockCaptureDevicesEnabled,
+    };
+    virtual void setDeveloperPreferenceOverride(DeveloperPreference, std::optional<bool>) { }
+
+#if ENABLE(INSPECTOR_NETWORK_THROTTLING)
+    virtual bool setEmulatedConditions(std::optional<int64_t>&& /* bytesPerSecondLimit */) { return false; }
+#endif
+
+#if ENABLE(REMOTE_INSPECTOR)
+    virtual bool allowRemoteInspectionToPageDirectly() const { return false; }
+#endif
 };
 
 } // namespace WebCore
+
+namespace WTF {
+
+template<> struct EnumTraits<WebCore::InspectorClient::DeveloperPreference> {
+    using values = EnumValues<
+        WebCore::InspectorClient::DeveloperPreference,
+        WebCore::InspectorClient::DeveloperPreference::PrivateClickMeasurementDebugModeEnabled,
+        WebCore::InspectorClient::DeveloperPreference::ITPDebugModeEnabled,
+        WebCore::InspectorClient::DeveloperPreference::MockCaptureDevicesEnabled
+    >;
+};
+
+} // namespace WTF

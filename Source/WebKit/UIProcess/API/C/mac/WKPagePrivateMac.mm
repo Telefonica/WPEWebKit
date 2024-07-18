@@ -30,30 +30,31 @@
 #import "PageLoadStateObserver.h"
 #import "WKAPICast.h"
 #import "WKNSURLExtras.h"
+#import "WKNavigationInternal.h"
 #import "WKViewInternal.h"
+#import "WKWebViewInternal.h"
 #import "WebPageGroup.h"
 #import "WebPageProxy.h"
 #import "WebPreferences.h"
 #import "WebProcessPool.h"
-
-using namespace WebKit;
+#import <wtf/MainThread.h>
 
 @interface WKObservablePageState : NSObject <_WKObservablePageState> {
-    RefPtr<WebPageProxy> _page;
-    std::unique_ptr<PageLoadStateObserver> _observer;
+    RefPtr<WebKit::WebPageProxy> _page;
+    std::unique_ptr<WebKit::PageLoadStateObserver> _observer;
 }
 
 @end
 
 @implementation WKObservablePageState
 
-- (id)initWithPage:(RefPtr<WebPageProxy>&&)page
+- (id)initWithPage:(RefPtr<WebKit::WebPageProxy>&&)page
 {
     if (!(self = [super init]))
         return nil;
 
     _page = WTFMove(page);
-    _observer = std::make_unique<PageLoadStateObserver>(self, @"URL");
+    _observer = makeUnique<WebKit::PageLoadStateObserver>(self, @"URL");
     _page->pageLoadState().addObserver(*_observer);
 
     return self;
@@ -61,7 +62,11 @@ using namespace WebKit;
 
 - (void)dealloc
 {
-    _page->pageLoadState().removeObserver(*_observer);
+    _observer->clearObject();
+
+    ensureOnMainRunLoop([page = WTFMove(_page), observer = WTFMove(_observer)] {
+        page->pageLoadState().removeObserver(*observer);
+    });
 
     [super dealloc];
 }
@@ -118,13 +123,13 @@ using namespace WebKit;
 
 id <_WKObservablePageState> WKPageCreateObservableState(WKPageRef pageRef)
 {
-    return [[WKObservablePageState alloc] initWithPage:toImpl(pageRef)];
+    return [[WKObservablePageState alloc] initWithPage:WebKit::toImpl(pageRef)];
 }
 
 _WKRemoteObjectRegistry *WKPageGetObjectRegistry(WKPageRef pageRef)
 {
-#if WK_API_ENABLED && !TARGET_OS_IPHONE
-    return toImpl(pageRef)->remoteObjectRegistry();
+#if PLATFORM(MAC)
+    return WebKit::toImpl(pageRef)->remoteObjectRegistry();
 #else
     return nil;
 #endif
@@ -132,30 +137,45 @@ _WKRemoteObjectRegistry *WKPageGetObjectRegistry(WKPageRef pageRef)
 
 bool WKPageIsURLKnownHSTSHost(WKPageRef page, WKURLRef url)
 {
-    WebPageProxy* webPageProxy = toImpl(page);
-    bool privateBrowsingEnabled = webPageProxy->pageGroup().preferences().privateBrowsingEnabled();
+    WebKit::WebPageProxy* webPageProxy = WebKit::toImpl(page);
 
-    return webPageProxy->process().processPool().isURLKnownHSTSHost(toImpl(url)->string(), privateBrowsingEnabled);
+    return webPageProxy->process().processPool().isURLKnownHSTSHost(WebKit::toImpl(url)->string());
+}
+
+WKNavigation *WKPageLoadURLRequestReturningNavigation(WKPageRef pageRef, WKURLRequestRef urlRequestRef)
+{
+    auto resourceRequest = WebKit::toImpl(urlRequestRef)->resourceRequest();
+    return WebKit::wrapper(WebKit::toImpl(pageRef)->loadRequest(WTFMove(resourceRequest)));
+}
+
+WKNavigation *WKPageLoadFileReturningNavigation(WKPageRef pageRef, WKURLRef fileURL, WKURLRef resourceDirectoryURL)
+{
+    return WebKit::wrapper(WebKit::toImpl(pageRef)->loadFile(WebKit::toWTFString(fileURL), WebKit::toWTFString(resourceDirectoryURL)));
+}
+
+WKWebView *WKPageGetWebView(WKPageRef page)
+{
+    return page ? WebKit::toImpl(page)->cocoaView().autorelease() : nil;
 }
 
 #if PLATFORM(MAC)
 bool WKPageIsPlayingVideoInEnhancedFullscreen(WKPageRef pageRef)
 {
-    return toImpl(pageRef)->isPlayingVideoInEnhancedFullscreen();
+    return WebKit::toImpl(pageRef)->isPlayingVideoInEnhancedFullscreen();
 }
 #endif
 
 void WKPageSetFullscreenDelegate(WKPageRef page, id <_WKFullscreenDelegate> delegate)
 {
-#if WK_API_ENABLED && ENABLE(FULLSCREEN_API)
-    static_cast<WebKit::FullscreenClient&>(toImpl(page)->fullscreenClient()).setDelegate(delegate);
+#if ENABLE(FULLSCREEN_API)
+    downcast<WebKit::FullscreenClient>(WebKit::toImpl(page)->fullscreenClient()).setDelegate(delegate);
 #endif
 }
 
 id <_WKFullscreenDelegate> WKPageGetFullscreenDelegate(WKPageRef page)
 {
-#if WK_API_ENABLED && ENABLE(FULLSCREEN_API)
-    return static_cast<WebKit::FullscreenClient&>(toImpl(page)->fullscreenClient()).delegate().autorelease();
+#if ENABLE(FULLSCREEN_API)
+    return downcast<WebKit::FullscreenClient>(WebKit::toImpl(page)->fullscreenClient()).delegate().autorelease();
 #else
     return nil;
 #endif

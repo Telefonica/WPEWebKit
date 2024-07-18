@@ -32,19 +32,19 @@
 #include <wtf/MonotonicTime.h>
 #include <wtf/RefCounted.h>
 #include <wtf/Seconds.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
 class DOMTimerFireState;
 class Document;
-class HTMLPlugInElement;
 class ScheduledAction;
 
-class DOMTimer final : public RefCounted<DOMTimer>, public SuspendableTimer {
+class DOMTimer final : public RefCounted<DOMTimer>, public SuspendableTimerBase, public CanMakeWeakPtr<DOMTimer> {
     WTF_MAKE_NONCOPYABLE(DOMTimer);
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    virtual ~DOMTimer();
+    WEBCORE_EXPORT virtual ~DOMTimer();
 
     static Seconds defaultMinimumInterval() { return 4_ms; }
     static Seconds defaultAlignmentInterval() { return 0_s; }
@@ -55,16 +55,17 @@ public:
     // Creates a new timer owned by specified ScriptExecutionContext, starts it
     // and returns its Id.
     static int install(ScriptExecutionContext&, std::unique_ptr<ScheduledAction>, Seconds timeout, bool singleShot);
+    static int install(ScriptExecutionContext&, Function<void(ScriptExecutionContext&)>&&, Seconds timeout, bool singleShot);
     static void removeById(ScriptExecutionContext&, int timeoutId);
 
     // Notify that the interval may need updating (e.g. because the minimum interval
     // setting for the context has changed).
     void updateTimerIntervalIfNecessary();
 
-    static void scriptDidInteractWithPlugin(HTMLPlugInElement&);
+    static void scriptDidInteractWithPlugin();
 
 private:
-    DOMTimer(ScriptExecutionContext&, std::unique_ptr<ScheduledAction>, Seconds interval, bool singleShot);
+    DOMTimer(ScriptExecutionContext&, Function<void(ScriptExecutionContext&)>&&, Seconds interval, bool singleShot);
     friend class Internals;
 
     WEBCORE_EXPORT Seconds intervalClampedToMinimum() const;
@@ -72,7 +73,7 @@ private:
     bool isDOMTimersThrottlingEnabled(Document&) const;
     void updateThrottlingStateIfNecessary(const DOMTimerFireState&);
 
-    // SuspendableTimer
+    // SuspendableTimerBase
     void fired() override;
     void didStop() override;
     WEBCORE_EXPORT std::optional<MonotonicTime> alignedFireTime(MonotonicTime) const override;
@@ -88,11 +89,11 @@ private:
 
     int m_timeoutId;
     int m_nestingLevel;
-    std::unique_ptr<ScheduledAction> m_action;
+    Function<void(ScriptExecutionContext&)> m_action;
     Seconds m_originalInterval;
     TimerThrottleState m_throttleState;
+    bool m_oneShot;
     Seconds m_currentTimerInterval;
-    Seconds m_nestedTimerInterval;
     RefPtr<UserGestureToken> m_userGestureTokenToForward;
 };
 

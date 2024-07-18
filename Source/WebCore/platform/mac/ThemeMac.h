@@ -27,13 +27,19 @@
 
 #include "ThemeCocoa.h"
 
+#if PLATFORM(MAC)
+
 namespace WebCore {
 
 class ThemeMac final : public ThemeCocoa {
 public:
+#if HAVE(LARGE_CONTROL_SIZE)
+    static bool supportsLargeFormControls();
+#endif
+
     static NSView *ensuredView(ScrollView*, const ControlStates&, bool useUnparentedView = false);
     static void setFocusRingClipRect(const FloatRect&);
-    static bool drawCellOrFocusRingWithViewIntoContext(NSCell *, GraphicsContext&, const FloatRect&, NSView *, bool drawButtonCell, bool drawFocusRing, bool useImageBuffer, float deviceScaleFactor);
+    static bool drawCellOrFocusRingWithViewIntoContext(NSCell *, GraphicsContext&, const FloatRect&, NSView *, bool drawButtonCell, bool drawFocusRing, float deviceScaleFactor);
 
 private:
     friend NeverDestroyed<ThemeMac>;
@@ -44,17 +50,20 @@ private:
     std::optional<FontCascadeDescription> controlFont(ControlPart, const FontCascade&, float zoomFactor) const final;
 
     LengthSize controlSize(ControlPart, const FontCascade&, const LengthSize&, float zoomFactor) const final;
-    LengthSize minimumControlSize(ControlPart, const FontCascade&, float zoomFactor) const final;
+    LengthSize minimumControlSize(ControlPart, const FontCascade&, const LengthSize&, float zoomFactor) const final;
 
     LengthBox controlPadding(ControlPart, const FontCascade&, const LengthBox& zoomedBox, float zoomFactor) const final;
     LengthBox controlBorder(ControlPart, const FontCascade&, const LengthBox& zoomedBox, float zoomFactor) const final;
 
     bool controlRequiresPreWhiteSpace(ControlPart part) const final { return part == PushButtonPart; }
 
-    void paint(ControlPart, ControlStates&, GraphicsContext&, const FloatRect&, float zoomFactor, ScrollView*, float deviceScaleFactor, float pageScaleFactor) final;
+    void paint(ControlPart, ControlStates&, GraphicsContext&, const FloatRect&, float zoomFactor, ScrollView*, float deviceScaleFactor, float pageScaleFactor, bool useSystemAppearance, bool useDarkAppearance, const Color& tintColor) final;
     void inflateControlPaintRect(ControlPart, const ControlStates&, FloatRect&, float zoomFactor) const final;
 
     bool userPrefersReducedMotion() const final;
+    bool userPrefersContrast() const final;
 };
 
 } // namespace WebCore
+
+#endif // PLATFORM(MAC)

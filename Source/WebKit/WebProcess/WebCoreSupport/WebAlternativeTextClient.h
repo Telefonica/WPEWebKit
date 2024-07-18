@@ -23,9 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
-#ifndef WebAlternativeTextClient_h
-#define WebAlternativeTextClient_h
+#pragma once
 
 #include <WebCore/AlternativeTextClient.h>
 
@@ -33,35 +31,33 @@ namespace WebKit {
 
 class WebPage;
 
-class WebAlternativeTextClient : public WebCore::AlternativeTextClient {
+class WebAlternativeTextClient final : public WebCore::AlternativeTextClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    WebAlternativeTextClient(WebPage *);
+    explicit WebAlternativeTextClient(WebPage*);
     virtual ~WebAlternativeTextClient();
-    void pageDestroyed() override;
+
+private:
 #if USE(AUTOCORRECTION_PANEL)
     void showCorrectionAlternative(WebCore::AlternativeTextType, const WebCore::FloatRect& boundingBoxOfReplacedString, const String& replacedString, const String& replacementString, const Vector<String>& alternativeReplacementStrings) override;
     void dismissAlternative(WebCore::ReasonForDismissingAlternativeText) override;
     String dismissAlternativeSoon(WebCore::ReasonForDismissingAlternativeText) override;
     void recordAutocorrectionResponse(WebCore::AutocorrectionResponse, const String& replacedString, const String& replacementString) override;
 #endif
+
 #if USE(DICTATION_ALTERNATIVES)
-    void showDictationAlternativeUI(const WebCore::FloatRect& boundingBoxOfDictatedText, uint64_t dictationContext) override;
-    void removeDictationAlternatives(uint64_t dictationContext) override;
-    Vector<String> dictationAlternatives(uint64_t dictationContext) override;
+    void showDictationAlternativeUI(const WebCore::FloatRect& boundingBoxOfDictatedText, WebCore::DictationContext) final;
+    void removeDictationAlternatives(WebCore::DictationContext) final;
+    Vector<String> dictationAlternatives(WebCore::DictationContext) final;
 #endif
-private:
-#if PLATFORM(IOS)
-#pragma clang diagnostic push
-#if defined(__has_warning) && __has_warning("-Wunused-private-field")
-#pragma clang diagnostic ignored "-Wunused-private-field"
+
+#if !(USE(AUTOCORRECTION_PANEL) || USE(DICTATION_ALTERNATIVES))
+    IGNORE_CLANG_WARNINGS_BEGIN("unused-private-field")
 #endif
-#endif
-    WebPage *m_page;
-#if PLATFORM(IOS)
-#pragma clang diagnostic pop
+    WebPage* m_page;
+#if !(USE(AUTOCORRECTION_PANEL) || USE(DICTATION_ALTERNATIVES))
+    IGNORE_CLANG_WARNINGS_END
 #endif
 };
 
 }
-
-#endif // WebAlternativeTextClient_h

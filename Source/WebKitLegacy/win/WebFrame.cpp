@@ -30,10 +30,7 @@
 #include "CFDictionaryPropertyBag.h"
 #include "COMPropertyBag.h"
 #include "DOMCoreClasses.h"
-#include "HTMLFrameOwnerElement.h"
 #include "MarshallingHelpers.h"
-#include "PluginDatabase.h"
-#include "PluginView.h"
 #include "WebActionPropertyBag.h"
 #include "WebChromeClient.h"
 #include "WebDataSource.h"
@@ -52,36 +49,42 @@
 #include "WebScriptWorld.h"
 #include "WebURLResponse.h"
 #include "WebView.h"
+#include <JavaScriptCore/APICast.h>
+#include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/JSCJSValue.h>
+#include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/JSObject.h>
 #include <WebCore/BString.h>
 #include <WebCore/COMPtr.h>
-#include <WebCore/CSSAnimationController.h>
-#include <WebCore/MemoryCache.h>
+#include <WebCore/DOMWindow.h>
 #include <WebCore/Document.h>
 #include <WebCore/DocumentLoader.h>
 #include <WebCore/DocumentMarkerController.h>
-#include <WebCore/DOMWindow.h>
 #include <WebCore/Editor.h>
 #include <WebCore/Event.h>
 #include <WebCore/EventHandler.h>
 #include <WebCore/FormState.h>
-#include <WebCore/FrameLoader.h>
+#include <WebCore/Frame.h>
 #include <WebCore/FrameLoadRequest.h>
+#include <WebCore/FrameLoader.h>
 #include <WebCore/FrameTree.h>
 #include <WebCore/FrameView.h>
 #include <WebCore/FrameWin.h>
 #include <WebCore/GDIObjectCounter.h>
 #include <WebCore/GraphicsContext.h>
-#include <WebCore/HistoryItem.h>
-#include <WebCore/HTMLAppletElement.h>
-#include <WebCore/HTMLFormElement.h>
+#include <WebCore/GraphicsContextWin.h>
 #include <WebCore/HTMLFormControlElement.h>
+#include <WebCore/HTMLFormElement.h>
+#include <WebCore/HTMLFrameOwnerElement.h>
 #include <WebCore/HTMLInputElement.h>
 #include <WebCore/HTMLNames.h>
 #include <WebCore/HTMLPlugInElement.h>
+#include <WebCore/HistoryItem.h>
+#include <WebCore/JSDOMBinding.h>
 #include <WebCore/JSDOMWindow.h>
 #include <WebCore/KeyboardEvent.h>
 #include <WebCore/MIMETypeRegistry.h>
-#include <WebCore/MainFrame.h>
+#include <WebCore/MemoryCache.h>
 #include <WebCore/MouseRelatedEvent.h>
 #include <WebCore/NotImplemented.h>
 #include <WebCore/Page.h>
@@ -89,28 +92,22 @@
 #include <WebCore/PluginData.h>
 #include <WebCore/PolicyChecker.h>
 #include <WebCore/PrintContext.h>
+#include <WebCore/RenderLayerCompositor.h>
+#include <WebCore/RenderTreeAsText.h>
+#include <WebCore/RenderView.h>
 #include <WebCore/ResourceHandle.h>
 #include <WebCore/ResourceLoader.h>
 #include <WebCore/ResourceRequest.h>
-#include <WebCore/RenderView.h>
-#include <WebCore/RenderTreeAsText.h>
-#include <WebCore/Settings.h>
-#include <WebCore/TextIterator.h>
-#include <WebCore/JSDOMBinding.h>
 #include <WebCore/ScriptController.h>
 #include <WebCore/SecurityOrigin.h>
-#include <JavaScriptCore/APICast.h>
-#include <JavaScriptCore/HeapInlines.h>
-#include <JavaScriptCore/JSCJSValue.h>
-#include <JavaScriptCore/JSLock.h>
-#include <JavaScriptCore/JSObject.h>
-#include <bindings/ScriptValue.h>
+#include <WebCore/Settings.h>
+#include <WebCore/TextIterator.h>
 #include <wtf/MathExtras.h>
 
 #if USE(CG)
 #include <CoreGraphics/CoreGraphics.h>
 #elif USE(CAIRO)
-#include "PlatformContextCairo.h"
+#include <WebCore/GraphicsContextCairo.h>
 #include <cairo-win32.h>
 #endif
 
@@ -124,7 +121,6 @@ extern "C" {
 
 using namespace WebCore;
 using namespace HTMLNames;
-using namespace std;
 
 using JSC::JSGlobalObject;
 using JSC::JSLock;
@@ -247,7 +243,7 @@ WebFrame::WebFrame()
 {
     WebFrameCount++;
     gClassCount++;
-    gClassNameCount().add("WebFrame");
+    gClassNameCount().add("WebFrame"_s);
 }
 
 WebFrame::~WebFrame()
@@ -255,7 +251,7 @@ WebFrame::~WebFrame()
     delete d;
     WebFrameCount--;
     gClassCount--;
-    gClassNameCount().remove("WebFrame");
+    gClassNameCount().remove("WebFrame"_s);
 }
 
 WebFrame* WebFrame::createInstance()
@@ -324,8 +320,7 @@ HRESULT WebFrame::paintDocumentRectToContext(RECT rect, _In_ HDC deviceContext)
     // We can't paint with a layout still pending.
     view->updateLayoutAndStyleIfNeededRecursive();
 
-    GraphicsContext gc(deviceContext);
-    gc.setShouldIncludeChildWindows(true);
+    GraphicsContextWin gc(deviceContext);
     gc.save();
     LONG width = rect.right - rect.left;
     LONG height = rect.bottom - rect.top;
@@ -355,8 +350,7 @@ HRESULT WebFrame::paintScrollViewRectToContextAtPoint(RECT rect, POINT pt, _In_ 
     // We can't paint with a layout still pending.
     view->updateLayoutAndStyleIfNeededRecursive();
 
-    GraphicsContext gc(deviceContext);
-    gc.setShouldIncludeChildWindows(true);
+    GraphicsContextWin gc(deviceContext);
     gc.save();
     IntRect dirtyRect(rect);
     dirtyRect.move(-pt.x, -pt.y);
@@ -530,7 +524,7 @@ JSGlobalContextRef WebFrame::globalContext()
     if (!coreFrame)
         return nullptr;
 
-    return toGlobalRef(coreFrame->script().globalObject(mainThreadNormalWorld())->globalExec());
+    return toGlobalRef(coreFrame->script().globalObject(mainThreadNormalWorld()));
 }
 
 JSGlobalContextRef WebFrame::globalContextForScriptWorld(IWebScriptWorld* iWorld)
@@ -543,7 +537,7 @@ JSGlobalContextRef WebFrame::globalContextForScriptWorld(IWebScriptWorld* iWorld
     if (!world)
         return 0;
 
-    return toGlobalRef(coreFrame->script().globalObject(world->world())->globalExec());
+    return toGlobalRef(coreFrame->script().globalObject(world->world()));
 }
 
 HRESULT WebFrame::loadRequest(_In_opt_ IWebURLRequest* request)
@@ -561,22 +555,22 @@ HRESULT WebFrame::loadRequest(_In_opt_ IWebURLRequest* request)
     if (!coreFrame)
         return E_UNEXPECTED;
 
-    coreFrame->loader().load(FrameLoadRequest(*coreFrame, requestImpl->resourceRequest(), ShouldOpenExternalURLsPolicy::ShouldNotAllow));
+    coreFrame->loader().load(FrameLoadRequest(*coreFrame, requestImpl->resourceRequest()));
     return S_OK;
 }
 
-void WebFrame::loadData(RefPtr<WebCore::SharedBuffer>&& data, BSTR mimeType, BSTR textEncodingName, BSTR baseURL, BSTR failingURL)
+void WebFrame::loadData(Ref<WebCore::FragmentedSharedBuffer>&& data, BSTR mimeType, BSTR textEncodingName, BSTR baseURL, BSTR failingURL)
 {
     String mimeTypeString(mimeType, SysStringLen(mimeType));
     if (!mimeType)
-        mimeTypeString = "text/html";
+        mimeTypeString = "text/html"_s;
 
     String encodingString(textEncodingName, SysStringLen(textEncodingName));
 
     // FIXME: We should really be using MarshallingHelpers::BSTRToKURL here,
     // but that would turn a null BSTR into a null URL, and we crash inside of
     // WebCore if we use a null URL in constructing the ResourceRequest.
-    URL baseCoreURL = URL(URL(), String(baseURL ? baseURL : L"", SysStringLen(baseURL)));
+    URL baseCoreURL { String(baseURL ? baseURL : L"", SysStringLen(baseURL)) };
 
     URL failingCoreURL = MarshallingHelpers::BSTRToKURL(failingURL);
 
@@ -586,32 +580,32 @@ void WebFrame::loadData(RefPtr<WebCore::SharedBuffer>&& data, BSTR mimeType, BST
 
     // This method is only called from IWebFrame methods, so don't ASSERT that the Frame pointer isn't null.
     if (Frame* coreFrame = core(this))
-        coreFrame->loader().load(FrameLoadRequest(*coreFrame, request, ShouldOpenExternalURLsPolicy::ShouldNotAllow, substituteData));
+        coreFrame->loader().load(FrameLoadRequest(*coreFrame, request, substituteData));
 }
 
 HRESULT WebFrame::loadData(_In_opt_ IStream* data, _In_ BSTR mimeType, _In_ BSTR textEncodingName, _In_ BSTR url)
 {
-    auto sharedBuffer = SharedBuffer::create();
+    SharedBufferBuilder sharedBuffer;
 
     STATSTG stat;
     if (SUCCEEDED(data->Stat(&stat, STATFLAG_NONAME))) {
         if (!stat.cbSize.HighPart && stat.cbSize.LowPart) {
             Vector<char> dataBuffer(stat.cbSize.LowPart);
             ULONG read;
-            // FIXME: this does a needless copy, would be better to read right into the SharedBuffer
+            // FIXME: this does a needless copy, would be better to read right into the FragmentedSharedBuffer
             // or adopt the Vector or something.
             if (SUCCEEDED(data->Read(dataBuffer.data(), static_cast<ULONG>(dataBuffer.size()), &read)))
-                sharedBuffer->append(dataBuffer.data(), static_cast<int>(dataBuffer.size()));
+                sharedBuffer.append(dataBuffer.data(), static_cast<int>(dataBuffer.size()));
         }
     }
 
-    loadData(WTFMove(sharedBuffer), mimeType, textEncodingName, url, nullptr);
+    loadData(sharedBuffer.take(), mimeType, textEncodingName, url, nullptr);
     return S_OK;
 }
 
 HRESULT WebFrame::loadPlainTextString(_In_ BSTR plainText, _In_ BSTR url)
 {
-    RefPtr<SharedBuffer> sharedBuffer = SharedBuffer::create(reinterpret_cast<char*>(plainText), sizeof(UChar) * SysStringLen(plainText));
+    auto sharedBuffer = SharedBuffer::create(reinterpret_cast<char*>(plainText), sizeof(UChar) * SysStringLen(plainText));
     BString plainTextMimeType(TEXT("text/plain"), 10);
     BString utf16Encoding(TEXT("utf-16"), 6);
     loadData(WTFMove(sharedBuffer), plainTextMimeType, utf16Encoding, url, nullptr);
@@ -620,7 +614,7 @@ HRESULT WebFrame::loadPlainTextString(_In_ BSTR plainText, _In_ BSTR url)
 
 void WebFrame::loadHTMLString(_In_ BSTR htmlString, _In_ BSTR baseURL, _In_ BSTR unreachableURL)
 {
-    RefPtr<SharedBuffer> sharedBuffer = SharedBuffer::create(reinterpret_cast<char*>(htmlString), sizeof(UChar) * SysStringLen(htmlString));
+    auto sharedBuffer = SharedBuffer::create(reinterpret_cast<char*>(htmlString), sizeof(UChar) * SysStringLen(htmlString));
     BString utf16Encoding(TEXT("utf-16"), 6);
     loadData(WTFMove(sharedBuffer), 0, utf16Encoding, baseURL, unreachableURL);
 }
@@ -733,7 +727,7 @@ HRESULT WebFrame::findFrameNamed(_In_ BSTR name, _COM_Outptr_opt_ IWebFrame** fr
     if (!coreFrame)
         return E_UNEXPECTED;
 
-    Frame* foundFrame = coreFrame->tree().find(AtomicString(name, SysStringLen(name)));
+    Frame* foundFrame = coreFrame->tree().find(AtomString(name, SysStringLen(name)), *coreFrame);
     if (!foundFrame)
         return S_OK;
 
@@ -759,7 +753,7 @@ HRESULT WebFrame::parentFrame(_COM_Outptr_opt_ IWebFrame** frame)
     return hr;
 }
 
-class EnumChildFrames : public IEnumVARIANT
+class EnumChildFrames final : public IEnumVARIANT
 {
 public:
     EnumChildFrames(Frame* f)
@@ -858,7 +852,38 @@ HRESULT WebFrame::childFrames(_COM_Outptr_opt_ IEnumVARIANT** enumFrames)
 
 // IWebFramePrivate ------------------------------------------------------
 
-HRESULT WebFrame::renderTreeAsExternalRepresentation(BOOL forPrinting, _Deref_opt_out_ BSTR* result)
+enum WebRenderTreeAsTextOption {
+    WebRenderTreeAsTextShowAllLayers           = 1 << 0,
+    WebRenderTreeAsTextShowLayerNesting        = 1 << 1,
+    WebRenderTreeAsTextShowCompositedLayers    = 1 << 2,
+    WebRenderTreeAsTextShowOverflow            = 1 << 3,
+    WebRenderTreeAsTextShowSVGGeometry         = 1 << 4,
+    WebRenderTreeAsTextShowLayerFragments      = 1 << 5
+};
+
+typedef unsigned WebRenderTreeAsTextOptions;
+
+static OptionSet<RenderAsTextFlag> toRenderAsTextFlags(WebRenderTreeAsTextOptions options)
+{
+    OptionSet<RenderAsTextFlag> flags;
+
+    if (options & WebRenderTreeAsTextShowAllLayers)
+        flags.add(RenderAsTextFlag::ShowAllLayers);
+    if (options & WebRenderTreeAsTextShowLayerNesting)
+        flags.add(RenderAsTextFlag::ShowLayerNesting);
+    if (options & WebRenderTreeAsTextShowCompositedLayers)
+        flags.add(RenderAsTextFlag::ShowCompositedLayers);
+    if (options & WebRenderTreeAsTextShowOverflow)
+        flags.add(RenderAsTextFlag::ShowOverflow);
+    if (options & WebRenderTreeAsTextShowSVGGeometry)
+        flags.add(RenderAsTextFlag::ShowSVGGeometry);
+    if (options & WebRenderTreeAsTextShowLayerFragments)
+        flags.add(RenderAsTextFlag::ShowLayerFragments);
+
+    return flags;
+}
+
+HRESULT WebFrame::renderTreeAsExternalRepresentation(unsigned options, _Deref_opt_out_ BSTR* result)
 {
     if (!result)
         return E_POINTER;
@@ -867,7 +892,20 @@ HRESULT WebFrame::renderTreeAsExternalRepresentation(BOOL forPrinting, _Deref_op
     if (!coreFrame)
         return E_UNEXPECTED;
 
-    *result = BString(externalRepresentation(coreFrame, forPrinting ? RenderAsTextPrintingMode : RenderAsTextBehaviorNormal)).release();
+    *result = BString(externalRepresentation(coreFrame, toRenderAsTextFlags(options))).release();
+    return S_OK;
+}
+
+HRESULT WebFrame::renderTreeAsExternalRepresentationForPrinting(_Deref_opt_out_ BSTR* result)
+{
+    if (!result)
+        return E_POINTER;
+
+    Frame* coreFrame = core(this);
+    if (!coreFrame)
+        return E_UNEXPECTED;
+
+    *result = BString(externalRepresentation(coreFrame, { RenderAsTextFlag::PrintingMode })).release();
     return S_OK;
 }
 
@@ -916,7 +954,7 @@ HRESULT WebFrame::layout()
     if (!view)
         return E_FAIL;
 
-    view->layout();
+    view->layoutContext().layout();
     return S_OK;
 }
 
@@ -979,12 +1017,12 @@ HRESULT WebFrame::setTextDirection(_In_ BSTR direction)
         return E_UNEXPECTED;
 
     String directionString(direction, SysStringLen(direction));
-    if (directionString == "auto")
-        coreFrame->editor().setBaseWritingDirection(NaturalWritingDirection);
-    else if (directionString == "ltr")
-        coreFrame->editor().setBaseWritingDirection(LeftToRightWritingDirection);
-    else if (directionString == "rtl")
-        coreFrame->editor().setBaseWritingDirection(RightToLeftWritingDirection);
+    if (directionString == "auto"_s)
+        coreFrame->editor().setBaseWritingDirection(WritingDirection::Natural);
+    else if (directionString == "ltr"_s)
+        coreFrame->editor().setBaseWritingDirection(WritingDirection::LeftToRight);
+    else if (directionString == "rtl"_s)
+        coreFrame->editor().setBaseWritingDirection(WritingDirection::RightToLeft);
     return S_OK;
 }
 
@@ -1018,7 +1056,7 @@ HRESULT WebFrame::selectAll()
     if (!coreFrame)
         return E_UNEXPECTED;
 
-    if (!coreFrame->editor().command("SelectAll").execute())
+    if (!coreFrame->editor().command("SelectAll"_s).execute())
         return E_FAIL;
 
     return S_OK;
@@ -1040,7 +1078,7 @@ Ref<Frame> WebFrame::createSubframeWithOwnerElement(IWebView* webView, Page* pag
     d->webView->viewWindow(&viewWindow);
 
     this->AddRef(); // We release this ref in frameLoaderDestroyed()
-    auto frame = Frame::create(page, ownerElement, new WebFrameLoaderClient(this));
+    auto frame = Frame::create(page, ownerElement, makeUniqueRef<WebFrameLoaderClient>(this));
     d->frame = frame.ptr();
     return frame;
 }
@@ -1088,13 +1126,12 @@ HRESULT WebFrame::elementWithName(BSTR name, IDOMElement* form, IDOMElement** el
 
     HTMLFormElement* formElement = formElementFromDOMElement(form);
     if (formElement) {
-        const Vector<FormAssociatedElement*>& elements = formElement->associatedElements();
-        AtomicString targetName((UChar*)name, SysStringLen(name));
-        for (unsigned int i = 0; i < elements.size(); i++) {
-            if (!is<HTMLFormControlElement>(*elements[i]))
+        AtomString targetName((UChar*)name, SysStringLen(name));
+        for (auto& associatedElement : formElement->copyAssociatedElementsVector()) {
+            if (!is<HTMLFormControlElement>(associatedElement))
                 continue;
-            HTMLFormControlElement& elt = downcast<HTMLFormControlElement>(*elements[i]);
-            // Skip option elements, other duds
+            auto& elt = downcast<HTMLFormControlElement>(associatedElement.get());
+            // Skip option elements, other duds.
             if (elt.name() == targetName) {
                 *element = DOMElement::createInstance(&elt);
                 return S_OK;
@@ -1136,64 +1173,6 @@ HRESULT WebFrame::elementDoesAutoComplete(_In_opt_ IDOMElement *element, _Out_ B
     return S_OK;
 }
 
-HRESULT WebFrame::resumeAnimations()
-{
-    Frame* frame = core(this);
-    if (!frame)
-        return E_UNEXPECTED;
-
-    frame->animation().resumeAnimations();
-    return S_OK;
-}
-
-HRESULT WebFrame::suspendAnimations()
-{
-    Frame* frame = core(this);
-    if (!frame)
-        return E_UNEXPECTED;
-
-    frame->animation().suspendAnimations();
-    return S_OK;
-}
-
-HRESULT WebFrame::pauseAnimation(_In_ BSTR animationName, _In_opt_ IDOMNode* node, double secondsFromNow, _Out_ BOOL* animationWasRunning)
-{
-    if (!node || !animationWasRunning)
-        return E_POINTER;
-
-    *animationWasRunning = FALSE;
-
-    Frame* frame = core(this);
-    if (!frame)
-        return E_UNEXPECTED;
-
-    COMPtr<DOMNode> domNode(Query, node);
-    if (!domNode)
-        return E_FAIL;
-
-    *animationWasRunning = frame->animation().pauseAnimationAtTime(downcast<Element>(*domNode->node()), String(animationName, SysStringLen(animationName)), secondsFromNow);
-    return S_OK;
-}
-
-HRESULT WebFrame::pauseTransition(_In_ BSTR propertyName, _In_opt_ IDOMNode* node, double secondsFromNow, _Out_ BOOL* transitionWasRunning)
-{
-    if (!node || !transitionWasRunning)
-        return E_POINTER;
-
-    *transitionWasRunning = FALSE;
-
-    Frame* frame = core(this);
-    if (!frame)
-        return E_UNEXPECTED;
-
-    COMPtr<DOMNode> domNode(Query, node);
-    if (!domNode)
-        return E_FAIL;
-
-    *transitionWasRunning = frame->animation().pauseTransitionAtTime(downcast<Element>(*domNode->node()), String(propertyName, SysStringLen(propertyName)), secondsFromNow);
-    return S_OK;
-}
-
 HRESULT WebFrame::visibleContentRect(_Out_ RECT* rect)
 {
     if (!rect)
@@ -1209,21 +1188,6 @@ HRESULT WebFrame::visibleContentRect(_Out_ RECT* rect)
         return E_FAIL;
 
     *rect = view->visibleContentRect();
-    return S_OK;
-}
-
-HRESULT WebFrame::numberOfActiveAnimations(_Out_ UINT* number)
-{
-    if (!number)
-        return E_POINTER;
-
-    *number = 0;
-
-    Frame* frame = core(this);
-    if (!frame)
-        return E_UNEXPECTED;
-
-    *number = frame->animation().numberOfActiveAnimations(frame->document());
     return S_OK;
 }
 
@@ -1267,8 +1231,9 @@ HRESULT WebFrame::controlsInForm(IDOMElement* form, IDOMElement** controls, int*
     if (!formElement)
         return E_FAIL;
 
+    auto elements = formElement->copyAssociatedElementsVector();
     int inCount = *cControls;
-    int count = (int) formElement->associatedElements().size();
+    int count = (int) elements.size();
     *cControls = count;
     if (!controls)
         return S_OK;
@@ -1276,10 +1241,10 @@ HRESULT WebFrame::controlsInForm(IDOMElement* form, IDOMElement** controls, int*
         return E_FAIL;
 
     *cControls = 0;
-    const Vector<FormAssociatedElement*>& elements = formElement->associatedElements();
-    for (int i = 0; i < count; i++) {
-        if (elements.at(i)->isEnumeratable()) { // Skip option elements, other duds
-            controls[*cControls] = DOMElement::createInstance(&elements.at(i)->asHTMLElement());
+    for (auto& element : elements) {
+        if (element->isEnumeratable()) {
+            // Skip option elements, other duds.
+            controls[*cControls] = DOMElement::createInstance(&element->asHTMLElement());
             (*cControls)++;
         }
     }
@@ -1386,7 +1351,7 @@ HRESULT WebFrame::canProvideDocumentSource(bool* result)
         BString mimeTypeBStr;
         if (SUCCEEDED(urlResponse->MIMEType(&mimeTypeBStr))) {
             String mimeType(mimeTypeBStr, SysStringLen(mimeTypeBStr));
-            *result = mimeType == "text/html" || WebCore::MIMETypeRegistry::isXMLMIMEType(mimeType);
+            *result = mimeType == "text/html"_s || WebCore::MIMETypeRegistry::isXMLMIMEType(mimeType);
         }
     }
     return hr;
@@ -1402,7 +1367,7 @@ HRESULT WebFrame::layerTreeAsText(_Deref_out_opt_ BSTR* result)
     if (!frame)
         return E_UNEXPECTED;
 
-    String text = frame->layerTreeAsText();
+    String text = frame->contentRenderer()->compositor().layerTreeAsText();
     *result = BString(text).release();
     return S_OK;
 }
@@ -1575,7 +1540,7 @@ void WebFrame::drawHeader(PlatformGraphicsContext* pctx, IWebUIDelegate* ui, con
 void WebFrame::drawFooter(PlatformGraphicsContext* pctx, IWebUIDelegate* ui, const IntRect& pageRect, UINT page, UINT pageCount, float headerHeight, float footerHeight)
 {
     int x = pageRect.x();
-    int y = max((int)headerHeight+pageRect.height(), m_pageHeight-static_cast<int>(footerHeight));
+    int y = std::max((int)headerHeight+pageRect.height(), m_pageHeight-static_cast<int>(footerHeight));
     RECT footerRect = {x, y, x+pageRect.width(), y+static_cast<int>(footerHeight)};
     ui->drawFooterInRect(d->webView, &footerRect, reinterpret_cast<ULONG_PTR>(pctx), page + 1, pageCount);
 }
@@ -1656,7 +1621,7 @@ void WebFrame::drawFooter(PlatformGraphicsContext* pctx, IWebUIDelegate* ui, con
     HDC hdc = hdcFromContext(pctx);
     
     int x = pageRect.x();
-    int y = max(static_cast<int>(headerHeight) + pageRect.height(), m_pageHeight  -static_cast<int>(footerHeight));
+    int y = std::max(static_cast<int>(headerHeight) + pageRect.height(), m_pageHeight  -static_cast<int>(footerHeight));
     RECT footerRect = {x, y, x + pageRect.width(), y + static_cast<int>(footerHeight)};
 
     ui->drawFooterInRect(d->webView, &footerRect, reinterpret_cast<ULONG_PTR>(hdc), page+1, pageCount);
@@ -1791,7 +1756,7 @@ HRESULT WebFrame::spoolPages(HDC printDC, UINT startPage, UINT endPage, void* ct
         return E_FAIL;
     }
 
-    PlatformContextCairo platformContext(cr);
+    GraphicsContextCairo platformContext(cr);
     PlatformGraphicsContext* pctx = &platformContext;
     cairo_destroy(cr);
 
@@ -1840,8 +1805,7 @@ HRESULT WebFrame::spoolPages(HDC printDC, UINT startPage, UINT endPage, void* ct
     float headerHeight = 0, footerHeight = 0;
     headerAndFooterHeights(&headerHeight, &footerHeight);
 #if USE(CG) || USE(CAIRO)
-    GraphicsContext spoolCtx(pctx);
-    spoolCtx.setShouldIncludeChildWindows(true);
+    GraphicsContextWin spoolCtx(pctx);
 
     for (UINT ii = startPage; ii < endPage; ii++)
         spoolPage(pctx, spoolCtx, printDC, ui.get(), headerHeight, footerHeight, ii, pageCount);
@@ -1881,13 +1845,15 @@ HRESULT WebFrame::string(_Deref_opt_out_ BSTR* result)
 
     *result = nullptr;
 
-    Frame* coreFrame = core(this);
-    if (!coreFrame)
+    auto* frame = core(this);
+    if (!frame)
         return E_UNEXPECTED;
 
-    RefPtr<Range> allRange(rangeOfContents(*coreFrame->document()));
-    String allString = plainText(allRange.get());
-    *result = BString(allString).release();
+    auto* document = frame->document();
+    if (!document)
+        return E_FAIL;
+
+    *result = BString(plainText(makeRangeSelectingNodeContents(*document))).release();
     return S_OK;
 }
 
@@ -2003,13 +1969,17 @@ HRESULT WebFrame::stringByEvaluatingJavaScriptInScriptWorld(IWebScriptWorld* iWo
 
     // The global object is probably a proxy object? - if so, we know how to use this!
     JSC::JSObject* globalObjectObj = toJS(globalObjectRef);
-    if (globalObjectObj->inherits(*globalObjectObj->vm(), JSDOMWindowProxy::info()))
-        anyWorldGlobalObject = static_cast<JSDOMWindowProxy*>(globalObjectObj)->window();
+    auto& vm = globalObjectObj->vm();
+    if (globalObjectObj->inherits<JSWindowProxy>())
+        anyWorldGlobalObject = JSC::jsDynamicCast<JSDOMWindow*>(static_cast<JSWindowProxy*>(globalObjectObj)->window());
+
+    if (!anyWorldGlobalObject)
+        return E_INVALIDARG;
 
     // Get the frame frome the global object we've settled on.
     Frame* frame = anyWorldGlobalObject->wrapped().frame();
     ASSERT(frame->document());
-    JSValue result = frame->script().executeScriptInWorld(world->world(), string, true);
+    JSValue result = frame->script().executeScriptInWorldIgnoringException(world->world(), string, true);
 
     if (!frame) // In case the script removed our frame from the page.
         return S_OK;
@@ -2017,12 +1987,12 @@ HRESULT WebFrame::stringByEvaluatingJavaScriptInScriptWorld(IWebScriptWorld* iWo
     // This bizarre set of rules matches behavior from WebKit for Safari 2.0.
     // If you don't like it, use -[WebScriptObject evaluateWebScript:] or 
     // JSEvaluateScript instead, since they have less surprising semantics.
-    if (!result || !result.isBoolean() && !result.isString() && !result.isNumber())
+    if (!result || (!result.isBoolean() && !result.isString() && !result.isNumber()))
         return S_OK;
 
-    JSC::ExecState* exec = anyWorldGlobalObject->globalExec();
-    JSC::JSLockHolder lock(exec);
-    String resultString = result.toWTFString(exec);
+    JSC::JSGlobalObject* lexicalGlobalObject = anyWorldGlobalObject;
+    JSC::JSLockHolder lock(lexicalGlobalObject);
+    String resultString = result.toWTFString(lexicalGlobalObject);
     *evaluationResult = BString(resultString).release();
 
     return S_OK;
@@ -2073,7 +2043,7 @@ COMPtr<IAccessible> WebFrame::accessible() const
     else if (!m_accessible || m_accessible->document() != currentDocument) {
         // Either we've never had a wrapper for this frame's top-level Document,
         // the Document renderer was destroyed and its wrapper was detached, or
-        // the previous Document is in the page cache, and the current document
+        // the previous Document is in the back/forward cache, and the current document
         // needs to be wrapped.
         m_accessible = new AccessibleDocument(currentDocument, webView()->viewWindow());
     }
@@ -2082,13 +2052,15 @@ COMPtr<IAccessible> WebFrame::accessible() const
 
 void WebFrame::updateBackground()
 {
-    Color backgroundColor = webView()->transparent() ? Color::transparent : Color::white;
     Frame* coreFrame = core(this);
 
     if (!coreFrame || !coreFrame->view())
         return;
 
-    coreFrame->view()->updateBackgroundRecursively(backgroundColor, webView()->transparent());
+    std::optional<Color> backgroundColor;
+    if (webView()->transparent())
+        backgroundColor = Color(Color::transparentBlack);
+    coreFrame->view()->updateBackgroundRecursively(backgroundColor);
 }
 
 // IWebFrame2

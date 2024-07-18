@@ -27,7 +27,7 @@
 
 #include "AcceleratedBackingStore.h"
 
-#if USE(REDIRECTED_XCOMPOSITE_WINDOW)
+#if PLATFORM(X11)
 
 #include <WebCore/RefPtrCairo.h>
 #include <WebCore/XUniqueResource.h>
@@ -39,14 +39,19 @@ class WebPageProxy;
 class AcceleratedBackingStoreX11 final : public AcceleratedBackingStore {
     WTF_MAKE_NONCOPYABLE(AcceleratedBackingStoreX11); WTF_MAKE_FAST_ALLOCATED;
 public:
+    static bool checkRequirements();
     static std::unique_ptr<AcceleratedBackingStoreX11> create(WebPageProxy&);
     ~AcceleratedBackingStoreX11();
 
 private:
-    AcceleratedBackingStoreX11(WebPageProxy&);
+    explicit AcceleratedBackingStoreX11(WebPageProxy&);
 
     void update(const LayerTreeContext&) override;
+#if USE(GTK4)
+    void snapshot(GtkSnapshot*) override;
+#else
     bool paint(cairo_t*, const WebCore::IntRect&) override;
+#endif
 
     RefPtr<cairo_surface_t> m_surface;
     WebCore::XUniqueDamage m_damage;
@@ -54,4 +59,4 @@ private:
 
 } // namespace WebKit
 
-#endif // USE(REDIRECTED_XCOMPOSITE_WINDOW)
+#endif // PLATFORM(X11)

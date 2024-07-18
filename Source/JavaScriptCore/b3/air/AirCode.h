@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,22 +34,30 @@
 #include "AirStackSlot.h"
 #include "AirTmp.h"
 #include "B3SparseCollection.h"
-#include "CCallHelpers.h"
+#include "GPRInfo.h"
+#include "MacroAssembler.h"
 #include "RegisterAtOffsetList.h"
 #include "StackAlignment.h"
+#include <wtf/HashSet.h>
 #include <wtf/IndexMap.h>
+#include <wtf/SmallSet.h>
+#include <wtf/WeakRandom.h>
 
-namespace JSC { namespace B3 {
+namespace JSC {
+
+class CCallHelpers;
+
+namespace B3 {
 
 class Procedure;
 
-#if COMPILER(GCC) && ASSERT_DISABLED
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wreturn-type"
-#endif // COMPILER(GCC) && ASSERT_DISABLED
+#if !ASSERT_ENABLED
+IGNORE_RETURN_TYPE_WARNINGS_BEGIN
+#endif
 
 namespace Air {
 
+class GenerateAndAllocateRegisters;
 class BlockInsertionSet;
 class CCallSpecial;
 class CFG;
@@ -61,6 +69,8 @@ typedef SharedTask<WasmBoundsCheckGeneratorFunction> WasmBoundsCheckGenerator;
 
 typedef void PrologueGeneratorFunction(CCallHelpers&, Code&);
 typedef SharedTask<PrologueGeneratorFunction> PrologueGenerator;
+
+extern const char* const tierName;
 
 // This is an IR that is very close to the bare metal. It requires about 40x more bytes than the
 // generated machine code - for example if you're generating 1MB of machine code, you need about
@@ -102,9 +112,7 @@ public:
     // Note that you can rely on stack slots always getting indices that are larger than the index
     // of any prior stack slot. In fact, all stack slots you create in the future will have an index
     // that is >= stackSlots().size().
-    JS_EXPORT_PRIVATE StackSlot* addStackSlot(
-        unsigned byteSize, StackSlotKind, B3::StackSlot* = nullptr);
-    StackSlot* addStackSlot(B3::StackSlot*);
+    JS_EXPORT_PRIVATE StackSlot* addStackSlot(uint64_t byteSize, StackSlotKind);
 
     JS_EXPORT_PRIVATE Special* addSpecial(std::unique_ptr<Special>);
 
@@ -193,7 +201,7 @@ public:
         RELEASE_ASSERT(m_entrypoints.size() == m_prologueGenerators.size());
     }
     
-    CCallHelpers::Label entrypointLabel(unsigned index) const
+    MacroAssembler::Label entrypointLabel(unsigned index) const
     {
         return m_entrypointLabels[index];
     }
@@ -223,7 +231,7 @@ public:
     RegisterSet calleeSaveRegisters() const { return m_calleeSaveRegisters; }
 
     // Recomputes predecessors and deletes unreachable blocks.
-    void resetReachability();
+    JS_EXPORT_PRIVATE void resetReachability();
     
     JS_EXPORT_PRIVATE void dump(PrintStream&) const;
 
@@ -302,7 +310,13 @@ public:
     }
 
     void addFastTmp(Tmp);
-    bool isFastTmp(Tmp tmp) const { return m_fastTmps.contains(tmp); }
+
+    template<typename Functor>
+    void forEachFastTmp(const Functor& functor) const
+    {
+        for (Tmp tmp : m_fastTmps)
+            functor(tmp);
+    }
     
     CFG& cfg() const { return *m_cfg; }
     
@@ -327,13 +341,28 @@ public:
     // it's mainly for validating the results from JSAir.
     unsigned jsHash() const;
 
-    void setDisassembler(std::unique_ptr<Disassembler>&& disassembler) { m_disassembler = WTFMove(disassembler); }
+    bool shouldPreserveB3Origins() const { return m_preserveB3Origins; }
+    void forcePreservationOfB3Origins() { m_preserveB3Origins = true; }
+
+    void setDisassembler(std::unique_ptr<Disassembler>&& disassembler)
+    {
+        m_disassembler = WTFMove(disassembler);
+        forcePreservationOfB3Origins();
+    }
     Disassembler* disassembler() { return m_disassembler.get(); }
 
     RegisterSet mutableGPRs();
     RegisterSet mutableFPRs();
     RegisterSet pinnedRegisters() const { return m_pinnedRegs; }
+    
+    void emitDefaultPrologue(CCallHelpers&);
+    void emitEpilogue(CCallHelpers&);
 
+    std::unique_ptr<GenerateAndAllocateRegisters> m_generateAndAllocateRegisters;
+
+    void setForceIRCRegisterAllocation() { m_forceIRC = true; }
+    bool forceIRCRegisterAllocation() { return m_forceIRC; }
+    
 private:
     friend class ::JSC::B3::Procedure;
     friend class BlockInsertionSet;
@@ -362,30 +391,32 @@ private:
     Vector<std::unique_ptr<BasicBlock>> m_blocks;
     SparseCollection<Special> m_specials;
     std::unique_ptr<CFG> m_cfg;
-    HashSet<Tmp> m_fastTmps;
+    SmallSet<Tmp, TmpHash, 2> m_fastTmps;
     CCallSpecial* m_cCallSpecial { nullptr };
     unsigned m_numGPTmps { 0 };
     unsigned m_numFPTmps { 0 };
     unsigned m_frameSize { 0 };
     unsigned m_callArgAreaSize { 0 };
+    unsigned m_optLevel { defaultOptLevel() };
     bool m_stackIsAllocated { false };
+    bool m_preserveB3Origins { true };
+    bool m_forceIRC { false };
     RegisterAtOffsetList m_uncorrectedCalleeSaveRegisterAtOffsetList;
     RegisterSet m_calleeSaveRegisters;
     StackSlot* m_calleeSaveStackSlot { nullptr };
     Vector<FrequentedBlock> m_entrypoints; // This is empty until after lowerEntrySwitch().
-    Vector<CCallHelpers::Label> m_entrypointLabels; // This is empty until code generation.
+    Vector<MacroAssembler::Label> m_entrypointLabels; // This is empty until code generation.
     Vector<Ref<PrologueGenerator>, 1> m_prologueGenerators;
     RefPtr<WasmBoundsCheckGenerator> m_wasmBoundsCheckGenerator;
     const char* m_lastPhaseName;
     std::unique_ptr<Disassembler> m_disassembler;
-    unsigned m_optLevel { defaultOptLevel() };
     Ref<PrologueGenerator> m_defaultPrologueGenerator;
 };
 
 } } } // namespace JSC::B3::Air
 
-#if COMPILER(GCC) && ASSERT_DISABLED
-#pragma GCC diagnostic pop
-#endif // COMPILER(GCC) && ASSERT_DISABLED
+#if !ASSERT_ENABLED
+IGNORE_RETURN_TYPE_WARNINGS_END
+#endif
 
 #endif // ENABLE(B3_JIT)

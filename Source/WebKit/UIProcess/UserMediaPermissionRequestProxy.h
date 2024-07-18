@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2014 Igalia S.L.
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -20,6 +20,11 @@
 #pragma once
 
 #include "APIObject.h"
+#include <WebCore/CaptureDevice.h>
+#include <WebCore/FrameIdentifier.h>
+#include <WebCore/MediaStreamRequest.h>
+#include <WebCore/UserMediaRequestIdentifier.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
@@ -33,43 +38,102 @@ class UserMediaPermissionRequestManagerProxy;
 
 class UserMediaPermissionRequestProxy : public API::ObjectImpl<API::Object::Type::UserMediaPermissionRequest> {
 public:
-    static Ref<UserMediaPermissionRequestProxy> create(UserMediaPermissionRequestManagerProxy& manager, uint64_t userMediaID, uint64_t mainFrameID, uint64_t frameID, Ref<WebCore::SecurityOrigin>&& userMediaDocumentOrigin, Ref<WebCore::SecurityOrigin>&& topLevelDocumentOrigin, Vector<String>&& videoDeviceUIDs, Vector<String>&& audioDeviceUIDs, String&& deviceIDHashSalt)
-    {
-        return adoptRef(*new UserMediaPermissionRequestProxy(manager, userMediaID, mainFrameID, frameID, WTFMove(userMediaDocumentOrigin), WTFMove(topLevelDocumentOrigin), WTFMove(videoDeviceUIDs), WTFMove(audioDeviceUIDs), WTFMove(deviceIDHashSalt)));
-    }
+    static Ref<UserMediaPermissionRequestProxy> create(UserMediaPermissionRequestManagerProxy&, WebCore::UserMediaRequestIdentifier, WebCore::FrameIdentifier, WebCore::FrameIdentifier, Ref<WebCore::SecurityOrigin>&&, Ref<WebCore::SecurityOrigin>&&, Vector<WebCore::CaptureDevice>&&, Vector<WebCore::CaptureDevice>&&, WebCore::MediaStreamRequest&&, CompletionHandler<void(bool)>&& = { });
 
-    void allow(const String& videoDeviceUID, const String& audioDeviceUID);
+    ~UserMediaPermissionRequestProxy() = default;
 
+    void allow(const String& audioDeviceUID, const String& videoDeviceUID);
+    void allow();
+    void promptForGetUserMedia();
+
+    enum class UserMediaDisplayCapturePromptType { Window, Screen, UserChoose };
+    virtual void promptForGetDisplayMedia(UserMediaDisplayCapturePromptType = UserMediaDisplayCapturePromptType::UserChoose);
+    virtual bool canPromptForGetDisplayMedia();
+
+    void doDefaultAction();
     enum class UserMediaAccessDenialReason { NoConstraints, UserMediaDisabled, NoCaptureDevices, InvalidConstraint, HardwareError, PermissionDenied, OtherFailure };
-    void deny(UserMediaAccessDenialReason);
+    void deny(UserMediaAccessDenialReason = UserMediaAccessDenialReason::UserMediaDisabled);
 
     void invalidate();
+    bool isPending() const { return m_manager; }
 
-    bool requiresAudio() const { return m_audioDeviceUIDs.size(); }
-    bool requiresVideo() const { return m_videoDeviceUIDs.size(); }
+    bool requiresAudioCapture() const { return m_eligibleAudioDevices.size(); }
+    bool requiresVideoCapture() const { return !requiresDisplayCapture() && m_eligibleVideoDevices.size(); }
+    bool requiresDisplayCapture() const { return (m_request.type == WebCore::MediaStreamRequest::Type::DisplayMedia || m_request.type == WebCore::MediaStreamRequest::Type::DisplayMediaWithAudio) && m_eligibleVideoDevices.size(); }
+    bool requiresDisplayCaptureWithAudio() const { return m_request.type == WebCore::MediaStreamRequest::Type::DisplayMediaWithAudio && m_eligibleVideoDevices.size(); }
 
-    const Vector<String>& videoDeviceUIDs() const { return m_videoDeviceUIDs; }
-    const Vector<String>& audioDeviceUIDs() const { return m_audioDeviceUIDs; }
+    void setEligibleVideoDeviceUIDs(Vector<WebCore::CaptureDevice>&& devices) { m_eligibleVideoDevices = WTFMove(devices); }
+    void setEligibleAudioDeviceUIDs(Vector<WebCore::CaptureDevice>&& devices) { m_eligibleAudioDevices = WTFMove(devices); }
 
-    uint64_t mainFrameID() const { return m_mainFrameID; }
-    uint64_t frameID() const { return m_frameID; }
+    Vector<String> videoDeviceUIDs() const;
+    Vector<String> audioDeviceUIDs() const;
+    bool hasAudioDevice() const { return !m_eligibleAudioDevices.isEmpty(); }
+    bool hasVideoDevice() const { return !m_eligibleVideoDevices.isEmpty(); }
+
+    bool hasPersistentAccess() const { return m_hasPersistentAccess; }
+    void setHasPersistentAccess() { m_hasPersistentAccess = true; }
+
+    WebCore::UserMediaRequestIdentifier userMediaID() const { return m_userMediaID; }
+    WebCore::FrameIdentifier mainFrameID() const { return m_mainFrameID; }
+    WebCore::FrameIdentifier frameID() const { return m_frameID; }
+
     WebCore::SecurityOrigin& topLevelDocumentSecurityOrigin() { return m_topLevelDocumentSecurityOrigin.get(); }
     WebCore::SecurityOrigin& userMediaDocumentSecurityOrigin() { return m_userMediaDocumentSecurityOrigin.get(); }
+    const WebCore::SecurityOrigin& topLevelDocumentSecurityOrigin() const { return m_topLevelDocumentSecurityOrigin.get(); }
+    const WebCore::SecurityOrigin& userMediaDocumentSecurityOrigin() const { return m_userMediaDocumentSecurityOrigin.get(); }
 
+    const WebCore::MediaStreamRequest& userRequest() const { return m_request; }
+
+    WebCore::MediaStreamRequest::Type requestType() const { return m_request.type; }
+
+    void setDeviceIdentifierHashSalt(String&& salt) { m_deviceIdentifierHashSalt = WTFMove(salt); }
     const String& deviceIdentifierHashSalt() const { return m_deviceIdentifierHashSalt; }
 
-private:
-    UserMediaPermissionRequestProxy(UserMediaPermissionRequestManagerProxy&, uint64_t userMediaID, uint64_t mainFrameID, uint64_t frameID, Ref<WebCore::SecurityOrigin>&& userMediaDocumentOrigin, Ref<WebCore::SecurityOrigin>&& topLevelDocumentOrigin, Vector<String>&& videoDeviceUIDs, Vector<String>&& audioDeviceUIDs, String&&);
+    WebCore::CaptureDevice audioDevice() const { return m_eligibleAudioDevices.isEmpty() ? WebCore::CaptureDevice { } : m_eligibleAudioDevices[0]; }
+    WebCore::CaptureDevice videoDevice() const { return m_eligibleVideoDevices.isEmpty() ? WebCore::CaptureDevice { } : m_eligibleVideoDevices[0]; }
 
+#if ENABLE(MEDIA_STREAM)
+    bool isUserGesturePriviledged() const { return m_request.isUserGesturePriviledged; }
+#endif
+
+    CompletionHandler<void(bool)> decisionCompletionHandler() { return std::exchange(m_decisionCompletionHandler, { }); }
+
+protected:
+    UserMediaPermissionRequestProxy(UserMediaPermissionRequestManagerProxy&, WebCore::UserMediaRequestIdentifier, WebCore::FrameIdentifier mainFrameID, WebCore::FrameIdentifier, Ref<WebCore::SecurityOrigin>&& userMediaDocumentOrigin, Ref<WebCore::SecurityOrigin>&& topLevelDocumentOrigin, Vector<WebCore::CaptureDevice>&& audioDevices, Vector<WebCore::CaptureDevice>&& videoDevices, WebCore::MediaStreamRequest&&, CompletionHandler<void(bool)>&&);
+
+    UserMediaPermissionRequestManagerProxy* manager() const { return m_manager; }
+
+private:
     UserMediaPermissionRequestManagerProxy* m_manager;
-    uint64_t m_userMediaID;
-    uint64_t m_mainFrameID;
-    uint64_t m_frameID;
+    WebCore::UserMediaRequestIdentifier m_userMediaID;
+    WebCore::FrameIdentifier m_mainFrameID;
+    WebCore::FrameIdentifier m_frameID;
     Ref<WebCore::SecurityOrigin> m_userMediaDocumentSecurityOrigin;
     Ref<WebCore::SecurityOrigin> m_topLevelDocumentSecurityOrigin;
-    Vector<String> m_videoDeviceUIDs;
-    Vector<String> m_audioDeviceUIDs;
+    Vector<WebCore::CaptureDevice> m_eligibleVideoDevices;
+    Vector<WebCore::CaptureDevice> m_eligibleAudioDevices;
+    WebCore::MediaStreamRequest m_request;
+    bool m_hasPersistentAccess { false };
     String m_deviceIdentifierHashSalt;
+    CompletionHandler<void(bool)> m_decisionCompletionHandler;
 };
 
+String convertEnumerationToString(UserMediaPermissionRequestProxy::UserMediaAccessDenialReason);
+
 } // namespace WebKit
+
+namespace WTF {
+
+template<typename Type>
+struct LogArgument;
+
+template <>
+struct LogArgument<WebKit::UserMediaPermissionRequestProxy::UserMediaAccessDenialReason> {
+    static String toString(const WebKit::UserMediaPermissionRequestProxy::UserMediaAccessDenialReason type)
+    {
+        return convertEnumerationToString(type);
+    }
+};
+
+}; // namespace WTF
+

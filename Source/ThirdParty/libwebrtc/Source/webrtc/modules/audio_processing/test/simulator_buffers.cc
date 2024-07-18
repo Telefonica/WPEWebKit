@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/test/simulator_buffers.h"
+#include "modules/audio_processing/test/simulator_buffers.h"
 
-#include "webrtc/base/checks.h"
-#include "webrtc/modules/audio_processing/test/audio_buffer_tools.h"
+#include "modules/audio_processing/test/audio_buffer_tools.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 namespace test {
@@ -58,10 +58,11 @@ void SimulatorBuffers::CreateConfigAndBuffer(
     std::vector<float*>* buffer_data,
     std::vector<float>* buffer_data_samples) {
   int samples_per_channel = rtc::CheckedDivExact(sample_rate_hz, 100);
-  *config = StreamConfig(sample_rate_hz, num_channels, false);
-  buffer->reset(new AudioBuffer(config->num_frames(), config->num_channels(),
-                                config->num_frames(), config->num_channels(),
-                                config->num_frames()));
+  *config = StreamConfig(sample_rate_hz, num_channels);
+  buffer->reset(
+      new AudioBuffer(config->sample_rate_hz(), config->num_channels(),
+                      config->sample_rate_hz(), config->num_channels(),
+                      config->sample_rate_hz(), config->num_channels()));
 
   buffer_data_samples->resize(samples_per_channel * num_channels);
   for (auto& v : *buffer_data_samples) {

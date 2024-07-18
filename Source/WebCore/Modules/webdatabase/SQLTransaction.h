@@ -35,7 +35,6 @@
 #include "SQLValue.h"
 #include <wtf/Deque.h>
 #include <wtf/Lock.h>
-#include <wtf/Optional.h>
 
 namespace WebCore {
 
@@ -50,7 +49,7 @@ class VoidCallback;
 
 class SQLTransactionWrapper : public ThreadSafeRefCounted<SQLTransactionWrapper> {
 public:
-    virtual ~SQLTransactionWrapper() { }
+    virtual ~SQLTransactionWrapper() = default;
     virtual bool performPreflight(SQLTransaction&) = 0;
     virtual bool performPostflight(SQLTransaction&) = 0;
     virtual SQLError* sqlError() const = 0;
@@ -106,6 +105,8 @@ private:
 
     NO_RETURN_DUE_TO_ASSERT void unreachableState();
 
+    void callErrorCallbackDueToInterruption();
+
     void getNextStatement();
     bool runCurrentStatement();
     void handleCurrentStatementError();
@@ -137,8 +138,8 @@ private:
     bool m_readOnly { false };
     bool m_hasVersionMismatch { false };
 
-    Lock m_statementMutex;
-    Deque<std::unique_ptr<SQLStatement>> m_statementQueue;
+    Lock m_statementLock;
+    Deque<std::unique_ptr<SQLStatement>> m_statementQueue WTF_GUARDED_BY_LOCK(m_statementLock);
 
     std::unique_ptr<SQLStatement> m_currentStatement;
 

@@ -24,9 +24,10 @@
 #include "DOMObjectCache.h"
 #include <WebCore/DOMException.h>
 #include <WebCore/Document.h>
-#include "GObjectEventListener.h"
+#include <WebCore/ElementInlines.h>
 #include <WebCore/HTMLNames.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
+#include "GObjectEventListener.h"
 #include "WebKitDOMEventPrivate.h"
 #include "WebKitDOMEventTarget.h"
 #include "WebKitDOMHTMLCollectionPrivate.h"
@@ -39,6 +40,8 @@
 #include "ConvertToUTF8String.h"
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
 namespace WebKit {
 
@@ -88,30 +91,30 @@ static gboolean webkit_dom_html_table_element_remove_event_listener(WebKitDOMEve
     return WebKit::GObjectEventListener::removeEventListener(G_OBJECT(target), coreTarget, eventName, handler, useCapture);
 }
 
-static void webkit_dom_event_target_init(WebKitDOMEventTargetIface* iface)
+static void webkit_dom_html_table_element_dom_event_target_init(WebKitDOMEventTargetIface* iface)
 {
     iface->dispatch_event = webkit_dom_html_table_element_dispatch_event;
     iface->add_event_listener = webkit_dom_html_table_element_add_event_listener;
     iface->remove_event_listener = webkit_dom_html_table_element_remove_event_listener;
 }
 
-G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLTableElement, webkit_dom_html_table_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_event_target_init))
+G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLTableElement, webkit_dom_html_table_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_html_table_element_dom_event_target_init))
 
 enum {
-    PROP_0,
-    PROP_CAPTION,
-    PROP_T_HEAD,
-    PROP_T_FOOT,
-    PROP_ROWS,
-    PROP_T_BODIES,
-    PROP_ALIGN,
-    PROP_BG_COLOR,
-    PROP_BORDER,
-    PROP_CELL_PADDING,
-    PROP_CELL_SPACING,
-    PROP_RULES,
-    PROP_SUMMARY,
-    PROP_WIDTH,
+    DOM_HTML_TABLE_ELEMENT_PROP_0,
+    DOM_HTML_TABLE_ELEMENT_PROP_CAPTION,
+    DOM_HTML_TABLE_ELEMENT_PROP_T_HEAD,
+    DOM_HTML_TABLE_ELEMENT_PROP_T_FOOT,
+    DOM_HTML_TABLE_ELEMENT_PROP_ROWS,
+    DOM_HTML_TABLE_ELEMENT_PROP_T_BODIES,
+    DOM_HTML_TABLE_ELEMENT_PROP_ALIGN,
+    DOM_HTML_TABLE_ELEMENT_PROP_BG_COLOR,
+    DOM_HTML_TABLE_ELEMENT_PROP_BORDER,
+    DOM_HTML_TABLE_ELEMENT_PROP_CELL_PADDING,
+    DOM_HTML_TABLE_ELEMENT_PROP_CELL_SPACING,
+    DOM_HTML_TABLE_ELEMENT_PROP_RULES,
+    DOM_HTML_TABLE_ELEMENT_PROP_SUMMARY,
+    DOM_HTML_TABLE_ELEMENT_PROP_WIDTH,
 };
 
 static void webkit_dom_html_table_element_set_property(GObject* object, guint propertyId, const GValue* value, GParamSpec* pspec)
@@ -119,28 +122,28 @@ static void webkit_dom_html_table_element_set_property(GObject* object, guint pr
     WebKitDOMHTMLTableElement* self = WEBKIT_DOM_HTML_TABLE_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_ALIGN:
+    case DOM_HTML_TABLE_ELEMENT_PROP_ALIGN:
         webkit_dom_html_table_element_set_align(self, g_value_get_string(value));
         break;
-    case PROP_BG_COLOR:
+    case DOM_HTML_TABLE_ELEMENT_PROP_BG_COLOR:
         webkit_dom_html_table_element_set_bg_color(self, g_value_get_string(value));
         break;
-    case PROP_BORDER:
+    case DOM_HTML_TABLE_ELEMENT_PROP_BORDER:
         webkit_dom_html_table_element_set_border(self, g_value_get_string(value));
         break;
-    case PROP_CELL_PADDING:
+    case DOM_HTML_TABLE_ELEMENT_PROP_CELL_PADDING:
         webkit_dom_html_table_element_set_cell_padding(self, g_value_get_string(value));
         break;
-    case PROP_CELL_SPACING:
+    case DOM_HTML_TABLE_ELEMENT_PROP_CELL_SPACING:
         webkit_dom_html_table_element_set_cell_spacing(self, g_value_get_string(value));
         break;
-    case PROP_RULES:
+    case DOM_HTML_TABLE_ELEMENT_PROP_RULES:
         webkit_dom_html_table_element_set_rules(self, g_value_get_string(value));
         break;
-    case PROP_SUMMARY:
+    case DOM_HTML_TABLE_ELEMENT_PROP_SUMMARY:
         webkit_dom_html_table_element_set_summary(self, g_value_get_string(value));
         break;
-    case PROP_WIDTH:
+    case DOM_HTML_TABLE_ELEMENT_PROP_WIDTH:
         webkit_dom_html_table_element_set_width(self, g_value_get_string(value));
         break;
     default:
@@ -154,43 +157,43 @@ static void webkit_dom_html_table_element_get_property(GObject* object, guint pr
     WebKitDOMHTMLTableElement* self = WEBKIT_DOM_HTML_TABLE_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_CAPTION:
+    case DOM_HTML_TABLE_ELEMENT_PROP_CAPTION:
         g_value_set_object(value, webkit_dom_html_table_element_get_caption(self));
         break;
-    case PROP_T_HEAD:
+    case DOM_HTML_TABLE_ELEMENT_PROP_T_HEAD:
         g_value_set_object(value, webkit_dom_html_table_element_get_t_head(self));
         break;
-    case PROP_T_FOOT:
+    case DOM_HTML_TABLE_ELEMENT_PROP_T_FOOT:
         g_value_set_object(value, webkit_dom_html_table_element_get_t_foot(self));
         break;
-    case PROP_ROWS:
+    case DOM_HTML_TABLE_ELEMENT_PROP_ROWS:
         g_value_set_object(value, webkit_dom_html_table_element_get_rows(self));
         break;
-    case PROP_T_BODIES:
+    case DOM_HTML_TABLE_ELEMENT_PROP_T_BODIES:
         g_value_set_object(value, webkit_dom_html_table_element_get_t_bodies(self));
         break;
-    case PROP_ALIGN:
+    case DOM_HTML_TABLE_ELEMENT_PROP_ALIGN:
         g_value_take_string(value, webkit_dom_html_table_element_get_align(self));
         break;
-    case PROP_BG_COLOR:
+    case DOM_HTML_TABLE_ELEMENT_PROP_BG_COLOR:
         g_value_take_string(value, webkit_dom_html_table_element_get_bg_color(self));
         break;
-    case PROP_BORDER:
+    case DOM_HTML_TABLE_ELEMENT_PROP_BORDER:
         g_value_take_string(value, webkit_dom_html_table_element_get_border(self));
         break;
-    case PROP_CELL_PADDING:
+    case DOM_HTML_TABLE_ELEMENT_PROP_CELL_PADDING:
         g_value_take_string(value, webkit_dom_html_table_element_get_cell_padding(self));
         break;
-    case PROP_CELL_SPACING:
+    case DOM_HTML_TABLE_ELEMENT_PROP_CELL_SPACING:
         g_value_take_string(value, webkit_dom_html_table_element_get_cell_spacing(self));
         break;
-    case PROP_RULES:
+    case DOM_HTML_TABLE_ELEMENT_PROP_RULES:
         g_value_take_string(value, webkit_dom_html_table_element_get_rules(self));
         break;
-    case PROP_SUMMARY:
+    case DOM_HTML_TABLE_ELEMENT_PROP_SUMMARY:
         g_value_take_string(value, webkit_dom_html_table_element_get_summary(self));
         break;
-    case PROP_WIDTH:
+    case DOM_HTML_TABLE_ELEMENT_PROP_WIDTH:
         g_value_take_string(value, webkit_dom_html_table_element_get_width(self));
         break;
     default:
@@ -207,7 +210,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_CAPTION,
+        DOM_HTML_TABLE_ELEMENT_PROP_CAPTION,
         g_param_spec_object(
             "caption",
             "HTMLTableElement:caption",
@@ -217,7 +220,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_T_HEAD,
+        DOM_HTML_TABLE_ELEMENT_PROP_T_HEAD,
         g_param_spec_object(
             "t-head",
             "HTMLTableElement:t-head",
@@ -227,7 +230,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_T_FOOT,
+        DOM_HTML_TABLE_ELEMENT_PROP_T_FOOT,
         g_param_spec_object(
             "t-foot",
             "HTMLTableElement:t-foot",
@@ -237,7 +240,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_ROWS,
+        DOM_HTML_TABLE_ELEMENT_PROP_ROWS,
         g_param_spec_object(
             "rows",
             "HTMLTableElement:rows",
@@ -247,7 +250,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_T_BODIES,
+        DOM_HTML_TABLE_ELEMENT_PROP_T_BODIES,
         g_param_spec_object(
             "t-bodies",
             "HTMLTableElement:t-bodies",
@@ -257,7 +260,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_ALIGN,
+        DOM_HTML_TABLE_ELEMENT_PROP_ALIGN,
         g_param_spec_string(
             "align",
             "HTMLTableElement:align",
@@ -267,7 +270,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_BG_COLOR,
+        DOM_HTML_TABLE_ELEMENT_PROP_BG_COLOR,
         g_param_spec_string(
             "bg-color",
             "HTMLTableElement:bg-color",
@@ -277,7 +280,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_BORDER,
+        DOM_HTML_TABLE_ELEMENT_PROP_BORDER,
         g_param_spec_string(
             "border",
             "HTMLTableElement:border",
@@ -287,7 +290,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_CELL_PADDING,
+        DOM_HTML_TABLE_ELEMENT_PROP_CELL_PADDING,
         g_param_spec_string(
             "cell-padding",
             "HTMLTableElement:cell-padding",
@@ -297,7 +300,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_CELL_SPACING,
+        DOM_HTML_TABLE_ELEMENT_PROP_CELL_SPACING,
         g_param_spec_string(
             "cell-spacing",
             "HTMLTableElement:cell-spacing",
@@ -307,7 +310,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_RULES,
+        DOM_HTML_TABLE_ELEMENT_PROP_RULES,
         g_param_spec_string(
             "rules",
             "HTMLTableElement:rules",
@@ -317,7 +320,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_SUMMARY,
+        DOM_HTML_TABLE_ELEMENT_PROP_SUMMARY,
         g_param_spec_string(
             "summary",
             "HTMLTableElement:summary",
@@ -327,7 +330,7 @@ static void webkit_dom_html_table_element_class_init(WebKitDOMHTMLTableElementCl
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_WIDTH,
+        DOM_HTML_TABLE_ELEMENT_PROP_WIDTH,
         g_param_spec_string(
             "width",
             "HTMLTableElement:width",
@@ -526,8 +529,7 @@ void webkit_dom_html_table_element_set_align(WebKitDOMHTMLTableElement* self, co
     g_return_if_fail(WEBKIT_DOM_IS_HTML_TABLE_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLTableElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::alignAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::alignAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_table_element_get_bg_color(WebKitDOMHTMLTableElement* self)
@@ -545,8 +547,7 @@ void webkit_dom_html_table_element_set_bg_color(WebKitDOMHTMLTableElement* self,
     g_return_if_fail(WEBKIT_DOM_IS_HTML_TABLE_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLTableElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::bgcolorAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::bgcolorAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_table_element_get_border(WebKitDOMHTMLTableElement* self)
@@ -564,8 +565,7 @@ void webkit_dom_html_table_element_set_border(WebKitDOMHTMLTableElement* self, c
     g_return_if_fail(WEBKIT_DOM_IS_HTML_TABLE_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLTableElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::borderAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::borderAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_table_element_get_cell_padding(WebKitDOMHTMLTableElement* self)
@@ -583,8 +583,7 @@ void webkit_dom_html_table_element_set_cell_padding(WebKitDOMHTMLTableElement* s
     g_return_if_fail(WEBKIT_DOM_IS_HTML_TABLE_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLTableElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::cellpaddingAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::cellpaddingAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_table_element_get_cell_spacing(WebKitDOMHTMLTableElement* self)
@@ -602,8 +601,7 @@ void webkit_dom_html_table_element_set_cell_spacing(WebKitDOMHTMLTableElement* s
     g_return_if_fail(WEBKIT_DOM_IS_HTML_TABLE_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLTableElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::cellspacingAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::cellspacingAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_table_element_get_rules(WebKitDOMHTMLTableElement* self)
@@ -621,8 +619,7 @@ void webkit_dom_html_table_element_set_rules(WebKitDOMHTMLTableElement* self, co
     g_return_if_fail(WEBKIT_DOM_IS_HTML_TABLE_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLTableElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::rulesAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::rulesAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_table_element_get_summary(WebKitDOMHTMLTableElement* self)
@@ -640,8 +637,7 @@ void webkit_dom_html_table_element_set_summary(WebKitDOMHTMLTableElement* self, 
     g_return_if_fail(WEBKIT_DOM_IS_HTML_TABLE_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLTableElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::summaryAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::summaryAttr, WTF::AtomString::fromUTF8(value));
 }
 
 gchar* webkit_dom_html_table_element_get_width(WebKitDOMHTMLTableElement* self)
@@ -659,7 +655,7 @@ void webkit_dom_html_table_element_set_width(WebKitDOMHTMLTableElement* self, co
     g_return_if_fail(WEBKIT_DOM_IS_HTML_TABLE_ELEMENT(self));
     g_return_if_fail(value);
     WebCore::HTMLTableElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::widthAttr, convertedValue);
+    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::widthAttr, WTF::AtomString::fromUTF8(value));
 }
 
+G_GNUC_END_IGNORE_DEPRECATIONS;

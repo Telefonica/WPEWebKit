@@ -25,8 +25,11 @@
 
 #pragma once
 
+#include "LayerTreeAsTextOptions.h"
 #include "TiledBacking.h"
+#include "TransformationMatrix.h"
 #include <wtf/Forward.h>
+#include <wtf/OptionSet.h>
 
 namespace WebCore {
 
@@ -36,44 +39,41 @@ class GraphicsContext;
 class GraphicsLayer;
 class IntPoint;
 class IntRect;
-class TransformationMatrix;
 
-enum GraphicsLayerPaintingPhaseFlags {
-    GraphicsLayerPaintBackground            = 1 << 0,
-    GraphicsLayerPaintForeground            = 1 << 1,
-    GraphicsLayerPaintMask                  = 1 << 2,
-    GraphicsLayerPaintClipPath              = 1 << 3,
-    GraphicsLayerPaintOverflowContents      = 1 << 4,
-    GraphicsLayerPaintCompositedScroll      = 1 << 5,
-    GraphicsLayerPaintChildClippingMask     = 1 << 6,
-    GraphicsLayerPaintAllWithOverflowClip   = GraphicsLayerPaintBackground | GraphicsLayerPaintForeground
+enum class GraphicsLayerPaintingPhase {
+    Background            = 1 << 0,
+    Foreground            = 1 << 1,
+    Mask                  = 1 << 2,
+    ClipPath              = 1 << 3,
+    OverflowContents      = 1 << 4,
+    CompositedScroll      = 1 << 5,
+    ChildClippingMask     = 1 << 6,
 };
-typedef unsigned GraphicsLayerPaintingPhase;
 
 enum AnimatedPropertyID {
     AnimatedPropertyInvalid,
+    AnimatedPropertyTranslate,
+    AnimatedPropertyScale,
+    AnimatedPropertyRotate,
     AnimatedPropertyTransform,
     AnimatedPropertyOpacity,
     AnimatedPropertyBackgroundColor,
-    AnimatedPropertyFilter
+    AnimatedPropertyFilter,
 #if ENABLE(FILTERS_LEVEL_2)
-    , AnimatedPropertyWebkitBackdropFilter
+    AnimatedPropertyWebkitBackdropFilter,
 #endif
 };
 
-enum LayerTreeAsTextBehaviorFlags {
-    LayerTreeAsTextBehaviorNormal               = 0,
-    LayerTreeAsTextDebug                        = 1 << 0, // Dump extra debugging info like layer addresses.
-    LayerTreeAsTextIncludeVisibleRects          = 1 << 1,
-    LayerTreeAsTextIncludeTileCaches            = 1 << 2,
-    LayerTreeAsTextIncludeRepaintRects          = 1 << 3,
-    LayerTreeAsTextIncludePaintingPhases        = 1 << 4,
-    LayerTreeAsTextIncludeContentLayers         = 1 << 5,
-    LayerTreeAsTextIncludePageOverlayLayers     = 1 << 6,
-    LayerTreeAsTextIncludeAcceleratesDrawing    = 1 << 7,
-    LayerTreeAsTextIncludeBackingStoreAttached  = 1 << 8,
+inline bool animatedPropertyIsTransformOrRelated(AnimatedPropertyID property)
+{
+    return property == AnimatedPropertyTransform || property == AnimatedPropertyTranslate || property == AnimatedPropertyScale || property == AnimatedPropertyRotate;
+}
+
+enum class PlatformLayerTreeAsTextFlags : uint8_t {
+    Debug = 1 << 0,
+    IgnoreChildren = 1 << 1,
+    IncludeModels = 1 << 2,
 };
-typedef unsigned LayerTreeAsTextBehavior;
 
 enum GraphicsLayerPaintFlags {
     GraphicsLayerPaintNormal                    = 0,
@@ -84,12 +84,12 @@ typedef unsigned GraphicsLayerPaintBehavior;
     
 class GraphicsLayerClient {
 public:
-    virtual ~GraphicsLayerClient() {}
+    virtual ~GraphicsLayerClient() = default;
 
     virtual void tiledBackingUsageChanged(const GraphicsLayer*, bool /*usingTiledBacking*/) { }
     
     // Callback for when hardware-accelerated animation started.
-    virtual void notifyAnimationStarted(const GraphicsLayer*, const String& /*animationKey*/, double /*time*/) { }
+    virtual void notifyAnimationStarted(const GraphicsLayer*, const String& /*animationKey*/, MonotonicTime /*time*/) { }
     virtual void notifyAnimationEnded(const GraphicsLayer*, const String& /*animationKey*/) { }
 
     // Notification that a layer property changed that requires a subsequent call to flushCompositingState()
@@ -99,8 +99,8 @@ public:
     // Notification that this layer requires a flush before the next display refresh.
     virtual void notifyFlushBeforeDisplayRefresh(const GraphicsLayer*) { }
 
-    virtual void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const FloatRect& /* inClip */, GraphicsLayerPaintBehavior) { }
-    virtual void didCommitChangesForLayer(const GraphicsLayer*) const { }
+    virtual void paintContents(const GraphicsLayer*, GraphicsContext&, const FloatRect& /* inClip */, GraphicsLayerPaintBehavior) { }
+    virtual void didChangePlatformLayerForLayer(const GraphicsLayer*) { }
 
     // Provides current transform (taking transform-origin and animations into account). Input matrix has been
     // initialized to identity already. Returns false if the layer has no transform.
@@ -121,8 +121,8 @@ public:
 
     virtual bool isTrackingRepaints() const { return false; }
 
-    virtual bool shouldSkipLayerInDump(const GraphicsLayer*, LayerTreeAsTextBehavior) const { return false; }
-    virtual bool shouldDumpPropertyForLayer(const GraphicsLayer*, const char*) const { return true; }
+    virtual bool shouldSkipLayerInDump(const GraphicsLayer*, OptionSet<LayerTreeAsTextOptions>) const { return false; }
+    virtual bool shouldDumpPropertyForLayer(const GraphicsLayer*, const char*, OptionSet<LayerTreeAsTextOptions>) const { return true; }
 
     virtual bool shouldAggressivelyRetainTiles(const GraphicsLayer*) const { return false; }
     virtual bool shouldTemporarilyRetainTileCohorts(const GraphicsLayer*) const { return true; }
@@ -134,6 +134,8 @@ public:
     virtual bool needsIOSDumpRenderTreeMainFrameRenderViewLayerIsAlwaysOpaqueHack(const GraphicsLayer&) const { return false; }
 
     virtual void logFilledVisibleFreshTile(unsigned) { };
+
+    virtual TransformationMatrix transformMatrixForProperty(AnimatedPropertyID) const { return { }; }
 
 #ifndef NDEBUG
     // RenderLayerBacking overrides this to verify that it is not

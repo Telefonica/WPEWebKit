@@ -4,7 +4,7 @@
 # 
 # tests the rtpw sender and receiver functions
 #
-# Copyright (c) 2001-2006, Cisco Systems, Inc.
+# Copyright (c) 2001-2017, Cisco Systems, Inc.
 # All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without
@@ -37,7 +37,28 @@
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-RTPW=./rtpw
+case $(uname -s) in
+    *CYGWIN*|*MINGW*)
+        EXE=".exe"
+        ;;
+    *Linux*)
+        EXE=""
+        if [ -n "$CRYPTO_LIBDIR" ]
+        then
+            export LD_LIBRARY_PATH="$CRYPTO_LIBDIR"
+        fi
+        ;;
+    *Darwin*)
+        EXE=""
+        if [ -n "$CRYPTO_LIBDIR" ]
+        then
+            export DYLD_LIBRARY_PATH="$CRYPTO_LIBDIR"
+        fi
+        ;;
+esac
+
+RTPW=./rtpw$EXE
+[ -n "$MESON_EXE_WRAPPER" ] && RTPW="$MESON_EXE_WRAPPER $RTPW"
 DEST_PORT=9999
 DURATION=3
 
@@ -53,7 +74,7 @@ ARGS="-b $key -a -e 128"
 
 killall rtpw 2>/dev/null
 
-if test -x $RTPW; then
+if test -n $MESON_EXE_WRAPPER || test -x $RTPW; then
 
 echo  $0 ": starting rtpw receiver process... "
 
@@ -66,7 +87,7 @@ echo $0 ": receiver PID = $receiver_pid"
 sleep 1 
 
 # verify that the background job is running
-ps | grep -q $receiver_pid
+ps -e | grep -q $receiver_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -83,7 +104,7 @@ sender_pid=$!
 echo $0 ": sender PID = $sender_pid"
 
 # verify that the background job is running
-ps | grep -q $sender_pid
+ps -e | grep -q $sender_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -96,8 +117,8 @@ sleep $DURATION
 kill $receiver_pid
 kill $sender_pid
 
-wait $receiver_pid
-wait $sender_pid
+wait $receiver_pid 2>/dev/null
+wait $sender_pid 2>/dev/null
 
 
 key=033490ba9e82994fc21013395739038992b2edc5034f61a72345ca598d7bfd0189aa6dc2ecab32fd9af74df6dfc6
@@ -115,7 +136,7 @@ echo $0 ": receiver PID = $receiver_pid"
 sleep 1 
 
 # verify that the background job is running
-ps | grep -q $receiver_pid
+ps -e | grep -q $receiver_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -132,7 +153,7 @@ sender_pid=$!
 echo $0 ": sender PID = $sender_pid"
 
 # verify that the background job is running
-ps | grep -q $sender_pid
+ps -e | grep -q $sender_pid
 retval=$?
 echo $retval
 if [ $retval != 0 ]; then
@@ -145,8 +166,8 @@ sleep $DURATION
 kill $receiver_pid
 kill $sender_pid
 
-wait $receiver_pid
-wait $sender_pid
+wait $receiver_pid 2>/dev/null
+wait $sender_pid 2>/dev/null
 
 echo $0 ": done (test passed)"
 

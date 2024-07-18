@@ -39,7 +39,7 @@
 namespace WebCore {
 
 DatabaseThread::DatabaseThread()
-    : m_transactionCoordinator(std::make_unique<SQLTransactionCoordinator>())
+    : m_transactionCoordinator(makeUnique<SQLTransactionCoordinator>())
 {
     m_selfRef = this;
 }
@@ -56,18 +56,16 @@ DatabaseThread::~DatabaseThread()
     ASSERT(terminationRequested());
 }
 
-bool DatabaseThread::start()
+void DatabaseThread::start()
 {
-    LockHolder lock(m_threadCreationMutex);
+    Locker locker { m_threadCreationMutex };
 
     if (m_thread)
-        return true;
+        return;
 
     m_thread = Thread::create("WebCore: Database", [this] {
         databaseThread();
     });
-
-    return m_thread;
 }
 
 void DatabaseThread::requestTermination(DatabaseTaskSynchronizer* cleanupSync)
@@ -79,7 +77,7 @@ void DatabaseThread::requestTermination(DatabaseTaskSynchronizer* cleanupSync)
 
 bool DatabaseThread::terminationRequested(DatabaseTaskSynchronizer* taskSynchronizer) const
 {
-#ifndef NDEBUG
+#if ASSERT_ENABLED
     if (taskSynchronizer)
         taskSynchronizer->setHasCheckedForTermination();
 #else
@@ -93,7 +91,7 @@ void DatabaseThread::databaseThread()
 {
     {
         // Wait for DatabaseThread::start() to complete.
-        LockHolder lock(m_threadCreationMutex);
+        Locker locker { m_threadCreationMutex };
         LOG(StorageAPI, "Started DatabaseThread %p", this);
     }
 
@@ -106,13 +104,13 @@ void DatabaseThread::databaseThread()
     // Clean up the list of all pending transactions on this database thread
     m_transactionCoordinator->shutdown();
 
-    LOG(StorageAPI, "About to detach thread %i and clear the ref to DatabaseThread %p, which currently has %i ref(s)", m_thread->id(), this, refCount());
+    LOG(StorageAPI, "About to detach thread %p and clear the ref to DatabaseThread %p, which currently has %i ref(s)", m_thread.get(), this, refCount());
 
     // Close the databases that we ran transactions on. This ensures that if any transactions are still open, they are rolled back and we don't leave the database in an
     // inconsistent or locked state.
     DatabaseSet openSetCopy;
     {
-        LockHolder lock(m_openDatabaseSetMutex);
+        Locker locker { m_openDatabaseSetLock };
         if (m_openDatabaseSet.size() > 0) {
             // As the call to close will modify the original set, we must take a copy to iterate over.
             openSetCopy.swap(m_openDatabaseSet);
@@ -136,18 +134,18 @@ void DatabaseThread::databaseThread()
 
 void DatabaseThread::recordDatabaseOpen(Database& database)
 {
-    LockHolder lock(m_openDatabaseSetMutex);
+    Locker locker { m_openDatabaseSetLock };
 
-    ASSERT(currentThread() == m_thread->id());
+    ASSERT(m_thread == &Thread::current());
     ASSERT(!m_openDatabaseSet.contains(&database));
     m_openDatabaseSet.add(&database);
 }
 
 void DatabaseThread::recordDatabaseClosed(Database& database)
 {
-    LockHolder lock(m_openDatabaseSetMutex);
+    Locker locker { m_openDatabaseSetLock };
 
-    ASSERT(currentThread() == m_thread->id());
+    ASSERT(m_thread == &Thread::current());
     ASSERT(m_queue.killed() || m_openDatabaseSet.contains(&database));
     m_openDatabaseSet.remove(&database);
 }
@@ -174,7 +172,7 @@ void DatabaseThread::unscheduleDatabaseTasks(Database& database)
 
 bool DatabaseThread::hasPendingDatabaseActivity() const
 {
-    LockHolder lock(m_openDatabaseSetMutex);
+    Locker locker { m_openDatabaseSetLock };
     for (auto& database : m_openDatabaseSet) {
         if (database->hasPendingCreationEvent() || database->hasPendingTransaction())
             return true;

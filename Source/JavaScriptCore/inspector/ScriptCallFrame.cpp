@@ -59,12 +59,12 @@ bool ScriptCallFrame::isEqual(const ScriptCallFrame& o) const
 
 bool ScriptCallFrame::isNative() const
 {
-    return m_scriptName == "[native code]";
+    return m_scriptName == "[native code]"_s;
 }
 
-Ref<Inspector::Protocol::Console::CallFrame> ScriptCallFrame::buildInspectorObject() const
+Ref<Protocol::Console::CallFrame> ScriptCallFrame::buildInspectorObject() const
 {
-    return Inspector::Protocol::Console::CallFrame::create()
+    return Protocol::Console::CallFrame::create()
         .setFunctionName(m_functionName)
         .setUrl(m_scriptName)
         .setScriptId(String::number(m_sourceID))

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,23 +29,21 @@
 
 namespace JSC {
 
+class CallFrame;
 class VM;
-class ExecState;
-struct Instruction;
 
 class AbstractPC {
 public:
     AbstractPC()
-        : m_pointer(0)
-        , m_mode(None)
+        : m_mode(None)
     {
     }
     
-    AbstractPC(VM&, ExecState*);
+    AbstractPC(VM&, CallFrame*);
     
 #if ENABLE(JIT)
     AbstractPC(ReturnAddressPtr ptr)
-        : m_pointer(ptr.value())
+        : m_pointer(ptr)
         , m_mode(JIT)
     {
     }
@@ -54,7 +52,7 @@ public:
     ReturnAddressPtr jitReturnAddress() const
     {
         ASSERT(hasJITReturnAddress());
-        return ReturnAddressPtr(m_pointer);
+        return m_pointer;
     }
 #endif
 
@@ -62,8 +60,10 @@ public:
     bool operator!() const { return !isSet(); }
 
 private:
-    void* m_pointer;
-    
+#if ENABLE(JIT)
+    ReturnAddressPtr m_pointer;
+#endif
+
     enum Mode { None, JIT, Interpreter };
     Mode m_mode;
 };

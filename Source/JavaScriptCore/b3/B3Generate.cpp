@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,12 +28,12 @@
 
 #if ENABLE(B3_JIT)
 
-#include "AirCode.h"
 #include "AirGenerate.h"
-#include "AirInstInlines.h"
+#include "B3CanonicalizePrePostIncrements.h"
 #include "B3Common.h"
 #include "B3DuplicateTails.h"
 #include "B3EliminateCommonSubexpressions.h"
+#include "B3EliminateDeadCode.h"
 #include "B3FixSSA.h"
 #include "B3FoldPathConstants.h"
 #include "B3HoistLoopInvariantValues.h"
@@ -43,19 +43,19 @@
 #include "B3LowerMacrosAfterOptimizations.h"
 #include "B3LowerToAir.h"
 #include "B3MoveConstants.h"
+#include "B3OptimizeAssociativeExpressionTrees.h"
 #include "B3Procedure.h"
-#include "B3PureCSE.h"
 #include "B3ReduceDoubleToFloat.h"
+#include "B3ReduceLoopStrength.h"
 #include "B3ReduceStrength.h"
-#include "B3TimingScope.h"
 #include "B3Validate.h"
-#include "PCToCodeOriginMap.h"
+#include "CompilerTimingScope.h"
 
 namespace JSC { namespace B3 {
 
 void prepareForGeneration(Procedure& procedure)
 {
-    TimingScope timingScope("prepareForGeneration");
+    CompilerTimingScope timingScope("Total B3+Air", "prepareForGeneration");
 
     generateToAir(procedure);
     Air::prepareForGeneration(procedure.code());
@@ -68,10 +68,10 @@ void generate(Procedure& procedure, CCallHelpers& jit)
 
 void generateToAir(Procedure& procedure)
 {
-    TimingScope timingScope("generateToAir");
+    CompilerTimingScope timingScope("Total B3", "generateToAir");
     
-    if (shouldDumpIR(B3Mode) && !shouldDumpIRAtEachPhase(B3Mode)) {
-        dataLog("Initial B3:\n");
+    if (shouldDumpIR(procedure, B3Mode) && !shouldDumpIRAtEachPhase(B3Mode)) {
+        dataLog(tierName, "Initial B3:\n");
         dataLog(procedure);
     }
 
@@ -80,17 +80,23 @@ void generateToAir(Procedure& procedure)
     
     if (shouldValidateIR())
         validate(procedure);
-
+    
     if (procedure.optLevel() >= 2) {
         reduceDoubleToFloat(procedure);
         reduceStrength(procedure);
-        hoistLoopInvariantValues(procedure);
-        eliminateCommonSubexpressions(procedure);
+        // FIXME: Re-enable B3 hoistLoopInvariantValues
+        // https://bugs.webkit.org/show_bug.cgi?id=212651
+        if (Options::useB3HoistLoopInvariantValues())
+            hoistLoopInvariantValues(procedure);
+        if (eliminateCommonSubexpressions(procedure))
+            eliminateCommonSubexpressions(procedure);
+        eliminateDeadCode(procedure);
         inferSwitches(procedure);
-        duplicateTails(procedure);
+        reduceLoopStrength(procedure);
+        if (Options::useB3TailDup())
+            duplicateTails(procedure);
         fixSSA(procedure);
         foldPathConstants(procedure);
-        
         // FIXME: Add more optimizations here.
         // https://bugs.webkit.org/show_bug.cgi?id=150507
     } else if (procedure.optLevel() >= 1) {
@@ -102,6 +108,7 @@ void generateToAir(Procedure& procedure)
     lowerMacros(procedure);
 
     if (procedure.optLevel() >= 2) {
+        optimizeAssociativeExpressionTrees(procedure);
         reduceStrength(procedure);
 
         // FIXME: Add more optimizations here.
@@ -111,6 +118,10 @@ void generateToAir(Procedure& procedure)
     lowerMacrosAfterOptimizations(procedure);
     legalizeMemoryOffsets(procedure);
     moveConstants(procedure);
+    legalizeMemoryOffsets(procedure);
+    if (Options::useB3CanonicalizePrePostIncrements() && procedure.optLevel() >= 2)
+        canonicalizePrePostIncrements(procedure);
+    eliminateDeadCode(procedure);
 
     // FIXME: We should run pureCSE here to clean up some platform specific changes from the previous phases.
     // https://bugs.webkit.org/show_bug.cgi?id=164873
@@ -120,12 +131,15 @@ void generateToAir(Procedure& procedure)
     
     // If we're doing super verbose dumping, the phase scope of any phase will already do a dump.
     // Note that lowerToAir() acts like a phase in this regard.
-    if (shouldDumpIR(B3Mode) && !shouldDumpIRAtEachPhase(B3Mode)) {
+    if (shouldDumpIR(procedure, B3Mode) && !shouldDumpIRAtEachPhase(B3Mode)) {
         dataLog("B3 after ", procedure.lastPhaseName(), ", before generation:\n");
         dataLog(procedure);
     }
 
     lowerToAir(procedure);
+    if (shouldDumpIR(procedure, B3Mode))
+        procedure.setShouldDumpIR();
+    procedure.freeUnneededB3ValuesAfterLowering();
 }
 
 } } // namespace JSC::B3

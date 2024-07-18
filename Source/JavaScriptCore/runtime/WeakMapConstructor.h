@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple, Inc. All rights reserved.
+ * Copyright (C) 2013-2021 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,13 +32,13 @@ namespace JSC {
 class WeakMapPrototype;
 class GetterSetter;
 
-class WeakMapConstructor : public InternalFunction {
+class WeakMapConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
 
     static WeakMapConstructor* create(VM& vm, Structure* structure, WeakMapPrototype* prototype, GetterSetter*)
     {
-        WeakMapConstructor* constructor = new (NotNull, allocateCell<WeakMapConstructor>(vm.heap)) WeakMapConstructor(vm, structure);
+        WeakMapConstructor* constructor = new (NotNull, allocateCell<WeakMapConstructor>(vm)) WeakMapConstructor(vm, structure);
         constructor->finishCreation(vm, prototype);
         return constructor;
     }
@@ -47,17 +47,13 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
     }
 
 private:
-    WeakMapConstructor(VM& vm, Structure* structure)
-        : Base(vm, structure)
-    {
-    }
+    WeakMapConstructor(VM&, Structure*);
     void finishCreation(VM&, WeakMapPrototype*);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(WeakMapConstructor, InternalFunction);
 
 } // namespace JSC

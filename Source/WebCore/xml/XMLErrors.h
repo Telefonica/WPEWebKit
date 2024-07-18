@@ -37,6 +37,7 @@ namespace WebCore {
 class Document;
 
 class XMLErrors {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit XMLErrors(Document&);
 
@@ -47,7 +48,7 @@ public:
     void insertErrorMessageBlock();
 
 private:
-    void appendErrorMessage(const String& typeString, TextPosition, const char* message);
+    void appendErrorMessage(ASCIILiteral typeString, TextPosition, const char* message);
 
     Document& m_document;
     int m_errorCount { 0 };

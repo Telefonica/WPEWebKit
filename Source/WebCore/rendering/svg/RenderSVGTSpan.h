@@ -27,17 +27,17 @@
 namespace WebCore {
 
 class RenderSVGTSpan final : public RenderSVGInline {
+    WTF_MAKE_ISO_ALLOCATED(RenderSVGTSpan);
 public:
     explicit RenderSVGTSpan(SVGTextPositioningElement& element, RenderStyle&& style)
         : RenderSVGInline(element, WTFMove(style))
     {
     }
 
-    SVGTextPositioningElement& textPositioningElement() const { return static_cast<SVGTextPositioningElement&>(RenderSVGInline::graphicsElement()); }
 
 private:
     void graphicsElement() const = delete;
-    const char* renderName() const override { return "RenderSVGTSpan"; }
+    ASCIILiteral renderName() const override { return "RenderSVGTSpan"_s; }
     bool isSVGTSpan() const override { return true; }
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc.  All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,29 +26,79 @@
 #include "config.h"
 #include "CSSCustomPropertyValue.h"
 
+#include "CSSParserIdioms.h"
+#include "CSSTokenizer.h"
 
 namespace WebCore {
 
-bool CSSCustomPropertyValue::checkVariablesForCycles(const AtomicString& name, CustomPropertyValueMap& customProperties, HashSet<AtomicString>& seenProperties, HashSet<AtomicString>& invalidProperties) const
+Ref<CSSCustomPropertyValue> CSSCustomPropertyValue::createEmpty(const AtomString& name)
 {
-    ASSERT(containsVariables());
-    if (m_value)
-        return m_value->checkVariablesForCycles(name, customProperties, seenProperties, invalidProperties);
-    return true;
+    return adoptRef(*new CSSCustomPropertyValue(name, std::monostate { }));
 }
 
-void CSSCustomPropertyValue::resolveVariableReferences(const CustomPropertyValueMap& customProperties, Vector<Ref<CSSCustomPropertyValue>>& resolvedValues) const
+Ref<CSSCustomPropertyValue> CSSCustomPropertyValue::createWithID(const AtomString& name, CSSValueID id)
 {
-    ASSERT(containsVariables());
-    if (!m_value)
-        return;
-    
-    ASSERT(m_value->needsVariableResolution());
-    RefPtr<CSSVariableData> resolvedData = m_value->resolveVariableReferences(customProperties);
-    if (resolvedData)
-        resolvedValues.append(CSSCustomPropertyValue::createWithVariableData(m_name, resolvedData.releaseNonNull()));
-    else
-        resolvedValues.append(CSSCustomPropertyValue::createWithID(m_name, CSSValueInvalid));
+    ASSERT(WebCore::isCSSWideKeyword(id) || id == CSSValueInvalid);
+    return adoptRef(*new CSSCustomPropertyValue(name, { id }));
+}
+
+bool CSSCustomPropertyValue::equals(const CSSCustomPropertyValue& other) const
+{
+    if (m_name != other.m_name || m_value.index() != other.m_value.index())
+        return false;
+    return WTF::switchOn(m_value, [&](const std::monostate&) {
+        return true;
+    }, [&](const Ref<CSSVariableReferenceValue>& value) {
+        return value.get() == std::get<Ref<CSSVariableReferenceValue>>(other.m_value).get();
+    }, [&](const CSSValueID& value) {
+        return value == std::get<CSSValueID>(other.m_value);
+    }, [&](const Ref<CSSVariableData>& value) {
+        return value.get() == std::get<Ref<CSSVariableData>>(other.m_value).get();
+    }, [&](const Length& value) {
+        return value == std::get<Length>(other.m_value);
+    }, [&](const Ref<StyleImage>& value) {
+        return value.get() == std::get<Ref<StyleImage>>(other.m_value).get();
+    });
+}
+
+String CSSCustomPropertyValue::customCSSText() const
+{
+    if (m_stringValue.isNull()) {
+        WTF::switchOn(m_value, [&](const std::monostate&) {
+            m_stringValue = emptyString();
+        }, [&](const Ref<CSSVariableReferenceValue>& value) {
+            m_stringValue = value->cssText();
+        }, [&](const CSSValueID& value) {
+            m_stringValue = getValueName(value);
+        }, [&](const Ref<CSSVariableData>& value) {
+            m_stringValue = value->tokenRange().serialize();
+        }, [&](const Length& value) {
+            m_stringValue = CSSPrimitiveValue::create(value.value(), CSSUnitType::CSS_PX)->cssText();
+        }, [&](const Ref<StyleImage>& value) {
+            m_stringValue = value->cssValue()->cssText();
+        });
+    }
+    return m_stringValue;
+}
+
+Vector<CSSParserToken> CSSCustomPropertyValue::tokens() const
+{
+    Vector<CSSParserToken> result;
+    WTF::switchOn(m_value, [&](const std::monostate&) {
+        // Do nothing.
+    }, [&](const Ref<CSSVariableReferenceValue>&) {
+        ASSERT_NOT_REACHED();
+    }, [&](const CSSValueID&) {
+        // Do nothing.
+    }, [&](const Ref<CSSVariableData>& value) {
+        result.appendVector(value->tokens());
+    }, [&](auto&) {
+        CSSTokenizer tokenizer(customCSSText());
+        auto tokenizerRange = tokenizer.tokenRange();
+        while (!tokenizerRange.atEnd())
+            result.append(tokenizerRange.consume());
+    });
+    return result;
 }
 
 }

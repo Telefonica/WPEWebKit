@@ -27,7 +27,7 @@
 
 #include "CryptoAlgorithm.h"
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
 
 namespace WebCore {
 
@@ -35,7 +35,7 @@ class CryptoKeyAES;
 
 class CryptoAlgorithmAES_KW final : public CryptoAlgorithm {
 public:
-    static constexpr const char* s_name = "AES-KW";
+    static constexpr ASCIILiteral s_name = "AES-KW"_s;
     static constexpr CryptoAlgorithmIdentifier s_identifier = CryptoAlgorithmIdentifier::AES_KW;
     static Ref<CryptoAlgorithm> create();
 
@@ -44,7 +44,7 @@ private:
     CryptoAlgorithmIdentifier identifier() const final;
 
     void generateKey(const CryptoAlgorithmParameters&, bool extractable, CryptoKeyUsageBitmap, KeyOrKeyPairCallback&&, ExceptionCallback&&, ScriptExecutionContext&) final;
-    void importKey(CryptoKeyFormat, KeyData&&, const std::unique_ptr<CryptoAlgorithmParameters>&&, bool extractable, CryptoKeyUsageBitmap, KeyCallback&&, ExceptionCallback&&) final;
+    void importKey(CryptoKeyFormat, KeyData&&, const CryptoAlgorithmParameters&, bool extractable, CryptoKeyUsageBitmap, KeyCallback&&, ExceptionCallback&&) final;
     void exportKey(CryptoKeyFormat, Ref<CryptoKey>&&, KeyDataCallback&&, ExceptionCallback&&) final;
     void wrapKey(Ref<CryptoKey>&&, Vector<uint8_t>&&, VectorCallback&&, ExceptionCallback&&) final;
     void unwrapKey(Ref<CryptoKey>&&, Vector<uint8_t>&&, VectorCallback&&, ExceptionCallback&&) final;
@@ -56,4 +56,4 @@ private:
 
 } // namespace WebCore
 
-#endif // ENABLE(SUBTLE_CRYPTO)
+#endif // ENABLE(WEB_CRYPTO)

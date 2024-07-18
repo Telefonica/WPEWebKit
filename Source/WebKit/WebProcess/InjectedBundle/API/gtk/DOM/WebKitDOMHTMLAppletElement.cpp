@@ -26,86 +26,54 @@
 #include <WebCore/Document.h>
 #include "GObjectEventListener.h"
 #include <WebCore/HTMLNames.h>
-#include <WebCore/JSMainThreadExecState.h>
+#include <WebCore/JSExecState.h>
 #include "WebKitDOMEventPrivate.h"
 #include "WebKitDOMEventTarget.h"
-#include "WebKitDOMHTMLAppletElementPrivate.h"
 #include "WebKitDOMNodePrivate.h"
 #include "WebKitDOMPrivate.h"
 #include "ConvertToUTF8String.h"
 #include <wtf/GetPtr.h>
 #include <wtf/RefPtr.h>
 
-namespace WebKit {
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
 
-WebKitDOMHTMLAppletElement* kit(WebCore::HTMLAppletElement* obj)
+static gboolean webkit_dom_html_applet_element_dispatch_event(WebKitDOMEventTarget*, WebKitDOMEvent*, GError**)
 {
-    return WEBKIT_DOM_HTML_APPLET_ELEMENT(kit(static_cast<WebCore::Node*>(obj)));
+    return false;
 }
 
-WebCore::HTMLAppletElement* core(WebKitDOMHTMLAppletElement* request)
+static gboolean webkit_dom_html_applet_element_add_event_listener(WebKitDOMEventTarget*, const char*, GClosure*, gboolean)
 {
-    return request ? static_cast<WebCore::HTMLAppletElement*>(WEBKIT_DOM_OBJECT(request)->coreObject) : 0;
+    return false;
 }
 
-WebKitDOMHTMLAppletElement* wrapHTMLAppletElement(WebCore::HTMLAppletElement* coreObject)
+static gboolean webkit_dom_html_applet_element_remove_event_listener(WebKitDOMEventTarget*, const char*, GClosure*, gboolean)
 {
-    ASSERT(coreObject);
-    return WEBKIT_DOM_HTML_APPLET_ELEMENT(g_object_new(WEBKIT_DOM_TYPE_HTML_APPLET_ELEMENT, "core-object", coreObject, nullptr));
+    return false;
 }
 
-} // namespace WebKit
-
-static gboolean webkit_dom_html_applet_element_dispatch_event(WebKitDOMEventTarget* target, WebKitDOMEvent* event, GError** error)
-{
-    WebCore::Event* coreEvent = WebKit::core(event);
-    if (!coreEvent)
-        return false;
-    WebCore::HTMLAppletElement* coreTarget = static_cast<WebCore::HTMLAppletElement*>(WEBKIT_DOM_OBJECT(target)->coreObject);
-
-    auto result = coreTarget->dispatchEventForBindings(*coreEvent);
-    if (result.hasException()) {
-        auto description = WebCore::DOMException::description(result.releaseException().code());
-        g_set_error_literal(error, g_quark_from_string("WEBKIT_DOM"), description.legacyCode, description.name);
-        return false;
-    }
-    return result.releaseReturnValue();
-}
-
-static gboolean webkit_dom_html_applet_element_add_event_listener(WebKitDOMEventTarget* target, const char* eventName, GClosure* handler, gboolean useCapture)
-{
-    WebCore::HTMLAppletElement* coreTarget = static_cast<WebCore::HTMLAppletElement*>(WEBKIT_DOM_OBJECT(target)->coreObject);
-    return WebKit::GObjectEventListener::addEventListener(G_OBJECT(target), coreTarget, eventName, handler, useCapture);
-}
-
-static gboolean webkit_dom_html_applet_element_remove_event_listener(WebKitDOMEventTarget* target, const char* eventName, GClosure* handler, gboolean useCapture)
-{
-    WebCore::HTMLAppletElement* coreTarget = static_cast<WebCore::HTMLAppletElement*>(WEBKIT_DOM_OBJECT(target)->coreObject);
-    return WebKit::GObjectEventListener::removeEventListener(G_OBJECT(target), coreTarget, eventName, handler, useCapture);
-}
-
-static void webkit_dom_event_target_init(WebKitDOMEventTargetIface* iface)
+static void webkit_dom_html_applet_element_dom_event_target_init(WebKitDOMEventTargetIface* iface)
 {
     iface->dispatch_event = webkit_dom_html_applet_element_dispatch_event;
     iface->add_event_listener = webkit_dom_html_applet_element_add_event_listener;
     iface->remove_event_listener = webkit_dom_html_applet_element_remove_event_listener;
 }
 
-G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLAppletElement, webkit_dom_html_applet_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_event_target_init))
+G_DEFINE_TYPE_WITH_CODE(WebKitDOMHTMLAppletElement, webkit_dom_html_applet_element, WEBKIT_DOM_TYPE_HTML_ELEMENT, G_IMPLEMENT_INTERFACE(WEBKIT_DOM_TYPE_EVENT_TARGET, webkit_dom_html_applet_element_dom_event_target_init))
 
 enum {
-    PROP_0,
-    PROP_ALIGN,
-    PROP_ALT,
-    PROP_ARCHIVE,
-    PROP_CODE,
-    PROP_CODE_BASE,
-    PROP_HEIGHT,
-    PROP_HSPACE,
-    PROP_NAME,
-    PROP_OBJECT,
-    PROP_VSPACE,
-    PROP_WIDTH,
+    DOM_HTML_APPLET_ELEMENT_PROP_0,
+    DOM_HTML_APPLET_ELEMENT_PROP_ALIGN,
+    DOM_HTML_APPLET_ELEMENT_PROP_ALT,
+    DOM_HTML_APPLET_ELEMENT_PROP_ARCHIVE,
+    DOM_HTML_APPLET_ELEMENT_PROP_CODE,
+    DOM_HTML_APPLET_ELEMENT_PROP_CODE_BASE,
+    DOM_HTML_APPLET_ELEMENT_PROP_HEIGHT,
+    DOM_HTML_APPLET_ELEMENT_PROP_HSPACE,
+    DOM_HTML_APPLET_ELEMENT_PROP_NAME,
+    DOM_HTML_APPLET_ELEMENT_PROP_OBJECT,
+    DOM_HTML_APPLET_ELEMENT_PROP_VSPACE,
+    DOM_HTML_APPLET_ELEMENT_PROP_WIDTH,
 };
 
 static void webkit_dom_html_applet_element_set_property(GObject* object, guint propertyId, const GValue* value, GParamSpec* pspec)
@@ -113,37 +81,37 @@ static void webkit_dom_html_applet_element_set_property(GObject* object, guint p
     WebKitDOMHTMLAppletElement* self = WEBKIT_DOM_HTML_APPLET_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_ALIGN:
+    case DOM_HTML_APPLET_ELEMENT_PROP_ALIGN:
         webkit_dom_html_applet_element_set_align(self, g_value_get_string(value));
         break;
-    case PROP_ALT:
+    case DOM_HTML_APPLET_ELEMENT_PROP_ALT:
         webkit_dom_html_applet_element_set_alt(self, g_value_get_string(value));
         break;
-    case PROP_ARCHIVE:
+    case DOM_HTML_APPLET_ELEMENT_PROP_ARCHIVE:
         webkit_dom_html_applet_element_set_archive(self, g_value_get_string(value));
         break;
-    case PROP_CODE:
+    case DOM_HTML_APPLET_ELEMENT_PROP_CODE:
         webkit_dom_html_applet_element_set_code(self, g_value_get_string(value));
         break;
-    case PROP_CODE_BASE:
+    case DOM_HTML_APPLET_ELEMENT_PROP_CODE_BASE:
         webkit_dom_html_applet_element_set_code_base(self, g_value_get_string(value));
         break;
-    case PROP_HEIGHT:
+    case DOM_HTML_APPLET_ELEMENT_PROP_HEIGHT:
         webkit_dom_html_applet_element_set_height(self, g_value_get_string(value));
         break;
-    case PROP_HSPACE:
+    case DOM_HTML_APPLET_ELEMENT_PROP_HSPACE:
         webkit_dom_html_applet_element_set_hspace(self, g_value_get_long(value));
         break;
-    case PROP_NAME:
+    case DOM_HTML_APPLET_ELEMENT_PROP_NAME:
         webkit_dom_html_applet_element_set_name(self, g_value_get_string(value));
         break;
-    case PROP_OBJECT:
+    case DOM_HTML_APPLET_ELEMENT_PROP_OBJECT:
         webkit_dom_html_applet_element_set_object(self, g_value_get_string(value));
         break;
-    case PROP_VSPACE:
+    case DOM_HTML_APPLET_ELEMENT_PROP_VSPACE:
         webkit_dom_html_applet_element_set_vspace(self, g_value_get_long(value));
         break;
-    case PROP_WIDTH:
+    case DOM_HTML_APPLET_ELEMENT_PROP_WIDTH:
         webkit_dom_html_applet_element_set_width(self, g_value_get_string(value));
         break;
     default:
@@ -157,37 +125,37 @@ static void webkit_dom_html_applet_element_get_property(GObject* object, guint p
     WebKitDOMHTMLAppletElement* self = WEBKIT_DOM_HTML_APPLET_ELEMENT(object);
 
     switch (propertyId) {
-    case PROP_ALIGN:
+    case DOM_HTML_APPLET_ELEMENT_PROP_ALIGN:
         g_value_take_string(value, webkit_dom_html_applet_element_get_align(self));
         break;
-    case PROP_ALT:
+    case DOM_HTML_APPLET_ELEMENT_PROP_ALT:
         g_value_take_string(value, webkit_dom_html_applet_element_get_alt(self));
         break;
-    case PROP_ARCHIVE:
+    case DOM_HTML_APPLET_ELEMENT_PROP_ARCHIVE:
         g_value_take_string(value, webkit_dom_html_applet_element_get_archive(self));
         break;
-    case PROP_CODE:
+    case DOM_HTML_APPLET_ELEMENT_PROP_CODE:
         g_value_take_string(value, webkit_dom_html_applet_element_get_code(self));
         break;
-    case PROP_CODE_BASE:
+    case DOM_HTML_APPLET_ELEMENT_PROP_CODE_BASE:
         g_value_take_string(value, webkit_dom_html_applet_element_get_code_base(self));
         break;
-    case PROP_HEIGHT:
+    case DOM_HTML_APPLET_ELEMENT_PROP_HEIGHT:
         g_value_take_string(value, webkit_dom_html_applet_element_get_height(self));
         break;
-    case PROP_HSPACE:
+    case DOM_HTML_APPLET_ELEMENT_PROP_HSPACE:
         g_value_set_long(value, webkit_dom_html_applet_element_get_hspace(self));
         break;
-    case PROP_NAME:
+    case DOM_HTML_APPLET_ELEMENT_PROP_NAME:
         g_value_take_string(value, webkit_dom_html_applet_element_get_name(self));
         break;
-    case PROP_OBJECT:
+    case DOM_HTML_APPLET_ELEMENT_PROP_OBJECT:
         g_value_take_string(value, webkit_dom_html_applet_element_get_object(self));
         break;
-    case PROP_VSPACE:
+    case DOM_HTML_APPLET_ELEMENT_PROP_VSPACE:
         g_value_set_long(value, webkit_dom_html_applet_element_get_vspace(self));
         break;
-    case PROP_WIDTH:
+    case DOM_HTML_APPLET_ELEMENT_PROP_WIDTH:
         g_value_take_string(value, webkit_dom_html_applet_element_get_width(self));
         break;
     default:
@@ -204,7 +172,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_ALIGN,
+        DOM_HTML_APPLET_ELEMENT_PROP_ALIGN,
         g_param_spec_string(
             "align",
             "HTMLAppletElement:align",
@@ -214,7 +182,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_ALT,
+        DOM_HTML_APPLET_ELEMENT_PROP_ALT,
         g_param_spec_string(
             "alt",
             "HTMLAppletElement:alt",
@@ -224,7 +192,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_ARCHIVE,
+        DOM_HTML_APPLET_ELEMENT_PROP_ARCHIVE,
         g_param_spec_string(
             "archive",
             "HTMLAppletElement:archive",
@@ -234,7 +202,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_CODE,
+        DOM_HTML_APPLET_ELEMENT_PROP_CODE,
         g_param_spec_string(
             "code",
             "HTMLAppletElement:code",
@@ -244,7 +212,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_CODE_BASE,
+        DOM_HTML_APPLET_ELEMENT_PROP_CODE_BASE,
         g_param_spec_string(
             "code-base",
             "HTMLAppletElement:code-base",
@@ -254,7 +222,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_HEIGHT,
+        DOM_HTML_APPLET_ELEMENT_PROP_HEIGHT,
         g_param_spec_string(
             "height",
             "HTMLAppletElement:height",
@@ -264,7 +232,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_HSPACE,
+        DOM_HTML_APPLET_ELEMENT_PROP_HSPACE,
         g_param_spec_long(
             "hspace",
             "HTMLAppletElement:hspace",
@@ -274,7 +242,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_NAME,
+        DOM_HTML_APPLET_ELEMENT_PROP_NAME,
         g_param_spec_string(
             "name",
             "HTMLAppletElement:name",
@@ -284,7 +252,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_OBJECT,
+        DOM_HTML_APPLET_ELEMENT_PROP_OBJECT,
         g_param_spec_string(
             "object",
             "HTMLAppletElement:object",
@@ -294,7 +262,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_VSPACE,
+        DOM_HTML_APPLET_ELEMENT_PROP_VSPACE,
         g_param_spec_long(
             "vspace",
             "HTMLAppletElement:vspace",
@@ -304,7 +272,7 @@ static void webkit_dom_html_applet_element_class_init(WebKitDOMHTMLAppletElement
 
     g_object_class_install_property(
         gobjectClass,
-        PROP_WIDTH,
+        DOM_HTML_APPLET_ELEMENT_PROP_WIDTH,
         g_param_spec_string(
             "width",
             "HTMLAppletElement:width",
@@ -319,208 +287,103 @@ static void webkit_dom_html_applet_element_init(WebKitDOMHTMLAppletElement* requ
     UNUSED_PARAM(request);
 }
 
-gchar* webkit_dom_html_applet_element_get_align(WebKitDOMHTMLAppletElement* self)
+gchar* webkit_dom_html_applet_element_get_align(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->attributeWithoutSynchronization(WebCore::HTMLNames::alignAttr));
-    return result;
+    return nullptr;
 }
 
-void webkit_dom_html_applet_element_set_align(WebKitDOMHTMLAppletElement* self, const gchar* value)
+void webkit_dom_html_applet_element_set_align(WebKitDOMHTMLAppletElement*, const gchar*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    g_return_if_fail(value);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::alignAttr, convertedValue);
 }
 
-gchar* webkit_dom_html_applet_element_get_alt(WebKitDOMHTMLAppletElement* self)
+gchar* webkit_dom_html_applet_element_get_alt(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->attributeWithoutSynchronization(WebCore::HTMLNames::altAttr));
-    return result;
+    return nullptr;
 }
 
-void webkit_dom_html_applet_element_set_alt(WebKitDOMHTMLAppletElement* self, const gchar* value)
+void webkit_dom_html_applet_element_set_alt(WebKitDOMHTMLAppletElement*, const gchar*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    g_return_if_fail(value);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::altAttr, convertedValue);
 }
 
-gchar* webkit_dom_html_applet_element_get_archive(WebKitDOMHTMLAppletElement* self)
+gchar* webkit_dom_html_applet_element_get_archive(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->attributeWithoutSynchronization(WebCore::HTMLNames::archiveAttr));
-    return result;
+    return nullptr;
 }
 
-void webkit_dom_html_applet_element_set_archive(WebKitDOMHTMLAppletElement* self, const gchar* value)
+void webkit_dom_html_applet_element_set_archive(WebKitDOMHTMLAppletElement*, const gchar*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    g_return_if_fail(value);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::archiveAttr, convertedValue);
 }
 
-gchar* webkit_dom_html_applet_element_get_code(WebKitDOMHTMLAppletElement* self)
+gchar* webkit_dom_html_applet_element_get_code(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->attributeWithoutSynchronization(WebCore::HTMLNames::codeAttr));
-    return result;
+    return nullptr;
 }
 
-void webkit_dom_html_applet_element_set_code(WebKitDOMHTMLAppletElement* self, const gchar* value)
+void webkit_dom_html_applet_element_set_code(WebKitDOMHTMLAppletElement*, const gchar*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    g_return_if_fail(value);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::codeAttr, convertedValue);
 }
 
-gchar* webkit_dom_html_applet_element_get_code_base(WebKitDOMHTMLAppletElement* self)
+gchar* webkit_dom_html_applet_element_get_code_base(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->attributeWithoutSynchronization(WebCore::HTMLNames::codebaseAttr));
-    return result;
+    return nullptr;
 }
 
-void webkit_dom_html_applet_element_set_code_base(WebKitDOMHTMLAppletElement* self, const gchar* value)
+void webkit_dom_html_applet_element_set_code_base(WebKitDOMHTMLAppletElement*, const gchar*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    g_return_if_fail(value);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::codebaseAttr, convertedValue);
 }
 
-gchar* webkit_dom_html_applet_element_get_height(WebKitDOMHTMLAppletElement* self)
+gchar* webkit_dom_html_applet_element_get_height(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->attributeWithoutSynchronization(WebCore::HTMLNames::heightAttr));
-    return result;
+    return nullptr;
 }
 
-void webkit_dom_html_applet_element_set_height(WebKitDOMHTMLAppletElement* self, const gchar* value)
+void webkit_dom_html_applet_element_set_height(WebKitDOMHTMLAppletElement*, const gchar*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    g_return_if_fail(value);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::heightAttr, convertedValue);
 }
 
-glong webkit_dom_html_applet_element_get_hspace(WebKitDOMHTMLAppletElement* self)
+glong webkit_dom_html_applet_element_get_hspace(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    glong result = item->getIntegralAttribute(WebCore::HTMLNames::hspaceAttr);
-    return result;
+    return 0;
 }
 
-void webkit_dom_html_applet_element_set_hspace(WebKitDOMHTMLAppletElement* self, glong value)
+void webkit_dom_html_applet_element_set_hspace(WebKitDOMHTMLAppletElement*, glong)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    item->setIntegralAttribute(WebCore::HTMLNames::hspaceAttr, value);
 }
 
-gchar* webkit_dom_html_applet_element_get_name(WebKitDOMHTMLAppletElement* self)
+gchar* webkit_dom_html_applet_element_get_name(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->getNameAttribute());
-    return result;
+    return nullptr;
 }
 
-void webkit_dom_html_applet_element_set_name(WebKitDOMHTMLAppletElement* self, const gchar* value)
+void webkit_dom_html_applet_element_set_name(WebKitDOMHTMLAppletElement*, const gchar*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    g_return_if_fail(value);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, convertedValue);
 }
 
-gchar* webkit_dom_html_applet_element_get_object(WebKitDOMHTMLAppletElement* self)
+gchar* webkit_dom_html_applet_element_get_object(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->attributeWithoutSynchronization(WebCore::HTMLNames::objectAttr));
-    return result;
+    return nullptr;
 }
 
-void webkit_dom_html_applet_element_set_object(WebKitDOMHTMLAppletElement* self, const gchar* value)
+void webkit_dom_html_applet_element_set_object(WebKitDOMHTMLAppletElement*, const gchar*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    g_return_if_fail(value);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::objectAttr, convertedValue);
 }
 
-glong webkit_dom_html_applet_element_get_vspace(WebKitDOMHTMLAppletElement* self)
+glong webkit_dom_html_applet_element_get_vspace(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    glong result = item->getIntegralAttribute(WebCore::HTMLNames::vspaceAttr);
-    return result;
+    return 0;
 }
 
-void webkit_dom_html_applet_element_set_vspace(WebKitDOMHTMLAppletElement* self, glong value)
+void webkit_dom_html_applet_element_set_vspace(WebKitDOMHTMLAppletElement*, glong)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    item->setIntegralAttribute(WebCore::HTMLNames::vspaceAttr, value);
 }
 
-gchar* webkit_dom_html_applet_element_get_width(WebKitDOMHTMLAppletElement* self)
+gchar* webkit_dom_html_applet_element_get_width(WebKitDOMHTMLAppletElement*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_val_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self), 0);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    gchar* result = convertToUTF8String(item->attributeWithoutSynchronization(WebCore::HTMLNames::widthAttr));
-    return result;
+    return nullptr;
 }
 
-void webkit_dom_html_applet_element_set_width(WebKitDOMHTMLAppletElement* self, const gchar* value)
+void webkit_dom_html_applet_element_set_width(WebKitDOMHTMLAppletElement*, const gchar*)
 {
-    WebCore::JSMainThreadNullState state;
-    g_return_if_fail(WEBKIT_DOM_IS_HTML_APPLET_ELEMENT(self));
-    g_return_if_fail(value);
-    WebCore::HTMLAppletElement* item = WebKit::core(self);
-    WTF::String convertedValue = WTF::String::fromUTF8(value);
-    item->setAttributeWithoutSynchronization(WebCore::HTMLNames::widthAttr, convertedValue);
 }
 
+G_GNUC_END_IGNORE_DEPRECATIONS;

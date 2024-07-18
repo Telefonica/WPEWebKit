@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,10 @@
 
 #pragma once
 
+#include "BytecodeIndex.h"
+#include "Heap.h"
+#include "SlotVisitorMacros.h"
+#include "VM.h"
 #include "WasmIndexOrName.h"
 #include "WriteBarrier.h"
 #include <limits.h>
@@ -33,50 +37,45 @@ namespace JSC {
 
 class CodeBlock;
 class JSObject;
-class SlotVisitor;
 
 class StackFrame {
 public:
-    StackFrame()
-        : m_bytecodeOffset(UINT_MAX)
-    { }
-
     StackFrame(VM&, JSCell* owner, JSCell* callee);
-
-    StackFrame(VM&, JSCell* owner, JSCell* callee, CodeBlock*, unsigned bytecodeOffset);
-
-    static StackFrame wasm(Wasm::IndexOrName indexOrName)
-    {
-        StackFrame result;
-        result.m_isWasmFrame = true;
-        result.m_wasmFunctionIndexOrName = indexOrName;
-        return result;
-    }
+    StackFrame(VM&, JSCell* owner, JSCell* callee, CodeBlock*, BytecodeIndex);
+    StackFrame(Wasm::IndexOrName);
 
     bool hasLineAndColumnInfo() const { return !!m_codeBlock; }
-    
+    CodeBlock* codeBlock() const { return m_codeBlock.get(); }
+
     void computeLineAndColumn(unsigned& line, unsigned& column) const;
     String functionName(VM&) const;
-    intptr_t sourceID() const;
-    String sourceURL() const;
+    SourceID sourceID() const;
+    String sourceURL(VM&) const;
     String toString(VM&) const;
 
-    bool hasBytecodeOffset() const { return m_bytecodeOffset != UINT_MAX && !m_isWasmFrame; }
-    unsigned bytecodeOffset()
+    bool hasBytecodeIndex() const { return m_bytecodeIndex && !m_isWasmFrame; }
+    BytecodeIndex bytecodeIndex()
     {
-        ASSERT(hasBytecodeOffset());
-        return m_bytecodeOffset;
+        ASSERT(hasBytecodeIndex());
+        return m_bytecodeIndex;
     }
-    
-    void visitChildren(SlotVisitor&);
+
+    template<typename Visitor>
+    void visitAggregate(Visitor& visitor)
+    {
+        if (m_callee)
+            visitor.append(m_callee);
+        if (m_codeBlock)
+            visitor.append(m_codeBlock);
+    }
+
+    bool isMarked(VM& vm) const { return (!m_callee || vm.heap.isMarked(m_callee.get())) && (!m_codeBlock || vm.heap.isMarked(m_codeBlock.get())); }
 
 private:
     WriteBarrier<JSCell> m_callee { };
     WriteBarrier<CodeBlock> m_codeBlock { };
-    union {
-        unsigned m_bytecodeOffset;
-        Wasm::IndexOrName m_wasmFunctionIndexOrName;
-    };
+    Wasm::IndexOrName m_wasmFunctionIndexOrName;
+    BytecodeIndex m_bytecodeIndex;
     bool m_isWasmFrame { false };
 };
 

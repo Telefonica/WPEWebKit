@@ -47,7 +47,7 @@ inline WebScriptWorld::WebScriptWorld(RefPtr<DOMWrapperWorld>&& world)
     allWorlds().add(m_world.get(), this);
 
     ++gClassCount;
-    gClassNameCount().add("WebScriptWorld");
+    gClassNameCount().add("WebScriptWorld"_s);
 }
 
 WebScriptWorld::~WebScriptWorld()
@@ -56,7 +56,7 @@ WebScriptWorld::~WebScriptWorld()
     allWorlds().remove(m_world.get());
 
     --gClassCount;
-    gClassNameCount().remove("WebScriptWorld");
+    gClassNameCount().remove("WebScriptWorld"_s);
 }
 
 WebScriptWorld* WebScriptWorld::standardWorld()
@@ -67,7 +67,7 @@ WebScriptWorld* WebScriptWorld::standardWorld()
 
 COMPtr<WebScriptWorld> WebScriptWorld::createInstance()
 {
-    return createInstance(ScriptController::createWorld());
+    return createInstance(ScriptController::createWorld("WebScriptWorld"_s, WebCore::ScriptController::WorldType::User));
 }
 
 COMPtr<WebScriptWorld> WebScriptWorld::createInstance(RefPtr<DOMWrapperWorld>&& world)
@@ -130,9 +130,11 @@ HRESULT WebScriptWorld::standardWorld(_COM_Outptr_opt_ IWebScriptWorld** outWorl
 
 HRESULT WebScriptWorld::scriptWorldForGlobalContext(JSGlobalContextRef context, IWebScriptWorld** outWorld)
 {
+    if (!context)
+        return E_POINTER;
     if (!outWorld)
         return E_POINTER;
-    return findOrCreateWorld(currentWorld(toJS(context))).copyRefTo(outWorld);
+    return findOrCreateWorld(currentWorld(*toJS(context))).copyRefTo(outWorld);
 }
 
 HRESULT WebScriptWorld::unregisterWorld()

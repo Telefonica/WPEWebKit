@@ -26,8 +26,11 @@
 #include "config.h"
 #include "PlatformScreen.h"
 
+#include "DestinationColorSpace.h"
 #include "FloatRect.h"
 #include "NotImplemented.h"
+#include "Widget.h"
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -54,21 +57,69 @@ bool screenHasInvertedColors()
     return false;
 }
 
-FloatRect screenRect(Widget*)
+double screenDPI()
 {
     notImplemented();
-    return FloatRect(0, 0, 1024, 640);
+    return 96;
 }
 
-FloatRect screenAvailableRect(Widget*)
+void setScreenDPIObserverHandler(Function<void()>&&, void*)
 {
     notImplemented();
-    return FloatRect(0, 0, 1024, 640);
+}
+
+bool is1080() {
+    String s = String::fromUTF8(getenv("WPE_OUTPUT_MODE"));
+    String fullhd = String::fromUTF8("1080");
+
+    if (!s.isEmpty()) {
+        if(s.contains(fullhd)){
+            return true; 
+        }else{
+            return false;
+        }
+    }else{
+        return false;
+    }
+
+}
+
+FloatRect screenRect(Widget* widget)
+{
+    if(is1080())
+        return FloatRect(0, 0, 1920, 1080);
+    else
+        return FloatRect(0, 0, 1280, 720);
+}
+
+FloatRect screenAvailableRect(Widget* widget)
+{
+    if(is1080())
+        return FloatRect(0, 0, 1920, 1080);
+    else
+        return FloatRect(0, 0, 1280, 720);
+}
+
+DestinationColorSpace screenColorSpace(Widget*)
+{
+    return DestinationColorSpace::SRGB();
 }
 
 bool screenSupportsExtendedColor(Widget*)
 {
     return false;
 }
+
+#if ENABLE(TOUCH_EVENTS)
+bool screenHasTouchDevice()
+{
+    return true;
+}
+
+bool screenIsTouchPrimaryInputDevice()
+{
+    return true;
+}
+#endif
 
 } // namespace WebCore

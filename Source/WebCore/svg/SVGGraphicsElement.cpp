@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2004, 2005, 2008 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005, 2006 Rob Buis <buis@kde.org>
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,37 +22,35 @@
 #include "config.h"
 #include "SVGGraphicsElement.h"
 
+#include "LegacyRenderSVGPath.h"
 #include "RenderSVGPath.h"
 #include "RenderSVGResource.h"
 #include "SVGMatrix.h"
 #include "SVGNames.h"
 #include "SVGPathData.h"
 #include "SVGRect.h"
+#include "SVGRenderSupport.h"
 #include "SVGSVGElement.h"
 #include "SVGStringList.h"
+#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace WebCore {
 
-// Animated property definitions
-DEFINE_ANIMATED_TRANSFORM_LIST(SVGGraphicsElement, SVGNames::transformAttr, Transform, transform)
-
-BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGGraphicsElement)
-    REGISTER_LOCAL_ANIMATED_PROPERTY(transform)
-    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGElement)
-    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGTests)
-END_REGISTER_ANIMATED_PROPERTIES
+WTF_MAKE_ISO_ALLOCATED_IMPL(SVGGraphicsElement);
 
 SVGGraphicsElement::SVGGraphicsElement(const QualifiedName& tagName, Document& document)
     : SVGElement(tagName, document)
+    , SVGTests(this)
     , m_shouldIsolateBlending(false)
 {
-    registerAnimatedPropertiesForSVGGraphicsElement();
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        PropertyRegistry::registerProperty<SVGNames::transformAttr, &SVGGraphicsElement::m_transform>();
+    });
 }
 
-SVGGraphicsElement::~SVGGraphicsElement()
-{
-}
+SVGGraphicsElement::~SVGGraphicsElement() = default;
 
 Ref<SVGMatrix> SVGGraphicsElement::getCTMForBindings()
 {
@@ -75,31 +74,26 @@ AffineTransform SVGGraphicsElement::getScreenCTM(StyleUpdateStrategy styleUpdate
 
 AffineTransform SVGGraphicsElement::animatedLocalTransform() const
 {
-    AffineTransform matrix;
-    auto* style = renderer() ? &renderer()->style() : nullptr;
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    // LBSE handles transforms via RenderLayer, no need to handle CSS transforms here.
+    if (document().settings().layerBasedSVGEngineEnabled()) {
+        if (m_supplementalTransform)
+            return *m_supplementalTransform * transform().concatenate();
+        return transform().concatenate();
+    }
+#endif
 
-    // If CSS property was set, use that, otherwise fallback to attribute (if set).
-    if (style && style->hasTransform()) {
-        
-        FloatRect boundingBox;
-        switch (style->transformBox()) {
-        case TransformBox::FillBox:
-            boundingBox = renderer()->objectBoundingBox();
-            break;
-        case TransformBox::BorderBox:
-            // For SVG elements without an associated CSS layout box, the used value for border-box is view-box.
-        case TransformBox::ViewBox: {
-            FloatSize viewportSize;
-            SVGLengthContext(this).determineViewport(viewportSize);
-            boundingBox.setSize(viewportSize);
-            break;
-            }
-        }
-        
+    AffineTransform matrix;
+
+    auto* style = renderer() ? &renderer()->style() : nullptr;
+    bool hasSpecifiedTransform = style && style->hasTransform();
+
+    // Honor any of the transform-related CSS properties if set.
+    if (hasSpecifiedTransform || (style && (style->translate() || style->scale() || style->rotate()))) {
         // Note: objectBoundingBox is an emptyRect for elements like pattern or clipPath.
         // See the "Object bounding box units" section of http://dev.w3.org/csswg/css3-transforms/
         TransformationMatrix transform;
-        style->applyTransform(transform, boundingBox);
+        style->applyTransform(transform, renderer()->transformReferenceBoxRect());
 
         // Flatten any 3D transform.
         matrix = transform.toAffineTransform();
@@ -110,9 +104,15 @@ AffineTransform SVGGraphicsElement::animatedLocalTransform() const
             matrix.setE(matrix.e() / zoom);
             matrix.setF(matrix.f() / zoom);
         }
+    }
 
-    } else
-        transform().concatenate(matrix);
+    // If we didn't have the CSS "transform" property set, we must account for the "transform" attribute.
+    if (!hasSpecifiedTransform && style) {
+        auto t = style->computeTransformOrigin(renderer()->transformReferenceBoxRect()).xy();
+        matrix.translate(t);
+        matrix *= transform().concatenate();
+        matrix.translate(-t.x(), -t.y());
+    }
 
     if (m_supplementalTransform)
         return *m_supplementalTransform * matrix;
@@ -122,28 +122,14 @@ AffineTransform SVGGraphicsElement::animatedLocalTransform() const
 AffineTransform* SVGGraphicsElement::supplementalTransform()
 {
     if (!m_supplementalTransform)
-        m_supplementalTransform = std::make_unique<AffineTransform>();
+        m_supplementalTransform = makeUnique<AffineTransform>();
     return m_supplementalTransform.get();
 }
 
-bool SVGGraphicsElement::isSupportedAttribute(const QualifiedName& attrName)
-{
-    static const auto supportedAttributes = makeNeverDestroyed([] {
-        HashSet<QualifiedName> set;
-        SVGTests::addSupportedAttributes(set);
-        set.add(SVGNames::transformAttr);
-        return set;
-    }());
-    return supportedAttributes.get().contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGGraphicsElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void SVGGraphicsElement::parseAttribute(const QualifiedName& name, const AtomString& value)
 {
     if (name == SVGNames::transformAttr) {
-        SVGTransformListValues newList;
-        newList.parse(value);
-        detachAnimatedTransformListWrappers(newList.size());
-        setTransformBaseValue(newList);
+        m_transform->baseVal()->parse(value);
         return;
     }
 
@@ -153,27 +139,28 @@ void SVGGraphicsElement::parseAttribute(const QualifiedName& name, const AtomicS
 
 void SVGGraphicsElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (!isSupportedAttribute(attrName)) {
-        SVGElement::svgAttributeChanged(attrName);
+    if (PropertyRegistry::isKnownAttribute(attrName)) {
+        ASSERT(attrName == SVGNames::transformAttr);
+        InstanceInvalidationGuard guard(*this);
+
+        if (auto renderer = this->renderer()) {
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+            if (document().settings().layerBasedSVGEngineEnabled()) {
+                renderer->updateFromElement();
+                updateSVGRendererForElementChange();
+                return;
+            }
+#endif
+
+            renderer->setNeedsTransformUpdate();
+        }
+
+        updateSVGRendererForElementChange();
         return;
     }
 
-    InstanceInvalidationGuard guard(*this);
-
-    if (SVGTests::handleAttributeChange(this, attrName))
-        return;
-
-    auto renderer = this->renderer();
-    if (!renderer)
-        return;
-
-    if (attrName == SVGNames::transformAttr) {
-        renderer->setNeedsTransformUpdate();
-        RenderSVGResource::markForLayoutAndParentResourceInvalidation(*renderer);
-        return;
-    }
-
-    ASSERT_NOT_REACHED();
+    SVGElement::svgAttributeChanged(attrName);
+    SVGTests::svgAttributeChanged(attrName);
 }
 
 SVGElement* SVGGraphicsElement::nearestViewportElement() const
@@ -198,29 +185,20 @@ FloatRect SVGGraphicsElement::getBBox(StyleUpdateStrategy styleUpdateStrategy)
 
 RenderPtr<RenderElement> SVGGraphicsElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
-    return createRenderer<RenderSVGPath>(*this, WTFMove(style));
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    if (document().settings().layerBasedSVGEngineEnabled())
+        return createRenderer<RenderSVGPath>(*this, WTFMove(style));
+#endif
+
+    return createRenderer<LegacyRenderSVGPath>(*this, WTFMove(style));
 }
 
-void SVGGraphicsElement::toClipPath(Path& path)
+Path SVGGraphicsElement::toClipPath()
 {
-    updatePathFromGraphicsElement(this, path);
+    Path path = pathFromGraphicsElement(this);
     // FIXME: How do we know the element has done a layout?
     path.transform(animatedLocalTransform());
-}
-
-Ref<SVGStringList> SVGGraphicsElement::requiredFeatures()
-{
-    return SVGTests::requiredFeatures(*this);
-}
-
-Ref<SVGStringList> SVGGraphicsElement::requiredExtensions()
-{ 
-    return SVGTests::requiredExtensions(*this);
-}
-
-Ref<SVGStringList> SVGGraphicsElement::systemLanguage()
-{
-    return SVGTests::systemLanguage(*this);
+    return path;
 }
 
 }

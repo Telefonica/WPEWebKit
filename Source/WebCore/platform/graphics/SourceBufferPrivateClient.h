@@ -27,25 +27,24 @@
 
 #if ENABLE(MEDIA_SOURCE)
 
+#include "MediaDescription.h"
 #include <wtf/MediaTime.h>
 #include <wtf/Vector.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
-class SourceBufferPrivate;
-#if ENABLE(VIDEO_TRACK)
 class AudioTrackPrivate;
 class InbandTextTrackPrivate;
-#endif
 class MediaSample;
 class MediaDescription;
+class PlatformTimeRanges;
 class VideoTrackPrivate;
 
-class SourceBufferPrivateClient {
+class SourceBufferPrivateClient : public CanMakeWeakPtr<SourceBufferPrivateClient> {
 public:
-    virtual ~SourceBufferPrivateClient() { }
+    virtual ~SourceBufferPrivateClient() = default;
 
-#if ENABLE(VIDEO_TRACK)
     struct InitializationSegment {
         MediaTime duration;
 
@@ -67,25 +66,68 @@ public:
         };
         Vector<TextTrackInformation> textTracks;
     };
-    virtual void sourceBufferPrivateDidReceiveInitializationSegment(const InitializationSegment&) = 0;
-    virtual void sourceBufferPrivateDidReceiveSample(MediaSample&) = 0;
-    virtual bool sourceBufferPrivateHasAudio() const = 0;
-    virtual bool sourceBufferPrivateHasVideo() const = 0;
-
-    virtual void sourceBufferPrivateReenqueSamples(const AtomicString& trackID) = 0;
-    virtual void sourceBufferPrivateDidBecomeReadyForMoreSamples(const AtomicString& trackID) = 0;
-#endif
-
-    virtual MediaTime sourceBufferPrivateFastSeekTimeForMediaTime(const MediaTime& time, const MediaTime&, const MediaTime&) { return time; }
-    virtual void sourceBufferPrivateSeekToTime(const MediaTime&) { };
-
-    enum AppendResult { AppendSucceeded, ReadStreamFailed, ParsingFailed };
+    
+    enum class ReceiveResult : uint8_t {
+        RecieveSucceeded,
+        AppendError,
+        ClientDisconnected,
+        BufferRemoved,
+        IPCError,
+    };
+    virtual void sourceBufferPrivateDidReceiveInitializationSegment(InitializationSegment&&, CompletionHandler<void(ReceiveResult)>&&) = 0;
+    virtual void sourceBufferPrivateStreamEndedWithDecodeError() = 0;
+    virtual void sourceBufferPrivateAppendError(bool decodeError) = 0;
+    enum class AppendResult : uint8_t {
+        AppendSucceeded,
+        ReadStreamFailed,
+        ParsingFailed
+    };
     virtual void sourceBufferPrivateAppendComplete(AppendResult) = 0;
-    virtual void sourceBufferPrivateDidReceiveRenderingError(int errorCode) = 0;
-
-    virtual double timestampOffset() const = 0;
+    virtual void sourceBufferPrivateDurationChanged(const MediaTime&, CompletionHandler<void()>&&) = 0;
+    virtual void sourceBufferPrivateHighestPresentationTimestampChanged(const MediaTime&) = 0;
+    virtual void sourceBufferPrivateDidDropSample() = 0;
+    virtual void sourceBufferPrivateBufferedDirtyChanged(bool) = 0;
+    virtual void sourceBufferPrivateDidReceiveRenderingError(int64_t errorCode) = 0;
+    virtual void sourceBufferPrivateReportExtraMemoryCost(uint64_t) = 0;
 };
 
-}
+String convertEnumerationToString(SourceBufferPrivateClient::ReceiveResult);
+
+} // namespace WebCore
+
+namespace WTF {
+
+template<typename Type>
+struct LogArgument;
+
+template <>
+struct LogArgument<WebCore::SourceBufferPrivateClient::ReceiveResult> {
+    static String toString(const WebCore::SourceBufferPrivateClient::ReceiveResult result)
+    {
+        return convertEnumerationToString(result);
+    }
+};
+
+template<> struct EnumTraits<WebCore::SourceBufferPrivateClient::ReceiveResult> {
+    using values = EnumValues<
+        WebCore::SourceBufferPrivateClient::ReceiveResult,
+        WebCore::SourceBufferPrivateClient::ReceiveResult::RecieveSucceeded,
+        WebCore::SourceBufferPrivateClient::ReceiveResult::AppendError,
+        WebCore::SourceBufferPrivateClient::ReceiveResult::ClientDisconnected,
+        WebCore::SourceBufferPrivateClient::ReceiveResult::BufferRemoved,
+        WebCore::SourceBufferPrivateClient::ReceiveResult::IPCError
+    >;
+};
+
+template<> struct EnumTraits<WebCore::SourceBufferPrivateClient::AppendResult> {
+    using values = EnumValues<
+        WebCore::SourceBufferPrivateClient::AppendResult,
+        WebCore::SourceBufferPrivateClient::AppendResult::AppendSucceeded,
+        WebCore::SourceBufferPrivateClient::AppendResult::ReadStreamFailed,
+        WebCore::SourceBufferPrivateClient::AppendResult::ParsingFailed
+    >;
+};
+
+} // namespace WTF
 
 #endif // ENABLE(MEDIA_SOURCE)

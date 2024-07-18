@@ -8,51 +8,66 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "gflags/gflags.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/system_wrappers/include/metrics_default.h"
-#include "webrtc/test/field_trial.h"
-#include "webrtc/test/gmock.h"
-#include "webrtc/test/gtest.h"
-#include "webrtc/test/testsupport/fileutils.h"
-#include "webrtc/test/testsupport/trace_to_stderr.h"
+#include <memory>
+#include <regex>
+#include <string>
+#include <vector>
 
-#if defined(WEBRTC_IOS)
-#include "webrtc/test/ios/test_support.h"
-#endif
+#include "absl/debugging/failure_signal_handler.h"
+#include "absl/debugging/symbolize.h"
+#include "absl/flags/parse.h"
+#include "test/gmock.h"
+#include "test/test_main_lib.h"
 
-DEFINE_bool(logs, false, "print logs to stderr");
+namespace {
 
-DEFINE_string(force_fieldtrials, "",
-    "Field trials control experimental feature code which can be forced. "
-    "E.g. running with --force_fieldtrials=WebRTC-FooFeature/Enable/"
-    " will assign the group Enable to field trial WebRTC-FooFeature.");
+std::vector<std::string> ReplaceDashesWithUnderscores(int argc, char* argv[]) {
+  std::vector<std::string> args(argv, argv + argc);
+  for (std::string& arg : args) {
+    // Only replace arguments that starts with a dash.
+    if (!arg.empty() && arg[0] == '-') {
+      // Don't replace the 2 first characters.
+      auto begin = arg.begin() + 2;
+      // Replace dashes on the left of '=' or on all the arg if no '=' is found.
+      auto end = std::find(arg.begin(), arg.end(), '=');
+      std::replace(begin, end, '-', '_');
+    }
+  }
+  return args;
+}
+
+std::vector<char*> VectorOfStringsToVectorOfPointers(
+    std::vector<std::string>& input) {
+  std::vector<char*> output(input.size());
+  for (size_t i = 0; i < input.size(); ++i) {
+    output[i] = &(input[i][0]);
+  }
+  return output;
+}
+
+}  // namespace
 
 int main(int argc, char* argv[]) {
-  ::testing::InitGoogleMock(&argc, argv);
+  // Initialize the symbolizer to get a human-readable stack trace
+  absl::InitializeSymbolizer(argv[0]);
+  testing::InitGoogleMock(&argc, argv);
+  // Before parsing the arguments with the absl flag library, any internal '-'
+  // characters will be converted to '_' characters to make sure the string is a
+  // valid attribute name.
+  std::vector<std::string> new_argv = ReplaceDashesWithUnderscores(argc, argv);
+  std::vector<char*> raw_new_argv = VectorOfStringsToVectorOfPointers(new_argv);
+  absl::ParseCommandLine(argc, &raw_new_argv[0]);
 
-  // Default to LS_INFO, even for release builds to provide better test logging.
-  // TODO(pbos): Consider adding a command-line override.
-  if (rtc::LogMessage::GetLogToDebug() > rtc::LS_INFO)
-    rtc::LogMessage::LogToDebug(rtc::LS_INFO);
-
-  // AllowCommandLineParsing allows us to ignore flags passed on to us by
-  // Chromium build bots without having to explicitly disable them.
-  google::AllowCommandLineReparsing();
-  google::ParseCommandLineFlags(&argc, &argv, false);
-
-  webrtc::test::SetExecutablePath(argv[0]);
-  webrtc::test::InitFieldTrialsFromString(FLAGS_force_fieldtrials);
-  webrtc::metrics::Enable();
-
-  rtc::LogMessage::SetLogToStderr(FLAGS_logs);
-  std::unique_ptr<webrtc::test::TraceToStderr> trace_to_stderr;
-  if (FLAGS_logs)
-      trace_to_stderr.reset(new webrtc::test::TraceToStderr);
-#if defined(WEBRTC_IOS)
-  rtc::test::InitTestSuite(RUN_ALL_TESTS, argc, argv);
-  rtc::test::RunTestsFromIOSApp();
+// This absl handler use unsupported features/instructions on Fuchsia
+#if !defined(WEBRTC_FUCHSIA)
+  absl::FailureSignalHandlerOptions options;
+  absl::InstallFailureSignalHandler(options);
 #endif
 
-  return RUN_ALL_TESTS();
+  std::unique_ptr<webrtc::TestMain> main = webrtc::TestMain::Create();
+  int err_code = main->Init();
+  if (err_code != 0) {
+    return err_code;
+  }
+  return main->Run(argc, argv);
 }

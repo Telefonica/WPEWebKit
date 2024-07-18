@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 #pragma once
 
 #include "Connection.h"
+#include <WebCore/ProcessIdentifier.h>
 #include <wtf/HashMap.h>
 #include <wtf/ProcessID.h>
 #include <wtf/RefPtr.h>
@@ -34,39 +35,74 @@
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
 
+#if PLATFORM(WIN)
+#include <wtf/win/Win32Handle.h>
+#endif
+
+#if PLATFORM(COCOA)
+#include "XPCEventHandler.h"
+#endif
+
 namespace WebKit {
 
-class ProcessLauncher : public ThreadSafeRefCounted<ProcessLauncher> {
+#if PLATFORM(GTK) || PLATFORM(WPE)
+enum class SandboxPermission {
+    ReadOnly,
+    ReadWrite,
+};
+#endif
+
+class ProcessLauncher : public ThreadSafeRefCounted<ProcessLauncher>, public CanMakeWeakPtr<ProcessLauncher> {
 public:
     class Client {
     public:
         virtual ~Client() { }
         
         virtual void didFinishLaunching(ProcessLauncher*, IPC::Connection::Identifier) = 0;
+        virtual bool shouldConfigureJSCForTesting() const { return false; }
+        virtual bool isJITEnabled() const { return true; }
+        virtual bool shouldEnableSharedArrayBuffer() const { return false; }
+        virtual bool shouldEnableCaptivePortalMode() const { return false; }
+#if PLATFORM(COCOA)
+        virtual RefPtr<XPCEventHandler> xpcEventHandler() const { return nullptr; }
+#endif
     };
     
     enum class ProcessType {
         Web,
-#if ENABLE(NETSCAPE_PLUGIN_API)
-        Plugin32,
-        Plugin64,
-#endif
         Network,
-        Storage,
+#if ENABLE(GPU_PROCESS)
+        GPU,
+#endif
+#if ENABLE(BUBBLEWRAP_SANDBOX)
+        DBusProxy,
+#endif
     };
 
     struct LaunchOptions {
         ProcessType processType;
+        WebCore::ProcessIdentifier processIdentifier;
         HashMap<String, String> extraInitializationData;
+        bool nonValidInjectedCodeAllowed { false };
+        bool shouldMakeProcessLaunchFailForTesting { false };
+        CString customWebContentServiceBundleIdentifier;
 
-#if ENABLE(DEVELOPER_MODE) && (PLATFORM(GTK) || PLATFORM(WPE))
+#if PLATFORM(GTK) || PLATFORM(WPE)
+        HashMap<CString, SandboxPermission> extraSandboxPaths;
+#if ENABLE(DEVELOPER_MODE)
         String processCmdPrefix;
+#endif
+#endif
+
+#if PLATFORM(PLAYSTATION)
+        String processPath;
+        int32_t userId { -1 };
 #endif
     };
 
-    static Ref<ProcessLauncher> create(Client* client, const LaunchOptions& launchOptions)
+    static Ref<ProcessLauncher> create(Client* client, LaunchOptions&& launchOptions)
     {
-        return adoptRef(*new ProcessLauncher(client, launchOptions));
+        return adoptRef(*new ProcessLauncher(client, WTFMove(launchOptions)));
     }
 
     bool isLaunching() const { return m_isLaunching; }
@@ -76,12 +112,16 @@ public:
     void invalidate();
 
 private:
-    ProcessLauncher(Client*, const LaunchOptions& launchOptions);
+    ProcessLauncher(Client*, LaunchOptions&&);
 
     void launchProcess();
     void didFinishLaunchingProcess(ProcessID, IPC::Connection::Identifier);
 
     void platformInvalidate();
+
+#if PLATFORM(COCOA)
+    void terminateXPCConnection();
+#endif
 
     Client* m_client;
 
@@ -89,10 +129,13 @@ private:
     OSObjectPtr<xpc_connection_t> m_xpcConnection;
 #endif
 
-    WeakPtrFactory<ProcessLauncher> m_weakPtrFactory;
+#if PLATFORM(WIN)
+    WTF::Win32Handle m_hProcess;
+#endif
+
     const LaunchOptions m_launchOptions;
-    bool m_isLaunching;
-    ProcessID m_processIdentifier;
+    bool m_isLaunching { true };
+    ProcessID m_processIdentifier { 0 };
 };
 
 } // namespace WebKit

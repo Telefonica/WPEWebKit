@@ -23,14 +23,14 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef Atomics_h
-#define Atomics_h
+#pragma once
 
 #include <atomic>
+#include <wtf/FastMalloc.h>
 #include <wtf/StdLibExtras.h>
 
 #if OS(WINDOWS)
-#if !COMPILER(GCC_OR_CLANG)
+#if !COMPILER(GCC_COMPATIBLE)
 extern "C" void _ReadWriteBarrier(void);
 #pragma intrinsic(_ReadWriteBarrier)
 #endif
@@ -54,6 +54,8 @@ ALWAYS_INLINE bool hasFence(std::memory_order order)
 
 template<typename T>
 struct Atomic {
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+
     // Don't pass a non-default value for the order parameter unless you really know
     // what you are doing and have thought about it very hard. The cost of seq_cst
     // is usually not high enough to justify the risk.
@@ -242,7 +244,7 @@ inline T atomicExchange(T* location, T newValue, std::memory_order order = std::
 // to do things like register allocation and code motion over pure operations.
 inline void compilerFence()
 {
-#if OS(WINDOWS) && !COMPILER(GCC_OR_CLANG)
+#if OS(WINDOWS) && !COMPILER(GCC_COMPATIBLE)
     _ReadWriteBarrier();
 #else
     asm volatile("" ::: "memory");
@@ -273,8 +275,6 @@ inline void loadLoadFence() { arm_dmb(); }
 inline void loadStoreFence() { arm_dmb(); }
 inline void storeLoadFence() { arm_dmb(); }
 inline void storeStoreFence() { arm_dmb_st(); }
-inline void memoryBarrierAfterLock() { arm_dmb(); }
-inline void memoryBarrierBeforeUnlock() { arm_dmb(); }
 inline void crossModifyingCodeFence() { arm_isb(); }
 
 #elif CPU(X86) || CPU(X86_64)
@@ -297,18 +297,6 @@ inline void x86_cpuid()
 #if OS(WINDOWS)
     int info[4];
     __cpuid(info, 0);
-#elif CPU(X86)
-    // GCC 4.9 on x86 in PIC mode can't use %ebx, so we have to save and restore it manually.
-    // But since we don't care about what cpuid returns (we use it as a serializing instruction),
-    // we can simply throw away what cpuid put in %ebx.
-    intptr_t a = 0, c, d;
-    asm volatile(
-        "pushl %%ebx\n\t"
-        "cpuid\n\t"
-        "popl %%ebx\n\t"
-        : "+a"(a), "=c"(c), "=d"(d)
-        :
-        : "memory");
 #else
     intptr_t a = 0, b, c, d;
     asm volatile(
@@ -323,8 +311,6 @@ inline void loadLoadFence() { compilerFence(); }
 inline void loadStoreFence() { compilerFence(); }
 inline void storeLoadFence() { x86_ortop(); }
 inline void storeStoreFence() { compilerFence(); }
-inline void memoryBarrierAfterLock() { compilerFence(); }
-inline void memoryBarrierBeforeUnlock() { compilerFence(); }
 inline void crossModifyingCodeFence() { x86_cpuid(); }
 
 #else
@@ -333,119 +319,176 @@ inline void loadLoadFence() { std::atomic_thread_fence(std::memory_order_seq_cst
 inline void loadStoreFence() { std::atomic_thread_fence(std::memory_order_seq_cst); }
 inline void storeLoadFence() { std::atomic_thread_fence(std::memory_order_seq_cst); }
 inline void storeStoreFence() { std::atomic_thread_fence(std::memory_order_seq_cst); }
-inline void memoryBarrierAfterLock() { std::atomic_thread_fence(std::memory_order_seq_cst); }
-inline void memoryBarrierBeforeUnlock() { std::atomic_thread_fence(std::memory_order_seq_cst); }
 inline void crossModifyingCodeFence() { std::atomic_thread_fence(std::memory_order_seq_cst); } // Probably not strong enough.
 
 #endif
 
-typedef unsigned Dependency;
+#if CPU(ARM64) || CPU(X86) || CPU(X86_64)
+// Use this fence if you want a fence between loads that are already depdendent.
+inline void dependentLoadLoadFence() { compilerFence(); }
+#else
+inline void dependentLoadLoadFence() { loadLoadFence(); }
+#endif
 
-ALWAYS_INLINE Dependency nullDependency()
+template<typename T>
+T opaque(T pointer)
+{
+#if !OS(WINDOWS)
+    asm volatile("" : "+r"(pointer) ::);
+#endif
+    return pointer;
+}
+
+typedef unsigned InternalDependencyType;
+
+inline InternalDependencyType opaqueMixture()
 {
     return 0;
 }
 
-template <typename T, typename std::enable_if<sizeof(T) == 8>::type* = nullptr>
-ALWAYS_INLINE Dependency dependency(T value)
+template<typename... Arguments, typename T>
+inline InternalDependencyType opaqueMixture(T value, Arguments... arguments)
 {
-    unsigned dependency;
-    uint64_t copy = bitwise_cast<uint64_t>(value);
-#if CPU(ARM64)
-    // Create a magical zero value through inline assembly, whose computation
-    // isn't visible to the optimizer. This zero is then usable as an offset in
-    // further address computations: adding zero does nothing, but the compiler
-    // doesn't know it. It's magical because it creates an address dependency
-    // from the load of `location` to the uses of the dependency, which triggers
-    // the ARM ISA's address dependency rule, a.k.a. the mythical C++ consume
-    // ordering. This forces weak memory order CPUs to observe `location` and
-    // dependent loads in their store order without the reader using a barrier
-    // or an acquire load.
-    asm("eor %w[dependency], %w[in], %w[in]"
-        : [dependency] "=r"(dependency)
-        : [in] "r"(copy));
-#elif CPU(ARM)
-    asm("eor %[dependency], %[in], %[in]"
-        : [dependency] "=r"(dependency)
-        : [in] "r"(copy));
-#else
-    // No dependency is needed for this architecture.
-    loadLoadFence();
-    dependency = 0;
-    UNUSED_PARAM(copy);
-#endif
-    return dependency;
+    union {
+        InternalDependencyType copy;
+        T value;
+    } u;
+    u.copy = 0;
+    u.value = value;
+    return opaqueMixture(arguments...) + u.copy;
 }
 
-// FIXME: This code is almost identical to the other dependency() overload.
-// https://bugs.webkit.org/show_bug.cgi?id=169405
-template <typename T, typename std::enable_if<sizeof(T) == 4>::type* = nullptr>
-ALWAYS_INLINE Dependency dependency(T value)
-{
-    unsigned dependency;
-    uint32_t copy = bitwise_cast<uint32_t>(value);
-#if CPU(ARM64)
-    asm("eor %w[dependency], %w[in], %w[in]"
-        : [dependency] "=r"(dependency)
-        : [in] "r"(copy));
-#elif CPU(ARM)
-    asm("eor %[dependency], %[in], %[in]"
-        : [dependency] "=r"(dependency)
-        : [in] "r"(copy));
-#else
-    loadLoadFence();
-    dependency = 0;
-    UNUSED_PARAM(copy);
-#endif
-    return dependency;
-}
-
-template <typename T, typename std::enable_if<sizeof(T) == 2>::type* = nullptr>
-ALWAYS_INLINE Dependency dependency(T value)
-{
-    return dependency(static_cast<uint32_t>(value));
-}
-
-template <typename T, typename std::enable_if<sizeof(T) == 1>::type* = nullptr>
-ALWAYS_INLINE Dependency dependency(T value)
-{
-    return dependency(static_cast<uint32_t>(value));
-}
-
-template<typename T>
-struct DependencyWith {
+class Dependency {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    DependencyWith()
-        : dependency(nullDependency())
-        , value()
+    Dependency()
+        : m_value(0)
     {
     }
     
-    DependencyWith(Dependency dependency, const T& value)
-        : dependency(dependency)
+    // On TSO architectures, this is a load-load fence and the value it returns is not meaningful (it's
+    // zero). The load-load fence is usually just a compiler fence. On ARM, this is a self-xor that
+    // produces zero, but it's concealed from the compiler. The CPU understands this dummy op to be a
+    // phantom dependency.
+    template<typename... Arguments>
+    static Dependency fence(Arguments... arguments)
+    {
+        InternalDependencyType input = opaqueMixture(arguments...);
+        InternalDependencyType output;
+#if CPU(ARM64)
+        // Create a magical zero value through inline assembly, whose computation
+        // isn't visible to the optimizer. This zero is then usable as an offset in
+        // further address computations: adding zero does nothing, but the compiler
+        // doesn't know it. It's magical because it creates an address dependency
+        // from the load of `location` to the uses of the dependency, which triggers
+        // the ARM ISA's address dependency rule, a.k.a. the mythical C++ consume
+        // ordering. This forces weak memory order CPUs to observe `location` and
+        // dependent loads in their store order without the reader using a barrier
+        // or an acquire load.
+        asm("eor %w[out], %w[in], %w[in]"
+            : [out] "=r"(output)
+            : [in] "r"(input));
+#elif CPU(ARM)
+        asm("eor %[out], %[in], %[in]"
+            : [out] "=r"(output)
+            : [in] "r"(input));
+#else
+        // No dependency is needed for this architecture.
+        loadLoadFence();
+        output = 0;
+        UNUSED_PARAM(input);
+#endif
+        Dependency result;
+        result.m_value = output;
+        return result;
+    }
+
+    // This function exists as a helper to aid in not making mistakes when doing a load
+    // and fencing on the result of the load. A couple examples of where things can go
+    // wrong, and how this function helps:
+    // 
+    // Consider this program:
+    // ```
+    // a = load(p1)
+    // b = load(p2)
+    // if (a != b) return;
+    // d = Dependency::fence(b)
+    // ```
+    // When consuming the d dependency, the compiler can prove that a and b are the same
+    // value, and end up replacing the dependency on whatever register is allocated for `a`
+    // instead of being over `b`, leading to the dependency being on load(p1) instead of
+    // load(p2). We fix this by splitting the value feeding into the fence and the value
+    // being used:
+    // b' = load(p2)
+    // Dependency::fence(b')
+    // b = opaque(b')
+    // b' feeds into the fence, and b will be the value compared. Crucially, the compiler can't
+    // prove that b == b'.
+    //
+    // Let's consider another use case. Imagine you end up with a program like this (perhaps
+    // after some inlining or various optimizations):
+    // a = load(p1)
+    // b = load(p2)
+    // if (a != b) return;
+    // c = load(p2)
+    // d = Dependency::fence(c)
+    // Similar to the first test, the compiler can prove a and b are the same, allowing it to
+    // prove that c == a == b, allowing it to potentially have the dependency be on the wrong
+    // value, similar to above. The fix here is to obscure the pointer we're loading from from
+    // the compiler.
+    template<typename T>
+    static Dependency loadAndFence(const T* pointer, T& output)
+    {
+#if CPU(ARM64) || CPU(ARM)
+        T value = *opaque(pointer);
+        Dependency dependency = Dependency::fence(value);
+        output = opaque(value);
+        return dependency;
+#else
+        T value = *pointer;
+        Dependency dependency = Dependency::fence(value);
+        output = value;
+        return dependency;
+#endif
+    }
+    
+    // On TSO architectures, this just returns the pointer you pass it. On ARM, this produces a new
+    // pointer that is dependent on this dependency and the input pointer.
+    template<typename T>
+    T* consume(T* pointer)
+    {
+#if CPU(ARM64) || CPU(ARM)
+        return bitwise_cast<T*>(bitwise_cast<char*>(pointer) + m_value);
+#else
+        UNUSED_PARAM(m_value);
+        return pointer;
+#endif
+    }
+    
+private:
+    InternalDependencyType m_value;
+};
+
+template<typename InputType, typename ValueType>
+struct InputAndValue {
+    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+
+    InputAndValue() { }
+    
+    InputAndValue(InputType input, ValueType value)
+        : input(input)
         , value(value)
     {
     }
     
-    Dependency dependency;
-    T value;
+    InputType input;
+    ValueType value;
 };
-    
-template<typename T>
-inline DependencyWith<T> dependencyWith(Dependency dependency, const T& value)
-{
-    return DependencyWith<T>(dependency, value);
-}
 
-template<typename T>
-inline T* consume(T* pointer, Dependency dependency)
+template<typename InputType, typename ValueType>
+InputAndValue<InputType, ValueType> inputAndValue(InputType input, ValueType value)
 {
-#if CPU(ARM64) || CPU(ARM)
-    return bitwise_cast<T*>(bitwise_cast<char*>(pointer) + dependency);
-#else
-    UNUSED_PARAM(dependency);
-    return pointer;
-#endif
+    return InputAndValue<InputType, ValueType>(input, value);
 }
 
 template<typename T, typename Func>
@@ -469,11 +512,7 @@ ALWAYS_INLINE T& ensurePointer(Atomic<T*>& pointer, const Func& func)
 
 using WTF::Atomic;
 using WTF::Dependency;
-using WTF::DependencyWith;
-using WTF::consume;
-using WTF::dependency;
-using WTF::dependencyWith;
+using WTF::InputAndValue;
+using WTF::inputAndValue;
 using WTF::ensurePointer;
-using WTF::nullDependency;
-
-#endif // Atomics_h
+using WTF::opaqueMixture;

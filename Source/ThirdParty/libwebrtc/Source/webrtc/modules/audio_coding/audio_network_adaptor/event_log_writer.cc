@@ -8,11 +8,20 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <math.h>
-#include <algorithm>
+#include "modules/audio_coding/audio_network_adaptor/event_log_writer.h"
 
-#include "webrtc/logging/rtc_event_log/rtc_event_log.h"
-#include "webrtc/modules/audio_coding/audio_network_adaptor/event_log_writer.h"
+#include <math.h>
+
+#include <algorithm>
+#include <cstdlib>
+#include <memory>
+#include <utility>
+
+#include "absl/types/optional.h"
+#include "api/rtc_event_log/rtc_event.h"
+#include "api/rtc_event_log/rtc_event_log.h"
+#include "logging/rtc_event_log/events/rtc_event_audio_network_adaptation.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -60,7 +69,9 @@ void EventLogWriter::MaybeLogEncoderConfig(
 }
 
 void EventLogWriter::LogEncoderConfig(const AudioEncoderRuntimeConfig& config) {
-  event_log_->LogAudioNetworkAdaptation(config);
+  auto config_copy = std::make_unique<AudioEncoderRuntimeConfig>(config);
+  event_log_->Log(
+      std::make_unique<RtcEventAudioNetworkAdaptation>(std::move(config_copy)));
   last_logged_config_ = config;
 }
 

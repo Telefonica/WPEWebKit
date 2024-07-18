@@ -26,15 +26,16 @@
 #include "config.h"
 #include "IDBKey.h"
 
-#if ENABLE(INDEXED_DATABASE)
-
 #include "IDBKeyData.h"
-#include <runtime/ArrayBufferView.h>
-#include <runtime/JSArrayBuffer.h>
-#include <runtime/JSArrayBufferView.h>
-#include <runtime/JSCInlines.h>
+#include <JavaScriptCore/ArrayBufferView.h>
+#include <JavaScriptCore/JSArrayBuffer.h>
+#include <JavaScriptCore/JSArrayBufferView.h>
+#include <JavaScriptCore/JSCInlines.h>
+#include <wtf/IsoMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_ISO_ALLOCATED_IMPL(IDBKey);
 
 using IDBKeyVector = Vector<RefPtr<IDBKey>>;
 
@@ -52,10 +53,12 @@ Ref<IDBKey> IDBKey::createBinary(JSC::JSArrayBuffer& arrayBuffer)
 Ref<IDBKey> IDBKey::createBinary(JSC::JSArrayBufferView& arrayBufferView)
 {
     auto bufferView = arrayBufferView.possiblySharedImpl();
+    if (!bufferView)
+        return createInvalid();
     return adoptRef(*new IDBKey(ThreadSafeDataBuffer::copyData(bufferView->data(), bufferView->byteLength())));
 }
 
-IDBKey::IDBKey(KeyType type, double number)
+IDBKey::IDBKey(IndexedDB::KeyType type, double number)
     : m_type(type)
     , m_value(number)
     , m_sizeEstimate(OverheadSize + sizeof(double))
@@ -63,37 +66,35 @@ IDBKey::IDBKey(KeyType type, double number)
 }
 
 IDBKey::IDBKey(const String& value)
-    : m_type(KeyType::String)
+    : m_type(IndexedDB::KeyType::String)
     , m_value(value)
     , m_sizeEstimate(OverheadSize + value.length() * sizeof(UChar))
 {
 }
 
 IDBKey::IDBKey(const IDBKeyVector& keyArray, size_t arraySize)
-    : m_type(KeyType::Array)
+    : m_type(IndexedDB::KeyType::Array)
     , m_value(keyArray)
     , m_sizeEstimate(OverheadSize + arraySize)
 {
 }
 
 IDBKey::IDBKey(const ThreadSafeDataBuffer& buffer)
-    : m_type(KeyType::Binary)
+    : m_type(IndexedDB::KeyType::Binary)
     , m_value(buffer)
     , m_sizeEstimate(OverheadSize + buffer.size())
 {
 }
 
-IDBKey::~IDBKey()
-{
-}
+IDBKey::~IDBKey() = default;
 
 bool IDBKey::isValid() const
 {
-    if (m_type == KeyType::Invalid)
+    if (m_type == IndexedDB::KeyType::Invalid)
         return false;
 
-    if (m_type == KeyType::Array) {
-        for (auto& key : WTF::get<IDBKeyVector>(m_value)) {
+    if (m_type == IndexedDB::KeyType::Array) {
+        for (auto& key : std::get<IDBKeyVector>(m_value)) {
             if (!key->isValid())
                 return false;
         }
@@ -108,9 +109,9 @@ int IDBKey::compare(const IDBKey& other) const
         return m_type > other.m_type ? -1 : 1;
 
     switch (m_type) {
-    case KeyType::Array: {
-        auto& array = WTF::get<IDBKeyVector>(m_value);
-        auto& otherArray = WTF::get<IDBKeyVector>(other.m_value);
+    case IndexedDB::KeyType::Array: {
+        auto& array = std::get<IDBKeyVector>(m_value);
+        auto& otherArray = std::get<IDBKeyVector>(other.m_value);
         for (size_t i = 0; i < array.size() && i < otherArray.size(); ++i) {
             if (int result = array[i]->compare(*otherArray[i]))
                 return result;
@@ -121,19 +122,19 @@ int IDBKey::compare(const IDBKey& other) const
             return 1;
         return 0;
     }
-    case KeyType::Binary:
-        return compareBinaryKeyData(WTF::get<ThreadSafeDataBuffer>(m_value), WTF::get<ThreadSafeDataBuffer>(other.m_value));
-    case KeyType::String:
-        return -codePointCompare(WTF::get<String>(other.m_value), WTF::get<String>(m_value));
-    case KeyType::Date:
-    case KeyType::Number: {
-        auto number = WTF::get<double>(m_value);
-        auto otherNumber = WTF::get<double>(other.m_value);
+    case IndexedDB::KeyType::Binary:
+        return compareBinaryKeyData(std::get<ThreadSafeDataBuffer>(m_value), std::get<ThreadSafeDataBuffer>(other.m_value));
+    case IndexedDB::KeyType::String:
+        return -codePointCompare(std::get<String>(other.m_value), std::get<String>(m_value));
+    case IndexedDB::KeyType::Date:
+    case IndexedDB::KeyType::Number: {
+        auto number = std::get<double>(m_value);
+        auto otherNumber = std::get<double>(other.m_value);
         return (number < otherNumber) ? -1 : ((number > otherNumber) ? 1 : 0);
     }
-    case KeyType::Invalid:
-    case KeyType::Min:
-    case KeyType::Max:
+    case IndexedDB::KeyType::Invalid:
+    case IndexedDB::KeyType::Min:
+    case IndexedDB::KeyType::Max:
         ASSERT_NOT_REACHED();
         return 0;
     }
@@ -160,5 +161,3 @@ String IDBKey::loggingString() const
 #endif
 
 } // namespace WebCore
-
-#endif

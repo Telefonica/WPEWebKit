@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2020 Apple Inc. All rights reserved.
  * Copyright (C) 2008, 2010 Nokia Corporation and/or its subsidiary(-ies)
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,12 +31,17 @@
 #import <WebCore/FocusDirection.h>
 #import <wtf/Forward.h>
 
+namespace WebCore {
+class HTMLImageElement;
+}
+
 @class WebView;
 
 // FIXME: This class is used as a concrete class on Mac, but on iOS this is an abstract
 // base class of the concrete class, WebChromeClientIOS. Because of that, this class and
 // many of its functions are not marked final. That is messy way to organize things.
 class WebChromeClient : public WebCore::ChromeClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WebChromeClient(WebView*);
 
@@ -59,7 +64,7 @@ private:
     void focusedElementChanged(WebCore::Element*) override;
     void focusedFrameChanged(WebCore::Frame*) final;
 
-    WebCore::Page* createWindow(WebCore::Frame&, const WebCore::FrameLoadRequest&, const WebCore::WindowFeatures&, const WebCore::NavigationAction&) final;
+    WebCore::Page* createWindow(WebCore::Frame&, const WebCore::WindowFeatures&, const WebCore::NavigationAction&) final;
     void show() final;
 
     bool canRunModal() final;
@@ -84,13 +89,12 @@ private:
     bool canRunBeforeUnloadConfirmPanel() final;
     bool runBeforeUnloadConfirmPanel(const String& message, WebCore::Frame&) final;
 
-    void closeWindowSoon() final;
+    void closeWindow() final;
 
     void runJavaScriptAlert(WebCore::Frame&, const String&) override;
     bool runJavaScriptConfirm(WebCore::Frame&, const String&) override;
     bool runJavaScriptPrompt(WebCore::Frame&, const String& message, const String& defaultValue, String& result) override;
 
-    bool supportsImmediateInvalidation() final;
     void invalidateRootView(const WebCore::IntRect&) final;
     void invalidateContentsAndRootView(const WebCore::IntRect&) final;
     void invalidateContentsForSlowScroll(const WebCore::IntRect&) final;
@@ -99,37 +103,36 @@ private:
     WebCore::IntPoint screenToRootView(const WebCore::IntPoint&) const final;
     WebCore::IntRect rootViewToScreen(const WebCore::IntRect&) const final;
 
-#if PLATFORM(IOS)
     WebCore::IntPoint accessibilityScreenToRootView(const WebCore::IntPoint&) const final;
     WebCore::IntRect rootViewToAccessibilityScreen(const WebCore::IntRect&) const final;
-#endif
+
+    void didFinishLoadingImageForElement(WebCore::HTMLImageElement&) final;
 
     PlatformPageClient platformPageClient() const final;
     void contentsSizeChanged(WebCore::Frame&, const WebCore::IntSize&) const final;
-    void scrollRectIntoView(const WebCore::IntRect&) const final;
+    void intrinsicContentsSizeChanged(const WebCore::IntSize&) const final { }
 
+    void scrollContainingScrollViewsToRevealRect(const WebCore::IntRect&) const final;
     void setStatusbarText(const String&) override;
 
     bool shouldUnavailablePluginMessageBeButton(WebCore::RenderEmbeddedObject::PluginUnavailabilityReason) const final;
     void unavailablePluginButtonClicked(WebCore::Element&, WebCore::RenderEmbeddedObject::PluginUnavailabilityReason) const final;
-    void mouseDidMoveOverElement(const WebCore::HitTestResult&, unsigned modifierFlags) final;
+    void mouseDidMoveOverElement(const WebCore::HitTestResult&, unsigned modifierFlags, const String&, WebCore::TextDirection) final;
 
-    void setToolTip(const String&, WebCore::TextDirection) final;
+    void setToolTip(const String&);
 
-    void print(WebCore::Frame&) final;
+    void print(WebCore::Frame&, const WebCore::StringWithDirection&) final;
     void exceededDatabaseQuota(WebCore::Frame&, const String& databaseName, WebCore::DatabaseDetails) final;
     void reachedMaxAppCacheSize(int64_t spaceNeeded) final;
     void reachedApplicationCacheOriginQuota(WebCore::SecurityOrigin&, int64_t totalSpaceNeeded) final;
 
-#if ENABLE(DASHBOARD_SUPPORT)
-    void annotatedRegionsChanged() final;
-#endif
-
     void runOpenPanel(WebCore::Frame&, WebCore::FileChooser&) override;
+    void showShareSheet(WebCore::ShareDataWithParsedURL&, CompletionHandler<void(bool)>&&) override;
+
     void loadIconForFiles(const Vector<String>&, WebCore::FileIconLoader&) final;
     RefPtr<WebCore::Icon> createIconForFiles(const Vector<String>& filenames) override;
 
-#if !PLATFORM(IOS)
+#if !PLATFORM(IOS_FAMILY)
     void setCursor(const WebCore::Cursor&) final;
     void setCursorHiddenUntilMouseMoves(bool) final;
 #endif
@@ -138,6 +141,21 @@ private:
     std::unique_ptr<WebCore::ColorChooser> createColorChooser(WebCore::ColorChooserClient&, const WebCore::Color&) final;
 #endif
 
+#if ENABLE(DATALIST_ELEMENT)
+    std::unique_ptr<WebCore::DataListSuggestionPicker> createDataListSuggestionPicker(WebCore::DataListSuggestionsClient&) final;
+    bool canShowDataListSuggestionLabels() const final { return false; }
+#endif
+
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+    std::unique_ptr<WebCore::DateTimeChooser> createDateTimeChooser(WebCore::DateTimeChooserClient&) final;
+#endif
+
+#if ENABLE(APP_HIGHLIGHTS)
+    void storeAppHighlight(WebCore::AppHighlight&&) const final;
+#endif
+
+    void setTextIndicator(const WebCore::TextIndicatorData&) const final;
+
 #if ENABLE(POINTER_LOCK)
     bool requestPointerLock() final;
     void requestPointerUnlock() final;
@@ -145,24 +163,28 @@ private:
 
     WebCore::KeyboardUIMode keyboardUIMode() final;
 
+    bool hoverSupportedByPrimaryPointingDevice() const override { return true; }
+    bool hoverSupportedByAnyAvailablePointingDevice() const override { return true; }
+    std::optional<WebCore::PointerCharacteristics> pointerCharacteristicsOfPrimaryPointingDevice() const override { return WebCore::PointerCharacteristics::Fine; }
+    OptionSet<WebCore::PointerCharacteristics> pointerCharacteristicsOfAllAvailablePointingDevices() const override { return WebCore::PointerCharacteristics::Fine; }
+
     NSResponder *firstResponder() final;
     void makeFirstResponder(NSResponder *) final;
 
     void enableSuddenTermination() final;
     void disableSuddenTermination() final;
 
-    bool shouldReplaceWithGeneratedFileForUpload(const String& path, String &generatedFilename) final;
-    String generateReplacementFile(const String& path) final;
-
-    void elementDidFocus(WebCore::Element&) override;
+#if !PLATFORM(IOS_FAMILY)
+    void elementDidFocus(WebCore::Element&, const WebCore::FocusOptions&) override;
     void elementDidBlur(WebCore::Element&) override;
+#endif
 
     bool shouldPaintEntireContents() const final;
 
     void attachRootGraphicsLayer(WebCore::Frame&, WebCore::GraphicsLayer*) override;
-    void attachViewOverlayGraphicsLayer(WebCore::Frame&, WebCore::GraphicsLayer*) final;
+    void attachViewOverlayGraphicsLayer(WebCore::GraphicsLayer*) final;
     void setNeedsOneShotDrawingSynchronization() final;
-    void scheduleCompositingLayerFlush() final;
+    void triggerRenderingUpdate() final;
 
     CompositingTriggerFlags allowedCompositingTriggers() const final
     {
@@ -171,7 +193,7 @@ private:
             VideoTrigger |
             PluginTrigger| 
             CanvasTrigger |
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
             AnimatedOpacityTrigger | // Allow opacity animations to trigger compositing mode for iOS: <rdar://problem/7830677>
 #endif
             AnimationTrigger);
@@ -180,13 +202,18 @@ private:
 #if ENABLE(VIDEO) && PLATFORM(MAC) && ENABLE(VIDEO_PRESENTATION_MODE)
     void setUpPlaybackControlsManager(WebCore::HTMLMediaElement&) final;
     void clearPlaybackControlsManager() final;
+    void playbackControlsMediaEngineChanged() final;
 #endif
 
 #if ENABLE(VIDEO)
+    bool canEnterVideoFullscreen(WebCore::HTMLMediaElementEnums::VideoFullscreenMode) const final;
     bool supportsVideoFullscreen(WebCore::HTMLMediaElementEnums::VideoFullscreenMode) final;
-    void enterVideoFullscreenForVideoElement(WebCore::HTMLVideoElement&, WebCore::HTMLMediaElementEnums::VideoFullscreenMode) final;
-    void exitVideoFullscreenForVideoElement(WebCore::HTMLVideoElement&) final;
+#if ENABLE(VIDEO_PRESENTATION_MODE)
+    void setMockVideoPresentationModeEnabled(bool) final;
+    void enterVideoFullscreenForVideoElement(WebCore::HTMLVideoElement&, WebCore::HTMLMediaElementEnums::VideoFullscreenMode, bool standby) final;
+    void exitVideoFullscreenForVideoElement(WebCore::HTMLVideoElement&, WTF::CompletionHandler<void(bool)>&& = [](bool) { }) final;
     void exitVideoFullscreenToModeWithoutAnimation(WebCore::HTMLVideoElement&, WebCore::HTMLMediaElementEnums::VideoFullscreenMode) final;
+#endif
 #endif
 
 #if ENABLE(FULLSCREEN_API)
@@ -202,7 +229,7 @@ private:
 
     void wheelEventHandlersChanged(bool) final { }
 
-#if ENABLE(SUBTLE_CRYPTO)
+#if ENABLE(WEB_CRYPTO)
     bool wrapCryptoKey(const Vector<uint8_t>&, Vector<uint8_t>&) const final;
     bool unwrapCryptoKey(const Vector<uint8_t>&, Vector<uint8_t>&) const final;
 #endif
@@ -212,14 +239,33 @@ private:
     bool hasRelevantSelectionServices(bool isTextOnly) const final;
 #endif
 
-#if ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS)
-    void addPlaybackTargetPickerClient(uint64_t /*contextId*/) final;
-    void removePlaybackTargetPickerClient(uint64_t /*contextId*/) final;
-    void showPlaybackTargetPicker(uint64_t /*contextId*/, const WebCore::IntPoint&, bool /* hasVideo */) final;
-    void playbackTargetPickerClientStateDidChange(uint64_t /*contextId*/, WebCore::MediaProducer::MediaStateFlags) final;
+#if ENABLE(WIRELESS_PLAYBACK_TARGET) && !PLATFORM(IOS_FAMILY)
+    void addPlaybackTargetPickerClient(WebCore::PlaybackTargetClientContextIdentifier) final;
+    void removePlaybackTargetPickerClient(WebCore::PlaybackTargetClientContextIdentifier) final;
+    void showPlaybackTargetPicker(WebCore::PlaybackTargetClientContextIdentifier, const WebCore::IntPoint&, bool /* hasVideo */) final;
+    void playbackTargetPickerClientStateDidChange(WebCore::PlaybackTargetClientContextIdentifier, WebCore::MediaProducerMediaStateFlags) final;
     void setMockMediaPlaybackTargetPickerEnabled(bool) final;
-    void setMockMediaPlaybackTargetPickerState(const String&, WebCore::MediaPlaybackTargetContext::State) final;
+    void setMockMediaPlaybackTargetPickerState(const String&, WebCore::MediaPlaybackTargetContext::MockState) final;
+    void mockMediaPlaybackTargetPickerDismissPopup() override;
 #endif
 
-    WebView *m_webView;
+    String signedPublicKeyAndChallengeString(unsigned keySizeIndex, const String& challengeString, const URL&) const final;
+
+#if PLATFORM(MAC)
+    void changeUniversalAccessZoomFocus(const WebCore::IntRect&, const WebCore::IntRect&) final;
+#endif
+
+    RefPtr<PAL::WebGPU::GPU> createGPUForWebGPU() const final;
+
+    void requestCookieConsent(CompletionHandler<void(WebCore::CookieConsentDecisionResult)>&&) final;
+
+    void classifyModalContainerControls(Vector<String>&&, CompletionHandler<void(Vector<WebCore::ModalContainerControlType>&&)>&&) final;
+
+    void decidePolicyForModalContainer(OptionSet<WebCore::ModalContainerControlType>, CompletionHandler<void(WebCore::ModalContainerDecision)>&&) final;
+
+#if ENABLE(VIDEO_PRESENTATION_MODE)
+    bool m_mockVideoPresentationModeEnabled { false };
+#endif
+
+    __weak WebView *m_webView;
 };

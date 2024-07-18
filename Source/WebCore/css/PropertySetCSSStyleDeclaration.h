@@ -25,12 +25,13 @@
 
 #pragma once
 
-#include "CSSParserMode.h"
+#include "CSSParserContext.h"
 #include "CSSStyleDeclaration.h"
 #include "DeprecatedCSSOMValue.h"
 #include <memory>
 #include <wtf/HashMap.h>
 #include <wtf/RefPtr.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
@@ -42,6 +43,7 @@ class StyleSheetContents;
 class StyledElement;
 
 class PropertySetCSSStyleDeclaration : public CSSStyleDeclaration {
+    WTF_MAKE_ISO_ALLOCATED(PropertySetCSSStyleDeclaration);
 public:
     explicit PropertySetCSSStyleDeclaration(MutableStyleProperties& propertySet)
         : m_propertySet(&propertySet)
@@ -57,7 +59,7 @@ protected:
     virtual CSSParserContext cssParserContext() const;
 
     MutableStyleProperties* m_propertySet;
-    std::unique_ptr<HashMap<CSSValue*, RefPtr<DeprecatedCSSOMValue>>> m_cssomValueWrappers;
+    HashMap<CSSValue*, WeakPtr<DeprecatedCSSOMValue>> m_cssomValueWrappers;
 
 private:
     void ref() override;
@@ -77,17 +79,19 @@ private:
     ExceptionOr<void> setCssText(const String&) final;
     RefPtr<CSSValue> getPropertyCSSValueInternal(CSSPropertyID) final;
     String getPropertyValueInternal(CSSPropertyID) final;
-    ExceptionOr<bool> setPropertyInternal(CSSPropertyID, const String& value, bool important) final;
+    ExceptionOr<void> setPropertyInternal(CSSPropertyID, const String& value, bool important) final;
     
     Ref<MutableStyleProperties> copyProperties() const final;
+    bool isCSSPropertyExposed(CSSPropertyID) const;
 
-    DeprecatedCSSOMValue* wrapForDeprecatedCSSOM(CSSValue*);
+    RefPtr<DeprecatedCSSOMValue> wrapForDeprecatedCSSOM(CSSValue*);
     
     virtual bool willMutate() WARN_UNUSED_RETURN { return true; }
     virtual void didMutate(MutationType) { }
 };
 
 class StyleRuleCSSStyleDeclaration final : public PropertySetCSSStyleDeclaration {
+    WTF_MAKE_ISO_ALLOCATED(StyleRuleCSSStyleDeclaration);
 public:
     static Ref<StyleRuleCSSStyleDeclaration> create(MutableStyleProperties& propertySet, CSSRule& parentRule)
     {
@@ -107,17 +111,19 @@ private:
 
     CSSStyleSheet* parentStyleSheet() const final;
 
-    CSSRule* parentRule() const final { return m_parentRule;  }
+    CSSRule* parentRule() const final { return m_parentRule; }
 
     bool willMutate() final WARN_UNUSED_RETURN;
     void didMutate(MutationType) final;
     CSSParserContext cssParserContext() const final;
 
     unsigned m_refCount;
+    StyleRuleType m_parentRuleType;
     CSSRule* m_parentRule;
 };
 
 class InlineCSSStyleDeclaration final : public PropertySetCSSStyleDeclaration {
+    WTF_MAKE_ISO_ALLOCATED(InlineCSSStyleDeclaration);
 public:
     InlineCSSStyleDeclaration(MutableStyleProperties& propertySet, StyledElement& parentElement)
         : PropertySetCSSStyleDeclaration(propertySet)
@@ -130,6 +136,7 @@ private:
     StyledElement* parentElement() const final { return m_parentElement; }
     void clearParentElement() final { m_parentElement = nullptr; }
 
+    bool willMutate() final WARN_UNUSED_RETURN;
     void didMutate(MutationType) final;
     CSSParserContext cssParserContext() const final;
 

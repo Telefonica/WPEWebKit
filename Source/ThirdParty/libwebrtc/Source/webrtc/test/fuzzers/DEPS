@@ -1,3 +1,5 @@
 include_rules = [
-  "+webrtc",
+  "+audio",
+  "+pc",
+  "+net/dcsctp",
 ]

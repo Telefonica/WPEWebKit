@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,14 +28,17 @@
 #if ENABLE(APPLE_PAY)
 
 #include "ActiveDOMObject.h"
+#include "ApplePayPaymentAuthorizationResult.h"
 #include "ApplePayPaymentRequest.h"
 #include "EventTarget.h"
 #include "ExceptionOr.h"
+#include "PaymentSession.h"
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
 
 namespace JSC {
-class ExecState;
+class CallFrame;
+class JSGlobalObject;
 class JSValue;
 }
 
@@ -47,41 +50,43 @@ class Payment;
 class PaymentContact;
 class PaymentCoordinator;
 class PaymentMethod;
-class URL;
-enum class PaymentAuthorizationStatus;
+struct ApplePayCouponCodeUpdate;
 struct ApplePayLineItem;
 struct ApplePayPaymentRequest;
 struct ApplePayShippingMethod;
-struct ApplePayPaymentAuthorizationResult;
 struct ApplePayPaymentMethodUpdate;
 struct ApplePayShippingContactUpdate;
 struct ApplePayShippingMethodUpdate;
 
-class ApplePaySession final : public RefCounted<ApplePaySession>, public ActiveDOMObject, public EventTargetWithInlineData {
+class ApplePaySession final : public PaymentSession, public ActiveDOMObject, public EventTargetWithInlineData {
+    WTF_MAKE_ISO_ALLOCATED(ApplePaySession);
 public:
     static ExceptionOr<Ref<ApplePaySession>> create(Document&, unsigned version, ApplePayPaymentRequest&&);
     virtual ~ApplePaySession();
 
-    static const unsigned short STATUS_SUCCESS = 0;
-    static const unsigned short STATUS_FAILURE = 1;
-    static const unsigned short STATUS_INVALID_BILLING_POSTAL_ADDRESS = 2;
-    static const unsigned short STATUS_INVALID_SHIPPING_POSTAL_ADDRESS = 3;
-    static const unsigned short STATUS_INVALID_SHIPPING_CONTACT = 4;
-    static const unsigned short STATUS_PIN_REQUIRED = 5;
-    static const unsigned short STATUS_PIN_INCORRECT = 6;
-    static const unsigned short STATUS_PIN_LOCKOUT = 7;
+    static constexpr auto STATUS_SUCCESS = ApplePayPaymentAuthorizationResult::Success;
+    static constexpr auto STATUS_FAILURE = ApplePayPaymentAuthorizationResult::Failure;
+    static constexpr auto STATUS_INVALID_BILLING_POSTAL_ADDRESS = ApplePayPaymentAuthorizationResult::InvalidBillingPostalAddress;
+    static constexpr auto STATUS_INVALID_SHIPPING_POSTAL_ADDRESS = ApplePayPaymentAuthorizationResult::InvalidShippingPostalAddress;
+    static constexpr auto STATUS_INVALID_SHIPPING_CONTACT = ApplePayPaymentAuthorizationResult::InvalidShippingContact;
+    static constexpr auto STATUS_PIN_REQUIRED = ApplePayPaymentAuthorizationResult::PINRequired;
+    static constexpr auto STATUS_PIN_INCORRECT = ApplePayPaymentAuthorizationResult::PINIncorrect;
+    static constexpr auto STATUS_PIN_LOCKOUT = ApplePayPaymentAuthorizationResult::PINLockout;
 
-    static ExceptionOr<bool> supportsVersion(ScriptExecutionContext&, unsigned version);
-    static ExceptionOr<bool> canMakePayments(ScriptExecutionContext&);
-    static ExceptionOr<void> canMakePaymentsWithActiveCard(ScriptExecutionContext&, const String& merchantIdentifier, Ref<DeferredPromise>&&);
-    static ExceptionOr<void> openPaymentSetup(ScriptExecutionContext&, const String& merchantIdentifier, Ref<DeferredPromise>&&);
+    static ExceptionOr<bool> supportsVersion(Document&, unsigned version);
+    static ExceptionOr<bool> canMakePayments(Document&);
+    static ExceptionOr<void> canMakePaymentsWithActiveCard(Document&, const String& merchantIdentifier, Ref<DeferredPromise>&&);
+    static ExceptionOr<void> openPaymentSetup(Document&, const String& merchantIdentifier, Ref<DeferredPromise>&&);
 
-    ExceptionOr<void> begin();
+    ExceptionOr<void> begin(Document&);
     ExceptionOr<void> abort();
-    ExceptionOr<void> completeMerchantValidation(JSC::ExecState&, JSC::JSValue merchantSession);
+    ExceptionOr<void> completeMerchantValidation(JSC::JSGlobalObject&, JSC::JSValue merchantSession);
     ExceptionOr<void> completeShippingMethodSelection(ApplePayShippingMethodUpdate&&);
     ExceptionOr<void> completeShippingContactSelection(ApplePayShippingContactUpdate&&);
     ExceptionOr<void> completePaymentMethodSelection(ApplePayPaymentMethodUpdate&&);
+#if ENABLE(APPLE_PAY_COUPON_CODE)
+    ExceptionOr<void> completeCouponCodeChange(ApplePayCouponCodeUpdate&&);
+#endif
     ExceptionOr<void> completePayment(ApplePayPaymentAuthorizationResult&&);
 
     // Old functions.
@@ -92,29 +97,35 @@ public:
 
     const ApplePaySessionPaymentRequest& paymentRequest() const { return m_paymentRequest; }
 
-    void validateMerchant(const URL&);
-    void didAuthorizePayment(const Payment&);
-    void didSelectShippingMethod(const ApplePaySessionPaymentRequest::ShippingMethod&);
-    void didSelectShippingContact(const PaymentContact&);
-    void didSelectPaymentMethod(const PaymentMethod&);
-    void didCancelPaymentSession();
-
-    using RefCounted<ApplePaySession>::ref;
-    using RefCounted<ApplePaySession>::deref;
+    using PaymentSession::ref;
+    using PaymentSession::deref;
 
 private:
-    ApplePaySession(Document&, ApplePaySessionPaymentRequest&&);
+    ApplePaySession(Document&, unsigned version, ApplePaySessionPaymentRequest&&);
 
     // ActiveDOMObject.
     const char* activeDOMObjectName() const override;
-    bool canSuspendForDocumentSuspension() const override;
     void stop() override;
+    void suspend(ReasonForSuspension) override;
+    bool virtualHasPendingActivity() const final;
 
     // EventTargetWithInlineData.
     EventTargetInterface eventTargetInterface() const override { return ApplePaySessionEventTargetInterfaceType; }
     ScriptExecutionContext* scriptExecutionContext() const override { return ActiveDOMObject::scriptExecutionContext(); }
     void refEventTarget() override { ref(); }
     void derefEventTarget() override { deref(); }
+
+    // PaymentSession
+    unsigned version() const override;
+    void validateMerchant(URL&&) override;
+    void didAuthorizePayment(const Payment&) override;
+    void didSelectShippingMethod(const ApplePayShippingMethod&) override;
+    void didSelectShippingContact(const PaymentContact&) override;
+    void didSelectPaymentMethod(const PaymentMethod&) override;
+#if ENABLE(APPLE_PAY_COUPON_CODE)
+    void didChangeCouponCode(String&& couponCode) override;
+#endif
+    void didCancelPaymentSession(PaymentSessionError&&) override;
 
     PaymentCoordinator& paymentCoordinator() const;
 
@@ -125,10 +136,13 @@ private:
     bool canCompleteShippingMethodSelection() const;
     bool canCompleteShippingContactSelection() const;
     bool canCompletePaymentMethodSelection() const;
+#if ENABLE(APPLE_PAY_COUPON_CODE)
+    bool canCompleteCouponCodeChange() const;
+#endif
     bool canCompletePayment() const;
+    bool canSuspendWithoutCanceling() const;
 
     bool isFinalState() const;
-    void didReachFinalState();
 
     enum class State {
         Idle,
@@ -137,6 +151,9 @@ private:
         ShippingMethodSelected,
         ShippingContactSelected,
         PaymentMethodSelected,
+#if ENABLE(APPLE_PAY_COUPON_CODE)
+        CouponCodeChanged,
+#endif
         CancelRequested,
         Authorized,
         Completed,
@@ -152,6 +169,7 @@ private:
     } m_merchantValidationState { MerchantValidationState::Idle };
 
     const ApplePaySessionPaymentRequest m_paymentRequest;
+    unsigned m_version;
 };
 
 }

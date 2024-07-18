@@ -25,11 +25,11 @@
 
 #pragma once
 
-#include "WebEvent.h"
 #include "WebKitNavigationAction.h"
+#include "WebMouseEvent.h"
 #include <WebCore/FrameLoaderTypes.h>
 
-unsigned toPlatformModifiers(WebKit::WebEvent::Modifiers);
+unsigned toPlatformModifiers(OptionSet<WebKit::WebEvent::Modifier>);
 WebKitNavigationType toWebKitNavigationType(WebCore::NavigationType);
 unsigned toWebKitMouseButton(WebKit::WebMouseEvent::Button);
 unsigned toWebKitError(unsigned webCoreError);
@@ -40,4 +40,4 @@ enum SnapshotRegion {
     SnapshotRegionFullDocument
 };
 
-static const char networkCacheSubdirectory[] = "WebKitCache";
+static constexpr auto networkCacheSubdirectory = "WebKitCache"_s;

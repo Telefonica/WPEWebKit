@@ -2,6 +2,7 @@
  * Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005 Rob Buis <buis@kde.org>
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
+ * Copyright (C) 2021 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,54 +23,25 @@
 #include "config.h"
 #include "FEDiffuseLighting.h"
 
+#include "ImageBuffer.h"
 #include "LightSource.h"
 #include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
-FEDiffuseLighting::FEDiffuseLighting(Filter& filter, const Color& lightingColor, float surfaceScale, float diffuseConstant, float kernelUnitLengthX, float kernelUnitLengthY, Ref<LightSource>&& lightSource)
-    : FELighting(filter, DiffuseLighting, lightingColor, surfaceScale, diffuseConstant, 0, 0, kernelUnitLengthX, kernelUnitLengthY, WTFMove(lightSource))
+Ref<FEDiffuseLighting> FEDiffuseLighting::create(const Color& lightingColor, float surfaceScale, float diffuseConstant, float, float, float kernelUnitLengthX, float kernelUnitLengthY, Ref<LightSource>&& lightSource)
 {
+    return create(lightingColor, surfaceScale, diffuseConstant, kernelUnitLengthX, kernelUnitLengthY, WTFMove(lightSource));
 }
 
-Ref<FEDiffuseLighting> FEDiffuseLighting::create(Filter& filter, const Color& lightingColor, float surfaceScale, float diffuseConstant, float kernelUnitLengthX, float kernelUnitLengthY, Ref<LightSource>&& lightSource)
+Ref<FEDiffuseLighting> FEDiffuseLighting::create(const Color& lightingColor, float surfaceScale, float diffuseConstant, float kernelUnitLengthX, float kernelUnitLengthY, Ref<LightSource>&& lightSource)
 {
-    return adoptRef(*new FEDiffuseLighting(filter, lightingColor, surfaceScale, diffuseConstant, kernelUnitLengthX, kernelUnitLengthY, WTFMove(lightSource)));
+    return adoptRef(*new FEDiffuseLighting(lightingColor, surfaceScale, diffuseConstant, kernelUnitLengthX, kernelUnitLengthY, WTFMove(lightSource)));
 }
 
-FEDiffuseLighting::~FEDiffuseLighting()
+FEDiffuseLighting::FEDiffuseLighting(const Color& lightingColor, float surfaceScale, float diffuseConstant, float kernelUnitLengthX, float kernelUnitLengthY, Ref<LightSource>&& lightSource)
+    : FELighting(FilterEffect::Type::FEDiffuseLighting, lightingColor, surfaceScale, diffuseConstant, 0, 0, kernelUnitLengthX, kernelUnitLengthY, WTFMove(lightSource))
 {
-}
-
-const Color& FEDiffuseLighting::lightingColor() const
-{
-    return m_lightingColor;
-}
-
-bool FEDiffuseLighting::setLightingColor(const Color& lightingColor)
-{
-    if (m_lightingColor == lightingColor)
-        return false;
-    m_lightingColor = lightingColor;
-    return true;
-}
-
-float FEDiffuseLighting::surfaceScale() const 
-{
-    return m_surfaceScale;
-}
-
-bool FEDiffuseLighting::setSurfaceScale(float surfaceScale)
-{
-    if (m_surfaceScale == surfaceScale)
-        return false;
-    m_surfaceScale = surfaceScale;
-    return true;
-}
-
-float FEDiffuseLighting::diffuseConstant() const
-{
-    return m_diffuseConstant;
 }
 
 bool FEDiffuseLighting::setDiffuseConstant(float diffuseConstant)
@@ -80,50 +52,16 @@ bool FEDiffuseLighting::setDiffuseConstant(float diffuseConstant)
     return true;
 }
 
-float FEDiffuseLighting::kernelUnitLengthX() const
+TextStream& FEDiffuseLighting::externalRepresentation(TextStream& ts, FilterRepresentation representation) const
 {
-    return m_kernelUnitLengthX;
-}
+    ts << indent << "[feDiffuseLighting";
+    FilterEffect::externalRepresentation(ts, representation);
 
-bool FEDiffuseLighting::setKernelUnitLengthX(float kernelUnitLengthX)
-{
-    if (m_kernelUnitLengthX == kernelUnitLengthX)
-        return false;
-    m_kernelUnitLengthX = kernelUnitLengthX;
-    return true;
-}
+    ts << " surfaceScale=\"" << m_surfaceScale << "\"";
+    ts << " diffuseConstant=\"" << m_diffuseConstant << "\"";
+    ts << " kernelUnitLength=\"" << m_kernelUnitLengthX << ", " << m_kernelUnitLengthY << "\"";
 
-float FEDiffuseLighting::kernelUnitLengthY() const
-{
-    return m_kernelUnitLengthY;
-}
-
-bool FEDiffuseLighting::setKernelUnitLengthY(float kernelUnitLengthY)
-{
-    if (m_kernelUnitLengthY == kernelUnitLengthY)
-        return false;
-    m_kernelUnitLengthY = kernelUnitLengthY;
-    return true;
-}
-
-const LightSource& FEDiffuseLighting::lightSource() const
-{
-    return m_lightSource.get();
-}
-
-void FEDiffuseLighting::dump()
-{
-}
-
-TextStream& FEDiffuseLighting::externalRepresentation(TextStream& ts, int indent) const
-{
-    writeIndent(ts, indent);
-    ts << "[feDiffuseLighting";
-    FilterEffect::externalRepresentation(ts);
-    ts << " surfaceScale=\"" << m_surfaceScale << "\" "
-       << "diffuseConstant=\"" << m_diffuseConstant << "\" "
-       << "kernelUnitLength=\"" << m_kernelUnitLengthX << ", " << m_kernelUnitLengthY << "\"]\n";
-    inputEffect(0)->externalRepresentation(ts, indent + 1);
+    ts << "]\n";
     return ts;
 }
 

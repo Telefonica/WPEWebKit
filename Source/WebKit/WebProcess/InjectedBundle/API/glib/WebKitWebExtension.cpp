@@ -23,9 +23,14 @@
 #include "APIDictionary.h"
 #include "APIInjectedBundleBundleClient.h"
 #include "APIString.h"
+#include "WebKitSecurityOriginPrivate.h"
+#include "WebKitUserMessagePrivate.h"
 #include "WebKitWebExtensionPrivate.h"
 #include "WebKitWebPagePrivate.h"
 #include "WebProcess.h"
+#include "WebProcessProxyMessages.h"
+#include <WebCore/GCController.h>
+#include <glib/gi18n-lib.h>
 #include <wtf/HashMap.h>
 #include <wtf/glib/GRefPtr.h>
 #include <wtf/glib/WTFGType.h>
@@ -33,9 +38,9 @@
 using namespace WebKit;
 
 /**
- * SECTION: WebKitWebExtension
- * @Short_description: Represents a WebExtension of the WebProcess
- * @Title: WebKitWebExtension
+ * WebKitWebExtension:
+ *
+ * Represents an extension of the WebProcess.
  *
  * WebKitWebExtension is a loadable module for the WebProcess. It allows you to execute code in the
  * WebProcess and being able to use the DOM API, to change any request or to inject custom
@@ -47,7 +52,7 @@ using namespace WebKit;
  * This function has to be public and it has to use the #G_MODULE_EXPORT macro. It is called when the
  * web process is initialized.
  *
- * <informalexample><programlisting>
+ * ```c
  * static void
  * web_page_created_callback (WebKitWebExtension *extension,
  *                            WebKitWebPage      *web_page,
@@ -65,7 +70,7 @@ using namespace WebKit;
  *                       G_CALLBACK (web_page_created_callback),
  *                       NULL);
  * }
- * </programlisting></informalexample>
+ * ```
  *
  * The previous piece of code shows a trivial example of an extension that notifies when
  * a #WebKitWebPage is created.
@@ -78,14 +83,14 @@ using namespace WebKit;
  * function, you have to call webkit_web_context_set_web_extensions_initialization_user_data() with
  * the desired data as parameter. You can see an example of this in the following piece of code:
  *
- * <informalexample><programlisting>
- * #define WEB_EXTENSIONS_DIRECTORY /<!-- -->* ... *<!-- -->/
+ * ```c
+ * #define WEB_EXTENSIONS_DIRECTORY // ...
  *
  * static void
  * initialize_web_extensions (WebKitWebContext *context,
  *                            gpointer          user_data)
  * {
- *   /<!-- -->* Web Extensions get a different ID for each Web Process *<!-- -->/
+ *   // Web Extensions get a different ID for each Web Process
  *   static guint32 unique_id = 0;
  *
  *   webkit_web_context_set_web_extensions_directory (
@@ -103,13 +108,14 @@ using namespace WebKit;
  *
  *   GtkWidget *view = webkit_web_view_new ();
  *
- *   /<!-- -->* ... *<!-- -->/
+ *   // ...
  * }
- * </programlisting></informalexample>
+ * ```
  */
 
 enum {
     PAGE_CREATED,
+    USER_MESSAGE_RECEIVED,
 
     LAST_SIGNAL
 };
@@ -117,7 +123,11 @@ enum {
 typedef HashMap<WebPage*, GRefPtr<WebKitWebPage> > WebPageMap;
 
 struct _WebKitWebExtensionPrivate {
+    RefPtr<InjectedBundle> bundle;
     WebPageMap pages;
+#if ENABLE(DEVELOPER_MODE)
+    bool garbageCollectOnPageDestroy;
+#endif
 };
 
 static guint signals[LAST_SIGNAL] = { 0, };
@@ -142,6 +152,28 @@ static void webkit_web_extension_class_init(WebKitWebExtensionClass* klass)
         g_cclosure_marshal_VOID__OBJECT,
         G_TYPE_NONE, 1,
         WEBKIT_TYPE_WEB_PAGE);
+
+    /**
+     * WebKitWebExtension::user-message-received:
+     * @extension: the #WebKitWebExtension on which the signal is emitted
+     * @message: the #WebKitUserMessage received
+     *
+     * This signal is emitted when a #WebKitUserMessage is received from the
+     * #WebKitWebContext corresponding to @extension. Messages sent by #WebKitWebContext
+     * are always broadcasted to all #WebKitWebExtension<!-- -->s and they can't be
+     * replied to. Calling webkit_user_message_send_reply() will do nothing.
+     *
+     * Since: 2.28
+     */
+    signals[USER_MESSAGE_RECEIVED] = g_signal_new(
+        "user-message-received",
+        G_TYPE_FROM_CLASS(klass),
+        G_SIGNAL_RUN_LAST,
+        0,
+        nullptr, nullptr,
+        g_cclosure_marshal_generic,
+        G_TYPE_NONE, 1,
+        WEBKIT_TYPE_USER_MESSAGE);
 }
 
 class WebExtensionInjectedBundleClient final : public API::InjectedBundle::Client {
@@ -162,17 +194,10 @@ private:
     void willDestroyPage(InjectedBundle&, WebPage& page) override
     {
         m_extension->priv->pages.remove(&page);
-    }
-
-    void didReceiveMessage(InjectedBundle&, const String& messageName, API::Object* messageBody) override
-    {
-        ASSERT(messageBody->type() == API::Object::Type::Dictionary);
-        API::Dictionary& message = *static_cast<API::Dictionary*>(messageBody);
-        if (messageName == String::fromUTF8("PrefetchDNS")) {
-            API::String* hostname = static_cast<API::String*>(message.get(String::fromUTF8("Hostname")));
-            WebProcess::singleton().prefetchDNS(hostname->string());
-        } else
-            ASSERT_NOT_REACHED();
+#if ENABLE(DEVELOPER_MODE)
+        if (m_extension->priv->garbageCollectOnPageDestroy)
+            WebCore::GCController::singleton().garbageCollectNow();
+#endif
     }
 
     void didReceiveMessageToPage(InjectedBundle&, WebPage& page, const String& messageName, API::Object* messageBody) override
@@ -188,8 +213,23 @@ private:
 WebKitWebExtension* webkitWebExtensionCreate(InjectedBundle* bundle)
 {
     WebKitWebExtension* extension = WEBKIT_WEB_EXTENSION(g_object_new(WEBKIT_TYPE_WEB_EXTENSION, NULL));
-    bundle->setClient(std::make_unique<WebExtensionInjectedBundleClient>(extension));
+    extension->priv->bundle = bundle;
+    bundle->setClient(makeUnique<WebExtensionInjectedBundleClient>(extension));
     return extension;
+}
+
+void webkitWebExtensionDidReceiveUserMessage(WebKitWebExtension* extension, UserMessage&& message)
+{
+    // Sink the floating ref.
+    GRefPtr<WebKitUserMessage> userMessage = webkitUserMessageCreate(WTFMove(message), [](UserMessage&&) { });
+    g_signal_emit(extension, signals[USER_MESSAGE_RECEIVED], 0, userMessage.get());
+}
+
+void webkitWebExtensionSetGarbageCollectOnPageDestroy(WebKitWebExtension* extension)
+{
+#if ENABLE(DEVELOPER_MODE)
+    extension->priv->garbageCollectOnPageDestroy = true;
+#endif
 }
 
 /**
@@ -209,8 +249,119 @@ WebKitWebPage* webkit_web_extension_get_page(WebKitWebExtension* extension, guin
     WebKitWebExtensionPrivate* priv = extension->priv;
     WebPageMap::const_iterator end = priv->pages.end();
     for (WebPageMap::const_iterator it = priv->pages.begin(); it != end; ++it)
-        if (it->key->pageID() == pageID)
+        if (it->key->identifier().toUInt64() == pageID)
             return it->value.get();
 
     return 0;
+}
+
+void webkit_web_extension_add_origin_access_whitelist_entry(WebKitWebExtension* extension, WebKitSecurityOrigin* origin, const char* protocol, const char* host, gboolean allowSubdomains)
+{
+    g_return_if_fail(WEBKIT_IS_WEB_EXTENSION(extension));
+    g_return_if_fail(origin);
+    g_return_if_fail(protocol);
+
+    extension->priv->bundle->addOriginAccessAllowListEntry(webkitSecurityOriginGetSecurityOriginData(origin).toString(), String::fromUTF8(protocol), String::fromUTF8(host), host ? allowSubdomains : true);
+}
+
+void webkit_web_extension_remove_origin_access_whitelist_entry(WebKitWebExtension* extension, WebKitSecurityOrigin* origin, const char* protocol, const char* host, gboolean allowSubdomains)
+{
+    g_return_if_fail(WEBKIT_IS_WEB_EXTENSION(extension));
+    g_return_if_fail(origin);
+    g_return_if_fail(protocol);
+
+    extension->priv->bundle->removeOriginAccessAllowListEntry(webkitSecurityOriginGetSecurityOriginData(origin).toString(), String::fromUTF8(protocol), String::fromUTF8(host), host ? allowSubdomains : true);
+}
+
+void webkit_web_extension_reset_origin_access_whitelists(WebKitWebExtension* extension)
+{
+    g_return_if_fail(WEBKIT_IS_WEB_EXTENSION(extension));
+
+    extension->priv->bundle->resetOriginAccessAllowLists();
+}
+
+void webkit_web_extension_add_mixed_content_whitelist_entry(WebKitWebExtension *extension, const gchar* origin, const gchar* domain)
+{
+    g_return_if_fail(WEBKIT_IS_WEB_EXTENSION(extension));
+
+    extension->priv->bundle->addMixedContentWhitelistEntry(String::fromUTF8(origin), String::fromUTF8(domain));
+}
+
+void webkit_web_extension_remove_mixed_content_whitelist_entry(WebKitWebExtension *extension, const gchar* origin, const gchar* domain)
+{
+    g_return_if_fail(WEBKIT_IS_WEB_EXTENSION(extension));
+
+    extension->priv->bundle->removeMixedContentWhitelistEntry(String::fromUTF8(origin), String::fromUTF8(domain));
+}
+
+void webkit_web_extension_reset_mixed_content_whitelist_entry(WebKitWebExtension *extension)
+{
+    g_return_if_fail(WEBKIT_IS_WEB_EXTENSION(extension));
+
+    extension->priv->bundle->resetMixedContentWhitelist();
+}
+
+/**
+ * webkit_web_extension_send_message_to_context:
+ * @extension: a #WebKitWebExtension
+ * @message: a #WebKitUserMessage
+ * @cancellable: (nullable): a #GCancellable or %NULL to ignore
+ * @callback: (scope async): (nullable): A #GAsyncReadyCallback to call when the request is satisfied or %NULL
+ * @user_data: (closure): the data to pass to callback function
+ *
+ * Send @message to the #WebKitWebContext corresponding to @extension. If @message is floating, it's consumed.
+ *
+ * If you don't expect any reply, or you simply want to ignore it, you can pass %NULL as @calback.
+ * When the operation is finished, @callback will be called. You can then call
+ * webkit_web_extension_send_message_to_context_finish() to get the message reply.
+ *
+ * Since: 2.28
+ */
+void webkit_web_extension_send_message_to_context(WebKitWebExtension* extension, WebKitUserMessage* message, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer userData)
+{
+    g_return_if_fail(WEBKIT_IS_WEB_EXTENSION(extension));
+    g_return_if_fail(WEBKIT_IS_USER_MESSAGE(message));
+
+    // We sink the reference in case of being floating.
+    GRefPtr<WebKitUserMessage> adoptedMessage = message;
+    if (!callback) {
+        WebProcess::singleton().parentProcessConnection()->send(Messages::WebProcessProxy::SendMessageToWebContext(webkitUserMessageGetMessage(message)), 0);
+        return;
+    }
+
+    GRefPtr<GTask> task = adoptGRef(g_task_new(extension, cancellable, callback, userData));
+    CompletionHandler<void(UserMessage&&)> completionHandler = [task = WTFMove(task)](UserMessage&& replyMessage) {
+        switch (replyMessage.type) {
+        case UserMessage::Type::Null:
+            g_task_return_new_error(task.get(), G_IO_ERROR, G_IO_ERROR_CANCELLED, _("Operation was cancelled"));
+            break;
+        case UserMessage::Type::Message:
+            g_task_return_pointer(task.get(), g_object_ref_sink(webkitUserMessageCreate(WTFMove(replyMessage))), static_cast<GDestroyNotify>(g_object_unref));
+            break;
+        case UserMessage::Type::Error:
+            g_task_return_new_error(task.get(), WEBKIT_USER_MESSAGE_ERROR, replyMessage.errorCode, _("Message %s was not handled"), replyMessage.name.data());
+            break;
+        }
+    };
+    WebProcess::singleton().parentProcessConnection()->sendWithAsyncReply(Messages::WebProcessProxy::SendMessageToWebContextWithReply(webkitUserMessageGetMessage(message)), WTFMove(completionHandler));
+}
+
+/**
+ * webkit_web_extension_send_message_to_context_finish:
+ * @extension: a #WebKitWebExtension
+ * @result: a #GAsyncResult
+ * @error: return location for error or %NULL to ignor
+ *
+ * Finish an asynchronous operation started with webkit_web_extension_send_message_to_context().
+ *
+ * Returns: (transfer full): a #WebKitUserMessage with the reply or %NULL in case of error.
+ *
+ * Since: 2.28
+ */
+WebKitUserMessage* webkit_web_extension_send_message_to_context_finish(WebKitWebExtension* extension, GAsyncResult* result, GError** error)
+{
+    g_return_val_if_fail(WEBKIT_IS_WEB_EXTENSION(extension), nullptr);
+    g_return_val_if_fail(g_task_is_valid(result, extension), nullptr);
+
+    return WEBKIT_USER_MESSAGE(g_task_propagate_pointer(G_TASK(result), error));
 }

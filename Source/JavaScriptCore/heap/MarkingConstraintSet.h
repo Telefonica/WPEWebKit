@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,14 +26,20 @@
 #pragma once
 
 #include "MarkingConstraint.h"
+#include "MarkingConstraintExecutorPair.h"
 #include <wtf/BitVector.h>
 #include <wtf/Vector.h>
 
 namespace JSC {
 
+class Heap;
+class MarkingConstraintSolver;
+
 class MarkingConstraintSet {
+    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(MarkingConstraintSet);
 public:
-    MarkingConstraintSet();
+    MarkingConstraintSet(Heap&);
     ~MarkingConstraintSet();
     
     void didStartMarking();
@@ -41,18 +47,25 @@ public:
     void add(
         CString abbreviatedName,
         CString name,
-        ::Function<void(SlotVisitor&, const VisitingTimeout&)>,
-        ConstraintVolatility);
+        MarkingConstraintExecutorPair&&,
+        ConstraintVolatility,
+        ConstraintConcurrency = ConstraintConcurrency::Concurrent,
+        ConstraintParallelism = ConstraintParallelism::Sequential);
     
     void add(
-        CString abbreviatedName,
-        CString name,
-        ::Function<void(SlotVisitor&, const VisitingTimeout&)>,
-        ::Function<double(SlotVisitor&)>,
-        ConstraintVolatility);
+        CString abbreviatedName, CString name,
+        MarkingConstraintExecutorPair&& executors,
+        ConstraintVolatility volatility,
+        ConstraintParallelism parallelism)
+    {
+        add(abbreviatedName, name, WTFMove(executors), volatility, ConstraintConcurrency::Concurrent, parallelism);
+    }
     
     void add(std::unique_ptr<MarkingConstraint>);
-    
+
+    // The following functions are only used by the real GC via the MarkingConstraintSolver.
+    // Hence, we only need the SlotVisitor version.
+
     // Assuming that the mark stacks are all empty, this will give you a guess as to whether or
     // not the wavefront is advancing.
     bool isWavefrontAdvancing(SlotVisitor&);
@@ -60,21 +73,20 @@ public:
     
     // Returns true if this executed all constraints and none of them produced new work. This
     // assumes that you've alraedy visited roots and drained from there.
-    bool executeConvergence(
-        SlotVisitor&,
-        MonotonicTime timeout = MonotonicTime::infinity());
-    
+    bool executeConvergence(SlotVisitor&);
+
+    // This function is only used by the verifier GC via Heap::verifyGC().
+    // Hence, we only need the AbstractSlotVisitor version.
+
     // Simply runs all constraints without any shenanigans.
-    void executeAll(SlotVisitor&);
-    
+    void executeAllSynchronously(AbstractSlotVisitor&);
+
 private:
-    class ExecutionContext;
-    friend class ExecutionContext;
+    friend class MarkingConstraintSolver;
+
+    bool executeConvergenceImpl(SlotVisitor&);
     
-    bool executeConvergenceImpl(SlotVisitor&, MonotonicTime timeout);
-    
-    bool drain(SlotVisitor&, MonotonicTime, BitVector& unexecuted, BitVector& executed, bool& didVisitSomething);
-    
+    Heap& m_heap;
     BitVector m_unexecutedRoots;
     BitVector m_unexecutedOutgrowths;
     Vector<std::unique_ptr<MarkingConstraint>> m_set;

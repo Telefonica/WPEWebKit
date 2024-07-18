@@ -16,8 +16,10 @@
 
 ******************************************************************/
 
-#include "defines.h"
-#include "constants.h"
+#include "modules/audio_coding/codecs/ilbc/init_encode.h"
+
+#include "modules/audio_coding/codecs/ilbc/constants.h"
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  *  Initiation of encoder instance.

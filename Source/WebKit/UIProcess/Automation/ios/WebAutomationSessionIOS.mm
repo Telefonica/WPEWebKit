@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017, 2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,18 +26,20 @@
 #import "config.h"
 #import "WebAutomationSession.h"
 
-#if PLATFORM(IOS)
+#if PLATFORM(IOS_FAMILY)
 
+#import "Logging.h"
 #import "NativeWebKeyboardEvent.h"
 #import "WebAutomationSessionMacros.h"
 #import "WebPageProxy.h"
+#import "_WKTouchEventGenerator.h"
 #import <WebCore/KeyEventCodesIOS.h>
 #import <WebCore/NotImplemented.h>
 #import <WebCore/WebEvent.h>
-
-using namespace WebCore;
+#import <wtf/BlockPtr.h>
 
 namespace WebKit {
+using namespace WebCore;
 
 void WebAutomationSession::sendSynthesizedEventsToPage(WebPageProxy& page, NSArray *eventsToSend)
 {
@@ -57,7 +59,7 @@ void WebAutomationSession::sendSynthesizedEventsToPage(WebPageProxy& page, NSArr
 
         case WebEventKeyDown:
         case WebEventKeyUp:
-            page.handleKeyboardEvent(NativeWebKeyboardEvent(event));
+            page.handleKeyboardEvent(NativeWebKeyboardEvent(event, NativeWebKeyboardEvent::HandledByInputMethod::No));
             break;
         }
     }
@@ -65,7 +67,8 @@ void WebAutomationSession::sendSynthesizedEventsToPage(WebPageProxy& page, NSArr
 
 #pragma mark Commands for Platform: 'iOS'
 
-void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& page, KeyboardInteraction interaction, WTF::Variant<VirtualKey, CharKey>&& key)
+#if ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
+void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& page, KeyboardInteraction interaction, std::variant<VirtualKey, CharKey>&& key)
 {
     // The modifiers changed by the virtual key when it is pressed or released.
     WebEventFlags changedModifiers = 0;
@@ -84,19 +87,19 @@ void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& pag
 
             switch (virtualKey) {
             case VirtualKey::Shift:
-                changedModifiers |= WebEventFlagMaskShift;
+                changedModifiers |= WebEventFlagMaskShiftKey;
                 break;
             case VirtualKey::Control:
-                changedModifiers |= WebEventFlagMaskControl;
+                changedModifiers |= WebEventFlagMaskControlKey;
                 break;
             case VirtualKey::Alternate:
-                changedModifiers |= WebEventFlagMaskAlternate;
+                changedModifiers |= WebEventFlagMaskOptionKey;
                 break;
             case VirtualKey::Meta:
                 // The 'meta' key does not exist on Apple keyboards and is usually
                 // mapped to the Command key when using third-party keyboards.
             case VirtualKey::Command:
-                changedModifiers |= WebEventFlagMaskCommand;
+                changedModifiers |= WebEventFlagMaskCommandKey;
                 break;
             default:
                 break;
@@ -129,19 +132,19 @@ void WebAutomationSession::platformSimulateKeyboardInteraction(WebPageProxy& pag
     case KeyboardInteraction::KeyPress: {
         m_currentModifiers |= changedModifiers;
 
-        [eventsToBeSent addObject:[[[::WebEvent alloc] initWithKeyEventType:WebEventKeyDown timeStamp:CFAbsoluteTimeGetCurrent() characters:characters charactersIgnoringModifiers:unmodifiedCharacters modifiers:m_currentModifiers isRepeating:NO withFlags:inputFlags withInputManagerHint:nil keyCode:keyCode isTabKey:isTabKey] autorelease]];
+        [eventsToBeSent addObject:adoptNS([[::WebEvent alloc] initWithKeyEventType:WebEventKeyDown timeStamp:CFAbsoluteTimeGetCurrent() characters:characters charactersIgnoringModifiers:unmodifiedCharacters modifiers:m_currentModifiers isRepeating:NO withFlags:inputFlags withInputManagerHint:nil keyCode:keyCode isTabKey:isTabKey]).get()];
         break;
     }
     case KeyboardInteraction::KeyRelease: {
         m_currentModifiers &= ~changedModifiers;
 
-        [eventsToBeSent addObject:[[[::WebEvent alloc] initWithKeyEventType:WebEventKeyUp timeStamp:CFAbsoluteTimeGetCurrent() characters:characters charactersIgnoringModifiers:unmodifiedCharacters modifiers:m_currentModifiers isRepeating:NO withFlags:inputFlags withInputManagerHint:nil keyCode:keyCode isTabKey:isTabKey] autorelease]];
+        [eventsToBeSent addObject:adoptNS([[::WebEvent alloc] initWithKeyEventType:WebEventKeyUp timeStamp:CFAbsoluteTimeGetCurrent() characters:characters charactersIgnoringModifiers:unmodifiedCharacters modifiers:m_currentModifiers isRepeating:NO withFlags:inputFlags withInputManagerHint:nil keyCode:keyCode isTabKey:isTabKey]).get()];
         break;
     }
     case KeyboardInteraction::InsertByKey: {
         // Modifiers only change with KeyPress or KeyRelease, this code path is for single characters.
-        [eventsToBeSent addObject:[[[::WebEvent alloc] initWithKeyEventType:WebEventKeyDown timeStamp:CFAbsoluteTimeGetCurrent() characters:characters charactersIgnoringModifiers:unmodifiedCharacters modifiers:m_currentModifiers isRepeating:NO withFlags:inputFlags withInputManagerHint:nil keyCode:keyCode isTabKey:isTabKey] autorelease]];
-        [eventsToBeSent addObject:[[[::WebEvent alloc] initWithKeyEventType:WebEventKeyUp timeStamp:CFAbsoluteTimeGetCurrent() characters:characters charactersIgnoringModifiers:unmodifiedCharacters modifiers:m_currentModifiers isRepeating:NO withFlags:inputFlags withInputManagerHint:nil keyCode:keyCode isTabKey:isTabKey] autorelease]];
+        [eventsToBeSent addObject:adoptNS([[::WebEvent alloc] initWithKeyEventType:WebEventKeyDown timeStamp:CFAbsoluteTimeGetCurrent() characters:characters charactersIgnoringModifiers:unmodifiedCharacters modifiers:m_currentModifiers isRepeating:NO withFlags:inputFlags withInputManagerHint:nil keyCode:keyCode isTabKey:isTabKey]).get()];
+        [eventsToBeSent addObject:adoptNS([[::WebEvent alloc] initWithKeyEventType:WebEventKeyUp timeStamp:CFAbsoluteTimeGetCurrent() characters:characters charactersIgnoringModifiers:unmodifiedCharacters modifiers:m_currentModifiers isRepeating:NO withFlags:inputFlags withInputManagerHint:nil keyCode:keyCode isTabKey:isTabKey]).get()];
         break;
     }
     }
@@ -162,13 +165,59 @@ void WebAutomationSession::platformSimulateKeySequence(WebPageProxy& page, const
     BOOL isTabKey = [text isEqualToString:@"\t"];
 
     [text enumerateSubstringsInRange:NSMakeRange(0, text.length) options:NSStringEnumerationByComposedCharacterSequences usingBlock:^(NSString *substring, NSRange substringRange, NSRange enclosingRange, BOOL *stop) {
-        [eventsToBeSent addObject:[[::WebEvent alloc] initWithKeyEventType:WebEventKeyDown timeStamp:CFAbsoluteTimeGetCurrent() characters:substring charactersIgnoringModifiers:substring modifiers:m_currentModifiers isRepeating:NO withFlags:0 withInputManagerHint:nil keyCode:0 isTabKey:isTabKey]];
-        [eventsToBeSent addObject:[[::WebEvent alloc] initWithKeyEventType:WebEventKeyUp timeStamp:CFAbsoluteTimeGetCurrent() characters:substring charactersIgnoringModifiers:substring modifiers:m_currentModifiers isRepeating:NO withFlags:0 withInputManagerHint:nil keyCode:0 isTabKey:isTabKey]];
+        auto keyDownEvent = adoptNS([[::WebEvent alloc] initWithKeyEventType:WebEventKeyDown timeStamp:CFAbsoluteTimeGetCurrent() characters:substring charactersIgnoringModifiers:substring modifiers:m_currentModifiers isRepeating:NO withFlags:0 withInputManagerHint:nil keyCode:0 isTabKey:isTabKey]);
+        [eventsToBeSent addObject:keyDownEvent.get()];
+        auto keyUpEvent = adoptNS([[::WebEvent alloc] initWithKeyEventType:WebEventKeyUp timeStamp:CFAbsoluteTimeGetCurrent() characters:substring charactersIgnoringModifiers:substring modifiers:m_currentModifiers isRepeating:NO withFlags:0 withInputManagerHint:nil keyCode:0 isTabKey:isTabKey]);
+        [eventsToBeSent addObject:keyUpEvent.get()];
     }];
 
     sendSynthesizedEventsToPage(page, eventsToBeSent.get());
 }
+#endif // ENABLE(WEBDRIVER_KEYBOARD_INTERACTIONS)
+
+#if ENABLE(WEBDRIVER_TOUCH_INTERACTIONS)
+#if !LOG_DISABLED
+static TextStream& operator<<(TextStream& ts, TouchInteraction interaction)
+{
+    switch (interaction) {
+    case TouchInteraction::TouchDown:
+        ts << "TouchDown";
+        break;
+    case TouchInteraction::MoveTo:
+        ts << "MoveTo";
+        break;
+    case TouchInteraction::LiftUp:
+        ts << "LiftUp";
+        break;
+    }
+    return ts;
+}
+#endif // !LOG_DISABLED
+
+void WebAutomationSession::platformSimulateTouchInteraction(WebPageProxy& page, TouchInteraction interaction, const WebCore::IntPoint& locationInViewport, std::optional<Seconds> duration, AutomationCompletionHandler&& completionHandler)
+{
+    WebCore::IntPoint locationOnScreen = page.syncRootViewToScreen(IntRect(locationInViewport, IntSize())).location();
+    LOG_WITH_STREAM(AutomationInteractions, stream << "platformSimulateTouchInteraction: interaction=" << interaction << ", locationInViewport=" << locationInViewport << ", locationOnScreen=" << locationOnScreen << ", duration=" << duration.value_or(0_s).seconds());
+
+    auto interactionFinished = makeBlockPtr([completionHandler = WTFMove(completionHandler)] () mutable {
+        completionHandler(std::nullopt);
+    });
+
+    _WKTouchEventGenerator *generator = [_WKTouchEventGenerator sharedTouchEventGenerator];
+    switch (interaction) {
+    case TouchInteraction::TouchDown:
+        [generator touchDown:locationOnScreen completionBlock:interactionFinished.get()];
+        break;
+    case TouchInteraction::LiftUp:
+        [generator liftUp:locationOnScreen completionBlock:interactionFinished.get()];
+        break;
+    case TouchInteraction::MoveTo:
+        [generator moveToPoint:locationOnScreen duration:duration.value_or(0_s).seconds() completionBlock:interactionFinished.get()];
+        break;
+    }
+}
+#endif // ENABLE(WEBDRIVER_TOUCH_INTERACTIONS)
 
 } // namespace WebKit
 
-#endif // PLATFORM(IOS)
+#endif // PLATFORM(IOS_FAMILY)

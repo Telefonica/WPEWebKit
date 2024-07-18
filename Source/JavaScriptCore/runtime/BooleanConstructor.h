@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2008, 2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2008-2021 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -27,13 +27,13 @@ namespace JSC {
 class BooleanPrototype;
 class GetterSetter;
 
-class BooleanConstructor : public InternalFunction {
+class BooleanConstructor final : public InternalFunction {
 public:
     typedef InternalFunction Base;
 
     static BooleanConstructor* create(VM& vm, Structure* structure, BooleanPrototype* booleanPrototype, GetterSetter*)
     {
-        BooleanConstructor* constructor = new (NotNull, allocateCell<BooleanConstructor>(vm.heap)) BooleanConstructor(vm, structure);
+        BooleanConstructor* constructor = new (NotNull, allocateCell<BooleanConstructor>(vm)) BooleanConstructor(vm, structure);
         constructor->finishCreation(vm, booleanPrototype);
         return constructor;
     }
@@ -42,18 +42,15 @@ public:
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype) 
     { 
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info()); 
+        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info()); 
     }
-
-protected:
-    void finishCreation(VM&, BooleanPrototype*);
 
 private:
     BooleanConstructor(VM&, Structure*);
-    static ConstructType getConstructData(JSCell*, ConstructData&);
-    static CallType getCallData(JSCell*, CallData&);
+    void finishCreation(VM&, BooleanPrototype*);
 };
+STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(BooleanConstructor, InternalFunction);
 
-JSObject* constructBooleanFromImmediateBoolean(ExecState*, JSGlobalObject*, JSValue);
+JSObject* constructBooleanFromImmediateBoolean(JSGlobalObject*, JSValue);
 
 } // namespace JSC

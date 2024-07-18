@@ -25,53 +25,54 @@
  */
 
 #include "config.h"
-#include "WebProcessMainUnix.h"
+#include "WebProcessMain.h"
 
-#include "ChildProcessMain.h"
+#include "AuxiliaryProcessMain.h"
 #include "WebProcess.h"
-#include <WebCore/PlatformDisplayWPE.h>
 #include <glib.h>
-#include <iostream>
-#include <libsoup/soup.h>
 
-using namespace WebCore;
+#if USE(GCRYPT)
+#include <pal/crypto/gcrypt/Initialization.h>
+#endif
+
+#if USE(GSTREAMER)
+#include <gst/gst.h>
+#endif
 
 namespace WebKit {
+using namespace WebCore;
 
-class WebProcessMain final: public ChildProcessMainBase {
+class WebProcessMainWPE final : public AuxiliaryProcessMainBase<WebProcess> {
 public:
     bool platformInitialize() override
     {
+#if USE(GCRYPT)
+        PAL::GCrypt::initialize();
+#endif
+
 #if ENABLE(DEVELOPER_MODE)
         if (g_getenv("WEBKIT2_PAUSE_WEB_PROCESS_ON_LAUNCH"))
-            WTF::sleep(30);
+            WTF::sleep(30_s);
 #endif
+
+        // Required for GStreamer initialization.
+        // FIXME: This should be probably called in other processes as well.
+        g_set_prgname("WPEWebProcess");
 
         return true;
     }
 
-    bool parseCommandLine(int argc, char** argv) override
+    void platformFinalize() override
     {
-        ASSERT(argc == 3);
-        if (argc < 3)
-            return false;
-
-        if (!ChildProcessMainBase::parseCommandLine(argc, argv))
-            return false;
-
-        int wpeFd = atoi(argv[2]);
-        RunLoop::main().dispatch(
-            [wpeFd] {
-                RELEASE_ASSERT(is<PlatformDisplayWPE>(PlatformDisplay::sharedDisplay()));
-                downcast<PlatformDisplayWPE>(PlatformDisplay::sharedDisplay()).initialize(wpeFd);
-            });
-        return true;
+#if USE(GSTREAMER)
+        gst_deinit();
+#endif
     }
 };
 
-int WebProcessMainUnix(int argc, char** argv)
+int WebProcessMain(int argc, char** argv)
 {
-    return ChildProcessMain<WebProcess, WebProcessMain>(argc, argv);
+    return AuxiliaryProcessMain<WebProcessMainWPE>(argc, argv);
 }
 
 } // namespace WebKit

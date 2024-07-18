@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,8 +25,6 @@
 
 #import <WebKit/WKFoundation.h>
 
-#if WK_API_ENABLED
-
 #import <Foundation/Foundation.h>
 
 /*! A WKProcessPool object represents a pool of web content processes.
@@ -35,8 +33,6 @@
  implementation-defined process limit is reached; after that, web views
  with the same process pool end up sharing web content processes.
  */
-WK_CLASS_AVAILABLE(macosx(10.10), ios(8.0))
-@interface WKProcessPool : NSObject <NSCoding>
+WK_CLASS_AVAILABLE(macos(10.10), ios(8.0))
+@interface WKProcessPool : NSObject <NSSecureCoding>
 @end
-
-#endif

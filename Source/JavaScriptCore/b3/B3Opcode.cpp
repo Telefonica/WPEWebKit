@@ -30,10 +30,9 @@
 
 #include <wtf/PrintStream.h>
 
-#if COMPILER(GCC) && ASSERT_DISABLED
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wreturn-type"
-#endif // COMPILER(GCC) && ASSERT_DISABLED
+#if !ASSERT_ENABLED
+IGNORE_RETURN_TYPE_WARNINGS_BEGIN
+#endif
 
 namespace JSC { namespace B3 {
 
@@ -45,19 +44,19 @@ std::optional<Opcode> invertedCompare(Opcode opcode, Type type)
     case NotEqual:
         return Equal;
     case LessThan:
-        if (isInt(type))
+        if (type.isInt())
             return GreaterEqual;
         return std::nullopt;
     case GreaterThan:
-        if (isInt(type))
+        if (type.isInt())
             return LessEqual;
         return std::nullopt;
     case LessEqual:
-        if (isInt(type))
+        if (type.isInt())
             return GreaterThan;
         return std::nullopt;
     case GreaterEqual:
-        if (isInt(type))
+        if (type.isInt())
             return LessThan;
         return std::nullopt;
     case Above:
@@ -121,6 +120,9 @@ void printInternal(PrintStream& out, Opcode opcode)
     case ConstFloat:
         out.print("ConstFloat");
         return;
+    case BottomTuple:
+        out.print("BottomTuple");
+        return;
     case Get:
         out.print("Get");
         return;
@@ -156,6 +158,12 @@ void printInternal(PrintStream& out, Opcode opcode)
         return;
     case UMod:
         out.print("UMod");
+        return;
+    case FMin:
+        out.print("FMin");
+        return;
+    case FMax:
+        out.print("FMax");
         return;
     case Neg:
         out.print("Neg");
@@ -328,6 +336,9 @@ void printInternal(PrintStream& out, Opcode opcode)
     case Patchpoint:
         out.print("Patchpoint");
         return;
+    case Extract:
+        out.print("Extract");
+        return;
     case CheckAdd:
         out.print("CheckAdd");
         return;
@@ -373,8 +384,8 @@ void printInternal(PrintStream& out, Opcode opcode)
 
 } // namespace WTF
 
-#if COMPILER(GCC) && ASSERT_DISABLED
-#pragma GCC diagnostic pop
-#endif // COMPILER(GCC) && ASSERT_DISABLED
+#if !ASSERT_ENABLED
+IGNORE_RETURN_TYPE_WARNINGS_END
+#endif
 
 #endif // ENABLE(B3_JIT)
