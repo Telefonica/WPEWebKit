@@ -53,7 +53,6 @@ class SharedBuffer;
 class CDMInstanceClient : public CanMakeWeakPtr<CDMInstanceClient> {
 public:
     virtual ~CDMInstanceClient() = default;
-
     virtual void unrequestedInitializationDataReceived(const String&, Ref<SharedBuffer>&&) = 0;
 
 #if !RELEASE_LOG_DISABLED
@@ -82,6 +81,8 @@ public:
         Remote,
 #if ENABLE(THUNDER)
         Thunder,
+#else
+        OpenCDM        
 #endif
     };
     virtual ImplementationType implementationType() const = 0;

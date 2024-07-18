@@ -29,6 +29,7 @@
 #include "config.h"
 #include "CDMFactory.h"
 
+
 #if ENABLE(ENCRYPTED_MEDIA)
 
 #include "CDMProxy.h"
@@ -37,14 +38,37 @@
 #include "CDMThunder.h"
 #endif
 
+#if ENABLE(CLEARKEY)
+#include "CDMClearKey.h"
+#endif
+
+#if ENABLE(OPENCDM)
+#include "CDMOpenCDM.h"
+#endif
+
 namespace WebCore {
 
 void CDMFactory::platformRegisterFactories(Vector<CDMFactory*>& factories)
 {
 #if ENABLE(THUNDER)
     factories.append(&CDMFactoryThunder::singleton());
+    GST_DEBUG("THUNDER CDM factory added");
 #else
+
+#if ENABLE(CLEARKEY)
+    factories.append(&CDMFactoryClearKey::singleton());
+    GST_DEBUG("CLEARKEY CDM factory added");
+#endif
+
+#if ENABLE(OPENCDM)
+    factories.append(&CDMFactoryOpenCDM::singleton());
+    GST_DEBUG("OPENCDM CDM factory added");
+#endif
+
+#if !ENABLE(CLEARKEY) && !ENABLE(OPENCDM)
     UNUSED_PARAM(factories);
+#endif
+
 #endif
 }
 
@@ -54,6 +78,32 @@ Vector<CDMProxyFactory*> CDMProxyFactory::platformRegisterFactories()
 #if ENABLE(THUNDER)
     factories.reserveInitialCapacity(1);
     factories.uncheckedAppend(&CDMFactoryThunder::singleton());
+    GST_DEBUG("THUNDER CDM factory added unchecked");
+#else
+    int num_factories=0;
+
+#if ENABLE(CLEARKEY)
+    ++num_factories;
+#endif
+
+#if ENABLE(OPENCDM)
+    ++num_factories;
+#endif
+
+    if(num_factories>0){
+         factories.reserveInitialCapacity(num_factories);
+    }
+
+#if ENABLE(CLEARKEY)
+    factories.uncheckedAppend(&CDMFactoryClearKey::singleton());
+    GST_DEBUG("CLEARKEY CDM factory added unchecked");
+#endif
+
+#if ENABLE(OPENCDM)
+    factories.uncheckedAppend(&CDMFactoryOpenCDM::singleton());
+    GST_DEBUG("OPENCDM CDM factory added unchecked");
+#endif
+
 #endif
     return factories;
 }

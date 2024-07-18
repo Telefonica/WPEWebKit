@@ -62,6 +62,9 @@ struct _WebKitMediaCommonEncryptionDecryptClass {
     bool (*decrypt)(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* ivBuffer, GstBuffer* keyIDBuffer, GstBuffer* buffer, unsigned subsamplesCount, GstBuffer* subsamplesBuffer);
 };
 
+
+RefPtr<WebCore::CDMInstance> webKitMediaCommonEncryptionDecryptCDMInstance(WebKitMediaCommonEncryptionDecrypt*);
+
 G_END_DECLS
 
 // This function returns a C++ type. It's internal to the decryptors so it is safe to move it here to avoid the C++ return warning because of the C only linkage

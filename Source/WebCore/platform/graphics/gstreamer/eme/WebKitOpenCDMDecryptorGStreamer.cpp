@@ -23,10 +23,15 @@
 #include "config.h"
 #include "WebKitOpenCDMDecryptorGStreamer.h"
 
-#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(OPENCDM)
+//esto bloquea toda la compilacion
+#if 0
 
-#include "CDMOpenCDM.h"
-#include <GStreamerCommon.h>
+#if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
+
+#include "GStreamerCommon.h"
+#include "GStreamerEMEUtilities.h"
+#include "WebKitCommonEncryptionDecryptorGStreamer.h"
+#include "opencdm/CDMOpenCDM.h"
 #include <open_cdm.h>
 #include <open_cdm_adapter.h>
 #include <wtf/Lock.h>
@@ -35,6 +40,8 @@
 
 #define GST_WEBKIT_OPENCDM_DECRYPT_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE((obj), WEBKIT_TYPE_OPENCDM_DECRYPT, WebKitOpenCDMDecryptPrivate))
 
+using WebCore::GstMappedBuffer;
+
 struct _WebKitOpenCDMDecryptPrivate {
     String m_session;
     WebCore::ScopedSession m_openCdmSession;
@@ -42,12 +49,12 @@ struct _WebKitOpenCDMDecryptPrivate {
 };
 
 static void webKitMediaOpenCDMDecryptorFinalize(GObject*);
-static bool webKitMediaOpenCDMDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* keyIDBuffer, GstBuffer* iv, GstBuffer* sample, unsigned subSamplesCount, GstBuffer* subSamples);
-static bool webKitMediaOpenCDMDecryptorHandleKeyId(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer&);
-static bool webKitMediaOpenCDMDecryptorAttemptToDecryptWithLocalInstance(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer&);
+static gboolean webKitMediaOpenCDMDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt*, GstBuffer* keyIDBuffer, GstBuffer* iv, GstBuffer* sample, unsigned subSamplesCount, GstBuffer* subSamples);
+static gboolean webKitMediaOpenCDMDecryptorHandleKeyId(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer&);
+static gboolean webKitMediaOpenCDMDecryptorAttemptToDecryptWithLocalInstance(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer&);
 
-static const char* cencEncryptionMediaTypes[] = { "video/mp4", "audio/mp4", "video/x-h264", "audio/mpeg", nullptr };
-static const char* webmEncryptionMediaTypes[] = { "video/webm", "audio/webm", "video/x-vp9", nullptr };
+static const char* cencEncryptionMediaTypes[] = { "video/mp4", "audio/mp4", "video/x-h264","video/x-h265", "audio/mpeg", nullptr };
+static const char* webmEncryptionMediaTypes[] = { "video/webm", "audio/webm", "video/x-vp8", "video/x-vp9", nullptr };
 
 static GstStaticPadTemplate srcTemplate = GST_STATIC_PAD_TEMPLATE("src",
     GST_PAD_SRC,
@@ -58,8 +65,17 @@ static GstStaticPadTemplate srcTemplate = GST_STATIC_PAD_TEMPLATE("src",
         "video/mp4; "
         "audio/mp4; "
         "audio/mpeg; "
+#if USE(WPEWEBKIT_PLATFORM_AMLOGIC)
+        "video/x-h264(memory:SecMem); "
+        "video/x-h265(memory:SecMem); "
+        "video/x-vp8(memory:SecMem); "
+        "video/x-vp9(memory:SecMem); "));
+#else
         "video/x-h264; "
+        "video/x-h265; "
+        "video/x-vp8; "
         "video/x-vp9; "));
+#endif
 
 GST_DEBUG_CATEGORY(webkit_media_opencdm_decrypt_debug_category);
 #define GST_CAT_DEFAULT webkit_media_opencdm_decrypt_debug_category
@@ -72,6 +88,26 @@ enum SessionResult {
     NewSession,
     OldSession
 };
+
+static const char* protectionSystemId(WebKitMediaCommonEncryptionDecrypt* decryptor)
+{
+    
+    WebKitOpenCDMDecryptPrivate* priv = GST_WEBKIT_OPENCDM_DECRYPT_GET_PRIVATE(WEBKIT_OPENCDM_DECRYPT(decryptor));
+    LockHolder locker(priv->m_mutex);
+    RefPtr<WebCore::CDMInstance> cdmInstance = webKitMediaCommonEncryptionDecryptCDMInstance(decryptor);
+    ASSERT(cdmInstance && is<WebCore::CDMInstanceOpenCDM>(*cdmInstance));
+    auto& cdmInstanceOpenCDM = downcast<WebCore::CDMInstanceOpenCDM>(*cdmInstance);
+    cdmInstanceOpenCDM.keySystem();
+}
+
+static bool cdmProxyAttached(WebKitMediaCommonEncryptionDecrypt* decryptor, const RefPtr<WebCore::CDMProxy>& cdmProxy)
+{
+    auto* self = WEBKIT_MEDIA_CENC_DECRYPT(decryptor);
+    self->priv->cdmProxy = reinterpret_cast<WebCore::CDMProxyOpenCDM*>(cdmProxy.get());
+    return self->priv->cdmProxy;
+}
+
+
 
 static void addKeySystemToSinkPadCaps(GRefPtr<GstCaps>& caps, const char* uuid)
 {
@@ -88,7 +124,10 @@ static GRefPtr<GstCaps> createSinkPadTemplateCaps()
     if (!opencdm_is_type_supported(WebCore::GStreamerEMEUtilities::s_ClearKeyKeySystem, emptyString.c_str()))
         addKeySystemToSinkPadCaps(caps, WEBCORE_GSTREAMER_EME_UTILITIES_CLEARKEY_UUID);
 
-    if (!opencdm_is_type_supported(WebCore::GStreamerEMEUtilities::s_PlayReadyKeySystems[0], emptyString.c_str()))
+    if (!opencdm_is_type_supported(WebCore::GStreamerEMEUtilities::s_PlayReadyKeySystemMS, emptyString.c_str()))
+        addKeySystemToSinkPadCaps(caps, WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID);
+
+    if (!opencdm_is_type_supported(WebCore::GStreamerEMEUtilities::s_PlayReadyKeySystemYT, emptyString.c_str()))
         addKeySystemToSinkPadCaps(caps, WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID);
 
     if (!opencdm_is_type_supported(WebCore::GStreamerEMEUtilities::s_WidevineKeySystem, emptyString.c_str())) {
@@ -108,7 +147,6 @@ static void webkit_media_opencdm_decrypt_class_init(WebKitOpenCDMDecryptClass* k
 
     GST_DEBUG_CATEGORY_INIT(webkit_media_opencdm_decrypt_debug_category,
         "webkitopencdm", 0, "OpenCDM decryptor");
-
     GstElementClass* elementClass = GST_ELEMENT_CLASS(klass);
     GRefPtr<GstCaps> gstSinkPadTemplateCaps = createSinkPadTemplateCaps();
     gst_element_class_add_pad_template(elementClass, gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS, gstSinkPadTemplateCaps.get()));
@@ -121,9 +159,13 @@ static void webkit_media_opencdm_decrypt_class_init(WebKitOpenCDMDecryptClass* k
         "Metrological");
 
     WebKitMediaCommonEncryptionDecryptClass* cencClass = WEBKIT_MEDIA_CENC_DECRYPT_CLASS(klass);
-    cencClass->handleKeyId = GST_DEBUG_FUNCPTR(webKitMediaOpenCDMDecryptorHandleKeyId);
+    cencClass->protectionSystemId = GST_DEBUG_FUNCPTR(protectionSystemId);
+    cencClass->cdmProxyAttached = GST_DEBUG_FUNCPTR(cdmProxyAttached);
     cencClass->decrypt = GST_DEBUG_FUNCPTR(webKitMediaOpenCDMDecryptorDecrypt);
-    cencClass->attemptToDecryptWithLocalInstance = GST_DEBUG_FUNCPTR(webKitMediaOpenCDMDecryptorAttemptToDecryptWithLocalInstance);
+    
+    //cencClass->handleKeyId = GST_DEBUG_FUNCPTR(webKitMediaOpenCDMDecryptorHandleKeyId);
+    //cencClass->decrypt = GST_DEBUG_FUNCPTR(webKitMediaOpenCDMDecryptorDecrypt);
+    //cencClass->attemptToDecryptWithLocalInstance = GST_DEBUG_FUNCPTR(webKitMediaOpenCDMDecryptorAttemptToDecryptWithLocalInstance);
 
     g_type_class_add_private(klass, sizeof(WebKitOpenCDMDecryptPrivate));
 }
@@ -172,17 +214,17 @@ static SessionResult webKitMediaOpenCDMDecryptorResetSessionFromKeyIdIfNeeded(We
     return returnValue;
 }
 
-static bool webKitMediaOpenCDMDecryptorHandleKeyId(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer& keyId)
+static gboolean webKitMediaOpenCDMDecryptorHandleKeyId(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer& keyId)
 {
     return webKitMediaOpenCDMDecryptorResetSessionFromKeyIdIfNeeded(self, keyId) == InvalidSession;
 }
 
-static bool webKitMediaOpenCDMDecryptorAttemptToDecryptWithLocalInstance(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer& keyId)
+static gboolean webKitMediaOpenCDMDecryptorAttemptToDecryptWithLocalInstance(WebKitMediaCommonEncryptionDecrypt* self, const WebCore::SharedBuffer& keyId)
 {
     return webKitMediaOpenCDMDecryptorResetSessionFromKeyIdIfNeeded(self, keyId) != InvalidSession;
 }
 
-static bool webKitMediaOpenCDMDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer, GstBuffer* ivBuffer, GstBuffer* buffer, unsigned subSampleCount, GstBuffer* subSamplesBuffer)
+static gboolean webKitMediaOpenCDMDecryptorDecrypt(WebKitMediaCommonEncryptionDecrypt* self, GstBuffer* keyIDBuffer, GstBuffer* ivBuffer, GstBuffer* buffer, unsigned subSampleCount, GstBuffer* subSamplesBuffer)
 {
     WebKitOpenCDMDecryptPrivate* priv = GST_WEBKIT_OPENCDM_DECRYPT_GET_PRIVATE(self);
 
@@ -206,11 +248,26 @@ static bool webKitMediaOpenCDMDecryptorDecrypt(WebKitMediaCommonEncryptionDecryp
 
     // Decrypt cipher.
     GST_TRACE_OBJECT(self, "decrypting");
+#if USE(WPEWEBKIT_PLATFORM_AMLOGIC)
+    GstCaps *caps = gst_pad_get_current_caps (GST_BASE_TRANSFORM(self)->srcpad);
+    if (int errorCode = opencdm_gstreamer_session_decrypt_ex(priv->m_openCdmSession.get(), buffer, subSamplesBuffer, subSampleCount, ivBuffer, keyIDBuffer, 0, caps)) {
+       gst_caps_unref(caps);
+#else
     if (int errorCode = opencdm_gstreamer_session_decrypt(priv->m_openCdmSession.get(), buffer, subSamplesBuffer, subSampleCount, ivBuffer, keyIDBuffer, 0)) {
+#endif
         GST_ERROR_OBJECT(self, "subsample decryption failed, error code %d", errorCode);
         return false;
     }
+#if USE(WPEWEBKIT_PLATFORM_AMLOGIC)
+    gst_caps_unref(caps);
+#endif
 
     return true;
 }
-#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER) && USE(OPENCDM)
+
+
+
+
+#endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
+
+#endif //fin del bloqueo

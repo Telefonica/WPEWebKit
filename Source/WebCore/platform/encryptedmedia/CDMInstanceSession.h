@@ -51,8 +51,10 @@ public:
 
     using KeyStatus = CDMKeyStatus;
     using KeyStatusVector = Vector<std::pair<Ref<SharedBuffer>, KeyStatus>>;
+    using MessageType = CDMMessageType;
     virtual void updateKeyStatuses(KeyStatusVector&&) = 0;
     virtual void sendMessage(CDMMessageType, Ref<SharedBuffer>&& message) = 0;
+    virtual void enqueueMessageWithTask(CDMInstanceSessionClient::MessageType, Ref<SharedBuffer>&&) = 0;
     virtual void sessionIdChanged(const String&) = 0;
     using PlatformDisplayID = uint32_t;
     virtual PlatformDisplayID displayID() = 0;
@@ -79,7 +81,7 @@ public:
     };
 
     using LicenseCallback = CompletionHandler<void(Ref<SharedBuffer>&& message, const String& sessionId, bool needsIndividualization, SuccessValue succeeded)>;
-    virtual void requestLicense(LicenseType, const AtomString& initDataType, Ref<SharedBuffer>&& initData, LicenseCallback&&) = 0;
+    virtual void requestLicense(LicenseType, const AtomString& initDataType, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback&&) = 0;
 
     using KeyStatusVector = CDMInstanceSessionClient::KeyStatusVector;
     using Message = std::pair<MessageType, Ref<SharedBuffer>>;

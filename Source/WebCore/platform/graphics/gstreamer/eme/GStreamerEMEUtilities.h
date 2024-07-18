@@ -28,9 +28,17 @@
 #include <gst/gst.h>
 #include <wtf/text/WTFString.h>
 
+#include <array>
+#include <wtf/Seconds.h>
+#include <openssl/md5.h>
+#include <wtf/text/Base64.h>
+
 #define WEBCORE_GSTREAMER_EME_UTILITIES_CLEARKEY_UUID "1077efec-c0b2-4d02-ace3-3c1e52e2fb4b"
 #define WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID "edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
 #define WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID "9a04f079-9840-4286-ab92-e65be0885f95"
+
+// NOTE: YouTube 2018 EME conformance tests expect this to be >=5s.
+const WTF::Seconds WEBCORE_GSTREAMER_EME_LICENSE_KEY_RESPONSE_TIMEOUT = WTF::Seconds(6);
 
 GST_DEBUG_CATEGORY_EXTERN(webkit_media_common_encryption_decrypt_debug_category);
 
@@ -112,6 +120,8 @@ public:
     static constexpr auto s_WidevineUUID = WEBCORE_GSTREAMER_EME_UTILITIES_WIDEVINE_UUID ""_s;
     static constexpr auto s_WidevineKeySystem = "com.widevine.alpha"_s;
     static constexpr auto s_PlayReadyUUID = WEBCORE_GSTREAMER_EME_UTILITIES_PLAYREADY_UUID ""_s;
+    static constexpr auto s_PlayReadyKeySystemMS = "com.microsoft.playready"_s;
+    static constexpr auto s_PlayReadyKeySystemYT = "com.youtube.playready"_s;
     static constexpr std::array<ASCIILiteral, 2> s_PlayReadyKeySystems = { "com.microsoft.playready"_s,  "com.youtube.playready"_s };
 #if GST_CHECK_VERSION(1, 16, 0)
     static constexpr auto s_unspecifiedUUID = GST_PROTECTION_UNSPECIFIED_SYSTEM_ID ""_s;
@@ -200,6 +210,19 @@ public:
         static NeverDestroyed<ASCIILiteral> empty(""_s);
         return empty;
     }
+
+    #if (!defined(GST_DISABLE_GST_DEBUG))
+
+static String initDataMD5(const InitData& initData) {
+    uint8_t digest[MD5_DIGEST_LENGTH];
+    RefPtr<SharedBuffer> payload=initData.payload();
+    
+    MD5(payload->data(), payload->size(), digest);
+
+    return WTF::base64URLEncodeToString(&digest[0], MD5_DIGEST_LENGTH);
+}
+#endif
+
 };
 
 }

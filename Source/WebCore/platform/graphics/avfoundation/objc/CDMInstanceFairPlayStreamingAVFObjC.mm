@@ -714,7 +714,7 @@ Keys CDMInstanceSessionFairPlayStreamingAVFObjC::keyIDs()
     return keyIDs;
 }
 
-void CDMInstanceSessionFairPlayStreamingAVFObjC::requestLicense(LicenseType licenseType, const AtomString& initDataType, Ref<SharedBuffer>&& initData, LicenseCallback&& callback)
+void CDMInstanceSessionFairPlayStreamingAVFObjC::requestLicense(LicenseType licenseType, const AtomString& initDataType, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback&& callback)
 {
     if (!isLicenseTypeSupported(licenseType)) {
         ERROR_LOG(LOGIDENTIFIER, " false, licenseType \"", licenseType, "\" not supported");

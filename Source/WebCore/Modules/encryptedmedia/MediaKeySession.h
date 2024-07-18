@@ -37,6 +37,7 @@
 #include "MediaKeyMessageType.h"
 #include "MediaKeySessionType.h"
 #include "MediaKeyStatus.h"
+#include "BufferSource.h"
 #include <wtf/Observer.h>
 #include <wtf/RefCounted.h>
 #include <wtf/UniqueRef.h>
@@ -78,7 +79,7 @@ public:
     double expiration() const;
     Ref<MediaKeyStatusMap> keyStatuses() const;
 
-    void generateRequest(const AtomString&, const BufferSource&, Ref<DeferredPromise>&&);
+    void generateRequest(const AtomString&, const BufferSource&,std::optional<BufferSource::VariantType>&&,Ref<DeferredPromise>&&);
     void load(const String&, Ref<DeferredPromise>&&);
     void update(const BufferSource&, Ref<DeferredPromise>&&);
     void close(Ref<DeferredPromise>&&);
@@ -94,7 +95,8 @@ public:
 private:
     MediaKeySession(Document&, WeakPtr<MediaKeys>&&, MediaKeySessionType, bool useDistinctiveIdentifier, Ref<CDM>&&, Ref<CDMInstanceSession>&&);
     void enqueueMessage(MediaKeyMessageType, const SharedBuffer&);
-    void updateExpiration(double);
+    void enqueueMessageWithTask(MediaKeyMessageType type, Ref<SharedBuffer>&& message) override;
+    void updateExpiration(double expiration);
     void sessionClosed();
     String mediaKeysStorageDirectory() const;
 

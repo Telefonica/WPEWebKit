@@ -58,9 +58,19 @@
 #include "GStreamerMediaStreamSource.h"
 #endif
 
-#if ENABLE(ENCRYPTED_MEDIA) && ENABLE(THUNDER)
+#if ENABLE(ENCRYPTED_MEDIA)
+#if ENABLE(THUNDER)
 #include "CDMThunder.h"
 #include "WebKitThunderDecryptorGStreamer.h"
+#endif
+#if ENABLE(OPENCDM)
+#include "CDMOpenCDM.h"
+#include "WebKitOpenCDMDecryptorGStreamer.h"
+#endif
+#if ENABLE(CLEARKEY)
+#include "CDMClearKey.h"
+#include "WebKitClearKeyDecryptorGStreamer.h"
+#endif
 #endif
 
 #if ENABLE(VIDEO)
@@ -361,10 +371,35 @@ void registerWebKitGStreamerElements()
         //   is an alternative outside of WebKit.
         // - Use GST_RANK_NONE for elements explicitely created by WebKit (no auto-plugging).
 
-#if ENABLE(ENCRYPTED_MEDIA) && ENABLE(THUNDER)
-        if (!CDMFactoryThunder::singleton().supportedKeySystems().isEmpty())
+#if ENABLE(ENCRYPTED_MEDIA) 
+GST_DEBUG("Registering ENCRYPTED_MEDIA Gstreamer Elements:");
+#if ENABLE(THUNDER)
+        if (!CDMFactoryThunder::singleton().supportedKeySystems().isEmpty()){
             gst_element_register(nullptr, "webkitthunder", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_MEDIA_THUNDER_DECRYPT);
+            GST_DEBUG("THUNDER Gstreamer Element Registered");
+        }
+
 #endif
+
+#if ENABLE(OPENCDM)
+    GRefPtr<GstElementFactory> decryptorFactory = adoptGRef(gst_element_factory_find("webkitopencdm"));
+    if (!decryptorFactory){
+        gst_element_register(0, "webkitopencdm", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_OPENCDM_DECRYPT);
+        GST_DEBUG("OPENCDM Gstreamer Element Registered");
+    }
+
+#endif
+
+#if ENABLE(CLEARKEY)
+    GRefPtr<GstElementFactory> clearKeyDecryptorFactory = adoptGRef(gst_element_factory_find("webkitclearkey"));
+    if (!clearKeyDecryptorFactory){
+        gst_element_register(nullptr, "webkitclearkey", GST_RANK_PRIMARY + 100, WEBKIT_TYPE_MEDIA_CK_DECRYPT);
+        GST_DEBUG("CLEARKEY Gstreamer Element Registered");    
+    }
+#endif
+
+#endif
+
 
 #if ENABLE(MEDIA_STREAM)
         gst_element_register(nullptr, "mediastreamsrc", GST_RANK_PRIMARY, WEBKIT_TYPE_MEDIA_STREAM_SRC);

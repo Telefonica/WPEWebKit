@@ -69,6 +69,8 @@
 #include "GStreamerEMEUtilities.h"
 #include "SharedBuffer.h"
 #include "WebKitCommonEncryptionDecryptorGStreamer.h"
+#include "opencdm/CDMOpenCDM.h"
+#include "WebKitOpenCDMDecryptorGStreamer.h"
 #endif
 
 #if ENABLE(WEB_AUDIO)
@@ -2040,6 +2042,23 @@ void MediaPlayerPrivateGStreamer::handleMessage(GstMessage* message)
             gst_mpegts_section_unref(section);
         }
 #endif
+#if ENABLE(ENCRYPTED_MEDIA)
+#if !ENABLE(THUNDER)
+        else if (gst_structure_has_name(structure, "drm-key-needed")) {
+            GST_DEBUG("drm-key-needed message from %s", GST_MESSAGE_SRC_NAME(message));
+            GRefPtr<GstEvent> event;
+            gst_structure_get(structure, "event", GST_TYPE_EVENT, &event.outPtr(), nullptr);
+            handleProtectionEvent(event.get());
+        } else if (gst_structure_has_name(structure, "decrypt-key-needed")) {
+            GST_DEBUG("decrypt-key-needed message from %s", GST_MESSAGE_SRC_NAME(message));
+            attemptToDecryptWithLocalInstance();
+        }
+            else if (gst_structure_has_name(structure, "drm-initialization-data-encountered")) {
+            GST_DEBUG("drm-initialization-data-encountered message from %s", GST_MESSAGE_SRC_NAME(message));
+            handleProtectionStructure(structure);
+        }
+#endif
+#endif
         else if (gst_structure_has_name(structure, "http-headers")) {
             GST_DEBUG_OBJECT(pipeline(), "Processing HTTP headers: %" GST_PTR_FORMAT, structure);
             if (const char* uri = gst_structure_get_string(structure, "uri")) {
@@ -2149,6 +2168,28 @@ void MediaPlayerPrivateGStreamer::handleMessage(GstMessage* message)
         break;
     }
 }
+
+void MediaPlayerPrivateGStreamer::handleProtectionStructure(const GstStructure* structure)
+{
+    GST_DEBUG("Handling a protection structure");
+
+    GRefPtr<GstBuffer> data;
+    GUniqueOutPtr<char> eventKeySystemUUID;
+    gst_structure_get(structure, "init-data", GST_TYPE_BUFFER, &data.outPtr(), "key-system-uuid", G_TYPE_STRING, &eventKeySystemUUID.outPtr(), nullptr);
+
+    GstMappedBuffer mappedInitData(data.get(), GST_MAP_READ);
+    if (!mappedInitData) {
+        GST_WARNING("cannot map protection data");
+        return;
+    }
+
+    InitData initData(reinterpret_cast<const uint8_t*>(mappedInitData.data()), mappedInitData.size());
+    static const ASCIILiteral initDataType { !g_strcmp0(eventKeySystemUUID.get(), GST_PROTECTION_UNSPECIFIED_SYSTEM_ID) ? "webm"_s : "cenc"_s };
+
+    initializationDataEncounteredOld(WTF::String(initDataType), initData);
+
+}
+
 
 void MediaPlayerPrivateGStreamer::processBufferingStats(GstMessage* message)
 {
@@ -4442,6 +4483,17 @@ void MediaPlayerPrivateGStreamer::initializationDataEncountered(InitData&& initD
     });
 }
 
+void MediaPlayerPrivateGStreamer::initializationDataEncounteredOld(const String& initDataType, const InitData& initData)
+{
+    ASSERT(isMainThread());
+
+    GST_TRACE("init data encountered of size %" G_GSIZE_FORMAT " with MD5 %s", initData.sizeInBytes(), GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
+    GST_MEMDUMP("init data", initData.characters8(), initData.sizeInBytes());
+
+    m_player->initializationDataEncountered(initDataType, ArrayBuffer::create(reinterpret_cast<const uint8_t*>(initData.characters8()), initData.sizeInBytes()));
+}
+
+
 void MediaPlayerPrivateGStreamer::cdmInstanceAttached(CDMInstance& instance)
 {
     ASSERT(isMainThread());
@@ -4513,6 +4565,12 @@ void MediaPlayerPrivateGStreamer::handleProtectionEvent(GstEvent* event)
     const char* eventKeySystemUUID = nullptr;
     GstBuffer* initData = nullptr;
     gst_event_parse_protection(event, &eventKeySystemUUID, &initData, nullptr);
+
+    if (m_cdmInstance && g_strcmp0(eventKeySystemUUID, GST_PROTECTION_UNSPECIFIED_SYSTEM_ID) && g_strcmp0(GStreamerEMEUtilities::keySystemToUuid(m_cdmInstance->keySystem()), eventKeySystemUUID)) {
+        GST_DEBUG("The protection event with UUID %s is ignored because it isn't supported by the CDM %s", eventKeySystemUUID, m_cdmInstance->keySystem().utf8().data());
+        return;
+    }
+
     initializationDataEncountered({ GStreamerEMEUtilities::uuidToKeySystem(String::fromLatin1(eventKeySystemUUID)), initData });
 }
 

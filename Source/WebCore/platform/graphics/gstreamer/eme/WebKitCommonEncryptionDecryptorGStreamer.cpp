@@ -23,6 +23,9 @@
 #include "config.h"
 #include "WebKitCommonEncryptionDecryptorGStreamer.h"
 
+//esto bloquea toda la compilacion
+#if 0
+
 #if ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
 
 #include "CDMProxy.h"
@@ -35,6 +38,7 @@
 #include <wtf/glib/WTFGType.h>
 
 using WebCore::CDMProxy;
+
 
 // Instances of this class are tied to the decryptor lifecycle. They can't be alive after the decryptor has been destroyed.
 class CDMProxyDecryptionClientImplementation : public WebCore::CDMProxyDecryptionClient {
@@ -537,4 +541,13 @@ static void setContext(GstElement* element, GstContext* context)
     GST_ELEMENT_CLASS(parent_class)->set_context(element, context);
 }
 
+RefPtr<CDMInstance> webKitMediaCommonEncryptionDecryptCDMProxy(WebKitMediaCommonEncryptionDecrypt* self)
+{
+    WebKitMediaCommonEncryptionDecryptPrivate* priv = WEBKIT_MEDIA_CENC_DECRYPT_GET_PRIVATE(self);
+    ASSERT(priv->m_mutex.isLocked());
+    return webkitMediaCommonEncryptionDecryptIsCDMInstanceAvailable(self) ? priv->m_cdmInstance : nullptr;
+}
+
 #endif // ENABLE(ENCRYPTED_MEDIA) && USE(GSTREAMER)
+
+#endif //este es el bloqueo

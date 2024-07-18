@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2016 Metrological Group B.V.
- * Copyright (C) 2016 Igalia S.L.
+ * Copyright (C) 2020 Metrological Group B.V.
+ * Copyright (C) 2020 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,23 +26,25 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-[
-    ActiveDOMObject,
-    Conditional=ENCRYPTED_MEDIA,
-    EnabledBySetting=EncryptedMediaAPIEnabled,
-    ExportToWrappedFunction,
-    DisabledByQuirk=hasBrokenEncryptedMediaAPISupport,
-    Exposed=Window
-] interface MediaKeySession : EventTarget {
-    readonly attribute DOMString sessionId;
-    readonly attribute unrestricted double expiration;
-    readonly attribute Promise<undefined> closed;
-    readonly attribute MediaKeyStatusMap keyStatuses;
-    attribute EventHandler onkeystatuseschange;
-    attribute EventHandler onmessage;
-    Promise<undefined> generateRequest([AtomString] DOMString initDataType, BufferSource initData, optional BufferSource? customData);
-    Promise<boolean> load(DOMString sessionId);
-    Promise<undefined> update(BufferSource response);
-    Promise<undefined> close();
-    Promise<undefined> remove();
+#pragma once
+
+#if ENABLE(ENCRYPTED_MEDIA) && ENABLE(OPENCDM)
+
+#include "CDMInstanceSession.h"
+#include "CDMOpenCDM.h"
+#include "GStreamerEMEUtilities.h"
+
+namespace WebCore {
+
+
+class CDMProxyOpenCDM final : public CDMProxy, public CanMakeWeakPtr<CDMProxyThunder, WeakPtrFactoryInitialization::Eager> {
+public:
+    CDMProxyOpenCDM()= default;
+    virtual ~CDMProxyThunder() = default;
+
+    RefPtr<CDMInstanceOpenCDM> getOpenCDMInstance();
 };
+
+} // namespace WebCore
+
+#endif // ENABLE(ENCRYPTED_MEDIA) && ENABLE(OPENCDM)

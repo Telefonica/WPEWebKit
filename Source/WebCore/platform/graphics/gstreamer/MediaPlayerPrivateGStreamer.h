@@ -558,6 +558,8 @@ private:
     bool isCDMAttached() const { return m_cdmInstance; }
     void attemptToDecryptWithLocalInstance();
     void initializationDataEncountered(InitData&&);
+    void initializationDataEncounteredOld(const String& initDataType, const InitData& initData);
+    void handleProtectionStructure(const GstStructure* structure);
     InitData parseInitDataFromProtectionMessage(GstMessage*);
     bool waitForCDMAttachment();
 #endif
