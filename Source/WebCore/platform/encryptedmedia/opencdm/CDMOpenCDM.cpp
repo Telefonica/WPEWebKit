@@ -12,6 +12,7 @@
 #include "MediaKeyMessageType.h"
 #include "SharedBuffer.h"
 #include "GStreamerEMEUtilities.h"
+#include "CDMUtilities.h"
 
 namespace {
 
@@ -242,8 +243,21 @@ bool CDMPrivateOpenCDM::supportsSessions() const
 
 bool CDMPrivateOpenCDM::supportsInitData(const AtomString& initDataType, const SharedBuffer& initData) const
 {
-    // TODO: Sure? What about "initData"???
-    return supportsInitDataType(initDataType);
+    
+    // Validate the initData buffer as an JSON object in keyids case.
+    if (equalLettersIgnoringASCIICase(initDataType, "keyids"_s) && CDMUtilities::parseJSONObject(initData))
+        return true;
+
+    // Validate the initData buffer as CENC initData. FIXME: Validate it is actually CENC.
+    if (equalLettersIgnoringASCIICase(initDataType, "cenc"_s) && !initData.isEmpty())
+        return true;
+
+    // Validate the initData buffer as WebM initData.
+    if (equalLettersIgnoringASCIICase(initDataType, "webm"_s) && !initData.isEmpty())
+        return true;
+
+    return false;
+    
 }
 
 RefPtr<SharedBuffer> CDMPrivateOpenCDM::sanitizeResponse(const SharedBuffer& response) const
@@ -263,9 +277,9 @@ class CDMInstanceOpenCDM::Session : public ThreadSafeRefCounted<CDMInstanceOpenC
 public:
     using Notification = void (Session::*)(RefPtr<WebCore::SharedBuffer>&&);
     using ChallengeGeneratedCallback = Function<void(Session*)>;
-    using SessionChangedCallback = Function<void(Session*, bool, RefPtr<SharedBuffer>&&, KeyStatusVector&)>;
+    using SessionChangedCallback = Function<void(Session*, bool, RefPtr<SharedBuffer>&&, CDMInstanceSessionClient::KeyStatusVector&)>;
 
-    static Ref<Session> create(CDMInstanceOpenCDM*, OpenCDMSystem&, const String&, const AtomString&, Ref<WebCore::SharedBuffer>&&, LicenseType, Ref<WebCore::SharedBuffer>&&);
+    static Ref<Session> create(CDMInstanceSessionOpenCDM*, OpenCDMSystem&, const String&, const AtomString&, Ref<WebCore::SharedBuffer>&&, CDMInstanceSession::LicenseType, Ref<WebCore::SharedBuffer>&&);
     ~Session();
 
     bool isValid() const { return m_session.get() && m_message && !m_message->isEmpty(); }
@@ -293,7 +307,7 @@ public:
         if (!keyId.data())
             return false;
 
-        auto index = m_keyStatuses.findMatching([&keyId](const std::pair<Ref<SharedBuffer>, KeyStatus>& item) {
+        auto index = m_keyStatuses.findIf([&keyId](const std::pair<Ref<SharedBuffer>, KeyStatus>& item) {
             return memmem(keyId.data(), keyId.size(), item.first->data(), item.first->size());
         });
 
@@ -315,7 +329,7 @@ public:
 
 private:
     Session() = delete;
-    Session(CDMInstanceSessionOpenCDM*, OpenCDMSystem&, const String&, const AtomString&, Ref<WebCore::SharedBuffer>&&, LicenseType, Ref<WebCore::SharedBuffer>&&);
+    Session(CDMInstanceSessionOpenCDM*, OpenCDMSystem&, const String&, const AtomString&, Ref<WebCore::SharedBuffer>&&, CDMInstanceSession::LicenseType, Ref<WebCore::SharedBuffer>&&);
     void challengeGeneratedCallback(RefPtr<SharedBuffer>&&);
     void keyUpdatedCallback(RefPtr<SharedBuffer>&& = nullptr);
     // This doesn't need any params but it's made like this to fit the notification mechanism in place.
@@ -347,7 +361,7 @@ private:
     // Needed due to the fact the Session pointer is passed to the OCDM as the userData for notifications which are no
     // warranted to be called on the main thread the Session lives on.
     static HashSet<Session*> m_validSessions;
-    KeyStatusVector m_keyStatuses;
+    CDMInstanceSessionClient::KeyStatusVector m_keyStatuses;
 };
 
 CDMInstanceOpenCDM::Session::~Session()
@@ -356,7 +370,7 @@ CDMInstanceOpenCDM::Session::~Session()
     Session::m_validSessions.remove(this);
 }
 
-CDMInstanceOpenCDM::Session::Session(CDMInstanceSessionOpenCDM* parent, OpenCDMSystem& source, const String& keySystem, const AtomString& initDataType, Ref<WebCore::SharedBuffer>&& initData, LicenseType licenseType, Ref<WebCore::SharedBuffer>&& customData)
+CDMInstanceOpenCDM::Session::Session(CDMInstanceSessionOpenCDM* parent, OpenCDMSystem& source, const String& keySystem, const AtomString& initDataType, Ref<WebCore::SharedBuffer>&& initData, CDMInstanceSession::LicenseType licenseType, Ref<WebCore::SharedBuffer>&& customData)
     : m_initData(WTFMove(initData))
     , m_keySystem(keySystem)
     , m_ocdmSystem(source)
@@ -371,9 +385,6 @@ CDMInstanceOpenCDM::Session::Session(CDMInstanceSessionOpenCDM* parent, OpenCDMS
     };
     m_openCDMSessionCallbacks.keys_updated_callback = [](const OpenCDMSession* session, void* userData) {
         Session::openCDMNotification(session, userData, &Session::keysUpdateDoneCallback, "all keys updated", nullptr, 0);
-        if (userData) {
-            static_cast<Session*>(userData)->m_parent->setAllKeysReceived(true);
-        }
     };
     m_openCDMSessionCallbacks.error_message_callback = [](OpenCDMSession* session, void* userData, const char message[]) {
         Session::openCDMNotification(session, userData, &Session::errorCallback, "error", reinterpret_cast<const uint8_t*>(message), strlen(message));
@@ -399,7 +410,7 @@ CDMInstanceOpenCDM::Session::Session(CDMInstanceSessionOpenCDM* parent, OpenCDMS
     Session::m_validSessions.add(this);
 }
 
-Ref<CDMInstanceOpenCDM::Session> CDMInstanceOpenCDM::Session::create(CDMInstanceOpenCDM* parent, OpenCDMSystem& source, const String& keySystem, const AtomString& initDataType, Ref<WebCore::SharedBuffer>&& initData, LicenseType licenseType, Ref<WebCore::SharedBuffer>&& customData)
+Ref<CDMInstanceOpenCDM::Session> CDMInstanceOpenCDM::Session::create(CDMInstanceSessionOpenCDM* parent, OpenCDMSystem& source, const String& keySystem, const AtomString& initDataType, Ref<WebCore::SharedBuffer>&& initData, CDMInstanceSession::LicenseType licenseType, Ref<WebCore::SharedBuffer>&& customData)
 {
     return adoptRef(*new Session(parent, source, keySystem, initDataType, WTFMove(initData), licenseType, WTFMove(customData)));
 }
@@ -437,7 +448,7 @@ void CDMInstanceOpenCDM::Session::challengeGeneratedCallback(RefPtr<SharedBuffer
     if (id().isEmpty()) {
         GST_INFO("Challenge generated in a session without id");
         m_message = WTFMove(message);
-        m_needsIndividualization = requestType == CDMInstance::MessageType::IndividualizationRequest;
+        m_needsIndividualization = requestType == CDMInstanceSession::MessageType::IndividualizationRequest;
         return;
     }
 
@@ -446,7 +457,7 @@ void CDMInstanceOpenCDM::Session::challengeGeneratedCallback(RefPtr<SharedBuffer
     if (!m_challengeCallbacks.isEmpty()) {
         std::optional<WebCore::MediaKeyMessageType> requestType;
         m_message = WTFMove(message);
-        m_needsIndividualization = requestType == CDMInstance::MessageType::IndividualizationRequest;
+        m_needsIndividualization = requestType == CDMInstanceSession::MessageType::IndividualizationRequest;
 
         for (const auto& challengeCallback : m_challengeCallbacks)
             challengeCallback(this);
@@ -464,7 +475,7 @@ void CDMInstanceOpenCDM::Session::challengeGeneratedCallback(RefPtr<SharedBuffer
 void CDMInstanceOpenCDM::Session::keyUpdatedCallback(RefPtr<SharedBuffer>&& buffer)
 {
     GST_MEMDUMP("Updated key", reinterpret_cast<const guint8*>(buffer->data()), buffer->size());
-    auto index = m_keyStatuses.findMatching([&buffer](const std::pair<Ref<SharedBuffer>, KeyStatus>& item) {
+    auto index = m_keyStatuses.findIf([&buffer](const std::pair<Ref<SharedBuffer>, KeyStatus>& item) {
         return memmem(buffer->data(), buffer->size(), item.first->data(), item.first->size());
     });
 
@@ -542,7 +553,8 @@ void CDMInstanceOpenCDM::Session::remove(SessionChangedCallback&& callback)
 HashSet<CDMInstanceOpenCDM::Session*> CDMInstanceOpenCDM::Session::m_validSessions;
 
 CDMInstanceOpenCDM::CDMInstanceOpenCDM(OpenCDMSystem& system, const String& keySystem)
-    : m_openCDMSystem(system)
+    : CDMInstanceProxy(keySystem),
+     m_openCDMSystem(system)
     , m_keySystem(keySystem)
 {
 }
@@ -552,17 +564,19 @@ CDMInstanceOpenCDM::~CDMInstanceOpenCDM() = default;
 void CDMInstanceOpenCDM::initializeWithConfiguration(const CDMKeySystemConfiguration&, AllowDistinctiveIdentifiers distinctiveIdentifiers, AllowPersistentState persistentState, SuccessCallback&& callback)
 {
     // TODO: Please, review
-    callback(succeeded);    
+    callback(Succeeded);    
 }
 
 
 
-void CDMInstanceOpenCDM::setServerCertificate(Ref<SharedBuffer>&&, SuccessCallback&& callback)
+void CDMInstanceOpenCDM::setServerCertificate(Ref<SharedBuffer>&& certificate, SuccessCallback&& callback)
 {
 
     WebCore::CDMInstance::SuccessValue success_value=WebCore::CDMInstance::SuccessValue::Failed;
+    
+    auto data = certificate->extractData();
 
-    if (opencdm_system_set_server_certificate(&m_openCDMSystem, reinterpret_cast<unsigned char*>(const_cast<char*>(certificate->data())), certificate->size())==OpenCDMError::ERROR_NONE){
+    if (opencdm_system_set_server_certificate(&m_openCDMSystem, const_cast<uint8_t*>(data.data()), data.size())==OpenCDMError::ERROR_NONE){
         success_value=WebCore::CDMInstance::SuccessValue::Succeeded;
     }
 
@@ -716,12 +730,20 @@ bool CDMInstanceOpenCDM::removeSession(const String& sessionId)
     return m_sessionsMap.remove(sessionId);
 }
 
+RefPtr<CDMInstanceSession> CDMInstanceOpenCDM::createSession()
+{
+    RefPtr<CDMInstanceSessionOpenCDM> newSession = adoptRef(new CDMInstanceSessionOpenCDM(*this));
+    ASSERT(newSession);
+    return newSession;
+}
+
 RefPtr<CDMInstanceOpenCDM::Session> CDMInstanceOpenCDM::lookupSession(const String& sessionId) const
 {
     LockHolder locker(m_sessionMapMutex);
     auto session = m_sessionsMap.find(sessionId);
     return session == m_sessionsMap.end() ? nullptr : session->value;
 }
+
 
 
 

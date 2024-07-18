@@ -114,6 +114,7 @@ public:
     bool isKeyIdInSessionUsable(const SharedBuffer&, const String&) const;
 
     OpenCDMSystem* ocdmSystem() const { return &m_openCDMSystem; }
+    RefPtr<CDMInstanceSession> createSession() final;
 
 private:
     bool addSession(const String& sessionId, RefPtr<Session>&& session);
@@ -144,6 +145,7 @@ public:
 
     void setClient(WeakPtr<CDMInstanceSessionClient>&& client) final;
     void clearClient() final { m_client.clear(); }
+    WeakPtr<CDMInstanceSessionClient> client(){ return m_client;}
 
     private:
         InitData m_initData;

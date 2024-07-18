@@ -278,25 +278,28 @@ void MediaKeySession::generateRequest(const AtomString& initDataType, const Buff
 
 void MediaKeySession::enqueueMessageWithTask(MediaKeyMessageType type, Ref<SharedBuffer>&& message)
 {
+    #warning dont forget to m_taskQueue
+    #if 0
     m_taskQueue.enqueueTask([this, type, message = WTFMove(message)] () mutable {
         MediaKeyMessageType messageType;
         switch (type) {
-        case CDMInstance::MessageType::LicenseRequest:
+        case CDMInstanceSession::MessageType::LicenseRequest:
             messageType = MediaKeyMessageType::LicenseRequest;
             break;
-        case CDMInstance::MessageType::LicenseRenewal:
+        case CDMInstanceSession::MessageType::LicenseRenewal:
             messageType = MediaKeyMessageType::LicenseRenewal;
             break;
-        case CDMInstance::MessageType::LicenseRelease:
+        case CDMInstanceSession::MessageType::LicenseRelease:
             messageType = MediaKeyMessageType::LicenseRelease;
             break;
-        case CDMInstance::MessageType::IndividualizationRequest:
+        case CDMInstanceSession::MessageType::IndividualizationRequest:
             messageType = MediaKeyMessageType::IndividualizationRequest;
             break;
         }
 
         enqueueMessage(messageType, WTFMove(message));
     });
+    #endif
 }
 
 void MediaKeySession::load(const String& sessionId, Ref<DeferredPromise>&& promise)

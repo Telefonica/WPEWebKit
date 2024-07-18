@@ -2176,16 +2176,11 @@ void MediaPlayerPrivateGStreamer::handleProtectionStructure(const GstStructure* 
     GRefPtr<GstBuffer> data;
     GUniqueOutPtr<char> eventKeySystemUUID;
     gst_structure_get(structure, "init-data", GST_TYPE_BUFFER, &data.outPtr(), "key-system-uuid", G_TYPE_STRING, &eventKeySystemUUID.outPtr(), nullptr);
-
-    GstMappedBuffer mappedInitData(data.get(), GST_MAP_READ);
-    if (!mappedInitData) {
-        GST_WARNING("cannot map protection data");
-        return;
-    }
-
-    InitData initData(reinterpret_cast<const uint8_t*>(mappedInitData.data()), mappedInitData.size());
-    static const ASCIILiteral initDataType { !g_strcmp0(eventKeySystemUUID.get(), GST_PROTECTION_UNSPECIFIED_SYSTEM_ID) ? "webm"_s : "cenc"_s };
-
+ 
+    const char * system_type=eventKeySystemUUID.get();
+    static const ASCIILiteral initDataType { !g_strcmp0(system_type, GST_PROTECTION_UNSPECIFIED_SYSTEM_ID) ? "webm"_s : "cenc"_s };
+    InitData initData(String::fromUTF8(system_type),data.get());
+    
     initializationDataEncounteredOld(WTF::String(initDataType), initData);
 
 }
@@ -4487,10 +4482,9 @@ void MediaPlayerPrivateGStreamer::initializationDataEncounteredOld(const String&
 {
     ASSERT(isMainThread());
 
-    GST_TRACE("init data encountered of size %" G_GSIZE_FORMAT " with MD5 %s", initData.sizeInBytes(), GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
-    GST_MEMDUMP("init data", initData.characters8(), initData.sizeInBytes());
-
-    m_player->initializationDataEncountered(initDataType, ArrayBuffer::create(reinterpret_cast<const uint8_t*>(initData.characters8()), initData.sizeInBytes()));
+    GST_TRACE("init data encountered of size %" G_GSIZE_FORMAT " with MD5 %s", initData.payload()->size(), GStreamerEMEUtilities::initDataMD5(initData).utf8().data());
+    GST_MEMDUMP("init data", reinterpret_cast<const uint8_t*>(initData.payload()->makeContiguous()->data()), initData.payload()->size());
+    m_player->initializationDataEncountered(initDataType, ArrayBuffer::create(reinterpret_cast<const uint8_t*>(initData.payload()->makeContiguous()->data()), initData.payload()->size()));
 }
 
 
