@@ -85,6 +85,8 @@ private:
     ScopedOCDMSystem m_openCDMSystem;
 };
 
+class CDMInstanceSessionOpenCDM;
+
 class CDMInstanceOpenCDM final : public CDMInstanceProxy {
 private:
     CDMInstanceOpenCDM() = delete;
@@ -117,28 +119,29 @@ public:
     RefPtr<CDMInstanceSession> createSession() final;
 
 private:
-    bool addSession(const String& sessionId, RefPtr<Session>&& session);
+    bool addSession(const String& sessionId, RefPtr<CDMInstanceSessionOpenCDM>& session);
     bool removeSession(const String& sessionId);
-    RefPtr<Session> lookupSession(const String& sessionId) const;
+    RefPtr<CDMInstanceSessionOpenCDM> lookupSession(const String& sessionId) const;
     String getKeySystem();
 
     mutable Lock m_sessionMapMutex;
-    HashMap<String, RefPtr<Session>> m_sessionsMap;
+    HashMap<String, RefPtr<CDMInstanceSessionOpenCDM>> m_sessionsMap;
     OpenCDMSystem& m_openCDMSystem;
     String m_keySystem;
     CDMInstanceClient* m_client { nullptr };
 };
+
 class CDMInstanceSessionOpenCDM final : public CDMInstanceSessionProxy {
 public:
     CDMInstanceSessionOpenCDM(CDMInstanceOpenCDM&);
 
-    // Request License will automatically create a Session. The session is later on referred to with its session id.
-    void requestLicense(LicenseType, const AtomString& initDataType, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback&&) final;
+    // Request License will automatically create a Session. The session is later on referred to with its session id.    
+    void requestLicense(CDMInstanceSession::LicenseType, const AtomString& initDataType, Ref<SharedBuffer>&& initData, Ref<SharedBuffer>&& customData, LicenseCallback&&) final;
      // Operations on the DRM system -> Session.
-    void updateLicense(const String&, LicenseType, Ref<SharedBuffer>&&, LicenseUpdateCallback&&) final;
-    void loadSession(LicenseType, const String&, const String&, LoadSessionCallback&&) final;
+    void updateLicense(const String&, CDMInstanceSession::LicenseType, Ref<SharedBuffer>&&, LicenseUpdateCallback&&) final;
+    void loadSession(CDMInstanceSession::LicenseType, const String&, const String&, LoadSessionCallback&&) final;
     void closeSession(const String&, CloseSessionCallback&&) final;
-    void removeSessionData(const String&, LicenseType, RemoveSessionDataCallback&&) final;
+    void removeSessionData(const String&, CDMInstanceSession::LicenseType, RemoveSessionDataCallback&&) final;
     void storeRecordOfKeyUsage(const String&) final;
 
     bool isValid() const;
@@ -146,10 +149,11 @@ public:
     void setClient(WeakPtr<CDMInstanceSessionClient>&& client) final;
     void clearClient() final { m_client.clear(); }
     WeakPtr<CDMInstanceSessionClient> client(){ return m_client;}
+    bool isKeyIdInSessionUsable(const SharedBuffer& keyId) const;
 
     private:
         InitData m_initData;
-        Ref<CDMInstanceOpenCDM::Session> m_session;
+        RefPtr<CDMInstanceOpenCDM::Session> m_session;
         String m_sessionId;
         WeakPtr<CDMInstanceSessionClient> m_client;
 };
